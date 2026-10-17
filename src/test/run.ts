@@ -188,7 +188,7 @@ export async function run(): Promise<void> {
       assert.equal(loaded.errors.length, 0);
       assert.equal(loaded.characters[0].authorNotes, "作者のメモ");
     } finally {
-      await fs.rm(temporaryRoot, { recursive: true, force: true });
+      await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 
@@ -254,7 +254,7 @@ export async function run(): Promise<void> {
       assert.equal(proposed.authorNotes, "作者のメモ");
       assert.equal(proposed.exportNote, "公開時の注記");
     } finally {
-      await fs.rm(temporaryRoot, { recursive: true, force: true });
+      await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 
@@ -303,7 +303,7 @@ export async function run(): Promise<void> {
       };
       assert.equal(retired.name, "リン");
     } finally {
-      await fs.rm(temporaryRoot, { recursive: true, force: true });
+      await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 
@@ -350,7 +350,7 @@ export async function run(): Promise<void> {
       assert.equal(after.characters[0].authorNotes, "作者のメモ");
       assert.equal(await pending.count(), 0);
     } finally {
-      await fs.rm(temporaryRoot, { recursive: true, force: true });
+      await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 
@@ -385,7 +385,7 @@ export async function run(): Promise<void> {
       assert.equal(loaded.characters[0].personality, "無鉄砲");
       assert.equal(loaded.characters[0].role, "主人公");
     } finally {
-      await fs.rm(temporaryRoot, { recursive: true, force: true });
+      await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 
@@ -438,7 +438,7 @@ export async function run(): Promise<void> {
       assert.ok(ignore.includes(".aiwriter/cache/"));
       assert.ok(ignore.includes(".novelai-recovery/"));
     } finally {
-      await fs.rm(temporaryRoot, { recursive: true, force: true });
+      await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 
@@ -476,7 +476,7 @@ export async function run(): Promise<void> {
       });
       assert.equal(await fs.readFile(characterPath, "utf8"), externallyEditedJson);
     } finally {
-      await fs.rm(temporaryRoot, { recursive: true, force: true });
+      await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 
@@ -556,7 +556,7 @@ export async function run(): Promise<void> {
         ["灯"]
       );
     } finally {
-      await fs.rm(temporaryRoot, { recursive: true, force: true });
+      await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 
@@ -624,7 +624,7 @@ export async function run(): Promise<void> {
           monitor.dispose();
         }
       } finally {
-        await fs.rm(temporaryRoot, { recursive: true, force: true });
+        await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
   );
@@ -722,7 +722,7 @@ export async function run(): Promise<void> {
         );
         assert.equal((await unmergedPaths(a)).length, 0);
       } finally {
-        await fs.rm(temporaryRoot, { recursive: true, force: true });
+        await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
   );
@@ -764,7 +764,7 @@ export async function run(): Promise<void> {
         );
         assert.equal(after.records[0].name, "fire");
       } finally {
-        await fs.rm(temporaryRoot, { recursive: true, force: true });
+        await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
   );
@@ -829,7 +829,7 @@ export async function run(): Promise<void> {
           saved,
           vscode.ConfigurationTarget.Global
         );
-        await fs.rm(temporaryRoot, { recursive: true, force: true });
+        await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
   );
@@ -862,7 +862,7 @@ export async function run(): Promise<void> {
         assert.equal(opened.viewType, MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
       } finally {
         await vscode.commands.executeCommand("workbench.action.closeAllEditors");
-        await fs.rm(temporaryRoot, { recursive: true, force: true });
+        await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
   );
