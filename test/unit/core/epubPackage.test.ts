@@ -1599,6 +1599,94 @@ describe("口絵・扉絵の面（設計書6.65.15）", () => {
     expect(face.indexOf("<img")).toBeLessThan(face.indexOf("<figcaption>"));
   });
 
+  /*
+    添える文があると、縦書きで文が次の面へはみ出した（作者の実機確認、
+    2026-10-17「EPUB+ リーダー」）。縦書きでは max-inline-size が高さに
+    あたり、絵が紙の高さいっぱいになって文の入る余地が無かった。
+    裁定は「文があるときだけ絵を8割ほどに抑え、文ごと1面に収める」
+  */
+  test("添える文があるときだけ、縮める印が付く（口絵・扉絵、縦横とも）", () => {
+    for (const writingMode of ["vertical", "horizontal"] as const) {
+      const files = open(
+        buildEpub(
+          book({
+            config: { ...defaultBookConfig("氷の街"), writingMode },
+            blocks: [
+              {
+                type: "frontIllustration",
+                sourcePath: "素材/口絵.png",
+                data: png,
+                caption: "口絵の確認（表紙の絵を借りています）",
+              },
+              { type: "body" },
+              {
+                type: "sectionArt",
+                sourcePath: "素材/扉.png",
+                data: png,
+                caption: "第二部",
+              },
+              {
+                type: "sectionArt",
+                sourcePath: "素材/扉2.png",
+                data: png,
+                caption: "",
+              },
+            ],
+          })
+        )
+      );
+
+      expect(files["OEBPS/plate-page-1.xhtml"]).toContain(
+        '<figure class="plate plate-captioned">'
+      );
+      expect(files["OEBPS/plate-page-2.xhtml"]).toContain(
+        '<figure class="plate plate-captioned">'
+      );
+      // 文が無い面は今までどおり（絵をいっぱいに出す）
+      expect(files["OEBPS/plate-page-3.xhtml"]).toContain(
+        '<figure class="plate">'
+      );
+    }
+  });
+
+  test("縮める指定は CSS で、文の無い面の指定より後ろに置く", () => {
+    const css = open(buildEpub(withConfig({ writingMode: "vertical" })))[
+      "OEBPS/style.css"
+    ];
+    const plain = css.indexOf(".plate img {");
+    const captioned = css.indexOf(".plate-captioned img {");
+
+    // 文の無い面は今までどおり 100%
+    expect(css).toContain(
+      ".plate img { max-inline-size: 100%; max-block-size: 100%; }"
+    );
+    // 同じ詳細度なので、後ろに無いと 100% が勝つ
+    expect(plain).toBeGreaterThan(-1);
+    expect(captioned).toBeGreaterThan(plain);
+
+    const rule = css.slice(captioned, css.indexOf("}", captioned));
+    expect(rule).toContain("max-inline-size: 80%;");
+    expect(rule).toContain("max-block-size: 80%;");
+    expect(rule).toContain("max-height: 80vh;");
+    expect(rule).toContain("max-width: 80vw;");
+    // 論理（%）が先、物理（vh・vw）が後。後勝ちで、vh を読めないリーダーは
+    // 後ろの宣言を捨てて % に戻る
+    expect(rule.indexOf("max-inline-size: 80%;")).toBeLessThan(
+      rule.indexOf("max-height: 80vh;")
+    );
+    expect(rule.indexOf("max-block-size: 80%;")).toBeLessThan(
+      rule.indexOf("max-width: 80vw;")
+    );
+
+    // 図と文を面の途中で割らない（新旧の書き方を並べる）
+    const figure = css.slice(
+      css.indexOf(".plate-captioned {"),
+      css.indexOf("}", css.indexOf(".plate-captioned {"))
+    );
+    expect(figure).toContain("break-inside: avoid;");
+    expect(figure).toContain("page-break-inside: avoid;");
+  });
+
   test("解説文が無ければ figcaption そのものを出さない", () => {
     const files = open(
       buildEpub(

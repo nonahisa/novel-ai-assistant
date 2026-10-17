@@ -1465,7 +1465,10 @@ export function buildPlateFragment(
 ): string {
   const caption = plate.caption.trim();
   return [
-    '<figure class="plate">',
+    // 文を添える面だけ、絵を縮めて文ごと1面に収める印を付ける（作者の裁定、
+    // 2026-10-17）。文が無ければ今までどおり絵を面いっぱいに出す。
+    // 縮め方は CSS の `.plate-captioned` に書く（理由もそちら）
+    caption ? '<figure class="plate plate-captioned">' : '<figure class="plate">',
     // 代替文は解説文があればそれを。無ければ面の呼び名（「口絵」）——
     // **空の alt は「飾りなので読み上げなくてよい」の意味になる**。
     // 属性値なので縦中横は通さない（span を挟むと属性が壊れる）
@@ -1749,6 +1752,37 @@ export function buildEpubCss(
     ".plate { margin: 0; padding: 0; text-align: center; }",
     ".plate img { max-inline-size: 100%; max-block-size: 100%; }",
     ".plate figcaption { font-size: 0.85em; margin-block-start: 0.6em; }",
+    /*
+      文を添えた口絵・扉絵（作者の裁定、2026-10-17「絵を小さくして文ごと
+      1面に収める」）。100% のままだと、縦書きでは max-inline-size が高さに
+      あたって絵が紙の高さいっぱいになり、文が次の面へはみ出した。
+
+      **% を先に、vh・vw を後ろに書く。** 論理（max-inline-size）と物理
+      （max-height）は同じ寸法の別名なので後勝ちになる。
+      - % だけでは足りない：block 方向（縦書きの横幅・横書きの高さ）の % は、
+        入れ物の寸法が決まっていない（auto）と効かない。縦長の絵を高さ8割に
+        しても、縦長の端末では横幅が面いっぱいのままで、文の入る列が残らない。
+        面の寸法そのもので抑えられるのは vh・vw だけである
+      - vh・vw を読めないリーダーは、その宣言を無効として捨てて % に戻る。
+        今までより悪くはならない
+      - 見開きで表示するリーダーでは vw が2面分を指すことがある。そこでも
+        高さ（vh）で縮むので、縦長の絵なら文の余地は残る
+      この面だけの指定なので、html・body へ高さを与える書き方はしない
+      （本文の面まで高さが固定され、長い話が切れるリーダーが出る）。
+
+      **図と文を面の途中で割らない。** `.page-break` と同じく古い書き方
+      （page-break-inside）も並べる。それしか読まないリーダーが現役である
+    */
+    ".plate-captioned {",
+    "  page-break-inside: avoid;",
+    "  break-inside: avoid;",
+    "}",
+    ".plate-captioned img {",
+    "  max-inline-size: 80%;",
+    "  max-block-size: 80%;",
+    "  max-height: 80vh;",
+    "  max-width: 80vw;",
+    "}",
     // 話の途中の改ページ。**古い書き方も並べる**（`page-break-before` しか
     // 見ないリーダーが現役で、片方だけだと場面が割れない）
     ".page-break {",

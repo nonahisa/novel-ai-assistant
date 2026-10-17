@@ -304,7 +304,10 @@ const GOLDEN: Record<string, string> = {
     //   `padding-inline-start: 1em` が増えた。**これは見た目を変える
     //   と決めた変更**なので、金型のほうを更新する。ここを直さずに
     //   済ませると、次に誰かが見た目を変えたときに気づけない
-    "f311500002027ae65542018dc766b5898c69eaec63a8f3b8acfae9f41c485ac9",
+    // 0.108.1：文を添えた口絵・扉絵の絵を縮める `.plate-captioned` を
+    //   足した（作者の裁定、2026-10-17）。**CSSだけが変わり、面のXHTMLは
+    //   1バイトも変わっていない**——文を添えた口絵の無い本の見た目は同じ
+    "39eef77d8f345d98eb97696d94443b194598d95135e7d5533e3edb9e7f509218",
   "OEBPS/cover.xhtml":
     "57c976846884228c05723713693b3112cba591ce48021a884c7ad902cbdf15e5",
   "OEBPS/titlepage.xhtml":
