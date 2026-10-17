@@ -99,6 +99,7 @@ import { locateAppliedSuggestion } from "../core/proposalUndo";
 import { relocateQuote } from "../core/relocateQuote";
 import { revealTextLocation } from "./revealLocation";
 import { columnOfWebviewPanel } from "./editorColumn";
+import { whenNoticePicked } from "../views/notify";
 import { reloadOpenDocumentAfterWrite } from "./reloadAfterWrite";
 import { openInDefaultEditor } from "../views/openDocument";
 import { notifyDone } from "../views/notify";
@@ -1040,6 +1041,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * モデルを覚えるのは、**切り替えたら確認を取り直す**ため。
    */
   private paidConfirmedFor: string | undefined;
+  /**
+   * 答えを待っている「別の作品の結果」の知らせ（作品の鍵ごと。作者の裁定
+   * 2026-10-17）。`category` は［表示する］で出す分類で、同じ作品の結果が
+   * 続けて届いたら最後の分類へ差し替える（知らせは重ねない）。
+   */
+  private pendingOffers = new Map<string, { category: string }>();
   /** 面が読み込み終わったら示す行（`focusContradiction`） */
   private focusRowId: string | undefined;
 
@@ -1340,37 +1347,45 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.postItems();
     // 開いたときの読み込みでは、届いたことを知らせない（作者は押していない）
     if (options.quiet) return arrivedCount;
+    /*
+      **同じ作品の知らせは1つにまとめる**（作者の裁定 2026-10-17）。答えていない
+      知らせがあるうちは新しく出さず、押したときに出す分類だけを差し替える。
+      続けて走らせると、右下が同じ作品の知らせで埋まって、ほかの知らせが
+      読めなくなるため。件数は「作品」欄の数で分かる
+    */
+    const offerKey = this.keyOf(work);
+    const pending = this.pendingOffers.get(offerKey);
+    if (pending) {
+      pending.category = category;
+      return arrivedCount;
+    }
+    const offer = { category };
+    this.pendingOffers.set(offerKey, offer);
     // **答えを待たない。** 待つと、検知を終えた側の処理が作者の返事まで止まる
-    void this.offerToShow(
-      work,
-      category,
-      (contents.items?.length ?? 0) +
-        (contents.contradictions?.length ?? 0) +
-        (contents.recordUpdates?.length ?? 0)
+    whenNoticePicked(
+      vscode.window.showInformationMessage(
+        arrivalNoticeText(work.title, category, arrivedCount.remaining),
+        "表示する"
+      ),
+      (answer) => {
+        // 押しても閉じても、この知らせは片づいた。次に届いたら新しく知らせる
+        if (this.pendingOffers.get(offerKey) === offer) {
+          this.pendingOffers.delete(offerKey);
+        }
+        if (answer === "表示する") this.showOffered(work, offer.category);
+      },
+      { label: "提案パネルの作品の切り替え", workFolder: work.folderPath }
     );
     return arrivedCount;
   }
 
   /**
-   * 別の作品の結果が届いたことを伝え、移るかどうかを選ばせる。
+   * 別の作品の知らせで［表示する］が押されたとき、その作品へ移る。
    *
-   * **呼ぶ側は待たない。** 待つと、検知を終えた側の処理が作者の返事まで
-   * 止まる（19話ぶんの実行がここで止まっては困る）。
+   * **押されたときだけ移る**（作者の裁定 2026-10-17「奪わないまま、知らせに
+   * 切り替えのボタン」）。届いただけでは `replaceContents` は画面に触らない。
    */
-  private async offerToShow(
-    work: WorkEntry,
-    category: string,
-    arrived: number
-  ): Promise<void> {
-    const answer = await vscode.window.showInformationMessage(
-      arrived > 0
-        ? `「${work.title}」の${category}の結果が届きました（${arrived}件）`
-        : `「${work.title}」の${category}は、指摘がありませんでした。`,
-      "表示する",
-      "あとで"
-    );
-    if (answer !== "表示する") return;
-
+  private showOffered(work: WorkEntry, category: string): void {
     // 答えるまでの間に、作者がその一覧を空にしていることがある
     const entry = this.buckets.get(this.keyOf(work));
     if (!entry?.categories.has(category)) return;
@@ -4464,6 +4479,28 @@ function describeUndoFailure(kind: "missing" | "ambiguous" | "broken"): string {
 /** 表示上の番号。提案の処理では item から引き直す */
 function id2(item: ProposalViewItem): string {
   return item.id;
+}
+
+/**
+ * 別の作品の結果が届いたときの知らせの文（作者の裁定 2026-10-17）。
+ *
+ * **作品名と機能名を出す。** どの作品のどの検知が終わったかが分からないと、
+ * ［表示する］を押すかどうか決められない。校正・メモパネルに並ぶ種類
+ * （`findingCategoryOf`）は作者が走らせた検知なので「〜の検知が終わりました」、
+ * それ以外（設定資料の更新・編集部からの提案など）は「届きました」と言う。
+ * 件数は一覧に残った数（`IncomingCount.remaining`）——完了の知らせと同じ数え方。
+ */
+export function arrivalNoticeText(
+  workTitle: string,
+  category: string,
+  remaining: number
+): string {
+  if (findingCategoryOf(category) === undefined) {
+    return `「${workTitle}」の${category}が届きました（${remaining}件）`;
+  }
+  // 推敲は「検知」ではないので、機能の名前のまま言う
+  const feature = category === "推敲" ? category : `${category}の検知`;
+  return `「${workTitle}」の${feature}が終わりました（${remaining}件）`;
 }
 
 /**
