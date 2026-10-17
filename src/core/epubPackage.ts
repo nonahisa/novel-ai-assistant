@@ -1743,6 +1743,11 @@ export function buildEpubCss(
     ...(kindCss ? [kindCss] : []),
     // 挿絵（設計書6.65.10）。本文の流れに入るので、面いっぱいには広げず
     // 前後に空きを取る。解説文は画像の直後（重ねない）
+    // figure・figcaption は**段落だと書いておく**。HTML5 の要素を知らない
+    // 組版（EPUB+ リーダーの中身の MuPDF。2026-10-17 に確かめた）は、
+    // 文字の並びの一部と見なし、解説文を絵の脇へ回り込ませる。脇に2字
+    // だけ入って次の面へ割れ、割れた行が次の面にもう一度描かれた
+    "figure, figcaption { display: block; }",
     "figure { margin: 0; padding: 0; }",
     ".illustration { margin-block: 2em; text-align: center; }",
     ".illustration img { max-inline-size: 100%; max-block-size: 100%; }",
@@ -1772,16 +1777,31 @@ export function buildEpubCss(
 
       **図と文を面の途中で割らない。** `.page-break` と同じく古い書き方
       （page-break-inside）も並べる。それしか読まないリーダーが現役である
+
+      **上限（max-*）だけでは効かないリーダーがある（0.108.4）。** EPUB+
+      リーダーの中身の MuPDF は max-* も vh・vw も読まず、絵を面の高さ
+      いっぱいに広げた。MuPDF が読むのは `height` の %（面の高さが基準）
+      なので、高さそのものを `height: 80%` で与える。
+      - 縦書きの Chromium 系でも、height は行の向き＝面の高さで、入れ物の
+        高さが決まっているので % が解ける。横書きでは入れ物の高さが auto
+        なので auto 扱いになり、後ろの max-height（80vh）が効く
+      - `height` に vh を書かない：MuPDF は vh を知らず、絵が豆粒になった。
+        `min()` も書かない：読めずに既定の大きさ（面いっぱい）へ戻った
+      - 高さと幅の上限が別々に効くと絵が歪むので、object-fit で縦横の
+        比を保つ（はみ出す分は余白になる）
     */
     ".plate-captioned {",
     "  page-break-inside: avoid;",
     "  break-inside: avoid;",
     "}",
     ".plate-captioned img {",
+    "  height: 80%;",
+    "  width: auto;",
     "  max-inline-size: 80%;",
     "  max-block-size: 80%;",
     "  max-height: 80vh;",
     "  max-width: 80vw;",
+    "  object-fit: contain;",
     "}",
     // 話の途中の改ページ。**古い書き方も並べる**（`page-break-before` しか
     // 見ないリーダーが現役で、片方だけだと場面が割れない）
