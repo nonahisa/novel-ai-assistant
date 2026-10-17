@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * プロットモードの読み込みは1本ずつ（実機確認リスト 369、2026-10-09）。
@@ -17,15 +18,7 @@ function bodyOf(file: string, marker: string): string {
   const source = readFileSync(path.join("src", "features", file), "utf-8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\/\/.*$/gm, "");
-  const start = source.indexOf(marker);
-  if (start === -1) throw new Error(`${marker} が見つかりません`);
-  const open = source.indexOf("{", source.indexOf(")", start));
-  let depth = 0;
-  for (let i = open; i < source.length; i++) {
-    if (source[i] === "{") depth++;
-    else if (source[i] === "}" && --depth === 0) return source.slice(open, i + 1);
-  }
-  throw new Error(`${marker} の閉じ括弧が見つかりません`);
+  return blockAfter(source, marker);
 }
 
 describe("プロットモードの読み込み", () => {

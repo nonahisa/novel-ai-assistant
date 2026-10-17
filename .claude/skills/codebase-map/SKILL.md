@@ -177,6 +177,7 @@ src/
 | `tuningStore.ts` | AIチューニングの台帳を記憶の中のファイルで動かす |
 | `confirmPicker.ts` | 確認の選択窓に答える |
 | `gitTemplate.ts`・`divergenceHarness.ts` | 本物の git の倉庫を1回作って写す・分岐を合わせる試験の前準備 |
+| `sourceBlock.ts` | ソースの文字列から、目印に続く `{ ... }`（関数の本体）を切り出す（ソース読みの試験の `bodyOf`） |
 | `srcSources.ts`・`importGraph.ts` | `src/` を1回だけ読む・静的 import をたどる |
 | `echoingMemento.ts` | globalState の送り返しまで写した作り物 |
 | `settingsExportFixture.ts` | 設定資料の書き出しの試験材料 |

@@ -8,6 +8,7 @@ import { postingCopyTargets } from "../../../src/core/postingCopyTargets";
 import { EXTRA_GUIDE, buildGuideBundles } from "../../../src/core/featureGuide";
 import { toNoteMarkdown } from "../../../src/core/noteMarkdown";
 import { toSiteNotation } from "../../../src/core/ruby";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * 「投稿サイト用に変換してコピー」の変換（設計書6.84）。
@@ -164,20 +165,7 @@ describe("どの入口も、同じ変換を通る", () => {
    * 関数のあいだの説明文まで拾い、そこに書かれた語で判定が揺れる。
    */
   function bodyOf(file: string, signature: string): string {
-    const source = readFileSync(file, "utf8");
-    const start = source.indexOf(signature);
-    expect(start, `${signature} が ${file} にない`).toBeGreaterThan(-1);
-
-    const open = source.indexOf("{", source.indexOf(")", start));
-    let depth = 0;
-    for (let i = open; i < source.length; i += 1) {
-      if (source[i] === "{") depth += 1;
-      else if (source[i] === "}") {
-        depth -= 1;
-        if (depth === 0) return source.slice(open, i + 1);
-      }
-    }
-    throw new Error(`${signature} の終わりが見つかりません`);
+    return blockAfter(readFileSync(file, "utf8"), signature, { where: file });
   }
 
   /**

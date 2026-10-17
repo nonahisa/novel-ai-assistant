@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * プロットモードの画面とAIとの相談（P-01、設計書6.4.10）のつなぎ方。
@@ -23,15 +24,7 @@ function source(file: string): string {
 }
 
 function bodyOf(text: string, marker: string): string {
-  const start = text.indexOf(marker);
-  if (start === -1) throw new Error(`${marker} が見つかりません`);
-  const open = text.indexOf("{", text.indexOf(")", start));
-  let depth = 0;
-  for (let i = open; i < text.length; i++) {
-    if (text[i] === "{") depth++;
-    else if (text[i] === "}" && --depth === 0) return text.slice(open, i + 1);
-  }
-  throw new Error(`${marker} の閉じ括弧が見つかりません`);
+  return blockAfter(text, marker);
 }
 
 describe("パネルのつなぎ方", () => {

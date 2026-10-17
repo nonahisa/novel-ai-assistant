@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * 大きい相談パネル（作者の要望、2026-08-28）。
@@ -207,15 +208,7 @@ describe("メインとサブを行き来する", () => {
 describe("質問の送信中は、両方の画面のボタンが押せない", () => {
   /** スクリプトの中の関数の本体（最初の `{` から対応する `}` まで） */
   function bodyOf(code: string, signature: string): string {
-    const start = code.indexOf(signature);
-    expect(start, `${signature} が見つからない`).toBeGreaterThan(-1);
-    const open = code.indexOf("{", start);
-    let depth = 0;
-    for (let i = open; i < code.length; i++) {
-      if (code[i] === "{") depth++;
-      else if (code[i] === "}" && --depth === 0) return code.slice(open, i + 1);
-    }
-    throw new Error(`${signature} の閉じ括弧が見つからない`);
+    return blockAfter(code, signature, { openAt: "afterMarker" });
   }
 
   for (const [name, html] of [

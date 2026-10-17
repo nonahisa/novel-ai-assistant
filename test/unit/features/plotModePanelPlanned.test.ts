@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * 予定の話を足す口（設計書6.4.8。作者の依頼、2026-09-23）が、
@@ -18,15 +19,7 @@ function bodyOf(file: string, marker: string): string {
     // コメントに書いた言葉で検査が通らないよう、先に落とす
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\/\/.*$/gm, "");
-  const start = source.indexOf(marker);
-  if (start === -1) throw new Error(`${marker} が見つかりません`);
-  const open = source.indexOf("{", source.indexOf(")", start));
-  let depth = 0;
-  for (let i = open; i < source.length; i++) {
-    if (source[i] === "{") depth++;
-    else if (source[i] === "}" && --depth === 0) return source.slice(open, i + 1);
-  }
-  throw new Error(`${marker} の閉じ括弧が見つかりません`);
+  return blockAfter(source, marker);
 }
 
 describe("予定の話を足す", () => {

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import "../support/sweepTimeout";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { findBlockAfter } from "../support/sourceBlock";
 
 /**
  * 原稿を開く道は1本（作者の裁定、2026-10-03「直す」。設計書6.25.11）。
@@ -44,15 +45,7 @@ function withoutComments(source: string): string {
 
 /** その関数の本体（`marker` から始まる最初の波括弧の組） */
 function bodyOf(source: string, marker: string): string {
-  const start = source.indexOf(marker);
-  if (start === -1) return "";
-  const open = source.indexOf("{", source.indexOf(")", start));
-  let depth = 0;
-  for (let i = open; i < source.length; i++) {
-    if (source[i] === "{") depth++;
-    else if (source[i] === "}" && --depth === 0) return source.slice(open, i + 1);
-  }
-  return "";
+  return findBlockAfter(source, marker) ?? "";
 }
 
 describe("原稿を開く道は1本", () => {

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * 改行コードが作品の多数派と違う原稿を開いたときの案内は、**同じファイルには
@@ -24,15 +25,7 @@ const source = readFileSync("src/features/manuscriptEditor.ts", "utf8")
   .replace(/\/\/.*$/gm, "");
 
 function bodyOf(marker: string): string {
-  const start = source.indexOf(marker);
-  if (start === -1) throw new Error(`${marker} が見つかりません`);
-  const open = source.indexOf("{", source.indexOf(")", start));
-  let depth = 0;
-  for (let i = open; i < source.length; i++) {
-    if (source[i] === "{") depth++;
-    else if (source[i] === "}" && --depth === 0) return source.slice(open, i + 1);
-  }
-  throw new Error(`${marker} の閉じ括弧が見つかりません`);
+  return blockAfter(source, marker);
 }
 
 describe("改行コードの違いの案内は、同じファイルに1回だけ", () => {
