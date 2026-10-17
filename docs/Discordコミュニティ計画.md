@@ -42,8 +42,7 @@ Discord サーバー
               └─ 母艦（開発担当セッション）が読む（8章）
 ```
 
-**ボットのコードは別リポジトリにする**（`nonahisa/novel-ai-community-bot`、非公開。手元は `Documents
-ovel-ai-community-bot`。2026-10-17 作成）。投稿サイトのヘルパーと同じ扱いで、製品の VSIX に混ざらないようにするため。この文書だけ製品の `docs/` に置く。
+**ボットのコードは別リポジトリにする**（`nonahisa/novel-ai-community-bot`、非公開。手元は `Documents/novel-ai-community-bot`。2026-10-17 作成）。投稿サイトのヘルパーと同じ扱いで、製品の VSIX に混ざらないようにするため。この文書だけ製品の `docs/` に置く。
 
 ---
 
