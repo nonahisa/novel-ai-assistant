@@ -457,6 +457,25 @@ describe("相談のログ（chat.md）は入れない", () => {
   });
 });
 
+describe("複数行の値", () => {
+  test("詳細の中で改行をまたいだ JSON の短い抜粋も残さない", () => {
+    const log = [
+      "[2026-10-17 13:40:12] --- AI呼び出しの失敗 ---",
+      "  種別: bad_response",
+      "  詳細: 読めませんでした: {",
+      '    "items": [{',
+      '      "note": "坂を上った"',
+      "[2026-10-17 13:41:00] 読めなかった: {",
+      '  "note": "川を渡った"',
+    ].join("\n");
+    const report = buildIssueReport(
+      input([{ label: "動作の記録（作品）", fileName: "actions.log", text: log }])
+    );
+    expect(report.document).not.toContain("坂を上った");
+    expect(report.document).not.toContain("川を渡った");
+  });
+});
+
 describe("指摘の採否（JSONL）", () => {
   test("指摘の対象と案は伏せ、種類と操作は残す", () => {
     const jsonl = JSON.stringify({

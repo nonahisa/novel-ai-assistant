@@ -359,11 +359,15 @@ export class IssueRedactor {
     result = this.quotes(result);
     result = this.names(result);
     result = this.longRuns(result);
-    if (charCount(result) > MAX_LINE_CHARS) {
-      const chars = Array.from(result);
-      result = `${chars.slice(0, MAX_LINE_CHARS).join("")}…（${chars.length - MAX_LINE_CHARS}字を省略）`;
-    }
-    return result;
+    // 長さの上限は1行ごと（続きの行ごと渡された値でも、後ろの行を落とさない）
+    return result
+      .split("\n")
+      .map((line) => {
+        if (charCount(line) <= MAX_LINE_CHARS) return line;
+        const chars = Array.from(line);
+        return `${chars.slice(0, MAX_LINE_CHARS).join("")}…（${chars.length - MAX_LINE_CHARS}字を省略）`;
+      })
+      .join("\n");
   }
 
   private secrets(input: string): string {
@@ -483,7 +487,8 @@ export class IssueRedactor {
 const BRACKET_LINE = /^\[(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\] ?(.*)$/;
 const JSON_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/;
 const FAILURE_HEADER = /^--- (.*) ---$/;
-const FIELD_LINE = /^ {2}([^:\n]{1,40}): ?(.*)$/;
+/** 失敗の記録の `  鍵: 値`。鍵に引用符や括弧を含む行（JSON の続き）は鍵とみなさない */
+const FIELD_LINE = /^ {2}([^\s:\n"'{}[\]][^:\n"'{}[\]]{0,39}): ?(.*)$/;
 const SINGLE_FIELD = /^([^\s:：]{1,24})[:：] ?(.*)$/;
 
 function localDate(parts: readonly string[]): Date {
@@ -574,11 +579,11 @@ function redactPlainRecord(
       }
       const kind = classifyKey(entry.key);
       if (kind === "plain") {
-        const [head, ...tail] = entry.value;
-        const redacted = redactor.text(head);
-        fields.set(entry.key, redacted);
-        lines.push(`  ${entry.key}: ${redacted}`);
-        lines.push(...tail.map((v) => redactor.text(v)));
+        // 続きの行ごと1回で伏せる（改行で割れた JSON を取りこぼさない）
+        const [head, ...tail] = redactor.text(entry.value.join("\n")).split("\n");
+        fields.set(entry.key, head);
+        lines.push(`  ${entry.key}: ${head}`);
+        lines.push(...tail);
       } else {
         // 応答・本文は続きの行ごとまとめて1つの印にする（行をまたいだ本文を残さない）
         lines.push(`  ${entry.key}: ${redactor.field(entry.key, entry.value.join("\n"))}`);
@@ -608,12 +613,10 @@ function redactPlainRecord(
     const value = [single[2], ...record.rest].join("\n");
     return { lines: [`${record.stamp} ${single[1]}: ${redactor.field(single[1], value)}`] };
   }
-  return {
-    lines: [
-      `${record.stamp} ${redactor.text(record.first)}`.trimEnd(),
-      ...record.rest.map((line) => redactor.text(line)),
-    ],
-  };
+  // 続きの行ごと1回で伏せる（改行で割れた JSON を行ごとに見ると、2行目以降の
+  // 短い抜粋が JSON と気づかれずに残る）
+  const [head, ...tail] = redactor.text([record.first, ...record.rest].join("\n")).split("\n");
+  return { lines: [`${record.stamp} ${head}`.trimEnd(), ...tail] };
 }
 
 function redactJsonValue(key: string, value: unknown, redactor: IssueRedactor): unknown {
