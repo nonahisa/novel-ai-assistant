@@ -70,7 +70,18 @@ export interface AcceptedProofreadIssue {
    * 必ず空にする札）には付けない。
    */
   suggestionCleared?: SuggestionClearedReason;
+  /**
+   * 修正案を書くよう頼んでいる札（冗長・漢字ひらき）なのに、**AIが初めから空で
+   * 返した**（作者の裁定 2026-10-17。A23）。検算が外した `suggestionCleared` とも、
+   * 初めから案の要らない札（長文など）とも分けて数えるための印。
+   * 画面は修正案の無い指摘に［適用］を出さず、押す口が届いても書き換えない
+   * （`proposalPanel.ts` の `applyIssue`）
+   */
+  suggestionMissing?: true;
 }
+
+/** 修正案を書くよう頼んでいる札（P-10 1.14） */
+const FIX_EXPECTED_REASONS: ReadonlySet<string> = new Set(["冗長", "漢字ひらき"]);
 
 /**
  * 修正案を空にした理由。
@@ -2175,6 +2186,10 @@ export function validateProofreadIssues(
       confidence: level(item.confidence),
       ...(run ? { monotony: run } : {}),
       ...(clearedBy ? { suggestionCleared: clearedBy } : {}),
+      // 「空文字」のような書き写しも、AIが空のつもりで書いたもの（`placeholder`）
+      ...((!suggestion || clearedBy === "placeholder") && FIX_EXPECTED_REASONS.has(reason)
+        ? { suggestionMissing: true as const }
+        : {}),
     });
   }
 
