@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as nodePath from "node:path";
+import { configureTestRepo, git, gitTemplate } from "../support/gitTemplate";
 
 /**
  * 1件ずつ見比べる入口（設計書5.5.18）。
@@ -183,10 +182,6 @@ const {
 
 let root: string;
 
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" });
-}
-
 function write(dir: string, file: string, body: string): void {
   const full = nodePath.join(dir, file);
   fs.mkdirSync(nodePath.dirname(full), { recursive: true });
@@ -219,35 +214,44 @@ function 人物(summary: string, updatedAt: string): string {
  * この状態でないと、索引の2番・3番の版を取り出せない。
  */
 function setUpConflict(): void {
-  root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-walk-"));
-  git(root, "init", "-q", "-b", "main");
+  root = conflictTemplate.copy();
+}
+
+/**
+ * 止まったマージの雛形。**ファイルで1回だけ作り、テストごとに写す**
+ * （`support/gitTemplate.ts`。2026-10-17）。git を子プロセスで十数回起こして
+ * 1件ごとに作り直していたが、出来上がる状態は毎回同じである。止まったマージの
+ * 印（`MERGE_HEAD`・索引の2番・3番の版）も `.git` ごと写るので、写した先でも
+ * 本物の git が同じ衝突として扱う。手元の道を覚えた `origin` は無いので、
+ * 写したあとに直すものは無い。
+ */
+const conflictTemplate = gitTemplate("novelai-walk-", (dir) => {
+  git(dir, "init", "-q", "-b", "main");
   // 端末のgitの設定で結果が変わらないようにする
-  git(root, "config", "core.autocrlf", "false");
-  git(root, "config", "user.name", "作者");
-  git(root, "config", "user.email", "author@example.com");
+  configureTestRepo(dir);
 
-  write(root, 人物ファイル, 人物("もとの紹介", "2026-09-01T00:00:00.000Z"));
-  write(root, 原稿ファイル, "もとの一行。\n");
-  git(root, "add", "-A");
-  git(root, "commit", "-qm", "土台");
+  write(dir, 人物ファイル, 人物("もとの紹介", "2026-09-01T00:00:00.000Z"));
+  write(dir, 原稿ファイル, "もとの一行。\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "土台");
 
-  git(root, "checkout", "-q", "-b", "別環境");
-  write(root, 人物ファイル, 人物("むこうの紹介", "2026-09-05T00:00:00.000Z"));
-  write(root, 原稿ファイル, "むこうの一行。\n");
-  git(root, "commit", "-qam", "別のPCで直した");
+  git(dir, "checkout", "-q", "-b", "別環境");
+  write(dir, 人物ファイル, 人物("むこうの紹介", "2026-09-05T00:00:00.000Z"));
+  write(dir, 原稿ファイル, "むこうの一行。\n");
+  git(dir, "commit", "-qam", "別のPCで直した");
 
-  git(root, "checkout", "-q", "main");
-  write(root, 人物ファイル, 人物("こちらの紹介", "2026-09-03T00:00:00.000Z"));
-  write(root, 原稿ファイル, "こちらの一行。\n");
-  git(root, "commit", "-qam", "こちらで直した");
+  git(dir, "checkout", "-q", "main");
+  write(dir, 人物ファイル, 人物("こちらの紹介", "2026-09-03T00:00:00.000Z"));
+  write(dir, 原稿ファイル, "こちらの一行。\n");
+  git(dir, "commit", "-qam", "こちらで直した");
 
   // 衝突するので終了コードは 0 にならない。**止まった状態が欲しい**
   try {
-    git(root, "merge", "--no-commit", "別環境");
+    git(dir, "merge", "--no-commit", "別環境");
   } catch {
     // CONFLICT で落ちるのが正しい
   }
-}
+});
 
 function scope() {
   return { id: "w1", title: "いじめられっ子", folderPath: root };

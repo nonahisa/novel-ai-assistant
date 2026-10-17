@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as nodePath from "node:path";
+import {
+  configureTestRepo,
+  git,
+  gitTemplate,
+  pointOrigin,
+} from "../support/gitTemplate";
 
 /**
  * 開いたときの点検の「合わせて送る」道（設計書6.15.1）を、**本物のgit**で走らせる。
@@ -87,10 +91,8 @@ const { runStartupHandoff } = await import("../../../src/features/handoffSync");
 
 let root: string;
 let remote: string;
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" });
-}
+/** 「別のPC」の写し。GitHub役から取り出した状態で雛形に入れてある */
+let otherClone: string;
 
 function write(dir: string, file: string, body: string): void {
   const full = nodePath.join(dir, file);
@@ -102,44 +104,52 @@ function read(file: string): string {
   return fs.readFileSync(nodePath.join(root, file), "utf8");
 }
 
-function configure(dir: string): void {
-  // **端末のgitの設定で結果が変わらないようにする**（resolveDivergence.test.ts と同じ理由）
-  git(dir, "config", "core.autocrlf", "false");
-  git(dir, "config", "user.name", "作者");
-  git(dir, "config", "user.email", "author@example.com");
-}
-
 const ORIGINAL = "いち\nに\nさん\nし\nご\n";
 
-/** GitHub役の置き場と、この端末の写しを作る */
-function setUp(): void {
-  const base = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-handoff-"));
-  remote = nodePath.join(base, "remote.git");
-  root = nodePath.join(base, "work");
-
+/**
+ * GitHub役の置き場と、この端末・別のPCの写しの雛形。
+ *
+ * **ファイルで1回だけ作り、テストごとに写す**（`support/gitTemplate.ts`。
+ * 2026-10-17）。中身は毎回同じなので、写してもテストが受け取る状態は変わらない。
+ */
+const template = gitTemplate("novelai-handoff-", (base) => {
   const seed = nodePath.join(base, "seed");
   fs.mkdirSync(seed, { recursive: true });
   git(seed, "init", "-q", "-b", "main");
-  configure(seed);
+  // **端末のgitの設定で結果が変わらないようにする**（resolveDivergence.test.ts と同じ理由）
+  configureTestRepo(seed);
   write(seed, "短編/本文/第1話.txt", ORIGINAL);
   git(seed, "add", "-A");
   git(seed, "commit", "-qm", "初回");
 
-  git(base, "clone", "-q", "--bare", seed, remote);
-  git(base, "-c", "core.autocrlf=false", "clone", "-q", remote, root);
-  configure(root);
+  const bare = nodePath.join(base, "remote.git");
+  git(base, "clone", "-q", "--bare", seed, bare);
+  configureTestRepo(bare);
+  git(base, "-c", "core.autocrlf=false", "clone", "-q", bare, "work");
+  configureTestRepo(nodePath.join(base, "work"));
+  git(base, "-c", "core.autocrlf=false", "clone", "-q", bare, "other");
+  configureTestRepo(nodePath.join(base, "other"));
+});
+
+/** 雛形を写して、GitHub役の置き場と、この端末の写しを決める */
+function setUp(): void {
+  const base = template.copy();
+  remote = nodePath.join(base, "remote.git");
+  root = nodePath.join(base, "work");
+  otherClone = nodePath.join(base, "other");
+  pointOrigin(root, remote);
+  pointOrigin(otherClone, remote);
 }
 
 /** 別のPCで書いた分を、GitHub役へ入れる */
 function pushFromOtherMachine(file: string, body: string): void {
-  const other = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-other-"));
-  git(other, "-c", "core.autocrlf=false", "clone", "-q", remote, "clone");
-  const clone = nodePath.join(other, "clone");
-  configure(clone);
-  write(clone, file, body);
-  git(clone, "add", "-A");
-  git(clone, "commit", "-qm", "別のPCで書いた");
-  git(clone, "push", "-q", "origin", "main");
+  // 書く前にGitHub役の最新へ追いつく（この端末が先に送っていることがある。
+  // 以前は呼ぶたびに取り出し直していたのと同じ状態から書く）
+  git(otherClone, "pull", "-q", "--ff-only", "origin", "main");
+  write(otherClone, file, body);
+  git(otherClone, "add", "-A");
+  git(otherClone, "commit", "-qm", "別のPCで書いた");
+  git(otherClone, "push", "-q", "origin", "main");
 }
 
 /** この端末で、名前を変えて（必要なら中身も直して）記録する */

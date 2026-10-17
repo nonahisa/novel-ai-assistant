@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import * as fs from "node:fs";
-import * as nodePath from "node:path";
+import "../support/sweepTimeout";
+import { srcSource, srcSources } from "../support/srcSources";
 
 /**
  * 応答の見込み（`maxOutputTokens`）を、どの機能がAIへ渡すか
@@ -26,15 +26,19 @@ import * as nodePath from "node:path";
  * ——モデルでも、16,384を確保したうえで送ることになる。
  * 非力な機械では、その差がそのまま無駄なメモリになる。
  */
-const FEATURES = nodePath.join(__dirname, "..", "..", "..", "src", "features");
-const AI = nodePath.join(__dirname, "..", "..", "..", "src", "ai");
-
+/*
+  **読みは1回にして使い回す**（2026-10-17）。`test.each` の行ごとに同じファイルを
+  読み直し、さらに src 全体を2回歩いていたので、並列の負荷の中で時間切れに
+  なった（単独なら1秒で通る）。読む中身は同じで、確かめることは変わらない。
+  共通の読み込みは `support/srcSources.ts`。待ちの上限は `support/sweepTimeout.ts`
+  （src 全体を読む網のテストと同じ扱い）。
+*/
 function read(file: string): string {
-  return fs.readFileSync(nodePath.join(FEATURES, file), "utf8");
+  return srcSource(`features/${file}`);
 }
 
 function readAi(file: string): string {
-  return fs.readFileSync(nodePath.join(AI, file), "utf8");
+  return srcSource(`ai/${file}`);
 }
 
 /**
@@ -238,34 +242,19 @@ describe("出力トークンの3つの口に、機能の名前を渡す", () => 
     return found;
   }
 
-  function allSourceFiles(dir: string): string[] {
-    const out: string[] = [];
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = nodePath.join(dir, entry.name);
-      if (entry.isDirectory()) out.push(...allSourceFiles(full));
-      else if (entry.name.endsWith(".ts")) out.push(full);
-    }
-    return out;
-  }
-
-  const SRC = nodePath.join(__dirname, "..", "..", "..", "src");
-
   test("機能を渡さない（引数2つの）呼び出しが1つも残っていない", () => {
     const offenders: string[] = [];
-    for (const file of allSourceFiles(SRC)) {
+    for (const { file, body } of srcSources()) {
       // 決め方そのものを持つファイルは、既定の引数を宣言する側なので除く
-      if (file.endsWith(nodePath.join("ai", "outputLimit.ts"))) continue;
-      offenders.push(
-        ...twoArgumentCalls(nodePath.relative(SRC, file), fs.readFileSync(file, "utf8"))
-      );
+      if (file.endsWith("ai/outputLimit.ts")) continue;
+      offenders.push(...twoArgumentCalls(file, body));
     }
     expect(offenders).toEqual([]);
   });
 
   test("検査が空振りしていない（呼び出しそのものは十分ある）", () => {
     let calls = 0;
-    for (const file of allSourceFiles(SRC)) {
-      const source = fs.readFileSync(file, "utf8");
+    for (const { body: source } of srcSources()) {
       for (const name of NAMES) {
         calls += source.split(`${name}(`).length - 1;
       }
