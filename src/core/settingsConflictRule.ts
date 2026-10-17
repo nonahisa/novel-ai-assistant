@@ -59,6 +59,8 @@ const CHARACTER_AUTHOR_KEYS = [
   "rejectedRelations",
   // 誤りとして落とした値（2026-09-26 深夜）。作者の操作でしか増えない
   "rejectedValues",
+  // 主人公の印（2026-10-17）。作者だけが付け外しする
+  "isProtagonist",
 ] as const;
 
 /** 片側をそのまま残す決め方 */

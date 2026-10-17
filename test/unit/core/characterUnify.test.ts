@@ -19,6 +19,21 @@ describe("同一人物をまとめる", () => {
     expect(retiredId).toBe("char_001");
   });
 
+  test("主人公の印は、吸収される側にあっても引き継ぐ（2026-10-17）", () => {
+    // 作者が付けた印を、まとめる操作で黙って落とさない
+    const { unified } = unifyCharacters(
+      character("char_003", "リンセップ・アウクト"),
+      character("char_001", "リン", { isProtagonist: true })
+    );
+    expect(unified.isProtagonist).toBe(true);
+
+    const { unified: plain } = unifyCharacters(
+      character("char_003", "リンセップ・アウクト"),
+      character("char_001", "リン")
+    );
+    expect("isProtagonist" in plain).toBe(false);
+  });
+
   test("作者が書いた文章は両方残す", () => {
     // 「まとめたら作者メモが消えた」は取り返しがつかない
     const { unified } = unifyCharacters(

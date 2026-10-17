@@ -76,6 +76,45 @@ describe("作者による書き換え", () => {
     expect(edited.isMob).toBe(true);
   });
 
+  test("作者は主人公の印を付けられる・外せる（2026-10-17）", () => {
+    const marked = applyCharacterEdits(emptyCharacter("char_001", "灯"), {
+      isProtagonist: "1",
+    });
+    expect(marked.isProtagonist).toBe(true);
+
+    const unmarked = applyCharacterEdits(marked, { isProtagonist: "" });
+    // 印の無い人物には欄を置かない
+    expect("isProtagonist" in unmarked).toBe(false);
+  });
+
+  test("AIの提案を採る経路では、主人公の印を付け外ししない", () => {
+    // 印は作者だけのもの（CLAUDE.md 規則2）。再読込・抽出のまとめの案に
+    // 鍵が混じっていても無視する
+    const plain = applyCharacterEdits(
+      emptyCharacter("char_001", "灯"),
+      { isProtagonist: "1", personality: "冷静沈着" },
+      { authorConfirmed: false }
+    );
+    expect("isProtagonist" in plain).toBe(false);
+    expect(plain.personality).toBe("冷静沈着");
+
+    const marked = applyCharacterEdits(
+      { ...emptyCharacter("char_001", "灯"), isProtagonist: true },
+      { isProtagonist: "" },
+      { authorConfirmed: false }
+    );
+    expect(marked.isProtagonist).toBe(true);
+  });
+
+  test("印が渡されなければ主人公の印を触らない", () => {
+    const edited = applyCharacterEdits(
+      { ...emptyCharacter("char_001", "灯"), isProtagonist: true },
+      { role: "主人公" }
+    );
+
+    expect(edited.isProtagonist).toBe(true);
+  });
+
   test("チェックが渡されなければモブ扱いを触らない", () => {
     // 能力・場所にはこの項目が無く、AIの提案にも含まれない
     const character = {
