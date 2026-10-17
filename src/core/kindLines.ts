@@ -1,4 +1,6 @@
 import {
+  SCRIPT_GOTHIC_FONT_FAMILY,
+  SCRIPT_LAYOUT_CSS,
   SCRIPT_LINE_CLASSES,
   SCRIPT_LINE_CSS,
   SCRIPT_LINE_RULES,
@@ -47,9 +49,12 @@ const SERIFU_RULE = SCRIPT_RULES.find((rule) => rule.cls === SCRIPT_LINE_CLASSES
  * 絵の説明（全角空白の字下げ）と台詞（人物名「…」）は台本と同じ規則を借りる
  * ——同じ形の行が、種類によって違う組み方になるのは紛らわしい。
  */
+/** 漫画の原作のページ・コマの印。**名前の定義はここだけ**（公募の納品用も見分けに使う） */
+export const MANGA_LINE_CLASSES = { page: "manga-page", panel: "manga-panel" } as const;
+
 const MANGA_RULES: readonly KindLineRule[] = [
-  { cls: "manga-page", pattern: "^\\u25A0" },
-  { cls: "manga-panel", pattern: "^\\u25A1" },
+  { cls: MANGA_LINE_CLASSES.page, pattern: "^\\u25A0" },
+  { cls: MANGA_LINE_CLASSES.panel, pattern: "^\\u25A1" },
   TOGAKI_RULE,
   SERIFU_RULE,
 ];
@@ -134,6 +139,40 @@ export function kindLineCss(kind: WorkKindKey | undefined): string {
     default:
       return "";
   }
+}
+
+/**
+ * 台本の組み方（人物名の欄・「「」の次の字の下へのぶら下げ・ト書きと柱のゴシック。
+ * 作者の裁定、2026-10-17）を当てる種類か。**台本と漫画の原作**（作者の裁定、2026-10-17
+ * 「漫画の原作にも、台本と同じ組み方を当てる」）。漫画の原作は台本のト書き・台詞の印を
+ * 借りているので、同じ行には同じ組み方が当たる。
+ *
+ * 公募の納品用（`manuscriptGrid.ts`）・読む紙（`printHtml.ts`）・原稿エディター
+ * （`views/manuscriptEditorHtml.ts`）が**この1つで決める**——種類の名前を3か所へ
+ * 並べて書くと、1か所だけ足し忘れる日が来る。EPUB には当てない（`SCRIPT_LINE_CSS` だけ）
+ */
+export function kindUsesScriptLayout(kind: WorkKindKey | undefined): boolean {
+  return kind === "script" || kind === "manga";
+}
+
+/**
+ * 漫画の原作のページ（■）・コマ（□）の行の書体（作者の裁定、2026-10-17）。
+ *
+ * **台本の柱と同じゴシックにする。** ページ・コマの行は、柱と同じく読み上げる言葉ではなく
+ * 作画への指示（構造の見出し）である。絵の説明（ト書き）がゴシック・台詞が明朝になる以上、
+ * ここだけ明朝だと「明朝の見出し → ゴシックの説明 → 明朝の台詞」と交互に替わり、
+ * 書体で「言葉」と「指示」を見分けられなくなる。字下げ・太字・罫は今のまま（`MANGA_CSS`）。
+ * `MANGA_CSS` に書かないのは、そちらが EPUB にも入るため（EPUB の書体は変えない）
+ */
+export const MANGA_LAYOUT_CSS = `.manga-page, .manga-panel { font-family: ${SCRIPT_GOTHIC_FONT_FAMILY}; }`;
+
+/**
+ * 台本の組み方のCSS（読む紙と原稿エディターが埋め込む）。当てない種類は空文字。
+ * 定義は `SCRIPT_LAYOUT_CSS` の1か所のまま、漫画の原作はページ・コマの書体だけを足す
+ */
+export function kindLayoutCss(kind: WorkKindKey | undefined): string {
+  if (!kindUsesScriptLayout(kind)) return "";
+  return kind === "manga" ? `${SCRIPT_LAYOUT_CSS}\n${MANGA_LAYOUT_CSS}` : SCRIPT_LAYOUT_CSS;
 }
 
 /** 規則ごとに作り直さない（4万字の原稿では行数ぶん効く） */

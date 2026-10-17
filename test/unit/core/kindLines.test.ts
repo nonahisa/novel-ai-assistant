@@ -1,10 +1,15 @@
 import { describe, expect, test } from "vitest";
 import {
+  kindLayoutCss,
   kindLineClass,
   kindLineCss,
   kindLineRules,
+  kindUsesScriptLayout,
+  MANGA_LAYOUT_CSS,
 } from "../../../src/core/kindLines";
 import {
+  SCRIPT_GOTHIC_FONT_FAMILY,
+  SCRIPT_LAYOUT_CSS,
   SCRIPT_LINE_CSS,
   scriptLineClass,
 } from "../../../src/core/scriptLines";
@@ -55,6 +60,30 @@ describe("漫画の原作", () => {
   test("台本のト書き・台詞の組み方も一緒に入る（同じ class を付けるため）", () => {
     expect(kindLineCss("manga")).toContain(SCRIPT_LINE_CSS);
     expect(kindLineCss("manga")).toContain(".manga-page");
+  });
+
+  /**
+   * 台本と同じ組み方（人物名の欄・ぶら下げ・書体）を当てる（作者の裁定、2026-10-17）。
+   * 定義は台本の `SCRIPT_LAYOUT_CSS` の1か所で、ページ・コマの書体だけを足す。
+   * EPUB に入る `kindLineCss` には書体を入れない
+   */
+  test("台本と同じ組み方を当て、ページ・コマはゴシック（EPUB の CSS には入れない）", () => {
+    expect(kindUsesScriptLayout("manga")).toBe(true);
+    expect(kindLayoutCss("manga")).toContain(SCRIPT_LAYOUT_CSS);
+    expect(kindLayoutCss("manga")).toContain(MANGA_LAYOUT_CSS);
+    expect(MANGA_LAYOUT_CSS).toBe(`.manga-page, .manga-panel { font-family: ${SCRIPT_GOTHIC_FONT_FAMILY}; }`);
+    expect(kindLineCss("manga")).not.toContain("font-family");
+  });
+});
+
+describe("台本の組み方を当てる種類", () => {
+  test("台本と漫画の原作だけ", () => {
+    expect(kindUsesScriptLayout("script")).toBe(true);
+    expect(kindLayoutCss("script")).toBe(SCRIPT_LAYOUT_CSS);
+    for (const kind of [undefined, "novel", "essay", "lyrics"] as const) {
+      expect(kindUsesScriptLayout(kind)).toBe(false);
+      expect(kindLayoutCss(kind)).toBe("");
+    }
   });
 });
 

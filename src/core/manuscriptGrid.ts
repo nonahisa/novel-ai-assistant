@@ -2,8 +2,9 @@ import { tokenizeLine, type NotationMode } from "./manuscriptRender";
 import { stripMemoLines } from "./sceneMemo";
 import { tcyRuns } from "./tateChuYoko";
 import { isHangable, isNoLineEnd, isNoLineStart } from "./kinsoku";
+import { kindLineClass, kindUsesScriptLayout, MANGA_LINE_CLASSES } from "./kindLines";
 import {
-  classifyScriptLine,
+  SCRIPT_LINE_CLASSES,
   SCRIPT_ROLE_WIDTH,
   SCRIPT_SPEECH_HANG,
   splitSerifu,
@@ -354,12 +355,24 @@ export function layoutGrid(
 export const SCRIPT_TOGAKI_INDENT = 3;
 
 /**
- * 1段落を行へ割る。**台本だけ、行の種類で組み方を変える。**
+ * 字下げせずにゴシックで組む見出しの行：台本の柱と、漫画の原作のページ・コマ
+ * （ページ・コマをゴシックにする理由は `kindLines.ts` の `MANGA_LAYOUT_CSS`）
+ */
+const GOTHIC_HEADING_CLASSES: ReadonlySet<string> = new Set([
+  SCRIPT_LINE_CLASSES.hashira,
+  MANGA_LINE_CLASSES.page,
+  MANGA_LINE_CLASSES.panel,
+]);
+
+/**
+ * 1段落を行へ割る。**台本と漫画の原作だけ、行の種類で組み方を変える**（当てる種類は
+ * `kindLines.ts` の `kindUsesScriptLayout`。漫画の原作は作者の裁定、2026-10-17）。
  *
- * - 見分け方は `scriptLines.ts` の `classifyScriptLine`（原稿エディター・読む紙と
- *   同じ規則）。**`kindLineClass` は通さない**——漫画の原作も同じ「ト書き」の
- *   印を借りているので、そちらを通すと漫画まで変わる（今回は台本だけ）
- * - **ト書き**：3字下げ。行頭の全角空白で見分けるので、**頭の全角空白は字下げに
+ * - 見分け方は `kindLines.ts` の `kindLineClass`（原稿エディター・読む紙と同じ規則）。
+ *   漫画の原作はページ（■）・コマ（□）を先に見るので、`□コマ1「看板」` のような行が
+ *   台詞に化けない（台本だけの `classifyScriptLine` では見分けられない）
+ * - **ページ・コマ**（漫画の原作）：字下げせず、台本の柱と同じゴシック
+ * - **ト書き**（漫画の原作では絵の説明）：3字下げ。行頭の全角空白で見分けるので、**頭の全角空白は字下げに
  *   置き換える**（残すと「空白1字＋字下げ3字」で4字下がる。紙だけの話で、原稿は
  *   変えない）。字下げのぶん、1行に入る字を減らして割る（1行の字数は指定どおり）
  * - **台詞**：人物名の欄と、「「」の次の字の下へのぶら下げ（`serifuLines`）
@@ -371,11 +384,11 @@ function linesOfParagraph(
   options: GridOptions,
   kind: WorkKindKey | undefined
 ): GridLine[] {
-  if (kind !== "script") {
+  if (!kindUsesScriptLayout(kind)) {
     return breakIntoLines(unitsOfLine(text, notation, options.vertical), options);
   }
-  const lineKind = classifyScriptLine(text);
-  if (lineKind === "togaki") {
+  const lineClass = kindLineClass(kind, text);
+  if (lineClass === SCRIPT_LINE_CLASSES.togaki) {
     const columns = Math.max(1, Math.floor(options.columns));
     const indent = Math.min(SCRIPT_TOGAKI_INDENT, columns - 1);
     const body = text.replace(/^　+/, "");
@@ -384,12 +397,12 @@ function linesOfParagraph(
       (line) => ({ ...line, indent, gothic: true as const })
     );
   }
-  if (lineKind === "hashira") {
+  if (GOTHIC_HEADING_CLASSES.has(lineClass)) {
     return breakIntoLines(unitsOfLine(text, notation, options.vertical), options).map(
       (line) => ({ ...line, gothic: true as const })
     );
   }
-  if (lineKind === "serifu") {
+  if (lineClass === SCRIPT_LINE_CLASSES.serifu) {
     const serifu = splitSerifu(text);
     if (serifu) return serifuLines(serifu.role, serifu.speech, notation, options);
   }

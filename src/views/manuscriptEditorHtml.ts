@@ -42,8 +42,13 @@ import { MANUSCRIPT_SIZE_DEFAULT } from "../core/manuscriptAppearance";
 import { NOTATION_RULES } from "../core/manuscriptRender";
 import { MEMO_LINE_PATTERN, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
 import { TCY_RUN_PATTERN } from "../core/tateChuYoko";
-import { kindLineCss, kindLineRules } from "../core/kindLines";
-import { SCRIPT_LAYOUT_CSS, SCRIPT_ROLE_MAX } from "../core/scriptLines";
+import {
+  kindLayoutCss,
+  kindLineCss,
+  kindLineRules,
+  kindUsesScriptLayout,
+} from "../core/kindLines";
+import { SCRIPT_ROLE_MAX } from "../core/scriptLines";
 import type { WorkKindKey } from "../core/workKind";
 import { findAction } from "./actionList";
 import { OBSERVE_VISIBLE_WIDTH_SOURCE } from "./visibleWidthScript";
@@ -95,13 +100,14 @@ export function buildManuscriptEditorHtml(
    */
   const kindCss = kindLineCss(kind);
   /*
-    台本だけ、台詞のぶら下げを「「」の位置にそろえる印と、ト書き・柱のゴシックを足す
-    （作者の裁定、2026-10-17。紙と同じ `SCRIPT_LAYOUT_CSS`）。台詞と人物名は、作者が
-    選んだ書体（novelai.manuscriptEditor.fontFamily。既定は明朝）のまま。
-    ト書き・柱のゴシックは選んだ書体に関わらず固定の並び（選んだ書体がゴシックなら
+    台本と漫画の原作だけ、台詞のぶら下げを「「」の位置にそろえる印と、ト書き・柱
+    （漫画の原作では絵の説明とページ・コマ）のゴシックを足す（作者の裁定、2026-10-17。
+    紙と同じ `kindLayoutCss`）。台詞と人物名は、作者が選んだ書体
+    （novelai.manuscriptEditor.fontFamily。既定は明朝）のまま。
+    ゴシックは選んだ書体に関わらず固定の並び（選んだ書体がゴシックなら
     全部ゴシックに見えるだけで、困ることはない）
   */
-  const layoutCss = kind === "script" ? `\n${SCRIPT_LAYOUT_CSS}` : "";
+  const layoutCss = kindUsesScriptLayout(kind) ? `\n${kindLayoutCss(kind)}` : "";
   const scriptCss = kindCss ? `\n${kindCss}${layoutCss}` : "";
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -5373,7 +5379,7 @@ ${RESUME_WRITING_LABEL ? `
   }
 
   /**
-   * 台本の台詞の、ぶら下げの幅の印（script-role-N。作者の裁定、2026-10-17）。
+   * 台本と漫画の原作の台詞の、ぶら下げの幅の印（script-role-N。作者の裁定、2026-10-17）。
    *
    * 折り返した行を「「」の次の字（台詞の1字目）の下にそろえるため、**その行の「「」
    * までの字数**を数える（下げ幅は core/scriptLines.ts の SCRIPT_SPEECH_HANG を足した
@@ -5381,9 +5387,10 @@ ${RESUME_WRITING_LABEL ? `
    * 数えるのは画面に見えている字（ルビは親文字だけ。読みは数えない）。
    * **印（class）を足すだけで、要素は足さない**——人物名を要素で包むと、打っている
    * 最中にカーソルと変換の位置がずれる。そのため紙のような「人物名の欄」は作らず、
-   * 行ごとの「「」の位置でぶら下げる。台本以外（漫画の原作を含む）は 0 で、印を付けない
+   * 行ごとの「「」の位置でぶら下げる。台本と漫画の原作のほかは 0 で、印を付けない
+   * （当てる種類は core/kindLines.ts の kindUsesScriptLayout）
    */
-  const SCRIPT_ROLE_MAX = ${kind === "script" ? SCRIPT_ROLE_MAX : 0};
+  const SCRIPT_ROLE_MAX = ${kindUsesScriptLayout(kind) ? SCRIPT_ROLE_MAX : 0};
 
   function composeRoleClass(element) {
     const visible = composeVisibleText(element);

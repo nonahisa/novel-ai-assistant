@@ -147,9 +147,10 @@ export interface GridPrintHtmlInput {
   /** 紙の端から本文までの余白（mm）。省略なら普通（`GRID_MARGIN_MM`） */
   marginMm?: number;
   /**
-   * 作品の種類。**台本だけ、行の種類で組み方を変える**：ト書きの3字下げ
-   * （作者の裁定、2026-10-09）、台詞の人物名の欄と「「」の次の字の下へのぶら下げ、
-   * ト書きと柱のゴシック（2026-10-17。`manuscriptGrid.ts` の `linesOfParagraph`）。
+   * 作品の種類。**台本と漫画の原作だけ、行の種類で組み方を変える**：ト書き（漫画の
+   * 原作では絵の説明）の3字下げ（作者の裁定、2026-10-09）、台詞の人物名の欄と「「」の
+   * 次の字の下へのぶら下げ、ト書きと柱（漫画の原作ではページ・コマ）のゴシック
+   * （2026-10-17。`manuscriptGrid.ts` の `linesOfParagraph`）。
    * ほかの種類はいまのまま（本文をそのまま升目に置く）
    */
   kind?: WorkKindKey;
@@ -219,7 +220,8 @@ function renderLine(line: GridLine): string {
   const cells = line.units.map(renderUnit).join("");
   // ぶら下げは最後のマスのあとに置く。行の枠からはみ出して、余白に出る
   const hang = line.hang ? renderUnit(line.hang) : "";
-  // 台本のト書きと柱はゴシック（`GridLine.gothic`）。マスの寸法は変わらない
+  // 台本のト書きと柱、漫画の原作の絵の説明とページ・コマはゴシック（`GridLine.gothic`）。
+  // マスの寸法は変わらない
   return `<div class="${line.gothic ? "gl g" : "gl"}">${indent}${cells}${hang}</div>`;
 }
 
