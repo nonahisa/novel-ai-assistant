@@ -13,6 +13,7 @@ import {
 import {
   emptyHeaderFooter,
   marginsAttribute,
+  PRINT_DIALOG_FIGURE,
   PRINT_GOTHIC_FONT_FAMILY,
 } from "../../../src/core/printHtml";
 import { gridGeometry, layoutGrid, type GridOptions } from "../../../src/core/manuscriptGrid";
@@ -212,9 +213,21 @@ describe("上下の余白と案内", () => {
     );
   });
 
+  test("案内帯に、読む紙と同じ印刷の画面の図を出す（図の定義は1か所）", () => {
+    const out = grid();
+    const start = out.indexOf('<div class="print-guide">');
+
+    expect(out).toContain(PRINT_DIALOG_FIGURE);
+    expect(out.indexOf(PRINT_DIALOG_FIGURE)).toBeGreaterThan(start);
+    expect(out.indexOf(PRINT_DIALOG_FIGURE)).toBeLessThan(out.indexOf('<div id="print-pages">'));
+    expect(out).toMatch(/@media print \{[^@]*\.print-guide \{ display: none; \}/);
+  });
+
   test("外のものを読み込まない", () => {
     const out = grid();
 
+    expect(out).not.toMatch(/url\(/);
+    expect(out).not.toContain("<img");
     expect(out).not.toMatch(/<script[^>]*\ssrc=/);
     expect(out).not.toContain("http://");
     expect(out).not.toContain("https://");

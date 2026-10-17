@@ -385,10 +385,103 @@ export function buildPrintGuide(paper: string, margins: HeaderFooter): string {
       `上下の余白：${escapeHtml(describeHeaderFooter(margins))}</p>`,
     "<p>Ctrl+P で印刷の画面を開き、送信先を「PDF に保存」にしてください。" +
       "「詳細設定」の「ヘッダーとフッター」のチェックを外してください（入れたままだと、日付とファイルの場所が紙の端に刷られます）。" +
-      "用紙サイズ・余白・倍率は「既定」のままにしてください。</p>",
+      "用紙サイズ・余白・倍率は「既定」のままにしてください。" +
+      "印刷の画面の並びや名前は、ブラウザやその版によって少し違うことがあります。</p>",
+    PRINT_DIALOG_FIGURE,
     "</div>",
   ].join("\n");
 }
+
+/**
+ * 案内帯の中に描く、印刷の画面（Chrome・Edge）の図。触る所に番号と色の印を付ける。
+ *
+ * 文だけの案内では「メニューが独特でわかりにくい」（作者の声、2026-10-17）。
+ * 名前を読んで探すより、画面のどのあたりかを先に見せたほうが迷わない。
+ *
+ * - **HTML と CSS の箱で描く。** 画像を読み込むと、書き出したファイルを別の
+ *   PC へ写したときに図が欠ける。インラインの SVG は名前空間の URL を書きたく
+ *   なり、「外のものを読み込まない」の見張り（`http://` を含まない）とぶつかる
+ * - 右の設定の列は Chrome の並び（送信先 → ページ → … → 詳細設定を開くと
+ *   オプション）。Edge は名前が違う所があるので、手順の側に書き添える
+ * - **既定で開いておく。** わかりにくいと言われた作者に、まず閉じた札を探させない。
+ *   開いている間は帯を上に貼り付けない（`:has` の規則）ので、面を読み進めると
+ *   図は上へ流れて消え、面を覆わない
+ * - 定義はここ1か所。読む紙と公募の納品用（`printGridHtml.ts`）の両方が
+ *   `buildPrintGuide` を通して同じ図を出す
+ */
+export const PRINT_DIALOG_FIGURE = [
+  '<details class="print-figure" open>',
+  "<summary>印刷の画面のどこを触るか（図。押すと開け閉めできます）</summary>",
+  '<div class="pf-body">',
+  '<div class="pf-dialog">',
+  // 左：紙の見本が並ぶ所（触らない）
+  '<div class="pf-preview"><div class="pf-sheet"></div><div class="pf-sheet"></div></div>',
+  // 右：設定の列
+  '<div class="pf-panel">',
+  '<div class="pf-title">印刷</div>',
+  '<div class="pf-row pf-hit"><span class="pf-mark">①</span><span class="pf-label">送信先</span><span class="pf-field">PDF に保存 ▼</span></div>',
+  '<div class="pf-row"><span class="pf-label">ページ</span><span class="pf-field">すべて ▼</span></div>',
+  '<div class="pf-row"><span class="pf-label">レイアウト</span><span class="pf-field">縦 ▼</span></div>',
+  '<div class="pf-row pf-hit"><span class="pf-mark">②</span><span class="pf-label">詳細設定 ▼</span></div>',
+  '<div class="pf-more">',
+  '<div class="pf-row pf-keep"><span class="pf-label">用紙サイズ</span><span class="pf-field">既定のまま</span></div>',
+  '<div class="pf-row pf-keep"><span class="pf-label">余白</span><span class="pf-field">既定のまま</span></div>',
+  '<div class="pf-row pf-keep"><span class="pf-label">倍率</span><span class="pf-field">既定のまま</span></div>',
+  '<div class="pf-row"><span class="pf-label">オプション</span></div>',
+  '<div class="pf-row pf-hit"><span class="pf-mark">③</span><span class="pf-check">☐</span> ヘッダーとフッター</div>',
+  '<div class="pf-row"><span class="pf-check">☐</span> 背景のグラフィック</div>',
+  "</div>",
+  '<div class="pf-buttons"><span class="pf-button pf-save pf-hit"><span class="pf-mark">④</span>保存</span><span class="pf-button">キャンセル</span></div>',
+  "</div>",
+  "</div>",
+  // 図の横（狭い窓では下）に、番号の順の手順
+  '<ol class="pf-steps">',
+  "<li><span class=\"pf-mark\">①</span>「送信先」で「PDF に保存」を選ぶ<small>Edge では「プリンター」で「PDF として保存」</small></li>",
+  "<li><span class=\"pf-mark\">②</span>「詳細設定」を押して開く<small>Edge では「その他の設定」</small></li>",
+  "<li><span class=\"pf-mark\">③</span>「ヘッダーとフッター」のチェックを外す<small>入れたままだと、日付とファイルの場所が紙の端に刷られます</small></li>",
+  "<li><span class=\"pf-mark\">④</span>「保存」を押して、保存先を選ぶ</li>",
+  '<li class="pf-dont">灰色の「用紙サイズ」「余白」「倍率」は既定のまま（触りません）</li>',
+  "</ol>",
+  "</div>",
+  "</details>",
+].join("\n");
+
+/**
+ * 印刷の画面の図の見た目（`pageSheetCss` の `@media screen` の中に入る。紙には
+ * 帯ごと刷らない）。触る所は橙の枠と番号、触らない所は灰色。
+ */
+const PRINT_FIGURE_CSS = [
+  // 図を開いている間は帯を上に貼り付けない（面を覆わないように）。
+  // `:has` を知らないブラウザでは貼り付いたままになるだけで、図は閉じられる
+  ".print-guide:has(.print-figure[open]) { position: static; }",
+  ".print-figure { margin-top: 6px; }",
+  ".print-figure > summary { cursor: pointer; font-weight: bold; color: #7a4a00; }",
+  ".pf-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 24px; margin: 8px 0 4px; }",
+  ".pf-dialog { display: flex; flex: 0 1 440px; max-width: 100%; border: 1px solid #999; border-radius: 6px; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); font-size: 12px; line-height: 1.4; overflow: hidden; }",
+  ".pf-preview { flex: 1 1 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px; background: #e6e6e6; }",
+  ".pf-sheet { width: 48px; height: 68px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }",
+  ".pf-panel { flex: 0 0 250px; padding: 8px 10px; }",
+  ".pf-title { font-size: 14px; font-weight: bold; margin-bottom: 4px; }",
+  ".pf-row { display: flex; align-items: center; gap: 6px; min-height: 22px; margin: 1px 0; padding: 0 4px; border: 2px solid transparent; border-radius: 4px; }",
+  ".pf-label { min-width: 5em; }",
+  ".pf-field { flex: 1; padding: 0 4px; border: 1px solid #bbb; border-radius: 3px; background: #fafafa; }",
+  ".pf-more { margin-left: 10px; padding-left: 6px; border-left: 2px solid #ddd; }",
+  ".pf-keep { color: #999; }",
+  ".pf-keep .pf-field { border-style: dashed; }",
+  ".pf-hit { border-color: #e8590c; background: #fff0e0; }",
+  ".pf-mark { color: #e8590c; font-weight: bold; font-size: 15px; line-height: 1; }",
+  ".pf-check { font-size: 15px; line-height: 1; }",
+  ".pf-buttons { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }",
+  ".pf-button { display: inline-flex; align-items: center; gap: 4px; padding: 1px 10px; border: 2px solid #bbb; border-radius: 4px; }",
+  ".pf-button.pf-save { background: #1a73e8; color: #fff; }",
+  ".pf-button.pf-save.pf-hit { border-color: #e8590c; }",
+  ".pf-button.pf-save .pf-mark { color: #fff; }",
+  ".pf-steps { flex: 1 1 260px; margin: 0; padding: 0; list-style: none; }",
+  ".pf-steps li { margin: 0 0 6px; }",
+  ".pf-steps .pf-mark { margin-right: 4px; }",
+  ".pf-steps small { display: block; color: #666; margin-left: 1.5em; }",
+  ".pf-steps .pf-dont { color: #777; }",
+];
 
 /**
  * 上下の余白の置き方を、面に割るスクリプトへ渡す属性（`data-margins`）。
@@ -691,6 +784,7 @@ export function pageSheetCss(
     '  .print-guide { position: sticky; top: 0; z-index: 1; margin: 0; padding: 10px 16px; background: #fff8dc; border-bottom: 1px solid #c8b560; font-family: "Yu Gothic UI", "Meiryo", sans-serif; font-size: 14px; line-height: 1.6; }',
     "  .print-guide p { margin: 0; }",
     "  .print-guide-lead { font-weight: bold; }",
+    ...PRINT_FIGURE_CSS.map((rule) => `  ${rule}`),
     "  #print-pages { padding: 24px 16px; }",
     "  .page { margin: 0 auto 24px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25); }",
     "  .page-body { outline: 1px dashed rgba(0, 0, 0, 0.15); }",
