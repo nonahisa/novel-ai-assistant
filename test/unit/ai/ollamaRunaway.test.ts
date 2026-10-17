@@ -10,6 +10,7 @@ import {
 import { bundledFeatureOutput } from "../../../src/core/bundledTuning";
 import { workspace } from "../support/vscodeStub";
 import { useMemoryTuningStore } from "../support/tuningStore";
+import { ndjson, ollamaShowResponse } from "../support/aiResponses";
 
 /**
  * 手元の Ollama が出力を止めずに書き続けたとき、製品が1回ぶんで打ち切れるか
@@ -44,10 +45,6 @@ function expectedTypoCap(): number {
   return Math.ceil((seed.outputTokens * 1.25) / 1024) * 1024;
 }
 
-function ndjson(lines: unknown[]): string {
-  return lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
-}
-
 /** 送った本文を溜めながら、決まった応答を流す */
 function stubFetch(): Array<Record<string, unknown>> {
   const bodies: Array<Record<string, unknown>> = [];
@@ -56,10 +53,7 @@ function stubFetch(): Array<Record<string, unknown>> {
     vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.endsWith("/api/show")) {
-        return new Response(
-          JSON.stringify({ model_info: { "test.context_length": 131_072 } }),
-          { status: 200 }
-        );
+        return ollamaShowResponse();
       }
       bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       return new Response(
@@ -206,10 +200,7 @@ function stubStream(stream: ReadableStream<Uint8Array>): void {
     vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.endsWith("/api/show")) {
-        return new Response(
-          JSON.stringify({ model_info: { "test.context_length": 131_072 } }),
-          { status: 200 }
-        );
+        return ollamaShowResponse();
       }
       return new Response(stream, { status: 200 });
     })
@@ -270,10 +261,7 @@ describe("流す道の時間切れ", () => {
       vi.fn(async (input: Parameters<typeof fetch>[0]) => {
         const url = input instanceof Request ? input.url : String(input);
         if (url.endsWith("/api/show")) {
-          return new Response(
-            JSON.stringify({ model_info: { "test.context_length": 131_072 } }),
-            { status: 200 }
-          );
+          return ollamaShowResponse();
         }
         return new Response(stream, { status: 200 });
       })
@@ -312,10 +300,7 @@ describe("流す道の時間切れ", () => {
       vi.fn(async (input: Parameters<typeof fetch>[0]) => {
         const url = input instanceof Request ? input.url : String(input);
         if (url.endsWith("/api/show")) {
-          return new Response(
-            JSON.stringify({ model_info: { "test.context_length": 131_072 } }),
-            { status: 200 }
-          );
+          return ollamaShowResponse();
         }
         return new Response(stream, { status: 200 });
       })

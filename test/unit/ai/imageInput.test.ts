@@ -16,6 +16,7 @@ import {
 import { imageNoteFor } from "../../../src/ai/registry";
 import { setStreamingSettingReader } from "../../../src/ai/ollamaStream";
 import { workspace } from "../support/vscodeStub";
+import { jsonResponse } from "../support/aiResponses";
 
 /**
  * 写真（画像）をAIへ渡す形と、写真を読めるかの判定（設計書6.117.4）。
@@ -34,13 +35,6 @@ const params: GenerateParams = {
   temperature: 0,
   numCtx: 8192,
 };
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 function context(): ExtensionContext {
   const stored = new Map<string, unknown>();

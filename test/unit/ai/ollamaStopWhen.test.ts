@@ -4,6 +4,7 @@ import { setStreamingSettingReader } from "../../../src/ai/ollamaStream";
 import { endsWithInlineRepetition } from "../../../src/core/inlineRepetition";
 import { parsePhotoTranscriptionStoppingRepeats } from "../../../src/core/photoTranscribeValidation";
 import { useMemoryTuningStore } from "../support/tuningStore";
+import { ollamaShowResponse } from "../support/aiResponses";
 
 /**
  * 機能が決めた条件で、流しの途中で受け取りをやめる（`GenerateParams.stopWhen`。
@@ -52,9 +53,7 @@ function stubStream(body: () => ReadableStream<Uint8Array>): void {
     vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.endsWith("/api/show")) {
-        return new Response(JSON.stringify({ model_info: { "test.context_length": 131_072 } }), {
-          status: 200,
-        });
+        return ollamaShowResponse();
       }
       return new Response(body(), { status: 200 });
     })

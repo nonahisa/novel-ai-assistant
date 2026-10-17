@@ -41,6 +41,7 @@ vi.mock("../../../src/ai/fetchTimeouts", async (importOriginal) => {
 
 import { ollamaGenerate } from "../../../src/mcp/tools/ollama";
 import { runByRunner } from "../../../src/mcp/tools/run";
+import { ndjson } from "../support/aiResponses";
 
 const input = {
   model: "test-model",
@@ -49,10 +50,6 @@ const input = {
   numCtx: 8192,
   temperature: 0,
 };
-
-function ndjson(lines: unknown[]): string {
-  return lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
-}
 
 /** 同梱の見込み（`typo_check`）から、送るはずの上限を組み立てる（数字を写さない） */
 function expectedTypoCap(): number {

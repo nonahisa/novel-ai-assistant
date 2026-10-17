@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { saveLoadedContextWindow } from "../../../src/ai/lmstudioModelLoad";
 import { workspace } from "../support/vscodeStub";
+import { jsonResponse } from "../support/aiResponses";
 
 /**
  * `saveLoadedContextWindow`（実測の文脈長を設定へ書き戻す口）を呼ぶテストが
@@ -26,13 +27,6 @@ const NOT_LOADED_MODEL = {
   state: "not-loaded",
   max_context_length: 262144,
 };
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 /** LM Studioの `/api/v0/models` を立てる */
 function stubLmStudio(native: unknown[]): void {

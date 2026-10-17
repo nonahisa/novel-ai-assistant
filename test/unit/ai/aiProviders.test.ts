@@ -12,6 +12,7 @@ import { LmStudioProvider } from "../../../src/ai/lmstudioProvider";
 import { AIError, isRefusalError } from "../../../src/ai/types";
 import { setStreamingSettingReader } from "../../../src/ai/ollamaStream";
 import { workspace } from "../support/vscodeStub";
+import { jsonResponse } from "../support/aiResponses";
 
 const ollamaParams = {
   systemPrompt: "system",
@@ -103,13 +104,6 @@ function claudeMessage(
     stop_sequence: null,
     usage: { input_tokens: 10, output_tokens: 5 },
   };
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
 }
 
 function deferred<T>(): {
