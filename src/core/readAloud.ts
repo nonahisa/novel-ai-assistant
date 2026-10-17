@@ -3,7 +3,7 @@ import {
   tokenizeLine,
   type NotationMode,
 } from "./manuscriptRender";
-import { isMemoLine } from "./sceneMemo";
+import { MEMO_LINE_PATTERN, isMemoLine } from "./sceneMemo";
 
 /**
  * 読み上げ（音読推敲。設計書6.42）。
@@ -310,3 +310,22 @@ function toSpeech(source: string, notation: NotationMode): string {
  * 中身まで持つと、印の書き方が変わったときにここが取り残される。
  */
 export const READ_ALOUD_MEMO_TEXT = "音読：ここで引っかかった";
+
+const MEMO_MARK_RE = new RegExp(MEMO_LINE_PATTERN);
+
+/**
+ * その1行が「引っかかった」で置いたメモか（設計書6.42）。
+ *
+ * **同じ文の上に2つ挿さないための見分け**（不具合、2026-10-17）。止めて
+ * ［▶ 続ける］で読み直すと［⚑］がまた押せるようになり、同じ文でもう一度
+ * 押すと、直前に同じ行がもう1つ入っていた。直前の行がこれなら挿さない。
+ *
+ * 印の書き方（`//`・`／／`・字下げ・印のあとの空白）は付箋の決まり
+ * （`core/sceneMemo.ts`）にそろえる。作者が手で直した行でも同じ印と読むため。
+ * **中身が違えば別の付箋**——作者が書いたメモの上へは、これまでどおり挿す。
+ */
+export function isReadingMemoLine(line: string): boolean {
+  if (!isMemoLine(line)) return false;
+  const body = line.replace(MEMO_MARK_RE, "").replace(/^[\s　]+|[\s　]+$/g, "");
+  return body === READ_ALOUD_MEMO_TEXT;
+}

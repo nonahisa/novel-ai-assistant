@@ -51,6 +51,7 @@ vi.mock("vscode", async (importOriginal) => {
 
 import {
   insertMemoLineAbove,
+  insertReadingMemo,
   isInsideWork,
 } from "../../../src/features/manuscriptEditor";
 import { READ_ALOUD_MEMO_TEXT } from "../../../src/core/readAloud";
@@ -160,5 +161,82 @@ describe("作品の中のファイルか", () => {
   test("空の道は外として扱う", () => {
     expect(isInsideWork(work, "")).toBe(false);
     expect(isInsideWork("", "C:/小説/1.md")).toBe(false);
+  });
+});
+
+/**
+ * 読み上げの「⚑ 引っかかった」を、止めて［▶ 続ける］で読み直したあとに
+ * **同じ文でもう一度押したとき**（不具合、2026-10-17。画面の自動テスト
+ * test/e2e/readAloudMark.test.ts で見つかった）。
+ *
+ * 押せない間の連打は画面の側（aloudMarking）が防いでいるが、計画が届いて
+ * 押せるようになったあとの2回目は、同じ文の直前へ同じメモの行をもう1つ
+ * 挿していた（「一行目／メモ／メモ／二行目」）。
+ */
+describe("読み上げの印は、同じ文の上に2つ入らない", () => {
+  /** 行の中身を持つ偽の文書（直前の行を読むのに使う） */
+  function documentOf(lines: string[]): Parameters<typeof insertReadingMemo>[0] {
+    return {
+      uri: { fsPath: "C:/小説/本文/1.md", toString: () => "file:///1.md" },
+      lineCount: lines.length,
+      lineAt: (index: number) => ({ text: lines[index] }),
+    } as unknown as Parameters<typeof insertReadingMemo>[0];
+  }
+
+  test("直前の行が同じ読み上げの印なら、挿さない", async () => {
+    const doc = documentOf([
+      "一行目の文。",
+      "// " + READ_ALOUD_MEMO_TEXT,
+      "二行目の文。",
+      "三行目の文。",
+      "",
+    ]);
+
+    // 計画では「二行目の文。」は（メモが入ったあとの）3行目
+    expect(await insertReadingMemo(doc, 3)).toBe("already");
+    expect(inserted).toEqual([]);
+  });
+
+  test("直前の行に印が無ければ、いままでどおり挿す", async () => {
+    const doc = documentOf(["一行目の文。", "二行目の文。", "三行目の文。", ""]);
+
+    expect(await insertReadingMemo(doc, 2)).toBe("inserted");
+    expect(inserted).toEqual([
+      { line: 1, character: 0, text: "// " + READ_ALOUD_MEMO_TEXT + "\n" },
+    ]);
+  });
+
+  /** 作者が自分で書いた別の付箋は、読み上げの印ではない。その上へは挿す */
+  test("直前が作者の別の付箋なら、挿す", async () => {
+    const doc = documentOf(["一行目の文。", "// 潮の匂いを足す", "二行目の文。", ""]);
+
+    expect(await insertReadingMemo(doc, 3)).toBe("inserted");
+    expect(inserted).toHaveLength(1);
+  });
+
+  /** 同じ印でも、別の文の上（2つ以上離れた行）なら別の引っかかりである */
+  test("印が2行以上上にあるだけなら、挿す", async () => {
+    const doc = documentOf([
+      "// " + READ_ALOUD_MEMO_TEXT,
+      "一行目の文。",
+      "二行目の文。",
+      "",
+    ]);
+
+    expect(await insertReadingMemo(doc, 3)).toBe("inserted");
+  });
+
+  test("先頭の行（直前の行が無い）なら、挿す", async () => {
+    const doc = documentOf(["一行目の文。", ""]);
+
+    expect(await insertReadingMemo(doc, 1)).toBe("inserted");
+    expect(inserted[0].line).toBe(0);
+  });
+
+  test("当てられなければ failed", async () => {
+    applied = false;
+    const doc = documentOf(["一行目の文。", "二行目の文。", ""]);
+
+    expect(await insertReadingMemo(doc, 2)).toBe("failed");
   });
 });

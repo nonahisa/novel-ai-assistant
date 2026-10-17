@@ -9,6 +9,7 @@ import { allActions } from "../../../src/views/actionList";
 import {
   READ_ALOUD_MEMO_TEXT,
   buildReadingPlan,
+  isReadingMemoLine,
 } from "../../../src/core/readAloud";
 import { isMemoLine, parseMemos } from "../../../src/core/sceneMemo";
 
@@ -202,6 +203,22 @@ describe("シーンメモ", () => {
 
     // その行は、読み上げの文にもならない
     expect(speeches(line + "\n本文です。")).toEqual(["本文です。"]);
+  });
+
+  /**
+   * 同じ文の上に2つ挿さないための見分け（不具合、2026-10-17）。
+   * 作者が手で直した書き方でも同じ印と読み、中身が違えば別の付箋とする。
+   */
+  it("引っかかったの行を見分ける", () => {
+    expect(isReadingMemoLine("// " + READ_ALOUD_MEMO_TEXT)).toBe(true);
+    expect(isReadingMemoLine("//" + READ_ALOUD_MEMO_TEXT)).toBe(true);
+    expect(isReadingMemoLine("　／／ " + READ_ALOUD_MEMO_TEXT + " ")).toBe(true);
+
+    // 作者の別の付箋・本文・印の無い同じ字は、引っかかったの行ではない
+    expect(isReadingMemoLine("// 潮の匂いを足す")).toBe(false);
+    expect(isReadingMemoLine("// " + READ_ALOUD_MEMO_TEXT + "。語尾が重い")).toBe(false);
+    expect(isReadingMemoLine(READ_ALOUD_MEMO_TEXT)).toBe(false);
+    expect(isReadingMemoLine("")).toBe(false);
   });
 });
 
