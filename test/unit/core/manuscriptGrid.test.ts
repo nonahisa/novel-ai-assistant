@@ -9,7 +9,7 @@ import {
   type GridOptions,
   type GridUnit,
 } from "../../../src/core/manuscriptGrid";
-import { SCRIPT_ROLE_WIDTH } from "../../../src/core/scriptLines";
+import { SCRIPT_ROLE_WIDTH, SCRIPT_SPEECH_HANG } from "../../../src/core/scriptLines";
 
 /**
  * 公募の納品用の組版（設計書6.33.5 の3）。
@@ -340,13 +340,18 @@ describe("台本の字下げ", () => {
     const first = serifu[0].units.map((unit) => unit.text || "□").join("");
     expect(first.startsWith("太郎□□□「行こう")).toBe(true);
     expect(serifu[0].units[SCRIPT_ROLE_WIDTH].text).toBe("「");
-    // 2行目以降：「「」の下（5マス下げ）。字下げを足しても字数は20のまま
+    // 2行目以降：「「」の次の字（台詞の1字目）の下＝6マス下げ（作者の裁定、2026-10-17
+    // 「「」と同じ高さだと上すぎる」）。字下げを足しても字数は20のまま
+    const hang = SCRIPT_ROLE_WIDTH + SCRIPT_SPEECH_HANG;
+    expect(hang).toBe(6);
     expect(serifu.length).toBeGreaterThanOrEqual(2);
     for (const line of serifu.slice(1)) {
-      expect(line.indent).toBe(SCRIPT_ROLE_WIDTH);
-      expect(SCRIPT_ROLE_WIDTH + lineWidth(line)).toBeLessThanOrEqual(options.columns);
+      expect(line.indent).toBe(hang);
+      expect(hang + lineWidth(line)).toBeLessThanOrEqual(options.columns);
     }
-    expect(lineWidth(serifu[0])).toBeLessThanOrEqual(options.columns);
+    // 1行目は欄＋台詞で字数いっぱいまで入る（2行目以降より1字多い）
+    expect(lineWidth(serifu[0])).toBe(options.columns);
+    expect(lineWidth(serifu[1])).toBe(options.columns - hang);
   });
 
   test("台詞は1字も落ちず、空きマスは字を持たない", () => {
@@ -354,15 +359,23 @@ describe("台本の字下げ", () => {
     expect(allText(serifu)).toBe("太郎「行こう、もう終電は出てしまったけれど、歩けば朝には着くはずだ」");
   });
 
-  test("欄より長い人物名は切らず、超えたぶんだけ「「」が後ろへずれる。続きはその「「」の下", () => {
+  test("欄より長い人物名は切らず、超えたぶんだけ「「」が後ろへずれる。続きはその「「」の次の字の下", () => {
     const body = "密倉家の会長「お前が三門の息子か。話は聞いている。学校でのことも全部だ」";
     const result = layoutGrid([{ heading: "", body, notation: "curly" }], options, "script")[0].lines;
 
     expect(show(result[0]).startsWith("密倉家の会長「")).toBe(true);
     expect(result[0].units[6].text).toBe("「");
     expect(result.length).toBeGreaterThanOrEqual(2);
-    for (const line of result.slice(1)) expect(line.indent).toBe(6);
+    for (const line of result.slice(1)) expect(line.indent).toBe(7);
     expect(allText(result)).toBe(body);
+  });
+
+  test("折り返しの下げ幅が行の半分を超える長さの人物名は、ふつうの行へ戻す（下げ幅の1字も数える）", () => {
+    // 20字：欄5＋1＝6、名前9字なら9＋1＝10（半分ちょうど）はぶら下げる。10字なら11で戻す
+    const nine = layoutGrid([{ heading: "", body: `あいうえおかきくけ「${"ん".repeat(30)}」`, notation: "curly" }], options, "script")[0].lines;
+    expect(nine[1].indent).toBe(10);
+    const ten = layoutGrid([{ heading: "", body: `あいうえおかきくけこ「${"ん".repeat(30)}」`, notation: "curly" }], options, "script")[0].lines;
+    for (const line of ten) expect(line.indent ?? 0).toBe(0);
   });
 
   test("ト書きと柱はゴシック、台詞は明朝", () => {

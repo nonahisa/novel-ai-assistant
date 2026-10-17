@@ -2110,7 +2110,8 @@ describe("脚本の行（組んで書く面）", () => {
 
   it("ト書き・柱はゴシック、台詞のぶら下げは行ごとの印で決まる（台本の画面だけ）", () => {
     expect(scriptHtml).toContain(SCRIPT_LAYOUT_CSS);
-    expect(scriptHtml).toContain(".script-serifu.script-role-2 { padding-inline-start: 2em; text-indent: -2em; }");
+    // 折り返しは「「」の次の字の下（「「」の位置＋1字。作者の裁定、2026-10-17）
+    expect(scriptHtml).toContain(".script-serifu.script-role-2 { padding-inline-start: 3em; text-indent: -3em; }");
     const manga = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "manga");
     expect(manga).not.toContain(SCRIPT_LAYOUT_CSS);
     expect(manga).toContain("const SCRIPT_ROLE_MAX = 0;");

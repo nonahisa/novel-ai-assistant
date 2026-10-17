@@ -9,6 +9,7 @@ import {
   SCRIPT_LINE_RULES,
   SCRIPT_ROLE_MAX,
   SCRIPT_ROLE_WIDTH,
+  SCRIPT_SPEECH_HANG,
   scriptRoleClass,
 } from "../../../src/core/scriptLines";
 
@@ -214,6 +215,13 @@ describe("組み方の指定（SCRIPT_LINE_CSS）", () => {
 describe("台本の人物名の欄（SCRIPT_LAYOUT_CSS）", () => {
   it("欄の幅は5字（作者の作品の呼び名が4〜6字に集まっているため）", () => {
     expect(SCRIPT_ROLE_WIDTH).toBe(5);
+  });
+
+  it("折り返しは「「」の位置からさらに1字下げる（台詞の1字目の下。下げ幅の定義はここだけ）", () => {
+    expect(SCRIPT_SPEECH_HANG).toBe(1);
+    expect(SCRIPT_LAYOUT_CSS).toContain(".script-serifu.script-role-5 { padding-inline-start: 6em; text-indent: -6em; }");
+    // EPUB などに埋め込む 6em の決め打ちは変えない
+    expect(SCRIPT_LINE_CSS).toContain("padding-inline-start: 6em;");
   });
 
   it("ぶら下げの印の上限は、台詞と見分ける規則の役名の上限と同じ", () => {
