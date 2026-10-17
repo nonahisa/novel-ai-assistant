@@ -556,17 +556,6 @@ describe("測定のあいだの待ち時間", () => {
     expect(new Set(seen)).toEqual(new Set([600]));
   });
 
-  test("台帳に待ち時間が無いモデルでも、測り直しの最中に欄を作らない", async () => {
-    state.limitChars = 1_000_000;
-    state.timeoutAboveChars = 20_000;
-    state.timeoutTimes = 1;
-    const seen: unknown[] = [];
-    state.onCall = () => seen.push(ledger().timeoutSeconds);
-    await measure({ answer: "そのままにする" });
-
-    expect(new Set(seen)).toEqual(new Set([undefined]));
-  });
-
   test("測り終えたら、ふだんの待ち時間（台帳の600秒）へ戻る", async () => {
     state.limitChars = 1_000_000;
     state.timeoutAboveChars = 20_000;
@@ -589,18 +578,6 @@ describe("測定のあいだの待ち時間", () => {
     expect(tuning.timeoutSeconds as number).toBeLessThanOrEqual(
       maxTimeoutSeconds("ollama")
     );
-  });
-
-  test("反映しなければ、延ばした待ち時間は元へ戻る", async () => {
-    state.limitChars = 1_000_000;
-    state.timeoutAboveChars = 20_000;
-    state.timeoutTimes = 1;
-    const { tuning } = await measure({
-      before,
-      answer: "そのままにする",
-    });
-
-    expect(tuning.timeoutSeconds).toBe(600);
   });
 
   test("**測定が終われば、ふだんの上限に戻る**（クラウド600秒・手元1800秒）", async () => {

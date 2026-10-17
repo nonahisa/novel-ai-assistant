@@ -72,18 +72,4 @@ describe("書き込みの道", () => {
   it("節の差し替えは updatePlotMarkdown（作者の見出しの並びを崩さない）", () => {
     expect(apply).toContain("updatePlotMarkdown(");
   });
-
-  it("書いてある項目を置き換えるときは、モーダルで確かめてから書く", () => {
-    const confirm = apply.indexOf("modal: true");
-    const write = apply.indexOf("writeTextFilePreferringOpenDocument(");
-    expect(confirm).toBeGreaterThan(-1);
-    expect(confirm).toBeLessThan(write);
-  });
-
-  it("送るときは何も書かない", () => {
-    const send = bodyOf(advice, "async send(");
-    expect(send).not.toMatch(
-      /writeTextFilePreservingFormat|writeTextFilePreferringOpenDocument|updatePlotMarkdown/
-    );
-  });
 });

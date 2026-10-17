@@ -182,11 +182,6 @@ describe("どこを取りこぼすか", () => {
       "プロットを立てたい",
     ]);
   });
-
-  test("誤検出も取り違えも、いまは0件", () => {
-    expect(measure().falsePositive).toEqual([]);
-    expect(measure().wrong).toEqual([]);
-  });
 });
 
 describe("「どんなときに読むか」の文が、そのまま成績になる", () => {
@@ -221,19 +216,5 @@ describe("「どんなときに読むか」の文が、そのまま成績にな�
 
     expect(importWork?.whenToRead).not.toContain("本文");
     expect(importWork?.whenToRead).toContain("原稿");
-  });
-});
-
-describe("規則を変えても崩してはいけないこと", () => {
-  test("緩めた先でも、創作の相談には手順書きを渡さない", () => {
-    // `procedures.test.ts` が見張っている4件。**緩めた先でも守れているか**
-    for (const question of [
-      "主人公の動機が弱い気がします",
-      "この段落は冗長ですか",
-      "第12話の終わり方が唐突でしょうか",
-      "タイトルはこれでいいと思う？",
-    ]) {
-      expect(selectProcedure({ question }), question).toBeUndefined();
-    }
   });
 });

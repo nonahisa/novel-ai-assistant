@@ -66,6 +66,11 @@ describe("貼り付け先ごとの変換", () => {
   it("シーンメモは、どちらの経路でも落ちる", () => {
     expect(convertForPosting("// 付箋\n本文", NOTE).text).toBe("本文");
     expect(convertForPosting("// 付箋\n本文", KAKUYOMU).text).toBe("本文");
+    // 本文の途中の行にあっても落ちる（core/sceneMemo.test.ts から寄せた）
+    expect(
+      convertForPosting("　港を見下ろした。\n// TODO 描写\n　風が吹いた。", KAKUYOMU)
+        .text
+    ).toBe("　港を見下ろした。\n　風が吹いた。");
   });
 
   /** コードの中の `//` は付箋ではない（落とすとコードが壊れる） */

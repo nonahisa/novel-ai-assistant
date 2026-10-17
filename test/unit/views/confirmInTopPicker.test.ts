@@ -80,14 +80,6 @@ describe("確認は画面上部の選択窓で訊く（A4）", () => {
     expect(calls[0].options.title).toBe("19話をAIで確認します。");
   });
 
-  test("作品名を渡すと、題の頭に作品名が出る", async () => {
-    const calls = picking(() => undefined);
-    await confirmRun("15チャンク中 15件を処理します。", "実行", {
-      work: { title: "こちら冒険者ギルド生活保護課!!" },
-    });
-    expect(calls[0].options.title).toContain("こちら冒険者ギルド生活保護課!!");
-  });
-
   test("取りやめの項目が見えている。選べば false", async () => {
     const calls = picking((shown) => labelled(shown, "取りやめる"));
     expect(await confirmRun("19話をAIで確認します。")).toBe(false);

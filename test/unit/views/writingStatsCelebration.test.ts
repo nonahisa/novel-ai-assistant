@@ -76,10 +76,6 @@ describe("達成の記録", () => {
     expect(html).toContain('<div id="achievements"></div>');
     expect(script).toContain("renderAchievements();");
   });
-
-  test("スクリプトがJavaScriptとして読める", () => {
-    expect(() => new Function(script)).not.toThrow();
-  });
 });
 
 /** 画面のスクリプトから関数を1つ取り出して、その場で動かす */

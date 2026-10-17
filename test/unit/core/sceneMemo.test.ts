@@ -32,7 +32,6 @@ import {
 } from "../../../src/core/sceneMemoMarkdown";
 import { countChars, countManuscriptLines } from "../../../src/core/charCount";
 import { splitIntoChunks, withLineNumbers } from "../../../src/core/chunker";
-import { convertForPosting } from "../../../src/core/postingConvert";
 import { buildPrintHtml } from "../../../src/core/printHtml";
 import { renderTermMarks } from "../../../src/core/manuscriptRender";
 import { hideMemoLinesInMarkdown } from "../../../src/core/markdownItRuby";
@@ -191,18 +190,6 @@ describe("読者向けの出力とAIから消す（6.40.2）", () => {
     expect(countManuscriptLines(BODY_WITH_MEMO)).toBe(
       countManuscriptLines("　彼女は港を見下ろしていた。\n　風が吹いた。")
     );
-  });
-
-  it("投稿用にコピー：メモは投稿されない", () => {
-    const posted = convertForPosting(BODY_WITH_MEMO, {
-      label: "試験",
-      detail: "",
-      style: "site",
-      emphasis: "kakuyomu",
-      registered: false,
-    }).text;
-    expect(posted).not.toContain("TODO");
-    expect(posted).toContain("港を見下ろしていた");
   });
 
   it("PDF：メモは紙に出ない", () => {

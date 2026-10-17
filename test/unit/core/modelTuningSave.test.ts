@@ -184,15 +184,26 @@ describe("ほかの測定結果を消さない", () => {
  */
 describe("これまでの約束は変わらない", () => {
   test("読めない欄・知らない欄は、そのまま残る", async () => {
-    // 作者が手で書いた覚書を、測って戻すだけで消さない
+    // 作者が手で書いた覚書を、測って戻すだけで消さない。
+    // **土台にするのは生の中身である。** 読み取り（`parseModelTuning`）を
+    // 通したものを書き戻すと、こちらが解釈できなかった欄が黙って消える。
+    // 既にある欄（timeoutSeconds）を書き換える回でも同じ
     await useMemoryTuningStore({
-      "ollama/gemma4:26b": { contextWindow: "131072", memo: "26Bはこれ" },
+      "ollama/gemma4:26b": {
+        contextWindow: "131072",
+        timeoutSeconds: 200,
+        memo: "26Bはこれ",
+      },
     });
 
-    await saveModelTuning("ollama", "gemma4:26b", { measuredChars: 160834 });
+    await saveModelTuning("ollama", "gemma4:26b", {
+      timeoutSeconds: 400,
+      measuredChars: 160834,
+    });
 
     expect(tuningStoreContents()["ollama/gemma4:26b"]).toEqual({
       contextWindow: "131072",
+      timeoutSeconds: 400,
       memo: "26Bはこれ",
       measuredChars: 160834,
     });
@@ -200,12 +211,15 @@ describe("これまでの約束は変わらない", () => {
 
   test("`undefined` を渡すと、その欄だけ消える", async () => {
     await useMemoryTuningStore({
-      "ollama/a": { timeoutSeconds: 600, measuredChars: 100 },
+      "ollama/a": { timeoutSeconds: 600, measuredChars: 100, memo: "覚書" },
     });
 
     await saveModelTuning("ollama", "a", { timeoutSeconds: undefined });
 
-    expect(tuningStoreContents()["ollama/a"]).toEqual({ measuredChars: 100 });
+    expect(tuningStoreContents()["ollama/a"]).toEqual({
+      measuredChars: 100,
+      memo: "覚書",
+    });
   });
 
   test("残る欄が1つも無くなったら、鍵ごと落ちる", async () => {

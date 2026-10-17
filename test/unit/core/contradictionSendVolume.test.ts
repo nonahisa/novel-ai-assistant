@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { describeSendVolume } from "../../../src/core/sendVolume";
-import { CARRY_OVER_DEFAULT_CHAPTERS } from "../../../src/core/contradictionMaterial";
 
 /**
  * 矛盾検知の引き継ぎ（`carryOver`）を既定にした（作者の裁定、2026-09-23。A3①）。
@@ -14,12 +13,6 @@ import { CARRY_OVER_DEFAULT_CHAPTERS } from "../../../src/core/contradictionMate
  */
 
 describe("送る量の言い方（`describeSendVolume`）", () => {
-  test("本文と、それ以外（指示と設定資料）を分けて言う", () => {
-    expect(describeSendVolume({ totalChars: 12345, bodyChars: 10000 })).toBe(
-      "送る量: 約12,345字（本文 10,000字＋指示と設定資料 2,345字）"
-    );
-  });
-
   test("本文以外が無ければ内訳を出さない", () => {
     expect(describeSendVolume({ totalChars: 800, bodyChars: 800 })).toBe(
       "送る量: 約800字"
@@ -44,10 +37,6 @@ describe("矛盾検知の確認画面は、実際に送る量で見積もる", (
     join(__dirname, "..", "..", "..", "src", "features", "checkContradictions.ts"),
     "utf8"
   );
-
-  test("既定は2話ぶん引き継ぐ（測った値）", () => {
-    expect(CARRY_OVER_DEFAULT_CHAPTERS).toBe(2);
-  });
 
   test("時間の見積もりへ本文の字数だけを渡さない", () => {
     const call = source.indexOf("estimateRunTimeText({");

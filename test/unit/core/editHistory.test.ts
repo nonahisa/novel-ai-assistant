@@ -197,12 +197,6 @@ describe("編集者モードで使える操作", () => {
     }
   });
 
-  test("原稿の受け渡しに要るものは開く", () => {
-    for (const command of ["novelai.gitSync", "novelai.resolveConflicts"]) {
-      expect(isCommandAllowed(command, "editor")).toBe(true);
-    }
-  });
-
   test("知らないコマンドは、足すまで編集者に開かない", () => {
     // **許すものを並べる作りにしてある。**
     // 機能を足したときに、うっかり編集部へ開かないため

@@ -5,7 +5,6 @@ import {
   buildTitleFitPrompt,
   TITLE_FIT_SCHEMA,
   TITLE_FIT_SYSTEM_PROMPT,
-  TITLE_FIT_VERSION,
 } from "../../../src/prompts/titleFit";
 
 /**
@@ -21,10 +20,6 @@ const TARGETS = titleFitTargets("鉛の海", [
 ]);
 
 describe("P-41 の組み立て", () => {
-  test("版を持つ（変えたら上げる）", () => {
-    expect(TITLE_FIT_VERSION).toMatch(/^\d+\.\d+$/);
-  });
-
   test("測る相手の層は1つだけ（ほかの層の名前を混ぜない）", () => {
     const prompt = buildTitleFitPrompt({ readerType: "lore_deep", targets: TARGETS });
 

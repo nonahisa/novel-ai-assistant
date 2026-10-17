@@ -24,7 +24,6 @@ vi.mock("../../../src/core/runtime", async (importOriginal) => {
 });
 
 import { isPathInside } from "../../../src/core/pathText";
-import * as paths from "../../../src/core/pathText";
 
 afterEach(() => {
   host.windows = false;
@@ -157,30 +156,6 @@ describe("URI の日本語が符号化されていても、同じ場所として
   test("手元の道の % は符号として読まない（名前の一部）", () => {
     // 手元のフォルダー名に「%E4」と書いてあっても、それは名前そのもの
     expect(isPathInside("/小説/%E4%BB%AE", "/小説/仮/1.md")).toBe(false);
-  });
-});
-
-describe("以前の写し（startsWith 型）が誤っていたこと", () => {
-  /**
-   * `termHighlight.ts`・`settingsStore.ts` にあった判定をそのまま写したもの。
-   * **ここにだけ残す**——共通の判定と並べて、何が変わったかを示すため。
-   */
-  function oldStartsWithCopy(parentPath: string, candidatePath: string): boolean {
-    const parent = paths.normalizeForComparison(parentPath);
-    const candidate = paths.normalizeForComparison(candidatePath);
-    const relative = paths.relative(parent, candidate);
-    return (
-      relative.length > 0 &&
-      !relative.startsWith("..") &&
-      !paths.isAbsolute(relative)
-    );
-  }
-
-  test("「..下書き」を外と誤判定していた。共通の判定は中と答える", () => {
-    const parent = "/小説/作品";
-    const child = "/小説/作品/..下書き/1.md";
-    expect(oldStartsWithCopy(parent, child)).toBe(false);
-    expect(isPathInside(parent, child)).toBe(true);
   });
 });
 

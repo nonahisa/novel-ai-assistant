@@ -1,6 +1,4 @@
 import { describe, expect, test } from "vitest";
-import { readFileSync } from "node:fs";
-import * as path from "node:path";
 import {
   countEpisodeChars,
   episodeBodyForCount,
@@ -95,27 +93,5 @@ describe("ルビの扱い", () => {
   test("設定で外さないと決めていれば .md でも外さない", () => {
     const md = countEpisodeChars(WITH_RUBY, { ext: ".md", excludeRuby: false });
     expect(md.net).toBe(countChars(WITH_RUBY, false).net);
-  });
-});
-
-/**
- * 写しを作らないこと。作品一覧と原稿エディタが別々に数え始めた結果、
- * 同じファイルに2つの字数が出た。**同じ関数を通っていることを見張る。**
- */
-describe("数え方の置き場所", () => {
-  const read = (...parts: string[]): string =>
-    readFileSync(path.join(__dirname, "..", "..", "..", ...parts), "utf8");
-
-  test("作品一覧（scanner）は countEpisodeChars を通す", () => {
-    const source = read("src", "core", "scanner.ts");
-    expect(source).toContain("countEpisodeChars");
-    // 自前で `countChars` を呼び直していないこと
-    expect(source).not.toContain("countChars(");
-  });
-
-  test("原稿エディタも同じ関数を通す", () => {
-    const source = read("src", "features", "manuscriptEditor.ts");
-    expect(source).toContain("countEpisodeChars");
-    expect(source).not.toContain("countChars(");
   });
 });

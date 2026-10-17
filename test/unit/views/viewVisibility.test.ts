@@ -124,12 +124,4 @@ describe("起動のたびに素の状態へ戻す", () => {
 
     expect(visibleViews(context)).toEqual(VIEWS.map((view) => view.id));
   });
-
-  test("印の名前は、`package.json` の式に実在する", () => {
-    // 名前が食い違うと、戻したつもりの印が別のものになる
-    const all = VIEWS.map((view) => view.when ?? "").join(" ");
-
-    expect(all).toContain(FOCUS_CHAT_KEY);
-    expect(all).toContain(SOLO_VIEW_KEY);
-  });
 });

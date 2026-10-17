@@ -41,7 +41,9 @@ describe("実行環境で選べないプロバイダを外す", () => {
   });
 
   test("外部プロセスを起動できない（ブラウザ）なら、手元のものを外す", () => {
-    // localhost はブラウザからは作者のPCではないので、選んでも必ず失敗する
+    // localhost はブラウザからは作者のPCではないので、選んでも必ず失敗する。
+    // **LM Studioも localhost である。** Ollamaだけ外しても足りない。
+    // クラウドの4つは減らさない（完全一致なので、どちらの誤りもここで落ちる）
     const result = filterProvidersForRuntime(all, false);
     expect(result.map((p) => p.id)).toEqual([
       "gemini",
@@ -49,17 +51,6 @@ describe("実行環境で選べないプロバイダを外す", () => {
       "sakura",
       "claude",
     ]);
-  });
-
-  /** **LM Studioも localhost である。** Ollamaだけ外しても足りない */
-  test("LM Studioも外す", () => {
-    const result = filterProvidersForRuntime(all, false);
-    expect(result.map((p) => p.id)).not.toContain("lmstudio");
-  });
-
-  test("クラウドのものは減らさない", () => {
-    const result = filterProvidersForRuntime(all, false);
-    expect(result).toHaveLength(all.length - 2);
   });
 
   test("手元のものが無くても壊れない", () => {

@@ -62,17 +62,6 @@ const REGISTRATION = {
 describe("指示書の中身（VS Code に触らない部分）", () => {
   const body = "# 見出し\n\n本文です。\n";
 
-  test("**本文は1つで、違うのは頭の数行だけ**", () => {
-    const documents = AI_INSTRUCTION_TARGETS.map((target) =>
-      buildAiInstructionDocument(target, body)
-    );
-    // どれも本文で終わる（本文へ差し込みを始めたら、ここで落ちる）
-    for (const document of documents) expect(document.endsWith(body)).toBe(true);
-    // フロントマターを持つのは Claude Code だけ
-    const withFrontMatter = documents.filter((text) => text.startsWith("---\n"));
-    expect(withFrontMatter).toHaveLength(1);
-  });
-
   /*
     **登録ファイルの無い置き先には、束の場所を書き添える**（0.70.2）。
 

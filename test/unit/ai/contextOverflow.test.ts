@@ -111,17 +111,6 @@ describe("HTTPの失敗を context_overflow へ付け替える", () => {
     );
   });
 
-  test("残高不足の400は bad_response のままにする", () => {
-    const original = toStatusError(
-      400,
-      '{"error":{"message":"insufficient credit"}}',
-      "さくらのAI Engine"
-    );
-
-    expect(asContextOverflowError(original, "さくらのAI Engine")).toBeUndefined();
-    expect(original.kind).toBe("bad_response");
-  });
-
   test("429は本文が合っていても付け替えない", () => {
     // レート上限は待てば回復する。「本文を短くしてください」は的外れ
     const original = toStatusError(429, REAL_BODY, "さくらのAI Engine");

@@ -145,8 +145,8 @@ describe("申告が取れないときの落とし先", () => {
  * （`LARGE_MODEL_MIN_BILLIONS` から組み立てる）。
  */
 describe("階級が渡されなければ、大きさから導く", () => {
-  /** 境目ちょうど（大きい側） */
-  const AT_BORDER = `${LARGE_MODEL_MIN_BILLIONS}B`;
+  // 境目ちょうど（大きい側）は ai/capability.test.ts「境目ちょうどは高性能の側」が
+  // 同じ inferTier で見ている
   /** 境目の手前（小さい側）。0.1B だけ足りない */
   const BELOW_BORDER = `${LARGE_MODEL_MIN_BILLIONS - 0.1}B`;
 
@@ -158,12 +158,6 @@ describe("階級が渡されなければ、大きさから導く", () => {
     expect(result.profile.narrowContradictionCategories).toBe(false);
     expect(result.forLog).toBe("高性能");
     expect(result.tier).toBe("high");
-  });
-
-  it("境目ちょうども、高性能側へ倒れる", () => {
-    expect(notice({ providerId: "ollama", parameterSize: AT_BORDER }).tier).toBe(
-      "high"
-    );
   });
 
   it("境目の手前なら標準で、絞りも抑制も立つ", () => {

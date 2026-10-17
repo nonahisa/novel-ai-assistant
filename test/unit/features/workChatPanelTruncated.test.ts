@@ -237,18 +237,8 @@ describe("読み取れなかったJSONを作者に見せない", () => {
 });
 
 describe("タイムアウトは、その場で直せる", () => {
-  test("案内に「秒数を上げる」札が付く", async () => {
-    response.error = new AIError("応答がありませんでした。", "timeout");
-    const h = harness();
-
-    await ask(h, "第12話の視点はどうですか");
-
-    const error = h.posted.find((m) => m.type === "error");
-    expect(error?.actions, "札が出ていない").toBeTruthy();
-    // 既定の180秒の倍
-    expect(error!.actions![0].label).toBe("タイムアウトを360秒にする");
-  });
-
+  // 札の文字列は features/workChatPanelTimeoutAdvice.test.ts「延ばす札を出し、
+  // チャンクの話はしない」が同じ相手・同じ失敗で見ている（2026-10-17 に重複を外した）
   test("押すまでは何も書かない", async () => {
     response.error = new AIError("応答がありませんでした。", "timeout");
     const h = harness();

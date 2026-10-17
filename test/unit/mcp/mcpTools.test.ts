@@ -403,23 +403,9 @@ describe("typo", () => {
     ).toThrow(/chunkId/);
   });
 
-  /**
-   * **runner に既定を作らない**（設計書6.87.8 の5）。手元へ投げるのと
-   * Anthropic へ本文を渡すのとでは、作者にとっての意味がまるで違う。
-   * 転送層の zod と、ハンドラの中の両方で断る。
-   */
-  test("runner を省くと、転送層で断られる", () => {
-    const schema = z.object(NOVEL_RUN_INPUT);
-    expect(
-      schema.safeParse({
-        folder: WORK,
-        feature: "typo",
-        filePath: "本文/004_よあけ.txt",
-        numCtx: NUM_CTX,
-      }).success
-    ).toBe(false);
-  });
-
+  // **runner に既定を作らない**（設計書6.87.8 の5）。転送層の zod で断ることは
+  // 上の proofread「runner を省くとエラーになる」が同じ形（NOVEL_RUN_INPUT）で、
+  // ハンドラで断ることは mcp/mcpBundledTools.test.ts「runner は省略できない」が見ている
   test("runner が claude なら、プロンプトと戻し先だけを返す", async () => {
     const result = await typoRun({
       folder: WORK,
@@ -587,17 +573,6 @@ describe("chat", () => {
     expect(result.answer.reply).toBe("書き出しは静かでよいと思います。");
     expect(result.answer.options).toEqual([]);
     expect(result.proposals.edit).toBe(false);
-  });
-
-  test("runner を省くと、転送層で断られる", () => {
-    const schema = z.object(NOVEL_RUN_INPUT);
-    expect(
-      schema.safeParse({
-        folder: WORK,
-        feature: "chat",
-        options: { question: "どう思いますか" },
-      }).success
-    ).toBe(false);
   });
 
   test("runner が claude なら、プロンプトと戻し先だけを返す", async () => {

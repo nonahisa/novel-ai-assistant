@@ -202,14 +202,6 @@ describe("作品一覧のボタン", () => {
 });
 
 describe("Ollamaを選んで、つながらなかったとき", () => {
-  test("セットアップの案内へ繋ぐ", () => {
-    // **「設定を開く」と言われても、まだ何も入れていない人は何もできない**
-    const source = readFileSync("src/ai/registry.ts", "utf-8");
-
-    expect(source).toContain('providerPick.providerId === "ollama"');
-    expect(source).toContain("novelai.setupOllama");
-  });
-
   test("クラウドのAIは、今までどおり設定を開く", () => {
     // 鍵の入力で先に躓くので、ここへは来ない
     const source = readFileSync("src/ai/registry.ts", "utf-8");

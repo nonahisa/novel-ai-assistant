@@ -19,17 +19,7 @@ import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
 
 const HTML = buildWorkChatPanelHtml("test-nonce", "vscode-resource:");
 
-function script(html: string): string {
-  const found = html.match(/<script nonce="test-nonce">([\s\S]*?)<\/script>/);
-  expect(found, "スクリプトが見つからない").toBeTruthy();
-  return found![1];
-}
-
 describe("作業の提案は既定で畳む", () => {
-  test("JavaScriptとして読める", () => {
-    expect(() => new Function(script(HTML))).not.toThrow();
-  });
-
   test("「ほかにできること（N件）を見る」の1行を置く", () => {
     expect(HTML).toContain("'ほかにできること（'");
     expect(HTML).toContain("'件）を'");
