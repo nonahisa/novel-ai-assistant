@@ -2,7 +2,8 @@ import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { registeredPostingSites } from "../../../src/features/postingCopyRegistered";
 import type { WorkEntry } from "../../../src/models/types";
-import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { Uri, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 「投稿サイト用に変換してコピー」で、登録済みの投稿先を先頭に出すための
@@ -34,20 +35,7 @@ describe("登録してある投稿先を読む", () => {
   beforeEach(() => {
     disk.clear();
     workspace.textDocuments = [];
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      stat: async (uri: { fsPath: string }) => {
-        if (!disk.has(uri.fsPath)) {
-          throw new FileSystemError("missing", "FileNotFound");
-        }
-        return { type: 1, ctime: 0, mtime: 0, size: 0 };
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk, { methods: ["createDirectory", "readFile", "stat"] });
   });
 
   test("台帳に書いてある順のまま返す", async () => {

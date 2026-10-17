@@ -1,11 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import {
-  commands,
-  FileSystemError,
-  window,
-  workspace,
-  type StubMessage,
-} from "../support/vscodeStub";
+import { commands, window, workspace, type StubMessage } from "../support/vscodeStub";
 import type { AIRegistry } from "../../../src/ai/registry";
 import { splitIntoChunks, type Chunk } from "../../../src/core/chunker";
 import type { WorkEntry } from "../../../src/models/types";
@@ -348,6 +342,7 @@ import {
   bridgeConfirmsToMessages,
   type ConfirmPicker,
 } from "../support/confirmPicker";
+import { memoryFs } from "../support/memoryDisk";
 
 const work: WorkEntry = {
   id: "work_test",
@@ -2381,26 +2376,10 @@ describe("人物抽出フロー", () => {
       // `PendingUpdateStore.stage` が実際に書き込めるよう、偽ディスクを敷く
       // （`pendingUpdateSource.test.ts` と同じ形）
       disk.clear();
-      workspace.fs = {
-        createDirectory: async () => undefined,
-        readFile: async (uri: { fsPath: string }) => {
-          const bytes = disk.get(uri.fsPath);
-          if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-          return bytes;
-        },
-        writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-          disk.set(uri.fsPath, bytes);
-        },
-        rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
-          const bytes = disk.get(from.fsPath);
-          if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-          disk.set(to.fsPath, bytes);
-          disk.delete(from.fsPath);
-        },
-        delete: async (uri: { fsPath: string }) => {
-          disk.delete(uri.fsPath);
-        },
-      } as unknown as typeof workspace.fs;
+      workspace.fs = memoryFs(disk, {
+        methods: ["createDirectory", "readFile", "writeFile", "rename", "delete"],
+        renameRefusesExisting: false,
+      });
     });
 
     function installWindow(): { showInformationMessage: ReturnType<typeof vi.fn> } {

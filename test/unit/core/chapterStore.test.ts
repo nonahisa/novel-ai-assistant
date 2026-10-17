@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { ChapterStore, ChapterStoreError } from "../../../src/core/chapterStore";
 import { emptyChapterSet } from "../../../src/models/chapter";
 import type { WorkEntry } from "../../../src/models/types";
-import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { Uri, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 章の台帳の保存（設計書6.66.1）。
@@ -38,39 +39,7 @@ describe("章の台帳の読み書き", () => {
   beforeEach(() => {
     disk.clear();
     workspace.textDocuments = [];
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-      rename: async (
-        from: { fsPath: string },
-        to: { fsPath: string },
-        options?: { overwrite?: boolean }
-      ) => {
-        const bytes = disk.get(from.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        if (!options?.overwrite && disk.has(to.fsPath)) {
-          throw new FileSystemError("exists", "FileExists");
-        }
-        disk.set(to.fsPath, bytes);
-        disk.delete(from.fsPath);
-      },
-      delete: async (uri: { fsPath: string }) => {
-        disk.delete(uri.fsPath);
-      },
-      stat: async (uri: { fsPath: string }) => {
-        if (!disk.has(uri.fsPath)) {
-          throw new FileSystemError("missing", "FileNotFound");
-        }
-        return { type: 1, ctime: 0, mtime: 0, size: 0 };
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk);
   });
 
   function written(): { chapters: Array<Record<string, string>> } {

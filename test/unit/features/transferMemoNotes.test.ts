@@ -1,7 +1,8 @@
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { Uri, window, workspace } from "../support/vscodeStub";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 投稿済みのメモを別の作品へ移すとき、**移す前に**「投稿の記録が N件残ります」と
@@ -63,20 +64,7 @@ beforeEach(() => {
   confirmations = [];
   moves.transferMemoToWork.mockReset();
   workspace.textDocuments = [];
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    stat: async (uri: { fsPath: string }) => {
-      if (!disk.has(uri.fsPath)) {
-        throw new FileSystemError("missing", "FileNotFound");
-      }
-      return { type: 1, ctime: 0, mtime: 0, size: 0 };
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk, { methods: ["createDirectory", "readFile", "stat"] });
 
   // 移す先には「氷の街」を選ぶ
   (window as unknown as Record<string, unknown>).showQuickPick = async (

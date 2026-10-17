@@ -7,8 +7,9 @@ import {
   type EpisodeHeadingSource,
 } from "../../../src/core/collectedSections";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
-import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { Uri, window, workspace } from "../support/vscodeStub";
 import { isConfirmPick, readConfirm } from "../support/confirmPicker";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 分け済みの作品の、話ごとのファイルの見出しから章を立てる（設計書6.66）。
@@ -223,39 +224,7 @@ describe("「話の見出しから章を立てる」", () => {
     confirmAnswer = "章を立てる";
     infoMessages = [];
     workspace.textDocuments = [];
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-      rename: async (
-        from: { fsPath: string },
-        to: { fsPath: string },
-        options?: { overwrite?: boolean }
-      ) => {
-        const bytes = disk.get(from.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        if (!options?.overwrite && disk.has(to.fsPath)) {
-          throw new FileSystemError("exists", "FileExists");
-        }
-        disk.set(to.fsPath, bytes);
-        disk.delete(from.fsPath);
-      },
-      delete: async (uri: { fsPath: string }) => {
-        disk.delete(uri.fsPath);
-      },
-      stat: async (uri: { fsPath: string }) => {
-        if (!disk.has(uri.fsPath)) {
-          throw new FileSystemError("missing", "FileNotFound");
-        }
-        return { type: 1, ctime: 0, mtime: 0, size: 0 };
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk);
 
     // 確認（画面上部の選択窓。A4、2026-09-23）は中身を覚えて答える。
     // 選択窓でない知らせは積むだけ

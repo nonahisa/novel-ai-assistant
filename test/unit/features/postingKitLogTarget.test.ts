@@ -2,7 +2,7 @@ import * as path from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { WorkEntry } from "../../../src/models/types";
 import { useLogFile } from "../../../src/core/logger";
-import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * 投稿先を設定した記録を、**設定した作品のログ**へ書く（0.81.4）。
@@ -24,6 +24,7 @@ vi.mock("../../../src/core/workFormatStore", () => ({
 }));
 
 import { configurePostingSites } from "../../../src/features/postingKit";
+import { memoryFs } from "../support/memoryDisk";
 
 const work: WorkEntry = {
   id: "work_log_target",
@@ -82,39 +83,7 @@ beforeEach(() => {
   );
 
   workspace.textDocuments = [];
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-    rename: async (
-      from: { fsPath: string },
-      to: { fsPath: string },
-      options?: { overwrite?: boolean }
-    ) => {
-      const bytes = disk.get(from.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      if (!options?.overwrite && disk.has(to.fsPath)) {
-        throw new FileSystemError("exists", "FileExists");
-      }
-      disk.set(to.fsPath, bytes);
-      disk.delete(from.fsPath);
-    },
-    delete: async (uri: { fsPath: string }) => {
-      disk.delete(uri.fsPath);
-    },
-    stat: async (uri: { fsPath: string }) => {
-      if (!disk.has(uri.fsPath)) {
-        throw new FileSystemError("missing", "FileNotFound");
-      }
-      return { type: 1, ctime: 0, mtime: 0, size: 0 };
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk);
 
   Object.assign(window, {
     showInformationMessage: async () => undefined,
