@@ -79,6 +79,15 @@ describe("口調の案の長さ", () => {
     expect(clamped.endsWith("など。")).toBe(true);
   });
 
+  test("括弧の外に句点も読点も無ければ、閉じていない括弧の手前で切る（26b のガイの形）", () => {
+    // 実測（2026-10-17、26b）：「…ガイ自身の台詞は『主よ。」で終わった
+    const value =
+      "一人称は「ボク」ではない（※ナインの台詞と混同の恐れがあるため本文から判断すると、" +
+      "ガイ自身の台詞は『主よ。何用か』『〜である！』等）。「〜である」と尊大に言い切る";
+    const clamped = clampEnrichField(speechField(), value);
+    expect(clamped).toBe("一人称は「ボク」ではない。");
+  });
+
   test("上限以内の案はそのまま", () => {
     expect(clampEnrichField(speechField(), "一人称は「ボク」。快活な口調。")).toBe(
       "一人称は「ボク」。快活な口調。"

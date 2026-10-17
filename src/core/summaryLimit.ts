@@ -70,18 +70,34 @@ export function clampAtSentenceEnd(
   // 引く（「おっけー。任せといて！」）ので、そこで切ると括弧が閉じない
   let depth = 0;
   let end = -1;
+  let comma = -1;
+  // 上限の位置でまだ閉じていない括弧のうち、いちばん外側の開き括弧の位置
+  let outerOpen = -1;
   characters.slice(0, maxChars).forEach((char, index) => {
-    if (OPENING.has(char)) depth += 1;
-    else if (CLOSING.has(char)) depth = Math.max(0, depth - 1);
-    else if (depth === 0 && SENTENCE_ENDS.has(char)) end = index;
+    if (OPENING.has(char)) {
+      if (depth === 0) outerOpen = index;
+      depth += 1;
+    } else if (CLOSING.has(char)) {
+      depth = Math.max(0, depth - 1);
+    } else if (depth === 0 && SENTENCE_ENDS.has(char)) {
+      end = index;
+    } else if (depth === 0 && COMMAS.has(char)) {
+      comma = index;
+    }
   });
   if (end > 0) return characters.slice(0, end + 1).join("");
-  // 句点が無ければ読点まで戻し、**その読点を句点に替えて文を閉じる**。
+  // 句点が無ければ、括弧の外の読点まで戻し、**その読点を句点に替えて文を閉じる**。
   // 「…など、」で終わると、資料の上で続きが消えたように読める（実測：e4b、台詞を引いた案）
-  const clamped = clampSummary(text, maxChars);
-  if (clamped && /[、，,]$/u.test(clamped)) return `${clamped.slice(0, -1)}。`;
-  return clamped;
+  if (comma > 0) return `${characters.slice(0, comma).join("")}。`;
+  // 読点も無く、上限が括弧の中にかかるなら、閉じていない括弧の手前で切る
+  // （実測：26b の案が「…台詞は『主よ。」で終わった）
+  if (depth > 0 && outerOpen > 0) {
+    return `${characters.slice(0, outerOpen).join("").replace(/[、，,\s]+$/u, "")}。`;
+  }
+  return clampSummary(text, maxChars);
 }
+
+const COMMAS = new Set([..."、，,"]);
 
 const OPENING = new Set([..."「『（(【"]);
 const CLOSING = new Set([..."」』）)】"]);
