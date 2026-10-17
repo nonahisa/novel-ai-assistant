@@ -65,6 +65,8 @@ const EDITOR_ALLOWED = new Set<string>([
   "novelai.openExtensionSettings",
   "novelai.showVersion",
   "novelai.showLog",
+  // 不具合を伝える記録（設計書8.5）。書くのは `.aiwriter/reports/` だけで原稿に触れない
+  "novelai.exportIssueReport",
 ]);
 
 /** そのコマンドは、いまのモードで使えるか */

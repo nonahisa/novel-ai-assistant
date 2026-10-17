@@ -4796,6 +4796,29 @@ export async function activate(
     })
   );
 
+  // 障害報告用の記録の書き出し（設計書8.5）。作品は迷いようが無いときだけ決め、
+  // 決まらなければ書き出す側で選ばせる（「作品を選ばない」も選べる）
+  context.subscriptions.push(
+    registerCommand("novelai.exportIssueReport", async (node?: WorkNode) => {
+      const fromNode = node ? await resolveWork(node, registry) : undefined;
+      if (node && !fromNode) return;
+      const folder = fromNode ? undefined : logTargetWorkFolder(registry);
+      const preferred =
+        fromNode ??
+        (folder
+          ? registry.list().find((entry) => path.isSamePath(entry.folderPath, folder))
+          : undefined);
+      const { exportIssueReport } = await import("./features/exportIssueReport.js");
+      await exportIssueReport({
+        context,
+        aiRegistry,
+        works: registry.list(),
+        preferred,
+        storageRoot: fallbackLogRoot,
+      });
+    })
+  );
+
   context.subscriptions.push(
     registerCommand("novelai.mergeIntoLibrary", async () => {
       const { mergeIntoLibrary } = await import(

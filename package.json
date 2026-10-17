@@ -661,6 +661,12 @@
         "icon": "$(output)"
       },
       {
+        "command": "novelai.exportIssueReport",
+        "title": "障害報告用の記録を書き出す",
+        "category": "小説執筆",
+        "icon": "$(report)"
+      },
+      {
         "command": "novelai.openProposals",
         "title": "提案パネルを開く",
         "category": "小説執筆",
