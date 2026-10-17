@@ -1113,6 +1113,19 @@ describe("読み上げ", () => {
     expect(code).toContain("composeOn ? composeDomToNotation(compose) : write.value");
   });
 
+  /**
+   * 拡張機能が「引っかかった」の印を挿さなかったとき（同じ文の上にもうある。
+   * 不具合、2026-10-17）、本文が変わらないので計画は届かない。
+   * 返事で［⚑］を戻さないと、読み終えるまで押せないままになる。
+   */
+  it("印を挿さなかった返事で、［⚑］を押せる形へ戻す", () => {
+    expect(code).toContain('message.type === "readingMarkSkipped"');
+    const take = code.slice(code.indexOf("function aloudTakeMarkSkipped()"));
+    const body = take.slice(0, take.indexOf("\n  }"));
+    expect(body).toContain("aloudMarking = false");
+    expect(body).toContain("aloudPaintState()");
+  });
+
   /** 切り替えの最中に声だけが続くと、止め方の無い幽霊になる */
   it("向き・面・画面を離れたら止める", () => {
     const dir = code.slice(code.indexOf('dirButton.addEventListener("click"'));

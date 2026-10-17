@@ -112,7 +112,11 @@ import {
   memoLineRestorePoint,
   type RemovedMemoLine,
 } from "../core/sceneMemo";
-import { READ_ALOUD_MEMO_TEXT, buildReadingPlan } from "../core/readAloud";
+import {
+  READ_ALOUD_MEMO_TEXT,
+  buildReadingPlan,
+  isReadingMemoLine,
+} from "../core/readAloud";
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
 import { copyEmphasisFor } from "../core/postingCopyTargets";
@@ -957,10 +961,7 @@ export async function insertMemoLineAbove(
   line: number,
   options: { body?: string; reveal?: boolean } = {}
 ): Promise<boolean> {
-  const index = Math.min(
-    Math.max((Number.isFinite(line) ? line : 1) - 1, 0),
-    Math.max(document.lineCount - 1, 0)
-  );
+  const index = memoInsertIndex(document, line);
 
   const change = new vscode.WorkspaceEdit();
   change.insert(
@@ -986,6 +987,46 @@ export async function insertMemoLineAbove(
     openManuscripts.get(manuscriptLedgerKey(document.uri))?.revealLine(index + 1, "end");
   }
   return true;
+}
+
+/**
+ * 付箋を挿す行（0始まり）。1始まりの `line` の**上**＝その行の頭。
+ *
+ * 挿す処理と「直前の行を見る」処理（`insertReadingMemo`）で同じ位置を
+ * 使うため1か所に置く。ずれると、見た行と挿した行が食い違う。
+ */
+function memoInsertIndex(document: vscode.TextDocument, line: number): number {
+  return Math.min(
+    Math.max((Number.isFinite(line) ? line : 1) - 1, 0),
+    Math.max(document.lineCount - 1, 0)
+  );
+}
+
+/**
+ * 読み上げの「⚑ 引っかかった」の印を、読んでいる文の上に挿す（設計書6.42）。
+ *
+ * **直前の行がすでに同じ印なら挿さない**（`"already"`。不具合、2026-10-17）。
+ * 止めて［▶ 続ける］で読み直すと［⚑］がまた押せるようになり、同じ文で
+ * もう一度押すと同じ行がもう1つ入っていた。画面の側の「押せない間」だけでは
+ * 防げない（計画が届いたあとの押下なので、画面の持つ行番号は正しい）。
+ * 見分けは**拡張機能側の文書**で行う——本文を持っている側が決めれば、
+ * 画面と食い違わない。
+ */
+export async function insertReadingMemo(
+  document: vscode.TextDocument,
+  line: number
+): Promise<"inserted" | "already" | "failed"> {
+  const index = memoInsertIndex(document, line);
+  if (index > 0 && isReadingMemoLine(document.lineAt(index - 1).text)) {
+    return "already";
+  }
+  // **飛ばない**（`reveal: false`）。聞いている最中に画面が動くと、
+  // どこを読んでいたのか分からなくなる
+  const ok = await insertMemoLineAbove(document, line, {
+    body: READ_ALOUD_MEMO_TEXT,
+    reveal: false,
+  });
+  return ok ? "inserted" : "failed";
 }
 
 /**
@@ -2992,12 +3033,14 @@ export class ManuscriptEditorProvider
           break;
 
         case "readingMark":
-          // **飛ばない**（`reveal: false`）。聞いている最中に画面が動くと、
-          // どこを読んでいたのか分からなくなる
-          await insertMemoLineAbove(document, message.line, {
-            body: READ_ALOUD_MEMO_TEXT,
-            reveal: false,
-          });
+          /*
+            **挿さなかったときは、画面へそう返す。** 画面は［⚑］を「次の計画が
+            届くまで」押せなくしているが、本文が変わらなければ計画は届かない。
+            返さないと、読み終えるまで［⚑］が押せないままになる
+          */
+          if ((await insertReadingMemo(document, message.line)) !== "inserted") {
+            await panel.webview.postMessage({ type: "readingMarkSkipped" });
+          }
           break;
 
         case "readingVoice":

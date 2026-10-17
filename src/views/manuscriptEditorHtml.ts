@@ -5177,6 +5177,8 @@ ${RESUME_WRITING_LABEL ? `
       takeClipboardWritten(message);
     } else if (message.type === "readingPlan") {
       aloudTakePlan(message);
+    } else if (message.type === "readingMarkSkipped") {
+      aloudTakeMarkSkipped();
     } else if (message.type === "showReading") {
       // 詳細メニューの「原稿を読み上げる」。**列を出すだけ**（設計書6.42）
       aloudOpenRow();
@@ -9196,6 +9198,16 @@ ${RESUME_WRITING_LABEL ? `
    */
   function aloudAskPlan() {
     vscode.postMessage({ type: "readingPlan", text: aloudTextNow() });
+  }
+
+  /**
+   * 「引っかかった」の印を拡張機能側が挿さなかった（同じ文の上にもうある・
+   * 挿せなかった）。本文が変わらないので次の計画は届かない。ここで［⚑］を
+   * 押せる形へ戻す（戻さないと、読み終えるまで押せないままになる）
+   */
+  function aloudTakeMarkSkipped() {
+    aloudMarking = false;
+    aloudPaintState();
   }
 
   /**
