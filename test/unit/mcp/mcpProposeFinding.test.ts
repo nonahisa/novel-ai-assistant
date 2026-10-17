@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { createHash } from "node:crypto";
 import { novelPropose } from "../../../src/mcp/tools/propose";
 import { typoPrompt } from "../../../src/mcp/tools/typo";
 import { McpToolError } from "../../../src/mcp/tools/shared";
@@ -22,6 +21,7 @@ import {
   resolveFindings,
   type FindingLine,
 } from "../../../src/models/finding";
+import { folderFingerprint } from "../support/folderFingerprint";
 
 /**
  * 外部AIの指摘を提案パネルへ置く道（MCP `novel.propose` の `kind: "finding"`。
@@ -75,21 +75,7 @@ function writePermission(folder: string, tools: string[]): void {
 
 /** 原稿と設定資料の指紋。**1バイトでも変われば変わる** */
 function manuscriptFingerprint(folder: string): string {
-  const hash = createHash("sha256");
-  for (const dir of ["本文", "設定"]) {
-    const walk = (current: string): void => {
-      for (const name of fs.readdirSync(current).sort()) {
-        const full = nodePath.join(current, name);
-        if (fs.statSync(full).isDirectory()) walk(full);
-        else {
-          hash.update(full.slice(folder.length));
-          hash.update(fs.readFileSync(full));
-        }
-      }
-    };
-    walk(nodePath.join(folder, dir));
-  }
-  return hash.digest("hex");
+  return folderFingerprint(folder, { under: ["本文", "設定"] });
 }
 
 function chunkIdOf(folder: string): string {

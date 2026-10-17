@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { createHash } from "node:crypto";
 import { synopsisCommit } from "../../../src/mcp/tools/synopsisCommit";
 import {
   readSynopsisStash,
@@ -27,6 +26,7 @@ import {
 } from "../../../src/core/synopsisDoc";
 import { buildSynopsisListMarkdown } from "../../../src/core/synopsisMarkdown";
 import { buildEmotionCurveMarkdown } from "../../../src/core/emotionCurve";
+import { fileHashes } from "../support/folderFingerprint";
 
 /**
  * 外部AIの各話あらすじ・作品紹介文を、資料へ保存する道（`novel.synopsis.commit`。
@@ -120,23 +120,7 @@ function writeExistingSynopses(folder: string): Buffer {
 
 /** `設定/` の下の全ファイルの指紋 */
 function fingerprints(folder: string): Map<string, string> {
-  const result = new Map<string, string>();
-  const base = nodePath.join(folder, "設定");
-  if (!fs.existsSync(base)) return result;
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = nodePath.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else {
-        result.set(
-          nodePath.relative(folder, full),
-          createHash("sha256").update(fs.readFileSync(full)).digest("hex")
-        );
-      }
-    }
-  };
-  walk(base);
-  return result;
+  return fileHashes(folder, "設定", { allowMissing: true });
 }
 
 /** 製品の各話あらすじが使う本文のハッシュ（`loadEpisodeBodies` と同じ材料） */

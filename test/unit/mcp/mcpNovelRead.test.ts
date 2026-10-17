@@ -11,6 +11,7 @@ import {
   setExternalClientName,
 } from "../../../src/mcp/tools/accessLog";
 import { assertExternalAccessAllowed } from "../../../src/mcp/tools/permission";
+import { folderSnapshot } from "../support/folderFingerprint";
 
 /**
  * MCP の読む口 `novel.read`（設計書6.87.24。外部AIから届く範囲を広げる案3の1件目）。
@@ -130,16 +131,7 @@ function makeWork(name: string, options: { allow?: string[] } = {}): string {
 
 /** 作品フォルダーの中身（場所と中身）。何も書いていないことを確かめる */
 function snapshot(folder: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = nodePath.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else result[nodePath.relative(folder, full)] = fs.readFileSync(full, "utf8");
-    }
-  };
-  walk(folder);
-  return result;
+  return folderSnapshot(folder);
 }
 
 beforeEach(() => {

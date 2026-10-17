@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { createHash } from "node:crypto";
 import { novelPropose } from "../../../src/mcp/tools/propose";
 import { McpToolError } from "../../../src/mcp/tools/shared";
 import {
@@ -31,6 +30,7 @@ import {
   window,
   workspace,
 } from "../support/vscodeStub";
+import { folderFingerprint } from "../support/folderFingerprint";
 
 /**
  * 外部AIの提案を、人物以外（能力・組織・場所・世界観）へ広げる
@@ -109,21 +109,7 @@ function seedLocation(folder: string, overrides: Partial<Location> = {}): {
 
 /** `設定/` の下（人物以外の台帳）の指紋。1バイトでも変われば変わる */
 function ledgerFingerprint(folder: string): string {
-  const hash = createHash("sha256");
-  const root = nodePath.join(folder, "設定");
-  const walk = (dir: string): void => {
-    for (const name of fs.readdirSync(dir).sort()) {
-      const full = nodePath.join(dir, name);
-      if (fs.statSync(full).isDirectory()) {
-        walk(full);
-        continue;
-      }
-      hash.update(nodePath.relative(root, full));
-      hash.update(fs.readFileSync(full));
-    }
-  };
-  walk(root);
-  return hash.digest("hex");
+  return folderFingerprint(folder, { under: ["設定"] });
 }
 
 function pendingSettingsDir(folder: string): string {

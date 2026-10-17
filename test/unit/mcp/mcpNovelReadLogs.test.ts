@@ -6,6 +6,7 @@ import { novelRead } from "../../../src/mcp/tools/read";
 import { estimateResultTokens, READ_RESULT_TOKEN_BUDGET } from "../../../src/mcp/tools/payloadBudget";
 import { recordExternalAccess, setExternalClientName } from "../../../src/mcp/tools/accessLog";
 import { assertExternalAccessAllowed } from "../../../src/mcp/tools/permission";
+import { folderSnapshot } from "../support/folderFingerprint";
 
 /**
  * 読む口 `novel.read` の相談ログ・ログ・編集履歴（作者の裁定 2026-10-16 の6。設計書6.87.24）。
@@ -64,16 +65,7 @@ function chatLogOf(count: number, replyChars = 20): string {
 }
 
 function snapshot(folder: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = nodePath.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else result[nodePath.relative(folder, full)] = fs.readFileSync(full, "utf8");
-    }
-  };
-  walk(folder);
-  return result;
+  return folderSnapshot(folder);
 }
 
 beforeEach(() => {

@@ -5,6 +5,7 @@ import nodePath from "node:path";
 import { novelPrompt, novelRun, novelValidate } from "../../../src/mcp/tools/features";
 import { FEATURE_NAMES } from "../../../src/core/mcpFeatures";
 import { announcePromptVersion } from "../../../src/prompts/announce";
+import { folderSnapshot } from "../support/folderFingerprint";
 
 /**
  * 更新告知文を外から呼ぶ（`novel.run` の `feature: announce`。棚卸しの9件目、2026-10-16）。
@@ -24,16 +25,7 @@ function write(relative: string, value: unknown): void {
 }
 
 function snapshot(): Record<string, string> {
-  const result: Record<string, string> = {};
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = nodePath.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else result[nodePath.relative(folder, full)] = fs.readFileSync(full, "utf8");
-    }
-  };
-  walk(folder);
-  return result;
+  return folderSnapshot(folder);
 }
 
 beforeEach(() => {

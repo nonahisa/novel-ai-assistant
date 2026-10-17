@@ -171,6 +171,7 @@ src/
 |---|---|
 | `vscodeStub.ts` | `vscode` の代役（vitest の別名で差し替わる） |
 | `memoryDisk.ts` | `Map<道, 中身>` を `workspace.fs` に見せる（`memoryFs(disk, {...})`）。口の数・`stat` の答え・一覧の返し方は**写す前の形を選んで渡す**（作り物を親切にしない） |
+| `folderFingerprint.ts` | 本物の一時フォルダーの中身の指紋・道ごとの sha256・中身の表（「読むだけの道具が1バイトも書いていない」を前後で比べる。MCP の試験） |
 | `openDocumentFake.ts` | 偽のディスク＋エディターで開いている文書（開いた文書へ当てて保存する道） |
 | `tuningStore.ts` | AIチューニングの台帳を記憶の中のファイルで動かす |
 | `confirmPicker.ts` | 確認の選択窓に答える |

@@ -2,7 +2,6 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { createHash } from "node:crypto";
 import { settingsPropose } from "../../../src/mcp/tools/propose";
 import { McpToolError } from "../../../src/mcp/tools/shared";
 import {
@@ -20,6 +19,7 @@ import {
 } from "../../../src/core/pendingUpdateFormat";
 import { parseCharacter } from "../../../src/models/character";
 import { diffCharacter } from "../../../src/core/characterDiff";
+import { folderFingerprint } from "../support/folderFingerprint";
 
 /**
  * 設定資料の更新案を承認待ちへ置く道具（設計書6.87.16）。
@@ -70,13 +70,7 @@ function workCopy(): string {
 
 /** 台帳の中身の指紋。**1バイトでも変われば変わる** */
 function ledgerFingerprint(folder: string): string {
-  const dir = nodePath.join(folder, "設定", "characters");
-  const hash = createHash("sha256");
-  for (const name of fs.readdirSync(dir).sort()) {
-    hash.update(name);
-    hash.update(fs.readFileSync(nodePath.join(dir, name)));
-  }
-  return hash.digest("hex");
+  return folderFingerprint(folder, { under: [nodePath.join("設定", "characters")] });
 }
 
 function pendingDir(folder: string): string {

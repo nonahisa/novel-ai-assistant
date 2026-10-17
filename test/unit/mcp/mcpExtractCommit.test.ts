@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { createHash } from "node:crypto";
 import { extractCommit } from "../../../src/mcp/tools/extractCommit";
 import {
   extractStashFileOf,
@@ -22,6 +21,7 @@ import {
   unwrapPendingCharacter,
 } from "../../../src/core/pendingUpdateFormat";
 import { parsePendingSettingsPayload } from "../../../src/core/pendingSettingsMerge";
+import { fileHashes } from "../support/folderFingerprint";
 
 /**
  * 外部AIの設定資料の抽出を、資料へ保存する道（`novel.extract.commit`。
@@ -136,21 +136,7 @@ function stashBoth(folder: string): void {
 
 /** `設定/` の下の全ファイルの指紋（名前と中身）。**1バイトでも変われば変わる** */
 function fingerprints(folder: string): Map<string, string> {
-  const result = new Map<string, string>();
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = nodePath.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else {
-        result.set(
-          nodePath.relative(folder, full),
-          createHash("sha256").update(fs.readFileSync(full)).digest("hex")
-        );
-      }
-    }
-  };
-  walk(nodePath.join(folder, "設定"));
-  return result;
+  return fileHashes(folder, "設定");
 }
 
 function filesIn(dir: string): string[] {

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { createHash } from "node:crypto";
 import { pendingListTool } from "../../../src/mcp/tools/pendingList";
 import { McpToolError } from "../../../src/mcp/tools/shared";
 import {
@@ -25,6 +24,7 @@ import {
   type Finding,
   type FindingDecision,
 } from "../../../src/models/finding";
+import { folderFingerprint as fingerprintOf } from "../support/folderFingerprint";
 
 /**
  * 提案パネルの指摘を外から読む（MCP `pending.list` の `kind: "finding"`。
@@ -84,23 +84,7 @@ function findingsFile(folder: string): string {
 
 /** 作品フォルダー全体の指紋（`.aiwriter/history` の記録は除く）。**1バイトでも変われば変わる** */
 function folderFingerprint(folder: string): string {
-  const hash = createHash("sha256");
-  const walk = (current: string): void => {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) =>
-      a.name.localeCompare(b.name)
-    )) {
-      const full = nodePath.join(current, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === "history") continue;
-        walk(full);
-      } else {
-        hash.update(nodePath.relative(folder, full));
-        hash.update(fs.readFileSync(full));
-      }
-    }
-  };
-  walk(folder);
-  return hash.digest("hex");
+  return fingerprintOf(folder, { skipFolderNames: ["history"] });
 }
 
 function daysAgo(days: number): string {

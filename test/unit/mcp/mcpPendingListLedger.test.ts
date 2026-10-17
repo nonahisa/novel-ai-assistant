@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { createHash } from "node:crypto";
 import { pendingList, pendingListTool } from "../../../src/mcp/tools/pendingList";
 import { novelPropose } from "../../../src/mcp/tools/propose";
 import { exposureOf, recordExternalAccess, setExternalClientName } from "../../../src/mcp/tools/accessLog";
@@ -16,6 +15,7 @@ import { permissionKeyOf } from "../../../src/core/externalAccessPermission";
 import { describeLedgerProposal } from "../../../src/core/ledgerProposalPlan";
 import { parseLedgerProposalFile } from "../../../src/models/ledgerProposal";
 import { estimateResultTokens, READ_RESULT_TOKEN_BUDGET } from "../../../src/mcp/tools/payloadBudget";
+import { folderFingerprint } from "../support/folderFingerprint";
 
 /**
  * `pending.list` が外部AIの台帳の案（`.aiwriter/pending-ledger/`。設計書6.87.24）も返す。
@@ -115,20 +115,7 @@ function placeThree(folder: string): void {
 
 /** 作品フォルダー全体の指紋。1バイトでも変われば変わる */
 function fingerprint(folder: string): string {
-  const hash = createHash("sha256");
-  const walk = (dir: string): void => {
-    for (const name of fs.readdirSync(dir).sort()) {
-      const full = nodePath.join(dir, name);
-      if (fs.statSync(full).isDirectory()) {
-        walk(full);
-        continue;
-      }
-      hash.update(nodePath.relative(folder, full));
-      hash.update(fs.readFileSync(full));
-    }
-  };
-  walk(folder);
-  return hash.digest("hex");
+  return folderFingerprint(folder);
 }
 
 /** 手で1件置く（多数・壊れた案の試験用） */
