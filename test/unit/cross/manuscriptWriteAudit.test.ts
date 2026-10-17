@@ -52,16 +52,9 @@ describe("本文を書く経路", () => {
     expect(records).toBe(2);
   });
 
-  test("改行を揃えるのも、履歴を通す（0.50.6）", () => {
-    const source = sourceOf("src/features/eolUnify.ts");
-    expect(source).toContain("改行コードを揃えた");
-    expect(source).toContain("recordEdit(work, {");
-  });
-
-  test("口述の整文も、履歴を通す（0.40.8）", () => {
-    const source = sourceOf("src/features/dictationClean.ts");
-    expect(source).toContain("口述筆記の整文を反映した");
-  });
+  // 改行を揃える（0.50.6）と口述の整文（0.40.8）も履歴を通す経路である。
+  // 見張りは書く順序まで見る core/eolUnifyHistory.test.ts と
+  // cross/dictationHistory.test.ts にある（2026-10-17 にここの重複を外した）
 
   test("**提案の適用は、履歴も退避も通る**", () => {
     const source = sourceOf("src/features/reviewProposals.ts");

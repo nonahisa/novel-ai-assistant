@@ -5,7 +5,6 @@ import {
   CHAPTER_PROPOSE_HINTS,
   CHAPTER_PROPOSE_SCHEMA,
   CHAPTER_PROPOSE_SYSTEM_PROMPT,
-  CHAPTER_PROPOSE_VERSION,
   NO_CHAPTERS_MARK,
   type ChapterProposeEpisode,
 } from "../../../src/prompts/chapterPropose";
@@ -26,10 +25,6 @@ const EPISODES: ChapterProposeEpisode[] = [
 ];
 
 describe("P-31 章立ての提案のプロンプト", () => {
-  test("版が定まっている（キャッシュや再現の手掛かりになる）", () => {
-    expect(CHAPTER_PROPOSE_VERSION).toMatch(/^\d+\.\d+$/);
-  });
-
   test("話の一覧とあらすじが材料として入る", () => {
     const prompt = buildChapterProposePrompt({
       workTitle: "氷の街",

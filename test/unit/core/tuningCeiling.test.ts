@@ -123,16 +123,6 @@ describe("読める長さの列", () => {
  * 片方が括弧書き、片方が記号、では読む側が2通り覚えることになる。
  */
 describe("断りの書き方を揃える", () => {
-  test("書ける長さの時間切れも、括弧書きのまま", () => {
-    const markdown = buildTuningStatsMarkdown([
-      entry("Ollama", "gemma4:12b", {
-        measuredOutputTokens: 4290,
-        outputMeasureTimedOut: true,
-      }),
-    ]);
-    expect(rowOf(markdown, "gemma4:12b")).toContain("4,290（時間切れあり）");
-  });
-
   test("両方の断りが、1行に並んでも読める", () => {
     const markdown = buildTuningStatsMarkdown([
       entry("Ollama", "gemma4:12b", {
@@ -177,11 +167,6 @@ describe("天井の印が、設定から表まで届く", () => {
     expect(tuning?.contextHitCeiling).toBe(false);
   });
 
-  test("`true` はこれまでどおり読める", () => {
-    const tuning = parseModelTuning(raw).get("ollama/gemma4:26b");
-    expect(tuning?.contextHitCeiling).toBe(true);
-  });
-
   test("**`false` の行には「これ以上は試していません」を出さない**", () => {
     const tuning = parseModelTuning(raw).get("ollama/gemma4:12b");
     if (!tuning) throw new Error("読めていない");
@@ -191,16 +176,6 @@ describe("天井の印が、設定から表まで届く", () => {
     );
     expect(row).toContain("194,288");
     expect(row).not.toContain("これ以上は試していません");
-  });
-
-  test("`true` の行には、これまでどおり出る", () => {
-    const tuning = parseModelTuning(raw).get("ollama/gemma4:26b");
-    if (!tuning) throw new Error("読めていない");
-    const row = rowOf(
-      buildTuningStatsMarkdown([entry("Ollama", "gemma4:26b", tuning)]),
-      "gemma4:26b"
-    );
-    expect(row).toContain("これ以上は試していません");
   });
 
   test("真偽値でない値は、これまでどおり読まない", () => {

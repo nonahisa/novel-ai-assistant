@@ -308,27 +308,7 @@ describe("書き足しても、作者の文書の形を変えない", () => {
   });
 });
 
-describe("書き出し（テンプレート）", () => {
-  test("埋める欄を並べない", () => {
-    // 開いた瞬間に空欄が10個あるのは、自由に書く文書ではなく記入用紙である
-    const template = buildPlotTemplate("作品");
-    const headings = template.match(/^## /gm) ?? [];
-
-    expect(headings.length).toBeLessThanOrEqual(2);
-  });
-
-  test("自由に書いてよいことを書く", () => {
-    expect(buildPlotTemplate("作品")).toContain("自由に書けます");
-  });
-
-  test("使える見出しの名前は載せる", () => {
-    // 使いたい人には名前が要る。使わない人には空欄が要らない
-    const template = buildPlotTemplate("作品");
-
-    expect(template).toContain("モチーフ");
-    expect(template).toContain("主人公の行動原理");
-  });
-});
+// 書き出し（テンプレート）の見張りは core/plotTemplate.test.ts にある
 
 describe("プロット逆算の応答の検証", () => {
   test("コードフェンス付きでも読める", () => {

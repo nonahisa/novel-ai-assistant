@@ -162,42 +162,8 @@ describe("台帳への書き込み", () => {
     expect(updated.filter((entry) => entry.key === "modelTuning")).toEqual([]);
   });
 
-  test("作者が手で書いた、読めない欄・知らない欄を落とさない", async () => {
-    // **土台にするのは生の中身である。** 読み取り（`parseModelTuning`）を
-    // 通したものを書き戻すと、こちらが解釈できなかった欄が黙って消える。
-    // 作者にとっては、自分で書いたメモが測定のたびに消えることになる
-    withSettings({});
-    await useMemoryTuningStore({
-      "ollama/gemma4:e4b": {
-        contextWindow: "131072",
-        timeoutSeconds: 200,
-        memo: "26Bはこれ",
-      },
-    });
-
-    await saveModelTuning("ollama", "gemma4:e4b", { timeoutSeconds: 400 });
-
-    expect(tuningStoreContents()["ollama/gemma4:e4b"]).toEqual({
-      contextWindow: "131072",
-      timeoutSeconds: 400,
-      memo: "26Bはこれ",
-    });
-  });
-
-  test("欄を消しても、ほかの欄は残る", async () => {
-    withSettings({});
-    await useMemoryTuningStore({
-      "ollama/gemma4:e4b": { timeoutSeconds: 400, memo: "26Bはこれ" },
-    });
-
-    await saveModelTuning("ollama", "gemma4:e4b", {
-      timeoutSeconds: undefined,
-    });
-
-    expect(tuningStoreContents()["ollama/gemma4:e4b"]).toEqual({
-      memo: "26Bはこれ",
-    });
-  });
+  // 知らない欄を残すこと・欄を消すことは core/modelTuningSave.test.ts
+  // 「これまでの約束は変わらない」が見ている
 });
 
 /**

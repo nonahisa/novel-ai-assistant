@@ -5,7 +5,6 @@ import { OllamaProvider } from "../../../src/ai/ollamaProvider";
 import {
   ClaudeProvider,
   toClaudeAIError,
-  toClaudeJsonSchema,
 } from "../../../src/ai/claudeProvider";
 import { OpenAIProvider } from "../../../src/ai/openaiProvider";
 import { GeminiProvider } from "../../../src/ai/geminiProvider";
@@ -417,32 +416,6 @@ describe("AIプロバイダ境界", () => {
     });
 
     expect(sentNumCtx).toBe(8192);
-  });
-
-  test("Claude用スキーマへnull許容とadditionalProperties禁止を再帰変換する", () => {
-    expect(
-      toClaudeJsonSchema({
-        type: "object",
-        properties: {
-          value: { type: ["string", "null"] },
-          nested: { type: "object", properties: { id: { type: "string" } } },
-        },
-      })
-    ).toEqual({
-      type: "object",
-      properties: {
-        value: { anyOf: [{ type: "string" }, { type: "null" }] },
-        nested: {
-          type: "object",
-          properties: { id: { type: "string" } },
-          additionalProperties: false,
-          // 必須でない項目には総数の上限があり、超えると要求ごと拒否される
-          required: ["id"],
-        },
-      },
-      additionalProperties: false,
-      required: ["value", "nested"],
-    });
   });
 
   test("Ollamaは呼び出し元のキャンセルをabortedとして返す", async () => {

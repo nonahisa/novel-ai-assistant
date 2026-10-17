@@ -89,11 +89,8 @@ describe("CPUだけの機械でも、目安が実際の時間の桁に入る", (
     expect(estimate!.source).toBe("measured");
   });
 
-  it("これまでの決め打ち（1チャンク20秒）では桁が合わない（直す前の姿）", () => {
-    const minutes = (LAPTOP_CHUNKS.length * OLD_SECONDS_PER_CHUNK) / 60;
-    // 5チャンク × 20秒 ＝ 100秒。実際の31分の1/18しかない
-    expect(minutes).toBeLessThan(ACTUAL_MINUTES / 2);
-  });
+  // 直す前の決め打ち（1チャンク20秒）では、5チャンク × 20秒 ＝ 100秒で、
+  // 実際の31分の1/18しかなかった。決め打ちへ戻れば上の件が桁で落ちる
 
   it("書く量をまだ測っていなければ、読み込みの実測に決め打ちを足す（一部が決め打ちだと名乗る）", async () => {
     await useMemoryTuningStore({

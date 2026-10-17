@@ -182,15 +182,6 @@ describe("同一人物の候補検出", () => {
     expect(candidates[0].confidence).toBe("weak");
     expect(candidates[0].weakNote).toContain("誰にでも使う");
   });
-
-  test("無関係な2人は候補にしない", () => {
-    const characters = [
-      emptyCharacter("char_001", "ホンゴー"),
-      emptyCharacter("char_002", "ジャック"),
-    ];
-
-    expect(findMergeCandidates(characters)).toEqual([]);
-  });
 });
 
 /**

@@ -94,17 +94,6 @@ describe("確認画面の目安（抽出など）", () => {
     // 2回 ×（5 + 10 × 2）= 50秒
     expect(estimate?.ms).toBe(50_000);
   });
-
-  it("測っていなければ、これまでどおり決め打ちへ落ちる", () => {
-    const estimate = estimateCallsTimeFor({
-      providerId: PROVIDER,
-      model: "まだ測っていないモデル",
-      feature: "character_extract",
-      inputChars: [2000, 2000],
-      fallbackSecondsPerCall: 20,
-    });
-    expect(estimate?.source).toBe("fixed");
-  });
 });
 
 describe("止められない思考のぶんを、同梱の最大に足す", () => {

@@ -56,7 +56,10 @@ describe("語句一致（BM25）", () => {
   });
 
   test("件数の上限を守る", () => {
-    expect(index.search("を", 2).length).toBeLessThanOrEqual(2);
+    // 3件とも当たる質問で見る。1文字の質問（「を」など）は2つ組みが作れず
+    // 常に空が返るので、上限を確かめたことにならない（2026-10-17 に直した）
+    expect(index.search("嫉妬 稽古 調合", 3)).toHaveLength(3);
+    expect(index.search("嫉妬 稽古 調合", 2)).toHaveLength(2);
   });
 
   test("母集団を渡すと、その外の文書は返らない", () => {

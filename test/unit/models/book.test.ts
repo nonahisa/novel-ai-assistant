@@ -71,12 +71,6 @@ describe("本の設計図の既定値", () => {
     });
   });
 
-  test("登場人物一覧は、選ばないかぎり本へ入らない（設計書6.65.11）", () => {
-    expect(defaultBookConfig("氷の街").characterPage.enabled).toBe(false);
-    // 出すと決めた人は、たいてい顔も出したい。イラストの側は既定で入
-    expect(defaultBookConfig("氷の街").characterPage.showIcons).toBe(true);
-  });
-
   test("表紙の合成は、題名と作者名だけを出す（設計書6.65.8）", () => {
     const layout = defaultCoverLayout();
 

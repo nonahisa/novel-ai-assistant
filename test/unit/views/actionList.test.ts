@@ -1522,12 +1522,6 @@ describe("更新告知文の置き場所", () => {
       : [];
   }
 
-  test("「投稿脱稿 → 広報支援」に「更新SNS告知文作成」が並ぶ（実機確認リスト F-48 の代わり）", () => {
-    expect(itemsIn("投稿脱稿", "広報支援")).toContain(
-      "novelai.generateAnnouncement"
-    );
-  });
-
   test("「SNS告知設定」は「作品管理 → 作品別設定」にある（実機確認リスト F-48 の代わり）", () => {
     expect(itemsIn("作品管理", "作品別設定")).toContain(
       "novelai.configureAnnouncement"

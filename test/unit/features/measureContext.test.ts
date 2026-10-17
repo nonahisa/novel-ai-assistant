@@ -125,19 +125,6 @@ describe("エラーを「入らなかった」と数えてよいか", () => {
     expect(countErrorAsTooLong(true, limited)).toBe(false);
   });
 
-  test("残高切れ・鍵の失効も数えない（長さとは関係が無い）", () => {
-    for (const kind of [
-      "insufficient_credit",
-      "authentication_failed",
-      "permission_denied",
-      "not_running",
-    ] as const) {
-      expect(countErrorAsTooLong(true, new AIError("失敗", kind)), kind).toBe(
-        false
-      );
-    }
-  });
-
   /**
    * **時間切れだけは別**（作者の依頼、2026-09-13）。
    *

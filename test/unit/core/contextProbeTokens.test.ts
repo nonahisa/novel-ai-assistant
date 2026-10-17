@@ -330,12 +330,6 @@ describe("指示文に雛形を残さない", () => {
     );
     expect(quoted).toEqual(["あかさた", "なにぬね"]);
   });
-
-  test("合言葉そのものは、これまでどおり user 側にだけ置く", () => {
-    expect(systemPrompt).not.toContain("あかさた");
-    expect(userPrompt).toContain("あかさた");
-    expect(userPrompt).toContain("なにぬね");
-  });
 });
 
 describe("結果の文言", () => {

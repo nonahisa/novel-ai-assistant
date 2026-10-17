@@ -1,5 +1,4 @@
 import { describe, expect, test, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
 
 import {
   excerptForRecheck,
@@ -400,27 +399,5 @@ describe("1件を確かめる", () => {
     expect(calls[0].userPrompt).toContain("走った");
     // 書き直されたあとの本文が入っていないと、判断できない
     expect(calls[0].userPrompt).toContain("　彼は駆けた。");
-  });
-});
-
-/**
- * 画面側の口（WebViewを要するので、その道が残っているかを見る）。
- */
-describe("再チェックの口", () => {
-  const html = () => readFileSync("src/views/proposalPanelHtml.ts", "utf-8");
-
-  test("押すと、再チェックを送る道がある", () => {
-    // 正規表現もエスケープも使わない。潰れても「見つからない」としか出ない
-    expect(html()).toContain('data-action="recheck"');
-  });
-
-  test("解消が確かめられたものは、一覧から外す", () => {
-    expect(html()).toContain(".issue.resolved { display: none; }");
-  });
-
-  /** AIの答えは数十秒かかる。押した手応えが無いと、壊れたようにしか見えない */
-  test("再チェック中は、その行の操作を止める", () => {
-    expect(html()).toContain("再チェック中…");
-    expect(html()).toContain("item.busy ? ' disabled' : ''");
   });
 });

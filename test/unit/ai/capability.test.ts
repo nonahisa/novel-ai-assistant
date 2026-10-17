@@ -580,6 +580,8 @@ describe("モデルの大きさの境目は1つ（LARGE_MODEL_MIN_BILLIONS）", 
     // **境目を直書きしない。** 実測で線を引き直したときに、
     // テストだけが古い境目を守り続けることになる
     expect(inferTier(`${LARGE_MODEL_MIN_BILLIONS}.0B`, "ollama")).toBe("high");
+    // 小数点の無い書き方（MCP の通知が受け取る形）でも同じ（mcp/mcpNotice.test.ts から寄せた）
+    expect(inferTier(`${LARGE_MODEL_MIN_BILLIONS}B`, "ollama")).toBe("high");
   });
 
   test("境目の手前は標準のまま", () => {

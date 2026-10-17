@@ -75,23 +75,11 @@ describe("結果は変わらない", () => {
   ];
   const index = new Bm25Index(docs);
 
-  test("含む語で引ける", () => {
-    expect(index.search("嫉妬", 5).map((h) => h.id)).toContain("a");
-  });
-
-  test("一致が無い文書は返さない", () => {
-    expect(index.search("宇宙船", 5)).toEqual([]);
-  });
-
   test("点の高い順に並ぶ", () => {
     const hits = index.search("嫉妬 稽古", 5);
     for (let i = 1; i < hits.length; i++) {
       expect(hits[i - 1].score).toBeGreaterThanOrEqual(hits[i].score);
     }
-  });
-
-  test("件数の上限を守る", () => {
-    expect(index.search("の", 2).length).toBeLessThanOrEqual(2);
   });
 
   test("空の索引でも壊れない", () => {

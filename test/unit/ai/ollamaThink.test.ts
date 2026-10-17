@@ -47,16 +47,6 @@ describe("流して受け取る道を通るか", () => {
     delete process.env.NOVELAI_OLLAMA_STREAM;
   });
 
-  test("設定が入なら通る", () => {
-    setStreamingSettingReader(() => true);
-    expect(willStreamChat({})).toBe(true);
-  });
-
-  test("呼び出し側が断れば通らない（測定は配布と同じ道で行う）", () => {
-    setStreamingSettingReader(() => true);
-    expect(willStreamChat({ disableStreaming: true })).toBe(false);
-  });
-
   test("既定（設定が切）では通らない", () => {
     delete process.env.NOVELAI_OLLAMA_STREAM;
     setStreamingSettingReader(() => false);

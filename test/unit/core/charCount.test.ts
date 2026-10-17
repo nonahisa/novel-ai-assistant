@@ -270,16 +270,6 @@ describe("ルビと傍点は字数に入れない", () => {
  * 自分では持たない。
  */
 describe("stripRuby の定義は1つ", () => {
-  const charCountSource = readFileSync("src/core/charCount.ts", "utf8");
-
-  test("charCount.ts は ruby.ts のものを読んでいる", () => {
-    expect(charCountSource).toContain('import { stripRuby } from "./ruby";');
-  });
-
-  test("charCount.ts に写しの定義が戻っていない", () => {
-    expect(charCountSource).not.toMatch(/function stripRuby/);
-  });
-
   test("実体を持つのは ruby.ts だけ", () => {
     const owners = readdirSync("src/core")
       .filter((name) => name.endsWith(".ts"))

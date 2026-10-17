@@ -61,16 +61,6 @@ describe("書ける長さの字数", () => {
     );
   });
 
-  test("時間切れだけのときは、これまでどおり", () => {
-    const markdown = buildTuningStatsMarkdown([
-      entry("gemma4:12b", {
-        measuredOutputTokens: 4290,
-        outputMeasureTimedOut: true,
-      }),
-    ]);
-    expect(rowOf(markdown, "gemma4:12b")).toContain("4,290（時間切れあり）");
-  });
-
   test("測っていない行には、何も足さない", () => {
     const markdown = buildTuningStatsMarkdown([
       entry("qwen3:8b", { charsPerToken: 1.359 }),

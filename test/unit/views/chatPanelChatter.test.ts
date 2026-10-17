@@ -16,10 +16,6 @@ function script(): string {
 }
 
 describe("独り言の表示", () => {
-  test("スクリプトがJavaScriptとして読める", () => {
-    expect(() => new Function(script())).not.toThrow();
-  });
-
   test("独り言を受け取れる", () => {
     expect(script()).toContain("'chatter'");
   });

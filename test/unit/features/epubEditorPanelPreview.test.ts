@@ -1765,19 +1765,6 @@ describe("面の保留（設計書6.65.15の段D）", () => {
     expect(latest().characterNotice).toContain("全員にイラストが付きます");
   });
 
-  test("素材置き場の下のフォルダーの画像も当たる", async () => {
-    writeCharacter("char_001", "ターナ先生");
-    putBytes("素材/人物/ターナ先生.png", [1, 2, 3]);
-    writeBook({
-      title: "氷の街",
-      blocks: [{ type: "characters" }, { type: "body" }],
-    });
-
-    await open();
-
-    expect(latest().characterNotice).toContain("全員にイラストが付きます");
-  });
-
   test("別名と同じ名前の画像でも当たる", async () => {
     writeCharacter("char_001", "月島灯", { aliases: ["あかり"] });
     putBytes("素材/あかり.png", [1, 2, 3]);

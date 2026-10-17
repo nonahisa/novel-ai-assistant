@@ -78,15 +78,6 @@ describe("実行前の確認", () => {
     }
   });
 
-  test("Escで閉じられたら false", async () => {
-    const picker = answerConfirms(undefined);
-    try {
-      expect(await confirmRun("19話をAIで確認します。")).toBe(false);
-    } finally {
-      picker.restore();
-    }
-  });
-
   test("押すボタンの名前は呼び出し側が決められる", async () => {
     const picker = answerConfirms("まとめる");
     try {

@@ -62,11 +62,7 @@ describe("EPUB は本文へ触れない", () => {
     expect(STORE.slice(at, at + 120)).toContain("draftPath()");
   });
 
-  test("口述筆記は、触れるかわりに履歴へ残す（こちらは別の決まり）", () => {
-    // 「本文へ触れていないか」を EPUB と口述で同じ問いにしない。
-    // 口述は触れるのが機能で、残すことで筋を通している（0.40.8）
-    const dictation = sourceOf("src/features/dictationClean.ts");
-    expect(dictation).toContain("recordEdit(work, {");
-    expect(dictation).toContain("口述筆記の整文を反映した");
-  });
+  // 「本文へ触れていないか」を EPUB と口述で同じ問いにしない。口述は触れるのが
+  // 機能で、履歴へ残すことで筋を通している（0.40.8）。その見張りは
+  // cross/dictationHistory.test.ts にある
 });

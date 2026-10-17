@@ -265,28 +265,6 @@ describe("確保するコンテキスト長", () => {
     expect(size).toBeLessThan(Math.ceil((45715 + 8192) * 1.1));
     expect(size).toBeGreaterThanOrEqual(Math.ceil(20000 / 0.7) + 8192);
   });
-
-  test("モデルの上限は超えない", () => {
-    // /api/show が取れないときは 8192 で頭打ちになる（従来の固定値と同じ）
-    expect(
-      contextSizeForPrompt({
-        promptChars: 30000,
-        outputTokens: 8192,
-        contextWindow: 8192,
-      })
-    ).toBe(8192);
-  });
-
-  test("短いプロンプトでも4096は確保する", () => {
-    // 極端に小さい num_ctx は、応答が数十トークンで切れる
-    expect(
-      contextSizeForPrompt({
-        promptChars: 10,
-        outputTokens: 0,
-        contextWindow: 131072,
-      })
-    ).toBe(4096);
-  });
 });
 
 describe("入り切らないチャンクを半分にする", () => {

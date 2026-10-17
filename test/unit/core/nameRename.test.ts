@@ -230,6 +230,8 @@ describe("提案パネルの適用経路に、そのまま乗る", () => {
     "イークェス家の紋章が光る。",
   ].join("\n");
 
+  // target が original に無い件も失敗に数えるので、target の実在もここで見ている
+  // （無いと、適用が「指摘の位置を特定できませんでした」で止まる）
   test("1件ずつの適用（個別確認変換）が全件通る", () => {
     const plan = planTextReplacements(text, mapping);
     const applied = applyLikeProposalPanel(text, plan);
@@ -250,13 +252,6 @@ describe("提案パネルの適用経路に、そのまま乗る", () => {
     expect(applied.text).toContain("レオン・ヴァイスが門をくぐった。");
     // 「レオン・ヴァイス」が「レオン・ヴァイス・ヴァイス」に化けない
     expect(applied.text).not.toContain("ヴァイス・ヴァイス");
-  });
-
-  test("target は必ず original の中にある", () => {
-    // 無いと、適用が「指摘の位置を特定できませんでした」で止まる
-    for (const item of planTextReplacements(text, mapping)) {
-      expect(item.original).toContain(item.target);
-    }
   });
 
   test("まとめて適用の対象から外れない（修正案が空でない）", () => {

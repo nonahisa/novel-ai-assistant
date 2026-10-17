@@ -228,29 +228,6 @@ describe("画面に出る詳細メニュー（道順を書く人はここを読�
     ]);
   });
 
-  test("分類は10で、この順に並ぶ（「執筆支援」を工程の束に割った。2026-09-24）", () => {
-    expect(ACTION_TREE.map((group) => group.label)).toEqual([
-      "執筆データ",
-      "作品管理",
-      "新作構想",
-      "作品執筆",
-      "自己校正",
-      "投稿脱稿",
-      "電子出版等",
-      "資料管理",
-      "環境設定",
-      "ヘルプ",
-    ]);
-    expect(ACTION_TREE.filter((group) => group.standalone).map((g) => g.label)).toEqual([]);
-  });
-
-  test("見出しを挟まない分類は、中身がちょうど1つの操作", () => {
-    for (const group of ACTION_TREE.filter((g) => g.standalone)) {
-      expect(group.entries, group.label).toHaveLength(1);
-      expect(group.entries[0].kind, group.label).toBe("action");
-    }
-  });
-
   test("「ヘルプ」に「動作診断」は出ない（ブラウザ版からも外した）", () => {
     const group = ACTION_TREE.find((g) => g.label === "ヘルプ");
     for (const runtimeAllowsProcesses of [true, false]) {

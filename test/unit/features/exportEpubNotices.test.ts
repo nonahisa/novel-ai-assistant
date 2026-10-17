@@ -526,6 +526,8 @@ describe("人物紹介の面（イラストとルビ）", () => {
     expect(characterPage()).toContain('src="portrait-1.png"');
   });
 
+  // 素材置き場を下の階層まで集める（`collectMaterialImages`）ことを通しで見るのは
+  // ここだけ。EPUBエディターの画面も同じ部品を呼ぶ
   test("素材の下のフォルダーの画像も入る", async () => {
     writePerson("char_001", "ターナ先生");
     putBytes("素材/人物/ターナ先生.png", [0x89, 0x50, 0x4e, 0x47]);

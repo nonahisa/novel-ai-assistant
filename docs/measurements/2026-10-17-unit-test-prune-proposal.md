@@ -2,6 +2,8 @@
 
 `test/unit` の 1,205 ファイル・20,088 件（`10c447ca` で数えた）を走査し、消してよい候補を洗い出した。**テストは1件も消していない。** 消すかどうかは作者が選ぶ。
 
+（追記 2026-10-17：作者が「全部消してよさそう」を選んだので、1件ずつ確かめて**76件を消し、2件を残した**。ai・prompts・mcp の走査結果も足した。末尾の2節「ai・prompts・mcp の走査結果」「消した結果」）
+
 - **途中版である。** 9つに分けて走査したうち8つの結果が入っている。**ai と prompts と mcp（133ファイル）はまだ載っていない**（担当が走査中のまま、本体が報告を締め切った）
 - **本体が自分で開いて確かめたのは、表で「本体が確かめた」と書いた件だけ**（recheckProposal・modelTuningLookup・bm25Memory）。ほかは担当が両方のテストを開いて比べた報告をそのまま載せた。消す前に1件ずつ開いて確かめること
 - 区分：**A 重なる**（同じ関数の同じ振る舞いを別の件が確かめている）／**B 古い**（もう無い物や道を見張っている、または常に通る）／**C ソースの文字を読むだけ**（同じことを動きで確かめるテストが既にある）
@@ -218,6 +220,130 @@
 
 ## まだ見ていない範囲
 
-- ai と prompts と mcp の133ファイル（担当が走査中のまま締め切った）。続ける場合は同じ決まりで走査し、この文書へ足す
+- ai と prompts と mcp の133ファイル（担当が走査中のまま締め切った）。続ける場合は同じ決まりで走査し、この文書へ足す（→ 走査の結果は末尾の節に足した）
 - 走査した範囲でも、全 it の本文までは読んでいない。名前から重なりを拾えなかったものは漏れている。担当が「中身まで見ていない」と書いた大きなファイル：cross/composeFace（177件）・chatSettingsSync（48件）・chatProfilePrompts（42件）・writingStats（65件）、views/manuscriptEditorUnsent・Save・Keys・ClipboardMenu、epubEditorPanelHtml、relationGraphPanelHtml、settingsPanelLayout、features/epubEditorPanelPreview（88件）・extractCharactersFlow（64件）
 - 候補を外して行の覆いを取り直す比較
+
+## ai・prompts・mcp の走査結果（追記、2026-10-17）
+
+途中版で未着だった133ファイルの走査結果。決まりは上と同じ（区分 A・B・C、「全部」は残す側が同じ入力で同じ値を確かめているものだけ）。
+
+**全部消してよさそう（19件）**
+
+| ファイル | テスト名 | 区分 | 残す側／根拠 |
+|---|---|---|---|
+| ai/outputLimit.test.ts | resolveOutputTokensForSend > 台帳に実測が無ければ、設定値をそのまま送る（8,192で頭を打たない） | A | 同じファイル「上限の出どころ > 実測が無ければ、出どころは設定」 |
+| ai/outputLimit.test.ts | resolveOutputTokensForSend > 台帳に実測があれば、そこまでを上限にする | A | 同じファイル「実測を実送信の上限に使うときの守り > 印の無い実測は、これまでどおり上限になる」 |
+| ai/outputLimit.test.ts | resolveOutputTokensForSend > 設定のほうが小さければ、設定が勝つ | A | 同じファイル「上限の出どころ > 設定のほうが小さければ、出どころは設定」 |
+| ai/runTimeEstimateTuning.test.ts | 確認画面の目安（抽出など） > 測っていなければ、これまでどおり決め打ちへ落ちる | A | ai/runTimeEstimateCpu.test.ts「速さを一度も測っていなければ、これまでの決め打ちへ落ちる」 |
+| ai/runTimeEstimateCpu.test.ts | CPUだけの機械でも… > これまでの決め打ち（1チャンク20秒）では桁が合わない（直す前の姿） | B | 製品を呼ばず定数の割り算だけで常に通る |
+| ai/providerRuntimeFilter.test.ts | 実行環境で選べないプロバイダを外す > LM Studioも外す | A | 同じファイル「外部プロセスを起動できない（ブラウザ）なら、手元のものを外す」 |
+| ai/providerRuntimeFilter.test.ts | 実行環境で選べないプロバイダを外す > クラウドのものは減らさない | A | 同上 |
+| ai/contextOverflow.test.ts | HTTPの失敗を context_overflow へ付け替える > 残高不足の400は bad_response のままにする | A | 同じファイル「プロバイダが返す失敗の種別 > さくら：残高不足の400は bad_response のまま」 |
+| ai/ollamaThink.test.ts | 流して受け取る道を通るか > 設定が入なら通る | A | ai/aiProviders.test.ts「流し受信を断る旗 > 旗を立てなければ…流す道を通る」 |
+| ai/ollamaThink.test.ts | 流して受け取る道を通るか > 呼び出し側が断れば通らない | A | ai/aiProviders.test.ts「流し受信を断る旗 > disableStreaming の呼び出しは流す道を通らない」 |
+| ai/aiProviders.test.ts | AIプロバイダ境界 > Claude用スキーマへnull許容とadditionalProperties禁止を再帰変換する | A | ai/claudeSchemaLimits.test.ts と ai/aiProviderSchemas.test.ts |
+| mcp/mcpNotice.test.ts | 階級が渡されなければ、大きさから導く > 境目ちょうども、高性能側へ倒れる | A | ai/capability.test.ts「境目ちょうどは高性能の側」（inferTier） |
+| mcp/contradictionPrompt.test.ts | 前の話に出た人物を引き継ぐ > carryOver: 2 で、第4話にも主人公の設定が載る | A | 同じファイル「指定しなければ、既定の2話ぶんを引き継ぐ」 |
+| mcp/mcpTools.test.ts | typo > runner を省くと、転送層で断られる | A | 同じファイル proofread「runner を省くとエラーになる」、mcp/mcpBundledTools.test.ts「runner は省略できない」 |
+| mcp/mcpTools.test.ts | chat > runner を省くと、転送層で断られる | A | 同上 |
+| prompts/characterExtractionQuality.test.ts | 登場人物抽出の品質ゲート > 上限を足してもプロンプトの版は上げない | A | 同じファイル「v5.3の構造化出力契約を公開する」（同じ版の固定） |
+| prompts/announcePrompt.test.ts | 更新告知のスキーマ > 版は文書と揃えて 1.1 | A | prompts/publicityReaderPrompt.test.ts「版」、cross/promptDocShape |
+| prompts/titleFit.test.ts | P-41 の組み立て > 版を持つ（変えたら上げる） | B | cross/promptDocShape が版の一致を見る。こちらは書式しか見ない |
+| prompts/chapterProposePrompt.test.ts | P-31 章立ての提案のプロンプト > 版が定まっている | B | 同上 |
+
+**1件ずつ見てほしい（今回は消していない）**
+
+ai/ollamaThink の既定切・ai/lmstudioLauncher の4件・aiProviders の refusal・aiProviderSchemas の実スキーマ・vscodeLmProvider の構築・capability の2件・mcpNotice の2件・mcpFactContradiction の runner・deviationCheck／photoTranscribe／chatGrounding の版の固定。
+
+## 消した結果（2026-10-17）
+
+作者が選んだ「全部消してよさそう」（上の59件と、ai・prompts・mcp の19件。計78件）を、1件ずつ両方のテストを開いて入力と期待値を比べてから消した。
+
+- **消したのは76件**（ファイルまるごとは `cross/episodePlotNoOverwrite.test.ts` の1ファイル4件）。**2件は消さなかった**（理由は下）
+- 残す側が消す側の確かめをすべて含まなかったものは、**残す側に1行足してから消した**（3ファイル4か所）
+  - `core/modelTuningSave.test.ts`：既にある欄を書き換える回でも知らない欄が残ること、欄を消す回でも知らない欄が残ること（`core/modelTuningLookup.test.ts` から寄せた）
+  - `core/postingConvert.test.ts`：本文の途中の行にあるシーンメモも落ちること（`core/sceneMemo.test.ts` は途中の行で見ていた）
+  - `ai/capability.test.ts`：小数点の無い大きさ（`26B`）でも境目ちょうどは高性能の側（大きさを読む関数に直接のテストが無いため）
+- **残す側も何も確かめていなかった件を直した**（1か所）。`core/bm25Memory.test.ts` と `core/retrieval.test.ts` の「件数の上限を守る」は、どちらも1文字の質問（「の」「を」）で、2つ組みが作れず常に空が返っていた。残す側を、3件当たる質問で上限2が効く形に直した
+- 消したテストの名前が出ていた、ほかのテストの注を直した（`features/episodePlotCreate.test.ts`・`features/plotModePanelPlanned.test.ts`）。引継ぎ書の記録（2831行・17811行）にも名前が残るが、記録なので触っていない（2831行は同じ行で `episodePlotCreate.test.ts` を本物の確認として挙げている）
+- 製品のコードは触っていない
+
+**消さなかったもの（2件）**
+
+- `features/chatterService.test.ts`「本文の感想 > AIが仕事中なら取りに行かない」：残す側とされた「AIが仕事中なら話さない」は、既定で祝いが先に出るので、感想を取りに行く道まで届かない。感想の道で仕事中に止まる（`requestComment` が0回）ことを見るのはこの1件だけ
+- `features/exportEpubNotices.test.ts`「素材の下のフォルダーの画像も入る」：残す側とされた `core/characterIconLookup.test.ts` は、一覧を渡されてから引く純関数しか見ない。素材置き場を下の階層まで集める `collectMaterialImages` には直接のテストが無く、通しで見ていたのは画面側（`features/epubEditorPanelPreview.test.ts`）とこの件だけだった。画面と書き出しは同じ部品を呼ぶので、画面側を消し、こちらを残して注を足した
+
+**1件ずつの記録**
+
+| ファイル | テスト名 | 件 | 扱い | 残す側／根拠 | 足した・直した |
+|---|---|---|---|---|---|
+| features/workChatPanelTruncated.test.ts | タイムアウトは、その場で直せる > 案内に「秒数を上げる」札が付く | 1 | 消した | features/workChatPanelTimeoutAdvice.test.ts「延ばす札を出し、チャンクの話はしない」（同じ相手・同じ失敗・同じ札） | なし |
+| features/recheckProposal.test.ts | 再チェックの口（3件） | 3 | 消した | features/proposalPanelContradictionRecheck.test.ts「矛盾の描画に、再チェックの口がある」 | なし |
+| core/modelTuningLookup.test.ts | 作者が手で書いた、読めない欄・知らない欄を落とさない | 1 | 消した | core/modelTuningSave.test.ts「読めない欄・知らない欄は、そのまま残る」 | 残す側の入力に既存の欄（timeoutSeconds 200→400）の書き換えを足し、注（生の中身を土台にする理由）を移した |
+| core/modelTuningLookup.test.ts | 欄を消しても、ほかの欄は残る | 1 | 消した | core/modelTuningSave.test.ts「`undefined` を渡すと、その欄だけ消える」 | 残す側の入力に知らない欄（memo）を足した |
+| core/nameRename.test.ts | target は必ず original の中にある | 1 | 消した | 同じファイル「1件ずつの適用が全件通る」（target が無ければ failed に数える） | 理由の注を残す側へ移した |
+| core/plotDoc.test.ts | 書き出し（テンプレート）3件 | 3 | 消した | core/plotTemplate.test.ts の同じ3件（見出しは PLOT_SECTIONS 全部を見る） | なし |
+| core/procedureSelect.test.ts | 緩めた先でも、創作の相談には手順書きを渡さない | 1 | 消した | core/procedures.test.ts「合うものが無ければ渡さない」（同じ4文・同じ呼び方） | なし |
+| core/procedureSelect.test.ts | 誤検出も取り違えも、いまは0件 | 1 | 消した | 同じファイル「いま：当たり22・見逃し4・取り違え0・誤検出0」 | なし |
+| core/pathInside.test.ts | 「..下書き」を外と誤判定していた（昔の写し） | 1 | 消した | 同じファイル「「..」で始まる名前のフォルダーは、中にある」 | なし |
+| core/sceneMemo.test.ts | 投稿用にコピー：メモは投稿されない | 1 | 消した | core/postingConvert.test.ts「シーンメモは、どちらの経路でも落ちる」 | 残す側に「本文の途中の行のメモも落ちる」1行を足した |
+| core/tuningCeiling.test.ts | 書ける長さの時間切れも、括弧書きのまま | 1 | 消した | core/tuningStats.test.ts「時間切れ混じりの実測には、その印を残す」（欄を完全一致） | なし |
+| core/tuningOutputChars.test.ts | 時間切れだけのときは、これまでどおり | 1 | 消した | 同上 | なし |
+| core/tuningCeiling.test.ts | `true` はこれまでどおり読める | 1 | 消した | core/tuningOutputChars.test.ts「天井の印が読めている」 | なし |
+| core/tuningCeiling.test.ts | `true` の行には、これまでどおり出る | 1 | 消した | core/tuningOutputChars.test.ts「設定から読んだものを表にすると、断りが全部出る」 | なし |
+| core/bm25Memory.test.ts | 含む語で引ける／一致が無い文書は返さない／件数の上限を守る | 3 | 消した | core/retrieval.test.ts の同名3件 | 「件数の上限を守る」は両方とも1文字の質問（「を」「の」）で常に空が返り、何も確かめていなかった。残す側を3件当たる質問で上限2が効く形に直した |
+| cross/episodePlotNoOverwrite.test.ts | ファイル全体（4件） | 4 | ファイルごと消した | features/episodePlotCreate.test.ts「既にあれば、1文字も変えずにそのまま開く」（動き） | 残す側と plotModePanelPlanned の注にあった名前を直した |
+| cross/epubDoesNotTouchManuscript.test.ts | 口述筆記は、触れるかわりに履歴へ残す | 1 | 消した | cross/dictationHistory.test.ts「適用に成功したら編集履歴を残す」（書く順序まで見る） | 理由の注を残した |
+| cross/manuscriptWriteAudit.test.ts | 口述の整文も、履歴を通す（0.40.8） | 1 | 消した | 同上 | 経路の表に、どこで見ているかの注を残した |
+| cross/manuscriptWriteAudit.test.ts | 改行を揃えるのも、履歴を通す（0.50.6） | 1 | 消した | core/eolUnifyHistory.test.ts「書き込みが通ったときだけ残す」「1件ずつ残す」（文言・順序・失敗時まで） | 同上 |
+| core/contextProbeTokens.test.ts | 合言葉そのものは、これまでどおり user 側にだけ置く | 1 | 消した | core/contextProbe.test.ts「合言葉は user 側にだけ置く」（同じ関数・両方の合言葉） | なし |
+| core/chunkMerge.test.ts | モデルの上限は超えない | 1 | 消した | core/contextStep.test.ts「モデルの上限は超えない」 | なし |
+| core/chunkMerge.test.ts | 短いプロンプトでも4096は確保する | 1 | 消した | core/contextStep.test.ts「下限4096は保つ」（応答0と10の違いだけ） | なし |
+| core/contradictionSendVolume.test.ts | 既定は2話ぶん引き継ぐ（測った値） | 1 | 消した | core/contradictionMaterial.test.ts「既定は2話ぶん引き継ぐ」 | なし |
+| core/contradictionSendVolume.test.ts | 本文と、それ以外を分けて言う | 1 | 消した | cross/contradictionConsentVolume.test.ts「同じ本文を重ねて送らないなら、「のべ」と言わない」（同じ数から同じ文） | なし |
+| core/editHistory.test.ts | 原稿の受け渡しに要るものは開く | 1 | 消した | core/editorMode.test.ts「原稿を受け取り、直したものを返すために要るものは開く」（4件で上位集合） | なし |
+| core/charCount.test.ts | charCount.ts は ruby.ts のものを読んでいる | 1 | 消した | 同じファイル「同じ関数が返る」（toBe で同一性） | なし |
+| core/charCount.test.ts | charCount.ts に写しの定義が戻っていない | 1 | 消した | 同じファイル「実体を持つのは ruby.ts だけ」（src/core 全体） | なし |
+| core/episodeCharCount.test.ts | 作品一覧（scanner）は countEpisodeChars を通す | 1 | 消した | core/episodeCharSingleSource.test.ts「数え方の源は1つ」「生の countChars を直に呼ぶのは…だけ」 | なし |
+| core/episodeCharCount.test.ts | 原稿エディタも同じ関数を通す | 1 | 消した | 同上 | なし |
+| core/aiInstructions.test.ts | 本文は1つで、違うのは頭の数行だけ | 1 | 消した | 同じファイル「4つの相手ぶんを置くと、本文は同じで頭の数行だけが違う」（書き出して同じ2点を見る） | なし（純関数の側で落ちたときの手がかりだけ失う） |
+| features/firstRun.test.ts | Ollamaを選んで、つながらなかったとき > セットアップの案内へ繋ぐ | 1 | 消した | ai/registry.test.ts「Ollamaにつながらなければ、セットアップの案内へ繋ぐ」（動き） | なし |
+| features/plotModePanelAdvice.test.ts | 書いてある項目を置き換えるときは、モーダルで確かめてから書く | 1 | 消した | features/plotAdvice.test.ts「作者の書いた項目を置き換えるときは確認し、断られたら書かない」 | なし |
+| features/plotModePanelAdvice.test.ts | 送るときは何も書かない | 1 | 消した | features/plotAdvice.test.ts「会話の文と書き込み案を並べ、案は何も書かない」 | なし |
+| features/measureContext.test.ts | 残高切れ・鍵の失効も数えない | 1 | 消した | 同じファイル「数えてよいのは bad_response と unknown だけ」（13種別の表に4つとも入る） | なし |
+| features/measureContextTokens.test.ts | 反映しなければ、延ばした待ち時間は元へ戻る | 1 | 消した | features/measureContextTuning.test.ts「反映しなければ、元の待ち時間へ戻す」 | なし |
+| features/measureContextTokens.test.ts | 台帳に待ち時間が無いモデルでも、測り直しの最中に欄を作らない | 1 | 消した | features/measureContextTuning.test.ts「元から欄が無かった台帳は元どおり空に戻る」（台帳へ一度も書かない） | なし |
+| features/chatterService.test.ts | 本文の感想 > AIが仕事中なら取りに行かない | 1 | 消さなかった | （同じファイル「AIが仕事中なら話さない」） | 残す側は既定で祝いが先に出て、感想を取りに行く道まで届かない。感想の道で仕事中に止まる（requestComment が0回）ことを見るのはこの1件だけ |
+| features/epubEditorPanelPreview.test.ts | 素材置き場の下のフォルダーの画像も当たる | 1 | 消した | features/exportEpubNotices.test.ts「素材の下のフォルダーの画像も入る」（同じ collectMaterialImages を通しで見る） | なし |
+| features/exportEpubNotices.test.ts | 素材の下のフォルダーの画像も入る | 1 | 消さなかった | （core/characterIconLookup.test.ts「素材の下のフォルダーの絵も当たる」） | 残す側の純関数は一覧を渡されてから引くだけ。素材置き場を下の階層まで集める collectMaterialImages には直接のテストが無く、通しで見るのは画面側とこの件だけだった。画面側を消したので、こちらを残し注を足した |
+| views/workChatPanelStaged.test.ts | JavaScriptとして読める | 1 | 消した | views/workChatPanelLarge.test.ts「どちらもJavaScriptとして読める」（同じ引数の SIDEBAR） | 使わなくなった script() を外した |
+| views/chatPanelChatter.test.ts | スクリプトがJavaScriptとして読める | 1 | 消した | 同上 | なし |
+| views/writingStatsCelebration.test.ts | スクリプトがJavaScriptとして読める | 1 | 消した | views/writingStatsPanelHtml.test.ts の同名の件（同じ引数） | なし |
+| views/notify.test.ts | 実行前の確認 > Escで閉じられたら false | 1 | 消した | views/confirmInTopPicker.test.ts「閉じられたら false」 | なし |
+| views/confirmInTopPicker.test.ts | 作品名を渡すと、題の頭に作品名が出る | 1 | 消した | views/notify.test.ts「作品名を渡すと、確認の文の1行目（窓の題）に出る」（題を完全一致） | なし |
+| views/actionList.test.ts | 「投稿脱稿 → 広報支援」に「更新SNS告知文作成」が並ぶ | 1 | 消した | 同じファイル「告知の入口の場所（F-48）」の同じ場所の件 | なし |
+| views/menuVisible.test.ts | 分類は10で、この順に並ぶ | 1 | 消した | views/actionList.test.ts「分類は決めた順に並ぶ」。消す側の「単独の分類は無い」は、同じファイルの「組み直した並びを、丸ごと写す」（完全一致）が捕まえる | なし |
+| views/menuVisible.test.ts | 見出しを挟まない分類は、中身がちょうど1つの操作 | 1 | 消した | （B）単独の分類が無いので空の並びを回して常に通る | なし |
+| views/viewVisibility.test.ts | 印の名前は、package.json の式に実在する | 1 | 消した | 同じファイル「相談だけ落ちる」（SOLO_VIEW_KEY が違えば落ちる）「ほかが全部落ちる」（FOCUS_CHAT_KEY が違えば落ちる） | なし |
+| models/characterAppellations.test.ts | 無関係な2人は候補にしない | 1 | 消した | 同じファイル「肩書きが同じだけの別人は候補にしない」（同じ条件に共通の呼び方を足した入力） | なし |
+| models/book.test.ts | 登場人物一覧は、選ばないかぎり本へ入らない | 1 | 消した | 同じファイル「題名だけ渡せば、残りは既定で埋まる」（toEqual に characterPage: { enabled: false, showIcons: true }） | なし |
+| ai/outputLimit.test.ts | resolveOutputTokensForSend > 台帳に実測が無ければ、設定値をそのまま送る | 1 | 消した | 同じファイル「上限の出どころ > 実測が無ければ、出どころは設定」（tokens も完全一致。ForSend は ForSend の .tokens を返すだけの包み） | なし |
+| ai/outputLimit.test.ts | resolveOutputTokensForSend > 台帳に実測があれば、そこまでを上限にする | 1 | 消した | 同じファイル「印の無い実測は、これまでどおり上限になる」（同じ関数・同じ入力） | なし |
+| ai/outputLimit.test.ts | resolveOutputTokensForSend > 設定のほうが小さければ、設定が勝つ | 1 | 消した | 同じファイル「上限の出どころ > 設定のほうが小さければ、出どころは設定」 | なし |
+| ai/runTimeEstimateTuning.test.ts | 測っていなければ、これまでどおり決め打ちへ落ちる | 1 | 消した | ai/runTimeEstimateCpu.test.ts「速さを一度も測っていなければ、これまでの決め打ちへ落ちる」（値・文言まで完全一致） | なし |
+| ai/runTimeEstimateCpu.test.ts | これまでの決め打ちでは桁が合わない（直す前の姿） | 1 | 消した | （B）製品を呼ばず定数の割り算だけで常に通る。直す前の不具合（桁が1/18）は同じファイル「読み込みの速さが分かっていれば…」が桁で捕まえる | 数字の記録を注に残した |
+| ai/providerRuntimeFilter.test.ts | LM Studioも外す | 1 | 消した | 同じファイル「外部プロセスを起動できない（ブラウザ）なら、手元のものを外す」（完全一致） | 理由の注を残す側へ移した |
+| ai/providerRuntimeFilter.test.ts | クラウドのものは減らさない | 1 | 消した | 同上 | 同上 |
+| ai/contextOverflow.test.ts | 残高不足の400は bad_response のままにする | 1 | 消した | 同じファイル「さくら：残高不足の400は bad_response のまま」（同じ本文の400をプロバイダへ返し、同じ関数を通す） | なし |
+| ai/ollamaThink.test.ts | 設定が入なら通る | 1 | 消した | ai/aiProviders.test.ts「旗を立てなければ…流す道を通る」（プロバイダは willStreamChat で決め、送る stream を見る） | なし |
+| ai/ollamaThink.test.ts | 呼び出し側が断れば通らない | 1 | 消した | ai/aiProviders.test.ts「disableStreaming の呼び出しは流す道を通らない」 | なし |
+| ai/aiProviders.test.ts | Claude用スキーマへnull許容とadditionalProperties禁止を再帰変換する | 1 | 消した | ai/claudeSchemaLimits.test.ts（null 許容の object の完全一致、src/prompts の全スキーマを再帰でたどる検査）と ai/aiProviderSchemas.test.ts「必須にしても…表せる」 | 使わなくなった import を外した |
+| mcp/mcpNotice.test.ts | 境目ちょうども、高性能側へ倒れる | 1 | 消した | ai/capability.test.ts「境目ちょうどは高性能の側」（同じ inferTier） | 残す側に小数点の無い書き方（26B）の1行を足した（大きさを読む関数に直接のテストが無いため） |
+| mcp/contradictionPrompt.test.ts | carryOver: 2 で、第4話にも主人公の設定が載る | 1 | 消した | 同じファイル「指定しなければ、既定の2話ぶんを引き継ぐ」（同じ値と、materialFor(2) との一致） | なし |
+| mcp/mcpTools.test.ts | typo > runner を省くと、転送層で断られる | 1 | 消した | 同じファイル proofread「runner を省くとエラーになる」（同じ NOVEL_RUN_INPUT。runner は機能に依らず必須の enum）、mcp/mcpBundledTools.test.ts「runner は省略できない」 | どこで見ているかの注を残した |
+| mcp/mcpTools.test.ts | chat > runner を省くと、転送層で断られる | 1 | 消した | 同上 | なし |
+| prompts/characterExtractionQuality.test.ts | 上限を足してもプロンプトの版は上げない | 1 | 消した | 同じファイル「v5.3の構造化出力契約を公開する」（同じ 5.10） | 理由の注を残す側へ移した |
+| prompts/announcePrompt.test.ts | 版は文書と揃えて 1.1 | 1 | 消した | prompts/publicityReaderPrompt.test.ts「版」（同じ 1.1）、cross/promptDocShape.test.ts の P-30 | 使わなくなった import を外した |
+| prompts/titleFit.test.ts | 版を持つ（変えたら上げる） | 1 | 消した | cross/promptDocShape.test.ts の P-41（定数の実在と文書の版の一致） | 同上 |
+| prompts/chapterProposePrompt.test.ts | 版が定まっている | 1 | 消した | cross/promptDocShape.test.ts の P-31 | 同上 |

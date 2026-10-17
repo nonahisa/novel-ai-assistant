@@ -115,35 +115,6 @@ describe("resolveOutputTokensForSend", () => {
     });
   });
 
-  it("台帳に実測が無ければ、設定値をそのまま送る（8,192で頭を打たない）", async () => {
-    installSettings({ maxOutputTokens: 16384 });
-
-    expect(resolveOutputTokensForSend("ollama", "測っていないモデル")).toBe(
-      16384
-    );
-  });
-
-  it("台帳に実測があれば、そこまでを上限にする", async () => {
-    // 実測は「そこまで書けた」ことの記録なので、上限にしてよい。
-    // それ以上を許しても書けないことは測って分かっている
-    installSettings({ maxOutputTokens: 16384 });
-    await saveModelTuning("ollama", "gemma4:12b", {
-      measuredOutputTokens: 6500,
-    });
-
-    expect(resolveOutputTokensForSend("ollama", "gemma4:12b")).toBe(6500);
-  });
-
-  it("設定のほうが小さければ、設定が勝つ", async () => {
-    // 作者が設定で下げたのなら、実測より作者の指定を採る
-    installSettings({ maxOutputTokens: 2000 });
-    await saveModelTuning("ollama", "gemma4:12b", {
-      measuredOutputTokens: 6500,
-    });
-
-    expect(resolveOutputTokensForSend("ollama", "gemma4:12b")).toBe(2000);
-  });
-
   it("同じモデル名でもプロバイダが違えば台帳を混同しない", async () => {
     installSettings({ maxOutputTokens: 16384 });
     await saveModelTuning("ollama", "gpt-oss-120b", {

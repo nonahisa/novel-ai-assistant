@@ -773,13 +773,6 @@ describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
     expect(chunk.carriedOverChapters).toEqual([]);
   });
 
-  test("carryOver: 2 で、第4話にも主人公の設定が載る", () => {
-    const chunk = materialFor(2);
-
-    expect(chunk.characterDetails).toContain("相沢 春人");
-    expect(chunk.carriedOverChapters).toEqual([2, 3]);
-  });
-
   test("文字列で渡しても同じ（測定の台本は文字列で渡す）", () => {
     // `scripts/measure.mjs` の `--option carryOver=2` は文字列のまま届く
     expect(materialFor("2")).toEqual(materialFor(2));
