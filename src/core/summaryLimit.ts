@@ -76,7 +76,11 @@ export function clampAtSentenceEnd(
     else if (depth === 0 && SENTENCE_ENDS.has(char)) end = index;
   });
   if (end > 0) return characters.slice(0, end + 1).join("");
-  return clampSummary(text, maxChars);
+  // 句点が無ければ読点まで戻し、**その読点を句点に替えて文を閉じる**。
+  // 「…など、」で終わると、資料の上で続きが消えたように読める（実測：e4b のガイ）
+  const clamped = clampSummary(text, maxChars);
+  if (clamped && /[、，,]$/u.test(clamped)) return `${clamped.slice(0, -1)}。`;
+  return clamped;
 }
 
 const OPENING = new Set([..."「『（(【"]);

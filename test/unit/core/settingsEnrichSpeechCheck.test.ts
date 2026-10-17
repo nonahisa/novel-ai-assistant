@@ -58,13 +58,25 @@ describe("口調の案の長さ", () => {
     expect(clampEnrichField(speechField(), value)).toBe("一人称は使わない。");
   });
 
-  test("句点が1つも無ければ、今までどおり読点まで戻す（何も残らないよりよい）", () => {
+  test("句点が1つも無ければ読点まで戻し、読点を句点に替えて文を閉じる", () => {
     const value =
       "主を呼ぶときは「主よ」と呼びかけ、『〜である』『〜であろう』と古風に言い切り、" +
       "感情をほとんど表に出さず淡々と話し、ほかの者には短く命じる";
     const clamped = clampEnrichField(speechField(), value);
     expect([...clamped].length).toBeLessThanOrEqual(SPEECH_STYLE_MAX_CHARS);
-    expect(clamped.endsWith("、")).toBe(true);
+    expect(clamped).toBe(
+      "主を呼ぶときは「主よ」と呼びかけ、『〜である』『〜であろう』と古風に言い切り、感情をほとんど表に出さず淡々と話し。"
+    );
+  });
+
+  test("括弧の中の句点では切らない（e4b のガイの形：台詞の引用が続く案）", () => {
+    // 実測（2026-10-17、e4b）：台詞を引いた案が上限を超え、「…など、」で終わった
+    const value =
+      "『主よ。何用か』『あいつらは塩振ってブレスで焼いたらうまいのである！ いくらでも食えるのである！』など、" +
+      "語尾に「である」を付けて尊大に言い切る";
+    const clamped = clampEnrichField(speechField(), value);
+    expect(clamped.endsWith("、")).toBe(false);
+    expect(clamped.endsWith("など。")).toBe(true);
   });
 
   test("上限以内の案はそのまま", () => {
