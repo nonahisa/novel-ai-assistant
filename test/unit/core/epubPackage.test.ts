@@ -1687,6 +1687,38 @@ describe("口絵・扉絵の面（設計書6.65.15）", () => {
     expect(figure).toContain("page-break-inside: avoid;");
   });
 
+  /*
+    0.108.4 の再現テスト。EPUB+ リーダー（中身は SumatraPDF＝MuPDF の
+    組版。2026-10-17 に作者の手元で確かめた）では、0.108.1 の本で
+    - 絵が面の高さいっぱいに出た（MuPDF は max-* も vh・vw も読まない）
+    - 文が絵の脇へ回り込み、2字だけ出て次の面へ割れ、割れた行が
+      次の面にもう一度描かれた（MuPDF は figcaption を段落と見なさない）
+    MuPDF が読むのは「height の %」と「display: block」なので、それを足す。
+  */
+  test("MuPDF 系のリーダーでも、文を添えた口絵が1面に収まる書き方になっている", () => {
+    for (const writingMode of ["vertical", "horizontal"] as const) {
+      const css = open(buildEpub(withConfig({ writingMode })))[
+        "OEBPS/style.css"
+      ];
+
+      // figure・figcaption を段落として扱わせる（知らないリーダーでは
+      // 文が絵の脇へ回り込む）
+      expect(css).toMatch(/figure, figcaption \{[^}]*display: block;/);
+
+      const at = css.indexOf(".plate-captioned img {");
+      const rule = css.slice(at, css.indexOf("}", at));
+      // 面に頼る max-* を読まないリーダーにも効く、高さそのものの指定
+      expect(rule).toContain("height: 80%;");
+      expect(rule).toContain("width: auto;");
+      // 縦と横の上限が別々に効いても絵が歪まないようにする
+      expect(rule).toContain("object-fit: contain;");
+      // height に vh を書かない：MuPDF は vh を知らず、絵が豆粒になる
+      expect(rule).not.toMatch(/(^|[\s;{])height:\s*[^;]*vh/);
+      // min() も書かない：MuPDF は読めずに既定の大きさへ戻す
+      expect(rule).not.toContain("min(");
+    }
+  });
+
   test("解説文が無ければ figcaption そのものを出さない", () => {
     const files = open(
       buildEpub(

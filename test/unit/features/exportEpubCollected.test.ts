@@ -307,7 +307,10 @@ const GOLDEN: Record<string, string> = {
     // 0.108.1：文を添えた口絵・扉絵の絵を縮める `.plate-captioned` を
     //   足した（作者の裁定、2026-10-17）。**CSSだけが変わり、面のXHTMLは
     //   1バイトも変わっていない**——文を添えた口絵の無い本の見た目は同じ
-    "39eef77d8f345d98eb97696d94443b194598d95135e7d5533e3edb9e7f509218",
+    // 0.108.4：MuPDF 系のリーダー（EPUB+）向けに figure・figcaption を
+    //   段落と明記し、文を添えた口絵の絵へ height: 80% を足した。ここでも
+    //   **CSSだけが変わった**（標準どおりのリーダーでは figure はもとから段落）
+    "080ad8b25d6a3b1a8d0f4bba3c554458e325359adf0da92f5f5a1a063c8dce5c",
   "OEBPS/cover.xhtml":
     "57c976846884228c05723713693b3112cba591ce48021a884c7ad902cbdf15e5",
   "OEBPS/titlepage.xhtml":

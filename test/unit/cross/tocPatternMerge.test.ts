@@ -287,34 +287,38 @@ describe("書き出し", () => {
  * 0.108.1：文を添えた口絵・扉絵の絵を縮める `.plate-captioned` を CSS に
  * 足した（作者の裁定、2026-10-17）ので `css` を採り直した。目次は同じ値の
  * まま。足した規則は文を添えた口絵の面にしか当たらない。
+ *
+ * 0.108.4：MuPDF 系のリーダー（EPUB+）でも文を添えた口絵が1面に収まる
+ * よう、`figure, figcaption { display: block; }` と `.plate-captioned img`
+ * の `height: 80%` などを足したので `css` を採り直した。目次は同じ値。
  */
 describe("既にある本は変わらない（回帰の固定）", () => {
   const BEFORE: Record<string, { nav: string; css: string }> = {
     "縦組みの本・目次だけ横組み": {
       nav: "4843ec691ada64f86573c4f54d0fd926daf7a04122839a9dcce0f257e64e299b",
-      css: "39eef77d8f345d98eb97696d94443b194598d95135e7d5533e3edb9e7f509218",
+      css: "080ad8b25d6a3b1a8d0f4bba3c554458e325359adf0da92f5f5a1a063c8dce5c",
     },
     "縦組みの本・本文と同じ流れ": {
       nav: "0cd8292838f91c840262d49771872bc363e15097aa2ca6936525c25304e5c918",
-      css: "39eef77d8f345d98eb97696d94443b194598d95135e7d5533e3edb9e7f509218",
+      css: "080ad8b25d6a3b1a8d0f4bba3c554458e325359adf0da92f5f5a1a063c8dce5c",
     },
     "縦組みの本・章ごと": {
       nav: "0cd8292838f91c840262d49771872bc363e15097aa2ca6936525c25304e5c918",
-      css: "39eef77d8f345d98eb97696d94443b194598d95135e7d5533e3edb9e7f509218",
+      css: "080ad8b25d6a3b1a8d0f4bba3c554458e325359adf0da92f5f5a1a063c8dce5c",
     },
     // **横組みの本で「本文と同じ流れ」**が、いちばん壊しやすい組み合わせ
     // である。読み替えで向きを入れてしまうと、目次だけ横組みの印が付く
     "横組みの本・本文と同じ流れ": {
       nav: "0a38fcf0c5d6ad5f6256df1492425fea06a1cb411aa7e05a71d8bf9f1431c853",
-      css: "3d1b453c2efa51c65b4238c16cf9f2dfb3657515793575865cdbb02d7eb92808",
+      css: "93eca565cf283faf35493ab58e063267966ef51a844baed2cc09d9835feddc63",
     },
     "横組みの本・目次だけ横組み": {
       nav: "340b1327e6be8cbcbd35debea0b4396d42845365ba3e9cfa34e6f5e72f789dbd",
-      css: "3d1b453c2efa51c65b4238c16cf9f2dfb3657515793575865cdbb02d7eb92808",
+      css: "93eca565cf283faf35493ab58e063267966ef51a844baed2cc09d9835feddc63",
     },
     "何も書いていない設計図": {
       nav: "0cd8292838f91c840262d49771872bc363e15097aa2ca6936525c25304e5c918",
-      css: "39eef77d8f345d98eb97696d94443b194598d95135e7d5533e3edb9e7f509218",
+      css: "080ad8b25d6a3b1a8d0f4bba3c554458e325359adf0da92f5f5a1a063c8dce5c",
     },
   };
 
