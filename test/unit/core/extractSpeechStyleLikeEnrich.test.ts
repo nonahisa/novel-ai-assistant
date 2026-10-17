@@ -82,6 +82,30 @@ describe("抽出の検算：台詞に無い一人称を書いた口調は、口�
     expect(result.droppedSpeechStyles).toEqual([]);
   });
 
+  test("一人称に添えた括弧書き（「私（または不明）」）は一人称に含めない", () => {
+    // 実測（26b、ハイエルフ未亡人の写し第12話の側近）。「私」は台詞にあるのに、
+    // 括弧書きごと「私（または不明）」を一人称と読んで口調を落としていた
+    const body = "側近は頭を下げた。\n「私がお供いたします、殿下」";
+    const value = "一人称は「私（または不明）」。非常に丁寧な敬語を用いる。";
+    const quote = "「私がお供いたします、殿下」";
+    const result = validateCharacterExtractResult(
+      {
+        characters: [
+          {
+            name: "側近",
+            entityType: "person",
+            evidence: "側近は頭を下げた。",
+            speechStyle: value,
+            speechEvidence: quote,
+          },
+        ],
+      },
+      chunkOf(body)
+    );
+    expect(result.accepted[0].data.speechStyle).toBe(value);
+    expect(result.droppedSpeechStyles).toEqual([]);
+  });
+
   test("ほかの人物の台詞にある一人称は、これまでどおり一人称の部分だけ外す", () => {
     // 台詞の話し手までは確かめない（`firstPersonsUnspokenInDialogue` の限界）。
     // 話のどこかの台詞にあれば、根拠の台詞との照合（first_person_unquoted）に任せる

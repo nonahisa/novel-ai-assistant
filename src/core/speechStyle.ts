@@ -274,7 +274,10 @@ const CLAIM_BEFORE_LABEL = new RegExp(
 
 function termsIn(quoted: string): string[] {
   return [...quoted.matchAll(/[「『]([^」』「『]{1,8})[」』]/gu)]
-    .map((match) => match[1].trim())
+    // **一人称に添えた括弧書きは外す**（2026-10-18。抽出の口調の測定）。26b が
+    // 「一人称は「私（または不明）」」と書き、括弧書きごとを一人称と読んで、
+    // 台詞にある「私」の口調を落としていた
+    .map((match) => match[1].replace(/[（(][^）)]*[）)]?/gu, "").trim())
     .filter((term) => term.length > 0);
 }
 
