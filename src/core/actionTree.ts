@@ -2744,6 +2744,21 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "AIが返したエラーの詳細の記録\n\n" +
           "・抽出が失敗して理由が分からないときに開く",
       },
+      // ログ表示の隣に置く（設計書8.5）。ログを見て困ったら、そのまま報告へ進める
+      {
+        kind: "action",
+        command: "novelai.exportIssueReport",
+        label: "障害報告用の記録",
+        icon: "report",
+        requiresWork: false,
+        detail:
+          "不具合を伝えるための記録を、テキスト1枚に書き出す\n\n" +
+          "・前半の要約は Discord の /不具合を報告 の欄にそのまま貼れる\n\n" +
+          "・後半はログの該当行。ファイルごと添付する\n\n" +
+          "・原稿の本文・AIの応答・人物名・作品名・鍵は伏せる\n\n" +
+          "・書き出す前に、入れるものと伏せるものを確かめられる\n\n" +
+          "外へは送らない。貼るのは作者。",
+      },
       {
         kind: "action",
         command: "novelai.openChatLog",

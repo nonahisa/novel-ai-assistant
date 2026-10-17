@@ -52,6 +52,9 @@ const MARKDOWN_ALLOWED = new Set([
   // 取り込みの記録をMarkdownの文書として書き出す（設計書6.99）。
   // **通知に入りきらない話を回す先**なので、見出しと箇条書きで組む
   "src/core/importRecordMarkdown.ts",
+  // 障害報告用の記録をMarkdownの文書として書き出す（設計書8.5）。
+  // 見出しは Discord の入力窓の欄と同じ文字列で、伏せ字の `***` も含む
+  "src/core/issueReport.ts",
   // .gitignore に書き込む注釈。Markdownではないが「#」で始まる
   "src/core/workRegistry.ts",
   // MarkdownString（ツールチップ）として渡す
