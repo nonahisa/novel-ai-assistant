@@ -1,6 +1,9 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { openEpubEditorPanel } from "../../../src/features/epubEditorPanel";
+import {
+  bakeCoverForRequest,
+  openEpubEditorPanel,
+} from "../../../src/features/epubEditorPanel";
 import { emptyCharacter } from "../../../src/models/character";
 import {
   defaultBackCoverLayout,
@@ -623,6 +626,72 @@ describe("焼いたあとに合成の欄を変えたとき（精査 R19）", () 
     expect(page("表紙").compose).toBeUndefined();
     expect(page("表紙").note).toContain("焼いた画像を表示中");
     expect(latest().compose.front.baked?.note).not.toContain("まだ焼いていません");
+  });
+
+  /**
+   * 外部AIの依頼（run.request の coverBake）で、欄と違う体裁で焼いたとき
+   * （作者の裁定、2026-10-17「焼いた体裁を欄にも反映する」）。
+   *
+   * 直す前は、焼いた鍵だけを体裁つきで覚え、欄は「大」のままだったので、
+   * 焼いた直後に「まだ焼いていません」が出ていた（実機、2026-10-17）。
+   */
+  test("外部AIの依頼で欄と違う体裁で焼くと、欄にも当たり、焼いた画像の面になる（保存はしない）", async () => {
+    writeBook({ title: "氷の街", coverImagePath: "素材/表紙.png" });
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.front}`, [0x89, 0x50]);
+    const bookPath = diskPath(path.join(work.folderPath, "設定", "書籍", "book.json"));
+    const bookBefore = disk.get(bookPath);
+
+    await open();
+    const done = bakeCoverForRequest(
+      { subscriptions: [] } as unknown as Parameters<typeof bakeCoverForRequest>[0],
+      work,
+      { side: "front", vertical: true, size: "medium" }
+    );
+    let request: { requestId?: string } | undefined;
+    for (let tries = 0; tries < 50 && !request; tries++) {
+      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      request = posted.find((message) => message.type === "bakeRequest") as
+        | { requestId?: string }
+        | undefined;
+    }
+    expect(request?.requestId).toBeTruthy();
+
+    // 画面の欄は「大」のまま（既定）。焼いたのは依頼の体裁（中）
+    await send({
+      type: "bake",
+      side: "front",
+      dataUrl: PNG,
+      requestId: request?.requestId,
+      config: { coverLayout: defaultCoverLayout() },
+    });
+    const result = await done;
+    expect(result.ok).toBe(true);
+
+    // 焼いた直後は焼いた画像の面（「まだ焼いていません」を出さない）
+    const cover = page("表紙") as PreviewPage & { unbaked?: boolean };
+    expect(cover.compose).toBeUndefined();
+    expect(cover.unbaked).toBeFalsy();
+    expect(cover.note).toContain("焼いた画像を表示中");
+    expect(latest().compose.front.baked?.note).not.toContain("まだ焼いていません");
+
+    // 画面の欄へ、焼いた体裁を送り直す（表紙の題名だけ）
+    const filled = posted.find((message) => message.type === "coverLayout") as
+      | { side?: string; layout?: { title?: { size?: string; vertical?: boolean; visible?: boolean } } }
+      | undefined;
+    expect(filled?.side).toBe("front");
+    expect(filled?.layout?.title).toMatchObject({ size: "medium", vertical: true, visible: true });
+
+    // 未保存の印が立ち、book.json は書かない（保存は作者が押したときだけ）
+    expect((latest() as PreviewPayload & { dirty?: boolean }).dirty).toBe(true);
+    expect(disk.get(bookPath)).toBe(bookBefore);
+
+    // 作者が［保存］を押せば、焼いた体裁が設計図に残る
+    await send({ type: "save", config: {} });
+    const saved = JSON.parse(
+      new TextDecoder().decode(disk.get(bookPath) as Uint8Array)
+    ) as { coverLayout?: { title?: { size?: string } } };
+    expect(saved.coverLayout?.title?.size).toBe("medium");
   });
 
   test("表紙に関わらない欄を変えても、焼いた画像のまま", async () => {

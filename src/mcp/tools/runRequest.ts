@@ -112,7 +112,7 @@ export const RUN_REQUEST_INPUT = {
     })
     .optional()
     .describe(
-      `${RUN_COVER_FEATURE} のときだけ（必須）。この1回だけ題名に当てる体裁で、book.json と画面の欄は変わらない。` +
+      `${RUN_COVER_FEATURE} のときだけ（必須）。題名に当てる体裁。焼けたら EPUBエディターの欄にも同じ体裁が入る（未保存のまま。book.json は作者が保存を押すまで変わらない）。` +
         "焼いた画像は［表紙を焼く］と同じ 設定/書籍/表紙_合成済み.png（裏表紙は 裏表紙_合成済み.png）に置き換わる"
     ),
 };

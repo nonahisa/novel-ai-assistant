@@ -716,6 +716,18 @@ describe("画面から拡張機能へ返すもの", () => {
     expect(script).toContain("toDataURL('image/png')");
   });
 
+  it("外部AIの依頼で焼いた体裁は、その面の合成の欄だけへ入れ、送り返さない", () => {
+    // 作者の裁定（2026-10-17「焼いた体裁を欄にも反映する」）。欄全体（fillForm）を
+    // 入れ直すと、設計図に載らない打ちかけの挿絵が消える。設計図は拡張機能側で直っている
+    const start = script.indexOf("message.type === 'coverLayout'");
+    expect(start).toBeGreaterThan(0);
+    const end = script.indexOf("message.type === 'imagePicked'", start);
+    const handler = script.slice(start, end);
+    expect(handler).toContain("fillLayout(message.side, message.layout)");
+    expect(handler).not.toContain("fillForm(");
+    expect(handler).not.toContain("post(");
+  });
+
   it("画像が読めなかったときは、拡張機能へ中身を頼み直す", () => {
     // `asWebviewUri` の画像をcanvasへ描くと、環境によっては
     // 「汚れた canvas」になって `toDataURL` が落ちる。落ちたら

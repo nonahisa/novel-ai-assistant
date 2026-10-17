@@ -246,9 +246,10 @@ export const RUN_COVER_SIDES: readonly RunCoverSide[] = ["front", "back"];
 export const RUN_COVER_SIZES: readonly RunCoverSize[] = ["large", "medium", "small"];
 
 /**
- * 焼くときの体裁。**題名だけに、この1回だけ当てる**——欄（book.json・画面の欄）には
- * 書かない。欄へ入れると設計図が「未保存」になり、閉じたときに下書きの控えが残って、
- * 次に開いた作者に「戻しますか」が出る。
+ * 焼くときの体裁。**題名だけに当てる。** 焼けたら同じ体裁を画面の欄にも当てる（作者の裁定、
+ * 2026-10-17「焼いた体裁を欄にも反映する」。欄と違うままだと、焼いた直後に「まだ焼いていません」
+ * が出る）。**book.json には書かない**——画面は「未保存の変更あり」になり、設計図に残るのは作者が
+ * ［保存］を押したときだけ。保存せずに閉じれば下書きの控えが残り、次に開いたとき「戻しますか」が出る。
  *
  * 題名は必ず出す（`visible`）。置き場所・色・ほかの文字（作者名など）は設計図のまま。
  */
@@ -1014,7 +1015,8 @@ export function runStatusOf(
           message:
             "作者の VS Code の EPUBエディターで焼きました（［表紙を焼く］と同じ関数・画面に出ている canvas）。" +
             "焼いた画像の場所・体裁・題名を描いた範囲（titleBlock）は result.findings にあります。" +
-            "字が立っているかは cover.ink で測れます（region に titleBlock を渡す）。原稿と book.json は変わっていません。",
+            "字が立っているかは cover.ink で測れます（region に titleBlock を渡す）。原稿と book.json は変わっていません。" +
+            "EPUBエディターの欄にも同じ体裁を当てました（未保存のまま。book.json へ書くのは作者が［保存］を押したときだけです）。",
         };
       }
       if (ticket.feature === "settings") {
@@ -1253,14 +1255,15 @@ export function describeCoverConfirm(input: RunCoverConfirmInput): {
     `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
     `機能：${RUN_COVER_LABEL}`,
     `面と体裁：${side}・${describeRunCoverSpec(input.cover)}` +
-      "（この1回だけ当てます。置き場所・色・ほかの文字は本の設計図のまま）",
+      "（題名だけに当てます。置き場所・色・ほかの文字は本の設計図のまま）",
     "AIは呼びません。本文はどこへも送りません。料金はかかりません。",
     "EPUBエディターの画面が開きます（開いていればそれを使います。焦点は移しません）。",
     input.bakedExists
       ? `いまの焼いた画像（${input.bakedRelative}）は、この体裁で焼いた画像に置き換わります。` +
         "設定/ は Git 管理下なので、前の画像は復元できます。"
       : `焼いた画像を ${input.bakedRelative} へ保存します（次の書き出しから${side}に入ります）。`,
-    "原稿と本の設計図（book.json）・画面の欄は変わりません。",
+    "焼いたあと、EPUBエディターの欄にも同じ体裁が入ります（未保存のまま。本の設計図（book.json）に残るのは［保存］を押したときだけです）。",
+    "原稿と本の設計図（book.json）は変わりません。",
     "",
     `期限：${formatClock(deadline)} を過ぎて押しても焼きません。`,
     "覚えのない依頼なら「焼く」を押さずに閉じてください。",

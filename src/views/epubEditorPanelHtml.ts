@@ -2560,7 +2560,8 @@ window.addEventListener('message', function (event) {
       直す前の不具合も起きず、何も確かめたことにならない。拡張機能は先に合成の面を
       選ばせてから頼んでくる。それでも canvas が無ければ、焼かずにそう返す。
 
-      体裁は題名だけに、この1回だけ当てる（欄は変えない）。
+      体裁は題名だけに当てて焼く。焼けたら拡張機能が同じ体裁を欄へ書き戻してくる
+      （coverLayout。作者の裁定、2026-10-17）ので、ここでは欄を触らない。
     */
     const side = message.side;
     if (SIDES.indexOf(side) < 0) return;
@@ -2580,6 +2581,19 @@ window.addEventListener('message', function (event) {
       size: message.size
     });
     bake(side, { requestId: message.requestId, layout: layout });
+    return;
+  }
+  if (message.type === 'coverLayout') {
+    /*
+      外部AIの依頼で焼いた体裁を、その面の合成の欄へ入れる（作者の裁定、2026-10-17
+      「焼いた体裁を欄にも反映する」）。欄・見本・焼いた画像を揃えるため。
+
+      **設計図は拡張機能側で既に直っている**ので送り返さない（imagePicked と同じ）。
+      入れるのはその面の合成の欄だけで、ほかの欄（打ちかけの挿絵など）には触らない。
+      保存はしない——未保存の印は、続けて届く面の出し直しが立てる。
+    */
+    if (SIDES.indexOf(message.side) < 0 || !message.layout) return;
+    fillLayout(message.side, message.layout);
     return;
   }
   if (message.type === 'imagePicked') {
