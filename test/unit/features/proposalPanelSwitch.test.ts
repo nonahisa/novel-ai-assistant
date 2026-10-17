@@ -36,6 +36,8 @@ const posted: Array<{
 }> = [];
 /** 通知に出た文言。**画面を奪わない代わりに、ここで届いたことを伝える** */
 const notified: string[] = [];
+/** 通知に並んだボタン（`notified` と同じ順） */
+const notifiedButtons: string[][] = [];
 /** その通知に作者が何と答えるか。既定は「答えない」（×で閉じたのと同じ） */
 let notificationAnswer: string | undefined;
 /** 警告に出た文言。再チェックがAI未設定を伝えているかを見る */
@@ -50,8 +52,9 @@ vi.mock("vscode", () => {
         warned.push(message);
         return Promise.resolve(undefined);
       }),
-      showInformationMessage: vi.fn((message: string) => {
+      showInformationMessage: vi.fn((message: string, ...buttons: string[]) => {
         notified.push(message);
+        notifiedButtons.push(buttons);
         return Promise.resolve(notificationAnswer);
       }),
       showErrorMessage: vi.fn(),
@@ -162,6 +165,7 @@ function switchWork(panel: ProposalPanel, workId: string): void {
 beforeEach(() => {
   posted.length = 0;
   notified.length = 0;
+  notifiedButtons.length = 0;
   warned.length = 0;
   notificationAnswer = undefined;
 });
@@ -540,6 +544,78 @@ describe("作品ごとに分けて持つ", () => {
 
     expect(latest().workTitle).toBe("別の作品");
     expect(latest().items).toHaveLength(1);
+  });
+
+  /**
+   * 別の作品の結果は、画面を奪わずに知らせで伝える（作者の裁定 2026-10-17
+   * 「奪わないまま、知らせに切り替えのボタン」）。
+   */
+  test("知らせは「作品名・機能名の検知が終わりました（N件）」と［表示する］だけ", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(other, [otherTypo]);
+
+    expect(notified).toEqual(["「別の作品」の誤字脱字の検知が終わりました（1件）"]);
+    expect(notifiedButtons).toEqual([["表示する"]]);
+  });
+
+  test("いま見ている作品の結果なら、知らせは出さない", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(work, [{ ...typo, line: 20 }], "推敲");
+
+    expect(notified).toEqual([]);
+  });
+
+  test("同じ作品の結果が続けて届いても、知らせは1つにまとめる", () => {
+    // 答えていない知らせがあるうちは重ねない。続けて走らせると、右下が
+    // 同じ作品の知らせで埋まり、ほかの知らせが読めなくなる
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(other, [otherTypo]);
+    panel.showResults(other, [{ ...otherTypo, line: 20 }], "推敲");
+    panel.showResults(other, [{ ...otherTypo, line: 30 }]);
+
+    expect(notified).toHaveLength(1);
+  });
+
+  test("まとめた知らせで［表示する］を押すと、最後に届いた分類が出る", async () => {
+    notificationAnswer = "表示する";
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(other, [otherTypo]);
+    panel.showResults(other, [{ ...otherTypo, line: 20 }], "推敲");
+
+    expect(latest().workTitle).toBe("いじめられっ子");
+    await settle();
+
+    expect(latest().workTitle).toBe("別の作品");
+    expect(latest().category).toBe("推敲");
+  });
+
+  test("作品が違えば、知らせは作品ごとに出す", () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(other, [otherTypo]);
+    panel.showResults(
+      { ...other, id: "w3", title: "三つめ", folderPath: "C:/小説/三つめ" },
+      [{ ...otherTypo, filePath: "C:/小説/三つめ/本文/001.txt" }]
+    );
+
+    expect(notified).toHaveLength(2);
+    expect(notified[1]).toContain("三つめ");
+  });
+
+  test("知らせに答えたあとに届いた結果は、また知らせる", async () => {
+    const panel = panelWithView();
+    panel.showResults(work, [typo]);
+    panel.showResults(other, [otherTypo]);
+    // ×で閉じた（答えは undefined）
+    await settle();
+    panel.showResults(other, [{ ...otherTypo, line: 20 }], "推敲");
+
+    expect(notified).toHaveLength(2);
+    expect(notified[1]).toContain("推敲");
   });
 
   test("切り替え口は、作品が2つ以上のときだけ出す", () => {

@@ -8,11 +8,11 @@
  * - 作品A の指摘は、置き場へ見本を置く（AI は呼ばない）。作品B は偽の Ollama が1件の指摘を返す
  * - 作品B の原稿は、作品A と同じ書庫の中。Ctrl+P で開いて（原稿エディター）Ctrl+Alt+T で走らせる
  *
- * **このテストは現状を記録する。** 製品の設計（`proposalPanel.ts` の `replaceContents`、2026-08-27 の作者の指摘）は
- * 「別の作品の結果が届いても、見ている画面は奪わない」で、移るかどうかは「作品」欄で作者が選ぶ。
- * 欄には作品Bの件数が出る。B-3 の「案」（終わったらその作品を選ぶ）は、この設計とぶつかる。
- * 通る＝いまは「欄に作品Bの件数が出て、表示は作品Aのまま」。製品が案どおりになれば、このテストの
- * 「表示は作品Aのまま」の確かめが落ちて知らせる。
+ * **作者の裁定（2026-10-17）「奪わないまま、知らせに切り替えのボタン」を確かめる。**
+ * 届いただけでは表示は作品Aのまま（`proposalPanel.ts` の `replaceContents`。2026-08-27 の作者の指摘
+ * 「届いた結果で画面を奪わない」）。右下に「「作品B」の誤字脱字の検知が終わりました（1件）」と
+ * ［表示する］の知らせが出て、押したときだけ提案パネルが作品Bへ切り替わる。
+ * 検知の完了の知らせ（「誤字脱字検知が完了しました」）も同時に出るので、作品名で見分ける。
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -29,7 +29,7 @@ import {
 } from "./support/sampleFinding";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { activateTab, clearNotifications, quickOpen, quickPickRows, quickPickTitle } from "./support/workbenchDom";
+import { activateTab, clearNotifications, notificationTexts, quickOpen, quickPickRows, quickPickTitle } from "./support/workbenchDom";
 
 const EPISODE_A = "001_はじまり.txt";
 const TEXT_A = "　朝の駅は静かだった。\n　近づいてみると、男は以外にも若かった。\n";
@@ -69,7 +69,7 @@ async function actionLog(session: E2ESession): Promise<string> {
   return (await readFile(path.join(session.workFolder, "..", OTHER_TITLE, ".aiwriter", "logs", "actions.log"), "utf8").catch(() => "")).replace(/\r\n/g, "\n");
 }
 
-test("作品Aの提案パネルを見ている途中で作品Bの誤字脱字検知が終わると、「作品」欄に作品Bの件数が出る（表示は作品Aのまま＝現状の設計）", async () => {
+test("作品Aの提案パネルを見ている途中で作品Bの誤字脱字検知が終わると、表示は作品Aのまま知らせが出て、［表示する］で作品Bへ切り替わる", async () => {
   const fake = await startFakeOllama(() => ANSWER_B);
   try {
     const registerOther: Record<string, unknown> = { key: REGISTER_OTHER_KEY, command: "novelai.addWork", args: { folderPath: "", title: OTHER_TITLE } };
@@ -163,13 +163,36 @@ test("作品Aの提案パネルを見ている途中で作品Bの誤字脱字検
         ).catch(async (error: unknown) => {
           throw new Error(`${String(error)}（欄：${JSON.stringify(after)}）`);
         });
-        // 現状：表示は作品Aのまま（B-3 の「切り替わらない」が起きている）
+        // 届いただけでは画面を奪わない：表示は作品Aのまま
         await holdsFor(
           async () => ((await worksSelect(frame))?.selected ?? "").includes(E2E_WORK_TITLE),
           "表示が作品Aのまま",
           2_000
         ).catch(async (error: unknown) => {
-          throw new Error(`${String(error)}（欄：${JSON.stringify(await worksSelect(frame))}。作品Bへ切り替わったなら、B-3 の案どおりになったということ）`);
+          throw new Error(`${String(error)}（欄：${JSON.stringify(await worksSelect(frame))}。押す前に作品Bへ切り替わっている）`);
+        });
+
+        // 右下に作品Bの知らせと［表示する］が出る（完了の知らせとは作品名で見分ける）
+        const offer = page.locator(".notification-toast", { hasText: `「${OTHER_TITLE}」の誤字脱字の検知が終わりました（1件）` });
+        await waitUntil(
+          async () => (await offer.count()) > 0,
+          "「「作品B」の誤字脱字の検知が終わりました（1件）」の知らせが出る",
+          15_000
+        ).catch(async (error: unknown) => {
+          throw new Error(`${String(error)}（知らせ：${JSON.stringify(await notificationTexts(page))}）`);
+        });
+        await offer.first().locator("a.monaco-button, .monaco-button", { hasText: "表示する" }).first().click();
+
+        // 押したら、提案パネルが作品Bへ切り替わる
+        await waitUntil(
+          async () => {
+            const current = (await proposalPanelFrame(page)) ?? frame;
+            return ((await worksSelect(current))?.selected ?? "").includes(OTHER_TITLE);
+          },
+          "［表示する］で提案パネルの表示が作品Bへ切り替わる",
+          15_000
+        ).catch(async (error: unknown) => {
+          throw new Error(`${String(error)}（欄：${JSON.stringify(await worksSelect((await proposalPanelFrame(page)) ?? frame))}）`);
         });
         void activateTab;
         void OPEN_PROPOSALS_KEY;
