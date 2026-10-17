@@ -11,8 +11,7 @@ import { tcyRuns } from "./tateChuYoko";
 import {
   SCRIPT_GOTHIC_FONT_FAMILY,
   SCRIPT_LAYOUT_CSS,
-  SCRIPT_ROLE_WIDTH,
-  scriptRoleClass,
+  SCRIPT_NAMED_CLASS,
   splitSerifu,
 } from "./scriptLines";
 
@@ -477,10 +476,11 @@ function renderBody(
     if (afterBlank && paragraphs.length > 0) names.push("gap");
     const lineClass = kindLineClass(kind, line);
     if (lineClass) names.push(lineClass);
-    // 台本の台詞は、人物名を欄に入れて「「」の位置をそろえる（作者の裁定、2026-10-17。
-    // 公募の納品用・原稿エディターと同じ幅 `SCRIPT_ROLE_WIDTH`）。漫画の原作は変えない
+    // 台本の台詞は、人物名を決まった幅の欄に入れて「「」の高さをそろえる（作者の裁定、
+    // 2026-10-17。公募の納品用と同じ幅 `SCRIPT_ROLE_WIDTH`。長い名前は欄の中で折り返す。
+    // 組み方は `SCRIPT_LAYOUT_CSS` の `.script-named`）。漫画の原作は変えない
     const serifu = kind === "script" ? splitSerifu(line) : undefined;
-    if (serifu) names.push(scriptRoleClass(Math.max(SCRIPT_ROLE_WIDTH, roleCells(serifu.role, notation, vertical))));
+    if (serifu) names.push(SCRIPT_NAMED_CLASS);
     const attr = names.length > 0 ? ` class="${names.join(" ")}"` : "";
     const inner = serifu
       ? `<span class="script-role">${renderInline(serifu.role, notation, vertical)}</span>${renderInline(serifu.speech, notation, vertical)}`
@@ -489,22 +489,6 @@ function renderBody(
     afterBlank = false;
   }
   return paragraphs;
-}
-
-/**
- * 人物名が紙の上で取る字数。ルビは親文字だけを数え、縦書きの縦中横は1字に数える
- * （読みや半角の数字の並びで、ぶら下げの幅が広がりすぎないように）。
- * 字の形までは測らないので、半角の英字は1字として数える。
- */
-function roleCells(role: string, notation: NotationMode, vertical: boolean): number {
-  let cells = 0;
-  for (const token of tokenizeLine(role, notation)) {
-    const text = token.kind === "ruby" ? token.base : token.text;
-    for (const segment of segmentsForTcy(text, vertical)) {
-      cells += segment.tcy ? 1 : [...segment.text].length;
-    }
-  }
-  return cells;
 }
 
 /**
