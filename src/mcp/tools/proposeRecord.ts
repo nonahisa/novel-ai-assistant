@@ -436,8 +436,12 @@ function applyLocationRelations(
     skipped.push({
       field: `${current.name}の位置関係（${relation.target}）`,
       reason:
-        `引用の文では「${relation.target}」のほうが「${current.name}」の中にあります（within の向きが逆）。` +
-        `「${relation.target}」の記録に「${current.name}」の within として置いてください`,
+        relation.kind === "direction"
+          ? // 方角も向きを確かめる（作者の裁定 2026-10-17。A18）
+            `引用の文では「${relation.target}」のほうが「${current.name}」の${relation.value}にあります（direction の向きが逆）。` +
+            `「${relation.target}」の記録に「${current.name}」の direction（${relation.value}）として置いてください`
+          : `引用の文では「${relation.target}」のほうが「${current.name}」の中にあります（within の向きが逆）。` +
+            `「${relation.target}」の記録に「${current.name}」の within として置いてください`,
     });
   }
   // 形が合わず `normalizeExtractedLocation` が読み捨てた件も、黙らせない
