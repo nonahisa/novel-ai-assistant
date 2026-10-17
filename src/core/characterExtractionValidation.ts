@@ -12,6 +12,7 @@ import { chaptersForCandidate, isGroundedInChunk } from "./groundedEvidence";
 import {
   clampSpeechStyle,
   firstPersonsMissingFromQuote,
+  firstPersonsUnspokenInDialogue,
   isSpeechStyleEcho,
   speechQuoteProblem,
   withoutFirstPersonClaims,
@@ -154,6 +155,11 @@ export interface DroppedSpeechStyleRecord {
    * 読みがあったとき）。無ければ口調ごと外した
    */
   kept?: string;
+  /**
+   * 口調に書いた一人称のうち、その話の台詞のどこにも無かったもの
+   * （`first_person_unspoken` のとき。報告で「何が無かったか」を見せるため）
+   */
+  unspoken?: string[];
 }
 
 /**
@@ -880,7 +886,9 @@ function dropSharedSpeechQuotes(
  * - 値が空・不在文（「記述なし」）→ 黙って外す（空欄と同じ。報告に出す値が無い）
  * - 指示の言葉・例の写し → 外して記録（`instruction_echo`）
  * - 根拠の台詞が無い・本文に無い・地の文 → 外して記録
- * - 通ったら長さの上限で切る（捨てずに切る。紹介と同じ）
+ * - 書いた一人称がこの話の台詞のどこにも無い → 外して記録（`first_person_unspoken`）
+ * - 書いた一人称が根拠の台詞に無い → 一人称の部分だけ外して記録
+ * - 通ったら長さの上限で、文の切れ目まで戻して切る（捨てずに切る）
  *
  * 根拠の引用（`speechEvidence`）は、通ったときだけ残す。マージが面の根拠として持つ。
  */
@@ -908,6 +916,27 @@ function checkSpeechStyle(
       speechStyle: value,
       speechEvidence: quote,
       reason,
+    });
+    clear();
+    return;
+  }
+
+  // **書いた一人称が、この話の台詞のどこにも無ければ、口調の欄ごと外す**
+  // （作者の裁定 2026-10-17「抽出の口調にも、再読込と同じ直し方を当てる」）。
+  // 26b が冒険者の口調に「一人称は俺、場面により余」と書いた（再読込で実測）。
+  // 「余」は皇子の語り（地の文）にしか無い。一人称の節だけを外すと
+  // 「場面により余。」の残りが読めない文になるので、案ごと外す。人物は残す。
+  //
+  // **下の根拠の台詞との照合より先に見る。** 「話の台詞のどこにも無い」は
+  // 「根拠の台詞に無い」より強い。後に置くと、節を外した残りが先に通ってしまう
+  const unspoken = firstPersonsUnspokenInDialogue(value, chunkText);
+  if (unspoken.length > 0) {
+    dropped.push({
+      characterName: character.name,
+      speechStyle: value,
+      speechEvidence: quote,
+      reason: "first_person_unspoken",
+      unspoken,
     });
     clear();
     return;

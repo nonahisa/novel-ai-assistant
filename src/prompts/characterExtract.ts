@@ -1,4 +1,4 @@
-import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
+import { SUMMARY_MAX_CHARS, schemaMaxLength } from "../core/summaryLimit";
 import {
   EXAMPLE_OTHER,
   EXAMPLE_PERSON,
@@ -68,7 +68,11 @@ import type { ForeignNarratorNote } from "../core/sceneNarrators";
 //      （作者の裁定 2026-10-10「控えめな直しから」。設計書6.5.12）。皇子の「余」の
 //      場面を主人公（「俺」）の場面と読み、「余」を主人公の一人称の揺れに入れていた。
 //      その場面が無いチャンクでは 5.9 と同じ文
-export const CHARACTER_EXTRACT_VERSION = "5.10";
+// 5.11: 口調（speechStyle）のスキーマの長さの上限を、字数の上限の1.5倍にした
+//      （作者の裁定 2026-10-17「再読込と同じ直し方」。`schemaMaxLength`）。上限
+//      ちょうどだと Ollama が語の途中で書くのを止める。頼みの本文は 5.10 と同じで、
+//      超えた分は検算が文の切れ目で切る（`clampSpeechStyle`）
+export const CHARACTER_EXTRACT_VERSION = "5.11";
 
 /**
  * 送るときの温度。本文から拾うだけだが、書きぶりの揺れを少しだけ許す。
@@ -489,10 +493,11 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           role: { type: ["string", "null"] },
           personality: { type: ["string", "null"] },
           appearance: { type: ["string", "null"] },
-          // 口調（2026-09-25）。上限はコードでも切る（`clampSpeechStyle`）
+          // 口調（2026-09-25）。**送る上限は字数の上限より広い**（5.11）——
+          // 字数の上限は検算が文の切れ目で守る（`clampSpeechStyle`）
           speechStyle: {
             type: ["string", "null"],
-            maxLength: SPEECH_STYLE_MAX_CHARS,
+            maxLength: schemaMaxLength(SPEECH_STYLE_MAX_CHARS),
           },
           // 口調の根拠。**台詞の中に実在するかを検算が確かめる**
           speechEvidence: { type: ["string", "null"] },

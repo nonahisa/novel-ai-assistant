@@ -2,7 +2,7 @@ import type { MentionExcerpt } from "../core/mentionExcerpts";
 import type { SettingsKind } from "../core/settingsSummary";
 import type { SettingsTarget } from "./settingsChat";
 import type { CustomFieldDefinition } from "../models/customField";
-import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
+import { SUMMARY_MAX_CHARS, schemaMaxLength } from "../core/summaryLimit";
 import {
   SPEECH_STYLE_ASPECTS,
   SPEECH_STYLE_MAX_CHARS,
@@ -261,9 +261,13 @@ export function enrichableFields(
  * 句読点まで戻すコードの切り詰め（`clampEnrichField`）が働く余地が無かった。
  * 頼みの「◯字以内」はそのまま残し、超えた分はコードが文の切れ目まで戻す
  * （CLAUDE.md 規則3：字数はコード側で検証する）
+ *
+ * 本体は `core/summaryLimit.ts` の `schemaMaxLength`。抽出（P-04a 5.11）も同じ
+ * 広げ方を使うので、両方のプロンプトが core から取る（こちらから抽出の
+ * プロンプトを import しているため、逆向きに取ると循環する）
  */
 export function enrichSchemaMaxLength(maxChars: number): number {
-  return Math.ceil(maxChars * 1.5);
+  return schemaMaxLength(maxChars);
 }
 
 /** その種別のJSONスキーマ。全項目を必須にして、面倒な項目を落とさせない */
