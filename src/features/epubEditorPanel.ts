@@ -1437,7 +1437,10 @@ function takeBakeWaiter(
 /** 画面の返事を待つ時間。大きな元イラストの読み込みと受け渡しを見込む */
 const COVER_REQUEST_TIMEOUT_MS = 60_000;
 
-/** 題名にだけ、この1回の体裁を当てた設計図（**写しを作るだけ。設計図は変えない**） */
+/**
+ * 題名にだけ、依頼の体裁を当てた設計図（**写しを作るだけ**。焼けたあとで `bakeCover` が
+ * これを画面の欄へ当てる。book.json は作者が［保存］を押すまで変わらない）
+ */
 function withCoverOverride(config: BookConfig, spec: RunCoverSpec): BookConfig {
   const key = spec.side === "back" ? "backCoverLayout" : "coverLayout";
   const layout = config[key];
@@ -1532,7 +1535,9 @@ export async function inspectCoverForRequest(
  *    その面を選ばせる
  * 3. 題名にだけこの1回の体裁を当てて焼かせ、返事を待つ（時間切れあり）
  *
- * 欄（画面と book.json）には何も書かない。保存は［表紙を焼く］と同じ \`bakeCover\` が行う。
+ * 焼けたら、その体裁を画面の欄にも当てる（作者の裁定、2026-10-17。欄・見本・焼いた画像を
+ * 揃えるため）。**book.json には書かない**——画面は「未保存の変更あり」になり、設計図に
+ * 残るのは作者が［保存］を押したときだけ。焼く保存は［表紙を焼く］と同じ \`bakeCover\` が行う。
  */
 export async function bakeCoverForRequest(
   context: vscode.ExtensionContext,
@@ -1713,12 +1718,24 @@ async function bakeCover(
   // **焼いた見た目を覚え直す**（精査 R19）。焼く知らせには画面のいまの欄が
   // 添えてあり、受け口で `state.current` へ取り込み済みなので、焼けたものは
   // いまの値である。覚え直さないと、焼いた直後も「まだ焼いていません」が残る。
-  // **外部AIの依頼で焼いたときは、その1回だけの体裁を当てた値を覚える**——欄とは
-  // 違う体裁で焼いているので、画面は「まだ焼いていません」（欄のとおりではない）と言うのが正しい
-  state.bakedLooks[side] = coverLookKey(
-    request ? withCoverOverride(state.current, request.waiter.spec) : state.current,
-    side
-  );
+  //
+  // **外部AIの依頼で焼いたときは、焼いた体裁を欄（`state.current`）にも当てる**
+  // （作者の裁定、2026-10-17「焼いた体裁を欄にも反映する」）。欄を元のままにすると、
+  // 焼いた直後なのに「まだ焼いていません」が出て、右上の「焼きました」と食い違った。
+  // **book.json へは書かない**——`saved` は変えないので「未保存の変更あり」になり、
+  // 設計図に残るのは作者が［保存］を押したときだけ（作者のデータを勝手に上書きしない）
+  if (request) {
+    state.current = withCoverOverride(state.current, request.waiter.spec);
+    // 画面の欄は画面が持っているので、その面の合成の欄だけ書き戻す。
+    // **欄全体（`book`）は送らない**——場所を書く前の挿絵のように、設計図に載らず
+    // 欄の中にだけある打ちかけを消してしまう。面を出し直す前に送る（見本は欄から描く）
+    state.panel.webview.postMessage({
+      type: "coverLayout",
+      side,
+      layout: side === "back" ? state.current.backCoverLayout : state.current.coverLayout,
+    });
+  }
+  state.bakedLooks[side] = coverLookKey(state.current, side);
   request?.waiter.resolve({
     ok: true,
     filePath: target,
@@ -1729,7 +1746,9 @@ async function bakeCover(
   });
 
   const unsaved = isDirty(state)
-    ? "（合成の指定はまだ未保存です。「保存」で book.json へ残ります）"
+    ? request
+      ? "（外部AIの依頼の体裁を欄にも当てました。合成の指定はまだ未保存です。「保存」で book.json へ残ります）"
+      : "（合成の指定はまだ未保存です。「保存」で book.json へ残ります）"
     : "";
   // **焼いたら面を出し直す。** 本へ入るのは焼いた画像なので、プレビューも
   // そちらへ切り替わらないと、画面と本の中身が食い違う（設計書6.65.8）
