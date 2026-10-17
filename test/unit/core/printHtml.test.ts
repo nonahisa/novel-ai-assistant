@@ -495,37 +495,41 @@ describe("脚本の組版", () => {
 
     expect(out).toContain('<p class="script-hashira">○駅前・夜</p>');
     expect(out).toContain('class="gap script-togaki"');
-    expect(out).toContain('class="gap script-serifu script-role-5"');
+    expect(out).toContain('class="gap script-serifu script-named"');
   });
 
   /**
-   * 人物名の欄（作者の裁定、2026-10-17。公募の納品用・原稿エディターと同じ幅）。
-   * 人物名を span で包み、欄の幅（5字）より短ければ空ける。折り返しは「「」の下へ
+   * 人物名の欄（作者の裁定、2026-10-17。公募の納品用と同じ幅 5字）。人物名を span で包み、
+   * 行の頭の空き（欄5字＋下げ幅1字）へ浮かせて欄の幅に固定する。「「」はどの台詞でも
+   * 欄の次（1行目だけ1字戻す）、台詞の続きは1字目の下
    */
-  test("台詞は人物名を欄に入れ、ぶら下げの幅を「「」の位置にする", () => {
+  test("台詞は人物名を決まった幅の欄に入れ、「「」を欄の次にそろえる", () => {
     const out = scriptHtml("太郎「行こう」");
 
     expect(out).toContain(
-      '<p class="script-serifu script-role-5"><span class="script-role">太郎</span>「行こう」</p>'
+      '<p class="script-serifu script-named"><span class="script-role">太郎</span>「行こう」</p>'
     );
-    expect(out).toContain(`.script-role { display: inline-block; min-inline-size: ${SCRIPT_ROLE_WIDTH}em; text-indent: 0; }`);
-    // 折り返しは「「」の次の字（台詞の1字目）の下＝5＋1字（作者の裁定、2026-10-17）
-    expect(out).toContain(".script-serifu.script-role-5 { padding-inline-start: 6em; text-indent: -6em; }");
+    expect(out).toContain(
+      ".script-serifu.script-named { display: flow-root; padding-inline-start: 6em; text-indent: -1em; }"
+    );
+    expect(out).toContain(
+      `.script-named .script-role { float: inline-start; inline-size: ${SCRIPT_ROLE_WIDTH}em; margin-inline-start: -6em; text-indent: 0; overflow-wrap: anywhere; }`
+    );
   });
 
-  test("欄より長い人物名は切らず、その「「」の位置でぶら下げる", () => {
+  test("欄より長い人物名も同じ欄に入れる（欄の中で折り返す。「「」の位置は変わらない）", () => {
     const out = scriptHtml("密倉家の会長「来たか」");
 
     expect(out).toContain(
-      '<p class="script-serifu script-role-6"><span class="script-role">密倉家の会長</span>「来たか」</p>'
+      '<p class="script-serifu script-named"><span class="script-role">密倉家の会長</span>「来たか」</p>'
     );
   });
 
-  test("人物名のルビは親文字だけを数える", () => {
-    // 記法ごと数えると9字、読みまで数えると5字を超える。親文字は2字なので欄の幅5のまま
-    const out = scriptHtml("{太志|たいし}「はい」");
-
-    expect(out).toContain('class="script-serifu script-role-5"');
+  test("面をまたいだ台詞の続きは1字戻さない（続きの指定が後に来る）", () => {
+    const css = SCRIPT_LAYOUT_CSS;
+    expect(css.indexOf(".script-serifu.cont { text-indent: 0; }")).toBeGreaterThan(
+      css.indexOf(".script-serifu.script-named {")
+    );
   });
 
   test("書体：ト書きと柱はゴシック、台詞は明朝のまま。面をまたいだ台詞の続きはぶら下げの位置から", () => {
@@ -563,7 +567,7 @@ describe("脚本の組版", () => {
   test("ルビは脚本でも今までどおり組まれる", () => {
     const out = scriptHtml("{太郎|たろう}「行こう」");
 
-    expect(out).toContain('<p class="script-serifu script-role-5">');
+    expect(out).toContain('<p class="script-serifu script-named">');
     expect(out).toContain("<ruby>太郎<rt>たろう</rt></ruby>");
   });
 

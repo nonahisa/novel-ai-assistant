@@ -400,16 +400,18 @@ function linesOfParagraph(
  * 台詞の行（作者の裁定、2026-10-17）。
  *
  * - 人物名を `SCRIPT_ROLE_WIDTH` 字の欄に入れ、足りない分を空きマスで埋めて、
- *   「「」を欄の次のマスにそろえる。**欄より長い名前は切らない**——超えたぶんだけ
- *   「「」が後ろへずれる
+ *   「「」を欄の次のマスにそろえる。**「「」はどの台詞の行でも同じ高さ**（作者の裁定、
+ *   2026-10-17「「の高さをそろえて」）
+ * - **欄に収まらない長い名前は、欄の中で折り返す**：欄の字数で機械的に割り、続きを
+ *   次の行の欄に置く（`roleChunks`）。名前を切らない——台詞が先に終わっても、名前の
+ *   行ぶん行を使う
  * - 台詞が2行以上になったら、折り返した行を**「「」の次の字（台詞の1字目）の下**に
- *   そろえる（ぶら下げ字下げ。「「」から `SCRIPT_SPEECH_HANG` 字下げる。作者の裁定、
- *   2026-10-17「「」と同じ高さだと上すぎる」）。そろえる先は**その行の「「」**
- *   （長い名前の行は、ずれた「「」の次）
- * - 1行の字数は指定どおりのまま。1行目は「欄＋台詞」、2行目以降は「ぶら下げ＋台詞」が
+ *   そろえる（「「」から `SCRIPT_SPEECH_HANG` 字下げる。作者の裁定、2026-10-17）
+ * - 1行の字数は指定どおりのまま。1行目は「欄＋台詞」、2行目以降は「欄＋1字＋台詞」が
  *   ちょうど字数に収まるよう、台詞を行ごとの幅で割る（2行目以降は1行目より1字少ない）
- * - 人物名が長すぎて、折り返した行に台詞の入る字が行の半分を切るときは、欄もぶら下げも
- *   やめてふつうの行として割る（1行に数字しか入らない紙にしない）
+ * - **字数の少ない升目（欄と下げ幅で行の半分を超える。5字の欄なら11字以下）だけは、
+ *   欄もぶら下げもやめてふつうの行として割る**。2行目以降に台詞が数字ぶんしか入らない
+ *   紙になるのを避けるため（最小の5字では台詞の入るマスが1つも残らない）
  */
 function serifuLines(
   role: string,
@@ -418,32 +420,67 @@ function serifuLines(
   options: GridOptions
 ): GridLine[] {
   const columns = Math.max(1, Math.floor(options.columns));
-  const roleUnits = unitsOfLine(role, notation, options.vertical);
-  const roleWidth = roleUnits.reduce((sum, unit) => sum + unit.width, 0);
-  // 「「」の位置（欄の幅か、それより長い名前の字数）
-  const indent = Math.max(SCRIPT_ROLE_WIDTH, roleWidth);
-  // 折り返した行の字下げ（「「」の次の字の下）
-  const hangIndent = indent + SCRIPT_SPEECH_HANG;
+  const hangIndent = SCRIPT_ROLE_WIDTH + SCRIPT_SPEECH_HANG;
   if (hangIndent > Math.floor(columns / 2)) {
     return breakIntoLines(unitsOfLine(role + speech, notation, options.vertical), options);
   }
+  const chunks = roleChunks(unitsOfLine(role, notation, options.vertical), SCRIPT_ROLE_WIDTH);
   const narrowed = { ...options, columns: columns - hangIndent };
-  const lines = breakIntoLines(
+  const speechLines = breakIntoLines(
     unitsOfLine(speech, notation, options.vertical),
     narrowed,
-    columns - indent
+    columns - SCRIPT_ROLE_WIDTH
   );
-  // 欄の空きは、字の無いマス。行割りには通さない（禁則の判定に関わらない）
-  const padding: GridUnit[] = Array.from({ length: indent - roleWidth }, () => ({
+  const result: GridLine[] = [];
+  const count = Math.max(chunks.length, speechLines.length);
+  for (let index = 0; index < count; index++) {
+    const chunk = chunks[index];
+    const line = speechLines[index] ?? { units: [] };
+    if (!chunk) {
+      // 名前の続きが無い行：欄と下げ幅のぶんを空ける（今までの折り返し）
+      result.push({ ...line, indent: hangIndent });
+      continue;
+    }
+    // 欄に名前（の続き）を入れ、空きマスで欄の幅まで埋める。2行目以降は下げ幅の1字も空ける
+    const filled = chunk.reduce((sum, unit) => sum + unit.width, 0);
+    const pad = SCRIPT_ROLE_WIDTH - filled + (index === 0 ? 0 : SCRIPT_SPEECH_HANG);
+    result.push({ ...line, units: [...chunk, ...emptyCells(pad), ...line.units] });
+  }
+  return result;
+}
+
+/** 字の無いマス（欄の空き）。行割りには通さない（禁則の判定に関わらない） */
+function emptyCells(count: number): GridUnit[] {
+  return Array.from({ length: Math.max(0, count) }, () => ({
     kind: "char" as const,
     text: "",
     width: 1,
   }));
-  return lines.map((line, index) =>
-    index === 0
-      ? { ...line, units: [...roleUnits, ...padding, ...line.units] }
-      : { ...line, indent: hangIndent }
+}
+
+/**
+ * 人物名を、欄の字数ずつに割る（作者の裁定、2026-10-17：割り方は欄の字数で機械的に）。
+ * 禁則は見ない。ルビは途中で割らず次の欄へ送る。欄より長いルビだけは欄の字数で割る
+ * （読みは字数の比で割り振る。`splitWideRuby` と同じ）。名前が空なら空の欄を1つ
+ */
+function roleChunks(units: readonly GridUnit[], width: number): GridUnit[][] {
+  const chunks: GridUnit[][] = [];
+  let chunk: GridUnit[] = [];
+  let filled = 0;
+  const parts = units.flatMap((unit) =>
+    unit.kind === "ruby" && unit.width > width ? splitWideRuby(unit, width) : [unit]
   );
+  for (const unit of parts) {
+    if (filled + unit.width > width && chunk.length > 0) {
+      chunks.push(chunk);
+      chunk = [];
+      filled = 0;
+    }
+    chunk.push(unit);
+    filled += unit.width;
+  }
+  chunks.push(chunk);
+  return chunks;
 }
 
 /** マスと行の寸法（mm） */

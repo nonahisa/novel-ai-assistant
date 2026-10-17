@@ -94,6 +94,9 @@ export const SCRIPT_ROLE_WIDTH = 5;
  */
 export const SCRIPT_SPEECH_HANG = 1;
 
+/** 読む紙で、人物名を欄に入れた台詞の行に付ける印（`SCRIPT_LAYOUT_CSS`） */
+export const SCRIPT_NAMED_CLASS = "script-named";
+
 /**
  * 台本のト書きと柱の書体（作者の裁定、2026-10-17：台詞は明朝、ト書きと柱はゴシック）。
  *
@@ -213,14 +216,17 @@ export const SCRIPT_LINE_CSS = [
  * （漫画の原作は台詞・ト書きの印を借りているが、ここは足さない）。原稿エディターと
  * 読む紙（`printHtml.ts`）がそのまま埋め込む。EPUB には足さない（`SCRIPT_LINE_CSS` だけ）。
  *
- * - **台詞の折り返しを「「」の次の字の下にそろえる**：行に付けた `script-role-N`（N は
- *   「「」の前までの字数）で、ぶら下げの幅（N ＋ `SCRIPT_SPEECH_HANG` 字）を行ごとに
- *   決める。`SCRIPT_LINE_CSS` の 6em の決め打ちより強い指定（class 2つ）なので、
- *   印の付いた行だけが置き換わる
- * - **人物名の欄**（読む紙だけ）：人物名を `span.script-role` で包み、欄の幅
- *   （`SCRIPT_ROLE_WIDTH`）より短ければ空ける。長い名前は欄を押し広げる（切らない）。
- *   原稿エディターは打つ面の中に要素を足せない（足すとカーソルと変換がずれる）ので、
- *   欄は作らず、行ごとの「「」の位置でぶら下げる
+ * - **原稿エディター**：台詞の折り返しを「「」の次の字の下にそろえる。行に付けた
+ *   `script-role-N`（N は「「」の前までの字数）で、ぶら下げの幅（N ＋ `SCRIPT_SPEECH_HANG`
+ *   字）を行ごとに決める。`SCRIPT_LINE_CSS` の 6em の決め打ちより強い指定（class 2つ）
+ *   なので、印の付いた行だけが置き換わる。打つ面の中に要素を足せない（足すとカーソルと
+ *   変換がずれる）ので、人物名の欄は作らない
+ * - **読む紙**（`p.script-named`。作者の裁定、2026-10-17「「の高さをそろえて」）：
+ *   人物名を `span.script-role` で包み、行の頭の空き（欄の幅＋下げ幅）の中へ浮かせて
+ *   （float）欄の幅に固定する。**長い名前は欄の中で折り返し**、「「」はどの台詞でも
+ *   欄の次（`text-indent` で1行目だけ下げ幅ぶん戻す）、台詞の続きは1字目の下にそろう。
+ *   名前が台詞より長く続いても、段落が浮かせた名前を包む（`display: flow-root`）ので
+ *   次の行と重ならない
  * - **書体**：ト書きと柱はゴシック、台詞（人物名を含む）は本文の書体（明朝）のまま
  * - **面をまたいだ台詞の続き**（読む紙の `p.cont`）は、ぶら下げの位置から始める
  */
@@ -232,6 +238,12 @@ export const SCRIPT_LAYOUT_CSS = [
     const hang = n + SCRIPT_SPEECH_HANG;
     return `.script-serifu.script-role-${n} { padding-inline-start: ${hang}em; text-indent: -${hang}em; }`;
   }),
-  `.script-role { display: inline-block; min-inline-size: ${SCRIPT_ROLE_WIDTH}em; text-indent: 0; }`,
+  `.script-serifu.${SCRIPT_NAMED_CLASS} { display: flow-root; padding-inline-start: ${
+    SCRIPT_ROLE_WIDTH + SCRIPT_SPEECH_HANG
+  }em; text-indent: -${SCRIPT_SPEECH_HANG}em; }`,
+  `.${SCRIPT_NAMED_CLASS} .script-role { float: inline-start; inline-size: ${SCRIPT_ROLE_WIDTH}em; margin-inline-start: -${
+    SCRIPT_ROLE_WIDTH + SCRIPT_SPEECH_HANG
+  }em; text-indent: 0; overflow-wrap: anywhere; }`,
+  // 後ろに置く（同じ強さの指定は後が勝つ）。続きの面では「「」が無いので戻さない
   ".script-serifu.cont { text-indent: 0; }",
 ].join("\n");
