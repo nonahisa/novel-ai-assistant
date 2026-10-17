@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import "../support/sweepTimeout";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { SRC_DIR, srcSources } from "../support/srcSources";
 
 /**
  * 小さいモデルへの知らせを、自分からは出さない（作者の裁定 2026-10-10 朝、A11
@@ -12,28 +13,14 @@ import * as path from "node:path";
  * 訊かれたときだけ使う材料へ移した（`core/chatModelNotes.ts`）。
  * 外した部品の名前が `src/` へ戻ってこないことを見張る。
  */
-const SRC = path.resolve(__dirname, "../../../src");
-const BS = String.fromCharCode(92);
+const SRC = SRC_DIR;
 
-function sources(): { file: string; body: string }[] {
-  const found: { file: string; body: string }[] = [];
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-        continue;
-      }
-      if (!entry.name.endsWith(".ts")) continue;
-      found.push({
-        file: path.relative(SRC, full).split(BS).join("/"),
-        body: fs.readFileSync(full, "utf8"),
-      });
-    }
-  };
-  walk(SRC);
-  return found;
-}
+/*
+  **src 全体を読むのは1回だけ**（2026-10-17）。以前は名前1つごとに src 全体
+  （約1,000ファイル）を歩いて読み直していて（11回）、このファイルだけで
+  単独4〜6秒かかっていた。読む中身は同じで、確かめることは変わらない。
+*/
+const sources = srcSources;
 
 describe("小さいモデルへの知らせを自分からは出さない（A11）", () => {
   test("知らせを出す部品のファイルが無い", () => {

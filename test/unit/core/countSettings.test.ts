@@ -1,6 +1,6 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { describe, it, expect } from "vitest";
+import "../support/sweepTimeout";
+import { srcSources } from "../support/srcSources";
 import {
   parseCountMode,
   pickCount,
@@ -68,13 +68,14 @@ describe("countModeLabel", () => {
 });
 
 describe("数え方を読む場所は1か所だけ", () => {
-  function collect(dir: string, out: string[] = []): string[] {
-    for (const name of readdirSync(dir)) {
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) collect(p, out);
-      else if (name.endsWith(".ts")) out.push(p.split("\\").join("/"));
-    }
-    return out;
+  /*
+    **src 全体は共通の読み込みで1回だけ読む**（2026-10-17。`support/srcSources.ts`）。
+    ファイルごとに歩いて読み直していたため、並列の負荷の中で時間切れになった。
+    読む中身は同じで、確かめることは変わらない。
+  */
+  /** `src/...` の形の道と中身（以前の `collect("src")` と同じ道の形） */
+  function collect(): Array<{ file: string; body: string }> {
+    return srcSources().map(({ file, body }) => ({ file: `src/${file}`, body }));
   }
 
   /**
@@ -83,9 +84,10 @@ describe("数え方を読む場所は1か所だけ", () => {
    * 作品一覧は純文字数で固定だった）。読むのは `countSettings.ts` だけにする。
    */
   it("countMode を直接読むのは countSettings.ts だけ", () => {
-    const offenders = collect("src")
-      .filter((file) => !file.endsWith("core/countSettings.ts"))
-      .filter((file) => readFileSync(file, "utf-8").includes('"countMode"'));
+    const offenders = collect()
+      .filter(({ file }) => !file.endsWith("core/countSettings.ts"))
+      .filter(({ body }) => body.includes('"countMode"'))
+      .map(({ file }) => file);
     expect(offenders).toEqual([]);
   });
 
@@ -93,13 +95,12 @@ describe("数え方を読む場所は1か所だけ", () => {
     // `mode === "gross" ? counts.gross : counts.net` を各所に書くと、
     // 新しい画面を足したときに書き忘れる。選び分けは VS Code に依存しない
     // `countMode.ts` の1か所に置く（J1。`countSettings.ts` は書き出し直すだけ）
-    const offenders = collect("src")
-      .filter((file) => !file.endsWith("core/countMode.ts"))
+    const offenders = collect()
+      .filter(({ file }) => !file.endsWith("core/countMode.ts"))
       // 設定値の読み取り・印（「総」）の選び分けは、こちらに残っている
-      .filter((file) => !file.endsWith("core/countSettings.ts"))
-      .filter((file) =>
-        /===\s*"gross"\s*\?/.test(readFileSync(file, "utf-8"))
-      );
+      .filter(({ file }) => !file.endsWith("core/countSettings.ts"))
+      .filter(({ body }) => /===\s*"gross"\s*\?/.test(body))
+      .map(({ file }) => file);
     expect(offenders).toEqual([]);
   });
 });

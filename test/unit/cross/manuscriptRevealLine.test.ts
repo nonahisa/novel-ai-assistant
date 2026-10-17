@@ -1,4 +1,4 @@
-import { describe, expect, test, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
 /**
@@ -198,7 +198,45 @@ function makeProvider(): ManuscriptEditorProvider {
       },
     },
   } as unknown as ManuscriptEditorDeps;
-  return new ManuscriptEditorProvider(deps);
+  const provider = new ManuscriptEditorProvider(deps);
+  const revealLine = provider.revealLine.bind(provider);
+  provider.revealLine = (...args) => settle(revealLine(...args));
+  return provider;
+}
+
+/**
+ * **台帳に載るのを待つ時間を、偽の時計で進める**（2026-10-17。単体テストの重さの見直し）。
+ *
+ * ここの代役の `openWith` は原稿を台帳へ載せないので、`revealLine` は毎回
+ * 待つ上限（1.5秒）まで台帳を見に行ってから「開けなかった」と決める。
+ * 実際の時計で待つと、1件1.5秒・ファイル全体で30秒になっていた。
+ *
+ * 待つ回数と、待ってから諦めることは製品のとおりに走らせ、**時計だけを進める。**
+ * 「諦める前に、しばらく待つ」は偽の時計の上で測る（`Date` も偽の時計に従う）。
+ */
+async function settle<T>(work: Promise<T>): Promise<T> {
+  if (!vi.isFakeTimers()) return work;
+  let done = false;
+  void work.then(
+    () => (done = true),
+    () => (done = true)
+  );
+  // 見に行く間隔（50ms）ずつ進める。上限は偽の時計で20秒——製品の待つ上限
+  // （1.5秒。何度か待つ道でも数秒）を十分に越え、終わらなければ試験の時間切れで落ちる
+  for (let step = 0; !done && step < 400; step++) {
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  return work;
+}
+
+/** 待ちのある describe で、偽の時計に切り替える */
+function useFakeClock(): void {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 }
 
 const episodePath = "C:/小説/いじめられっ子/本文/2.md";
@@ -245,6 +283,8 @@ describe("台帳の鍵", () => {
 });
 
 describe("開いていないときの受け皿", () => {
+  useFakeClock();
+
   test("登録作品の話なら、横書きの原稿エディタで開く", async () => {
     await makeProvider().revealLine(episodePath, 40);
 
@@ -361,6 +401,8 @@ describe("開いていないときの受け皿", () => {
  * 入口か列が違うと、同じ原稿の2枚目ができる。
  */
 describe("タブが既にある原稿へは、もう1枚開かない", () => {
+  useFakeClock();
+
   test("縦書きで開いている話へは、縦書きの入口・その列で開く", async () => {
     const manuscript = {
       input: new layout.TabInputCustom(episodePath, MANUSCRIPT_EDITOR_VIEW_TYPE),
@@ -499,6 +541,8 @@ function disconnectedLayout() {
  * コピーしたと答えてから通す。
  */
 describe("つながりの切れた画面へ飛ぶとき", () => {
+  useFakeClock();
+
   test("素のエディタへ譲らず、作者に訊く（既定は再読み込み）", async () => {
     layout.groups = disconnectedLayout().groups;
 

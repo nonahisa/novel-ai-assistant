@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import * as ts from "typescript";
+import "../support/sweepTimeout";
+import { SRC_DIR, srcSources } from "../support/srcSources";
 
 /**
  * 済んだ記録（`notifyDone`）を、**操作した作品のログ**へ書く（0.81.4）。
@@ -31,17 +33,16 @@ import * as ts from "typescript";
  * 書き先を向けていることも見る——90余りのコマンドがここを通る。
  */
 
-const SRC = resolve(__dirname, "../../../src");
+const SRC = SRC_DIR;
 
-function sourceFiles(dir: string): string[] {
-  const found: string[] = [];
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name);
-    if (statSync(full).isDirectory()) found.push(...sourceFiles(full));
-    else if (name.endsWith(".ts")) found.push(full);
-  }
-  return found;
-}
+/*
+  **時間切れの扱い**（2026-10-17）。src 全体を歩いて読み、そのうち `notifyDone(` を
+  含む約40ファイル（合わせて190万字）を TypeScript で構文解析する。単独なら1秒で
+  通るが、並列の負荷の中では既定の5秒を越えて落ちた。歩き方は1エントリずつ
+  `statSync` を呼ぶ形をやめて共通の読み込み（`support/srcSources.ts`）へ寄せ、
+  構文解析の量は変えられない（全部を見るのがこの網の役目）ので、待ちの上限だけを
+  src 全体を読むほかの網と同じにした（`support/sweepTimeout.ts`）。
+*/
 
 /** 作品を1つ受け取る引数があるか（配列は作品をまたぐので見ない） */
 function takesWork(fn: ts.SignatureDeclaration, file: ts.SourceFile): boolean {
@@ -72,8 +73,7 @@ function callsIn(body: ts.Node, file: ts.SourceFile): Call[] {
 describe("済んだ記録は、操作した作品のログへ", () => {
   test("作品を受け取る関数は、notifyDone の前に useLogFile で書き先を向ける", () => {
     const offenders: string[] = [];
-    for (const full of sourceFiles(SRC)) {
-      const text = readFileSync(full, "utf8");
+    for (const { file: relativePath, fullPath: full, body: text } of srcSources()) {
       if (!text.includes("notifyDone(")) continue;
       const file = ts.createSourceFile(full, text, ts.ScriptTarget.Latest, true);
       const visit = (node: ts.Node): void => {
@@ -92,7 +92,7 @@ describe("済んだ記録は、操作した作品のログへ", () => {
             if (firstRoute && firstRoute.at < call.at) continue;
             const line = file.getLineAndCharacterOfPosition(call.at).line + 1;
             const name = node.name?.getText(file) ?? "(無名の関数)";
-            offenders.push(`${relative(SRC, full)}:${line} ${name}`);
+            offenders.push(`${relativePath}:${line} ${name}`);
           }
         }
         ts.forEachChild(node, visit);

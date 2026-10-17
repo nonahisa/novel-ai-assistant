@@ -1,6 +1,8 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import * as nodePath from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import "../support/sweepTimeout";
+import { srcSources } from "../support/srcSources";
 import { workspace } from "../support/vscodeStub";
 import { findingsRetentionDays } from "../../../src/features/findingStore";
 
@@ -72,28 +74,21 @@ describe("設定を読むところ", () => {
    * 数えない（経緯を書き残せるようにするため）。
    */
   test("findings.retentionDays を読むのは findingStore.ts だけ", () => {
+    /*
+      **src 全体は共通の読み込みで1回だけ読む**（2026-10-17。`support/srcSources.ts`）。
+      ファイルごとに歩いて読み直していたため、並列の負荷の中で時間切れになった。
+      読む中身は同じで、確かめることは変わらない。
+    */
     const owner = "src/features/findingStore.ts";
     const offenders: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = nodePath.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(full);
-          continue;
-        }
-        if (!entry.name.endsWith(".ts")) continue;
-        const relative = nodePath
-          .relative(root, full)
-          .split(nodePath.sep)
-          .join("/");
-        if (relative === owner) continue;
-        const code = readFileSync(full, "utf8")
-          .replace(/\/\*[\s\S]*?\*\//g, "")
-          .replace(/\/\/.*$/gm, "");
-        if (code.includes('"findings.retentionDays"')) offenders.push(relative);
-      }
-    };
-    walk(nodePath.join(root, "src"));
+    for (const { file, body } of srcSources()) {
+      const relative = `src/${file}`;
+      if (relative === owner) continue;
+      const code = body
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/.*$/gm, "");
+      if (code.includes('"findings.retentionDays"')) offenders.push(relative);
+    }
 
     expect(offenders).toEqual([]);
   });

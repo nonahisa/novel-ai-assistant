@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { mkdtempSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -579,7 +580,14 @@ describe("状態の説明文", () => {
 // コミット数の数え方と「未コミットなら取り込まない」の2点は
 // 本物のリポジトリで確かめる。
 
-const tempRoot = path.join(os.tmpdir(), "novelai-git-test");
+/*
+  **実行ごとに別の場所を使う**（2026-10-17）。以前は決まった名前
+  （一時フォルダーの `novelai-git-test`）を使い、`beforeAll` で消してから
+  作り直していた。単体テストを2つ同時に走らせると（全件と覆いの測定を重ねる、
+  別の作業場で走らせる等）、片方がもう片方の倉庫を途中で消し、負荷の高い
+  ときだけ落ちる形になっていた。
+*/
+const tempRoot = mkdtempSync(path.join(os.tmpdir(), "novelai-git-test-"));
 /**
  * `test.skipIf` はテストを集める時点で評価される。
  * `beforeAll` で判定すると間に合わず、全部スキップされたまま
@@ -609,9 +617,6 @@ const IDENTITY = [
 beforeAll(async () => {
   if (!gitReady) return;
 
-  await fs.rm(tempRoot, { recursive: true, force: true });
-  await fs.mkdir(tempRoot, { recursive: true });
-
   const remote = path.join(tempRoot, "remote.git");
   await git(["init", "--bare", "-b", "main", remote], tempRoot);
 
@@ -627,22 +632,28 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  if (!gitReady) return;
+  // 場所は git が無くても作ってあるので、いつも片づける
   await fs.rm(tempRoot, { recursive: true, force: true });
 });
 
 describe("実際のgitでの確認", () => {
-  test.skipIf(!gitReady)("同期が取れている状態を正しく読む", async () => {
-    const status = await readSyncStatus(workDir);
+  // 同じ describe のほかの件と同じ待ち（本物の git を何回か起こす。この件だけ
+  // 既定の5秒のままで、並列の負荷の中では際どかった）
+  test.skipIf(!gitReady)(
+    "同期が取れている状態を正しく読む",
+    async () => {
+      const status = await readSyncStatus(workDir);
 
-    expect(status).toMatchObject({
-      kind: "tracked",
-      branch: "main",
-      behind: 0,
-      ahead: 0,
-      dirty: 0,
-    });
-  });
+      expect(status).toMatchObject({
+        kind: "tracked",
+        branch: "main",
+        behind: 0,
+        ahead: 0,
+        dirty: 0,
+      });
+    },
+    60_000
+  );
 
   test.skipIf(!gitReady)(
     "別の環境が進んだぶんを、fetch後に未取得として数える",
