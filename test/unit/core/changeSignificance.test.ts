@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  changeGroups,
   describeInvolvement,
   scoreCharacterChanges,
   scoreChanges,
@@ -103,6 +104,21 @@ describe("関与度の点数", () => {
 
   test("何度も変わっている項目は上がる", () => {
     const character = emptyCharacter("char_001", "文佳");
+    character.appearedChapters = [1, 5, 9, 11, 12];
+    character.changes = [
+      change("appearance", "黒髪", [1]),
+      change("appearance", "銀髪", [5]),
+      change("appearance", "白髪", [9]),
+      change("appearance", "赤毛", [11, 12]),
+    ];
+
+    // 20（基礎）+ 5（新しい内容を足した話が4つ）+ 10（続いている）
+    expect(scoreCharacterChanges(character)[0].score).toBe(35);
+  });
+
+  test("3つの話で変わっただけでは、段の加点を付けない（2026-10-17）", () => {
+    // 3段から足すと、出来事と細部が足されただけの人物が「高」に残った
+    const character = emptyCharacter("char_001", "文佳");
     character.appearedChapters = [1, 5, 9, 12];
     character.changes = [
       change("appearance", "黒髪", [1]),
@@ -110,8 +126,23 @@ describe("関与度の点数", () => {
       change("appearance", "白髪", [9, 12]),
     ];
 
-    // 20（基礎）+ 5（3段）+ 10（続いている）
-    expect(scoreCharacterChanges(character)[0].score).toBe(35);
+    // 20（基礎）+ 10（続いている）
+    expect(scoreCharacterChanges(character)[0].score).toBe(30);
+  });
+
+  test("同じ話の値は、何件あっても1段に数える（2026-10-17）", () => {
+    // AIが同じ話の中で同じことを違う言葉で書いた跡を、段に化けさせない
+    const character = emptyCharacter("char_001", "文佳");
+    character.appearedChapters = [1, 7];
+    character.changes = [
+      change("role", "新人", [1]),
+      change("role", "見習い", [1]),
+      change("role", "新入り", [1]),
+      change("role", "課長", [7]),
+    ];
+
+    // 55（基礎）+ 5（最新の登場話で変わったばかり）。件数の4は段にしない
+    expect(scoreCharacterChanges(character)[0].score).toBe(60);
   });
 
   test("いちばん新しい登場話で変わったばかりなら、半分だけ足す", () => {
@@ -266,5 +297,219 @@ describe("AIが注釈を書き写してきたとき", () => {
   test("注釈しか無ければ空にする", () => {
     // 空にしておけば、呼び出し側が「値なし」として扱う
     expect(stripInvolvementNote("［関与度 30（低）］")).toBe("");
+  });
+});
+
+/**
+ * 作者の判断例（2026-10-17。docs/measurements/2026-10-17-change-significance-proposal.md）。
+ *
+ * 作者が役割の関与度を見て「高すぎる」「合っている」と判断した人物を、
+ * **作り物の値で同じ形に写した**もの（作者の作品の文は写さない）。
+ * 形とは「話でまとめた群がいくつあり、それぞれがどれだけ新しい語を足しているか」
+ * である。新しさは先に `changeGroups` の出力で確かめてから点を見る——
+ * 作り物の文が狙いどおりの新しさになっていなければ、点が合っても偶然である。
+ *
+ * - 奥原型・純也型：AIの言い換えで段が増えていた。60未満（「中」）にする
+ * - 春原月夜型・三門太志型・ジャック型・圭織型：60以上（「高」）に残す
+ * - ホンゴー型：言い換えばかりだが、物語の中心にいる。あらすじの半分以上に
+ *   名前が出るか、作者が主人公の印を付けていれば 60 に残る
+ */
+function roleChanges(groups: Array<[number[], string[]]>): RecordChange[] {
+  return groups.flatMap(([chapters, values]) =>
+    values.map((value) => change("role", value, chapters))
+  );
+}
+
+function personWith(
+  name: string,
+  appearedChapters: number[],
+  changes: RecordChange[]
+): Character {
+  const character = emptyCharacter("char_001", name);
+  character.appearedChapters = appearedChapters;
+  character.changes = changes;
+  return character;
+}
+
+function roleScore(
+  character: Character,
+  context?: Parameters<typeof scoreCharacterChanges>[1]
+): number {
+  const significance = scoreCharacterChanges(character, context).find(
+    (entry) => entry.field === "role"
+  );
+  if (!significance) throw new Error("役割の関与度が出ていません");
+  return significance.score;
+}
+
+function novelties(character: Character): number[] {
+  return changeGroups(
+    character.changes.filter((entry) => entry.field === "role")
+  ).map((group) => Math.round(group.novelty * 100) / 100);
+}
+
+/** 奥原型：同じ話の言い換えが3件、後の話もその言い換え */
+const okuharaLike = () =>
+  personWith("奥田", [6, 8, 11], roleChanges([
+    [[6], ["盗賊団の見張り役", "盗賊団の下っ端", "村人（隣人）"]],
+    [[11], ["盗賊団の下っ端の村人"]],
+  ]));
+
+/** 純也型：新しい段は3つ（出来事と細部が足されただけ）。最後は前の値の一部 */
+const junyaLike = () =>
+  personWith("純一", [6, 7, 8, 10, 12, 15, 18], roleChanges([
+    [[6], ["旅の仲間。追われている少年", "少年（同行者）"]],
+    [[7], ["呪いをかけられた被害者"]],
+    [[8], ["港町の学校の生徒、呪いの被害者"]],
+    [[12], ["生徒"]],
+  ]));
+
+/** 春原月夜型：同じ話の言い換え3件のあと、最新の登場話で前に無い語を足す */
+const tsukiyoLike = () =>
+  personWith("春野", [13, 15, 18], roleChanges([
+    [[13], ["同じ組の生徒", "学生", "武術を習う小学生"]],
+    [[18], ["主人公の幼なじみ"]],
+  ]));
+
+/** 三門太志型：本当に変わった段が5つ。最後だけ言い換え */
+const futoshiLike = () =>
+  personWith("三浦太一", [1, 3, 5, 7, 9, 10], roleChanges([
+    [[1], ["火事で亡くなった少年"]],
+    [[3], ["少女に生まれ変わった魂"]],
+    [[5], ["学生"]],
+    [[7], ["少女に宿る霊、旧家の息子"]],
+    [[9], ["守護霊として宿る魂"]],
+    [[10], ["少女に宿る霊"]],
+  ]));
+
+/** ジャック型：短い語での降格は言い換えに見えるが、最新の登場話で新しい役目が付く */
+const jackLike = () =>
+  personWith("ジョン", [1, 5, 7], roleChanges([
+    [[1], ["元一級の騎士"]],
+    [[5], ["元一級の騎士。三級"]],
+    [[7], ["元一級の騎士。見習いを鍛える教官"]],
+  ]));
+
+/** 圭織型：3つの話で、それぞれ新しい関係が足される */
+const kaoriLike = () =>
+  personWith("香織", [4, 10, 12], roleChanges([
+    [[4], ["母親", "主人公の母"]],
+    [[10], ["旧家の母親"]],
+    [[12], ["霊の母"]],
+  ]));
+
+/** ホンゴー型：主人公だが、役割の記録はほぼ言い換え */
+const hongoLike = () =>
+  personWith("本田", [1, 6, 7, 10, 18], roleChanges([
+    [[1], ["役所の窓口係、旅人"]],
+    [[6], ["役所の窓口係の職員"]],
+    [[7], ["役所の窓口係"]],
+    [[10], ["役所の窓口係。旅人"]],
+    [[18], ["役所の窓口係"]],
+  ]));
+
+describe("作者の判断例（2026-10-17）", () => {
+  test("作り物の値が、狙いどおりの新しさになっている", () => {
+    expect(novelties(okuharaLike())).toEqual([1, 0.22]);
+    expect(novelties(junyaLike())).toEqual([1, 1, 0.77, 0]);
+    expect(novelties(tsukiyoLike())).toEqual([1, 1]);
+    expect(novelties(futoshiLike())).toEqual([1, 0.9, 1, 0.8, 0.88, 0]);
+    expect(novelties(jackLike())).toEqual([1, 0.29, 0.64]);
+    expect(novelties(kaoriLike())).toEqual([1, 0.5, 0.5]);
+    expect(novelties(hongoLike())).toEqual([1, 0.38, 0, 0, 0]);
+  });
+
+  test("奥原型は「高」から外れる（言い換えを段に数えない）", () => {
+    expect(roleScore(okuharaLike())).toBeLessThan(60);
+  });
+
+  test("純也型は「高」から外れる（新しい段が3つでは加点しない）", () => {
+    expect(roleScore(junyaLike())).toBeLessThan(60);
+  });
+
+  test("春原月夜型は「高」に残る（最新の登場話で前に無い語を足した）", () => {
+    expect(roleScore(tsukiyoLike())).toBe(60);
+  });
+
+  test("三門太志型は「高」に残る（本当に変わった段が5つある）", () => {
+    expect(roleScore(futoshiLike())).toBe(65);
+  });
+
+  test("ジャック型・圭織型は「高」に残る", () => {
+    expect(roleScore(jackLike())).toBe(60);
+    expect(roleScore(kaoriLike())).toBe(60);
+  });
+
+  test("ホンゴー型は、言い換えだけなら「中」", () => {
+    expect(roleScore(hongoLike())).toBe(55);
+  });
+
+  test("あらすじの半分以上に名前が出る人物は +5", () => {
+    const synopses = ["本田が窓口に立つ", "本田が旅に出る", "役所の一日"];
+
+    expect(roleScore(hongoLike(), { synopses })).toBe(60);
+  });
+
+  test("あらすじに出るのが半分未満なら足さない", () => {
+    const synopses = ["本田が窓口に立つ", "役所の一日", "雨の日"];
+
+    expect(roleScore(hongoLike(), { synopses })).toBe(55);
+  });
+
+  test("名前の一部である別名もあらすじで数える", () => {
+    // あらすじでは下の名前だけで書かれることが多い
+    const character = futoshiLike();
+    character.aliases = ["太一", "坊や"];
+    const synopses = ["太一が目を覚ます", "太一が学校へ行く", "坊やと呼ばれる"];
+
+    expect(roleScore(character, { synopses })).toBe(70);
+    // 「坊や」は名前の一部ではないので数えない
+    expect(
+      roleScore(character, { synopses: ["坊やと呼ばれる", "坊やが泣く"] })
+    ).toBe(65);
+  });
+
+  test("作者が主人公の印を付けた人物は +5", () => {
+    const character = hongoLike();
+    character.isProtagonist = true;
+
+    expect(roleScore(character)).toBe(60);
+  });
+
+  test("主人公の印とあらすじが重なっても +5 は1回だけ", () => {
+    const character = hongoLike();
+    character.isProtagonist = true;
+    const synopses = ["本田が窓口に立つ", "本田が旅に出る"];
+
+    expect(roleScore(character, { synopses })).toBe(60);
+    const [significance] = scoreCharacterChanges(character, { synopses });
+    expect(significance.reasons.join("\n")).toContain("主人公");
+  });
+
+  test("AIへ渡す材料にも、あらすじの加点が入る（画面と同じ数字）", () => {
+    const synopses = ["本田が窓口に立つ", "本田が旅に出る"];
+
+    expect(describeCharacter(hongoLike(), [], { synopses })).toContain(
+      "関与度 60（高）"
+    );
+    expect(describeCharacter(hongoLike())).toContain("関与度 55（中）");
+  });
+
+  test("重み0の項目は、人物の加点でも押し上げない", () => {
+    const character = changed("summary");
+    character.isProtagonist = true;
+
+    expect(scoreCharacterChanges(character)[0].score).toBe(0);
+  });
+
+  test("群が1つしか無い項目には、定着の加点を付けない", () => {
+    // 同じ話の言い換えだけで、話をまたぐ変化が無い。変化した後の姿が無いので、
+    // それが根を張っているかを測りようがない
+    const character = personWith("三浦", [14, 18], roleChanges([
+      [[14], ["亡くなった子ども"]],
+      [[14, 18], ["学生"]],
+    ]));
+
+    expect(roleScore(character)).toBe(55);
   });
 });

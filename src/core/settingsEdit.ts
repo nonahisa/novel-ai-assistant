@@ -76,6 +76,12 @@ export interface RecordEdits {
    * 他の項目と同じ経路で保存するため、真偽値ではなく文字列で持つ。
    */
   isMob?: string;
+  /**
+   * 主人公（中心人物）の印（2026-10-17）。"1"（入）か ""（切）。
+   * **作者が画面で付け外ししたときだけ効く**——AIの提案を採る経路
+   * （`authorConfirmed: false`）で届いても無視する（`applyCharacterEdits`）
+   */
+  isProtagonist?: string;
   /** 作者が足した項目。キーは項目定義の key */
   customFields?: Record<string, string>;
   /**
@@ -135,7 +141,7 @@ export function applyCharacterEdits(
   options?: EditOptions
 ): Character {
   const relations = editedRelations(character.relations, edits.relations);
-  return {
+  const edited: Character = {
     ...character,
     // 作者が書いた紹介文も長さは揃える。一覧の見た目が崩れるため
     summary: clampSummary(nullableText(character.summary, edits.summary)),
@@ -186,6 +192,14 @@ export function applyCharacterEdits(
       editedAliases(character.aliases, edits.aliases)
     ),
   };
+  // 主人公の印（2026-10-17）は**作者の操作でしか付け外ししない**（CLAUDE.md 規則2）。
+  // AIの提案を採る経路（再読込・抽出のまとめ）は `authorConfirmed: false` で来るので、
+  // 鍵が混じっていても無視する。印の無い人物には欄を置かない
+  if (edits.isProtagonist !== undefined && options?.authorConfirmed !== false) {
+    if (edits.isProtagonist === "1") edited.isProtagonist = true;
+    else delete edited.isProtagonist;
+  }
+  return edited;
 }
 
 /**

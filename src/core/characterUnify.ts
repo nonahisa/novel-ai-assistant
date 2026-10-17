@@ -124,6 +124,9 @@ export function unifyCharacters(
       // 「語り手（僕）」を名前のある人物へまとめたときに落とすと、次の抽出で
       // 仮の名前の記録がまた作られる。どちらにも無ければ欄ごと置かない
       ...unifyUnnamedNarrator(keep, absorb),
+      // 主人公の印（2026-10-17）は、どちらかに付いていれば引き継ぐ。作者が付けた
+      // 印なので、まとめる操作で黙って落とさない。どちらにも無ければ欄ごと置かない
+      ...(keep.isProtagonist || absorb.isProtagonist ? { isProtagonist: true } : {}),
       abilities: dedupeBy(
         [...keep.abilities, ...absorb.abilities],
         (ability) => ability.name

@@ -58,6 +58,12 @@ export function describeCharacter(
      * 変化もどれも事実として要る
      */
     omitChanges?: boolean;
+    /**
+     * 各話あらすじの本文。関与度の「あらすじの半分以上に名前が出る +5」に使う
+     * （`changeSignificance.ts` の `characterCentrality`、2026-10-17）。
+     * 渡さなければその加点は付かない（主人公の印の加点は人物だけで決まる）
+     */
+    synopses?: readonly string[];
   } = {}
 ): string {
   const lines: string[] = [`名前: ${character.name}`];
@@ -119,7 +125,7 @@ export function describeCharacter(
   // ふるいにかけると「髪を切った話」を聞かれたときに答えられなくなる
   for (const significance of options.omitChanges
     ? []
-    : scoreCharacterChanges(character)) {
+    : scoreCharacterChanges(character, { synopses: options.synopses })) {
     const values = describeChangeValues(
       changesOfField(character.changes, significance.field)
     );

@@ -190,7 +190,12 @@ import {
 import { PendingSettingsUpdateStore } from "../core/pendingSettingsUpdates";
 import { describePendingUpdateCounts } from "../core/pendingSettingsMerge";
 import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
-import { describeInvolvement, scoreChanges } from "../core/changeSignificance";
+import {
+  characterCentrality,
+  describeInvolvement,
+  scoreChanges,
+  type CharacterCentrality,
+} from "../core/changeSignificance";
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
@@ -513,6 +518,12 @@ export class SettingsPanel {
   /** 作品全体の資料（紹介文・キャッチコピー・各話あらすじ）。読むだけ */
   private workInfo: WorkInfoDoc = { blurb: "", catchphrase: "", episodes: [] };
   /**
+   * 各話あらすじの本文（空のものは除く）。変化の関与度の「あらすじの半分以上に
+   * 名前が出る +5」に使う（2026-10-17）。作品の情報を読むときに一緒に読んだ
+   * ものを使い、別に読み直さない（読めなければ空で、その加点が付かないだけ）
+   */
+  private synopsisTexts: string[] = [];
+  /**
    * いま開いている本文の話数（設計書6.92）。本文から開いていなければ null。
    *
    * **話数の求め方は増やさない。** `episodeParser.ts` がファイル名から
@@ -803,6 +814,7 @@ export class SettingsPanel {
     this.customFieldSet = await this.customFieldStore.loadOrEmpty();
     this.customFields = fieldsFor(this.customFieldSet, "character");
     this.workInfo = await this.loadWorkInfo();
+    this.synopsisTexts = this.workInfo.episodes.map((episode) => episode.synopsis);
     this.pendingUpdatesText = await this.countPendingUpdates();
 
     this.post({
@@ -969,7 +981,8 @@ export class SettingsPanel {
             // 要確認（根拠が無いので本体へ入れていない変化）を見分けるのに、
             // いまの本体の値が要る
             (field) => (isCharacterTextField(field) ? character[field] : null),
-            character.rejectedValues
+            character.rejectedValues,
+            characterCentrality(character, { synopses: this.synopsisTexts })
           ),
         ],
         fields: [
@@ -1019,6 +1032,13 @@ export class SettingsPanel {
             "isMob",
             "モブ・集団として扱う（一覧の下へまとめ、ハイライトと辞書から外す）",
             character.isMob
+          ),
+          // 主人公の印（作者の裁定、2026-10-17）。物語の中心が誰かは機械には
+          // 決められないので、作者がここで付ける。AIは付け外ししない
+          checkField(
+            "isProtagonist",
+            "主人公（中心人物）として扱う（作中での変化の関与度に +5）",
+            character.isProtagonist === true
           ),
           // 作者が足した項目は、既定の項目のあと・メモの前に並べる
           ...customFieldControls(character.customFields, this.customFields),
@@ -2750,6 +2770,7 @@ export class SettingsPanel {
       abilitySystem: this.abilitySystem,
       characters: this.characters,
       notes,
+      synopses: this.synopsisTexts,
     });
   }
 
@@ -3262,7 +3283,12 @@ function referenceLines(
    */
   currentOf?: (field: string) => string | null | undefined,
   /** 作者が誤りとして落とした値（2026-09-26 深夜）。今は人物だけが持つ */
-  rejectedValues?: readonly RejectedValue[]
+  rejectedValues?: readonly RejectedValue[],
+  /**
+   * 人物の側の関与度の加点（主人公の印・あらすじ。2026-10-17）。
+   * AIへ渡す材料（`describeCharacter`）と同じ数字にするために渡す
+   */
+  centrality?: CharacterCentrality
 ): DetailView["reference"] {
   const heldFields = changes && currentOf
     ? [...new Set(changes.map((change) => change.field))]
@@ -3294,7 +3320,7 @@ function referenceLines(
     // **関与度を添える**（`changeSignificance.ts`）。AIへ渡す材料と同じ数字を
     // 同じ書き方で出す。紹介に何が書かれ、何が書かれなかったのかを
     // 作者がここで確かめられるようにするためである
-    ...scoreChanges(changes ?? [], appearedChapters).map((significance) => ({
+    ...scoreChanges(changes ?? [], appearedChapters, centrality).map((significance) => ({
       label: `変化（${significance.field}）`,
       value: `${describeChangeValues(
         changesOfField(changes ?? [], significance.field)

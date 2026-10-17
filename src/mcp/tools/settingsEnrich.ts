@@ -70,8 +70,10 @@ import {
   readSettingsFile,
   readSettingsRecords,
   settingsDirOf,
+  SYNOPSES_FILE,
   workTitleOf,
 } from "./shared";
+import { parseSynopsisSet } from "../../models/synopsis";
 import { pastSceneSourcesOf } from "./contradiction";
 import { CHARACTER_PROPOSE_FIELDS } from "./propose";
 import { runOnce, validateWith, type RunnerInput } from "./run";
@@ -187,6 +189,23 @@ function readCustomFields(folder: string): CustomFieldDefinition[] {
     return fieldsFor(parseCustomFieldSet(raw), "character");
   } catch {
     return fieldsFor(emptyCustomFieldSet(), "character");
+  }
+}
+
+/**
+ * 各話あらすじの本文（空のものは除く）。変化の関与度の「あらすじの半分以上に
+ * 名前が出る +5」に使う（2026-10-17）。**読めなければ空**（画面と同じく、
+ * その加点が付かないだけで、再読込は止めない）
+ */
+function readSynopsisTexts(folder: string): string[] {
+  const raw = readSettingsFile(folder, SYNOPSES_FILE);
+  if (raw === undefined) return [];
+  try {
+    return parseSynopsisSet(raw)
+      .episodes.map((episode) => episode.synopsis.trim())
+      .filter((synopsis) => synopsis.length > 0);
+  } catch {
+    return [];
   }
 }
 
@@ -427,6 +446,8 @@ export function settingsEnrichPrompt(input: SettingsEnrichInput) {
         characters: target.characters,
         // 留意点があれば変化の記録を外す（製品の画面と同じ。作者の裁定 2026-10-15 の6）
         notes: input.notes,
+        // 関与度の点を画面と同じにする（あらすじの加点。2026-10-17）
+        synopses: kind === "character" ? readSynopsisTexts(input.folder) : undefined,
       }),
     },
     excerpts,

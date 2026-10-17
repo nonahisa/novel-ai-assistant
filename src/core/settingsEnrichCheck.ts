@@ -109,6 +109,12 @@ export interface EnrichDescribeContext {
    * 疑いのある履歴は材料から外す。**記録そのものは書き換えない**（実装ルール2）
    */
   notes?: string;
+  /**
+   * 各話あらすじの本文（人物のときだけ効く）。変化の関与度の
+   * 「あらすじの半分以上に名前が出る +5」に使う（2026-10-17）。画面と MCP で
+   * 同じ点になるよう、どちらも渡す
+   */
+  synopses?: readonly string[];
 }
 
 /** プロンプトの【現在の設定】に渡す文章（製品の `describe` と同じ） */
@@ -120,6 +126,7 @@ export function describeEnrichTarget(
   if (kind === "character") {
     return describeCharacter(record as Character, context.customFields, {
       omitChanges: enrichOmitsChanges(context.notes),
+      synopses: context.synopses,
     });
   }
   if (kind === "ability") {
