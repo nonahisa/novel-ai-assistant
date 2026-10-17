@@ -275,7 +275,9 @@ describe("キャッシュを同期するオプション（設計書5.5.7）", ()
 // gitignoreの「後勝ち」と、除外したディレクトリの中を再び含める挙動は
 // 思い込みで書くと外しやすい。gitに直接聞いて固定する。
 
-const tempRoot = path.join(os.tmpdir(), "novelai-gitignore-test");
+// 実行ごとに別の場所にする。決まった名前だと、同時に走る2本が互いに消し合って
+// EBUSY・File exists で落ちた（2026-10-17、core/git.test.ts と同じ原因）
+const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "novelai-gitignore-test-"));
 const gitReady = await isGitAvailable();
 
 beforeAll(async () => {
