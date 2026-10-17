@@ -82,7 +82,7 @@
 | 141 | プロット逸脱検知を、ハイエルフ未亡人（確認用コピー）でさくら | B | MCP `novel.run` deviation をさくら `preview/gemma-4-31B-it` で第11話。操作ログの終了行で読める | 直した側は `unit/core/deviationValidation.test.ts`。**C（課金）にもできる境目** |
 | 147 | （一部 2026-10-16 機械で確認：直っている〔CHA | D〔そろえる〕 | 直って単体テスト済み。残りは「見て分かるか」の文言 | 147・149 を1件に。画面は e2e/look/divergenceLook.test.ts で撮れるので、写真を見るだけでよい |
 | 149 | （一部 2026-10-16 機械で確認：直っている〔CHA | D〔そろえる〕 | 同上 | `unit/features/walkConflicts.test.ts` |
-| 158 | つないだあと、Claude Code で新しい会話を始めて「 | B（付け替え） | 手順書は MCP の prompts として出す。出ることはテスト済み。「/」の品書きの見せ方は Claude Code の側 | `test/unit/mcp/mcpSetup.test.ts`、`src/mcp/prompts/setupGuide.ts`。**付け替えでなく E に残す境目もある**（Claude Code の画面で見たい場合） |
+| 158 | つないだあと、Claude Code で新しい会話を始めて「 | B（付け替え） | 手順書は MCP の prompts として出す。出ることはテスト済み。「/」の品書きの見せ方は Claude Code の側 | `test/unit/mcp/mcpSetup.test.ts:34`「名前は setup、題は作者の言葉」・`:39`「サーバーに登録されている」・`:53`「聞き取る項目がそろっている」、`src/mcp/prompts/setupGuide.ts`。**付け替えでなく E に残す境目もある**（Claude Code の画面で見たい場合） |
 | 159 | （一部 2026-10-16 機械で確認：e2e/setup | A（付け替え） | 残りは「OS から作者の VS Code へ届いて前に出る」。受け口は1つで、10-17 に run.request が同じ道で3回、作者の画面に確認の窓を出した。確認の窓は e2e 済み | 受け口 `src/features/readerStatsHelperLink.ts:531`（registerUriHandler は1つだけ）。引継ぎ書 25204・25205・25207行。e2e/setupRequestConfirm.test.ts |
 | 160 | Node.jsを入れていない環境でも「Claude Code | C | Node.js の無い環境が無い | 作者の機械はどちらも Node.js 24 |
 | 194 | （2026-10-15 MCP で測定、**減っていない** | B〔測〕 | 文語体を現代表記へ直す提案は減っていない。製品の弱いところとして直すかの裁定 | 2026-10-15-ai-measure.md |
