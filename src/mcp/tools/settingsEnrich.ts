@@ -266,6 +266,8 @@ interface EnrichTarget {
   customFields: CustomFieldDefinition[];
   characters: Character[];
   excerpts: MentionExcerpt[];
+  /** 作品の本文（話ごと）。名前の出ない話の変化を見分ける検算に渡す（A27） */
+  sources: ExcerptSource[];
   /**
    * 作品の語り手と話ごとの本文（人物のときだけ。2026-10-10、設計書6.5.12）。
    * 語り手が決まらなければ null
@@ -331,6 +333,7 @@ function loadTarget(input: SettingsEnrichInput): EnrichTarget {
     customFields,
     characters,
     excerpts,
+    sources,
     narration: narrationOf(kind, characters, sources),
   };
 }
@@ -400,6 +403,7 @@ function loadStagedTarget(input: SettingsEnrichInput): EnrichTarget {
     customFields,
     characters,
     excerpts,
+    sources,
     narration: narrationOf(kind, characters, sources),
   };
 }
@@ -529,6 +533,8 @@ export function settingsEnrichValidate(
     parsed,
     excerptText,
     knownChapters: knownChaptersOfWork(input.folder),
+    // 製品の画面と同じく、名前の出ない話の変化を根拠にした案を見分ける（A27）
+    sources: kind === "character" ? target.sources : undefined,
   });
 
   if (input.fromExtract) {
@@ -622,6 +628,10 @@ export function settingsEnrichValidate(
     dropped: {
       unknownCitations: checked.unknownCitations,
       speechEchoes: checked.speechEchoes,
+      /** 口調の案に書かれていたが、抜粋の台詞に無かった一人称（あれば口調の案ごと落とした） */
+      speechUnspokenFirstPersons: checked.speechUnspokenFirstPersons,
+      /** 名前の出ない話の変化の記録から持ち越した語を含んでいたので落とした項目（A27） */
+      foreignChanges: checked.foreignChanges,
       misattributed: droppedTotal(misattributed.dropped),
     },
     /**
@@ -750,6 +760,9 @@ function stagedSummaryOf(
     dropped: {
       unknownCitations: checked.unknownCitations,
       speechEchoes: checked.speechEchoes,
+      speechUnspokenFirstPersons: checked.speechUnspokenFirstPersons,
+      /** 名前の出ない話の変化の記録から持ち越した語を含んでいたので落とした項目（A27） */
+      foreignChanges: checked.foreignChanges,
       misattributed: droppedTotal(misattributed.dropped),
     },
     stashed,

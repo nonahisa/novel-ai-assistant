@@ -19,12 +19,13 @@ import {
 } from "./settingsSummary";
 import { isMeaningfulValue } from "./characterExtractionValidation";
 import { stripInvolvementNote } from "./changeSignificance";
-import { clampSummary } from "./summaryLimit";
-import { isSpeechStyleEcho } from "./speechStyle";
+import { clampAtSentenceEnd, clampSummary } from "./summaryLimit";
+import { firstPersonsUnspokenInDialogue, isSpeechStyleEcho } from "./speechStyle";
 import { unknownCitedChapters } from "./chapterCitations";
 import { expandNameVariants } from "./termIndex";
 import { normalizeName, sharedNameParts } from "./characterMerge";
 import { evidencePhrases } from "./groundedEvidence";
+import type { ExcerptSource } from "./mentionExcerpts";
 
 /**
  * 「AIで再読込」（P-20、設計書6.31.1）の材料と検算の、`vscode` の要らない部分
@@ -172,7 +173,13 @@ export function clampEnrichField(field: EnrichableField, value: unknown): string
   // （`placeholderText.ts`）。資料へ載る手前で落とす
   const body = stripInvolvementNote(text);
   if (!body) return "";
-  return field.maxChars ? (clampSummary(body, field.maxChars) ?? "") : body;
+  if (!field.maxChars) return body;
+  // **口調は文の切れ目で切る**（作者の裁定 2026-10-17。A22）。紹介は途中まででも
+  // 情報が残るので読点まで戻してよいが、口調は「語尾は…と、」で切れると読めない
+  if (!field.custom && field.key === "speechStyle") {
+    return clampAtSentenceEnd(body, field.maxChars) ?? "";
+  }
+  return clampSummary(body, field.maxChars) ?? "";
 }
 
 /** 項目ごとの提案（いまの値と並べて作者に見せる1行） */
@@ -194,6 +201,16 @@ export interface EnrichCheckResult {
   unknownCitations: Array<{ label: string; chapters: number[] }>;
   /** 口調の提案が指示の言葉の写しだったので落とした数（設計書6.5.11） */
   speechEchoes: number;
+  /**
+   * 口調の提案に書かれていたが、抜粋の台詞に1度も出てこなかった一人称
+   * （作者の裁定 2026-10-17。A22）。空でなければ口調の提案ごと落としている
+   */
+  speechUnspokenFirstPersons: string[];
+  /**
+   * 名前の出ない話の変化の記録から持ち越した語を含んでいたので落とした項目
+   * （作者の裁定 2026-10-17「製品で弾く」。A27）
+   */
+  foreignChanges: Array<{ label: string; phrases: string[]; chapters: number[] }>;
 }
 
 /**
@@ -211,11 +228,22 @@ export function checkEnrichProposals(input: {
   excerptText: string;
   /** 作品の話数。空なら照合しない（`unknownCitedChapters`） */
   knownChapters: ReadonlySet<number>;
+  /**
+   * 作品の本文（話ごと）。人物のとき、名前の出ない話の変化を根拠にした案を
+   * 見分けるのに使う（`foreignChangePhrases`）。渡さなければ見ない
+   */
+  sources?: readonly ExcerptSource[];
 }): EnrichCheckResult {
   const current = input.record as unknown as Record<string, unknown>;
   const proposals: EnrichProposal[] = [];
   const unknownCitations: EnrichCheckResult["unknownCitations"] = [];
   let speechEchoes = 0;
+  const speechUnspokenFirstPersons: string[] = [];
+  const foreignChanges: EnrichCheckResult["foreignChanges"] = [];
+  const foreign =
+    input.kind === "character" && input.sources
+      ? foreignChangePhrases(input.record as Character, input.sources)
+      : [];
 
   for (const field of enrichableFields(input.kind, input.customFields)) {
     const proposed = clampEnrichField(field, input.parsed[field.key]);
@@ -235,11 +263,40 @@ export function checkEnrichProposals(input: {
       speechEchoes += 1;
       continue;
     }
+    /*
+      **口調の案に書いた一人称が、抜粋の台詞にあるか**（作者の裁定 2026-10-17。A22）。
+      26b がアジャーノの案に「一人称は俺、場面により余」と書いた。「余」は第12話の
+      皇子の語り（地の文）にしか無い。**一人称の節だけを外さず、案ごと落とす**——
+      「場面により余。」のように並べて書かれると、節を外した残りが読めない文になる
+    */
+    if (input.kind === "character" && !field.custom && field.key === "speechStyle") {
+      const unspoken = firstPersonsUnspokenInDialogue(proposed, input.excerptText);
+      if (unspoken.length > 0) {
+        speechUnspokenFirstPersons.push(...unspoken);
+        continue;
+      }
+    }
     // **無い話を根拠にした値は出さない**（2026-09-25 精査 F5）。作者の実機で、
     // 2話しかない作品に「第17話を根拠に文佳の祖母」と返ってきた
     const unknown = unknownCitedChapters(proposed, input.knownChapters);
     if (unknown.length > 0) {
       unknownCitations.push({ label: field.label, chapters: unknown });
+      continue;
+    }
+    /*
+      **名前の出ない話の変化を根拠にした案は出さない**（作者の裁定 2026-10-17
+      「製品で弾く」。A27）。アジャーノの記録に第12話の抽出で入った「帝国の皇子」を、
+      26b・31b が「第12話から皇子」と紹介へ持ち越した（4回中4回）。第12話の本文に
+      アジャーノの名前は1度も出ない。留意点で変化を材料から外しても（2.3）、
+      所属・性格など本体の欄に同じ語が残るので、コードでも見る
+    */
+    const carried = foreign.filter((item) => proposed.includes(item.phrase));
+    if (carried.length > 0) {
+      foreignChanges.push({
+        label: field.label,
+        phrases: [...new Set(carried.map((item) => item.phrase))],
+        chapters: [...new Set(carried.flatMap((item) => item.chapters))].sort((a, b) => a - b),
+      });
       continue;
     }
     // 追加項目の値は customFields の中にある
@@ -255,7 +312,69 @@ export function checkEnrichProposals(input: {
     });
   }
 
-  return { proposals, unknownCitations, speechEchoes };
+  return {
+    proposals,
+    unknownCitations,
+    speechEchoes,
+    speechUnspokenFirstPersons,
+    foreignChanges,
+  };
+}
+
+/** 変化の値を語句へ割る区切り（句読点・括弧・中黒・空白） */
+const PHRASE_SEPARATOR = /[。、，,．.（）()「」『』【】・\s]+/u;
+
+/**
+ * 名前の出ない話の変化から取った語句（A27）。
+ *
+ * - 対象は AI が抽出した変化だけ（`source` が "author" のものは作者の値なので信じる。
+ *   実装ルール2）
+ * - 変化の**どの話の本文にも、名前・別名が1度も出ない**ものだけ。話の本文が
+ *   手元に無い話が1つでもあれば判定しない（決められないものは通す）。
+ *   記録の登場話（`appearedChapters`）は見ない——混入した抽出が書いたものだから
+ * - 変化の値を句読点で割った2字以上の語句。**名前の出る話の変化にも同じ語句が
+ *   あれば除く**（「冒険者」が第10話にも第12話にもある、など）
+ */
+export function foreignChangePhrases(
+  character: Character,
+  sources: readonly ExcerptSource[]
+): Array<{ phrase: string; chapters: number[] }> {
+  const names = expandNameVariants([character.name, ...character.aliases]).filter(
+    (name) => name.length > 0
+  );
+  if (names.length === 0) return [];
+  const textsOf = new Map<number, string[]>();
+  for (const source of sources) {
+    if (typeof source.chapter !== "number") continue;
+    textsOf.set(source.chapter, [...(textsOf.get(source.chapter) ?? []), source.text]);
+  }
+  const named = (chapter: number): boolean | undefined => {
+    const texts = textsOf.get(chapter);
+    if (!texts) return undefined;
+    return texts.some((text) => names.some((name) => text.includes(name)));
+  };
+
+  const phrasesOf = (value: string): string[] =>
+    value
+      .split(PHRASE_SEPARATOR)
+      .map((part) => part.trim())
+      .filter((part) => [...part].length >= 2);
+
+  const suspect: Array<{ phrase: string; chapters: number[] }> = [];
+  const grounded = new Set<string>();
+  for (const item of character.changes ?? []) {
+    const chapters = item.chapters.filter((chapter) => Number.isSafeInteger(chapter));
+    const seen = chapters.map(named);
+    const isForeign =
+      item.source !== "author" &&
+      chapters.length > 0 &&
+      seen.every((value) => value === false);
+    for (const phrase of phrasesOf(item.value)) {
+      if (isForeign) suspect.push({ phrase, chapters });
+      else grounded.add(phrase);
+    }
+  }
+  return suspect.filter((item) => !grounded.has(item.phrase));
 }
 
 /**
