@@ -1,8 +1,11 @@
 import { escapeHtml } from "./manuscriptRender";
 import {
   buildPrintGuide,
+  emptyHeaderFooter,
+  marginsAttribute,
   pageSheetCss,
   PRINT_FONT_FAMILY,
+  PRINT_GOTHIC_FONT_FAMILY,
   type HeaderFooter,
   type PrintEpisode,
 } from "./printHtml";
@@ -117,25 +120,36 @@ export function gridMarginClear(paper: GridPaper, grid: GridOptions, marginMm: n
 }
 
 /**
- * 公募の上下の余白の既定：上は何も刷らず、下にページ番号。
+ * 公募の上下の余白の既定：上は何も刷らず、下の中央にページ番号（奇数・偶数とも）。
+ * 公募によってはページ番号の位置に指定があるので、読む紙と同じく枠ごとに選べる
+ * （作者の裁定、2026-10-17）。
  *
  * **作者名は既定に入れない。** 公募には、審査の公平のため原稿に名前を
  * 出さない決まりのものがある。
+ *
+ * 呼ぶたびに新しい箱を返す（既定を共有して、どこかで書き換えられないように）。
  */
-export const GRID_HEADER_FOOTER: HeaderFooter = { top: "none", bottom: "page" };
+export function gridHeaderFooter(): HeaderFooter {
+  const margins = emptyHeaderFooter();
+  margins.odd.bottom.center = "page";
+  margins.even.bottom.center = "page";
+  return margins;
+}
 
 export interface GridPrintHtmlInput {
   workTitle: string;
   episodes: readonly PrintEpisode[];
   paper: GridPaper;
   grid: GridOptions;
-  /** 省略なら `GRID_HEADER_FOOTER` */
+  /** 省略なら `gridHeaderFooter()` */
   headerFooter?: HeaderFooter;
   author?: string;
   /** 紙の端から本文までの余白（mm）。省略なら普通（`GRID_MARGIN_MM`） */
   marginMm?: number;
   /**
-   * 作品の種類。**台本だけ、ト書きを3字下げる**（作者の裁定、2026-10-09）。
+   * 作品の種類。**台本だけ、行の種類で組み方を変える**：ト書きの3字下げ
+   * （作者の裁定、2026-10-09）、台詞の人物名の欄と「「」の下へのぶら下げ、
+   * ト書きと柱のゴシック（2026-10-17。`manuscriptGrid.ts` の `linesOfParagraph`）。
    * ほかの種類はいまのまま（本文をそのまま升目に置く）
    */
   kind?: WorkKindKey;
@@ -158,7 +172,7 @@ export function describeGrid(
 export function buildGridPrintHtml(input: GridPrintHtmlInput): string {
   const paper = gridPaper(input.paper);
   const title = escapeHtml(input.workTitle.trim() || "無題");
-  const margins = input.headerFooter ?? GRID_HEADER_FOOTER;
+  const margins = input.headerFooter ?? gridHeaderFooter();
   const author = escapeHtml((input.author ?? "").trim());
   const marginMm = input.marginMm ?? GRID_MARGIN_MM;
   const pages = layoutGrid(input.episodes, input.grid, input.kind);
@@ -173,7 +187,7 @@ export function buildGridPrintHtml(input: GridPrintHtmlInput): string {
     buildGridStyle(paper, input.grid, marginMm),
     "</style>",
     "</head>",
-    `<body data-grid="1" data-vertical="${input.grid.vertical ? "1" : "0"}" data-head="${margins.top}" data-foot="${margins.bottom}" data-title="${title}" data-author="${author}">`,
+    `<body data-grid="1" data-vertical="${input.grid.vertical ? "1" : "0"}" ${marginsAttribute(margins)} data-title="${title}" data-author="${author}">`,
     buildPrintGuide(escapeHtml(describeGrid(input.paper, input.grid, marginMm)), margins),
     '<div id="print-pages">',
     // 扉（題だけ）。上下の余白には何も刷らない（スクリプトが飛ばす）
@@ -205,7 +219,8 @@ function renderLine(line: GridLine): string {
   const cells = line.units.map(renderUnit).join("");
   // ぶら下げは最後のマスのあとに置く。行の枠からはみ出して、余白に出る
   const hang = line.hang ? renderUnit(line.hang) : "";
-  return `<div class="gl">${indent}${cells}${hang}</div>`;
+  // 台本のト書きと柱はゴシック（`GridLine.gothic`）。マスの寸法は変わらない
+  return `<div class="${line.gothic ? "gl g" : "gl"}">${indent}${cells}${hang}</div>`;
 }
 
 /**
@@ -270,6 +285,8 @@ function buildGridStyle(paper: GridPaperInfo, grid: GridOptions, marginMm: numbe
     ".gl i, .gl b { font-style: normal; font-weight: normal; }",
     ".gl i { display: block; flex: none; inline-size: 1em; block-size: 1em; line-height: 1; text-align: center; }",
     ".gl i.t { text-combine-upright: all; -webkit-text-combine: horizontal; }",
+    // 台本のト書きと柱（作者の裁定、2026-10-17）。台詞と人物名は明朝のまま
+    `.gl.g { font-family: ${PRINT_GOTHIC_FONT_FAMILY}; }`,
     /*
       傍点：マスの外側（ルビと同じ側）にゴマ点を置く。**圏点（text-emphasis）は
       使わない**——1字ぶんの高さのマスでは、圏点が行の高さを押し広げて字が

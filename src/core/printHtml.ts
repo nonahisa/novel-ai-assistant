@@ -8,6 +8,13 @@ import { kindLineClass, kindLineCss } from "./kindLines";
 import type { WorkKindKey } from "./workKind";
 import { PRINT_PAGINATE_SCRIPT } from "./printPaginate";
 import { tcyRuns } from "./tateChuYoko";
+import {
+  SCRIPT_GOTHIC_FONT_FAMILY,
+  SCRIPT_LAYOUT_CSS,
+  SCRIPT_ROLE_WIDTH,
+  scriptRoleClass,
+  splitSerifu,
+} from "./scriptLines";
 
 /**
  * 印刷用に組版したHTMLを作る（PDF出力のもと）。
@@ -67,13 +74,126 @@ export const MARGIN_CONTENTS: readonly {
   { id: "none", label: "なし", detail: "何も刷りません" },
 ];
 
-export interface HeaderFooter {
-  top: MarginContent;
-  bottom: MarginContent;
+/** ヘッダー（またはフッター）1本の、左・中央・右の3つの枠 */
+export interface MarginRow {
+  left: MarginContent;
+  center: MarginContent;
+  right: MarginContent;
 }
+
+/** 1つの面の上（ヘッダー）と下（フッター） */
+export interface PageMargins {
+  top: MarginRow;
+  bottom: MarginRow;
+}
+
+/**
+ * 上下の余白に刷るものの置き方（作者の裁定、2026-10-17）。
+ *
+ * **奇数ページと偶数ページで別々に、ヘッダー・フッターの左・中央・右へ置く。**
+ * 奇数・偶数はページ番号で数える（扉は数えず、本文の1ページ目が1＝奇数）。
+ * 左・右は紙の物理的な左右（縦書きの紙でも、頭と足は横書きで刷る）。
+ */
+export interface HeaderFooter {
+  odd: PageMargins;
+  even: PageMargins;
+}
+
+/** 枠の名前（左・中央・右）。選ぶ画面と案内帯で使う */
+export const MARGIN_COLUMNS: readonly { id: keyof MarginRow; label: string }[] = [
+  { id: "left", label: "左" },
+  { id: "center", label: "中央" },
+  { id: "right", label: "右" },
+];
+
+/** 上（ヘッダー）と下（フッター） */
+export const MARGIN_ROWS: readonly { id: keyof PageMargins; label: string }[] = [
+  { id: "top", label: "ヘッダー" },
+  { id: "bottom", label: "フッター" },
+];
+
+/** 奇数・偶数 */
+export const MARGIN_PARITIES: readonly { id: keyof HeaderFooter; label: string }[] = [
+  { id: "odd", label: "奇数ページ" },
+  { id: "even", label: "偶数ページ" },
+];
 
 export function marginContentLabel(id: MarginContent): string {
   return MARGIN_CONTENTS.find((item) => item.id === id)?.label ?? id;
+}
+
+/** 何も刷らない置き方。ここから必要な枠だけを埋める */
+export function emptyHeaderFooter(): HeaderFooter {
+  const row = (): MarginRow => ({ left: "none", center: "none", right: "none" });
+  return {
+    odd: { top: row(), bottom: row() },
+    even: { top: row(), bottom: row() },
+  };
+}
+
+/**
+ * 枠ごとに中身を置き換えた、新しい置き方を返す（元は書き換えない。既定を
+ * 共有している箱を、選ぶ画面や外部AIの依頼で壊さないため）。
+ */
+export function mapHeaderFooter(
+  margins: HeaderFooter,
+  replace: (content: MarginContent) => MarginContent
+): HeaderFooter {
+  const row = (source: MarginRow): MarginRow => ({
+    left: replace(source.left),
+    center: replace(source.center),
+    right: replace(source.right),
+  });
+  return {
+    odd: { top: row(margins.odd.top), bottom: row(margins.odd.bottom) },
+    even: { top: row(margins.even.top), bottom: row(margins.even.bottom) },
+  };
+}
+
+/** 置き方のどこかに、その中身があるか（作者名を訊くかどうかを決める） */
+export function headerFooterUses(margins: HeaderFooter, content: MarginContent): boolean {
+  return MARGIN_PARITIES.some((parity) =>
+    MARGIN_ROWS.some((row) =>
+      MARGIN_COLUMNS.some((column) => margins[parity.id][row.id][column.id] === content)
+    )
+  );
+}
+
+/**
+ * 置き方を1行の文にする（選ぶ画面の既定の説明・案内帯・外部AIの知らせで共用）。
+ *
+ * 「奇数ページ：ヘッダー中央に話の見出し・ヘッダー右にページ番号／偶数ページ：…」。
+ * **奇数と偶数が同じなら1つにまとめる**（公募の既定のように左右を分けない紙で、
+ * 同じ文を2回読ませない）。何も刷らないときは「なし」。
+ */
+export function describeHeaderFooter(margins: HeaderFooter): string {
+  const side = (page: PageMargins): string => {
+    const parts: string[] = [];
+    for (const row of MARGIN_ROWS) {
+      for (const column of MARGIN_COLUMNS) {
+        const content = page[row.id][column.id];
+        if (content === "none") continue;
+        parts.push(`${row.label}${column.label}に${marginContentLabel(content)}`);
+      }
+    }
+    return parts.length > 0 ? parts.join("・") : "なし";
+  };
+  const odd = side(margins.odd);
+  const even = side(margins.even);
+  if (odd === even) return `奇数・偶数ページとも：${odd}`;
+  return `奇数ページ：${odd}／偶数ページ：${even}`;
+}
+
+/**
+ * 読む紙（文庫・A5・A4）の既定（作者の裁定、2026-10-17）。
+ * 奇数ページはページ番号をヘッダーの右、偶数ページはヘッダーの左。章（話）の題は
+ * ヘッダーの中央（奇数・偶数とも）。それ以外は刷らない。
+ */
+function readingHeaderFooter(): HeaderFooter {
+  const margins = emptyHeaderFooter();
+  margins.odd.top = { left: "none", center: "episode", right: "page" };
+  margins.even.top = { left: "page", center: "episode", right: "none" };
+  return margins;
 }
 
 export interface PrintPresetInfo {
@@ -96,9 +216,9 @@ export interface PrintPresetInfo {
   /**
    * 上下の余白に刷るものの既定（作者が選ばなかったとき）。
    *
-   * **ページ番号は下に置く**（どの紙でも）。文庫は市販の本に倣って上に
-   * 話の見出し（柱）を、A5・A4 は手元で読み返すときに何の紙か分かるよう
-   * 題名を置く。
+   * 3つの紙とも同じ（作者の裁定、2026-10-17。`readingHeaderFooter`）：
+   * ページ番号は奇数ページのヘッダー右・偶数ページのヘッダー左、話の見出しは
+   * ヘッダーの中央。
    */
   headerFooter: HeaderFooter;
 }
@@ -117,7 +237,7 @@ export const PRINT_PRESETS: readonly PrintPresetInfo[] = [
     size: "105mm 148mm",
     vertical: true,
     fontSize: "9pt",
-    headerFooter: { top: "episode", bottom: "page" },
+    headerFooter: readingHeaderFooter(),
   },
   {
     id: "a5-vertical",
@@ -126,7 +246,7 @@ export const PRINT_PRESETS: readonly PrintPresetInfo[] = [
     size: "148mm 210mm",
     vertical: true,
     fontSize: "10pt",
-    headerFooter: { top: "title", bottom: "page" },
+    headerFooter: readingHeaderFooter(),
   },
   {
     id: "a4-horizontal",
@@ -135,7 +255,7 @@ export const PRINT_PRESETS: readonly PrintPresetInfo[] = [
     size: "210mm 297mm",
     vertical: false,
     fontSize: "10.5pt",
-    headerFooter: { top: "title", bottom: "page" },
+    headerFooter: readingHeaderFooter(),
   },
 ];
 
@@ -212,7 +332,7 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
     // 測るのに使う（縦書きは左へ、横書きは下へはみ出す）
     // 上下の余白に何を刷るかと、その材料（題名・作者名）もスクリプトへ渡す。
     // 中身を入れるのはスクリプト（ページ番号と話は面に割るまで決まらない）
-    `<body data-vertical="${preset.vertical ? "1" : "0"}" data-head="${margins.top}" data-foot="${margins.bottom}" data-title="${title}" data-author="${author}">`,
+    `<body data-vertical="${preset.vertical ? "1" : "0"}" ${marginsAttribute(margins)} data-title="${title}" data-author="${author}">`,
     buildGuide(preset, margins),
     // 紙1枚ずつの面は、ここへスクリプトが並べる（設計書6.33.5 の1）
     '<div id="print-pages"></div>',
@@ -263,12 +383,23 @@ export function buildPrintGuide(paper: string, margins: HeaderFooter): string {
     '<div class="print-guide">',
     `<p class="print-guide-lead">この画面の白い面が、そのまま紙1枚ずつになります（<span id="print-page-count">面に分けています…</span>）。` +
       `紙：${paper}。` +
-      `上の余白：${marginContentLabel(margins.top)}／下の余白：${marginContentLabel(margins.bottom)}</p>`,
+      `上下の余白：${escapeHtml(describeHeaderFooter(margins))}</p>`,
     "<p>Ctrl+P で印刷の画面を開き、送信先を「PDF に保存」にしてください。" +
       "「詳細設定」の「ヘッダーとフッター」のチェックを外してください（入れたままだと、日付とファイルの場所が紙の端に刷られます）。" +
       "用紙サイズ・余白・倍率は「既定」のままにしてください。</p>",
     "</div>",
   ].join("\n");
+}
+
+/**
+ * 上下の余白の置き方を、面に割るスクリプトへ渡す属性（`data-margins`）。
+ *
+ * **JSON を逃がして1つの属性に入れる。** 枠が12あり、属性を12並べると読み書きの
+ * どちらかで1つ取り違えても気づきにくい。`getAttribute` が実体参照を戻すので、
+ * スクリプトはそのまま `JSON.parse` で読める。公募の納品用（`printGridHtml.ts`）も同じ。
+ */
+export function marginsAttribute(margins: HeaderFooter): string {
+  return `data-margins="${escapeHtml(JSON.stringify(margins))}"`;
 }
 
 /** `@page` の `size`（幅 高さ）を、幅と高さに分ける */
@@ -289,6 +420,9 @@ const PAGE_MARGIN = "15mm";
 /** 紙の書体。明朝を先に置く（公募の納品用の組版も同じ） */
 export const PRINT_FONT_FAMILY =
   '"Yu Mincho", "游明朝", "Hiragino Mincho ProN", "MS Mincho", serif';
+
+/** 紙のゴシック（台本のト書きと柱）。定義は `scriptLines.ts`（原稿エディターと同じ） */
+export const PRINT_GOTHIC_FONT_FAMILY = SCRIPT_GOTHIC_FONT_FAMILY;
 
 /** 1話ぶん。**話ごとに改ページする**（本の体裁に合わせる） */
 function renderEpisode(
@@ -343,11 +477,34 @@ function renderBody(
     if (afterBlank && paragraphs.length > 0) names.push("gap");
     const lineClass = kindLineClass(kind, line);
     if (lineClass) names.push(lineClass);
+    // 台本の台詞は、人物名を欄に入れて「「」の位置をそろえる（作者の裁定、2026-10-17。
+    // 公募の納品用・原稿エディターと同じ幅 `SCRIPT_ROLE_WIDTH`）。漫画の原作は変えない
+    const serifu = kind === "script" ? splitSerifu(line) : undefined;
+    if (serifu) names.push(scriptRoleClass(Math.max(SCRIPT_ROLE_WIDTH, roleCells(serifu.role, notation, vertical))));
     const attr = names.length > 0 ? ` class="${names.join(" ")}"` : "";
-    paragraphs.push(`<p${attr}>${renderInline(line, notation, vertical)}</p>`);
+    const inner = serifu
+      ? `<span class="script-role">${renderInline(serifu.role, notation, vertical)}</span>${renderInline(serifu.speech, notation, vertical)}`
+      : renderInline(line, notation, vertical);
+    paragraphs.push(`<p${attr}>${inner}</p>`);
     afterBlank = false;
   }
   return paragraphs;
+}
+
+/**
+ * 人物名が紙の上で取る字数。ルビは親文字だけを数え、縦書きの縦中横は1字に数える
+ * （読みや半角の数字の並びで、ぶら下げの幅が広がりすぎないように）。
+ * 字の形までは測らないので、半角の英字は1字として数える。
+ */
+function roleCells(role: string, notation: NotationMode, vertical: boolean): number {
+  let cells = 0;
+  for (const token of tokenizeLine(role, notation)) {
+    const text = token.kind === "ruby" ? token.base : token.text;
+    for (const segment of segmentsForTcy(text, vertical)) {
+      cells += segment.tcy ? 1 : [...segment.text].length;
+    }
+  }
+  return cells;
 }
 
 /**
@@ -460,7 +617,12 @@ function buildStyle(
     小説の紙は、これまでと1バイトも変わらない
   */
   const kindCss = kindLineCss(kind);
-  const script = kindCss ? [kindCss] : [];
+  // 台本だけ、人物名の欄と書体（台詞は明朝・ト書きと柱はゴシック）を足す
+  // （作者の裁定、2026-10-17。原稿エディターと同じ `SCRIPT_LAYOUT_CSS`）
+  const script = [
+    ...(kindCss ? [kindCss] : []),
+    ...(kind === "script" ? [SCRIPT_LAYOUT_CSS] : []),
+  ];
 
   return [
     // 面に割れたら、スクリプトが余白を0にする（面の中に余白を持つため）。
@@ -524,10 +686,17 @@ export function pageSheetCss(
     `.page { position: relative; box-sizing: border-box; width: ${width}; height: ${height}; overflow: hidden; background: #fff; break-after: page; page-break-after: always; }`,
     ".page:last-child { break-after: auto; page-break-after: auto; }",
     `.page-body { position: absolute; top: ${margin}; right: ${margin}; bottom: ${margin}; left: ${margin}; overflow: hidden; }`,
-    // 頭と足（ヘッダー・フッター）は上下の余白の中ほどに置く
-    `.page-head, .page-foot { position: absolute; left: ${margin}; right: ${margin}; height: ${margin}; display: flex; align-items: center; justify-content: center; font-size: 0.8em; line-height: 1; white-space: nowrap; overflow: hidden; }`,
+    // 頭と足（ヘッダー・フッター）は上下の余白の中ほどに置く。
+    // 中は左・中央・右の3つの枠（作者の裁定、2026-10-17）。**格子で
+    // 「1fr auto 1fr」に割る**——flex の両端寄せだと、左右の字の長さが違うとき
+    // 中央の枠が紙の真ん中からずれる。左右の枠は同じ幅を分け合い、中央は字の分だけ取る
+    `.page-head, .page-foot { position: absolute; left: ${margin}; right: ${margin}; height: ${margin}; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); column-gap: 1em; align-items: center; font-size: 0.8em; line-height: 1; white-space: nowrap; overflow: hidden; }`,
     ".page-head { top: 0; }",
     ".page-foot { bottom: 0; }",
+    ".margin-left, .margin-center, .margin-right { overflow: hidden; }",
+    ".margin-left { text-align: left; }",
+    ".margin-center { text-align: center; }",
+    ".margin-right { text-align: right; }",
     // 段落が面をまたいだとき、続きの頭には場面転換の空きを付けない
     "p.cont { margin-block-start: 0; }",
     ".paginating #print-source, .paginated #print-source { display: none; }",

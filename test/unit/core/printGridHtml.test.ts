@@ -2,14 +2,19 @@ import { describe, expect, test } from "vitest";
 import {
   buildGridPrintHtml,
   describeGrid,
-  GRID_HEADER_FOOTER,
   GRID_MARGIN_MM,
   GRID_MARGINS,
   gridFontSizePt,
+  gridHeaderFooter,
   gridMarginClear,
   gridPaper,
   type GridPaper,
 } from "../../../src/core/printGridHtml";
+import {
+  emptyHeaderFooter,
+  marginsAttribute,
+  PRINT_GOTHIC_FONT_FAMILY,
+} from "../../../src/core/printHtml";
 import { gridGeometry, layoutGrid, type GridOptions } from "../../../src/core/manuscriptGrid";
 import { PRINT_PAGINATE_SCRIPT } from "../../../src/core/printPaginate";
 
@@ -161,22 +166,36 @@ describe("縦書きと横書き", () => {
 });
 
 describe("上下の余白と案内", () => {
-  test("公募の既定は、上：なし／下：ページ番号", () => {
-    expect(GRID_HEADER_FOOTER).toEqual({ top: "none", bottom: "page" });
-    expect(grid()).toContain('data-head="none" data-foot="page"');
+  test("公募の既定は、上：なし／下の中央：ページ番号（奇数・偶数とも）", () => {
+    const none = { left: "none", center: "none", right: "none" };
+    const page = { top: none, bottom: { left: "none", center: "page", right: "none" } };
+    expect(gridHeaderFooter()).toEqual({ odd: page, even: page });
+    expect(grid()).toContain(marginsAttribute(gridHeaderFooter()));
+    expect(grid()).toContain("上下の余白：奇数・偶数ページとも：フッター中央にページ番号");
   });
 
-  test("選んだものと作者名を渡す", () => {
+  test("既定は呼ぶたびに新しい箱（どこかで書き換えても既定は変わらない）", () => {
+    const first = gridHeaderFooter();
+    first.odd.bottom.center = "author";
+    expect(gridHeaderFooter().odd.bottom.center).toBe("page");
+  });
+
+  /** 公募によってはページ番号の位置に指定がある。読む紙と同じく枠ごとに選べる */
+  test("選んだ置き方（奇数・偶数で違ってよい）と作者名を渡す", () => {
+    const margins = emptyHeaderFooter();
+    margins.odd.bottom.right = "page";
+    margins.even.bottom.left = "page";
+    margins.odd.top.left = "author";
     const out = buildGridPrintHtml({
       workTitle: "銀の航路",
       episodes: [{ heading: "第1話", body: "本文", notation: "curly" }],
       paper: "a4-landscape",
       grid: V40,
-      headerFooter: { top: "author", bottom: "page" },
+      headerFooter: margins,
       author: "山田",
     });
 
-    expect(out).toContain('data-head="author" data-foot="page"');
+    expect(out).toContain(marginsAttribute(margins));
     expect(out).toContain('data-author="山田"');
   });
 
@@ -307,8 +326,22 @@ describe("台本の字下げ", () => {
       grid: V40,
       kind: "script",
     });
-    expect(out).toContain('<div class="gl"><i>○</i><i>駅</i>');
-    expect(out).toContain('<div class="gl"><i></i><i></i><i></i><i>太</i><i>郎</i><i>、</i>');
-    expect(out).toContain('<div class="gl"><i>太</i><i>郎</i><i>「</i>');
+    // 柱とト書きはゴシックの印（g）。台詞は明朝のまま（印なし）
+    expect(out).toContain('<div class="gl g"><i>○</i><i>駅</i>');
+    expect(out).toContain('<div class="gl g"><i></i><i></i><i></i><i>太</i><i>郎</i><i>、</i>');
+    // 台詞：人物名（2字）＋空き3マスの欄のあとに「「」
+    expect(out).toContain('<div class="gl"><i>太</i><i>郎</i><i></i><i></i><i></i><i>「</i>');
+    expect(out).toContain(`.gl.g { font-family: ${PRINT_GOTHIC_FONT_FAMILY}; }`);
+  });
+
+  test("台詞が折り返したら、続きの行は「「」の下（5マスの空き）から", () => {
+    const out = buildGridPrintHtml({
+      workTitle: "夜の駅",
+      episodes: [{ heading: "", body: `太郎「${"あ".repeat(40)}」`, notation: "curly" }],
+      paper: "a4-landscape",
+      grid: V40,
+      kind: "script",
+    });
+    expect(out).toContain('<div class="gl"><i></i><i></i><i></i><i></i><i></i><i>あ</i>');
   });
 });

@@ -6,6 +6,8 @@ import {
   resolvePdfExportRequest,
 } from "../../../src/core/pdfExportConfig";
 import { parseWorkConfig } from "../../../src/core/workRegistry";
+import { emptyHeaderFooter, printPreset } from "../../../src/core/printHtml";
+import { gridHeaderFooter } from "../../../src/core/printGridHtml";
 
 /**
  * ［PDF出力］の前回の設定（`config.json` の `pdfExport`）。作者の裁定 2026-10-16 夜の3：
@@ -51,6 +53,32 @@ describe("前回の設定を読む", () => {
     expect(parsePdfExportConfig({ ...GRID, range: { scope: "files", files: [] } })).toBeUndefined();
     expect(parsePdfExportConfig("文庫")).toBeUndefined();
     expect(parsePdfExportConfig(undefined)).toBeUndefined();
+  });
+
+  /** 上下の余白の置き方（2026-10-17〜。奇数・偶数 × ヘッダー・フッター × 左・中央・右） */
+  test("上下の余白の置き方も読む", () => {
+    const margins = emptyHeaderFooter();
+    margins.odd.top.right = "page";
+    margins.even.top.left = "page";
+    expect(parsePdfExportConfig({ ...GRID, headerFooter: margins })).toEqual({ ...GRID, headerFooter: margins });
+  });
+
+  test("前の形（上と下に1つずつ）の置き方は、奇数・偶数とも中央の枠へ寄せて読む", () => {
+    const read = parsePdfExportConfig({ ...GRID, headerFooter: { top: "title", bottom: "page" } });
+    const expected = emptyHeaderFooter();
+    for (const side of [expected.odd, expected.even]) {
+      side.top.center = "title";
+      side.bottom.center = "page";
+    }
+    expect(read?.headerFooter).toEqual(expected);
+  });
+
+  test("読めない置き方は、紙・範囲ごと無かったことにする（半端に読まない）", () => {
+    const margins = emptyHeaderFooter() as unknown as { odd: { top: { left: string } } };
+    margins.odd.top.left = "date";
+    expect(parsePdfExportConfig({ ...GRID, headerFooter: margins })).toBeUndefined();
+    expect(parsePdfExportConfig({ ...GRID, headerFooter: { top: "title" } })).toBeUndefined();
+    expect(parsePdfExportConfig({ ...GRID, headerFooter: "下にページ番号" })).toBeUndefined();
   });
 
   test("作品の設定（config.json）に載る。壊れていても作品は開ける", () => {
@@ -139,6 +167,28 @@ describe("外部AIの依頼で使う設定を決める", () => {
     expect(lines.paper).toContain("A4横置き");
     expect(lines.paper).toContain("40字×30行");
     expect(lines.direction).toBe("縦書き");
+  });
+
+  test("上下の余白：記録が無ければ紙の既定（読む紙はヘッダー左右に番号、公募は下の中央）", () => {
+    const reading = resolvePdfExportRequest(undefined, available);
+    expect(reading.headerFooter).toEqual(printPreset("bunko-vertical").headerFooter);
+    expect(describePdfExportPlan(reading).margins).toContain("奇数ページ：ヘッダー中央に話の見出し・ヘッダー右にページ番号");
+    const grid = resolvePdfExportRequest(GRID as Parameters<typeof resolvePdfExportRequest>[0], available);
+    expect(grid.headerFooter).toEqual(gridHeaderFooter());
+  });
+
+  test("上下の余白：前回の置き方があれば、それを使う", () => {
+    const margins = emptyHeaderFooter();
+    margins.odd.bottom.right = "page";
+    margins.even.bottom.left = "author";
+    const plan = resolvePdfExportRequest(
+      { paper: { kind: "preset", preset: "a5-vertical" }, range: { scope: "all" }, headerFooter: margins },
+      available
+    );
+    expect(plan.headerFooter).toEqual(margins);
+    expect(describePdfExportPlan(plan).margins).toBe(
+      "奇数ページ：フッター右にページ番号／偶数ページ：フッター左に作者名"
+    );
   });
 
   test("Windowsの区切りで覚えていても同じ話を指す", () => {

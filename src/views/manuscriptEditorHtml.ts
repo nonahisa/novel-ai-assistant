@@ -43,6 +43,7 @@ import { NOTATION_RULES } from "../core/manuscriptRender";
 import { MEMO_LINE_PATTERN, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
 import { TCY_RUN_PATTERN } from "../core/tateChuYoko";
 import { kindLineCss, kindLineRules } from "../core/kindLines";
+import { SCRIPT_LAYOUT_CSS, SCRIPT_ROLE_MAX } from "../core/scriptLines";
 import type { WorkKindKey } from "../core/workKind";
 import { findAction } from "./actionList";
 import { OBSERVE_VISIBLE_WIDTH_SOURCE } from "./visibleWidthScript";
@@ -93,7 +94,15 @@ export function buildManuscriptEditorHtml(
    * 空にしてあるので、小説のHTMLは以前と1文字も変わらない。
    */
   const kindCss = kindLineCss(kind);
-  const scriptCss = kindCss ? `\n${kindCss}` : "";
+  /*
+    台本だけ、台詞のぶら下げを「「」の位置にそろえる印と、ト書き・柱のゴシックを足す
+    （作者の裁定、2026-10-17。紙と同じ `SCRIPT_LAYOUT_CSS`）。台詞と人物名は、作者が
+    選んだ書体（novelai.manuscriptEditor.fontFamily。既定は明朝）のまま。
+    ト書き・柱のゴシックは選んだ書体に関わらず固定の並び（選んだ書体がゴシックなら
+    全部ゴシックに見えるだけで、困ることはない）
+  */
+  const layoutCss = kind === "script" ? `\n${SCRIPT_LAYOUT_CSS}` : "";
+  const scriptCss = kindCss ? `\n${kindCss}${layoutCss}` : "";
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -5350,13 +5359,53 @@ ${RESUME_WRITING_LABEL ? `
    * 同じものを使う。** 別々に組み立てると、打った瞬間に片方の印だけが
    * 消える（付箋を打ったら脚本の印が落ちる、という形で必ず出る）。
    */
-  function composeLineClass(line) {
+  function composeLineClass(line, element) {
     let names = "line";
     const memo = memoClassFor(line);
     if (memo) names += " " + memo;
     const script = scriptLineClass(line);
     if (script) names += " " + script;
+    if (SCRIPT_ROLE_MAX > 0 && script === "script-serifu" && element) {
+      const role = composeRoleClass(element);
+      if (role) names += " " + role;
+    }
     return names;
+  }
+
+  /**
+   * 台本の台詞の、ぶら下げの幅の印（script-role-N。作者の裁定、2026-10-17）。
+   *
+   * 折り返した行を「「」の下にそろえるため、**その行の「「」までの字数**を数える。
+   * 数えるのは画面に見えている字（ルビは親文字だけ。読みは数えない）。
+   * **印（class）を足すだけで、要素は足さない**——人物名を要素で包むと、打っている
+   * 最中にカーソルと変換の位置がずれる。そのため紙のような「人物名の欄」は作らず、
+   * 行ごとの「「」の位置でぶら下げる。台本以外（漫画の原作を含む）は 0 で、印を付けない
+   */
+  const SCRIPT_ROLE_MAX = ${kind === "script" ? SCRIPT_ROLE_MAX : 0};
+
+  function composeRoleClass(element) {
+    const visible = composeVisibleText(element);
+    const at = visible.indexOf("「");
+    if (at <= 0) return "";
+    const cells = Math.min(SCRIPT_ROLE_MAX, Array.from(visible.slice(0, at)).length);
+    return "script-role-" + cells;
+  }
+
+  /** 行の入れ物の、画面に見えている字（ルビの読み〔rt・rp〕を除く） */
+  function composeVisibleText(node) {
+    let out = "";
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) {
+        out += child.nodeValue || "";
+      } else if (
+        child.nodeType === 1 &&
+        child.nodeName !== "RT" &&
+        child.nodeName !== "RP"
+      ) {
+        out += composeVisibleText(child);
+      }
+    }
+    return out;
   }
 
   /** その行が付箋か。**行の先頭だけを見る**（途中の // はURL・会話文） */
@@ -5754,6 +5803,8 @@ ${RESUME_WRITING_LABEL ? `
         p.appendChild(em);
       }
     }
+    // 中身を組んでから付け直す（台詞のぶら下げの幅は、見えている字で数えるため）
+    p.setAttribute("class", composeLineClass(line, p));
     return p;
   }
 
@@ -7008,7 +7059,7 @@ ${RESUME_WRITING_LABEL ? `
     for (const element of lines) {
       // 行の入れ物だけを見る（ルビの中の要素は行ではない）
       if (element.parentNode !== compose) continue;
-      element.setAttribute("class", composeLineClass(element.textContent || ""));
+      element.setAttribute("class", composeLineClass(element.textContent || "", element));
     }
   }
 

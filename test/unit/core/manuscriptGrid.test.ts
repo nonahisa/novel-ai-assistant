@@ -9,6 +9,7 @@ import {
   type GridOptions,
   type GridUnit,
 } from "../../../src/core/manuscriptGrid";
+import { SCRIPT_ROLE_WIDTH } from "../../../src/core/scriptLines";
 
 /**
  * 公募の納品用の組版（設計書6.33.5 の3）。
@@ -306,7 +307,7 @@ describe("台本の字下げ", () => {
     return layoutGrid([{ heading: "", body: SCRIPT, notation: "curly" }], options, kind)[0].lines;
   }
 
-  test("柱は0字・ト書きは3字下げ（折り返しても）・台詞は0字", () => {
+  test("柱は0字・ト書きは3字下げ（折り返しても）・台詞の1行目は0字", () => {
     const result = scriptLines("script");
 
     // 柱
@@ -316,11 +317,67 @@ describe("台本の字下げ", () => {
     const togaki = result.filter((line) => line.indent === 3);
     expect(togaki.length).toBeGreaterThanOrEqual(2);
     expect(show(togaki[0]).startsWith("太郎、")).toBe(true);
-    // 台詞（2行以上に折り返す）は0字のまま
+    // 台詞（2行以上に折り返す）：1行目は人物名から（0字）。続きは「「」の下へ
     const serifu = result.slice(1 + togaki.length);
     expect(serifu.length).toBeGreaterThanOrEqual(2);
-    expect(show(serifu[0]).startsWith("太郎「")).toBe(true);
-    for (const line of serifu) expect(line.indent ?? 0).toBe(0);
+    expect(serifu[0].indent ?? 0).toBe(0);
+    expect(show(serifu[0]).startsWith("太郎")).toBe(true);
+  });
+
+  /**
+   * 人物名の欄（作者の裁定、2026-10-17）。台詞の頭（「「」）を欄の次のマスにそろえ、
+   * 折り返した行も「「」の下へそろえる。欄より長い名前は切らずに後ろへずらす。
+   */
+  /** 台詞の行（柱1行とト書きのあと） */
+  function serifuLines(): GridLine[] {
+    const result = scriptLines("script");
+    return result.slice(1 + result.filter((line) => line.indent === 3).length);
+  }
+
+  test(`人物名を${SCRIPT_ROLE_WIDTH}字の欄に入れ、「「」を欄の次のマスにそろえる`, () => {
+    const serifu = serifuLines();
+    // 1行目：太郎（2字）＋空き3マス＋「…
+    const first = serifu[0].units.map((unit) => unit.text || "□").join("");
+    expect(first.startsWith("太郎□□□「行こう")).toBe(true);
+    expect(serifu[0].units[SCRIPT_ROLE_WIDTH].text).toBe("「");
+    // 2行目以降：「「」の下（5マス下げ）。字下げを足しても字数は20のまま
+    expect(serifu.length).toBeGreaterThanOrEqual(2);
+    for (const line of serifu.slice(1)) {
+      expect(line.indent).toBe(SCRIPT_ROLE_WIDTH);
+      expect(SCRIPT_ROLE_WIDTH + lineWidth(line)).toBeLessThanOrEqual(options.columns);
+    }
+    expect(lineWidth(serifu[0])).toBeLessThanOrEqual(options.columns);
+  });
+
+  test("台詞は1字も落ちず、空きマスは字を持たない", () => {
+    const serifu = serifuLines();
+    expect(allText(serifu)).toBe("太郎「行こう、もう終電は出てしまったけれど、歩けば朝には着くはずだ」");
+  });
+
+  test("欄より長い人物名は切らず、超えたぶんだけ「「」が後ろへずれる。続きはその「「」の下", () => {
+    const body = "密倉家の会長「お前が三門の息子か。話は聞いている。学校でのことも全部だ」";
+    const result = layoutGrid([{ heading: "", body, notation: "curly" }], options, "script")[0].lines;
+
+    expect(show(result[0]).startsWith("密倉家の会長「")).toBe(true);
+    expect(result[0].units[6].text).toBe("「");
+    expect(result.length).toBeGreaterThanOrEqual(2);
+    for (const line of result.slice(1)) expect(line.indent).toBe(6);
+    expect(allText(result)).toBe(body);
+  });
+
+  test("ト書きと柱はゴシック、台詞は明朝", () => {
+    const result = scriptLines("script");
+    expect(result[0].gothic).toBe(true);
+    for (const line of result.filter((item) => item.indent === 3)) expect(line.gothic).toBe(true);
+    for (const line of serifuLines()) expect(line.gothic).toBeUndefined();
+  });
+
+  test("人物名が長すぎて台詞の入る字が半分を切るときは、欄もぶら下げもやめる", () => {
+    const narrow: GridOptions = { columns: 10, rows: 40, hanging: true, vertical: true };
+    const body = "お手伝いさんの娘「はい、ただいま参ります」";
+    const result = layoutGrid([{ heading: "", body, notation: "curly" }], narrow, "script")[0].lines;
+    for (const line of result) expect(line.indent ?? 0).toBe(0);
+    expect(allText(result)).toBe(body);
   });
 
   test("字下げを足しても、1行の字数は指定を超えない", () => {

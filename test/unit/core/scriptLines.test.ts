@@ -3,8 +3,13 @@ import {
   classifyScriptLine,
   scriptLineClass,
   splitSerifu,
+  SCRIPT_GOTHIC_FONT_FAMILY,
+  SCRIPT_LAYOUT_CSS,
   SCRIPT_LINE_CSS,
   SCRIPT_LINE_RULES,
+  SCRIPT_ROLE_MAX,
+  SCRIPT_ROLE_WIDTH,
+  scriptRoleClass,
 } from "../../../src/core/scriptLines";
 
 /**
@@ -199,5 +204,38 @@ describe("組み方の指定（SCRIPT_LINE_CSS）", () => {
     expect(ruleBody(".script-togaki")).toMatch(
       /padding-inline-start:\s*2em;/
     );
+  });
+});
+
+/**
+ * 人物名の欄と書体（作者の裁定、2026-10-17）。公募の納品用・読む紙・原稿エディターが
+ * 同じ定数を使う（定義はここだけ）。
+ */
+describe("台本の人物名の欄（SCRIPT_LAYOUT_CSS）", () => {
+  it("欄の幅は5字（作者の作品の呼び名が4〜6字に集まっているため）", () => {
+    expect(SCRIPT_ROLE_WIDTH).toBe(5);
+  });
+
+  it("ぶら下げの印の上限は、台詞と見分ける規則の役名の上限と同じ", () => {
+    const serifu = SCRIPT_LINE_RULES.find((rule) => rule.kind === "serifu");
+    expect(serifu?.pattern).toContain(`{1,${SCRIPT_ROLE_MAX}}`);
+    expect(SCRIPT_LAYOUT_CSS).toContain(`.script-serifu.script-role-${SCRIPT_ROLE_MAX} {`);
+    expect(SCRIPT_LAYOUT_CSS).not.toContain(`.script-role-${SCRIPT_ROLE_MAX + 1} `);
+  });
+
+  it("印は1〜上限に収める", () => {
+    expect(scriptRoleClass(0)).toBe("script-role-1");
+    expect(scriptRoleClass(5)).toBe("script-role-5");
+    expect(scriptRoleClass(40)).toBe(`script-role-${SCRIPT_ROLE_MAX}`);
+  });
+
+  it("ト書きと柱はゴシック。游ゴシックは Medium を先に置く（細い字で刷られないように）", () => {
+    expect(SCRIPT_LAYOUT_CSS).toContain(`.script-hashira, .script-togaki { font-family: ${SCRIPT_GOTHIC_FONT_FAMILY}; }`);
+    expect(SCRIPT_GOTHIC_FONT_FAMILY.indexOf("Yu Gothic Medium")).toBe(1);
+  });
+
+  it("論理プロパティで書く（縦書きでも横書きでも行の始まりに効く）", () => {
+    expect(SCRIPT_LAYOUT_CSS).not.toContain("padding-left");
+    expect(SCRIPT_LAYOUT_CSS).toContain("padding-inline-start");
   });
 });

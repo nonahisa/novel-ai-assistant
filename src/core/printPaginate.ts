@@ -70,6 +70,20 @@ export const PAGINATE_HELPERS = [
   "  if (slot === 'page') return info.number > 0 ? String(info.number) : '';",
   "  return '';",
   "}",
+  // ヘッダー（フッター）1本に、左・中央・右の3つの枠を作って中身を入れる
+  // （作者の裁定、2026-10-17）。**枠は何も刷らなくても3つとも作る**——格子の
+  // 列（1fr auto 1fr）がそろわないと、中央の字が紙の真ん中から外れる。
+  // 文字は textContent で入れる（題名に `<` があっても札にならない）
+  "function fillMarginRow(box, row, info) {",
+  "  if (!box) return;",
+  "  while (box.firstChild) box.removeChild(box.firstChild);",
+  "  ['left', 'center', 'right'].forEach(function (column) {",
+  "    var cell = box.ownerDocument.createElement('span');",
+  "    cell.className = 'margin-' + column;",
+  "    cell.textContent = row ? marginText(row[column], info) : '';",
+  "    box.appendChild(cell);",
+  "  });",
+  "}",
   // 段落を部品へ。平文と傍点は1字ずつ、ルビなどの札はかたまりごと。
   // **縦中横（tcy）は傍点の中でも札として1つ**——先に見ないと、傍点として
   // 1字ずつにほどかれ、面に分けたあとで縦中横が消える（作者の裁定、2026-10-09）
@@ -233,9 +247,12 @@ export const PRINT_PAGINATE_SCRIPT = [
   "",
   // 上下の余白を埋める。**扉には何も刷らず、番号も数えない**
   // （本文の1ページ目を1とする。本の数え方とは違うが、作者が数えやすい）
+  // 奇数・偶数はページ番号で決める（本文の1ページ目＝1＝奇数）。置き方は
+  // body の data-margins（JSON。`printHtml.ts` の `marginsAttribute`）。
+  // 読めなければ何も刷らない——面に分けること自体は止めない
   "function decorate() {",
-  "  var headSlot = body.getAttribute('data-head') || 'none';",
-  "  var footSlot = body.getAttribute('data-foot') || 'none';",
+  "  var margins = null;",
+  "  try { margins = JSON.parse(body.getAttribute('data-margins') || 'null'); } catch (e) { margins = null; }",
   "  var base = {",
   "    title: body.getAttribute('data-title') || '',",
   "    author: body.getAttribute('data-author') || ''",
@@ -245,10 +262,9 @@ export const PRINT_PAGINATE_SCRIPT = [
   "    if (page.classList.contains('page-cover')) return;",
   "    number += 1;",
   "    var info = { title: base.title, author: base.author, heading: page.getAttribute('data-heading') || '', number: number };",
-  "    var head = page.querySelector('.page-head');",
-  "    var foot = page.querySelector('.page-foot');",
-  "    if (head) head.textContent = marginText(headSlot, info);",
-  "    if (foot) foot.textContent = marginText(footSlot, info);",
+  "    var side = margins ? (number % 2 === 1 ? margins.odd : margins.even) : null;",
+  "    fillMarginRow(page.querySelector('.page-head'), side ? side.top : null, info);",
+  "    fillMarginRow(page.querySelector('.page-foot'), side ? side.bottom : null, info);",
   "  });",
   "}",
   "",

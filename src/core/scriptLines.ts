@@ -67,6 +67,43 @@ export const SCRIPT_LINE_RULES: readonly ScriptLineRule[] = [
   { kind: "serifu", pattern: "^[^\\s「」]{1,12}「" },
 ];
 
+/**
+ * 台詞の役名の上限（字）。上の規則の `{1,12}` と同じ値で、役名の欄の幅の印
+ * （`script-role-N`）をここまで用意する。2つがずれないことは
+ * `test/unit/core/scriptLines.test.ts` が見張る
+ */
+export const SCRIPT_ROLE_MAX = 12;
+
+/**
+ * 人物名の欄の幅（字。作者の裁定、2026-10-17）。**台詞の頭（「「」）をこの位置に
+ * そろえる。** 公募の納品用（`manuscriptGrid.ts`）・読む紙（`printHtml.ts`）・
+ * 原稿エディター（`views/manuscriptEditorHtml.ts`）が同じ値を使う（定義はここだけ）。
+ *
+ * 5字にしたのは、作者の作品の人物の呼び名が4〜6字に集まっているため
+ * （三門太志・春原月夜が4字、おばあさん・月夜ちゃんが5字、お手伝いさん・密倉家の会長が6字。
+ * 確認用コピーの設定資料で数えた）。フルネームと「さん」付けまでが欄に収まり、
+ * 6字の呼び名だけ1字ぶん後ろへずれる。欄より長い名前は切らない
+ */
+export const SCRIPT_ROLE_WIDTH = 5;
+
+/**
+ * 台本のト書きと柱の書体（作者の裁定、2026-10-17：台詞は明朝、ト書きと柱はゴシック）。
+ *
+ * **游ゴシックは Medium を先に置く。** Windows の Chrome・Edge で「Yu Gothic」とだけ
+ * 指定すると細い字（Light）が選ばれ、紙では薄くかすれる
+ */
+export const SCRIPT_GOTHIC_FONT_FAMILY =
+  '"Yu Gothic Medium", "游ゴシック Medium", "Yu Gothic", "游ゴシック", "YuGothic", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif';
+
+/**
+ * 台詞の行に付ける、ぶら下げの幅の印（`script-role-N`。N は「「」までの字数）。
+ * 1〜`SCRIPT_ROLE_MAX` に収める
+ */
+export function scriptRoleClass(cells: number): string {
+  const n = Math.min(SCRIPT_ROLE_MAX, Math.max(1, Math.round(cells)));
+  return `script-role-${n}`;
+}
+
 /** 行ごとに作り直さない（4万字の原稿では行数ぶん効く） */
 const MATCHERS = SCRIPT_LINE_RULES.map((rule) => ({
   kind: rule.kind,
@@ -161,4 +198,30 @@ export const SCRIPT_LINE_CSS = [
   "  padding-inline-start: 6em;",
   "  text-indent: -6em;",
   "}",
+].join("\n");
+
+/**
+ * 台本の人物名の欄と書体（作者の裁定、2026-10-17）。**台本だけ**に当てる
+ * （漫画の原作は台詞・ト書きの印を借りているが、ここは足さない）。原稿エディターと
+ * 読む紙（`printHtml.ts`）がそのまま埋め込む。EPUB には足さない（`SCRIPT_LINE_CSS` だけ）。
+ *
+ * - **台詞の折り返しを「「」の下にそろえる**：行に付けた `script-role-N`（N は「「」の
+ *   前までの字数）で、ぶら下げの幅を行ごとに決める。`SCRIPT_LINE_CSS` の 6em の
+ *   決め打ちより強い指定（class 2つ）なので、印の付いた行だけが置き換わる
+ * - **人物名の欄**（読む紙だけ）：人物名を `span.script-role` で包み、欄の幅
+ *   （`SCRIPT_ROLE_WIDTH`）より短ければ空ける。長い名前は欄を押し広げる（切らない）。
+ *   原稿エディターは打つ面の中に要素を足せない（足すとカーソルと変換がずれる）ので、
+ *   欄は作らず、行ごとの「「」の位置でぶら下げる
+ * - **書体**：ト書きと柱はゴシック、台詞（人物名を含む）は本文の書体（明朝）のまま
+ * - **面をまたいだ台詞の続き**（読む紙の `p.cont`）は、ぶら下げの位置から始める
+ */
+export const SCRIPT_LAYOUT_CSS = [
+  "/* 台本の人物名の欄と書体（定義は core/scriptLines.ts の SCRIPT_LAYOUT_CSS） */",
+  `.script-hashira, .script-togaki { font-family: ${SCRIPT_GOTHIC_FONT_FAMILY}; }`,
+  ...Array.from({ length: SCRIPT_ROLE_MAX }, (_, index) => {
+    const n = index + 1;
+    return `.script-serifu.script-role-${n} { padding-inline-start: ${n}em; text-indent: -${n}em; }`;
+  }),
+  `.script-role { display: inline-block; min-inline-size: ${SCRIPT_ROLE_WIDTH}em; text-indent: 0; }`,
+  ".script-serifu.cont { text-indent: 0; }",
 ].join("\n");

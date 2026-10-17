@@ -171,7 +171,7 @@ describe("スクリプトの形", () => {
 
   test("上下の余白は文字として入れる（札として読ませない）", () => {
     // 題名や作者名に < があっても、紙に文字として出る
-    expect(PRINT_PAGINATE_SCRIPT).toContain("head.textContent = marginText(");
+    expect(PRINT_PAGINATE_SCRIPT).toContain("cell.textContent = row ? marginText(row[column], info) : '';");
     expect(PRINT_PAGINATE_SCRIPT).not.toContain("innerHTML");
   });
 
@@ -200,5 +200,152 @@ describe("スクリプトの形", () => {
 
   test("閉じタグの字を含まない（script 要素がそこで終わらない）", () => {
     expect(PRINT_PAGINATE_SCRIPT).not.toContain("</");
+  });
+});
+
+/**
+ * 奇数・偶数ページごとの左・中央・右（作者の裁定、2026-10-17）。
+ *
+ * スクリプトを**そのまま**偽の document の上で走らせる（公募の納品用の道。面は
+ * 組んで渡してあるので、割らずに上下の余白を埋めるだけ）。奇数・偶数はページ番号で
+ * 決まり、扉には何も刷らないことを確かめる。
+ */
+describe("上下の余白を奇数・偶数ページで分けて埋める", () => {
+  interface FakeEl {
+    className: string;
+    textContent: string;
+    children: FakeEl[];
+    attrs: Record<string, string>;
+    ownerDocument: unknown;
+    readonly firstChild: FakeEl | null;
+    appendChild(child: FakeEl): FakeEl;
+    removeChild(child: FakeEl): FakeEl;
+    getAttribute(name: string): string | null;
+    querySelector(selector: string): FakeEl | null;
+    querySelectorAll(selector: string): FakeEl[];
+    classList: { contains(name: string): boolean; add(name: string): void; remove(name: string): void };
+  }
+
+  function el(className = "", attrs: Record<string, string> = {}): FakeEl {
+    const node: FakeEl = {
+      className,
+      textContent: "",
+      children: [],
+      attrs,
+      ownerDocument: undefined,
+      get firstChild() {
+        return node.children[0] ?? null;
+      },
+      appendChild(child) {
+        node.children.push(child);
+        return child;
+      },
+      removeChild(child) {
+        node.children = node.children.filter((item) => item !== child);
+        return child;
+      },
+      getAttribute: (name) => (name in node.attrs ? node.attrs[name] : null),
+      querySelector: (selector) => node.querySelectorAll(selector)[0] ?? null,
+      querySelectorAll(selector) {
+        const name = selector.replace(/^\./, "");
+        const found: FakeEl[] = [];
+        const walk = (item: FakeEl) => {
+          for (const child of item.children) {
+            if (child.className.split(" ").includes(name)) found.push(child);
+            walk(child);
+          }
+        };
+        walk(node);
+        return found;
+      },
+      classList: {
+        contains: (name) => node.className.split(" ").includes(name),
+        add: (name) => {
+          node.className = `${node.className} ${name}`.trim();
+        },
+        remove: (name) => {
+          node.className = node.className.split(" ").filter((item) => item !== name).join(" ");
+        },
+      },
+    };
+    return node;
+  }
+
+  function page(cover: boolean): FakeEl {
+    const p = el(cover ? "page page-cover" : "page grid-page", { "data-heading": "第1話　雨" });
+    p.appendChild(el("page-head"));
+    p.appendChild(el("page-body"));
+    p.appendChild(el("page-foot"));
+    return p;
+  }
+
+  function run(margins: unknown, pages: number): FakeEl[] {
+    const root = el();
+    const all = [page(true), ...Array.from({ length: pages }, () => page(false))];
+    for (const item of all) root.appendChild(item);
+    const body = el("", {
+      "data-grid": "1",
+      "data-vertical": "1",
+      "data-margins": JSON.stringify(margins),
+      "data-title": "銀の航路",
+      "data-author": "山田",
+    });
+    const doc = {
+      body,
+      head: el(),
+      getElementById: (id: string) => (id === "print-pages" ? root : null),
+      createElement: () => {
+        const made = el();
+        made.ownerDocument = doc;
+        return made;
+      },
+    };
+    for (const item of all) {
+      for (const part of item.children) part.ownerDocument = doc;
+    }
+    new Function("document", "window", PRINT_PAGINATE_SCRIPT)(doc, {});
+    return all;
+  }
+
+  function cells(box: FakeEl | null): string[] {
+    return (box?.children ?? []).map((cell) => `${cell.className}:${cell.textContent}`);
+  }
+
+  const none = { left: "none", center: "none", right: "none" };
+  const margins = {
+    odd: { top: { left: "none", center: "episode", right: "page" }, bottom: none },
+    even: { top: { left: "page", center: "episode", right: "none" }, bottom: { ...none, center: "title" } },
+  };
+
+  test("奇数ページ（本文の1ページ目）はヘッダー右、偶数ページはヘッダー左に番号", () => {
+    const [cover, first, second, third] = run(margins, 3);
+
+    expect(cells(first.querySelector(".page-head"))).toEqual([
+      "margin-left:",
+      "margin-center:第1話　雨",
+      "margin-right:1",
+    ]);
+    expect(cells(second.querySelector(".page-head"))).toEqual([
+      "margin-left:2",
+      "margin-center:第1話　雨",
+      "margin-right:",
+    ]);
+    expect(cells(second.querySelector(".page-foot"))).toEqual([
+      "margin-left:",
+      "margin-center:銀の航路",
+      "margin-right:",
+    ]);
+    expect(cells(third.querySelector(".page-head"))[2]).toBe("margin-right:3");
+    // 扉には何も刷らない（枠も作らない）
+    expect(cover.querySelector(".page-head")?.children).toEqual([]);
+  });
+
+  test("置き方が読めなければ、何も刷らない（面に分けることは止めない）", () => {
+    const [, first] = run("壊れた", 1);
+    expect(cells(first.querySelector(".page-head"))).toEqual([
+      "margin-left:",
+      "margin-center:",
+      "margin-right:",
+    ]);
   });
 });

@@ -113,13 +113,21 @@ beforeEach(() => {
   put("本文/003_春.txt", "　春が来た。\n");
 });
 
-describe("画面で書き出せたら、紙・向き・範囲を覚える", () => {
+/** 読む紙の既定の置き方（2026-10-17） */
+const NONE = { left: "none", center: "none", right: "none" };
+const READING_MARGINS = {
+  odd: { top: { left: "none", center: "episode", right: "page" }, bottom: NONE },
+  even: { top: { left: "page", center: "episode", right: "none" }, bottom: NONE },
+};
+
+describe("画面で書き出せたら、紙・向き・範囲・余白の置き方を覚える", () => {
   test("すべての話を選んだら「全話」として覚える。ほかの欄は落とさない", async () => {
     answer({ paper: "a4-horizontal" });
     await exportPdf(work);
     expect(config().pdfExport).toEqual({
       paper: { kind: "preset", preset: "a4-horizontal" },
       range: { scope: "all" },
+      headerFooter: READING_MARGINS,
     });
     expect(config().kind).toBe("novel");
     expect(config().workTitle).toBe("灯の町");
@@ -131,7 +139,40 @@ describe("画面で書き出せたら、紙・向き・範囲を覚える", () =
     expect(config().pdfExport).toEqual({
       paper: { kind: "preset", preset: "a5-vertical" },
       range: { scope: "files", files: ["本文/001_灯.txt", "本文/003_春.txt"] },
+      headerFooter: READING_MARGINS,
     });
+  });
+
+  test("前回の置き方があれば「前回と同じ置き方」を先頭に出す（同じ種類の紙のときだけ）", async () => {
+    const saved = {
+      odd: { top: NONE, bottom: { ...NONE, right: "page" } },
+      even: { top: NONE, bottom: { ...NONE, left: "page" } },
+    };
+    const base = JSON.parse(read(".aiwriter/config.json") ?? "{}") as Record<string, unknown>;
+    put(
+      ".aiwriter/config.json",
+      JSON.stringify({
+        ...base,
+        pdfExport: { paper: { kind: "preset", preset: "a5-vertical" }, range: { scope: "all" }, headerFooter: saved },
+      })
+    );
+    const seen: Array<Array<Record<string, unknown>>> = [];
+    (window as unknown as Record<string, unknown>).showQuickPick = async (
+      items: Array<Record<string, unknown>>
+    ) => {
+      seen.push(items);
+      const scope = items.find((item) => item.all === true);
+      if (scope) return scope;
+      const last = items.find((item) => item.margins === "last");
+      if (last) return last;
+      return items.find((item) => item.id === "bunko-vertical");
+    };
+    await exportPdf(work);
+
+    const marginPick = seen.find((items) => items.some((item) => item.margins));
+    expect(marginPick?.[0].label).toBe("前回と同じ置き方");
+    expect(marginPick?.[0].description).toBe("奇数ページ：フッター右にページ番号／偶数ページ：フッター左にページ番号");
+    expect((config().pdfExport as { headerFooter: unknown }).headerFooter).toEqual(saved);
   });
 
   test("取りやめたら覚えない", async () => {
@@ -224,5 +265,38 @@ describe("外部AIからの書き出しは、前回の設定で組む", () => {
     if (!made.ok) throw new Error(made.reason);
     // 升目で組んだときだけ出る枚数の一言
     expect(made.notices.join("\n")).toContain("20字×20行で本文");
+    // 置き方の記録が無いので、公募の既定（下の中央にページ番号）
+    expect(made.notices[0]).toContain("奇数・偶数ページとも：フッター中央にページ番号");
+  });
+
+  test("前回の置き方で組む。作者名の枠は、名前を訊けないので空けて断る", async () => {
+    put(
+      ".aiwriter/config.json",
+      JSON.stringify({
+        schemaVersion: "1",
+        workTitle: "灯の町",
+        manuscriptDir: "本文",
+        settingsDir: "設定",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        pdfExport: {
+          paper: { kind: "preset", preset: "bunko-vertical" },
+          range: { scope: "all" },
+          headerFooter: {
+            odd: { top: NONE, bottom: { left: "author", center: "none", right: "page" } },
+            even: { top: NONE, bottom: { left: "page", center: "none", right: "author" } },
+          },
+        },
+      })
+    );
+    const plan = await planPdfExportForRequest(work);
+    if (!plan.ok) throw new Error(plan.reason);
+    expect(plan.lines.margins).toContain("フッター左に作者名");
+
+    const made = await exportPdfForRequest(work);
+    if (!made.ok) throw new Error(made.reason);
+    expect(made.notices[0]).toContain("奇数ページ：フッター右にページ番号／偶数ページ：フッター左にページ番号");
+    expect(made.notices.join("\n")).toContain("作者名を刷る余白は、外からは名前を訊けないため空けました");
+    const html = exportedHtmls()[0];
+    expect(html).not.toContain("&quot;author&quot;");
   });
 });

@@ -223,6 +223,23 @@ export interface WorkPdfExportConfig {
    * からの相対パス（区切りは `/`）——同期される欄なので、機械ごとの絶対パスは持たない
    */
   range: { scope: "all" } | { scope: "files"; files: string[] };
+  /**
+   * 上下の余白に刷るものの置き方（奇数・偶数ページ × ヘッダー・フッター × 左・中央・右。
+   * 2026-10-17〜）。形は `core/printHtml.ts` の `HeaderFooter` の写し。**作者名そのものは
+   * 覚えない**（置き場所だけ）。無い記録は紙の既定で組む
+   */
+  headerFooter?: {
+    odd: PdfExportPageMargins;
+    even: PdfExportPageMargins;
+  };
+}
+
+/** 余白の枠に置く中身。`core/printHtml.ts` の `MarginContent` の写し */
+export type PdfExportMarginContent = "title" | "episode" | "author" | "page" | "none";
+
+export interface PdfExportPageMargins {
+  top: { left: PdfExportMarginContent; center: PdfExportMarginContent; right: PdfExportMarginContent };
+  bottom: { left: PdfExportMarginContent; center: PdfExportMarginContent; right: PdfExportMarginContent };
 }
 
 /**

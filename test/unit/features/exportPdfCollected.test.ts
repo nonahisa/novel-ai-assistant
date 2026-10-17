@@ -222,20 +222,31 @@ describe("合本は話ごとに章へ割る（設計書6.65.15）", () => {
   });
 });
 
+/** 書き出したHTMLの、上下の余白の置き方（body の data-margins を読み戻す） */
+function exportedMargins(): unknown {
+  const raw = /data-margins="([^"]*)"/.exec(exportedHtml())?.[1] ?? "null";
+  return JSON.parse(raw.replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
+}
+
 /**
- * 上下の余白（ヘッダー・フッター）を選ぶ（設計書6.33.5 の2、0.84.1）。
+ * 上下の余白（ヘッダー・フッター）を選ぶ（設計書6.33.5 の2、0.84.1。2026-10-17 から
+ * 奇数・偶数ページごとに、ヘッダー・フッターの左・中央・右へ置く）。
  *
- * **選ぶのは書き出すときだけ**で、どこにも保存しない（紙の大きさの選び方と
- * 同じ持ち方）。作者名は EPUB の設計図に書いてあればそれを初めから入れて
- * 見せ、無ければ尋ねる。**尋ねた名前を設計図へ書き込まない。**
+ * 置き方は紙・範囲といっしょに作品の設定へ覚える（`exportPdfLastSettings.test.ts`）。
+ * 作者名は EPUB の設計図に書いてあればそれを初めから入れて見せ、無ければ尋ねる。
+ * **尋ねた名前を設計図へ書き込まない**（どこにも覚えない）。
  */
 describe("上下の余白に刷るものを選ぶ", () => {
   const picks: Array<{ title?: string; items: Array<Record<string, unknown>> }> = [];
   const asked: Array<{ value?: string }> = [];
 
-  /** 範囲・紙は既定で答え、上下の余白は `top`・`bottom` を選ぶ */
-  function choose(top: string, bottom: string, typedAuthor?: string): void {
-    const marginAnswers = [top, bottom];
+  /**
+   * 範囲・紙は既定で答え、余白は「刷るものと置き場所を選ぶ」から、
+   * `[刷るもの, 奇数の置き場所, 偶数の置き場所]` を順に選んで「これで決める」
+   */
+  function choose(placements: Array<[string, string, string]>, typedAuthor?: string): void {
+    const contents = placements.map((item) => item[0]);
+    const places = placements.flatMap((item) => [item[1], item[2]]);
     (window as unknown as Record<string, unknown>).showQuickPick = async (
       items: Array<Record<string, unknown>>,
       options?: { title?: string }
@@ -247,8 +258,14 @@ describe("上下の余白に刷るものを選ぶ", () => {
       if (preset) return preset;
       const chooseItem = items.find((item) => item.margins === "choose");
       if (chooseItem) return chooseItem;
-      const want = marginAnswers.shift();
-      return items.find((item) => item.margin === want);
+      if (items.some((item) => item.done === true)) {
+        const want = contents.shift();
+        return want === undefined
+          ? items.find((item) => item.done === true)
+          : items.find((item) => item.content === want);
+      }
+      const label = places.shift();
+      return items.find((item) => "place" in item && item.label === label);
     };
     (window as unknown as Record<string, unknown>).showInputBox = async (
       options?: { value?: string }
@@ -264,47 +281,91 @@ describe("上下の余白に刷るものを選ぶ", () => {
     put("本文/第1話 出会い.txt", "　朝が来た。");
   });
 
-  test("既定のままなら、紙の既定（文庫：上は話の見出し・下はページ番号）", async () => {
+  const none = { left: "none", center: "none", right: "none" };
+
+  test("既定のままなら、紙の既定（奇数はヘッダー右・偶数はヘッダー左に番号、中央に話の見出し）", async () => {
     await exportPdf(work);
 
-    expect(exportedHtml()).toContain('data-head="episode" data-foot="page"');
+    expect(exportedMargins()).toEqual({
+      odd: { top: { left: "none", center: "episode", right: "page" }, bottom: none },
+      even: { top: { left: "page", center: "episode", right: "none" }, bottom: none },
+    });
   });
 
   test("既定の項目に、何が刷られるかを書いて見せる", async () => {
-    choose("title", "page");
+    choose([]);
     await exportPdf(work);
 
     const marginPick = picks.find((pick) => pick.items.some((item) => item.margins));
     const keep = marginPick?.items.find((item) => item.margins === "default");
-    expect(keep?.description).toBe("上：話の見出し／下：ページ番号");
+    expect(keep?.description).toBe(
+      "奇数ページ：ヘッダー中央に話の見出し・ヘッダー右にページ番号／偶数ページ：ヘッダー左にページ番号・ヘッダー中央に話の見出し"
+    );
   });
 
-  test("上と下を選ぶと、選んだものが刷られる", async () => {
-    choose("title", "none");
+  test("刷るものを選んで、奇数・偶数の置き場所を決めると、そのとおりに刷られる", async () => {
+    choose([
+      ["page", "フッター右", "フッター左"],
+      ["episode", "刷らない", "刷らない"],
+      ["title", "ヘッダー中央", "ヘッダー中央"],
+    ]);
     await exportPdf(work);
 
-    expect(exportedHtml()).toContain('data-head="title" data-foot="none"');
+    expect(exportedMargins()).toEqual({
+      odd: { top: { ...none, center: "title" }, bottom: { ...none, right: "page" } },
+      even: { top: { ...none, center: "title" }, bottom: { ...none, left: "page" } },
+    });
     // 作者名を選んでいないので、名前は尋ねない
     expect(asked).toHaveLength(0);
   });
 
-  test("上と下の選択肢は、題名・話の見出し・作者名・ページ番号・なし と取りやめる", async () => {
-    choose("title", "page");
+  test("ほかのものが置かれた枠を選ぶと、そちらは刷らなくなる（選ぶ画面にそう出す）", async () => {
+    // 既定ではヘッダー中央に話の見出し。そこへ題名を置く
+    choose([["title", "ヘッダー中央", "ヘッダー中央"]]);
     await exportPdf(work);
 
-    const topPick = picks.find((pick) => pick.items.some((item) => item.margin));
-    expect(topPick?.items.map((item) => item.label)).toEqual([
+    const placePick = picks.find((pick) => pick.items.some((item) => "place" in item));
+    const center = placePick?.items.find((item) => item.label === "ヘッダー中央");
+    expect(center?.description).toBe("いまは話の見出し（置くと、そちらは刷らなくなります）");
+    const margins = exportedMargins() as { odd: { top: Record<string, string> } };
+    expect(margins.odd.top).toEqual({ left: "none", center: "title", right: "page" });
+  });
+
+  test("刷るものの選択肢は、題名・話の見出し・作者名・ページ番号と、これで決める・取りやめる", async () => {
+    choose([]);
+    await exportPdf(work);
+
+    const contentPick = picks.find((pick) => pick.items.some((item) => item.done === true));
+    expect(contentPick?.items.map((item) => item.label)).toEqual([
+      "これで決める",
       "題名",
       "話の見出し",
       "作者名",
       "ページ番号",
-      "なし",
+      "$(close) 取りやめる",
+    ]);
+  });
+
+  test("置き場所は、ヘッダー・フッターの左・中央・右と、刷らない", async () => {
+    choose([["page", "フッター中央", "フッター中央"]]);
+    await exportPdf(work);
+
+    const placePick = picks.find((pick) => pick.items.some((item) => "place" in item));
+    expect(placePick?.title).toBe("奇数ページの「ページ番号」をどこに置きますか");
+    expect(placePick?.items.map((item) => item.label)).toEqual([
+      "ヘッダー左",
+      "ヘッダー中央",
+      "ヘッダー右",
+      "フッター左",
+      "フッター中央",
+      "フッター右",
+      "刷らない",
       "$(close) 取りやめる",
     ]);
   });
 
   test("作者名を選び、設計図に名前が無ければ尋ねる。尋ねた名前は保存しない", async () => {
-    choose("author", "page", "山田太郎");
+    choose([["author", "フッター左", "フッター右"]], "山田太郎");
     await exportPdf(work);
 
     expect(asked).toHaveLength(1);
@@ -317,7 +378,7 @@ describe("上下の余白に刷るものを選ぶ", () => {
 
   test("EPUBの設計図に作者名があれば、初めから入れて見せる", async () => {
     put("設定/書籍/book.json", JSON.stringify({ author: "筆名A" }));
-    choose("page", "author", "筆名A");
+    choose([["author", "フッター中央", "刷らない"]], "筆名A");
     await exportPdf(work);
 
     expect(asked[0]?.value).toBe("筆名A");
@@ -330,7 +391,7 @@ describe("上下の余白に刷るものを選ぶ", () => {
     // 名前を打ち替えた形で、設計図のファイルが1字も変わらないことを見る
     const book = JSON.stringify({ author: "筆名A" });
     put("設定/書籍/book.json", book);
-    choose("author", "page", "別の筆名B");
+    choose([["author", "ヘッダー左", "ヘッダー左"]], "別の筆名B");
     await exportPdf(work);
 
     expect(asked[0]?.value).toBe("筆名A");
@@ -342,7 +403,7 @@ describe("上下の余白に刷るものを選ぶ", () => {
   });
 
   test("作者名を尋ねられて取りやめたら、書き出さない", async () => {
-    choose("author", "page", undefined);
+    choose([["author", "フッター中央", "フッター中央"]], undefined);
     await exportPdf(work);
 
     expect([...disk.keys()].some((name) => name.endsWith(".html"))).toBe(false);
@@ -431,8 +492,8 @@ describe("公募の納品用で書き出す", () => {
     expect(html).toContain('data-grid="1"');
     expect(html).toContain("@page { size: 297mm 210mm; margin: 0; }");
     expect(html).toContain("公募の納品用・縦書き・40字×40行・句読点のぶら下げあり");
-    // 公募の上下の既定：上はなし、下はページ番号（名前を出さない公募があるため）
-    expect(html).toContain('data-head="none" data-foot="page"');
+    // 公募の上下の既定：上はなし、下の中央にページ番号（名前を出さない公募があるため）
+    expect(html).toContain("上下の余白：奇数・偶数ページとも：フッター中央にページ番号");
   });
 
   /** 余白（作者の裁定、2026-10-09）：普通（20mm）／狭く（10mm）。既定は普通 */
@@ -689,6 +750,10 @@ describe(".mdと.txtが混ざっても両方組まれる（実機確認リスト
  * - 2026-10-09（作者の裁定）：読む紙に厳しい禁則（`line-break: strict` と、面の切れ目の
  *   小さい仮名・長音）と縦書きの縦中横（見出しの「第1話」の 1 も立つ）が加わった。
  *   話の割り方は変わらない
+ * - 2026-10-17（作者の裁定）：上下の余白を奇数・偶数ページごとの左・中央・右に分けた
+ *   （body の data-head・data-foot が data-margins に替わり、頭と足に3つの枠ができた）。
+ *   読む紙の既定も、ページ番号をヘッダーの左右・話の見出しをヘッダーの中央に改めた。
+ *   本文の組み方と話の割り方は変わらない
  */
 const GOLDEN =
-  "9656495dad555a4ab2027bac5bb6f70c66082b4dfed9a66ac08e9b75a336dee5";
+  "c6893dafb119530d03a262536c3693a69452401506c7f24d2511438719638cb2";

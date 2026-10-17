@@ -1,15 +1,24 @@
 import { describe, expect, test } from "vitest";
 import {
   buildPrintHtml,
+  describeHeaderFooter,
+  emptyHeaderFooter,
+  headerFooterUses,
   MARGIN_CONTENTS,
+  PRINT_GOTHIC_FONT_FAMILY,
   PRINT_PRESETS,
   printPreset,
+  type HeaderFooter,
   type MarginContent,
   type PrintPreset,
 } from "../../../src/core/printHtml";
 import { timestampedFileNameCandidates } from "../../../src/core/timestampedFileName";
 import type { NotationMode } from "../../../src/core/manuscriptRender";
-import { SCRIPT_LINE_CSS } from "../../../src/core/scriptLines";
+import {
+  SCRIPT_LAYOUT_CSS,
+  SCRIPT_LINE_CSS,
+  SCRIPT_ROLE_WIDTH,
+} from "../../../src/core/scriptLines";
 import { PRINT_PAGINATE_SCRIPT } from "../../../src/core/printPaginate";
 
 /**
@@ -310,7 +319,7 @@ describe("印刷に近いプレビュー", () => {
  */
 describe("ヘッダーとフッター", () => {
   function withMargins(
-    headerFooter?: { top: MarginContent; bottom: MarginContent },
+    headerFooter?: HeaderFooter,
     author?: string,
     preset: PrintPreset = "bunko-vertical"
   ): string {
@@ -323,6 +332,22 @@ describe("ヘッダーとフッター", () => {
     });
   }
 
+  /** 全ページ同じ置き方で、ヘッダーとフッターの中央に1つずつ */
+  function centered(top: MarginContent, bottom: MarginContent): HeaderFooter {
+    const margins = emptyHeaderFooter();
+    for (const side of [margins.odd, margins.even]) {
+      side.top.center = top;
+      side.bottom.center = bottom;
+    }
+    return margins;
+  }
+
+  /** body の data-margins を読み戻す（スクリプトが getAttribute で読むのと同じ形） */
+  function marginsOf(out: string): unknown {
+    const raw = /data-margins="([^"]*)"/.exec(out)?.[1] ?? "";
+    return JSON.parse(raw.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"));
+  }
+
   test("選べる中身は5つ", () => {
     expect(MARGIN_CONTENTS.map((item) => item.label)).toEqual([
       "題名",
@@ -333,30 +358,38 @@ describe("ヘッダーとフッター", () => {
     ]);
   });
 
-  test("既定は紙ごとに持つ", () => {
-    expect(printPreset("bunko-vertical").headerFooter).toEqual({
-      top: "episode",
-      bottom: "page",
-    });
-    expect(printPreset("a5-vertical").headerFooter).toEqual({ top: "title", bottom: "page" });
-    expect(printPreset("a4-horizontal").headerFooter).toEqual({ top: "title", bottom: "page" });
+  /**
+   * 読む紙の既定（作者の裁定、2026-10-17）：奇数ページはページ番号をヘッダーの右、
+   * 偶数ページはヘッダーの左。章（話）の題はヘッダーの中央。それ以外は刷らない
+   */
+  test("既定は3つの紙とも、奇数はヘッダー右・偶数はヘッダー左にページ番号、中央に話の見出し", () => {
+    const none = { left: "none", center: "none", right: "none" };
+    for (const preset of PRINT_PRESETS) {
+      expect(printPreset(preset.id).headerFooter).toEqual({
+        odd: { top: { left: "none", center: "episode", right: "page" }, bottom: none },
+        even: { top: { left: "page", center: "episode", right: "none" }, bottom: none },
+      });
+    }
   });
 
   test("選ばなければ、紙の既定をスクリプトへ伝える", () => {
-    expect(withMargins()).toContain('data-head="episode" data-foot="page"');
-    expect(withMargins(undefined, undefined, "a4-horizontal")).toContain(
-      'data-head="title" data-foot="page"'
+    expect(marginsOf(withMargins())).toEqual(printPreset("bunko-vertical").headerFooter);
+    expect(marginsOf(withMargins(undefined, undefined, "a4-horizontal"))).toEqual(
+      printPreset("a4-horizontal").headerFooter
     );
+    // 前の形（data-head・data-foot）は出さない
+    expect(withMargins()).not.toContain("data-head=");
   });
 
-  test("選んだものを伝える", () => {
-    expect(withMargins({ top: "author", bottom: "none" }, "山田")).toContain(
-      'data-head="author" data-foot="none"'
-    );
+  test("選んだものを、奇数・偶数の枠ごとに伝える", () => {
+    const margins = emptyHeaderFooter();
+    margins.odd.bottom.right = "author";
+    margins.even.bottom.left = "title";
+    expect(marginsOf(withMargins(margins, "山田"))).toEqual(margins);
   });
 
   test("題名と作者名は、逃がしてから渡す", () => {
-    const out = withMargins({ top: "author", bottom: "title" }, '"><script>');
+    const out = withMargins(centered("author", "title"), '"><script>');
 
     expect(out).toContain('data-title="銀の航路"');
     expect(out).toContain('data-author="&quot;&gt;&lt;script&gt;"');
@@ -364,14 +397,33 @@ describe("ヘッダーとフッター", () => {
   });
 
   test("作者名が無ければ空で渡す（上下に何も出ない）", () => {
-    expect(withMargins({ top: "author", bottom: "page" })).toContain('data-author=""');
+    expect(withMargins(centered("author", "page"))).toContain('data-author=""');
   });
 
   test("案内帯に、上下の余白に何が刷られるかを出す", () => {
-    expect(withMargins()).toContain("上の余白：話の見出し／下の余白：ページ番号");
-    expect(withMargins({ top: "none", bottom: "none" })).toContain(
-      "上の余白：なし／下の余白：なし"
+    expect(withMargins()).toContain(
+      "上下の余白：奇数ページ：ヘッダー中央に話の見出し・ヘッダー右にページ番号／偶数ページ：ヘッダー左にページ番号・ヘッダー中央に話の見出し"
     );
+    expect(withMargins(centered("none", "none"))).toContain("上下の余白：奇数・偶数ページとも：なし");
+  });
+
+  test("置き方を文にする：奇数と偶数が同じなら1つにまとめる", () => {
+    expect(describeHeaderFooter(centered("title", "page"))).toBe(
+      "奇数・偶数ページとも：ヘッダー中央に題名・フッター中央にページ番号"
+    );
+  });
+
+  test("ヘッダーとフッターは、左・中央・右の3つの枠を格子で並べる（中央が紙の真ん中からずれない）", () => {
+    const out = withMargins();
+    expect(out).toContain("grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);");
+    expect(out).toContain(".margin-right { text-align: right; }");
+  });
+
+  test("作者名を置いたかを、12の枠すべてから探す", () => {
+    const margins = emptyHeaderFooter();
+    expect(headerFooterUses(margins, "author")).toBe(false);
+    margins.even.bottom.right = "author";
+    expect(headerFooterUses(margins, "author")).toBe(true);
   });
 });
 
@@ -443,7 +495,56 @@ describe("脚本の組版", () => {
 
     expect(out).toContain('<p class="script-hashira">○駅前・夜</p>');
     expect(out).toContain('class="gap script-togaki"');
-    expect(out).toContain('class="gap script-serifu"');
+    expect(out).toContain('class="gap script-serifu script-role-5"');
+  });
+
+  /**
+   * 人物名の欄（作者の裁定、2026-10-17。公募の納品用・原稿エディターと同じ幅）。
+   * 人物名を span で包み、欄の幅（5字）より短ければ空ける。折り返しは「「」の下へ
+   */
+  test("台詞は人物名を欄に入れ、ぶら下げの幅を「「」の位置にする", () => {
+    const out = scriptHtml("太郎「行こう」");
+
+    expect(out).toContain(
+      '<p class="script-serifu script-role-5"><span class="script-role">太郎</span>「行こう」</p>'
+    );
+    expect(out).toContain(`.script-role { display: inline-block; min-inline-size: ${SCRIPT_ROLE_WIDTH}em; text-indent: 0; }`);
+    expect(out).toContain(".script-serifu.script-role-5 { padding-inline-start: 5em; text-indent: -5em; }");
+  });
+
+  test("欄より長い人物名は切らず、その「「」の位置でぶら下げる", () => {
+    const out = scriptHtml("密倉家の会長「来たか」");
+
+    expect(out).toContain(
+      '<p class="script-serifu script-role-6"><span class="script-role">密倉家の会長</span>「来たか」</p>'
+    );
+  });
+
+  test("人物名のルビは親文字だけを数える", () => {
+    // 記法ごと数えると9字、読みまで数えると5字を超える。親文字は2字なので欄の幅5のまま
+    const out = scriptHtml("{太志|たいし}「はい」");
+
+    expect(out).toContain('class="script-serifu script-role-5"');
+  });
+
+  test("書体：ト書きと柱はゴシック、台詞は明朝のまま。面をまたいだ台詞の続きはぶら下げの位置から", () => {
+    const out = scriptHtml();
+
+    expect(out).toContain(`.script-hashira, .script-togaki { font-family: ${PRINT_GOTHIC_FONT_FAMILY}; }`);
+    expect(out).toContain(".script-serifu.cont { text-indent: 0; }");
+    expect(out).toContain(SCRIPT_LAYOUT_CSS);
+  });
+
+  test("漫画の原作は、台本の印を借りても人物名の欄を作らない（今回は台本だけ）", () => {
+    const out = buildPrintHtml({
+      workTitle: "夜の駅",
+      episodes: [{ heading: "第1話", body: "太郎「行こう」", notation: "curly" }],
+      preset: "bunko-vertical",
+      kind: "manga",
+    });
+
+    expect(out).toContain('<p class="script-serifu">太郎「行こう」</p>');
+    expect(out).not.toContain(SCRIPT_LAYOUT_CSS);
   });
 
   test("どれにも当たらない行には、印を付けない", () => {
@@ -461,7 +562,7 @@ describe("脚本の組版", () => {
   test("ルビは脚本でも今までどおり組まれる", () => {
     const out = scriptHtml("{太郎|たろう}「行こう」");
 
-    expect(out).toContain('<p class="script-serifu">');
+    expect(out).toContain('<p class="script-serifu script-role-5">');
     expect(out).toContain("<ruby>太郎<rt>たろう</rt></ruby>");
   });
 
