@@ -334,7 +334,7 @@ describe("台本の字下げ", () => {
     expect(out).toContain(`.gl.g { font-family: ${PRINT_GOTHIC_FONT_FAMILY}; }`);
   });
 
-  test("台詞が折り返したら、続きの行は「「」の下（5マスの空き）から", () => {
+  test("台詞が折り返したら、続きの行は「「」の次の字の下（6マスの空き）から", () => {
     const out = buildGridPrintHtml({
       workTitle: "夜の駅",
       episodes: [{ heading: "", body: `太郎「${"あ".repeat(40)}」`, notation: "curly" }],
@@ -342,6 +342,7 @@ describe("台本の字下げ", () => {
       grid: V40,
       kind: "script",
     });
-    expect(out).toContain('<div class="gl"><i></i><i></i><i></i><i></i><i></i><i>あ</i>');
+    expect(out).toContain('<div class="gl"><i></i><i></i><i></i><i></i><i></i><i></i><i>あ</i>');
+    expect(out).not.toContain('<div class="gl"><i></i><i></i><i></i><i></i><i></i><i>あ</i>');
   });
 });

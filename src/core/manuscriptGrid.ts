@@ -2,7 +2,12 @@ import { tokenizeLine, type NotationMode } from "./manuscriptRender";
 import { stripMemoLines } from "./sceneMemo";
 import { tcyRuns } from "./tateChuYoko";
 import { isHangable, isNoLineEnd, isNoLineStart } from "./kinsoku";
-import { classifyScriptLine, SCRIPT_ROLE_WIDTH, splitSerifu } from "./scriptLines";
+import {
+  classifyScriptLine,
+  SCRIPT_ROLE_WIDTH,
+  SCRIPT_SPEECH_HANG,
+  splitSerifu,
+} from "./scriptLines";
 import type { WorkKindKey } from "./workKind";
 
 /**
@@ -218,12 +223,20 @@ function splitWideRuby(unit: GridUnit, columns: number): GridUnit[] {
  */
 export function breakIntoLines(
   source: readonly GridUnit[],
-  options: GridOptions
+  options: GridOptions,
+  /**
+   * 1行目だけ字数を変えるとき（台本の台詞：1行目と、ぶら下げた2行目以降で
+   * 入る字が違う）。省略なら全行 `options.columns`
+   */
+  firstColumns?: number
 ): GridLine[] {
   const columns = Math.max(1, Math.floor(options.columns));
+  const first = firstColumns === undefined ? columns : Math.max(1, Math.floor(firstColumns));
+  // 長いルビは、狭いほうの行にも入る長さで割る
+  const narrowest = Math.min(columns, first);
   const units = source.flatMap((unit) =>
-    unit.kind === "ruby" && unit.width > columns
-      ? splitWideRuby(unit, columns)
+    unit.kind === "ruby" && unit.width > narrowest
+      ? splitWideRuby(unit, narrowest)
       : [unit]
   );
   if (units.length === 0) return [{ units: [] }];
@@ -235,7 +248,8 @@ export function breakIntoLines(
 
   while (index < units.length) {
     const unit = units[index];
-    if (width + unit.width <= columns) {
+    const limit = lines.length === 0 ? first : columns;
+    if (width + unit.width <= limit) {
       line.push(unit);
       width += unit.width;
       index += 1;
@@ -348,7 +362,7 @@ export const SCRIPT_TOGAKI_INDENT = 3;
  * - **ト書き**：3字下げ。行頭の全角空白で見分けるので、**頭の全角空白は字下げに
  *   置き換える**（残すと「空白1字＋字下げ3字」で4字下がる。紙だけの話で、原稿は
  *   変えない）。字下げのぶん、1行に入る字を減らして割る（1行の字数は指定どおり）
- * - **台詞**：人物名の欄と、「「」の下へのぶら下げ（`serifuLines`）
+ * - **台詞**：人物名の欄と、「「」の次の字の下へのぶら下げ（`serifuLines`）
  * - **書体**：ト書きと柱はゴシック、台詞と、どれにも当たらない行は明朝
  */
 function linesOfParagraph(
@@ -388,12 +402,14 @@ function linesOfParagraph(
  * - 人物名を `SCRIPT_ROLE_WIDTH` 字の欄に入れ、足りない分を空きマスで埋めて、
  *   「「」を欄の次のマスにそろえる。**欄より長い名前は切らない**——超えたぶんだけ
  *   「「」が後ろへずれる
- * - 台詞が2行以上になったら、折り返した行を「「」の下にそろえる（ぶら下げ字下げ）。
- *   そろえる先は**その行の「「」**（長い名前の行は、ずれた「「」の下）
- * - 1行の字数は指定どおりのまま。台詞はぶら下げの幅だけ短い行で割るので、
- *   1行目も2行目以降も「欄＋台詞」がちょうど字数に収まる
- * - 人物名が長すぎて、台詞の入る字が行の半分を切るときは、欄もぶら下げもやめて
- *   ふつうの行として割る（1行に数字しか入らない紙にしない）
+ * - 台詞が2行以上になったら、折り返した行を**「「」の次の字（台詞の1字目）の下**に
+ *   そろえる（ぶら下げ字下げ。「「」から `SCRIPT_SPEECH_HANG` 字下げる。作者の裁定、
+ *   2026-10-17「「」と同じ高さだと上すぎる」）。そろえる先は**その行の「「」**
+ *   （長い名前の行は、ずれた「「」の次）
+ * - 1行の字数は指定どおりのまま。1行目は「欄＋台詞」、2行目以降は「ぶら下げ＋台詞」が
+ *   ちょうど字数に収まるよう、台詞を行ごとの幅で割る（2行目以降は1行目より1字少ない）
+ * - 人物名が長すぎて、折り返した行に台詞の入る字が行の半分を切るときは、欄もぶら下げも
+ *   やめてふつうの行として割る（1行に数字しか入らない紙にしない）
  */
 function serifuLines(
   role: string,
@@ -404,12 +420,19 @@ function serifuLines(
   const columns = Math.max(1, Math.floor(options.columns));
   const roleUnits = unitsOfLine(role, notation, options.vertical);
   const roleWidth = roleUnits.reduce((sum, unit) => sum + unit.width, 0);
+  // 「「」の位置（欄の幅か、それより長い名前の字数）
   const indent = Math.max(SCRIPT_ROLE_WIDTH, roleWidth);
-  if (indent > Math.floor(columns / 2)) {
+  // 折り返した行の字下げ（「「」の次の字の下）
+  const hangIndent = indent + SCRIPT_SPEECH_HANG;
+  if (hangIndent > Math.floor(columns / 2)) {
     return breakIntoLines(unitsOfLine(role + speech, notation, options.vertical), options);
   }
-  const narrowed = { ...options, columns: columns - indent };
-  const lines = breakIntoLines(unitsOfLine(speech, notation, options.vertical), narrowed);
+  const narrowed = { ...options, columns: columns - hangIndent };
+  const lines = breakIntoLines(
+    unitsOfLine(speech, notation, options.vertical),
+    narrowed,
+    columns - indent
+  );
   // 欄の空きは、字の無いマス。行割りには通さない（禁則の判定に関わらない）
   const padding: GridUnit[] = Array.from({ length: indent - roleWidth }, () => ({
     kind: "char" as const,
@@ -419,7 +442,7 @@ function serifuLines(
   return lines.map((line, index) =>
     index === 0
       ? { ...line, units: [...roleUnits, ...padding, ...line.units] }
-      : { ...line, indent }
+      : { ...line, indent: hangIndent }
   );
 }
 

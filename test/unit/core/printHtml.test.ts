@@ -509,7 +509,8 @@ describe("脚本の組版", () => {
       '<p class="script-serifu script-role-5"><span class="script-role">太郎</span>「行こう」</p>'
     );
     expect(out).toContain(`.script-role { display: inline-block; min-inline-size: ${SCRIPT_ROLE_WIDTH}em; text-indent: 0; }`);
-    expect(out).toContain(".script-serifu.script-role-5 { padding-inline-start: 5em; text-indent: -5em; }");
+    // 折り返しは「「」の次の字（台詞の1字目）の下＝5＋1字（作者の裁定、2026-10-17）
+    expect(out).toContain(".script-serifu.script-role-5 { padding-inline-start: 6em; text-indent: -6em; }");
   });
 
   test("欄より長い人物名は切らず、その「「」の位置でぶら下げる", () => {

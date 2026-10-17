@@ -87,6 +87,14 @@ export const SCRIPT_ROLE_MAX = 12;
 export const SCRIPT_ROLE_WIDTH = 5;
 
 /**
+ * 台詞の折り返した行を、「「」の位置からさらに何字下げるか（作者の裁定、2026-10-17：
+ * 「2行目が「「」と同じ高さだと上すぎる。もう1字下げる」）。1なら「「」の次の字＝
+ * 台詞の1字目の下にそろう。公募の納品用・読む紙・原稿エディターが同じ値を使う
+ * （定義はここだけ）。EPUB の 6em の決め打ち（`SCRIPT_LINE_CSS`）には当てない
+ */
+export const SCRIPT_SPEECH_HANG = 1;
+
+/**
  * 台本のト書きと柱の書体（作者の裁定、2026-10-17：台詞は明朝、ト書きと柱はゴシック）。
  *
  * **游ゴシックは Medium を先に置く。** Windows の Chrome・Edge で「Yu Gothic」とだけ
@@ -205,9 +213,10 @@ export const SCRIPT_LINE_CSS = [
  * （漫画の原作は台詞・ト書きの印を借りているが、ここは足さない）。原稿エディターと
  * 読む紙（`printHtml.ts`）がそのまま埋め込む。EPUB には足さない（`SCRIPT_LINE_CSS` だけ）。
  *
- * - **台詞の折り返しを「「」の下にそろえる**：行に付けた `script-role-N`（N は「「」の
- *   前までの字数）で、ぶら下げの幅を行ごとに決める。`SCRIPT_LINE_CSS` の 6em の
- *   決め打ちより強い指定（class 2つ）なので、印の付いた行だけが置き換わる
+ * - **台詞の折り返しを「「」の次の字の下にそろえる**：行に付けた `script-role-N`（N は
+ *   「「」の前までの字数）で、ぶら下げの幅（N ＋ `SCRIPT_SPEECH_HANG` 字）を行ごとに
+ *   決める。`SCRIPT_LINE_CSS` の 6em の決め打ちより強い指定（class 2つ）なので、
+ *   印の付いた行だけが置き換わる
  * - **人物名の欄**（読む紙だけ）：人物名を `span.script-role` で包み、欄の幅
  *   （`SCRIPT_ROLE_WIDTH`）より短ければ空ける。長い名前は欄を押し広げる（切らない）。
  *   原稿エディターは打つ面の中に要素を足せない（足すとカーソルと変換がずれる）ので、
@@ -220,7 +229,8 @@ export const SCRIPT_LAYOUT_CSS = [
   `.script-hashira, .script-togaki { font-family: ${SCRIPT_GOTHIC_FONT_FAMILY}; }`,
   ...Array.from({ length: SCRIPT_ROLE_MAX }, (_, index) => {
     const n = index + 1;
-    return `.script-serifu.script-role-${n} { padding-inline-start: ${n}em; text-indent: -${n}em; }`;
+    const hang = n + SCRIPT_SPEECH_HANG;
+    return `.script-serifu.script-role-${n} { padding-inline-start: ${hang}em; text-indent: -${hang}em; }`;
   }),
   `.script-role { display: inline-block; min-inline-size: ${SCRIPT_ROLE_WIDTH}em; text-indent: 0; }`,
   ".script-serifu.cont { text-indent: 0; }",
