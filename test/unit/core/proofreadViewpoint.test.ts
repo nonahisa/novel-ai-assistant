@@ -497,7 +497,7 @@ describe("札と指示", () => {
     expect(explainProofreadReason("視点")).toContain("わざとなら");
   });
 
-  test("プロンプトに視点の定義と「推し量りは違う」が入り、版は 1.13", () => {
+  test("プロンプトに視点の定義と「推し量りは違う」が入り、版は 1.14", () => {
     const prompt = buildProofreadPrompt({
       chunkTextWithLineNumbers: "1: 本文",
       narrativeStyle: "",
@@ -507,7 +507,7 @@ describe("札と指示", () => {
     expect(prompt).toContain("視点のずれではありません");
     expect(prompt).toContain("、視点");
     // 1.12 で形式名詞を外し、出力例とスキーマを直した。1.13 で冗長にも修正案を頼んだ
-    expect(PROOFREAD_VERSION).toBe("1.13");
+    expect(PROOFREAD_VERSION).toBe("1.14");
   });
 
   test("1.11：視点は一人称の場面の2つの形だけ。語り手自身の心の声・丸括弧は挙げない", () => {

@@ -28,7 +28,10 @@ import { foreignNarratorSentences } from "./characterExtract";
  *
  * ## 変更履歴
  *
- * - 2.3 留意点があるときは、【現在の設定】へ人物の**変化の記録を渡さない**
+ * - 2.4 送るスキーマの長さの上限を、字数の上限の1.5倍にした（作者の裁定
+ *   2026-10-17。`enrichSchemaMaxLength`）。上限ちょうどだと Ollama が語の途中で
+ *   書くのを止め、口調の案が「…語尾が幼」で切れていた。頼みの本文は 2.3 と同じ
+ * - 2.3留意点があるときは、【現在の設定】へ人物の**変化の記録を渡さない**
  *   （作者の裁定 2026-10-15 の6。`enrichOmitsChanges`）。あわせて、その回は
  *   紹介の説明から関与度の一文を外し、【書き方】の変化の段落も送らない——
  *   渡していない変化について書けと頼むことになり、26b は「（高）」だけを
@@ -42,7 +45,7 @@ import { foreignNarratorSentences } from "./characterExtract";
  *   留意点が空なら、従来（1.1）と同じ「項目の充実」として動く
  * - 1.1 変化の関与度を紹介へどこまで書くかを指示
  */
-export const SETTINGS_ENRICH_VERSION = "2.3";
+export const SETTINGS_ENRICH_VERSION = "2.4";
 
 /**
  * 製品がこのプロンプトを送るときの温度。項目の提案は設定として書くので、
@@ -249,6 +252,20 @@ export function enrichableFields(
   ];
 }
 
+/**
+ * スキーマに書く長さの上限（2.4。作者の裁定 2026-10-17）。**字数の上限そのもの
+ * より広くする。**
+ *
+ * Ollama はスキーマの maxLength に届いたところで書くのを止める。上限ちょうどに
+ * すると、口調の案が「…語尾が幼」のように語の途中で切れ（e4b・26b で7人中2件）、
+ * 句読点まで戻すコードの切り詰め（`clampEnrichField`）が働く余地が無かった。
+ * 頼みの「◯字以内」はそのまま残し、超えた分はコードが文の切れ目まで戻す
+ * （CLAUDE.md 規則3：字数はコード側で検証する）
+ */
+export function enrichSchemaMaxLength(maxChars: number): number {
+  return Math.ceil(maxChars * 1.5);
+}
+
 /** その種別のJSONスキーマ。全項目を必須にして、面倒な項目を落とさせない */
 export function buildEnrichSchema(
   kind: SettingsKind,
@@ -258,7 +275,7 @@ export function buildEnrichSchema(
   const properties: Record<string, unknown> = {};
   for (const field of fields) {
     properties[field.key] = field.maxChars
-      ? { type: ["string", "null"], maxLength: field.maxChars }
+      ? { type: ["string", "null"], maxLength: enrichSchemaMaxLength(field.maxChars) }
       : { type: ["string", "null"] };
   }
   // **留意点が無いときも置く。** 空配列が返るだけで害は無い。

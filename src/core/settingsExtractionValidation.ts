@@ -27,7 +27,10 @@ import {
   normalizeForComparison,
 } from "./groundedEvidence";
 import { WORLD_CATEGORIES, type WorldCategory } from "../models/world";
-import { withinDirectionFromQuote } from "./locationWithinDirection";
+import {
+  directionFromQuote,
+  withinDirectionFromQuote,
+} from "./locationWithinDirection";
 // 「（記述なし）」のような不在を述べる文の判定は人物側と共有する。
 // 片方だけ直しても、もう片方から同じ文言が入り込む
 import { isMeaningfulValue } from "./characterExtractionValidation";
@@ -365,9 +368,11 @@ function moveReversedWithinRelations(
     }
     const fromKey = normalizeLocationName(fromName);
     // 相手が正しい向きを自分で持っていれば、二重に足さない
+    // 方角は値ごと移す（「港は学校の北」→「学校は港の北」。引用の方角の語のまま）
     const already = (owner.data.relations ?? []).some(
       (existing) =>
-        existing.kind === "within" &&
+        existing.kind === relation.kind &&
+        (existing.value ?? null) === (relation.value ?? null) &&
         normalizeLocationName(existing.target) === fromKey
     );
     if (already) continue;
@@ -377,8 +382,8 @@ function moveReversedWithinRelations(
         ...(owner.data.relations ?? []),
         {
           target: fromName,
-          kind: "within",
-          value: null,
+          kind: relation.kind,
+          value: relation.value ?? null,
           evidence: relation.evidence ?? null,
           chapters: chaptersForCandidate(chunk, [fromName], relation.evidence),
         },
@@ -1050,6 +1055,24 @@ export function validateLocationRelations(
       ) === "reversed"
     ) {
       reversed.push({ target, kind, value: null, evidence: relation.evidence ?? null });
+      continue;
+    }
+    /*
+      **方角も向きを確かめる**（作者の裁定 2026-10-17「検算で照らす」。A18）。
+      「港の北に学校がある」から「港は学校の北」と読むと、向きごと逆になる。
+      読み方は「中にある」と同じ（文の形から読めるときだけ。値の方角の語で読む）
+    */
+    if (
+      kind === "direction" &&
+      value &&
+      directionFromQuote(
+        relation.evidence ?? "",
+        [location.name, ...(location.aliases ?? [])],
+        [target],
+        value
+      ) === "reversed"
+    ) {
+      reversed.push({ target, kind, value, evidence: relation.evidence ?? null });
       continue;
     }
 

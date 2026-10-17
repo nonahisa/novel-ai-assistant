@@ -91,6 +91,69 @@ export function withinDirectionFromQuote(
   selfNames: readonly string[],
   targetNames: readonly string[]
 ): WithinDirection {
+  return directionByShape(
+    evidence,
+    selfNames,
+    targetNames,
+    CONTAINER_THEN_CONTAINED,
+    AFTER_CONTAINER
+  );
+}
+
+/** 正規表現の中で字そのものとして使う */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/**
+ * 方角（direction）の関係の向きを、引用の文の形から確かめる（作者の裁定
+ * 2026-10-17「検算で照らす」。A18）。関係は「自分が相手の `value`（北など）にある」。
+ *
+ * 「中にある」と同じく、方角も向きのある関係で、「港の北に学校がある」から
+ * 「港は学校の北」と読めば向きごと逆になる。読む形は `withinDirectionFromQuote` と
+ * 同じ並び：
+ *
+ * - 「XのDにY」「XのDの Y」「XのDにある（という）Y」——Y が X の D
+ * - 「YはXのDにある（建つ…）」——Y が X の D
+ *
+ * D は**関係の値そのもの**（「北」「南東」。添えの「側」「の方」は許す）。値と違う
+ * 方角の語、「港から北へ」のような道のりの書き方は読まない（`unknown`）。
+ */
+export function directionFromQuote(
+  evidence: string,
+  selfNames: readonly string[],
+  targetNames: readonly string[],
+  value: string
+): WithinDirection {
+  const word = normalizeForComparison(value).replace(/(?:側|の方|方面)$/u, "");
+  if (!word) return "unknown";
+  const direction = `${escapeRegExp(word)}(?:側|の方|方面)?`;
+  return directionByShape(
+    evidence,
+    selfNames,
+    targetNames,
+    new RegExp(
+      `^の${direction}(?:に(?:${EXIST_WORDS})?(?:という)?の?|の)$`,
+      "u"
+    ),
+    new RegExp(`^の${direction}に(?:${EXIST_WORDS})`, "u")
+  );
+}
+
+/**
+ * 引用の中で、自分と相手の名前の並びと、間・後ろの語の形から向きを読む
+ * （「中にある」と方角で共用）。
+ *
+ * - `betweenShape`：「X（間）Y」で Y が X の側にあると言う、X と Y の間の語
+ * - `afterShape`：「Y は X（後ろ）」で Y が X の側にあると言う、X の直後の語
+ */
+function directionByShape(
+  evidence: string,
+  selfNames: readonly string[],
+  targetNames: readonly string[],
+  betweenShape: RegExp,
+  afterShape: RegExp
+): WithinDirection {
   const quote = normalizeForComparison(evidence);
   const longFirst = [...selfNames, ...targetNames]
     .map(normalizeForComparison)
@@ -109,15 +172,15 @@ export function withinDirectionFromQuote(
     for (const second of tagged) {
       if (first.self === second.self || first.end > second.start) continue;
       const between = quote.slice(first.end, second.start);
-      // 「X…Y」で、Y が X の中
-      if (CONTAINER_THEN_CONTAINED.test(between)) {
+      // 「X…Y」で、Y が X の中（方角なら X の D）
+      if (betweenShape.test(between)) {
         if (second.self) selfInside = true;
         else targetInside = true;
       }
-      // 「Y は X …にある」で、Y が X の中
+      // 「Y は X …にある」で、Y が X の中（方角なら X の D）
       if (
         SUBJECT_MARK.test(between) &&
-        AFTER_CONTAINER.test(quote.slice(second.end))
+        afterShape.test(quote.slice(second.end))
       ) {
         if (first.self) selfInside = true;
         else targetInside = true;

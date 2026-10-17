@@ -4,6 +4,7 @@ import {
   buildEnrichSchema,
   ENRICHABLE_FIELDS,
   MISATTRIBUTED_KEY,
+  enrichSchemaMaxLength,
 } from "../../../src/prompts/settingsEnrich";
 import { SUMMARY_MAX_CHARS } from "../../../src/core/summaryLimit";
 import {
@@ -68,7 +69,11 @@ describe("項目を充実させる提案", () => {
     const schema = buildEnrichSchema("character") as {
       properties: Record<string, { maxLength?: number }>;
     };
-    expect(schema.properties.speechStyle.maxLength).toBe(SPEECH_STYLE_MAX_CHARS);
+    // 2.4：スキーマは上限ちょうどにしない（Ollama が語の途中で止めるため）。
+    // 字数はコードが文の切れ目まで戻す（settingsEnrichSpeechCheck.test.ts）
+    expect(schema.properties.speechStyle.maxLength).toBe(
+      enrichSchemaMaxLength(SPEECH_STYLE_MAX_CHARS)
+    );
     // 人物以外には聞かない
     expect(ENRICHABLE_FIELDS.ability.map((entry) => entry.key)).not.toContain(
       "speechStyle"
@@ -80,7 +85,10 @@ describe("項目を充実させる提案", () => {
       properties: Record<string, { maxLength?: number }>;
     };
 
-    expect(schema.properties.summary.maxLength).toBe(SUMMARY_MAX_CHARS);
+    expect(schema.properties.summary.maxLength).toBe(
+      enrichSchemaMaxLength(SUMMARY_MAX_CHARS)
+    );
+    expect(enrichSchemaMaxLength(SUMMARY_MAX_CHARS)).toBeGreaterThan(SUMMARY_MAX_CHARS);
     expect(schema.properties.role.maxLength).toBeUndefined();
   });
 

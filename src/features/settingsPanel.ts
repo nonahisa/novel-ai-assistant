@@ -2029,15 +2029,22 @@ export class SettingsPanel {
     // **検算は core の1か所**（`checkEnrichProposals`。MCP の `settingsEnrich` と共用）。
     // 無い話を根拠にした値（F5）と、口調の指示の写し（6.5.11）はそこで落ち、
     // 項目と数だけが返る
-    const { proposals: checked, unknownCitations, speechEchoes } =
-      checkEnrichProposals({
-        kind,
-        record,
-        customFields: this.customFields,
-        parsed,
-        excerptText: excerpts.map((excerpt) => excerpt.text).join("\n"),
-        knownChapters: await this.knownChapters(),
-      });
+    const {
+      proposals: checked,
+      unknownCitations,
+      speechEchoes,
+      speechUnspokenFirstPersons,
+      foreignChanges,
+    } = checkEnrichProposals({
+      kind,
+      record,
+      customFields: this.customFields,
+      parsed,
+      excerptText: excerpts.map((excerpt) => excerpt.text).join("\n"),
+      knownChapters: await this.knownChapters(),
+      // 名前の出ない話の変化を根拠にした案を見分ける（作者の裁定 2026-10-17。A27）
+      sources: kind === "character" ? await this.sourcesForCheck(narration) : undefined,
+    });
     const proposals: FieldProposal[] = checked.map(
       ({ field, before, after, fillsBlank }) => ({
         // 反映するときに、既定の項目と同じ経路で書き戻せるようにする
@@ -2092,11 +2099,49 @@ export class SettingsPanel {
       speechEchoes > 0
         ? "（口調の提案は、指示の言葉をそのまま写したものだったので除きました）"
         : "";
+    // 口調の案の一人称が台詞に無かった（作者の裁定 2026-10-17。A22）。
+    // 一人称は画面に出してよい（本文の語で、作者が確かめられる）
+    if (speechUnspokenFirstPersons.length > 0) {
+      useLogFile(this.work.folderPath);
+      logFailure("再読込の口調の提案のうち、一人称が台詞に無かったもの", {
+        一人称: speechUnspokenFirstPersons,
+        応答: text,
+      });
+    }
+    // 名前の出ない話の変化から持ち越した案（A27）。語句と話数は記録にある値なので
+    // 画面に出してよい（作者が台帳で確かめられる）
+    if (foreignChanges.length > 0) {
+      useLogFile(this.work.folderPath);
+      logFailure("再読込の提案のうち、名前の出ない話の変化の記録から持ち越したもの", {
+        項目: foreignChanges.map(
+          (item) => `${item.label}：「${item.phrases.join("」「")}」（第${item.chapters.join("・")}話）`
+        ),
+        応答: text,
+      });
+    }
+    const foreignChangeNotice =
+      foreignChanges.length > 0
+        ? `（${foreignChanges
+            .map((item) => item.label)
+            .join("・")}の提案は、この人物の名前が出てこない話（第${[
+            ...new Set(foreignChanges.flatMap((item) => item.chapters)),
+          ]
+            .sort((a, b) => a - b)
+            .join("・")}話）の記録から持ち越した「${[
+            ...new Set(foreignChanges.flatMap((item) => item.phrases)),
+          ].join("」「")}」を含んでいたので除きました）`
+        : "";
+    const speechFirstPersonNotice =
+      speechUnspokenFirstPersons.length > 0
+        ? `（口調の提案は、一人称「${speechUnspokenFirstPersons.join(
+            "」「"
+          )}」がこの人物の場面の台詞に見当たらないので除きました）`
+        : "";
     const suspectNotice =
       moves.length > 0
         ? `（ほかの語り手の場面だけの話から取り違えて入った疑いのある値 ${moves.length} 件を、別の人物へ移す案として並べました。既定では選んでいません）`
         : "";
-    const notice = `${misattributed.droppedNotice}${citationNotice}${speechEchoNotice}${suspectNotice}`;
+    const notice = `${misattributed.droppedNotice}${citationNotice}${foreignChangeNotice}${speechEchoNotice}${speechFirstPersonNotice}${suspectNotice}`;
 
     if (proposals.length === 0 && misattributed.items.length === 0) {
       this.post({
@@ -2149,6 +2194,25 @@ export class SettingsPanel {
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
+    }
+  }
+
+  /**
+   * 再読込の検算に渡す本文（話ごと）。語り手を決めたときに読んでいればそれを使う。
+   * 読めなければ undefined——その検算だけを飛ばし、**提案そのものは止めない**
+   */
+  private async sourcesForCheck(
+    narration: { sources: ExcerptSource[] } | null
+  ): Promise<ExcerptSource[] | undefined> {
+    if (narration) return narration.sources;
+    try {
+      return await this.loadedExcerptSources();
+    } catch (error) {
+      useLogFile(this.work.folderPath);
+      logFailure("再読込：変化の記録を本文と照らすための本文を読めなかった（照らさずに続行）", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
     }
   }
 

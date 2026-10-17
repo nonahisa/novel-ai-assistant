@@ -321,6 +321,129 @@ export function firstPersonsMissingFromQuote(
   });
 }
 
+/** 一人称の節の中で、ほかの特徴の書き始めと読む語（ここから先は一人称の話ではない） */
+const OTHER_ASPECT_START = /語尾|口癖|敬語|丁寧|口調|方言|話し方|呼び/u;
+
+/** 一人称の直後に続いたら、その一人称を「使わない」と言っている形 */
+const NEGATED_AFTER = /^[」』]?(?:ではな|でな|じゃな|は使わな|を使わな)/u;
+
+/** 節の残りから拾うときに除く語（一人称以外の意味で普通に書かれる） */
+const NOT_IN_REST = new Set<string>(["自分", "某", "うち", "われ", "ワレ"]);
+
+/** CJK の漢字か（1字の一人称の前後を確かめる） */
+function isKanji(char: string | undefined): boolean {
+  return char !== undefined && /\p{Script=Han}/u.test(char);
+}
+
+/**
+ * AIで再読込の口調の案に書かれた一人称（作者の裁定 2026-10-17。A22）。
+ *
+ * `claimedFirstPersons` は「一人称」の直後の語しか読まない。再読込の口調の案は
+ * 「一人称は俺、場面により余。」のように**1つの節に並べて**書いてくる（26b の
+ * ある冒険者の案）。そこで、「一人称」から句点（または語尾・口癖などの書き始め）までの
+ * 節の中にある一人称の語も拾う。
+ *
+ * - 「一人称は「ボク」ではない」のように否定した語は拾わない
+ * - 節の残りは一覧の語（`FIRST_PERSON_WORDS`）だけを拾う。括弧の語を何でも拾うと、
+ *   「一人称は俺で、語尾に「〜だな」」の語尾まで一人称と読む
+ * - 1字の漢字の語は、前後が漢字でないときだけ（「余計」「私物」を読まない）
+ */
+export function claimedFirstPersonsInClause(value: string): string[] {
+  const found: string[] = [];
+  const add = (term: string): void => {
+    if (!found.includes(term)) found.push(term);
+  };
+  for (const match of value.matchAll(CLAIM_AFTER_LABEL)) {
+    const start = match.index ?? 0;
+    const afterClaim = start + match[0].length;
+    const terms = match[1] ? termsIn(match[1]) : match[2] ? [match[2]] : [];
+    if (!NEGATED_AFTER.test(value.slice(afterClaim))) terms.forEach(add);
+
+    // 節の残り（句点・ほかの特徴の書き始めまで）
+    let rest = value.slice(afterClaim);
+    const stop = rest.search(/[。！？]/u);
+    if (stop >= 0) rest = rest.slice(0, stop);
+    const aspect = rest.search(OTHER_ASPECT_START);
+    if (aspect >= 0) rest = rest.slice(0, aspect);
+    for (const word of [...FIRST_PERSON_WORDS].sort((a, b) => b.length - a.length)) {
+      if (NOT_IN_REST.has(word)) continue;
+      let from = 0;
+      for (;;) {
+        const at = rest.indexOf(word, from);
+        if (at < 0) break;
+        from = at + word.length;
+        const prev = rest[at - 1];
+        const next = rest[at + word.length];
+        if (word.length === 1 && (isKanji(prev) || isKanji(next))) continue;
+        if (NEGATED_AFTER.test(rest.slice(at + word.length))) continue;
+        // 長い語の一部（「俺様」の「俺」）は、長い語のほうで拾っている
+        if (found.some((term) => term.length > word.length && term.includes(word))) continue;
+        add(word);
+      }
+    }
+  }
+  for (const match of value.matchAll(CLAIM_BEFORE_LABEL)) {
+    termsIn(match[1]).forEach(add);
+  }
+  return found;
+}
+
+/**
+ * 本文の台詞（「」『』の中と、心の声に使われる（）の中）を並べる。
+ * `speechQuoteProblem` と同じ見方。
+ */
+function dialogueOf(text: string): string[] {
+  return [
+    ...quotedSpans(text).map((span) => text.slice(span.start, span.end)),
+    ...(text.match(PARENTHESIZED) ?? []),
+  ];
+}
+
+/**
+ * 口調の案に書いた一人称のうち、本文の抜粋の**台詞の中に**1度も出てこないもの
+ * （作者の裁定 2026-10-17。A22）。
+ *
+ * 再読込の案には根拠の台詞が付かないので、抽出の検算
+ * （`firstPersonsMissingFromQuote`。根拠の台詞だけを見る）が当たらない。代わりに、
+ * その人物の名前で集めた抜粋の台詞全体と照らす。**地の文は見ない**——26b が
+ * ある冒険者の案に入れた「余」は、第12話の皇子の語り（地の文）にあった。
+ *
+ * **台詞を誰が言ったかまでは確かめない**（`speechQuoteProblem` と同じ限界）。
+ * 別の人物の台詞にある一人称や、ほかの人物が呼びかけた名前（「◯◯、大変そうだね」）
+ * は通ってしまう。
+ */
+export function firstPersonsUnspokenInDialogue(
+  value: string,
+  bodyText: string
+): string[] {
+  const claimed = claimedFirstPersonsInClause(value);
+  if (claimed.length === 0) return [];
+  const lines = dialogueOf(bodyText).map(kanaFolded);
+  return claimed.filter((term) => {
+    const folded = kanaFolded(term);
+    const forms = new Set<string>([folded]);
+    for (const reading of FIRST_PERSON_READINGS[term] ?? []) forms.add(reading);
+    for (const [kanji, readings] of Object.entries(FIRST_PERSON_READINGS)) {
+      if (readings.includes(folded)) forms.add(kanji);
+    }
+    return ![...forms].some((form) =>
+      lines.some((line) => containsAsWord(line, form))
+    );
+  });
+}
+
+/** 1字の漢字は、前後が漢字でないときだけ一致とみなす（「余計」の「余」を数えない） */
+function containsAsWord(line: string, form: string): boolean {
+  if ([...form].length !== 1 || !isKanji(form)) return line.includes(form);
+  let from = 0;
+  for (;;) {
+    const at = line.indexOf(form, from);
+    if (at < 0) return false;
+    from = at + form.length;
+    if (!isKanji(line[at - 1]) && !isKanji(line[at + form.length])) return true;
+  }
+}
+
 /** 一人称の書き方を、後ろに続く「で、」「を使い、」ごと外すための形 */
 const CLAIM_CLAUSE_AFTER_LABEL = new RegExp(
   String.raw`一人称(?:は|が)?[：:]?\s*(?:${QUOTED_TERMS}|(?:${WORD_ALTERNATION})(?=[でをと、。，,\s（(]|$))(?:を使い分け(?:る|て)|を使(?:う|い)|で)?[。、，,]?`,

@@ -120,7 +120,8 @@ describe("冗長の修正案（1.13）", () => {
   } as unknown as Chunk;
 
   test("冗長は片方を削った形を書くよう頼んでいる", () => {
-    expect(prompt).toContain("冗長は、重なっている語の片方を削った形を書いてください");
+    // 1.14 で「必ず書く」へ強めた（proofreadRedundancyNoFix.test.ts）
+    expect(prompt).toContain("冗長は、必ず修正案を書いてください。** 重なっている語の片方を削った形です");
   });
 
   test("片方を削った修正案は、そのまま適用できる形で通る", () => {

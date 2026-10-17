@@ -46,3 +46,59 @@ export function clampSummary(
   }
   return head;
 }
+
+/**
+ * 上限を超えたら、**文の切れ目（句点・感嘆符・疑問符）**まで戻して切る
+ * （作者の裁定 2026-10-17。AIで再読込の口調の案）。
+ *
+ * `clampSummary` は上限の6割より前の句点を使わず、読点まで戻す。紹介なら
+ * 「途中までの情報」に値打ちがあるが、口調の案は「語尾は…と、」で切れると
+ * 読めない文が資料に載る（実測：e4b の案「…語尾が幼」）。句点が
+ * 1つも無いときだけ、`clampSummary` と同じく読点まで戻す。
+ */
+export function clampAtSentenceEnd(
+  value: string | null | undefined,
+  maxChars: number
+): string | null {
+  if (!value) return null;
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  const characters = [...text];
+  if (characters.length <= maxChars) return text;
+
+  // **括弧の中の句点・感嘆符は文の切れ目にしない。** 口調の案は台詞を
+  // 引く（「おっけー。任せといて！」）ので、そこで切ると括弧が閉じない
+  let depth = 0;
+  let end = -1;
+  let comma = -1;
+  // 上限の位置でまだ閉じていない括弧のうち、いちばん外側の開き括弧の位置
+  let outerOpen = -1;
+  characters.slice(0, maxChars).forEach((char, index) => {
+    if (OPENING.has(char)) {
+      if (depth === 0) outerOpen = index;
+      depth += 1;
+    } else if (CLOSING.has(char)) {
+      depth = Math.max(0, depth - 1);
+    } else if (depth === 0 && SENTENCE_ENDS.has(char)) {
+      end = index;
+    } else if (depth === 0 && COMMAS.has(char)) {
+      comma = index;
+    }
+  });
+  if (end > 0) return characters.slice(0, end + 1).join("");
+  // 句点が無ければ、括弧の外の読点まで戻し、**その読点を句点に替えて文を閉じる**。
+  // 「…など、」で終わると、資料の上で続きが消えたように読める（実測：e4b、台詞を引いた案）
+  if (comma > 0) return `${characters.slice(0, comma).join("")}。`;
+  // 読点も無く、上限が括弧の中にかかるなら、閉じていない括弧の手前で切る
+  // （実測：26b の案が「…台詞は『主よ。」で終わった）
+  if (depth > 0 && outerOpen > 0) {
+    return `${characters.slice(0, outerOpen).join("").replace(/[、，,\s]+$/u, "")}。`;
+  }
+  return clampSummary(text, maxChars);
+}
+
+const COMMAS = new Set([..."、，,"]);
+
+const OPENING = new Set([..."「『（(【"]);
+const CLOSING = new Set([..."」』）)】"]);
+const SENTENCE_ENDS = new Set([..."。！？!?"]);
