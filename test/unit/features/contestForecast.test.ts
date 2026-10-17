@@ -13,7 +13,8 @@ import { invalidateWorkGoals } from "../../../src/core/workGoalsStore";
 import { parseWorkGoals, type WorkGoals } from "../../../src/models/workGoals";
 import type { WorkEntry } from "../../../src/models/types";
 import type { DeviceWritingStats } from "../../../src/models/writingStats";
-import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { Uri, window, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 完成予定から公募を選ぶ（設計書6.3.6.3）。入口は作品目標設定。
@@ -162,33 +163,7 @@ beforeEach(() => {
   workspace.getConfiguration = (() => ({
     get: <T>(_key: string, defaultValue: T): T => defaultValue,
   })) as unknown as typeof workspace.getConfiguration;
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-    rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
-      const bytes = disk.get(from.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      disk.set(to.fsPath, bytes);
-      disk.delete(from.fsPath);
-    },
-    delete: async (uri: { fsPath: string }) => {
-      disk.delete(uri.fsPath);
-    },
-    stat: async (uri: { fsPath: string }) => {
-      if (!disk.has(uri.fsPath)) throw new FileSystemError("missing", "FileNotFound");
-      return { type: 1, ctime: 0, mtime: 0, size: 0 };
-    },
-    readDirectory: async () => {
-      throw new FileSystemError("missing", "FileNotFound");
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk, { renameRefusesExisting: false, readDirectory: "missing" });
   Object.assign(window, {
     showInformationMessage: async (text: string, ...rest: unknown[]) => {
       informed.push(text);

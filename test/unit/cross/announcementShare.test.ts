@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { offerAnnouncementActions } from "../../../src/features/generateAnnouncement";
 import { X_SHARE_LABEL } from "../../../src/core/snsShare";
 import type { WorkEntry } from "../../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { env, Uri, window, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 更新告知の結果画面から、Xの投稿画面を開く配線（設計書6.79.8）。
@@ -110,23 +111,9 @@ describe("Xへ貼り付ける", () => {
     notices.length = 0;
     env.clipboard.text = "";
     env.opened.length = 0;
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-      stat: async (uri: { fsPath: string }) => {
-        if (!disk.has(uri.fsPath)) {
-          throw new FileSystemError("missing", "FileNotFound");
-        }
-        return { type: 1, ctime: 0, mtime: 0, size: 0 };
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk, {
+      methods: ["createDirectory", "readFile", "writeFile", "stat"],
+    });
 
     Object.assign(window, {
       showWarningMessage: async () => undefined,

@@ -74,9 +74,12 @@ export interface MemoryFsOptions {
    * - `"nested"`：下にあるものを直下の名前で返す（さらに下があればフォルダー）。区切りは `path.sep`
    * - `"filesOnly"`：直下のファイルだけを返す（`path.dirname` が一致するもの）
    *
-   * どちらも、1件も無ければ「無い」で断る
+   * - `"empty"`：どのフォルダーも空として返す（一覧を使わない試験で、口だけ要るとき）
+   * - `"missing"`：どのフォルダーも「無い」で断る
+   *
+   * `nested` と `filesOnly` は、1件も無ければ「無い」で断る
    */
-  readonly readDirectory?: "nested" | "filesOnly";
+  readonly readDirectory?: "nested" | "filesOnly" | "empty" | "missing";
 }
 
 const DEFAULT_METHODS: readonly MemoryFsMethod[] = [
@@ -141,6 +144,10 @@ export function memoryFs(
       throw new FileSystemError("missing", "FileNotFound");
     },
     readDirectory: async (uri: { fsPath: string }) => {
+      if (options.readDirectory === "empty") return [];
+      if (options.readDirectory === "missing") {
+        throw new FileSystemError("missing", "FileNotFound");
+      }
       if (options.readDirectory === "filesOnly") {
         const entries = [...disk.keys()].filter(
           (filePath) => nodePath.dirname(filePath) === uri.fsPath
