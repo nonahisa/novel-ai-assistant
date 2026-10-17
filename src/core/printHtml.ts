@@ -4,13 +4,13 @@ import {
   type NotationMode,
 } from "./manuscriptRender";
 import { stripMemoLines } from "./sceneMemo";
-import { kindLineClass, kindLineCss } from "./kindLines";
+import { kindLayoutCss, kindLineClass, kindLineCss, kindUsesScriptLayout } from "./kindLines";
 import type { WorkKindKey } from "./workKind";
 import { PRINT_PAGINATE_SCRIPT } from "./printPaginate";
 import { tcyRuns } from "./tateChuYoko";
 import {
   SCRIPT_GOTHIC_FONT_FAMILY,
-  SCRIPT_LAYOUT_CSS,
+  SCRIPT_LINE_CLASSES,
   SCRIPT_NAMED_CLASS,
   splitSerifu,
 } from "./scriptLines";
@@ -569,10 +569,14 @@ function renderBody(
     if (afterBlank && paragraphs.length > 0) names.push("gap");
     const lineClass = kindLineClass(kind, line);
     if (lineClass) names.push(lineClass);
-    // 台本の台詞は、人物名を決まった幅の欄に入れて「「」の高さをそろえる（作者の裁定、
-    // 2026-10-17。公募の納品用と同じ幅 `SCRIPT_ROLE_WIDTH`。長い名前は欄の中で折り返す。
-    // 組み方は `SCRIPT_LAYOUT_CSS` の `.script-named`）。漫画の原作は変えない
-    const serifu = kind === "script" ? splitSerifu(line) : undefined;
+    // 台本と漫画の原作の台詞は、人物名を決まった幅の欄に入れて「「」の高さをそろえる
+    // （作者の裁定、2026-10-17。公募の納品用と同じ幅 `SCRIPT_ROLE_WIDTH`。長い名前は欄の
+    // 中で折り返す。組み方は `SCRIPT_LAYOUT_CSS` の `.script-named`）。台詞の印が付いた
+    // 行だけを分ける——漫画のコマの行（`□コマ1「看板」`）は「「」を含んでも台詞ではない
+    const serifu =
+      lineClass === SCRIPT_LINE_CLASSES.serifu && kindUsesScriptLayout(kind)
+        ? splitSerifu(line)
+        : undefined;
     if (serifu) names.push(SCRIPT_NAMED_CLASS);
     const attr = names.length > 0 ? ` class="${names.join(" ")}"` : "";
     const inner = serifu
@@ -694,12 +698,10 @@ function buildStyle(
     小説の紙は、これまでと1バイトも変わらない
   */
   const kindCss = kindLineCss(kind);
-  // 台本だけ、人物名の欄と書体（台詞は明朝・ト書きと柱はゴシック）を足す
-  // （作者の裁定、2026-10-17。原稿エディターと同じ `SCRIPT_LAYOUT_CSS`）
-  const script = [
-    ...(kindCss ? [kindCss] : []),
-    ...(kind === "script" ? [SCRIPT_LAYOUT_CSS] : []),
-  ];
+  // 台本と漫画の原作だけ、人物名の欄と書体（台詞は明朝・ト書きと柱、漫画のページと
+  // コマはゴシック）を足す（作者の裁定、2026-10-17。原稿エディターと同じ `kindLayoutCss`）
+  const layoutCss = kindLayoutCss(kind);
+  const script = [...(kindCss ? [kindCss] : []), ...(layoutCss ? [layoutCss] : [])];
 
   return [
     // 面に割れたら、スクリプトが余白を0にする（面の中に余白を持つため）。

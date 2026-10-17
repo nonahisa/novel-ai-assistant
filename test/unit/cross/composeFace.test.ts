@@ -2108,13 +2108,35 @@ describe("脚本の行（組んで書く面）", () => {
     expect(node.childNodes.map((child) => child.nodeName)).toEqual(["#text"]);
   });
 
-  it("ト書き・柱はゴシック、台詞のぶら下げは行ごとの印で決まる（台本の画面だけ）", () => {
+  it("ト書き・柱はゴシック、台詞のぶら下げは行ごとの印で決まる（台本と漫画の原作の画面）", () => {
     expect(scriptHtml).toContain(SCRIPT_LAYOUT_CSS);
     // 折り返しは「「」の次の字の下（「「」の位置＋1字。作者の裁定、2026-10-17）
     expect(scriptHtml).toContain(".script-serifu.script-role-2 { padding-inline-start: 3em; text-indent: -3em; }");
-    const manga = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "manga");
-    expect(manga).not.toContain(SCRIPT_LAYOUT_CSS);
-    expect(manga).toContain("const SCRIPT_ROLE_MAX = 0;");
+    // ページ・コマのゴシックは漫画の原作の画面だけ
+    expect(scriptHtml).not.toContain(".manga-page, .manga-panel { font-family");
+    // それ以外の種類には当てない
+    const essay = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "essay");
+    expect(essay).not.toContain(SCRIPT_LAYOUT_CSS);
+    expect(essay).toContain("const SCRIPT_ROLE_MAX = 0;");
+  });
+
+  /**
+   * 漫画の原作にも台本と同じ組み方を当てる（作者の裁定、2026-10-17）。台詞には「「」までの
+   * 字数の印、ページ（■）・コマ（□）の行は「「」を含んでいても台詞にしない
+   */
+  it("漫画の原作の画面でも、台詞に「「」までの字数の印が付き、ページ・コマはゴシック", () => {
+    const mangaHtml = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "manga");
+    expect(mangaHtml).toContain(SCRIPT_LAYOUT_CSS);
+    expect(mangaHtml).toContain(".manga-page, .manga-panel { font-family:");
+    const code = mangaHtml.slice(mangaHtml.indexOf("<script"));
+    const source = code.slice(code.indexOf("/* compose:start */"), code.indexOf("/* compose:end */"));
+    const api = new Function(source + "\nreturn { composeBuildLine };")() as {
+      composeBuildLine(line: string, doc: unknown, mode?: Mode): FakeNode;
+    };
+    const classOfManga = (line: string) => (api.composeBuildLine(line, fakeDoc).attributes ?? {}).class ?? "";
+    expect(classOfManga("太郎「行こう」")).toBe("line script-serifu script-role-2");
+    expect(classOfManga("□コマ1「看板の文字」")).toBe("line manga-panel");
+    expect(classOfManga("　教室の全景。")).toBe("line script-togaki");
   });
 
   it("どれにも当たらない行には、印を付けない", () => {

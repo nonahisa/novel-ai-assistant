@@ -604,16 +604,37 @@ describe("脚本の組版", () => {
     expect(out).toContain(SCRIPT_LAYOUT_CSS);
   });
 
-  test("漫画の原作は、台本の印を借りても人物名の欄を作らない（今回は台本だけ）", () => {
+  /**
+   * 漫画の原作にも台本と同じ組み方を当てる（作者の裁定、2026-10-17）。台詞は人物名の欄、
+   * 絵の説明（ト書き）はゴシック。ページ（■）・コマ（□）の行は台本の柱と同じゴシックで、
+   * 「「」を含んでいても台詞の欄は作らない
+   */
+  test("漫画の原作も、台詞を人物名の欄に入れ、ページ・コマ・絵の説明をゴシックにする", () => {
     const out = buildPrintHtml({
       workTitle: "夜の駅",
-      episodes: [{ heading: "第1話", body: "太郎「行こう」", notation: "curly" }],
+      episodes: [
+        {
+          heading: "第1話",
+          // コマに数字を書かない（縦書きの紙では半角数字が縦中横の span に包まれる）
+          body: ["■一ページ", "□一コマ「看板の文字」", "　教室の全景。", "太郎「行こう」"].join("\n"),
+          notation: "curly",
+        },
+      ],
       preset: "bunko-vertical",
       kind: "manga",
     });
 
-    expect(out).toContain('<p class="script-serifu">太郎「行こう」</p>');
-    expect(out).not.toContain(SCRIPT_LAYOUT_CSS);
+    expect(out).toContain(
+      '<p class="script-serifu script-named"><span class="script-role">太郎</span>「行こう」</p>'
+    );
+    expect(out).toContain('<p class="manga-panel">□一コマ「看板の文字」</p>');
+    expect(out).toContain('<p class="script-togaki">　教室の全景。</p>');
+    expect(out).toContain(SCRIPT_LAYOUT_CSS);
+    expect(out).toContain(`.manga-page, .manga-panel { font-family: ${PRINT_GOTHIC_FONT_FAMILY}; }`);
+  });
+
+  test("ページ・コマのゴシックは、台本の紙には入らない", () => {
+    expect(scriptHtml()).not.toContain(".manga-page, .manga-panel { font-family");
   });
 
   test("どれにも当たらない行には、印を付けない", () => {

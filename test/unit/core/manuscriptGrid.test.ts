@@ -423,9 +423,55 @@ describe("台本の字下げ", () => {
     expect(allText(togaki)).toBe("太郎、ドアを開けて、雨の降る駅前の広場へ一歩ずつ出ていく。");
   });
 
-  test.each([undefined, "novel", "manga"] as const)("台本でなければ（%s）いまのまま", (kind) => {
+  test.each([undefined, "novel"] as const)("台本・漫画の原作でなければ（%s）いまのまま", (kind) => {
     const result = scriptLines(kind);
     for (const line of result) expect(line.indent ?? 0).toBe(0);
     expect(show(result[1]).startsWith("　太郎、")).toBe(true);
+  });
+});
+
+/**
+ * 漫画の原作にも、台本と同じ組み方を当てる（作者の裁定、2026-10-17）。絵の説明（ト書き）は
+ * 3字下げのゴシック、台詞は人物名の欄と「「」の次の字の下へのぶら下げ。ページ（■）と
+ * コマ（□）の行は字下げせず、台本の柱と同じゴシックにする
+ */
+describe("漫画の原作の字下げ", () => {
+  const MANGA = [
+    "■1ページ",
+    "□コマ1「看板の文字」",
+    "　放課後の教室。窓の外は夕焼けで、机の上に置いた鞄の影が長く伸びている。",
+    "太郎「行こう、もう終電は出てしまったけれど、歩けば朝には着くはずだ」",
+  ].join("\n");
+  const options: GridOptions = { columns: 20, rows: 40, hanging: true, vertical: true };
+
+  function mangaLines(): GridLine[] {
+    return layoutGrid([{ heading: "", body: MANGA, notation: "curly" }], options, "manga")[0].lines;
+  }
+
+  test("ページ・コマの行は字下げせず、ゴシック。台詞の形をしたコマの行も台詞にしない", () => {
+    const result = mangaLines();
+    expect(show(result[0])).toBe("■1ページ");
+    expect(result[0].indent ?? 0).toBe(0);
+    expect(result[0].gothic).toBe(true);
+    expect(show(result[1])).toBe("□コマ1「看板の文字」");
+    expect(result[1].indent ?? 0).toBe(0);
+    expect(result[1].gothic).toBe(true);
+  });
+
+  test("絵の説明は3字下げ（折り返しても）のゴシック", () => {
+    const togaki = mangaLines().filter((line) => line.indent === 3);
+    expect(togaki.length).toBeGreaterThanOrEqual(2);
+    for (const line of togaki) expect(line.gothic).toBe(true);
+    expect(allText(togaki)).toBe("放課後の教室。窓の外は夕焼けで、机の上に置いた鞄の影が長く伸びている。");
+  });
+
+  test(`台詞は人物名を${SCRIPT_ROLE_WIDTH}字の欄に入れ、続きは「「」の次の字の下（明朝）`, () => {
+    const result = mangaLines();
+    const serifu = result.slice(2 + result.filter((line) => line.indent === 3).length);
+    expect(serifu.length).toBeGreaterThanOrEqual(2);
+    expect(serifu[0].units[SCRIPT_ROLE_WIDTH].text).toBe("「");
+    for (const line of serifu.slice(1)) expect(line.indent).toBe(SCRIPT_ROLE_WIDTH + SCRIPT_SPEECH_HANG);
+    for (const line of serifu) expect(line.gothic).toBeUndefined();
+    expect(allText(serifu)).toBe("太郎「行こう、もう終電は出てしまったけれど、歩けば朝には着くはずだ」");
   });
 });
