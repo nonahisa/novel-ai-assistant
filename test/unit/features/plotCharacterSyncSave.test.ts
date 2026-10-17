@@ -1,8 +1,9 @@
 import * as nodePath from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { Uri, window, workspace } from "../support/vscodeStub";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import type { WorkEntry } from "../../../src/models/types";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * plot.md を保存したときの、設定資料への差分反映（設計書6.4.9）。
@@ -93,26 +94,10 @@ describe("plot.md の保存で人物の更新案を積む", () => {
     state.characters = [character("char_001", "灯", "主人公")];
     state.plotText = plot("- 灯：主人公。幽霊が見える。");
 
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-      rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
-        const bytes = disk.get(from.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        disk.set(to.fsPath, bytes);
-        disk.delete(from.fsPath);
-      },
-      delete: async (uri: { fsPath: string }) => {
-        disk.delete(uri.fsPath);
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk, {
+      methods: ["createDirectory", "readFile", "writeFile", "rename", "delete"],
+      renameRefusesExisting: false,
+    });
 
     window.showInformationMessage = (async (message: string) => {
       announced.push(message);

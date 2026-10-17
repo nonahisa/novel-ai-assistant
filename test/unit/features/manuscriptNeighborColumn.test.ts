@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * 原稿エディタの［次の話 →］［← 前の話］は、**その原稿エディタがいる列**に
@@ -31,15 +32,7 @@ function bodyOf(source: string, marker: string): string {
     // コメントに書いた言葉で検査が通らないよう、先に落とす
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\/\/.*$/gm, "");
-  const start = cleaned.indexOf(marker);
-  if (start === -1) throw new Error(`${marker} が見つかりません`);
-  const open = cleaned.indexOf("{", cleaned.indexOf(")", start));
-  let depth = 0;
-  for (let i = open; i < cleaned.length; i++) {
-    if (cleaned[i] === "{") depth++;
-    else if (cleaned[i] === "}" && --depth === 0) return cleaned.slice(open, i + 1);
-  }
-  throw new Error(`${marker} の閉じ括弧が見つかりません`);
+  return blockAfter(cleaned, marker);
 }
 
 const editor = readFileSync("src/features/manuscriptEditor.ts", "utf8");

@@ -8,6 +8,7 @@ import {
   untitledMarkdownUri,
 } from "../../../src/views/openDocument";
 import { FileSystemError, Uri, commands, workspace } from "../support/vscodeStub";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * ファイルは、作者の既定のエディターで開く（設計書6.17.6）。
@@ -307,16 +308,7 @@ describe("生成文書の開き方", () => {
  */
 describe("プロットを開く入口", () => {
   function bodyOf(file: string, marker: string): string {
-    const source = readFileSync(file, "utf-8");
-    const start = source.indexOf(marker);
-    expect(start, `${file} に ${marker} が無い`).toBeGreaterThan(-1);
-    const open = source.indexOf("{", source.indexOf(")", start));
-    let depth = 0;
-    for (let i = open; i < source.length; i++) {
-      if (source[i] === "{") depth++;
-      else if (source[i] === "}" && --depth === 0) return source.slice(open, i + 1);
-    }
-    throw new Error(`${marker} の閉じ括弧が見つからない`);
+    return blockAfter(readFileSync(file, "utf-8"), marker, { where: file });
   }
 
   it("「プロットを作る」は、既定の画面で開く助けを通る", () => {

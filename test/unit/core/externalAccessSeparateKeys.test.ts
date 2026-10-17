@@ -19,7 +19,8 @@ import { ExternalAccessPermissionStore } from "../../../src/core/externalAccessP
 import { assertExternalAccessAllowed } from "../../../src/mcp/tools/permission";
 import { setExternalClientName } from "../../../src/mcp/tools/accessLog";
 import type { WorkEntry } from "../../../src/models/types";
-import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { Uri, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 相談ログ・ログ・編集履歴を読む鍵は、**`"*"` に含めない**
@@ -139,17 +140,7 @@ describe("許可の印を書く側（拡張機能）", () => {
 
   beforeEach(() => {
     disk.clear();
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk, { methods: ["createDirectory", "readFile", "writeFile"] });
   });
 
   function tools(): string[] {

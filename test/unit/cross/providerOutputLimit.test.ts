@@ -11,6 +11,7 @@ import { SakuraProvider } from "../../../src/ai/sakuraProvider";
 import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../../src/ai/outputLimit";
 import type { AIProvider } from "../../../src/ai/types";
 import { workspace } from "../support/vscodeStub";
+import { jsonResponse } from "../support/aiResponses";
 
 /**
  * 出力トークンの2つの欄を、全プロバイダが同じように扱う（設計書6.77の第2段）。
@@ -80,13 +81,6 @@ const claudeModel = {
     thinking: { supported: false },
   },
 };
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 function openAiChat() {
   return {

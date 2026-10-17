@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { zipSync } from "fflate";
 import { convertDocxToMarkdown } from "../../../src/features/docxImport";
 import type { WorkEntry } from "../../../src/models/types";
-import { FileSystemError, FileType, Uri, window, workspace } from "../support/vscodeStub";
+import { FileType, Uri, window, workspace } from "../support/vscodeStub";
 import { cancelRunningTask } from "../../../src/views/progress";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * Word（.docx）を .md へ一括変換する（設計書6.85）。
@@ -72,59 +73,13 @@ function textOf(kind: string): string {
 
 /** 作り物のファイルシステム。キーは `Uri.file` が返す形に揃える */
 function installDisk(): void {
-  const separator = path.sep;
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-    rename: async (
-      from: { fsPath: string },
-      to: { fsPath: string },
-      options?: { overwrite?: boolean }
-    ) => {
-      const bytes = disk.get(from.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      if (!options?.overwrite && disk.has(to.fsPath)) {
-        throw new FileSystemError("exists", "FileExists");
-      }
-      disk.set(to.fsPath, bytes);
-      disk.delete(from.fsPath);
-    },
-    delete: async (uri: { fsPath: string }) => {
-      disk.delete(uri.fsPath);
-    },
-    stat: async (uri: { fsPath: string }) => {
-      // **種類も返す**（本物の `stat` は必ず返す）。本文の置き場の決め方
-      // （`manuscriptFolderRule.ts`）は「フォルダーか」を種類で見る
-      if (disk.has(uri.fsPath)) return { type: FileType.File, mtime: 0, size: 1 };
-      const prefix = uri.fsPath + separator;
-      for (const key of disk.keys()) {
-        if (key.startsWith(prefix)) {
-          return { type: FileType.Directory, mtime: 0, size: 0 };
-        }
-      }
-      throw new FileSystemError("missing", "FileNotFound");
-    },
-    readDirectory: async (uri: { fsPath: string }) => {
-      const prefix = uri.fsPath + separator;
-      const names = new Map<string, FileType>();
-      for (const key of disk.keys()) {
-        if (!key.startsWith(prefix)) continue;
-        const rest = key.slice(prefix.length);
-        const cut = rest.indexOf(separator);
-        if (cut < 0) names.set(rest, FileType.File);
-        else names.set(rest.slice(0, cut), FileType.Directory);
-      }
-      if (names.size === 0) throw new FileSystemError("missing", "FileNotFound");
-      return [...names.entries()];
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk, {
+    // **種類も返す**（本物の `stat` は必ず返す）。本文の置き場の決め方
+    // （`manuscriptFolderRule.ts`）は「フォルダーか」を種類で見る
+    fileStat: { type: FileType.File, mtime: 0, size: 1 },
+    folderStat: { type: FileType.Directory, mtime: 0, size: 0 },
+    readDirectory: "nested",
+  });
 }
 
 /** 「この作品の本文フォルダー」を選び、確認では「変換する」を押す */

@@ -1,11 +1,12 @@
 import * as nodePath from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { Uri, window, workspace } from "../support/vscodeStub";
 import { emptyCharacter } from "../../../src/models/character";
 import type { WorkEntry } from "../../../src/models/types";
 import type { WorkChatTurn } from "../../../src/prompts/workChat";
 import { AIError, type GenerateParams } from "../../../src/ai/types";
 import { cancelRunningTask } from "../../../src/views/progress";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 「相談を資料へ反映」を、AIを待っている最中に中止ボタンで止める
@@ -88,26 +89,10 @@ describe("相談を資料へ反映：実行中の中止", () => {
     disk.clear();
     warned = [];
     state.stage.mockClear();
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-      rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
-        const bytes = disk.get(from.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        disk.set(to.fsPath, bytes);
-        disk.delete(from.fsPath);
-      },
-      delete: async (uri: { fsPath: string }) => {
-        disk.delete(uri.fsPath);
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk, {
+      methods: ["createDirectory", "readFile", "writeFile", "rename", "delete"],
+      renameRefusesExisting: false,
+    });
     window.showWarningMessage = (async (message: string) => {
       warned.push(message);
       return undefined;

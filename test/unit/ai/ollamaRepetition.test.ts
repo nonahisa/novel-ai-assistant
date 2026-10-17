@@ -3,6 +3,7 @@ import { OllamaProvider } from "../../../src/ai/ollamaProvider";
 import { setStreamingSettingReader } from "../../../src/ai/ollamaStream";
 import { REPEATED_ELEMENT_LIMIT } from "../../../src/core/repeatedElements";
 import { useMemoryTuningStore } from "../support/tuningStore";
+import { ollamaShowResponse } from "../support/aiResponses";
 
 /**
  * 手元の AI が**同じ指摘を延々と繰り返した**とき、製品が途中で受け取りを
@@ -67,10 +68,7 @@ function stubStream(body: () => ReadableStream<Uint8Array>): void {
     vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.endsWith("/api/show")) {
-        return new Response(
-          JSON.stringify({ model_info: { "test.context_length": 131_072 } }),
-          { status: 200 }
-        );
+        return ollamaShowResponse();
       }
       return new Response(body(), { status: 200 });
     })
@@ -151,10 +149,7 @@ describe("流さない道：上限で切れた答えからも救う", () => {
       vi.fn(async (input: Parameters<typeof fetch>[0]) => {
         const url = input instanceof Request ? input.url : String(input);
         if (url.endsWith("/api/show")) {
-          return new Response(
-            JSON.stringify({ model_info: { "test.context_length": 131_072 } }),
-            { status: 200 }
-          );
+          return ollamaShowResponse();
         }
         return new Response(
           JSON.stringify({

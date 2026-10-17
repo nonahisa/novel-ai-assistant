@@ -1,15 +1,10 @@
 import * as nodePath from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import {
-  FileSystemError,
-  Uri,
-  commands,
-  window,
-  workspace,
-} from "../support/vscodeStub";
+import { Uri, commands, window, workspace } from "../support/vscodeStub";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import type { WorkEntry } from "../../../src/models/types";
 import type { WorkChatTurn } from "../../../src/prompts/workChat";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 相談から設定資料への書き込み（設計書6.72、P-32）。
@@ -568,26 +563,10 @@ describe("相談を資料へ反映する", () => {
     state.pending = [];
     state.characters = [character("char_001", "灯", "主人公")];
 
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-      rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
-        const bytes = disk.get(from.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        disk.set(to.fsPath, bytes);
-        disk.delete(from.fsPath);
-      },
-      delete: async (uri: { fsPath: string }) => {
-        disk.delete(uri.fsPath);
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk, {
+      methods: ["createDirectory", "readFile", "writeFile", "rename", "delete"],
+      renameRefusesExisting: false,
+    });
 
     executeCommand = vi.fn(async () => undefined);
     Object.assign(commands, { executeCommand });
@@ -1036,26 +1015,10 @@ describe("相談から人物の資料へ直接書く", () => {
     // 紹介文がまだ空の人物（直接書ける）
     state.characters = [character("char_001", "灯", "")];
 
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-      rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
-        const bytes = disk.get(from.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        disk.set(to.fsPath, bytes);
-        disk.delete(from.fsPath);
-      },
-      delete: async (uri: { fsPath: string }) => {
-        disk.delete(uri.fsPath);
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk, {
+      methods: ["createDirectory", "readFile", "writeFile", "rename", "delete"],
+      renameRefusesExisting: false,
+    });
     Object.assign(commands, { executeCommand: vi.fn(async () => undefined) });
     window.showInformationMessage = (async (message: string) => {
       announced.push(message);

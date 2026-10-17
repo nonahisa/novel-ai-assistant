@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * 予定の話の並べ替え・差し込み（設計書6.4.8。作者の依頼、2026-09-23）が、
@@ -21,16 +22,7 @@ function source(file: string): string {
 }
 
 function bodyOf(file: string, marker: string): string {
-  const text = source(file);
-  const start = text.indexOf(marker);
-  if (start === -1) throw new Error(`${marker} が見つかりません`);
-  const open = text.indexOf("{", text.indexOf(")", start));
-  let depth = 0;
-  for (let i = open; i < text.length; i++) {
-    if (text[i] === "{") depth++;
-    else if (text[i] === "}" && --depth === 0) return text.slice(open, i + 1);
-  }
-  throw new Error(`${marker} の閉じ括弧が見つかりません`);
+  return blockAfter(source(file), marker);
 }
 
 describe("予定の話を動かす", () => {

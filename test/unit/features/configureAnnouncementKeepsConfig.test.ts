@@ -1,8 +1,9 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import type { WorkEntry } from "../../../src/models/types";
-import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { Uri, window, workspace } from "../support/vscodeStub";
 import { configureAnnouncement } from "../../../src/features/generateAnnouncement";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 告知の設定（ハッシュタグ・URL）を保存するとき、作品の設定（`config.json`）の
@@ -26,17 +27,7 @@ const configPath = Uri.file(path.join(work.folderPath, ".aiwriter", "config.json
 
 beforeEach(() => {
   disk.clear();
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk, { methods: ["createDirectory", "readFile", "writeFile"] });
   const answers = ["創作 小説", "https://example.com/works/1"];
   (window as unknown as Record<string, unknown>).showInputBox = async () => answers.shift();
   window.showWarningMessage = async () => undefined;

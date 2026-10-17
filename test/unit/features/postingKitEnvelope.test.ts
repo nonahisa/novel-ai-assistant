@@ -4,7 +4,8 @@ import { postNewEpisode } from "../../../src/features/postingKit";
 import { parsePostingEnvelope } from "../../../src/core/postingEnvelope";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { env, Uri, window, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 「貼り込み係へ渡す形でコピー」（設計書6.79.3）の配線。
@@ -133,39 +134,7 @@ describe("貼り込み係へ渡す形でコピー", () => {
     env.clipboard.text = "";
     env.opened.length = 0;
     workspace.textDocuments = [];
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-      rename: async (
-        from: { fsPath: string },
-        to: { fsPath: string },
-        options?: { overwrite?: boolean }
-      ) => {
-        const bytes = disk.get(from.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        if (!options?.overwrite && disk.has(to.fsPath)) {
-          throw new FileSystemError("exists", "FileExists");
-        }
-        disk.set(to.fsPath, bytes);
-        disk.delete(from.fsPath);
-      },
-      delete: async (uri: { fsPath: string }) => {
-        disk.delete(uri.fsPath);
-      },
-      stat: async (uri: { fsPath: string }) => {
-        if (!disk.has(uri.fsPath)) {
-          throw new FileSystemError("missing", "FileNotFound");
-        }
-        return { type: 1, ctime: 0, mtime: 0, size: 0 };
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk);
 
     Object.assign(window, {
       showInformationMessage: async (message: string) => {

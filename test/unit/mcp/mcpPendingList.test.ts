@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { createHash } from "node:crypto";
 import { pendingList } from "../../../src/mcp/tools/pendingList";
 import { McpToolError } from "../../../src/mcp/tools/shared";
 import {
@@ -25,6 +24,7 @@ import { emptyCharacter, type Character } from "../../../src/models/character";
 import { emptyLocation, type Location } from "../../../src/models/location";
 import type { WorkEntry } from "../../../src/models/types";
 import { FileSystemError, FileType, workspace } from "../support/vscodeStub";
+import { folderFingerprint } from "../support/folderFingerprint";
 
 /**
  * 承認待ちを読む道具（`pending.list`。0.85.1、作者の承認 2026-09-24）。
@@ -86,20 +86,7 @@ function location(overrides: Partial<Location> = {}): Location {
 
 /** 作品フォルダー全体の指紋。1バイトでも変われば変わる */
 function fingerprint(folder: string): string {
-  const hash = createHash("sha256");
-  const walk = (dir: string): void => {
-    for (const name of fs.readdirSync(dir).sort()) {
-      const full = nodePath.join(dir, name);
-      if (fs.statSync(full).isDirectory()) {
-        walk(full);
-        continue;
-      }
-      hash.update(nodePath.relative(folder, full));
-      hash.update(fs.readFileSync(full));
-    }
-  };
-  walk(folder);
-  return hash.digest("hex");
+  return folderFingerprint(folder);
 }
 
 /** 人物3件（更新・古い案・新規の重複）と、場所1件を積んだ作品 */

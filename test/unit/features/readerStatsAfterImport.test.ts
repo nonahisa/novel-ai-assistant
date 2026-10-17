@@ -11,7 +11,8 @@ import {
 } from "../../../src/core/readerStatsEnvelope";
 import { readPostingLedger } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { env, Uri, window, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * ZIPから取り込んだ直後の作品で、**読者の反応の口が通るか**（設計書6.99／6.79.7）。
@@ -63,39 +64,7 @@ beforeEach(() => {
   workspace.textDocuments = [];
   disk.set(ledgerPath, utf8(`${JSON.stringify(AFTER_IMPORT, null, 2)}\n`));
 
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-    rename: async (
-      from: { fsPath: string },
-      to: { fsPath: string },
-      options?: { overwrite?: boolean }
-    ) => {
-      const bytes = disk.get(from.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      if (!options?.overwrite && disk.has(to.fsPath)) {
-        throw new FileSystemError("exists", "FileExists");
-      }
-      disk.set(to.fsPath, bytes);
-      disk.delete(from.fsPath);
-    },
-    delete: async (uri: { fsPath: string }) => {
-      disk.delete(uri.fsPath);
-    },
-    stat: async (uri: { fsPath: string }) => {
-      if (!disk.has(uri.fsPath)) {
-        throw new FileSystemError("missing", "FileNotFound");
-      }
-      return { type: 1, ctime: 0, mtime: 0, size: 0 };
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk);
 
   Object.assign(window, {
     showQuickPick: async () => undefined,

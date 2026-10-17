@@ -1,12 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import * as paths from "../../../src/core/paths";
-import {
-  FileSystemError,
-  Uri,
-  resetFileSystemWatchers,
-  window,
-  workspace,
-} from "../support/vscodeStub";
+import { Uri, resetFileSystemWatchers, window, workspace } from "../support/vscodeStub";
 import { ExternalAccessWatcher } from "../../../src/features/externalAccessWatcher";
 import {
   EXTERNAL_ACCESS_DENIED_DETAIL,
@@ -19,6 +13,7 @@ import {
 } from "../../../src/core/externalAccessPermission";
 import type { WorkEntry } from "../../../src/models/types";
 import type * as vscode from "vscode";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 処理済みのノックを、別の窓が拾い直さない（設計書6.87.14）。
@@ -144,17 +139,7 @@ beforeEach(() => {
   disk.clear();
   resetFileSystemWatchers();
   knockModals = [];
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk, { methods: ["createDirectory", "readFile", "writeFile"] });
   /*
     **許可のあとの「いまの許可を見る」は、作者が閉じるまで返事をしない**
     ——実機と同じく、ここでは永久に待たせる。

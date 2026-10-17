@@ -1,10 +1,11 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
+import { FileType, Uri, workspace } from "../support/vscodeStub";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import type { RecordChange } from "../../../src/models/jsonValidation";
 import type { WorkEntry } from "../../../src/models/types";
 import { MOVE_DESTINATION_KEY_PREFIX, MOVE_REMOVE_ONLY } from "../../../src/core/pendingNarratorMoves";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 語り手の取り違えの移す案を、提案パネルの「設定資料の更新」に出す
@@ -136,35 +137,11 @@ beforeEach(() => {
   state.failOn = null;
   logged.lines = [];
   workspace.textDocuments = [];
-  workspace.fs = {
-    createDirectory: async () => {},
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    readDirectory: async (uri: { fsPath: string }) => {
-      const entries = [...disk.keys()].filter((filePath) => path.dirname(filePath) === uri.fsPath);
-      if (entries.length === 0) throw new FileSystemError("missing", "FileNotFound");
-      return entries.map((filePath) => [path.basename(filePath), FileType.File] as [string, FileType]);
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-    rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
-      const bytes = disk.get(from.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      disk.set(to.fsPath, bytes);
-      disk.delete(from.fsPath);
-    },
-    delete: async (uri: { fsPath: string }) => {
-      disk.delete(uri.fsPath);
-    },
-    stat: async (uri: { fsPath: string }) => {
-      if (!disk.has(uri.fsPath)) throw new FileSystemError("missing", "FileNotFound");
-      return { type: FileType.File };
-    },
-  };
+  workspace.fs = memoryFs(disk, {
+    renameRefusesExisting: false,
+    fileStat: { type: FileType.File },
+    readDirectory: "filesOnly",
+  });
 });
 
 function pendingFiles(): string[] {

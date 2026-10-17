@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { AchievementStore } from "../../../src/core/achievementStore";
 import type { Achievement } from "../../../src/core/celebrations";
 import type { WorkEntry } from "../../../src/models/types";
-import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { Uri, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 作品の達成の記録（設計書6.3.8）。
@@ -39,26 +40,10 @@ describe("作品の達成の記録", () => {
 
   beforeEach(() => {
     disk.clear();
-    workspace.fs = {
-      createDirectory: async () => undefined,
-      readFile: async (uri: { fsPath: string }) => {
-        const bytes = disk.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      },
-      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        disk.set(uri.fsPath, bytes);
-      },
-      rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
-        const bytes = disk.get(from.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        disk.set(to.fsPath, bytes);
-        disk.delete(from.fsPath);
-      },
-      delete: async (uri: { fsPath: string }) => {
-        disk.delete(uri.fsPath);
-      },
-    } as unknown as typeof workspace.fs;
+    workspace.fs = memoryFs(disk, {
+      methods: ["createDirectory", "readFile", "writeFile", "rename", "delete"],
+      renameRefusesExisting: false,
+    });
   });
 
   test("無ければ空として読み、書き足すと残る", async () => {

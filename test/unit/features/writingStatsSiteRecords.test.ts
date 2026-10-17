@@ -2,7 +2,8 @@ import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { readSiteRecords } from "../../../src/features/writingStatsPanel";
 import type { WorkEntry } from "../../../src/models/types";
-import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { Uri, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * 執筆量パネルの「サイトの記録」を読むところ（0.33.9のレビュー、中1）。
@@ -39,23 +40,7 @@ function writeLedger(ledger: unknown): void {
 beforeEach(() => {
   disk.clear();
   workspace.textDocuments = [];
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-    stat: async (uri: { fsPath: string }) => {
-      if (!disk.has(uri.fsPath)) {
-        throw new FileSystemError("missing", "FileNotFound");
-      }
-      return { type: 1, ctime: 0, mtime: 0, size: 0 };
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk, { methods: ["createDirectory", "readFile", "writeFile", "stat"] });
 });
 
 describe("サイトの記録の読み込み", () => {

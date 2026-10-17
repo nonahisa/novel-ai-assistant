@@ -7,6 +7,7 @@ import {
 } from "../../../src/core/postingCopyTargets";
 import { POSTING_SITES } from "../../../src/models/posting";
 import { toSiteNotation } from "../../../src/core/ruby";
+import { blockAfter } from "../support/sourceBlock";
 
 /**
  * 「投稿サイト用に変換してコピー」で訊くこと（作者の裁定、2026-09-06）。
@@ -179,20 +180,7 @@ describe("残る2つの入口も、同じ1段の訊き方を通る", () => {
    * 関数のあいだにある説明文まで拾い、そこに書かれた語で判定が揺れる。
    */
   function bodyOf(file: string, signature: string): string {
-    const source = readFileSync(file, "utf8");
-    const start = source.indexOf(signature);
-    expect(start, `${signature} が ${file} にない`).toBeGreaterThan(-1);
-
-    const open = source.indexOf("{", source.indexOf(")", start));
-    let depth = 0;
-    for (let i = open; i < source.length; i += 1) {
-      if (source[i] === "{") depth += 1;
-      else if (source[i] === "}") {
-        depth -= 1;
-        if (depth === 0) return source.slice(open, i + 1);
-      }
-    }
-    throw new Error(`${signature} の終わりが見つかりません`);
+    return blockAfter(readFileSync(file, "utf8"), signature, { where: file });
   }
 
   const entries = [

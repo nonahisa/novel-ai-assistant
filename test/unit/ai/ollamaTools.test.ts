@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { OllamaProvider } from "../../../src/ai/ollamaProvider";
 import { workspace } from "../support/vscodeStub";
+import { jsonResponse } from "../support/aiResponses";
 
 /**
  * 道具（tool）を Ollama へ渡す口と、道具だけが返ったときの受け。
@@ -42,13 +43,6 @@ const TOOLS = [
     },
   },
 ] as const;
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 /** 普通に本文が返る応答 */
 function textReply(content: string): unknown {

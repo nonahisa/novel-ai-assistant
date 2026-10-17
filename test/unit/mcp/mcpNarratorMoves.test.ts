@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { createHash } from "node:crypto";
 import { extractCommit } from "../../../src/mcp/tools/extractCommit";
 import { pendingList } from "../../../src/mcp/tools/pendingList";
 import { settingsPrompt, settingsValidate } from "../../../src/mcp/tools/settings";
@@ -19,6 +18,7 @@ import {
   reviewPendingNarratorMoves,
 } from "../../../src/features/narratorMovePending";
 import { FileSystemError, FileType, workspace } from "../support/vscodeStub";
+import { folderFingerprint } from "../support/folderFingerprint";
 
 /**
  * 外部AI（MCP）の道で、語り手の取り違えの移す案を積む・読む（0.102.12。
@@ -157,20 +157,7 @@ function filesIn(dir: string): string[] {
 
 /** `設定/` の下の全ファイルの指紋。移す案を積んでも台帳は1バイトも変えない */
 function settingsFingerprint(folder: string): string {
-  const hash = createHash("sha256");
-  const walk = (dir: string): void => {
-    for (const name of fs.readdirSync(dir).sort()) {
-      const full = nodePath.join(dir, name);
-      if (fs.statSync(full).isDirectory()) {
-        walk(full);
-        continue;
-      }
-      hash.update(nodePath.relative(folder, full));
-      hash.update(fs.readFileSync(full));
-    }
-  };
-  walk(nodePath.join(folder, "設定"));
-  return hash.digest("hex");
+  return folderFingerprint(folder, { under: ["設定"] });
 }
 
 afterEach(() => {

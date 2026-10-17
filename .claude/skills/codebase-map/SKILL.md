@@ -164,3 +164,21 @@ src/
 **依存の方向**：`views` / `features` → `core` → `models`。逆流させない。`models` は VSCode API に依存させない（テストしやすくするため）。
 
 **単体テストの置き場所**（2026-09-23、残課題 A5）：`test/unit/` の下に **`src/` と同じ形のフォルダー**（`core`・`features`・`views`・`prompts`・`mcp`・`ai`・`models`）。主に試す `src/` のファイルと同じフォルダーへ置く。1つに決まらないもの（複数のフォルダーにまたがる・ソースや文書を走査する網のテスト）は `test/unit/cross/`。部品は `test/unit/support/`。**直下に置くと `cross/testPlacement.test.ts` が落ちる。**
+
+**テストの前準備は、写す前に `support/` を見る**（2026-10-17。同じ作り物を各ファイルで写すと、直すたびに十数ファイルへ写すことになる）：
+
+| 部品 | 使いどころ |
+|---|---|
+| `vscodeStub.ts` | `vscode` の代役（vitest の別名で差し替わる） |
+| `memoryDisk.ts` | `Map<道, 中身>` を `workspace.fs` に見せる（`memoryFs(disk, {...})`）。口の数・`stat` の答え・一覧の返し方は**写す前の形を選んで渡す**（作り物を親切にしない） |
+| `folderFingerprint.ts` | 本物の一時フォルダーの中身の指紋・道ごとの sha256・中身の表（「読むだけの道具が1バイトも書いていない」を前後で比べる。MCP の試験） |
+| `aiResponses.ts` | AIの口へ立てる `fetch` の作り物が返す応答（JSON の応答・Ollama の流し受信の行・`/api/show`） |
+| `openDocumentFake.ts` | 偽のディスク＋エディターで開いている文書（開いた文書へ当てて保存する道） |
+| `tuningStore.ts` | AIチューニングの台帳を記憶の中のファイルで動かす |
+| `confirmPicker.ts` | 確認の選択窓に答える |
+| `gitTemplate.ts`・`divergenceHarness.ts` | 本物の git の倉庫を1回作って写す・分岐を合わせる試験の前準備 |
+| `sourceBlock.ts` | ソースの文字列から、目印に続く `{ ... }`（関数の本体）を切り出す（ソース読みの試験の `bodyOf`） |
+| `srcSources.ts`・`importGraph.ts` | `src/` を1回だけ読む・静的 import をたどる |
+| `echoingMemento.ts` | globalState の送り返しまで写した作り物 |
+| `settingsExportFixture.ts` | 設定資料の書き出しの試験材料 |
+| `sweepTimeout.ts` | 重い網のテストの待ちを延ばす |
