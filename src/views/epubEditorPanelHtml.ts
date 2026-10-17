@@ -1968,7 +1968,10 @@ const FONT_STACK = '"Yu Mincho", "游明朝", "Hiragino Mincho ProN", serif';
 const VERTICAL_ROTATE =
   'ー～〜―—‐－─…‥' +
   '「」『』（）［］｛｝〔〕【】〈〉《》〘〙〖〗' +
-  '()[]{}<>＜＞';
+  '()[]{}<>＜＞' +
+  // 下線も縦組みの字形（vert）では縦の線になる（2026-10-17 作者の実機で、
+  // 題名の _ が横のまま焼けていた）
+  '_＿';
 const VERTICAL_SMALL_KANA =
   'ぁぃぅぇぉっゃゅょゎゕゖ' +
   'ァィゥェォッャュョヮヵヶ' +

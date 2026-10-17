@@ -612,6 +612,15 @@ describe("縦に並べる題名の約物", () => {
     }
   });
 
+  // 2026-10-17 作者の実機：「いじめられっ子_確認用」を縦で焼くと、_ が横のままだった。
+  // 縦組みの字形（vert）では下線は縦の線に替わるので、回す字に入れる
+  it("下線（半角の _・全角の ＿）も回す", () => {
+    const kind = api().verticalGlyphKind;
+    for (const character of Array.from("_＿")) {
+      expect(kind(character), character).toBe("rotate");
+    }
+  });
+
   it("小書きの仮名の表", () => {
     const kind = api().verticalGlyphKind;
     for (const character of Array.from(
