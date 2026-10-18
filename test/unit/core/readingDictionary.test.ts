@@ -155,6 +155,27 @@ describe("AIの答えの検算", () => {
     expect(result.dropped.map((d) => d.reason)).toEqual([reason]);
   });
 
+  test("句の前の字まで読みに含めた答えは捨てる（gemma4:e4b の実際の答え、2026-10-19）", () => {
+    // 声へ渡すと「最初のさいしょのいちぎょうを書き直した」になり、読みが壊れる
+    const result = validateReadingItems("最初の一行を書き直した。", [
+      { word: "一行", quote: "最初の一行を書き直した。", reading: "さいしょのいちぎょう" },
+    ]);
+    expect(result.entries).toEqual([]);
+    expect(result.dropped.map((d) => d.reason)).toEqual(["読みの長さが合わない"]);
+  });
+
+  test("漢字1字に4音までの読みは通す（承る＝うけたまわる）", () => {
+    const result = validateReadingItems("謹んで承ります。", [
+      { word: "承る", quote: "謹んで承ります", reading: "うけたまわる" },
+    ]);
+    // 句に「承る」は無いので語が句に無い——ここで見たいのは長さの線なので、句を合わせる
+    expect(result.dropped.map((d) => d.reason)).toEqual(["語が句に無い"]);
+    const ok = validateReadingItems("謹んで承る。", [
+      { word: "承る", quote: "謹んで承る", reading: "うけたまわる" },
+    ]);
+    expect(ok.entries).toHaveLength(1);
+  });
+
   test("同じ語・同じ句は1つに畳む", () => {
     const item = { word: "音", quote: "その音は", reading: "おと" };
     const result = validateReadingItems(source, [item, item]);

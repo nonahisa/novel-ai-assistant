@@ -200,11 +200,7 @@ function checkItem(
   if (ECHO_READINGS.has(reading)) return "読みが指示の言葉";
   if (!HIRAGANA_ONLY.test(reading)) return "読みがひらがなでない";
   if (reading.length > READING_MAX) return "読みの長さが合わない";
-  /*
-    **1字の語は1字以上、ふつうは語の字数以上の読みになる**（漢字1字は
-    1音以上）。語の5倍を超える読みは、句ぜんたいの読みや説明を書いている。
-  */
-  if (reading.length < word.length || reading.length > word.length * 5) {
+  if (reading.length < word.length || reading.length > readingMaxFor(word)) {
     return "読みの長さが合わない";
   }
   if (reading === toHiragana(word)) return "読みの長さが合わない";
@@ -213,6 +209,25 @@ function checkItem(
     return "送り仮名が合わない";
   }
   return { word, quote, reading, source: "ai" };
+}
+
+/**
+ * その語の読みとして長すぎない上限（字）。
+ *
+ * **漢字1字は1音以上、ふつうは語の字数以上の読みになる**ので下限は語の字数。
+ * 上限は、漢字1字だけの語なら5音（承る＝うけたまわる）、2字以上の熟語なら
+ * 1字3音（十分＝じゅうぶん、入学＝にゅうがく）までとし、仮名の字はそのまま足す。
+ *
+ * **句の前の字まで読みに入れた答えを落とすため**である。gemma4:e4b が
+ * 「最初の一行」の一行に「さいしょのいちぎょう」を返した（2026-10-19 の測定）。
+ * 通すと声が「最初のさいしょのいちぎょう」と読む。以前の上限（語の5倍）では
+ * 2字の語に10字まで通っていた。
+ */
+function readingMaxFor(word: string): number {
+  let kanji = 0;
+  for (const char of word) if (KANJI.test(char)) kanji++;
+  const kana = word.length - kanji;
+  return (kanji <= 1 ? 5 : kanji * 3) + kana;
 }
 
 /** 語の末尾の仮名（送り仮名）。無ければ空 */

@@ -110,16 +110,20 @@ export async function readingDictionarySummary(
   }
 }
 
-/** 区切り1つぶんの控え（チャンクキャッシュへしまう形） */
+/**
+ * 区切り1つぶんの控え（チャンクキャッシュへしまう形）。
+ *
+ * **検算する前のAIの答え（項目の並び）をしまう。** 検算を後から締めたとき
+ * （2026-10-19、読みの長さの上限）、検算済みの項目をしまっていると、古い
+ * 検算で通った項目が控えから出続ける。答えをしまい、使うたびにいまの検算に通す。
+ */
 interface CachedChunk {
-  entries: ReadingEntry[];
-  dropped: number;
+  items: unknown[];
 }
 
 function isCachedChunk(value: unknown): value is CachedChunk {
   if (typeof value !== "object" || value === null) return false;
-  const record = value as Record<string, unknown>;
-  return Array.isArray(record.entries) && typeof record.dropped === "number";
+  return Array.isArray((value as Record<string, unknown>).items);
 }
 
 /**
@@ -259,21 +263,8 @@ export async function runReadingDictionary(
               });
               continue;
             }
-            // **AIを信用しない**（CLAUDE.md 実装ルール3）。句は送った区切りの中に在るはず
-            const checked = validateReadingItems(chunk.text, items);
-            if (checked.dropped.length > 0) {
-              logStep(
-                `読みの確かめ：検算で${checked.dropped.length}件を捨てました（` +
-                  checked.dropped
-                    .map((d) => `${d.reason}: ${JSON.stringify(d.item)}`)
-                    .join(" / ") +
-                  "）"
-              );
-            }
-            await cache.set(hash, base, {
-              entries: checked.entries,
-              dropped: checked.dropped.length,
-            } satisfies CachedChunk);
+            // 検算は控えから取り出すときに行う（下。控えの説明を参照）
+            await cache.set(hash, base, { items } satisfies CachedChunk);
           } catch (error) {
             if (error instanceof AIError && error.kind === "aborted") {
               cancelled = true;
@@ -304,12 +295,23 @@ export async function runReadingDictionary(
 
   const fresh: ReadingEntry[] = [];
   let dropped = 0;
-  for (const hash of hashes) {
-    const cached = cache.get(hash, base);
-    if (!isCachedChunk(cached)) continue;
-    fresh.push(...cached.entries);
-    dropped += cached.dropped;
-  }
+  chunks.forEach((chunk, index) => {
+    const cached = cache.get(hashes[index], base);
+    if (!isCachedChunk(cached)) return;
+    // **AIを信用しない**（CLAUDE.md 実装ルール3）。句は送った区切りの中に在るはず
+    const checked = validateReadingItems(chunk.text, cached.items);
+    if (checked.dropped.length > 0) {
+      logStep(
+        `読みの確かめ：検算で${checked.dropped.length}件を捨てました（` +
+          checked.dropped
+            .map((d) => `${d.reason}: ${JSON.stringify(d.item)}`)
+            .join(" / ") +
+          "）"
+      );
+    }
+    fresh.push(...checked.entries);
+    dropped += checked.dropped.length;
+  });
   const entries = mergeReadingEntries(loaded.file.entries, fresh);
   try {
     await saveReadingDictionary(
