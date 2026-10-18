@@ -39,7 +39,10 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
   "postingStore.ts": "読み込み時の控えと突き合わせる",
   // スケジュール（設計書6.111.8）。投稿状態の台帳と同じ約束
   "scheduleStore.ts": "読み込み時の控えと突き合わせる（未保存の編集も断る）",
-  "readerTargetStore.ts": "assertSaveAllowed を持つ（未保存の編集も断る）",
+  // 読み上げの読みの辞書（設計書6.42.1）。書く直前に読み直し、読んだときの
+  // ハッシュと違えば書かない（同期で入った別の機械の直しを押し流さない）
+  "readingDictionaryStore.ts": "書く直前に読み直してハッシュを照合する",
+  "readerTargetStore.ts":"assertSaveAllowed を持つ（未保存の編集も断る）",
   // 写真の書き起こしの「AIへの頼み」（設計書6.117.7）。作者の文なので、書く直前に
   // 読み直し、画面が最後に読んだ文と食い違えば書かない。読めない（壊れ・競合の印）ファイルにも書かない
   "photoTranscribeRequestStore.ts":

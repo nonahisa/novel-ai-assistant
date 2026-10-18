@@ -1793,6 +1793,45 @@ export async function activate(
         aiRegistry
       );
     },
+    // 読み上げの読みの辞書（設計書6.42.1）。**繋ぐのはここだけ**——口述の
+    // 整文と同じく、原稿エディタにAIの登録簿を抱えさせない。作品に属さない
+    // 原稿では辞書の置き場が無いので、何もしない
+    readingDictionary: {
+      summary: async (filePath, text) => {
+        const work = workOfPath(registry, filePath);
+        if (!work) return { spans: [], active: 0, missing: 0 };
+        const { readingDictionarySummary } = await import(
+          "./features/readingDictionary.js"
+        );
+        return readingDictionarySummary({ work, episodePath: filePath, text });
+      },
+      run: async (filePath, text) => {
+        const work = workOfPath(registry, filePath);
+        if (!work) {
+          void vscode.window.showInformationMessage(
+            "読みの確かめは、作品に登録した原稿で使えます。"
+          );
+          return;
+        }
+        const { runReadingDictionary } = await import(
+          "./features/readingDictionary.js"
+        );
+        await runReadingDictionary({ work, episodePath: filePath, text }, aiRegistry);
+      },
+      manage: async (filePath, text) => {
+        const work = workOfPath(registry, filePath);
+        if (!work) {
+          void vscode.window.showInformationMessage(
+            "読みの辞書は、作品に登録した原稿で使えます。"
+          );
+          return;
+        }
+        const { manageReadingDictionary } = await import(
+          "./features/readingDictionary.js"
+        );
+        await manageReadingDictionary({ work, episodePath: filePath, text });
+      },
+    },
     // シーンメモ（設計書6.40.4）。**繋ぐのはここだけ**——原稿エディタが
     // パネルを直に読み込むと、パネル側もこちらを読むので輪になる
     openSceneMemos: async (filePath) => {

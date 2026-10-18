@@ -63,6 +63,7 @@ export function mergeTreeArgs(ours: string, theirs: string): string[] {
  * | `.aiwriter/pending-characters/`・`pending-settings/` | 畳める | **AIの提案で、まだ資料になっていない。** 再抽出で作り直せる（5.5.18。`pending-settings/` は人物以外の承認待ち、2026-09-23〜） |
  * | `.aiwriter/pending-ledger/` | **畳めない** | 外部AIの台帳の案（章立て・伏線・予定の段。6.87.24）。**再抽出では戻らない**ので、片側を黙って残すと、もう片方の機械で置かれた案（作者がまだ見ていない）が消える。作者に訊く（作者の裁定 2026-10-16 夜の6） |
  * | `.aiwriter/extracted.json` | **畳めない** | 抽出済みの話の記録。正しくは両方の和集合で、片方を残すと再抽出が走る |
+ * | `.aiwriter/readings/` | **畳めない**（一覧に載せないので既定で作者に訊く） | 読み上げの読みの辞書。作者が直した読み・消した印（墓標）を含み、片方を残すともう片方の機械での直しが消える（設計書6.42.1） |
  * | `.aiwriter/photo-transcribe-request.json` | **畳めない** | 写真の書き起こしの「AIへの頼み」。作者が書いた文で、片方を残すともう片方の頼みが消える（設計書6.117.7） |
  * | `設定/_schema/` | 畳める | AI向けのスキーマ。次の生成で作り直される（`settingsConflictRule.ts` と同じ判断。0.45.1） |
  * | `設定/{abilities,characters,locations,organizations,world}.md` | 畳める | 設定資料集の書き出し先。次の書き出しで作り直される（0.45.1）。**名指しの5つだけ**——`synopsis.md` のようなあらすじは作者が手で直す |
