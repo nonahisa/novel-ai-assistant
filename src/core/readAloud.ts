@@ -4,6 +4,7 @@ import {
   type NotationMode,
 } from "./manuscriptRender";
 import { MEMO_LINE_PATTERN, isMemoLine } from "./sceneMemo";
+import type { ReadingSpan } from "./readingDictionary";
 
 /**
  * 読み上げ（音読推敲。設計書6.42）。
@@ -98,10 +99,14 @@ const EDGE_SPACE = /^[\s　]+|[\s　]+$/g;
  *
  * @param text 原稿エディタが持っている本文（**LF区切り**。`core/eolSpace.ts`）
  * @param notation その原稿の記法（`.md` は curly、`.txt` は site）
+ * @param readings 読みの辞書から求めた、読みを差し替える範囲（元の本文の位置。
+ *   設計書6.42.1）。**声へ渡す写しだけを差し替える**——本文は1字も変えない。
+ *   作者のルビ・傍点の記法に掛かる範囲は使わない（作者のルビが勝つ）
  */
 export function buildReadingPlan(
   text: string,
-  notation: NotationMode
+  notation: NotationMode,
+  readings: readonly ReadingSpan[] = []
 ): ReadingSentence[] {
   const plan: ReadingSentence[] = [];
   const lines = text.split("\n");
@@ -112,13 +117,21 @@ export function buildReadingPlan(
     // **シーンメモは読まない**（設計書6.40.2）。作者の覚え書きであって
     // 本文ではないので、声に出すと原稿の流れが切れる
     if (!isMemoLine(line)) {
-      for (const piece of splitSentences(line, notation)) {
+      const inNotation = notationMask(line, notation);
+      const lineSpans = spansInLine(
+        readings,
+        lineStart,
+        lineStart + line.length,
+        inNotation
+      );
+      for (const piece of splitSentences(line, inNotation)) {
         const sentence = makeSentence(
           text,
           lineStart + piece.start,
           lineStart + piece.end,
           i + 1,
-          notation
+          notation,
+          lineSpans
         );
         // 記号と空白しか無かった文は捨てる（声に渡すものが無い）
         if (sentence) plan.push(sentence);
@@ -191,8 +204,10 @@ function notationMask(line: string, notation: NotationMode): boolean[] {
  * 行末も切れ目になる——**行が変われば文も変わる**という前提で書かれた原稿
  * （句点を打たない地の文、台詞だけの行）が多い。
  */
-function splitSentences(line: string, notation: NotationMode): Piece[] {
-  const inNotation = notationMask(line, notation);
+function splitSentences(
+  line: string,
+  inNotation: readonly boolean[]
+): Piece[] {
   const pieces: Piece[] = [];
   let start = 0;
   for (let i = 0; i < line.length; i++) {
@@ -262,7 +277,8 @@ function makeSentence(
   rawStart: number,
   rawEnd: number,
   line: number,
-  notation: NotationMode
+  notation: NotationMode,
+  spans: readonly ReadingSpan[]
 ): ReadingSentence | undefined {
   let start = rawStart;
   let end = rawEnd;
@@ -270,9 +286,65 @@ function makeSentence(
   while (end > start && isEdgeSpace(text[end - 1])) end--;
   if (start >= end) return undefined;
 
-  const speech = toSpeech(text.slice(start, end), notation);
+  const speech = toSpeech(
+    withReadings(text.slice(start, end), start, spans),
+    notation
+  );
   if (speech === "") return undefined;
   return { start, end, line, speech };
+}
+
+/**
+ * その行に当てる読みの範囲。**行の中に収まり、記法に掛からないものだけ。**
+ *
+ * 記法の内側（ルビの親文字・傍点の中）は作者が読ませ方を決めている所なので、
+ * 辞書の読みで上書きしない（作者のルビが勝つ。設計書6.42.1）。
+ */
+function spansInLine(
+  spans: readonly ReadingSpan[],
+  lineStart: number,
+  lineEnd: number,
+  inNotation: readonly boolean[]
+): ReadingSpan[] {
+  const out: ReadingSpan[] = [];
+  for (const span of spans) {
+    if (span.start < lineStart || span.end > lineEnd) continue;
+    let touches = false;
+    for (let at = span.start; at < span.end; at++) {
+      if (inNotation[at - lineStart]) {
+        touches = true;
+        break;
+      }
+    }
+    if (!touches) out.push(span);
+  }
+  return out;
+}
+
+/**
+ * 文の写しの中で、辞書の範囲を読みへ差し替える。
+ *
+ * **後ろから差し替える**——前から差し替えると、読みと語の字数の違いで
+ * 後ろの範囲の位置がずれる。範囲は記法に掛からないものだけが来るうえ、
+ * 読みはひらがなだけなので、差し替えたあとで記法の読み方が変わることはない。
+ */
+function withReadings(
+  source: string,
+  sourceStart: number,
+  spans: readonly ReadingSpan[]
+): string {
+  const sourceEnd = sourceStart + source.length;
+  const inside = spans
+    .filter((span) => span.start >= sourceStart && span.end <= sourceEnd)
+    .sort((a, b) => b.start - a.start);
+  let out = source;
+  for (const span of inside) {
+    out =
+      out.slice(0, span.start - sourceStart) +
+      span.reading +
+      out.slice(span.end - sourceStart);
+  }
+  return out;
 }
 
 function isEdgeSpace(char: string): boolean {

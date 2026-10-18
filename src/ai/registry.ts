@@ -86,7 +86,13 @@ export type AssignableFeature =
     ので、ほかの機能と相乗りさせない（相乗りすると、相談のために選んだ文字だけの
     AIへ写真を回すことになる）。
   */
-  | "transcribe";
+  | "transcribe"
+  /*
+    読み上げの読みの辞書（P-50。設計書6.42.1）。**話ごとに1回走らせる軽い
+    作業**で、手元の小さいモデルでも足りる。ほかの機能と相乗りさせると、
+    推敲のために選んだ大きなクラウドのAIへ、押すたびに1話ぶん送ることになる。
+  */
+  | "readingDictionary";
 
 /**
  * 機能の表示名。**画面に出す名前はここだけが持つ。**
@@ -103,6 +109,7 @@ export const ASSIGNABLE_FEATURE_LABELS: Record<AssignableFeature, string> = {
   generate: "あらすじ・紹介文・キャッチコピーなど",
   chat: "AIに相談",
   transcribe: "写真の書き起こし",
+  readingDictionary: "読み上げの読みの確かめ",
 };
 
 /** 選択画面に並べる順。重い（＝手元AIの効きが大きい）ものから */
@@ -117,6 +124,7 @@ export const ASSIGNABLE_FEATURES: AssignableFeature[] = [
   "generate",
   "chat",
   "transcribe",
+  "readingDictionary",
 ];
 
 export interface FeatureAssignment {

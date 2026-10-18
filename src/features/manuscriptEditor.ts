@@ -117,6 +117,7 @@ import {
   buildReadingPlan,
   isReadingMemoLine,
 } from "../core/readAloud";
+import type { ReadingSpan } from "../core/readingDictionary";
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
 import { copyEmphasisFor } from "../core/postingCopyTargets";
@@ -1732,6 +1733,12 @@ type Incoming =
   /** 選ばれた声を覚える（端末ごと。作品には書かない） */
   | { type: "readingVoice"; name: string }
   /**
+   * 読みの辞書（設計書6.42.1）。`run` は［読みを確かめる（AI）］、
+   * `open` は［読みの一覧］、`status` は列を開いたときの様子の問い合わせ。
+   * **本文は画面が持っているものを送らせる**（句はこの本文から探す）
+   */
+  | { type: "readingDictionary"; action: "run" | "open" | "status"; text: string }
+  /**
    * 「noteに貼ったときの見た目」の面を開いた・閉じた（設計書6.69）。
    *
    * **開いているあいだだけ組む。** 本文ぜんたいをHTMLへ組んで送る道は
@@ -1899,6 +1906,22 @@ export interface ManuscriptEditorDeps {
   readAloudVoice?: () => string | undefined;
   /** 選ばれた声を覚える */
   saveReadAloudVoice?: (name: string) => Promise<void>;
+  /**
+   * 読み上げの読みの辞書（設計書6.42.1）。
+   *
+   * **繋ぐのは `extension.ts` だけ。** ここからAIの機能を直に読み込むと、
+   * 原稿エディタがAIの登録簿を抱えることになる（口述の整文と同じ理由）。
+   * 省略できる形にしてあるのは、この画面が辞書なしでも読み上げられるため。
+   * 作品に属さない原稿では、どれも何もしない（辞書の置き場が無い）。
+   */
+  readingDictionary?: {
+    /** 読み上げに当てる範囲と、一覧の様子（失敗しても投げない） */
+    summary(filePath: string, text: string): Promise<ReadingDictionaryView>;
+    /** AIで作る（作り直す） */
+    run(filePath: string, text: string): Promise<void>;
+    /** 一覧を見る・直す・消す */
+    manage(filePath: string, text: string): Promise<void>;
+  };
   /**
    * ウィンドウの再読み込みをまたいで「この原稿の、この行へ飛ぶ」を覚える所
    * （`workspaceState`。設計書6.25.11）。**作業場ごと**にする——再読み込みは
@@ -3017,20 +3040,61 @@ export class ManuscriptEditorProvider
           );
           break;
 
-        case "readingPlan":
+        case "readingPlan": {
           /*
             **文へ割るのはこちら**（`core/readAloud.ts`）。画面の中に置くと
             確かめようがないうえ、ルビの記法は原稿の種類で違う（設計書6.12）。
             **本文は画面が送ってきたものをそのまま使う**——こちらの文書で
             作ると、打った直後は120ミリ秒ぶん位置がずれる。
+
+            読みの辞書（設計書6.42.1）があれば、**声へ渡す写しだけ**を
+            辞書の読みへ差し替える。毎回読み直すので、［読みを確かめる］や
+            一覧での直しは、次の［▶ 読む］からそのまま効く
           */
+          const dictionary = await this.deps.readingDictionary?.summary(
+            fromUri(document.uri),
+            message.text
+          );
           await panel.webview.postMessage({
             type: "readingPlan",
-            sentences: buildReadingPlan(message.text, notation),
+            sentences: buildReadingPlan(
+              message.text,
+              notation,
+              dictionary?.spans ?? []
+            ),
             // 画面が「自分が送った本文の計画か」を確かめるための目印
             textLength: message.text.length,
           });
           break;
+        }
+
+        case "readingDictionary": {
+          const filePath = fromUri(document.uri);
+          const dictionary = this.deps.readingDictionary;
+          if (!dictionary) {
+            await panel.webview.postMessage({ type: "readingDictionaryStatus", note: "" });
+            break;
+          }
+          try {
+            if (message.action === "run") {
+              await dictionary.run(filePath, message.text);
+            } else if (message.action === "open") {
+              await dictionary.manage(filePath, message.text);
+            }
+          } finally {
+            /*
+              **どの操作のあとも、失敗しても、列の様子を出し直す。** 画面は
+              押したボタンをこの知らせが届くまで押せなくしているので、
+              返さないと二度と押せなくなる
+            */
+            const view = await dictionary.summary(filePath, message.text);
+            await panel.webview.postMessage({
+              type: "readingDictionaryStatus",
+              note: readingDictionaryNote(view),
+            });
+          }
+          break;
+        }
 
         case "readingMark":
           /*
@@ -4739,6 +4803,35 @@ function readOrientation(orientation: ManuscriptOrientation): {
 export function clampReadAloudRate(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.min(2, Math.max(0.5, value));
+}
+
+/** 読みの辞書の様子（設計書6.42.1。`readingDictionary.summary` の答え） */
+export interface ReadingDictionaryView {
+  /** 読み上げに当てる範囲（元の本文の位置） */
+  spans: ReadingSpan[];
+  /** 使っている項目の数（消した項目は数えない） */
+  active: number;
+  /** 句が本文に見当たらない項目の数 */
+  missing: number;
+  /** 辞書が読めなかったときの理由 */
+  problem?: string;
+}
+
+/**
+ * 読み上げの列に出す、辞書の様子の一言。
+ *
+ * **見当たらない項目があれば作り直しを促す**——本文を直して句が消えると、
+ * その場所の読みは効かなくなる（効かない項目を黙って抱えたままにしない）。
+ */
+export function readingDictionaryNote(view: ReadingDictionaryView): string {
+  if (view.problem) return view.problem;
+  if (view.active === 0) return "";
+  const head = `読みの辞書：${view.active}件`;
+  if (view.missing === 0) return head;
+  return (
+    `${head}（本文に見当たらない${view.missing}件。` +
+    "本文を直したなら［読みを確かめる］で作り直せます）"
+  );
 }
 
 /** いまのテーマに合う色を選ぶ */

@@ -999,6 +999,9 @@ body.clipped #cheer { white-space: normal; }
     <select id="aloudVoice" title="読み上げに使う声。この端末に入っている日本語の声だけが並びます"></select>
   </label>
   <button id="aloudMark" title="いま読んでいる文の上にメモの印を置いて、一時停止します">⚑ 引っかかった</button>
+  <button id="aloudDictRun" title="この話の中で、読みが2通りある語（十分・音・一日など）をAIが確かめ、読み上げの読みを直します。本文は書き換えません">読みを確かめる（AI）</button>
+  <button id="aloudDictOpen" title="読みの辞書の一覧を開きます。読みを直したり、項目を消したりできます">読みの一覧</button>
+  <span id="aloudDict"></span>
   <span id="aloudNote"></span>
 </div>
 
@@ -5179,6 +5182,8 @@ ${RESUME_WRITING_LABEL ? `
       aloudTakePlan(message);
     } else if (message.type === "readingMarkSkipped") {
       aloudTakeMarkSkipped();
+    } else if (message.type === "readingDictionaryStatus") {
+      aloudDictTakeStatus(message);
     } else if (message.type === "showReading") {
       // 詳細メニューの「原稿を読み上げる」。**列を出すだけ**（設計書6.42）
       aloudOpenRow();
@@ -9336,6 +9341,8 @@ ${RESUME_WRITING_LABEL ? `
     document.body.classList.add("aloud");
     aloudToggle.classList.add("on");
     aloudLoadVoices();
+    // 辞書の様子（件数・本文に見当たらない数）を出す
+    aloudDictAsk("status");
     // **列のぶんだけ本文の面が縮む。** 折り返し幅が変わるので、重ね敷きの
     // 枠を測り直す（測り直さないと、用語の色が1行ずつずれる）
     scheduleAlignMarks();
@@ -9383,6 +9390,45 @@ ${RESUME_WRITING_LABEL ? `
     aloudMarking = true;
     // 引っかかったから印を打つので、そのまま読み進めても頭に入らない
     aloudPause();
+  });
+
+  /*
+    **読みの辞書**（設計書6.42.1）。AIに作らせるのも、一覧で直すのも
+    拡張機能側で、ここは頼むだけである。辞書は計画を頼むたびに向こうで
+    読み直されるので、作った・直したあとの［▶ 読む］からそのまま効く。
+    **本文は画面が持っているものを送る**（句はこの本文から探す）。
+  */
+  const aloudDictRun = document.getElementById("aloudDictRun");
+  const aloudDictOpen = document.getElementById("aloudDictOpen");
+  const aloudDict = document.getElementById("aloudDict");
+
+  function aloudDictAsk(action) {
+    vscode.postMessage({
+      type: "readingDictionary",
+      action: action,
+      text: aloudTextNow(),
+    });
+  }
+
+  /** 様子が届いた（操作が終わった）。ボタンを押せる形へ戻す */
+  function aloudDictTakeStatus(message) {
+    aloudDictRun.disabled = false;
+    aloudDictOpen.disabled = false;
+    aloudDict.textContent = typeof message.note === "string" ? message.note : "";
+  }
+
+  aloudDictRun.addEventListener("click", function () {
+    // **終わるまで押せなくする。** 続けて押すと、同じ話を2回送る
+    aloudDictRun.disabled = true;
+    aloudDictOpen.disabled = true;
+    aloudDict.textContent = "読みを確かめています…";
+    aloudDictAsk("run");
+  });
+
+  aloudDictOpen.addEventListener("click", function () {
+    aloudDictRun.disabled = true;
+    aloudDictOpen.disabled = true;
+    aloudDictAsk("open");
   });
 
   aloudRate.addEventListener("change", function () {
