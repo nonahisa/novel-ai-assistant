@@ -11,7 +11,8 @@ concurrency:
 jobs:
   quality:
     runs-on: windows-latest
-    timeout-minutes: 15
+    # テストが増えて14〜15分かかり、15分では打ち切られるようになった（2026-10-18）
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
