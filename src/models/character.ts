@@ -68,6 +68,28 @@ export interface DistinctPerson {
   id: string | null;
 }
 
+/**
+ * 宿り：この人物の心が、別の人物の体にいる（作者の裁定、2026-10-18。設計書6.5.13）。
+ *
+ * 憑依・転生・入れ替わりのある作品では、「体の持ち主」と「中にいる心」が別の人物になる。
+ * 名前1つで人物を分ける記録では、体の記録に心の過去（「前世は男子小学生」）が混ざり、
+ * 統合の候補にも体と心の組が並ぶ。**どの心がどの体にいるかは作者だけが決める**
+ * （主人公の印と同じく、AIの抽出・マージ・提案の採用では動かさない）。
+ *
+ * 心の側の人物に持たせる。体の持ち主は名前で持つ（`DistinctPerson` と同じく、
+ * 作者が書いた名前のまま。あとで別名へまとめられても引き当てられるように）。
+ */
+export interface CharacterDwelling {
+  /** 心が宿っている体の持ち主の名前 */
+  body: string;
+  /** 何話から（無ければ決めない） */
+  fromChapter?: number;
+  /** 何話まで（無ければ今も） */
+  untilChapter?: number;
+  /** 作者の補足（「第17話から文佳の心も戻り、同居」） */
+  note?: string;
+}
+
 /** ある人物が特定の相手を呼ぶ呼称 */
 export interface AddressTerm {
   targetName: string;
@@ -366,6 +388,11 @@ export interface Character {
    */
   isProtagonist?: boolean;
   /**
+   * 宿り（2026-10-18。`CharacterDwelling`）。この人物の心が別の人物の体にいる記録。
+   * **作者だけが付け外しする**（主人公の印と同じ扱い）。無い人物には欄ごと置かない
+   */
+  dwellings?: CharacterDwelling[];
+  /**
    * 作中での変化。作者が食い違いを「これは変化だ」と確定させたものが入る。
    * 話数と、分かれば作中の時期（`設定/timeline.json`）を持つ（設計書6.18）。
    */
@@ -445,6 +472,22 @@ export function keepProtagonistMark(
 ): Character {
   const { isProtagonist: _ignored, ...rest } = next;
   return current.isProtagonist === true ? { ...rest, isProtagonist: true } : rest;
+}
+
+/**
+ * 書き込む人物へ、いまの記録の「作者だけが付け外しする印」を移す。
+ * 主人公の印（`keepProtagonistMark`）と宿り（2026-10-18）。理由は主人公の印と同じ——
+ * 承認待ちの更新案は作られた時点の写しなので、案の側の印を使うと、作者がそのあとで
+ * 付け外しした印が戻る。
+ */
+export function keepAuthorOnlyMarks(
+  next: Character,
+  current: Pick<Character, "isProtagonist" | "dwellings">
+): Character {
+  const { dwellings: _ignored, ...rest } = keepProtagonistMark(next, current);
+  return current.dwellings && current.dwellings.length > 0
+    ? { ...rest, dwellings: current.dwellings.map((entry) => ({ ...entry })) }
+    : rest;
 }
 
 /** char_001_月島灯.json の形式にする */
@@ -655,6 +698,19 @@ export function parseCharacter(raw: unknown): Character {
       id: (entry.id as string | null | undefined) ?? null,
     };
   });
+  // 宿り（2026-10-18）。**壊れた形は読み込みエラーにする。** 作者だけが書く記録なので、
+  // 黙って捨てると作者の判断が消える
+  const dwellings = optionalObjectArray(value.dwellings, "dwellings", (entry, path) => {
+    requireNonEmptyString(entry.body, `${path}.body`);
+    optionalChapter(entry.fromChapter, `${path}.fromChapter`);
+    optionalChapter(entry.untilChapter, `${path}.untilChapter`);
+    optionalString(entry.note, `${path}.note`);
+    const dwelling: CharacterDwelling = { body: entry.body as string };
+    if (entry.fromChapter !== undefined) dwelling.fromChapter = entry.fromChapter as number;
+    if (entry.untilChapter !== undefined) dwelling.untilChapter = entry.untilChapter as number;
+    if (typeof entry.note === "string" && entry.note.trim()) dwelling.note = entry.note;
+    return dwelling;
+  });
   // 性格の面（2026-09-24 夜）。**壊れた形は読み込みエラーにする。**
   // 黙って空にすると、作者が「変化」と決めた印（supersededBy）が消え、
   // 過去の面が次の抽出で本体へ戻る
@@ -723,6 +779,9 @@ export function parseCharacter(raw: unknown): Character {
   // 主人公の印（2026-10-17）は、立っているときだけ欄を持つ。手で false と
   // 書かれた資料も「印なし」と同じ形にそろえる（保存のたびに欄が揺れないように）
   if (character.isProtagonist !== true) delete character.isProtagonist;
+  // 宿り（2026-10-18）も、あるときだけ欄を持つ（空の配列を保存のたびに増やさない）
+  if (dwellings && dwellings.length > 0) character.dwellings = dwellings;
+  else delete character.dwellings;
   return character;
 }
 
@@ -780,6 +839,13 @@ function optionalStringArray(value: unknown, path: string): void {
 
 function optionalNumberArray(value: unknown, path: string): void {
   if (value !== undefined && (!Array.isArray(value) || value.some((item) => !Number.isInteger(item) || item < 0))) invalid(path);
+}
+
+/** 話数（1以上の整数） */
+function optionalChapter(value: unknown, path: string): void {
+  if (value !== undefined && (typeof value !== "number" || !Number.isInteger(value) || value < 1)) {
+    invalid(path);
+  }
 }
 
 function optionalEnum(value: unknown, path: string, allowed: readonly string[]): void {

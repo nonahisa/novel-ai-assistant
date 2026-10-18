@@ -61,6 +61,8 @@ const CHARACTER_AUTHOR_KEYS = [
   "rejectedValues",
   // 主人公の印（2026-10-17）。作者だけが付け外しする
   "isProtagonist",
+  // 宿り（2026-10-18）。作者だけが付け外しする
+  "dwellings",
 ] as const;
 
 /** 片側をそのまま残す決め方 */

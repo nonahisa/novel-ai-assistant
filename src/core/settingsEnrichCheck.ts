@@ -116,6 +116,12 @@ export interface EnrichDescribeContext {
    * 同じ点になるよう、どちらも渡す
    */
   synopses?: readonly string[];
+  /**
+   * 同じ作品の人物の記録そのもの（人物のときだけ効く。2026-10-18）。宿り
+   * （設計書6.5.13）の行を出し、体の記録に混ざった心の側の記述を本人の変化と
+   * 分けて渡すのに使う。画面と MCP で同じ材料になるよう、どちらも渡す
+   */
+  people?: readonly Character[];
 }
 
 /** プロンプトの【現在の設定】に渡す文章（製品の `describe` と同じ） */
@@ -128,6 +134,7 @@ export function describeEnrichTarget(
     return describeCharacter(record as Character, context.customFields, {
       omitChanges: enrichOmitsChanges(context.notes),
       synopses: context.synopses,
+      characters: context.people,
     });
   }
   if (kind === "ability") {

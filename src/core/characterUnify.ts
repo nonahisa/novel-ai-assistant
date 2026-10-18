@@ -1,5 +1,6 @@
 import type { Character } from "../models/character";
 import { mergeChangeLists, mergeConflicts } from "../models/jsonValidation";
+import { dwellingBlockedNames, unifyDwellings } from "./characterDwelling";
 import {
   dedupeRelations,
   normalizeName,
@@ -41,13 +42,20 @@ export function unifyCharacters(
     throw new Error("同じ人物どうしはまとめられません。");
   }
 
-  const blocked = new Set(
-    others
-      .filter(
-        (character) => character.id !== keep.id && character.id !== absorb.id
-      )
-      .map((character) => normalizeSpacing(character.name))
+  const rest = others.filter(
+    (character) => character.id !== keep.id && character.id !== absorb.id
   );
+  const blocked = new Set(rest.map((character) => normalizeSpacing(character.name)));
+  // 宿り（2026-10-18。設計書6.5.13）で結ばれた相手の呼び名も別名にしない。
+  // 文佳の体の記録をまとめるとき、汚染で入っていた「太志」（宿った心の呼び名）を
+  // まとめた先へ運ぶと、次の抽出で太志の場面が文佳へ寄せられる
+  const everyone = [keep, absorb, ...rest];
+  for (const name of [
+    ...dwellingBlockedNames(keep, everyone),
+    ...dwellingBlockedNames(absorb, everyone),
+  ]) {
+    blocked.add(name);
+  }
   const keepKey = normalizeSpacing(keep.name);
   const aliases: string[] = [];
   const seen = new Set<string>();
@@ -59,9 +67,12 @@ export function unifyCharacters(
     aliases.push(alias);
   }
 
+  // 宿りは `unifyDwellings` の結果だけを使う。残す側の欄を広げて持ち込むと、
+  // まとめる相手を体とする宿り（意味を失ったもの）が残る
+  const { dwellings: _keepDwellings, ...keepRest } = keep;
   return {
     unified: {
-      ...keep,
+      ...keepRest,
       aliases,
       // 別人の記録（設計書6.5.8）は両方から引き継ぐ。吸収される側の分を
       // 落とすと、「アジャーノは別人」という作者の判断がまとめる操作1回で
@@ -127,6 +138,9 @@ export function unifyCharacters(
       // 主人公の印（2026-10-17）は、どちらかに付いていれば引き継ぐ。作者が付けた
       // 印なので、まとめる操作で黙って落とさない。どちらにも無ければ欄ごと置かない
       ...(keep.isProtagonist || absorb.isProtagonist ? { isProtagonist: true } : {}),
+      // 宿り（2026-10-18）も、両方から引き継ぐ。作者が書いた記録なので黙って落とさない。
+      // まとめる相手そのものを体とする宿りだけは意味を失うので落とす（`unifyDwellings`）
+      ...withDwellings(unifyDwellings(keep, absorb)),
       abilities: dedupeBy(
         [...keep.abilities, ...absorb.abilities],
         (ability) => ability.name
@@ -195,6 +209,13 @@ function unifyFacets(
 }
 
 const SPOILER_ORDER = ["public", "staff_only", "author_only"] as const;
+
+/** 宿りがあるときだけ欄を置く（空の配列を増やさない） */
+function withDwellings(
+  dwellings: ReturnType<typeof unifyDwellings>
+): { dwellings?: NonNullable<ReturnType<typeof unifyDwellings>> } {
+  return dwellings ? { dwellings } : {};
+}
 
 function narrowerSpoiler(
   left: Character["spoilerLevel"],

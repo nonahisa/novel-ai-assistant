@@ -58,6 +58,7 @@ import {
 } from "./personalityFacets";
 import { addSpeechStyleFacet } from "./speechStyle";
 import { findResemblingCharacter } from "./characterResemblance";
+import { dwellingBlockedNames, isDwellingPair } from "./characterDwelling";
 
 /**
  * 抽出結果を既存の人物一覧へマージする。
@@ -741,8 +742,12 @@ function applyExtracted(
   ]);
   const ownKey = normalizeSpacing(target.name);
   const existingKeys = new Set([...aliases].map(normalizeSpacing));
+  // 宿り（2026-10-18。設計書6.5.13）で結ばれた相手の呼び名も別名にしない。
+  // 抽出は「体を共有＝同一人物の別の呼び方」と読み、文佳の別名へ「太志」を足してくる
+  const dwellingBlocked = dwellingBlockedNames(target, everyone);
   for (const a of incoming) {
     const key = normalizeSpacing(a);
+    if (dwellingBlocked.has(key)) continue;
     // **ほかのレコードの「名前」は別名にしない。**
     // 別人の名前が別名に入ると、その2人は「同じ呼び名を持つ」ことになり、
     // 「重複をまとめる」に別人どうしの組が並ぶ（実データで12件）。
@@ -1512,13 +1517,27 @@ function findCharacter(
   // 目で本文を読むので、「アジャン」と「アジャーノ」をまた1人として返す。
   // 名前で引き当てた先が「その名前は別人のものだ」と言っているなら、
   // そのレコードは候補から外す。
-  const usable = list.filter((c) => !distinctKeys(c).has(normalizeName(name)));
+  // 宿り（2026-10-18。設計書6.5.13）の相手の呼び名も、そのレコードの呼び名として
+  // 使わない。文佳の別名に汚染で残った「太志」で、太志の場面を文佳へ寄せないため。
+  // 名前そのものが宿りの相手のものなら、そのレコードは候補から外す（別人と同じ扱い）。
+  // 宿りが1つも無い作品では何もしない（毎回の照合を重くしない）
+  const anyDwelling = list.some((c) => (c.dwellings ?? []).length > 0);
+  const dwellingKeys = (c: Character): Set<string> =>
+    anyDwelling
+      ? new Set([...dwellingBlockedNames(c, list)].map(normalizeName))
+      : new Set();
+  const usable = list.filter(
+    (c) =>
+      !distinctKeys(c).has(normalizeName(name)) &&
+      !dwellingKeys(c).has(normalizeName(name))
+  );
 
   const incomingPrimary = normalizeName(name);
   const exactMatches = usable.filter((c) => {
     // レコード側が別人だと決めた呼び名は、そのレコードの呼び名として使わない。
     // 作者が手でJSONを直したときなど、別名に残ったままのことがある
     const blocked = distinctKeys(c);
+    for (const key of dwellingKeys(c)) blocked.add(key);
     const primary = normalizeName(c.name);
     const candidates = [c.name, ...c.aliases]
       .map(normalizeName)
@@ -1724,6 +1743,9 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
       // **出すと、操作メニューの「重複をまとめる」に永久に1件が残る。**
       // 分けたのに「重複しています」と言われ続けるのは、直っていないのと同じ
       if (isDeclaredDistinct(a, b)) continue;
+      // 作者が宿り（心と体）として記録した組も出さない（2026-10-18。設計書6.5.13）。
+      // 1つの体に2人がいるのであって、同じ人物ではない
+      if (isDwellingPair(a, b, characters)) continue;
 
       // 別レコードなのに呼称が重なっている。
       //

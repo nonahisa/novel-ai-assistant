@@ -368,6 +368,25 @@ export function characterSchema(): Record<string, unknown> {
         "作者が付けた「主人公（中心人物）」の印。変化の関与度に +5 を足す。" +
         "印の無い人物には欄が無い。**作者の判断なので、AIは立てることも消すこともしないこと**",
     },
+    // 宿り（2026-10-18。設計書6.5.13）。作者だけが書く
+    dwellings: {
+      type: "array",
+      description:
+        "作者が書いた「宿り」：この人物の心が、別の人物（body）の体にいる記録（憑依・転生・入れ替わり）。" +
+        "fromChapter〜untilChapter はその話数の範囲。宿りの無い人物には欄が無い。" +
+        "**作者の判断なので、AIは足すことも消すことも直すこともしないこと**",
+      items: {
+        type: "object",
+        properties: {
+          body: { type: "string", description: "心が宿っている体の持ち主の名前" },
+          fromChapter: { type: "integer", minimum: 1 },
+          untilChapter: { type: "integer", minimum: 1 },
+          note: { type: "string", description: "作者の補足" },
+        },
+        required: ["body"],
+        additionalProperties: false,
+      },
+    },
     // 名前の出てこない語り手の印（2026-10-10）。外部のAIにも見せる——
     // 消されると、次の抽出で「語り手（僕）」がもう1件作られる
     unnamedNarrator: {
@@ -571,6 +590,7 @@ export function schemaReadme(workTitle: string): string {
    （消すと、2人がまた1人にまとめられます）。
 7. **スキーマに無い項目を足さない。** 読み込み時に落ちます。
 8. **人物の \`isProtagonist\`（主人公の印）を付けたり消したりしない。** 作者が決める印です。
+9. **人物の \`dwellings\`（宿り：心がどの体にいるか）を足したり消したり直したりしない。** 作者が決める記録です。
 
 ## 書き方
 

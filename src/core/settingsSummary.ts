@@ -7,6 +7,7 @@ import { WORLD_CATEGORY_LABELS, type WorldItem } from "../models/world";
 import { describeChangeValues, formatChapters } from "./settingsMarkdown";
 import { hashText } from "./hash";
 import { changesOfField } from "./recordChanges";
+import { describeDwellings, splitDwellingChanges } from "./characterDwelling";
 import {
   describeInvolvement,
   scoreCharacterChanges,
@@ -64,6 +65,12 @@ export function describeCharacter(
      * 渡さなければその加点は付かない（主人公の印の加点は人物だけで決まる）
      */
     synopses?: readonly string[];
+    /**
+     * 同じ作品の人物（2026-10-18）。宿り（設計書6.5.13）の行を出し、体の記録に
+     * 混ざった心の側の記述を、本人の変化と分けて渡すのに使う。渡さなければ
+     * 宿りの行は出ず、変化は今までどおり全部を本人の変化として渡す
+     */
+    characters?: readonly Character[];
   } = {}
 ): string {
   const lines: string[] = [`名前: ${character.name}`];
@@ -95,6 +102,11 @@ export function describeCharacter(
       character.relations.map((r) => `${r.name}=${r.relation}`).join("、")
     );
   }
+  // 宿り（2026-10-18）。どの心がどの体にいるかを、心の側にも体の側にも書く。
+  // 書かないと、AIは「体を共有＝同じ人物」と読み、紹介に前世と今を混ぜる
+  for (const line of options.characters ? describeDwellings(character, options.characters) : []) {
+    push(lines, line.label, line.value);
+  }
   if (character.abilities.length > 0) {
     push(
       lines,
@@ -123,17 +135,37 @@ export function describeCharacter(
   // 紹介は80字しかないので、どの変化に紙幅を使うかをここで示す。
   // **変化そのものは低いものも全部渡す。** 相談（P-18）ではどれも事実であり、
   // ふるいにかけると「髪を切った話」を聞かれたときに答えられなくなる
+  //
+  // 体の記録に混ざった心の側の記述（宿り、2026-10-18）は、本人の変化から外して
+  // 別の行で渡す。消すと相談で「前世」の話に答えられなくなる
+  const split = options.characters
+    ? splitDwellingChanges(character, options.characters)
+    : { own: character.changes, dwelling: [], dwellers: [] };
   for (const significance of options.omitChanges
     ? []
-    : scoreCharacterChanges(character, { synopses: options.synopses })) {
+    : scoreCharacterChanges(character, {
+        synopses: options.synopses,
+        characters: options.characters,
+      })) {
     const values = describeChangeValues(
-      changesOfField(character.changes, significance.field)
+      changesOfField(split.own, significance.field)
     );
     push(
       lines,
       `変化（${significance.field}）`,
       `${values}［${describeInvolvement(significance)}］`
     );
+  }
+  if (!options.omitChanges && split.dwelling.length > 0) {
+    const who = split.dwellers.map((dweller) => dweller.name).join("・");
+    // 1件だけの記述も渡す（本人の変化と違い「変わったか」を問わない。心の過去そのもの）
+    for (const field of [...new Set(split.dwelling.map((entry) => entry.field))]) {
+      push(
+        lines,
+        `宿った心（${who}）の記述（${field}）`,
+        describeChangeValues(changesOfField(split.dwelling, field))
+      );
+    }
   }
   // 作者が足した項目は、定義された順に並べる。
   // 値が入っていないものは出さない（AIに「なし」と読ませないため）

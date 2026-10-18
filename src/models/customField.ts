@@ -89,6 +89,8 @@ const RESERVED_KEYS = new Set([
   // 人物以外の資料の既定の項目（2026-09-23〜、種類ごとに項目を足せるようにした）
   "region", "parent", "category", "description", "cost", "limitation",
   "userIds", "userNames",
+  // 宿り（2026-10-18。人物の `dwellings`）。作者だけが書く記録と同じ鍵を使わせない
+  "dwellings",
 ]);
 
 export function emptyCustomFieldSet(): CustomFieldSet {

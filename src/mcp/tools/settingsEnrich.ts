@@ -452,6 +452,8 @@ export function settingsEnrichPrompt(input: SettingsEnrichInput) {
         notes: input.notes,
         // 関与度の点を画面と同じにする（あらすじの加点。2026-10-17）
         synopses: kind === "character" ? readSynopsisTexts(input.folder) : undefined,
+        // 宿り（2026-10-18）の行と仕分け（画面と同じ材料にする）
+        people: target.characters,
       }),
     },
     excerpts,

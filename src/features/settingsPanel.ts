@@ -196,6 +196,12 @@ import {
   scoreChanges,
   type CharacterCentrality,
 } from "../core/changeSignificance";
+import {
+  describeDwellings,
+  formatDwellingsForEdit,
+  splitDwellingChanges,
+} from "../core/characterDwelling";
+import { EXAMPLE_OTHER } from "../core/exampleNames";
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
@@ -963,6 +969,9 @@ export class SettingsPanel {
         readOnly: [
           { label: "登場話", value: formatChapters(character.appearedChapters) },
           { label: "一人称", value: character.firstPerson.default ?? "" },
+          // 宿り（2026-10-18）。心の側にも体の側にも出す。体の側は記録を持たないので、
+          // ここで見えないと、太志の記録を開いた作者しか宿りに気づけない
+          ...describeDwellings(character, this.characters),
         ].filter((entry) => entry.value),
         reference: [
           // 性格の面（2026-09-24 夜）。どの話で見えた面かと、作中で変わった
@@ -982,7 +991,8 @@ export class SettingsPanel {
             // いまの本体の値が要る
             (field) => (isCharacterTextField(field) ? character[field] : null),
             character.rejectedValues,
-            characterCentrality(character, { synopses: this.synopsisTexts })
+            characterCentrality(character, { synopses: this.synopsisTexts }),
+            dwellingSplitOf(character, this.characters)
           ),
         ],
         fields: [
@@ -1040,6 +1050,20 @@ export class SettingsPanel {
             "主人公（中心人物）として扱う（作中での変化の関与度に +5）",
             character.isProtagonist === true
           ),
+          // 宿り（作者の裁定、2026-10-18）。憑依・転生・入れ替わりで、この人物の心が
+          // 別の人物の体にいるとき。主人公の印と同じく作者だけが書き、AIは書かない
+          {
+            ...field(
+              "dwellings",
+              "宿り（この人物の心が別の人物の体にいるとき。1行に1つ「体の持ち主=第4話〜第16話：補足」）",
+              formatDwellingsForEdit(character.dwellings),
+              true
+            ),
+            hint:
+              `例：「${EXAMPLE_OTHER.givenName}=第4話〜：第17話から${EXAMPLE_OTHER.givenName}の心も戻り、同居」。範囲と補足は省けます。` +
+              "書くと、2人は「重複をまとめる」の候補に出なくなり、体の側の資料には" +
+              "宿った心の過去として書かれた記述（「前世」「生前」を含む変化）が、本人の変化と分けて並びます。",
+          },
           // 作者が足した項目は、既定の項目のあと・メモの前に並べる
           ...customFieldControls(character.customFields, this.customFields),
           field("authorNotes", "作者メモ", character.authorNotes, true),
@@ -2835,6 +2859,8 @@ export class SettingsPanel {
       characters: this.characters,
       notes,
       synopses: this.synopsisTexts,
+      // 宿り（2026-10-18）の行と、心の側の記述の仕分けに使う
+      people: this.characters,
     });
   }
 
@@ -3311,6 +3337,20 @@ function customFieldControls(
   }));
 }
 
+/** 宿り（2026-10-18）で、体の記録を本人の変化と心の側の記述に分ける。体でなければ undefined */
+function dwellingSplitOf(
+  character: Character,
+  characters: readonly Character[]
+): { own: RecordChange[]; moved: RecordChange[]; who: string } | undefined {
+  const split = splitDwellingChanges(character, characters);
+  if (split.dwellers.length === 0) return undefined;
+  return {
+    own: split.own,
+    moved: split.dwelling,
+    who: split.dwellers.map((dweller) => dweller.name).join("・"),
+  };
+}
+
 /**
  * 画面のいちばん下へ回す参考情報。
  *
@@ -3352,8 +3392,15 @@ function referenceLines(
    * 人物の側の関与度の加点（主人公の印・あらすじ。2026-10-17）。
    * AIへ渡す材料（`describeCharacter`）と同じ数字にするために渡す
    */
-  centrality?: CharacterCentrality
+  centrality?: CharacterCentrality,
+  /**
+   * 宿り（2026-10-18。設計書6.5.13）で、体の記録を本人の変化と心の側の記述に
+   * 分けたもの（`splitDwellingChanges`）。渡されたら、変化の行と関与度は本人の分
+   * だけで出し、心の側の記述は別の行に並べる（記録は書き換えない）
+   */
+  dwelling?: { own: RecordChange[]; moved: RecordChange[]; who: string }
 ): DetailView["reference"] {
+  const scored = dwelling ? dwelling.own : changes ?? [];
   const heldFields = changes && currentOf
     ? [...new Set(changes.map((change) => change.field))]
         .map((field) => ({
@@ -3384,10 +3431,10 @@ function referenceLines(
     // **関与度を添える**（`changeSignificance.ts`）。AIへ渡す材料と同じ数字を
     // 同じ書き方で出す。紹介に何が書かれ、何が書かれなかったのかを
     // 作者がここで確かめられるようにするためである
-    ...scoreChanges(changes ?? [], appearedChapters, centrality).map((significance) => ({
+    ...scoreChanges(scored, appearedChapters, centrality).map((significance) => ({
       label: `変化（${significance.field}）`,
       value: `${describeChangeValues(
-        changesOfField(changes ?? [], significance.field)
+        changesOfField(scored, significance.field)
       )}［${describeInvolvement(significance)}］`,
       // **行は1行のまま、操作だけを足す**（作者の裁定、2026-09-21）。
       // 抽出は話者を取り違えることがあり、誤って入った変化を消す手段が
@@ -3403,6 +3450,21 @@ function referenceLines(
           }
         : {}),
     })),
+    /*
+      宿った心の側の記述（2026-10-18）。この体の持ち主の変化ではないので、関与度は
+      付けず、紹介の材料でも本人の変化と分けて渡す。誤りなら同じく落とせる
+    */
+    ...(dwelling
+      ? [...new Set(dwelling.moved.map((entry) => entry.field))].map((field) => ({
+          label: `宿った心（${dwelling.who}）の記述（${field}）`,
+          value: describeChangeValues(changesOfField(dwelling.moved, field)),
+          action: {
+            label: "誤りを落とす",
+            field,
+            kind: "dropChanges" as const,
+          },
+        }))
+      : []),
     ...conflicts.map((conflict) => ({
       label: `変化かもしれない（${conflict.field}）`,
       value: [describeConflictValues(conflict), conflict.note ?? ""]

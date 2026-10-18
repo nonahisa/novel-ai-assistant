@@ -23,6 +23,7 @@ import { nextAiNoteId, type AiNote, type AiNoteSource } from "../models/aiNote";
 import { withOptionalCustomFields } from "../models/customField";
 import { clampSummary } from "./summaryLimit";
 import { recordRemovedRelations } from "./rejectedRelations";
+import { DwellingEditError, parseDwellingsEdit } from "./characterDwelling";
 
 /**
  * 作者がパネル上で書き換えた内容をレコードへ反映する。
@@ -82,6 +83,11 @@ export interface RecordEdits {
    * （`authorConfirmed: false`）で届いても無視する（`applyCharacterEdits`）
    */
   isProtagonist?: string;
+  /**
+   * 宿り（2026-10-18。設計書6.5.13）。1行に1つ「体の持ち主=第4話〜第16話：補足」
+   * （`parseDwellingsEdit` の形）。主人公の印と同じく、**作者が画面で直したときだけ効く**
+   */
+  dwellings?: string;
   /** 作者が足した項目。キーは項目定義の key */
   customFields?: Record<string, string>;
   /**
@@ -198,6 +204,19 @@ export function applyCharacterEdits(
   if (edits.isProtagonist !== undefined && options?.authorConfirmed !== false) {
     if (edits.isProtagonist === "1") edited.isProtagonist = true;
     else delete edited.isProtagonist;
+  }
+  // 宿り（2026-10-18）も同じく作者の操作でしか付け外ししない。読めない行は
+  // 黙って捨てず、何行目かを添えて保存を止める（関係の欄と同じ扱い）
+  if (edits.dwellings !== undefined && options?.authorConfirmed !== false) {
+    let dwellings;
+    try {
+      dwellings = parseDwellingsEdit(edits.dwellings, edited.name);
+    } catch (error) {
+      if (error instanceof DwellingEditError) throw new SettingsEditError(error.message);
+      throw error;
+    }
+    if (dwellings.length > 0) edited.dwellings = dwellings;
+    else delete edited.dwellings;
   }
   return edited;
 }

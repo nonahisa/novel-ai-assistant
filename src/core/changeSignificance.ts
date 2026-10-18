@@ -1,6 +1,7 @@
 import type { Character } from "../models/character";
 import type { RecordChange } from "../models/jsonValidation";
 import { changedFields, changesOfField, sortChanges } from "./recordChanges";
+import { splitDwellingChanges } from "./characterDwelling";
 
 /**
  * 作中での変化が、物語の筋にどれだけ食い込んでいるかを数値にする（設計書6.18）。
@@ -252,6 +253,12 @@ export interface CharacterInvolvementContext {
    * 渡さなければ、あらすじによる加点は付けない
    */
   synopses?: readonly string[];
+  /**
+   * 同じ作品の人物（2026-10-18）。宿り（設計書6.5.13）で心が宿っている体の記録から、
+   * 心の側の記述（「前世は男子小学生」）を外して測るのに使う。渡さなければ外さない。
+   * **外すのは点の材料からだけで、記録は書き換えない**
+   */
+  characters?: readonly Character[];
 }
 
 /** あらすじの、この割合以上に名前が出る人物を物語の中心と見る */
@@ -346,8 +353,12 @@ export function scoreCharacterChanges(
   character: Character,
   context: CharacterInvolvementContext = {}
 ): ChangeSignificance[] {
+  // 体の記録に混ざった心の側の記述は、体の持ち主の変化ではない。段にも定着にも数えない
+  const changes = context.characters
+    ? splitDwellingChanges(character, context.characters).own
+    : character.changes;
   return scoreChanges(
-    character.changes,
+    changes,
     character.appearedChapters,
     characterCentrality(character, context)
   );
