@@ -513,3 +513,35 @@ describe("作者の判断例（2026-10-17）", () => {
     expect(roleScore(character)).toBe(55);
   });
 });
+
+/**
+ * 作者の判断例（2026-10-18。docs/measurements/2026-10-18-identity-and-significance-proposal.md）。
+ *
+ * ウィズ型：最新の登場話の値が、前の話までの語（「父」「姿を消した」）を
+ * つなぎ直し、短い語（「半年前から」）を足しただけ。新しい語が半分に届かないので
+ * 段に数えず、段の +5 も「変わったばかり」の +5 も付かない。作者の判断は「中まで」。
+ */
+const wizLike = () =>
+  personWith("ウォル", [6, 7, 9, 18], roleChanges([
+    [[6], ["元二級の狩人（弓）"]],
+    [[7], ["元狩人。姿を消した賞金首"]],
+    [[9], ["施しを受ける者。リナの父"]],
+    [[18], ["リナの父。半年前から姿を消した"]],
+  ]));
+
+describe("作者の判断例（2026-10-18）", () => {
+  test("作り物の値が、狙いどおりの新しさになっている", () => {
+    // 最後の群は 0.4 と 0.5 のあいだ（実データのウィズは 0.47）
+    expect(novelties(wizLike())).toEqual([1, 0.9, 1, 0.46]);
+  });
+
+  test("ウィズ型は「高」から外れる（前の語を半分以上くり返す話は段に数えない）", () => {
+    expect(roleScore(wizLike())).toBe(55);
+  });
+
+  test("前の判断例（10-17）の合否は変わらない", () => {
+    expect(roleScore(tsukiyoLike())).toBe(60);
+    expect(roleScore(okuharaLike())).toBeLessThan(60);
+    expect(roleScore(junyaLike())).toBeLessThan(60);
+  });
+});
