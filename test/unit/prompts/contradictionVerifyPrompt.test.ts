@@ -28,14 +28,22 @@ const prompt = buildContradictionVerifyPrompt({
   settingKnownAt: "",
 });
 
-describe("P-12b の頼み方（1.1）", () => {
+describe("P-12b の頼み方（1.2）", () => {
   /**
    * 1.0→1.1 で上げた（控えの鍵が変わり、1.0 の却下を使い回さない）。裁定⑧の
    * 小さいモデル向けの形は、大きいモデルの文面を変えないので版を据え置き、
-   * 製品の鍵の `strict:` の印で分ける（`contradictionVerifyPromptVersion`）
+   * 製品の鍵の `strict:` の印で分ける（`contradictionVerifyPromptVersion`）。
+   * 1.1→1.2 は口調の但し書きの一人称の1文（A21 の作者の裁定①、2026-10-19）
    */
-  it("版は 1.1（裁定⑧の小さいモデル向けの形では上げない）", () => {
-    expect(CONTRADICTION_VERIFY_VERSION).toBe("1.1");
+  it("版は 1.2（口調の但し書きで一人称を独立させた）", () => {
+    expect(CONTRADICTION_VERIFY_VERSION).toBe("1.2");
+  });
+
+  it("一人称は語尾ではない、と独立した1文で書く（26b が一人称を語尾の話に含めて却下した）", () => {
+    expect(VERIFY_SPEECH_NOTE).toContain(
+      "しかし、一人称は語尾ではありません。台詞の一人称が設定の一人称と違うなら、語尾が設定どおりでも食い違いです。"
+    );
+    expect(prompt).toContain("台詞が、話している人物の設定と違う一人称・丁寧さの段・話し方の種類で話していて、");
   });
 
   it("「そもそも食い違っていない」の但し書きに、口調の但し書きを置く", () => {

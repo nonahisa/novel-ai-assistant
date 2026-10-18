@@ -1312,10 +1312,12 @@ async function verifyContradictionResults(
             chapterLabel: labelOf.get(result.chunkId) ?? result.chapterLabel,
             chunk,
             issue,
+            // 小さいモデル（strict）へは直す前の引き方で渡す（A21 の作者の裁定①、製品と同じ）
             settingKnownAt: describeKnownAt(
               settings.knownAt,
               issue.settingSays,
-              knownAtScopeOf(issue, chunk)
+              knownAtScopeOf(issue, chunk),
+              { smallModel: prompts.suppression === "strict" }
             ),
             // 小さいモデル（strict）へは、話数の記録が無いときの書き方を変える（P-12b 1.1 の抑制版、裁定⑧）
             smallModel: prompts.suppression === "strict",

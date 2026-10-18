@@ -160,3 +160,37 @@ describe("確かめの答えの控えの鍵", () => {
     expect(after).not.toBe(before);
   });
 });
+
+/**
+ * **小さいモデルには、索引の直しを効かせない**（A21 の作者の裁定①、2026-10-19）。
+ *
+ * **再現**：e4b は「この設定が分かる話」が埋まると、話数を却下の材料に使う。
+ * 台Cのほくろの左右（設定「相沢春人は右目の下に小さなほくろがある。」に「第1話」）を
+ * 「設定資料（第1話）の情報が古く…」で、ギプスの左右（「第2話」）を「時間の経過による
+ * 負傷部位の変化」で落とした（3回のうち2〜3回。直す前は3回とも採用）。
+ * 小さいモデルへは、直す前と同じ引き方（変化の記録だけ・値の丸ごと一致）で引く。
+ */
+describe("小さいモデルには直す前の引き方で渡す", () => {
+  test("本体の値（初出の話で補ったもの）には話数を付けない", () => {
+    const index = buildKnownAtIndex([haruto]);
+    expect(describeKnownAt(index, "相沢春人は右目の下に小さなほくろがある。")).toBe("第1話");
+    expect(
+      describeKnownAt(index, "相沢春人は右目の下に小さなほくろがある。", undefined, {
+        smallModel: true,
+      })
+    ).toBe("");
+  });
+
+  test("変化の記録に無い一人称にも話数を付けない", () => {
+    const index = buildKnownAtIndex([elsie]);
+    expect(describeKnownAt(index, "一人称: ボク", undefined, { smallModel: true })).toBe("");
+  });
+
+  test("文の形のままでは引かない（変化の記録の値と丸ごと一致したときだけ）", () => {
+    const index = buildKnownAtIndex([elsie]);
+    expect(describeKnownAt(index, "役割: 近衛騎士", undefined, { smallModel: true })).toBe("");
+    expect(describeKnownAt(index, "近衛騎士", undefined, { smallModel: true })).toBe(
+      "第5話、第6話"
+    );
+  });
+});

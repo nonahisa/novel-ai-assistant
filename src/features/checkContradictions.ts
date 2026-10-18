@@ -1720,9 +1720,17 @@ export async function checkContradictions(
     );
   }
 
-  /** 検証へ渡す「この設定が分かる話」。鍵と送る文面の両方がここを通る */
+  /**
+   * 検証へ渡す「この設定が分かる話」。鍵と送る文面の両方がここを通る。
+   * 小さいモデルへは直す前の引き方で渡す（A21 の作者の裁定①、2026-10-19。
+   * 線引きは検出の段の抑制版と同じ `suppressUncertainContradictions`）
+   */
   function knownAtOf(issue: AcceptedContradiction, chunk: Chunk): string {
-    return settings.knownAtFor(issue.settingSays, knownAtScopeOf(issue, chunk));
+    return settings.knownAtFor(
+      issue.settingSays,
+      knownAtScopeOf(issue, chunk),
+      capability.suppressUncertainContradictions
+    );
   }
 
   /**
@@ -1862,7 +1870,7 @@ interface SettingsMaterial {
    */
   futureFactsFor(text: string, chapter: number | null): string;
   /** その設定が何話で分かるか。検証で使う（設計書6.10.5） */
-  knownAtFor(settingSays: string, scope: KnownAtScope): string;
+  knownAtFor(settingSays: string, scope: KnownAtScope, smallModel: boolean): string;
   synopsesBefore(chapter: number | null): string;
   /**
    * 話ごとのあらすじ（設計書6.10.9）。**作中の日付を読むのに要る。**
@@ -2004,7 +2012,8 @@ async function collectSettings(
       return lines.slice(0, 20).join("\n");
     },
     // 書き方は MCP と同じ関数（`core/contradictionAssembly.ts`）
-    knownAtFor: (settingSays, scope) => describeKnownAt(knownAt, settingSays, scope),
+    knownAtFor: (settingSays, scope, smallModel) =>
+      describeKnownAt(knownAt, settingSays, scope, { smallModel }),
     synopsesBefore(chapter) {
       if (chapter === null) return "";
       // **その話より前だけを渡す。** 後の話を渡すと、まだ書かれていない

@@ -584,6 +584,11 @@ export interface KnownAtEntry {
   owners: string[];
   /** 持ち主の登場話。名前が出ていなければ、その話に出ている人に絞る */
   appeared: number[];
+  /**
+   * 変化の記録（`changes`）から載せたか。小さいモデルへは、直す前と同じく
+   * これだけを引く（`lookupRecordedKnownAtValue`。A21 の作者の裁定①、2026-10-19）
+   */
+  fromChanges: boolean;
 }
 
 export interface KnownAtIndex {
@@ -626,15 +631,20 @@ export function buildKnownAtIndex(
       .filter((name) => name.length > 0);
     const appeared = sortedChapters(person.appearedChapters ?? []);
     const firstAppearance = appeared.length > 0 ? [appeared[0]] : [];
-    const add = (field: string, value: string | null | undefined, chapters: readonly number[]): void => {
+    const add = (
+      field: string,
+      value: string | null | undefined,
+      chapters: readonly number[],
+      fromChanges = false
+    ): void => {
       const trimmed = (value ?? "").trim();
       const at = sortedChapters(chapters);
       if (!trimmed || at.length === 0) return;
-      entries.push({ field, value: trimmed, chapters: at, owners, appeared });
+      entries.push({ field, value: trimmed, chapters: at, owners, appeared, fromChanges });
     };
     const recorded = new Set<string>();
     for (const change of person.changes) {
-      add(change.field, change.value, change.chapters);
+      add(change.field, change.value, change.chapters, true);
       recorded.add(entryKey(change.field, change.value));
     }
     // 本体の値は、変化の記録に同じ値が無いときだけ初出の話で補う。
@@ -680,6 +690,29 @@ export function lookupKnownAtValue(
 ): number[] {
   const wanted = value.trim();
   return index.entries.find((entry) => entry.value === wanted)?.chapters ?? [];
+}
+
+/**
+ * 直す前（〜0.109.x）の引き方：変化の記録の値と丸ごと一致したときだけ話数を返す。
+ *
+ * **小さいモデルへはこちらで渡す**（A21 の作者の裁定①、2026-10-19）。e4b は
+ * 話数が埋まると、それを却下の材料に使う——台Cのほくろの左右を「設定資料
+ * （第1話）の情報が古く…」、ギプスの左右を「時間の経過による負傷部位の変化」で
+ * 落とした（docs/measurements/2026-10-18-speech-note-with-index.md）。
+ *
+ * 直す前は「項目＋値」の鍵の Map で、同じ鍵が重なると後の記録の話数が勝ち、
+ * 値だけで引くと最初に載った鍵が当たった。その振る舞いをそのまま写す
+ * （小さいモデルの答えを、直す前と1文字も変えないため）。
+ */
+export function lookupRecordedKnownAtValue(index: KnownAtIndex, value: string): number[] {
+  const wanted = value.trim();
+  const recorded = index.entries.filter((entry) => entry.fromChanges);
+  const first = recorded.find((entry) => entry.value === wanted);
+  if (!first) return [];
+  const same = recorded.filter(
+    (entry) => entry.field === first.field && entry.value === first.value
+  );
+  return same[same.length - 1].chapters;
 }
 
 /** 指摘がどの話のものか（人物を絞るのに使う） */

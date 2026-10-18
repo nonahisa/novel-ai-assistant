@@ -24,6 +24,7 @@ import {
 } from "./pastSceneSelect";
 import { linesAround } from "./factContradiction";
 import {
+  lookupRecordedKnownAtValue,
   lookupSettingKnownAt,
   type AcceptedContradiction,
   type KnownAtIndex,
@@ -126,13 +127,23 @@ export function contradictionVerifyContext(chunk: Chunk, line: number): string {
  *
  * 指摘には「どの項目の話か」が付いてこないので、検出の段が書いた
  * `settingSays` の文のまま引く（`lookupSettingKnownAt`。2026-10-17）。
+ *
+ * **小さいモデル（`smallModel`）へは直す前の引き方で渡す**（A21 の作者の裁定①、
+ * 2026-10-19。`lookupRecordedKnownAtValue`）。線引きは確かめの段の小さいモデル向けの
+ * 形と同じもの（製品は `suppressUncertainContradictions`、MCP は `suppression: "strict"`。
+ * どちらもモデルの大きさを API のパラメーター数から読む `capabilityProfile` の判断）。
+ * 大きいモデル（26b）は話数が付くと写しの第10話「わたくし」を通すようになり、
+ * 小さいモデル（e4b）は話数を却下の材料に使って正しい指摘を落とした。
  */
 export function describeKnownAt(
   knownAt: KnownAtIndex,
   settingSays: string,
-  scope?: KnownAtScope
+  scope?: KnownAtScope,
+  options: { smallModel?: boolean } = {}
 ): string {
-  const chapters = lookupSettingKnownAt(knownAt, settingSays, scope);
+  const chapters = options.smallModel
+    ? lookupRecordedKnownAtValue(knownAt, settingSays)
+    : lookupSettingKnownAt(knownAt, settingSays, scope);
   if (chapters.length === 0) return "";
   return chapters.map((at) => `第${at}話`).join("、");
 }
