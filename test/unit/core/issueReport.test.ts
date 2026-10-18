@@ -299,7 +299,8 @@ describe("2段の形", () => {
     expect(big.summary).toContain("ほか");
   });
 
-  test("ファイル全体は1MB以内（長いログは古い行から省く）", () => {
+  // 3,000行を組むので、GitHub の検査機では5秒を越えることがある（2026-10-18、CI で時間切れ）
+  test("ファイル全体は1MB以内（長いログは古い行から省く）", { timeout: 30_000 }, () => {
     const line = `[2026-10-17 13:00:00] ${"abcdefghij".repeat(90)}`;
     const huge = Array.from({ length: 3000 }, () => line).join("\n");
     const big = buildIssueReport(

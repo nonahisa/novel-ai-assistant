@@ -158,7 +158,10 @@ const template = gitTemplate("novelai-diverge-", (base) => {
 
 /** 雛形を写して、この端末とGitHub役の場所を決める */
 function setUp(): void {
-  const base = template.copy();
+  // **一時フォルダーの道を長い形にそろえる。** GitHub の検査機（Windows）では os.tmpdir() が
+  // `C:\Users\RUNNER~1\…` の短い形（8.3）で返り、git の `--show-toplevel` は長い形で返す。
+  // 食い違うと「同じフォルダー」と判定できず、作品名の代わりにフォルダー名が出る（2026-10-18、CI で10-06から落ちていた）
+  const base = fs.realpathSync.native(template.copy());
   remote = nodePath.join(base, "remote.git");
   root = nodePath.join(base, "work");
   otherClone = nodePath.join(base, "other");
