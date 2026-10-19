@@ -292,10 +292,10 @@ describe("資料の表示とAIへの材料", () => {
     ];
 
     expect(describeDwellings(people[0], people)).toEqual([
-      { label: "心が宿っている体", value: "灯（第4話〜）。第17話から同居" },
+      { label: "心の入っている体", value: "灯（第4話〜）。第17話から同居" },
     ]);
     expect(describeDwellings(people[1], people)).toEqual([
-      { label: "この体に宿る心", value: "三浦太一（第4話〜）。第17話から同居" },
+      { label: "体に入っている心", value: "三浦太一（第4話〜）。第17話から同居" },
     ]);
   });
 
@@ -309,16 +309,16 @@ describe("資料の表示とAIへの材料", () => {
     const people = [dweller(), body()];
     const text = describeCharacter(people[1], [], { characters: people });
 
-    expect(text).toContain("この体に宿る心: 三浦太一（第4話〜）");
+    expect(text).toContain("体に入っている心: 三浦太一（第4話〜）");
     expect(text).toMatch(/変化（role）: [^\n]*港町の少女[^\n]*旧家の孫娘/u);
     expect(text).not.toMatch(/変化（role）: [^\n]*前世/u);
-    expect(text).toMatch(/宿った心（三浦太一）の記述（role）: [^\n]*前世は男子小学生/u);
+    expect(text).toMatch(/入っている心（三浦太一）の記述（role）: [^\n]*前世は男子小学生/u);
   });
 
   test("人物の一覧を渡さなければ、今までどおり（宿りの行も仕分けも無い）", () => {
     const text = describeCharacter(body(), []);
 
-    expect(text).not.toContain("この体に宿る心");
+    expect(text).not.toContain("体に入っている心");
     expect(text).not.toContain("宿った心");
     expect(text).toMatch(/変化（role）: [^\n]*前世/u);
   });

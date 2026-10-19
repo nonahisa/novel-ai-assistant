@@ -1079,14 +1079,14 @@ export class SettingsPanel {
           {
             ...field(
               "dwellings",
-              "宿り（この人物の心が別の人物の体にいるとき。1行に1つ「体の持ち主=第4話〜第16話：補足」）",
+              "心と体が別の人物（憑依・転生・入れ替わりで、この人物の心が別の人物の体に入っているとき。1行に1つ「体の持ち主=第4話〜第16話：補足」）",
               formatDwellingsForEdit(character.dwellings),
               true
             ),
             hint:
               `例：「${EXAMPLE_OTHER.givenName}=第4話〜：第17話から${EXAMPLE_OTHER.givenName}の心も戻り、同居」。範囲と補足は省けます。` +
               "書くと、2人は「重複をまとめる」の候補に出なくなり、体の側の資料には" +
-              "宿った心の過去として書かれた記述（「前世」「生前」を含む変化）が、本人の変化と分けて並びます。",
+              "入っている心の過去として書かれた記述（「前世」「生前」を含む変化）が、本人の変化と分けて並びます。",
           },
           // 作者が足した項目は、既定の項目のあと・メモの前に並べる
           ...customFieldControls(character.customFields, this.customFields),
@@ -3746,7 +3746,7 @@ function referenceLines(
     */
     ...(dwelling
       ? [...new Set(dwelling.moved.map((entry) => entry.field))].map((field) => ({
-          label: `宿った心（${dwelling.who}）の記述（${field}）`,
+          label: `入っている心（${dwelling.who}）の記述（${field}）`,
           value: describeChangeValues(changesOfField(dwelling.moved, field)),
           action: {
             label: "誤りを落とす",

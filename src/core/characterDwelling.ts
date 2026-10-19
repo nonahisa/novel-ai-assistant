@@ -159,8 +159,8 @@ export interface DwellingLine {
   value: string;
 }
 
-export const DWELLER_LABEL = "心が宿っている体";
-export const BODY_LABEL = "この体に宿る心";
+export const DWELLER_LABEL = "心の入っている体";
+export const BODY_LABEL = "体に入っている心";
 
 export function describeDwellings(
   character: Character,
@@ -301,7 +301,7 @@ export function parseDwellingsEdit(text: string, ownName: string): CharacterDwel
     const rangeText = at < 0 ? "" : head.slice(at + 1).trim();
     const fail = (why: string): never => {
       throw new DwellingEditError(
-        `宿りの${index + 1}行目「${raw}」が読めません。${why}` +
+        `「心と体が別の人物」の${index + 1}行目「${raw}」が読めません。${why}` +
           "1行に1つ「体の持ち主=第4話〜第16話：補足」の形で書いてください（範囲と補足は省けます）。"
       );
     };

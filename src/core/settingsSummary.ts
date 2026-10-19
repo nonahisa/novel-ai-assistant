@@ -162,7 +162,7 @@ export function describeCharacter(
     for (const field of [...new Set(split.dwelling.map((entry) => entry.field))]) {
       push(
         lines,
-        `宿った心（${who}）の記述（${field}）`,
+        `入っている心（${who}）の記述（${field}）`,
         describeChangeValues(changesOfField(split.dwelling, field))
       );
     }
