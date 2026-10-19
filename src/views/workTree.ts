@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
-import { toUri } from "../core/paths";
+import { toUri, join as joinPath } from "../core/paths";
+import {
+  foldersToProbeForGit,
+  groupWorksByLibrary,
+  type LibraryGroup,
+} from "../core/workLibraries";
 import { EpisodeFile, WorkEntry, WorkStats } from "../models/types";
 import { emptyCounts, formatCount, toManuscriptPages } from "../core/charCount";
 import {
@@ -90,12 +95,28 @@ export interface WorkTreeSnapshotOptions {
 }
 
 export type TreeNode =
+  | LibraryNode
   | WorkNode
   | ChapterNode
   | EpisodeNode
   | MemoFolderNode
   | MemoFileNode
   | MessageNode;
+
+/**
+ * 書庫の段（設計書6.97.7）。書庫が2つ以上あるときだけ、作品の行の上に入る。
+ *
+ * 作品の行・話の行・右クリックには関わらない（作品の行はそのまま子になるだけ）。
+ * `type` は新しい値にして、作品の行を探す処理（`type === "work"`）に当たらないようにする。
+ */
+export class LibraryNode {
+  readonly type = "library" as const;
+  constructor(
+    public readonly library: LibraryGroup,
+    /** この書庫に入る作品の行（画面に出ているのと同じオブジェクトを使う） */
+    public readonly works: WorkNode[]
+  ) {}
+}
 
 /**
  * 作品の行。
@@ -213,6 +234,16 @@ export class MemoFileNode {
 export class MessageNode {
   readonly type = "message" as const;
   constructor(public readonly text: string) {}
+}
+
+/** 書庫の段の中も含めて、作品の行だけを取り出す */
+function workRowsOf(nodes: readonly TreeNode[]): WorkNode[] {
+  const rows: WorkNode[] = [];
+  for (const node of nodes) {
+    if (node.type === "work") rows.push(node);
+    else if (node.type === "library") rows.push(...node.works);
+  }
+  return rows;
 }
 
 export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
@@ -516,19 +547,70 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     // 取り直した行が返るまで、古い行を撃っても届かない（`rootRows` の説明）
     this.rootRows.clear();
     this.rootOrder = [];
+    // 作者が git init した・.git を消したあとの描き直しで、見分けを取り直す
+    this.gitProbes.clear();
     this._onDidChangeTreeData.fire();
   }
 
   /** 画面に出した作品の行を控える（1作品だけ撃つ相手。`rootRows` の説明） */
   private rememberRoot(nodes: TreeNode[]): TreeNode[] {
     this.rootOrder = nodes;
+    // 書庫の段の中の作品の行も、1作品だけ撃つ相手（`rootRows`）に入れる
     this.rootRows = new Map(
-      nodes
-        .filter((node): node is WorkNode => node.type === "work")
-        .map((node) => [node.work.id, node])
+      workRowsOf(nodes).map((node) => [node.work.id, node])
     );
     return nodes;
   }
+
+  /**
+   * 書庫の段を挟んで並べる（設計書6.97.7）。**書庫が2つに満たなければ、
+   * 作品の行をそのまま返す**（いまと同じ並び）。
+   *
+   * `.git` の有無は `stat` 1回ずつ（git は呼ばない）。控えの行（6.107）も走査の行も
+   * 同じ登録簿から決めるので、控えから出した回と同じ分け方になる。
+   */
+  private async arrange(rows: WorkNode[]): Promise<TreeNode[]> {
+    if (rows.length < 2) return rows;
+    const works = rows.map((row) => row.work);
+    const gitFolders = await this.foldersWithGit(works);
+    const layout = groupWorksByLibrary(works, gitFolders);
+    if (layout.libraries.length === 0) return rows;
+    const byId = new Map(rows.map((row) => [row.work.id, row]));
+    const pick = (list: readonly WorkEntry[]): WorkNode[] =>
+      list
+        .map((work) => byId.get(work.id))
+        .filter((row): row is WorkNode => row !== undefined);
+    return [
+      ...layout.libraries.map(
+        (library) => new LibraryNode(library, pick(library.works))
+      ),
+      ...pick(layout.standalone),
+    ];
+  }
+
+  /** `.git` が在ったフォルダー（比較用の鍵）。調べられなかった所は「無い」に倒す */
+  private async foldersWithGit(works: readonly WorkEntry[]): Promise<Set<string>> {
+    const found = new Set<string>();
+    await Promise.all(
+      foldersToProbeForGit(works).map(async ({ key, folderPath }) => {
+        let has = this.gitProbes.get(key);
+        if (has === undefined) {
+          try {
+            await vscode.workspace.fs.stat(toUri(joinPath(folderPath, ".git")));
+            has = true;
+          } catch {
+            has = false;
+          }
+          this.gitProbes.set(key, has);
+        }
+        if (has) found.add(key);
+      })
+    );
+    return found;
+  }
+
+  /** `.git` の有無の控え（比較用の鍵 -> 有無）。丸ごと描き直すたびに捨てる */
+  private gitProbes = new Map<string, boolean>();
 
   private track(work: Promise<void>): void {
     this.pendingRows.add(work);
@@ -660,6 +742,27 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     // 出続けていた（2026-08-21、作者の指摘）
     const mode = currentCountMode();
     const modeLabel = countModeLabel(mode);
+
+    if (node.type === "library") {
+      const item = new vscode.TreeItem(
+        node.library.name,
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      // 開閉はVS CodeがIDで覚える。作品（`work:`）の行と重ならない頭を付ける
+      item.id = `library:${node.library.folderPath}`;
+      item.contextValue = "library";
+      item.iconPath = new vscode.ThemeIcon("library");
+      item.tooltip = new vscode.MarkdownString(
+        [
+          `**${node.library.name}**`,
+          "",
+          `- 作品: ${node.works.length}作品`,
+          "",
+          "`" + node.library.folderPath + "`",
+        ].join("\n")
+      );
+      return item;
+    }
 
     if (node.type === "work") {
       const { work, stats } = node;
@@ -1038,7 +1141,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         走査が終わるまで14〜105秒、1行も出なかった。走査は裏で回し、
         終わったら描き直しを求めて差し替える。
       */
-      const quick = this.renderFromSnapshot(works);
+      const quick = await this.renderFromSnapshot(works);
       if (quick) return this.rememberRoot(quick);
       /*
         **走査のあいだ、案内を「読み込んでいます」に差し替える**（設計書6.1.2）。
@@ -1056,13 +1159,15 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       try {
         const nodes = await this.scanAll(works);
         this.finishScan(nodes);
-        return this.rememberRoot(nodes);
+        return this.rememberRoot(await this.arrange(nodes));
       } finally {
         // **途中で失敗しても印を落とす。** 落とし忘れると、
         // 作品が0件になったあとも「読み込んでいます」が出たままになる
         if (scanning) this.noteLoading(false, works.length);
       }
     }
+
+    if (node.type === "library") return node.works;
 
     if (node.type === "work") {
       // 走査に失敗していれば、開いたときに理由を出す。
@@ -1204,7 +1309,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    * **並びと顔ぶれは登録簿に従う。** 控えにだけある作品（解除した作品）は
    * 出さず、控えに無い作品は「読み込み中」の行で出す。
    */
-  private renderFromSnapshot(works: readonly WorkEntry[]): TreeNode[] | undefined {
+  private async renderFromSnapshot(
+    works: readonly WorkEntry[]
+  ): Promise<TreeNode[] | undefined> {
     const store = this.snapshotOptions.snapshot;
     if (!store || this.snapshotTried || this.firstRenderNotified) return undefined;
     this.snapshotTried = true;
@@ -1212,7 +1319,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     const snapshot = readWorkListSnapshot(store);
     let shown = 0;
-    const nodes = works.map((work) => {
+    const rows = works.map((work) => {
       const entry = snapshotEntryFor(work, snapshot);
       if (!entry) {
         return new WorkNode(
@@ -1243,6 +1350,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     // それなら走査を待つ従来の出し方（「N作品を読み込み中」の案内）のほうが分かる
     if (shown === 0) return undefined;
 
+    // 書庫の段を挟む（走査の行と同じ分け方。`stat` だけで、作品は読まない）
+    const nodes = await this.arrange(rows);
     try {
       this.snapshotOptions.onSnapshotRender?.(shown, works.length);
     } catch {
@@ -1268,7 +1377,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       this.finishScan(nodes);
       // 走査のあいだに作品が増減・解除されたら、この行は使わない
       // （`refresh()` が描き直しを求めており、次の描画で走査し直す）
-      if (generation === this.rootGeneration) this.warmedRoot = nodes;
+      const arranged = await this.arrange(nodes);
+      if (generation === this.rootGeneration) this.warmedRoot = arranged;
     } finally {
       this.noteLoading(false, works.length);
       /*
@@ -1294,8 +1404,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     const store = this.snapshotOptions.snapshot;
     if (!store) return;
     const entries: WorkListSnapshotEntry[] = [];
-    for (const node of nodes) {
-      if (node.type !== "work" || node.loadError || node.snapshot) continue;
+    for (const node of workRowsOf(nodes)) {
+      if (node.loadError || node.snapshot) continue;
       entries.push({
         id: node.work.id,
         folderPath: node.work.folderPath,
@@ -1478,8 +1588,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    * 詰まる。**走査そのもの（`core/scanner.ts`）は触っていない**ので、
    * 増やすかどうかは次の計測を見てから決める。
    */
-  private async scanAll(works: readonly WorkEntry[]): Promise<TreeNode[]> {
-    const nodes: TreeNode[] = new Array<TreeNode>(works.length);
+  private async scanAll(works: readonly WorkEntry[]): Promise<WorkNode[]> {
+    const nodes: WorkNode[] = new Array<WorkNode>(works.length);
     let next = 0;
     const worker = async (): Promise<void> => {
       for (;;) {

@@ -59,6 +59,7 @@ export function treeMenuCommandsFrom(
 
 /** 行の種類の言い方（`views/workTree.ts` の `TreeNode` の `type`） */
 const ROW_KINDS: Readonly<Record<string, string>> = {
+  library: "書庫の段",
   work: "作品の行",
   chapter: "章の行",
   episode: "話の行",
