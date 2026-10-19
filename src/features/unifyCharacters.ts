@@ -2,12 +2,18 @@ import { revealFolder } from "../views/openDocument";
 import * as vscode from "vscode";
 import { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
-import { CharacterStore, CharacterStoreError } from "../core/characterStore";
+import { CharacterStore } from "../core/characterStore";
 import {
   describeMergeCandidate,
   findMergeCandidates,
 } from "../core/characterMerge";
 import { unifyCharacters } from "../core/characterUnify";
+import {
+  applyCharacterUnify,
+  CharacterUnifyError,
+  describeDecisionBlockedByLoadErrors,
+  describeUnifyFailure,
+} from "../core/characterPairDecision";
 import { logFailure, useLogFile } from "../core/logger";
 import { cancelItem } from "../views/dialogs";
 import { confirmRun, whenNoticePicked } from "../views/notify";
@@ -26,12 +32,10 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   const store = new CharacterStore(work);
   const loaded = await store.loadAll();
 
-  if (loaded.errors.length > 0) {
+  const blocked = describeDecisionBlockedByLoadErrors(loaded.errors);
+  if (blocked) {
     // 壊れたJSONがあるまま統合すると、読めていない人物を見落とす
-    await vscode.window.showErrorMessage(
-      "読み込めない設定ファイルがあるため、まとめる操作を中止しました。" +
-        `（${loaded.errors.map((error) => error.file).join("、")}）`
-    );
+    await vscode.window.showErrorMessage(blocked);
     return;
   }
 
@@ -115,45 +119,20 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   );
   if (!confirmed) return;
 
-  // このプロジェクトは既存ファイルの上書きを行わない（atomicWrite の replaceGuarded は
-  // 必ず失敗する）。そのため「残す側を退避 → 新しい内容を新規作成 → 取り下げ側を退避」
-  // の順で進める。
-  //
-  // 順序はわざとこうしている。新規作成に失敗した時点で止まれば、
-  // 取り下げ側のファイルは手つかずのまま残る。逆順にすると、
-  // 作成に失敗したときに人物が2件とも退避先へ行ってしまう。
-  let keepRecoveryPath: string;
-  try {
-    keepRecoveryPath = await store.retire(keepPick.keep.id);
-  } catch (error) {
-    await reportFailure("残す側のファイルを退避できませんでした", error);
-    return;
-  }
-
-  try {
-    await store.save(unified);
-  } catch (error) {
-    logFailure("まとめた人物の保存に失敗", { 詳細: messageOf(error) });
-    await vscode.window.showErrorMessage(
-      `まとめた内容を保存できませんでした。${messageOf(error)}\n` +
-        `「${keepPick.keep.name}」の元ファイルは次の場所にあります。` +
-        `手動で戻してください:\n${keepRecoveryPath}`,
-      { modal: true }
-    );
-    return;
-  }
-
+  // 書く順番（残す側を退避 → 作る → 取り下げ側を退避）と失敗の文は core の1か所
+  // （`applyCharacterUnify`）。設定資料パネルの候補の欄も同じものを通る
   let absorbRecoveryPath: string;
   try {
-    absorbRecoveryPath = await store.retire(retiredId);
+    ({ absorbRecoveryPath } = await applyCharacterUnify(
+      store,
+      keepPick.keep,
+      keepPick.absorb,
+      loaded.characters,
+      // 確認の窓に出した別名と、書く別名を同じにする
+      { unified, retiredId }
+    ));
   } catch (error) {
-    // まとめた内容は保存済み。取り下げ側が残ると一覧に重複が出るが、
-    // データは失われていない。何が起きたかだけ正確に伝える
-    await reportFailure(
-      `まとめた内容は保存しましたが、「${keepPick.absorb.name}」を取り下げられませんでした。` +
-        "一覧に重複が残ります",
-      error
-    );
+    await reportUnifyFailure(error, keepPick.keep.name, keepPick.absorb.name);
     return;
   }
 
@@ -173,17 +152,32 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   );
 }
 
-async function reportFailure(context: string, error: unknown): Promise<void> {
-  logFailure("人物のまとめ処理の失敗", {
-    場面: context,
-    詳細: messageOf(error),
-  });
-  await vscode.window.showErrorMessage(`${context}。${messageOf(error)}`);
-}
-
-function messageOf(error: unknown): string {
-  if (error instanceof CharacterStoreError) return error.message;
-  return error instanceof Error ? error.message : String(error);
+/**
+ * まとめるのに失敗したことを伝える。文は core（`describeUnifyFailure`）が組み、
+ * 設定資料パネルと同じ言い方になる。記録はこれまでどおり作品のログへ残す
+ */
+export async function reportUnifyFailure(
+  error: unknown,
+  keepName: string,
+  absorbName: string
+): Promise<string> {
+  if (!(error instanceof CharacterUnifyError)) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logFailure("人物のまとめ処理の失敗", { 詳細: detail });
+    await vscode.window.showErrorMessage(`まとめられませんでした。${detail}`);
+    return `まとめられませんでした。${detail}`;
+  }
+  const { message, modal } = describeUnifyFailure(error, keepName, absorbName);
+  logFailure(
+    error.stage === "save_unified" ? "まとめた人物の保存に失敗" : "人物のまとめ処理の失敗",
+    { 段: error.stage, 詳細: error.detail }
+  );
+  if (modal) {
+    await vscode.window.showErrorMessage(message, { modal: true });
+  } else {
+    await vscode.window.showErrorMessage(message);
+  }
+  return message;
 }
 
 /** どちらを残すか決める材料を出す */

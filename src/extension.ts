@@ -98,6 +98,7 @@ import {
   jumpSceneMemo,
   noteSceneMemoCaret,
   openSceneMemoPanel,
+  refreshSceneMemoMergeNotice,
   refreshSceneMemos,
   registerSceneMemoPanelRestore,
   type SceneMemoDeps,
@@ -2317,6 +2318,8 @@ export async function activate(
     // 開いていなければ何もしない。承認待ちの反映や外での書き換えは、
     // 相関図の側の見張りが拾う（`relationGraphPanel.ts`）
     void refreshRelationGraph(work.id);
+    // 校正・メモパネルの「人物の重複の候補が N組」も数え直す（設計書6.40.4）。本文は読み直さない
+    void refreshSceneMemoMergeNotice(work.id);
   });
   context.subscriptions.push({
     dispose: () => setSettingsChangeObserver(undefined),
@@ -2525,6 +2528,15 @@ export async function activate(
     // シーンメモで見送ったものを、提案の一覧からも下げる（6.96.5）
     noteFindingDismissed: (work, findingId) =>
       proposalPanel.noteFindingDismissed(work, findingId),
+    /*
+      人物の重複の候補の知らせの［設定資料パネルで見る］（作者の裁定 2026-10-19 夜。
+      設計書6.40.4・6.5.4）。設定資料パネルの登場人物タブの候補の欄で開く。
+      まとめる・別人にする操作は設定資料パネルにだけ置く（校正・メモパネルに写さない）
+    */
+    openMergeCandidates: async (work) => {
+      const panel = await openSettingsPanel(context, work, aiRegistry);
+      await panel.showMergeCandidates();
+    },
   };
 
   /*
@@ -5051,6 +5063,8 @@ export async function activate(
         // 消えたはずの人物が一覧に残り続ける
         await findOpenSettingsPanel(work.id)?.refreshFromDisk();
         refreshActionBadges();
+        // 校正・メモパネルの「人物の重複の候補が N組」も数え直す（設計書6.40.4）
+        await refreshSceneMemoMergeNotice(work.id);
         return CHECK_COMPLETED;
       }
     )

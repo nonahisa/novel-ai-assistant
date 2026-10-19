@@ -48,6 +48,8 @@ import {
 } from "../core/sceneMemoRows";
 import { locateFindings } from "../core/findingLocation";
 import { findingAppliesDirectly, findingFileKey } from "../core/findingSource";
+import { CharacterStore } from "../core/characterStore";
+import { findMergeCandidates } from "../core/characterMerge";
 import type { FindingFixOutcome } from "./proposalPanel";
 import type { FindingAdviceOutcome } from "./findingAdvice";
 import type { FindingAdviceExample } from "../core/findingAdviceValidation";
@@ -190,6 +192,16 @@ export interface SceneMemoDeps {
    * 見送りそのものは効く。
    */
   noteFindingDismissed?: (work: WorkEntry, findingId: string) => void;
+  /**
+   * 人物の重複の候補を、設定資料パネルの登場人物タブの候補の欄で開く口
+   * （画面のボタンは［設定資料パネルで見る］。作者の裁定 2026-10-19 夜。設計書6.40.4）。
+   *
+   * **この画面には候補の一覧を置かない**——まとめる・別人にする操作は設定資料パネルの
+   * 1か所にだけ置く。ここは件数を知らせて連れて行くだけ。
+   * 設定資料パネルを直に読み込まないのは、パネルどうしが読み合う輪を作らないため
+   * （繋ぐのは `extension.ts`）。**渡されなければ知らせも出さない**（押せない口を作らない）
+   */
+  openMergeCandidates?: (work: WorkEntry) => Promise<void>;
 }
 
 export async function openSceneMemoPanel(
@@ -454,6 +466,30 @@ export async function refreshSceneMemoFindings(workId: string): Promise<void> {
 }
 
 /**
+ * 人物の重複の候補の知らせだけを数え直す（設計書6.40.4）。
+ *
+ * 設定資料パネルで候補を片づけるたびに呼ばれる。**本文は読み直さない**——
+ * 人物を1組まとめただけで70万字の合本を読み直すと、片づける手が止まる。
+ */
+export async function refreshSceneMemoMergeNotice(workId: string): Promise<void> {
+  const panel = openPanels.get(workId);
+  if (panel) await panel.recountMergeCandidates();
+}
+
+/**
+ * 人物の重複の候補の数（詳細メニューの印と同じ数え方。`extension.ts` の mergeCandidates）。
+ * **読めなければ0**——知らせが出ないだけで実害はない
+ */
+async function countMergeCandidates(work: WorkEntry): Promise<number> {
+  try {
+    const loaded = await new CharacterStore(work).loadAll();
+    return findMergeCandidates(loaded.characters).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * 次の／前のメモへ飛ぶ（コマンド。設計書6.40.4）。
  *
  * **パネルが開いていなくても飛べる。** 作者がキー割当だけで使う道である。
@@ -679,6 +715,8 @@ type PanelMessage =
   | { type: "consultInChat"; findingId: string }
   /** 上の帯の［提案パネル］ */
   | { type: "openProposals" }
+  /** 人物の重複の候補の知らせの［設定資料パネルで見る］（設計書6.40.4） */
+  | { type: "openMergeCandidates" }
   /** 帯に出ている直近の1手（［直す］か［済み］）を戻す */
   | { type: "undoFix" }
   /** AIの指摘を退ける。**追記で残す**だけで、指摘の行は書き換えない */
@@ -764,6 +802,9 @@ class SceneMemoPanel {
    * VS Code の「元に戻す」（開いている話のとき）で戻す。
    */
   private lastUndoable: UndoableStep | null = null;
+
+  /** 人物の重複の候補の数（上の知らせ。0なら出さない。設計書6.40.4） */
+  private mergeCandidateCount = 0;
 
   /** 行の下に出している助言（指摘の id → 中身） */
   private readonly advice = new Map<string, AdviceView>();
@@ -854,6 +895,15 @@ class SceneMemoPanel {
     }
   }
 
+  /** 人物の重複の候補だけを数え直して描き直す（`refreshSceneMemoMergeNotice`） */
+  async recountMergeCandidates(): Promise<void> {
+    if (!this.deps.openMergeCandidates) return;
+    const count = await countMergeCandidates(this.work);
+    if (count === this.mergeCandidateCount) return;
+    this.mergeCandidateCount = count;
+    this.post();
+  }
+
   /** その本文が、この作品の話か（保存の知らせを振り分ける） */
   covers(filePath: string): boolean {
     return belongsTo(this.files, filePath);
@@ -891,6 +941,10 @@ class SceneMemoPanel {
       this.order = collected.order;
       this.notices = collected.notices;
       await this.loadLabels(collected.collectedTexts);
+      // 開く口が無ければ数えない（知らせを出さないので、読むだけ無駄になる）
+      if (this.deps.openMergeCandidates) {
+        this.mergeCandidateCount = await countMergeCandidates(this.work);
+      }
       // **提案パネルの［戻す］で戻されたら、帯を下げる**（指摘がまた並んでいる）。
       // 残すと、もう戻っているものに［戻す］が出たままになる。
       // ［済み］の帯は、ここでは下げない——開いている話の［済み］は未保存で、
@@ -1013,6 +1067,9 @@ class SceneMemoPanel {
           return;
         case "openProposals":
           await this.deps.openProposals?.();
+          return;
+        case "openMergeCandidates":
+          await this.deps.openMergeCandidates?.(this.work);
           return;
         case "undoFix":
           // 名前は［直す］の帯のころのまま（画面の部品を同じにしたため）。
@@ -1551,6 +1608,8 @@ class SceneMemoPanel {
         activeKey: this.activeKey,
         totalCount: this.memos.length,
         notice: this.notices.join(" "),
+        // 人物の重複の候補の知らせ（設計書6.40.4）。一覧はここに置かず、設定資料パネルへ連れて行く
+        mergeNotice: this.mergeNotice(),
         // 戻せる直近の1手（［直す］か［済み］）。戻す口が無ければ帯も出さない
         fixed: this.undoBanner(),
         emptyMessage:
@@ -1566,6 +1625,12 @@ class SceneMemoPanel {
         } satisfies SceneMemoRestoreState,
       },
     });
+  }
+
+  /** 人物の重複の候補の知らせの文。0組か、開く口が無ければ null（出さない） */
+  private mergeNotice(): string | null {
+    if (!this.deps.openMergeCandidates || this.mergeCandidateCount === 0) return null;
+    return `人物の重複の候補が ${this.mergeCandidateCount}組あります`;
   }
 
   /**
