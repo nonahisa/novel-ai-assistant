@@ -26,6 +26,8 @@
  * 何を書くかは拡張機能が控えた案で決める（画面から届いた文を書く道を作らない）。
  * 入力欄は複数行の欄にしない（`textarea` は「本文を書き換える欄」と紛れる）。
  */
+import { IME_ENTER_GUARD_SOURCE } from "./imeEnterGuardScript";
+
 export function buildPlotModePanelHtml(
   nonce: string,
   cspSource: string
@@ -523,10 +525,16 @@ function clearSentAdvice() {
 
 el.adviceSend.addEventListener("click", sendAdvice);
 
+${IME_ENTER_GUARD_SOURCE}
+/*
+  **日本語の変換を確定する Enter では送らない**（変換中の Enter は確定の操作）。
+  isComposing と 229 だけでは、Windows で compositionend のあとに届く確定の
+  Enter をすり抜けた（作者の実機、2026-10-19）。見分け方は imeEnterGuardScript.ts
+*/
+const isAdviceImeEnter = watchImeEnter(el.adviceInput);
 el.adviceInput.addEventListener("keydown", function (event) {
   if (event.key !== "Enter") return;
-  // **日本語の変換を確定する Enter では送らない**（変換中の Enter は確定の操作）
-  if (event.isComposing || event.keyCode === 229) return;
+  if (isAdviceImeEnter(event)) return;
   event.preventDefault();
   sendAdvice();
 });

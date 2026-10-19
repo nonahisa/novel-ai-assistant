@@ -52,6 +52,7 @@ import { SCRIPT_ROLE_MAX } from "../core/scriptLines";
 import type { WorkKindKey } from "../core/workKind";
 import { findAction } from "./actionList";
 import { OBSERVE_VISIBLE_WIDTH_SOURCE } from "./visibleWidthScript";
+import { IME_ENTER_GUARD_SOURCE } from "./imeEnterGuardScript";
 
 /**
  * 測る書体の名前。
@@ -8688,13 +8689,18 @@ ${RESUME_WRITING_LABEL ? `
     document.body.classList.remove("findmark");
   }
 
+  /*
+    **変換中の Enter は、語を確定するためのもの。** ここで探すと、
+    確定した瞬間に次へ飛ぶ。isComposing と 229 だけでは、compositionend の
+    あとに届く確定の Enter をすり抜ける（見分け方は imeEnterGuardScript.ts）
+  */
+${IME_ENTER_GUARD_SOURCE}
+  const isFindImeEnter = watchImeEnter(findInput);
   findInput.addEventListener("keydown", function (event) {
-    /*
-      **変換中の Enter は、語を確定するためのもの。** ここで探すと、
-      確定した瞬間に次へ飛ぶ（keyCode 229 は変換中の打鍵を表す古い印）
-    */
+    // 変換中のキーは Esc も含めて日本語入力に任せる（これまでどおり）
     if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter") {
+      if (isFindImeEnter(event)) return;
       event.preventDefault();
       findGo(event.shiftKey ? -1 : 1);
       return;
