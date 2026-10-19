@@ -92,8 +92,10 @@ import {
   appendVerifyNote,
   buildContradictionPastSceneIndex,
   buildContradictionVerifyUserPrompt,
+  contradictionVerifyCacheSource,
   contradictionVerifyPromptVersion,
   describeKnownAt,
+  knownAtScopeOf,
   selectContradictionPastScenes,
 } from "../core/contradictionAssembly";
 import {
@@ -134,6 +136,7 @@ import { buildKnownAtIndex,
   sortContradictions,
   validateContradictions,
   type AcceptedContradiction,
+  type KnownAtScope,
 } from "../core/contradictionValidation";
 import {
   startRunEta,
@@ -1705,8 +1708,28 @@ export async function checkContradictions(
    * 両方がここを通る**（片方だけ変わると、数えた件数と送る件数がずれる）
    */
   function verifyCacheKey(issue: AcceptedContradiction, chunk: Chunk): string {
+    // 「この設定が分かる話」も鍵に入れる（2026-10-17）。空なら以前の鍵のまま
     return hashText(
-      `${chunk.hash}:${issue.line}:${issue.excerpt}:${issue.settingSays}`
+      contradictionVerifyCacheSource(
+        chunk.hash,
+        issue.line,
+        issue.excerpt,
+        issue.settingSays,
+        knownAtOf(issue, chunk)
+      )
+    );
+  }
+
+  /**
+   * 検証へ渡す「この設定が分かる話」。鍵と送る文面の両方がここを通る。
+   * 小さいモデルへは直す前の引き方で渡す（A21 の作者の裁定①、2026-10-19。
+   * 線引きは検出の段の抑制版と同じ `suppressUncertainContradictions`）
+   */
+  function knownAtOf(issue: AcceptedContradiction, chunk: Chunk): string {
+    return settings.knownAtFor(
+      issue.settingSays,
+      knownAtScopeOf(issue, chunk),
+      capability.suppressUncertainContradictions
     );
   }
 
@@ -1767,9 +1790,9 @@ export async function checkContradictions(
           ),
           chunk,
           issue,
-          // 指摘には「どの項目の話か」が付いてこないので、値だけで引く。
+          // 指摘には「どの項目の話か」が付いてこないので、検出の段が書いた文のまま引く。
           // 以前は "role" 決め打ちで、外見や状態の指摘では当たらなかった
-          settingKnownAt: settings.knownAtFor(issue.settingSays),
+          settingKnownAt: knownAtOf(issue, chunk),
           // 小さいモデルへは、話数の記録が無いときの書き方を変える（P-12b 1.1 の抑制版、裁定⑧）
           smallModel: capability.suppressUncertainContradictions,
         }),
@@ -1847,7 +1870,7 @@ interface SettingsMaterial {
    */
   futureFactsFor(text: string, chapter: number | null): string;
   /** その設定が何話で分かるか。検証で使う（設計書6.10.5） */
-  knownAtFor(value: string): string;
+  knownAtFor(settingSays: string, scope: KnownAtScope, smallModel: boolean): string;
   synopsesBefore(chapter: number | null): string;
   /**
    * 話ごとのあらすじ（設計書6.10.9）。**作中の日付を読むのに要る。**
@@ -1989,7 +2012,8 @@ async function collectSettings(
       return lines.slice(0, 20).join("\n");
     },
     // 書き方は MCP と同じ関数（`core/contradictionAssembly.ts`）
-    knownAtFor: (value) => describeKnownAt(knownAt, value),
+    knownAtFor: (settingSays, scope, smallModel) =>
+      describeKnownAt(knownAt, settingSays, scope, { smallModel }),
     synopsesBefore(chapter) {
       if (chapter === null) return "";
       // **その話より前だけを渡す。** 後の話を渡すと、まだ書かれていない

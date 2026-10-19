@@ -17,6 +17,7 @@ import {
   parseContradictionResult,
   validateContradictions,
   type AcceptedContradiction,
+  type KnownAtIndex,
   type RejectedContradiction,
 } from "../../core/contradictionValidation";
 // 過去の場面の抜粋と検証の段は、製品と同じ組み立てを通す（2026-09-26）
@@ -25,6 +26,7 @@ import {
   buildContradictionPastSceneIndex,
   buildContradictionVerifyUserPrompt,
   describeKnownAt,
+  knownAtScopeOf,
   selectContradictionPastScenes,
 } from "../../core/contradictionAssembly";
 import { pastSceneMaxChars, type PastSceneIndex } from "../../core/pastSceneSelect";
@@ -151,7 +153,7 @@ interface Settings {
    * **どの値が何話で分かるか**の索引（設計書6.10.5）。検証の段で使う。
    * 製品と同じ `buildKnownAtIndex` で組む
    */
-  knownAt: Map<string, number[]>;
+  knownAt: KnownAtIndex;
   unreadable: number;
 }
 
@@ -1310,7 +1312,13 @@ async function verifyContradictionResults(
             chapterLabel: labelOf.get(result.chunkId) ?? result.chapterLabel,
             chunk,
             issue,
-            settingKnownAt: describeKnownAt(settings.knownAt, issue.settingSays),
+            // 小さいモデル（strict）へは直す前の引き方で渡す（A21 の作者の裁定①、製品と同じ）
+            settingKnownAt: describeKnownAt(
+              settings.knownAt,
+              issue.settingSays,
+              knownAtScopeOf(issue, chunk),
+              { smallModel: prompts.suppression === "strict" }
+            ),
             // 小さいモデル（strict）へは、話数の記録が無いときの書き方を変える（P-12b 1.1 の抑制版、裁定⑧）
             smallModel: prompts.suppression === "strict",
           }),

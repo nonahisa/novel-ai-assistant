@@ -38,6 +38,10 @@ const state = vi.hoisted(() => ({
   parameterSize: "31B",
   /** 検証の答えの控えを引いたときの鍵の版（裁定⑧） */
   verifyKeyVersions: [] as string[],
+  /** 検証の答えの控えを引いたときの鍵（「この設定が分かる話」が入る） */
+  verifyKeyHashes: [] as string[],
+  /** 文佳の登場話（空なら索引に初出の話が載らない） */
+  appearedChapters: [] as number[],
 }));
 
 vi.mock("../../../src/ai/registry", () => ({
@@ -91,7 +95,9 @@ vi.mock("../../../src/core/characterStore", () => ({
   CharacterStore: class {
     async loadAll() {
       return {
-        characters: [{ ...emptyCharacter("c1", "文佳"), role: "侍女" }],
+        characters: [
+          { ...emptyCharacter("c1", "文佳"), role: "侍女", appearedChapters: state.appearedChapters },
+        ],
         errors: [],
       };
     }
@@ -129,9 +135,10 @@ vi.mock("../../../src/core/settingsAsOf", async (importOriginal) => ({
 vi.mock("../../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
-    get(_hash: string, key: { feature: string; promptVersion?: string }) {
+    get(hash: string, key: { feature: string; promptVersion?: string }) {
       if (key.feature === "contradiction_verify") {
         state.verifyKeyVersions.push(key.promptVersion ?? "");
+        state.verifyKeyHashes.push(hash);
         return state.verifyCached
           ? JSON.stringify({ verdict: "採用", reason: "", explanation: "", confidence: "high" })
           : undefined;
@@ -195,6 +202,8 @@ beforeEach(() => {
   state.logged = [];
   state.parameterSize = "31B";
   state.verifyKeyVersions = [];
+  state.verifyKeyHashes = [];
+  state.appearedChapters = [];
   declineDialogs();
   Object.assign(window, {
     createOutputChannel: () => ({
@@ -334,7 +343,7 @@ describe("検証の控えの鍵（裁定⑧）", () => {
 
     expect(state.verifyKeyVersions.length).toBeGreaterThan(0);
     for (const version of state.verifyKeyVersions) {
-      expect(version).toMatch(/^1.1:strict:/);
+      expect(version).toMatch(/^1.2:strict:/);
     }
   });
 
@@ -343,8 +352,53 @@ describe("検証の控えの鍵（裁定⑧）", () => {
 
     expect(state.verifyKeyVersions.length).toBeGreaterThan(0);
     for (const version of state.verifyKeyVersions) {
-      expect(version).toMatch(/^1.1:/);
+      expect(version).toMatch(/^1.2:/);
       expect(version).not.toContain("strict:");
     }
+  });
+});
+
+/**
+ * 「この設定が分かる話」の索引の直しは、大きいモデルだけに効かせる（A21 の作者の
+ * 裁定①、2026-10-19）。e4b は話数が埋まると、それを却下の材料に使って正しい指摘を
+ * 落とした（台Cのほくろ・ギプス）。話数は検証の控えの鍵に入るので、鍵で見張る：
+ * 文佳の初出（第1話）が索引に載っても、8B の鍵は載らないときと同じで、31B は変わる
+ */
+describe("分かる話の索引の直しは大きいモデルだけ（A21 裁定①）", () => {
+  beforeEach(() => {
+    state.cachedFeatures = new Set(["contradiction_check", "contradiction_future"]);
+    state.settledAnswer = {
+      contradictions: [
+        {
+          line: 1,
+          excerpt: "文佳は城の門をくぐった。",
+          settingSays: "文佳は侍女",
+          textSays: "文佳は城の門をくぐった",
+          category: "人物",
+          note: "",
+        },
+      ],
+    };
+  });
+
+  async function verifyKeysWith(parameterSize: string, appeared: number[]): Promise<string[]> {
+    state.parameterSize = parameterSize;
+    state.appearedChapters = appeared;
+    state.verifyKeyHashes = [];
+    await checkContradictions(work, registry);
+    expect(state.verifyKeyHashes.length).toBeGreaterThan(0);
+    return [...state.verifyKeyHashes];
+  }
+
+  test("小さいモデル（8B）には初出の話を渡さない（鍵が直す前と同じ）", async () => {
+    const without = await verifyKeysWith("8B", []);
+    const withFirst = await verifyKeysWith("8B", [1]);
+    expect(withFirst).toEqual(without);
+  });
+
+  test("大きいモデル（31B）には初出の話を渡す（鍵が変わる）", async () => {
+    const without = await verifyKeysWith("31B", []);
+    const withFirst = await verifyKeysWith("31B", [1]);
+    expect(withFirst).not.toEqual(without);
   });
 });

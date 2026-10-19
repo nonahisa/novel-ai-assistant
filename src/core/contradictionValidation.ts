@@ -2,6 +2,7 @@ import type { Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
 import { decodeByteFallback } from "./byteFallback";
 import { lineHoldingQuote } from "./relocateQuote";
+import { CHARACTER_AS_OF_FIELDS } from "./contradictionMaterial";
 import {
   CONTRADICTION_CATEGORIES,
   SPEECH_INSTRUCTION_TEXTS,
@@ -554,63 +555,293 @@ function extractBraces(text: string): string | null {
  * （`knownAtFor`）が**それぞれ**テンプレートリテラルで鍵を組み立てていた。
  * 書く側は空白区切り、読む側はNUL区切りになっており、**読みは一度も
  * 当たっていなかった**——裏取りプロンプトの「この設定が分かる話」は
- * 常に「（不明）」だった（0.22.10で修正）。
+ * 常に「（不明）」だった（0.22.10で修正）。索引の形を1つの関数で作れば、
+ * ずれること自体が起きない。
  *
- * しかも読む側の区切りが**生のNUL文字**でソースに書かれていたため、
- * grepがこのファイルをバイナリ扱いし、検索でも見つからなかった。
- * 鍵の組み立てを1つの関数にすれば、ずれること自体が起きない。
+ * ## 変化の記録に無い設定も載せる（2026-10-17）
  *
- * 区切りは項目名にも値にも現れないNULにする（`characterUnify.ts` と
- * 同じ理由。エスケープで書く——生のまま置くとgit/grepが差分を見せない）。
+ * 変化の記録（`changes`）だけを索引にしていた頃は、**一人称・口調のように
+ * 変化の記録に載らない設定**は、どう引いても「（不明）」だった。確かめの段の
+ * 26b は、その「（不明）」を「まだ明かされていない」と読んで、作者の作品の
+ * 写しの第10話「わたくし」（設定の一人称は「ボク」）を落とした。
+ *
+ * そこで、本体の値（`CHARACTER_AS_OF_FIELDS`）と一人称を**その人物が初めて
+ * 出た話**で載せる。検出の段の材料（`contradictionMaterial.ts`）は、初出が
+ * その話以前の人物しか載せないので、検出の段が見た設定は「初出の時点で
+ * 分かっていたもの」として扱える。**変化の記録にある値は、その記録の話数が
+ * 勝つ**（初出は話数の分からない値の補いにすぎない）。一人称の使い分けは
+ * 自前の話数を持つので、そちらを使う。登場話の記録が無い人の、話数の分から
+ * ない値は載せない（分からないものを「第何話」と言わない）。
  */
-export function buildKnownAtIndex(
-  people: ReadonlyArray<{ changes: readonly RecordChangeLike[] }>
-): Map<string, number[]> {
-  const index = new Map<string, number[]>();
-  for (const person of people) {
-    for (const change of person.changes) {
-      const chapters = change.chapters.filter(Number.isFinite);
-      if (chapters.length === 0) continue;
-      index.set(knownAtKey(change.field, change.value), chapters);
-    }
-  }
-  return index;
+export interface KnownAtEntry {
+  /** どの項目の値か（`role`・`firstPerson` など） */
+  field: string;
+  /** 前後の空白を除いた値 */
+  value: string;
+  /** その値が分かる話（昇順） */
+  chapters: number[];
+  /** 持ち主の名前と別名。指摘の文に名前が出ていれば、その人に絞る */
+  owners: string[];
+  /** 持ち主の登場話。名前が出ていなければ、その話に出ている人に絞る */
+  appeared: number[];
+  /**
+   * 変化の記録（`changes`）から載せたか。小さいモデルへは、直す前と同じく
+   * これだけを引く（`lookupRecordedKnownAtValue`。A21 の作者の裁定①、2026-10-19）
+   */
+  fromChanges: boolean;
 }
 
-/** 索引を引く。見つからなければ空配列 */
-export function lookupKnownAt(
-  index: ReadonlyMap<string, number[]>,
-  field: string,
-  value: string
-): number[] {
-  return index.get(knownAtKey(field, value)) ?? [];
+export interface KnownAtIndex {
+  readonly entries: readonly KnownAtEntry[];
+}
+
+/** 索引に載せる人物の形。製品の `Character` をそのまま渡せる */
+export interface KnownAtPerson {
+  name?: string;
+  aliases?: readonly string[];
+  appearedChapters?: readonly number[];
+  firstPerson?: {
+    default: string | null;
+    variants: ReadonlyArray<{ form: string; chapters: readonly number[] }>;
+  };
+  changes: readonly RecordChangeLike[];
+  // 本体の値（`CHARACTER_AS_OF_FIELDS`）。変化の記録に無ければ初出の話で載せる
+  summary?: string | null;
+  role?: string | null;
+  personality?: string | null;
+  speechStyle?: string | null;
+  appearance?: string | null;
+  gender?: string | null;
+  affiliation?: string | null;
 }
 
 interface RecordChangeLike {
   field: string;
   value: string;
-  chapters: number[];
+  chapters: readonly number[];
 }
 
-function knownAtKey(field: string, value: string): string {
-  return `${field}\u0000${value.trim()}`;
+export function buildKnownAtIndex(
+  people: ReadonlyArray<KnownAtPerson>
+): KnownAtIndex {
+  const entries: KnownAtEntry[] = [];
+  for (const person of people) {
+    const owners = [person.name ?? "", ...(person.aliases ?? [])]
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0);
+    const appeared = sortedChapters(person.appearedChapters ?? []);
+    const firstAppearance = appeared.length > 0 ? [appeared[0]] : [];
+    const add = (
+      field: string,
+      value: string | null | undefined,
+      chapters: readonly number[],
+      fromChanges = false
+    ): void => {
+      const trimmed = (value ?? "").trim();
+      const at = sortedChapters(chapters);
+      if (!trimmed || at.length === 0) return;
+      entries.push({ field, value: trimmed, chapters: at, owners, appeared, fromChanges });
+    };
+    const recorded = new Set<string>();
+    for (const change of person.changes) {
+      add(change.field, change.value, change.chapters, true);
+      recorded.add(entryKey(change.field, change.value));
+    }
+    // 本体の値は、変化の記録に同じ値が無いときだけ初出の話で補う。
+    // 項目の並びは材料の組み立てと同じもの（`CHARACTER_AS_OF_FIELDS`）を見るので、項目名で読む
+    const fields = person as unknown as Record<string, unknown>;
+    for (const field of CHARACTER_AS_OF_FIELDS) {
+      const value = fields[field];
+      if (typeof value !== "string") continue;
+      if (recorded.has(entryKey(field, value))) continue;
+      add(field, value, firstAppearance);
+    }
+    const firstPerson = person.firstPerson;
+    if (firstPerson) {
+      add("firstPerson", firstPerson.default, firstAppearance);
+      for (const variant of firstPerson.variants) {
+        const own = variant.chapters.filter(Number.isFinite);
+        add("firstPerson", variant.form, own.length > 0 ? own : firstAppearance);
+      }
+    }
+  }
+  return { entries };
+}
+
+/** 索引を引く（項目と値の両方が分かるとき）。見つからなければ空配列 */
+export function lookupKnownAt(
+  index: KnownAtIndex,
+  field: string,
+  value: string
+): number[] {
+  const key = entryKey(field, value);
+  return index.entries.find((entry) => entryKey(entry.field, entry.value) === key)?.chapters ?? [];
 }
 
 /**
- * 項目名が分からないとき、値だけで索引を引く。
+ * 項目名が分からないとき、値だけで索引を引く（値が丸ごと一致するときだけ）。
  *
- * 裏取りの指摘（`settingSays`）には「どの項目の話か」が付いてこない。
  * 以前は "role" と決め打ちで引いており、外見や状態の指摘では
- * **当たりようがなかった**。どの項目であれ、その値が記録された話数は
- * 「いつ分かったか」の答えとして正しい。
+ * **当たりようがなかった**。
  */
 export function lookupKnownAtValue(
-  index: ReadonlyMap<string, number[]>,
+  index: KnownAtIndex,
   value: string
 ): number[] {
-  const suffix = `\u0000${value.trim()}`;
-  for (const [key, chapters] of index) {
-    if (key.endsWith(suffix)) return chapters;
+  const wanted = value.trim();
+  return index.entries.find((entry) => entry.value === wanted)?.chapters ?? [];
+}
+
+/**
+ * 直す前（〜0.109.x）の引き方：変化の記録の値と丸ごと一致したときだけ話数を返す。
+ *
+ * **小さいモデルへはこちらで渡す**（A21 の作者の裁定①、2026-10-19）。e4b は
+ * 話数が埋まると、それを却下の材料に使う——台Cのほくろの左右を「設定資料
+ * （第1話）の情報が古く…」、ギプスの左右を「時間の経過による負傷部位の変化」で
+ * 落とした（docs/measurements/2026-10-18-speech-note-with-index.md）。
+ *
+ * 直す前は「項目＋値」の鍵の Map で、同じ鍵が重なると後の記録の話数が勝ち、
+ * 値だけで引くと最初に載った鍵が当たった。その振る舞いをそのまま写す
+ * （小さいモデルの答えを、直す前と1文字も変えないため）。
+ */
+export function lookupRecordedKnownAtValue(index: KnownAtIndex, value: string): number[] {
+  const wanted = value.trim();
+  const recorded = index.entries.filter((entry) => entry.fromChanges);
+  const first = recorded.find((entry) => entry.value === wanted);
+  if (!first) return [];
+  const same = recorded.filter(
+    (entry) => entry.field === first.field && entry.value === first.value
+  );
+  return same[same.length - 1].chapters;
+}
+
+/** 指摘がどの話のものか（人物を絞るのに使う） */
+export interface KnownAtScope {
+  chapterStart: number | null;
+  chapterEnd: number | null;
+  /** 名前を探すのに一緒に見る文（引用・本文の欄） */
+  alsoText?: string;
+}
+
+/**
+ * 検出の段が書いた `settingSays` のまま、その設定が何話で分かるかを引く
+ * （2026-10-17）。見つからなければ空配列。
+ *
+ * 検出の段は値をそのまま写さず、「一人称: ボク」「一人称は「ボク」である。」
+ * 「第2話にて「左の足首を折った」と記述されている。」のような文で書く。
+ * 値の丸ごと一致（`lookupKnownAtValue`）では、実データではほぼ当たらなかった。
+ *
+ * 1. 文から候補を切り出す——全体・最初の「:」の後ろ・かぎ括弧の中
+ * 2. まず候補と値の**丸ごと一致**で探す（1〜3字の値はこれでしか引かない。
+ *    「俺」を含むだけの文に当たると、どの指摘にも話数が付いてしまう）
+ * 3. 無ければ、4字以上の候補と値の**包含**（どちら向きでも）で探す
+ * 4. 名前が文に出ている人がいればその人に、いなければその話に出ている人に絞る
+ *    （「俺」を使う人が何人もいるとき、別の人の初出を言わないため）
+ *
+ * 見つかった値ごとに**いちばん早い話**を返す——確かめの段が知りたいのは
+ * 「いつから分かっているか」で、何話で繰り返されたかではない。
+ */
+export function lookupSettingKnownAt(
+  index: KnownAtIndex,
+  settingSays: string,
+  scope?: KnownAtScope
+): number[] {
+  const candidates = settingCandidates(settingSays, index);
+  if (candidates.length === 0) return [];
+
+  let matched = index.entries.filter((entry) =>
+    candidates.includes(normalizeSettingValue(entry.value))
+  );
+  if (matched.length === 0) {
+    const long = candidates.filter((item) => [...item].length >= MIN_CONTAIN_CHARS);
+    matched = index.entries.filter((entry) => {
+      const value = normalizeSettingValue(entry.value);
+      const valueChars = [...value].length;
+      return long.some(
+        (item) =>
+          value.includes(item) ||
+          // 文のほうが値を含む向きは、値が文の大半を占めるときだけ。「冒険者ギルド」
+          // （所属）が、世界観の「冒険者ギルドは報酬の4割を差し引く」に当たった
+          // （写しの e4b、2026-10-17）——固有名詞を含むだけの別の設定である
+          (valueChars >= MIN_CONTAIN_CHARS &&
+            valueChars * 10 >= [...item].length * MIN_COVER_TENTHS &&
+            item.includes(value))
+      );
+    });
   }
-  return [];
+  if (matched.length === 0) return [];
+
+  const haystack = `${settingSays}\n${scope?.alsoText ?? ""}`.replace(/\s+/g, "");
+  const named = matched.filter((entry) =>
+    entry.owners.some((owner) => {
+      const name = owner.replace(/\s+/g, "");
+      return [...name].length >= 2 && haystack.includes(name);
+    })
+  );
+  if (named.length > 0) {
+    matched = named;
+  } else if (scope && scope.chapterStart !== null) {
+    const start = scope.chapterStart;
+    const end = scope.chapterEnd ?? start;
+    const present = matched.filter((entry) =>
+      entry.appeared.some((at) => at >= start && at <= end)
+    );
+    if (present.length > 0) matched = present;
+  }
+
+  return [...new Set(matched.map((entry) => entry.chapters[0]))].sort((a, b) => a - b);
+}
+
+/** 包含で引くときの、候補と値の最小の字数 */
+const MIN_CONTAIN_CHARS = 4;
+
+/** 文のほうが値を含むとき、値が文の何割以上を占めていれば同じ設定と見るか */
+const MIN_COVER_TENTHS = 6;
+
+function settingCandidates(settingSays: string, index: KnownAtIndex): string[] {
+  const raw: string[] = [settingSays];
+  const colon = settingSays.search(/[:：]/);
+  if (colon >= 0) raw.push(settingSays.slice(colon + 1));
+  // 「相沢春人は、左の足首を折った。」のように、持ち主の名前を頭に付けて書いてくる
+  // （台B の e4b）。名前と助詞を外した残りも候補にする。名前の空白（「相沢 春人」）は
+  // 書き手によって付いたり付かなかったりするので、空白を除いて比べる
+  const compact = settingSays.trim().replace(/\s+/g, "");
+  const owners = new Set(index.entries.flatMap((entry) => entry.owners));
+  for (const owner of owners) {
+    const name = owner.replace(/\s+/g, "");
+    if ([...name].length < 2 || !compact.startsWith(name)) continue;
+    const rest = compact.slice(name.length).replace(/^[はのがも][、，,]?/, "");
+    if (rest !== compact.slice(name.length)) raw.push(rest);
+  }
+  for (const match of settingSays.matchAll(/[「『"“]([^「」『』"“”]+)[」』"”]/g)) {
+    raw.push(match[1]);
+  }
+  const out: string[] = [];
+  for (const item of raw) {
+    const normalized = normalizeSettingValue(item);
+    if (normalized && !out.includes(normalized)) out.push(normalized);
+  }
+  return out;
+}
+
+/** 比べる前に、前後の空白・かぎ括弧・文末の句点を落とす */
+function normalizeSettingValue(value: string): string {
+  return value
+    .trim()
+    .replace(/^[「『"“]+/, "")
+    .replace(/[」』"”]+$/, "")
+    .replace(/[。．.、，,\s]+$/u, "")
+    .trim();
+}
+
+function sortedChapters(chapters: readonly number[]): number[] {
+  return [...new Set(chapters.filter(Number.isFinite))].sort((a, b) => a - b);
+}
+
+/**
+ * 区切りは項目名にも値にも現れないNULにする（`characterUnify.ts` と同じ理由。
+ * エスケープで書く——生のまま置くとgit/grepがバイナリ扱いし、差分も検索も効かない）。
+ */
+function entryKey(field: string, value: string): string {
+  return `${field}\u0000${value.trim()}`;
 }

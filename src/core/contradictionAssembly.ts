@@ -23,7 +23,13 @@ import {
   type PastSceneSemantic,
 } from "./pastSceneSelect";
 import { linesAround } from "./factContradiction";
-import { lookupKnownAtValue, type AcceptedContradiction } from "./contradictionValidation";
+import {
+  lookupRecordedKnownAtValue,
+  lookupSettingKnownAt,
+  type AcceptedContradiction,
+  type KnownAtIndex,
+  type KnownAtScope,
+} from "./contradictionValidation";
 import {
   buildContradictionVerifyPrompt,
   CONTRADICTION_VERIFY_VERSION,
@@ -116,18 +122,58 @@ export function contradictionVerifyContext(chunk: Chunk, line: number): string {
 }
 
 /**
- * その値が何話で分かるか（設計書6.10.5）を、検証のプロンプトへ書く形にする。
+ * その設定が何話で分かるか（設計書6.10.5）を、検証のプロンプトへ書く形にする。
  * 分からなければ空文字（プロンプトは「（不明）」と書く）。
  *
- * 指摘には「どの項目の話か」が付いてこないので、値だけで引く。
+ * 指摘には「どの項目の話か」が付いてこないので、検出の段が書いた
+ * `settingSays` の文のまま引く（`lookupSettingKnownAt`。2026-10-17）。
+ *
+ * **小さいモデル（`smallModel`）へは直す前の引き方で渡す**（A21 の作者の裁定①、
+ * 2026-10-19。`lookupRecordedKnownAtValue`）。線引きは確かめの段の小さいモデル向けの
+ * 形と同じもの（製品は `suppressUncertainContradictions`、MCP は `suppression: "strict"`。
+ * どちらもモデルの大きさを API のパラメーター数から読む `capabilityProfile` の判断）。
+ * 大きいモデル（26b）は話数が付くと写しの第10話「わたくし」を通すようになり、
+ * 小さいモデル（e4b）は話数を却下の材料に使って正しい指摘を落とした。
  */
 export function describeKnownAt(
-  knownAt: ReadonlyMap<string, number[]>,
-  value: string
+  knownAt: KnownAtIndex,
+  settingSays: string,
+  scope?: KnownAtScope,
+  options: { smallModel?: boolean } = {}
 ): string {
-  const chapters = lookupKnownAtValue(knownAt, value);
+  const chapters = options.smallModel
+    ? lookupRecordedKnownAtValue(knownAt, settingSays)
+    : lookupSettingKnownAt(knownAt, settingSays, scope);
   if (chapters.length === 0) return "";
   return chapters.map((at) => `第${at}話`).join("、");
+}
+
+/** 指摘とそのチャンクから、`describeKnownAt` に渡す範囲を作る（製品と MCP で同じ形にする） */
+export function knownAtScopeOf(issue: AcceptedContradiction, chunk: Chunk): KnownAtScope {
+  return {
+    chapterStart: chunk.chapterStart,
+    chapterEnd: chunk.chapterEnd,
+    alsoText: `${issue.excerpt}\n${issue.textSays}`,
+  };
+}
+
+/**
+ * 製品の、検証の答えの控えの鍵（ハッシュする前の文字列）。
+ *
+ * **「この設定が分かる話」を足す**（2026-10-17）。索引が広がって、同じ指摘でも
+ * 渡す話数が変わるので、変わったものは問い直す。**空のときは何も足さない**
+ * ——以前の鍵と1文字も変わらないので、話数の引けない指摘（これまでの大半）は
+ * 作者のクラウドAIの控えをそのまま使える。
+ */
+export function contradictionVerifyCacheSource(
+  chunkHash: string,
+  line: number,
+  excerpt: string,
+  settingSays: string,
+  settingKnownAt: string
+): string {
+  const base = `${chunkHash}:${line}:${excerpt}:${settingSays}`;
+  return settingKnownAt ? `${base}:${settingKnownAt}` : base;
 }
 
 /** 検証で分かったことを、もとの補足へ足す（作者の判断材料になる） */
