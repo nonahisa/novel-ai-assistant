@@ -43,7 +43,12 @@ import {
   rateLimitWaitHooks,
   sleepUnlessAborted,
 } from "./rateLimitRetry";
-import { factsRevealedAfter } from "../core/settingsAsOf";
+import {
+  buildFutureFacts,
+  describeFutureKnownAt,
+  type FutureFactEntry,
+  type FutureFactsList,
+} from "../core/contradictionFutureFacts";
 import {
   buildContradictionTermIndex,
   carryOverBodyText,
@@ -56,7 +61,6 @@ import {
   promptVersionWithNarrator,
   promptVersionWithStoryDates,
   CARRY_OVER_DEFAULT_CHAPTERS,
-  CHARACTER_AS_OF_FIELDS,
   type CarryOverBody,
   type CarryOverResult,
   type MissedCharacters,
@@ -192,19 +196,6 @@ import { cancelItem } from "../views/dialogs";
  * 切り詰められたチャンクが黙って捨てられる。
  */
 const RETRY_SMALLER = Symbol("retry-smaller");
-
-/** 項目の名前を、作者に読める言葉にする */
-const FIELD_LABELS: Record<string, string> = {
-  summary: "紹介",
-  role: "役割",
-  personality: "性格",
-  speechStyle: "口調",
-  appearance: "外見",
-  gender: "性別",
-  affiliation: "所属",
-  region: "地域",
-  description: "説明",
-};
 
 export interface ContradictionRunResult {
   issues: AcceptedContradiction[];
@@ -673,17 +664,24 @@ export async function checkContradictions(
     ...cacheKeyBase,
     feature: "contradiction_future",
   };
-  // 検証は別のプロンプトなので、版も別に持つ
-  const verifyKeyBase = {
+  // 検証は別のプロンプトなので、版も別に持つ。
+  // **出どころ（本命／あとで判明する事実）ごとに分ける**（P-12b 1.3）——future へは
+  // 文面が違う。本命の鍵は 1.2 のときと1文字も変わらない
+  const verifyKeyBaseFor = (source: "settled" | "future") => ({
     feature: "contradiction_verify",
     // 検証のプロンプトは観点で変わらないので、観点の印は混ぜない。
     // **抑制の印だけは混ぜる**（P-12b 1.1 の抑制版、裁定⑧）——小さいモデルへは文面が違う
     promptVersion: contradictionVerifyPromptVersion(
       capability.suppressUncertainContradictions,
-      material.fingerprint
+      material.fingerprint,
+      source
     ),
     providerId: resolved.provider.id,
     model: resolved.model,
+  });
+  const verifyKeyBases = {
+    settled: verifyKeyBaseFor("settled"),
+    future: verifyKeyBaseFor("future"),
   };
 
   // **鍵は渡す抜粋ごとに変える**（設計書6.74）。過去の話を書き直したら、
@@ -730,7 +728,7 @@ export async function checkContradictions(
       return built ? sendCharsOf(built) : undefined;
     },
     futureChars: (chunk) => {
-      const facts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
+      const facts = settings.futureFactsFor(chunk.text, chunk.chapterStart).text;
       if (!facts) return undefined;
       const built = promptFor(chunk, "future", facts);
       return built ? sendCharsOf(built) : undefined;
@@ -986,12 +984,10 @@ export async function checkContradictions(
    * 検出した1件。**検証まで、どのチャンクの何行目かを持ち回る**
    * （設計書6.10.5）。前後の本文を渡すのに要る
    */
-  // source は、どちらの突き合わせから来た指摘か（取り下げを low で残すかの判断に使う）
-  const found: Array<{
-    issue: AcceptedContradiction;
-    chunk: Chunk;
-    source: "settled" | "future";
-  }> = [];
+  // source は、どちらの突き合わせから来た指摘か（取り下げを low で残すかの判断と、
+  // 確かめの段の文面に使う）。futureFacts は、future の指摘のときに検出の段へ渡した
+  // 事実の一覧（確かめの段の「この設定が分かる話」を引く。P-12b 1.3）
+  const found: Array<{ issue: AcceptedContradiction; chunk: Chunk } & VerifyOrigin> = [];
   let rejectedCount = 0;
   /**
    * 検証で落とした理由。**最後にまとめて操作ログへ出す**（設計書6.8）。
@@ -1118,15 +1114,15 @@ export async function checkContradictions(
           }
           if (raw === undefined) continue;
 
-          collect(raw, chunk, "settled");
+          collect(raw, chunk, SETTLED_ORIGIN);
 
           // **あとで判明する事実とも突き合わせる**（設計書6.10.4）。
           // 「まだ知らない」ではなく「両立しない」を探す、逆向きの見方である
           const futureFacts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
-          if (futureFacts) {
+          if (futureFacts.text) {
             const futureCached = cache.get(chunk.hash, futureKeyBase);
             const futureRaw =
-              futureCached ?? (await ask(chunk, "future", futureFacts));
+              futureCached ?? (await ask(chunk, "future", futureFacts.text));
             // **入らなかった向きは、ここでは分け直さない。** この段は
             // 「あとで判明する事実」との突き合わせで、本命（settled）が
             // 通ったチャンクの補足である。分け直すと同じ本文を二重に数える
@@ -1135,21 +1131,21 @@ export async function checkContradictions(
               futureRaw !== RETRY_SMALLER &&
               !(futureRaw instanceof AIError)
             ) {
-              collect(futureRaw, chunk, "future");
+              collect(futureRaw, chunk, futureOrigin(futureFacts));
             }
           }
           processedChunks++;
         }
 
         /** 応答を検証して、どのチャンクの指摘かを覚えておく */
-        function collect(raw: unknown, chunk: Chunk, source: "settled" | "future"): void {
+        function collect(raw: unknown, chunk: Chunk, origin: VerifyOrigin): void {
           const validated = validateContradictions(raw, chunk);
           rejectedCount += validated.rejected.length;
           rejectedReasons.push(
             ...validated.rejected.map((entry) => entry.reason)
           );
           for (const issue of validated.accepted) {
-            found.push({ issue, chunk, source });
+            found.push({ issue, chunk, ...origin });
           }
         }
 
@@ -1316,7 +1312,7 @@ export async function checkContradictions(
               // 提案パネルにも同じ進みを出す（本文を読む段とは別の札で）
               options.onVerifyProgress?.(done, found.length);
 
-              const outcome = await verify(entry.issue, entry.chunk, controller);
+              const outcome = await verify(entry.issue, entry.chunk, entry, controller);
               if (outcome.undecided) verifyUndecided++;
               // あとの話から来た台詞が「発言者の誤り」で取り下げられたら、消さずに
               // 確信度 low で残す（2026-10-19。判断は core の1か所）
@@ -1727,7 +1723,11 @@ export async function checkContradictions(
    * 検証の答えを覚えておく鍵。**確認の前に数えるときと、検証するときの
    * 両方がここを通る**（片方だけ変わると、数えた件数と送る件数がずれる）
    */
-  function verifyCacheKey(issue: AcceptedContradiction, chunk: Chunk): string {
+  function verifyCacheKey(
+    issue: AcceptedContradiction,
+    chunk: Chunk,
+    origin: VerifyOrigin
+  ): string {
     // 「この設定が分かる話」も鍵に入れる（2026-10-17）。空なら以前の鍵のまま
     return hashText(
       contradictionVerifyCacheSource(
@@ -1735,7 +1735,7 @@ export async function checkContradictions(
         issue.line,
         issue.excerpt,
         issue.settingSays,
-        knownAtOf(issue, chunk)
+        knownAtOf(issue, chunk, origin)
       )
     );
   }
@@ -1743,9 +1743,22 @@ export async function checkContradictions(
   /**
    * 検証へ渡す「この設定が分かる話」。鍵と送る文面の両方がここを通る。
    * 小さいモデルへは直す前の引き方で渡す（A21 の作者の裁定①、2026-10-19。
-   * 線引きは検出の段の抑制版と同じ `suppressUncertainContradictions`）
+   * 線引きは検出の段の抑制版と同じ `suppressUncertainContradictions`）。
+   *
+   * **「あとで判明する事実」から来た指摘は、検出の段へ渡した事実の一覧から引く**
+   * （P-12b 1.3、作者の裁定 2026-10-19 夜「C」）。`settingSays` の文から引くと、
+   * AI の言い換えや頭書きで空になり、小さいモデルへ事実と逆の案内が渡った。
+   * 大きいモデルも小さいモデルも同じ引き方にする（引くのは判明の話そのもので、
+   * A21 の裁定①で避けた「初出の話」ではない）
    */
-  function knownAtOf(issue: AcceptedContradiction, chunk: Chunk): string {
+  function knownAtOf(
+    issue: AcceptedContradiction,
+    chunk: Chunk,
+    origin: VerifyOrigin
+  ): string {
+    if (origin.source === "future") {
+      return describeFutureKnownAt(issue, origin.futureFacts, knownAtScopeOf(issue, chunk));
+    }
     return settings.knownAtFor(
       issue.settingSays,
       knownAtScopeOf(issue, chunk),
@@ -1766,10 +1779,13 @@ export async function checkContradictions(
     const sentSettled = new Set(sendPlan.settled.map((chunk) => chunk.hash));
     const sentFuture = new Set(sendPlan.future.map((chunk) => chunk.hash));
     const keys = new Set<string>();
-    const add = (raw: unknown, chunk: Chunk): void => {
+    const add = (raw: unknown, chunk: Chunk, origin: VerifyOrigin): void => {
       for (const issue of validateContradictions(raw, chunk).accepted) {
-        const key = verifyCacheKey(issue, chunk);
-        if (cache.get(key, verifyKeyBase) === undefined) keys.add(key);
+        const key = verifyCacheKey(issue, chunk, origin);
+        // 本命と future で鍵の版が違うので、出どころも混ぜて数える
+        if (cache.get(key, verifyKeyBases[origin.source]) === undefined) {
+          keys.add(`${origin.source}:${key}`);
+        }
       }
     };
     for (const chunk of chunks) {
@@ -1777,11 +1793,12 @@ export async function checkContradictions(
       // 輪と同じく、本命の答えが無ければ2回目へ進まない
       const settledRaw = cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk));
       if (settledRaw == null) continue;
-      add(settledRaw, chunk);
+      add(settledRaw, chunk, SETTLED_ORIGIN);
       if (sentFuture.has(chunk.hash)) continue;
-      if (!settings.futureFactsFor(chunk.text, chunk.chapterStart)) continue;
+      const futureFacts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
+      if (!futureFacts.text) continue;
       const futureRaw = cache.get(chunk.hash, futureKeyBase);
-      if (futureRaw != null) add(futureRaw, chunk);
+      if (futureRaw != null) add(futureRaw, chunk, futureOrigin(futureFacts));
     }
     return keys.size;
   }
@@ -1790,9 +1807,11 @@ export async function checkContradictions(
   async function verify(
     issue: AcceptedContradiction,
     chunk: Chunk,
+    origin: VerifyOrigin,
     controller: AbortController
   ): Promise<VerifyOutcome> {
-    const key = verifyCacheKey(issue, chunk);
+    const key = verifyCacheKey(issue, chunk, origin);
+    const verifyKeyBase = verifyKeyBases[origin.source];
     const cached = cache.get(key, verifyKeyBase);
     if (cached !== undefined) {
       return parseVerifyOutcome(
@@ -1812,9 +1831,11 @@ export async function checkContradictions(
           issue,
           // 指摘には「どの項目の話か」が付いてこないので、検出の段が書いた文のまま引く。
           // 以前は "role" 決め打ちで、外見や状態の指摘では当たらなかった
-          settingKnownAt: knownAtOf(issue, chunk),
+          settingKnownAt: knownAtOf(issue, chunk, origin),
           // 小さいモデルへは、話数の記録が無いときの書き方を変える（P-12b 1.1 の抑制版、裁定⑧）
           smallModel: capability.suppressUncertainContradictions,
+          // 「あとで判明する事実」から来た指摘には、その出どころを伝える（P-12b 1.3）
+          source: origin.source,
         }),
         model,
         temperature: CONTRADICTION_VERIFY_TEMPERATURE,
@@ -1847,6 +1868,20 @@ export async function checkContradictions(
       return undecidedOutcome("検証できませんでした");
     }
   }
+}
+
+/**
+ * 指摘がどちらの突き合わせから来たか（確かめの段の文面・控えの鍵・話数の引き方を分ける。
+ * P-12b 1.3）。future のときは、検出の段へ渡した事実の一覧も持ち回る
+ */
+type VerifyOrigin =
+  | { source: "settled" }
+  | { source: "future"; futureFacts: readonly FutureFactEntry[] };
+
+const SETTLED_ORIGIN: VerifyOrigin = { source: "settled" };
+
+function futureOrigin(list: FutureFactsList): VerifyOrigin {
+  return { source: "future", futureFacts: list.facts };
 }
 
 /** 同じ箇所の同じ指摘が、重なったチャンクから二重に出ることがある */
@@ -1886,9 +1921,9 @@ interface SettingsMaterial {
   namesIn(text: string): string[];
   /**
    * その本文より**あと**で判明する事実（設計書6.10.4）。
-   * 無ければ空文字。
+   * 無ければ文面は空文字。事実の一覧は、確かめの段で話数を引くのに使う（P-12b 1.3）
    */
-  futureFactsFor(text: string, chapter: number | null): string;
+  futureFactsFor(text: string, chapter: number | null): FutureFactsList;
   /** その設定が何話で分かるか。検証で使う（設計書6.10.5） */
   knownAtFor(settingSays: string, scope: KnownAtScope, smallModel: boolean): string;
   synopsesBefore(chapter: number | null): string;
@@ -2011,25 +2046,17 @@ async function collectSettings(
       material.relevantFor(text, chapter, relevantOptions),
     namesIn: (text) => material.namesIn(text),
     futureFactsFor(text, chapter) {
-      if (chapter === null) return "";
-      const lines: string[] = [];
+      // 組み立ては core（`buildFutureFacts`）。文面は直す前と1バイトも変えていない
+      // ——`contradiction_future` の控えの鍵は文面を含まないので、変えると
+      // 同じ鍵に別の材料で得た答えが入る
+      if (chapter === null) return buildFutureFacts([], null);
+      const found: (typeof people)[number][] = [];
       for (const match of index.find(text)) {
         if (match.entry.kind !== "character") continue;
         const character = characterById.get(match.entry.id);
-        if (!character) continue;
-        const facts = factsRevealedAfter(
-          character,
-          CHARACTER_AS_OF_FIELDS,
-          chapter
-        );
-        for (const fact of facts) {
-          const label = FIELD_LABELS[fact.field] ?? fact.field;
-          const line = `${character.name}の${label}（第${fact.chapter}話で判明）: ${fact.value}`;
-          if (!lines.includes(line)) lines.push(line);
-        }
+        if (character) found.push(character);
       }
-      // **多すぎると、1件ずつの吟味が薄まる。** 近い先の話から順に絞る
-      return lines.slice(0, 20).join("\n");
+      return buildFutureFacts(found, chapter);
     },
     // 書き方は MCP と同じ関数（`core/contradictionAssembly.ts`）
     knownAtFor: (settingSays, scope, smallModel) =>

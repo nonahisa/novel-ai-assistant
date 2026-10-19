@@ -1322,6 +1322,9 @@ async function verifyContradictionResults(
             ),
             // 小さいモデル（strict）へは、話数の記録が無いときの書き方を変える（P-12b 1.1 の抑制版、裁定⑧）
             smallModel: prompts.suppression === "strict",
+            // この道には「あとで判明する事実」の段が無いので、出どころは本命に決まる
+            // （P-12b 1.3。future の文面と話数の引き方は製品だけ）
+            source: "settled",
           }),
           schema: CONTRADICTION_VERIFY_SCHEMA,
           temperature,
