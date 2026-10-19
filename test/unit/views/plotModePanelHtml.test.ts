@@ -320,7 +320,9 @@ describe("AIとの相談の欄", () => {
   });
 
   it("日本語の変換を確定する Enter では送らない", () => {
-    expect(html).toContain("event.isComposing || event.keyCode === 229");
+    // 見分け方の中身は imeEnterGuardScript.test.ts で確かめる。ここは欄へ当てたことだけ
+    expect(html).toContain("function watchImeEnter(");
+    expect(html).toContain("if (isAdviceImeEnter(event)) return;");
   });
 
   it("AIを呼べない画面（null）では欄を出さない", () => {

@@ -32,6 +32,7 @@ import {
   BACKUP_DROP_MAX_BYTES,
   DROP_FILE_EXTENSIONS,
 } from "../core/backupFileKinds";
+import { IME_ENTER_GUARD_SOURCE } from "./imeEnterGuardScript";
 
 /**
  * 大きく開いたときだけ出すツールバー。
@@ -1339,9 +1340,13 @@ document.addEventListener('drop', (event) => {
   }
 });
 
+${IME_ENTER_GUARD_SOURCE}
+// 変換の確定に使った Enter は送らない（見分け方は imeEnterGuardScript.ts）
+const isInputImeEnter = watchImeEnter(inputEl);
 inputEl.addEventListener('keydown', (event) => {
   // Ctrl+Enter で送る。Enterだけだと改行が打てない
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    if (isInputImeEnter(event)) return;
     event.preventDefault();
     send(inputEl.value);
     return;
