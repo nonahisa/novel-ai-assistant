@@ -8,6 +8,7 @@ import { kindLayoutCss, kindLineClass, kindLineCss, kindUsesScriptLayout } from 
 import type { WorkKindKey } from "./workKind";
 import { PRINT_PAGINATE_SCRIPT } from "./printPaginate";
 import { tcyRuns } from "./tateChuYoko";
+import { dashRuns, MARK_FONT_GOTHIC, markFontFor, PRINT_DASH_CHARS } from "./markFont";
 import {
   SCRIPT_GOTHIC_FONT_FAMILY,
   SCRIPT_LINE_CLASSES,
@@ -516,6 +517,23 @@ export const PRINT_FONT_FAMILY =
 /** 紙のゴシック（台本のト書きと柱）。定義は `scriptLines.ts`（原稿エディターと同じ） */
 export const PRINT_GOTHIC_FONT_FAMILY = SCRIPT_GOTHIC_FONT_FAMILY;
 
+/**
+ * ダッシュの印に当てる明朝（設計書6.33.6）。紙の明朝の先頭は游明朝で、
+ * ダッシュが繋がらない。原稿エディターと同じ判定（`markFontFor`）で倒し先を引く
+ * ——写しの列を持たない。公募の納品用の組版も同じものを使う
+ */
+export const PRINT_DASH_FONT_FAMILY = markFontFor(PRINT_FONT_FAMILY);
+
+/**
+ * ゴシックの行（台本のト書きと柱・漫画の原作のページとコマ）のダッシュに当てる列。
+ * 紙のゴシックの先頭は游ゴシック Medium で、これもダッシュが繋がらない
+ * （`markFontFor` の一覧は「Yu Gothic」の綴りだけを見るので、ここは名指しで引く）
+ */
+export const PRINT_DASH_GOTHIC_FONT_FAMILY = MARK_FONT_GOTHIC;
+
+/** 紙で印に包むダッシュの字（定義と理由は `markFont.ts`）。公募の納品用の組版も同じ */
+export { PRINT_DASH_CHARS };
+
 /** 1話ぶん。**話ごとに改ページする**（本の体裁に合わせる） */
 function renderEpisode(
   episode: PrintEpisode,
@@ -634,9 +652,30 @@ function renderPlain(text: string, vertical: boolean): string {
     .map((segment) =>
       segment.tcy
         ? `<span class="tcy">${escapeHtml(segment.text)}</span>`
-        : escapeHtml(segment.text)
+        : renderDashes(segment.text)
     )
     .join("");
+}
+
+/**
+ * 続いたダッシュを印（`span.dash`）で包んで逃がす（設計書6.33.6）。
+ *
+ * 紙の書体（游明朝が先頭）のダッシュは字送りより線が短く、「――」が割れて
+ * 見える（作者の実機の報告、2026-10-19）。印にだけ繋がる明朝を当てる
+ * （`buildStyle` の `.dash`）。**続きは1つの span にまとめる**（`dashRuns`）。
+ *
+ * 面に割るスクリプトは、この印を1字ずつの部品にほどいて数える
+ * （`printPaginate.ts` の `atomsOf`）。包んでも面の切れ目は変わらない。
+ */
+export function renderDashes(text: string): string {
+  let html = "";
+  let at = 0;
+  for (const run of dashRuns(text, PRINT_DASH_CHARS)) {
+    html += escapeHtml(text.slice(at, run.start));
+    html += `<span class="dash">${escapeHtml(text.slice(run.start, run.end))}</span>`;
+    at = run.end;
+  }
+  return html + escapeHtml(text.slice(at));
 }
 
 /**
@@ -701,7 +740,17 @@ function buildStyle(
   // 台本と漫画の原作だけ、人物名の欄と書体（台詞は明朝・ト書きと柱、漫画のページと
   // コマはゴシック）を足す（作者の裁定、2026-10-17。原稿エディターと同じ `kindLayoutCss`）
   const layoutCss = kindLayoutCss(kind);
-  const script = [...(kindCss ? [kindCss] : []), ...(layoutCss ? [layoutCss] : [])];
+  const script = [
+    ...(kindCss ? [kindCss] : []),
+    ...(layoutCss
+      ? [
+          layoutCss,
+          // ゴシックの行の中のダッシュは、ゴシックの繋がる列へ（明朝の印のままだと
+          // そこだけ字面が変わる）。行の書体の指定より後ろに置いて勝たせる
+          `.script-hashira .dash, .script-togaki .dash, .manga-page .dash, .manga-panel .dash { font-family: ${PRINT_DASH_GOTHIC_FONT_FAMILY}; }`,
+        ]
+      : []),
+  ];
 
   return [
     // 面に割れたら、スクリプトが余白を0にする（面の中に余白を持つため）。
@@ -738,6 +787,9 @@ function buildStyle(
     // 段落のあいだは空けない。字下げ（全角空白）で見分けるのが日本語の組み方
     "p { margin: 0; }",
     "p.gap { margin-block-start: 1.5em; }",
+    // ダッシュの印だけ、繋がる明朝へ（設計書6.33.6）。**字送りを広げない**——
+    // 見出しと扉の題は letter-spacing を持っており、印の中で効くと線が割れる
+    `.dash { font-family: ${PRINT_DASH_FONT_FAMILY}; letter-spacing: 0; line-height: 0; }`,
     ...script,
     "ruby { ruby-align: center; }",
     "rt { font-size: 0.5em; letter-spacing: 0; }",
