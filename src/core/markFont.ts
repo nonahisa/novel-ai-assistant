@@ -99,6 +99,50 @@ export const MARK_FONT_GOTHIC =
   '"BIZ UDGothic", "Noto Sans JP", "Noto Sans CJK JP", "Meiryo", sans-serif';
 
 /**
+ * ダッシュの印で包む字（欧文の U+2014 EM DASH と、和文の U+2015 HORIZONTAL BAR）。
+ *
+ * 原稿エディターの `DASH_CHARS`（views/manuscriptEditorHtml.ts のスクリプトの中）と
+ * 同じ集合。見た目がほとんど同じ別の字なので、ソースへ直に書かず符号から作る。
+ */
+export const MARK_DASH_CHARS = String.fromCodePoint(0x2014) + String.fromCodePoint(0x2015);
+
+/**
+ * 紙（PDF出力の印刷用 HTML）で印に包むダッシュの字。**和文の U+2015 だけ**
+ * （原稿エディターの2字より狭い。設計書6.33.6）。
+ *
+ * ヘッドレスの Edge で測った（2026-10-19）：游明朝は U+2015 が割れるが、欧文の
+ * U+2014 は全角の字送りで繋がって描かれる。一方、倒し先の先頭の BIZ UD明朝は
+ * U+2014 が**半角の字送り**で、包むと「————」が半分の長さに縮み、行の字数と
+ * 面の切れ目まで動く。そこで、紙の書体のままで困る U+2015 だけを包む。
+ * 面に割るスクリプト（printPaginate.ts）も同じ字を使うので、ここに置く
+ * （printHtml.ts は printPaginate.ts を読み込むため、逆向きに引けない）
+ */
+export const PRINT_DASH_CHARS = String.fromCodePoint(0x2015);
+
+/**
+ * 続いたダッシュの区間（`start` から `end` の手前まで）。
+ *
+ * **続きは1つの区間にまとめる。** 1本ずつ別の箱にすると、箱の置き場所の丸めで
+ * 境目に1ピクセルの切れ目が出る（原稿エディターで作者が見た、2026-09-22）。
+ */
+export function dashRuns(
+  text: string,
+  chars: string = MARK_DASH_CHARS
+): Array<{ start: number; end: number }> {
+  const runs: Array<{ start: number; end: number }> = [];
+  let start = -1;
+  for (let i = 0; i <= text.length; i++) {
+    const isDash = i < text.length && chars.includes(text[i]);
+    if (isDash && start < 0) start = i;
+    if (!isDash && start >= 0) {
+      runs.push({ start, end: i });
+      start = -1;
+    }
+  }
+  return runs;
+}
+
+/**
  * 隙間の出る書体なら、倒し先の列を返す。困らない書体なら `undefined`。
  *
  * 作者の書体のときも、既定にまかせたときの実効の書体のときも、

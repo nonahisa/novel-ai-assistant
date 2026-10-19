@@ -1,4 +1,5 @@
 import { NO_LINE_END, NO_LINE_START_STRICT } from "./kinsoku";
+import { PRINT_DASH_CHARS } from "./markFont";
 
 /**
  * 印刷用HTMLを、紙1枚ずつの面に割るスクリプト（設計書6.33.5 の1）。
@@ -49,6 +50,8 @@ export const PAGINATE_HELPERS = [
   "var NO_START = " + JSON.stringify(NO_LINE_START_STRICT) + ";",
   "var NO_END = " + JSON.stringify(NO_LINE_END) + ";",
   "var MAX_PULL = 4;",
+  // ダッシュの印で包む字（markFont.ts の PRINT_DASH_CHARS。読む紙が包むのと同じ字）
+  "var DASH_CHARS = " + JSON.stringify(PRINT_DASH_CHARS) + ";",
   "function firstOf(text) { return text ? Array.from(text)[0] : ''; }",
   "function lastOf(text) { var chars = Array.from(text || ''); return chars.length ? chars[chars.length - 1] : ''; }",
   "function cutForKinsoku(texts, cut) {",
@@ -80,9 +83,35 @@ export const PAGINATE_HELPERS = [
   "  ['left', 'center', 'right'].forEach(function (column) {",
   "    var cell = box.ownerDocument.createElement('span');",
   "    cell.className = 'margin-' + column;",
-  "    cell.textContent = row ? marginText(row[column], info) : '';",
+  "    appendMarked(cell, row ? marginText(row[column], info) : '');",
   "    box.appendChild(cell);",
   "  });",
+  "}",
+  // 帯の字（話の見出し・題名）のダッシュも、本文と同じ印で包む（設計書6.33.6）。
+  // 字は textNode で入れる（札として読まれない）。続きは1つの印にまとめる
+  "function appendMarked(cell, text) {",
+  // ダッシュが無ければ、これまでどおり文字を1つ入れるだけ
+  "  if (!Array.from(text || '').some(function (ch) { return DASH_CHARS.indexOf(ch) >= 0; })) { cell.textContent = text || ''; return; }",
+  "  var run = '';",
+  "  var inDash = false;",
+  "  function flushRun() {",
+  "    if (!run) return;",
+  "    if (inDash) {",
+  "      var mark = cell.ownerDocument.createElement('span');",
+  "      mark.className = 'dash';",
+  "      mark.textContent = run;",
+  "      cell.appendChild(mark);",
+  "    } else {",
+  "      cell.appendChild(cell.ownerDocument.createTextNode(run));",
+  "    }",
+  "    run = '';",
+  "  }",
+  "  Array.from(text || '').forEach(function (ch) {",
+  "    var isDash = DASH_CHARS.indexOf(ch) >= 0;",
+  "    if (isDash !== inDash) { flushRun(); inDash = isDash; }",
+  "    run += ch;",
+  "  });",
+  "  flushRun();",
   "}",
   // 段落を部品へ。平文と傍点は1字ずつ、ルビなどの札はかたまりごと。
   // **縦中横（tcy）は傍点の中でも札として1つ**——先に見ないと、傍点として
@@ -97,6 +126,10 @@ export const PAGINATE_HELPERS = [
   "      atoms.push({ t: 'node', s: '', n: node });",
   "    } else if (node.nodeType === 1 && node.classList.contains('emphasis')) {",
   "      Array.from(node.textContent || '').forEach(function (ch) { atoms.push({ t: 'em', s: ch }); });",
+  // ダッシュの印（設計書6.33.6）も1字ずつ。かたまりにすると「――――」が切れ目の
+  // 単位から外れ、包む前と面の切れ目が変わる。描くときに fill が包み直す
+  "    } else if (node.nodeType === 1 && node.classList.contains('dash')) {",
+  "      Array.from(node.textContent || '').forEach(function (ch) { atoms.push({ t: 'dash', s: ch }); });",
   "    } else if (node.nodeType === 1) {",
   "      atoms.push({ t: 'node', s: '', n: node });",
   "    }",
@@ -161,9 +194,9 @@ export const PRINT_PAGINATE_SCRIPT = [
   "  var runType = '';",
   "  function flush() {",
   "    if (!run) return;",
-  "    if (runType === 'em') {",
+  "    if (runType === 'em' || runType === 'dash') {",
   "      var span = doc.createElement('span');",
-  "      span.className = 'emphasis';",
+  "      span.className = runType === 'em' ? 'emphasis' : 'dash';",
   "      span.textContent = run;",
   "      shell.appendChild(span);",
   "    } else {",

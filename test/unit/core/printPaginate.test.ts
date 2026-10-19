@@ -171,7 +171,10 @@ describe("スクリプトの形", () => {
 
   test("上下の余白は文字として入れる（札として読ませない）", () => {
     // 題名や作者名に < があっても、紙に文字として出る
-    expect(PRINT_PAGINATE_SCRIPT).toContain("cell.textContent = row ? marginText(row[column], info) : '';");
+    // ダッシュを印で包むとき（設計書6.33.6）も、字は textContent と文字のノードで入れる
+    expect(PRINT_PAGINATE_SCRIPT).toContain("appendMarked(cell, row ? marginText(row[column], info) : '');");
+    expect(PRINT_PAGINATE_SCRIPT).toContain("cell.textContent = text || '';");
+    expect(PRINT_PAGINATE_SCRIPT).toContain("createTextNode(run)");
     expect(PRINT_PAGINATE_SCRIPT).not.toContain("innerHTML");
   });
 

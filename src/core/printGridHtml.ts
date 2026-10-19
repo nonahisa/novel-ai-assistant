@@ -4,8 +4,12 @@ import {
   emptyHeaderFooter,
   marginsAttribute,
   pageSheetCss,
+  PRINT_DASH_CHARS,
+  PRINT_DASH_FONT_FAMILY,
+  PRINT_DASH_GOTHIC_FONT_FAMILY,
   PRINT_FONT_FAMILY,
   PRINT_GOTHIC_FONT_FAMILY,
+  renderDashes,
   type HeaderFooter,
   type PrintEpisode,
 } from "./printHtml";
@@ -192,7 +196,7 @@ export function buildGridPrintHtml(input: GridPrintHtmlInput): string {
     buildPrintGuide(escapeHtml(describeGrid(input.paper, input.grid, marginMm)), margins),
     '<div id="print-pages">',
     // 扉（題だけ）。上下の余白には何も刷らない（スクリプトが飛ばす）
-    `<div class="page page-cover"><div class="page-head"></div><div class="page-body"><h1 class="cover-title">${title}</h1></div><div class="page-foot"></div></div>`,
+    `<div class="page page-cover"><div class="page-head"></div><div class="page-body"><h1 class="cover-title">${renderDashes(input.workTitle.trim() || "無題")}</h1></div><div class="page-foot"></div></div>`,
     ...pages.map(renderPage),
     "</div>",
     "<script>",
@@ -240,6 +244,11 @@ function renderUnit(unit: GridUnit): string {
   if (unit.kind === "tcy") names.push("t");
   if (unit.kind === "half") names.push("h");
   if (unit.emphasis) names.push("e");
+  // ダッシュのマスだけ、繋がる書体へ（設計書6.33.6。ふつうの紙と同じ列）。
+  // マスの寸法は変わらないので、行とページの割り（manuscriptGrid.ts）には響かない
+  if (unit.kind === "char" && unit.text.length === 1 && PRINT_DASH_CHARS.includes(unit.text)) {
+    names.push("d");
+  }
   const attr = names.length > 0 ? ` class="${names.join(" ")}"` : "";
   return `<i${attr}>${escapeHtml(unit.text)}</i>`;
 }
@@ -289,6 +298,11 @@ function buildGridStyle(paper: GridPaperInfo, grid: GridOptions, marginMm: numbe
     ".gl i.t { text-combine-upright: all; -webkit-text-combine: horizontal; }",
     // 台本のト書きと柱（作者の裁定、2026-10-17）。台詞と人物名は明朝のまま
     `.gl.g { font-family: ${PRINT_GOTHIC_FONT_FAMILY}; }`,
+    // ダッシュのマス（紙の明朝・ゴシックとも先頭の游はダッシュが繋がらない）
+    `.gl i.d { font-family: ${PRINT_DASH_FONT_FAMILY}; }`,
+    // 扉の題と上下の帯（面に割るスクリプトが包む）のダッシュ。ふつうの紙と同じ指定
+    `.dash { font-family: ${PRINT_DASH_FONT_FAMILY}; letter-spacing: 0; line-height: 0; }`,
+    `.gl.g i.d { font-family: ${PRINT_DASH_GOTHIC_FONT_FAMILY}; }`,
     /*
       傍点：マスの外側（ルビと同じ側）にゴマ点を置く。**圏点（text-emphasis）は
       使わない**——1字ぶんの高さのマスでは、圏点が行の高さを押し広げて字が
