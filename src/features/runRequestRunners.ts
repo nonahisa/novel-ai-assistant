@@ -245,12 +245,30 @@ export function createRunRequestDeps(
     },
     measure: (work, file, def) =>
       def?.feature === "opening" ? measureOpening(work) : measureTarget(work, file),
-    confirm: async (message, detail, button = "走らせる") =>
-      (await vscode.window.showWarningMessage(
+    confirm: async (message, detail, button = "走らせる", more = []) => {
+      /*
+        **［詳しく］は2枚目の窓で開く**（設計書7.1.1）。モーダルの説明は畳めない
+        ので、詳しい行を足した窓で訊き直す。先頭のボタンは「走らせる」のまま
+        （統合テストと E2E がこの並びで押す）
+      */
+      const moreLabel = "詳しく";
+      const lines = more.filter((line) => line.trim() !== "");
+      const first = await vscode.window.showWarningMessage(
         message,
         { modal: true, detail },
-        button
-      )) === button,
+        button,
+        ...(lines.length > 0 ? [moreLabel] : [])
+      );
+      if (first === button) return true;
+      if (first !== moreLabel) return false;
+      return (
+        (await vscode.window.showWarningMessage(
+          message,
+          { modal: true, detail: [detail, "", `${moreLabel}：`, ...lines].join("\n") },
+          button
+        )) === button
+      );
+    },
     run: (def, work, filePaths) => runFeature(def, work, input.aiRegistry, filePaths),
     describeFailure: (error) => {
       if (error instanceof AIError) {

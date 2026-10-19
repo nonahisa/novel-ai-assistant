@@ -160,13 +160,13 @@ describe("AIを掛ける前の確認", () => {
     expect(text).toContain("まだ書かれていない節があります：視点・この話の目標");
   });
 
-  test("有料のAIなら、1回ぶん課金されると言う（実機確認リスト F-73 の代わり）", () => {
+  test("有料のAIなら、共通の形で料金を言う（実機確認リスト F-73 の代わり。設計書7.1.1）", () => {
     const text = describeEpisodePlotDesignConfirm({
       items: 3,
       blanks: [],
       paidProvider: "Google Gemini",
     });
-    expect(text).toContain("Google Gemini は1回ぶん課金されます。");
+    expect(text).toContain("Google Gemini（有料）で送ります\n料金：AIを 1 回呼びます。使った量だけかかります");
   });
 
   test("本文との照合は、本文の字数も出す（実機確認リスト F-73 の代わり）", () => {

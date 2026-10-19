@@ -22,7 +22,7 @@ describe("写真を送る前の確かめ", () => {
       "この写真 3枚を『Claude（クラウド・有料）（claude-opus-5-5）』へ送ります。"
     );
     expect(confirm.detail).toContain("写真は外のサービスに渡ります。");
-    expect(confirm.detail).toContain("課金");
+    expect(confirm.detail).toContain("料金：送るたびに、使った量だけかかります");
   });
 
   test("無料のクラウドでも外へ出ることは言う（課金の行は出さない）", () => {
@@ -72,7 +72,7 @@ describe("作者からの頼みも、送る前に見せる（6.117.7）", () => 
   test("クラウドへ送るとき、頼みの文を本文の末尾に出す（改行もそのまま）", () => {
     const confirm = describePhotoSend({ ...base, providerId: "claude", request: "旧字体はそのまま\nルビは（）に" });
     expect(confirm.detail).toBe(
-      "写真は外のサービスに渡ります。\n呼び出すたびに課金されます。\n\nAIへの頼み（一緒に送ります）：\n旧字体はそのまま\nルビは（）に"
+      "写真は外のサービスに渡ります。\n料金：送るたびに、使った量だけかかります\n\nAIへの頼み（一緒に送ります）：\n旧字体はそのまま\nルビは（）に"
     );
   });
 

@@ -1945,10 +1945,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         actionLabel: "AIへの相談",
         remember: { id: "ai.paid.workChat" },
         model: resolved.model,
-        detail:
-          "送信するたびに1回ずつ課金されます。\n" +
-          "会話が続くほど、これまでのやり取りも一緒に送るため入力が長くなります。\n" +
+        sends: "問いと、これまでのやり取り・作品の資料",
+        more: [
+          "会話が続くほど、これまでのやり取りも一緒に送るため入力が長くなります。",
           "（この確認はこの会話で一度だけです。「最初から」を押すと再び確認します）",
+        ],
       });
       if (!ok) {
         this.postAll({ type: "cancelled" });
@@ -4378,9 +4379,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         actionLabel: spec.label,
         remember: { id: "ai.paid.workChat" },
         model: resolved.model,
-        detail:
-          "問いを1つ出すたびに1回ずつ課金されます（受け取れなかったときは、もう1回頼み直します）。\n" +
+        sends: "これまでのやり取りと作品の資料",
+        more: [
+          "問いを1つ出すたびにAIを1回呼びます（受け取れなかったときは、もう1回頼み直します）。",
           "（この確認はこの会話で一度だけです。「最初から」を押すと再び確認します）",
+        ],
       });
       if (!ok) {
         this.postAll({ type: "cancelled" });

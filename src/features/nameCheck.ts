@@ -379,9 +379,9 @@ export async function suggestNames(
     work,
     model: resolved.model,
     calls: 1,
-    detail:
-      `送るのは既にある名前の一覧と、作品の世界観の節だけです。\n` +
-      "本文は送りません。候補が出るだけで、何も書き換わりません。",
+    sends: "既にある名前の一覧と、作品の世界観の節",
+    bodyNotSent: true,
+    more: ["候補が出るだけで、何も書き換わりません。"],
   });
   if (!ok) return;
 

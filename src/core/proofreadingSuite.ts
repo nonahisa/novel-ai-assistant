@@ -13,6 +13,7 @@
  * VS Code APIに依存しない。
  */
 
+import { paidPriceLine } from "./paidUsageNotice";
 import {
   describeCallTimeEstimate,
   type CallTimeEstimate,
@@ -532,7 +533,7 @@ export function buildSuiteConfirm(
         "分かれて数が増えることがあります）。"
     );
     if (estimate.isPaid) {
-      lines.push("チャンクごとに課金されます。");
+      lines.push(paidPriceLine());
     } else {
       // 無料のAI（Ollama・LM Studio）では料金の話をしない。
       // 作者が知りたいのは「どれくらい待つか」だけである

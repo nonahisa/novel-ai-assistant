@@ -235,9 +235,11 @@ export async function applyChatToSettings(
     remember: { id: "ai.paid.chatSettingsSync" },
     model: resolved.model,
     calls: 1,
-    detail:
-      "いま画面にある会話をAIへ送り、作者が決めた人物の設定を拾い出します。\n" +
+    sends: "いま画面にある会話と、人物の名前の一覧",
+    more: [
+      "会話から、作者が決めた人物の設定を拾い出します。",
       "拾ったあと、資料へ直接書くか承認待ちに積むかを選べます（選ぶまで資料は変わりません）。",
+    ],
   });
   if (!ok) return { ...EMPTY, failed: true };
 

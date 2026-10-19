@@ -882,7 +882,10 @@ export async function runWorkTuning(
     remember: { id: "ai.paid.measureContext" },
     model,
     calls: plannedCallCount(target),
-    detail: `${plan}\n送るのは製品に同梱した短い文だけで、作品の本文は送りません。`,
+    sends: "製品に同梱した短い文",
+    bodyNotSent: true,
+    // 段ごとの回数の内訳。合計は窓の3行目に出る
+    more: [plan],
   });
   if (!ok) return;
 

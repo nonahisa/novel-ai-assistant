@@ -14,6 +14,7 @@
  */
 
 import * as path from "./pathText";
+import { paidCostLines } from "./paidUsageNotice";
 import {
   EPISODE_PLOTS_DIR,
   episodePlotChapterFromFileName,
@@ -234,7 +235,7 @@ export function describeEpisodePlotDesignConfirm(options: {
     options.blanks.length > 0
       ? `\nまだ書かれていない節があります：${options.blanks.join("・")}`
       : "",
-    options.paidProvider ? `\n${options.paidProvider} は1回ぶん課金されます。` : "",
+    options.paidProvider ? `\n${paidCostLines(options.paidProvider, 1).join("\n")}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -261,7 +262,7 @@ export function describeEpisodePlotContrastConfirm(options: {
     "",
     "本文もプロットも書き換えません。 食い違いを並べるだけで、",
     "箇条書きのほうが古いこともあります。",
-    options.paidProvider ? `\n${options.paidProvider} は1回ぶん課金されます。` : "",
+    options.paidProvider ? `\n${paidCostLines(options.paidProvider, 1).join("\n")}` : "",
   ]
     .filter(Boolean)
     .join("\n");

@@ -63,6 +63,7 @@ import { estimateRunTimeText } from "../ai/runTimeEstimate";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import { confirmRun } from "../views/notify";
 import { confirmFormatFit } from "./formatFitPrompt";
 import {
@@ -284,7 +285,7 @@ export async function checkDeviations(
         ? "\n（見る種別が前回から変わっているため、今回はすべて送り直します）"
         : "",
       resolved.provider.isPaid
-        ? `\n${resolved.provider.displayName} は話ごとに課金されます。`
+        ? `\n${paidCostLines(resolved.provider.displayName, pending.length).join("\n")}`
         : "",
     ]
       .filter(Boolean)

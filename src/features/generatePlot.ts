@@ -33,6 +33,7 @@ import {
   PLOT_REVERSE_VERSION,
 } from "../prompts/plotReverse";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { withCancellableProgress } from "../views/progress";
 import {
@@ -102,7 +103,7 @@ export async function generatePlot(
         "AIの呼び出しは1回です（本文全体は読み直しません）。",
         "作者が既に書いた項目は、確認せずに書き換えることはありません。",
         resolved.provider.isPaid
-          ? `\n${resolved.provider.displayName} はトークンを消費し、利用量が加算されます。`
+          ? `\n${paidCostLines(resolved.provider.displayName, 1).join("\n")}`
           : "",
       ]
         .filter(Boolean)

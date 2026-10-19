@@ -26,13 +26,13 @@ import {
  */
 
 const confirmCalls = vi.hoisted(() => ({
-  list: [] as Array<{ calls?: number; detail?: string }>,
+  list: [] as Array<{ calls?: number; more?: readonly string[] }>,
   answer: true,
 }));
 
 vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmPaidUsage: vi.fn(
-    async (provider: { isPaid: boolean }, options: { calls?: number; detail?: string }) => {
+    async (provider: { isPaid: boolean }, options: { calls?: number; more?: readonly string[] }) => {
       // 無料のAIには確認を出さない（製品と同じ）
       if (!provider.isPaid) return true;
       confirmCalls.list.push(options);
@@ -748,7 +748,8 @@ describe("読める長さを、断られた文から覚える", () => {
     const target = { providerId: "sakura", local: false };
     expect(confirmCalls.list).toHaveLength(1);
     expect(confirmCalls.list[0].calls).toBe(plannedCallCount(target));
-    expect(confirmCalls.list[0].detail).toContain(
+    // 回数の合計は窓の3行目（calls）、段ごとの内訳は［詳しく］に入る
+    expect((confirmCalls.list[0].more ?? []).join("\n")).toContain(
       `合わせて最大 ${plannedCallCount(target)} 回`
     );
     expect(plannedStages(target).map((stage) => stage.id)).toContain("declaredLimit");

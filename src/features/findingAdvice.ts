@@ -133,9 +133,9 @@ export async function askFindingAdvice(
     work: request.work,
     model: resolved.model,
     calls: 1,
-    detail:
-      "送るのは指摘の一文と前後の段落、指摘の中身だけです（本文全体は送りません）。\n" +
-      "返るのは短い助言だけで、本文は書き換わりません。",
+    // 前後の段落は本文なので「本文は送りません」とは言わない
+    sends: "指摘の一文と前後の段落、指摘の中身（本文全体は送りません）",
+    more: ["返るのは短い助言だけで、本文は書き換わりません。"],
   });
   if (!ok) return { kind: "cancelled" };
 

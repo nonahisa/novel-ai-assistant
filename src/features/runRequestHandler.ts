@@ -39,7 +39,6 @@ import {
   type RunStateRecord,
   type RunTicket,
 } from "../core/runRequest";
-import { paidUsageLines } from "../core/paidUsageNotice";
 import { VECTOR_INDEX_VERSION } from "../core/vectorIndexFormat";
 import type { PdfExportPlanLines } from "../core/pdfExportConfig";
 
@@ -126,9 +125,17 @@ export interface RunRequestHandlerDeps<W extends RunWork = RunWork> {
   measure(work: W, file: string | undefined, def?: RunFeatureDef): Promise<RunMeasure>;
   /**
    * モーダルで確かめる。ボタン（既定は「走らせる」）が押されたら true。
-   * 表紙を焼く依頼だけ「焼く」にする——確認の文面が「「焼く」を押さずに」と言うため
+   * 表紙を焼く依頼だけ「焼く」にする——確認の文面が「「焼く」を押さずに」と言うため。
+   *
+   * `more` は［詳しく］で開く行（有料のAIのモデル名と料金の細かい断り。設計書7.1.1）。
+   * 渡せば窓に［詳しく］のボタンが並び、押すと行を足した窓で訊き直す
    */
-  confirm(message: string, detail: string, button?: string): Promise<boolean>;
+  confirm(
+    message: string,
+    detail: string,
+    button?: string,
+    more?: readonly string[]
+  ): Promise<boolean>;
   run(def: RunFeatureDef, work: W, filePaths: string[]): Promise<RunOutcome>;
   /** 走らせている途中の例外を、理由と次の操作にする（`AIError.kind` ごと。規則5） */
   describeFailure(error: unknown): RunFailureView;
@@ -418,19 +425,14 @@ export async function handleRunRequest<W extends RunWork>(
     paid: ai.paid,
     bodyChars: measured.bodyChars,
     episodeCount: measured.episodeCount,
-    // **有料の断りは画面の確認と同じ行**（`confirmPaidUsage` と同じ部品）。
-    // 判定のAIだけが有料なら、判定のAIの行を出す
-    paidLines: ai.paid
-      ? paidUsageLines(ai.providerName, ai.model)
-      : verifier?.paid
-        ? paidUsageLines(verifier.providerName, verifier.model)
-        : [],
+    // **有料の断りは画面の確認と同じ3行**（`describeRunConfirm` が
+    // `core/paidUsageNotice.ts` で組む）。判定のAIだけが有料でも出す
     def,
     ...(verifier
       ? { verifier: { providerName: verifier.providerName, model: verifier.model, paid: verifier.paid } }
       : {}),
   });
-  const accepted = await deps.confirm(confirm.message, confirm.detail);
+  const accepted = await deps.confirm(confirm.message, confirm.detail, undefined, confirm.more);
   if (!accepted) {
     await deps.writeState(stateOf(ticket, "declined", deps.now()));
     deps.log(`作者が断りました：${forLog}`);
@@ -790,7 +792,7 @@ async function handleTestAiRequest<W extends RunWork>(
     model: ai.model,
     paid: ai.paid,
   });
-  if (!(await deps.confirm(confirm.message, confirm.detail))) {
+  if (!(await deps.confirm(confirm.message, confirm.detail, undefined, confirm.more))) {
     await deps.writeState(stateOf(ticket, "declined", deps.now()));
     deps.log(`作者が断りました：${forLog}`);
     return;

@@ -339,9 +339,8 @@ export async function readFromWork(
     work,
     model: resolved.model,
     calls: 1,
-    detail:
-      `送るのは${material.basis}の${material.chars}字だけです。\n` +
-      "本文は書き換えません。",
+    sends: `${material.basis}の${material.chars}字`,
+    more: ["本文は書き換えません。"],
   });
   if (!ok) return "cancelled";
 

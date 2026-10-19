@@ -1,6 +1,7 @@
 import { EXTENSION_URI_AUTHORITY } from "./setupRequest";
 import { clientKeyOf } from "./externalAccessPermission";
 import type { PdfExportPlanLines } from "./pdfExportConfig";
+import { paidUsageNotice } from "./paidUsageNotice";
 
 /**
  * VS Code の中のAI設定で走らせてもらう道（設計書6.87.22）。
@@ -346,18 +347,29 @@ export interface RunTestAiConfirmInput {
 export function describeTestAiConfirm(input: RunTestAiConfirmInput): {
   message: string;
   detail: string;
+  /** ［詳しく］で開く行。無料のときは空 */
+  more: string[];
 } {
   const who = clientKeyOf(input.ticket.client);
   const deadline = new Date(Date.parse(input.ticket.createdAt) + RUN_CONFIRM_MS);
+  const aiLine = `確かめるAI：${input.providerName}（${input.model}）※AI設定で選んだAI（機能ごとの割当ではありません）`;
+  const steps = "接続を確かめたあと、「はい」とだけ答える短い文を1回送って、生成できるかを試します。";
+  // **有料なら、画面の確認と同じ3行を先頭に置く**（設計書7.1.1）。
+  // モデル名と手順の説明は［詳しく］へ
+  const notice = input.paid
+    ? paidUsageNotice(input.providerName, input.model, {
+        sends: "「はい」とだけ答える短い文",
+        bodyNotSent: true,
+        calls: 1,
+        more: [aiLine, steps],
+      })
+    : undefined;
   const lines = [
+    ...(notice ? [...notice.lines, ""] : []),
     `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
     `作品：${input.workTitle}（許可を確かめるための作品で、本文は送りません）`,
     `機能：${RUN_TEST_AI_LABEL}`,
-    `確かめるAI：${input.providerName}（${input.model}）※AI設定で選んだAI（機能ごとの割当ではありません）`,
-    "接続を確かめたあと、「はい」とだけ答える短い文を1回送って、生成できるかを試します。",
-    input.paid
-      ? "料金：有料のAIです。短い文1回ぶんの、ごく少額の料金がかかります。"
-      : "料金：無料・手元で実行（API課金なし）",
+    ...(notice ? [] : [aiLine, steps, "料金：無料・手元で実行（API課金なし）"]),
     "",
     "結果（繋がったか・繋がらなければ理由と次の操作）は拡張機能の保管庫に置き、頼んだ側が読みます。" +
       "原稿・設定資料・提案パネルは変わりません。",
@@ -367,6 +379,7 @@ export function describeTestAiConfirm(input: RunTestAiConfirmInput): {
   return {
     message: `外部AI（${who}）からの依頼です。「${RUN_TEST_AI_LABEL}」を走らせますか？`,
     detail: lines.join("\n"),
+    more: notice ? [...notice.more] : [],
   };
 }
 
@@ -1094,8 +1107,6 @@ export interface RunConfirmInput {
   paid: boolean;
   bodyChars: number;
   episodeCount: number;
-  /** 有料のAIのときの断り（`core/paidUsageNotice.ts` の行） */
-  paidLines: readonly string[];
   /** 機能の定義（処理済みを飛ばすか・足す行）。無ければ従来どおり */
   def?: RunFeatureDef;
   /** 判定に使う2つ目のAI（事実の照合） */
@@ -1107,41 +1118,85 @@ export interface RunConfirmInput {
  * 使うAI・送る量・料金）。見せずに走らせると、作者は何を許したのか分からない。
  *
  * **名乗りは自己申告と書く**（6.87.14「名乗りは目印であって、鍵ではない」）。
+ *
+ * **有料のAIを使うときは、画面の確認と同じ3行を先頭に置く**（設計書7.1.1。
+ * `core/paidUsageNotice.ts`）。量（本文の字数と話数）は2行目に入れる。
+ * モデル名・送る量の細かい断り・料金の細かい断りは `more`（［詳しく］）へ移す。
+ * どこから・作品・期限・「覚えのない依頼なら」は**安全のための行**なので、
+ * 3行のあとに残す。
  */
 export function describeRunConfirm(input: RunConfirmInput): {
   message: string;
   detail: string;
+  /** ［詳しく］で開く行。無料のときは空 */
+  more: string[];
 } {
   const who = clientKeyOf(input.ticket.client);
   const deadline = new Date(Date.parse(input.ticket.createdAt) + RUN_CONFIRM_MS);
-  const lines = [
-    `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
-    `作品：${input.workTitle}`,
-    `対象：${input.targetLabel}`,
-    `機能：${input.featureLabel}`,
-    input.verifier
-      ? `使うAI：取り出し ${input.providerName}（${input.model}）・判定 ` +
-        `${input.verifier.providerName}（${input.verifier.model}）※機能別AI割当のとおり`
-      : `使うAI：${input.providerName}（${input.model}）※機能別AI割当のとおり`,
-    `送る量：本文 約${input.bodyChars.toLocaleString("ja-JP")}字（${input.episodeCount}話）。` +
-      (input.def?.skipsProcessed === false ? "" : "処理済みの部分は送りません。") +
-      "指示と設定資料のぶんが加わります。" +
-      "保存していない変更は含まれません（保存済みの本文を読みます）。",
-    ...(input.def?.confirmNotes ?? []),
-    // **どちらかが有料なら料金の断りを出す**（有料のほうの行は呼ぶ側が組んで渡す）
-    ...(input.paid || input.verifier?.paid
-      ? input.paidLines
-      : ["料金：無料・手元で実行（API課金なし）"]),
+  const volume = `本文 約${input.bodyChars.toLocaleString("ja-JP")}字（${input.episodeCount}話）`;
+  const volumeNotes = [
+    input.def?.skipsProcessed === false ? "" : "処理済みの部分は送りません。",
+    "指示と設定資料のぶんが加わります。",
+    "保存していない変更は含まれません（保存済みの本文を読みます）。",
+  ].filter(Boolean);
+  const aiLine = input.verifier
+    ? `使うAI：取り出し ${input.providerName}（${input.model}）・判定 ` +
+      `${input.verifier.providerName}（${input.verifier.model}）※機能別AI割当のとおり`
+    : `使うAI：${input.providerName}（${input.model}）※機能別AI割当のとおり`;
+  const tail = [
     "",
     "結果は拡張機能の保管庫（この機械の中）に置き、頼んだ側が読みます。" +
       "原稿・設定資料・提案パネルは変わりません。",
     `期限：${formatClock(deadline)} を過ぎて押しても走りません。`,
     "覚えのない依頼なら「走らせる」を押さずに閉じてください。",
   ];
-  return {
-    message: `外部AI（${who}）からの依頼です。あなたのAIで「${input.featureLabel}」を走らせますか？`,
-    detail: lines.join("\n"),
-  };
+  const message = `外部AI（${who}）からの依頼です。あなたのAIで「${input.featureLabel}」を走らせますか？`;
+
+  if (!(input.paid || input.verifier?.paid)) {
+    const lines = [
+      `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
+      `作品：${input.workTitle}`,
+      `対象：${input.targetLabel}`,
+      `機能：${input.featureLabel}`,
+      aiLine,
+      `送る量：${volume}。${volumeNotes.join("")}`,
+      ...(input.def?.confirmNotes ?? []),
+      "料金：無料・手元で実行（API課金なし）",
+      ...tail,
+    ];
+    return { message, detail: lines.join("\n"), more: [] };
+  }
+
+  // **有料のほうだけを1行目に名指しする**（判定のAIだけが有料のこともある）。
+  // 両方が有料で同じサービスなら1つにまとめる
+  const paidParts = [
+    input.paid ? { name: input.providerName, model: input.model, role: "取り出し" } : undefined,
+    input.verifier?.paid
+      ? { name: input.verifier.providerName, model: input.verifier.model, role: "判定" }
+      : undefined,
+  ].filter((part): part is { name: string; model: string; role: string } => part !== undefined);
+  const paidName = [...new Set(paidParts.map((part) => part.name))].join("・");
+  const paidModel =
+    paidParts.length > 1
+      ? paidParts.map((part) => `${part.role} ${part.model}`).join("・")
+      : paidParts[0].model;
+  const notice = paidUsageNotice(paidName, paidModel, {
+    sends: volume,
+    more: volumeNotes,
+  });
+  const lines = [
+    ...notice.lines,
+    "",
+    `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
+    `作品：${input.workTitle}`,
+    `対象：${input.targetLabel}`,
+    `機能：${input.featureLabel}`,
+    // 2つのAIを使うときは、どちらが何をするかを窓に残す（片方は無料のこともある）
+    ...(input.verifier ? [aiLine] : []),
+    ...(input.def?.confirmNotes ?? []),
+    ...tail,
+  ];
+  return { message, detail: lines.join("\n"), more: [...notice.more] };
 }
 
 // ── 索引づくり（vectorIndex）─────────────────────────────

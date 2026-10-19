@@ -761,12 +761,12 @@ async function runMeasurement(
     actionLabel: "AIチューニング",
     remember: { id: "ai.paid.measureContext" },
     model: resolved.model,
-    detail:
-      `最大で約 ${ceilingChars.toLocaleString("ja-JP")} 字まで、` +
-      "長さを変えながら10回ほど送ります。\n" +
-      `送る量は、多く見て合計 約 ${estimateTokens.toLocaleString("ja-JP")} ` +
-      "トークンです（途中で決まれば、これより少なく済みます）。\n" +
-      "送るのは検査用の詰め物だけで、作品の本文は送りません。",
+    // 量（字数・回数・トークン）は窓の本文に残す。作者はこれを見て決める
+    sends:
+      `検査用の詰め物（最大 約${ceilingChars.toLocaleString("ja-JP")}字まで、` +
+      `長さを変えて10回ほど。多く見て合計 約${estimateTokens.toLocaleString("ja-JP")}トークン）`,
+    bodyNotSent: true,
+    more: ["途中で決まれば、見込みより少なく済みます。"],
   });
   if (!ok) return;
 

@@ -30,7 +30,7 @@ import {
 } from "../../../src/core/runRequest";
 import { sha256Text } from "../../../src/core/hash";
 import { permissionKeyOf } from "../../../src/core/externalAccessPermission";
-import { paidUsageLines } from "../../../src/core/paidUsageNotice";
+import { paidUsageNotice } from "../../../src/core/paidUsageNotice";
 
 /**
  * VS Code の中のAI設定で走らせてもらう道の判定（設計書6.87.22）。
@@ -281,19 +281,34 @@ describe("確認のモーダル", () => {
   };
 
   test("依頼の中身を全部並べる（どこから・作品・話・機能・AI・送る量）", () => {
-    const { message, detail } = describeRunConfirm({ ...base, paid: false, paidLines: [] });
+    const { message, detail, more } = describeRunConfirm({ ...base, paid: false });
     expect(message).toContain("誤字脱字の検知");
     for (const expected of ["claude-code", "自己申告", "星の町", "第3話.txt", "作り物のクラウドAI", "model-x", "4,321字", "無料"]) {
       expect(detail).toContain(expected);
     }
     expect(detail).not.toContain("今後は確認しない");
+    // 無料なら［詳しく］は要らない
+    expect(more).toEqual([]);
   });
 
-  test("有料のAIなら、画面の確認と同じ料金の断りを出す", () => {
-    const paidLines = paidUsageLines("作り物のクラウドAI", "model-x");
-    const { detail } = describeRunConfirm({ ...base, paid: true, paidLines });
-    for (const line of paidLines) expect(detail).toContain(line);
+  test("有料のAIなら、画面の確認と同じ3行を先頭に置き、細かい断りは［詳しく］へ", () => {
+    const { detail, more } = describeRunConfirm({ ...base, paid: true });
+    const expected = paidUsageNotice("作り物のクラウドAI", "model-x", {
+      sends: "本文 約4,321字（1話）",
+      more: [
+        "処理済みの部分は送りません。",
+        "指示と設定資料のぶんが加わります。",
+        "保存していない変更は含まれません（保存済みの本文を読みます）。",
+      ],
+    });
+    expect(detail.split("\n").slice(0, 3)).toEqual([...expected.lines]);
+    expect(more).toEqual([...expected.more]);
+    // 安全のための行は窓に残す
+    for (const kept of ["自己申告", "作品：星の町", "対象：第3話.txt", "期限：", "覚えのない依頼なら"]) {
+      expect(detail).toContain(kept);
+    }
     expect(detail).not.toContain("無料");
+    expect(detail).not.toContain("model-x");
   });
 
   test("処理済みを飛ばさない機能では「処理済みの部分は送りません」と言わない", () => {
@@ -301,11 +316,10 @@ describe("確認のモーダル", () => {
       ...base,
       featureLabel: "冒頭診断",
       paid: false,
-      paidLines: [],
       def: findRunFeature("opening"),
     }).detail;
     expect(opening).not.toContain("処理済みの部分は送りません");
-    const typo = describeRunConfirm({ ...base, paid: false, paidLines: [], def: findRunFeature("typo") }).detail;
+    const typo = describeRunConfirm({ ...base, paid: false, def: findRunFeature("typo") }).detail;
     expect(typo).toContain("処理済みの部分は送りません");
   });
 
@@ -314,7 +328,6 @@ describe("確認のモーダル", () => {
       ...base,
       featureLabel: "設定資料の抽出",
       paid: false,
-      paidLines: [],
       def: findRunFeature("settings"),
     });
     expect(detail).toContain("external-extract.json");
@@ -322,22 +335,35 @@ describe("確認のモーダル", () => {
   });
 
   test("判定に別のAIを使う機能は、両方のAIを並べ、片方が有料なら料金の断りを出す", () => {
-    const paidLines = paidUsageLines("判定のクラウドAI", "judge-1");
-    const { detail } = describeRunConfirm({
+    const { detail, more } = describeRunConfirm({
       ...base,
       featureLabel: "矛盾検知（事実の照合）",
       paid: true,
-      paidLines,
       def: findRunFeature("factContradiction"),
       verifier: { providerName: "判定のクラウドAI", model: "judge-1", paid: true },
     });
+    // 2つのAIを使うときは、どちらが何をするかを窓に残す
     expect(detail).toContain("作り物のクラウドAI（model-x）");
     expect(detail).toContain("判定のクラウドAI（judge-1）");
-    for (const line of paidLines) expect(detail).toContain(line);
+    // 両方が有料なら1行目に両方の名前、モデルは役目つきで［詳しく］へ
+    expect(detail.split("\n")[0]).toBe("作り物のクラウドAI・判定のクラウドAI（有料）で送ります");
+    expect(more[0]).toBe("使うモデル：取り出し model-x・判定 judge-1");
+  });
+
+  test("判定のAIだけが有料なら、1行目は判定のAIの名前", () => {
+    const { detail } = describeRunConfirm({
+      ...base,
+      featureLabel: "矛盾検知（事実の照合）",
+      paid: false,
+      def: findRunFeature("factContradiction"),
+      verifier: { providerName: "判定のクラウドAI", model: "judge-1", paid: true },
+    });
+    expect(detail.split("\n")[0]).toBe("判定のクラウドAI（有料）で送ります");
+    expect(detail).not.toContain("料金：無料");
   });
 
   test("AI接続確認の確認は、短い文を1回だけ送ることと料金を並べる", () => {
-    const { message, detail } = describeTestAiConfirm({
+    const { message, detail, more } = describeTestAiConfirm({
       ticket: ticket({ feature: "testAI" }),
       workTitle: "星の町",
       providerName: "作り物のクラウドAI",
@@ -345,10 +371,31 @@ describe("確認のモーダル", () => {
       paid: true,
     });
     expect(message).toContain("AI接続確認");
-    for (const expected of ["claude-code", "自己申告", "作り物のクラウドAI", "model-x", "本文は送りません", "料金"]) {
+    // 有料なら画面の確認と同じ3行（設計書7.1.1）
+    expect(detail.split("\n").slice(0, 3)).toEqual([
+      "作り物のクラウドAI（有料）で送ります",
+      "送るもの：「はい」とだけ答える短い文（本文は送りません）",
+      "料金：AIを 1 回呼びます。使った量だけかかります",
+    ]);
+    for (const expected of ["claude-code", "自己申告"]) {
       expect(detail).toContain(expected);
     }
+    expect(more.join("\n")).toContain("model-x");
     expect(detail).not.toContain("今後は確認しない");
+  });
+
+  test("AI接続確認：無料のAIなら3行も［詳しく］も出さず、無料と書く", () => {
+    const { detail, more } = describeTestAiConfirm({
+      ticket: ticket({ feature: "testAI" }),
+      workTitle: "星の町",
+      providerName: "Ollama",
+      model: "gemma",
+      paid: false,
+    });
+    expect(detail).toContain("確かめるAI：Ollama（gemma）");
+    expect(detail).toContain("料金：無料");
+    expect(detail).not.toContain("（有料）で送ります");
+    expect(more).toEqual([]);
   });
 });
 

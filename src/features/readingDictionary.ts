@@ -195,9 +195,9 @@ export async function runReadingDictionary(
       actionLabel: "読みの確かめ",
       model: resolved.model,
       calls: pending.length,
-      detail:
-        `送るのはこの話の本文 ${chars.toLocaleString("ja-JP")}字です` +
-        `（${pending.length}回に分けて送ります。前回から変わっていない所は送りません）。`,
+      sends:
+        `この話の本文 ${chars.toLocaleString("ja-JP")}字` +
+        "（前回から変わっていない所は送りません）",
       remember: { id: "ai.paid.readingDictionary" },
       work,
     });

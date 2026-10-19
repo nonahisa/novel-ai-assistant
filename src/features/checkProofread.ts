@@ -67,6 +67,7 @@ import { estimateRunTimeText } from "../ai/runTimeEstimate";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import {
   logStep,
   responseExcerptForLog,
@@ -256,7 +257,7 @@ export async function checkProofread(
       "",
       "本文は書き換えません。 指摘を1件ずつ確認して適用します。",
       resolved.provider.isPaid
-        ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
+        ? `\n${paidCostLines(resolved.provider.displayName).join("\n")}`
         : "",
     ]
       .filter(Boolean)

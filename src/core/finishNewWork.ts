@@ -38,6 +38,7 @@ import {
   type SuiteEstimate,
 } from "./proofreadingSuite";
 import { prerequisiteInfo, type Prerequisite } from "./prerequisites";
+import { paidPriceLine } from "./paidUsageNotice";
 
 /** まとめの入口。`package.json` と詳細メニューが同じIDを使う */
 export const FINISH_NEW_WORK_COMMAND = "novelai.finishNewWork";
@@ -310,7 +311,7 @@ export function buildFinishConfirm(
         "分かれて数が増えることがあります）。"
     );
     if (estimate.isPaid) {
-      lines.push("チャンクごとに課金されます。");
+      lines.push(paidPriceLine());
     } else {
       // 無料のAI（Ollama・LM Studio）では料金の話をしない。
       // 作者が知りたいのは「どれくらい待つか」だけである
@@ -326,7 +327,7 @@ export function buildFinishConfirm(
       `本文を丸ごと読む段が${scanning.length}つあります` +
         "（送る量は、実行時にモデルの大きさから決まります）。"
     );
-    if (estimate?.isPaid) lines.push("チャンクごとに課金されます。");
+    if (estimate?.isPaid) lines.push(paidPriceLine());
   }
   if (others.length > 0) {
     lines.push(`残りの${others.length}段は、1回ずつの短い呼び出しです。`);

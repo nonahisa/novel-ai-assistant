@@ -96,6 +96,7 @@ import { estimateRunTimeText } from "../ai/runTimeEstimate";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import { confirmRun } from "../views/notify";
 import {
   logFailure,
@@ -339,7 +340,7 @@ export async function checkFactContradictions(
       // 判定だけ別のAIになりうることを黙らない（有料のAIなら料金にも効く）
       "見つかった候補は、矛盾検知に割り当てたAIが1件ずつ確かめます。",
       provider.isPaid
-        ? `\n${provider.displayName} はチャンクごとに課金されます。`
+        ? `\n${paidCostLines(provider.displayName).join("\n")}`
         : "",
     ]
       .filter(Boolean)
@@ -704,7 +705,7 @@ export async function checkFactContradictions(
               `（${verifier.provider.displayName} / ${verifier.model}）が1件ずつ確かめます。`,
             "送るのは候補の前後の数行だけです。本文は書き換えません。",
             verifier.provider.isPaid
-              ? `\n${verifier.provider.displayName} は1件ごとに課金されます。`
+              ? `\n${paidCostLines(verifier.provider.displayName, unverified).join("\n")}`
               : "",
           ]
             .filter(Boolean)
