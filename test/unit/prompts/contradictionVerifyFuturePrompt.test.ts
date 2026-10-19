@@ -128,7 +128,8 @@ describe("future から来た指摘の文面（1.3）", () => {
   it("「作中の変化」は future 用の説明になる（1.2 の説明は出さない）", () => {
     expect(known).toContain("2. **作中の変化** … 判明した事実が、対象の話の時点より後に起きた変化と読める場合だけ");
     expect(known).toContain("作中の変化には当たりません");
-    expect(known).toContain("三ヶ月前に退学した");
+    // 例は測定の台の仕込み（三ヶ月前の退学）と重ならない事実にしてある（答えを教えて測らないため）
+    expect(known).toContain("一年前に東京から越してきた");
     expect(known).not.toContain("人物の身の上が先へ進むのは矛盾ではありません");
   });
 
