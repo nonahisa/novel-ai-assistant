@@ -32,6 +32,7 @@ import {
 } from "./contradictionValidation";
 import {
   buildContradictionVerifyPrompt,
+  CONTRADICTION_VERIFY_FUTURE_VERSION,
   CONTRADICTION_VERIFY_VERSION,
 } from "../prompts/contradictionVerify";
 
@@ -48,9 +49,22 @@ import {
  */
 export function contradictionVerifyPromptVersion(
   smallModel: boolean,
-  materialFingerprint: string
+  materialFingerprint: string,
+  /**
+   * 指摘がどちらの突き合わせから来たか（P-12b 1.3）。省けば本命（settled）で、
+   * 鍵は 1.2 のときと1文字も変わらない。
+   *
+   * **「あとで判明する事実」（future）からの指摘だけ、別の版と `future:` の印を付ける。**
+   * future へは文面が違う（出どころの一文・理由の並べ方）ので、本命と同じ鍵に入れると
+   * 1.2 の文面で得た却下を使い回す。版を上げずに印で分けるのは `strict:` と同じ理由
+   */
+  source: "settled" | "future" = "settled"
 ): string {
-  return `${CONTRADICTION_VERIFY_VERSION}:${smallModel ? "strict:" : ""}${materialFingerprint}`;
+  const strict = smallModel ? "strict:" : "";
+  if (source === "future") {
+    return `${CONTRADICTION_VERIFY_FUTURE_VERSION}:${strict}future:${materialFingerprint}`;
+  }
+  return `${CONTRADICTION_VERIFY_VERSION}:${strict}${materialFingerprint}`;
 }
 
 /**
@@ -195,6 +209,12 @@ export function buildContradictionVerifyUserPrompt(input: {
    * （製品は `suppressUncertainContradictions`、MCP は `suppression: "strict"`）
    */
   smallModel?: boolean;
+  /**
+   * どちらの突き合わせから来た指摘か（P-12b 1.3）。省けば本命（settled）。
+   * future のときは `settingKnownAt` も `describeFutureKnownAt` で引いたものを渡す
+   * （`core/contradictionFutureFacts.ts`）
+   */
+  source?: "settled" | "future";
 }): string {
   return buildContradictionVerifyPrompt({
     chapterLabel: input.chapterLabel,
@@ -205,5 +225,6 @@ export function buildContradictionVerifyUserPrompt(input: {
     category: input.issue.category,
     settingKnownAt: input.settingKnownAt,
     smallModel: input.smallModel,
+    source: input.source,
   });
 }

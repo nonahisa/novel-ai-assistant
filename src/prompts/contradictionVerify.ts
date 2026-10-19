@@ -53,6 +53,21 @@
 // （docs/measurements/2026-10-18-speech-note-with-index.md）
 export const CONTRADICTION_VERIFY_VERSION = "1.2";
 
+// 1.3（2026-10-19 夜、作者の裁定「A+C で実装する」）：**「あとで判明する事実」の段
+// （future）から来た指摘にだけ**、出どころの一文を置き、却下の理由から
+// 「まだ明かされていない」を外し、「作中の変化」を future 用の説明に差し替える
+// （`source: "future"`）。e4b は第3話の「学校で授業を受け」（第4話で判明する
+// 「三ヶ月前に退学」）を「作中の変化」で、26b は第2話の「生まれてからずっと本屋」
+// （第5話で判明する「元刑事」）を「まだ明かされていない」で取り下げていた。
+// future の照合は「設定が対象の話より後に分かる」ことが前提なので、その2つの理由が
+// 前提そのもので当たりを消す。
+// **本命の突き合わせ（settled）の文面は1文字も変えていない**ので、
+// `CONTRADICTION_VERIFY_VERSION` は 1.2 のまま据え置き、future の控えの鍵だけに
+// この版と `future:` の印を付ける（`contradictionVerifyPromptVersion`。裁定⑧の
+// `strict:` と同じやり方）。上げると作者のクラウドAIの確かめの控えまで作り直しになる
+// （docs/進捗と引継ぎ.md 8章「【測定】2026-10-19 夜：矛盾検知「あとで判明する事実」2項目の測り直し」）
+export const CONTRADICTION_VERIFY_FUTURE_VERSION = "1.3";
+
 /**
  * 送るときの温度。指摘が本当に矛盾かを確かめるだけなので揺らさない。
  *
@@ -146,7 +161,56 @@ export interface ContradictionVerifyInput {
    * MCP の `suppression: "strict"`）と一対で決める。
    */
   smallModel?: boolean;
+  /**
+   * 指摘がどちらの突き合わせから来たか（1.3）。省けば本命（settled）で、1.2 と同じ文面。
+   *
+   * `"future"`（あとで判明する事実との照合）のときだけ、出どころの一文を置き、
+   * 「まだ明かされていない」を並べず、「作中の変化」を future 用の説明にする。
+   * 大きいモデルにも小さいモデルにも同じ形を送る。
+   */
+  source?: "settled" | "future";
 }
+
+/**
+ * 「あとで判明する事実」から来た指摘の、出どころの説明（1.3）。
+ *
+ * **「まだ明かされていない」という言い回しを含めない**（却下の理由の一覧から外した
+ * 語を、説明の側から思い出させない。指示の言葉は答えに返ってくる。CLAUDE.md
+ * 「繰り返し起きた失敗」3番）。「本文にまだ書かれていないこと自体は却下の理由に
+ * ならない」は、26b が前提そのものを理由に取り下げた型への答えとして書く。
+ * 「登場人物が知らない」とは書かない——却下の理由「発言者の誤り」（知らずに言った
+ * 台詞）とぶつかる。そちらは取り下げても `keepWithdrawnSpeechAsLow` が low で残す。
+ */
+export const VERIFY_FUTURE_SOURCE_NOTE =
+  "この指摘は、あとの話で判明する事実との照合から来たものです。" +
+  "「設定では」の欄は、対象の話より後で明らかになる事実です。" +
+  "本文の記述が、その事実と両立するかを判断してください。" +
+  "その事実が対象の話の本文にまだ書かれていないこと自体は、前提なので却下の理由になりません。";
+
+/**
+ * 「あとで判明する事実」から来た指摘で、話数が引けなかったときの書き方（1.3）。
+ *
+ * 小さいモデル向けの `VERIFY_KNOWN_AT_NONE_SMALL`（「この話より後で明かされる設定だと
+ * いう記録はありません」）は、future では事実と逆になる。「（不明）」も、e4b は
+ * 「設定が不明」と読んだ（裁定⑧）。後の話であることは分かっているので、それだけを言う。
+ */
+export const VERIFY_KNOWN_AT_NONE_FUTURE = "対象の話より後の話（何話かは引けませんでした）";
+
+/**
+ * 「あとで判明する事実」から来た指摘の、「作中の変化」の説明（1.3）。
+ *
+ * 1.2 の説明（「人物の身の上が先へ進むのは矛盾ではありません」）は、判明した事実が
+ * 対象の話より後の出来事だと決めてかかる。e4b は第4話で判明する「三ヶ月前に退学」を、
+ * 第3話の「学校で授業を受け」より後のことと読んで取り下げた。判明した話から見て
+ * 過去に起きたことなら、対象の話の時点で既に起きている——その見分けを書く。
+ *
+ * 例は測定の台の仕込み（退学・元刑事・画家）と重ならない事実にする。重なると、
+ * 答えを教えたうえで撃つことになり、効いたかどうかが測れない。
+ */
+const FUTURE_CHANGE_TEXT = `**作中の変化** … 判明した事実が、対象の話の時点より後に起きた変化と読める場合だけ
+   （例：第9話で判明した結婚が、第5話より後の出来事である）。
+   判明した事実が、対象の話の時点で既に起きていたこと（例：第7話で「一年前に東京から越してきた」と
+   分かり、対象の話がその一年のうちにある）なら、作中の変化には当たりません。`;
 
 /**
  * 「この設定が分かる話」が引けなかったときの書き方（小さいモデル向け、裁定⑧）。
@@ -191,7 +255,13 @@ const REJECT_REASON_TEXTS: Record<VerifyRejectReason, string> = {
 export function verifyRejectReasonsFor(input: {
   settingKnownAt: string;
   smallModel?: boolean;
+  source?: "settled" | "future";
 }): readonly VerifyRejectReason[] {
+  // **future では大小とも並べない**（1.3）。設定が対象の話より後に分かるのが
+  // この照合の前提なので、この理由は前提そのもので当たりを消す（26b の瀬戸）
+  if (input.source === "future") {
+    return VERIFY_REJECT_REASONS.filter((reason) => reason !== "まだ明かされていない");
+  }
   if (!(input.smallModel ?? false) || input.settingKnownAt) return VERIFY_REJECT_REASONS;
   return VERIFY_REJECT_REASONS.filter((reason) => reason !== "まだ明かされていない");
 }
@@ -200,12 +270,18 @@ export function buildContradictionVerifyPrompt(
   input: ContradictionVerifyInput
 ): string {
   const small = input.smallModel ?? false;
+  const future = input.source === "future";
   const knownAt =
-    input.settingKnownAt || (small ? VERIFY_KNOWN_AT_NONE_SMALL : "（不明）");
+    input.settingKnownAt ||
+    (future ? VERIFY_KNOWN_AT_NONE_FUTURE : small ? VERIFY_KNOWN_AT_NONE_SMALL : "（不明）");
   const reasons = verifyRejectReasonsFor(input);
+  const reasonText = (reason: VerifyRejectReason): string =>
+    future && reason === "作中の変化" ? FUTURE_CHANGE_TEXT : REJECT_REASON_TEXTS[reason];
   const reasonItems = reasons
-    .map((reason, index) => `${index + 1}. ${REJECT_REASON_TEXTS[reason]}`)
+    .map((reason, index) => `${index + 1}. ${reasonText(reason)}`)
     .join("\n");
+  // 本命（settled）では何も足さない。1.2 と1文字も変えないため、欄ごと出さない
+  const sourceBlock = future ? `\n【指摘の出どころ】\n${VERIFY_FUTURE_SOURCE_NOTE}\n` : "";
   return `次の指摘が、本当に矛盾かどうかを判断してください。
 
 【対象の話】${input.chapterLabel}
@@ -219,7 +295,7 @@ ${input.contextWithLineNumbers}
 - 設定では: ${input.settingSays}
 - 本文では: ${input.textSays}
 - この設定が分かる話: ${knownAt}
-
+${sourceBlock}
 【却下すべき場合】
 次のどれかに当てはまるなら、矛盾ではありません。
 
