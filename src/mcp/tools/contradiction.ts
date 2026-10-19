@@ -44,6 +44,7 @@ import {
 import {
   describeVerifyResults,
   parseVerifyOutcome,
+  keepWithdrawnSpeechAsLow,
   undecidedOutcome,
   type VerifyOutcome,
 } from "../../core/contradictionVerifyValidation";
@@ -1330,6 +1331,14 @@ async function verifyContradictionResults(
         outcome = undecidedOutcome(`検証できませんでした（${describeError(error)}）`);
       }
       if (outcome.undecided) undecided++;
+      // この道には「あとで判明する事実」との突き合わせの段が無いので、指摘はすべて
+      // settled から来たものである。同じ関数を通して、画面と判断の置き場所をそろえる
+      // （将来 future の段を足したら、ここへ source を渡す）
+      const keptLow = keepWithdrawnSpeechAsLow(issue, outcome, "settled");
+      if (keptLow) {
+        kept.push({ ...issue, ...keptLow });
+        continue;
+      }
       if (!outcome.keep) {
         verifyRejected.push({ reason: outcome.reason });
         dropped.push({

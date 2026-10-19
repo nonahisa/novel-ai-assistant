@@ -985,3 +985,26 @@ describe("説明で打ち消した指摘（2026-10-11、さくら Kimi-K2.6）",
     expect(result.rejected.map((entry) => entry.reason)).toEqual(["self_denied"]);
   });
 });
+
+describe("断りのあとで食い違いとして指摘する文（2026-10-19、e4b 第3話）", () => {
+  // docs/measurements/2026-10-19-ai-three-field-items.md 項目1 の実際の note
+  const REAL_NOTE =
+    "ミナは退学しており、授業を受けている描写は矛盾する可能性があります。" +
+    "ただし、これは『この時点ではまだ分かっていないはずのこと』として" +
+    "矛盾とは断定できませんが、設定との食い違いとして指摘します";
+
+  test("実際の note は検算で落とさない", () => {
+    expect(deniesContradiction(REAL_NOTE)).toBe(false);
+  });
+
+  test.each([
+    "矛盾とは断定できません。",
+    "設定とは矛盾ではありません。",
+    "矛盾とは断定できませんが、食い違いとして指摘する必要はありません。",
+    "矛盾とは言えないため、食い違いとして指摘するのは適切ではありません。",
+    "矛盾とは断定できないので、食い違いとして指摘しません。",
+    "矛盾とは断定できず、食い違いとして指摘しなくてよいと考えます。",
+  ])("本当の取り下げは今までどおり落とす: %s", (note) => {
+    expect(deniesContradiction(note)).toBe(true);
+  });
+});
