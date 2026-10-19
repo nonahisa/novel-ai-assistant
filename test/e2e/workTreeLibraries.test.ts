@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "vitest";
-import { SIDEBAR_LAUNCH, treeRowLabels, waitTreeSettled } from "./support/sidebar";
+import { SIDEBAR_LAUNCH, scrollTreeUntilRow, treeRowLabels, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { pressWorkbenchKey } from "./support/workbenchDom";
@@ -99,6 +99,14 @@ function indexOfHead(labels: readonly string[], head: string): number {
   return labels.findIndex((label) => label.startsWith(head));
 }
 
+/**
+ * 書庫の段（名前だけの行）の位置。**段の行の名前は後ろに空白が付く**（説明の欄が空のため。
+ * 2026-10-19 に母艦で「書庫  」と読めた）ので、空白を落として比べる
+ */
+function indexOfLibrary(labels: readonly string[], name: string): number {
+  return labels.findIndex((label) => label.trim() === name);
+}
+
 test("書庫が2つと単独の作品があると、書庫の段が2つ出て、単独の作品は段の後ろに並ぶ", async () => {
   await withVsCode(
     "書庫の段が2つ",
@@ -107,17 +115,24 @@ test("書庫が2つと単独の作品があると、書庫の段が2つ出て、
       const labels = await openList(session, TWO_LIBRARIES);
       const mainLibrary = path.basename(path.dirname(session.workFolder));
       // 書庫の段（名前だけの行）
-      const mainIndex = labels.findIndex((label) => label === mainLibrary);
-      const zIndex = labels.findIndex((label) => label === "Z書庫");
+      const mainIndex = indexOfLibrary(labels, mainLibrary);
+      const zIndex = indexOfLibrary(labels, "Z書庫");
       expect(mainIndex, `書庫「${mainLibrary}」の段（行：${labels.join(" / ")}）`).toBeGreaterThanOrEqual(0);
       expect(zIndex, `書庫「Z書庫」の段（行：${labels.join(" / ")}）`).toBeGreaterThanOrEqual(0);
-      // 単独の作品は、どの書庫の段よりも後ろ
-      const soloIndex = indexOfHead(labels, "Solo作品");
-      expect(soloIndex, `単独の作品の行（行：${labels.join(" / ")}）`).toBeGreaterThan(Math.max(mainIndex, zIndex));
-      // 書庫の中の作品は、その書庫の段の後ろ・単独の作品の前
+      // 書庫の中の作品は、その書庫の段の後ろ
       expect(indexOfHead(labels, E2E_WORK_TITLE)).toBeGreaterThan(mainIndex);
       expect(indexOfHead(labels, "Zeta1")).toBeGreaterThan(zIndex);
-      expect(indexOfHead(labels, "Zeta1")).toBeLessThan(soloIndex);
+      /*
+        単独の作品は、最後の書庫の中の作品よりも後ろ。**木は見えている行しか描かない**ので、
+        枠の下にある単独の作品は、作品一覧を下へ送ってから読む（2026-10-19、母艦の既定の窓で
+        Solo作品の行が描かれず落ちた）
+      */
+      const lastLibraryWork = mainIndex > zIndex ? E2E_WORK_TITLE : "Zeta2";
+      await scrollTreeUntilRow(session.page, lastLibraryWork, "Solo作品");
+      const below = await treeRowLabels(session.page);
+      const soloIndex = indexOfHead(below, "Solo作品");
+      expect(soloIndex, `単独の作品の行（行：${below.join(" / ")}）`).toBeGreaterThan(indexOfHead(below, lastLibraryWork));
+      expect(indexOfHead(below, lastLibraryWork), `最後の書庫の作品の行（行：${below.join(" / ")}）`).toBeGreaterThanOrEqual(0);
     },
     launchFor(TWO_LIBRARIES)
   );
@@ -130,7 +145,7 @@ test("書庫が1つしかないときは、書庫の段が出ない", async () =
     async (session) => {
       const labels = await openList(session, ONE_LIBRARY);
       const mainLibrary = path.basename(path.dirname(session.workFolder));
-      expect(labels.includes(mainLibrary), `書庫の段が出ていないこと（行：${labels.join(" / ")}）`).toBe(false);
+      expect(indexOfLibrary(labels, mainLibrary), `書庫の段が出ていないこと（行：${labels.join(" / ")}）`).toBe(-1);
       expect(indexOfHead(labels, E2E_WORK_TITLE)).toBeGreaterThanOrEqual(0);
       expect(indexOfHead(labels, "Same隣")).toBeGreaterThanOrEqual(0);
       expect(indexOfHead(labels, "Solo作品")).toBeGreaterThanOrEqual(0);
