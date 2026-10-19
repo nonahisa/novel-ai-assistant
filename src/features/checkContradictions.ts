@@ -127,6 +127,7 @@ import {
 import {
   describeVerifyResults,
   parseVerifyOutcome,
+  keepWithdrawnSpeechAsLow,
   undecidedOutcome,
   type VerifyOutcome,
 } from "../core/contradictionVerifyValidation";
@@ -985,7 +986,12 @@ export async function checkContradictions(
    * 検出した1件。**検証まで、どのチャンクの何行目かを持ち回る**
    * （設計書6.10.5）。前後の本文を渡すのに要る
    */
-  const found: Array<{ issue: AcceptedContradiction; chunk: Chunk }> = [];
+  // source は、どちらの突き合わせから来た指摘か（取り下げを low で残すかの判断に使う）
+  const found: Array<{
+    issue: AcceptedContradiction;
+    chunk: Chunk;
+    source: "settled" | "future";
+  }> = [];
   let rejectedCount = 0;
   /**
    * 検証で落とした理由。**最後にまとめて操作ログへ出す**（設計書6.8）。
@@ -1112,7 +1118,7 @@ export async function checkContradictions(
           }
           if (raw === undefined) continue;
 
-          collect(raw, chunk);
+          collect(raw, chunk, "settled");
 
           // **あとで判明する事実とも突き合わせる**（設計書6.10.4）。
           // 「まだ知らない」ではなく「両立しない」を探す、逆向きの見方である
@@ -1129,21 +1135,21 @@ export async function checkContradictions(
               futureRaw !== RETRY_SMALLER &&
               !(futureRaw instanceof AIError)
             ) {
-              collect(futureRaw, chunk);
+              collect(futureRaw, chunk, "future");
             }
           }
           processedChunks++;
         }
 
         /** 応答を検証して、どのチャンクの指摘かを覚えておく */
-        function collect(raw: unknown, chunk: Chunk): void {
+        function collect(raw: unknown, chunk: Chunk, source: "settled" | "future"): void {
           const validated = validateContradictions(raw, chunk);
           rejectedCount += validated.rejected.length;
           rejectedReasons.push(
             ...validated.rejected.map((entry) => entry.reason)
           );
           for (const issue of validated.accepted) {
-            found.push({ issue, chunk });
+            found.push({ issue, chunk, source });
           }
         }
 
@@ -1312,7 +1318,18 @@ export async function checkContradictions(
 
               const outcome = await verify(entry.issue, entry.chunk, controller);
               if (outcome.undecided) verifyUndecided++;
-              if (!outcome.keep) {
+              // あとの話から来た台詞が「発言者の誤り」で取り下げられたら、消さずに
+              // 確信度 low で残す（2026-10-19。判断は core の1か所）
+              const keptLow = keepWithdrawnSpeechAsLow(
+                entry.issue,
+                outcome,
+                entry.source
+              );
+              if (keptLow) {
+                log.step(
+                  `検証で取り下げ（発言者の誤り）を確信度 low で残す: ${entry.issue.excerpt.slice(0, 20)}`
+                );
+              } else if (!outcome.keep) {
                 verifyRejected.push({ reason: outcome.reason });
                 log.step(
                   `検証で取り下げ: ${entry.issue.excerpt.slice(0, 20)} ` +
@@ -1340,7 +1357,10 @@ export async function checkContradictions(
                 filePath: at.filePath,
                 line: at.line,
                 // 検証で分かったことは、作者の判断材料になる
-                note: appendVerifyNote(entry.issue.note, outcome.explanation),
+                // （low で残すときは、説明まで含めた補足を core が作っている）
+                ...(keptLow ?? {
+                  note: appendVerifyNote(entry.issue.note, outcome.explanation),
+                }),
               });
             }
           }

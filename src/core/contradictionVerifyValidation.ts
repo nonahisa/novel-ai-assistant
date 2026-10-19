@@ -83,6 +83,54 @@ function echoesSpeechKeep(explanation: string): boolean {
   );
 }
 
+/** 取り下げの指摘を読むのに要る欄（`AcceptedContradiction` の一部） */
+export interface WithdrawnIssueFields {
+  excerpt: string;
+  textSays: string;
+  note: string;
+}
+
+/** 台詞だと読める手がかり。括弧か、検出の段が書く「発言者が…」の言い回し */
+const SPEECH_CLUE = /[「『]|発言者|台詞|セリフ|嘘|偽っ|思い違い|勘違い/;
+
+/**
+ * 確かめの段が取り下げた指摘のうち、消さずに確信度 low で残すものを決める
+ * （2026-10-19、作者の裁定の案2A。設計書6.10.5）。
+ *
+ * 検出の段は、あとの話で分かる事実と台詞が食い違うとき「確信度を low にして、
+ * 発言者が知らない／偽っている可能性と書け」と頼む。ところが確かめの段は同じ
+ * 指摘を「発言者の誤り」として消し、作者が見る前に無くなっていた。二つの段の
+ * 言うことを揃えるため、**あとの話から来た（future）台詞が「発言者の誤り」で
+ * 取り下げられたときだけ**残す。
+ *
+ * - 「まだ明かされていない」は対象にしない（「この人物はまだ知らない」という
+ *   正しい取り下げがありうるので、作者の裁定で外した）
+ * - 本命の突き合わせ（settled）は対象にしない。過去の場面との食い違いを
+ *   発言者の誤りで消すのは正しい仕事である
+ * - 地の文は対象にしない
+ *
+ * 返すのは上書きする欄だけ。残さないときは undefined。AI は呼ばない。
+ * 画面（`features/checkContradictions`）と MCP の両方がここを通る。
+ */
+export function keepWithdrawnSpeechAsLow(
+  issue: WithdrawnIssueFields,
+  outcome: VerifyOutcome,
+  source: "settled" | "future"
+): { confidence: "low"; note: string } | undefined {
+  if (source !== "future") return undefined;
+  if (outcome.keep || outcome.reason !== "発言者の誤り") return undefined;
+  const clue = `${issue.excerpt}\n${issue.textSays}\n${issue.note}`;
+  if (!SPEECH_CLUE.test(clue)) return undefined;
+
+  const why = outcome.explanation.trim();
+  const added =
+    "確かめの段は発言者の誤りとして取り下げましたが、" +
+    "嘘や思い違いの可能性として残します" +
+    (why ? `（検証: ${why}）` : "");
+  const base = issue.note.trim();
+  return { confidence: "low", note: base ? `${base}（${added}）` : added };
+}
+
 function normalizeReason(value: string): VerifyRejectReason | undefined {
   const trimmed = value.trim();
   return (VERIFY_REJECT_REASONS as readonly string[]).includes(trimmed)
