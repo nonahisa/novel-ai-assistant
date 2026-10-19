@@ -122,7 +122,11 @@ export async function suggestContestsByAI(
       work,
       model: resolved.model,
       calls: 1,
-      detail: volume,
+      sends:
+        `作品の概要と、公募${candidates.length}件の募集内容` +
+        `（約${sendChars.toLocaleString("ja-JP")}字）`,
+      bodyNotSent: true,
+      more: narrowed.note ? [narrowed.note] : [],
     });
     if (!ok) return CHECK_CANCELLED;
   } else {

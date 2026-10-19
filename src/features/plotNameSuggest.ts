@@ -225,10 +225,11 @@ export async function suggestPlotNames(
     work,
     model: resolved.model,
     calls: 1,
-    detail:
-      `送るのは、選んだ${chosenTargets.length}人の役名と説明、既にある名前の一覧、` +
-      "プロットの世界観の節だけです。本文は送りません。候補が出るだけで、" +
-      "［入れる］を押すまで何も書き換わりません。",
+    sends:
+      `選んだ${chosenTargets.length}人の役名と説明、既にある名前の一覧、` +
+      "プロットの世界観の節",
+    bodyNotSent: true,
+    more: ["候補が出るだけで、［入れる］を押すまで何も書き換わりません。"],
   });
   if (!ok) return undefined;
 

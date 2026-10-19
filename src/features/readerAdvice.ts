@@ -36,6 +36,7 @@ import {
 } from "../prompts/readerAdvice";
 import { confirmRun } from "../views/notify";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import { withAiTurnProgress } from "./aiTurn";
 
 /**
@@ -169,7 +170,7 @@ export async function requestReaderAdvice(
     fallbackSecondsPerCall: READER_ADVICE_FALLBACK_SECONDS,
   });
   const costNotice = resolved.provider.isPaid
-    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
+    ? `\n${paidCostLines(resolved.provider.displayName).join("\n")}`
     : "";
   const siteLabels = materials.map((material) => material.siteLabel).join("・");
   const confirmed = await confirmRun(

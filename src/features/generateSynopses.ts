@@ -3,6 +3,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
   resolveOutputTokensForPlanning,
@@ -213,7 +214,7 @@ export async function generateSynopses(
     fallbackSecondsPerCall: SYNOPSIS_FALLBACK_SECONDS_PER_EPISODE,
   });
   const costNotice = resolved.provider.isPaid
-    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
+    ? `\n${paidCostLines(resolved.provider.displayName, pending.length).join("\n")}`
     : "";
   const confirmed = await confirmRun(
     `${loaded.bodies.length} 話中 ${pending.length} 話のあらすじを作ります` +

@@ -3363,9 +3363,16 @@ export class SettingsPanel {
         actionLabel: progressLabel,
         remember: { id: "ai.paid.settingsPanel" },
         model: resolved.model,
-        detail:
-          "この画面でAIを呼ぶたびに課金されます。\n" +
+        // 量は組み上がった頼みの字数（指示・設定・本文の抜粋を含む）で示す
+        sends:
+          (feature === "chat"
+            ? "選んだ項目の設定と問い、本文の関係する場面の抜粋"
+            : "選んだ項目の設定と、本文の関係する場面の抜粋") +
+          `（約${prompt.length.toLocaleString("ja-JP")}字）`,
+        more: [
+          "この画面でAIを呼ぶたびに料金がかかります。",
           "（この確認はこの画面で一度だけです）",
+        ],
       });
       if (!ok) return undefined;
       this.paidConfirmedFor = paidKey;

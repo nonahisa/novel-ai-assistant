@@ -173,6 +173,63 @@ describe("確認は画面上部の選択窓で訊く（A4）", () => {
 });
 
 /**
+ * ［詳しく］（作者の裁定 2026-10-19「確認画面はもう少しシンプルに」。設計書7.1.1）。
+ *
+ * 窓の本文から外した断り（モデル名・「実際の金額は…」）は、消さずに［詳しく］へ
+ * 置く。選ぶと詳しい行を足して訊き直し、**選んでも走らない**。
+ */
+describe("［詳しく］で外した行を開く", () => {
+  const more = ["使うモデル：claude-sonnet-5-5", "実際の金額はモデル・実使用量・各社の現行料金によって変わります。"];
+
+  test("渡したときだけ、取りやめるの下に［詳しく］が並び、詳しい行は窓に出ない", async () => {
+    const calls = picking(() => undefined);
+    await confirmRun("プロットの相談を実行しますか", "実行", {
+      detail: "Claude（有料）で送ります",
+      more,
+    });
+    const labels = calls[0].items.map((item) => item.label);
+    const cancel = labels.findIndex((label) => label.includes("取りやめる"));
+    expect(labels[cancel + 1]).toBe("$(info) 詳しく");
+    expect(labels.some((label) => label.includes("使うモデル"))).toBe(false);
+
+    const plain = picking(() => undefined);
+    await confirmRun("19話をAIで確認します。");
+    expect(plain[0].items.some((item) => item.label.includes("詳しく"))).toBe(false);
+  });
+
+  test("［詳しく］を選ぶと走らず、詳しい行を足して訊き直す。次に実行を選べば始まる", async () => {
+    let round = 0;
+    const calls = picking((shown) => {
+      round++;
+      return round === 1 ? labelled(shown, "詳しく") : shown.items[0];
+    });
+    expect(
+      await confirmRun("プロットの相談を実行しますか", "実行", {
+        detail: "Claude（有料）で送ります",
+        more,
+      })
+    ).toBe(true);
+    expect(calls).toHaveLength(2);
+    const second = calls[1].items;
+    const labels = second.map((item) => item.label);
+    const heading = second.findIndex(
+      (item) => item.kind === QuickPickItemKind.Separator && item.label === "詳しく"
+    );
+    expect(heading).toBeGreaterThan(labels.indexOf("Claude（有料）で送ります"));
+    expect(labels).toContain("使うモデル：claude-sonnet-5-5");
+    // 開いたあとは［詳しく］の項目を外す（押しても何も変わらない項目を残さない）
+    expect(labels).not.toContain("$(info) 詳しく");
+  });
+
+  test("［詳しく］は押せる項目ではない（覚え書きにも残らない）", async () => {
+    const calls = picking(() => undefined);
+    await confirmRun("プロットの相談を実行しますか", "実行", { more });
+    const item = calls[0].items.find((entry) => entry.label === "$(info) 詳しく");
+    expect(item?.button).toBeUndefined();
+  });
+});
+
+/**
  * 取り消しにくい操作の「実行」には警告の印を付ける（実機確認リスト 0.82.7）。
  *
  * モーダルだった頃は窓の顔（警告の三角）で分けていた。選択窓に移ったので、

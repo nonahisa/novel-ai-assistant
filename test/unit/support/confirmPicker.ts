@@ -18,6 +18,8 @@ interface PickItem {
   kind?: number;
   button?: string;
   __cancel?: boolean;
+  /** ［詳しく］の項目だけが持つ、開いたときに足す行 */
+  more?: readonly string[];
 }
 
 /** 画面に出た確認の1回ぶん */
@@ -26,8 +28,13 @@ export interface ShownConfirm {
   readonly title: string;
   /** 押せる項目の名前（印を除いたもの）。並んだ順 */
   readonly buttons: readonly string[];
-  /** 「内容」の下に並んだ行（区切りは除く） */
+  /** 「内容」の下に並んだ行（区切りは除く。［詳しく］を開いて足した行は入れない） */
   readonly rows: readonly string[];
+  /**
+   * ［詳しく］で開く行（モデル名・料金の細かい断りなど。設計書7.1.1）。
+   * ［詳しく］が無ければ空。**窓の本文には出ない行**なので `text`・`flat` に入れない
+   */
+  readonly more: readonly string[];
   /** 題と行を改行でつないだもの */
   readonly text: string;
   /**
@@ -64,18 +71,23 @@ export function readConfirm(
   const separator = items.findIndex(
     (item) => item.kind === -1 && item.label === "内容"
   );
+  const moreSeparator = items.findIndex(
+    (item) => item.kind === -1 && item.label === "詳しく"
+  );
   const rows =
     separator < 0
       ? []
       : items
-          .slice(separator + 1)
+          .slice(separator + 1, moreSeparator < 0 ? undefined : moreSeparator)
           .filter((item) => item.kind !== -1)
           .map((item) => item.label);
   const run = items.find((item) => typeof item.button === "string");
+  const more = items.find((item) => Array.isArray(item.more))?.more ?? [];
   return {
     title,
     buttons,
     rows,
+    more,
     text: [title, ...rows].join("\n"),
     flat: [title, ...rows].join(""),
     warning: Boolean(run?.label.startsWith("$(warning)")),

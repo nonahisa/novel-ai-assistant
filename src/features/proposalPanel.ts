@@ -4096,10 +4096,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         remember: { id: "ai.paid.proposalPanel" },
         model: resolved.model,
         calls: 1,
-        detail:
-          "本文が書き直されていれば、その1件についてAIへ1回だけ問い合わせます。\n" +
-          "書き直されていなければ、AIは呼びません。\n" +
+        sends: "指摘1件の箇所の前後と、元の指摘",
+        more: [
+          "本文が書き直されていれば、その1件についてAIへ1回だけ問い合わせます。",
+          "書き直されていなければ、AIは呼びません。",
           "（この確認は、このパネルで一度だけです）",
+        ],
       });
       if (!ok) return;
       this.paidConfirmedFor = paidKey;

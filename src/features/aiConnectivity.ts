@@ -6,7 +6,7 @@ import type {
 import { lmstudioEndpoint } from "../ai/lmstudioProvider";
 import { prepareLmStudioModel } from "../ai/registry";
 import { canRunProcesses } from "../core/runtime";
-import { paidUsageLines } from "../core/paidUsageNotice";
+import { paidUsageNotice } from "../core/paidUsageNotice";
 import { withProgress } from "../views/progress";
 import { confirmRun, notifyDone, type ConfirmWork } from "../views/notify";
 
@@ -252,10 +252,20 @@ export async function confirmPaidUsage(
     /** 何をするか。「作品紹介文の生成」など */
     actionLabel: string;
     model: string;
-    /** AIを何回呼ぶか。分かるときだけ添える */
+    /** AIを何回呼ぶか。分かるときだけ添える（窓の3行目に入る） */
     calls?: number;
-    /** 追加の説明。処理の大きさが分かるもの */
-    detail?: string;
+    /**
+     * 送るもの。**短い名詞で**（窓の2行目「送るもの：…」に入る）。
+     * 本文を送る機能は字数を入れる——作者が量を見て決めるため
+     */
+    sends: string;
+    /** 本文を送らない機能は true（2行目に「（本文は送りません）」が付く） */
+    bodyNotSent?: boolean;
+    /**
+     * 機能ごとの補足（「この確認はこの画面で一度だけです」「本文は書き換えません」）。
+     * **窓の本文には出さず、［詳しく］へ入る**
+     */
+    more?: readonly string[];
     /**
      * 「以降は訊かない」を出すときの覚え書きの id
      * （`core/confirmMemory.ts`。渡さなければ訊き方は今までどおり）
@@ -273,15 +283,19 @@ export async function confirmPaidUsage(
 
   // **行の中身は `core/paidUsageNotice.ts` の1か所**（外から頼まれた実行の
   // 確認、設計書6.87.22 も同じ行を出す。写すと片方だけ言い回しがずれる）
-  const lines = paidUsageLines(provider.displayName, options.model, {
+  // 窓の本文は3行（どこへ・何を・いくら）。モデル名と料金の細かい断りは［詳しく］へ
+  const notice = paidUsageNotice(provider.displayName, options.model, {
+    sends: options.sends,
+    bodyNotSent: options.bodyNotSent,
     calls: options.calls,
-    detail: options.detail,
+    more: options.more,
   });
 
   // **訊き方は `confirmRun` に寄せる。** 「以降は訊かない」の出し方を
   // 2か所に書くと、片方だけ直したときに振る舞いが割れる
   return confirmRun(`${options.actionLabel}を実行しますか`, "実行", {
-    detail: lines.join("\n"),
+    detail: notice.lines.join("\n"),
+    more: notice.more,
     remember: options.remember,
     work: options.work,
   });

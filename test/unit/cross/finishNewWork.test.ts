@@ -329,7 +329,7 @@ describe("先に出す確認", () => {
       estimate: { ...estimate, isPaid: true, providerNames: ["Gemini"] },
     });
 
-    expect(confirm?.detail).toContain("チャンクごとに課金されます。");
+    expect(confirm?.detail).toContain("料金：送るたびに、使った量だけかかります");
     // 無料のときの「目安◯分」は出さない（知りたいのは料金のほう）
     expect(confirm?.detail).not.toContain("目安");
   });

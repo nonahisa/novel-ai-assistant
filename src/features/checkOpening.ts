@@ -148,7 +148,8 @@ export async function checkOpening(
       work,
       model: resolved.model,
       calls: 1,
-      detail,
+      sends: `第1話の冒頭 ${material.openingText.length}字`,
+      more: ["本文は書き換えません。"],
     });
     if (!ok) return CHECK_CANCELLED;
   }

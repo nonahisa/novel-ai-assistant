@@ -8,6 +8,7 @@ import {
 } from "../ai/outputLimit";
 import type { GenerateResult } from "../ai/types";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import { withCancellableProgress } from "../views/progress";
 import {
   buildDictationCleanPrompt,
@@ -126,7 +127,7 @@ export async function runDictationClean(
   }
 
   const costNotice = resolved.provider.isPaid
-    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
+    ? `\n${paidCostLines(resolved.provider.displayName).join("\n")}`
     : "";
   // **確認は置き換える前に1回だけ。** 整えた結果をもう一度確認させると、
   // 話し終えるたびに2回押すことになる（口述はまとめて何度も行う操作である）

@@ -7,6 +7,7 @@ import {
 } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 
 import {
   resolveOutputTokensForPlanning,
@@ -118,7 +119,7 @@ export async function generateAnnouncement(
   }
 
   const costNotice = resolved.provider.isPaid
-    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
+    ? `\n${paidCostLines(resolved.provider.displayName, 1).join("\n")}`
     : "";
   const confirmed = await confirmRun(
     `更新告知文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,

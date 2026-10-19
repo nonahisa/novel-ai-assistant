@@ -257,11 +257,22 @@ describe("毎回作者に確かめてから走らせる", () => {
       }),
     });
     await handleRunRequest(queryOf(), d);
-    const [message, detail] = vi.mocked(d.confirm).mock.calls[0] ?? ["", ""];
+    const [message, detail, , more] = vi.mocked(d.confirm).mock.calls[0] ?? ["", ""];
     expect(message).toContain("誤字脱字の検知");
-    for (const expected of ["claude-code", "星の町", "第1話.txt", "作り物のクラウドAI", "big-1", "4,000字", "トークンを消費"]) {
+    // 窓の本文は画面の確認と同じ3行が先頭（設計書7.1.1）。量は2行目に残る
+    expect(detail.split("\n").slice(0, 3)).toEqual([
+      "作り物のクラウドAI（有料）で送ります",
+      "送るもの：本文 約4,000字（1話）",
+      "料金：送るたびに、使った量だけかかります",
+    ]);
+    for (const expected of ["claude-code", "星の町", "第1話.txt"]) {
       expect(detail).toContain(expected);
     }
+    // モデル名と料金の細かい断りは［詳しく］に渡す（消さない）
+    const opened = (more ?? []).join("\n");
+    expect(detail).not.toContain("トークンを消費");
+    expect(opened).toContain("使うモデル：big-1");
+    expect(opened).toContain("トークンを消費");
   });
 
   test("走らせた結果（検算済み）を、使ったAI・モデル・プロンプトの版と一緒に書く", async () => {
@@ -356,11 +367,12 @@ describe("2026-10-16 に足した機能", () => {
     );
     const { d, store } = deps({ resolveAi }, { ticket: ticket({ feature: "factContradiction" }) });
     await handleRunRequest(queryOf(), d);
-    const [, detail] = vi.mocked(d.confirm).mock.calls[0] ?? ["", ""];
+    const [, detail, , more] = vi.mocked(d.confirm).mock.calls[0] ?? ["", ""];
     expect(detail).toContain("Ollama（gemma）");
     expect(detail).toContain("判定のクラウドAI（judge-1）");
-    // 判定のAIが有料なら、料金の断りを出す（取り出しが無料でも）
-    expect(detail).toContain("トークンを消費");
+    // 判定のAIが有料なら、料金の断りを出す（取り出しが無料でも）。1行目は有料のほうだけ
+    expect(detail.split("\n")[0]).toBe("判定のクラウドAI（有料）で送ります");
+    expect((more ?? []).join("\n")).toContain("トークンを消費");
     const result = store.get(ID)?.result;
     expect(result?.provider.name).toBe("Ollama");
     expect(result?.verifyProvider).toEqual({ id: "cloud", name: "判定のクラウドAI", paid: true });

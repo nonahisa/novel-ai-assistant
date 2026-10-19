@@ -12,7 +12,8 @@
  *   「外部AIから頼まれた「誤字脱字の検知」を終えました（N件）」の知らせ、`done` と指摘 N件。
  *   **提案パネルは開かず、`.aiwriter/findings.jsonl` も作られない**
  * - 2件目（リストの2項目め）：誤字脱字をクラウドのAI（Gemini）に割り当てると、確認に料金の断り
- *   （「トークンを消費し、利用量が加算されます」）が出る。**押さずに閉じる**と `declined`。
+ *   （画面の確認と同じ3行「Gemini（有料）で送ります／送るもの：本文 約N字（1話）／料金：…」。
+ *   設計書7.1.1）が出る。**押さずに閉じる**と `declined`。
  *   鍵は置かない——確認はAIを呼ぶ前に出るので、鍵が無くても確認までは届く（押さないので送らない）
  *
  * 依頼の届け方は `vectorIndexRequests.test.ts` と同じ：MCP の `run.request` と同じ形の札を保管庫へ置き、
@@ -299,8 +300,10 @@ test("誤字脱字をクラウドのAIに割り当てた作品への依頼は、
     async (session) => {
       const id = await sendTypoRequest(session);
       const { confirm } = await waitProductConfirm(session);
-      expect(confirm, "クラウドのAIなのに料金の断りが無い").toContain("実行するとトークンを消費し、利用量が加算されます。");
-      expect(confirm, "使うAIが割り当てたクラウドのAIになっていない").toContain("gemini-2.5-flash");
+      // 有料の断りは画面の確認と同じ3行（設計書7.1.1）。モデル名は［詳しく］の2枚目にある
+      expect(confirm, "クラウドのAIなのに料金の断りが無い").toContain("料金：送るたびに、使った量だけかかります");
+      expect(confirm, "使うAIが割り当てたクラウドのAIになっていない").toMatch(/Gemini.*（有料）で送ります/);
+      expect(confirm, "送る量が2行目に無い").toMatch(/送るもの：本文 約[\d,]+字（1話）/);
       expect(confirm, "クラウドのAIなのに無料の行が出た").not.toContain("料金：無料");
 
       await closeDialog(session.page);

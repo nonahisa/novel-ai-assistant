@@ -82,6 +82,7 @@ import { estimateRunTimeText } from "../ai/runTimeEstimate";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import { confirmRun } from "../views/notify";
 import {
   logFailure,
@@ -281,7 +282,7 @@ export async function checkForeshadows(
       "伏線の記録へは何も自動で入りません。 候補を「提案」パネルへ並べますので、",
       "登録するものを1件ずつ選んでください。",
       resolved.provider.isPaid
-        ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
+        ? `\n${paidCostLines(resolved.provider.displayName).join("\n")}`
         : "",
     ]
       .filter(Boolean)
@@ -810,7 +811,7 @@ export async function checkForeshadowResolution(
           "伏線の記録へは何も自動で入りません。 回収されたと読める箇所を「提案」パネルへ",
           "並べますので、回収済みにするものを1件ずつ選んでください。",
           resolved.provider.isPaid
-            ? `\n${resolved.provider.displayName} は1か所ごとに課金されます。`
+            ? `\n${paidCostLines(resolved.provider.displayName).join("\n")}`
             : "",
         ]
           .filter(Boolean)

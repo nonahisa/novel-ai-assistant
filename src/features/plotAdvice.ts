@@ -199,9 +199,12 @@ export class PlotAdviceSession {
         remember: { id: "ai.paid.plotAdvice" },
         work,
         model: resolved.model,
-        detail:
-          "送るたびに1回ずつ課金されます。送るのは、プロット（plot.md）の中身と、" +
-          `この画面での直近の会話です。本文は送りません。\n（この確認はこの画面で一度だけです）`,
+        sends: "プロットと直近の会話",
+        bodyNotSent: true,
+        more: [
+          "送るのは、プロット（plot.md）の中身と、この画面での直近の会話です。",
+          "（この確認はこの画面で一度だけです）",
+        ],
       });
       if (!ok) return false;
       this.paidConfirmedFor = paidKey;

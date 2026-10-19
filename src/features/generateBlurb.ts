@@ -8,6 +8,7 @@ import {
   truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import {
   WHITESPACE_RUNAWAY_ADVICE,
   endsInWhitespaceRunaway,
@@ -136,7 +137,7 @@ export async function generateWorkBlurb(
   }
 
   const costNotice = resolved.provider.isPaid
-    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
+    ? `\n${paidCostLines(resolved.provider.displayName, 1).join("\n")}`
     : "";
   const confirmed = await confirmRun(
     blurbConfirmMessage({
@@ -320,7 +321,7 @@ export async function generateCatchphrases(
 
   const history = new CatchphraseHistory(work);
   const costNotice = resolved.provider.isPaid
-    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
+    ? `\n${paidCostLines(resolved.provider.displayName, 1).join("\n")}`
     : "";
   const confirmed = await confirmRun(
     `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,

@@ -156,12 +156,19 @@ export async function makeTargetSheetAdvice(
     work,
     model: resolved.model,
     calls: 1,
-    detail:
-      "送るのはシートの材料（狙いと理由・点数・ずれ・向かう先" +
+    // 根拠の引用は本文の抜き書きなので、そのときは「本文は送りません」と言わない
+    sends:
+      "シートの材料（狙いと理由・点数・ずれ・向かう先" +
       (material.evidence.length > 0
-        ? `・本文の実像の根拠の引用${material.evidence.length}件`
-        : "") +
-      "）だけです。本文そのものは送りません。\n本文は書き換えません。",
+        ? `・本文の実像の根拠の引用${material.evidence.length}件）`
+        : "）"),
+    bodyNotSent: material.evidence.length === 0,
+    more: [
+      ...(material.evidence.length > 0
+        ? ["本文そのものは送りません（送るのは根拠の引用だけです）。"]
+        : []),
+      "本文は書き換えません。",
+    ],
   });
   if (!ok) return "cancelled";
 

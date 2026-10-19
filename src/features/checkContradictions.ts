@@ -161,6 +161,7 @@ import {
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import {
   logFailure,
   responseExcerptForLog,
@@ -832,7 +833,7 @@ export async function checkContradictions(
         ? "\n（見る観点が前回から変わっているため、今回はすべて送り直します）"
         : "",
       resolved.provider.isPaid
-        ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
+        ? `\n${paidCostLines(resolved.provider.displayName, sendChars.length).join("\n")}`
         : "",
     ]
       .filter(Boolean)

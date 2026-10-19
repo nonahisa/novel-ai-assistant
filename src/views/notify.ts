@@ -104,6 +104,15 @@ export interface ConfirmOptions {
    */
   detail?: string;
   /**
+   * ［詳しく］で開く行（作者の裁定 2026-10-19「確認画面はもう少しシンプルに」）。
+   *
+   * 窓の本文から外したいが、**消してはいけない断り**（モデル名・「実際の金額は
+   * …によって変わります」）をここへ。渡すと「取りやめる」の下に［詳しく］の
+   * 項目が並び、選ぶと「詳しく」の区切りの下にこの行を足して訊き直す。
+   * 小さい字（項目の `detail`）は1行で「…」に切れるので、複数行の置き場に使わない
+   */
+  more?: readonly string[];
+  /**
    * 「以降は訊かない」を出すときの覚え書きの id（`core/confirmMemory.ts`）。
    *
    * **渡さないかぎり、訊き方は1文字も変わらない。** 危ない操作には
@@ -269,6 +278,7 @@ export async function confirmRunOrChoose(
   const answer = await askInTopPicker({
     message: shownMessage,
     detail: options.detail,
+    more: options.more,
     buttons,
     runLabel,
     warning: options.kind === "warning",
@@ -285,8 +295,18 @@ export async function confirmRunOrChoose(
   return undefined;
 }
 
-/** 確認の選択窓の項目。`button` を持つものだけが押せる */
-type ConfirmPickItem = vscode.QuickPickItem & { readonly button?: string };
+/**
+ * 確認の選択窓の項目。`button` を持つものだけが押せる。
+ * `more` は［詳しく］の項目だけが持つ、開いたときに足す行（選ぶと足して訊き直す。
+ * 行を項目に持たせておくのは、試験が開く前の窓から中身を読めるようにするため）
+ */
+type ConfirmPickItem = vscode.QuickPickItem & {
+  readonly button?: string;
+  readonly more?: readonly string[];
+};
+
+/** ［詳しく］の項目の名前と、開いたあとの行の見出し */
+export const CONFIRM_MORE_LABEL = "詳しく";
 
 /**
  * 読んでいるだけの行を選ばれたとき、訊き直す回数の上限。
@@ -317,10 +337,15 @@ const CONFIRM_REASK_LIMIT = 20;
  *
  * 取り消しにくい操作（`warning`）は、実行の項目に警告の印を付ける。
  * モーダルの頃の「警告の顔」の代わりである。
+ *
+ * `more` を渡すと、取りやめるの下に［詳しく］を置く。選ばれたら「詳しく」の
+ * 区切りの下にその行を足して訊き直す（開いたあとは［詳しく］を外す）。
+ * **［詳しく］は押せる項目（`button`）にしない**——選んでも走らせないため
  */
 async function askInTopPicker(params: {
   message: string;
   detail?: string;
+  more?: readonly string[];
   buttons: readonly string[];
   runLabel: string;
   warning: boolean;
@@ -330,22 +355,45 @@ async function askInTopPicker(params: {
     label: `${iconOfButton(button, params.runLabel, params.warning)} ${button}`,
     button,
   }));
+  const toRows = (source: ReadonlyArray<string | null>): ConfirmPickItem[] =>
+    source.map(
+      (row): ConfirmPickItem =>
+        row === null
+          ? { label: "", kind: vscode.QuickPickItemKind.Separator }
+          : { label: row }
+    );
   const rows: ConfirmPickItem[] =
     layout.rows.length > 0
       ? [
           { label: "内容", kind: vscode.QuickPickItemKind.Separator },
-          ...layout.rows.map(
-            (row): ConfirmPickItem =>
-              row === null
-                ? { label: "", kind: vscode.QuickPickItemKind.Separator }
-                : { label: row }
-          ),
+          ...toRows(layout.rows),
         ]
       : [];
+  const moreLines = (params.more ?? []).filter((line) => line.trim() !== "");
+  // 詳しい行も、本文の行と同じ幅で割る（1行は折り返されず「…」で切れる）
+  const moreRows: ConfirmPickItem[] =
+    moreLines.length > 0
+      ? [
+          { label: CONFIRM_MORE_LABEL, kind: vscode.QuickPickItemKind.Separator },
+          ...toRows(layoutConfirm("", moreLines.join("\n")).rows),
+        ]
+      : [];
+  const moreItem: ConfirmPickItem = {
+    label: `$(info) ${CONFIRM_MORE_LABEL}`,
+    description: "使うモデル・料金の細かい断り",
+    more: moreLines,
+  };
+  let expanded = false;
 
   for (let round = 0; round < CONFIRM_REASK_LIMIT; round++) {
     const picked = await vscode.window.showQuickPick<ConfirmPickItem>(
-      [...actions, cancelItem("取りやめる"), ...rows],
+      [
+        ...actions,
+        cancelItem("取りやめる"),
+        ...(moreRows.length > 0 && !expanded ? [moreItem] : []),
+        ...rows,
+        ...(expanded ? moreRows : []),
+      ],
       {
         title: layout.title,
         placeHolder: `「${params.runLabel}」を選ぶと始まります。内容は下に並べています`,
@@ -357,7 +405,8 @@ async function askInTopPicker(params: {
     );
     if (!picked || isCancelItem(picked)) return undefined;
     if (picked.button !== undefined) return picked.button;
-    // 内容の行が選ばれた——読んでいただけなので、もう一度訊く
+    if (picked.more !== undefined) expanded = true;
+    // 内容の行（か［詳しく］）が選ばれた——読んでいただけなので、もう一度訊く
   }
   return undefined;
 }

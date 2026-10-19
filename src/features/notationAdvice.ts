@@ -123,9 +123,9 @@ export async function askNotationAdvice(
     work: request.work,
     model: resolved.model,
     calls: 1,
-    detail:
-      `送るのは「${group.label}」の表記と出現例だけです（本文全体は送りません）。\n` +
-      "返るのは助言だけで、本文は書き換わりません。",
+    // 出現例は本文の抜き書きなので「本文は送りません」とは言わない
+    sends: `「${group.label}」の表記と出現例（本文全体は送りません）`,
+    more: ["返るのは助言だけで、本文は書き換わりません。"],
   });
   if (!ok) return { kind: "cancelled" };
 

@@ -1,4 +1,5 @@
 import { isLocalProviderId } from "./localProviders";
+import { paidPriceLine } from "./paidUsageNotice";
 
 /**
  * 写真を送る前の確かめの文（設計書6.117.5）。**文言はここ1か所。** VS Code に依存しない。
@@ -62,7 +63,7 @@ export function describePhotoSend(input: PhotoSendConfirmInput): PhotoSendConfir
     message: `${count}を${ai}へ送ります。`,
     detail:
       "写真は外のサービスに渡ります。" +
-      (input.isPaid ? "\n呼び出すたびに課金されます。" : "") +
+      (input.isPaid ? `\n${paidPriceLine()}` : "") +
       requestNote(input.request),
     proceed: "送って書き起こす",
   };

@@ -36,6 +36,7 @@ import {
   resolveOutputTokensForSend,
 } from "../ai/outputLimit";
 import { confirmProviderReachable } from "./aiConnectivity";
+import { paidCostLines } from "../core/paidUsageNotice";
 import {
   describeChunkSettings,
   readChunkSettings,
@@ -366,7 +367,7 @@ export async function proposeChapters(
     episode.synopsis.trim()
   ).length;
   const costNotice = resolved.provider.isPaid
-    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
+    ? `\n${paidCostLines(resolved.provider.displayName, 1).join("\n")}`
     : "";
   const materialNotice = describeChapterMaterial(
     withSynopsis,
@@ -500,7 +501,7 @@ export async function suggestChapterName(
   }
 
   const costNotice = resolved.provider.isPaid
-    ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
+    ? `\n${paidCostLines(resolved.provider.displayName, 1).join("\n")}`
     : "";
   const confirmed = await confirmRun(
     `章「${chapter.name}」の名前の案を出します（AIの呼び出しは1回）。\n` +

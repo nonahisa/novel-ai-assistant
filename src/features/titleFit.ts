@@ -111,9 +111,9 @@ export async function measureTitleFit(
     work,
     model: resolved.model,
     calls: batches.length,
-    detail:
-      `送るのは作品タイトルとサブタイトル${episodes}件だけです（本文は送りません）。\n` +
-      `「${READER_TYPES[reader.type].label}」に向けて見立てます。題は書き換えません。`,
+    sends: `作品タイトルとサブタイトル${episodes}件`,
+    bodyNotSent: true,
+    more: [`「${READER_TYPES[reader.type].label}」に向けて見立てます。題は書き換えません。`],
   });
   if (!ok) return "cancelled";
 
