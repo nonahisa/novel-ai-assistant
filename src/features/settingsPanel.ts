@@ -17,10 +17,22 @@ import {
 import type { AiNote, AiNoteSource } from "../models/aiNote";
 import { CharacterStore } from "../core/characterStore";
 import {
+  distinctPairRefusal,
   planCharacterSeparation,
   type SeparationPlan,
 } from "../core/characterSeparate";
-import { normalizeName } from "../core/characterMerge";
+import {
+  describeMergeCandidate,
+  findMergeCandidates,
+  normalizeName,
+} from "../core/characterMerge";
+import {
+  applyCharacterDistinct,
+  applyCharacterUnify,
+  CharacterUnifyError,
+  describeDecisionBlockedByLoadErrors,
+  describeUnifyFailure,
+} from "../core/characterPairDecision";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { PendingNarratorMoveStore } from "../core/pendingNarratorMoveStore";
 import {
@@ -514,6 +526,17 @@ export class SettingsPanel {
   /** 「反映待ちの更新が N 件あります」。0件なら空で、画面は入口を隠す */
   private pendingUpdatesText = "";
   private loadErrors: Array<{ file: string; message: string }> = [];
+  /**
+   * 人物のうち読み込めなかったファイル。重複の候補（設計書6.5.4）を出すかを決める。
+   * ほかの種類の壊れたファイルでは止めない（詳細メニューの「重複をまとめる」と同じ）
+   */
+  private characterLoadErrors: Array<{ file: string; message: string }> = [];
+  /**
+   * 候補の1組を書いている途中か。**続けて押された2回目は受けない**——
+   * 1回目の退避と作り直しが終わる前に2回目が同じ人物を退避しにいくと、
+   * 読み込んだときの控えと食い違って止まる（止まっても壊れはしないが、作者には失敗に見える）
+   */
+  private mergeBusy = false;
 
   /** 本文は重いので一度読んだら使い回す。パネルを閉じるまで有効 */
   private excerptSources: ExcerptSource[] | undefined;
@@ -796,6 +819,7 @@ export class SettingsPanel {
     const loadedWorld = await this.worldStore.loadAll();
 
     this.characters = loadedCharacters.characters;
+    this.characterLoadErrors = loadedCharacters.errors;
     this.abilities = loadedAbilities.records;
     this.locations = loadedLocations.records;
     this.organizations = loadedOrganizations.records;
@@ -1326,6 +1350,16 @@ export class SettingsPanel {
           return;
         case "separate":
           await this.handleSeparate(message.kind, message.id, message.alias);
+          return;
+        case "unifyPair":
+          await this.handleUnifyPair(
+            message.keepId,
+            message.absorbId,
+            message.selectedId
+          );
+          return;
+        case "distinctPair":
+          await this.handleDistinctPair(message.ids, message.selectedId);
           return;
         case "applyRuby":
           await this.handleApplyRuby();
@@ -2819,6 +2853,251 @@ export class SettingsPanel {
     );
   }
 
+  /* ── 重複の候補を一覧から片づける（作者の依頼と裁定 2026-10-19 夜。設計書6.5.4） ──
+   *
+   * 「一回ごとにメニューが出るのはツライ」。詳細メニューの「重複をまとめる」は1組ごとに
+   * 選ぶ画面を2回開き直し、警告の窓で訊く。ここでは登場人物タブの一覧の上に候補を並べ、
+   * **押した1回で書く。確認の窓は出さない**（依頼の本旨）。そのかわり押した直後に、
+   * 何をしたかと戻す道を帯で出す。
+   *
+   * 書くのは詳細メニューと同じ core（`characterPairDecision.ts`）。写しを作らない。
+   */
+
+  /** 画面へ送る候補。**読み込めない人物があれば出さない**（読めていない人物を見落とす） */
+  private mergeCandidateViews(): MergeCandidateView[] {
+    if (this.characterLoadErrors.length > 0) return [];
+    return findMergeCandidates(this.characters).map((candidate) => {
+      const [first, second] = candidate.ids.map((id) =>
+        this.characters.find((character) => character.id === id)
+      );
+      const sameName = candidate.names[0] === candidate.names[1];
+      return {
+        ids: candidate.ids,
+        names: candidate.names,
+        // 同名の組（「お母さん」と「お母さん」）は名前だけでは見分けが付かない（6.5.8）
+        labels: sameName
+          ? [
+              `${candidate.names[0]}（${candidate.ids[0]}）`,
+              `${candidate.names[1]}（${candidate.ids[1]}）`,
+            ]
+          : candidate.names,
+        reason: describeMergeCandidate(candidate),
+        distinctRefusal: first && second ? distinctPairRefusal(first, second) : null,
+      };
+    });
+  }
+
+  /**
+   * 候補はあるのに出せないときの断り（読み込めない人物のファイルがある）。
+   * 出す候補が無ければ空。**黙って欄を消さない**——校正・メモパネルの知らせは
+   * 件数を言っているので、来てみたら何も無いと壊れて見える
+   */
+  private mergeBlockedNotice(): string {
+    if (this.characterLoadErrors.length === 0) return "";
+    if (findMergeCandidates(this.characters).length === 0) return "";
+    return describeDecisionBlockedByLoadErrors(this.characterLoadErrors);
+  }
+
+  /**
+   * 校正・メモパネルの［設定資料パネルで見る］から来たとき（設計書6.40.4）。
+   * 登場人物タブの候補の欄を開いて見せる。開きっぱなしのパネルは、そのあと
+   * 増えた候補を知らないので読み直してから送る
+   */
+  async showMergeCandidates(): Promise<void> {
+    this.reveal();
+    await this.loadAll();
+    await this.whenReady();
+    this.post({ type: "showMergeCandidates" });
+  }
+
+  /** 押した組がいまも候補にあるか。古い画面から押されたら書かない */
+  private stillCandidate(a: string, b: string): boolean {
+    return findMergeCandidates(this.characters).some(
+      (candidate) =>
+        (candidate.ids[0] === a && candidate.ids[1] === b) ||
+        (candidate.ids[0] === b && candidate.ids[1] === a)
+    );
+  }
+
+  /** 書く前の確かめ。断るなら作者へ伝えて false */
+  private async readyToDecide(a: string, b: string): Promise<boolean> {
+    const blocked = describeDecisionBlockedByLoadErrors(this.characterLoadErrors);
+    if (blocked) {
+      this.post({ type: "error", message: blocked });
+      return false;
+    }
+    if (!this.stillCandidate(a, b)) {
+      // 別の窓やメニューで先に片づけた。黙って何もしないと壊れて見える
+      await this.postMergeResolved("", undefined, {
+        notice: "その組はもう候補にありません（資料が変わったようです）。一覧を読み直しました。",
+      });
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * ［「A」を残してまとめる］。`keepId` が残す名前の人物。
+   *
+   * @param selectedId 画面でいま開いている人物（パネルは選択を覚えていないので画面に渡させる）
+   */
+  private async handleUnifyPair(
+    keepId: string,
+    absorbId: string,
+    selectedId?: string
+  ): Promise<void> {
+    if (this.mergeBusy) return;
+    this.mergeBusy = true;
+    try {
+      if (!(await this.readyToDecide(keepId, absorbId))) return;
+      const keep = this.characters.find((character) => character.id === keepId);
+      const absorb = this.characters.find((character) => character.id === absorbId);
+      if (!keep || !absorb) return;
+
+      let unified: Character;
+      try {
+        ({ unified } = await applyCharacterUnify(
+          this.characterStore,
+          keep,
+          absorb,
+          this.characters
+        ));
+      } catch (error) {
+        await this.reportMergeFailure(error, keep.name, absorb.name);
+        return;
+      }
+
+      // 戻す道（作者の依頼「戻す道は帯に書く」）。まとめた側の名前が別名に残り、
+      // 「別の人物に分ける」の札に出るときだけ、その道を案内する
+      const canSeparateBack = separableAliases(unified).some(
+        (alias) => normalizeName(alias) === normalizeName(absorb.name)
+      );
+      const band =
+        `「${absorb.name}」を「${keep.name}」にまとめました。` +
+        "まとめた側の元のファイルは、回復用の場所（設定/characters/.novelai-recovery）に残っています。" +
+        (canSeparateBack
+          ? `別人だったときは、「${keep.name}」を開いて「別の人物に分ける」で「${absorb.name}」を押すと、` +
+            `名前だけの人物として分け直せます（紹介などの中身は「${keep.name}」に残ります）。`
+          : "");
+      // 開いていた人物がまとめた2人のどちらかなら、残した人物の中身へ切り替える
+      const touched = selectedId === keepId || selectedId === absorbId;
+      await this.postMergeResolved(band, touched ? keepId : undefined, {
+        replaceDetail: touched,
+      });
+    } finally {
+      this.mergeBusy = false;
+    }
+  }
+
+  /** ［別人］。2人の記録に互いを「別人」と書く（中身は動かさない） */
+  private async handleDistinctPair(
+    ids: [string, string],
+    selectedId?: string
+  ): Promise<void> {
+    if (this.mergeBusy) return;
+    this.mergeBusy = true;
+    try {
+      const [aId, bId] = ids;
+      if (!(await this.readyToDecide(aId, bId))) return;
+      const a = this.characters.find((character) => character.id === aId);
+      const b = this.characters.find((character) => character.id === bId);
+      if (!a || !b) return;
+      const refusal = distinctPairRefusal(a, b);
+      if (refusal) {
+        this.post({ type: "error", message: refusal });
+        return;
+      }
+
+      let stripped: Array<{ name: string; aliases: string[] }>;
+      try {
+        ({ strippedAliases: stripped } = await applyCharacterDistinct(
+          this.characterStore,
+          a,
+          b
+        ));
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        useLogFile(this.work.folderPath);
+        logFailure("重複の候補を別人にする処理の失敗", { 詳細: detail });
+        // 片方だけ書けていても「別人だ」は効く（片側の記録で足りる）。読み直して見せる
+        await this.loadAll();
+        this.post({ type: "error", message: `別人として覚えられませんでした。${detail}` });
+        return;
+      }
+
+      // 承認待ちの更新案は人物まるごとの写し。残すと、反映したときに別人の記録が
+      // 巻き戻り、しかも差分に出ない（「別の人物に分ける」と同じ理由。6.5.8）
+      await this.discardPendingFor(aId);
+      await this.discardPendingFor(bId);
+
+      const strippedNote = stripped
+        .map(
+          (entry) =>
+            `「${entry.name}」の別名から ${entry.aliases.map((alias) => `「${alias}」`).join("")} を外しました。`
+        )
+        .join("");
+      const band =
+        `「${a.name}」と「${b.name}」を別人として覚えました。次の抽出でもまとめ直されず、重複の候補にも出ません。` +
+        strippedNote +
+        "取り消すには、設定/characters の2人のファイルの distinctFrom から、互いを指す項目を消してください。";
+      const touched = selectedId === aId || selectedId === bId;
+      await this.postMergeResolved(band, touched ? selectedId : undefined, {
+        replaceDetail: touched,
+      });
+    } finally {
+      this.mergeBusy = false;
+    }
+  }
+
+  /**
+   * 書いたあとに読み直して送る。**詳細は、触った人物を開いていたときだけ入れ替える**——
+   * 関係の無い人物の欄に書きかけがあったら、作り直すと消える
+   */
+  private async postMergeResolved(
+    band: string,
+    detailId: string | undefined,
+    options: { replaceDetail?: boolean; notice?: string } = {}
+  ): Promise<void> {
+    await this.loadAll();
+    // 本文の色分け・作品の一覧・操作メニューの印・相関図を引き直す（保存と同じ口）
+    if (band) changeObserver?.(this.work);
+    this.post({
+      type: "mergeResolved",
+      groups: this.groups(),
+      workInfo: this.workInfoView(),
+      band,
+      notice: options.notice ?? "",
+      ...(options.replaceDetail
+        ? { detail: detailId ? this.detailOf("character", detailId) : undefined }
+        : {}),
+    });
+  }
+
+  private async reportMergeFailure(
+    error: unknown,
+    keepName: string,
+    absorbName: string
+  ): Promise<void> {
+    useLogFile(this.work.folderPath);
+    // 途中まで書けていることがある（作り直しの前に退避が済んでいる）。画面を古いまま残さない
+    await this.loadAll();
+    if (!(error instanceof CharacterUnifyError)) {
+      const detail = error instanceof Error ? error.message : String(error);
+      logFailure("人物のまとめ処理の失敗", { 場面: "設定資料パネル", 詳細: detail });
+      this.post({ type: "error", message: `まとめられませんでした。${detail}` });
+      return;
+    }
+    const { message, modal } = describeUnifyFailure(error, keepName, absorbName);
+    logFailure("人物のまとめ処理の失敗", {
+      場面: "設定資料パネル",
+      段: error.stage,
+      詳細: error.detail,
+    });
+    this.post({ type: "error", message });
+    // 作者が手で戻さないとファイルが正規の場所に無いときだけ、窓で止める（流れて消えると戻せない）
+    if (modal) void vscode.window.showErrorMessage(message, { modal: true });
+  }
+
   /** 分けた人物の更新案を片づける。読めない・無いときは何もしない */
   private async discardPendingFor(characterId: string): Promise<void> {
     try {
@@ -3197,10 +3476,21 @@ export class SettingsPanel {
       2026-09-23 ⑥）。`init` と `saved` を送る場所は十か所近くあり、1つずつ
       足すと必ずどこかで書き忘れて、入口が古い件数のまま残る。
     */
-    if (message.type === "init" || message.type === "saved") {
+    /*
+      **重複の候補（設計書6.5.4）も同じ所で添える。** 保存・取り下げ・分ける・外の変更の
+      読み直しのどれでも候補は増減するので、知らせごとに書くと必ずどこかで書き忘れる。
+      候補はいまの人物から毎回組み直す（画面の側で1組ずつ消さない）
+    */
+    if (
+      message.type === "init" ||
+      message.type === "saved" ||
+      message.type === "mergeResolved"
+    ) {
       void this.panel.webview.postMessage({
         ...message,
         pendingUpdates: this.pendingUpdatesText,
+        mergeCandidates: this.mergeCandidateViews(),
+        mergeBlocked: this.mergeBlockedNotice(),
       });
       return;
     }
@@ -3994,6 +4284,13 @@ type PanelMessage =
   | { type: "retire"; kind: SettingsKind; id: string }
   /** 1つにまとめられた人物を、別人に分ける（設計書6.5.8） */
   | { type: "separate"; kind: SettingsKind; id: string; alias: string }
+  /**
+   * 重複の候補の1組を、`keepId` の名前を残してまとめる（設計書6.5.4）。
+   * **id で送らせる**——同じ名前の組（「お母さん」が2件）は名前では特定できない
+   */
+  | { type: "unifyPair"; keepId: string; absorbId: string; selectedId?: string }
+  /** 重複の候補の1組を、別人として覚える（設計書6.5.4） */
+  | { type: "distinctPair"; ids: [string, string]; selectedId?: string }
   /** 資料の読み仮名を、本文のルビとして振る（設計書6.12.5） */
   | { type: "applyRuby" }
   /** 反映待ちの更新を確かめる（「更新分を反映」を開く。2026-09-23） */
@@ -4181,4 +4478,33 @@ type OutgoingMessage =
       model: string;
     }
   | { type: "busy"; busy: boolean; label: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /**
+   * 重複の候補の1組を片づけた（設計書6.5.4）。`saved` を使わないのは、あちらが
+   * 開いている詳細を必ず作り直すため——関係の無い人物の欄の書きかけが消える。
+   * `detail` は、触った人物を開いていたときだけ入れる（無ければ詳細に触らない）
+   */
+  | {
+      type: "mergeResolved";
+      groups: Record<SettingsKind, SettingsListItem[]>;
+      workInfo: WorkInfoView;
+      /** パネルの中に出す帯。何をしたかと戻す道 */
+      band: string;
+      /** 下の行に出す短い知らせ。無ければ空 */
+      notice: string;
+      detail?: DetailView | undefined;
+    }
+  /** 登場人物タブの候補の欄を開いて見せる（校正・メモパネルから来たとき） */
+  | { type: "showMergeCandidates" };
+
+/** 重複の候補の1組。画面はこれを描くだけで、組み直さない */
+interface MergeCandidateView {
+  ids: [string, string];
+  names: [string, string];
+  /** ボタンと名前に出す字。同じ名前の組だけ id を添える */
+  labels: [string, string];
+  /** 何が一致したのか（`describeMergeCandidate`） */
+  reason: string;
+  /** 別人にできない組なら、その理由（［別人］の代わりに出す）。できるなら null */
+  distinctRefusal: string | null;
+}

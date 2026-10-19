@@ -141,6 +141,18 @@ input[type="search"] { flex: 1 1 120px; min-width: 90px; }
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 #notice:empty { display: none; }
+/* 人物の重複の候補の知らせ（設計書6.40.4）。一覧はここに置かず、設定資料パネルへ連れて行く */
+#mergeNotice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+#mergeNotice[hidden] { display: none; }
+#mergeNoticeText { flex: 1 1 auto; min-width: 0; }
+#openMergeCandidates { flex: 0 0 auto; white-space: nowrap; }
 /* ［直す］で当てた・［済み］で消した直近の1手と［戻す］（設計書6.96.5・6.40.4）。
    当てた指摘も済ませたメモも一覧から消えるので、戻す口は一覧の外のここに置く */
 #fixed {
@@ -311,6 +323,10 @@ select#tag option { color: var(--note-color, var(--vscode-dropdown-foreground));
   </div>
 </header>
 <div id="notice"></div>
+<div id="mergeNotice" hidden>
+  <span id="mergeNoticeText"></span>
+  <button id="openMergeCandidates" title="設定資料パネルの登場人物タブで、候補を1組ずつまとめるか別人にするか決められます">設定資料パネルで見る</button>
+</div>
 <div id="fixed" hidden>
   <span id="fixedText"></span>
   <button id="undoFix" title="直す前の本文へ戻します（指摘はまた一覧に並びます）">戻す</button>
@@ -336,6 +352,9 @@ const el = {
   exportMd: document.getElementById("export"),
   openProposals: document.getElementById("openProposals"),
   notice: document.getElementById("notice"),
+  mergeNotice: document.getElementById("mergeNotice"),
+  mergeNoticeText: document.getElementById("mergeNoticeText"),
+  openMergeCandidates: document.getElementById("openMergeCandidates"),
   fixed: document.getElementById("fixed"),
   fixedText: document.getElementById("fixedText"),
   undoFix: document.getElementById("undoFix"),
@@ -368,6 +387,8 @@ el.tag.addEventListener("change", sendFilter);
 el.exportMd.addEventListener("click", function () { post("export"); });
 el.openProposals.addEventListener("click", function () { post("openProposals"); });
 el.undoFix.addEventListener("click", function () { post("undoFix"); });
+// 人物の重複の候補は設定資料パネルで片づける（この画面に一覧は置かない。設計書6.40.4）
+el.openMergeCandidates.addEventListener("click", function () { post("openMergeCandidates"); });
 
 /**
  * 文字で探すは、打ち終わるのを少し待ってから送る。
@@ -576,6 +597,9 @@ function render() {
   el.title.textContent = data.title;
   el.counts.textContent = data.countsLabel;
   el.notice.textContent = data.notice;
+  // 人物の重複の候補の知らせ。0組なら拡張機能が null を送るので隠す
+  el.mergeNotice.hidden = !data.mergeNotice;
+  el.mergeNoticeText.textContent = data.mergeNotice || "";
   // 戻せる直近の1手（［直す］か［済み］）。無ければ帯ごと隠す。
   // ボタンの説明は手の種類で変わるので、拡張機能から受け取る
   el.fixed.hidden = !data.fixed;

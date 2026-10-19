@@ -209,6 +209,69 @@ textarea { resize: vertical; min-height: 32px; }
   font-size: inherit;
 }
 #pending-updates-open:hover { background: var(--vscode-button-hoverBackground); }
+/*
+  重複の候補（設計書6.5.4。作者の依頼 2026-10-19 夜）。登場人物の一覧の上に置く。
+  一覧の行と見分けが付くよう、枠で囲んで地の色を変える
+*/
+#list .merge-block {
+  margin: 6px 8px 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-focusBorder));
+  background: var(--vscode-editorWidget-background);
+}
+#list .merge-title { font-size: 12px; font-weight: bold; margin-bottom: 4px; }
+#list .merge-card {
+  padding: 6px 0;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+#list .merge-card:first-of-type { border-top: none; }
+#list .merge-names { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+/* 名前は押すと中身が開く。見比べるための口なので、押せると分かる形にする */
+#list .merge-name {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--vscode-textLink-foreground);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+}
+#list .merge-reason { font-size: 11px; opacity: 0.75; margin: 2px 0 4px; }
+/* ボタンは折り返す（一覧の幅は260pxほどしかない） */
+#list .merge-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+#list .merge-actions button {
+  padding: 2px 8px;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 11px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+#list .merge-actions button:hover:enabled { background: var(--vscode-button-secondaryHoverBackground); }
+#list .merge-actions button:disabled { opacity: 0.5; cursor: default; }
+#list .merge-refusal { font-size: 11px; opacity: 0.75; }
+/* 押した直後の帯。何をしたかと戻す道。次の操作で入れ替わる */
+#list .merge-band {
+  margin: 6px 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--vscode-inputValidation-infoBackground, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-inputValidation-infoBorder, var(--vscode-focusBorder));
+}
+#list .merge-band button {
+  margin-top: 4px;
+  padding: 1px 8px;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 11px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
 #list .item {
   padding: 6px 10px;
   cursor: pointer;
@@ -573,6 +636,20 @@ button.danger:hover {
    * 既定は閉じる。ネームドキャラを探すときに間へ挟まると目当ての名前を見つけにくい。
    */
   let mobsOpen = false;
+  /**
+   * 重複の候補（設計書6.5.4）。拡張機能がいまの人物から組んで、一覧の知らせごとに送る。
+   * **画面では1組ずつ消さない**——押したあとに届く一覧が正しい残りである
+   */
+  let mergeCandidates = [];
+  /** 候補はあるのに出せないときの断り（読み込めない人物のファイルがある） */
+  let mergeBlocked = "";
+  /** 押した直後の帯（何をしたかと戻す道） */
+  let mergeBand = "";
+  /**
+   * 押して返事を待っている組（id を2つつないだ鍵）。返事が来るまでボタンを押せなくする。
+   * 続けて押すと、1回目の書き換えの途中に2回目が同じ人物を退避しにいく
+   */
+  const mergePending = new Set();
 
   const el = {
     tabs: document.getElementById("tabs"),
@@ -722,6 +799,19 @@ button.danger:hover {
     const mobs = items.filter(function (item) { return item.isMob; });
 
     el.list.replaceChildren();
+    // 重複の候補は登場人物の一覧の上（設計書6.5.4）。帯は候補が0組になっても残す
+    // ——最後の1組を片づけた直後に、何をしたかと戻す道が消えると読めない
+    if (activeKind === "character") {
+      if (mergeBand) el.list.appendChild(mergeBandRow());
+      if (activeKind === "character" && mergeCandidates.length > 0) {
+        el.list.appendChild(mergeBlock());
+      } else if (mergeBlocked) {
+        const blockedRow = document.createElement("div");
+        blockedRow.className = "merge-block";
+        blockedRow.textContent = mergeBlocked;
+        el.list.appendChild(blockedRow);
+      }
+    }
     if (items.length === 0) {
       const empty = document.createElement("div");
       empty.className = "empty";
@@ -741,6 +831,138 @@ button.danger:hover {
     if (open) {
       for (const item of mobs) el.list.appendChild(listRow(item));
     }
+  }
+
+  /** 押した直後の帯。［閉じる］で下げる（次の操作でも入れ替わる） */
+  function mergeBandRow() {
+    const band = document.createElement("div");
+    band.className = "merge-band";
+    const text = document.createElement("div");
+    text.textContent = mergeBand;
+    band.appendChild(text);
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "閉じる";
+    close.addEventListener("click", function () {
+      mergeBand = "";
+      renderList();
+    });
+    band.appendChild(close);
+    return band;
+  }
+
+  /**
+   * 重複の候補の欄（作者の依頼 2026-10-19 夜「一回ごとにメニューが出るのはツライ」）。
+   *
+   * 1組ごとに両方の名前と手掛かりを出し、［「A」を残してまとめる］［「B」を残してまとめる］
+   * ［別人］を並べる。**押してもパネルは閉じず、確認の窓も出ない**（拡張機能が書いて、
+   * 残りの候補と帯を返す）。名前を押すと、その人物の中身が右に開く（見比べるため）。
+   */
+  function mergeBlock() {
+    const block = document.createElement("div");
+    block.className = "merge-block";
+    block.id = "merge-candidates";
+    const title = document.createElement("div");
+    title.className = "merge-title";
+    title.textContent = "重複の候補 " + mergeCandidates.length + "組";
+    block.appendChild(title);
+    const hint = document.createElement("div");
+    hint.className = "merge-reason";
+    hint.textContent =
+      "同じ人物なら、残す名前のほうを押してください（もう一方は別名になります）。名前を押すと中身を見比べられます。";
+    block.appendChild(hint);
+    for (const candidate of mergeCandidates) block.appendChild(mergeCard(candidate));
+    return block;
+  }
+
+  function mergeCard(candidate) {
+    const key = candidate.ids[0] + "|" + candidate.ids[1];
+    const pending = mergePending.has(key);
+    const card = document.createElement("div");
+    card.className = "merge-card";
+    card.setAttribute("data-pair", key);
+
+    const names = document.createElement("div");
+    names.className = "merge-names";
+    for (let i = 0; i < 2; i++) {
+      if (i === 1) {
+        const plus = document.createElement("span");
+        plus.textContent = "＋";
+        names.appendChild(plus);
+      }
+      const name = document.createElement("button");
+      name.type = "button";
+      name.className = "merge-name";
+      name.textContent = candidate.labels[i];
+      name.title = candidate.names[i] + " の中身を開きます";
+      const id = candidate.ids[i];
+      name.addEventListener("click", function () { selectCharacter(id); });
+      names.appendChild(name);
+    }
+    card.appendChild(names);
+
+    const reason = document.createElement("div");
+    reason.className = "merge-reason";
+    reason.textContent = candidate.reason;
+    card.appendChild(reason);
+
+    const actions = document.createElement("div");
+    actions.className = "merge-actions";
+    for (let i = 0; i < 2; i++) {
+      const keepId = candidate.ids[i];
+      const absorbId = candidate.ids[1 - i];
+      const unify = document.createElement("button");
+      unify.type = "button";
+      unify.textContent = "「" + candidate.labels[i] + "」を残してまとめる";
+      unify.title =
+        "「" + candidate.names[1 - i] + "」を「" + candidate.names[i] +
+        "」にまとめます（「" + candidate.names[1 - i] + "」は別名になります）";
+      unify.disabled = pending;
+      unify.addEventListener("click", function () {
+        mergePending.add(key);
+        renderList();
+        post("unifyPair", { keepId: keepId, absorbId: absorbId, selectedId: selectedCharacterId() });
+      });
+      actions.appendChild(unify);
+    }
+    if (candidate.distinctRefusal) {
+      // 別人にできない組（同じ名前の2人）は札を出さず、理由を出す（押せない札を並べない）
+      const refusal = document.createElement("div");
+      refusal.className = "merge-refusal";
+      refusal.textContent = candidate.distinctRefusal;
+      actions.appendChild(refusal);
+    } else {
+      const distinct = document.createElement("button");
+      distinct.type = "button";
+      distinct.textContent = "別人";
+      distinct.title = "この2人は別人だと覚えます（次の抽出でもまとめ直されず、候補にも出なくなります）";
+      distinct.disabled = pending;
+      distinct.addEventListener("click", function () {
+        mergePending.add(key);
+        renderList();
+        post("distinctPair", { ids: candidate.ids, selectedId: selectedCharacterId() });
+      });
+      actions.appendChild(distinct);
+    }
+    card.appendChild(actions);
+    return card;
+  }
+
+  /** いま右に開いている人物の id（開いていなければ空）。拡張機能は選択を覚えていない */
+  function selectedCharacterId() {
+    return selected && selected.kind === "character" ? selected.id : "";
+  }
+
+  /** 人物を1人選んで右に開く（一覧の行を押したときと同じ） */
+  function selectCharacter(id) {
+    selected = { kind: "character", id: id };
+    draft = null;
+    proposal = null;
+    chatLog = [];
+    questionText = "";
+    notesText = "";
+    renderList();
+    post("select", { kind: "character", id: id });
   }
 
   /**
@@ -2044,6 +2266,17 @@ button.danger:hover {
     return box;
   }
 
+  /**
+   * 一覧の知らせに添えて届く重複の候補を受け取る。**知らせに無ければ触らない**（古い形）。
+   * 届いたら、押して待っていたボタンを戻す（届いた一覧が正しい残りである）
+   */
+  function receiveMergeCandidates(message) {
+    if (!Array.isArray(message.mergeCandidates)) return;
+    mergeCandidates = message.mergeCandidates;
+    mergeBlocked = message.mergeBlocked || "";
+    mergePending.clear();
+  }
+
   el.search.addEventListener("input", renderList);
 
   window.addEventListener("message", function (event) {
@@ -2051,6 +2284,7 @@ button.danger:hover {
     switch (message.type) {
       case "init":
         groups = message.groups;
+        receiveMergeCandidates(message);
         if (message.workInfo) workInfo = message.workInfo;
         renderTabs();
         renderList();
@@ -2162,12 +2396,47 @@ button.danger:hover {
             : null;
         detail = message.detail;
         groups = message.groups;
+        receiveMergeCandidates(message);
         if (message.workInfo) workInfo = message.workInfo;
         renderTabs();
         renderList();
         renderDetail();
         renderPendingUpdates(message.pendingUpdates);
         setStatus(message.notice || "保存しました。");
+        break;
+      /*
+        重複の候補の1組を片づけた（設計書6.5.4）。**詳細は、触った人物を開いていたときだけ
+        入れ替える**（"detail" が付いて来る）。関係の無い人物の欄の書きかけは消さない
+      */
+      case "mergeResolved":
+        groups = message.groups;
+        receiveMergeCandidates(message);
+        if (message.workInfo) workInfo = message.workInfo;
+        if (message.band) mergeBand = message.band;
+        if ("detail" in message) {
+          detail = message.detail || null;
+          if (!detail) selected = null;
+          else selected = { kind: "character", id: detail.id };
+          draft = null;
+          proposal = null;
+          renderDetail();
+        }
+        renderTabs();
+        renderList();
+        renderPendingUpdates(message.pendingUpdates);
+        setStatus(message.notice || "");
+        break;
+      // 校正・メモパネルの［設定資料パネルで見る］から来た。登場人物タブの候補の欄を見せる
+      case "showMergeCandidates":
+        activeKind = "character";
+        setCollapsed(false);
+        renderTabs();
+        renderList();
+        el.list.scrollTop = 0;
+        {
+          const block = document.getElementById("merge-candidates");
+          if (block && block.scrollIntoView) block.scrollIntoView({ block: "start" });
+        }
         break;
       case "busy":
         busy = message.busy;
@@ -2177,6 +2446,11 @@ button.danger:hover {
       case "error":
         setStatus(message.message, true);
         busy = false;
+        // 押して待っていた候補のボタンを戻す（断られたら、もう一度押せるように）
+        if (mergePending.size > 0) {
+          mergePending.clear();
+          renderList();
+        }
         renderDetail();
         break;
     }
