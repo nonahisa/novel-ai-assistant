@@ -1175,7 +1175,7 @@ export function describeRunConfirm(input: RunConfirmInput): {
       ? { name: input.verifier.providerName, model: input.verifier.model, role: "判定" }
       : undefined,
   ].filter((part): part is { name: string; model: string; role: string } => part !== undefined);
-  const paidName = [...new Set(paidParts.map((part) => part.name))].join("・");
+  const paidName = [...new Set(paidParts.map((part) => part.name))];
   const paidModel =
     paidParts.length > 1
       ? paidParts.map((part) => `${part.role} ${part.model}`).join("・")
