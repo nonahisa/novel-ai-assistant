@@ -3,6 +3,8 @@ import { SettingsPanel } from "../../../src/features/settingsPanel";
 import { findMergeCandidates } from "../../../src/core/characterMerge";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import { buildSettingsPanelHtml } from "../../../src/views/settingsPanelHtml";
+import type { PendingUpdate } from "../../../src/core/pendingReview";
+import { memoryCharacterStore, memoryPendingStore } from "../support/memoryCharacterStore";
 
 /**
  * 設定資料パネルの登場人物タブで、重複の候補を一覧から片づける
@@ -51,10 +53,12 @@ interface PanelInnards {
   characterStore: unknown;
   loadAll(): Promise<void>;
   post(message: unknown): void;
-  discardPendingFor(id: string): Promise<void>;
+  discardPendingFor(id: string): Promise<PendingUpdate[]>;
+  pendingCharacterStore(): ReturnType<typeof memoryPendingStore>;
   mergeCandidateViews(): MergeView[];
   handleUnifyPair(keepId: string, absorbId: string, selectedId?: string): Promise<void>;
   handleDistinctPair(ids: [string, string], selectedId?: string): Promise<void>;
+  handleUndoPairDecision(selectedId?: string): Promise<void>;
 }
 
 /**
@@ -102,7 +106,9 @@ function panelWith(initial: Character[]) {
   };
   inner.discardPendingFor = async (id) => {
     discarded.push(id);
+    return [];
   };
+  inner.pendingCharacterStore = () => memoryPendingStore();
   return {
     inner,
     calls,
@@ -271,6 +277,117 @@ describe("［別人］", () => {
   });
 });
 
+describe("帯の［戻す］（作者の裁定 2026-10-20・10-22）", () => {
+  /** 保存先と反映待ちを記憶で持つパネル（ハッシュの控えまで写した偽物。`support/memoryCharacterStore`） */
+  function undoablePanel(initial: Character[], pendingInitial: PendingUpdate[] = []) {
+    const base = panelWith(initial);
+    const store = memoryCharacterStore(initial);
+    const pending = memoryPendingStore(pendingInitial);
+    base.inner.characterStore = store;
+    base.inner.loadAll = async () => {
+      const loaded = await store.loadAll();
+      base.inner.characters = loaded.characters;
+      base.inner.characterLoadErrors = loaded.errors;
+    };
+    base.inner.pendingCharacterStore = () => pending;
+    // 別人の片づけも本物の道（パネルの discardPendingFor）を通す
+    delete (base.inner as Partial<PanelInnards>).discardPendingFor;
+    return { ...base, store, pending };
+  }
+
+  const lastResolved = (posted: Array<Record<string, unknown>>) =>
+    [...posted].reverse().find((message) => message.type === "mergeResolved");
+
+  test("まとめた直後の帯に［戻す］を出し、押すとまとめる前の2人に戻る", async () => {
+    const { inner, posted, store } = undoablePanel(threePairs());
+    await inner.loadAll();
+
+    await inner.handleUnifyPair("char_002", "char_001");
+    expect(lastResolved(posted)).toMatchObject({ undoable: true });
+    expect(store.read("char_001")).toBeUndefined();
+
+    await inner.handleUndoPairDecision();
+
+    const undone = lastResolved(posted);
+    expect(undone).toMatchObject({ undoable: false });
+    expect(undone?.band).toBe(
+      "まとめる前に戻しました。「ギルマス」と「ギルドマスター」は別々の記録に戻り、" +
+        "まとめた内容は回復用の場所（設定/characters/.novelai-recovery）に残っています。"
+    );
+    expect(store.read("char_001")?.name).toBe("ギルドマスター");
+    expect(store.read("char_002")?.aliases).toEqual([]);
+    // 候補の欄にもまた出る
+    expect(inner.mergeCandidateViews()).toHaveLength(3);
+  });
+
+  test("戻すのは直近の1手だけ。2回目は「戻せる操作がありません」", async () => {
+    const { inner, posted } = undoablePanel(threePairs());
+    await inner.loadAll();
+    await inner.handleUnifyPair("char_001", "char_002");
+    await inner.handleUnifyPair("char_003", "char_004");
+
+    await inner.handleUndoPairDecision();
+    expect(lastResolved(posted)?.band).toContain("「三門太志」と「太志」は別々の記録に戻り");
+    expect(inner.mergeCandidateViews()).toHaveLength(2);
+
+    await inner.handleUndoPairDecision();
+    expect(lastResolved(posted)?.band).toContain("戻せる操作がありません");
+    // 1手目（ギルドマスター）はまとめたまま
+    expect(inner.mergeCandidateViews()).toHaveLength(2);
+  });
+
+  test("まとめたあとに書き換えられていたら戻さず、理由を帯に出して［戻す］を下げる", async () => {
+    const { inner, posted, store } = undoablePanel(threePairs());
+    await inner.loadAll();
+    await inner.handleUnifyPair("char_001", "char_002");
+    store.tamper("char_001", { summary: "作者が書いた" });
+
+    await inner.handleUndoPairDecision();
+
+    expect(lastResolved(posted)).toMatchObject({
+      band: "戻せませんでした。「ギルドマスター」が、まとめたあとに書き換えられています。何も書き換えていません。",
+      undoable: false,
+    });
+    expect(store.read("char_001")?.summary).toBe("作者が書いた");
+  });
+
+  test("まとめると、反映待ちの件数を帯に出す（取り下げた側は捨て、残す側は寄せる）", async () => {
+    const people = threePairs();
+    const { inner, posted, pending } = undoablePanel(people, [
+      { character: { ...people[0], summary: "新しい紹介" }, filePath: "pending/char_001.json" },
+      { character: { ...people[1], summary: "略称" }, filePath: "pending/char_002.json" },
+    ]);
+    await inner.loadAll();
+
+    await inner.handleUnifyPair("char_001", "char_002");
+
+    expect(lastResolved(posted)?.band).toContain(
+      "反映待ちの更新のうち、「ギルマス」の 1件は捨て、「ギルドマスター」の 1件はまとめたあとの姿に合わせました。"
+    );
+    expect([...pending.files.keys()]).toEqual(["pending/char_001.json"]);
+    expect(pending.files.get("pending/char_001.json")?.character.aliases).toContain("ギルマス");
+  });
+
+  test("別人にした直後の帯は［戻す］を出し、distinctFrom を手で消す案内は出さない。押すと別人の記録が消える", async () => {
+    const { inner, posted, store } = undoablePanel(threePairs());
+    await inner.loadAll();
+
+    await inner.handleDistinctPair(["char_005", "char_006"]);
+    const band = lastResolved(posted);
+    expect(band).toMatchObject({ undoable: true });
+    expect(band?.band).not.toContain("distinctFrom");
+    expect(inner.mergeCandidateViews()).toHaveLength(2);
+
+    await inner.handleUndoPairDecision();
+
+    expect(lastResolved(posted)?.band).toBe(
+      "別人として覚えたのを取り消しました。「近所のおばあさん」と「ばあさん」は、また重複の候補に出ます。"
+    );
+    expect(store.read("char_005")?.distinctFrom ?? []).toEqual([]);
+    expect(inner.mergeCandidateViews()).toHaveLength(3);
+  });
+});
+
 describe("3組を、メニューを開かずに押し切る", () => {
   test("まとめる2回と別人1回で、候補が0組になる", async () => {
     const { inner } = panelWith(threePairs());
@@ -299,5 +416,11 @@ describe("画面", () => {
 
   test("押したら返事が来るまでその組のボタンを押せなくする", () => {
     expect(html).toContain("mergePending");
+  });
+
+  test("帯の［戻す］は拡張機能が1手を持っているときだけ出し、押したら返事まで押せなくする", () => {
+    expect(html).toContain("if (mergeUndoable)");
+    expect(html).toContain('post("undoPairDecision"');
+    expect(html).toContain("undo.disabled = mergeUndoPending");
   });
 });

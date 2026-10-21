@@ -338,6 +338,88 @@ export class CharacterStore {
   }
 
   /**
+   * 読み込んだときの保存先とハッシュ（最後に読み込むか書いたときのもの）。
+   *
+   * 重複の候補の［戻す］（設計書6.5.4）が、「いまの記録がその手の直後のままか」を
+   * 確かめるのに使う。写しを返す（控えを外から書き換えさせない）。
+   */
+  snapshotOf(id: string): { filePath: string; hash: string } | undefined {
+    const snapshot = this.snapshots.get(id);
+    return snapshot ? { ...snapshot } : undefined;
+  }
+
+  /** そのファイルの中身のハッシュ。無ければ undefined */
+  async fileHash(filePath: string): Promise<string | undefined> {
+    const bytes = await this.readFileIfExists(filePath);
+    return bytes ? hashBytes(bytes) : undefined;
+  }
+
+  /**
+   * 回復用の場所へ退避したファイルを、元の保存先へ戻す（設計書6.5.4 の［戻す］）。
+   *
+   * **新規作成でしか書かない**（`mode: "create"`。既存ファイルを上書きしない約束は同じ）。
+   * 退避したファイルは消さずに残す——戻したあとで何かが起きても、元の中身は失われない。
+   * 戻す前に、退避したときの中身のままか（ハッシュ）、人物の JSON として読めるか、
+   * 保存先と同じ id のファイルが空いているかを確かめる。**壊れていれば直さず止める。**
+   */
+  async restoreRetired(
+    recoveryPath: string,
+    destinationPath: string,
+    expectedHash: string
+  ): Promise<void> {
+    const bytes = await this.readFileIfExists(recoveryPath);
+    if (!bytes || hashBytes(bytes) !== expectedHash) {
+      throw new CharacterStoreError(
+        `回復用の場所のファイルが見つからないか、退避したときから変わっています: ${recoveryPath}`,
+        "modified_externally"
+      );
+    }
+    let character: Character;
+    try {
+      character = parseCharacter(JSON.parse(new TextDecoder().decode(bytes)));
+    } catch (error) {
+      throw new CharacterStoreError(
+        `回復用の場所のファイルを人物として読めません: ${errorMessage(error)}`,
+        "io_error",
+        { recoveryPaths: [recoveryPath] }
+      );
+    }
+    const dirtyPaths = await this.dirtyDocumentPaths();
+    if (dirtyPaths.length > 0) {
+      throw new CharacterStoreError(
+        "人物設定に未保存の変更があります。保存してからもう一度実行してください。",
+        "unsaved_changes",
+        { recoveryPaths: dirtyPaths }
+      );
+    }
+    if (
+      (await this.findFilesById(character.id)).length > 0 ||
+      (await this.fileExists(destinationPath))
+    ) {
+      throw new CharacterStoreError(
+        `人物「${character.id}」の保存先はすでに存在します。`,
+        "path_conflict"
+      );
+    }
+    try {
+      await atomicWriteFile(destinationPath, bytes, { mode: "create" });
+    } catch (error) {
+      if (error instanceof AtomicWriteFileError) {
+        throw new CharacterStoreError(error.message, error.kind, {
+          persistenceState: error.persistenceState,
+          recoveryPaths: [recoveryPath, ...error.recoveryPaths],
+        });
+      }
+      throw new CharacterStoreError(
+        `人物「${character.id}」を元の場所へ戻せませんでした: ${errorMessage(error)}`,
+        "io_error",
+        { recoveryPaths: [recoveryPath] }
+      );
+    }
+    this.snapshots.set(character.id, { filePath: destinationPath, hash: expectedHash });
+  }
+
+  /**
    * 新規なら作成、既存なら書き換える。
    *
    * **既存ファイルの上書きはできない**（`atomicWrite` を参照）ので、

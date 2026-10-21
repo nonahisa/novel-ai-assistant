@@ -646,6 +646,13 @@ button.danger:hover {
   /** 押した直後の帯（何をしたかと戻す道） */
   let mergeBand = "";
   /**
+   * 帯に［戻す］を出すか。拡張機能が直近の1手を持っているときだけ立つ（設計書6.5.4）。
+   * 次の帯が届くと入れ替わる
+   */
+  let mergeUndoable = false;
+  /** ［戻す］を押して返事を待っているか。続けて押されないように押せなくする */
+  let mergeUndoPending = false;
+  /**
    * 押して返事を待っている組（id を2つつないだ鍵）。返事が来るまでボタンを押せなくする。
    * 続けて押すと、1回目の書き換えの途中に2回目が同じ人物を退避しにいく
    */
@@ -833,13 +840,31 @@ button.danger:hover {
     }
   }
 
-  /** 押した直後の帯。［閉じる］で下げる（次の操作でも入れ替わる） */
+  /**
+   * 押した直後の帯。［戻す］で直近の1手を戻し、［閉じる］で下げる（次の操作でも入れ替わる）。
+   * 時間では消さない（校正・メモパネルの［済み］の［戻す］と同じ。設計書6.40.4）
+   */
   function mergeBandRow() {
     const band = document.createElement("div");
     band.className = "merge-band";
     const text = document.createElement("div");
     text.textContent = mergeBand;
     band.appendChild(text);
+    if (mergeUndoable) {
+      const undo = document.createElement("button");
+      undo.type = "button";
+      undo.className = "merge-undo";
+      undo.textContent = "戻す";
+      undo.title = "いまの操作の前に戻します（記録がその後に書き換えられていたら、戻さずに理由を出します）";
+      undo.disabled = mergeUndoPending;
+      undo.addEventListener("click", function () {
+        mergeUndoPending = true;
+        renderList();
+        post("undoPairDecision", { selectedId: selectedCharacterId() });
+      });
+      band.appendChild(undo);
+      band.appendChild(document.createTextNode(" "));
+    }
     const close = document.createElement("button");
     close.type = "button";
     close.textContent = "閉じる";
@@ -2412,7 +2437,12 @@ button.danger:hover {
         groups = message.groups;
         receiveMergeCandidates(message);
         if (message.workInfo) workInfo = message.workInfo;
-        if (message.band) mergeBand = message.band;
+        // 帯が届いたら［戻す］の有無ごと入れ替える（直近の1手だけを持つ）
+        if (message.band) {
+          mergeBand = message.band;
+          mergeUndoable = !!message.undoable;
+        }
+        mergeUndoPending = false;
         if ("detail" in message) {
           detail = message.detail || null;
           if (!detail) selected = null;

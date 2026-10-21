@@ -31,8 +31,16 @@ import {
   applyCharacterUnify,
   CharacterUnifyError,
   describeDecisionBlockedByLoadErrors,
+  describePendingAfterUnify,
   describeUnifyFailure,
+  type PendingCharacterWriter,
 } from "../core/characterPairDecision";
+import {
+  undoPairDecision,
+  type PairUndoTicket,
+  type UndoCharacterStore,
+} from "../core/characterPairUndo";
+import type { PendingUpdate } from "../core/pendingReview";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { PendingNarratorMoveStore } from "../core/pendingNarratorMoveStore";
 import {
@@ -537,6 +545,12 @@ export class SettingsPanel {
    * 読み込んだときの控えと食い違って止まる（止まっても壊れはしないが、作者には失敗に見える）
    */
   private mergeBusy = false;
+  /**
+   * 帯の［戻す］が戻す、直近の1手（設計書6.5.4）。**1つだけ持つ**——次にまとめるか
+   * 別人にすると入れ替わり、戻すか、戻せないと分かったら捨てる。時間では消えない
+   * （校正・メモパネルの［済み］の［戻す］と同じ。6.40.4）
+   */
+  private mergeUndo: { ticket: PairUndoTicket; band: string } | undefined;
 
   /** 本文は重いので一度読んだら使い回す。パネルを閉じるまで有効 */
   private excerptSources: ExcerptSource[] | undefined;
@@ -1360,6 +1374,9 @@ export class SettingsPanel {
           return;
         case "distinctPair":
           await this.handleDistinctPair(message.ids, message.selectedId);
+          return;
+        case "undoPairDecision":
+          await this.handleUndoPairDecision(message.selectedId);
           return;
         case "applyRuby":
           await this.handleApplyRuby();
@@ -2954,35 +2971,47 @@ export class SettingsPanel {
       const absorb = this.characters.find((character) => character.id === absorbId);
       if (!keep || !absorb) return;
 
-      let unified: Character;
+      let applied: Awaited<ReturnType<typeof applyCharacterUnify>>;
       try {
-        ({ unified } = await applyCharacterUnify(
+        applied = await applyCharacterUnify(
           this.characterStore,
           keep,
           absorb,
-          this.characters
-        ));
+          this.characters,
+          // まとめる前の写しが反映待ちに残ると、反映でまとめが巻き戻る（6.5.4）
+          { pending: this.pendingCharacterStore() }
+        );
       } catch (error) {
         await this.reportMergeFailure(error, keep.name, absorb.name);
         return;
       }
+      const { unified } = applied;
+      const pendingNote = describePendingAfterUnify(applied.pending, keep.name, absorb.name);
+      if (pendingNote) {
+        useLogFile(this.work.folderPath);
+        logLine(`人物のまとめ（設定資料パネル）: ${pendingNote}`);
+      }
 
-      // 戻す道（作者の依頼「戻す道は帯に書く」）。まとめた側の名前が別名に残り、
-      // 「別の人物に分ける」の札に出るときだけ、その道を案内する
+      // ［戻す］のあとに残る道（作者の依頼「戻す道は帯に書く」）。まとめた側の名前が
+      // 別名に残り、「別の人物に分ける」の札に出るときだけ、その道を案内する
       const canSeparateBack = separableAliases(unified).some(
         (alias) => normalizeName(alias) === normalizeName(absorb.name)
       );
       const band =
         `「${absorb.name}」を「${keep.name}」にまとめました。` +
         "まとめた側の元のファイルは、回復用の場所（設定/characters/.novelai-recovery）に残っています。" +
+        pendingNote +
         (canSeparateBack
-          ? `別人だったときは、「${keep.name}」を開いて「別の人物に分ける」で「${absorb.name}」を押すと、` +
-            `名前だけの人物として分け直せます（紹介などの中身は「${keep.name}」に残ります）。`
+          ? `［戻す］が消えたあとで別人だと分かったときは、「${keep.name}」を開いて「別の人物に分ける」で` +
+            `「${absorb.name}」を押すと、名前だけの人物として分け直せます（紹介などの中身は「${keep.name}」に残ります）。`
           : "");
+      // 直近の1手を入れ替える（前の手はもう戻せない）
+      this.mergeUndo = applied.undo ? { ticket: applied.undo, band } : undefined;
       // 開いていた人物がまとめた2人のどちらかなら、残した人物の中身へ切り替える
       const touched = selectedId === keepId || selectedId === absorbId;
       await this.postMergeResolved(band, touched ? keepId : undefined, {
         replaceDetail: touched,
+        undoable: this.mergeUndo !== undefined,
       });
     } finally {
       this.mergeBusy = false;
@@ -3008,13 +3037,9 @@ export class SettingsPanel {
         return;
       }
 
-      let stripped: Array<{ name: string; aliases: string[] }>;
+      let applied: Awaited<ReturnType<typeof applyCharacterDistinct>>;
       try {
-        ({ strippedAliases: stripped } = await applyCharacterDistinct(
-          this.characterStore,
-          a,
-          b
-        ));
+        applied = await applyCharacterDistinct(this.characterStore, a, b);
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         useLogFile(this.work.folderPath);
@@ -3027,22 +3052,37 @@ export class SettingsPanel {
 
       // 承認待ちの更新案は人物まるごとの写し。残すと、反映したときに別人の記録が
       // 巻き戻り、しかも差分に出ない（「別の人物に分ける」と同じ理由。6.5.8）
-      await this.discardPendingFor(aId);
-      await this.discardPendingFor(bId);
+      const discardedPending = [
+        ...(await this.discardPendingFor(aId)),
+        ...(await this.discardPendingFor(bId)),
+      ];
 
-      const strippedNote = stripped
+      const strippedNote = applied.strippedAliases
         .map(
           (entry) =>
             `「${entry.name}」の別名から ${entry.aliases.map((alias) => `「${alias}」`).join("")} を外しました。`
         )
         .join("");
+      const pendingNote =
+        discardedPending.length > 0
+          ? `2人の反映待ちの更新 ${discardedPending.length}件は捨てました（反映すると別人の記録が巻き戻るため）。`
+          : "";
+      if (pendingNote) {
+        useLogFile(this.work.folderPath);
+        logLine(`重複の候補を別人にした（設定資料パネル）: ${pendingNote}`);
+      }
       const band =
         `「${a.name}」と「${b.name}」を別人として覚えました。次の抽出でもまとめ直されず、重複の候補にも出ません。` +
         strippedNote +
-        "取り消すには、設定/characters の2人のファイルの distinctFrom から、互いを指す項目を消してください。";
+        pendingNote;
+      // 直近の1手を入れ替える。片づけた反映待ちは［戻す］で積み直す
+      this.mergeUndo = applied.undo
+        ? { ticket: { ...applied.undo, pendingBefore: discardedPending }, band }
+        : undefined;
       const touched = selectedId === aId || selectedId === bId;
       await this.postMergeResolved(band, touched ? selectedId : undefined, {
         replaceDetail: touched,
+        undoable: this.mergeUndo !== undefined,
       });
     } finally {
       this.mergeBusy = false;
@@ -3056,7 +3096,7 @@ export class SettingsPanel {
   private async postMergeResolved(
     band: string,
     detailId: string | undefined,
-    options: { replaceDetail?: boolean; notice?: string } = {}
+    options: { replaceDetail?: boolean; notice?: string; undoable?: boolean } = {}
   ): Promise<void> {
     await this.loadAll();
     // 本文の色分け・作品の一覧・操作メニューの印・相関図を引き直す（保存と同じ口）
@@ -3066,6 +3106,7 @@ export class SettingsPanel {
       groups: this.groups(),
       workInfo: this.workInfoView(),
       band,
+      undoable: options.undoable ?? false,
       notice: options.notice ?? "",
       ...(options.replaceDetail
         ? { detail: detailId ? this.detailOf("character", detailId) : undefined }
@@ -3098,19 +3139,89 @@ export class SettingsPanel {
     if (modal) void vscode.window.showErrorMessage(message, { modal: true });
   }
 
-  /** 分けた人物の更新案を片づける。読めない・無いときは何もしない */
-  private async discardPendingFor(characterId: string): Promise<void> {
+  /**
+   * 分けた人物の更新案を片づけ、片づけたものを返す（別人の［戻す］が積み直すため）。
+   * 読めない・無いときは何もしない
+   */
+  private async discardPendingFor(characterId: string): Promise<PendingUpdate[]> {
+    const discarded: PendingUpdate[] = [];
     try {
-      const store = new PendingUpdateStore(this.work);
+      const store = this.pendingCharacterStore();
       const { updates } = await store.loadAll();
       for (const update of updates) {
-        if (update.character.id === characterId) {
+        // 新規案は id が仮（`char_000`）なので、id の一致で結ばない
+        if (update.kind !== "creation" && update.character.id === characterId) {
           await store.discard(update.filePath);
+          discarded.push(update);
         }
       }
     } catch {
       // 片づけに失敗しても、分けたこと自体は成立している。
       // ここで止めると作者は「失敗した」と読んで、もう一度押してしまう
+    }
+    return discarded;
+  }
+
+  /** 人物の反映待ちの置き場。単体テストが差し替えられるように1か所で作る */
+  private pendingCharacterStore(): PendingCharacterWriter {
+    return new PendingUpdateStore(this.work);
+  }
+
+  /**
+   * 帯の［戻す］（設計書6.5.4）。直近の1手だけを戻す。
+   *
+   * 戻す前に、いまの記録がその手の直後のままかを確かめる（`core/characterPairUndo.ts`）。
+   * 変わっていたら戻さず、理由を帯に出して札を捨てる。書く前に断られたとき
+   * （未保存の変更など）は、直せばもう一度押せるので帯と札を残す（6.40.4 と同じ）
+   */
+  private async handleUndoPairDecision(selectedId?: string): Promise<void> {
+    if (this.mergeBusy) return;
+    const held = this.mergeUndo;
+    if (!held) {
+      // パネルを開き直した・もう戻したあとに古い帯から押された
+      await this.postMergeResolved("戻せる操作がありません（パネルを開き直すと、前の操作は戻せなくなります）。", undefined);
+      return;
+    }
+    this.mergeBusy = true;
+    try {
+      const outcome = await undoPairDecision(
+        this.characterStore as UndoCharacterStore,
+        this.pendingCharacterStore(),
+        held.ticket
+      );
+      useLogFile(this.work.folderPath);
+      if (outcome.kind === "blocked") {
+        logFailure("重複の候補の［戻す］を見合わせた", { 詳細: outcome.message });
+        // 帯と［戻す］はそのまま。直してもう一度押せる
+        await this.postMergeResolved(held.band, undefined, { undoable: true });
+        this.post({ type: "error", message: outcome.message });
+        return;
+      }
+      this.mergeUndo = undefined;
+      if (outcome.kind === "broken") {
+        logFailure("重複の候補の［戻す］が途中で止まった", { 詳細: outcome.message });
+        await this.postMergeResolved(outcome.message, undefined);
+        this.post({ type: "error", message: outcome.message });
+        // 手で戻す先が書いてある。流れて消えると戻せない
+        void vscode.window.showErrorMessage(outcome.message, { modal: true });
+        return;
+      }
+      logLine(
+        outcome.kind === "done"
+          ? `重複の候補の［戻す］: ${outcome.band}`
+          : `重複の候補の［戻す］を断った: ${outcome.band}`
+      );
+      const ids =
+        held.ticket.kind === "unify"
+          ? [held.ticket.keep.id, held.ticket.absorb.id]
+          : held.ticket.pair.map((entry) => entry.before.id);
+      // 戻した2人のどちらかを開いていたら、その人物の中身を読み直して出す
+      const touched = outcome.kind === "done" && !!selectedId && ids.includes(selectedId);
+      await this.postMergeResolved(outcome.band, touched ? selectedId : undefined, {
+        replaceDetail: touched,
+      });
+    } finally {
+      this.mergeBusy = false;
     }
   }
 
@@ -4298,6 +4409,8 @@ type PanelMessage =
   | { type: "unifyPair"; keepId: string; absorbId: string; selectedId?: string }
   /** 重複の候補の1組を、別人として覚える（設計書6.5.4） */
   | { type: "distinctPair"; ids: [string, string]; selectedId?: string }
+  /** 帯の［戻す］。パネルが持つ直近の1手を戻す（設計書6.5.4） */
+  | { type: "undoPairDecision"; selectedId?: string }
   /** 資料の読み仮名を、本文のルビとして振る（設計書6.12.5） */
   | { type: "applyRuby" }
   /** 反映待ちの更新を確かめる（「更新分を反映」を開く。2026-09-23） */
@@ -4497,6 +4610,8 @@ type OutgoingMessage =
       workInfo: WorkInfoView;
       /** パネルの中に出す帯。何をしたかと戻す道 */
       band: string;
+      /** 帯に［戻す］を出すか（パネルが直近の1手を持っているとき） */
+      undoable: boolean;
       /** 下の行に出す短い知らせ。無ければ空 */
       notice: string;
       detail?: DetailView | undefined;

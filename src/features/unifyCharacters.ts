@@ -12,9 +12,12 @@ import {
   applyCharacterUnify,
   CharacterUnifyError,
   describeDecisionBlockedByLoadErrors,
+  describePendingAfterUnify,
   describeUnifyFailure,
+  type PendingAfterUnify,
 } from "../core/characterPairDecision";
-import { logFailure, useLogFile } from "../core/logger";
+import { PendingUpdateStore } from "../core/pendingUpdates";
+import { logFailure, logLine, useLogFile } from "../core/logger";
 import { cancelItem } from "../views/dialogs";
 import { confirmRun, whenNoticePicked } from "../views/notify";
 
@@ -122,19 +125,27 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   // 書く順番（残す側を退避 → 作る → 取り下げ側を退避）と失敗の文は core の1か所
   // （`applyCharacterUnify`）。設定資料パネルの候補の欄も同じものを通る
   let absorbRecoveryPath: string;
+  let pendingNote: string;
   try {
-    ({ absorbRecoveryPath } = await applyCharacterUnify(
+    let pending: PendingAfterUnify;
+    ({ absorbRecoveryPath, pending } = await applyCharacterUnify(
       store,
       keepPick.keep,
       keepPick.absorb,
       loaded.characters,
-      // 確認の窓に出した別名と、書く別名を同じにする
-      { unified, retiredId }
+      {
+        // まとめる前の写しが反映待ちに残ると、反映でまとめが巻き戻る（6.5.4）
+        pending: new PendingUpdateStore(work),
+        // 確認の窓に出した別名と、書く別名を同じにする
+        plan: { unified, retiredId },
+      }
     ));
+    pendingNote = describePendingAfterUnify(pending, unified.name, keepPick.absorb.name);
   } catch (error) {
     await reportUnifyFailure(error, keepPick.keep.name, keepPick.absorb.name);
     return;
   }
+  if (pendingNote) logLine(`人物のまとめ（詳細メニュー）: ${pendingNote}`);
 
   // **「退避先を開く」が押されるのを待たない**（ノートPCの実機、
   // 2026-09-23。抽出の完了の知らせと同じ直し）。待つと、知らせを閉じる
@@ -142,6 +153,7 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   whenNoticePicked(
     vscode.window.showInformationMessage(
       `「${unified.name}」にまとめました。` +
+        pendingNote +
         "「設定資料集出力」を実行すると一覧にも反映されます。",
       "退避先を開く"
     ),
