@@ -4,6 +4,7 @@ import {
   LOAD_CHECK_INTERVAL_MS,
   LOAD_WARNING_SNOOZE_MS,
   MANAGED_SEND_SETTLE_MS,
+  OLLAMA_VRAM_ESTIMATE_FACTOR,
   SPLIT_GPU_BUSY_UTILIZATION_PERCENT,
   LoadCheckSchedule,
   externalLoadMessage,
@@ -434,6 +435,77 @@ describe("Ollama が GPU と CPU に分けて載せたモデル（2026-09-25 午
         ],
       })
     ).toEqual([GEMMA26B_SPLIT, { name: "old", sizeVramBytes: 5 }]);
+  });
+});
+
+describe("Ollama の申告に乗らない分の見積もり（作者の裁定 2026-10-22「直す」）", () => {
+  /*
+    **再現**（2026-10-22 に作者の機械で測定。RTX 4060 Ti 8GB・Ollama 0.40.7・
+    gemma4:e4b・文脈16,384）：`/api/ps` の申告は 3.0GB なのに、実際の使用は約4.5GB
+    （KV キャッシュと計算用の領域）。ほかのアプリは約1.7GB（モデルを下ろしたあとの
+    1,705MiB）しか使っていないのに、差の約1.5GB が「ほかのアプリ」に数えられ、
+    3,072MiB の線をまたいで警告していた（送り終えた直後でも5秒以上あとでも）
+  */
+  const E4B = { name: "gemma4:e4b", sizeBytes: 3072 * 1024 * 1024, sizeVramBytes: 3072 * 1024 * 1024 };
+  const at = (usedMiB: number, totalMiB = 8188): GpuSample[][] => {
+    const sample = { ...gpu(usedMiB, 0), memoryTotalMiB: totalMiB };
+    return [[sample], [sample], [sample]];
+  };
+
+  test("申告3.0GB・実使用4.5GB・ほかのアプリ1.7GB・全体8GB では警告しない", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: at(1705 + 4608),
+      ollamaModels: [E4B],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(false);
+    expect(judgement.reasons).toEqual([]);
+  });
+
+  test("測定の出力そのもの（6,487MiB・gemma4:e4b(3.0GB)）でも警告しない", () => {
+    for (const used of [6487, 6379, 6201, 6170]) {
+      const judgement = judgeExternalLoad({
+        gpuSamples: at(used),
+        ollamaModels: [E4B],
+        providerId: "ollama",
+        sinceManagedSendMs: 5000,
+      });
+      expect(judgement.external, `${used}MiB`).toBe(false);
+    }
+  });
+
+  test("ログには申告と見積もりの両方を残す（数字が合わないとき追えるように）", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: at(6487),
+      ollamaModels: [E4B],
+      providerId: "ollama",
+    });
+    expect(judgement.summary).toContain("申告 3.0GB");
+    expect(judgement.summary).toContain("見積もり 4.5GB");
+  });
+
+  test("モデルが載っていても、ほかのアプリが本当に大きく使っていれば警告する（16GB の機械）", () => {
+    // 線は 16,376MiB×37.5%＝6,141MiB。モデルの実使用 4.5GB の上に、ほかのアプリが 7.3GB
+    const judgement = judgeExternalLoad({
+      gpuSamples: at(4608 + 7500, 16376),
+      ollamaModels: [E4B],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(true);
+    expect(judgement.reasons[0]).toContain("ほかのアプリが GPU のメモリ");
+  });
+
+  test("倍率そのもの：1.5倍（実測 1.36〜1.56倍。1.62倍を越えると 8GB の機械で見逃しはじめる）", () => {
+    expect(OLLAMA_VRAM_ESTIMATE_FACTOR).toBe(1.5);
+  });
+
+  test("モデルが載っていない（ゲームなど）で 5GB 使っていれば、今までどおり警告する", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: at(5000),
+      ollamaModels: [],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(true);
   });
 });
 

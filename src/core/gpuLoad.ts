@@ -12,6 +12,8 @@
  * - Ollama の `/api/ps`：いま読み込まれているモデルと、それが GPU に載せた量
  *   （**Ollama 自身が載せた分は「ほかのアプリ」から差し引く**——前の実行で
  *   こちらが載せたモデルが、しばらく残っているのはふつうのことだから）。
+ *   **申告には KV キャッシュと計算用の領域が入らないので、申告の1.5倍を差し引く**
+ *   （`OLLAMA_VRAM_ESTIMATE_FACTOR`。2026-10-22 の誤警告の直し）。
  *   **GPU に入りきらず CPU と分けて載せたモデルがあれば、メモリの線は見ない**
  *   （空いたメモリをそのモデルが埋め、申告も当てにならない。`isSplitAcrossCpu`）
  *
@@ -88,8 +90,38 @@ export const SPLIT_GPU_BUSY_UTILIZATION_PERCENT = 25;
  * `gemma4:e4b`・文脈16,384 で、一覧は 3,103MiB、実際の増え方は約4,230MiB）。
  * こちらが前の実行で載せたモデルが残っているだけで「ほかのアプリ」が
  * 常駐（約1.0GB）＋約1.1GB＝約2.2GBに見えるので、2GB の線では毎回騒ぐ。
+ *
+ * 2026-10-22 からは、その差を `OLLAMA_VRAM_ESTIMATE_FACTOR` の見積もりで差し引く。
+ * それでも下限は3GB のまま残す——見積もりの外れ（実測で約0.2GB）と常駐の揺れ
+ * （1.0〜1.7GB）を吸い、読み込み中の 4,840MiB（`/api/ps` は空）は越える高さだから。
  */
 export const OTHER_VRAM_FLOOR_MIB = 3072;
+
+/**
+ * Ollama が GPU にすべて載せたモデルの、**実際の使用量 ÷ `/api/ps` の申告**の見積もり。
+ * 申告（`size_vram`）には KV キャッシュと計算用の領域が入らないので、その分を
+ * 「ほかのアプリ」へ数えないよう、申告にこの倍率を掛けてから差し引く。
+ *
+ * ## 1.5倍にした理由（作者の機械 RTX 4060 Ti 8GB・gemma4:e4b・文脈16,384 の実測）
+ *
+ * - 2026-09-25：申告 3,103MiB・実際の増え方 約4,230MiB（1.36倍）
+ * - 2026-10-22（Ollama 0.40.7）：申告 3.0GB・使用 6,487MiB・モデルを下ろしたあと
+ *   1,705MiB——モデルの分は約4,782MiB（1.56倍）。倍率を掛けないと、ほかのアプリが
+ *   1.7GB しか使っていないのに 3.3GB と読み、3,072MiB の線をまたいで警告していた
+ *
+ * **申告に比例するとみなす**のは、ほかに頼れる数が無いからである。KV キャッシュは
+ * 本来 num_ctx とモデルの作り（層の数・注意の方式）で決まるが、作りごとの量を
+ * 知らずに式を立てると決めつけになる。1.5倍で実測の最大（1.56倍）との差は
+ * 約0.2GB で、線の下限（3GB）の余裕に収まる。**これ以上上げると、モデルが
+ * 載った 8GB の機械でほかのアプリが 3GB 以上使っている場面を見逃しはじめる**
+ * （1.62倍が境目。下の試験「GPU にすべて載ったモデル」）。
+ *
+ * **案「nvidia-smi のプロセスごとの使用量で Ollama の分を引く」は採らなかった。**
+ * Windows の WDDM では `--query-compute-apps` の `used_memory` が全プロセス
+ * `[N/A]` になる（2026-10-22 に作者の機械で確かめた）。作者の環境では一度も
+ * 値が取れず、判定の入力を増やすだけになる。
+ */
+export const OLLAMA_VRAM_ESTIMATE_FACTOR = 1.5;
 
 /** ほかのアプリのメモリの割合の線（8GB の機械で 3,070MiB——下限とほぼ同じにした） */
 export const OTHER_VRAM_RATIO = 0.375;
@@ -288,9 +320,13 @@ export function otherVramLimitMiB(totalMiB: number): number {
  */
 export function judgeExternalLoad(input: ExternalLoadInput): ExternalLoadJudgement {
   const readings = input.gpuSamples.filter((samples) => samples.length > 0);
-  const ollamaVramMiB =
+  const reportedVramMiB =
     (input.ollamaModels ?? []).reduce((sum, model) => sum + model.sizeVramBytes, 0) /
     (1024 * 1024);
+  // 申告に乗らない KV キャッシュと計算用の領域の分を足して見積もる。モデルごとに
+  // その分があるので、合計に掛けても同じ。分けて載せたモデルがあるときは
+  // メモリの線をそもそも見ない（下の watchesMemory）ので、掛けても判定は変わらない
+  const ollamaVramMiB = reportedVramMiB * OLLAMA_VRAM_ESTIMATE_FACTOR;
   const ollamaText =
     input.ollamaModels === undefined
       ? "Ollama の読み込みは不明"
@@ -371,7 +407,12 @@ export function judgeExternalLoad(input: ExternalLoadInput): ExternalLoadJudgeme
           ? `、${splitModels.map((model) => model.name).join("・")} を Ollama が GPU と CPU に分けて` +
             "載せているので見ない"
           : ""
-    }）、${ollamaText}`;
+    }）、${ollamaText}` +
+    `${
+      reportedVramMiB > 0
+        ? `（申告 ${gib(reportedVramMiB)} → 見積もり ${gib(ollamaVramMiB)} を差し引いた）`
+        : ""
+    }`;
 
   return { external: reasons.length > 0, reasons, summary };
 }
