@@ -9,6 +9,8 @@ import {
 import { distinctPairRefusal, planDistinctPair } from "../../../src/core/characterSeparate";
 import { findMergeCandidates } from "../../../src/core/characterMerge";
 import { emptyCharacter, type Character } from "../../../src/models/character";
+import { assembleCharacterReview, type PendingUpdate } from "../../../src/core/pendingReview";
+import { memoryPendingStore } from "../support/memoryCharacterStore";
 
 /**
  * 重複の候補の1組について、作者が決めたことを書く core（設計書6.5.4
@@ -55,7 +57,9 @@ describe("まとめる", () => {
     const keep = person("char_001", "三門太志");
     const absorb = person("char_002", "太志", { authorNotes: "作者のメモ" });
 
-    const applied = await applyCharacterUnify(store, keep, absorb, [keep, absorb]);
+    const applied = await applyCharacterUnify(store, keep, absorb, [keep, absorb], {
+      pending: memoryPendingStore(),
+    });
 
     expect(store.calls).toEqual(["retire:char_001", "save:char_001", "retire:char_002"]);
     expect(applied.unified.aliases).toContain("太志");
@@ -69,7 +73,9 @@ describe("まとめる", () => {
     const keep = person("char_001", "三門太志");
     const absorb = person("char_002", "太志");
 
-    const error = await applyCharacterUnify(store, keep, absorb, [keep, absorb]).catch(
+    const error = await applyCharacterUnify(store, keep, absorb, [keep, absorb], {
+      pending: memoryPendingStore(),
+    }).catch(
       (caught: unknown) => caught
     );
 
@@ -86,7 +92,9 @@ describe("まとめる", () => {
     const keep = person("char_001", "三門太志");
     const absorb = person("char_002", "太志");
 
-    const error = (await applyCharacterUnify(store, keep, absorb, [keep, absorb]).catch(
+    const error = (await applyCharacterUnify(store, keep, absorb, [keep, absorb], {
+      pending: memoryPendingStore(),
+    }).catch(
       (caught: unknown) => caught
     )) as CharacterUnifyError;
 
@@ -160,5 +168,95 @@ describe("別人にする", () => {
     const plan = planDistinctPair(a, b);
 
     expect(findMergeCandidates([plan.first, plan.second])).toEqual([]);
+  });
+});
+
+describe("まとめたあとの反映待ち（作者の裁定 2026-10-22。巻き戻りの穴）", () => {
+  /** 反映待ちをディスクの代わりに記憶で持つ口 */
+  function pendingWith(initial: PendingUpdate[]) {
+    const files = new Map(initial.map((update) => [update.filePath, update]));
+    return {
+      files,
+      async loadAll() {
+        return { updates: [...files.values()], errors: [] };
+      },
+      async stage(
+        characters: Character[],
+        options: { source?: PendingUpdate["source"]; kind?: PendingUpdate["kind"]; reason?: string } = {}
+      ) {
+        for (const character of characters) {
+          const filePath = `pending/${character.id}.json`;
+          files.set(filePath, { character, filePath, ...options });
+        }
+      },
+      async discard(filePath: string) {
+        files.delete(filePath);
+      },
+    };
+  }
+
+  test("まとめる前の残す側の丸写しが反映待ちに残っていても、反映でまとめが巻き戻らない", async () => {
+    const store = recordingStore();
+    const keep = person("char_001", "三門太志", { appearedChapters: [1] });
+    const absorb = person("char_002", "太志", { authorNotes: "作者のメモ", appearedChapters: [2] });
+    // 抽出が積んだ、まとめる前の「三門太志」の丸写し（紹介だけ新しい）
+    const pending = pendingWith([
+      {
+        character: { ...keep, summary: "寡黙な青年" },
+        filePath: "pending/char_001.json",
+        source: "chat",
+      },
+    ]);
+
+    const applied = await applyCharacterUnify(store, keep, absorb, [keep, absorb], { pending });
+
+    // 承認の画面に並ぶ差分。まとめを崩す変化（別名から「太志」を外す等）が無く、
+    // AIが足した紹介だけが残っていること
+    const review = assembleCharacterReview([...pending.files.values()], [applied.unified], []);
+    expect(review.items).toHaveLength(1);
+    const fields = review.items[0].diff.changes.map((change) => change.label);
+    expect(fields).toEqual(["紹介"]);
+    // 出どころは引き継ぐ
+    expect(review.items[0].update.source).toBe("chat");
+    expect(applied.pending).toMatchObject({ discarded: 0, rebased: 1 });
+  });
+
+  test("取り下げた側の反映待ちは捨て、ほかの人物の反映待ちには触らない", async () => {
+    const store = recordingStore();
+    const keep = person("char_001", "三門太志");
+    const absorb = person("char_002", "太志");
+    const other = person("char_003", "密倉文佳");
+    const pending = pendingWith([
+      { character: { ...absorb, summary: "眠そう" }, filePath: "pending/char_002.json" },
+      { character: { ...other, summary: "書店員" }, filePath: "pending/char_003.json" },
+      // 新規案は仮の id なので、まとめた2人とは結ばない
+      { character: person("char_000", "春原月夜"), filePath: "pending/new_春原月夜.json", kind: "creation" },
+    ]);
+
+    const applied = await applyCharacterUnify(store, keep, absorb, [keep, absorb, other], { pending });
+
+    expect([...pending.files.keys()].sort()).toEqual([
+      "pending/char_003.json",
+      "pending/new_春原月夜.json",
+    ]);
+    expect(applied.pending).toMatchObject({ discarded: 1, rebased: 0 });
+  });
+
+  test("反映待ちが読めなくても、まとめ自体は成り立ったまま件数と理由を返す", async () => {
+    const store = recordingStore();
+    const keep = person("char_001", "三門太志");
+    const absorb = person("char_002", "太志");
+    const pending = {
+      async loadAll(): Promise<{ updates: PendingUpdate[]; errors: Array<{ file: string; message: string }> }> {
+        return { updates: [], errors: [{ file: "char_001.json", message: "壊れています" }] };
+      },
+      async stage() {},
+      async discard() {},
+    };
+
+    const applied = await applyCharacterUnify(store, keep, absorb, [keep, absorb], { pending });
+
+    expect(store.calls).toEqual(["retire:char_001", "save:char_001", "retire:char_002"]);
+    expect(applied.pending.unreadable).toEqual(["char_001.json"]);
   });
 });

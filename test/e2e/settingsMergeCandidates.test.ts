@@ -10,6 +10,7 @@
  * - 押した結果は**ファイルで見る**：まとめた側は残した人物の別名になり、取り下げた側のファイルは
  *   回復用の場所へ移る。別人にした2人は distinctFrom で互いを指す
  * - 名前を押すと、その人物の中身が右に開く（見比べる口）
+ * - まとめた直後の帯の［戻す］で、まとめる前の2人に戻る（作者の裁定 2026-10-20・10-22）
  * - 校正・メモパネルの「人物の重複の候補が 3組あります」の［設定資料パネルで見る］で、
  *   設定資料パネルが登場人物タブの候補の欄を出して開く
  *
@@ -183,6 +184,36 @@ test("設定資料パネルの重複の候補3組を、［まとめる］2回と
       );
       // パネルは閉じていない（同じ面が残っている）
       expect(await settingsPanelFrame(session)).toBeDefined();
+    },
+    launchOptions
+  );
+});
+
+test("まとめた直後の帯の［戻す］で、まとめる前の2人に戻り、候補がまた3組になる", async () => {
+  await withVsCode(
+    "重複の候補の［戻す］",
+    [{ name: EPISODE, text: TEXT }],
+    async (session) => {
+      const frame = await openSettings(session);
+      await waitUntil(async () => (await candidatePairs(frame)).length === 3, "重複の候補が3組並ぶ", 15_000);
+      const folder = await charactersFolder(session);
+
+      await pressInPair(frame, "char_001|char_002", "「ギルドマスター」を残してまとめる");
+      await waitUntil(async () => (await candidatePairs(frame)).length === 2, "まとめた組が候補から消える", 15_000);
+      const undo = frame.locator("#list .merge-band button.merge-undo");
+      expect(await undo.count()).toBe(1);
+
+      await undo.click();
+      await waitUntil(async () => (await candidatePairs(frame)).length === 3, "戻すと候補がまた3組になる", 15_000);
+      expect(await bandText(frame)).toContain("まとめる前に戻しました");
+      // 戻したあとの帯には［戻す］を出さない（戻せるのは直近の1手だけ）
+      expect(await frame.locator("#list .merge-band button.merge-undo").count()).toBe(0);
+      expect(await noMenuNorDialog(session), "メニューか確認の窓が出ています").toBe(true);
+      // ファイル：2人とも元の場所にあり、残した人物の別名から「ギルマス」が消えている
+      const guild = await readJsonWhenPresent<Character>(path.join(folder, characterFileName(cast()[0])));
+      const short = await readJsonWhenPresent<Character>(path.join(folder, characterFileName(cast()[1])));
+      expect(guild.aliases).not.toContain("ギルマス");
+      expect(short.authorNotes).toBe("ギルマスのメモ");
     },
     launchOptions
   );
