@@ -70,8 +70,11 @@ test("機能別AI割当の広報素材を撮る", async () => {
         await waitUntil(
           async () =>
             (await session.app.evaluate(({ BrowserWindow }) => {
-              const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
-              return win ? win.getContentSize() : [0, 0];
+              // writeScene の contentSize と同じ形（find のコールバックは型が付かず落ちた）
+              for (const win of BrowserWindow.getAllWindows()) {
+                if (!win.isDestroyed()) return win.getContentSize();
+              }
+              return [0, 0];
             }))[0] === SIZE.width,
           "窓の幅が合う",
           10_000
