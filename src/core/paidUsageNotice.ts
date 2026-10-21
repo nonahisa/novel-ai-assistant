@@ -9,7 +9,7 @@
  * **窓の本文は3行**（作者の裁定 2026-10-19「確認画面はもう少しシンプルに」
  * 「3行にする」「課金の機能で共通にしてください」）。
  *
- * 1. どこへ送るか（`<サービス>（有料）で送ります`）
+ * 1. どこへ送るか（`<サービス>（有料）で送ります`。無料枠のあるAIは `<サービス>（無料枠あり・超えると有料）で送ります`）
  * 2. 何を送るか（`送るもの：…`。本文を送る機能は量を書く）
  * 3. いくらかかるか（`料金：…`。呼ぶ回数が分かれば入れる）
  *
@@ -46,6 +46,12 @@ export interface PaidUsageNoticeOptions {
   more?: readonly string[];
 }
 
+/** 末尾の性質の括弧1つ（「（クラウド・無料枠あり）」）の中身。無ければ空 */
+function trailingParen(name: string): string {
+  const m = name.trim().match(/（([^（）]*)）$/u);
+  return m ? m[1] : "";
+}
+
 /**
  * 表示名から、窓の1行目に出すサービス名を作る。
  *
@@ -60,9 +66,32 @@ export function paidServiceName(providerName: string): string {
   return short === "" ? trimmed : short;
 }
 
-/** 1行目。どのサービスへ送るか */
-export function paidHeadLine(providerName: string): string {
-  return `${paidServiceName(providerName)}（有料）で送ります`;
+/**
+ * 無料枠のあるAIか。
+ *
+ * **プロバイダ側に「無料枠あり」を表す印は無い**（`isPaid` は「呼ぶたびに課金されうるか」で、
+ * 無料枠つきのGeminiもさくらも true）。無料枠の有無を持つのは表示名の性質の括弧
+ * （「（クラウド・無料枠あり）」）だけなので、**サービス名ではなく括弧の中の「無料枠」で**
+ * 判じる。名前で決め打つと、無料枠のあるサービスが増えたときに外れる
+ */
+export function hasFreeTier(providerName: string): boolean {
+  return trailingParen(providerName).includes("無料枠");
+}
+
+/**
+ * 1行目。どのサービスへ送るか。
+ *
+ * 無料枠のあるAIは「（無料枠あり・超えると有料）」、それ以外は「（有料）」。
+ * 複数（取り出しと判定で別のAI）のときは「・」でつなぎ、**全部が無料枠つきのときだけ**
+ * 無料枠の言い方にする（1つでも純粋な有料があれば、有料と言うほうが安全）
+ */
+export function paidHeadLine(providerName: string | readonly string[]): string {
+  const names = typeof providerName === "string" ? [providerName] : providerName;
+  const free = names.length > 0 && names.every(hasFreeTier);
+  const label = names.map(paidServiceName).join("・");
+  return free
+    ? `${label}（無料枠あり・超えると有料）で送ります`
+    : `${label}（有料）で送ります`;
 }
 
 /**
@@ -93,7 +122,7 @@ export function paidMoreLines(
 
 /** 有料のAIを使う前の断り（窓の3行と［詳しく］の行） */
 export function paidUsageNotice(
-  providerName: string,
+  providerName: string | readonly string[],
   model: string,
   options: PaidUsageNoticeOptions
 ): PaidUsageNotice {
@@ -113,6 +142,9 @@ export function paidUsageNotice(
  * 3行へ畳むと、作者が量を見て決めるための行（チャンク数・材料・前の話の量）が
  * 窓から消える。
  */
-export function paidCostLines(providerName: string, calls?: number): string[] {
+export function paidCostLines(
+  providerName: string | readonly string[],
+  calls?: number
+): string[] {
   return [paidHeadLine(providerName), paidPriceLine(calls)];
 }

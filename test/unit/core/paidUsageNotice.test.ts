@@ -59,11 +59,26 @@ describe("有料のAIの確かめの3行", () => {
 
   test("表示名の末尾の性質の括弧は外す（括弧が2つ続かない）", () => {
     expect(paidHeadLine("Claude（クラウド・有料）")).toBe("Claude（有料）で送ります");
-    expect(paidHeadLine("Gemini（クラウド・無料枠あり）")).toBe("Gemini（有料）で送ります");
-    expect(paidHeadLine("さくらのAI（クラウド・無料枠あり）")).toBe("さくらのAI（有料）で送ります");
+    expect(paidHeadLine("Gemini（クラウド・無料枠あり）")).toBe("Gemini（無料枠あり・超えると有料）で送ります");
+    expect(paidHeadLine("さくらのAI（クラウド・無料枠あり）")).toBe("さくらのAI（無料枠あり・超えると有料）で送ります");
     expect(paidHeadLine("VS Code 経由でつなぐ")).toBe("VS Code 経由でつなぐ（有料）で送ります");
     // 括弧だけの名前は、そのまま残す（空にしない）
     expect(paidHeadLine("（名無し）")).toBe("（名無し）（有料）で送ります");
+  });
+
+  test("無料枠のあるAIは「無料枠あり・超えると有料」、純粋な有料は「有料」のまま", () => {
+    expect(paidHeadLine("Claude（クラウド・有料）")).toBe("Claude（有料）で送ります");
+    expect(paidHeadLine("ChatGPT（クラウド・有料）")).toBe("ChatGPT（有料）で送ります");
+    expect(paidCostLines("Gemini（クラウド・無料枠あり）", 2)[0]).toBe(
+      "Gemini（無料枠あり・超えると有料）で送ります"
+    );
+    // 取り出しと判定が別のAI：全部が無料枠つきのときだけ無料枠の言い方
+    expect(paidHeadLine(["Gemini（クラウド・無料枠あり）", "さくらのAI（クラウド・無料枠あり）"])).toBe(
+      "Gemini・さくらのAI（無料枠あり・超えると有料）で送ります"
+    );
+    expect(paidHeadLine(["Gemini（クラウド・無料枠あり）", "Claude（クラウド・有料）"])).toBe(
+      "Gemini・Claude（有料）で送ります"
+    );
   });
 
   test("モデル名と料金の細かい断りは、窓の本文から外して［詳しく］へ残す", () => {
