@@ -89,6 +89,8 @@ export async function startFakeOllama(
   /** 一覧に足す別のモデル名（モデルを選び替える場面を見るとき）。答え方は同じ */
   options: {
     extraModels?: readonly string[];
+    /** 一覧に出すモデル名を丸ごと差し替える（広報の撮影で、偽の名前を画面に出さないため） */
+    listedModels?: readonly string[];
     /**
      * 申告する大きさ（`parameter_size`）。既定は "1B"。製品が頼み方を大きいモデル向けに
      * 切り替える場面（20B 以上）を見るときに "25.2B" などを渡す
@@ -139,7 +141,7 @@ export async function startFakeOllama(
       };
       if (url.startsWith("/api/tags")) {
         sendJson({
-          models: [FAKE_OLLAMA_MODEL, ...(options.extraModels ?? [])].map((name) => ({
+          models: (options.listedModels ?? [FAKE_OLLAMA_MODEL, ...(options.extraModels ?? [])]).map((name) => ({
             name,
             size: 1_000_000,
             details: { parameter_size: options.parameterSize ?? "1B", quantization_level: "Q4_0" },
