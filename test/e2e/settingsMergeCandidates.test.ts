@@ -22,7 +22,7 @@
  *   npm run build
  *   npx vitest run --config vitest.e2e.config.mts test/e2e/settingsMergeCandidates.test.ts
  */
-import { readdir } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
@@ -216,6 +216,84 @@ test("まとめた直後の帯の［戻す］で、まとめる前の2人に戻�
       expect(short.authorNotes).toBe("ギルマスのメモ");
     },
     launchOptions
+  );
+});
+
+test("［別人］を押した直後の帯の［戻す］で、別人の記録が消えて、その組がまた候補に出る", async () => {
+  await withVsCode(
+    "別人の［戻す］",
+    [{ name: EPISODE, text: TEXT }],
+    async (session) => {
+      const frame = await openSettings(session);
+      await waitUntil(async () => (await candidatePairs(frame)).length === 3, "重複の候補が3組並ぶ", 15_000);
+      const folder = await charactersFolder(session);
+
+      await pressInPair(frame, "char_005|char_006", "別人");
+      await waitUntil(async () => (await candidatePairs(frame)).length === 2, "別人にした組が候補から消える", 15_000);
+      expect(await bandText(frame)).toContain("別人として覚えました");
+      await waitUntil(async () => {
+        const neighbor = await readJsonWhenPresent<Character>(path.join(folder, characterFileName(cast()[4])));
+        return neighbor.distinctFrom.some((entry) => entry.id === "char_006");
+      }, "別人の記録がファイルに入る", 10_000);
+
+      const undo = frame.locator("#list .merge-band button.merge-undo");
+      expect(await undo.count()).toBe(1);
+      await undo.click();
+      await waitUntil(async () => (await candidatePairs(frame)).length === 3, "戻すと候補がまた3組になる", 15_000);
+      const band = await bandText(frame);
+      expect(band).toContain("別人として覚えたのを取り消しました");
+      // ファイルを手で直す案内は出ない（自動で戻せた）
+      for (const word of ["distinctFrom", "ファイル", "消してください"]) {
+        expect(band, `帯に「${word}」が出ています`).not.toContain(word);
+      }
+      expect(await frame.locator("#list .merge-band button.merge-undo").count()).toBe(0);
+      expect(await noMenuNorDialog(session), "メニューか確認の窓が出ています").toBe(true);
+      // ファイル：2人の distinctFrom から互いを指す項目が消えている
+      await waitUntil(async () => {
+        const neighbor = await readJsonWhenPresent<Character>(path.join(folder, characterFileName(cast()[4])));
+        const granny = await readJsonWhenPresent<Character>(path.join(folder, characterFileName(cast()[5])));
+        return (
+          !neighbor.distinctFrom.some((entry) => entry.id === "char_006") &&
+          !granny.distinctFrom.some((entry) => entry.id === "char_005")
+        );
+      }, "互いを指す別人の記録が消える", 10_000);
+    },
+    launchOptions
+  );
+});
+
+test("反映待ちの更新がある人物を［まとめる］と、帯に反映待ちの件数の文が出る", async () => {
+  await withVsCode(
+    "まとめるときの反映待ち",
+    [{ name: EPISODE, text: TEXT }],
+    async (session) => {
+      const frame = await openSettings(session);
+      await waitUntil(async () => (await candidatePairs(frame)).length === 3, "重複の候補が3組並ぶ", 15_000);
+
+      await pressInPair(frame, "char_001|char_002", "「ギルドマスター」を残してまとめる");
+      await waitUntil(async () => (await candidatePairs(frame)).length === 2, "まとめた組が候補から消える", 15_000);
+      expect(await bandText(frame)).toContain(
+        "反映待ちの更新のうち、「ギルマス」の 1件は捨て、「ギルドマスター」の 1件はまとめたあとの姿に合わせました。"
+      );
+      // 取り下げた側の反映待ちは消え、残す側の分は残っている
+      const pendingFolder = path.join(session.workFolder, ".aiwriter", "pending-characters");
+      await waitUntil(async () => {
+        const names = await readdir(pendingFolder).catch(() => [] as string[]);
+        return names.includes("char_001.json") && !names.includes("char_002.json");
+      }, "取り下げた側の反映待ちが消え、残す側の分が残る", 10_000);
+    },
+    {
+      ...launchOptions,
+      prepareWork: async ({ workFolder }) => {
+        await writeCharactersTo(defaultCharactersFolder(workFolder), cast());
+        const pendingFolder = path.join(workFolder, ".aiwriter", "pending-characters");
+        await mkdir(pendingFolder, { recursive: true });
+        const keepSide = { ...cast()[0], aliases: ["ギルド長"] };
+        const absorbSide = { ...cast()[1], aliases: ["ギルマス殿"] };
+        await writeFile(path.join(pendingFolder, "char_001.json"), JSON.stringify(keepSide, null, 2), "utf8");
+        await writeFile(path.join(pendingFolder, "char_002.json"), JSON.stringify(absorbSide, null, 2), "utf8");
+      },
+    }
   );
 });
 
