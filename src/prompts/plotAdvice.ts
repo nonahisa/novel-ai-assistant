@@ -11,6 +11,7 @@ import {
 import {
   PLOT_ADVICE_MAX_QUESTIONS,
   PLOT_ADVICE_SUGGESTION_MARK,
+  plotAdviceFieldsNamed,
 } from "../core/plotAdviceValidation";
 
 /**
@@ -33,6 +34,8 @@ import {
  * - **次に勧める1項目はコードが決めて渡す**（`nextPlotAdviceField`）。P-43 で
  *   「頼むだけでは守られなかった」（目標の文字数を10本とも尋ねなかった）
  *   のと同じで、推奨順をAIに任せると飛ばしたり2つ挙げたりする
+ * - **渡すかどうかもコードが決める**（`plotAdviceFieldToRecommend`）。作者の
+ *   発言が項目を名指ししている回と、編集者がもう勧めた項目は渡さない（1.1）
  * - 案の読み取り・作者の文の書き換えの見張りは `core/plotAdviceValidation.ts`
  * - 書くのは作者が［この案をプロットに書く］を押したときだけ（`features/plotAdvice.ts`）
  *
@@ -49,8 +52,14 @@ import {
 /**
  * 変更履歴（要点だけ。詳しくはプロンプト設計書 P-01）
  * - 1.0: 初版（0.100.x）
+ * - 1.1: 勧める項目の段を「話が途切れたときに勧める項目（まだ勧めていません）」
+ *   に改め、作者が項目を名指しした回・編集者がもう勧めた項目は渡さない。
+ *   振る舞い3に「決めて書いてと頼まれたら書き込み案を先に」を足した。
+ *   1.0 では空欄の先頭（主人公の行動原理）が毎回入り、gemma4:e4b が「前に勧めた
+ *   こと」と読んで9問中5問で話を戻し、行動原理を決めて「入れて」と頼んでも
+ *   案を出さずに問いを重ねた（2026-10-23、0.110.2）
  */
-export const PLOT_ADVICE_VERSION = "1.0";
+export const PLOT_ADVICE_VERSION = "1.1";
 
 /** 温度。会話で引き出す場なので、相談・対話式プロット作成と同じだけ揺らす */
 export const PLOT_ADVICE_TEMPERATURE = 0.7;
@@ -88,7 +97,7 @@ export const PLOT_ADVICE_SYSTEM_PROMPT = `あなたは経験豊富な小説の�
 【振る舞い】
 1. 作者の作りたいものを引き出すことを、いちばん大事にすること。あなたのアイデアで作者の考えを上書きしないこと。
 2. 一度に多くを聞かないこと。問いは${PLOT_ADVICE_MAX_QUESTIONS}つまでにすること。
-3. 依頼文に「次に考えるとよい項目」があり、作者の発言がほかの話でなければ、その項目を1つだけ勧めること。ほかのまだ書かれていない項目の名前は挙げないこと。
+3. 依頼文に「話が途切れたときに勧める項目」があるときは、作者の発言に答えたうえで、話の続きが見えないときだけ、その項目を1つだけ勧めること。その項目はまだ勧めていないので、前に勧めたように書かないこと。ほかのまだ書かれていない項目の名前は挙げないこと。作者がある項目の中身を決めて「書いて」「入れて」と頼んだときは、問いを重ねずに、その項目の書き込み案を出すことを先にすること。
 4. 作者の書いたことに曖昧なところや食い違うところがあれば、否定せずに、問いの形で確かめること。
 5. ログラインは「誰が」「どんな状況で」「何を目指し」「何が障害か」の4つがそろっているかを見ること。
 6. テーマとあらすじが噛み合っているかを気にかけ、ずれていれば問いの形で伝えること。
@@ -126,7 +135,10 @@ export function emptyPlotAdviceFields(sections: PlotSections): PlotDialogueSecti
   ).map((entry) => entry.key as PlotDialogueSection);
 }
 
-/** 次に考えるとよい項目（推奨順で最初のまだ書かれていない項目）。全部書いてあれば undefined */
+/**
+ * 推奨順で最初のまだ書かれていない項目。全部書いてあれば undefined。
+ * 依頼文へ渡すかどうかは `plotAdviceFieldToRecommend` が決める。
+ */
 export function nextPlotAdviceField(
   sections: PlotSections
 ): PlotDialogueSection | undefined {
@@ -152,10 +164,61 @@ function headingOf(key: PlotDialogueSection): string {
   return PLOT_SECTIONS.find((entry) => entry.key === key)?.heading ?? key;
 }
 
+/**
+ * 今回の依頼文で「話が途切れたときに勧める項目」として渡す項目。渡さない回は undefined。
+ *
+ * - **作者の今回の発言が、書いてよい項目をどれか名指ししていれば渡さない。**
+ *   1.0 は空欄の先頭を毎回渡していたため、作者が世界観を相談しても、行動原理を
+ *   決めて「入れて」と頼んでも、依頼文は「行動原理はまだ空・次に考えて」と
+ *   言っていた。名指しした項目だけを外してほかを渡すと、作者の話からそらす
+ *   勧めになるので、その回は何も渡さない。**見るのは今回の発言だけ**——履歴まで
+ *   見ると、一度名指ししただけで10往復のあいだ勧めが止まる
+ * - **編集者が履歴でもう勧めた項目は渡さない。** 見出しで「まだ勧めていません」
+ *   と言うので、それが嘘にならないようにする（同じ項目を毎回勧め直さない）
+ */
+export function plotAdviceFieldToRecommend(
+  input: Pick<PlotAdvicePromptInput, "sections" | "userMessage" | "history">
+): PlotDialogueSection | undefined {
+  if (plotAdviceFieldsNamed([input.userMessage]).length > 0) return undefined;
+  const next = nextPlotAdviceField(input.sections);
+  if (!next) return undefined;
+  const heading = headingOf(next);
+  const already = recentPlotAdviceHistory(input.history).some(
+    (turn) => turn.role === "assistant" && turn.text.normalize("NFKC").includes(heading)
+  );
+  return already ? undefined : next;
+}
+
+/**
+ * 勧める項目の段。**指示の言葉は答えとして返ってくる**（CLAUDE.md の繰り返し
+ * 起きた失敗3）ので、返ってきても害の無い言い方にする。1.0 の「次に考えると
+ * よい項目」は、e4b が「次に考えるとよい項目として〜を提案しましたが」と、
+ * 前に勧めたことのように返した。「話が途切れたとき」で作者の話が先だと分かり、
+ * 「まだ勧めていません」で前の勧めとして読まれないようにする。
+ * 渡す項目が無く、名指しもされていない回（全部書いてある）は噛み合いを見させる。
+ * 名指しがあった回は段ごと出さない（代わりの指示文を書くと、それが返ってくる）。
+ */
+function recommendBlock(input: PlotAdvicePromptInput): string {
+  const field = plotAdviceFieldToRecommend(input);
+  if (field) {
+    return `【話が途切れたときに勧める項目（まだ勧めていません）】
+${headingOf(field)}
+
+`;
+  }
+  const named = plotAdviceFieldsNamed([input.userMessage]).length > 0;
+  if (!named && !nextPlotAdviceField(input.sections)) {
+    return `【話が途切れたときに勧める項目】
+（ありません。書いてある項目どうしの噛み合いを見てください）
+
+`;
+  }
+  return "";
+}
+
 export function buildPlotAdvicePrompt(input: PlotAdvicePromptInput): string {
   const written = describeWrittenPlot(input.sections, input.extra ?? "");
   const empty = emptyPlotAdviceFields(input.sections).map(headingOf);
-  const next = nextPlotAdviceField(input.sections);
   const history = recentPlotAdviceHistory(input.history)
     .map((turn) => `${turn.role === "author" ? "作者" : "編集者"}：${turn.text.trim()}`)
     .join("\n");
@@ -169,10 +232,7 @@ ${written || "（まだ何も書かれていません）"}
 【まだ書かれていない項目】
 ${empty.length > 0 ? empty.join("、") : "（ありません）"}
 
-【次に考えるとよい項目】
-${next ? headingOf(next) : "（ありません。書いてある項目どうしの噛み合いを見てください）"}
-
-【これまでの会話】
+${recommendBlock(input)}【これまでの会話】
 ${history || "（これが最初の発言です）"}
 
 【作者の発言】

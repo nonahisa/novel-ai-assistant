@@ -178,7 +178,7 @@ describe("送って、答えを並べる", () => {
     // 相談と同じ記録に残す（プロットモードの印つき）
     expect(state.chatLog).toHaveBeenCalledWith(
       work,
-      expect.objectContaining({ panel: "プロットモード", promptVersion: "P-01 1.0" })
+      expect.objectContaining({ panel: "プロットモード", promptVersion: "P-01 1.1" })
     );
   });
 
@@ -192,7 +192,9 @@ describe("送って、答えを並べる", () => {
     expect(params.disableThinking).toBe(true);
     expect(params.jsonSchema).toBeUndefined();
     expect(params.meta?.feature).toBe("plot_advice");
-    expect(params.userPrompt).toContain("【次に考えるとよい項目】\nログライン");
+    expect(params.userPrompt).toContain(
+      "【話が途切れたときに勧める項目（まだ勧めていません）】\nログライン"
+    );
     expect(params.userPrompt).toContain("【作者の発言】\n相談です");
   });
 

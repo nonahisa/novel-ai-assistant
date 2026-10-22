@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { emptyPlotSections, type PlotSections } from "../../../src/core/plotDoc";
-import { PLOT_ADVICE_SUGGESTION_MARK } from "../../../src/core/plotAdviceValidation";
+import {
+  PLOT_ADVICE_SUGGESTION_MARK,
+  plotAdviceFieldsNamed,
+} from "../../../src/core/plotAdviceValidation";
 import {
   PLOT_ADVICE_HISTORY_TURNS,
   PLOT_ADVICE_SYSTEM_PROMPT,
@@ -73,13 +76,13 @@ describe("未記入の項目と次に勧める1項目", () => {
     const prompt = buildPlotAdvicePrompt({
       workTitle: "現代ダンジョンのインフラ担当",
       sections: sections({ logline: "試験に落ちた新人が地下の配線を守る" }),
-      userMessage: "テーマを決めたいです",
+      userMessage: "続きを相談したいです",
       history: [],
     });
     expect(prompt).toContain("【ログライン】試験に落ちた新人が地下の配線を守る");
     expect(prompt).toContain("【まだ書かれていない項目】\nテーマ、モチーフ、世界観");
-    expect(prompt).toContain("【次に考えるとよい項目】\nテーマ");
-    expect(prompt).toContain("【作者の発言】\nテーマを決めたいです");
+    expect(prompt).toContain("【話が途切れたときに勧める項目（まだ勧めていません）】\nテーマ");
+    expect(prompt).toContain("【作者の発言】\n続きを相談したいです");
     expect(prompt).toContain("（これが最初の発言です）");
   });
 
@@ -158,6 +161,13 @@ describe("指示文", () => {
     expect(PLOT_ADVICE_SYSTEM_PROMPT).toContain("上書きしない");
   });
 
+  it("作者が決めて「書いて／入れて」と頼んだら、書き込み案を先にすると言う（1.1）", () => {
+    expect(PLOT_ADVICE_SYSTEM_PROMPT).toContain("「書いて」「入れて」と頼んだ");
+    expect(PLOT_ADVICE_SYSTEM_PROMPT).toContain("書き込み案を出すことを先にする");
+    // 1.0 の見出しの名で指さない（依頼文にもう無い段を探させない）
+    expect(PLOT_ADVICE_SYSTEM_PROMPT).not.toContain("次に考えるとよい項目");
+  });
+
   it("雛形の言葉と作品固有の例文を書かない", () => {
     for (const word of ["対象項目名", "書き込む内容", "復讐", "〇〇"]) {
       expect(PLOT_ADVICE_SYSTEM_PROMPT, word).not.toContain(word);
@@ -166,5 +176,80 @@ describe("指示文", () => {
 
   it("温度は設計の節のとおり 0.7", () => {
     expect(PLOT_ADVICE_TEMPERATURE).toBe(0.7);
+  });
+});
+
+/** 勧める項目の段（見出しから【これまでの会話】の前まで）だけを切り出す */
+function recommendBlock(prompt: string): string {
+  // 1.0 の見出し（【次に考えるとよい項目】）でも切り出す。新しい見出しだけを
+  // 探すと、直す前の依頼文では段が見つからず、再現テストが空で通ってしまう
+  const found = ["【話が途切れたときに勧める項目", "【次に考えるとよい項目】"]
+    .map((label) => prompt.indexOf(label))
+    .filter((at) => at >= 0);
+  const start = found.length > 0 ? Math.min(...found) : -1;
+  if (start < 0) return "";
+  const end = prompt.indexOf("【これまでの会話】", start);
+  return prompt.slice(start, end < 0 ? undefined : end);
+}
+
+/** 実物で測った作り物のプロット（ログライン・テーマ・主要登場人物だけ記入） */
+const measured = sections({
+  logline: "試験に落ちた新人が、最強の班長の下で地下の配線を守る",
+  theme: "名前の残らない仕事の誇り",
+  mainCharacters: "- 新人\n- 班長",
+});
+
+describe("作者が話している項目を、勧める項目に入れない（2026-10-23 の実測の再現）", () => {
+  it("世界観の相談なのに、主人公の行動原理を勧める段に入れない", () => {
+    const prompt = buildPlotAdvicePrompt({
+      workTitle: "現代ダンジョンのインフラ担当",
+      sections: measured,
+      userMessage: "世界観をどう作ればいいか迷っています。",
+      history: [],
+    });
+    expect(recommendBlock(prompt)).not.toContain("主人公の行動原理");
+  });
+
+  it("行動原理を決めて「入れて」と頼んだ回に、行動原理を「次に」と渡さない", () => {
+    const prompt = buildPlotAdvicePrompt({
+      workTitle: "現代ダンジョンのインフラ担当",
+      sections: measured,
+      userMessage:
+        "主人公の行動原理も決まった。誰にも気づかれない仕事でも手を抜きたくない。これをプロットに入れて。",
+      history: [],
+    });
+    expect(recommendBlock(prompt)).not.toContain("主人公の行動原理");
+  });
+
+  it("「動機」のような短い言い方でも、名指しとみなす", () => {
+    expect(plotAdviceFieldsNamed(["主人公の動機を考えたい"])).toContain("protagonistMotive");
+    expect(plotAdviceFieldsNamed(["第2幕が弱い気がする"])).toContain("outline");
+    expect(plotAdviceFieldsNamed(["一人称で書くか迷う"])).toContain("narrativePerson");
+  });
+
+  it("項目の話でなければ、まだ勧めていないことが分かる見出しで1項目を渡す", () => {
+    const prompt = buildPlotAdvicePrompt({
+      workTitle: "作品",
+      sections: measured,
+      userMessage: "どう広げればいいですか",
+      history: [],
+    });
+    expect(prompt).toContain(
+      "【話が途切れたときに勧める項目（まだ勧めていません）】\n主人公の行動原理"
+    );
+    expect(prompt).not.toContain("【次に考えるとよい項目】");
+  });
+
+  it("編集者がもう勧めた項目は、また「まだ勧めていない」と渡さない", () => {
+    const prompt = buildPlotAdvicePrompt({
+      workTitle: "作品",
+      sections: measured,
+      userMessage: "どう広げればいいですか",
+      history: [
+        { role: "author", text: "相談です" },
+        { role: "assistant", text: "主人公の行動原理を考えてみませんか。" },
+      ],
+    });
+    expect(recommendBlock(prompt)).toBe("");
   });
 });

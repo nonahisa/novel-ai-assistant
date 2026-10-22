@@ -210,3 +210,36 @@ describe("項目の当て方", () => {
     expect(sectionOf("ジャンル")).toBeUndefined();
   });
 });
+
+describe("作者が自分で話題にした項目は、勧めた数に入れない（2026-10-23 の実測の再現）", () => {
+  it("作者が世界観を話していれば、答えが世界観に触れても勧めとして数えない", () => {
+    const answer = parsePlotAdviceAnswer(
+      "世界観はダンジョンが日常にある現代ですね。主人公の行動原理とも結びつけられそうです。",
+      {
+        sections: sections({ logline: "新人が配線を守る", theme: "裏方の誇り" }),
+        authorTexts: ["世界観をどう作ればいいか迷っています。"],
+      }
+    );
+    expect(answer.warnings.filter((w) => w.includes("未記入の項目"))).toEqual([]);
+  });
+
+  it("履歴の作者の発言で名指しした項目（短い言い方を含む）も数えない", () => {
+    const answer = parsePlotAdviceAnswer(
+      "あらすじと主人公の行動原理、それに舞台も見えてきました。",
+      {
+        sections: sections(),
+        authorTexts: ["続きです", "行動原理は決まりました", "あらすじも考えたい"],
+      }
+    );
+    const warning = answer.warnings.find((w) => w.includes("未記入の項目"));
+    expect(warning).toBeUndefined();
+  });
+
+  it("作者が話していない項目を2つ挙げたら、従来どおり警告する", () => {
+    const answer = parsePlotAdviceAnswer("次は舞台か、主人公の行動原理を考えるとよいでしょう。", {
+      sections: sections(),
+      authorTexts: ["世界観をどう作ればいいか迷っています。"],
+    });
+    expect(answer.warnings.some((w) => w.includes("舞台・主人公の行動原理"))).toBe(true);
+  });
+});

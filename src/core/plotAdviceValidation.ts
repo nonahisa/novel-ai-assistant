@@ -87,6 +87,10 @@ const ECHO_WORDS = [
 export const PLOT_ADVICE_PROMPT_LABELS = [
   "【いまのプロット】",
   "【まだ書かれていない項目】",
+  // 1.1 の見出し。勧める項目が無い回は（まだ勧めていません）を付けない
+  "【話が途切れたときに勧める項目（まだ勧めていません）】",
+  "【話が途切れたときに勧める項目】",
+  // 1.0 の見出し。前の版の会話の写しが返ってきても外せるよう残す
   "【次に考えるとよい項目】",
   "【これまでの会話】",
   "【作者の発言】",
@@ -165,7 +169,7 @@ export function parsePlotAdviceAnswer(
   if (questions > PLOT_ADVICE_MAX_QUESTIONS) {
     warnings.push(`問いが ${questions} 個ありました（決まりは${PLOT_ADVICE_MAX_QUESTIONS}個まで）`);
   }
-  const named = emptyHeadingsNamed(reply, context.sections);
+  const named = emptyHeadingsNamed(reply, context.sections, context.authorTexts);
   if (named.length >= 2) {
     warnings.push(
       `未記入の項目を ${named.length} つ挙げていました（${named.join("・")}。決まりは1つだけ）`
@@ -294,11 +298,65 @@ export function countQuestions(text: string): number {
   return (outside.match(/[？?]+/gu) ?? []).length;
 }
 
-/** 答えの中で名前が出た、未記入の項目の見出し */
-function emptyHeadingsNamed(text: string, sections: PlotSections): string[] {
+/**
+ * 作者が項目を名指しするときの言い方（見出しそのものに加えて）。
+ *
+ * 作者は「主人公の行動原理」ではなく「行動原理」「動機」と言う。見出しの
+ * 完全一致だけでは、行動原理を決めて「入れて」と頼んだ回を拾えなかった
+ * （gemma4:e4b、2026-10-23）。**見逃すと、作者が話している項目を依頼文が
+ * 「まだ空・次に考えて」と言い、AIが案を出さずに問いを重ねる。拾いすぎた
+ * ときは、その回に勧める項目を渡さないだけで済む**ので、迷ったら入れる。
+ * 「設定」は作品の設定全般（人物・世界観・登場人物の資料）と紛れるので入れない。
+ */
+const PLOT_ADVICE_FIELD_ALIASES: Readonly<Record<PlotDialogueSection, readonly string[]>> = {
+  logline: ["ログライン"],
+  theme: ["テーマ", "主題"],
+  motif: ["モチーフ"],
+  worldview: ["世界観", "世界設定", "世界の仕組み"],
+  setting: ["舞台"],
+  narrativePerson: ["人称", "視点"],
+  protagonistMotive: ["行動原理", "動機"],
+  outline: ["あらすじ", "粗筋", "筋書き", "展開", "結末", "山場", "どんでん返し", "構成"],
+  mainCharacters: ["登場人物", "主要人物", "キャラ"],
+};
+
+/** 「第2幕」「第三幕」など幕の名指しは、あらすじ（大きな流れ）の話とみなす */
+const ACT_PATTERN = /第[0-9一二三四五六七八九十]+幕/u;
+
+/**
+ * 作者の発言が名指しした、書いてよい項目（plot.md の並び）。
+ *
+ * 依頼文で「勧める項目」を渡すかどうか（`prompts/plotAdvice.ts`）と、
+ * 答えの見張りで「勧めた数」から外す項目（`parsePlotAdviceAnswer`）の
+ * **両方がこの判定を使う**——片方だけ直すと、勧めは止めたのに警告は数える
+ * ずれが出る。判定はAIに任せない（P-43 で頼むだけでは守られなかった）。
+ */
+export function plotAdviceFieldsNamed(texts: readonly string[]): PlotDialogueSection[] {
+  const body = texts.join("\n").normalize("NFKC");
+  return PLOT_SECTIONS.filter((entry) => {
+    if (!isPlotDialogueSection(entry.key)) return false;
+    if (body.includes(entry.heading)) return true;
+    if (entry.key === "outline" && ACT_PATTERN.test(body)) return true;
+    return PLOT_ADVICE_FIELD_ALIASES[entry.key].some((word) => body.includes(word));
+  }).map((entry) => entry.key as PlotDialogueSection);
+}
+
+/**
+ * 答えの中で名前が出た、未記入の項目の見出し。**作者が自分で話題にした
+ * 項目は数えない**——作者が世界観を相談すれば、答えが世界観に触れるのは
+ * 勧めではなく返事である（数えると、世界観の相談への答えに行動原理が
+ * 1回出ただけで「2つ勧めた」と警告していた。2026-10-23）。
+ */
+function emptyHeadingsNamed(
+  text: string,
+  sections: PlotSections,
+  authorTexts: readonly string[]
+): string[] {
+  const byAuthor = new Set<PlotSectionKey>(plotAdviceFieldsNamed(authorTexts));
   return PLOT_SECTIONS.filter(
     (entry) =>
       isPlotDialogueSection(entry.key) &&
+      !byAuthor.has(entry.key) &&
       isBlankPlotSection(sections[entry.key] ?? "") &&
       text.includes(entry.heading)
   ).map((entry) => entry.heading);
