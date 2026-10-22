@@ -23,7 +23,7 @@ test("目標のお祝いの広報素材を撮る", async () => {
     episodes: [{ name: "001_雨の駅.txt", text: "　終電を逃した駅のホームに、雨の音だけが残っていた。\n" }],
     settings: { "novelai.stats.dailyGoal": 100, "window.zoomLevel": 0 },
     keybindings: [{ key: "ctrl+alt+shift+f8", command: "workbench.action.reopenTextEditor" }],
-    snapAt: 12,
+    snapAt: 14.2,
     play: async ({ page }, caption) => {
       await caption("1日の目標字数を決めておくと");
       await page.waitForTimeout(1_500);

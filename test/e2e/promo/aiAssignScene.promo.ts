@@ -55,7 +55,7 @@ test("機能別AI割当の広報素材を撮る", async () => {
   await rm(videoDir, { recursive: true, force: true });
   const png = path.join(OUT_DIR, "ai-assign.png");
 
-  const fake = await startFakeOllama(() => "OK", { extraModels: ["e2e-fake-chat:1b"] });
+  const fake = await startFakeOllama(() => "OK", { listedModels: ["gemma4:e4b", "gemma4:26b"] });
   let sceneStartedAt = 0;
   let videoStartedAt = 0;
   let sceneEndedAt = 0;
@@ -123,11 +123,12 @@ test("機能別AI割当の広報素材を撮る", async () => {
         windowSize: SIZE,
         workTitle: "雨の駅",
         globalState: {
+          "novelai.ai.model": "gemma4:e4b",
           "novelai.ai.featureAssignments": {
-            typo: { provider: "ollama", model: "e2e-fake:1b" },
+            typo: { provider: "ollama", model: "gemma4:e4b" },
             proofread: { provider: "gemini", model: "gemini-2.5-flash" },
             contradiction: { provider: "claude", model: "claude-sonnet-4-5" },
-            chat: { provider: "ollama", model: "e2e-fake-chat:1b" },
+            chat: { provider: "ollama", model: "gemma4:26b" },
           },
         },
       })

@@ -8,7 +8,7 @@ import { execFile } from "node:child_process";
 import { mkdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { fakeOllamaLaunch, startFakeOllama } from "../../support/fakeOllama";
+import { fakeOllamaLaunch, startFakeOllama, type FakeOllamaRequest } from "../../support/fakeOllama";
 import { resizeWindows, withVsCode, type E2ESession, type FixtureEpisode, type LaunchOptions } from "../../support/vscodeApp";
 import { waitUntil } from "../../support/wait";
 import { clearNotifications, dismissWorkbenchHover } from "../../support/workbenchDom";
@@ -52,6 +52,12 @@ export interface FeatureScene {
   open?: (session: E2ESession) => Promise<void>;
   /** 字幕つきの操作 */
   play: (session: E2ESession, caption: (text: string) => Promise<void>) => Promise<void>;
+  /** 偽の Ollama が一覧に出すモデル名（実在の名前にする。省くと偽の既定名が出る） */
+  fakeModels?: readonly string[];
+  /** 偽の Ollama の答え（既定は "OK"） */
+  fakeAnswer?: (request: FakeOllamaRequest) => string;
+  /** 起動時の globalState に足すもの */
+  globalState?: Record<string, unknown>;
   /** 画面ショットを抜く秒（動画の中） */
   snapAt: number;
 }
@@ -62,7 +68,7 @@ export async function recordFeature(scene: FeatureScene): Promise<void> {
   const videoDir = path.join(RELEASE_DIR, `raw-${scene.name}`);
   await rm(videoDir, { recursive: true, force: true });
   const png = path.join(OUT_DIR, `${scene.name}.png`);
-  const fake = await startFakeOllama(() => "OK", {});
+  const fake = await startFakeOllama(scene.fakeAnswer ?? (() => "OK"), scene.fakeModels ? { listedModels: scene.fakeModels } : {});
   let sceneStartedAt = 0;
   let videoStartedAt = 0;
   let sceneEndedAt = 0;
@@ -107,6 +113,7 @@ export async function recordFeature(scene: FeatureScene): Promise<void> {
         recordVideo: { dir: videoDir, size: SIZE },
         windowSize: SIZE,
         workTitle: scene.workTitle,
+        globalState: { ...(scene.fakeModels ? { "novelai.ai.model": scene.fakeModels[0] } : {}), ...(scene.globalState ?? {}) },
         prepareWork: scene.prepareWork,
       })
     );
