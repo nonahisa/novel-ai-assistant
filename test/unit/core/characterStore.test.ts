@@ -892,6 +892,172 @@ describe("人物ファイル保存", () => {
     });
   });
 
+  describe("退避したファイルを元へ戻す（snapshotOf・fileHash・restoreRetired）", () => {
+    // 重複の候補の［戻す］（設計書6.5.4）が頼る部品。戻す道が壊れると、
+    // 退避した人物の記録が回復先に取り残されるため、各分岐を押さえる。
+    async function retireOne(): Promise<{
+      store: CharacterStore;
+      original: Character;
+      characterPath: string;
+      recoveryPath: string;
+      hash: string;
+    }> {
+      const original = fixedCharacter("char_001", "灯");
+      const characterPath = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+      disk.set(characterPath, bytesFor(original));
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      const recoveryPath = diskPath(await store.retire("char_001"));
+      const hash = await store.fileHash(recoveryPath);
+      if (!hash) throw new Error("退避先のハッシュが取れない");
+      return { store, original, characterPath, recoveryPath, hash };
+    }
+
+    test("snapshotOf は読み込んだ保存先とハッシュの写しを返し、未読込は undefined", async () => {
+      const original = fixedCharacter("char_001", "灯");
+      const characterPath = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+      disk.set(characterPath, bytesFor(original));
+      const store = new CharacterStore(work);
+      await store.loadAll();
+
+      const snapshot = store.snapshotOf("char_001");
+      expect(diskPath(snapshot?.filePath ?? "")).toBe(characterPath);
+      expect(snapshot?.hash).toBe(await store.fileHash(characterPath));
+      // 写しなので、書き換えても控えは変わらない
+      if (snapshot) snapshot.hash = "改ざん";
+      expect(store.snapshotOf("char_001")?.hash).not.toBe("改ざん");
+      expect(store.snapshotOf("char_999")).toBeUndefined();
+    });
+
+    test("fileHash はファイルが無ければ undefined", async () => {
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      expect(
+        await store.fileHash(diskPath(path.join(characterDir, "無い.json")))
+      ).toBeUndefined();
+    });
+
+    test("退避したファイルを元の場所へ戻し、退避先は残す", async () => {
+      const { store, original, characterPath, recoveryPath, hash } =
+        await retireOne();
+      expect(disk.has(characterPath)).toBe(false);
+
+      await store.restoreRetired(recoveryPath, characterPath, hash);
+
+      expect(disk.get(characterPath)).toEqual(bytesFor(original));
+      // 戻したあとに何か起きても元の中身が失われないよう、退避先は消さない
+      expect(disk.has(recoveryPath)).toBe(true);
+      expect(store.snapshotOf("char_001")).toEqual({
+        filePath: characterPath,
+        hash,
+      });
+    });
+
+    test("ハッシュが違えば断り、何も書かない", async () => {
+      const { store, characterPath, recoveryPath } = await retireOne();
+
+      await expect(
+        store.restoreRetired(recoveryPath, characterPath, "違うハッシュ")
+      ).rejects.toMatchObject({ kind: "modified_externally" });
+      expect(disk.has(characterPath)).toBe(false);
+    });
+
+    test("退避先が無ければ断る", async () => {
+      const { store, characterPath, recoveryPath, hash } = await retireOne();
+      disk.delete(recoveryPath);
+
+      await expect(
+        store.restoreRetired(recoveryPath, characterPath, hash)
+      ).rejects.toMatchObject({ kind: "modified_externally" });
+    });
+
+    test("人物の JSON として読めなければ直さず断る", async () => {
+      const { store, characterPath, recoveryPath } = await retireOne();
+      const broken = utf8("{壊れた");
+      disk.set(recoveryPath, broken);
+      const brokenHash = await store.fileHash(recoveryPath);
+      if (!brokenHash) throw new Error("ハッシュが取れない");
+
+      const failure = await store
+        .restoreRetired(recoveryPath, characterPath, brokenHash)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(CharacterStoreError);
+      expect((failure as CharacterStoreError).kind).toBe("io_error");
+      expect((failure as CharacterStoreError).recoveryPaths).toEqual([
+        recoveryPath,
+      ]);
+      expect(disk.has(characterPath)).toBe(false);
+      expect(disk.get(recoveryPath)).toEqual(broken);
+    });
+
+    test("未保存の変更があれば断る", async () => {
+      const { store, characterPath, recoveryPath, hash } = await retireOne();
+      workspace.textDocuments = [
+        { uri: Uri.file(characterPath), isDirty: true, getText: () => "" },
+      ];
+
+      await expect(
+        store.restoreRetired(recoveryPath, characterPath, hash)
+      ).rejects.toMatchObject({ kind: "unsaved_changes" });
+      expect(disk.has(characterPath)).toBe(false);
+    });
+
+    test("元の場所に既にファイルがあれば断り、上書きしない", async () => {
+      const { store, characterPath, recoveryPath, hash } = await retireOne();
+      const newer = utf8('{"作者":"後から作ったファイル"}\n');
+      disk.set(characterPath, newer);
+
+      await expect(
+        store.restoreRetired(recoveryPath, characterPath, hash)
+      ).rejects.toMatchObject({ kind: "path_conflict" });
+      expect(disk.get(characterPath)).toEqual(newer);
+    });
+
+    test("同じ id の人物が別の名前で既にあれば断る", async () => {
+      const { store, original, recoveryPath, hash } = await retireOne();
+      const other = { ...original, name: "別名" };
+      const otherPath = diskPath(
+        path.join(characterDir, characterFileName(other))
+      );
+      disk.set(otherPath, bytesFor(other));
+      const destination = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+
+      await expect(
+        store.restoreRetired(recoveryPath, destination, hash)
+      ).rejects.toMatchObject({ kind: "path_conflict" });
+      expect(disk.has(destination)).toBe(false);
+    });
+
+    test("書き込みが失敗したら退避先を知らせる", async () => {
+      const { store, characterPath, recoveryPath, hash } = await retireOne();
+      workspace.fs = {
+        ...baseFs,
+        rename,
+        delete: remove,
+        writeFile: async () => {
+          throw new FileSystemError("書き込めません", "NoPermissions");
+        },
+      };
+
+      const failure = await store
+        .restoreRetired(recoveryPath, characterPath, hash)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(CharacterStoreError);
+      expect((failure as CharacterStoreError).recoveryPaths).toContain(
+        recoveryPath
+      );
+      expect(disk.has(characterPath)).toBe(false);
+    });
+  });
+
   describe("saveOrUpdate の呼び分け", () => {
     test("読み込んでいない人物は新規作成になる", async () => {
       const store = new CharacterStore(work);
