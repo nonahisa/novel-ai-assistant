@@ -100,7 +100,10 @@ describe("本物の fs で2つのプロセスが取り合う", () => {
     const held = await a.enter("誤字脱字の検知");
     let waitedFor: string | undefined;
     const waiting = b.enter("推敲", { onWait: (holder) => (waitedFor = holder.label) });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // 待ち始めの通知が出るまで最長5秒待つ（固定200msは遅い機械で揺れうる）
+    for (let i = 0; i < 500 && waitedFor === undefined; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     expect(waitedFor).toBe("誤字脱字の検知");
     expect(parseLease(fs.readFileSync(file, "utf8"))?.token).toBe("a");
     held.release();
@@ -108,7 +111,11 @@ describe("本物の fs で2つのプロセスが取り合う", () => {
     expect(entry.kind).toBe("held");
     expect(parseLease(fs.readFileSync(file, "utf8"))?.token).toBe("b");
     entry.release();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // 札の削除は非同期なので、消えるまで最長5秒待つ。固定50msだと
+    // 遅い機械（CI）で間に合わず「札が残っている」と揺れた
+    for (let i = 0; i < 500 && fs.existsSync(file); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     expect(fs.existsSync(file)).toBe(false);
   });
 });

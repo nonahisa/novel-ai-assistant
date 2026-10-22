@@ -325,8 +325,12 @@ describe("作品設定", () => {
       */
       expect(first.statMs).toBeGreaterThanOrEqual(0);
       expect(first.ignoreMs).toBeGreaterThanOrEqual(0);
+      // 最長の1件には stat と .gitignore の外の手間（登録簿の走査など）も入る。
+      // 遅い機械ではその分が1msを超えて揺れた（CIで 8.19 対 8.38）ため、
+      // 「ほぼ全部を内訳が説明している」＝最長の半分以上、で見る。
+      // 測り漏らし（内訳が0近く）なら、これでも落ちる
       expect(first.statMs + first.ignoreMs).toBeGreaterThanOrEqual(
-        first.slowestMs - 1
+        first.slowestMs * 0.5
       );
 
       /*
