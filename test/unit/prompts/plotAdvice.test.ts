@@ -164,6 +164,11 @@ describe("指示文", () => {
   it("作者が決めて「書いて／入れて」と頼んだら、書き込み案を先にすると言う（1.1）", () => {
     expect(PLOT_ADVICE_SYSTEM_PROMPT).toContain("「書いて」「入れて」と頼んだ");
     expect(PLOT_ADVICE_SYSTEM_PROMPT).toContain("書き込み案を出すことを先にする");
+    // 勧める段を出さない回（作者が項目を名指しした回）にも効くよう、
+    // 「ほかの項目を挙げない」は段がある条件の外に独立した1文で書く
+    expect(PLOT_ADVICE_SYSTEM_PROMPT).toContain(
+      "3. まだ書かれていない項目のうち、作者が話していない項目の名前は挙げないこと。"
+    );
     // 1.0 の見出しの名で指さない（依頼文にもう無い段を探させない）
     expect(PLOT_ADVICE_SYSTEM_PROMPT).not.toContain("次に考えるとよい項目");
   });
