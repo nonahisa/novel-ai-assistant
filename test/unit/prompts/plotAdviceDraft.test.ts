@@ -106,6 +106,112 @@ describe("2回目を呼ぶかどうか（plotAdviceDraftTarget）", () => {
     }
   });
 
+  it("「舞台に入れて、あとは…」（読点が続く頼み方）でも呼ぶ（2026-10-23 の取りこぼし）", () => {
+    expect(
+      plotAdviceDraftTarget({
+        userMessage: "舞台は瀬戸内の小さな漁村に決めた。舞台に入れて、あとは時代もそのうち考えたい。",
+        sections: sections(),
+        firstAnswer: {},
+      })
+    ).toBe("setting");
+  });
+
+  /*
+    履歴に分かれた頼み方（2026-10-23。e4b は3回中1回しか案が出なかった）。
+    今回の発言は項目を名指ししないので、直前の作者の発言の名指しを使う。
+  */
+  const WORLD_BEFORE = "世界観の設定を足したい。島は潮の満ち引きで姿が変わる、ということにしたい。";
+  const WORLD_NOW = "干潮の二時間だけ歩いて渡れる。それで決まり。書いて。";
+
+  it("今回が名指しの無い「書いて」なら、直前の作者の発言の名指し（1件）を使う", () => {
+    expect(
+      plotAdviceDraftTarget({
+        userMessage: WORLD_NOW,
+        sections: sections(),
+        firstAnswer: {},
+        history: [
+          { role: "author", text: WORLD_BEFORE },
+          { role: "assistant", text: "姿が変わるのは面白いですね。どれくらいの時間で変わりますか？" },
+        ],
+      })
+    ).toBe("worldview");
+  });
+
+  it("使うのは直前の作者の発言だけ（それより前の名指しは見ない）", () => {
+    expect(
+      plotAdviceDraftTarget({
+        userMessage: WORLD_NOW,
+        sections: sections(),
+        firstAnswer: {},
+        history: [
+          { role: "author", text: WORLD_BEFORE },
+          { role: "assistant", text: "どれくらいの時間で変わりますか？" },
+          { role: "author", text: "島へは船でしか行けないのが普通。" },
+          { role: "assistant", text: "なるほど。" },
+        ],
+      })
+    ).toBeUndefined();
+  });
+
+  it("直前の作者の発言の名指しが2つ以上・0件なら呼ばない", () => {
+    for (const before of ["舞台は漁村、テーマは待つことの意味にしたい。", "兄を探しに行く話にしたい。"]) {
+      expect(
+        plotAdviceDraftTarget({
+          userMessage: WORLD_NOW,
+          sections: sections(),
+          firstAnswer: {},
+          history: [
+            { role: "author", text: before },
+            { role: "assistant", text: "なるほど。" },
+          ],
+        }),
+        before
+      ).toBeUndefined();
+    }
+  });
+
+  it("今回が書く依頼でなければ、直前の名指しがあっても呼ばない", () => {
+    expect(
+      plotAdviceDraftTarget({
+        userMessage: "干潮の二時間だけ歩いて渡れる、というのはどうだろう",
+        sections: sections(),
+        firstAnswer: {},
+        history: [
+          { role: "author", text: WORLD_BEFORE },
+          { role: "assistant", text: "なるほど。" },
+        ],
+      })
+    ).toBeUndefined();
+  });
+
+  it("今回の発言が名指ししていれば、直前の名指しより今回を使う", () => {
+    expect(
+      plotAdviceDraftTarget({
+        userMessage: "舞台の欄に書いてほしい。瀬戸内の漁村。",
+        sections: sections(),
+        firstAnswer: {},
+        history: [
+          { role: "author", text: WORLD_BEFORE },
+          { role: "assistant", text: "なるほど。" },
+        ],
+      })
+    ).toBe("setting");
+  });
+
+  it("直前の名指しの項目に作者がもう書いていれば呼ばない", () => {
+    expect(
+      plotAdviceDraftTarget({
+        userMessage: WORLD_NOW,
+        sections: sections({ worldview: "潮で道が開く島" }),
+        firstAnswer: {},
+        history: [
+          { role: "author", text: WORLD_BEFORE },
+          { role: "assistant", text: "なるほど。" },
+        ],
+      })
+    ).toBeUndefined();
+  });
+
   it("作者がもう書いた項目へは呼ばない（2回目で作者の文を置き換える案を作らない）", () => {
     expect(
       plotAdviceDraftTarget({

@@ -385,6 +385,8 @@ export class PlotAdviceSession {
       userMessage: text,
       sections: parsedPlot.sections,
       firstAnswer: answer,
+      // 今回の発言が項目を名指ししないとき、直前の作者の発言の名指しを使うため
+      history,
     });
     const picked: PlotAdviceSuggestion | undefined =
       answer.suggestion ??

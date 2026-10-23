@@ -370,12 +370,37 @@ export function plotAdviceFieldsNamed(texts: readonly string[]): PlotDialogueSec
  * 「くれ」「もらえ」「おいて」「みて」「いい」など頼む言い方のときだけ当てる。
  * 拾いすぎたときの損はAIへもう1回送ることだけ（案は作者が押すまで書かない）、
  * 見逃したときの損は e4b で案が出ないままになることなので、頼む言い方は広めに並べる。
+ *
+ * **項目の名前＋「に」「の欄に」「欄に」「へ」の直後なら、読点が続いても頼む形とみなす**
+ * （`FIELD_WRITE_PATTERN`）。「舞台に入れて、あとは時代も…」を拾えず、gemma4:e4b・26b とも
+ * 6回中0回で案が出なかった（2026-10-23）。作中の動作（「手紙を書いて、」「手に入れて、」）は
+ * 書く先が項目の名前ではないので、この形には当たらない。
  */
-const WRITE_REQUEST_PATTERN =
-  /(?:書き込んで|書きこんで|書き加えて|書いて|入れて|いれて|反映して|反映させて|記入して|載せて|追記して|埋めて)(?=$|[。．.！!？?」』）)\s]|ほし(?!くな)|欲し(?!くな)|くださ|下さ|くれ|もらえ|もらいた|おいて|みて|もいい|いい|ね|よ|お願い)|(?:書いと|入れと|書き込んど)(?:いて|け)/u;
+const WRITE_VERBS =
+  "書き込んで|書きこんで|書き加えて|書いて|入れて|いれて|反映して|反映させて|記入して|載せて|追記して|埋めて";
+
+const WRITE_REQUEST_PATTERN = new RegExp(
+  String.raw`(?:${WRITE_VERBS})(?=$|[。．.！!？?」』）)\s]|ほし(?!くな)|欲し(?!くな)|くださ|下さ|くれ|もらえ|もらいた|おいて|みて|もいい|いい|ね|よ|お願い)|(?:書いと|入れと|書き込んど)(?:いて|け)`,
+  "u"
+);
+
+/** 項目の名前（見出しと別名）。名指しの判定（`plotAdviceFieldsNamed`）と同じ言葉を使う */
+const FIELD_WORDS: readonly string[] = PLOT_SECTIONS.filter((entry) =>
+  isPlotDialogueSection(entry.key)
+).flatMap((entry) => [entry.heading, ...PLOT_ADVICE_FIELD_ALIASES[entry.key as PlotDialogueSection]]);
+
+const FIELD_WRITE_PATTERN = new RegExp(
+  String.raw`(?:${FIELD_WORDS.map(escapeRegExp).join("|")})(?:の欄|欄)?(?:に|へ)(?:${WRITE_VERBS})[、,]`,
+  "u"
+);
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
 
 export function isPlotAdviceWriteRequest(text: string): boolean {
-  return WRITE_REQUEST_PATTERN.test(text.normalize("NFKC"));
+  const body = text.normalize("NFKC");
+  return WRITE_REQUEST_PATTERN.test(body) || FIELD_WRITE_PATTERN.test(body);
 }
 
 /**

@@ -431,6 +431,43 @@ describe("「書いて」と頼まれたら、案を別に頼む", () => {
     expect(text).toContain("瀬戸内の小さな漁村");
   });
 
+  /*
+    履歴に分かれた頼み方（2026-10-23 の測定で e4b が3回中1回しか案を出さなかった形）。
+    今回の発言は項目を名指ししないので、直前の作者の発言の名指しで2回目を呼ぶ。
+    見張りの「作者の言葉」には直前の発言も入るので、そこで決めた言葉を使った案は落ちない。
+  */
+  test("今回が名指しの無い「書いて」でも、直前の作者の発言の名指しで2回目を呼ぶ", async () => {
+    const BEFORE = "世界観の設定を足したい。島は潮の満ち引きで姿が変わる、ということにしたい。";
+    const NOW = "干潮の二時間だけ歩いて渡れる。それで決まり。書いて。";
+    state.generate
+      .mockImplementationOnce(async () => answer("姿が変わる島ですね。どれくらいの時間で変わりますか？"))
+      .mockImplementationOnce(async () => answer("なるほど。渡れる時間はどう使いますか？"))
+      .mockImplementationOnce(async () =>
+        answer('{"value": "島は潮の満ち引きで姿が変わる。"}')
+      );
+    const advice = session();
+    expect(await advice.send(BEFORE)).toBe(true);
+    // 1回目の発言は書く依頼でないので2回目は呼ばない
+    expect(state.generate).toHaveBeenCalledTimes(1);
+
+    expect(await advice.send(NOW)).toBe(true);
+    expect(state.generate).toHaveBeenCalledTimes(3);
+    const second = state.generate.mock.calls[2][0] as GenerateParams;
+    expect(second.userPrompt).toContain("【書く項目】\n世界観");
+    // 決めた中身は直近の会話として届く
+    expect(second.userPrompt).toContain(`作者：${BEFORE}`);
+    expect(second.userPrompt).toContain(`【作者の発言】\n${NOW}`);
+
+    const turn = lastView().turns[3];
+    expect(turn.suggestion).toMatchObject({
+      heading: "世界観",
+      value: "島は潮の満ち引きで姿が変わる。",
+      // 案の言葉は直前の発言にしか無い。見張りに履歴の作者の発言が入っていなければ false になる
+      grounded: true,
+      state: "open",
+    });
+  });
+
   test("案を求めない相談・名指しが2つ・1回目に案があるときは、2回目を呼ばない", async () => {
     state.generate.mockImplementation(async () => answer(FIRST));
     await session().send("舞台を瀬戸内の漁村にするか、山あいの町にするか迷っている");

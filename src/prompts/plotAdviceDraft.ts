@@ -89,6 +89,11 @@ export interface PlotAdviceDraftTargetInput {
   sections: PlotSections;
   /** 1回目（P-01）の答えを `parsePlotAdviceAnswer` で読んだもの */
   firstAnswer: Pick<PlotAdviceAnswer, "suggestion" | "dropped">;
+  /**
+   * これまでの会話（古い順。今回の発言は含まない）。今回の発言が項目を名指し
+   * しないときに、直前の作者の発言の名指しを見るためだけに使う
+   */
+  history?: readonly PlotAdviceTurn[];
 }
 
 /**
@@ -102,10 +107,15 @@ export interface PlotAdviceDraftTargetInput {
  *    同じ `already_written`・作者の文の言い換え `rewrites_author`）で落とした回は
  *    呼ばない**——頼み直しても同じものが返る見込みが高く、見張りを回り道で
  *    越える形になる
- * 2. **今回の発言が、書いてよい項目をちょうど1つ名指ししている**（`plotAdviceFieldsNamed`。
- *    見るのは今回の発言だけ）。2つ以上なら、どちらへ書くかをコードが決められない
- * 3. **今回の発言が書く依頼の言い方を含む**（`isPlotAdviceWriteRequest`）。案を
+ * 2. **今回の発言が書く依頼の言い方を含む**（`isPlotAdviceWriteRequest`）。案を
  *    求めない相談では決して呼ばない
+ * 3. **書いてよい項目がちょうど1つに決まる**（`plotAdviceFieldsNamed`）。見るのは
+ *    今回の発言で、**名指しが0件のときだけ、履歴の直前の作者の発言**の名指しを使う。
+ *    「世界観の設定を足したい。…」のあとに「…それで決まり。書いて。」と頼む形を
+ *    拾えず、gemma4:e4b は3回中1回しか案が出なかった（2026-10-23）。それより前の
+ *    発言は見ない——話が移ったあとの「書いて」を、昔の項目へ向けないため。
+ *    2つ以上なら、どちらへ書くかをコードが決められない。決めた中身は、2回目の
+ *    依頼文に直近3往復として渡り、見張りの「作者の言葉」にも履歴の作者の発言が入る
  * 4. **その項目がまだ空である。** 作者が書いた項目を置き換える案を、作者が
  *    1回目で受け取らなかった問い返しの裏で作らない（実装ルール2の考え方）。
  *    書いてある項目の書き換えは、1回目の案（置き換えの確認つき）の道に任せる
@@ -118,9 +128,13 @@ export function plotAdviceDraftTarget(
   if (firstAnswer.dropped === "already_written" || firstAnswer.dropped === "rewrites_author") {
     return undefined;
   }
-  const named = plotAdviceFieldsNamed([input.userMessage]);
-  if (named.length !== 1) return undefined;
   if (!isPlotAdviceWriteRequest(input.userMessage)) return undefined;
+  let named = plotAdviceFieldsNamed([input.userMessage]);
+  if (named.length === 0) {
+    const lastAuthor = [...(input.history ?? [])].reverse().find((turn) => turn.role === "author");
+    named = lastAuthor ? plotAdviceFieldsNamed([lastAuthor.text]) : [];
+  }
+  if (named.length !== 1) return undefined;
   const section = named[0];
   if (!isBlankPlotSection(input.sections[section] ?? "")) return undefined;
   return section;
