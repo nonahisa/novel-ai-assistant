@@ -322,5 +322,7 @@ describe("done へ移したものは、次の同期で送られる", () => {
     expect(tracked).toContain(".aiwriter/inbox/done/box.json");
     expect(tracked).not.toContain(".aiwriter/inbox/box.json");
     expect(git("status", "--porcelain").trim()).toBe("");
-  });
+    // 本物の git を何度も起こすので、CI の windows-latest では5秒を越えることがある
+    // （2026-10-23 に 5014ms で落ちた）。ほかの git のテストと同じ30秒にする
+  }, 30_000);
 });
