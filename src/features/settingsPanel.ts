@@ -1085,7 +1085,7 @@ export class SettingsPanel {
           // 決められないので、作者がここで付ける。AIは付け外ししない
           checkField(
             "isProtagonist",
-            "主人公（中心人物）として扱う（作中での変化の関与度に +5）",
+            "主人公（中心人物）として扱う（作中での変化の関与度に +10）",
             character.isProtagonist === true
           ),
           // 宿り（作者の裁定、2026-10-18）。憑依・転生・入れ替わりで、この人物の心が

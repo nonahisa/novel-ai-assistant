@@ -365,7 +365,7 @@ export function characterSchema(): Record<string, unknown> {
     isProtagonist: {
       type: "boolean",
       description:
-        "作者が付けた「主人公（中心人物）」の印。変化の関与度に +5 を足す。" +
+        "作者が付けた「主人公（中心人物）」の印。変化の関与度に +10 を足す。" +
         "印の無い人物には欄が無い。**作者の判断なので、AIは立てることも消すこともしないこと**",
     },
     // 宿り（2026-10-18。設計書6.5.13）。作者だけが書く

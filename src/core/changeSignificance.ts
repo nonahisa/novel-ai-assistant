@@ -269,10 +269,15 @@ export interface CharacterInvolvementContext {
 export const SYNOPSIS_PRESENCE_THRESHOLD = 0.5;
 
 /**
- * 人物の側の加点の大きさ（1つあたり）。主人公の印とあらすじは、それぞれに足す
- * （作者の裁定「印は重ねて足す」、2026-10-23）
+ * 人物の側の加点の大きさ。主人公の印とあらすじは、それぞれに足す
+ * （作者の裁定「印は重ねて足す」、2026-10-23）。
+ *
+ * 印は +10（作者の裁定「主人公をもう+5」、2026-10-23 夜）。2作品の一覧を見た作者が
+ * 「ホンゴーが低すぎる、それ以外は合う」と判断した。あらすじの +5 は機械の見立て
+ * なので据え置き、作者が決めた印のほうを重くする
  */
-const CENTRALITY_POINTS = 5;
+export const PROTAGONIST_MARK_POINTS = 10;
+export const SYNOPSIS_CENTRALITY_POINTS = 5;
 
 /**
  * 物語の中心にいる人物か（作者の裁定、2026-10-17）。
@@ -287,7 +292,8 @@ const CENTRALITY_POINTS = 5;
  *   「太一」）も数える。あらすじでは下の名前だけで書かれることが多い。
  *   名前に含まれない別名（あだ名・呼び名）は他人にも当たるので数えない
  *
- * それぞれ +5。**両方なら +10**（作者の裁定「印は重ねて足す」、2026-10-23）。
+ * 印は +10、あらすじは +5。**両方なら +15**（作者の裁定「印は重ねて足す」
+ * 「主人公をもう+5」、2026-10-23）。
  * 前は重ねず +5 だったため、あらすじに名前がよく出る人物（三門太志、18話中11話）は
  * 作者が印を付けても点が動かず、印を付けた意味が点に出なかった。
  */
@@ -307,12 +313,12 @@ export function characterCentrality(
   const parts: CharacterCentrality["parts"] = [];
   if (character.isProtagonist) {
     parts.push({
-      points: CENTRALITY_POINTS,
+      points: PROTAGONIST_MARK_POINTS,
       reason: "作者が主人公（中心人物）の印を付けている",
     });
   }
   if (inSynopses) {
-    parts.push({ points: CENTRALITY_POINTS, reason: synopsisNote });
+    parts.push({ points: SYNOPSIS_CENTRALITY_POINTS, reason: synopsisNote });
   }
   if (parts.length === 0) return undefined;
   return { points: parts.reduce((sum, part) => sum + part.points, 0), parts };
