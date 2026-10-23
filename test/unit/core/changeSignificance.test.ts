@@ -476,14 +476,22 @@ describe("作者の判断例（2026-10-17）", () => {
     expect(roleScore(character)).toBe(60);
   });
 
-  test("主人公の印とあらすじが重なっても +5 は1回だけ", () => {
+  test("主人公の印とあらすじが重なれば、+5 を別々に足す（作者の裁定、2026-10-23）", () => {
+    // 三門太志は、あらすじの18話中11話に名前が出るので、印を付けても付けなくても
+    // 70 のままだった。印を付けた意味が点に出るよう、印の +5 は別に足す
     const character = hongoLike();
     character.isProtagonist = true;
     const synopses = ["本田が窓口に立つ", "本田が旅に出る"];
 
-    expect(roleScore(character, { synopses })).toBe(60);
+    expect(roleScore(character, { synopses })).toBe(65);
     const [significance] = scoreCharacterChanges(character, { synopses });
-    expect(significance.reasons.join("\n")).toContain("主人公");
+    // 内訳も別々の行に出す（どちらの +5 か作者に見えるように）
+    expect(significance.reasons).toContain(
+      "作者が主人公（中心人物）の印を付けている +5"
+    );
+    expect(significance.reasons).toContain(
+      "各話あらすじの2話中2話に名前が出る +5"
+    );
   });
 
   test("AIへ渡す材料にも、あらすじの加点が入る（画面と同じ数字）", () => {

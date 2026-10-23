@@ -140,8 +140,28 @@ describe("一部が失敗したら「完了」と言わない", () => {
     // **空振りさせない。** `notifyRunCompletion` に口だけ用意して
     // 誰も渡していないと、案内は永久に出ない
     const code = source();
-    expect(code).toMatch(/timedOut: result\.timedOutChunks > 0/);
+    // 壁（Node の上限）で切れた分は、チューニングの誘いに数えない（2026-10-23）
+    expect(code).toMatch(
+      /timedOut: result\.timedOutChunks - result\.ceilingTimedOutChunks > 0/
+    );
+    expect(code).toMatch(/ceilingTimedOut: result\.ceilingTimedOutChunks > 0/);
     expect(code).toMatch(/isPaid: result\.usedPaidProvider/);
+  });
+
+  /**
+   * 作者の裁定「壁のときは勧めない」（2026-10-23）。VS Code が差し替えた fetch の
+   * 約300秒の壁で切れたときは、待ち時間を延ばしても変わらない。チューニングの
+   * 誘い（ボタン）は壁でない時間切れのときだけ出し、壁のときは送る量を減らす
+   * 道を、相談の時間切れ（`recoveryForAIError`）と同じ文で示す
+   */
+  test("壁で切れたときは、チャンクを小さくする案内を共通の文で出す", () => {
+    const body = notifyRunCompletionBody();
+
+    expect(body).toContain("options.ceilingTimedOut");
+    expect(body).toContain("FETCH_CEILING_RECOVERY");
+    expect(body).toContain("待ち時間の設定を延ばしても変わりません");
+    // ボタンを出す条件は、壁でない時間切れ（timedOut）だけ
+    expect(body).toMatch(/buttons = options\.timedOut \?/);
   });
 
   test("失敗の件数を渡している呼び出しが複数ある（空振りしていない）", () => {

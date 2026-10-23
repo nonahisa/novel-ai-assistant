@@ -141,10 +141,12 @@ export function scoreFieldChange(
   }
 
   // 人物の側の加点（物語の中心にいる人物）。項目ごとの点ではないので、
-  // 呼び出し側で1回だけ求めて渡す（`characterCentrality`）
-  if (centrality && centrality.points > 0) {
-    score += centrality.points;
-    reasons.push(`${centrality.reason} +${centrality.points}`);
+  // 呼び出し側で1回だけ求めて渡す（`characterCentrality`）。
+  // 印とあらすじは別々の行に出す——どちらの +5 か作者に見えるように
+  for (const part of centrality?.parts ?? []) {
+    if (part.points <= 0) continue;
+    score += part.points;
+    reasons.push(`${part.reason} +${part.points}`);
   }
 
   const capped = Math.min(score, 100);
@@ -242,8 +244,10 @@ function bigramsOf(value: string): string[] {
 
 /** 人物の側の加点（`characterCentrality`） */
 export interface CharacterCentrality {
+  /** 加点の合計（`parts` の和） */
   points: number;
-  reason: string;
+  /** 加点ごとの内訳。主人公の印とあらすじは別々に足す（2026-10-23） */
+  parts: { points: number; reason: string }[];
 }
 
 /** 人物の関与度を出すときに、人物の外から渡すもの */
@@ -264,7 +268,10 @@ export interface CharacterInvolvementContext {
 /** あらすじの、この割合以上に名前が出る人物を物語の中心と見る */
 export const SYNOPSIS_PRESENCE_THRESHOLD = 0.5;
 
-/** 人物の側の加点の大きさ。主人公の印とあらすじが重なっても1回だけ */
+/**
+ * 人物の側の加点の大きさ（1つあたり）。主人公の印とあらすじは、それぞれに足す
+ * （作者の裁定「印は重ねて足す」、2026-10-23）
+ */
 const CENTRALITY_POINTS = 5;
 
 /**
@@ -280,7 +287,9 @@ const CENTRALITY_POINTS = 5;
  *   「太一」）も数える。あらすじでは下の名前だけで書かれることが多い。
  *   名前に含まれない別名（あだ名・呼び名）は他人にも当たるので数えない
  *
- * どちらか、または両方で +5（重ねない）。
+ * それぞれ +5。**両方なら +10**（作者の裁定「印は重ねて足す」、2026-10-23）。
+ * 前は重ねず +5 だったため、あらすじに名前がよく出る人物（三門太志、18話中11話）は
+ * 作者が印を付けても点が動かず、印を付けた意味が点に出なかった。
  */
 export function characterCentrality(
   character: Pick<Character, "name" | "aliases" | "isProtagonist">,
@@ -295,18 +304,18 @@ export function characterCentrality(
     ? `各話あらすじの${presence.total}話中${presence.hits}話に名前が出る`
     : "";
 
+  const parts: CharacterCentrality["parts"] = [];
   if (character.isProtagonist) {
-    return {
+    parts.push({
       points: CENTRALITY_POINTS,
-      reason: inSynopses
-        ? `作者が主人公（中心人物）の印を付けている（${synopsisNote}。加点は1回だけ）`
-        : "作者が主人公（中心人物）の印を付けている",
-    };
+      reason: "作者が主人公（中心人物）の印を付けている",
+    });
   }
   if (inSynopses) {
-    return { points: CENTRALITY_POINTS, reason: synopsisNote };
+    parts.push({ points: CENTRALITY_POINTS, reason: synopsisNote });
   }
-  return undefined;
+  if (parts.length === 0) return undefined;
+  return { points: parts.reduce((sum, part) => sum + part.points, 0), parts };
 }
 
 /** あらすじの何話に名前が出るか。あらすじが1つも無ければ undefined */

@@ -727,6 +727,14 @@ export class AIFetchCeilingTimeoutError extends AIError {
   }
 }
 
+/**
+ * Node の上限で切れた時間切れに効く操作（2026-10-23）。相談の時間切れ
+ * （`recoveryForAIError`）と一括処理の完了通知（`notifyRunCompletion`）で
+ * 同じ文を出す。待ち時間は延ばしても変わらないので、送る量を減らす道だけを言う
+ */
+export const FETCH_CEILING_RECOVERY =
+  "「1チャンクの文字数」を小さくすると、一度に送る量が減ります。";
+
 /** 待ち時間の設定より先に、Node の通信部品の上限で切れた時間切れか */
 export function isFetchCeilingTimeout(
   error: unknown
@@ -782,7 +790,7 @@ export function recoveryForAIError(error: AIError): string {
       // 送る量を減らす道だけを言う。文の頭（`message`）が「減らしてください」と
       // 言っているので、ここはその具体的なやり方にする
       if (isFetchCeilingTimeout(error)) {
-        return "「1チャンクの文字数」を小さくすると、一度に送る量が減ります。";
+        return FETCH_CEILING_RECOVERY;
       }
       // 待ち時間の設定を先に出す。チャンクを小さくすると呼び出し回数が増え、
       // クラウドAIでは料金も増える。まず待つほうが害が少ない。

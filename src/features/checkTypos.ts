@@ -6,6 +6,7 @@ import {
   AIError,
   isConnectivityFailure,
   isFatalProviderFailure,
+  isFetchCeilingTimeout,
   type ProviderId,
 } from "../ai/types";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -138,6 +139,15 @@ export interface TypoCheckRunResult {
    * 「AIチューニング」へ誘って秒数を測らせる（設計書6.49）。
    */
   timedOutChunks: number;
+  /**
+   * `timedOutChunks` のうち、**待ち時間の設定より先に Node の上限（約300秒）で
+   * 切れた**チャンクの数（`AIFetchCeilingTimeoutError`。作者の裁定「壁のときは
+   * 勧めない」、2026-10-23）。
+   *
+   * この時間切れは待ち時間を延ばしても変わらないので、**チューニングへの誘いには
+   * 数えない**。通知では代わりに「1チャンクの文字数を小さくする」を示す
+   */
+  ceilingTimedOutChunks: number;
   /**
    * この回に使ったAIが有料か。
    *
@@ -545,6 +555,7 @@ export async function checkTypos(
   let failedChunks = 0;
   /** 時間切れで落ちた数。作者へ「待ち時間を測れます」と出すかの判断に使う */
   let timedOutChunks = 0;
+  let ceilingTimedOutChunks = 0;
   let cancelled = false;
   let connectivityLost = false;
   let consecutiveConnectivityFailures = 0;
@@ -768,6 +779,8 @@ export async function checkTypos(
           // **時間切れだけは別に数える。** 直し方が「待ち時間を延ばす」で
           // はっきりしており、ほかの失敗と束ねると案内が出せない
           if (e instanceof AIError && e.kind === "timeout") timedOutChunks++;
+          // 壁で切れたものは別にも数える（延ばしても変わらないので、誘いから外す）
+          if (isFetchCeilingTimeout(e)) ceilingTimedOutChunks++;
           if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
             done++;
             break;
@@ -817,6 +830,7 @@ export async function checkTypos(
       failedChunks,
       totalChunks: chunks.length,
       timedOutChunks,
+      ceilingTimedOutChunks,
       usedPaidProvider: resolved.provider.isPaid,
       dismissedCount: 0,
       cancelled: true,
@@ -840,6 +854,7 @@ export async function checkTypos(
     failedChunks,
     totalChunks: chunks.length,
     timedOutChunks,
+    ceilingTimedOutChunks,
     usedPaidProvider: resolved.provider.isPaid,
     dismissedCount: 0,
     cancelled: false,

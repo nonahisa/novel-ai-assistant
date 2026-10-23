@@ -210,6 +210,7 @@ import {
   useLogFile,
 } from "./core/logger";
 import { probeGeneration } from "./ai/generationProbe";
+import { FETCH_CEILING_RECOVERY } from "./ai/types";
 import { setVerifiedStateReporter, verifiedState } from "./core/verifiedMemento";
 import {
   SettingsWatcher,
@@ -8246,8 +8247,17 @@ function notifyRunCompletion(options: {
   /** 全体の件数。分かるときだけ渡す（「3件中2件」と言えるようにする） */
   totalCount?: number;
   tail?: string;
-  /** 失敗に時間切れが混じっていたか。混じっていればチューニングへ誘う（6.49） */
+  /**
+   * 失敗に、待ち時間で切れた時間切れが混じっていたか。混じっていればチューニングへ
+   * 誘う（6.49）。**Node の上限で切れたものは含めない**（`ceilingTimedOut` で渡す）
+   */
   timedOut?: boolean;
+  /**
+   * 失敗に、Node の上限（約300秒）で切れた時間切れが混じっていたか
+   * （`AIFetchCeilingTimeoutError`、2026-10-23）。混じっていれば、待ち時間では
+   * 変わらないことと、送る量を減らす道を示す
+   */
+  ceilingTimedOut?: boolean;
   /** いま使うAIが有料か。**渡さないときは中立に言う**（誤って「無料」と言わない） */
   isPaid?: boolean;
   /** どの機能のAIを測らせるか。**渡さないと既定のAIを測って空振りする**（6.28.9） */
@@ -8271,6 +8281,13 @@ function notifyRunCompletion(options: {
             ? "（AIを呼びますが、このAIは無料です）。"
             : "（AIを呼びます。有料のAIでは料金がかかります）。")
       : "";
+    // 壁で切れた分には、延ばす案内もチューニングの誘いも出さない。
+    // 効く操作の文は相談の時間切れ（`recoveryForAIError`）と同じものを使う
+    const ceilingNote = options.ceilingTimedOut
+      ? "VS Code の通信の上限（約300秒）で切れた部分があります。" +
+        "この上限は待ち時間の設定を延ばしても変わりません。" +
+        FETCH_CEILING_RECOVERY
+      : "";
     const buttons = options.timedOut ? ["AIチューニングを実行"] : [];
     void vscode.window
       .showWarningMessage(
@@ -8278,6 +8295,7 @@ function notifyRunCompletion(options: {
           `${summary}。` +
           "失敗した部分は見ていないので、そこに何かあっても出ていません。" +
           "ログで理由を確かめ、もう一度実行してください（成功した部分は再利用されます）。" +
+          ceilingNote +
           tuningNote,
         ...buttons
       )
@@ -8340,8 +8358,11 @@ function reportTypoCheckResult(
     totalCount: result.totalChunks,
     // **時間切れが1件でもあれば、測って直せることを伝える。**
     // 有料かどうかも渡す——「実行しますか」と誘う以上、押す前に
-    // 料金が出るのかどうかが分かっていなければならない
-    timedOut: result.timedOutChunks > 0,
+    // 料金が出るのかどうかが分かっていなければならない。
+    // **壁（Node の上限）で切れた分は数えない**（作者の裁定「壁のときは勧めない」、
+    // 2026-10-23）。待ち時間を測り直しても、その壁は動かない
+    timedOut: result.timedOutChunks - result.ceilingTimedOutChunks > 0,
+    ceilingTimedOut: result.ceilingTimedOutChunks > 0,
     isPaid: result.usedPaidProvider,
     // 誤字脱字に割り当てたAIを測らせる（既定とは別のことがある）
     tuningFeature: "typo",
