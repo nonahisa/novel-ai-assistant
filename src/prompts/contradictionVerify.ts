@@ -66,7 +66,15 @@ export const CONTRADICTION_VERIFY_VERSION = "1.2";
 // この版と `future:` の印を付ける（`contradictionVerifyPromptVersion`。裁定⑧の
 // `strict:` と同じやり方）。上げると作者のクラウドAIの確かめの控えまで作り直しになる
 // （docs/進捗と引継ぎ.md 8章「【測定】2026-10-19 夜：矛盾検知「あとで判明する事実」2項目の測り直し」）
-export const CONTRADICTION_VERIFY_FUTURE_VERSION = "1.3";
+//
+// 1.4（2026-10-23、作者の裁定「事実の文を渡す」）：future の指摘に、**コードが特定した、
+// 照らしたあとの話の事実の文**（【照らした事実（あとの話で判明）】）と、その文と本文を
+// 見比べる指示を渡す。検出の段の note は、その下に参考として置く。作り物の台Bで 26b は
+// 検出の段で本当の食い違い（第5話の「四十歳まで東京で中学の教師」）を note に書き、
+// settingSays には「宗一は七十八歳である。」と書いた。この段には事実の文が渡って
+// おらず、「78年間外で暮らしていないと78歳は両立する」で取り下げた。
+// 事実の文を渡さない呼び出し（`futureFacts` を省く）は 1.3 と同じ文面のまま
+export const CONTRADICTION_VERIFY_FUTURE_VERSION = "1.4";
 
 /**
  * 送るときの温度。指摘が本当に矛盾かを確かめるだけなので揺らさない。
@@ -169,7 +177,49 @@ export interface ContradictionVerifyInput {
    * 大きいモデルにも小さいモデルにも同じ形を送る。
    */
   source?: "settled" | "future";
+  /**
+   * future の指摘が照らした、あとの話で判明する事実の文（1.4）。検出の段へ送った一覧と
+   * 同じ書式の行（「宗一の紹介（第5話で判明）: …」）。**コードが選んだもの**
+   * （`core/contradictionFutureFacts.ts` の `futureFactLinesForIssue`）を渡す。
+   * 省くか空なら 1.3 と同じ文面。本命（settled）では使わない
+   */
+  futureFacts?: readonly string[];
+  /**
+   * 検出の段が書いた補足（`note`）。future で事実の文を渡すときだけ、その下に参考として
+   * 置く（1.4）。AI の文なので判断の土台にはさせない
+   */
+  detectionNote?: string;
 }
+
+/**
+ * 「あとで判明する事実」から来た指摘で、照らした事実の文を渡すときの出どころの説明（1.4）。
+ *
+ * 1.3 の文（`VERIFY_FUTURE_SOURCE_NOTE`）は「「設定では」の欄は…事実です」と言うが、
+ * その欄は検出の段の AI が書いた要約で、事実の一部しか写していないことがある（台Bの宗一）。
+ * 事実そのものは【照らした事実】の欄にあるので、そちらを指す。
+ * 却下の理由の語と「明かされていない」は含めない（1.3 と同じ理由）
+ */
+export const VERIFY_FUTURE_SOURCE_NOTE_WITH_FACTS =
+  "この指摘は、あとの話で判明する事実との照合から来たものです。" +
+  "下の【照らした事実】は、対象の話より後で明らかになる事実です。" +
+  "本文の記述が、その事実と両立するかを判断してください。" +
+  "その事実が対象の話の本文にまだ書かれていないこと自体は、前提なので却下の理由になりません。";
+
+/**
+ * 照らした事実と本文を見比べさせる指示（1.4）。
+ *
+ * **そのまま答えに返ってくる前提で書く**（CLAUDE.md「繰り返し起きた失敗」3番）。
+ * 却下の理由の語を含めない——説明に写っても、決められた理由ではないので読み取りが
+ * 却下として受け取らない（`normalizeReason`）。「設定では」の欄を疑えとは書くが、
+ * 「引用が違う」のような却下の道を示唆する言い方はしない
+ */
+export const VERIFY_FUTURE_FACTS_NOTE =
+  "「設定では」「本文では」の欄は、検出の段がまとめた文で、照らした事実の一部しか写していないことがあります。" +
+  "その2つの欄の文どうしを比べるのではなく、【照らした事実】の文と【該当箇所の前後】の本文を見比べてください。" +
+  "事実の文と本文が同時に成り立たないなら、採用です。";
+
+/** 検出の段の補足を、プロンプトへ載せる上限の字数。参考なので長くは要らない */
+const DETECTION_NOTE_MAX_CHARS = 200;
 
 /**
  * 「あとで判明する事実」から来た指摘の、出どころの説明（1.3）。
@@ -266,6 +316,27 @@ export function verifyRejectReasonsFor(input: {
   return VERIFY_REJECT_REASONS.filter((reason) => reason !== "まだ明かされていない");
 }
 
+/**
+ * future の指摘の、出どころの欄（1.3）と照らした事実の欄（1.4）。
+ *
+ * 事実の文が無ければ 1.3 と同じ文面（出どころの一文だけ）。事実の文があれば、
+ * 出どころの一文をそちらを指す形に替え、事実の文 → 見比べる指示 → 検出の段の補足
+ * （参考）の順に置く。**AI の文（補足）は事実の文より下に置く**——判断の土台は
+ * コードが選んだ事実の文である
+ */
+function futureSourceBlock(input: ContradictionVerifyInput): string {
+  const facts = (input.futureFacts ?? []).map((line) => line.trim()).filter(Boolean);
+  if (facts.length === 0) return `\n【指摘の出どころ】\n${VERIFY_FUTURE_SOURCE_NOTE}\n`;
+  const note = (input.detectionNote ?? "").trim().slice(0, DETECTION_NOTE_MAX_CHARS);
+  const noteBlock = note ? `\n【検出の段の補足（AIが書いた文。参考）】\n${note}\n` : "";
+  return (
+    `\n【指摘の出どころ】\n${VERIFY_FUTURE_SOURCE_NOTE_WITH_FACTS}\n` +
+    `\n【照らした事実（あとの話で判明）】\n${facts.map((line) => `- ${line}`).join("\n")}\n` +
+    `\n${VERIFY_FUTURE_FACTS_NOTE}\n` +
+    noteBlock
+  );
+}
+
 export function buildContradictionVerifyPrompt(
   input: ContradictionVerifyInput
 ): string {
@@ -281,7 +352,7 @@ export function buildContradictionVerifyPrompt(
     .map((reason, index) => `${index + 1}. ${reasonText(reason)}`)
     .join("\n");
   // 本命（settled）では何も足さない。1.2 と1文字も変えないため、欄ごと出さない
-  const sourceBlock = future ? `\n【指摘の出どころ】\n${VERIFY_FUTURE_SOURCE_NOTE}\n` : "";
+  const sourceBlock = future ? futureSourceBlock(input) : "";
   return `次の指摘が、本当に矛盾かどうかを判断してください。
 
 【対象の話】${input.chapterLabel}

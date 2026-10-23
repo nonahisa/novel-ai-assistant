@@ -96,6 +96,7 @@ import {
   appendVerifyNote,
   buildContradictionPastSceneIndex,
   buildContradictionVerifyUserPrompt,
+  futureVerifyMaterial,
   contradictionVerifyCacheSource,
   contradictionVerifyPromptVersion,
   describeKnownAt,
@@ -1736,7 +1737,11 @@ export async function checkContradictions(
         issue.line,
         issue.excerpt,
         issue.settingSays,
-        knownAtOf(issue, chunk, origin)
+        knownAtOf(issue, chunk, origin),
+        // future では照らした事実の文と note も文面に入る（P-12b 1.4）。鍵にも入れる
+        origin.source === "future"
+          ? futureVerifyMaterial(issue, chunk, origin.futureFacts)
+          : undefined
       )
     );
   }
@@ -1837,6 +1842,8 @@ export async function checkContradictions(
           smallModel: capability.suppressUncertainContradictions,
           // 「あとで判明する事実」から来た指摘には、その出どころを伝える（P-12b 1.3）
           source: origin.source,
+          // 照らした事実の文そのものも渡す（P-12b 1.4。AI の書いた settingSays に頼らない）
+          ...(origin.source === "future" ? { futureFacts: origin.futureFacts } : {}),
         }),
         model,
         temperature: CONTRADICTION_VERIFY_TEMPERATURE,

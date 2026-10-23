@@ -35,6 +35,10 @@ import {
   CONTRADICTION_VERIFY_FUTURE_VERSION,
   CONTRADICTION_VERIFY_VERSION,
 } from "../prompts/contradictionVerify";
+import {
+  futureFactLinesForIssue,
+  type FutureFactEntry,
+} from "./contradictionFutureFacts";
 
 /**
  * 製品の、検証の段（P-12b）の答えの控えの鍵に入れる版。
@@ -184,10 +188,18 @@ export function contradictionVerifyCacheSource(
   line: number,
   excerpt: string,
   settingSays: string,
-  settingKnownAt: string
+  settingKnownAt: string,
+  /**
+   * future の指摘で確かめの段へ渡した材料（照らした事実の文と note。P-12b 1.4）。
+   * 送る文面に入るので鍵にも入れる。省けば今までの鍵のまま
+   */
+  futureMaterial?: { facts: readonly string[]; note: string }
 ): string {
   const base = `${chunkHash}:${line}:${excerpt}:${settingSays}`;
-  return settingKnownAt ? `${base}:${settingKnownAt}` : base;
+  const withKnownAt = settingKnownAt ? `${base}:${settingKnownAt}` : base;
+  if (!futureMaterial) return withKnownAt;
+  // 区切りは NUL（本文や事実の文に現れない）。生の制御文字は置かない（sourceHygiene）
+  return [withKnownAt, ...futureMaterial.facts, futureMaterial.note].join("\u0000");
 }
 
 /** 検証で分かったことを、もとの補足へ足す（作者の判断材料になる） */
@@ -215,7 +227,17 @@ export function buildContradictionVerifyUserPrompt(input: {
    * （`core/contradictionFutureFacts.ts`）
    */
   source?: "settled" | "future";
+  /**
+   * 検出の段へ渡した「あとで判明する事実」の一覧（P-12b 1.4）。future のときだけ使う。
+   * ここから指摘が照らした事実の文を**コードが選んで**渡し、検出の段の note も参考として
+   * 添える（`futureVerifyMaterial`）。省けば 1.3 と同じ文面
+   */
+  futureFacts?: readonly FutureFactEntry[];
 }): string {
+  const material =
+    input.source === "future" && input.futureFacts
+      ? futureVerifyMaterial(input.issue, input.chunk, input.futureFacts)
+      : undefined;
   return buildContradictionVerifyPrompt({
     chapterLabel: input.chapterLabel,
     contextWithLineNumbers: contradictionVerifyContext(input.chunk, input.issue.line),
@@ -226,5 +248,23 @@ export function buildContradictionVerifyUserPrompt(input: {
     settingKnownAt: input.settingKnownAt,
     smallModel: input.smallModel,
     source: input.source,
+    ...(material ? { futureFacts: material.facts, detectionNote: material.note } : {}),
   });
+}
+
+/**
+ * future の指摘の確かめに渡す材料（P-12b 1.4）：照らした事実の文と、検出の段の note。
+ *
+ * **送る文面と控えの鍵の両方がここを通る**（製品の `verifyCacheKey`）。どちらかだけが
+ * 別の選び方をすると、違う事実で得た答えを使い回す
+ */
+export function futureVerifyMaterial(
+  issue: AcceptedContradiction,
+  chunk: Chunk,
+  facts: readonly FutureFactEntry[]
+): { facts: string[]; note: string } {
+  return {
+    facts: futureFactLinesForIssue(issue, facts, knownAtScopeOf(issue, chunk)),
+    note: issue.note,
+  };
 }

@@ -4,7 +4,9 @@ import {
   buildContradictionVerifyPrompt,
   CONTRADICTION_VERIFY_FUTURE_VERSION,
   CONTRADICTION_VERIFY_VERSION,
+  VERIFY_FUTURE_FACTS_NOTE,
   VERIFY_FUTURE_SOURCE_NOTE,
+  VERIFY_FUTURE_SOURCE_NOTE_WITH_FACTS,
   VERIFY_KNOWN_AT_NONE_FUTURE,
   VERIFY_KNOWN_AT_NONE_SMALL,
   VERIFY_REJECT_REASONS,
@@ -76,9 +78,9 @@ describe("本命（settled）の文面は 1.2 のまま", () => {
     expect(settled).not.toContain(VERIFY_KNOWN_AT_NONE_FUTURE);
   });
 
-  it("版の定数は 1.2 のまま。future の版は別に 1.3", () => {
+  it("版の定数は 1.2 のまま。future の版は別に持つ（1.4）", () => {
     expect(CONTRADICTION_VERIFY_VERSION).toBe("1.2");
-    expect(CONTRADICTION_VERIFY_FUTURE_VERSION).toBe("1.3");
+    expect(CONTRADICTION_VERIFY_FUTURE_VERSION).toBe("1.4");
   });
 });
 
@@ -145,6 +147,84 @@ describe("future から来た指摘の文面（1.3）", () => {
 
   it("出どころの一文・中立の文は、決められた却下の理由の語を含まない（答えに写っても理由と読まれない）", () => {
     for (const text of [VERIFY_FUTURE_SOURCE_NOTE, VERIFY_KNOWN_AT_NONE_FUTURE]) {
+      for (const reason of VERIFY_REJECT_REASONS) {
+        expect(text).not.toContain(reason);
+      }
+      expect(text).not.toContain("明かされていない");
+    }
+  });
+});
+
+/**
+ * P-12b 1.4：future の指摘に、**コードが特定した、照らしたあとの話の事実の文**を渡す
+ * （作者の裁定「事実の文を渡す」、2026-10-23）。台Bで 26b は、検出の段で本当の食い違い
+ * （第5話の「四十歳まで東京で中学の教師」）を note に書き、settingSays には「宗一は
+ * 七十八歳である。」と書いた。確かめの段は settingSays と本文だけを比べて「そもそも
+ * 食い違っていない」で消した。
+ */
+describe("future の指摘に、照らした事実の文を渡す（1.4）", () => {
+  const T2 = {
+    chapterLabel: "第2話",
+    contextWithLineNumbers: "1: 宗一はこの町で生まれ、七十八年間、一度も町の外で暮らしたことがない。",
+    excerpt: "宗一はこの町で生まれ、七十八年間、一度も町の外で暮らしたことがない。",
+    settingSays: "宗一は七十八歳である。",
+    textSays: "七十八年間、一度も町の外で暮らしたことがない",
+    category: "人物",
+    settingKnownAt: "第5話",
+    source: "future" as const,
+  };
+  const FACT = "宗一の紹介（第5話で判明）: 七十八歳の老人。四十歳まで東京で中学の教師をしていた。";
+  const NOTE = "第5話で判明する、四十歳まで東京で教師をしていたことと食い違う";
+  const withFacts = buildContradictionVerifyPrompt({
+    ...T2,
+    futureFacts: [FACT],
+    detectionNote: NOTE,
+  });
+
+  it("版は future だけ 1.4 に上がり、本命は 1.2 のまま", () => {
+    expect(CONTRADICTION_VERIFY_FUTURE_VERSION).toBe("1.4");
+    expect(CONTRADICTION_VERIFY_VERSION).toBe("1.2");
+  });
+
+  it("照らした事実の欄に事実の文があり、見比べる指示がある", () => {
+    expect(withFacts).toContain(`【照らした事実（あとの話で判明）】\n- ${FACT}`);
+    expect(withFacts).toContain(VERIFY_FUTURE_FACTS_NOTE);
+    expect(withFacts).toContain(VERIFY_FUTURE_SOURCE_NOTE_WITH_FACTS);
+    expect(withFacts).not.toContain(VERIFY_FUTURE_SOURCE_NOTE);
+  });
+
+  it("検出の段の補足は、事実の文より下に参考として置く", () => {
+    expect(withFacts).toContain(`【検出の段の補足（AIが書いた文。参考）】\n${NOTE}`);
+    expect(withFacts.indexOf(FACT)).toBeLessThan(withFacts.indexOf(NOTE));
+    // 補足が空なら欄ごと出さない
+    const noNote = buildContradictionVerifyPrompt({ ...T2, futureFacts: [FACT], detectionNote: "  " });
+    expect(noNote).not.toContain("【検出の段の補足");
+  });
+
+  it("欄は【却下すべき場合】より上（判断材料の並び）", () => {
+    expect(withFacts.indexOf("【照らした事実")).toBeLessThan(withFacts.indexOf("【却下すべき場合】"));
+  });
+
+  it("事実の文を渡さなければ、1.3 と同じ文面（出どころの一文は前のまま）", () => {
+    const without = buildContradictionVerifyPrompt(T2);
+    expect(without).toContain(VERIFY_FUTURE_SOURCE_NOTE);
+    expect(without).not.toContain("【照らした事実");
+    expect(without).not.toContain("【検出の段の補足");
+  });
+
+  it("本命（settled）では、事実の文を渡されても使わない", () => {
+    const settled = buildContradictionVerifyPrompt({
+      ...T2,
+      source: "settled",
+      futureFacts: [FACT],
+      detectionNote: NOTE,
+    });
+    expect(settled).not.toContain("【照らした事実");
+    expect(settled).not.toContain(NOTE);
+  });
+
+  it("新しい指示の文は、決められた却下の理由の語を含まない（答えに写っても理由と読まれない）", () => {
+    for (const text of [VERIFY_FUTURE_FACTS_NOTE, VERIFY_FUTURE_SOURCE_NOTE_WITH_FACTS]) {
       for (const reason of VERIFY_REJECT_REASONS) {
         expect(text).not.toContain(reason);
       }

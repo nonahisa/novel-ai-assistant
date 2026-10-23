@@ -7,6 +7,7 @@ import { emptyCharacter } from "../../../src/models/character";
 import { splitIntoChunks } from "../../../src/core/chunker";
 import {
   VERIFY_FUTURE_SOURCE_NOTE,
+  VERIFY_FUTURE_SOURCE_NOTE_WITH_FACTS,
   VERIFY_KNOWN_AT_NONE_FUTURE,
 } from "../../../src/prompts/contradictionVerify";
 
@@ -218,7 +219,7 @@ beforeEach(() => {
 
 describe("future から来た指摘の確かめ（P-12b 1.3）", () => {
   test.each(["31B", "8B"])(
-    "%s：出どころの一文と、事実の一覧から引いた話数（第4話）が渡る。「まだ明かされていない」は無い",
+    "%s：出どころの一文と、事実の一覧から引いた話数（第4話）と、照らした事実の文（1.4）が渡る。「まだ明かされていない」は無い",
     async (size) => {
       state.parameterSize = size;
       state.futureAnswer = {
@@ -229,10 +230,12 @@ describe("future から来た指摘の確かめ（P-12b 1.3）", () => {
 
       expect(state.verifyPrompts).toHaveLength(1);
       const prompt = state.verifyPrompts[0];
-      expect(prompt).toContain(VERIFY_FUTURE_SOURCE_NOTE);
+      // 1.4：照らした事実の文を渡すので、出どころの一文はそちらを指す形になる
+      expect(prompt).toContain(VERIFY_FUTURE_SOURCE_NOTE_WITH_FACTS);
+      expect(prompt).toContain(`【照らした事実（あとの話で判明）】\n- ミナの紹介（第4話で判明）: ${MINA_LATER}`);
       expect(prompt).toContain("- この設定が分かる話: 第4話");
       expect(prompt).not.toContain("まだ明かされていない");
-      expect(state.verifyKeyVersions.every((version) => version.startsWith("1.3:"))).toBe(true);
+      expect(state.verifyKeyVersions.every((version) => version.startsWith("1.4:"))).toBe(true);
       expect(state.verifyKeyVersions.every((version) => version.includes("future:"))).toBe(true);
     }
   );
@@ -275,6 +278,8 @@ describe("future から来た指摘の確かめ（P-12b 1.3）", () => {
 
     expect(state.verifyPrompts).toHaveLength(1);
     expect(state.verifyPrompts[0]).not.toContain(VERIFY_FUTURE_SOURCE_NOTE);
+    expect(state.verifyPrompts[0]).not.toContain(VERIFY_FUTURE_SOURCE_NOTE_WITH_FACTS);
+    expect(state.verifyPrompts[0]).not.toContain("【照らした事実");
     expect(state.verifyPrompts[0]).toContain("1. **まだ明かされていない**");
     expect(state.verifyKeyVersions.length).toBeGreaterThan(0);
     for (const version of state.verifyKeyVersions) {

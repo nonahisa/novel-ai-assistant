@@ -91,23 +91,32 @@ export function buildFutureFacts<T extends FutureFactPerson>(
   for (const person of people) {
     for (const fact of factsRevealedAfter(person, CHARACTER_AS_OF_FIELDS, chapter)) {
       const label = FUTURE_FACT_FIELD_LABELS[fact.field] ?? fact.field;
-      const line = `${person.name}の${label}（第${fact.chapter}話で判明）: ${fact.value}`;
-      if (lines.includes(line)) continue;
-      lines.push(line);
-      facts.push({
+      const entry: FutureFactEntry = {
         owner: person.name,
         aliases: person.aliases ?? [],
         field: fact.field,
         label,
         value: fact.value,
         chapter: fact.chapter,
-      });
+      };
+      const line = futureFactLine(entry);
+      if (lines.includes(line)) continue;
+      lines.push(line);
+      facts.push(entry);
     }
   }
   return {
     text: lines.slice(0, MAX_FUTURE_FACTS).join("\n"),
     facts: facts.slice(0, MAX_FUTURE_FACTS),
   };
+}
+
+/**
+ * 事実の1行。**検出の段へ送った一覧の行と同じ書式**（確かめの段へも同じ文を渡す。
+ * 書式を2つ持つと、片方だけ直ってずれる）
+ */
+export function futureFactLine(fact: FutureFactEntry): string {
+  return `${fact.owner}の${fact.label}（第${fact.chapter}話で判明）: ${fact.value}`;
 }
 
 /** 話数を引くのに見る、指摘の欄（`AcceptedContradiction` の一部） */
@@ -198,4 +207,60 @@ function factsOfNamedOwners(
       return compact.length > 0 && haystack.includes(compact);
     })
   );
+}
+
+/** 照らした事実を選ぶのに見る、指摘の欄 */
+export interface FutureIssueMaterial extends FutureIssueFields {
+  excerpt: string;
+  textSays: string;
+}
+
+/**
+ * future の指摘が照らした「あとの話で判明する事実」を、一覧から選ぶ（P-12b 1.4、
+ * 作者の裁定「事実の文を渡す」2026-10-23）。一覧が空なら空配列。
+ *
+ * **AI の書いた `settingSays` の文を、照らした事実の代わりにしない。** 台Bで 26b は
+ * 本当の食い違い（第5話の「四十歳まで東京で教師」）を note に書き、settingSays には
+ * 「宗一は七十八歳である。」と書いた。確かめの段がその文と本文だけを比べて消した。
+ *
+ * 選び方：
+ * 1. 持ち主を絞る——`settingSays`・`note`・引用と本文の欄の順に、名前（別名を含む）が
+ *    出た人の事実。どこにも出なければ一覧の全部
+ * 2. 話数（`lookupFutureKnownAt`）が決まれば、その話の事実に絞る。持ち主の中に
+ *    その話の事実が無ければ、一覧からその話の事実を取る
+ *
+ * **絞れないときに空にしない。** 一覧はこの本文に出た人物の、あとで判明する事実だけ
+ * （20件まで）で、検出の段が見たのと同じものである。
+ */
+export function selectFutureFactsForIssue(
+  issue: FutureIssueMaterial,
+  facts: readonly FutureFactEntry[],
+  scope?: KnownAtScope
+): FutureFactEntry[] {
+  if (facts.length === 0) return [];
+  const owned = [
+    issue.settingSays,
+    issue.note,
+    scope?.alsoText ?? `${issue.excerpt}\n${issue.textSays}`,
+  ]
+    .map((text) => factsOfNamedOwners(facts, text))
+    .find((found) => found.length > 0);
+  const pool = owned ?? [...facts];
+  const chapters = lookupFutureKnownAt(issue, facts, scope);
+  if (chapters.length > 0) {
+    const inPool = pool.filter((fact) => chapters.includes(fact.chapter));
+    if (inPool.length > 0) return inPool;
+    const inList = facts.filter((fact) => chapters.includes(fact.chapter));
+    if (inList.length > 0) return inList;
+  }
+  return pool;
+}
+
+/** `selectFutureFactsForIssue` の結果を、確かめのプロンプトへ書く行にする */
+export function futureFactLinesForIssue(
+  issue: FutureIssueMaterial,
+  facts: readonly FutureFactEntry[],
+  scope?: KnownAtScope
+): string[] {
+  return selectFutureFactsForIssue(issue, facts, scope).map(futureFactLine);
 }

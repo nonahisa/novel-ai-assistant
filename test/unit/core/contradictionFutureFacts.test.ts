@@ -3,9 +3,16 @@ import { emptyCharacter, type Character } from "../../../src/models/character";
 import {
   buildFutureFacts,
   describeFutureKnownAt,
+  futureFactLinesForIssue,
   lookupFutureKnownAt,
+  selectFutureFactsForIssue,
 } from "../../../src/core/contradictionFutureFacts";
-import { contradictionVerifyPromptVersion } from "../../../src/core/contradictionAssembly";
+import {
+  buildContradictionVerifyUserPrompt,
+  contradictionVerifyPromptVersion,
+} from "../../../src/core/contradictionAssembly";
+import type { Chunk } from "../../../src/core/chunker";
+import type { AcceptedContradiction } from "../../../src/core/contradictionValidation";
 import { parseVerifyOutcome } from "../../../src/core/contradictionVerifyValidation";
 
 /**
@@ -159,9 +166,9 @@ describe("確かめの段の控えの鍵", () => {
     expect(contradictionVerifyPromptVersion(true, "fp", "settled")).toBe("1.2:strict:fp");
   });
 
-  it("future は 1.3 と future: の印", () => {
-    expect(contradictionVerifyPromptVersion(false, "fp", "future")).toBe("1.3:future:fp");
-    expect(contradictionVerifyPromptVersion(true, "fp", "future")).toBe("1.3:strict:future:fp");
+  it("future は 1.4 と future: の印（1.4 で事実の文を渡すようにした）", () => {
+    expect(contradictionVerifyPromptVersion(false, "fp", "future")).toBe("1.4:future:fp");
+    expect(contradictionVerifyPromptVersion(true, "fp", "future")).toBe("1.4:strict:future:fp");
   });
 });
 
@@ -200,5 +207,120 @@ describe("future の答えの読み方（parseVerifyOutcome は変えていな�
     const outcome = parseVerifyOutcome(reply("作中の変化", "作中の変化には当たりません"));
     expect(outcome.keep).toBe(false);
     expect(outcome.reason).toBe("作中の変化");
+  });
+});
+
+/**
+ * **確かめの段へ、照らしたあとの話の事実の文そのものを渡す**（作者の裁定「事実の文を
+ * 渡す」、2026-10-23。P-12b 1.4）。
+ *
+ * 作り物の台Bで、26b は検出の段で「宗一はこの町で生まれ、七十八年間、一度も町の外で
+ * 暮らしたことがない。」と第5話の事実「四十歳まで東京で中学の教師をしていた」の
+ * 食い違いを拾ったのに、settingSays には「宗一は七十八歳である。」と書いた。
+ * 確かめの段には事実の文が渡らず、「78年間外で暮らしていないと78歳は両立する」で
+ * 消えた。**AI の書いた文に頼らず、コードが特定した事実の文を渡す。**
+ */
+describe("確かめの段へ渡す、照らした事実の文（selectFutureFactsForIssue）", () => {
+  const SOICHI_LATER = "七十八歳の老人。四十歳まで東京で中学の教師をしていた。";
+  const soichi = person("c4", "宗一", SOICHI_LATER, [
+    { value: "七十八歳の老人。町の古い家に一人で住んでいる。", chapter: 1 },
+    { value: SOICHI_LATER, chapter: 5 },
+  ]);
+  const facts = buildFutureFacts([soichi, seto], 2).facts;
+  const issue = {
+    excerpt: "宗一はこの町で生まれ、七十八年間、一度も町の外で暮らしたことがない。",
+    settingSays: "宗一は七十八歳である。",
+    textSays: "七十八年間、一度も町の外で暮らしたことがない",
+    note: "第5話で判明する、四十歳まで東京で教師をしていたことと食い違う",
+  };
+  const scope = { chapterStart: 2, chapterEnd: 2, alsoText: `${issue.excerpt}\n${issue.textSays}` };
+
+  it("台Bの宗一：settingSays が事実と違う文でも、名前と話数から第5話の事実の文を選ぶ", () => {
+    expect(futureFactLinesForIssue(issue, facts, scope)).toEqual([
+      `宗一の紹介（第5話で判明）: ${SOICHI_LATER}`,
+    ]);
+  });
+
+  it("文の書式は検出の段へ送った一覧の行と同じ", () => {
+    const list = buildFutureFacts([soichi, seto], 2);
+    for (const line of futureFactLinesForIssue(issue, facts, scope)) {
+      expect(list.text.split("\n")).toContain(line);
+    }
+  });
+
+  it("名前が文に無くても、引用・本文の欄の名前で絞る", () => {
+    expect(
+      selectFutureFactsForIssue({ ...issue, settingSays: "七十八歳である", note: "" }, facts, scope).map(
+        (fact) => fact.owner
+      )
+    ).toEqual(["宗一"]);
+  });
+
+  it("どこにも名前が無く話数も決められなければ、検出の段へ渡した一覧をそのまま渡す（空にしない）", () => {
+    const none = selectFutureFactsForIssue(
+      { excerpt: "", settingSays: "毎日外出している", textSays: "", note: "" },
+      facts
+    );
+    expect(none).toEqual(facts);
+  });
+
+  it("一覧が空なら空", () => {
+    expect(selectFutureFactsForIssue(issue, [], scope)).toEqual([]);
+  });
+});
+
+describe("確かめの頼み（buildContradictionVerifyUserPrompt）へ、事実の文と補足が渡る", () => {
+  const SOICHI_LATER = "七十八歳の老人。四十歳まで東京で中学の教師をしていた。";
+  const soichi = person("c4", "宗一", SOICHI_LATER, [
+    { value: "七十八歳の老人。町の古い家に一人で住んでいる。", chapter: 1 },
+    { value: SOICHI_LATER, chapter: 5 },
+  ]);
+  const text = "宗一はこの町で生まれ、七十八年間、一度も町の外で暮らしたことがない。";
+  const chunk = {
+    filePath: "第2話.txt",
+    hash: "h",
+    text,
+    index: 0,
+    startLine: 0,
+    chapterStart: 2,
+    chapterEnd: 2,
+  } as unknown as Chunk;
+  const issue = {
+    line: 1,
+    excerpt: text,
+    settingSays: "宗一は七十八歳である。",
+    textSays: "七十八年間、一度も町の外で暮らしたことがない",
+    category: "人物",
+    note: "第5話で判明する、四十歳まで東京で教師をしていたことと食い違う",
+    confidence: "high",
+  } as unknown as AcceptedContradiction;
+
+  it("future で事実の一覧を渡すと、照らした事実の欄と補足の欄が入る", () => {
+    const prompt = buildContradictionVerifyUserPrompt({
+      chapterLabel: "第2話",
+      chunk,
+      issue,
+      settingKnownAt: "第5話",
+      source: "future",
+      futureFacts: buildFutureFacts([soichi], 2).facts,
+    });
+    expect(prompt).toContain("【照らした事実（あとの話で判明）】");
+    expect(prompt).toContain(`- 宗一の紹介（第5話で判明）: ${SOICHI_LATER}`);
+    expect(prompt).toContain("【検出の段の補足（AIが書いた文。参考）】");
+    expect(prompt).toContain(issue.note);
+    // 事実の文が補足より上にある
+    expect(prompt.indexOf("【照らした事実")).toBeLessThan(prompt.indexOf("【検出の段の補足"));
+  });
+
+  it("本命（settled）では、事実の一覧を渡しても欄を足さない", () => {
+    const prompt = buildContradictionVerifyUserPrompt({
+      chapterLabel: "第2話",
+      chunk,
+      issue,
+      settingKnownAt: "",
+      futureFacts: buildFutureFacts([soichi], 2).facts,
+    });
+    expect(prompt).not.toContain("【照らした事実");
+    expect(prompt).not.toContain("【検出の段の補足");
   });
 });
