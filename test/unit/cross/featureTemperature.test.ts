@@ -34,6 +34,7 @@ import { NAME_SUGGEST_TEMPERATURE } from "../../../src/prompts/nameSuggest";
 import { PLOT_NAME_SUGGEST_TEMPERATURE } from "../../../src/prompts/plotNameSuggest";
 import { WORK_CHAT_TEMPERATURE } from "../../../src/prompts/workChat";
 import { PLOT_ADVICE_TEMPERATURE } from "../../../src/prompts/plotAdvice";
+import { PLOT_ADVICE_DRAFT_TEMPERATURE } from "../../../src/prompts/plotAdviceDraft";
 import { SEARCH_TERMS_TEMPERATURE } from "../../../src/prompts/searchTerms";
 
 /**
@@ -84,6 +85,7 @@ const EXPECTED: Array<[string, number]> = [
   ["プロットの名前の候補（P-45）", PLOT_NAME_SUGGEST_TEMPERATURE],
   ["相談（P-20）", WORK_CHAT_TEMPERATURE],
   ["プロットモードの相談（P-01）", PLOT_ADVICE_TEMPERATURE],
+  ["プロットの書き込み案の2回目（P-01b）", PLOT_ADVICE_DRAFT_TEMPERATURE],
   ["検索語づくり", SEARCH_TERMS_TEMPERATURE],
 ];
 
@@ -127,6 +129,7 @@ const PRODUCT_WIRED: Array<[string, string]> = [
   ["src/features/nameCheck.ts", "NAME_SUGGEST_TEMPERATURE"],
   ["src/features/plotNameSuggest.ts", "PLOT_NAME_SUGGEST_TEMPERATURE"],
   ["src/features/plotAdvice.ts", "PLOT_ADVICE_TEMPERATURE"],
+  ["src/features/plotAdvice.ts", "PLOT_ADVICE_DRAFT_TEMPERATURE"],
   ["src/features/workChatPanel.ts", "WORK_CHAT_TEMPERATURE"],
   ["src/features/workChatPanel.ts", "SEARCH_TERMS_TEMPERATURE"],
   ["src/features/settingsPanel.ts", "SEARCH_TERMS_TEMPERATURE"],

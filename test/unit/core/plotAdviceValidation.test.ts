@@ -3,6 +3,8 @@ import { emptyPlotSections, type PlotSections } from "../../../src/core/plotDoc"
 import {
   PLOT_ADVICE_SUGGESTION_MARK,
   countQuestions,
+  isPlotAdviceWriteRequest,
+  parsePlotAdviceDraft,
   parsePlotAdviceAnswer,
   sectionOf,
 } from "../../../src/core/plotAdviceValidation";
@@ -241,5 +243,114 @@ describe("作者が自分で話題にした項目は、勧めた数に入れな�
       authorTexts: ["世界観をどう作ればいいか迷っています。"],
     });
     expect(answer.warnings.some((w) => w.includes("舞台・主人公の行動原理"))).toBe(true);
+  });
+});
+
+/*
+  「書いて」と頼まれたときの2回目（P-01b、設計書6.4.10 の12）。
+  2回目を呼ぶかどうかの判定と、2回目の value の見張り。
+*/
+describe("書く依頼の言い方（isPlotAdviceWriteRequest）", () => {
+  it("2026-10-23 の台本の言い方は、どれも書く依頼として拾う", () => {
+    for (const text of [
+      "主人公の行動原理も決まった。ミナは兄に「必ず迎えに来る」と約束されたまま三年待たされたので、自分から迎えに行く。これをプロットに入れて。",
+      "舞台は瀬戸内の小さな漁村にする。決まりだから舞台の欄に書いてほしい。",
+      "あらすじの案を書き込んでほしい。第一幕は旅立ち、第二幕は島での兄の痕跡探し、第三幕は満潮が迫る中の脱出。",
+      "テーマはこれで反映して",
+      "ログラインに記入してください",
+      "舞台に書いといて",
+      "世界観に書いてもらえる？",
+    ]) {
+      expect(isPlotAdviceWriteRequest(text), text).toBe(true);
+    }
+  });
+
+  it("書いてある・書いていない・あらすじの中の動き（手に入れて逃げる）は書く依頼にしない", () => {
+    for (const text of [
+      "テーマは書いてあるけど、舞台はどうしよう",
+      "あらすじはまだ書いていない",
+      "舞台は書いてない",
+      "主人公は鍵を手に入れて逃げる",
+      "手紙を書いて、兄に渡す場面がある",
+      "動機はもう入れている",
+      "舞台をどうするか迷っている",
+      "まだ書かないで",
+    ]) {
+      expect(isPlotAdviceWriteRequest(text), text).toBe(false);
+    }
+  });
+});
+
+describe("2回目の value の見張り（parsePlotAdviceDraft）", () => {
+  const author = ["舞台は瀬戸内の小さな漁村にする。決まりだから舞台の欄に書いてほしい。"];
+
+  it("value を、コードが持つ項目の案にする（field はAIに書かせない）", () => {
+    const result = parsePlotAdviceDraft(
+      '{"value": "瀬戸内の小さな漁村"}',
+      "setting",
+      { sections: sections(), authorTexts: author }
+    );
+    expect(result).toEqual({
+      suggestion: {
+        section: "setting",
+        heading: "舞台",
+        value: "瀬戸内の小さな漁村",
+        overwrites: false,
+        grounded: true,
+      },
+    });
+  });
+
+  it("AIが field を足して別の項目を書いてきても、項目はコードが持つものにする", () => {
+    const result = parsePlotAdviceDraft(
+      '{"field": "テーマ", "value": "瀬戸内の小さな漁村"}',
+      "setting",
+      { sections: sections(), authorTexts: author }
+    );
+    expect("suggestion" in result && result.suggestion.section).toBe("setting");
+  });
+
+  it("壊れた JSON・空・雛形の言葉・長すぎる案は捨てる（1回目と同じ見張り）", () => {
+    const context = { sections: sections(), authorTexts: author };
+    expect(parsePlotAdviceDraft('{"value": ', "setting", context)).toEqual({ dropped: "broken_json" });
+    expect(parsePlotAdviceDraft("", "setting", context)).toEqual({ dropped: "broken_json" });
+    expect(parsePlotAdviceDraft('{"value": ""}', "setting", context)).toEqual({ dropped: "placeholder_value" });
+    // P-01b の指示語がそのまま返ってきた形（CLAUDE.md の繰り返し起きた失敗3）
+    expect(parsePlotAdviceDraft('{"value": "項目に入れる文"}', "setting", context)).toEqual({
+      dropped: "placeholder_value",
+    });
+    expect(parsePlotAdviceDraft('{"value": "【作者の発言】舞台は漁村"}', "setting", context)).toEqual({
+      dropped: "placeholder_value",
+    });
+    expect(
+      parsePlotAdviceDraft(JSON.stringify({ value: "漁村".repeat(400) }), "setting", context)
+    ).toEqual({ dropped: "too_long" });
+  });
+
+  it("作者への問い返しで終わる value は案にしない（e4b は問いを返す癖が測れている）", () => {
+    const result = parsePlotAdviceDraft(
+      '{"value": "漁村の名前や時代はどうしますか？"}',
+      "setting",
+      { sections: sections(), authorTexts: author }
+    );
+    expect(result).toEqual({ dropped: "asks_back" });
+  });
+
+  it("作者自身が問いの形で決めた中身（テーマの問い）は落とさない", () => {
+    const result = parsePlotAdviceDraft(
+      '{"value": "人は何のために待つのか？"}',
+      "theme",
+      { sections: sections(), authorTexts: ["テーマは「人は何のために待つのか？」にする。テーマに書いて。"] }
+    );
+    expect("suggestion" in result).toBe(true);
+  });
+
+  it("作者の発言に無い言葉が多い案は、落とさずに印を付ける", () => {
+    const result = parsePlotAdviceDraft(
+      '{"value": "霧に包まれた北の港町。灯台守の一族が暮らす"}',
+      "setting",
+      { sections: sections(), authorTexts: author }
+    );
+    expect("suggestion" in result && result.suggestion.grounded).toBe(false);
   });
 });

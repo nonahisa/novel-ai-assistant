@@ -136,6 +136,7 @@ beforeEach(() => {
   state.write.mockImplementation(async () => ({ ok: true }));
   state.chatLog.mockClear();
   state.logStep.mockClear();
+  state.logFailure.mockClear();
   workspace.textDocuments = [];
   window.showInformationMessage = (async (message: string) => {
     announced.push(message);
@@ -367,5 +368,160 @@ describe("案をプロットに書く", () => {
     expect(lastView().turns[1].suggestion?.state).toBe("dismissed");
     expect(await advice.apply(id)).toBe(false);
     expect(state.write).not.toHaveBeenCalled();
+  });
+});
+
+/*
+  「書いて」と頼まれたときの2回目（P-01b、設計書6.4.10 の12。作者の裁定 2026-10-23
+  「『書いて』のときだけ別に頼む」）。gemma4:e4b は決めて「入れて」と頼んでも
+  12回中0回しか案を出さず、毎回問いを返した。
+*/
+describe("「書いて」と頼まれたら、案を別に頼む", () => {
+  const ASK = "舞台は瀬戸内の小さな漁村にする。決まりだから舞台の欄に書いてほしい。";
+  const FIRST = "瀬戸内の漁村ですね。時代はいつ頃でしょうか？";
+
+  test("1回目に案が無く「書いてほしい」なら、2回目を呼んで案を並べる", async () => {
+    state.generate
+      .mockImplementationOnce(async () => answer(FIRST))
+      .mockImplementationOnce(async () => answer('{"value": "瀬戸内の小さな漁村"}'));
+    const advice = session();
+    expect(await advice.send(ASK)).toBe(true);
+
+    expect(state.generate).toHaveBeenCalledTimes(2);
+    const first = state.generate.mock.calls[0][0] as GenerateParams;
+    const second = state.generate.mock.calls[1][0] as GenerateParams;
+    // 2回目は形を value だけに決め、温度を下げ、同じ止め口で止まる
+    expect(second.jsonSchema).toEqual({
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    });
+    expect(second.temperature).toBeLessThan(first.temperature as number);
+    expect(second.disableThinking).toBe(true);
+    expect(second.signal).toBe(first.signal);
+    expect(second.meta?.feature).toBe("plot_advice_draft");
+    expect(second.userPrompt).toContain("【書く項目】\n舞台");
+    expect(second.userPrompt).toContain(`【作者の発言】\n${ASK}`);
+
+    // 画面には1回目の文と、2回目の案を1つの答えとして並べる。書きはしない
+    const turn = lastView().turns[1];
+    expect(turn.text).toBe(FIRST);
+    expect(turn.suggestion).toMatchObject({
+      heading: "舞台",
+      value: "瀬戸内の小さな漁村",
+      state: "open",
+    });
+    expect(state.write).not.toHaveBeenCalled();
+    // 2回目のあいだも考えている印のまま（［止める］が効く）。idle は最後の1回だけ
+    expect(views.filter((view) => view.status === "idle")).toHaveLength(1);
+
+    // 記録には2回目が分かる形で残る
+    expect(state.chatLog).toHaveBeenCalledTimes(2);
+    expect(state.chatLog.mock.calls[1][1]).toMatchObject({
+      panel: "プロットモード",
+      promptVersion: "P-01b 1.0",
+      target: expect.stringContaining("2回目"),
+      reply: '{"value": "瀬戸内の小さな漁村"}',
+    });
+
+    // 案は控えから書ける
+    const id = turn.suggestion?.id as string;
+    expect(await advice.apply(id)).toBe(true);
+    const text = (state.write.mock.calls[0] as unknown as [string, string])[1];
+    expect(text).toContain("瀬戸内の小さな漁村");
+  });
+
+  test("案を求めない相談・名指しが2つ・1回目に案があるときは、2回目を呼ばない", async () => {
+    state.generate.mockImplementation(async () => answer(FIRST));
+    await session().send("舞台を瀬戸内の漁村にするか、山あいの町にするか迷っている");
+    await session().send("舞台は漁村、テーマは待つことの意味。プロットに入れて。");
+    expect(state.generate).toHaveBeenCalledTimes(2);
+
+    state.generate.mockReset();
+    state.generate.mockImplementation(async () =>
+      answer(`${FIRST}\n${PLOT_ADVICE_SUGGESTION_MARK}\n{"field": "舞台", "value": "瀬戸内の小さな漁村"}`)
+    );
+    await session().send(ASK);
+    expect(state.generate).toHaveBeenCalledTimes(1);
+  });
+
+  test("2回目が壊れた JSON・空・呼び出しの失敗なら、1回目の答えだけを出す", async () => {
+    const seconds: Array<() => Promise<unknown>> = [
+      async () => answer('{"value": '),
+      async () => answer('{"value": ""}'),
+      async () => answer(""),
+      async () => {
+        throw new AIError("つながりません", "not_running");
+      },
+      async () => ({ text: '{"value": "瀬戸内', truncated: true, elapsedMs: 1 }),
+    ];
+    for (const second of seconds) {
+      state.generate.mockReset();
+      state.generate.mockImplementationOnce(async () => answer(FIRST)).mockImplementationOnce(second);
+      views = [];
+      const advice = session();
+      expect(await advice.send(ASK)).toBe(true);
+      expect(state.generate).toHaveBeenCalledTimes(2);
+      const turn = lastView().turns[1];
+      expect(turn.text).toBe(FIRST);
+      expect(turn.failed).toBeUndefined();
+      expect(turn.suggestion).toBeUndefined();
+      expect(lastView().status).toBe("idle");
+    }
+    // 落ちた理由はログに残す
+    expect(state.logStep.mock.calls.flat().join("\n")).toContain("書き込み案の2回目");
+  });
+
+  test("2回目の最中に［止める］を押せば2回目も止まり、1回目の答えだけを並べる", async () => {
+    state.generate
+      .mockImplementationOnce(async () => answer(FIRST))
+      .mockImplementationOnce(
+        (params: GenerateParams) =>
+          new Promise((_resolve, reject) => {
+            params.signal?.addEventListener("abort", () =>
+              reject(new AIError("中止", "aborted"))
+            );
+          })
+      );
+    const advice = session();
+    const pending = advice.send(ASK);
+    await vi.waitFor(() => expect(state.generate).toHaveBeenCalledTimes(2));
+    expect(lastView().status).toBe("busy");
+    advice.stop();
+    expect(await pending).toBe(true);
+    const turn = lastView().turns[1];
+    expect(turn.text).toBe(FIRST);
+    expect(turn.suggestion).toBeUndefined();
+    expect(lastView().status).toBe("idle");
+    expect(state.logFailure).not.toHaveBeenCalled();
+  });
+
+  test("画面を閉じたときも2回目は止まる", async () => {
+    let signal: AbortSignal | undefined;
+    state.generate
+      .mockImplementationOnce(async () => answer(FIRST))
+      .mockImplementationOnce(
+        (params: GenerateParams) =>
+          new Promise((_resolve, reject) => {
+            signal = params.signal;
+            params.signal?.addEventListener("abort", () =>
+              reject(new AIError("中止", "aborted"))
+            );
+          })
+      );
+    const advice = session();
+    const pending = advice.send(ASK);
+    await vi.waitFor(() => expect(state.generate).toHaveBeenCalledTimes(2));
+    advice.dispose();
+    await pending;
+    expect(signal?.aborted).toBe(true);
+  });
+
+  test("有料のAIの確かめには、もう1回送ることがあると書く", async () => {
+    state.provider = { ...(state.provider as object), isPaid: true };
+    state.generate.mockImplementation(async () => answer("はい。"));
+    await session().send("相談です");
+    const options = state.paid.mock.calls[0][1] as { more: string[] };
+    expect(options.more.join("\n")).toContain("もう1回送ることがあります");
   });
 });

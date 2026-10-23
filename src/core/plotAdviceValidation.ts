@@ -81,6 +81,12 @@ const ECHO_WORDS = [
   "項目の見出し",
   "その項目に書く文",
   "作者の言葉を生かして",
+  // P-01b 1.0（「書いて」の2回目。`prompts/plotAdviceDraft.ts`）の指示と段の見出しの言葉
+  "項目に入れる文",
+  "そのまま載せられる文",
+  "【書く項目】",
+  "【直前の会話】",
+  "【作者の発言】",
 ];
 
 /** プロンプトの段の見出し。答えにそのまま写ってきたら、その行は捨てる */
@@ -108,7 +114,9 @@ export type PlotAdviceDropReason =
   /** 作者が書いた中身と同じ（書く意味が無い） */
   | "already_written"
   /** 作者が書いた中身の言い換え */
-  | "rewrites_author";
+  | "rewrites_author"
+  /** 作者への問い返しで終わる（「書いて」の2回目だけが見る） */
+  | "asks_back";
 
 /** 画面へ出せる書き込み案 */
 export interface PlotAdviceSuggestion {
@@ -200,8 +208,19 @@ function readSuggestion(
   const field = typeof parsed.field === "string" ? parsed.field : "";
   const section = sectionOf(field);
   if (!section) return { dropped: "unknown_field" };
+  return checkSuggestionValue(section, parsed.value, context);
+}
 
-  const value = typeof parsed.value === "string" ? parsed.value.trim() : "";
+/**
+ * 案の中身の見張り。**1回目（P-01）の案と「書いて」の2回目（P-01b）の案の両方が
+ * ここを通る**——片方にだけ見張りを足すと、2回目が1回目より緩い道になる。
+ */
+function checkSuggestionValue(
+  section: PlotDialogueSection,
+  rawValue: unknown,
+  context: PlotAdviceCheckContext
+): { suggestion: PlotAdviceSuggestion } | { dropped: PlotAdviceDropReason } {
+  const value = typeof rawValue === "string" ? rawValue.trim() : "";
   if (isEchoOrPlaceholder(value)) return { dropped: "placeholder_value" };
   if (value.length > PLOT_ADVICE_VALUE_MAX) return { dropped: "too_long" };
 
@@ -342,6 +361,61 @@ export function plotAdviceFieldsNamed(texts: readonly string[]): PlotDialogueSec
 }
 
 /**
+ * 書く依頼の言い方（「書いて」「入れて」「書き込んで」「反映して」「記入して」など）。
+ * 「書いて」の2回目（P-01b、設計書6.4.10 の12）を呼ぶかどうかの判定に使う。
+ *
+ * **後ろに続く言葉で、頼む形だけを拾う。** 「書いて」「入れて」は相談の文に
+ * 状態や筋の動きとしても多く出る（「テーマは書いてあるけど」「鍵を手に入れて逃げる」
+ * 「手紙を書いて、兄に渡す」）。て形の直後が、文の終わり・「ほしい」「ください」
+ * 「くれ」「もらえ」「おいて」「みて」「いい」など頼む言い方のときだけ当てる。
+ * 拾いすぎたときの損はAIへもう1回送ることだけ（案は作者が押すまで書かない）、
+ * 見逃したときの損は e4b で案が出ないままになることなので、頼む言い方は広めに並べる。
+ */
+const WRITE_REQUEST_PATTERN =
+  /(?:書き込んで|書きこんで|書き加えて|書いて|入れて|いれて|反映して|反映させて|記入して|載せて|追記して|埋めて)(?=$|[。．.！!？?」』）)\s]|ほし(?!くな)|欲し(?!くな)|くださ|下さ|くれ|もらえ|もらいた|おいて|みて|もいい|いい|ね|よ|お願い)|(?:書いと|入れと|書き込んど)(?:いて|け)/u;
+
+export function isPlotAdviceWriteRequest(text: string): boolean {
+  return WRITE_REQUEST_PATTERN.test(text.normalize("NFKC"));
+}
+
+/**
+ * 「書いて」の2回目（P-01b）の答えを読む。
+ *
+ * - **項目はコードが持つ**（`section`）。AIが field を書いてきても見ない——
+ *   名指しした項目と別の項目へ書く案を作らせない
+ * - 中身は1回目の案と**同じ見張り**（`checkSuggestionValue`：空・雛形の言葉・
+ *   長すぎ・作者の文と同じ／言い換え・作者の言葉との重なり）を通す
+ * - **作者への問い返しで終わる中身は落とす**（`asks_back`）。形を決めても、
+ *   問いを返す癖のあるモデル（gemma4:e4b は 1.1 で、決めて「書いて」と頼む12回とも案を出さずに問いを返した。2026-10-23）は
+ *   value に問いを書く見込みがある。ただし作者自身が問いの形で決めた中身
+ *   （テーマ「人は何のために待つのか？」）は、作者の発言にその文があるので落とさない
+ */
+export function parsePlotAdviceDraft(
+  raw: string,
+  section: PlotDialogueSection,
+  context: PlotAdviceCheckContext
+): { suggestion: PlotAdviceSuggestion } | { dropped: PlotAdviceDropReason } {
+  const parsed = parseObject(raw.trim());
+  if (!parsed) return { dropped: "broken_json" };
+  const result = checkSuggestionValue(section, parsed.value, context);
+  if ("dropped" in result) return result;
+  if (asksBack(result.suggestion.value, context.authorTexts)) {
+    return { dropped: "asks_back" };
+  }
+  return result;
+}
+
+/** 最後の文が「？」で終わり、その文が作者の発言に無ければ問い返しとみなす */
+function asksBack(value: string, authorTexts: readonly string[]): boolean {
+  const body = value.normalize("NFKC").trim();
+  if (!/[?？]$/u.test(body)) return false;
+  const sentences = body.split(/(?<=[。．.!！])/u);
+  const last = sentences[sentences.length - 1].trim();
+  const source = authorTexts.join("\n").normalize("NFKC");
+  return !source.includes(last);
+}
+
+/**
  * 答えの中で名前が出た、未記入の項目の見出し。**作者が自分で話題にした
  * 項目は数えない**——作者が世界観を相談すれば、答えが世界観に触れるのは
  * 勧めではなく返事である（数えると、世界観の相談への答えに行動原理が
@@ -403,5 +477,7 @@ export function describePlotAdviceDrop(reason: PlotAdviceDropReason): string {
       return "書き込み案が、もう書いてある中身と同じでした";
     case "rewrites_author":
       return "書き込み案が、作者の書いた文の言い換えでした";
+    case "asks_back":
+      return "書き込み案が、作者への問い返しでした";
   }
 }

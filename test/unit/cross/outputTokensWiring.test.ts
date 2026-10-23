@@ -141,6 +141,8 @@ const PASSES_BOTH_TOKENS: Array<[file: string, marker: string]> = [
   ["findingAdvice.ts", "FINDING_ADVICE_FEATURE"],
   // プロットモードの相談（P-01、設計書6.4.10）。機能名は定数で渡す
   ["plotAdvice.ts", "PLOT_ADVICE_FEATURE"],
+  // 「書いて」の2回目（P-01b）。同じファイルの2つ目の呼び出しなので、別の目印で見張る
+  ["plotAdvice.ts", "PLOT_ADVICE_DRAFT_FEATURE"],
 ];
 
 describe("出力トークンの2つの欄の配り先", () => {

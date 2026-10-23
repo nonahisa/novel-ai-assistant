@@ -9,7 +9,10 @@ import type { PlotDialogueSection } from "../core/plotInterview";
 import {
   describePlotAdviceDrop,
   parsePlotAdviceAnswer,
+  parsePlotAdviceDraft,
+  type PlotAdviceSuggestion,
 } from "../core/plotAdviceValidation";
+import type { PlotSections } from "../core/plotDoc";
 import { hasConflictMarkers } from "../core/textDecode";
 import {
   readTextFile,
@@ -35,6 +38,14 @@ import {
   recentPlotAdviceHistory,
   type PlotAdviceTurn,
 } from "../prompts/plotAdvice";
+import {
+  PLOT_ADVICE_DRAFT_SCHEMA,
+  PLOT_ADVICE_DRAFT_SYSTEM_PROMPT,
+  PLOT_ADVICE_DRAFT_TEMPERATURE,
+  PLOT_ADVICE_DRAFT_VERSION,
+  buildPlotAdviceDraftPrompt,
+  plotAdviceDraftTarget,
+} from "../prompts/plotAdviceDraft";
 import { ensureConfigured, type AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
@@ -82,6 +93,12 @@ import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 
 /** 出力の上限・呼び出しの記録に使う機能名 */
 export const PLOT_ADVICE_FEATURE = "plot_advice";
+
+/**
+ * 「書いて」の2回目（P-01b）の機能名。**会話とは分けて数える**——書く量が
+ * 1項目の文だけで桁が違い、同じ名前で数えると会話の見込みが縮む（逆も同じ）。
+ */
+export const PLOT_ADVICE_DRAFT_FEATURE = "plot_advice_draft";
 
 /** 書き込み案の画面での状態 */
 export type PlotAdviceSuggestionState = "open" | "written" | "dismissed";
@@ -203,6 +220,8 @@ export class PlotAdviceSession {
         bodyNotSent: true,
         more: [
           "送るのは、プロット（plot.md）の中身と、この画面での直近の会話です。",
+          // P-01b（設計書6.4.10 の12）。送る回数が増えることを、料金の確かめで先に言う
+          "「書いて」「入れて」と頼んだときは、書き込み案を作るためにもう1回送ることがあります（送るのは直近の会話と、書く項目の名前です）。",
           "（この確認はこの画面で一度だけです）",
         ],
       });
@@ -227,6 +246,26 @@ export class PlotAdviceSession {
 
     const controller = new AbortController();
     this.controller = controller;
+    try {
+      return await this.exchange({ text, resolved, parsedPlot, history, userPrompt, controller });
+    } finally {
+      // **止め口は2回目（P-01b）が終わるまで外さない。** 1回目の終わりで外すと、
+      // 2回目の最中に［止める］を押しても・画面を閉じても止まらない
+      if (this.controller === controller) this.controller = undefined;
+    }
+  }
+
+  /** AIへ送って答えを並べる（1回目と、要るときは「書いて」の2回目） */
+  private async exchange(ctx: {
+    text: string;
+    resolved: Resolved;
+    parsedPlot: { sections: PlotSections };
+    history: PlotAdviceTurn[];
+    userPrompt: string;
+    controller: AbortController;
+  }): Promise<boolean> {
+    const { text, resolved, parsedPlot, history, userPrompt, controller } = ctx;
+    const { work } = this.deps;
     const started = Date.now();
     logStep(
       `プロットの相談: P-01 ${PLOT_ADVICE_VERSION} / ${work.title} / ` +
@@ -289,16 +328,15 @@ export class PlotAdviceSession {
       logFailure("プロットの相談", { 作品: work.title, 内容: message });
       this.finishFailed(`答えを受け取れませんでした。${message}`);
       return false;
-    } finally {
-      if (this.controller === controller) this.controller = undefined;
     }
 
+    const authorTexts = [
+      text,
+      ...history.filter((turn) => turn.role === "author").map((turn) => turn.text),
+    ];
     const answer = parsePlotAdviceAnswer(responseText, {
       sections: parsedPlot.sections,
-      authorTexts: [
-        text,
-        ...history.filter((turn) => turn.role === "author").map((turn) => turn.text),
-      ],
+      authorTexts,
     });
     for (const warning of answer.warnings) {
       logStep(`プロットの相談: ${warning}`);
@@ -335,22 +373,49 @@ export class PlotAdviceSession {
     }
 
     const reply = answer.reply || "プロットへの書き込み案があります。";
+
+    /*
+      **「書いて」と頼まれたのに案が無い回だけ、案を別に頼む**（P-01b、設計書6.4.10 の12。
+      作者の裁定 2026-10-23）。呼ぶかどうかは `plotAdviceDraftTarget` が決める。
+      2回目のあいだも考えている印（busy）のままにして［止める］を効かせ、
+      画面へは2回目の結果を合わせて1回だけ出す。2回目がどう終わっても、
+      1回目の答えは出す（全体を失敗にしない）
+    */
+    const draftSection = plotAdviceDraftTarget({
+      userMessage: text,
+      sections: parsedPlot.sections,
+      firstAnswer: answer,
+    });
+    const picked: PlotAdviceSuggestion | undefined =
+      answer.suggestion ??
+      (draftSection
+        ? await this.askDraft({
+            text,
+            resolved,
+            section: draftSection,
+            sections: parsedPlot.sections,
+            history,
+            authorTexts,
+            controller,
+          })
+        : undefined);
+
     this.history.push({ role: "author", text }, { role: "assistant", text: reply });
 
     let suggestion: PlotAdviceView["turns"][number]["suggestion"];
-    if (answer.suggestion) {
+    if (picked) {
       const id = `s${++this.seq}`;
       this.held.set(id, {
-        section: answer.suggestion.section,
-        heading: answer.suggestion.heading,
-        value: answer.suggestion.value,
+        section: picked.section,
+        heading: picked.heading,
+        value: picked.value,
       });
       suggestion = {
         id,
-        heading: answer.suggestion.heading,
-        value: answer.suggestion.value,
-        overwrites: answer.suggestion.overwrites,
-        grounded: answer.suggestion.grounded,
+        heading: picked.heading,
+        value: picked.value,
+        overwrites: picked.overwrites,
+        grounded: picked.grounded,
         state: "open",
       };
     }
@@ -362,6 +427,117 @@ export class PlotAdviceSession {
       ],
     });
     return true;
+  }
+
+  /**
+   * 「書いて」の2回目（P-01b）。**使える案が取れたときだけ返す。**
+   *
+   * 止めた・失敗した・切れた・空・見張りで落ちた、のどれでも undefined を返し、
+   * 呼び出し側は1回目の答えだけを出す。失敗の知らせは出さない（作者は1回目の
+   * 答えを受け取っており、2回目は作者が頼んだ呼び出しそのものではない）。理由はログに残す。
+   */
+  private async askDraft(args: {
+    text: string;
+    resolved: Resolved;
+    section: PlotDialogueSection;
+    sections: PlotSections;
+    history: PlotAdviceTurn[];
+    authorTexts: string[];
+    controller: AbortController;
+  }): Promise<PlotAdviceSuggestion | undefined> {
+    const { text, resolved, section, controller } = args;
+    const { work } = this.deps;
+    const started = Date.now();
+    const userPrompt = buildPlotAdviceDraftPrompt({
+      workTitle: work.title,
+      section,
+      userMessage: text,
+      history: args.history,
+    });
+    logStep(
+      `プロットの相談: 書き込み案の2回目 P-01b ${PLOT_ADVICE_DRAFT_VERSION} / ${section} / ` +
+        `${resolved.provider.displayName} / ${resolved.model}`
+    );
+
+    let responseText = "";
+    let usage: { inputTokens: number; outputTokens: number } | undefined;
+    let failure: string | undefined;
+    try {
+      const response = await resolved.provider.generate({
+        systemPrompt: PLOT_ADVICE_DRAFT_SYSTEM_PROMPT,
+        userPrompt,
+        model: resolved.model,
+        temperature: PLOT_ADVICE_DRAFT_TEMPERATURE,
+        maxOutputTokens: resolveOutputTokensForSend(
+          resolved.provider.id,
+          resolved.model,
+          PLOT_ADVICE_DRAFT_FEATURE
+        ),
+        plannedOutputTokens: resolveOutputTokensForPlanning(
+          resolved.provider.id,
+          resolved.model,
+          PLOT_ADVICE_DRAFT_FEATURE
+        ),
+        // 1回目と違い、答えは value だけの JSON なので形を決める（Ollama では `format`）。
+        // `numCtx` は1回目と同じく、受け皿が送る文から見積もって明示する
+        jsonSchema: PLOT_ADVICE_DRAFT_SCHEMA,
+        disableThinking: true,
+        // 1回目と同じ止め口。［止める］・画面を閉じたときに2回目も止まる
+        signal: controller.signal,
+        meta: { feature: PLOT_ADVICE_DRAFT_FEATURE, workFolder: work.folderPath },
+      });
+      responseText = response.text;
+      usage = response.usage;
+      if (response.truncated) failure = "答えが出力の上限で切れました";
+    } catch (error) {
+      const cancelled =
+        controller.signal.aborted ||
+        (error instanceof AIError && error.kind === "aborted");
+      if (cancelled) {
+        logStep("プロットの相談: 書き込み案の2回目を止めました（1回目の答えだけを出します）");
+        return undefined;
+      }
+      const message =
+        error instanceof AIError
+          ? `${error.message} ${recoveryForAIError(error)}`
+          : messageOf(error);
+      logFailure("プロットの相談（書き込み案の2回目）", { 作品: work.title, 内容: message });
+      failure = message;
+    }
+
+    let suggestion: PlotAdviceSuggestion | undefined;
+    if (!failure) {
+      const result = parsePlotAdviceDraft(responseText, section, {
+        sections: args.sections,
+        authorTexts: args.authorTexts,
+      });
+      if ("dropped" in result) {
+        failure = describePlotAdviceDrop(result.dropped);
+      } else {
+        suggestion = result.suggestion;
+      }
+    }
+    if (failure) {
+      logStep(
+        `プロットの相談: 書き込み案の2回目は使えませんでした（${failure}。1回目の答えだけを出します）` +
+          ` / ${responseExcerptForLog(responseText)}`
+      );
+    }
+
+    appendChatLog(work, {
+      panel: "プロットモード",
+      promptVersion: `P-01b ${PLOT_ADVICE_DRAFT_VERSION}`,
+      provider: resolved.provider.displayName,
+      model: resolved.model,
+      paid: resolved.provider.isPaid,
+      target: `プロット（plot.md）の書き込み案（「書いて」の2回目・${suggestion?.heading ?? section}）`,
+      question: text,
+      reply: responseText,
+      elapsedMs: Date.now() - started,
+      usage,
+      ...(failure ? { error: failure } : {}),
+    });
+    return suggestion;
   }
 
   /** 案を採らない（何も書かない。画面の印だけを変える） */
@@ -519,6 +695,9 @@ export class PlotAdviceSession {
     this.deps.post(view);
   }
 }
+
+/** 割当から解決した AI（`ensureConfigured` の答え） */
+type Resolved = NonNullable<Awaited<ReturnType<typeof ensureConfigured>>>;
 
 function describeWriteFailure(result: WriteTextFileResult): string {
   if (result.ok) return "";
