@@ -12,7 +12,7 @@ import {
   parsePlotAdviceDraft,
   type PlotAdviceSuggestion,
 } from "../core/plotAdviceValidation";
-import type { PlotSections } from "../core/plotDoc";
+import { PLOT_SECTIONS, type PlotSections } from "../core/plotDoc";
 import { hasConflictMarkers } from "../core/textDecode";
 import {
   readTextFile,
@@ -530,7 +530,10 @@ export class PlotAdviceSession {
       provider: resolved.provider.displayName,
       model: resolved.model,
       paid: resolved.provider.isPaid,
-      target: `プロット（plot.md）の書き込み案（「書いて」の2回目・${suggestion?.heading ?? section}）`,
+      // 作者が読む記録なので、落ちた回も鍵（setting）ではなく見出し（舞台）で書く
+      target: `プロット（plot.md）の書き込み案（「書いて」の2回目・${
+        PLOT_SECTIONS.find((entry) => entry.key === section)?.heading ?? section
+      }）`,
       question: text,
       reply: responseText,
       elapsedMs: Date.now() - started,
