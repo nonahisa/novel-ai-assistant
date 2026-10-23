@@ -1,5 +1,5 @@
 import { cloudFetch, localFetch } from "./fetchTimeouts";
-import { AIError } from "./types";
+import { AIError, AIFetchCeilingTimeoutError } from "./types";
 
 /**
  * クラウドAPIを叩くための共通部品。
@@ -61,6 +61,16 @@ export function isFetchTimeout(error: unknown): boolean {
   );
 }
 
+/**
+ * 応答の頭・本文を待つ Node の上限（undici の `headersTimeout`・`bodyTimeout`）で切れたか。
+ * 接続の待ち時間（`UND_ERR_CONNECT_TIMEOUT`）は入れない——300秒の壁とは別の話で、
+ * 送る量を減らしても変わらない。
+ */
+function isResponseWaitCeiling(error: unknown): boolean {
+  const code = (error as { cause?: { code?: unknown } })?.cause?.code;
+  return code === "UND_ERR_HEADERS_TIMEOUT" || code === "UND_ERR_BODY_TIMEOUT";
+}
+
 export interface JsonRequest {
   url: string;
   method?: "GET" | "POST";
@@ -93,6 +103,8 @@ export async function fetchJson<T>(request: JsonRequest): Promise<T> {
   };
 
   const timer = setTimeout(() => abort("timeout"), request.timeoutMs);
+  // 切れたときに「実際に何秒待ったか」を言うため（設定の秒数と食い違うことがある）
+  const startedAt = Date.now();
   const onExternalAbort = () => abort("caller");
   if (request.signal?.aborted) {
     onExternalAbort();
@@ -154,6 +166,23 @@ export async function fetchJson<T>(request: JsonRequest): Promise<T> {
       );
     }
     // **Node自身の待ち時間切れは「接続できない」ではない**（isFetchTimeout）
+    /*
+      **クラウドの口で応答を待つ上限に当たったら、待ち時間の設定は効いていない**
+      （作者の裁定「案内を直す」、2026-10-23）。VS Code が差し替えた fetch は渡した
+      待ち時間を捨てて300秒で切る（`fetchTimeouts.ts`）。「延ばしてください」と
+      言っても何も変わらないので、実際に待った秒数と、効く操作（送る量を減らす）
+      だけを言う。手元の口（`local`）はこちらの待ち時間が届くので、今までどおり
+    */
+    if (!request.local && isResponseWaitCeiling(error)) {
+      const waitedSeconds = Math.round((Date.now() - startedAt) / 1000);
+      throw new AIFetchCeilingTimeoutError(
+        `${request.label}の応答がタイムアウトしました（Node側の上限。${waitedSeconds}秒で切れました）。` +
+          "この上限は待ち時間の設定では変わりません。一度に送る量を減らしてください。",
+        describeFetchFailure(error),
+        waitedSeconds,
+        Math.round(request.timeoutMs / 1000)
+      );
+    }
     if (isFetchTimeout(error)) {
       throw new AIError(
         `${request.label}の応答がタイムアウトしました（Node側の上限）。` +

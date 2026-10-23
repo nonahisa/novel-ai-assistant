@@ -344,7 +344,12 @@ test("待ち時間10秒（上限より短い）で時間切れになると、延
   }
 }, 5 * MINUTE);
 
-test.skipIf(!LONG)("黙ったままの相手（ヘッダーも返さない）に、待ち時間900秒で相談すると、何秒で切れてどの赤字が出るか（測る）", async () => {
+/*
+  黙る相手は、VS Code が差し替えた fetch の300秒で切れる（2026-10-23 の実測で302秒）。作者の裁定「案内を直す」
+  （同じ日）で、このときは**待った秒数で言い、待ち時間や上限を延ばす案内と札を出さない**。効く手（送る量を減らす・
+  質問を分けて送り直す）だけを言う。文は `ai/httpClient.ts`（頭）と `workChatTimeoutAdvice` の `fetchCeiling`（続き）
+*/
+test.skipIf(!LONG)("黙ったままの相手（ヘッダーも返さない）に、待ち時間900秒で相談すると、Node の上限で切れ、待った秒数で言い、延ばす案内と札を出さない", async () => {
   const fake = await startFakeGemini("hang");
   try {
     await withVsCode(
@@ -354,7 +359,20 @@ test.skipIf(!LONG)("黙ったままの相手（ヘッダーも返さない）に
         await chooseFakeGemini(session.page, fake);
         const result = await askUntilError(session, fake, 16 * MINUTE);
         await report("hang 900秒", result, (await shootMain(session.page, result.frame, "timeout_hang_900")).file);
-        expect(result.turn.text).toContain("タイムアウト");
+        const text = result.turn.text;
+        const cut = /Geminiの応答がタイムアウトしました（Node側の上限。(\d+)秒で切れました）。/.exec(text);
+        expect(cut, `Node の上限の頭が無い：${text}`).not.toBeNull();
+        // 300秒の壁（実測302秒）。設定の900秒ではない
+        const waited = Number(cut?.[1]);
+        expect(waited).toBeGreaterThanOrEqual(280);
+        expect(waited).toBeLessThan(400);
+        expect(text).toContain("この上限は待ち時間の設定では変わりません。一度に送る量を減らしてください。");
+        // 最初の問いなので、これまでのやり取りは軽い。質問を分けて送り直す手を言う
+        expect(text).toContain("質問を短く分けて、もう一度送ってください。");
+        expect(text).not.toContain("延ば");
+        expect(text).not.toContain("900秒");
+        expect(text).not.toContain("novelai.cloudMaxTimeoutSeconds");
+        expect(result.turn.actions).toEqual([]);
       },
       launchOptions(fake, { "novelai.gemini.timeoutSeconds": 900 })
     );

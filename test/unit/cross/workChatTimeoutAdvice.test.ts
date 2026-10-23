@@ -138,6 +138,39 @@ describe("相談の時間切れの案内は、そのAIの上限で言う", () =>
    * 案内の両方が `maxTimeoutSeconds` を通らないと、札は1800秒を勧めるのに
    * 案内は600秒で「延ばせない」と言う食い違いになる。
    */
+  /**
+   * **Node の上限（300秒の壁）で切れたときは、延ばす案内を出さない**（作者の裁定
+   * 「案内を直す」、2026-10-23）。偽の Gemini が黙ったとき、設定900秒の相談が302秒で
+   * 切れ、「設定どおり900秒待ちましたが」「上限を最大1800秒まで延ばせます」と出ていた。
+   * どちらも事実と違い、延ばしても変わらない。
+   */
+  test("Node の上限で切れたら、待ち時間や上限を延ばす案内を言わず、送る量を減らす手を言う", () => {
+    const base = {
+      currentSeconds: 900,
+      maxSeconds: 600,
+      canRaise: false,
+      ceilingSetting: { setting: "novelai.cloudMaxTimeoutSeconds", maxSeconds: 1800 },
+      fetchCeiling: { waitedSeconds: 302 },
+    };
+    const light = workChatTimeoutAdvice({ ...base, sentChars: 30000, historyChars: 0 });
+    expect(light).toBe(
+      "この相談で送った量は30,000字です。質問を短く分けて、もう一度送ってください。"
+    );
+    const heavy = workChatTimeoutAdvice({ ...base, sentChars: 30000, historyChars: 12000 });
+    expect(heavy).toBe(
+      "この相談で送った量は30,000字で、そのうち12,000字はこれまでのやり取りです。" +
+        "「最初から」を押して会話を空にすると、そのぶんを送らずに済みます。"
+    );
+    const unknown = workChatTimeoutAdvice(base);
+    expect(unknown).toBe("質問を短く分けて、もう一度送ってください。");
+    for (const text of [light, heavy, unknown]) {
+      expect(text).not.toContain("延ば");
+      expect(text).not.toContain("900秒");
+      expect(text).not.toContain("novelai.cloudMaxTimeoutSeconds");
+      expect(text).not.toContain("上限");
+    }
+  });
+
   test("相談パネルは、クラウドの上限の定数を直に読まない", () => {
     const source = fs.readFileSync(
       path.join(__dirname, "..", "..", "..", "src", "features", "workChatPanel.ts"),

@@ -701,6 +701,40 @@ export function isRefusalError(error: unknown): error is AIRefusalError {
 }
 
 /**
+ * **こちらの待ち時間より先に、Node の通信部品の上限で切れた**時間切れ
+ * （クラウドのAIだけ。設計書6.63、`ai/fetchTimeouts.ts`）。
+ *
+ * VS Code が差し替えた fetch は、こちらが渡した待ち時間を捨てて、応答の頭を
+ * 300秒しか待たない。相手がヘッダーも返さず黙ると、設定を900秒にしていても
+ * 302秒で切れる（偽の Gemini で実測、2026-10-23）。**この時間切れは、待ち時間の
+ * 設定を延ばしても変わらない**ので、延ばす案内と札を出さないために見分ける。
+ *
+ * **種別は `timeout` のまま変えない。** 接続の失敗の数え方（`isConnectivityFailure`）
+ * や時間切れの数（`checkTypos.ts`）は今までどおり動く。`AIRefusalError` と同じく、
+ * **文面から見分けない**（実装ルール5）。
+ */
+export class AIFetchCeilingTimeoutError extends AIError {
+  constructor(
+    message: string,
+    detail: string | undefined,
+    /** 送ってから切れるまでに実際に待った秒数（四捨五入） */
+    readonly waitedSeconds: number,
+    /** こちらが待つつもりだった秒数（設定の値） */
+    readonly configuredSeconds: number
+  ) {
+    super(message, "timeout", detail);
+    this.name = "AIFetchCeilingTimeoutError";
+  }
+}
+
+/** 待ち時間の設定より先に、Node の通信部品の上限で切れた時間切れか */
+export function isFetchCeilingTimeout(
+  error: unknown
+): error is AIFetchCeilingTimeoutError {
+  return error instanceof AIFetchCeilingTimeoutError;
+}
+
+/**
  * 待っても直らない失敗か。**残りのチャンクを試すだけ無駄になる**もの。
  *
  * チャンク単位の失敗で全体を止めないのが原則だが（CLAUDE.md 実装スタイル）、
@@ -744,6 +778,12 @@ export function recoveryForAIError(error: AIError): string {
     case "model_not_found":
       return "利用可能なモデルを選び直してください。";
     case "timeout":
+      // **Node の上限で切れたなら、待ち時間を延ばしても変わらない**（2026-10-23）。
+      // 送る量を減らす道だけを言う。文の頭（`message`）が「減らしてください」と
+      // 言っているので、ここはその具体的なやり方にする
+      if (isFetchCeilingTimeout(error)) {
+        return "「1チャンクの文字数」を小さくすると、一度に送る量が減ります。";
+      }
       // 待ち時間の設定を先に出す。チャンクを小さくすると呼び出し回数が増え、
       // クラウドAIでは料金も増える。まず待つほうが害が少ない。
       //

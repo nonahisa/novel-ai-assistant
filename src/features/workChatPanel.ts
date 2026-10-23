@@ -82,7 +82,7 @@ import type { EpisodeFile, WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { findWorkForFile, readWorkConfig, workPaths } from "../core/workRegistry";
 import { AIRegistry } from "../ai/registry";
-import { AIError, recoveryForAIError } from "../ai/types";
+import { AIError, isFetchCeilingTimeout, recoveryForAIError } from "../ai/types";
 import {
   maxTimeoutSeconds,
   raisableTimeoutCeiling,
@@ -2390,9 +2390,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         （「下の札で延ばせます」か「もう延ばせません」か）が変わる。
       */
       const timedOut = error instanceof AIError && error.kind === "timeout";
-      const actions = timedOut
-        ? this.timeoutAction(resolved.provider, resolved.model)
-        : undefined;
+      // **Node の上限で切れたなら札を出さない**（2026-10-23）。延ばしても同じ秒数で切れる
+      const actions =
+        timedOut && !isFetchCeilingTimeout(error)
+          ? this.timeoutAction(resolved.provider, resolved.model)
+          : undefined;
       /*
         **相談の時間切れは、相談向けの案内にする**（ノートPCの実機、
         2026-09-23）。共通の案内（`recoveryForAIError`）は「秒数を延ばす」
@@ -2419,6 +2421,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
                     ceilingSetting: raisableTimeoutCeiling(resolved.provider.id),
                     sentChars: sent?.total,
                     historyChars: sent?.history,
+                    ...(isFetchCeilingTimeout(error)
+                      ? { fetchCeiling: { waitedSeconds: error.waitedSeconds } }
+                      : {}),
                   })
                 : recoveryForAIError(error)
             }`
@@ -4453,12 +4458,25 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       }
     } catch (error) {
       const timedOut = error instanceof AIError && error.kind === "timeout";
-      const actions = timedOut
-        ? this.timeoutAction(resolved.provider, resolved.model)
-        : undefined;
+      // 相談と同じく、Node の上限で切れたなら延ばす札を出さない（2026-10-23）
+      const actions =
+        timedOut && !isFetchCeilingTimeout(error)
+          ? this.timeoutAction(resolved.provider, resolved.model)
+          : undefined;
+      // 共通の案内は Node の上限のとき「1チャンクの文字数」を勧めるが、問答はチャンクに
+      // 分けないので効かない。相談と同じ案内にする
       const message =
         error instanceof AIError
-          ? `${error.message} ${recoveryForAIError(error)}`
+          ? `${error.message} ${
+              isFetchCeilingTimeout(error)
+                ? workChatTimeoutAdvice({
+                    currentSeconds: resolveTimeoutSeconds(resolved.provider.id, resolved.model),
+                    maxSeconds: maxTimeoutSeconds(resolved.provider.id),
+                    canRaise: false,
+                    fetchCeiling: { waitedSeconds: error.waitedSeconds },
+                  })
+                : recoveryForAIError(error)
+            }`
           : error instanceof Error
             ? error.message
             : String(error);
@@ -5068,7 +5086,44 @@ export function workChatTimeoutAdvice(input: {
   sentChars?: number;
   /** そのうち、これまでのやり取りの字数 */
   historyChars?: number;
+  /**
+   * 待ち時間の設定より先に、Node の通信部品の上限で切れた（`AIFetchCeilingTimeoutError`）。
+   * 待った秒数は文の頭（`error.message`）が言うので、ここでは使わない
+   */
+  fetchCeiling?: { waitedSeconds: number };
 }): string {
+  const sentChars = input.sentChars;
+  const historyChars = input.historyChars ?? 0;
+  const historyHeavy =
+    sentChars !== undefined &&
+    sentChars > 0 &&
+    historyChars / sentChars >= HISTORY_SHARE_FOR_CLEAR;
+  const clearHistory =
+    "「最初から」を押して会話を空にすると、そのぶんを送らずに済みます。";
+
+  /*
+    **Node の上限（300秒の壁）で切れたときは、延ばす話を一切しない**（作者の裁定
+    「案内を直す」、2026-10-23）。設定の秒数（`currentSeconds`）はここでは事実と
+    違う——設定900秒でも302秒で切れる。上限を延ばす設定も、延ばす札も効かない。
+    効くのは送る量を減らすことなので、その具体的な手を1つだけ言う。
+    履歴が重ければ「最初から」（ほかの分岐と同じ線引き）、そうでなければ質問を
+    分ける（答えが短くなれば、応答の頭が早く返る）
+  */
+  if (input.fetchCeiling) {
+    if (historyHeavy) {
+      return (
+        `この相談で送った量は${formatChars(sentChars)}字で、` +
+        `そのうち${formatChars(historyChars)}字はこれまでのやり取りです。` +
+        clearHistory
+      );
+    }
+    return (
+      (sentChars !== undefined && sentChars > 0
+        ? `この相談で送った量は${formatChars(sentChars)}字です。`
+        : "") + "質問を短く分けて、もう一度送ってください。"
+    );
+  }
+
   const atCeiling =
     Number.isFinite(input.currentSeconds) &&
     input.currentSeconds >= input.maxSeconds;
@@ -5079,8 +5134,6 @@ export function workChatTimeoutAdvice(input: {
       : "拡張機能の設定で、お使いのAIの「タイムアウト」の秒数を延ばしてください。";
   }
 
-  const sentChars = input.sentChars;
-  const historyChars = input.historyChars ?? 0;
   /*
     **上限を延ばす設定を示すのは、実際に待った秒数がまだ延ばせる限りより
     短いときだけ**（作者の裁定、2026-10-03。引継ぎ書 A10）。プロバイダごとの
@@ -5114,15 +5167,11 @@ export function workChatTimeoutAdvice(input: {
         : `待ち時間はすでに上限（${input.maxSeconds}秒）で、これ以上は延ばせません`) +
       (sentAmount ? `（${sentAmount}）。` : "。");
 
-  if (
-    sentChars !== undefined &&
-    sentChars > 0 &&
-    historyChars / sentChars >= HISTORY_SHARE_FOR_CLEAR
-  ) {
+  if (historyHeavy) {
     return (
       head +
       `そのうち${formatChars(historyChars)}字はこれまでのやり取りです。` +
-      "「最初から」を押して会話を空にすると、そのぶんを送らずに済みます。"
+      clearHistory
     );
   }
   if (ceiling) {
