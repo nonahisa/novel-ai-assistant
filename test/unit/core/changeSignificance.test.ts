@@ -494,6 +494,99 @@ describe("作者の判断例（2026-10-17）", () => {
     );
   });
 
+  test("三門太志型：あらすじでよく出る人物に印を付けると、70 から 75 へ動く（2026-10-23）", () => {
+    // 設計書の例（三門太志、18話中11話）。重ねない作りでは、印を付けても 70 のままだった
+    const character = futoshiLike();
+    character.aliases = ["太一"];
+    const synopses = ["太一が目を覚ます", "太一が学校へ行く", "雨の日"];
+
+    expect(roleScore(character, { synopses })).toBe(70);
+    character.isProtagonist = true;
+    expect(roleScore(character, { synopses })).toBe(75);
+  });
+
+  test("印もあらすじも無ければ、人物の加点は付かない", () => {
+    const [significance] = scoreCharacterChanges(hongoLike(), {
+      synopses: ["役所の一日", "雨の日"],
+    });
+
+    expect(significance.score).toBe(55);
+    expect(significance.reasons.join("\n")).not.toContain("主人公");
+    expect(significance.reasons.join("\n")).not.toContain("あらすじ");
+  });
+
+  test("印の +5 とあらすじの +5 は、それぞれ1行ずつ出る（まとめた1行にしない）", () => {
+    const character = hongoLike();
+    character.isProtagonist = true;
+    const [significance] = scoreCharacterChanges(character, {
+      synopses: ["本田が窓口に立つ", "本田が旅に出る"],
+    });
+
+    const centralityLines = significance.reasons.filter(
+      (line) => line.includes("主人公") || line.includes("あらすじ")
+    );
+    expect(centralityLines).toEqual([
+      "作者が主人公（中心人物）の印を付けている +5",
+      "各話あらすじの2話中2話に名前が出る +5",
+    ]);
+  });
+
+  test("両方の +5 で、中から高へ境目をまたぐ（片方だけでは中のまま）", () => {
+    // 所属の基礎点 50。変化後が1話だけなので定着の加点は付かない
+    const character = personWith("本田", [1, 2, 7, 8, 9], [
+      change("affiliation", "役所", [1, 2]),
+      change("affiliation", "ギルド", [7]),
+    ]);
+    const synopses = ["本田が窓口に立つ", "本田が旅に出る"];
+    const affiliation = (context?: Parameters<typeof scoreCharacterChanges>[1]) =>
+      scoreCharacterChanges(character, context).find(
+        (entry) => entry.field === "affiliation"
+      );
+
+    expect(affiliation()?.score).toBe(50);
+    expect(affiliation({ synopses })?.level).toBe("medium");
+    character.isProtagonist = true;
+    expect(affiliation()?.score).toBe(55);
+    expect(affiliation()?.level).toBe("medium");
+    expect(affiliation({ synopses })?.score).toBe(60);
+    expect(affiliation({ synopses })?.level).toBe("high");
+  });
+
+  test("両方の +5 を足しても 100 で止まる", () => {
+    // 役割 55 + 作者が確定 20 + 新しい段5つ 10 + 定着 10 = 95
+    const character = personWith("本田", [1, 3, 5, 7, 9, 10, 11], [
+      change("role", "見習い", [1], { source: "author" }),
+      change("role", "門番", [3]),
+      change("role", "騎士団の副長", [5]),
+      change("role", "王都の宰相", [7]),
+      change("role", "反乱軍の首領", [9, 10, 11]),
+    ]);
+    const synopses = ["本田が城へ入る", "本田が反旗を翻す"];
+
+    expect(roleScore(character)).toBe(95);
+    character.isProtagonist = true;
+    expect(roleScore(character, { synopses })).toBe(100);
+    // 上限で切っても、内訳には2つの +5 を残す（点が切れた理由を作者が読める）
+    const [significance] = scoreCharacterChanges(character, { synopses });
+    expect(significance.reasons).toContain(
+      "作者が主人公（中心人物）の印を付けている +5"
+    );
+    expect(significance.reasons).toContain("各話あらすじの2話中2話に名前が出る +5");
+  });
+
+  test("あらすじを渡さない材料では、印の +5 だけになる", () => {
+    // 矛盾検知・検索の資料などは、あらすじを渡さない（describeCharacter の既定）
+    const character = hongoLike();
+    character.isProtagonist = true;
+
+    expect(describeCharacter(character)).toContain("関与度 60（高）");
+    expect(
+      describeCharacter(character, [], {
+        synopses: ["本田が窓口に立つ", "本田が旅に出る"],
+      })
+    ).toContain("関与度 65（高）");
+  });
+
   test("AIへ渡す材料にも、あらすじの加点が入る（画面と同じ数字）", () => {
     const synopses = ["本田が窓口に立つ", "本田が旅に出る"];
 
