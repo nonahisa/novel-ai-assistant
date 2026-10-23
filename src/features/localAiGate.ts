@@ -69,6 +69,15 @@ type ProgressReporter = vscode.Progress<{ message?: string; increment?: number }
 const SINGLE_CALL_LABEL = "AIへの単発の問い合わせ";
 
 /**
+ * 自前で出す待ちの表示の題（作者の裁定「題を短くする」、2026-10-23）。
+ *
+ * 待ちの文（「別の窓（…）の「…」の完了を待っています…」）は本文として出すので、
+ * 題には同じ文を使わない。ステータスバーは「題: 本文」と並べるため、同じ文を
+ * 渡すと2回並んで読みにくかった。一括処理の進捗へ出すときは題を使わない
+ */
+const WAIT_DISPLAY_TITLE = "手元のAIの順番待ち";
+
+/**
  * 待っているあいだの表示。一括処理の中なら**その進捗**へ、そうでなければ
  * 中止ボタン付きの進捗を自前で出す。
  */
@@ -229,7 +238,7 @@ class ExtensionLocalAiGate implements LocalAiGate {
     const onWait = (holder: LeaseRecord): void => {
       const message = leaseWaitingMessage(holder);
       display ??= openWaitDisplay(
-        message.replace(/…$/, ""),
+        WAIT_DISPLAY_TITLE,
         () => abort.abort(),
         control,
         request.signal !== undefined

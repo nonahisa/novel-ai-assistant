@@ -12,8 +12,9 @@
  *
  * 何を見張るか：
  * 1. 窓1で Ctrl+Alt+T の誤字脱字検知（3〜4チャンク）を走らせ、1チャンク目を AI が返す前に、窓2の横の相談パネルから送ると、
- *    **窓2のステータスバーに待ちの表示**（「別の窓の「…」の完了を待っています…」と［中止］。`localAiGate.ts` の
- *    `openWaitDisplay` が自前で出す側）が出る。窓2のログの待ちの行は「こちらは「AIへの単発の問い合わせ」」
+ *    **窓2のステータスバーに待ちの表示**（題「手元のAIの順番待ち」・本文「別の窓の「…」の完了を待っています…」と
+ *    ［中止］。`localAiGate.ts` の `openWaitDisplay` が自前で出す側）が出る。待ちの文は1回だけ（2026-10-23 の裁定
+ *    「題を短くする」。前は題にも同じ文を渡していて2回並んだ）。窓2のログの待ちの行は「こちらは「AIへの単発の問い合わせ」」
  *    ＝相談は単発（kind=single）として札を取りに行った
  * 2. 窓1の1チャンク目が返ると、窓2の相談が合間に入り、**［待つ］［このまま送る］［やめる］の警告は出ずに**答えが出る
  * 3. 窓2のログ（窓ごとの出力の記録）の「手元のAIへ送る前の負荷：…」の1行に
@@ -271,6 +272,8 @@ test.skipIf(!RUN)(
         const statusWhileWaiting = await statusBarTexts(page2);
         await note(`[E2E] 窓2の待ちの表示：${JSON.stringify(statusWhileWaiting)}\n[E2E] 写真：${waitingShot}`);
         expect(statusWhileWaiting.some((text) => text.includes("中止")), `待ちの表示に［中止］が無い：${JSON.stringify(statusWhileWaiting)}`).toBe(true);
+        // 題と本文に同じ文を並べない（2026-10-23）
+        expect(waitingText.split(WAITING).length - 1, `待ちの文が2回以上並んでいる：${waitingText}`).toBe(1);
 
         /*
           ── 窓1が1チャンク目を返すと、窓2の相談が入り、警告なしに答えが出る。そのあいだ窓1の一括処理は
