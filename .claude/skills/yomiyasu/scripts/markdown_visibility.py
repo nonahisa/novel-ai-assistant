@@ -3,7 +3,9 @@
 Offsets are half-open Python string positions. This is a targeted scanner,
 not a claim to implement every CommonMark or GFM construct.
 """
+__version__ = "2.2.2"
 
+import os
 import re
 import unicodedata
 from bisect import bisect_left, bisect_right
@@ -713,3 +715,242 @@ def range_overlaps_protected(analysis, start, end, protected_kinds=None):
         masks, ends = cache[key]
     index = bisect_right(ends, start)
     return index < len(masks) and masks[index][0] < end
+
+
+def decode_source(data):
+    """入力のバイト列を、検査に使う文字列にする。lint、diff、check で同じ読み方にするための関数。
+
+    UTF-8 として厳密に解き（読めなければ UnicodeDecodeError）、先頭の BOM を1つ外し、
+    CRLF と CR を LF にそろえる。戻り値は (文字列, 情報) の組。情報は
+    {"bom": BOM があったか, "eol": 元の改行コード}。eol は "lf"、"crlf"、"cr"、
+    2種類以上が混ざるときは "mixed"、改行がなければ "none"。
+
+    標準入力が StringIO のようにバイト列を読めないときは、read() した文字列を渡してよい。
+    そのときは解く処理を飛ばし、BOM と改行の処理だけをする。
+    """
+    if isinstance(data, str):
+        text = data
+    else:
+        text = bytes(data).decode("utf-8")
+    bom = text.startswith("\ufeff")
+    if bom:
+        text = text[1:]
+    if "\r" in text:
+        crlf = text.count("\r\n")
+        cr = text.count("\r") - crlf
+        lf = text.count("\n") - crlf
+        kinds = [name for name, count in (("lf", lf), ("crlf", crlf), ("cr", cr)) if count]
+        eol = kinds[0] if len(kinds) == 1 else "mixed"
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    else:
+        eol = "lf" if "\n" in text else "none"
+    return text, {"bom": bom, "eol": eol}
+
+
+# ---- 文書の種類と読者 ----
+# lint、diff、check の3本が同じ値と名前を使うので、ここに1つだけ置く（ほかは import する）。
+# 公開の名前として読むだけにし、書き換えて使う使い方は約束しない。
+
+# (値, 名前, あわせて読む domains のファイル)。順は種類の表のとおり（formal と promo、2.2.0 の script は、あとから足した）
+DOC_TYPES = (
+    ("pr", "PR説明", ("business.md",)),
+    ("article", "技術記事", ("tech.md",)),
+    ("incident", "障害報告", ("business.md",)),
+    ("proposal", "提案書", ("business.md",)),
+    ("minutes", "議事録", ("business.md",)),
+    ("manual", "マニュアル", ("tech.md", "business.md")),
+    ("slides", "スライド", ("tech.md", "business.md")),
+    ("essay", "エッセイ・小説", ("essay.md",)),
+    ("formal", "公用文、規程、契約書、仕様書", ("business.md", "tech.md")),
+    ("promo", "紹介記事・宣伝文", ("essay.md", "business.md")),
+    ("mail", "メール・チャット", ("business.md",)),
+    ("paper", "論文・研究レポート", ("tech.md",)),
+    ("script", "台詞・脚本", ("essay.md",)),
+)
+# (値, 名前)
+READER_LEVELS = (
+    ("expert", "同じ分野の専門家"),
+    ("informed", "分野は違うが技術に詳しい人"),
+    ("general", "専門知識のない人"),
+)
+
+
+def _normalize_choice(option, value, rows):
+    """NFKC にし、前後の空白を外し、英字を小文字にして、使える値なら返す。None はそのまま返す。
+    使えない値（空の文字列を含む）は、標準エラーにそのまま書ける1行の文の ValueError にする。"""
+    if value is None:
+        return None
+    normalized = unicodedata.normalize("NFKC", str(value)).strip().lower()
+    for row in rows:
+        if row[0] == normalized:
+            return normalized
+    # 空や空白だけの値は、目に見えないので「（空）」と書く（--stance、--fail-on と同じ）
+    shown = value if str(value).strip() else "（空）"
+    # 値の一覧の閉じ括弧と「です」の間に空白を入れない（設計の文どおり。反証で見つけた例）
+    raise ValueError("{} に使えない値です: {}。使えるのは {}です。".format(
+        option, shown, "、".join("{}（{}）".format(row[0], row[1]) for row in rows)))
+
+
+def normalize_doc_type(value):
+    """--doc-type の値を正規化する（SLIDES、前後の空白、全角も slides）。None はそのまま。使えない値は ValueError。"""
+    return _normalize_choice("--doc-type", value, DOC_TYPES)
+
+
+def normalize_reader(value):
+    """--reader の値を正規化する。None はそのまま。使えない値は ValueError。"""
+    return _normalize_choice("--reader", value, READER_LEVELS)
+
+
+def context_label(doc_type, reader):
+    """lint と diff の人が読む出力の1行の頭（「文書の種類: スライド（slides）、読者: 指定なし。」）。"""
+    doc_type, reader = normalize_doc_type(doc_type), normalize_reader(reader)
+    kinds, readers = dict(row[:2] for row in DOC_TYPES), dict(READER_LEVELS)
+    return "文書の種類: {}、読者: {}。".format(
+        "{}（{}）".format(kinds[doc_type], doc_type) if doc_type else "指定なし",
+        "{}（{}）".format(readers[reader], reader) if reader else "指定なし")
+
+
+# ---- 語の一覧（.yomiyasu-words/ の allow.txt と flag.txt）----
+# lint、diff、check、フックの4本が同じ探し方と読み方を使うので、ここに1つだけ置く。
+# 探し方は状態フォルダ（check の state_dir_for）と同じたどり方で、.yomiyasu/ の中は探さない。
+
+WORDS_FOLDER = ".yomiyasu-words"
+# (キーの頭, ファイルの名前)。context.words のキーと出力の行の順もこの順
+WORDS_FILES = (("allow", "allow.txt"), ("flag", "flag.txt"))
+WORDS_MAX_LINES = 10000
+# ないファイル（とフォルダ）は一覧なし。ほかの読めない理由は終了コード2
+_WORDS_ABSENT = (FileNotFoundError, NotADirectoryError)
+
+
+class WordsError(Exception):
+    """語の一覧を読めない（ないフォルダの --words、UTF-8 でない、1万行を超える、開けない）。終了コード2にする。
+    str() は標準エラーにそのまま書ける1行の文（入力の誤りの「Error opening file …」と同じ形）。"""
+
+
+def _words_home(value):
+    """--words の値の頭の ~ を、ホームフォルダに置き換える（check と hook の _home_path と同じ決まり）。"""
+    if isinstance(value, str) and (value == "~" or value[:2] in ("~/", "~" + os.sep)):
+        try:
+            home = os.path.expanduser("~")
+            expanded = os.path.expanduser(value)
+        except Exception:  # pwd を読めない環境など
+            return value
+        if (not home.startswith("~") and os.path.splitdrive(home)[1].strip().strip("/" + os.sep)
+                and not expanded.startswith("~")):
+            return expanded
+    return value
+
+
+def find_words_folder(cwd, option=None):
+    """語の一覧のフォルダの絶対パスか None（フォルダがない）。
+
+    1 option（--words）があれば、そのフォルダ（相対パスは cwd から。ないかフォルダでなければ WordsError）。
+    2 cwd から上へたどり、.git（フォルダでもファイルでもよい）がある最初のフォルダの .yomiyasu-words/。
+    3 git の外では cwd の .yomiyasu-words/。2と3は、フォルダがなければ None。cwd が None（作業ディレクトリを
+    読めない）ときは、2と3を探さずに None、相対パスの option は WordsError。"""
+    if option is not None:
+        value = _words_home(option)
+        if not str(value).strip():
+            raise WordsError("--words に空の値は使えません")
+        if not os.path.isabs(value):
+            if cwd is None:
+                raise WordsError("Error opening folder {}: 作業ディレクトリを読めないため、相対パスを決められません".format(option))
+            value = os.path.join(cwd, value)
+        folder = os.path.abspath(value)
+        if not os.path.isdir(folder):
+            reason = "フォルダではありません" if os.path.exists(folder) else "フォルダがありません"
+            raise WordsError("Error opening folder {}: --words の{}".format(option, reason))
+        return folder
+    if cwd is None:
+        return None
+    cwd = os.path.abspath(cwd)
+    current = cwd
+    while True:
+        if os.path.exists(os.path.join(current, ".git")):
+            folder = os.path.join(current, WORDS_FOLDER)
+            break
+        parent = os.path.dirname(current)
+        if parent == current:
+            folder = os.path.join(cwd, WORDS_FOLDER)
+            break
+        current = parent
+    return folder if os.path.isdir(folder) else None
+
+
+def _words_lines(path, data):
+    """1つのファイルのバイト列を語の並びにする。UTF-8 でないときと1万行を超えるときは WordsError（行番号つき）。"""
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        before = data[:error.start]
+        line = before.count(b"\n") + before.count(b"\r") - before.count(b"\r\n") + 1
+        raise WordsError("Error opening file {}: UTF-8 として読めません（{}行目）".format(path, line))
+    text = decode_source(data)[0]
+    rows = text.split("\n")
+    if rows and rows[-1] == "":
+        rows.pop()
+    if len(rows) > WORDS_MAX_LINES:
+        raise WordsError("Error opening file {}: 行が多すぎます（{}行目。{:,}行までです）".format(
+            path, WORDS_MAX_LINES + 1, WORDS_MAX_LINES))
+    words = []
+    for row in rows:
+        word = row.strip()
+        if word and not word.startswith("#"):
+            words.append(word)
+    return words
+
+
+def load_words(folder):
+    """フォルダの allow.txt と flag.txt を読む。どちらもないときは None（一覧なし）。
+
+    戻り値は {"path": フォルダ, "allow": 語のタプル, "flag": 語のタプル, "allow_lines": 語の数, "flag_lines": 語の数,
+    "allow_sha256": 中身の SHA-256 か None, "flag_sha256": …}。ないほうのファイルは、語なし、数0、SHA-256 は None。
+    読めないファイルは WordsError。"""
+    import hashlib
+    result = {"path": folder}
+    found = False
+    for key, name in WORDS_FILES:
+        path = os.path.join(folder, name)
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except _WORDS_ABSENT:
+            words, digest = [], None
+        except (OSError, ValueError) as error:
+            reason = getattr(error, "strerror", None) or error
+            raise WordsError("Error opening file {}: ファイルを開けません（{}）".format(path, reason))
+        else:
+            found = True
+            words, digest = _words_lines(path, data), hashlib.sha256(data).hexdigest()
+        result[key] = tuple(words)
+        result[key + "_lines"] = len(words)
+        result[key + "_sha256"] = digest
+    return result if found else None
+
+
+def resolve_words(cwd, option=None, disabled=False):
+    """--words と --no-words から語の一覧を決める。一覧を使うときは load_words の値、使わないときは None。
+    disabled（--no-words）なら探さない。cwd は作業ディレクトリ（読めなければ None）。読めない一覧は WordsError。"""
+    if disabled:
+        return None
+    folder = find_words_folder(cwd, option)
+    return load_words(folder) if folder is not None else None
+
+
+def current_directory():
+    """作業ディレクトリか、読めない（消えた）ときは None。"""
+    try:
+        return os.getcwd()
+    except OSError:
+        return None
+
+
+def words_context(words):
+    """JSON の context.words と check の記録の options.words に入れる5つのキー（この順）。"""
+    return {"path": words["path"], "allow_lines": words["allow_lines"], "flag_lines": words["flag_lines"],
+            "allow_sha256": words["allow_sha256"], "flag_sha256": words["flag_sha256"]}
+
+
+def words_label(context):
+    """人が読む出力の「語の一覧: <パス>（allow N語、flag N語）。」。context は words_context の値（読むだけ）。"""
+    return "語の一覧: {}（allow {}語、flag {}語）。".format(context["path"], context["allow_lines"], context["flag_lines"])
