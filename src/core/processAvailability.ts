@@ -90,7 +90,7 @@ export function describeProcessesBlocked(command: string): string {
     return (
       "ブラウザ版では、この設定は要りません。" +
       "GitHubのリポジトリを開いている時点で、つながっています。" +
-      "保存は「作品管理」→「GitHubと同期」からご覧ください。"
+      "保存は「作品管理」→「GitHub作品管理」→「同期」からご覧ください。"
     );
   }
   // **案内文にサービス名を決め打ちしない。** 下の `startsWith("novelai.setup")`
@@ -112,7 +112,7 @@ export function describeProcessesBlocked(command: string): string {
   if (command === "novelai.saveAndSync") {
     return (
       "ブラウザ版では、保存と同期をまとめて行えません（gitコマンドを起動できないためです）。" +
-      "保存は Ctrl+S で、送信は「作品管理」→「GitHubと同期」の案内からお願いします。"
+      "保存は Ctrl+S で、送信は「作品管理」→「GitHub作品管理」→「同期」の案内からお願いします。"
     );
   }
   if (command === "novelai.gitRestore") {

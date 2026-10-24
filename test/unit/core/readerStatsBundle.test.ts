@@ -460,7 +460,7 @@ describe("登録の無い作品IDをその場で登録する（作者の裁定 2
     expect(notice.message).toContain(
       "登録しないことにした作品ID（カクヨム 作品ID 9999）の分だけでした"
     );
-    expect(notice.message).toContain("「読者の反応を貼り付けて取り込む」");
+    expect(notice.message).toContain("「読者反応自動取込」");
   });
 
   test("［作品に登録する］を付けるときは、直し方の文でボタンを指す", () => {

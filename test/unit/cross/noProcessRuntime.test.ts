@@ -10,7 +10,7 @@ import { platformLabel } from "../../../src/features/showVersion";
  *
  * **単体テストは Node の上で動くので、ふだんは `process` が在る。** そのため
  * 素の `process.platform` を読む所があっても、ここでは誰も気づかなかった。
- * ブラウザ版で「動作を診断」を押すと、生成文書の書き込み口が
+ * ブラウザ版で「動作診断」を押すと、生成文書の書き込み口が
  * `process is not defined` で落ち、無題文書へ逃げていた（本体が実機で確かめた）。
  *
  * ここでは**同期の呼び出しの間だけ** `process` を消して、ブラウザと同じ条件で
@@ -39,7 +39,7 @@ describe("process が無いところで落ちない", () => {
   });
 
   test("書き込み口の見張り（atomicWriteFile が必ず呼ぶ）が落ちない", () => {
-    // 「動作を診断」で落ちた1か所。`atomicWriteFile` は書く前に必ず
+    // 「動作診断」で落ちた1か所。`atomicWriteFile` は書く前に必ず
     // `SelfWriteTracker.markWriting` を呼ぶので、ここが落ちると
     // ブラウザ版の書き込みがすべて落ちる
     const tracker = new SelfWriteTracker();

@@ -38,7 +38,7 @@ export function canRunProcesses(): boolean {
  *
  * **`process` を読むのはこのファイルだけにする**（2026-09-23）。ほかの所で
  * `process.platform` を素で読むと、ブラウザ版では押した瞬間に
- * `process is not defined` で落ちる。実機で「動作を診断」（生成文書が
+ * `process is not defined` で落ちる。実機で「動作診断」（生成文書が
  * 置けなかった）と「バージョンを確認」（窓が出て落ちた）の2つを踏んだ。
  * 根は、場所の比べ方を8か所に書き写し、写すときに分け方を落としたこと。
  * `browserReach.test.ts` がほかでの素の `process` を止める。

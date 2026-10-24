@@ -137,7 +137,7 @@ export async function run(): Promise<void> {
     );
   });
 
-  await runCase("「動作を診断」が通り、登録した作品が出る", failures, async () => {
+  await runCase("「動作診断」が通り、登録した作品が出る", failures, async () => {
     await vscode.commands.executeCommand("novelai.diagnoseWeb");
     const text = await waitForDocument("# ブラウザ版の動作診断");
     assert(text !== undefined, "診断の結果が開かれませんでした");
