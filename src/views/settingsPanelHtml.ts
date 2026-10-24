@@ -1537,6 +1537,8 @@ button.danger:hover {
       // 紹介文のように少し長い文章が途中で隠れてしまう
       if (field.multiline) growWithContent(control);
       inputs[field.key] = control;
+      // 裏で埋まった読みを、描き直さずにこの欄へ映すための目印（readingFilled）
+      control.dataset.field = field.key;
       const wrap = labelled(field.label, control);
 
       /*
@@ -2346,6 +2348,27 @@ button.danger:hover {
         detail = message.detail;
         renderDetail();
         break;
+      /*
+        原稿でIMEの読みを拾い、空だった読みを裏で埋めた（設計書6.42.2）。
+        **開いている項目の読みの欄だけを書き換え、描き直さない**——描き直すと
+        ほかの欄の書きかけが消える。映さないと、空のまま残った欄が次の［保存］で
+        埋めた読みを消してしまう。作者が読みの欄に打ちかけていたら触らない
+      */
+      case "readingFilled": {
+        if (!detail || detail.kind !== message.kind || detail.id !== message.id) break;
+        const control = el.detail.querySelector('[data-field="reading"]');
+        if (!control || control.value !== control.dataset.initial) break;
+        if (control.value.trim() !== "") break;
+        control.value = message.reading;
+        control.dataset.initial = message.reading;
+        for (const field of detail.fields) {
+          if (field.key === "reading") {
+            field.value = message.reading;
+            delete field.imeReading;
+          }
+        }
+        break;
+      }
       /*
         呼び合いの絞りを切り替えた結果（設計書6.92）。
 

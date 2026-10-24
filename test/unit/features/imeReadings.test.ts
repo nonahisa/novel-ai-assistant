@@ -98,7 +98,7 @@ describe("設定資料へ書く／書かない", () => {
     characters.push(item("char_1", "東雲"));
     const result = await recordImeComposition(work, "しののめは", "東雲は");
     expect(result.capture).toEqual({ surface: "東雲", reading: "しののめ" });
-    expect(result.filled).toEqual(["東雲"]);
+    expect(result.filled).toEqual([{ kind: "character", id: "char_1", name: "東雲" }]);
     expect(saved).toHaveLength(1);
     expect(saved[0].via).toBe("saveOrUpdate");
     expect(saved[0].record.reading).toBe("しののめ");

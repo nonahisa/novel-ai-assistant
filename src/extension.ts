@@ -1876,14 +1876,21 @@ export async function activate(
           logLine(
             `IMEの読み：「${result.capture.surface}」を「${result.capture.reading}」と打ちました` +
               (result.filled.length > 0
-                ? `。設定資料の読みが空だったので埋めました（${result.filled.join("、")}）`
+                ? `。設定資料の読みが空だったので埋めました（${result.filled
+                    .map((item) => item.name)
+                    .join("、")}）`
                 : "")
           );
           for (const problem of result.problems) logLine(`IMEの読み：${problem}`);
-          if (result.filled.length > 0) {
+          const panel = findOpenSettingsPanel(work.id);
+          if (result.filled.length > 0 && panel && result.primary) {
             // 開いている設定資料パネルを読み直す。読み直さないと、パネルが持つ
-            // 読み込んだときの控えが古いまま残り、次の保存が「外で書き換えられた」で止まる
-            await findOpenSettingsPanel(work.id)?.refreshFromDisk();
+            // 読み込んだときの控えが古いまま残り、次の保存が「外で書き換えられた」で止まる。
+            // 読み直しは詳細を描き直さないので、開いている項目の読みの欄へも映す
+            await panel.refreshFromDisk();
+            for (const item of result.filled) {
+              panel.notifyReadingFilled(item.kind, item.id, result.primary);
+            }
           }
         } catch (error) {
           useLogFile(work.folderPath);

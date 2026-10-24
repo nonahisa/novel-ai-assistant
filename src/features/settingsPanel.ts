@@ -829,6 +829,17 @@ export class SettingsPanel {
     await this.loadAll();
   }
 
+  /**
+   * 原稿で打った読みで、空だった読みを裏で埋めたことを画面へ伝える（設計書6.42.2）。
+   *
+   * `refreshFromDisk` は詳細を描き直さないので、その項目を開いていると読みの欄が
+   * 空のまま残り、作者がほかの欄を直して［保存］を押すと、埋めた読みを空で
+   * 消してしまう。**読み直してから**呼ぶ（照合に使う控えを新しくしておく）
+   */
+  notifyReadingFilled(kind: SettingsKind, id: string, reading: string): void {
+    this.post({ type: "readingFilled", kind, id, reading });
+  }
+
   async initialize(): Promise<void> {
     const nonce = createNonce();
     this.panel.webview.html = buildSettingsPanelHtml(
@@ -4559,6 +4570,11 @@ type OutgoingMessage =
       notice: string;
     }
   | { type: "detail"; detail: DetailView }
+  /**
+   * 原稿で打った読みで、空だった読みを裏で埋めた（設計書6.42.2）。画面は、
+   * その項目を開いていて読みの欄が空のままなら、欄だけを書き換える
+   */
+  | { type: "readingFilled"; kind: SettingsKind; id: string; reading: string }
   /**
    * 呼び合いの絞りを切り替えた結果（設計書6.92）。
    *

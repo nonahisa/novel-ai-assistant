@@ -19,6 +19,7 @@ import {
 import { loadImeReadings, updateImeReadings } from "../core/imeReadingStore";
 import type { ReadingSpan } from "../core/readingDictionary";
 import { expandNameVariants } from "../core/termIndex";
+import type { SettingsKind } from "../core/settingsSummary";
 
 /**
  * IMEで打った読みを、設定資料と読み上げへ効かせる（設計書6.42.2）。
@@ -33,7 +34,6 @@ import { expandNameVariants } from "../core/termIndex";
  * 失敗は答えに載せて、呼ぶ側が記録（ログ）へ残す。
  */
 
-type SettingsKind = "character" | "ability" | "organization" | "location" | "world";
 
 /** 引き当てと読み上げに要るだけの項目の写し */
 interface NameRecord {
@@ -129,8 +129,8 @@ export interface ImeRecordResult {
   capture?: ImeCapture;
   /** その名前の、いまの主な読み */
   primary?: string;
-  /** 読みを埋めた項目の名前 */
-  filled: string[];
+  /** 読みを埋めた項目（開いている設定資料パネルへ映すのに種類と id が要る） */
+  filled: Array<{ kind: SettingsKind; id: string; name: string }>;
   /** 書けなかった理由（あれば） */
   problems: string[];
 }
@@ -167,7 +167,9 @@ export function recordImeComposition(
     );
     for (const target of targets) {
       try {
-        if (await fillReading(work, target, primary)) result.filled.push(target.name);
+        if (await fillReading(work, target, primary)) {
+          result.filled.push({ kind: target.kind, id: target.id, name: target.name });
+        }
       } catch (error) {
         result.problems.push(
           `「${target.name}」の読みを埋められませんでした（${
