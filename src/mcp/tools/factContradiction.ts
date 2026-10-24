@@ -68,6 +68,8 @@ import { askSampling } from "./sampling";
 import {
   assertRunner,
   describeOutcome,
+  failureSummaryOf,
+  type FailureGroup,
   claudeNote,
   temperatureFor,
   validateWith,
@@ -390,6 +392,8 @@ export type FactContradictionRunOutcome =
       temperature: { extract: number; verify: number };
       results: FactContradictionFileResult[];
       failures: Array<{ chunkId: string; reason: string }>;
+      /** 失敗を理由ごとに畳んだもの（`run.ts` の `summarizeFailures`）。失敗した回だけ付く */
+      failureSummary?: FailureGroup[];
       /** 工程ごとの数（どこで減ったのかが分からないと、直す場所が決まらない） */
       stages: {
         chunks: number;
@@ -592,6 +596,7 @@ export async function factContradictionRun(
         input.runner === "ollama"
           ? "原稿はこの機械から出ていません"
           : "本文は呼び出し元へ渡っており、その先は呼び出し元の設定によります",
+      failures,
     })} ${describeFactRun({
       chunksDone: context.chunks.length - failures.length,
       chunksTotal: context.chunks.length,
@@ -618,6 +623,8 @@ export async function factContradictionRun(
         : (input.model ?? "（不明）"),
     results,
     failures,
+    // 理由ごとの要約（チャンクを回すほかの道と同じ形。設計書6.87.15 の柱2の4）
+    ...failureSummaryOf(failures),
     stages: {
       chunks: context.chunks.length,
       acceptedFacts: facts.length,

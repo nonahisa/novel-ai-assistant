@@ -1014,7 +1014,74 @@ function assertPrerequisites(input: FeatureCallInput): void {
 
 export function novelPrompt(input: FeatureCallInput): unknown {
   assertPrerequisites(input);
-  return FEATURES[input.feature].prompt(input);
+  return withValidateNext(input, FEATURES[input.feature].prompt(input));
+}
+
+/* ── validate へ戻すときの引数の雛形（設計書6.87.15 の柱2の5）──────── */
+
+/**
+ * 雛形の中で、AIの応答を入れる所。
+ *
+ * **文字列にしない。** 指示の言葉はそのまま答えとして返ってくる
+ * （CLAUDE.md の「繰り返し起きた失敗」3）——「ここへ応答を」のような文字列を
+ * 置くと、埋め忘れた雛形がそのまま検算へ流れる。null なら、入力の形
+ * （`z.string()`）でもハンドラ（`needResponse`）でも「response が要ります」で止まる。
+ * 何を入れるかの説明は、雛形の外（`ValidateNext.note`）に書く。
+ */
+const RESPONSE_SLOT = null;
+
+/** 雛形へ写す引数。**validate が読むものだけ**（切り方は chunkId に入っている） */
+const NEXT_ARG_KEYS = ["folder", "feature", "filePath", "chapter", "options"] as const;
+
+export interface ValidateNext {
+  tool: "novel.validate";
+  /** 埋める所の名前（雛形の args の中） */
+  fill: "response";
+  note: string;
+  /**
+   * 呼び出し1回ぶんの引数。チャンクに切る機能は `chunks` と同じ並びで1件ずつ
+   * （chunkId まで埋めてある）、切らない機能は1件だけ
+   */
+  calls: Array<{ args: Record<string, unknown> }>;
+}
+
+const NEXT_NOTE =
+  "AIの応答（JSONの文字列）を args.response に入れ、args ごと novel.validate へ渡してください。" +
+  "ほかの値は書き換えないでください。chunks があるときは、calls は chunks と同じ並びです。";
+
+/**
+ * prompt の返事に `next` を添える（設計書6.87.15 の柱2の5）。
+ *
+ * **後付けをここ1か所にする。** 17の機能の prompt に1つずつ書くと、
+ * 機能を足したときに雛形の無い機能が生まれる。戻し先（`validateWith`）を
+ * 持つ返事——`novel.prompt` と、`novel.run` の `runner: "claude"`——にだけ付ける。
+ *
+ * **雛形は呼んだ側の引数から写す。** validate が読む引数（どの本文か・
+ * `options`）は prompt に渡したものと同じなので、機能ごとの表を持たずに済む。
+ * `options` は丸ごと写す（validate は使わない名前を読まない）。`stash` は
+ * 選び取るものなので入れない。
+ */
+function withValidateNext(input: FeatureCallInput, result: unknown): unknown {
+  if (!isRecord(result) || typeof result.validateWith !== "string") return result;
+  const base: Record<string, unknown> = {};
+  for (const key of NEXT_ARG_KEYS) {
+    if (input[key] !== undefined) base[key] = input[key];
+  }
+  const chunkIds = Array.isArray(result.chunks)
+    ? result.chunks
+        .map((chunk) => (isRecord(chunk) ? chunk.chunkId : undefined))
+        .filter((chunkId): chunkId is string => typeof chunkId === "string")
+    : [];
+  const calls =
+    chunkIds.length > 0
+      ? chunkIds.map((chunkId) => ({ args: { ...base, chunkId, response: RESPONSE_SLOT } }))
+      : [{ args: { ...base, response: RESPONSE_SLOT } }];
+  const next: ValidateNext = { tool: "novel.validate", fill: "response", note: NEXT_NOTE, calls };
+  return { ...result, next };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** `novel.validate` の `stash: true` を受け付ける機能 */
@@ -1056,7 +1123,8 @@ export function novelValidate(input: FeatureCallInput): unknown {
  */
 export async function novelRun(input: FeatureCallInput): Promise<unknown> {
   assertPrerequisites(input);
-  return FEATURES[input.feature].run(input);
+  // runner: claude はプロンプトを返すだけなので、prompt と同じ雛形を添える
+  return withValidateNext(input, await FEATURES[input.feature].run(input));
 }
 
 export function novelDetect(input: FeatureCallInput): unknown {

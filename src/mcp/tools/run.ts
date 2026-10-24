@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { McpToolError, describeError } from "./shared";
+import { McpToolError, describeError, parseChunkId } from "./shared";
+import { runnerRefusal } from "./runnerChoices";
 import { askSampling } from "./sampling";
 import { ollamaGenerate } from "./ollama";
 import { openChunkCache } from "./chunkCacheFile";
@@ -40,18 +41,14 @@ export const RUNNER_KINDS: readonly RunnerKind[] = [
  * **既定で埋めない**（設計書6.87.8 の5）。手元へ投げるのと、本文を
  * 呼び出し元やAnthropicへ渡すのとでは、**作者にとっての意味がまるで違う**。
  *
- * **断り文句もここに1つだけ置く。** 道具ごとに書くと、選択肢を増やしたときに
+ * **断り文句は `runnerChoices.ts` に1つだけ置く。** 道具ごとに書くと、選択肢を増やしたときに
  * 古い顔ぶれを案内し続ける道具が残る（`sampling` を足したときに実際、
  * 8か所が「ollama か claude で指定してください」と言ったままになった）。
+ * 文は、いま繋いでいる相手に使える選択肢だけを並べる（設計書6.87.15 の柱2の3）。
  */
 export function assertRunner(runner: unknown): asserts runner is RunnerKind {
   if (RUNNER_KINDS.includes(runner as RunnerKind)) return;
-  throw new McpToolError(
-    "runner を指定してください（既定はありません）。" +
-      "ollama＝手元のOllamaで検算まで通す（原稿は外へ出ない）／" +
-      "claude＝プロンプトだけ返す（読んだ応答を validate へ戻す）／" +
-      "sampling＝呼び出し元に考えてもらい、検算まで通す。"
-  );
+  throw new McpToolError(runnerRefusal());
 }
 
 /** `validate` へ戻してもらうときの決まり文句。ツールの説明にも出す */
@@ -117,6 +114,8 @@ export interface OllamaRunResult<R> {
   results: R[];
   /** 失敗したチャンク。**黙って飛ばさない**（件数だけでは何も分からない） */
   failures: Array<{ chunkId: string; reason: string }>;
+  /** 失敗を理由ごとに畳んだもの（`summarizeFailures`）。失敗した回だけ付く */
+  failureSummary?: FailureGroup[];
   /**
    * AIが同じ要素を繰り返したので、途中で受け取りをやめたチャンク
    * （2026-10-10）。`stoppedAt` 件目で止め、`kept` 件を閉じて検算へ回した。
@@ -145,6 +144,8 @@ export interface SamplingRunResult<R> {
   temperature: number;
   results: R[];
   failures: Array<{ chunkId: string; reason: string }>;
+  /** 失敗を理由ごとに畳んだもの（`summarizeFailures`）。失敗した回だけ付く */
+  failureSummary?: FailureGroup[];
 }
 
 export type RunOutcome<P, R> =
@@ -639,11 +640,13 @@ export async function runChunks<P extends { chunkId: string }, R>(
       failed: failures.length,
       where: "手元の Ollama で",
       aside: "原稿はこの機械から出ていません",
+      failures,
     }),
     model,
     temperature,
     results,
     failures,
+    ...failureSummaryOf(failures),
   };
 }
 
@@ -665,17 +668,122 @@ export function describeOutcome(options: {
   where: string;
   /** 本文の行き先についての断り */
   aside: string;
+  /**
+   * 失敗の一覧。渡せば、理由の種類ごとの1行を添える（設計書6.87.15 の柱2の4）。
+   * 渡さなければ、これまでどおり件数だけを書く
+   */
+  failures?: readonly ChunkFailure[];
 }): string {
   if (options.failed === 0) {
     return `${options.where}検算まで通しました（${options.aside}）。${VALIDATE_NOTE}`;
   }
+  const kinds = failureKindsLine(options.failures);
   if (options.done === 0) {
-    return `1件も通せませんでした（${options.failed}件すべて失敗）。理由は failures にあります。`;
+    return `1件も通せませんでした（${options.failed}件すべて失敗）。理由は failures にあります。${kinds}`;
   }
   return (
     `${options.where}${options.done}件を検算まで通しました（${options.aside}）。` +
-    `${options.failed}件は失敗しています（理由は failures）。${VALIDATE_NOTE}`
+    `${options.failed}件は失敗しています（理由は failures）。${kinds}${VALIDATE_NOTE}`
   );
+}
+
+/** 1チャンクの失敗（`failures` の1件） */
+export interface ChunkFailure {
+  chunkId: string;
+  reason: string;
+}
+
+/**
+ * 理由ごとに畳んだ失敗（設計書6.87.15 の柱2の4）。
+ *
+ * **元の `failures` は残し、これを足す。** 1件ずつの一覧を読んでいる外の AI や
+ * 既存のテストがあるので、形を変えずに要約を隣へ置く。
+ */
+export interface FailureGroup {
+  /** 理由の文（`failures` の `reason` そのまま） */
+  reason: string;
+  count: number;
+  /** この理由で失敗したチャンク（`failures` の順） */
+  chunkIds: string[];
+  /** 話数（重ねない・小さい順）。chunkId から読めないものは入らない */
+  chapters: number[];
+  /** 人が読む1行（「〈理由の最初の一文〉×3（第4・7・12話）」） */
+  label: string;
+}
+
+/**
+ * 失敗を理由の種類ごとに畳む（設計書6.87.15 の柱2の4）。
+ *
+ * **種類は理由の文が一字一句同じものどうし。** 文の中身から原因を当てて
+ * 寄せることはしない（CLAUDE.md 規則5「エラー文から原因を当てない」）。
+ * 許可の断りのように同じ文が並ぶものは1つに畳まれ、数字の入った文は
+ * 別々のまま残る——それは嘘ではない。並びは多い順（同じ数なら先に出た順）。
+ */
+export function summarizeFailures(
+  failures: readonly ChunkFailure[]
+): FailureGroup[] {
+  const groups = new Map<string, { chunkIds: string[]; chapters: Set<number> }>();
+  for (const failure of failures) {
+    let group = groups.get(failure.reason);
+    if (!group) {
+      group = { chunkIds: [], chapters: new Set() };
+      groups.set(failure.reason, group);
+    }
+    group.chunkIds.push(failure.chunkId);
+    const chapter = chapterOfChunkId(failure.chunkId);
+    if (chapter !== null) group.chapters.add(chapter);
+  }
+  return [...groups.entries()]
+    .map(([reason, group]) => {
+      const chapters = [...group.chapters].sort((a, b) => a - b);
+      const where = chapters.length > 0 ? `（第${chapters.join("・")}話）` : "";
+      return {
+        reason,
+        count: group.chunkIds.length,
+        chunkIds: group.chunkIds,
+        chapters,
+        label: `「${firstSentenceOf(reason)}」×${group.chunkIds.length}${where}`,
+      };
+    })
+    // sort は安定なので、同じ数なら先に出た順のまま
+    .sort((a, b) => b.count - a.count);
+}
+
+/** 結果へ足す形。**失敗した回だけ付ける**（`stoppedEarly` と同じ） */
+export function failureSummaryOf(
+  failures: readonly ChunkFailure[]
+): { failureSummary?: FailureGroup[] } {
+  return failures.length > 0 ? { failureSummary: summarizeFailures(failures) } : {};
+}
+
+/** 1行の報告に添える、種類ごとの並び。失敗が渡されなければ空 */
+function failureKindsLine(failures: readonly ChunkFailure[] | undefined): string {
+  if (!failures || failures.length === 0) return "";
+  const groups = summarizeFailures(failures);
+  return `種類ごと（${groups.length}種類。まとめは failureSummary）：${groups.map((group) => group.label).join("／")}。`;
+}
+
+/**
+ * chunkId から話数を読む。**読めなくても投げない**——要約のために
+ * 失敗の報告そのものが壊れては本末転倒である（`parseChunkId` は形が違うと投げる）。
+ */
+function chapterOfChunkId(chunkId: string): number | null {
+  try {
+    return parseChunkId(chunkId).chapter;
+  } catch {
+    return null;
+  }
+}
+
+/** 理由の最初の一文（長ければ切る）。種類の見出しに使う */
+const LABEL_MAX_CHARS = 60;
+
+function firstSentenceOf(reason: string): string {
+  const end = reason.indexOf("。");
+  const sentence = end >= 0 ? reason.slice(0, end + 1) : reason;
+  return sentence.length > LABEL_MAX_CHARS
+    ? `${sentence.slice(0, LABEL_MAX_CHARS)}…`
+    : sentence;
 }
 
 /**
@@ -720,10 +828,12 @@ export async function runChunksBySampling<
       failed: failures.length,
       where: "呼び出し元に考えてもらい、",
       aside: "本文は呼び出し元へ渡っており、その先は呼び出し元の設定によります",
+      failures,
     }),
     model: models.size > 0 ? [...models].join(" / ") : "（不明）",
     temperature,
     results,
     failures,
+    ...failureSummaryOf(failures),
   };
 }

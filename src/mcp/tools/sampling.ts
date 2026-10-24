@@ -1,4 +1,4 @@
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { samplingHost, samplingSupport } from "./samplingHost";
 import { McpToolError } from "./shared";
 import { assertSamplingAllowed } from "./permission";
 
@@ -33,31 +33,21 @@ import { assertSamplingAllowed } from "./permission";
  * 無ければ**何を選べばよいかを添えて断る**。
  */
 
-/**
- * 頼む相手（＝いま繋いでいるクライアント）。
- *
- * **転送層が渡す。** ここから `server.ts` を参照すると読み込みが循環するので、
- * 向こうから預けてもらう形にする。
- */
-let host: Server | undefined;
-
-export function setSamplingHost(server: Server): void {
-  host = server;
-}
-
-/** 試験から差し替えるための口。**本番では転送層しか呼ばない** */
-export function clearSamplingHost(): void {
-  host = undefined;
-}
+/*
+  **頼む相手は `samplingHost.ts` が持つ**（入力の形の断り文句からも読むため。
+  設計書6.87.15 の柱2の3）。転送層と試験はこれまでどおりここから預ける。
+*/
+export { clearSamplingHost, setSamplingHost } from "./samplingHost";
 
 /**
  * この道が使えるか。
  *
  * **宣言を見る。** 使えないのに投げると、呼んだ側には「失敗した」としか
  * 見えない——**選び直せる道を示すために、先に確かめる。**
+ * （分からないときも false。分からないことを区別したいときは `samplingSupport`）
  */
 export function samplingAvailable(): boolean {
-  return Boolean(host?.getClientCapabilities()?.sampling);
+  return samplingSupport() === "yes";
 }
 
 /**
@@ -121,6 +111,7 @@ export async function askSampling(
   */
   assertSamplingAllowed(request.folder);
 
+  const host = samplingHost();
   if (!host || !samplingAvailable()) {
     throw new McpToolError(SAMPLING_UNAVAILABLE);
   }

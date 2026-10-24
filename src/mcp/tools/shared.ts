@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { z } from "zod";
+import { runnerRefusal } from "./runnerChoices";
 import {
   DEFAULT_MANUSCRIPT_DIR,
   DEFAULT_SETTINGS_DIR,
@@ -141,7 +142,13 @@ export const CHUNK_INPUT = {
  */
 export const RUNNER_INPUT = {
   runner: z
-    .enum(["ollama", "claude", "sampling"])
+    /*
+      **断るときの文は、ハンドラと同じもの**（`runnerChoices.ts`。設計書6.87.15 の柱2の3）。
+      runner を省いた呼び出しはここで止まるので、既定の文（3つの名前の羅列）のままだと、
+      sampling に対応していない相手にも sampling を勧めることになる。
+      文は断るたびに組む（接続の宣言は、この形を作ったあとで届く）
+    */
+    .enum(["ollama", "claude", "sampling"], { error: () => runnerRefusal() })
     .describe(
       "本文の行き先。ollama＝手元のOllamaで検算まで通す（原稿は外へ出ない）／" +
         "claude＝プロンプトだけ返す（本文がAnthropicへ渡る）／" +
