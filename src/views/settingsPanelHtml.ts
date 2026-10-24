@@ -1578,6 +1578,32 @@ button.danger:hover {
         wrap.appendChild(hint);
       }
       /*
+        IMEで打った読みの提案（設計書6.42.2。作者の裁定、2026-10-24）。
+        作者が作った項目・別の読みが入っている項目には自動で書かないので、
+        ここで見せて、押したら読みの欄へ入れる。**保存は作者が押す**——別名の札と
+        同じく欄へ入れるだけにして、ほかの欄の書きかけを読み直しで消さない
+      */
+      if (field.imeReading) {
+        const ime = document.createElement("div");
+        ime.className = "chips";
+        const imeLabel = document.createElement("span");
+        imeLabel.className = "chiplabel";
+        imeLabel.textContent = "IMEでは『" + field.imeReading + "』と打っています";
+        ime.appendChild(imeLabel);
+        const useIme = document.createElement("button");
+        useIme.type = "button";
+        useIme.className = "chip";
+        useIme.textContent = "この読みにする";
+        useIme.title = "読みの欄へ入れます（「保存」を押すと設定資料に入ります）";
+        useIme.addEventListener("click", function () {
+          control.value = field.imeReading;
+          markChanged();
+          control.focus();
+        });
+        ime.appendChild(useIme);
+        wrap.appendChild(ime);
+      }
+      /*
         退けた関係（作者の裁定、2026-09-23）。関係欄の下に並べ、
         1件ずつ「退けた記録から外す」を押せるようにする。
         **外すのは記録だけで、関係そのものは戻さない**（戻すなら上の欄に書いて保存）。
