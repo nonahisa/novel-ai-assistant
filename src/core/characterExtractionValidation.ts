@@ -1403,7 +1403,21 @@ function fixRelationDirections(
  * 以前は並び順で解くつもりのコメントだけがあり、実際は「三門の祖母」が
  * 「祖母」「母」の2つに当たって直らなかった（2026-10-24）。
  * 「祖母と母」のように「祖母」の外にも「母」があれば、2人を指しているので直さない。
+ *
+ * 叔母・伯母・叔父・伯父・義母・義父・継母・継父・養母・養父も同じく「母」「父」を
+ * 包む。以前はこれらが「母」「父」の規則にだけ当たり、「叔母さん」に「息子」と
+ * 書かれていると「母」へ書き換えていた（2026-10-24 夜の作者の裁定で直した）。
+ * 向きの決まる組（甥・姪から見た叔母、嫁・婿から見た義母など）は規則を足し、
+ * 「大叔母」「大伯父」のように相手側の決まった言い方が無いものは、
+ * どの規則にも当てずに触らない（null）。
  */
+/** 義母・義父の側から見た子の語（嫁・婿・義理の子） */
+const IN_LAW_CHILD = /^(?:息子|娘|嫁|婿|義理の(?:息子|娘)|義息子|義娘)/u;
+/** 継母・継父の側から見た子の語 */
+const STEP_CHILD = /^(?:息子|娘|継子|連れ子)/u;
+/** 養母・養父の側から見た子の語 */
+const ADOPTED_CHILD = /^(?:息子|娘|養子|養女)/u;
+
 const KINSHIP_RULES: ReadonlyArray<{
   /** 相手の名前に現れる語 */
   inName: RegExp;
@@ -1416,15 +1430,27 @@ const KINSHIP_RULES: ReadonlyArray<{
 }> = [
   { inName: /祖母|^お?ばあ/u, reverse: /^孫/u, corrected: "祖母" },
   { inName: /祖父|^お?じい/u, reverse: /^孫/u, corrected: "祖父" },
+  // 「大叔母」などは within で外し、どの規則にも当てない（上のコメント）
+  { inName: /叔母/u, within: /大叔母/gu, reverse: /^(?:甥|姪)/u, corrected: "叔母" },
+  { inName: /伯母/u, within: /大伯母/gu, reverse: /^(?:甥|姪)/u, corrected: "伯母" },
+  { inName: /叔父/u, within: /大叔父/gu, reverse: /^(?:甥|姪)/u, corrected: "叔父" },
+  { inName: /伯父/u, within: /大伯父/gu, reverse: /^(?:甥|姪)/u, corrected: "伯父" },
+  // 義理の親から見た子の側の語。「息子」「娘」も、義理の子が自分の側を書いた形
+  { inName: /義母/u, reverse: IN_LAW_CHILD, corrected: "義母" },
+  { inName: /義父/u, reverse: IN_LAW_CHILD, corrected: "義父" },
+  { inName: /継母/u, reverse: STEP_CHILD, corrected: "継母" },
+  { inName: /継父/u, reverse: STEP_CHILD, corrected: "継父" },
+  { inName: /養母/u, reverse: ADOPTED_CHILD, corrected: "養母" },
+  { inName: /養父/u, reverse: ADOPTED_CHILD, corrected: "養父" },
   {
     inName: /母|^お?かあ/u,
-    within: /祖母/gu,
+    within: /祖母|叔母|伯母|義母|継母|養母/gu,
     reverse: /^(?:息子|娘)/u,
     corrected: "母",
   },
   {
     inName: /父|^お?とう/u,
-    within: /祖父/gu,
+    within: /祖父|叔父|伯父|義父|継父|養父/gu,
     reverse: /^(?:息子|娘)/u,
     corrected: "父",
   },
