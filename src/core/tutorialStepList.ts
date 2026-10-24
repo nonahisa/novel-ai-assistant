@@ -38,7 +38,14 @@ export const MARK_DESCRIPTION: Record<TutorialStepMark, string> = {
 
 export function buildTutorialStepItems(input: {
   steps: readonly TutorialStepInput[];
+  /** まだできないこと（作品を登録してから）。「いまはまだできません」と添える */
   later: readonly string[];
+  /**
+   * 開けるけれど、いまは出さないもの（`TutorialAdvice.withheld`。0.52.0）。
+   * **`later` と混ぜない**——混ぜると「できません」が添えられ、開ける執筆統計を
+   * 使えないものとして伝えてしまう（2026-10-24 に一覧の側で混ざっていた）
+   */
+  withheld?: readonly string[];
   marks: ReadonlyMap<string, TutorialStepMark>;
 }): TutorialStepList {
   const items: TutorialListItem[] = [];
@@ -60,6 +67,15 @@ export function buildTutorialStepItems(input: {
       label: "$(info) " + line,
       // 押せないものを押せる顔で出さない
       detail: "いまはまだできません（説明だけ）",
+    });
+  }
+  for (const line of input.withheld ?? []) {
+    items.push({
+      // 押しても何も起きない行なので、扱いは「説明だけ」の行と同じ
+      kind: "later",
+      label: "$(info) いまは出していません：" + line,
+      // 開き方は文の中に書いてある。「できません」とは書かない
+      detail: "説明だけ（この案内では並べていません）",
     });
   }
 

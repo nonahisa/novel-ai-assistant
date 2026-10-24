@@ -512,20 +512,23 @@ async function runTutorial(
     steps: TutorialStepInput[];
     advice: ReturnType<typeof tutorialAdvice>;
     later: string[];
+    withheld: string[];
   };
   const askGoal = async (): Promise<Goal | undefined> => {
     const goal = await askGoalPick(style, deps.hasWork());
     if (!goal) return undefined;
 
     const advice = tutorialAdvice(style, goal.goal);
-    const later = [
-      ...advice.later,
-      // **出さないと決めたものも、決めたと分かるように出す**（0.52.0）
-      ...(advice.withheld ?? []).map(
-        (line) => `いまは出していません：${line}`
-      ),
-    ];
-    return { ...goal, steps: advice.steps, advice, later };
+    // **出さないと決めたものも、決めたと分かるように出す**（0.52.0）。
+    // ただし「まだできないこと」とは混ぜない——混ぜると、開ける執筆統計に
+    // 「いまはまだできません」が添えられる（一覧の組み立ては core が分ける）
+    return {
+      ...goal,
+      steps: advice.steps,
+      advice,
+      later: advice.later,
+      withheld: advice.withheld ?? [],
+    };
   };
 
   /*
@@ -552,7 +555,8 @@ async function runTutorial(
     },
     hasWork: () => deps.hasWork(),
     pickWork: () => deps.pickWork(),
-    askStep: (goal, marks) => askStep(goal, goal.steps, goal.later, marks),
+    askStep: (goal, marks) =>
+      askStep(goal, goal.steps, goal.later, goal.withheld, marks),
     // 作品は WorkNode の形で渡す（受けるコマンドは `resolveWork` がそのまま使う）
     runStep: async (step, work) =>
       work
@@ -655,9 +659,10 @@ function askStep(
   goal: TutorialGoalInfo,
   steps: TutorialStepInput[],
   later: string[],
+  withheld: string[],
   marks: ReadonlyMap<string, TutorialStepMark>
 ): Promise<StepPick> {
-  const list = buildTutorialStepItems({ steps, later, marks });
+  const list = buildTutorialStepItems({ steps, later, withheld, marks });
   type Item = vscode.QuickPickItem & { source: TutorialListItem };
   const skipButton: vscode.QuickInputButton = {
     iconPath: new vscode.ThemeIcon("check"),
