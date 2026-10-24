@@ -27,6 +27,10 @@ import { aliasReadingOf, type AliasReadings } from "../models/aliasReading";
  * 声が名前を読み違える。そこで、確定した文字列が**設定資料の名前と完全に一致した
  * ときだけ**採る（前後に付いた助詞などのかなは、読みの側の同じかなと一緒に外す）。
  *
+ * 姓と名を分けて確定する打ち方（「しらかば」→白樺、「あかり」→灯）では、画面が
+ * すぐ後ろへ続けて打ったと確かめた前の確定を添えてくる。そのときは2回をつないで
+ * 同じ決まりで照らす（`captureJoinedImeReading`）。
+ *
  * ## ここは vscode に触らない
  *
  * 引き当て・控えの形・書くか提案するかの分かれ目・読み上げの範囲は純粋な
@@ -175,10 +179,81 @@ export function captureImeReading(
   committed: string,
   names: readonly string[]
 ): ImeCapture | undefined {
-  const typed = toHiragana(kana.trim());
+  const typed = kana.trim();
   const fixed = committed.trim();
-  if (!typed || !fixed) return undefined;
   if (typed.length > IME_TEXT_MAX || fixed.length > IME_TEXT_MAX) return undefined;
+  return captureWhere(typed, fixed, names, () => true);
+}
+
+/**
+ * 続けて打った2回の確定を、1回の確定とみなしてよい間の長さ（ミリ秒）。
+ *
+ * 作者は姓と名を分けて確定する（「しらかば」→白樺、「あかり」→灯。2026-10-24）。
+ * その夜の actions.log では、1組の2回の確定が 7〜8 秒離れていた（21:54:19→:26、
+ * :33→:41。後ろの名を打って変換する間を含む）。3秒などにすると作者本人の打ち方が
+ * 通らないので、その倍ほどの 15 秒にした。
+ *
+ * **誤ってつなげない守りは、時間ではなく位置と照合である。** つなぐのは前の確定の
+ * すぐ後ろ（カーソルの直前に前の確定の字がある）に打ったときだけで、しかも
+ * つないだ字がまるごと設定資料の名前と一致したときだけ採る。時間は「しばらく
+ * 書いたあと戻ってきた」ものを切る程度の役目なので、寛めに取ってよい。
+ *
+ * **画面の側（`manuscriptEditorHtml.ts` の `ime-reading` の印の中）に同じ値の写しが
+ * ある**（画面へは import できない）。揃っていることはテストが見張る
+ */
+export const IME_JOIN_GAP_MS = 15_000;
+
+/**
+ * 続けて打った2回の確定を、つなげて名前と照らす（設計書6.42.2。作者の裁定
+ * 「つなげて照らす」、2026-10-24）。
+ *
+ * **つなぐのは2回まで**（前の確定1つと、いまの確定）。作者の打ち方（姓＋名）は
+ * 2回で、ミドルネームのある名前は「・」などの区切りを別に打つので、区切りで
+ * かなでも漢字でもない字が入り、どのみち読みの形が決まらない（`readingShapeOf`）。
+ *
+ * 照らし方は1回の確定と同じ決まり（`captureImeReading`）を、つないだ字と読みに
+ * そのまま当てる。違うのは1つだけ——**名前が2回の確定の境目をまたぐときだけ採る。**
+ * 名前がまるごと前の確定の中にあるなら、前の確定を受け取ったときに拾い済みで
+ * （後ろに助詞「は」を確定した、など）、まるごといまの確定の中にあるなら
+ * 1回の確定として拾う側が受け持つ。どちらもここで拾うと二重に数える。
+ *
+ * 前後に空白の付いた確定はつながない（どこまでが前の確定か決まらない）
+ */
+export function captureJoinedImeReading(
+  previous: CompositionPair,
+  current: CompositionPair,
+  names: readonly string[]
+): ImeCapture | undefined {
+  for (const part of [previous, current]) {
+    if (!part.kana || !part.committed) return undefined;
+    if (part.kana.trim() !== part.kana || part.committed.trim() !== part.committed) {
+      return undefined;
+    }
+  }
+  const boundary = previous.committed.length;
+  return captureWhere(
+    previous.kana + current.kana,
+    previous.committed + current.committed,
+    names,
+    (at, end) => at < boundary && end > boundary
+  );
+}
+
+/**
+ * 引き当ての本体。`accept` は、確定した字の中の名前の位置（at〜end）を採ってよいか。
+ * **採れない位置は、長い名前を選ぶ比べにも入れない**（入れると、採れない長い名前が
+ * 採れる短い名前を押しのける）
+ */
+function captureWhere(
+  kana: string,
+  fixed: string,
+  names: readonly string[],
+  accept: (at: number, end: number) => boolean
+): ImeCapture | undefined {
+  const typed = toHiragana(kana);
+  if (!typed || !fixed) return undefined;
+  // つないだ字は2回ぶんの長さまで（1回ぶんの上限は呼ぶ側と画面で見ている）
+  if (typed.length > IME_TEXT_MAX * 2 || fixed.length > IME_TEXT_MAX * 2) return undefined;
   if (!HIRAGANA_ONLY.test(typed)) return undefined;
   if (!KANJI.test(fixed)) return undefined;
 
@@ -188,6 +263,7 @@ export function captureImeReading(
     const name = raw.trim();
     if (!name || !KANJI.test(name)) continue;
     for (let at = fixed.indexOf(name); at >= 0; at = fixed.indexOf(name, at + 1)) {
+      if (!accept(at, at + name.length)) continue;
       const before = fixed.slice(0, at);
       const after = fixed.slice(at + name.length);
       if (!KANA_ONLY.test(before) || !KANA_ONLY.test(after)) continue;

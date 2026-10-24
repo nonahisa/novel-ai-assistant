@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { buildReadingPlan } from "../../../src/core/readAloud";
 import {
   captureImeReading,
+  captureJoinedImeReading,
   decideImeReading,
   imeAliasSuggestionsFor,
   imeSuggestionFor,
@@ -325,5 +326,86 @@ describe("読み上げの範囲", () => {
       { start: 0, end: 1, reading: "う" },
       { start: 2, end: 4, reading: "あ" },
     ]);
+  });
+});
+
+/**
+ * 姓と名を2回に分けて確定する打ち方（作者の実機確認、2026-10-24。MS-IME）。
+ * 「しらかば→白樺」「あかり→灯」と続けて確定したら、つなげて名前と照らす。
+ * 照らし方は1回の確定と同じ決まり（前後のかなを外す・完全一致・読みの形・AFTER_NAME）
+ */
+describe("続けて打った2回の確定をつなげて照らす", () => {
+  const FULL = ["白樺灯", "灯", "黒瀬蓮", "白樺の森"];
+  const shirakaba = { kana: "しらかば", committed: "白樺" };
+
+  test("しらかば→白樺、あかり→灯 で 白樺灯＝しらかばあかり", () => {
+    expect(
+      captureJoinedImeReading(shirakaba, { kana: "あかり", committed: "灯" }, FULL)
+    ).toEqual({ surface: "白樺灯", reading: "しらかばあかり" });
+    expect(
+      captureJoinedImeReading(
+        { kana: "くろせ", committed: "黒瀬" },
+        { kana: "れん", committed: "蓮" },
+        FULL
+      )
+    ).toEqual({ surface: "黒瀬蓮", reading: "くろせれん" });
+  });
+
+  test("後ろの確定に助詞が付いていても同じ決まりで外す", () => {
+    expect(
+      captureJoinedImeReading(shirakaba, { kana: "あかりは", committed: "灯は" }, FULL)
+    ).toEqual({ surface: "白樺灯", reading: "しらかばあかり" });
+  });
+
+  test("後ろの確定が送り仮名なら採らない（AFTER_NAME と同じ）", () => {
+    expect(
+      captureJoinedImeReading(shirakaba, { kana: "あかりり", committed: "灯り" }, ["白樺灯"])
+    ).toBeUndefined();
+  });
+
+  test("つなげても名前に一致しなければ採らない", () => {
+    expect(
+      captureJoinedImeReading(shirakaba, { kana: "もり", committed: "森" }, FULL)
+    ).toBeUndefined();
+  });
+
+  /**
+   * 二重に数えない。名前がまるごと前の確定の中にあるなら、それは前の確定を
+   * 受け取ったときに拾い済み（後ろの「は」をつないでもう一度数えない）。
+   * まるごと後ろの確定の中にあるものは、1回の確定として拾う側が受け持つ
+   */
+  test("名前が片方の確定の中だけにあるなら、つないだ側では拾わない", () => {
+    expect(
+      captureJoinedImeReading(
+        { kana: "しらかばあかり", committed: "白樺灯" },
+        { kana: "は", committed: "は" },
+        FULL
+      )
+    ).toBeUndefined();
+    expect(
+      captureJoinedImeReading(
+        { kana: "は", committed: "は" },
+        { kana: "あかり", committed: "灯" },
+        FULL
+      )
+    ).toBeUndefined();
+  });
+
+  test("後ろがかなのままの確定でも、つなげれば名前に当たる", () => {
+    expect(
+      captureJoinedImeReading(shirakaba, { kana: "あかり", committed: "あかり" }, [
+        "白樺あかり",
+      ])
+    ).toEqual({ surface: "白樺あかり", reading: "しらかばあかり" });
+  });
+
+  test("前後に空白が付いた確定はつながない（どこが境目か決まらない）", () => {
+    expect(
+      captureJoinedImeReading(
+        { kana: "しらかば", committed: "白樺 " },
+        { kana: "あかり", committed: "灯" },
+        FULL
+      )
+    ).toBeUndefined();
   });
 });

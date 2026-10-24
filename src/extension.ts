@@ -1864,33 +1864,44 @@ export async function activate(
         }
         return result.spans;
       },
-      record: async (filePath, kana, committed) => {
+      record: async (filePath, kana, committed, previous) => {
         const work = workOfPath(registry, filePath);
         if (!work) return;
         try {
           const { recordImeComposition } = await import("./features/imeReadings.js");
           imeReadingsLoaded = true;
-          const result = await recordImeComposition(work, kana, committed);
-          if (!result.capture) return;
+          const result = await recordImeComposition(work, kana, committed, previous);
+          if (result.captures.length === 0) return;
           useLogFile(work.folderPath);
-          logLine(
-            `IMEの読み：「${result.capture.surface}」を「${result.capture.reading}」と打ちました` +
-              (result.filled.length > 0
-                ? `。設定資料の読みが空だったので埋めました（${result.filled
-                    // 別名の読みを埋めたときは、どの別名かも残す
-                    .map((item) => (item.alias ? `${item.name}の別名「${item.alias}」` : item.name))
-                    .join("、")}）`
-                : "")
-          );
+          for (const capture of result.captures) {
+            // 別名の読みを埋めたものは別名で、名前の読みを埋めたものは名前で、拾った字と対応させる
+            const filled = result.filled.filter(
+              (item) => (item.alias ?? item.name.trim()) === capture.surface
+            );
+            logLine(
+              `IMEの読み：「${capture.surface}」を「${capture.reading}」と打ちました` +
+                (previous && !committed.includes(capture.surface)
+                  ? `（「${previous.committed}」と「${committed}」を続けて確定）`
+                  : "") +
+                (filled.length > 0
+                  ? `。設定資料の読みが空だったので埋めました（${filled
+                      // 別名の読みを埋めたときは、どの別名かも残す
+                      .map((item) =>
+                        item.alias ? `${item.name}の別名「${item.alias}」` : item.name
+                      )
+                      .join("、")}）`
+                  : "")
+            );
+          }
           for (const problem of result.problems) logLine(`IMEの読み：${problem}`);
           const panel = findOpenSettingsPanel(work.id);
-          if (result.filled.length > 0 && panel && result.primary) {
+          if (result.filled.length > 0 && panel) {
             // 開いている設定資料パネルを読み直す。読み直さないと、パネルが持つ
             // 読み込んだときの控えが古いまま残り、次の保存が「外で書き換えられた」で止まる。
             // 読み直しは詳細を描き直さないので、開いている項目の読みの欄へも映す
             await panel.refreshFromDisk();
             for (const item of result.filled) {
-              panel.notifyReadingFilled(item.kind, item.id, result.primary, item.alias);
+              panel.notifyReadingFilled(item.kind, item.id, item.reading, item.alias);
             }
           }
         } catch (error) {

@@ -1987,6 +1987,51 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
    * 確定の字が空なら取り消し（Esc）なので知らせない。確定の知らせが字を
    * 持たない環境では、最後に変換中だった字を確定とみる。
    */
+  /*
+    **姓と名を分けて確定する打ち方**（作者の実機確認、2026-10-24。「しらかば」→白樺、
+    「あかり」→灯）。直前の確定を覚えておき、次の確定がそのすぐ後ろへ間を置かずに
+    続いたら、前の確定も添えて送る。つないで名前と照らすのは拡張機能の側
+    （core/imeReading.ts の captureJoinedImeReading）。つなぐのは2回まで。
+
+    間の長さは core の IME_JOIN_GAP_MS の写し（画面へは import できない。揃って
+    いることはテストが見張る）。根拠もそちらに書いた。
+  */
+  const IME_JOIN_GAP_MS = 15000;
+  let imePrevious = null;
+  /**
+   * カーソルの直前の字（確定のときに1回だけ読む）。**取れなければ null**——
+   * 選択に幅がある・カーソルが字の中にない（要素の境目）なら、つながない側に倒す。
+   *
+   * 組んで書く面は、カーソルのあるテキストノードの中だけを見る。全文を数える
+   * 道（位置の一覧）は使わない——前の確定が別のノードに分かれていたら、つながない
+   * だけで済む
+   */
+  function imeTextBeforeCaret(face) {
+    if (face === write) {
+      const end = write.selectionEnd;
+      if (typeof end !== "number" || write.selectionStart !== end) return null;
+      if (typeof write.value !== "string") return null;
+      return write.value.slice(Math.max(0, end - 130), end);
+    }
+    const selection = window.getSelection();
+    if (!selection || !selection.isCollapsed) return null;
+    const node = selection.focusNode;
+    if (!node || node.nodeType !== 3 || typeof node.data !== "string") return null;
+    return node.data.slice(0, selection.focusOffset);
+  }
+  /**
+   * いまの確定が、前の確定のすぐ後ろに続いているか。確定の字がもう入っている環境
+   * （前＋いまの字がカーソルの直前にある）と、まだ入っていない環境（Windows の日本語
+   * 入力では確定の知らせが先に来ることがある。前の字がカーソルの直前にある）の
+   * どちらでも見る。離れた所で打っていれば、どちらも成り立たない
+   */
+  function imeFollows(previous, face, committed, now) {
+    if (!previous || previous.face !== face) return false;
+    if (now - previous.at > IME_JOIN_GAP_MS) return false;
+    const before = imeTextBeforeCaret(face);
+    if (before === null) return false;
+    return before.endsWith(previous.committed + committed) || before.endsWith(previous.committed);
+  }
   let imeKana = "";
   let imeLast = "";
   function imeReadingStart() {
@@ -1999,19 +2044,32 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     imeLast = data;
     if (/^[ぁ-ゖー]+$/.test(data)) imeKana = data;
   }
-  function imeReadingEnd(event) {
+  function imeReadingEnd(event, face) {
     const committed = event && typeof event.data === "string" ? event.data : imeLast;
     const kana = imeKana;
     imeKana = "";
     imeLast = "";
-    if (!kana || !committed || committed === kana) return;
+    const previous = imePrevious;
+    imePrevious = null;
+    // 取り消し（Esc）・かなを打たない確定は、前の確定とのつながりも切る
+    if (!kana || !committed) return;
     if (kana.length > 64 || committed.length > 64) return;
-    vscode.postMessage({ type: "imeReading", kana: kana, committed: committed });
+    const now = Date.now();
+    const joined = imeFollows(previous, face, committed, now) ? previous : null;
+    // かなのままの確定（助詞など）も、次の確定とつなぐために覚える
+    imePrevious = { face: face, kana: kana, committed: committed, at: now };
+    // かなのままの確定は、それだけでは名前に当たらないので、つなぐときだけ送る
+    if (committed === kana && !joined) return;
+    const message = { type: "imeReading", kana: kana, committed: committed };
+    if (joined) message.previous = { kana: joined.kana, committed: joined.committed };
+    vscode.postMessage(message);
   }
   for (const face of [write, compose]) {
     face.addEventListener("compositionstart", imeReadingStart);
     face.addEventListener("compositionupdate", imeReadingUpdate);
-    face.addEventListener("compositionend", imeReadingEnd);
+    face.addEventListener("compositionend", function (event) {
+      imeReadingEnd(event, face);
+    });
   }
   /* ime-reading:end */
 

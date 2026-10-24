@@ -1741,9 +1741,16 @@ type Incoming =
   | { type: "readingDictionary"; action: "run" | "open" | "status"; text: string }
   /**
    * 変換を1回確定した（設計書6.42.2）。`kana` は変換中に最後にかなだけだった字、
-   * `committed` は確定した字。**確定のときに1回だけ届く**（変換中の1字ごとには来ない）
+   * `committed` は確定した字。**確定のときに1回だけ届く**（変換中の1字ごとには来ない）。
+   * `previous` は、この確定が直前の確定のすぐ後ろへ間を置かずに続いたときだけ付く
+   * 前の確定（姓と名を分けて確定する打ち方。拡張機能の側でつないで名前と照らす）
    */
-  | { type: "imeReading"; kana: string; committed: string }
+  | {
+      type: "imeReading";
+      kana: string;
+      committed: string;
+      previous?: { kana: string; committed: string };
+    }
   /**
    * 「noteに貼ったときの見た目」の面を開いた・閉じた（設計書6.69）。
    *
@@ -1939,7 +1946,12 @@ export interface ManuscriptEditorDeps {
     /** 読み上げに当てる、名前の読みの範囲（設定資料の読み、無ければIMEで打った読み） */
     spans(filePath: string, text: string): Promise<ReadingSpan[]>;
     /** 変換1回ぶんを控えへ足し、裁定どおりに設定資料の読みを埋める（失敗しても投げない） */
-    record(filePath: string, kana: string, committed: string): Promise<void>;
+    record(
+      filePath: string,
+      kana: string,
+      committed: string,
+      previous?: { kana: string; committed: string }
+    ): Promise<void>;
   };
   /**
    * ウィンドウの再読み込みをまたいで「この原稿の、この行へ飛ぶ」を覚える所
@@ -3139,18 +3151,17 @@ export class ManuscriptEditorProvider
             **待たない**：名前を確定するたびに来るので、設定資料を読み書きする間、
             ほかの知らせ（次の打鍵の送り）を止めない
           */
-          if (
-            typeof message.kana === "string" &&
-            typeof message.committed === "string" &&
-            message.kana.length > 0 &&
-            message.committed.length > 0 &&
-            message.kana.length <= IME_TEXT_MAX &&
-            message.committed.length <= IME_TEXT_MAX
-          ) {
+          if (isImeTextPair(message)) {
+            // 前の確定は形が合うときだけ添える。合わなければ捨てて、いまの確定だけを見る
+            // （つなげない側に倒す）
+            const previous: unknown = message.previous;
             void this.deps.nameReadings?.record(
               fromUri(document.uri),
               message.kana,
-              message.committed
+              message.committed,
+              isImeTextPair(previous)
+                ? { kana: previous.kana, committed: previous.committed }
+                : undefined
             );
           }
           break;
@@ -4905,6 +4916,23 @@ function colorsFor(): Record<string, string> {
     colors[kind] = dark ? pair.dark : pair.light;
   }
   return colors;
+}
+
+/**
+ * 画面から届いたIMEの読みの組が、形と長さの合うものか（設計書6.42.2）。
+ * **画面から届く値を信用しない**——かなと確定の字が、空でない・上限以下の文字列であること
+ */
+function isImeTextPair(value: unknown): value is { kana: string; committed: string } {
+  if (typeof value !== "object" || value === null) return false;
+  const { kana, committed } = value as Record<string, unknown>;
+  return (
+    typeof kana === "string" &&
+    typeof committed === "string" &&
+    kana.length > 0 &&
+    committed.length > 0 &&
+    kana.length <= IME_TEXT_MAX &&
+    committed.length <= IME_TEXT_MAX
+  );
 }
 
 function createNonce(): string {
