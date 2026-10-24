@@ -1980,6 +1980,48 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     }, 0);
   });
 
+  /* ime-reading:start */
+  /**
+   * IMEで打った読みを拾う（設計書6.42.2）。MS-IME・Google 日本語入力・ATOK の
+   * どれでも、変換中の字（data）は「かなだけ」から「漢字まじり」へ変わる。
+   * **最後にかなだけだった字**が作者の打った読みである。
+   *
+   * **変換中は変数を覚えるだけにする**（設計書6.34.5。変換中の1字ごとに全文を
+   * 数え直して入力が重くなり、作者の依頼で外した過去がある）。全文を数える・
+   * 画面の要素に触る処理をここへ足さない。拡張機能へ知らせるのは、確定の
+   * ときに1回だけ。名前かどうかの引き当ては拡張機能の側（core/imeReading.ts）。
+   *
+   * 確定の字が空なら取り消し（Esc）なので知らせない。確定の知らせが字を
+   * 持たない環境では、最後に変換中だった字を確定とみる。
+   */
+  let imeKana = "";
+  let imeLast = "";
+  function imeReadingStart() {
+    imeKana = "";
+    imeLast = "";
+  }
+  function imeReadingUpdate(event) {
+    const data = event ? event.data : undefined;
+    if (typeof data !== "string") return;
+    imeLast = data;
+    if (/^[ぁ-ゖー]+$/.test(data)) imeKana = data;
+  }
+  function imeReadingEnd(event) {
+    const committed = event && typeof event.data === "string" ? event.data : imeLast;
+    const kana = imeKana;
+    imeKana = "";
+    imeLast = "";
+    if (!kana || !committed || committed === kana) return;
+    if (kana.length > 64 || committed.length > 64) return;
+    vscode.postMessage({ type: "imeReading", kana: kana, committed: committed });
+  }
+  for (const face of [write, compose]) {
+    face.addEventListener("compositionstart", imeReadingStart);
+    face.addEventListener("compositionupdate", imeReadingUpdate);
+    face.addEventListener("compositionend", imeReadingEnd);
+  }
+  /* ime-reading:end */
+
   /**
    * 打たれた本文を、そのまま文書へ返す。
    *

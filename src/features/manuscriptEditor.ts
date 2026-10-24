@@ -118,6 +118,7 @@ import {
   isReadingMemoLine,
 } from "../core/readAloud";
 import type { ReadingSpan } from "../core/readingDictionary";
+import { IME_TEXT_MAX, mergeReadingSpans } from "../core/imeReading";
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
 import { copyEmphasisFor } from "../core/postingCopyTargets";
@@ -1739,6 +1740,11 @@ type Incoming =
    */
   | { type: "readingDictionary"; action: "run" | "open" | "status"; text: string }
   /**
+   * 変換を1回確定した（設計書6.42.2）。`kana` は変換中に最後にかなだけだった字、
+   * `committed` は確定した字。**確定のときに1回だけ届く**（変換中の1字ごとには来ない）
+   */
+  | { type: "imeReading"; kana: string; committed: string }
+  /**
    * 「noteに貼ったときの見た目」の面を開いた・閉じた（設計書6.69）。
    *
    * **開いているあいだだけ組む。** 本文ぜんたいをHTMLへ組んで送る道は
@@ -1921,6 +1927,19 @@ export interface ManuscriptEditorDeps {
     run(filePath: string, text: string): Promise<void>;
     /** 一覧を見る・直す・消す */
     manage(filePath: string, text: string): Promise<void>;
+  };
+  /**
+   * 設定資料の名前の読み（設計書6.42.2）。
+   *
+   * **繋ぐのは `extension.ts` だけ**（読みの辞書と同じ理由）。省略できる形に
+   * してあるのは、この画面が名前の読みなしでも読み上げられるため。
+   * 作品に属さない原稿では、どれも何もしない。
+   */
+  nameReadings?: {
+    /** 読み上げに当てる、名前の読みの範囲（設定資料の読み、無ければIMEで打った読み） */
+    spans(filePath: string, text: string): Promise<ReadingSpan[]>;
+    /** 変換1回ぶんを控えへ足し、裁定どおりに設定資料の読みを埋める（失敗しても投げない） */
+    record(filePath: string, kana: string, committed: string): Promise<void>;
   };
   /**
    * ウィンドウの再読み込みをまたいで「この原稿の、この行へ飛ぶ」を覚える所
@@ -3055,12 +3074,30 @@ export class ManuscriptEditorProvider
             fromUri(document.uri),
             message.text
           );
+          /*
+            設定資料の名前の読み（設計書6.42.2）は**辞書のあと**に合わせる——
+            辞書は文脈つきで、その場所の読みを決めたものだから勝たせる。
+            作者のルビは `buildReadingPlan` が記法に掛かる範囲を使わないので、
+            どちらよりも勝つ。名前の読みが取れなくても読み上げは止めない
+          */
+          let names: ReadingSpan[] = [];
+          try {
+            names =
+              (await this.deps.nameReadings?.spans(fromUri(document.uri), message.text)) ?? [];
+          } catch (error) {
+            await this.logForDocument(
+              document,
+              `読み上げ：設定資料の名前の読みを使えませんでした（${
+                error instanceof Error ? error.message : String(error)
+              }）`
+            );
+          }
           await panel.webview.postMessage({
             type: "readingPlan",
             sentences: buildReadingPlan(
               message.text,
               notation,
-              dictionary?.spans ?? []
+              mergeReadingSpans(dictionary?.spans ?? [], names)
             ),
             // 画面が「自分が送った本文の計画か」を確かめるための目印
             textLength: message.text.length,
@@ -3095,6 +3132,28 @@ export class ManuscriptEditorProvider
           }
           break;
         }
+
+        case "imeReading":
+          /*
+            **画面から届く値を信用しない**——形と長さを見てから渡す。
+            **待たない**：名前を確定するたびに来るので、設定資料を読み書きする間、
+            ほかの知らせ（次の打鍵の送り）を止めない
+          */
+          if (
+            typeof message.kana === "string" &&
+            typeof message.committed === "string" &&
+            message.kana.length > 0 &&
+            message.committed.length > 0 &&
+            message.kana.length <= IME_TEXT_MAX &&
+            message.committed.length <= IME_TEXT_MAX
+          ) {
+            void this.deps.nameReadings?.record(
+              fromUri(document.uri),
+              message.kana,
+              message.committed
+            );
+          }
+          break;
 
         case "readingMark":
           /*

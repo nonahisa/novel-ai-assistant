@@ -1577,6 +1577,19 @@ export async function activate(
   }
 
   /**
+   * IMEの読みを引き当てるための名前の写しを捨てる（設計書6.42.2）。
+   * 写しは短い間しか持たないが、資料が変わったと分かったときは待たずに捨てる。
+   * **まだ一度も読み込んでいなければ、読み込まない**（写しも無いので捨てる物が無い）
+   */
+  let imeReadingsLoaded = false;
+  const forgetImeNames = (workId: string): void => {
+    if (!imeReadingsLoaded) return;
+    void import("./features/imeReadings.js").then((module) =>
+      module.invalidateImeNameCache(workId)
+    );
+  };
+
+  /**
    * 外で変わった資料を、画面へ映し直す（設計書5.4.9）。
    *
    * **読み直しの経路を1本にする。** 以前は知らせの3つのボタンが
@@ -1591,6 +1604,7 @@ export async function activate(
    */
   const reloadAfterExternalChange = async (work: WorkEntry): Promise<void> => {
     highlighter.invalidate();
+    forgetImeNames(work.id);
     treeProvider.refresh(work.id);
     // 開いていなければ何もしない（勝手に画面を開かない）
     await findOpenSettingsPanel(work.id)?.refreshFromDisk();
@@ -1832,6 +1846,53 @@ export async function activate(
           "./features/readingDictionary.js"
         );
         await manageReadingDictionary({ work, episodePath: filePath, text });
+      },
+    },
+    // 設定資料の名前の読み（設計書6.42.2）。IMEで打った読みを拾って控え、
+    // 裁定どおりに設定資料の読みを埋め、読み上げにも当てる。**打鍵の裏で動くので
+    // 知らせを出さない**——失敗は記録（ログ）だけへ残す
+    nameReadings: {
+      spans: async (filePath, text) => {
+        const work = workOfPath(registry, filePath);
+        if (!work) return [];
+        const { imeNameReadingSpans } = await import("./features/imeReadings.js");
+        imeReadingsLoaded = true;
+        const result = await imeNameReadingSpans(work, text);
+        if (result.problem) {
+          useLogFile(work.folderPath);
+          logLine(`読み上げ：IMEの読みの控えを使えませんでした（${result.problem}）`);
+        }
+        return result.spans;
+      },
+      record: async (filePath, kana, committed) => {
+        const work = workOfPath(registry, filePath);
+        if (!work) return;
+        try {
+          const { recordImeComposition } = await import("./features/imeReadings.js");
+          imeReadingsLoaded = true;
+          const result = await recordImeComposition(work, kana, committed);
+          if (!result.capture) return;
+          useLogFile(work.folderPath);
+          logLine(
+            `IMEの読み：「${result.capture.surface}」を「${result.capture.reading}」と打ちました` +
+              (result.filled.length > 0
+                ? `。設定資料の読みが空だったので埋めました（${result.filled.join("、")}）`
+                : "")
+          );
+          for (const problem of result.problems) logLine(`IMEの読み：${problem}`);
+          if (result.filled.length > 0) {
+            // 開いている設定資料パネルを読み直す。読み直さないと、パネルが持つ
+            // 読み込んだときの控えが古いまま残り、次の保存が「外で書き換えられた」で止まる
+            await findOpenSettingsPanel(work.id)?.refreshFromDisk();
+          }
+        } catch (error) {
+          useLogFile(work.folderPath);
+          logLine(
+            `IMEの読み：控えへ足せませんでした（${
+              error instanceof Error ? error.message : String(error)
+            }）`
+          );
+        }
       },
     },
     // シーンメモ（設計書6.40.4）。**繋ぐのはここだけ**——原稿エディタが
@@ -2308,6 +2369,7 @@ export async function activate(
   // 分けても、本文の用語ハイライトは古い人物を指したままだった
   setSettingsChangeObserver((work) => {
     highlighter.invalidate();
+    forgetImeNames(work.id);
     // 開いている原稿エディターへも用語の位置と持ち主を送り直す（設計書6.5.8）。
     // invalidate() が引き直すのは素のテキストエディターの色だけで、原稿エディターは
     // 前に送った持ち主を持ち続け、別名を分けても「設定資料を見る」が古い人物を出した。
