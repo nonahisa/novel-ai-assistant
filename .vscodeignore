@@ -75,3 +75,6 @@ _mspages.cjs
 # 2026-09-26、測定で dist から起こした回の `last-send.json` が 0.89.14 の梱包へ入り、
 # 出口の許可リスト（releaseSupport）が止めた。作者ごとの時刻の台帳なので配布物に入れない
 dist/local-ai/**
+# yomiyasu（README・Release ノートの推敲のスキル）の検査の記録。原文と最終稿の全文が入るので
+# 配布物に入れない（2026-10-25、0.111.7 の梱包へ入り、出口の許可リスト〈releaseSupport〉が止めた）
+.yomiyasu/**
