@@ -3,6 +3,7 @@ import {
   objectValue,
   optionalBoolean,
   optionalString,
+  optionalStringArray,
   requireNonEmptyString,
 } from "./jsonValidation";
 
@@ -51,6 +52,11 @@ export const OTHER_CUSTOM_FIELD_KINDS: readonly OtherCustomFieldKind[] = [
   "world",
 ];
 
+const CUSTOM_FIELD_KINDS: readonly CustomFieldKind[] = [
+  "character",
+  ...OTHER_CUSTOM_FIELD_KINDS,
+];
+
 export interface CustomFieldSet {
   schemaVersion: string;
   /**
@@ -66,6 +72,19 @@ export interface CustomFieldSet {
    * 人物だけの作品では、これまでと1文字も違わないファイルになる。
    */
   byKind: Partial<Record<OtherCustomFieldKind, CustomFieldDefinition[]>>;
+  /**
+   * 外した項目のキー（2026-10-24〜）。種類ごとに持つ。
+   *
+   * **自動の採番がこのキーを二度と振らないようにするためだけの記録。**
+   * 外しても値は各レコードに残る（設計書5.2）ので、同じキーを新しい項目へ
+   * 振ると、外した項目の値が新しい項目の値として現れる。
+   *
+   * 定義（`fields`・`byKind`）と別の箱に置くのは、`withFieldsFor` が
+   * 定義の空になった種類を `byKind` ごと消すため。同じ箱だと、
+   * 種類の項目をすべて外したときに記録まで一緒に消える。
+   * 作者が手で同じキーの定義を戻しても拒まない（戻せば値も戻る）。
+   */
+  retiredKeys: Partial<Record<CustomFieldKind, string[]>>;
 }
 
 export const CUSTOM_FIELD_SCHEMA_VERSION = "0.1";
@@ -94,7 +113,12 @@ const RESERVED_KEYS = new Set([
 ]);
 
 export function emptyCustomFieldSet(): CustomFieldSet {
-  return { schemaVersion: CUSTOM_FIELD_SCHEMA_VERSION, fields: [], byKind: {} };
+  return {
+    schemaVersion: CUSTOM_FIELD_SCHEMA_VERSION,
+    fields: [],
+    byKind: {},
+    retiredKeys: {},
+  };
 }
 
 /** その種類の項目の定義 */
@@ -122,6 +146,36 @@ export function withFieldsFor(
   return { ...set, byKind };
 }
 
+/** その種類で外したキー。無ければ空 */
+export function retiredKeysFor(
+  set: CustomFieldSet,
+  kind: CustomFieldKind
+): string[] {
+  return set.retiredKeys[kind] ?? [];
+}
+
+/**
+ * その種類から1項目を外し、キーを「外したもの」として覚える。
+ *
+ * 値は消さない（各レコードに残る）。だからこそキーを覚えておき、
+ * 次に足す項目へ同じキーを振らない。
+ */
+export function withFieldRemoved(
+  set: CustomFieldSet,
+  kind: CustomFieldKind,
+  key: string
+): CustomFieldSet {
+  const remaining = fieldsFor(set, kind).filter((field) => field.key !== key);
+  const retired = retiredKeysFor(set, kind);
+  return {
+    ...withFieldsFor(set, kind, remaining),
+    retiredKeys: {
+      ...set.retiredKeys,
+      [kind]: retired.includes(key) ? retired : [...retired, key],
+    },
+  };
+}
+
 /**
  * 保存する形。**中身の無い種類は書かない**——人物だけの作品では、
  * `byKind` を持たないこれまでの形のまま保たれる。
@@ -130,6 +184,7 @@ export function customFieldSetToJson(set: CustomFieldSet): {
   schemaVersion: string;
   fields: CustomFieldDefinition[];
   byKind?: Partial<Record<OtherCustomFieldKind, CustomFieldDefinition[]>>;
+  retiredKeys?: Partial<Record<CustomFieldKind, string[]>>;
 } {
   const byKind: Partial<Record<OtherCustomFieldKind, CustomFieldDefinition[]>> =
     {};
@@ -137,10 +192,18 @@ export function customFieldSetToJson(set: CustomFieldSet): {
     const fields = set.byKind[kind];
     if (fields && fields.length > 0) byKind[kind] = fields;
   }
+  // 外したキーも中身のある種類だけ書く。何も外していない作品では、
+  // これまでと1文字も違わないファイルのまま保つ
+  const retiredKeys: Partial<Record<CustomFieldKind, string[]>> = {};
+  for (const kind of CUSTOM_FIELD_KINDS) {
+    const keys = set.retiredKeys[kind];
+    if (keys && keys.length > 0) retiredKeys[kind] = keys;
+  }
   return {
     schemaVersion: CUSTOM_FIELD_SCHEMA_VERSION,
     fields: set.fields,
     ...(Object.keys(byKind).length > 0 ? { byKind } : {}),
+    ...(Object.keys(retiredKeys).length > 0 ? { retiredKeys } : {}),
   };
 }
 
@@ -150,15 +213,27 @@ export function customFieldSetToJson(set: CustomFieldSet): {
  * 日本語の見出しをそのままキーにするとJSONが読みづらく、
  * 見出しを直したときにキーまで変わって値が失われる。
  * 連番のキーにして、見出しは別に持つ。
+ *
+ * **一度使ったキーは二度と振らない。** 残っている定義だけを見ると、
+ * いちばん後ろの項目を外してから足したときに同じキーが出て、
+ * 各レコードに残っている外した項目の値が新しい項目に化けて現れる。
+ * `usedKeys` には、外したキーの記録（`retiredKeysFor`）と、
+ * その種類のレコードに値として残っているキーを渡す——後者は、
+ * 記録を持つ前の版で外した項目を拾うため。
  */
-export function nextCustomFieldKey(existing: CustomFieldDefinition[]): string {
+export function nextCustomFieldKey(
+  existing: CustomFieldDefinition[],
+  usedKeys: Iterable<string> = []
+): string {
   let max = 0;
-  for (const field of existing) {
-    const matched = field.key.match(/^field_(\d+)$/);
-    if (!matched) continue;
+  const consider = (key: string): void => {
+    const matched = key.match(/^field_(\d+)$/);
+    if (!matched) return;
     const value = parseInt(matched[1], 10);
     if (value > max) max = value;
-  }
+  };
+  for (const field of existing) consider(field.key);
+  for (const key of usedKeys) consider(key);
   return `field_${String(max + 1).padStart(3, "0")}`;
 }
 
@@ -203,7 +278,28 @@ export function parseCustomFieldSet(raw: unknown): CustomFieldSet {
     }
   }
 
-  return { schemaVersion: CUSTOM_FIELD_SCHEMA_VERSION, fields, byKind };
+  const retiredKeys: CustomFieldSet["retiredKeys"] = {};
+  if (value.retiredKeys !== undefined) {
+    const kinds = objectValue(value.retiredKeys, "retiredKeys");
+    for (const [kind, keys] of Object.entries(kinds)) {
+      // 知らない種類は止める（byKind と同じ理由。黙って捨てると次の保存で
+      // 記録が消え、外したキーがまた振られる）
+      if (!(CUSTOM_FIELD_KINDS as readonly string[]).includes(kind)) {
+        invalid(`retiredKeys（種類「${kind}」は分かりません）`);
+      }
+      if (!Array.isArray(keys)) invalid(`retiredKeys.${kind}`);
+      optionalStringArray(keys, `retiredKeys.${kind}`);
+      const unique = [...new Set(keys as string[])];
+      if (unique.length > 0) retiredKeys[kind as CustomFieldKind] = unique;
+    }
+  }
+
+  return {
+    schemaVersion: CUSTOM_FIELD_SCHEMA_VERSION,
+    fields,
+    byKind,
+    retiredKeys,
+  };
 }
 
 /**

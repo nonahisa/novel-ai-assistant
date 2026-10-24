@@ -572,7 +572,7 @@ export function schemaReadme(workTitle: string): string {
 | \`設定/organizations/\` | 組織 | 1件1ファイル |
 | \`設定/locations/\` | 場所 | 1件1ファイル |
 | \`設定/world/\` | 世界観（世界の法則・社会・文化・用語） | 1件1ファイル |
-| \`設定/custom_fields.json\` | 作者が定義した人物の追加項目 | 1ファイル |
+| \`設定/custom_fields.json\` | 作者が定義した追加項目（人物は \`fields\`、ほかの種類は \`byKind\`。外した項目のキーは \`retiredKeys\`） | 1ファイル |
 
 ファイル名は \`char_001_月島灯.json\` の形式です。**先頭のIDと中身の \`id\` を必ず一致させてください。**
 

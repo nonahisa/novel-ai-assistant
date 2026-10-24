@@ -1,10 +1,14 @@
 import { describe, expect, test } from "vitest";
 import {
   MAX_CUSTOM_FIELDS,
+  customFieldSetToJson,
+  fieldsFor,
   nextCustomFieldKey,
   parseCustomFieldSet,
   parseCustomFieldValues,
+  retiredKeysFor,
   validateNewField,
+  withFieldRemoved,
   type CustomFieldDefinition,
 } from "../../../src/models/customField";
 import {
@@ -38,10 +42,115 @@ describe("項目の定義", () => {
     );
   });
 
-  test("外したあとに足しても、キーは使い回さない", () => {
-    // 使い回すと、残っている旧項目の値が別の項目に化けて現れる
+  test("残っている定義の最大番号より後ろを振る", () => {
     const remaining = [definition("field_003", "身長")];
     expect(nextCustomFieldKey(remaining)).toBe("field_004");
+  });
+
+  test("いちばん後ろの項目を外してから足しても、外したキーを使い回さない", () => {
+    // 使い回すと、各人物に残っている旧項目の値が、新しい項目の値として現れる
+    // （作者の「誕生日」が「好物」の欄に紛れ込む）
+    const before = parseCustomFieldSet({
+      fields: [
+        { key: "field_001", label: "身長" },
+        { key: "field_002", label: "誕生日" },
+      ],
+    });
+    const removed = withFieldRemoved(before, "character", "field_002");
+    expect(fieldsFor(removed, "character").map((field) => field.key)).toEqual([
+      "field_001",
+    ]);
+    expect(
+      nextCustomFieldKey(
+        fieldsFor(removed, "character"),
+        retiredKeysFor(removed, "character")
+      )
+    ).toBe("field_003");
+  });
+
+  test("外したキーの記録は、保存して読み直しても残る", () => {
+    const removed = withFieldRemoved(
+      parseCustomFieldSet({ fields: [{ key: "field_001", label: "誕生日" }] }),
+      "character",
+      "field_001"
+    );
+    const reloaded = parseCustomFieldSet(
+      JSON.parse(JSON.stringify(customFieldSetToJson(removed)))
+    );
+    // 定義が空になっても、外したキーは忘れない
+    expect(fieldsFor(reloaded, "character")).toEqual([]);
+    expect(retiredKeysFor(reloaded, "character")).toEqual(["field_001"]);
+    expect(
+      nextCustomFieldKey(
+        fieldsFor(reloaded, "character"),
+        retiredKeysFor(reloaded, "character")
+      )
+    ).toBe("field_002");
+  });
+
+  test("修正前に外した項目も、レコードに残っている値のキーから避ける", () => {
+    // 修正前の版で外した項目は custom_fields.json に記録が無い。
+    // 値は人物のファイルに残っているので、そのキーも使ったものとして数える
+    expect(
+      nextCustomFieldKey([definition("field_001", "身長")], ["field_002", "メモ"])
+    ).toBe("field_003");
+  });
+
+  test("外したキーの記録は種類ごとに持ち、ほかの種類の採番に響かない", () => {
+    const removed = withFieldRemoved(
+      parseCustomFieldSet({
+        fields: [],
+        byKind: { location: [{ key: "field_001", label: "気候" }] },
+      }),
+      "location",
+      "field_001"
+    );
+    expect(retiredKeysFor(removed, "location")).toEqual(["field_001"]);
+    expect(retiredKeysFor(removed, "character")).toEqual([]);
+    expect(customFieldSetToJson(removed)).toEqual({
+      schemaVersion: "0.1",
+      fields: [],
+      retiredKeys: { location: ["field_001"] },
+    });
+  });
+
+  test("外したことの無い作品では、ファイルの形を変えない", () => {
+    // 新しい欄は中身のあるときだけ書く。何も外していない作品で
+    // 保存のたびに差分が出ると、同期のたびに作者を惑わせる
+    const set = parseCustomFieldSet({
+      fields: [{ key: "field_001", label: "誕生日" }],
+    });
+    expect(Object.keys(customFieldSetToJson(set))).toEqual([
+      "schemaVersion",
+      "fields",
+    ]);
+  });
+
+  test("壊れた外したキーの記録は直さずに止める", () => {
+    expect(() =>
+      parseCustomFieldSet({ fields: [], retiredKeys: ["field_001"] })
+    ).toThrow();
+    expect(() =>
+      parseCustomFieldSet({ fields: [], retiredKeys: { character: "field_001" } })
+    ).toThrow();
+    expect(() =>
+      parseCustomFieldSet({ fields: [], retiredKeys: { character: [1] } })
+    ).toThrow();
+    expect(() =>
+      parseCustomFieldSet({ fields: [], retiredKeys: { charcter: ["field_001"] } })
+    ).toThrow();
+  });
+
+  test("作者が手で定義を戻したときは、外したキーと重なっても拒まない", () => {
+    // 記録は自動の採番を止めるためだけのもの。同じキーの定義を戻せば値も戻る
+    const set = parseCustomFieldSet({
+      fields: [{ key: "field_001", label: "誕生日" }],
+      retiredKeys: { character: ["field_001"] },
+    });
+    expect(fieldsFor(set, "character")).toHaveLength(1);
+    expect(nextCustomFieldKey(fieldsFor(set, "character"), retiredKeysFor(set, "character"))).toBe(
+      "field_002"
+    );
   });
 
   test("同じ名前は追加させない", () => {

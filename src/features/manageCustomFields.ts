@@ -4,10 +4,19 @@ import {
   CustomFieldStore,
   CustomFieldStoreError,
 } from "../core/customFieldStore";
+import { CharacterStore } from "../core/characterStore";
+import {
+  createAbilityStore,
+  createLocationStore,
+  createOrganizationStore,
+  createWorldStore,
+} from "../core/abilityStore";
 import {
   fieldsFor,
   nextCustomFieldKey,
+  retiredKeysFor,
   validateNewField,
+  withFieldRemoved,
   withFieldsFor,
   type CustomFieldDefinition,
   type CustomFieldKind,
@@ -29,7 +38,8 @@ import { askText, cancelItem, isCancelItem } from "../views/dialogs";
  *
  * 外すときは値を消さない。項目名を付け替えている途中かもしれないし、
  * 「消したら値まで消えた」は作者に見えない損失になる。
- * 定義を戻せば値も戻る。
+ * 同じキーの定義を custom_fields.json へ手で戻せば値も戻る（ここで足し直すと
+ * 新しいキーになる。外したキーを使い回すと値が別の項目に化けるため）。
  */
 
 /**
@@ -78,15 +88,30 @@ export async function manageCustomFields(work: WorkEntry): Promise<void> {
   const picked = await pickAction(fields, choice);
   if (!picked) return;
 
-  const updated =
-    picked === "add"
-      ? await addField(fields, choice)
-      : await removeField(fields);
-  if (!updated) return;
+  let next: CustomFieldSet;
+  if (picked === "add") {
+    // **一度使ったキーを二度と振らないため、値として残っているキーも集める。**
+    // 外したキーの記録（retiredKeys）を持つ前の版で外した項目は、
+    // レコードの値にしか痕跡が無い
+    const used = await collectUsedKeys(work, choice);
+    if (!used) return;
+    const updated = await addField(fields, choice, [
+      ...retiredKeysFor(set, choice.kind),
+      ...used,
+    ]);
+    if (!updated) return;
+    // 選んだ種類の定義だけを差し替える。ほかの種類の定義には触らない
+    next = withFieldsFor(set, choice.kind, updated);
+  } else {
+    const key = await pickFieldToRemove(fields);
+    if (key === undefined) return;
+    // 外したキーを覚える。値は各レコードに残るので、同じキーを
+    // 次の項目へ振ると、その値が新しい項目に化けて現れる
+    next = withFieldRemoved(set, choice.kind, key);
+  }
 
   try {
-    // 選んだ種類の定義だけを差し替える。ほかの種類の定義には触らない
-    await store.save(withFieldsFor(set, choice.kind, updated));
+    await store.save(next);
   } catch (error) {
     const message =
       error instanceof CustomFieldStoreError
@@ -101,7 +126,7 @@ export async function manageCustomFields(work: WorkEntry): Promise<void> {
   void vscode.window.showInformationMessage(
     picked === "add"
       ? `${choice.label}に項目を追加しました。設定資料を開くと、${choice.scope}に入力欄が増えています。`
-      : "項目を外しました。入力済みの内容は消えていません（項目を戻せば再び表示されます）。"
+      : "項目を外しました。入力済みの内容は消えていません（各資料のファイルに残っています）。"
   );
 }
 
@@ -174,9 +199,76 @@ async function pickAction(
   return "action" in picked ? picked.action : undefined;
 }
 
+/**
+ * その種類のレコードに値として残っている追加項目のキー。
+ *
+ * **読めないレコードがあれば止める**（undefined を返す）。そのレコードに
+ * どのキーの値が残っているか分からないまま番号を振ると、外した項目の
+ * 値を新しい項目へ紛れ込ませるおそれがある。壊れたJSONは直さない。
+ */
+async function collectUsedKeys(
+  work: WorkEntry,
+  choice: KindChoice
+): Promise<Set<string> | undefined> {
+  let loaded: LoadedRecords;
+  try {
+    loaded = await loadRecordsOf(work, choice.kind);
+  } catch (error) {
+    const message = `${choice.label}の資料を読めませんでした: ${errorMessage(error)}`;
+    useLogFile(work.folderPath);
+    logFailure("customFields.scanValues", { work: work.title, message });
+    void vscode.window.showErrorMessage(message);
+    return undefined;
+  }
+  if (loaded.errors.length > 0) {
+    const files = loaded.errors.map((entry) => entry.file).join("、");
+    useLogFile(work.folderPath);
+    logFailure("customFields.scanValues", {
+      work: work.title,
+      errors: loaded.errors,
+    });
+    void vscode.window.showErrorMessage(
+      `${choice.label}の資料に読めないファイルがあるため、項目を足せません（${files}）。` +
+        "外した項目の値と新しい項目が混ざらないよう、ファイルを直してから、もう一度お試しください。"
+    );
+    return undefined;
+  }
+  const keys = new Set<string>();
+  for (const record of loaded.records) {
+    for (const key of Object.keys(record.customFields ?? {})) keys.add(key);
+  }
+  return keys;
+}
+
+interface LoadedRecords {
+  records: Array<{ customFields?: Record<string, string> }>;
+  errors: Array<{ file: string; message: string }>;
+}
+
+async function loadRecordsOf(
+  work: WorkEntry,
+  kind: CustomFieldKind
+): Promise<LoadedRecords> {
+  switch (kind) {
+    case "character": {
+      const { characters, errors } = await new CharacterStore(work).loadAll();
+      return { records: characters, errors };
+    }
+    case "ability":
+      return createAbilityStore(work).loadAll();
+    case "organization":
+      return createOrganizationStore(work).loadAll();
+    case "location":
+      return createLocationStore(work).loadAll();
+    case "world":
+      return createWorldStore(work).loadAll();
+  }
+}
+
 async function addField(
   fields: CustomFieldDefinition[],
-  choice: KindChoice
+  choice: KindChoice,
+  usedKeys: string[]
 ): Promise<CustomFieldDefinition[] | undefined> {
   const label = await askText({
     title: `${choice.label}に追加する項目の名前`,
@@ -228,7 +320,7 @@ async function addField(
   return [
     ...fields,
     {
-      key: nextCustomFieldKey(fields),
+      key: nextCustomFieldKey(fields, usedKeys),
       label: trimmedLabel,
       hint: hint.trim(),
       multiline: length.multiline,
@@ -236,9 +328,9 @@ async function addField(
   ];
 }
 
-async function removeField(
+async function pickFieldToRemove(
   fields: CustomFieldDefinition[]
-): Promise<CustomFieldDefinition[] | undefined> {
+): Promise<string | undefined> {
   const picked = await vscode.window.showQuickPick(
     [
       ...fields.map((field) => ({
@@ -256,7 +348,7 @@ async function removeField(
   );
   if (!picked || !("key" in picked)) return undefined;
 
-  return fields.filter((field) => field.key !== picked.key);
+  return picked.key;
 }
 
 function errorMessage(error: unknown): string {
