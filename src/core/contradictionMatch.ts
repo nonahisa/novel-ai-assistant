@@ -75,10 +75,27 @@ export interface TravelTime {
   minDays: number;
 }
 
+/**
+ * 設定資料から分かる「死んだあとも心が別の体で出てくる人物」の印（2026-10-24）。
+ *
+ * 作者が付けた心と体の記録（宿り、`Character.dwellings`。設計書6.5.13）の心の側から
+ * 組む（`factsFromRecords.ts` の `afterlifeMarksFromCharacters`）。遷移の表
+ * （`transitions`）は第5段まで製品の道で空なので、幽霊・転生・憑依の除外は
+ * いまはこの印だけが効く（作者の裁定「設定資料から除く」）。
+ */
+export interface AfterlifeMark {
+  /** 人物の id（事実の `subject` と同じ） */
+  subject: string;
+  /** その宿りが何話までか。無ければ今も続いている */
+  untilChapter?: number;
+}
+
 export interface MatchInput {
   facts: readonly StoryFact[];
   /** 6.88.5。「死亡後の登場」の除外と、組の変化が正当かの判断に使う */
   transitions?: readonly IdentityTransition[];
+  /** 設定資料の宿りの印。「死亡後の登場」の除外にだけ使う */
+  afterlives?: readonly AfterlifeMark[];
   /** 場面ごとの肉体・人格・身分の組（6.88.5。第2段） */
   scenes?: readonly SceneIdentity[];
   travelTimes?: readonly TravelTime[];
@@ -144,7 +161,11 @@ export function findContradictionCandidates(
   const all = [
     ...findIntervalConflicts(intervals),
     ...findEventImpliedConflicts(facts, intervals),
-    ...findPostDeathAppearances(facts, input.transitions ?? []),
+    ...findPostDeathAppearances(
+      facts,
+      input.transitions ?? [],
+      input.afterlives ?? []
+    ),
     ...findKnowledgeViolations(facts),
     ...findTravelImpossibilities(facts, input.travelTimes ?? []),
     ...findIdentityDrift(input.scenes ?? [], input.transitions ?? []),
@@ -297,12 +318,20 @@ export function findEventImpliedConflicts(
  * 回想（`modality: thought`）は外す。幽霊・転生・憑依の遷移が記録されて
  * いるなら、出てくるのは矛盾ではないのでその人物ごと外す。
  *
+ * **設定資料に宿り（心と体の記録）がある人物も、その人物ごと外す**（`afterlives`。
+ * 作者の裁定 2026-10-24「設定資料から除く」）。死んだ人の心が別の体で出てくる
+ * 作品では、名前での登場は矛盾ではない。宿りの記録は作者だけが付けるので、
+ * 印のある人物だけを外し、印の無い人物はいまのまま出す（見逃しを増やさない）。
+ * ただし宿りが死んだ話より前に終わっていれば（生きているあいだの憑依）、
+ * 死後の登場は宿りでは説明できないので外さない。
+ *
  * **出すのは死亡後の最初の1件だけ。** そのあと何十回出てこようと、
  * 作者が直すべき場所は同じ1か所である。
  */
 export function findPostDeathAppearances(
   facts: readonly StoryFact[],
-  transitions: readonly IdentityTransition[] = []
+  transitions: readonly IdentityTransition[] = [],
+  afterlives: readonly AfterlifeMark[] = []
 ): ContradictionCandidate[] {
   const ordered = orderFacts(facts);
 
@@ -321,6 +350,20 @@ export function findPostDeathAppearances(
     if (!death) continue;
     if (compareFactPosition(positionOf(death), transition.at) < 0) {
       revived.add(transition.subject);
+    }
+  }
+  for (const mark of afterlives) {
+    const death = deaths.get(mark.subject);
+    if (!death) continue;
+    const deathChapter = positionOf(death).chapter;
+    // 終わりの話が分からない／死んだ話が分からないときは、続いているとみなす
+    // （作者が「この人の心は別の体にいる」と記録した以上、話数で縛らない）
+    if (
+      mark.untilChapter === undefined ||
+      deathChapter === null ||
+      mark.untilChapter >= deathChapter
+    ) {
+      revived.add(mark.subject);
     }
   }
 

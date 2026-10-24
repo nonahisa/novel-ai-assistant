@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildAttributeIntervals } from "../../../src/core/attributeIntervals";
 import { findIntervalConflicts } from "../../../src/core/contradictionMatch";
-import { factsFromCharacters } from "../../../src/core/factsFromRecords";
+import {
+  afterlifeMarksFromCharacters,
+  factsFromCharacters,
+} from "../../../src/core/factsFromRecords";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import type { RecordChange } from "../../../src/models/jsonValidation";
 
@@ -191,5 +194,29 @@ describe("組んだ事実を区間の照合へ通す", () => {
       }),
     ]);
     expect(findIntervalConflicts(buildAttributeIntervals(facts))).toEqual([]);
+  });
+});
+
+describe("心と体の記録（宿り）から、死後に戻る人物の印を組む", () => {
+  it("心の側の人物（dwellings を持つ側）に印を付け、話数の終わりも運ぶ", () => {
+    const marks = afterlifeMarksFromCharacters([
+      character({
+        ...emptyCharacter("char_001", "三門 太志"),
+        dwellings: [
+          { body: "密倉 文佳", fromChapter: 4 },
+          { body: "別の体", fromChapter: 1, untilChapter: 2 },
+        ],
+      }),
+      // 体の側は記録を持たない。体の持ち主は死後に戻る人物ではないので印を付けない
+      character({ ...emptyCharacter("char_002", "密倉 文佳") }),
+    ]);
+    expect(marks).toEqual([
+      { subject: "char_001", untilChapter: undefined },
+      { subject: "char_001", untilChapter: 2 },
+    ]);
+  });
+
+  it("宿りの無い人物には印を付けない", () => {
+    expect(afterlifeMarksFromCharacters([character()])).toEqual([]);
   });
 });

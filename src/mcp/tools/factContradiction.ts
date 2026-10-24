@@ -9,7 +9,10 @@ import {
   linesAround,
   type KnownCharacterTable,
 } from "../../core/factContradiction";
-import { factsFromCharacters } from "../../core/factsFromRecords";
+import {
+  afterlifeMarksFromCharacters,
+  factsFromCharacters,
+} from "../../core/factsFromRecords";
 import {
   buildFactContradictionIssue,
   candidateSidesOf,
@@ -24,6 +27,7 @@ import {
 import {
   filterAllowed,
   findContradictionCandidates,
+  type AfterlifeMark,
 } from "../../core/contradictionMatch";
 import {
   describeStoryFactRejections,
@@ -114,6 +118,8 @@ interface FactWorkContext {
   table: KnownCharacterTable;
   /** 既にある人物レコードから組んだ事実（設計書6.88.5の第2段） */
   recordFacts: StoryFact[];
+  /** 設定資料の宿り（心と体の記録）の印。「死亡後の登場」から外す人物（製品と同じ） */
+  afterlives: AfterlifeMark[];
   chunks: Array<{ chunkId: string; chunk: Chunk; chapterLabel: string }>;
   /** 内訳から話数が引けないときの落とし先 */
   chapterByFile: Map<string, number | null>;
@@ -189,6 +195,7 @@ function loadFactWork(input: FactContradictionInput): FactWorkContext {
   return {
     table,
     recordFacts: factsFromCharacters(characters),
+    afterlives: afterlifeMarksFromCharacters(characters),
     // `chunkIndex` は**切り終えた並びの何番目か**（`selectChunks` と同じ数え方）
     chunks: selectFrom(chunks, input.chunkIndex),
     chapterByFile,
@@ -478,7 +485,13 @@ export async function factContradictionRun(
   /* ── 第2・3段：機械照合（**AIを使わない**。設計書6.88.6）───── */
   const allFacts = [...facts, ...context.recordFacts];
   const candidates = filterAllowed(
-    findContradictionCandidates({ facts: allFacts, transitions: [], scenes: [] }),
+    findContradictionCandidates({
+      facts: allFacts,
+      transitions: [],
+      scenes: [],
+      // 遷移の表は第5段まで空なので、幽霊・転生・憑依は設定資料の宿りで外す（製品と同じ）
+      afterlives: context.afterlives,
+    }),
     // 容認リスト（6.88.8）の保存は第5段の残り。いまは何も抑えない
     []
   );

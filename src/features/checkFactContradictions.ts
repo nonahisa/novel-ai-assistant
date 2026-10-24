@@ -32,7 +32,10 @@ import {
 } from "./rateLimitRetry";
 import { CharacterStore } from "../core/characterStore";
 import { readTextFile } from "../core/textFile";
-import { factsFromCharacters } from "../core/factsFromRecords";
+import {
+  afterlifeMarksFromCharacters,
+  factsFromCharacters,
+} from "../core/factsFromRecords";
 import {
   filterAllowed,
   findContradictionCandidates,
@@ -222,6 +225,10 @@ export async function checkFactContradictions(
    * 「照合に使った数」と「報告した数」が静かに食い違う余地ができる。
    */
   const recordFacts = factsFromCharacters(characters);
+  // 心と体の記録（宿り）がある人物は「死亡後の登場」から外す（作者の裁定
+  // 2026-10-24「設定資料から除く」）。遷移の表は第5段まで空なので、幽霊・転生・
+  // 憑依の除外はいまはこれだけが効く
+  const afterlives = afterlifeMarksFromCharacters(characters);
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする。**
   // 見込みの定数を置くと、プロンプトの改訂に置いていかれて必ず追い越される
@@ -626,12 +633,14 @@ export async function checkFactContradictions(
       //
       // 既にある人物レコードから組んだ事実も混ぜる（6.88.5の第2段）。
       // 遷移・場面は第5段以降で供給するので、いまは空で呼ぶ。
+      // その代わり、設定資料の宿りの印で幽霊・転生・憑依を外す（上の afterlives）
       const allFacts = [...facts, ...recordFacts];
       candidates = filterAllowed(
         findContradictionCandidates({
           facts: allFacts,
           transitions: [],
           scenes: [],
+          afterlives,
         }),
         // 容認リスト（6.88.8）の保存は第5段。いまは何も抑えない
         []

@@ -6,6 +6,7 @@ import type { FactKind, StoryFact } from "../models/storyFact";
 // この1行のために丸ごと `vscode` 依存になる（`mcpReach.test.ts`）
 import { CHARACTER_FIELD_LABELS } from "./characterFieldLabels";
 import { CHARACTER_AS_OF_FIELDS } from "./contradictionMaterial";
+import type { AfterlifeMark } from "./contradictionMatch";
 
 /**
  * 既にある設定資料から「事実」を組む（設計書6.88.5・6.88.6の第2段）。
@@ -77,6 +78,28 @@ export function factsFromCharacters(
     facts.push(...factsFromCharacter(character));
   }
   return facts;
+}
+
+/**
+ * 心と体の記録（宿り。設計書6.5.13）から、死んだあとも心が別の体で出てくる
+ * 人物の印を組む（矛盾検知「死亡後の登場」の除外。作者の裁定 2026-10-24）。
+ *
+ * **心の側（`dwellings` を持つ人物）にだけ付ける。** 体の持ち主は生きていて、
+ * 中に別の心がいるだけなので、その人の死後の登場を外す理由にならない。
+ * 幽霊・転生・憑依の区別は資料に無い（宿りは「どの心がどの体にいるか」だけ）
+ * ので分けない——どれも、死んだ人の名前で事実が出てくる理由になる。
+ * 記録は読むだけで書き換えない（宿りは作者だけが付け外しする欄）。
+ */
+export function afterlifeMarksFromCharacters(
+  characters: readonly Character[]
+): AfterlifeMark[] {
+  const marks: AfterlifeMark[] = [];
+  for (const character of characters) {
+    for (const dwelling of character.dwellings ?? []) {
+      marks.push({ subject: character.id, untilChapter: dwelling.untilChapter });
+    }
+  }
+  return marks;
 }
 
 function factsFromCharacter(character: Character): StoryFact[] {

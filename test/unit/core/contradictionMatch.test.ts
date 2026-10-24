@@ -350,6 +350,66 @@ describe("死亡後の登場", () => {
     ).toEqual([]);
   });
 
+  /*
+    **製品の道では遷移の表（transitions）が空のまま渡る**（第5段で供給する予定）。
+    そのため上の「幽霊の遷移」の除外が製品では効かず、憑依・転生の作品で
+    誤検出になりえた（2026-10-24 の文書の整理で見つかった）。作者の裁定は
+    「設定資料から除く」——心と体の記録（宿り。設計書6.5.13）がある人物は出さない。
+  */
+  describe("設定資料の心と体の記録（宿り）", () => {
+    const appearance = fact({
+      id: "a1",
+      subject: "char_009",
+      chapter: 6,
+      predicate: "所在",
+      value: "教室",
+      storyTime: { day: 12, part: "朝" },
+    });
+
+    it("宿りの記録がある人物は、遷移の表が空でも候補にしない", () => {
+      expect(
+        findPostDeathAppearances([death, appearance], [], [{ subject: "char_009" }])
+      ).toEqual([]);
+      // 入口（製品が呼ぶ関数）からも同じく外れる
+      expect(
+        findContradictionCandidates({
+          facts: [death, appearance],
+          transitions: [],
+          scenes: [],
+          afterlives: [{ subject: "char_009" }],
+        }).filter((candidate) => candidate.predicate === "死亡")
+      ).toEqual([]);
+    });
+
+    it("印の無い人物は、いまのまま候補にする（見逃しを増やさない）", () => {
+      expect(
+        findPostDeathAppearances([death, appearance], [], [{ subject: "char_010" }])
+      ).toHaveLength(1);
+    });
+
+    it("宿りが死ぬ前の話で終わっていれば、死後の登場として候補にする", () => {
+      // 第2〜3話だけ別の体にいた（生きているあいだの憑依）。第5話で死んだあと
+      // 出てくるのは、宿りでは説明できない
+      expect(
+        findPostDeathAppearances(
+          [death, appearance],
+          [],
+          [{ subject: "char_009", untilChapter: 3 }]
+        )
+      ).toHaveLength(1);
+    });
+
+    it("宿りが死んだ話以降も続いていれば候補にしない", () => {
+      expect(
+        findPostDeathAppearances(
+          [death, appearance],
+          [],
+          [{ subject: "char_009", untilChapter: 5 }]
+        )
+      ).toEqual([]);
+    });
+  });
+
   it("死ぬ前の事実は候補にしない", () => {
     const before = fact({
       id: "b1",
