@@ -235,7 +235,7 @@ SOFTWARE.
 
 ---
 
-## fast-uri 3.1.8
+## fast-uri 3.1.9
 
 - ライセンス: BSD-3-Clause
 - 配布元: https://github.com/fastify/fast-uri
@@ -535,7 +535,7 @@ IN THE SOFTWARE.
 
 ---
 
-## undici 7.30.0
+## undici 7.30.1
 
 - ライセンス: MIT
 - 配布元: https://undici.nodejs.org
@@ -566,7 +566,7 @@ SOFTWARE.
 
 ---
 
-## zod 4.6.2
+## zod 4.6.7
 
 - ライセンス: MIT
 - 配布元: https://zod.dev
