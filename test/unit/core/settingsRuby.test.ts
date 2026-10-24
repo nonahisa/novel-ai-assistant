@@ -10,8 +10,10 @@ import {
   planRubyInsertions,
   rubyTermTotals,
   splitSingleCharTerms,
+  canHoldSettingsRuby,
   type RubyTerm,
 } from "../../../src/core/settingsRuby";
+import { rubyNotationFor } from "../../../src/core/ruby";
 
 /**
  * 設定資料の読み仮名を、本文のルビとして振る（設計書6.12.5）。
@@ -110,6 +112,81 @@ describe("振ってはいけないところ", () => {
     expect(apply("#焔火__ほむら__#と焔火。", "first")).toBe("#焔火__ほむら__#と焔火。");
     // 傍点はルビではないので、別の出現には振る
     expect(apply("{{焔火}}と焔火。", "first")).toBe("{{焔火}}と{焔火|ほむら}。");
+  });
+});
+
+/**
+ * `.txt` の原稿にも振る（作者の裁定、2026-10-24 夜。設計書6.12.5）。
+ *
+ * 手で振るルビ（6.12.7）と同じく、書き方は `rubyNotationFor` で決める。
+ * `.txt` へ内部記法を混ぜると、投稿サイトへ貼ったときに波括弧がそのまま出る。
+ */
+describe(".txt へは投稿サイトの書き方で振る", () => {
+  function applyTo(filePath: string, text: string, scope: "first" | "all" = "all") {
+    return applyRubyInsertions(
+      text,
+      planRubyInsertions(text, terms, scope),
+      rubyNotationFor(filePath)
+    );
+  }
+
+  it(".txt には ｜漢字《かんじ》 で入る", () => {
+    expect(applyTo("/w/第1話.txt", "薬師寺が焔火を見た。")).toBe(
+      "｜薬師寺《やくしじ》が｜焔火《ほむら》を見た。"
+    );
+  });
+
+  it(".md はこれまでどおり内部記法で入る", () => {
+    expect(applyTo("/w/第1話.md", "薬師寺が焔火を見た。")).toBe(
+      "{薬師寺|やくしじ}が{焔火|ほむら}を見た。"
+    );
+  });
+
+  it("作者が振ったルビ（投稿サイトの書き方）を上書きしない", () => {
+    const text = "｜薬師寺《やくしじ》と薬師寺《やくし》が笑った。";
+    expect(applyTo("/w/第1話.txt", text)).toBe(text);
+  });
+
+  it("「最初の1回だけ」では、作者のルビがある語をその話に振らない", () => {
+    const text = "｜焔火《ほむら》と焔火。薬師寺と薬師寺。";
+    expect(applyTo("/w/第1話.txt", text, "first")).toBe(
+      "｜焔火《ほむら》と焔火。｜薬師寺《やくしじ》と薬師寺。"
+    );
+  });
+
+  it("カクヨムの傍点の中には振らない（記法の内側に入れると崩れる）", () => {
+    const text = "《《薬師寺》》が笑った。";
+    expect(applyTo("/w/第1話.txt", text)).toBe(text);
+  });
+
+  it("長い名前の中の短い名前には、縦線で親文字を区切って振る", () => {
+    // 縦線が無いと、前の漢字まで親文字に読まれる（密倉文佳《ふみか》）
+    const text = "密倉文佳が来た。";
+    expect(
+      applyRubyInsertions(
+        text,
+        planRubyInsertions(text, [{ text: "文佳", reading: "ふみか" }], "all"),
+        rubyNotationFor("/w/第1話.txt")
+      )
+    ).toBe("密倉｜文佳《ふみか》が来た。");
+  });
+
+  it("確認画面は、.txt に入るときだけ書き方を断る", () => {
+    const confirmFor = (filePath: string) =>
+      buildRubyConfirm({
+        results: [{ filePath, count: 1, byTerm: [{ term: terms[0], count: 1 }] }],
+        terms: { usable: terms, singleChar: [] },
+        scopeLabel: "選んだ1話",
+        fileName: (p) => p,
+      }).detail;
+    expect(confirmFor("/w/第1話.txt")).toContain("投稿サイトの書き方（｜漢字《かんじ》）");
+    expect(confirmFor("/w/第1話.md")).not.toContain("投稿サイトの書き方");
+  });
+
+  it("振れる話は .txt と .md の両方（ほかの拡張子は外す）", () => {
+    expect(canHoldSettingsRuby("/w/第1話.txt")).toBe(true);
+    expect(canHoldSettingsRuby("/w/第1話.MD")).toBe(true);
+    expect(canHoldSettingsRuby("/w/第1話.docx")).toBe(false);
   });
 });
 

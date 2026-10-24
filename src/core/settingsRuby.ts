@@ -16,8 +16,27 @@
  * `{漢字|かんじ}` の中や、投稿サイト記法 `｜漢字《かんじ》` の中に
  * もう一度ルビを振ると、**二重になって本文が壊れる。**
  *
+ * ## `.txt` には投稿サイトの書き方で振る
+ *
+ * 作者の裁定（2026-10-24 夜）「.txt にも振れるように」。手で振るルビ
+ * （`features/ruby.ts`、設計書6.12.7）と同じく、書き方はファイルの種類で
+ * 決める（`rubyNotationFor`）。`.txt` へ内部記法を混ぜると、投稿サイトへ
+ * 貼ったときに波括弧がそのまま出る。
+ *
  * VS Code APIに依存しない。
  */
+
+import { rubyEditReplacement, rubyNotationFor, type RubyNotation } from "./ruby";
+
+/**
+ * 設定資料からルビを振れる本文か（`.txt` と `.md`）。
+ *
+ * 0.111.4 までは `.md` だけだった（内部記法でしか書けなかったため）。
+ */
+export function canHoldSettingsRuby(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return lower.endsWith(".md") || lower.endsWith(".txt");
+}
 
 export interface RubyTerm {
   /** 本文に現れる文字列（レコードの正式名称） */
@@ -46,10 +65,13 @@ export interface RubyInsertion {
  * - `{{強調}}` … 傍点
  * - `｜漢字《かんじ》` / `漢字《かんじ》` … 投稿サイトの書き方
  * - `#漢字__かんじ__#` … アルファポリスのもう1つの書き方
+ * - `《《強調》》` … カクヨム・ネオページの傍点。`.txt` の本文に入っている。
+ *   中へ振ると `《《｜漢字《かんじ》》》` になって、傍点もルビも崩れる
  */
 const PROTECTED = [
   /\{[^{}|\r\n]+\|[^{}|\r\n]*\}/g,
   /\{\{[^{}\r\n]+\}\}/g,
+  /《《[^《》\r\n]+》》/g,
   /[|｜][^|｜《》\r\n]+《[^《》\r\n]*》/g,
   /[一-鿿々々]+《[^《》\r\n]*》/g,
   /#[^#\r\n]+?__[^#\r\n]*?__#/g,
@@ -205,16 +227,22 @@ export function planRubyInsertions(
  * 決めたところへ実際に振る。
  *
  * **うしろから入れる。** 前から入れると、入れたぶんだけ後ろの位置がずれる。
+ *
+ * **書き方は呼ぶ側がファイルの種類で決めて渡す**（`rubyNotationFor`）。
+ * 組み立ては手で振るルビと同じ `rubyEditReplacement` に任せる——記法の
+ * 組み方を2か所に書くと、片方だけ直る日が来る。`.txt` の書き方は縦線つき
+ * なので、「密倉文佳」の中の「文佳」に振っても親文字が「文佳」に区切られる。
  */
 export function applyRubyInsertions(
   text: string,
-  insertions: readonly RubyInsertion[]
+  insertions: readonly RubyInsertion[],
+  notation: RubyNotation = "internal"
 ): string {
   let result = text;
   for (const insertion of [...insertions].sort((a, b) => b.start - a.start)) {
     result =
       result.slice(0, insertion.start) +
-      `{${insertion.term.text}|${insertion.term.reading}}` +
+      rubyEditReplacement(insertion.term.text, insertion.term.reading, notation) +
       result.slice(insertion.end);
   }
   return result;
@@ -377,6 +405,15 @@ export function buildRubyConfirm(options: {
     detail.push("", "語ごとの件数", byTerm);
   }
   detail.push("", "すでにルビや傍点になっているところへは振りません。");
+  // `.txt` に入る書き方を、押す前に言っておく。`.md` と同じ波括弧が
+  // 入ると思った作者が、投稿サイトの書き方を見て「壊れた」と取らないように
+  if (
+    results.some(
+      (entry) => entry.count > 0 && rubyNotationFor(entry.filePath) !== "internal"
+    )
+  ) {
+    detail.push(".txt の話には、投稿サイトの書き方（｜漢字《かんじ》）で振ります。");
+  }
   if (excluded.length > 0) {
     detail.push(describeExcludedTerms(excluded));
   }

@@ -11,6 +11,7 @@ import {
 import {
   applyRubyInsertions,
   buildRubyConfirm,
+  canHoldSettingsRuby,
   canRevertRuby,
   countByTerm,
   describeRubyResults,
@@ -22,6 +23,7 @@ import {
   type RubyScope,
   type RubyTerm,
 } from "../core/settingsRuby";
+import { rubyNotationFor } from "../core/ruby";
 import { manualActor, recordEdit } from "../core/actorContext";
 import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
 import { openManuscriptTabUris } from "./manuscriptEditor";
@@ -42,6 +44,9 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
  * 原稿を守る手順をそのまま通す——読み込み時のハッシュを照合し、
  * 文字コードと改行を保って書き戻す（設計書5.4.1）。
  *
+ * **`.txt` にも振る**（作者の裁定、2026-10-24 夜）。`.txt` には投稿サイトの
+ * 書き方（`｜漢字《かんじ》`）で入れる——手で振るルビ（設計書6.12.7）と同じ。
+ *
  * **振る前に、どこへ何件入るかを話ごとに見せる。** まとめて何十件も
  * 入る操作なので、押した結果を見てから決められるようにする。
  */
@@ -51,30 +56,18 @@ async function pickScope(
   work: WorkEntry
 ): Promise<{ files: string[]; label: string } | undefined> {
   const scan = await scanWork(work);
-  // **ルビは .md でしか使えない。** .txt を混ぜても振れないので、
-  // 選ぶ段階から外す（選ばせてから断ると、二度手間になる）
-  const markdown = scan.episodes.filter(
-    (episode) => episode.ext.toLowerCase() === ".md"
+  // **.txt にも振る**（作者の裁定、2026-10-24 夜）。0.111.4 までは内部記法で
+  // しか書けなかったので .md に限っていたが、いまは書き方をファイルの種類で
+  // 選ぶ（`rubyNotationFor`。手で振るルビと同じ）
+  const rubyable = scan.episodes.filter((episode) =>
+    canHoldSettingsRuby(episode.filePath)
   );
 
-  if (markdown.length === 0) {
-    const answer = await vscode.window.showWarningMessage(
-      "ルビを振れる本文（.md）がありません。",
-      {
-        modal: true,
-        detail:
-          "ルビはMarkdown（.md）でしか使えません。\n" +
-          "「本文 .md 化」で変換してから、もう一度お試しください。",
-      },
-      "本文 .md 化"
-    );
-    if (answer === "本文 .md 化") {
-      // この作品の .txt を変える話をしている。引数無しだと作品選択へ戻す
-      await vscode.commands.executeCommand("novelai.convertToMarkdown", {
-        type: "work",
-        work,
-      });
-    }
+  if (rubyable.length === 0) {
+    await vscode.window.showWarningMessage("ルビを振れる本文がありません。", {
+      modal: true,
+      detail: "この作品に、本文（.txt・.md）の話が見つかりませんでした。",
+    });
     return undefined;
   }
 
@@ -90,7 +83,7 @@ async function pickScope(
   // タブの場所はブラウザ版では符号化された形、話の場所は生の日本語で来る
   const openOne = candidates
     .map((candidate) =>
-      markdown.find((episode) => path.isSamePath(episode.filePath, candidate))
+      rubyable.find((episode) => path.isSamePath(episode.filePath, candidate))
     )
     .find((episode) => episode !== undefined);
 
@@ -99,8 +92,8 @@ async function pickScope(
   > = [
     {
       label: "$(book) すべての話",
-      description: `${markdown.length}話`,
-      detail: "この作品の本文（.md）すべてが対象です",
+      description: `${rubyable.length}話`,
+      detail: "この作品の本文すべてが対象です",
       choice: "all",
     },
   ];
@@ -132,8 +125,8 @@ async function pickScope(
 
   if (picked.choice === "all") {
     return {
-      files: markdown.map((episode) => episode.filePath),
-      label: `すべての話（${markdown.length}話）`,
+      files: rubyable.map((episode) => episode.filePath),
+      label: `すべての話（${rubyable.length}話）`,
     };
   }
   if (picked.choice === "open" && openOne) {
@@ -144,7 +137,7 @@ async function pickScope(
   }
 
   const chosen = await vscode.window.showQuickPick(
-    markdown.map((episode) => {
+    rubyable.map((episode) => {
       const chapter = formatChapterLabel(episode);
       const title = episodeTitle(episode, chapter);
       return {
@@ -487,7 +480,13 @@ async function writeAll(
 
         const result = await writeTextFilePreservingFormat(
           entry.filePath,
-          applyRubyInsertions(current.text, insertions),
+          // **書き方はファイルの種類で決める**（`.md` は内部記法、`.txt` は
+          // 投稿サイトの書き方。手で振るルビと同じ `rubyNotationFor`）
+          applyRubyInsertions(
+            current.text,
+            insertions,
+            rubyNotationFor(entry.filePath)
+          ),
           current,
           current.hash
         );
