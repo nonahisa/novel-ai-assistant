@@ -1,7 +1,7 @@
 import { isWindowsHost } from "./runtime";
 
 /**
- * 場所どうしの比べ方（設計書5.6）。
+ * 場所どうしの比べ方（設計書5.7.5）。
  *
  * **VS Code に依存させない。** `git.ts` から使うためである
  * （`git.ts` は実際のgitを動かして確かめられるよう vscode を持ち込まない）。

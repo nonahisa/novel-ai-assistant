@@ -6,7 +6,7 @@ import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 
 /**
- * 「投稿サイト用に変換してコピー」で、登録済みの投稿先を先頭に出すための
+ * 「コピー（投稿サイト用）」で、登録済みの投稿先を先頭に出すための
  * 手がかり（設計書6.68.2）。
  *
  * **3つの入口（普通のエディタ・作品一覧の右クリック・原稿エディタ）が

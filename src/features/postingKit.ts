@@ -377,7 +377,7 @@ async function walkSite(input: {
         案内しているのと同じ値で揃える（読み取れなければ話の見出し）。
 
         作品IDは**入っていれば**添える（6.68.5）。貼り込み係が投稿画面の
-        URLと突き合わせて、別の作品の画面への貼り込みを止める（6.79.6の2）。
+        URLと突き合わせて、別の作品の画面への貼り込みを止める（6.79.6 の貼り込み先の照合）。
       */
       await vscode.env.clipboard.writeText(
         buildPostingEnvelope({

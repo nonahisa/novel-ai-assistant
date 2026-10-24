@@ -85,7 +85,9 @@ export function resolveInitialAppearance(input: {
     size: clampSize(carry ? carry.size : saved?.size, sizeDefault),
     /*
       **組んで書くが標準**（作者の指定、2026-08-29）。覚えていないなら
-      組んで書くから始め、「やめる」を押した原稿だけ打つ面で開く。
+      組んで書くから始め、覚えた値が false の原稿だけ打つ面で開く
+      （抜けるボタンはもう無いので、いま false になるのは安全弁が
+      「書く」へ落としたときと、ボタンがあった頃に抜けた原稿だけ）。
     */
     compose: carry ? carry.compose : saved?.compose !== false,
   };

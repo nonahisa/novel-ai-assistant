@@ -80,7 +80,7 @@ export async function makeTargetSheetAdvice(
     profile: input.profile,
   });
   if ("missing" in built) {
-    // **材料が無ければ呼ばない**（6.107「実行したふり」）。何を済ませれば
+    // **材料が無ければ呼ばない**（6.104「実行したふり」）。何を済ませれば
     // 作れるかを言う
     await warnWithLog(
       built.missing === "aim"

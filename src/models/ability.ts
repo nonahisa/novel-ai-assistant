@@ -46,7 +46,7 @@ export const ABILITY_MASTERIES: readonly AbilityMastery[] = [
 
 /** ある人物が持つ能力。定義そのものではなく、その人物固有の事情を持つ */
 export interface CharacterAbility {
-  /** abilities.json の項目を指す。定義が未登録なら null */
+  /** 能力の定義（`設定/abilities/` の1件1ファイル）の id を指す。定義が未登録なら null */
   abilityId: string | null;
   /** 本文に出てきた表記 */
   name: string;

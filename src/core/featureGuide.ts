@@ -63,7 +63,7 @@ import {
  *   を選んで送る（選ぶのは `core/guideSelect.ts`）
  *
  * 全文をひとまとめに組み立てる `buildFeatureGuide()` は、この2つへ置き換えた
- * 時点で誰からも呼ばれなくなったので**消した**（0.25.2）。束に漏れが無いか
+ * 時点で誰からも呼ばれなくなったので**消した**（0.25.5）。束に漏れが無いか
  * どうかは、全文と突き合わせる代わりに `ACTION_TREE` を直接歩いて確かめる
  * （`featureGuide.test.ts`）——**元になる定義と照らすほうが、写しどうしを
  * 比べるより確かである。**
@@ -277,7 +277,7 @@ interface GuideBundleSplit {
 }
 
 /**
- * 小分類を、**束としてだけ**割る表（設計書6.19.4）。
+ * 小分類を、**束としてだけ**割る表（設計書6.56.2。上限の目印は6.27.9）。
  *
  * ## メニューは変えない
  *
@@ -694,7 +694,7 @@ function nameOnly(
  * 説明の1行。
  *
  * **短い版しか作らない。** 全文を渡す口（`detail: "full"`）は
- * `buildFeatureGuide()` と一緒に消した（0.25.2）——束はどれも
+ * `buildFeatureGuide()` と一緒に消した（0.25.5）——束はどれも
  * 相談へ渡すためのものなので、全文が要る場面が無い。
  */
 function describeAction(action: ActionItem, indent: string): string {

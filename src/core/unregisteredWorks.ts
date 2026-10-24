@@ -3,7 +3,7 @@ import { findLibraries, type WorkLocation } from "./libraryHome";
 import { countEpisodeFiles, scanCollection } from "./workCollection";
 
 /**
- * 書庫にあるのに登録されていない作品を拾う（設計書6.97.4）。
+ * 書庫にあるのに登録されていない作品を拾う（設計書6.97・5.7.3）。
  *
  * 作者の指示（2026-09-19）：「これも自動化できるようにしてください」。
  *

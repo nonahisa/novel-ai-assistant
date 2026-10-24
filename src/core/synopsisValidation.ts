@@ -152,7 +152,7 @@ function validateEmotion(raw: unknown): ChapterEmotion | null {
 
   const intensity = clampNumber(value.intensity, 0, 10);
   const valence = clampNumber(value.valence, -5, 5);
-  // 2つとも読めなければ、点として打てない
+  // どちらか1つでも読めなければ、点として打てない（縦と横の両方が要る）
   if (intensity === null || valence === null) return null;
 
   const dominant =

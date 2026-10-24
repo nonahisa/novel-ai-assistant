@@ -895,7 +895,7 @@ type IncomingMessage =
   /** いま見ている分類を空にする */
   | { type: "clearCategory" }
   /**
-   * 画面の script が読み込み終わった（設計書6.11.9）。
+   * 画面の script が読み込み終わった（設計書6.11.6）。
    *
    * **面は作者の知らないところで組み直される**（窓の大きさを変える、
    * 下段のタブを行き来する）。組み直しの直後に送ったものは、script が
@@ -3016,7 +3016,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         await this.clearCurrentCategory();
         return;
       case "ready":
-        // 組み直された面へ、いまの中身を送り直す（設計書6.11.9）
+        // 組み直された面へ、いまの中身を送り直す（設計書6.11.6）
         this.postItems();
         // 開いた直後に示すはずだった行も送り直す（開く前に送ったものは捨てられる）
         if (this.focusRowId) {

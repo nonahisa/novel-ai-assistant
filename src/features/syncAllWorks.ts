@@ -444,7 +444,7 @@ async function runPlan(
     const result = await pullFastForward(cwd, deps.run);
     if (!result.ok) {
       // **分かれていても、ここで合わせにいく**（設計書5.5.18）。
-      // 「『分かれた分を合わせる』でお試しください」と案内するだけでは、
+      // 「『分かれた分を合わせる』（いまの「分岐合流」）でお試しください」と案内するだけでは、
       // 作者にとってそこが行き止まりだった
       if (result.failure.kind === "diverged") {
         const folded = await foldHere(deps, plan, progress, start);

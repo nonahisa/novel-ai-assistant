@@ -203,11 +203,12 @@ export interface FindingDecision {
 /**
  * 原稿箱の取り込み（MCP `outbox.import`。設計書6.115）が判断の行に残す覚え書き。
  *
- * **ここに1つだけ置く。** 取り込む側（`mcp/tools/outbox.ts`）と、提案パネルの
+ * **ここに1つだけ置く。** 覚え書きを書く側（`core/outboxImport.ts`）と、提案パネルの
  * 「当てたもの」（`core/appliedFindings.ts`。誰がどこで当てたかを覚え書きから読む）が
  * 同じ文字列を見る。写しを置くと、片方の言い回しを直した日に「当てたもの」から
- * 黙って消える。`outbox.ts` は `fs` を静的に読むので、画面の側からは import できない
- * （ブラウザ版の束が起動時に落ちる。実装ルール7）——それでモデルへ置いた。
+ * 黙って消える。モデルへ置いたのは、書く側が `fs` を静的に読む
+ * `mcp/tools/outbox.ts` だった頃に、画面の側から import できなかったため
+ * （ブラウザ版の束が起動時に落ちる。実装ルール7）。いまはどちらも `core` にある。
  */
 export const OUTBOX_DECISION_NOTES = {
   /** ［直す］——AIの修正案を出先で当てた */

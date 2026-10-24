@@ -4,7 +4,7 @@ import { toSiteNotation } from "./ruby";
 import { stripMemoLines } from "./sceneMemo";
 
 /**
- * 「投稿サイト用に変換してコピー」の変換（設計書6.84）。
+ * 「コピー（投稿サイト用）」の変換（設計書6.84）。
  *
  * ## 入口は3つ、変換は1つ
  *

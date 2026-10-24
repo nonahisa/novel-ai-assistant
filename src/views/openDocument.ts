@@ -29,7 +29,9 @@ import type { WorkEntry } from "../models/types";
  *
  * 該当行へ飛ぶ・選択範囲を作るといった操作には `TextEditor` が要る。
  * `vscode.open` は何も返さないので、そこは `showTextDocument` のままにする
- * （提案パネルの「該当箇所へ移動」、ルビを振る、相談パネルの引用）。
+ * （いまの例外は、選んだ範囲へルビを差し込む `features/ruby.ts` だけ。設計書6.17.6）。
+ * 本文の「その行」へ飛ぶ操作（提案パネル・相談パネルなど）は
+ * `features/revealLocation.ts` の1本の道を通る。
  */
 export async function openInDefaultEditor(
   filePath: string,
@@ -352,7 +354,7 @@ export async function revealFolder(location: string): Promise<void> {
  *
  * **`canRunProcesses()` は実行環境そのものを見るので、単体テストからは
  * 片側（常にNode）しか確かめられない。** どちらを選ぶかだけを切り出して、
- * 両方の分岐をテストできるようにする（`providerRuntimeFilter.ts` と同じ手）。
+ * 両方の分岐をテストできるようにする（`ai/registry.ts` の `filterProvidersForRuntime` と同じ手）。
  */
 export function revealCommandFor(canRun: boolean): string {
   // `revealFileInOS` は手元のVS Codeにしか無い。

@@ -73,7 +73,7 @@ const EMPHASIS_AS_RUBY = /[|｜]([^|｜《》\r\n]+)《([・･]+)》/g;
  * ## 記法を、正規表現の**文字列**としても配る
  *
  * 原稿エディタは `.txt` の本文を、この記法のまま組んで見せる
- * （設計書6.12・6.25）。読む面・印刷用は `import` できるが、
+ * （設計書6.12・6.25）。印刷用（PDF）などの拡張機能側は `import` できるが、
  * **組んで書く面のJSは webview のテンプレート文字列の中にあって
  * `import` が効かない**。あちらへは文字列を埋め込むしかない。
  *
@@ -360,7 +360,14 @@ export function findRuby(text: string): Array<{ base: string; reading: string }>
   return found;
 }
 
-/** 傍点が入っているか。入っていなければ、貼り付け先を訊く必要が無い */
+/**
+ * 傍点が入っているか。
+ *
+ * 貼り付け先を訊くかどうかには使わない（2026-09-06 の作者の裁定で、傍点の
+ * 有無にかかわらず1度だけ訊く。`postingCopyTargets.ts`）。いまは傍点の
+ * 記法が無い note へ渡すときに、印を外したと断るのに使う
+ * （`noteMarkdown.ts`・`features/postingKit.ts`）
+ */
 export function hasEmphasis(text: string): boolean {
   EMPHASIS_INTERNAL.lastIndex = 0;
   return EMPHASIS_INTERNAL.test(text);

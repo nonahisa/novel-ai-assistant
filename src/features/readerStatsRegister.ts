@@ -80,7 +80,7 @@ export interface ReaderStatsRegisterOptions {
   /** その場で取り込んだあと（執筆量パネルを作り直す） */
   afterImport?(work: WorkEntry): Promise<void>;
   /**
-   * 作者が「読者の反応を貼り付けて取り込む」を押したとき。**「登録しない」にした
+   * 作者が「読者反応自動取込」を押したとき。**「登録しない」にした
    * IDでもボタンを出す**——自分で取り込みに来たのは、登録し直したいからである
    * （覚えを取り消す道。`DECLINED_UNDO_HINT`）
    */

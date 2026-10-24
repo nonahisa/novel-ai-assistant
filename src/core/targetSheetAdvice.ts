@@ -129,7 +129,7 @@ export function targetSheetBasis(
 
 /**
  * 助言の材料を組む。狙いが無い・点数が無いときは組まずに理由を返す
- * （6.107「実行したふり」：空の材料で AI を呼ばない）。
+ * （6.104「実行したふり」：空の材料で AI を呼ばない）。
  */
 export function buildTargetSheetAdviceMaterial(input: {
   readonly authorBlock: string | undefined;

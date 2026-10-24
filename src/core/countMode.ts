@@ -1,7 +1,7 @@
 import type { CharCounts } from "../models/types";
 
 /**
- * 文字数の数え方（純／総）と、その選び分け（設計書6.4）。
+ * 文字数の数え方（純／総）と、その選び分け（設計書6.3。画面をまたいだ揃え方は6.3.3）。
  *
  * **VS Code に依存しない。** 設定を読む `countSettings.ts` は `vscode` を持つので、
  * 画面なしで数える所（`episodeCharTable.ts` など）はこちらを使う。

@@ -349,7 +349,8 @@ function authorActualEdge(
     `compareAuthorReader` は宣言を優先して読む（`chatReaderBasis`）。
     **実像だけを入れた台帳**を渡す——宣言が混ざると、この辺が
     「書きたいもの ↔ 向けているつもり」にすり替わる（かつての単独の
-    3つの輪の紙が `actualOnly` で避けていたのと同じ理由）。
+    3つの輪の紙が、実像だけを読む指定で避けていたのと同じ理由。その指定は
+    紙ごと無くなった）。
   */
   // 突き合わせが見るのは点数だけ（出どころと日時は使わない）
   const comparison = compareAuthorReader(

@@ -796,7 +796,7 @@ function historySection(
     "|---|---|---|---|"
   );
   for (const entry of history.slice(0, TARGET_SHEET_HISTORY_ROWS)) {
-    // 狙いだけの日（設計書6.108.6）は、点数の欄を「まだ測っていません」にする
+    // 狙いだけの日（設計書6.108.5）は、点数の欄を「まだ測っていません」にする
     const top = entry.top
       ? READER_TYPES[entry.top].label
       : "（まだ測っていません）";

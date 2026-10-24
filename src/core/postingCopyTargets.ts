@@ -6,7 +6,7 @@ import {
 import { EMPHASIS_SITES, RUBY_STYLES, type EmphasisSite, type RubyStyle } from "./ruby";
 
 /**
- * 「投稿サイト用に変換してコピー」で訊く、貼り付け先の一覧
+ * 「コピー（投稿サイト用）」で訊く、貼り付け先の一覧
  * （作者の裁定、2026-09-06。設計書6.12.4）。
  *
  * **訊くのは貼り付け先だけにする。** それまでは2段だった——

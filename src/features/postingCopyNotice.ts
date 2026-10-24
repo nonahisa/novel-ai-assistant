@@ -11,7 +11,7 @@ import { postingPageUrlFor } from "./postingCopyRegistered";
 import { openSiteLink } from "./openSiteLink";
 
 /**
- * 「投稿サイト用に変換してコピー」のあとの知らせ（設計書6.84）。
+ * 「コピー（投稿サイト用）」のあとの知らせ（設計書6.84）。
  *
  * **noteだけ、言うことが増える。** noteの本文欄はMarkdownをそのまま
  * 解釈するが、**題名・目次・画像は貼り付けでは入らない**。そこを黙って

@@ -177,7 +177,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.addWorkFromGithub": "allTypes",
   // ZIPの取り込み（設計書6.98）。中身を見るまでタイプは分からない
   "novelai.importWorkFromZip": "allTypes",
-  // 未登録の作品を探す（設計書6.97.4）。こちらも中身を見るまで
+  // 未登録作品検索（設計書6.97・5.7.3）。こちらも中身を見るまで
   // タイプは分からないうえ、登録する前の操作である
   "novelai.collectUnregisteredWorks": "allTypes",
   // 呼び名を変えるだけの操作。中身が何であっても要る（設計書6.1.1）

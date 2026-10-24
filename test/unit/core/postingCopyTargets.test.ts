@@ -10,7 +10,7 @@ import { toSiteNotation } from "../../../src/core/ruby";
 import { blockAfter } from "../support/sourceBlock";
 
 /**
- * 「投稿サイト用に変換してコピー」で訊くこと（作者の裁定、2026-09-06）。
+ * 「コピー（投稿サイト用）」で訊くこと（作者の裁定、2026-09-06）。
  *
  * **訊くのは貼り付け先だけにする。** それまでは2段だった——
  *
@@ -136,7 +136,7 @@ describe("記法だけで決まる書き出し先", () => {
  * 画面の側（`features/ruby.ts`）。**単体では動かせない**ので、
  * 書いてあるコードの形で見る（`chatRunEntry.test.ts` と同じやり方）。
  */
-describe("「投稿サイト用に変換してコピー」は1段しか訊かない", () => {
+describe("「コピー（投稿サイト用）」は1段しか訊かない", () => {
   const source = readFileSync("src/features/ruby.ts", "utf8");
 
   /** copyForPosting の中身（次の関数の手前まで） */

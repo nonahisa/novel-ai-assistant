@@ -184,7 +184,7 @@ async function askWhichToRegister(
  * 作者に分からなくなる。失敗は集めて最後にまとめて報告する。
  *
  * **外へ出してある**（0.69.x）。「未登録の作品を探す」
- * （`collectUnregisteredWorks.ts`、設計書6.97.4）も同じ登録の仕方を通す
+ * （`collectUnregisteredWorks.ts`、設計書5.7.3）も同じ登録の仕方を通す
  * ——**写しを作ると、失敗の報告の仕方が2通りになる。**
  */
 export async function registerAll(

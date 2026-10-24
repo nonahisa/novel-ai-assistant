@@ -460,13 +460,6 @@ export function classifyContextOverflow(
 }
 
 /**
- * HTTPの失敗の通知文から、状態番号を読む。
- *
- * `AIError` は番号を持たないので、`httpClient.ts` の `toStatusError` が
- * 組み立てた「(HTTP 400)」から読む。**読めなければ諦める**——
- * 読めないものを400と決めつけると、別の原因を上限超えに化けさせる。
- */
-/**
  * その失敗のHTTP状態番号。
  *
  * **`AIError.status` を見る。** 0.28.3 までは `message` の `(HTTP 400)` を

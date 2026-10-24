@@ -408,7 +408,7 @@ describe("VS Code に戻ったとき", () => {
   });
 });
 
-describe("「読者の反応を貼り付けて取り込む」", () => {
+describe("「読者反応自動取込」", () => {
   test("まとめて渡された分を貼っても、登録した作品ぜんぶへ振り分ける", async () => {
     env.clipboard.text = mixedBundle();
 

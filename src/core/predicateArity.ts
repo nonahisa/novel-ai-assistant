@@ -167,7 +167,7 @@ const MULTIPLE_PREDICATES: readonly string[] = [
 
 /**
  * 同じものを指す項目名を、**人物レコードの項目名**（`characterFieldLabels.ts`）へ
- * 寄せる表（0.67.5）。
+ * 寄せる表（0.67.6）。
  *
  * ## なぜ要るのか
  *

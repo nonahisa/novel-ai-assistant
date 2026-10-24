@@ -135,7 +135,7 @@ export interface EpubIllustration {
 /** 本の中の1話。組み方は `epubXhtml.ts` が持つので、そのまま通す */
 export interface EpubChapter extends EpubChapterSource {
   /**
-   * 目次を章ごとに区切るときの束ね名（設計書6.65.6）。
+   * 目次を章ごとに区切るときの束ね名（設計書6.65.7の4）。
    *
    * **無ければ束ねない。** 話数しか分からない作品で章を捏造すると、
    * 作者が書いていない構成が本に載る。作り方は
