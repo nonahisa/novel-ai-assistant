@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   buildWriterGuide,
   WRITER_GUIDE_TITLE,
@@ -248,5 +248,38 @@ describe("はじめの案内の紙", () => {
     expect(guideFor(styleOf(), false)).toContain(
       "作品フォルダーにも GitHub にも入りません"
     );
+  });
+});
+
+/**
+ * 診断した日は作者の時計の日付で出す（2026-10-24 の文書の整理で見つかった）。
+ * 紙だけが `updatedAt.slice(0, 10)`（UTC の日付）を使っていて、日本で
+ * 朝9時より前に診断すると前の日の日付が出た。
+ *
+ * **時差を跨いで確かめる**（`localDate.test.ts` と同じ作法）。試験機の時計に
+ * 合わせて期待値を組むと、UTC の機械では素通りする。
+ */
+describe("はじめの案内の紙：診断した日", () => {
+  const originalTz = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = originalTz;
+  });
+
+  test("日本時間の朝9時前に診断しても、その日の日付が出る", () => {
+    process.env.TZ = "Asia/Tokyo";
+    const style = styleOf();
+    const goal = tutorialGoals(style, false)[0];
+    const guide = buildWriterGuide({
+      style,
+      goal,
+      advice: tutorialAdvice(style, goal.goal),
+      // 日本時間の 2026-09-13 05:00。UTC ではまだ 09-12 の20:00
+      advicePolicy: {
+        ...policyOf(TASTE_READER),
+        updatedAt: "2026-09-12T20:00:00.000Z",
+      },
+    });
+    expect(guide).toContain("**診断した日**：2026-09-13");
+    expect(guide).not.toContain("2026-09-12");
   });
 });

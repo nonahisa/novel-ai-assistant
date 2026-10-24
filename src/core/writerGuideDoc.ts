@@ -1,4 +1,5 @@
 import {
+  adviceDiagnosisDate,
   adviceLevel,
   ADVICE_AXIS_LABELS,
   ADVICE_LEVEL_LABELS,
@@ -82,7 +83,11 @@ export function buildWriterGuide(input: {
       "",
       "- **AIへの相談**：このタイプ向けの言い方だけを渡します（ほかの10タイプの文は送りません。混ぜると、どちらとも取れる助言になります）",
       "- **下の案内**：5問のほうのお答えに合わせて並べています",
-      "- **診断した日**：" + input.advicePolicy!.updatedAt.slice(0, 10) +
+      // 作者の時計の日付で出す。UTC で切ると、日本の朝9時前の診断が前日になる
+      // （`adviceDiagnosisDate` が同じ件を直した関数。読めない値だけ元の字を出す）
+      "- **診断した日**：" +
+        (adviceDiagnosisDate(input.advicePolicy!.updatedAt) ??
+          input.advicePolicy!.updatedAt.slice(0, 10)) +
         "（30日ほど経ったら、答え直すと合いやすくなります）",
       ""
     );
