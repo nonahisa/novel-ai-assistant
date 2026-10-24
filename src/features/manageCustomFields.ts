@@ -14,9 +14,11 @@ import {
 import {
   fieldsFor,
   nextCustomFieldKey,
+  restorableKeysFor,
   retiredKeysFor,
   validateNewField,
   withFieldRemoved,
+  withFieldRestored,
   withFieldsFor,
   type CustomFieldDefinition,
   type CustomFieldKind,
@@ -38,8 +40,9 @@ import { askText, cancelItem, isCancelItem } from "../views/dialogs";
  *
  * 外すときは値を消さない。項目名を付け替えている途中かもしれないし、
  * 「消したら値まで消えた」は作者に見えない損失になる。
- * 同じキーの定義を custom_fields.json へ手で戻せば値も戻る（ここで足し直すと
- * 新しいキーになる。外したキーを使い回すと値が別の項目に化けるため）。
+ * 「項目を追加」で足し直すと新しいキーになる（外したキーを使い回すと値が
+ * 別の項目に化けるため）。外した項目は「外した項目を戻す」で**同じキーのまま**
+ * 戻せる（作者の裁定、2026-10-24 夜）。戻せば各資料に残っていた値がそのまま出る。
  */
 
 /**
@@ -85,10 +88,12 @@ export async function manageCustomFields(work: WorkEntry): Promise<void> {
   if (!choice) return;
   const fields = fieldsFor(set, choice.kind);
 
-  const picked = await pickAction(fields, choice);
+  const restorable = restorableKeysFor(set, choice.kind);
+  const picked = await pickAction(fields, choice, restorable.length > 0);
   if (!picked) return;
 
   let next: CustomFieldSet;
+  let doneMessage: string;
   if (picked === "add") {
     // **一度使ったキーを二度と振らないため、値として残っているキーも集める。**
     // 外したキーの記録（retiredKeys）を持つ前の版で外した項目は、
@@ -102,12 +107,27 @@ export async function manageCustomFields(work: WorkEntry): Promise<void> {
     if (!updated) return;
     // 選んだ種類の定義だけを差し替える。ほかの種類の定義には触らない
     next = withFieldsFor(set, choice.kind, updated);
+    doneMessage = `${choice.label}に項目を追加しました。設定資料を開くと、${choice.scope}に入力欄が増えています。`;
+  } else if (picked === "restore") {
+    const key = await pickFieldToRestore(work, choice, restorable);
+    if (key === undefined) return;
+    // 見出し・説明・長さは外したときに覚えていないので、ここで訊き直す。
+    // キーだけは外す前と同じものを使う——新しく振ると、各資料に残っている
+    // 値と結び付かず、戻した意味が無くなる
+    const details = await askFieldDetails(fields, choice, "戻す項目");
+    if (!details) return;
+    const restored: CustomFieldDefinition = { key, ...details };
+    next = withFieldRestored(set, choice.kind, restored);
+    doneMessage = `「${restored.label}」を戻しました。各資料に残っていた内容が、そのまま表に出ます。`;
   } else {
     const key = await pickFieldToRemove(fields);
     if (key === undefined) return;
     // 外したキーを覚える。値は各レコードに残るので、同じキーを
     // 次の項目へ振ると、その値が新しい項目に化けて現れる
     next = withFieldRemoved(set, choice.kind, key);
+    doneMessage =
+      "項目を外しました。入力済みの内容は消えていません（各資料のファイルに残っています）。" +
+      "「外した項目を戻す」で戻せます。";
   }
 
   try {
@@ -123,11 +143,7 @@ export async function manageCustomFields(work: WorkEntry): Promise<void> {
     return;
   }
 
-  void vscode.window.showInformationMessage(
-    picked === "add"
-      ? `${choice.label}に項目を追加しました。設定資料を開くと、${choice.scope}に入力欄が増えています。`
-      : "項目を外しました。入力済みの内容は消えていません（各資料のファイルに残っています）。"
-  );
+  void vscode.window.showInformationMessage(doneMessage);
 }
 
 type KindChoice = (typeof KIND_CHOICES)[number];
@@ -164,11 +180,12 @@ async function pickKind(set: CustomFieldSet): Promise<KindChoice | undefined> {
   return "choice" in picked ? picked.choice : undefined;
 }
 
-type ManageAction = "add" | "remove";
+type ManageAction = "add" | "remove" | "restore";
 
 async function pickAction(
   fields: CustomFieldDefinition[],
-  choice: KindChoice
+  choice: KindChoice,
+  canRestore: boolean
 ): Promise<ManageAction | undefined> {
   const current =
     fields.length > 0
@@ -187,6 +204,14 @@ async function pickAction(
       label: "$(remove) 項目を外す",
       description: "入力済みの内容は消えません",
       action: "remove",
+    });
+  }
+  // 外した項目が無ければ出さない（押しても選ぶものが無い）
+  if (canRestore) {
+    items.push({
+      label: "$(history) 外した項目を戻す",
+      description: "各資料に残っている内容が、そのまま表に出ます",
+      action: "restore",
     });
   }
 
@@ -270,8 +295,24 @@ async function addField(
   choice: KindChoice,
   usedKeys: string[]
 ): Promise<CustomFieldDefinition[] | undefined> {
+  const details = await askFieldDetails(fields, choice, "追加する項目");
+  if (!details) return undefined;
+  return [...fields, { key: nextCustomFieldKey(fields, usedKeys), ...details }];
+}
+
+/**
+ * 項目の見出し・説明・長さを訊く。足すときと戻すときで同じ問いにする。
+ *
+ * `what` は「追加する項目」「戻す項目」——題に出して、いまどちらを
+ * しているかを作者が見失わないようにする。
+ */
+async function askFieldDetails(
+  fields: CustomFieldDefinition[],
+  choice: KindChoice,
+  what: string
+): Promise<Omit<CustomFieldDefinition, "key"> | undefined> {
   const label = await askText({
-    title: `${choice.label}に追加する項目の名前`,
+    title: `${choice.label}に${what}の名前`,
     placeHolder: `例: ${choice.example}`,
     prompt: "設定資料に出す見出しになります。",
     validateInput: (value) => validateNewField(fields, value) ?? null,
@@ -317,15 +358,94 @@ async function addField(
   );
   if (!length || !("multiline" in length)) return undefined;
 
-  return [
-    ...fields,
+  return {
+    label: trimmedLabel,
+    hint: hint.trim(),
+    multiline: length.multiline,
+  };
+}
+
+/**
+ * どの外した項目を戻すか。
+ *
+ * 外したときに見出しを覚えていない（`retiredKeys` はキーだけ）ので、
+ * **各資料に残っている値の例**を並べて、どの項目だったかを作者が
+ * 思い出せるようにする。キー（field_003 など）は作者に見せない。
+ *
+ * 資料の読み込みに失敗しても止めない——戻すのは同じキーを定義へ戻す
+ * だけで、値を混ぜる心配が無い（足すときとは違う）。読めなかったことは
+ * 記録に残し、例が欠けていることを言い添える。
+ */
+async function pickFieldToRestore(
+  work: WorkEntry,
+  choice: KindChoice,
+  keys: string[]
+): Promise<string | undefined> {
+  const values = new Map<string, string[]>();
+  let unreadable = false;
+  try {
+    const loaded = await loadRecordsOf(work, choice.kind);
+    if (loaded.errors.length > 0) {
+      unreadable = true;
+      useLogFile(work.folderPath);
+      logFailure("customFields.restoreScan", {
+        work: work.title,
+        errors: loaded.errors,
+      });
+    }
+    for (const record of loaded.records) {
+      for (const [key, value] of Object.entries(record.customFields ?? {})) {
+        if (!value.trim()) continue;
+        values.set(key, [...(values.get(key) ?? []), value]);
+      }
+    }
+  } catch (error) {
+    unreadable = true;
+    useLogFile(work.folderPath);
+    logFailure("customFields.restoreScan", {
+      work: work.title,
+      message: errorMessage(error),
+    });
+  }
+
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...keys.map((key, index) => {
+        const found = values.get(key) ?? [];
+        return {
+          label:
+            found.length > 0
+              ? `値の例: ${found
+                  .slice(0, 3)
+                  .map((value) => `「${shortenForPick(value)}」`)
+                  .join("")}`
+              : "値の入っていない項目",
+          description:
+            found.length > 0
+              ? `値のある資料 ${found.length}件`
+              : "どの資料にも内容が残っていません",
+          detail: `外した順で ${index + 1}番目`,
+          key,
+        };
+      }),
+      cancelItem(),
+    ],
     {
-      key: nextCustomFieldKey(fields, usedKeys),
-      label: trimmedLabel,
-      hint: hint.trim(),
-      multiline: length.multiline,
-    },
-  ];
+      title: `${choice.label}の外した項目を戻す`,
+      placeHolder: unreadable
+        ? "読めない資料があったため、値の例が欠けていることがあります"
+        : "戻す項目を選んでください。見出しはこのあと付け直します",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || !("key" in picked)) return undefined;
+  return picked.key;
+}
+
+/** 値の例は1行に収める。長い生い立ちなどで品書きが読めなくならないように */
+function shortenForPick(value: string): string {
+  const oneLine = value.replace(/\s+/gu, " ").trim();
+  return oneLine.length > 16 ? `${oneLine.slice(0, 16)}…` : oneLine;
 }
 
 async function pickFieldToRemove(

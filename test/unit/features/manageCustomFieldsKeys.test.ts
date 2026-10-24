@@ -21,6 +21,13 @@ describe("設定資料項目追加のキーの振り方", () => {
     expect(source).not.toMatch(/fields\.filter\(\(field\) => field\.key !== /);
   });
 
+  test("戻すときは、外したキーから選ばせ、同じキーのまま戻す関数を通す", () => {
+    // 新しく採番すると、各資料に残っている値と結び付かない（戻した意味が無い）
+    expect(source).toContain("restorableKeysFor(set, choice.kind)");
+    expect(source).toContain("withFieldRestored(set, choice.kind, restored)");
+    expect(source).toContain("外した項目を戻す");
+  });
+
   test("足すときは、外したキーとレコードに残るキーも渡して採番する", () => {
     expect(source).toContain("retiredKeysFor(set, choice.kind)");
     expect(source).toContain("collectUsedKeys(work, choice)");

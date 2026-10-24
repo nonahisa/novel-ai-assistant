@@ -177,6 +177,54 @@ export function withFieldRemoved(
 }
 
 /**
+ * 戻せる外したキー。記録の順のまま、いまの定義に既にあるキーは除く。
+ *
+ * 作者が custom_fields.json へ手で同じキーの定義を戻していることがある
+ * （`retiredKeys` の説明）。それをもう一度戻すと定義が2つになる。
+ */
+export function restorableKeysFor(
+  set: CustomFieldSet,
+  kind: CustomFieldKind
+): string[] {
+  const defined = new Set(fieldsFor(set, kind).map((field) => field.key));
+  return retiredKeysFor(set, kind).filter((key) => !defined.has(key));
+}
+
+/**
+ * 外した項目を**同じキーのまま**定義へ戻し、外したキーの記録から消す
+ * （作者の裁定、2026-10-24 夜「戻す操作を足す」）。
+ *
+ * 同じキーで戻すので、各レコードに残っていた値がそのまま表に出る。
+ * 記録から消しても、定義にあるキーは採番で避けられる（`nextCustomFieldKey`）
+ * ので、使い回しは起きない。もう一度外せば、また記録に入る。
+ *
+ * **外したキーでないものは戻さない**（例外）。ここで任意のキーを受けると、
+ * 採番を迂回して定義を足す口になる。
+ */
+export function withFieldRestored(
+  set: CustomFieldSet,
+  kind: CustomFieldKind,
+  definition: CustomFieldDefinition
+): CustomFieldSet {
+  if (!restorableKeysFor(set, kind).includes(definition.key)) {
+    throw new Error(`「${definition.key}」は戻せる項目ではありません。`);
+  }
+  const remainingRetired = retiredKeysFor(set, kind).filter(
+    (key) => key !== definition.key
+  );
+  const retiredKeys = { ...set.retiredKeys };
+  if (remainingRetired.length > 0) {
+    retiredKeys[kind] = remainingRetired;
+  } else {
+    delete retiredKeys[kind];
+  }
+  return {
+    ...withFieldsFor(set, kind, [...fieldsFor(set, kind), definition]),
+    retiredKeys,
+  };
+}
+
+/**
  * 保存する形。**中身の無い種類は書かない**——人物だけの作品では、
  * `byKind` を持たないこれまでの形のまま保たれる。
  */

@@ -21,11 +21,12 @@ describe("設定資料項目追加の選択画面", () => {
   );
   const calls = source.split("vscode.window.showQuickPick(").slice(1);
 
-  test("選択画面が4つある（種類・操作・長さ・外す項目）", () => {
-    expect(calls).toHaveLength(4);
+  // 「戻す項目」は 2026-10-24 夜に足した（外した項目を戻す）
+  test("選択画面が5つある（種類・操作・長さ・戻す項目・外す項目）", () => {
+    expect(calls).toHaveLength(5);
   });
 
-  test.each([0, 1, 2, 3])("%i 番目の選択画面は焦点が外れても閉じない", (index) => {
+  test.each([0, 1, 2, 3, 4])("%i 番目の選択画面は焦点が外れても閉じない", (index) => {
     // 呼び出しのすぐ後の `if (`（答えを確かめる行）までに設定があること。
     // 隣の呼び出しの設定を拾わないよう、そこで切る
     const end = calls[index].indexOf("\n  if (");

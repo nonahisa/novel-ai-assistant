@@ -6,9 +6,11 @@ import {
   nextCustomFieldKey,
   parseCustomFieldSet,
   parseCustomFieldValues,
+  restorableKeysFor,
   retiredKeysFor,
   validateNewField,
   withFieldRemoved,
+  withFieldRestored,
   type CustomFieldDefinition,
 } from "../../../src/models/customField";
 import {
@@ -177,6 +179,99 @@ describe("項目の定義", () => {
     expect(validateNewField(many, "もう一つ")).toContain(
       `${MAX_CUSTOM_FIELDS}個まで`
     );
+  });
+});
+
+describe("外した項目を戻す（2026-10-24 夜の作者の裁定）", () => {
+  test("同じキーのまま定義へ戻し、外したキーの記録から消す", () => {
+    // 同じキーで戻すので、各資料に残っている値がそのまま表に出る
+    const removed = withFieldRemoved(
+      parseCustomFieldSet({
+        fields: [
+          { key: "field_001", label: "身長" },
+          { key: "field_002", label: "誕生日" },
+        ],
+      }),
+      "character",
+      "field_002"
+    );
+    const restored = withFieldRestored(
+      removed,
+      "character",
+      definition("field_002", "誕生日", { hint: "本文から" })
+    );
+    expect(fieldsFor(restored, "character")).toEqual([
+      definition("field_001", "身長"),
+      definition("field_002", "誕生日", { hint: "本文から" }),
+    ]);
+    expect(retiredKeysFor(restored, "character")).toEqual([]);
+    // 何も外していない作品と同じ形のファイルへ戻る
+    expect(Object.keys(customFieldSetToJson(restored))).toEqual([
+      "schemaVersion",
+      "fields",
+    ]);
+  });
+
+  test("戻したあとも、そのキーを次の項目へ振らない", () => {
+    const restored = withFieldRestored(
+      withFieldRemoved(
+        parseCustomFieldSet({ fields: [{ key: "field_005", label: "誕生日" }] }),
+        "character",
+        "field_005"
+      ),
+      "character",
+      definition("field_005", "誕生日")
+    );
+    expect(
+      nextCustomFieldKey(
+        fieldsFor(restored, "character"),
+        retiredKeysFor(restored, "character")
+      )
+    ).toBe("field_006");
+    // もう一度外せば、また記録に入る
+    expect(
+      retiredKeysFor(withFieldRemoved(restored, "character", "field_005"), "character")
+    ).toEqual(["field_005"]);
+  });
+
+  test("ほかの種類の定義と記録には触らない", () => {
+    const set = parseCustomFieldSet({
+      fields: [],
+      byKind: { location: [{ key: "field_001", label: "気候" }] },
+      retiredKeys: { character: ["field_001"], location: ["field_002"] },
+    });
+    const restored = withFieldRestored(
+      set,
+      "location",
+      definition("field_002", "人口")
+    );
+    expect(fieldsFor(restored, "location").map((field) => field.key)).toEqual([
+      "field_001",
+      "field_002",
+    ]);
+    expect(retiredKeysFor(restored, "location")).toEqual([]);
+    expect(retiredKeysFor(restored, "character")).toEqual(["field_001"]);
+    expect(fieldsFor(restored, "character")).toEqual([]);
+  });
+
+  test("戻せるのは、外したキーのうち定義に無いものだけ", () => {
+    // 作者が custom_fields.json へ手で戻したキーは、もう戻す必要が無い
+    const set = parseCustomFieldSet({
+      fields: [{ key: "field_001", label: "誕生日" }],
+      retiredKeys: { character: ["field_001", "field_003", "field_002"] },
+    });
+    expect(restorableKeysFor(set, "character")).toEqual([
+      "field_003",
+      "field_002",
+    ]);
+    expect(restorableKeysFor(set, "world")).toEqual([]);
+  });
+
+  test("外したキーでないものは戻さない（定義を勝手に増やさない）", () => {
+    const set = parseCustomFieldSet({ fields: [] });
+    expect(() =>
+      withFieldRestored(set, "character", definition("field_009", "誕生日"))
+    ).toThrow();
   });
 });
 
