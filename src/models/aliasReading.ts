@@ -78,12 +78,14 @@ export function pruneAliasReadings(
 /**
  * 別名の読みを入れる。**いまの別名に合わせて刈り込み、空なら欄ごと外す**。
  *
- * `readings` を省くと、レコードがいま持っている読みを刈り込むだけ
- * （別名を書き換えた道で、読みの迷子を残さないため）
+ * `readings` は必ず渡す（undefined は「読みなし」）。レコードがいま持っている
+ * 読みを刈り込むだけなら `record.aliasReadings` を渡す。省いたら自分の読みを
+ * 使う形にしないのは、「読みなし」のつもりで undefined を渡した呼び手が、
+ * 写しの側の読みを黙って残してしまうため（承認待ちの案の写しで実際に起きかけた）
  */
 export function withOptionalAliasReadings<
   T extends { name: string; aliases: string[]; aliasReadings?: AliasReadings },
->(record: T, readings: Readonly<AliasReadings> | undefined = record.aliasReadings): T {
+>(record: T, readings: Readonly<AliasReadings> | undefined): T {
   const copy = { ...record };
   const pruned = pruneAliasReadings(readings, record.name, record.aliases);
   if (Object.keys(pruned).length > 0) copy.aliasReadings = pruned;

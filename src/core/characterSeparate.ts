@@ -115,7 +115,7 @@ export function planCharacterSeparation(
       ),
       { name: created.name, id: created.id },
     ],
-  });
+  }, source.aliasReadings);
 
   return { original, created, movedAliases };
 }
@@ -193,7 +193,7 @@ export function planDistinctPair(a: Character, b: Character): DistinctPairPlan {
       distinctFrom: already
         ? existing
         : [...existing, { name: other.name, id: other.id }],
-    });
+    }, self.aliasReadings);
   };
 
   return { first: mark(a, b), second: mark(b, a), strippedAliases };

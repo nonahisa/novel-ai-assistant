@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { parseCharacter } from "../../../src/models/character";
+import {
+  emptyCharacter,
+  keepAuthorOnlyMarks,
+  parseCharacter,
+} from "../../../src/models/character";
 import { parseAbility } from "../../../src/models/ability";
 import { parseLocation } from "../../../src/models/location";
 import { parseOrganization } from "../../../src/models/organization";
@@ -62,6 +66,27 @@ describe("別名の読みを読む", () => {
       expect("aliasReadings" in record).toBe(false);
     });
   }
+});
+
+describe("承認待ちの更新案を採るとき", () => {
+  test("いまの記録の別名の読みを使う（案の写しに無くても消えず、案の側の読みは使わない）", () => {
+    // 抽出が案を積んだあとで、原稿でIMEが別名の読みを埋めた——という並び
+    const current = {
+      ...emptyCharacter("char_001", "灯"),
+      aliases: ["姫君", "白雲"],
+      aliasReadings: { 姫君: "ひめぎみ", 白雲: "しらくも" },
+    };
+    const proposal = {
+      ...emptyCharacter("char_001", "灯"),
+      aliases: ["姫君", "灯ちゃん"],
+      aliasReadings: { 灯ちゃん: "あかりちゃん" },
+    };
+    const settled = keepAuthorOnlyMarks(proposal, current);
+    // 案で消えた別名（白雲）の読みは一緒に消える
+    expect(settled.aliasReadings).toEqual({ 姫君: "ひめぎみ" });
+    // 新しく作る案には持ち込まない
+    expect(keepAuthorOnlyMarks(proposal, {}).aliasReadings).toBeUndefined();
+  });
 });
 
 describe("刈り込み", () => {

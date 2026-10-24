@@ -646,9 +646,9 @@ export function editedAliases(
 /**
  * 別名の読みの欄に出す形。**1行に1つ「別名=読み」**（関係・宿りの欄と同じ書き方）。
  *
- * 読みのある別名に加えて、**漢字を含む別名は「別名=」の形で並べておく**。
+ * 読みのある別名に加えて、**漢字を含む2字以上の別名は「別名=」の形で並べておく**。
  * どの別名に読みを付けられるかを作者が探さずに済むように。仮名だけの別名は
- * 声が読み違えないので並べない（書けば読む）
+ * 声が読み違えないので並べない（書けば持つ）
  */
 export function formatAliasReadingsForEdit(record: {
   name: string;
@@ -663,8 +663,9 @@ export function formatAliasReadingsForEdit(record: {
     seen.add(alias);
     const reading = aliasReadingOf(record, alias);
     if (reading) lines.push(`${alias}=${reading}`);
-    // 読み上げで別名の読みが効くのは漢字を含む別名だけ（`nameReadingSpans`）
-    else if (KANJI.test(alias)) lines.push(`${alias}=`);
+    // 読み上げで別名の読みが効くのは漢字を含む2字以上の別名だけ（`nameReadingSpans`。
+    // 1字は一般の語とぶつかるので当てない）。効かない別名を空欄で並べない
+    else if (alias.length >= 2 && KANJI.test(alias)) lines.push(`${alias}=`);
   }
   return lines.join("\n");
 }

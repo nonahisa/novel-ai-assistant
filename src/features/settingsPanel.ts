@@ -1063,7 +1063,7 @@ export class SettingsPanel {
     return {
       ...field("aliasReadings", "別名の読み（1行に1つ「別名=読み」）", formatAliasReadingsForEdit(record), true),
       hint:
-        "読み上げで別名をこの読みで読みます。漢字を含む別名を並べています。" +
+        "読み上げで別名をこの読みで読みます（効くのは漢字を含む2字以上の別名）。そうした別名を並べています。" +
         "読みを書いて「保存」を押してください（空のままなら読みなし）。",
       ...(suggestions.length > 0 ? { imeAliasReadings: suggestions } : {}),
     };

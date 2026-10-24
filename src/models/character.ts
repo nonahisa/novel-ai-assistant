@@ -492,15 +492,21 @@ export function keepProtagonistMark(
  * 主人公の印（`keepProtagonistMark`）と宿り（2026-10-18）。理由は主人公の印と同じ——
  * 承認待ちの更新案は作られた時点の写しなので、案の側の印を使うと、作者がそのあとで
  * 付け外しした印が戻る。
+ *
+ * 別名の読み（設計書6.42.2）も同じに扱う。作者のデータで、しかも案のあとで原稿の
+ * IMEが裏で埋めることがある——案の写しをそのまま書くと、埋めた読みが承認で消える。
+ * いまの記録の読みを、**案の別名で刈り込んで**載せる（案で消えた別名の読みは消える）
  */
 export function keepAuthorOnlyMarks(
   next: Character,
-  current: Pick<Character, "isProtagonist" | "dwellings">
+  current: Pick<Character, "isProtagonist" | "dwellings" | "aliasReadings">
 ): Character {
   const { dwellings: _ignored, ...rest } = keepProtagonistMark(next, current);
-  return current.dwellings && current.dwellings.length > 0
-    ? { ...rest, dwellings: current.dwellings.map((entry) => ({ ...entry })) }
-    : rest;
+  const marked: Character =
+    current.dwellings && current.dwellings.length > 0
+      ? { ...rest, dwellings: current.dwellings.map((entry) => ({ ...entry })) }
+      : rest;
+  return withOptionalAliasReadings(marked, current.aliasReadings);
 }
 
 /** char_001_月島灯.json の形式にする */
