@@ -305,6 +305,17 @@ describe("続けて打った確定をつなげて送る（画面側）", () => {
     expect(posted[1]).toEqual({ type: "imeReading", kana: "あかり", committed: "灯" });
   });
 
+  it("同じ字が別の所にあっても、そこへ動いて打ったものはつながない（書く面）", () => {
+    vi.useFakeTimers();
+    const { field, insert } = textarea("白樺の森で。");
+    const { fire, posted } = harness({ write: field });
+    typeOne(fire, "write", insert, "しらかば", "白樺");
+    // 本文の頭の「白樺」の直後へカーソルを動かしてから打った
+    field.selectionStart = field.selectionEnd = 2;
+    typeOne(fire, "write", insert, "あかり", "灯");
+    expect(posted[1]).toEqual({ type: "imeReading", kana: "あかり", committed: "灯" });
+  });
+
   it("位置が離れた2つはつながない（組んで書く面。別のノードへ移った）", () => {
     vi.useFakeTimers();
     const first = editable();

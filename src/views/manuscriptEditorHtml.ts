@@ -2030,7 +2030,33 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     if (now - previous.at > IME_JOIN_GAP_MS) return false;
     const before = imeTextBeforeCaret(face);
     if (before === null) return false;
+    /*
+      書く面は位置の数も手元にあるので、それも合わせる（同じ字が本文の別の所に
+      あっても、そこへカーソルを動かして打ったものをつながない）。確定の字が
+      知らせの前に入るか後に入るかで、前の確定のときに覚えた位置と、いまの位置は
+      それぞれ確定の字の長さだけずれうるので、その4通りだけを認める
+    */
+    if (face === write) {
+      const end = imeCaretEnd(face);
+      if (end === null || previous.end === null) return false;
+      const step = end - previous.end;
+      const first = previous.committed.length;
+      if (
+        step !== 0 &&
+        step !== committed.length &&
+        step !== first &&
+        step !== first + committed.length
+      ) {
+        return false;
+      }
+    }
     return before.endsWith(previous.committed + committed) || before.endsWith(previous.committed);
+  }
+  /** 書く面のカーソルの位置（組んで書く面は数えない＝null） */
+  function imeCaretEnd(face) {
+    if (face !== write) return null;
+    const end = write.selectionEnd;
+    return typeof end === "number" ? end : null;
   }
   let imeKana = "";
   let imeLast = "";
@@ -2057,7 +2083,13 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     const now = Date.now();
     const joined = imeFollows(previous, face, committed, now) ? previous : null;
     // かなのままの確定（助詞など）も、次の確定とつなぐために覚える
-    imePrevious = { face: face, kana: kana, committed: committed, at: now };
+    imePrevious = {
+      face: face,
+      kana: kana,
+      committed: committed,
+      at: now,
+      end: imeCaretEnd(face),
+    };
     // かなのままの確定は、それだけでは名前に当たらないので、つなぐときだけ送る
     if (committed === kana && !joined) return;
     const message = { type: "imeReading", kana: kana, committed: committed };
