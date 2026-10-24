@@ -6,14 +6,17 @@ import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
  * 横の相談パネル（AIに相談）が、**入力欄の見えないまま開かない**こと（作者の裁定「両方直す」、2026-10-16）。
  *
  * 左の列には作品一覧・簡単ステップメニュー・詳細メニュー・AIに相談の4つが縦に並ぶ。相談は畳んだ形
- * （`visibility: collapsed`）で一番下に置かれ、開くと上の3つの残りの高さしか貰えず、約100pxまで縮むことが
- * あった。中の作り（上の「相談の対象」・聞き方の例・入力欄・ボタン2段）は合わせて約150pxあるので、
- * 入力欄と［送る］が窓の外へ押し出され、開いたのに打てない形になった（画面テスト `support/chatInput.ts`）。
+ * （`visibility: collapsed`）で一番下に置かれ、開くと約100pxまで縮むことがあった（2026-10-23 夜に測ると、
+ * 畳んだ区画は戻す高さを持たず、VS Code の区画の最小の高さ 120px で開いていた）。中の作り（上の「相談の対象」・
+ * 聞き方の例・入力欄・ボタン2段）は合わせて約150pxあるので、入力欄と［送る］が窓の外へ押し出され、
+ * 開いたのに打てない形になった（画面テスト `support/chatInput.ts`）。
+ * 2026-10-24 夜の作者の裁定「畳まずに出す」で、`collapsed` を外した。
  *
  * 直しは2段：
  * 1. **最初に出すときの高さを貰う**（`initialSize`）。VS Code は列の高さを、各ビューの重み（指定が無ければ20）
  *    で割って配る。相談に60を付けると、ほかの3つ（20×3）と同じだけ——列の半分を貰う。
- *    ただし効くのは「最初に出すとき」だけで、作者が境目を動かしたあとは作者の高さが勝つ
+ *    ただし効くのは「最初に出すとき」だけで、作者が境目を動かしたあとは作者の高さが勝つ。
+ *    **畳んだ区画には使われない**ので、10-16〜10-24 のあいだは値があっても効いていなかった
  * 2. **それでも低いときは、中の作りを詰めて入力欄と［送る］を残す**（WebView の CSS）。
  *    高さを決めるのは VS Code の側で、拡張機能に「この高さにしろ」と言う口は無い。確実に効くのはこちら
  */
@@ -43,10 +46,15 @@ function shortBlock(css: string): { limit: number; body: string } | undefined {
 describe("横の相談パネルの高さ", () => {
   test("最初に出すとき、ほかの3つのビューと同じだけの高さを貰う（initialSize）", () => {
     const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
-      contributes: { views: Record<string, Array<{ id: string; initialSize?: number }>> };
+      contributes: {
+        views: Record<string, Array<{ id: string; initialSize?: number; visibility?: string }>>;
+      };
     };
     const views = manifest.contributes.views.novelai;
     const chat = views.find((view) => view.id === "novelai.chatView");
+    // **畳んだ区画には initialSize が使われない**（2026-10-23 夜の測定。開くと最小の120pxに落ちた）。
+    // 値があっても畳んでいれば効かないので、畳まないことも一緒に見張る
+    expect(chat?.visibility).not.toBe("collapsed");
     const others = views
       .filter((view) => view.id !== "novelai.chatView")
       .reduce((sum, view) => sum + (view.initialSize ?? 20), 0);

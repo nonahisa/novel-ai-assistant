@@ -214,12 +214,18 @@ describe("コマンドの登録", () => {
 
     **覚えるのはVS Code側である。** 作者がいちど広げれば、以後はその
     状態で開く（`visibility` は「まだ触られていないとき」の既定）。
+
+    **この裁定は 2026-10-24 夜に外した**（作者の裁定「畳まずに出す」）。
+    畳んで始めた区画は、開いたときに戻す高さを VS Code が持っておらず、
+    区画の最小の高さ（120px）で開いた（2026-10-23 夜の測定）。高さを
+    拡張機能から決める口は無いので、畳まずに出して、package.json の
+    `initialSize`（重み60＝列の半分）を初回の配置で効かせる。
   */
-  test("初回は「AIに相談」だけ畳んで出す", () => {
-    expect(view("novelai.chatView").visibility).toBe("collapsed");
+  test("「AIに相談」も畳まずに出す（初めて開いても読める高さにする）", () => {
+    expect(view("novelai.chatView").visibility).toBeUndefined();
   });
 
-  test("上の3つは畳まない（既定のまま開く）", () => {
+  test("上の3つも畳まない（既定のまま開く）", () => {
     // ここへ `collapsed` を足すと、開き方の分からない作者には
     // 「メニューが消えた」ようにしか見えない
     for (const id of ["novelai.works", "novelai.steps", "novelai.actions"]) {
