@@ -1397,12 +1397,18 @@ function fixRelationDirections(
  * 途中の一致まで拾うと「ふじいさん」のような人名を巻き込む。
  * 漢字の語は「三門の母」のように名前の途中にも出るので位置を縛らない。
  *
- * 並び順に意味がある。「祖母」は「母」を含むため、先に見ないと
- * 「祖母」の相手を「母」へ直してしまう。
+ * **「祖母」は「母」を、「祖父」は「父」を含む。** 規則は全部当てて
+ * 「当たったのが1つだけ」のときに直すので（「兄妹」を決めつけないため）、
+ * 包む語は `within` に書き、その語を除いた残りで当たるかを見る。
+ * 以前は並び順で解くつもりのコメントだけがあり、実際は「三門の祖母」が
+ * 「祖母」「母」の2つに当たって直らなかった（2026-10-24）。
+ * 「祖母と母」のように「祖母」の外にも「母」があれば、2人を指しているので直さない。
  */
 const KINSHIP_RULES: ReadonlyArray<{
   /** 相手の名前に現れる語 */
   inName: RegExp;
+  /** この語を含む、より限定された語。名前からこれを除いてから `inName` を当てる */
+  within?: RegExp;
   /** その人物の側から見た語。これが relation に来ていたら向きが逆 */
   reverse: RegExp;
   /** 直したあとの関係 */
@@ -1410,8 +1416,18 @@ const KINSHIP_RULES: ReadonlyArray<{
 }> = [
   { inName: /祖母|^お?ばあ/u, reverse: /^孫/u, corrected: "祖母" },
   { inName: /祖父|^お?じい/u, reverse: /^孫/u, corrected: "祖父" },
-  { inName: /母|^お?かあ/u, reverse: /^(?:息子|娘)/u, corrected: "母" },
-  { inName: /父|^お?とう/u, reverse: /^(?:息子|娘)/u, corrected: "父" },
+  {
+    inName: /母|^お?かあ/u,
+    within: /祖母/gu,
+    reverse: /^(?:息子|娘)/u,
+    corrected: "母",
+  },
+  {
+    inName: /父|^お?とう/u,
+    within: /祖父/gu,
+    reverse: /^(?:息子|娘)/u,
+    corrected: "父",
+  },
   { inName: /姉|^お?ねえ/u, reverse: /^(?:弟|妹)/u, corrected: "姉" },
   { inName: /兄|^お?にい/u, reverse: /^(?:弟|妹)/u, corrected: "兄" },
   { inName: /弟/u, reverse: /^(?:兄|姉)/u, corrected: "弟" },
@@ -1431,13 +1447,15 @@ export function correctRelationDirection(
   const value = relation.trim();
   if (!name || !value) return null;
 
-  const matched = KINSHIP_RULES.filter((rule) => rule.inName.test(name));
+  const hits = (rule: (typeof KINSHIP_RULES)[number], text: string): boolean =>
+    rule.inName.test(rule.within ? text.replace(rule.within, "") : text);
+  const matched = KINSHIP_RULES.filter((rule) => hits(rule, name));
   // 「兄妹」のように2つの親族語が入った呼び名は、どちら側か決められない
   if (matched.length !== 1) return null;
 
   const rule = matched[0];
   // 既に相手側の語が書かれているなら触らない（「母の再婚相手」など）
-  if (rule.inName.test(value)) return value;
+  if (hits(rule, value)) return value;
   if (!rule.reverse.test(value)) return value;
   return rule.corrected;
 }
