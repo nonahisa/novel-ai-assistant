@@ -846,6 +846,13 @@ export const IGNORED_PATHS: readonly string[] = [
   */
   ".aiwriter/ai-instruction-usage.json",
   /*
+    IMEで打った名前の読みの控え（設計書6.42.2。0.111.4）。**同期しない**
+    （作者の裁定、2026-10-24 夜「同期から外す」）——名前を確定するたびに
+    書くので、同期すると2台で食い違いやすく、変更の記録が出続ける。
+    設定資料の読み（`reading`）に入った分は、設定資料と一緒に同期される。
+  */
+  ".aiwriter/imeReadings.json",
+  /*
     MCP の登録（設計書6.87.15 柱5）。**同期しない**——登録には束
     （`dist/mcp-server.mjs`）への**絶対パス**が入っており、束の場所は
     その機械ごとに違う。同期すると、別の機械には**存在しないパスを指す
@@ -924,6 +931,8 @@ async function isWorkFolderPresent(folderPath: string): Promise<boolean> {
  *
  * 承認待ちの更新案（`.aiwriter/pending-characters/`）と設定資料・IME辞書は
  * わざと除外しない。作者の判断待ちや読み物であり、別の環境でも見たいため。
+ * （ここでの IME辞書は書き出した辞書のこと。IMEで打った読みの控え
+ * `.aiwriter/imeReadings.json` は除外している。`IGNORED_PATHS` を参照）
  */
 async function ensureRecoveryIgnoreRule(
   folderPath: string,

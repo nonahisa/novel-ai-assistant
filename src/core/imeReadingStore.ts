@@ -10,16 +10,20 @@ import { parseImeReadingFile, type ImeReadingFile } from "./imeReading";
 /**
  * IMEで打った読みの控えの置き場（`.aiwriter/imeReadings.json`。設計書6.42.2）。
  *
- * ## 同期する
+ * ## 同期しない
  *
- * `IGNORED_PATHS` に入れない。作者がノートPCで打った名前の読みは、デスクトップの
- * 読み上げでも効いてほしい（読みの辞書 `readingDictionaryStore.ts` と同じ考え方）。
+ * `IGNORED_PATHS`（`workRegistry.ts`）に入れてある（作者の裁定、2026-10-24 夜
+ * 「同期から外す」）。名前を確定するたびに書くので、同期すると2台で食い違い
+ * やすく、変更の記録が出続ける。**設定資料の読み（`reading`）に入った分は、
+ * 設定資料と一緒にこれまでどおり同期される**——別の機械へ届けたい読みは
+ * そちらで届く。0.111.4 では同期していた（読みの辞書と同じ扱いだった）。
  *
  * ## 書き込みは①（上書き）＋ハッシュ照合
  *
  * 作品に1つの小さなファイルなので、回復先への退避は持たない（スキル `implement`
  * の実装ルール2、経路①）。**書く直前に読み直し、読んだときのハッシュと違えば
- * 書かずに止める**（同期で入った別の機械の回数を押し流さない）。
+ * 書かずに止める**。同期しなくても、同じ機械の別の窓（同じ作品を2つの窓で
+ * 開いている）が書くことはあるので、照合は残す。
  */
 
 const FILE_NAME = "imeReadings.json";
@@ -78,7 +82,7 @@ export async function saveImeReadings(
 
 /**
  * 読んで・変えて・書く。**照合で弾かれたら1度だけ読み直してやり直す**
- * （同期で別の機械の回数が入っていたら、それに足す）。2度目も弾かれたら投げる。
+ * （別の窓の回数が入っていたら、それに足す）。2度目も弾かれたら投げる。
  *
  * @returns 書いたあとの控え
  */
@@ -103,8 +107,8 @@ async function readTextOrUndefined(file: string): Promise<string | undefined> {
   try {
     bytes = await vscode.workspace.fs.readFile(path.toUri(file));
   } catch (error) {
-    // **「無い」だけを空として扱う。** 読めない（権限・同期中）を「無い」と
-    // 取り違えると、書く側の照合も素通りして別の機械の回数を空で上書きする
+    // **「無い」だけを空として扱う。** 読めない（権限・クラウドの取り寄せ中）を
+    // 「無い」と取り違えると、書く側の照合も素通りしてこれまでの回数を空で上書きする
     if (isNotFound(error)) return undefined;
     throw error;
   }

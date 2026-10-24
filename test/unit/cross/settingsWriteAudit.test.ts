@@ -43,6 +43,7 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
   // ハッシュと違えば書かない（同期で入った別の機械の直しを押し流さない）
   "readingDictionaryStore.ts": "書く直前に読み直してハッシュを照合する",
   // IMEで打った読みの控え（設計書6.42.2）。読みの辞書と同じ形。弾かれたら読み直して足し直す
+  // （同期からは外してある＝作者の裁定 2026-10-24 夜。照合は同じ機械の別の窓に効く）
   "imeReadingStore.ts": "書く直前に読み直してハッシュを照合する",
   "readerTargetStore.ts":"assertSaveAllowed を持つ（未保存の編集も断る）",
   // 写真の書き起こしの「AIへの頼み」（設計書6.117.7）。作者の文なので、書く直前に
