@@ -2281,9 +2281,23 @@ describe("変換中の字に色を置かない（作者の依頼、2026-09-24）
     expect(html).toContain("::highlight(novelai-reading)");
   });
 
-  /** 変換の途中の出来事を拾わない（拾えば、1字打つたびに何かが走る） */
-  it("compositionupdate を拾っていない", () => {
-    expect(html).not.toMatch(/addEventListener\(\s*"compositionupdate"/);
+  /**
+   * 変換の途中の出来事を拾わない（拾えば、1字打つたびに何かが走る）。
+   *
+   * **例外はIMEの読みを覚える1か所だけ**（設計書6.42.2。2026-10-24）。そこは
+   * 変換中の字が「かなだけ」なら変数へ覚えるだけで、全文を数えず画面の要素にも
+   * 触らない（中身は manuscriptEditorImeReading.test.ts が見張る）。ほかの所で
+   * 拾い始めたら、ここが落ちる
+   */
+  it("compositionupdate を拾うのは、IMEの読みを覚える1か所だけ", () => {
+    const start = html.indexOf("/* ime-reading:start */");
+    const end = html.indexOf("/* ime-reading:end */");
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const block = html.slice(start, end);
+    const outside = html.slice(0, start) + html.slice(end);
+    expect(outside).not.toMatch(/addEventListener\(\s*"compositionupdate"/);
+    expect(block.match(/addEventListener\(\s*"compositionupdate"/g)).toHaveLength(1);
   });
 
   /** 変換の始まりでは印を立てるだけ（位置を読む・数える処理を置かない） */
