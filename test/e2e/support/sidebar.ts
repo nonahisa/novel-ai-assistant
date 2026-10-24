@@ -45,6 +45,26 @@ export async function showSidebar(page: Page, workTitle: string): Promise<void> 
   await waitUntil(async () => (await treeRow(page, workTitle).count()) > 0, `作品一覧に「${workTitle}」の行が出る`);
 }
 
+/**
+ * 左の列の区画（作品一覧・簡単ステップメニュー・詳細メニュー・AIに相談）を、見出しを押して畳む。
+ *
+ * 0.111.7 から、横の「AIに相談」は初めて開くときに畳まずに出る（設計書6.6.3。作者の判断）。
+ * まっさらなプロファイルで起こすテストでは、相談が左の列の下半分を取り、上の木の区画が数行まで
+ * 低くなる。**木は見えている行しか DOM に描かない**ので、下のほうの行（「6. 編集部校正・校閲」
+ * など）が現れないまま待ちで落ちた（2026-10-24）。木の行を押す件は、先にここで相談を畳む。
+ *
+ * `showSidebar` には入れない——横の相談の高さそのものを見る件があり、畳むと 0.111.7 が直した
+ * 状態（畳んだ区画には initialSize が効かない）へ戻してしまうため
+ */
+export async function collapseSidebarPane(page: Page, title: string): Promise<void> {
+  const header = page.locator(".pane-header", { hasText: title }).first();
+  await header.waitFor({ state: "visible", timeout: 15_000 });
+  const expanded = async () => (await header.getAttribute("aria-expanded")) === "true";
+  if (!(await expanded())) return;
+  await header.click();
+  await waitUntil(async () => !(await expanded()), `左の列の「${title}」が畳まれる`, 5_000);
+}
+
 /** 名前（aria-label）が `head` で始まる行 */
 export function treeRow(page: Page, head: string): Locator {
   return page.locator(`.monaco-list-row[aria-label^="${head.replace(/"/g, '\\"')}"]`).first();

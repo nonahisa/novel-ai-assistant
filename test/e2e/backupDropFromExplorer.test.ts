@@ -139,7 +139,8 @@ async function watchWorkbenchDrag(page: Page): Promise<void> {
     target.__e2eWorkbenchDrag = { events: [], data: {} };
     if ((window as Window & { __e2eWorkbenchWatch?: boolean }).__e2eWorkbenchWatch) return;
     (window as Window & { __e2eWorkbenchWatch?: boolean }).__e2eWorkbenchWatch = true;
-    for (const type of ["dragstart", "drop"]) {
+    // dragend も控える：落ちたときに「drop が無いまま引きずりが終わった」のか「まだ終わっていない」のかを分けるため
+    for (const type of ["dragstart", "drop", "dragend"]) {
       document.addEventListener(
         type,
         (event) => {
@@ -181,6 +182,51 @@ async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 20 });
   await page.mouse.up();
   if (shift) await page.keyboard.up("Shift");
+}
+
+/**
+ * 本物の引きずりで落とし、本体の文書で drop が起きるまで、引きずりを最大3回やり直す。
+ *
+ * **やり直すのは、Playwright が引きずりを引き取りそこねたときだけ。** 15回に1回ほど、エクスプローラーの
+ * 行で dragstart は起きたのに、drop も dragend も来ないまま終わった（2026-10-25 母艦で捕まえた。
+ * 0.111.7 より前の 10-16 にも同じ形で落ちている）。Playwright は引きずりを自分で引き取って
+ * 便を送り直す作りで、引き取るかどうかを「動かした直後に dragstart が来たか」で決めている
+ * （playwright-core の crDragDrop）。dragstart がその見張りより遅れると、引きずりは始まったのに
+ * 誰も drop を送らない——と読んだ（便の形は合うが、Playwright の中を覗いて確かめたわけではない）。ここは製品が関わる前の段なので、やり直しても製品の不具合は隠れない。
+ * drop が起きたあと（落とし先がどこか・ファイルが開くか）は、やり直さずに呼び出し側が確かめる
+ */
+async function dragRowUntilDropped(session: E2ESession, chat: Frame, shift: boolean): Promise<void> {
+  const { page } = session;
+  const tries: string[][] = [];
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await watchWorkbenchDrag(page);
+    await dragRowOntoChat(page, chat, shift);
+    const dropped = await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("drop:")), "本体の文書で drop が起きる", 5_000)
+      .then(() => true)
+      .catch(() => false);
+    if (dropped) {
+      // やり直して通った回は、どれだけ揺れているかが後で分かるようにログへ残す
+      if (attempt > 1) console.warn(`[E2E] 引きずりを ${attempt} 回目で落とせました（前の回の本体の便：${JSON.stringify(tries)}）`);
+      return;
+    }
+    tries.push((await workbenchDrag(page)).events);
+    /*
+      引き取られなかった引きずりは、本体の窓の中で「引きずり中」のまま残り、次の引きずりが始まらない
+      （Escape では消えず、2回目・3回目は dragstart すら来なかった。2026-10-25）。Playwright が
+      取り消しに使うのと同じ dragCancel の便を本体の窓へ送って終わらせてから、やり直す
+    */
+    const cdp = await session.app.context().newCDPSession(page);
+    try {
+      await cdp.send("Input.dispatchDragEvent", { type: "dragCancel", x: 0, y: 0, data: { items: [], dragOperationsMask: 65535 } }).catch(() => undefined);
+    } finally {
+      await cdp.detach().catch(() => undefined);
+    }
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+  }
+  throw new Error(
+    `本体の文書で drop が起きるまで3回引きずりましたが、起きません（回ごとの本体の便：${JSON.stringify(tries)}／面に来た便：${JSON.stringify(await dragsInChat(chat))}／タブ：${JSON.stringify(await editorGroupTabs(page))}）`
+  );
 }
 
 /** 相談画面の WebView の外側の枠（別プロセスの枠）への CDP の口と、その枠の大きさ */
@@ -235,9 +281,8 @@ test("エクスプローラーの行を Shift なしで相談画面へ落とす�
       const { page } = session;
       const chat = await openChatBesideExplorer(page);
       const logBefore = await chatLog(chat);
-      await watchWorkbenchDrag(page);
 
-      await dragRowOntoChat(page, chat, false);
+      await dragRowUntilDropped(session, chat, false);
       await waitUntil(async () => tabNamesInclude((await editorGroupTabs(page)).flat(), BACKUP_NAME), "落としたファイルがエディターで開く", 10_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（タブ：${JSON.stringify(await editorGroupTabs(page))}／本体の便：${JSON.stringify((await workbenchDrag(page)).events)}）`);
@@ -268,11 +313,9 @@ test("エクスプローラーの行を Shift を押しながら相談画面へ�
     async (session) => {
       const { page } = session;
       const chat = await openChatBesideExplorer(page);
-      await watchWorkbenchDrag(page);
 
       // 1段目：本物の引きずり。VS Code は横取りせず、落とし先は WebView の <iframe> 要素になる
-      await dragRowOntoChat(page, chat, true);
-      await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("drop:")), "本体の文書で drop が起きる", 10_000);
+      await dragRowUntilDropped(session, chat, true);
       const drag = await workbenchDrag(page);
       expect(drag.events[0], `本物の引きずりがエクスプローラーの行から始まった（${JSON.stringify(drag.events)}）`).toMatch(/^dragstart:.*monaco-list-row/);
       expect(drag.events.find((event) => event.startsWith("drop:")), `落とし先は WebView の枠（${JSON.stringify(drag.events)}）`).toMatch(/^drop:IFRAME\.webview/);

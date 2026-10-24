@@ -38,7 +38,7 @@ import {
   readJsonLines,
   writeSampleFinding,
 } from "./support/sampleFinding";
-import { SIDEBAR_LAUNCH, scrollTreeUntilRow, showSidebar, treeRow } from "./support/sidebar";
+import { collapseSidebarPane, SIDEBAR_LAUNCH, scrollTreeUntilRow, showSidebar } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import {
@@ -113,10 +113,12 @@ test("簡単ステップメニュー「6. 編集部校正・校閲」の「作�
     async (session) => {
       const { page, root, workFolder } = session;
       await showSidebar(page, E2E_WORK_TITLE);
+      // 横の「AIに相談」が左の列の下半分を取り、簡単ステップメニューが数行まで低くなるので畳む（collapseSidebarPane）
+      await collapseSidebarPane(page, "AIに相談");
 
       /* ── ステップメニューの「6. 編集部校正・校閲」を開き、「作者／編集者切替」を押す ── */
-      const step = treeRow(page, STEP);
-      await waitUntil(async () => (await step.count()) > 0, `簡単ステップメニューに「${STEP}」が出る`);
+      // 窓が低いと、畳んでも「6.」が区画の外で描かれないことがある（ノートPCの狭い窓）。描かれるまで区画を送る
+      const step = await scrollTreeUntilRow(page, "1. 作品登録", STEP);
       await step.scrollIntoViewIfNeeded();
       if ((await step.getAttribute("aria-expanded")) !== "true") await step.click();
       await waitUntil(async () => (await step.getAttribute("aria-expanded")) === "true", `「${STEP}」が開く`);

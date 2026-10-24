@@ -78,6 +78,9 @@ test("狭いサイドバーでも、AIを呼ばない操作の右の薄字は切
       await showSidebar(page, E2E_WORK_TITLE);
       await setPane(page, "作品一覧", false);
       await setPane(page, "簡単ステップメニュー", false);
+      // 0.111.7 から横の「AIに相談」が畳まれずに出て左の列の下半分を取り、詳細メニューが数行しか
+      // 見えなくなった。木は見えている行しか描かないので、下の束の行が現れず待ちで落ちた（2026-10-24）
+      await setPane(page, "AIに相談", false);
       const width = await setSidebarWidth(page, 240);
       expect(width, "左の列が狭くなっていません").toBeLessThanOrEqual(260);
 
