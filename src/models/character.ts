@@ -6,6 +6,11 @@ import {
 import { parseAiNotes, type AiNote } from "./aiNote";
 import { parseCustomFieldValues } from "./customField";
 import {
+  parseOptionalAliasReadings,
+  withOptionalAliasReadings,
+  type AliasReadings,
+} from "./aliasReading";
+import {
   parseChanges,
   parseConflicts,
   type RecordChange,
@@ -277,6 +282,13 @@ export interface Character {
   distinctFrom: DistinctPerson[];
   /** 読み仮名。設定資料エクスポートで必要になる */
   reading: string | null;
+  /**
+   * 別名ごとの読み（設計書6.42.2）。鍵は `aliases` の表記そのまま。
+   * `reading` は名前の読みなので、別名の読みはここに持つ。**作者のデータ**——
+   * AIの抽出・マージは書かない・消さない。読みの無い人物には欄が無い
+   * （`withOptionalAliasReadings`）
+   */
+  aliasReadings?: AliasReadings;
   romaji: string | null;
   icon: string | null;
   iconSource: "external" | "generated" | "none";
@@ -783,7 +795,13 @@ export function parseCharacter(raw: unknown): Character {
   // 宿り（2026-10-18）も、あるときだけ欄を持つ（空の配列を保存のたびに増やさない）
   if (dwellings && dwellings.length > 0) character.dwellings = dwellings;
   else delete character.dwellings;
-  return character;
+  // 別名の読み（設計書6.42.2）。**壊れた形は止める**。いまの別名に無い鍵は持たない
+  // ——保存もこの関数を通るので、別名を消した道（パネル・まとめ・分け・差分の取り下げ）
+  // のどれでも、対応する読みが一緒に消える
+  return withOptionalAliasReadings(
+    character,
+    parseOptionalAliasReadings(value.aliasReadings)
+  );
 }
 
 /** 性格・口調の面を1つ読む。壊れた形は読み込みエラーにする */

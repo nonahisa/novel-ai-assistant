@@ -1,4 +1,5 @@
 import type { Character } from "../models/character";
+import { pruneAliasReadings } from "../models/aliasReading";
 import { mergeChangeLists, mergeConflicts } from "../models/jsonValidation";
 import { dwellingBlockedNames, unifyDwellings } from "./characterDwelling";
 import {
@@ -69,10 +70,23 @@ export function unifyCharacters(
 
   // 宿りは `unifyDwellings` の結果だけを使う。残す側の欄を広げて持ち込むと、
   // まとめる相手を体とする宿り（意味を失ったもの）が残る
-  const { dwellings: _keepDwellings, ...keepRest } = keep;
+  const { dwellings: _keepDwellings, aliasReadings: _keepAliasReadings, ...keepRest } = keep;
+  // 別名の読み（設計書6.42.2）は両方から引き継ぐ。残す側が勝つ。吸収される側の
+  // 名前は別名になるので、その名前の読みはその別名の読みへ移す（読みが迷子に
+  // ならない）。最後にまとめた後の別名で刈り込む
+  const aliasReadings = pruneAliasReadings(
+    {
+      ...(absorb.reading?.trim() ? { [absorb.name.trim()]: absorb.reading.trim() } : {}),
+      ...(absorb.aliasReadings ?? {}),
+      ...(keep.aliasReadings ?? {}),
+    },
+    keep.name,
+    aliases
+  );
   return {
     unified: {
       ...keepRest,
+      ...(Object.keys(aliasReadings).length > 0 ? { aliasReadings } : {}),
       aliases,
       // 別人の記録（設計書6.5.8）は両方から引き継ぐ。吸収される側の分を
       // 落とすと、「アジャーノは別人」という作者の判断がまとめる操作1回で

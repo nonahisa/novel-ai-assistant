@@ -21,7 +21,13 @@ import {
 } from "../models/world";
 import { nextAiNoteId, type AiNote, type AiNoteSource } from "../models/aiNote";
 import { withOptionalCustomFields } from "../models/customField";
+import {
+  aliasReadingOf,
+  withOptionalAliasReadings,
+  type AliasReadings,
+} from "../models/aliasReading";
 import { clampSummary } from "./summaryLimit";
+import { KANJI } from "./readingDictionary";
 import { recordRemovedRelations } from "./rejectedRelations";
 import { DwellingEditError, parseDwellingsEdit } from "./characterDwelling";
 
@@ -51,6 +57,11 @@ export interface RecordEdits {
   reading?: string;
   /** 読点・改行区切りの別名 */
   aliases?: string;
+  /**
+   * 別名の読み（設計書6.42.2）。1行に1つ「別名=読み」（`formatAliasReadingsForEdit`）。
+   * **作者が画面で直したときだけ効く**（`withEditedAliasReadings`）
+   */
+  aliasReadings?: string;
   /**
    * 人物の関係。**1行に1つ「相手=関係」**（`formatRelationsForEdit` の形）。
    * 場所では位置関係で、1行に1つ「港町の中」「港の北」「港から徒歩10分」
@@ -218,7 +229,8 @@ export function applyCharacterEdits(
     if (dwellings.length > 0) edited.dwellings = dwellings;
     else delete edited.dwellings;
   }
-  return edited;
+  // 別名の読み（設計書6.42.2）。別名を消したら読みも消え、入れ替えでは表記について回る
+  return withEditedAliasReadings(character, edited, edits, options);
 }
 
 /**
@@ -333,7 +345,7 @@ export function applyAbilityEdits(
 ): Ability {
   // 作者が足した項目（2026-09-23〜）。人物と同じく、渡されなかったキーは
   // 触らない。全部空になったらキーごと外す（これまでのファイルの形に戻す）
-  return withOptionalCustomFields(
+  const edited = withOptionalCustomFields(
     {
       ...ability,
       summary: clampSummary(nullableText(ability.summary, edits.summary)),
@@ -356,6 +368,8 @@ export function applyAbilityEdits(
     },
     editedCustomFields(ability.customFields ?? {}, edits.customFields)
   );
+  // 別名の読み（設計書6.42.2）は人物と同じ扱い
+  return withEditedAliasReadings(ability, edited, edits, options);
 }
 
 export function applyOrganizationEdits(
@@ -365,7 +379,7 @@ export function applyOrganizationEdits(
 ): Organization {
   // 作者が足した項目（2026-09-23〜）。人物と同じく、渡されなかったキーは
   // 触らない。全部空になったらキーごと外す（これまでのファイルの形に戻す）
-  return withOptionalCustomFields(
+  const edited = withOptionalCustomFields(
     {
       ...organization,
       summary: clampSummary(nullableText(organization.summary, edits.summary)),
@@ -387,6 +401,8 @@ export function applyOrganizationEdits(
     },
     editedCustomFields(organization.customFields ?? {}, edits.customFields)
   );
+  // 別名の読み（設計書6.42.2）は人物と同じ扱い
+  return withEditedAliasReadings(organization, edited, edits, options);
 }
 
 /**
@@ -404,7 +420,7 @@ export function applyWorldItemEdits(
 ): WorldItem {
   // 作者が足した項目（2026-09-23〜）。人物と同じく、渡されなかったキーは
   // 触らない。全部空になったらキーごと外す（これまでのファイルの形に戻す）
-  return withOptionalCustomFields(
+  const edited = withOptionalCustomFields(
     {
       ...item,
       // 漢字の造語はコード側で読みを作れない。ここが作者の入力口になる
@@ -425,6 +441,8 @@ export function applyWorldItemEdits(
     },
     editedCustomFields(item.customFields ?? {}, edits.customFields)
   );
+  // 別名の読み（設計書6.42.2）は人物と同じ扱い
+  return withEditedAliasReadings(item, edited, edits, options);
 }
 
 function editedWorldCategory(
@@ -469,9 +487,15 @@ export function applyLocationEdits(
       editedAliases(location.aliases, edits.aliases)
     ),
   };
-  return withOptionalCustomFields(
-    withOptionalRelations(edited, relations),
-    editedCustomFields(location.customFields ?? {}, edits.customFields)
+  // 別名の読み（設計書6.42.2）は人物と同じ扱い
+  return withEditedAliasReadings(
+    location,
+    withOptionalCustomFields(
+      withOptionalRelations(edited, relations),
+      editedCustomFields(location.customFields ?? {}, edits.customFields)
+    ),
+    edits,
+    options
   );
 }
 
@@ -616,6 +640,120 @@ export function editedAliases(
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
   return [...new Set(parts)];
+}
+
+
+/**
+ * 別名の読みの欄に出す形。**1行に1つ「別名=読み」**（関係・宿りの欄と同じ書き方）。
+ *
+ * 読みのある別名に加えて、**漢字を含む別名は「別名=」の形で並べておく**。
+ * どの別名に読みを付けられるかを作者が探さずに済むように。仮名だけの別名は
+ * 声が読み違えないので並べない（書けば読む）
+ */
+export function formatAliasReadingsForEdit(record: {
+  name: string;
+  aliases: readonly string[];
+  aliasReadings?: Readonly<AliasReadings>;
+}): string {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of record.aliases) {
+    const alias = raw.trim();
+    if (!alias || alias === record.name.trim() || seen.has(alias)) continue;
+    seen.add(alias);
+    const reading = aliasReadingOf(record, alias);
+    if (reading) lines.push(`${alias}=${reading}`);
+    // 読み上げで別名の読みが効くのは漢字を含む別名だけ（`nameReadingSpans`）
+    else if (KANJI.test(alias)) lines.push(`${alias}=`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * 別名の読みの欄の入力を読む（設計書6.42.2）。
+ *
+ * - 区切りは**最初の**「=」か「＝」。前後の空白と空行は落とす。**読みが空の行は
+ *   「読みなし」**（並べておいた「別名=」をそのまま保存しても何も起きない）
+ * - **読めない行・別名に無い呼び名は、行番号と中身を挙げて止める。** 黙って捨てると、
+ *   作者が書いた読みが保存のたびに消える。ただし**同じ保存で別名の欄から消した
+ *   別名**は止めずに落とす——別名を消したら、その読みも一緒に消える約束なので
+ */
+function parseAliasReadingsEdit(
+  text: string,
+  name: string,
+  knownAliases: readonly string[]
+): AliasReadings {
+  const known = new Set(knownAliases.map((alias) => alias.trim()).filter(Boolean));
+  const own = name.trim();
+  const result: AliasReadings = {};
+  const lines = text.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index].trim();
+    if (!line) continue;
+    const at = line.search(/[=＝]/);
+    const alias = at < 0 ? "" : line.slice(0, at).trim();
+    const reading = at < 0 ? "" : line.slice(at + 1).trim();
+    if (!alias) {
+      throw new SettingsEditError(
+        `別名の読みの${index + 1}行目「${line}」が読めません。` +
+          "1行に1つ「別名=読み」の形で書いてください（例：姫君=ひめぎみ）。"
+      );
+    }
+    if (alias === own) {
+      throw new SettingsEditError(
+        `別名の読みの${index + 1}行目「${line}」は名前です。名前の読みは「読み」の欄に書いてください。`
+      );
+    }
+    if (!known.has(alias)) {
+      throw new SettingsEditError(
+        `別名の読みの${index + 1}行目の「${alias}」は別名にありません。` +
+          "先に別名の欄へ足してから、読みを書いてください。"
+      );
+    }
+    if (reading) result[alias] = reading;
+  }
+  return result;
+}
+
+/**
+ * 編集のあとの別名の読みを入れる（設計書6.42.2）。**いまの別名に無い読みは落とす**
+ * （別名の欄で消した別名の読みは、一緒に消える）。
+ *
+ * - 別名の読みの欄（`edits.aliasReadings`）は**作者が画面で直したときだけ効く**。
+ *   AIの提案を採る経路（`authorConfirmed: false`）で鍵が混じっていても無視する
+ *   （作者のデータ。主人公の印・宿りと同じ扱い）
+ * - **別名から名前を選んだとき（入れ替え）は、読みも表記について回る。**
+ *   元の名前は別名へ移るので、元の読みはその別名の読みへ。新しい名前に別名の
+ *   読みがあり、同じ保存で読みの欄を直していなければ、それを名前の読みにする
+ */
+function withEditedAliasReadings<
+  T extends { name: string; aliases: string[]; reading: string | null; aliasReadings?: AliasReadings },
+>(before: T, edited: T, edits: RecordEdits, options: EditOptions | undefined): T {
+  let readings: AliasReadings = { ...(before.aliasReadings ?? {}) };
+  if (edits.aliasReadings !== undefined && options?.authorConfirmed !== false) {
+    readings = parseAliasReadingsEdit(edits.aliasReadings, edited.name, [
+      ...before.aliases,
+      ...edited.aliases,
+    ]);
+  }
+  const result = { ...edited };
+  const oldName = before.name.trim();
+  const newName = edited.name.trim();
+  const swapped =
+    newName !== oldName &&
+    before.aliases.some((alias) => alias.trim() === newName) &&
+    edited.aliases.some((alias) => alias.trim() === oldName);
+  if (swapped) {
+    const carried = aliasReadingOf({ aliasReadings: readings }, newName);
+    const oldReading = (before.reading ?? "").trim();
+    if (oldReading && !aliasReadingOf({ aliasReadings: readings }, oldName)) {
+      readings[oldName] = oldReading;
+    }
+    const readingUntouched =
+      edits.reading === undefined || edits.reading.trim() === oldReading;
+    if (carried && readingUntouched) result.reading = carried;
+  }
+  return withOptionalAliasReadings(result, readings);
 }
 
 type Relation = CharacterRelation;

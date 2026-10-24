@@ -16,6 +16,11 @@ import {
   parseOptionalCustomFieldValues,
   withOptionalCustomFields,
 } from "./customField";
+import {
+  parseOptionalAliasReadings,
+  withOptionalAliasReadings,
+  type AliasReadings,
+} from "./aliasReading";
 
 /**
  * 世界観の設定（P-03）。
@@ -84,6 +89,8 @@ export interface WorldItem {
    * 漢字ならAIの推定（P-16）か、作者が設定資料パネルで直接入力する。
    */
   reading: string | null;
+  /** 別名ごとの読み（設計書6.42.2）。人物の `aliasReadings` と同じ扱い */
+  aliasReadings?: AliasReadings;
   category: WorldCategory;
   /** 中身。これが本体 */
   description: string | null;
@@ -205,14 +212,18 @@ export function parseWorldItem(raw: unknown): WorldItem {
 
   // 追加項目の値は検証してから持たせる。`...value` のまま通すと、
   // 数値などの壊れた値が検証を素通りする
-  return withOptionalCustomFields(
-    normalizeWorldItem({
-      ...value,
-      id: value.id as string,
-      name: value.name as string,
-      conflicts,
-      aiNotes: parseAiNotes(value.aiNotes),
-    } as Partial<WorldItem>),
-    parseOptionalCustomFieldValues(value.customFields)
+  // 別名の読み（設計書6.42.2）も同じく、検証して刈り込んでから持たせる
+  return withOptionalAliasReadings(
+    withOptionalCustomFields(
+      normalizeWorldItem({
+        ...value,
+        id: value.id as string,
+        name: value.name as string,
+        conflicts,
+        aiNotes: parseAiNotes(value.aiNotes),
+      } as Partial<WorldItem>),
+      parseOptionalCustomFieldValues(value.customFields)
+    ),
+    parseOptionalAliasReadings(value.aliasReadings)
   );
 }

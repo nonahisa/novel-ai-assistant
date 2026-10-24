@@ -1877,7 +1877,8 @@ export async function activate(
             `IMEの読み：「${result.capture.surface}」を「${result.capture.reading}」と打ちました` +
               (result.filled.length > 0
                 ? `。設定資料の読みが空だったので埋めました（${result.filled
-                    .map((item) => item.name)
+                    // 別名の読みを埋めたときは、どの別名かも残す
+                    .map((item) => (item.alias ? `${item.name}の別名「${item.alias}」` : item.name))
                     .join("、")}）`
                 : "")
           );
@@ -1889,7 +1890,7 @@ export async function activate(
             // 読み直しは詳細を描き直さないので、開いている項目の読みの欄へも映す
             await panel.refreshFromDisk();
             for (const item of result.filled) {
-              panel.notifyReadingFilled(item.kind, item.id, result.primary);
+              panel.notifyReadingFilled(item.kind, item.id, result.primary, item.alias);
             }
           }
         } catch (error) {

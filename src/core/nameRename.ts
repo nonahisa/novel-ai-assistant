@@ -1,6 +1,7 @@
 import { findNameOccurrences } from "./nameOccurrences";
 import { NAME_PART_SEPARATOR } from "./termIndex";
 import { buildUniqueContext } from "./uniqueContext";
+import { pruneAliasReadings } from "../models/aliasReading";
 
 /**
  * 名前の付け替えの計画（設計書6.37.3）。
@@ -362,6 +363,25 @@ export function applyMappingToRecord<T extends object>(
         seen.add(alias);
         return true;
       });
+  }
+
+  // 別名の読み（設計書6.42.2）。鍵は別名の表記なので、別名と同じく付け替える。
+  // **読みそのものは変えない**（読みは表記ではない。付け替えで読みが変わるなら
+  // 作者が直す）。別名から外れた鍵は落とす——別名を消したら読みも消える約束
+  const readings = source.aliasReadings;
+  if (typeof readings === "object" && readings !== null && !Array.isArray(readings)) {
+    const renamed: Record<string, string> = {};
+    for (const [key, reading] of Object.entries(readings as Record<string, unknown>)) {
+      if (typeof reading !== "string") continue;
+      renamed[applyMappingToText(key, mapping)] = reading;
+    }
+    const aliases = Array.isArray(next.aliases)
+      ? (next.aliases as unknown[]).filter((alias): alias is string => typeof alias === "string")
+      : [];
+    const name = typeof next.name === "string" ? next.name : "";
+    const pruned = pruneAliasReadings(renamed, name, aliases);
+    if (Object.keys(pruned).length > 0) next.aliasReadings = pruned;
+    else delete next.aliasReadings;
   }
 
   return next as T;

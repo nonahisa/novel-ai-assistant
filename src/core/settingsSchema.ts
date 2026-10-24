@@ -44,6 +44,16 @@ function commonProperties(idPattern: string): Record<string, unknown> {
       type: ["string", "null"],
       description: "読み仮名。ひらがな。IME辞書の書き出しに使う",
     },
+    // 別名ごとの読み（設計書6.42.2）。作者のデータ。共通側へ置くのは、
+    // 別名を持つ種類すべてにあり、スキーマに無いと外部のAIの書き込みが落ちるため
+    aliasReadings: {
+      type: "object",
+      description:
+        "別名ごとの読み（鍵は aliases の表記そのまま、値はひらがな）。読み上げで別名を読むのに使う。" +
+        "読みの無い記録には欄が無い。**作者が付けるもの。AIは足すことも直すこともしないこと**" +
+        "（別名を消したときだけ、その別名の読みも一緒に消す）",
+      additionalProperties: { type: "string" },
+    },
     summary: {
       type: ["string", "null"],
       maxLength: SUMMARY_MAX_CHARS,
@@ -591,6 +601,7 @@ export function schemaReadme(workTitle: string): string {
 7. **スキーマに無い項目を足さない。** 読み込み時に落ちます。
 8. **人物の \`isProtagonist\`（主人公の印）を付けたり消したりしない。** 作者が決める印です。
 9. **人物の \`dwellings\`（宿り：心がどの体にいるか）を足したり消したり直したりしない。** 作者が決める記録です。
+10. **\`aliasReadings\`（別名ごとの読み）を足したり直したりしない。** 作者が付ける読みです。別名を消すときだけ、その別名の読みも一緒に消してください。
 
 ## 書き方
 

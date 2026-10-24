@@ -1068,6 +1068,45 @@ button.danger:hover {
     return node;
   }
 
+  /*
+    別名の読みの欄（1行に1つ「別名=読み」。設計書6.42.2）の行を扱う。
+    区切りは拡張機能側（parseAliasReadingsEdit）と同じく、最初の「=」か「＝」。
+    **改行は文字コードから作る**——この台本は TS のテンプレート文字列の中にあり、
+    文字列に改行の書き方を置くと本物の改行に化けて台本が壊れる
+  */
+  const ALIAS_READING_NEWLINE = String.fromCharCode(10);
+  function splitAliasReadingLine(line) {
+    const half = line.indexOf("=");
+    const full = line.indexOf("＝");
+    const at = half < 0 ? full : full < 0 ? half : Math.min(half, full);
+    if (at < 0) return null;
+    return { alias: line.slice(0, at).trim(), reading: line.slice(at + 1).trim() };
+  }
+  /** その別名の行の読み（行が無い・読みが空なら空の文字列） */
+  function aliasReadingLineOf(text, alias) {
+    const lines = text.split(ALIAS_READING_NEWLINE);
+    for (let i = 0; i < lines.length; i++) {
+      const parsed = splitAliasReadingLine(lines[i].trim());
+      if (parsed && parsed.alias === alias) return parsed.reading;
+    }
+    return "";
+  }
+  /** その別名の行を「別名=読み」にする（無ければ末尾に足す）。ほかの行は触らない */
+  function withAliasReadingLine(text, alias, reading) {
+    const lines = text.trim() === "" ? [] : text.split(ALIAS_READING_NEWLINE);
+    let found = false;
+    const next = lines.map(function (line) {
+      const parsed = splitAliasReadingLine(line.trim());
+      if (!found && parsed && parsed.alias === alias) {
+        found = true;
+        return alias + "=" + reading;
+      }
+      return line;
+    });
+    if (!found) next.push(alias + "=" + reading);
+    return next.join(ALIAS_READING_NEWLINE);
+  }
+
   /**
    * 中身の量に合わせて高さを変える入力欄。
    *
@@ -1604,6 +1643,34 @@ button.danger:hover {
         });
         ime.appendChild(useIme);
         wrap.appendChild(ime);
+      }
+      /*
+        IMEで別名を打った読みの提案（設計書6.42.2）。名前の読みの提案と同じく、
+        押したら別名の読みの欄のその別名の行へ入れるだけ。**保存は作者が押す**
+      */
+      if (field.imeAliasReadings && field.imeAliasReadings.length > 0) {
+        for (const entry of field.imeAliasReadings) {
+          const imeAlias = document.createElement("div");
+          imeAlias.className = "chips";
+          const aliasLabel = document.createElement("span");
+          aliasLabel.className = "chiplabel";
+          aliasLabel.textContent =
+            "IMEでは『" + entry.alias + "』を『" + entry.reading + "』と打っています";
+          imeAlias.appendChild(aliasLabel);
+          const useAlias = document.createElement("button");
+          useAlias.type = "button";
+          useAlias.className = "chip";
+          useAlias.textContent = "この読みにする";
+          useAlias.title =
+            "別名の読みの欄へ入れます（「保存」を押すと設定資料に入ります）";
+          useAlias.addEventListener("click", function () {
+            control.value = withAliasReadingLine(control.value, entry.alias, entry.reading);
+            markChanged();
+            control.focus();
+          });
+          imeAlias.appendChild(useAlias);
+          wrap.appendChild(imeAlias);
+        }
       }
       /*
         退けた関係（作者の裁定、2026-09-23）。関係欄の下に並べ、
@@ -2356,6 +2423,30 @@ button.danger:hover {
       */
       case "readingFilled": {
         if (!detail || detail.kind !== message.kind || detail.id !== message.id) break;
+        /*
+          別名の読みを裏で埋めたとき（設計書6.42.2）。名前の読みと同じ理由で、
+          別名の読みの欄が書きかけでなければ、その別名の行だけを書き換える。
+          作者がその別名に読みを書いていたら触らない
+        */
+        if (message.alias) {
+          const aliasControl = el.detail.querySelector('[data-field="aliasReadings"]');
+          if (!aliasControl || aliasControl.value !== aliasControl.dataset.initial) break;
+          if (aliasReadingLineOf(aliasControl.value, message.alias) !== "") break;
+          const next = withAliasReadingLine(aliasControl.value, message.alias, message.reading);
+          aliasControl.value = next;
+          aliasControl.dataset.initial = next;
+          for (const field of detail.fields) {
+            if (field.key === "aliasReadings") {
+              field.value = next;
+              if (field.imeAliasReadings) {
+                field.imeAliasReadings = field.imeAliasReadings.filter(function (entry) {
+                  return entry.alias !== message.alias;
+                });
+              }
+            }
+          }
+          break;
+        }
         const control = el.detail.querySelector('[data-field="reading"]');
         if (!control || control.value !== control.dataset.initial) break;
         if (control.value.trim() !== "") break;

@@ -16,6 +16,11 @@ import {
   parseOptionalCustomFieldValues,
   withOptionalCustomFields,
 } from "./customField";
+import {
+  parseOptionalAliasReadings,
+  withOptionalAliasReadings,
+  type AliasReadings,
+} from "./aliasReading";
 
 /**
  * 能力（魔法・超能力・スキル）のデータモデル。
@@ -64,6 +69,8 @@ export interface Ability {
   aliases: string[];
   /** ルビ。設定資料エクスポートで必要になる */
   reading: string | null;
+  /** 別名ごとの読み（設計書6.42.2）。人物の `aliasReadings` と同じ扱い */
+  aliasReadings?: AliasReadings;
   /** 一覧で名前の下に出す短い紹介。上限は SUMMARY_MAX_CHARS */
   summary: string | null;
   /** 作品側の分類語をそのまま使う（「光属性魔法」等） */
@@ -245,15 +252,19 @@ export function parseAbility(raw: unknown): Ability {
 
   // 追加項目の値は検証してから持たせる。`...value` のまま通すと、
   // 数値などの壊れた値が検証を素通りする
-  return withOptionalCustomFields(
-    normalizeAbility({
-      ...value,
-      id: value.id as string,
-      name: value.name as string,
-      conflicts,
-      aiNotes: parseAiNotes(value.aiNotes),
-    } as Partial<Ability>),
-    parseOptionalCustomFieldValues(value.customFields)
+  // 別名の読み（設計書6.42.2）も同じく、検証して刈り込んでから持たせる
+  return withOptionalAliasReadings(
+    withOptionalCustomFields(
+      normalizeAbility({
+        ...value,
+        id: value.id as string,
+        name: value.name as string,
+        conflicts,
+        aiNotes: parseAiNotes(value.aiNotes),
+      } as Partial<Ability>),
+      parseOptionalCustomFieldValues(value.customFields)
+    ),
+    parseOptionalAliasReadings(value.aliasReadings)
   );
 }
 

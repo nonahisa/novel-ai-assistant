@@ -308,6 +308,28 @@ describe("レコードへの当てはめ", () => {
     expect(next.aliases).toEqual(["レオン様"]);
   });
 
+  test("別名の読み（設計書6.42.2）は、別名と同じく鍵を付け替え、読みは変えない", () => {
+    const record = {
+      id: "char_001",
+      name: "マルキオ",
+      aliases: ["マルキオ様", "黒騎士"],
+      aliasReadings: { マルキオ様: "まるきおさま", 黒騎士: "くろきし" },
+    };
+    const next = applyMappingToRecord(record, mapping);
+    expect(next.aliasReadings).toEqual({ レオン様: "まるきおさま", 黒騎士: "くろきし" });
+  });
+
+  test("別名から外した呼び名の読みは消える", () => {
+    const record = {
+      id: "char_001",
+      name: "ミナ",
+      aliases: ["白姫", "黒騎士"],
+      aliasReadings: { 白姫: "しらひめ", 黒騎士: "くろきし" },
+    };
+    const next = applyMappingToRecord(record, [], { dropAliases: ["白姫"] });
+    expect(next.aliasReadings).toEqual({ 黒騎士: "くろきし" });
+  });
+
   test("作者が書いたものは触らない", () => {
     // authorNotes と exportNote は絶対に自動更新しない（CLAUDE.md 規則2）
     const record = {

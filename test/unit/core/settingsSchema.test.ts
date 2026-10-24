@@ -84,13 +84,14 @@ const OPTIONAL_KEYS: Record<string, readonly string[]> = {
   // 名前の出てこない語り手の印（2026-10-10）は、コードが作った語り手の記録にしか無い
   // 主人公の印（2026-10-17）も、作者が付けた人物にしか無い
   // 宿り（2026-10-18）も、作者が書いた人物にしか無い
-  登場人物: ["rejectedValues", "unnamedNarrator", "isProtagonist", "dwellings"],
-  能力: ["customFields"],
-  組織: ["customFields"],
+  // 別名の読み（設計書6.42.2）は、どの種類でも読みを付けた記録にしか無い
+  登場人物: ["rejectedValues", "unnamedNarrator", "isProtagonist", "dwellings", "aliasReadings"],
+  能力: ["customFields", "aliasReadings"],
+  組織: ["customFields", "aliasReadings"],
   // 位置関係（設計書6.93.2）も、関係が1つも無い場所には欄ごと無い
   // 略図の位置（設計書6.93.10）も、作者が点を動かしていない場所には欄ごと無い
-  場所: ["customFields", "relations", "sketchPosition"],
-  世界観: ["customFields"],
+  場所: ["customFields", "relations", "sketchPosition", "aliasReadings"],
+  世界観: ["customFields", "aliasReadings"],
 };
 
 describe("スキーマとデータ構造を突き合わせる", () => {

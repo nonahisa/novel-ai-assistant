@@ -16,6 +16,11 @@ import {
   parseOptionalCustomFieldValues,
   withOptionalCustomFields,
 } from "./customField";
+import {
+  parseOptionalAliasReadings,
+  withOptionalAliasReadings,
+  type AliasReadings,
+} from "./aliasReading";
 
 /**
  * 組織のデータモデル。
@@ -39,6 +44,8 @@ export interface Organization {
   aliases: string[];
   /** 読み仮名。設定資料エクスポートで必要になる */
   reading: string | null;
+  /** 別名ごとの読み（設計書6.42.2）。人物の `aliasReadings` と同じ扱い */
+  aliasReadings?: AliasReadings;
   /** 一覧で名前の下に出す短い紹介。上限は SUMMARY_MAX_CHARS */
   summary: string | null;
   /**
@@ -209,14 +216,18 @@ export function parseOrganization(raw: unknown): Organization {
 
   // 追加項目の値は検証してから持たせる。`...value` のまま通すと、
   // 数値などの壊れた値が検証を素通りする
-  return withOptionalCustomFields(
-    normalizeOrganization({
-      ...value,
-      id: value.id as string,
-      name: value.name as string,
-      conflicts,
-      aiNotes: parseAiNotes(value.aiNotes),
-    } as Partial<Organization>),
-    parseOptionalCustomFieldValues(value.customFields)
+  // 別名の読み（設計書6.42.2）も同じく、検証して刈り込んでから持たせる
+  return withOptionalAliasReadings(
+    withOptionalCustomFields(
+      normalizeOrganization({
+        ...value,
+        id: value.id as string,
+        name: value.name as string,
+        conflicts,
+        aiNotes: parseAiNotes(value.aiNotes),
+      } as Partial<Organization>),
+      parseOptionalCustomFieldValues(value.customFields)
+    ),
+    parseOptionalAliasReadings(value.aliasReadings)
   );
 }

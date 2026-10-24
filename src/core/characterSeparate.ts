@@ -5,6 +5,7 @@ import {
 } from "../models/character";
 import { normalizeName } from "./characterMerge";
 import { fillReading } from "./reading";
+import { aliasReadingOf, withOptionalAliasReadings } from "../models/aliasReading";
 
 /**
  * 1つにまとめられてしまった人物を、別人に分ける（設計書6.5.8）。
@@ -95,11 +96,16 @@ export function planCharacterSeparation(
   // 分けた拍子に資料へ出る
   created.spoilerLevel = source.spoilerLevel;
   created.isMob = source.isMob;
-  created.reading = fillReading(null, wanted);
+  // 別名の読み（設計書6.42.2）は別名について動く。切り出した呼び名の読みは
+  // 新しい人物の名前の読みに、一緒に移した別名の読みはその人物の別名の読みになる。
+  // 作者が付けた読みなので、機械的な変換（`fillReading`）より先に使う
+  created.reading = aliasReadingOf(source, wanted) ?? fillReading(null, wanted);
   created.aliases = movedAliases.filter((entry) => entry.trim() !== wanted);
+  const movedReadings = withOptionalAliasReadings(created, source.aliasReadings).aliasReadings;
+  if (movedReadings) created.aliasReadings = movedReadings;
   created.distinctFrom = [{ name: source.name, id: source.id }];
 
-  const original: Character = {
+  const original: Character = withOptionalAliasReadings({
     ...source,
     aliases: source.aliases.filter((entry) => !movedAliases.includes(entry)),
     // 既にある記録は消さない。作者が何度か分けていることがある
@@ -109,7 +115,7 @@ export function planCharacterSeparation(
       ),
       { name: created.name, id: created.id },
     ],
-  };
+  });
 
   return { original, created, movedAliases };
 }
@@ -180,13 +186,14 @@ export function planDistinctPair(a: Character, b: Character): DistinctPairPlan {
     const already = existing.some(
       (entry) => entry.id === other.id || normalizeName(entry.name) === key
     );
-    return {
+    // 外した別名の読み（設計書6.42.2）も一緒に消す
+    return withOptionalAliasReadings({
       ...self,
       aliases: self.aliases.filter((alias) => normalizeName(alias) !== key),
       distinctFrom: already
         ? existing
         : [...existing, { name: other.name, id: other.id }],
-    };
+    });
   };
 
   return { first: mark(a, b), second: mark(b, a), strippedAliases };
