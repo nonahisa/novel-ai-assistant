@@ -213,6 +213,24 @@ textarea[readonly] { background: var(--done-ground); }
   overflow-x: auto;
   overflow-y: hidden;
 }
+/*
+  縦書きの書く欄のカーソルの印は、ページが自分で描く（#vcaret）。iPad は縦書きの欄で、字の入る所は
+  正しいのに印をかなり下に描いた（作者の実機、2026-10-24。選択範囲の位置はページから正しく取れた）。
+  端末の見分けは Claude のアプリの中では当てにならないので、縦書きの欄ではどの端末でも自前の印にする
+*/
+#paper { position: relative; }
+.vertical .vwrite { caret-color: transparent; }
+.vcaret {
+  position: absolute;
+  height: 2px;
+  background: var(--ink);
+  pointer-events: none;
+  z-index: 2;
+  animation: vcaret-blink 1.06s steps(1, end) infinite;
+}
+@keyframes vcaret-blink { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0; } }
+/* 点滅は動きを減らす設定では止める（下の transition の止め方は animation に効かない） */
+@media (prefers-reduced-motion: reduce) { .vcaret { animation: none; } }
 /* 縦書きでは下線（変換中の印を含む）を字の右に引く。日本語の縦組みの慣わし（作者の要望、2026-10-05） */
 .vertical textarea, .vertical .view, .vertical .vwrite {
   text-underline-position: right;
@@ -333,7 +351,7 @@ textarea[readonly] { background: var(--done-ground); }
     <div class="band-note" id="bandNote" hidden></div>
     <div class="band-flash" id="bandFlash" hidden></div>
   </div>
-  <div class="sub">書いたものは、［パソコンへ送る］を押すまで送られません（書きかけはこの端末に控えます）。送ったあと、パソコンで同期して［原稿箱を取り込む］を押すと、原稿に入ります。</div>
+  <div class="sub">書いたものは、［パソコンへ送る］を押すまで送られません（書きかけは控えておき、次に開くと戻ります）。送ったあと、パソコンで同期して［原稿箱を取り込む］を押すと、原稿に入ります。</div>
   <div class="notice" id="status">読み込んでいます…</div>
   <div class="draft-panel" id="draftPanel" hidden>
     <h2>前に書きかけた分があります</h2>
@@ -369,6 +387,7 @@ textarea[readonly] { background: var(--done-ground); }
     <textarea id="text" aria-label="本文" spellcheck="false" hidden></textarea>
     <div id="vtext" class="vwrite" contenteditable="plaintext-only" spellcheck="false" role="textbox" aria-multiline="true" aria-label="本文（縦書き）" hidden></div>
     <div class="view" id="view" hidden></div>
+    <div id="vcaret" class="vcaret" aria-hidden="true" hidden></div>
   </div>
 </div>
 
@@ -827,6 +846,96 @@ var EditorLogic = (function () {
     return ops;
   }
 
+  /* ── 書きかけの控え（ページの保管場所と、ページの手元の覚え） ── */
+  /*
+    控えは2か所に置く：ページの保管場所（その人だけの場所。Claude のアプリの中でも残る）と、
+    手元の覚え（localStorage。保管場所が使えないときの受け皿）。読むときは新しいほうを使う。
+    iPad の Claude のアプリでは手元の覚えが残らないことがあった（作者の実機、2026-10-24）
+  */
+  var DRAFT_DOC_PREFIX = "editor-draft-";
+  // 保管場所の1文書は 256 KiB まで。鍵や時刻の分を残して、本文はこれより小さいときだけ置く
+  var DRAFT_DOC_MAX_BYTES = 240000;
+
+  // 控えの鍵（リポジトリ・枝・作品・話）。手元の覚えの名前にも、保管場所の文書の照合にも使う
+  function draftKeyOf(repo, workPath, file) {
+    var r = repo || {};
+    return [str(r.owner), str(r.name), str(r.branch), str(workPath), str(file)].join("|");
+  }
+
+  /*
+    保管場所の文書の名前。鍵には「/」や日本語が入り、文書の名前に使える字（英数字と _ - . ~ : @ +）を
+    外れるので、鍵から決まった値（2通りの 32 ビットの散らし）を作る。散らしが重なっても、
+    文書の中の鍵を読むときに照合するので、別の話の控えは戻さない
+  */
+  function draftDocId(key) {
+    var s = str(key);
+    var h1 = 0x811c9dc5, h2 = 0x01000193 ^ s.length;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+      h2 = Math.imul(h2 ^ c, 0x5bd1e995) >>> 0;
+      h2 = (h2 ^ (h2 >>> 15)) >>> 0;
+    }
+    function hex(n) { return ("0000000" + n.toString(16)).slice(-8); }
+    return DRAFT_DOC_PREFIX + hex(h1) + hex(h2);
+  }
+
+  // 控えを作る（保管場所と手元の覚えで同じ形）
+  function makeDraft(key, fields) {
+    var f = fields || {};
+    return { key: str(key), text: str(f.text), base: str(f.base), basedOn: str(f.basedOn), at: str(f.at), device: str(f.device) };
+  }
+
+  /*
+    読んだ値を控えとして検める。形が違う・鍵が違う（散らしの重なり）ものは null。
+    手元の覚えは鍵を持たない古い形（0.111.1 まで）も読む——名前そのものが鍵だったため
+  */
+  function parseDraft(value, key) {
+    var v = value;
+    if (typeof v === "string") {
+      try { v = JSON.parse(v); } catch (error) { return null; }
+    }
+    if (!v || typeof v !== "object" || Array.isArray(v) || typeof v.text !== "string") return null;
+    if (v.key !== undefined && str(v.key) !== str(key)) return null;
+    return makeDraft(key, v);
+  }
+
+  function draftTime(d) {
+    var t = d ? Date.parse(str(d.at)) : NaN;
+    return isNaN(t) ? -Infinity : t;
+  }
+
+  // 2つの控えのうち新しいほう（同じ時刻なら保管場所。片方だけならそれ）
+  function newerDraft(local, remote) {
+    if (!local) return remote || null;
+    if (!remote) return local;
+    return draftTime(local) > draftTime(remote) ? local : remote;
+  }
+
+  // 書く値が前に書いた値と同じか（時刻は比べない。同じ本文を時刻だけ変えて書き直さない）
+  function sameDraft(a, b) {
+    if (!a || !b) return !a && !b;
+    return a.key === b.key && a.text === b.text && a.base === b.base && a.basedOn === b.basedOn;
+  }
+
+  // UTF-8 にしたときのバイト数（保管場所の上限を確かめる）
+  function utf8Bytes(s) {
+    var text = str(s), n = 0;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      if (c < 0x80) n += 1;
+      else if (c < 0x800) n += 2;
+      else if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) { n += 4; i++; }
+      else n += 3;
+    }
+    return n;
+  }
+
+  // 保管場所に置ける大きさか（JSON にした全体で数える）
+  function draftFitsStore(d) {
+    return !!d && utf8Bytes(JSON.stringify(d)) <= DRAFT_DOC_MAX_BYTES;
+  }
+
   return {
     NOTATION_RULES: NOTATION_RULES,
     MEMO_LINE_PATTERN: MEMO_LINE_PATTERN,
@@ -840,7 +949,16 @@ var EditorLogic = (function () {
     buildBodyBox: buildBodyBox,
     parseBox: parseBox,
     latestBodyOf: latestBodyOf,
-    lineDiff: lineDiff
+    lineDiff: lineDiff,
+    DRAFT_DOC_MAX_BYTES: DRAFT_DOC_MAX_BYTES,
+    draftKeyOf: draftKeyOf,
+    draftDocId: draftDocId,
+    makeDraft: makeDraft,
+    parseDraft: parseDraft,
+    newerDraft: newerDraft,
+    sameDraft: sameDraft,
+    utf8Bytes: utf8Bytes,
+    draftFitsStore: draftFitsStore
   };
 })();
 /* editor-logic:end */
@@ -868,7 +986,7 @@ var EditorLogic = (function () {
   var repoEl = $("repo"), branchEl = $("branch"), loadEl = $("load");
   var workRowEl = $("workRow"), workEl = $("work"), episodeRowEl = $("episodeRow"), episodeEl = $("episode"), reopenEl = $("reopen");
   var bandEl = $("band"), bandStateEl = $("bandState"), bandNoteEl = $("bandNote"), bandFlashEl = $("bandFlash"), sendEl = $("send");
-  var toolsEl = $("tools"), countEl = $("count"), textEl = $("text"), viewEl = $("view"), paperEl = $("paper"), vtextEl = $("vtext");
+  var toolsEl = $("tools"), countEl = $("count"), textEl = $("text"), viewEl = $("view"), paperEl = $("paper"), vtextEl = $("vtext"), vcaretEl = $("vcaret");
   var modeWriteEl = $("modeWrite"), modeReadEl = $("modeRead"), dirVEl = $("dirV"), dirHEl = $("dirH");
   var draftPanelEl = $("draftPanel"), draftNoteEl = $("draftNote"), draftTextEl = $("draftText"), draftUseEl = $("draftUse"), draftDropEl = $("draftDrop");
   var diffPanelEl = $("diffPanel"), diffNoteEl = $("diffNote"), diffEl = $("diff"), sentTextEl = $("sentText"), diffCloseEl = $("diffClose");
@@ -942,22 +1060,152 @@ var EditorLogic = (function () {
   function rd() { return GitHubWorks.reader(gh, state.repo); }
   function repoPath(relative) { return GitHubWorks.repoPath(state.work, relative); }
 
-  /* ── 書きかけの控え（この端末だけ。送るまでの保険） ── */
-  function draftKey() {
-    return DRAFT_KEY + [state.repo.owner, state.repo.name, state.repo.branch, state.work.path, state.file].join("|");
+  /* ── 書きかけの控え（送るまでの保険） ── */
+  /*
+    控えは2か所：ページの保管場所（その人だけの場所 data/users/<その人>/。同じ人なら別の端末でも戻る）と、
+    手元の覚え（localStorage）。保管場所が使えない画面・立場では手元の覚えだけになる。
+    iPad の Claude のアプリでは手元の覚えが残らず、閉じるときの確かめの窓も出なかった（作者の実機、2026-10-24）
+  */
+  function draftKeyFor(file) { return EditorLogic.draftKeyOf(state.repo, state.work ? state.work.path : "", file); }
+  function draftKey() { return DRAFT_KEY + draftKeyFor(state.file); }
+
+  /*
+    保管場所の口。mcp と並べて取る（答えが無い画面では10秒待たされるため、GitHub を読む前に待たない）。
+    使えないとき・その人の名札（id）が無いときは null のまま——共有の場所へは逃がさない
+  */
+  var draftStore = { ready: null, db: null, uid: "", off: false };
+  function openDraftStore() {
+    draftStore.ready = (async function () {
+      try {
+        var both = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
+        var db = both[0], user = both[1];
+        if (!db || !user) return;
+        var uid = await user.id();
+        if (!uid) return;
+        draftStore.db = db;
+        draftStore.uid = uid;
+      } catch (error) { /* 使えなければ手元の覚えだけで動く */ }
+    })();
+    return draftStore.ready;
   }
-  var draftTimer = null;
+  function draftRef(key) {
+    if (!draftStore.db || draftStore.off) return null;
+    try { return draftStore.db.collection("data/users/" + draftStore.uid).doc(EditorLogic.draftDocId(key)); } catch (error) { return null; }
+  }
+  // 断られた（読むだけの立場・形の誤り）なら、この訪問のあいだは保管場所を使わない
+  function storeRefused(error) {
+    var code = error && error.code;
+    if (code === "invalid_argument" || code === "capability_disabled" || code === "capability_removed" || code === "quota_exceeded") draftStore.off = true;
+  }
+
+  /*
+    保管場所への書き込みの列：1つの話の控えにつき、同時に書くのは1つだけ。書いているあいだに
+    新しい値が来たら、最後の1つだけを覚えて、終わってから書く。消す（null）も同じ列を通す
+    （送った直後の「消す」が、書きかけの「書く」に追い越されると控えが残るため）。
+    前に書いた値と同じなら書かない
+  */
+  var storeQueue = {};
+  function storeDraft(key, draft) {
+    var q = storeQueue[key] || (storeQueue[key] = { busy: false, next: undefined, last: undefined });
+    q.next = draft;
+    if (!q.busy) pumpStore(key, q);
+  }
+  async function pumpStore(key, q) {
+    q.busy = true;
+    try {
+      while (q.next !== undefined) {
+        var want = q.next;
+        q.next = undefined;
+        if (q.last !== undefined && EditorLogic.sameDraft(q.last, want)) continue;
+        var ref = draftRef(key);
+        if (!ref) return;
+        // 大きすぎる本文は保管場所に置かない（手元の覚えには置いてある）。前の控えは古いので消す
+        if (want && !EditorLogic.draftFitsStore(want)) want = null;
+        try {
+          if (want) await ref.set(want); else await ref.delete();
+          q.last = want;
+        } catch (error) {
+          storeRefused(error);
+          q.last = undefined;
+        }
+      }
+    } finally {
+      q.busy = false;
+    }
+  }
+
+  function currentDraft() {
+    return EditorLogic.makeDraft(draftKeyFor(state.file), { text: textEl.value, base: state.base, basedOn: state.basedOn, at: new Date().toISOString(), device: deviceLabel() });
+  }
+  // いまの書きかけを、すぐに控える（手元の覚えは書き終えて戻る。保管場所は列に積む）
+  function saveDraftNow() {
+    if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+    if (storeTimer) { clearTimeout(storeTimer); storeTimer = null; }
+    if (!state.file || state.readOnly) return;
+    var key = draftKeyFor(state.file);
+    if (isDirty()) {
+      var d = currentDraft();
+      remember(DRAFT_KEY + key, JSON.stringify(d));
+      storeDraft(key, d);
+    } else {
+      forget(DRAFT_KEY + key);
+      storeDraft(key, null);
+    }
+  }
+  // 控えを両方から消す（送った・捨てた）
+  function dropDraft() {
+    if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+    if (storeTimer) { clearTimeout(storeTimer); storeTimer = null; }
+    if (!state.file) return;
+    var key = draftKeyFor(state.file);
+    forget(DRAFT_KEY + key);
+    storeDraft(key, null);
+  }
+  /*
+    打つたび：手元の覚えは止まって 0.4 秒で、保管場所は止まって 1.5 秒で書く（保管場所は呼ぶ回数に
+    限りがあるので、打っている最中は書かない）
+  */
+  var draftTimer = null, storeTimer = null;
+  var STORE_PAUSE_MS = 1500;
   function saveDraftSoon() {
     if (draftTimer) clearTimeout(draftTimer);
     draftTimer = setTimeout(function () {
       draftTimer = null;
-      if (!state.file) return;
-      if (isDirty()) remember(draftKey(), JSON.stringify({ text: textEl.value, base: state.base, basedOn: state.basedOn, at: new Date().toISOString() }));
+      if (!state.file || state.readOnly) return;
+      if (isDirty()) remember(draftKey(), JSON.stringify(currentDraft()));
       else forget(draftKey());
     }, 400);
+    if (storeTimer) clearTimeout(storeTimer);
+    storeTimer = setTimeout(function () {
+      storeTimer = null;
+      if (!state.file || state.readOnly) return;
+      storeDraft(draftKeyFor(state.file), isDirty() ? currentDraft() : null);
+    }, STORE_PAUSE_MS);
   }
-  function readDraft() {
-    try { var d = JSON.parse(recall(draftKey()) || "null"); return d && typeof d.text === "string" ? d : null; } catch (error) { return null; }
+
+  // 手元の覚えと保管場所の両方から読み、新しいほうを返す。保管場所は長く待たない（3秒で諦める）
+  async function readDraftFor(file) {
+    var key = draftKeyFor(file);
+    var local = EditorLogic.parseDraft(recall(DRAFT_KEY + key) || "null", key);
+    var remote = null;
+    try {
+      if (draftStore.ready) await withTimeout(draftStore.ready, 3000);
+      var ref = draftRef(key);
+      if (ref) {
+        var snap = await withTimeout(ref.get(), 3000);
+        if (snap && snap.exists) remote = EditorLogic.parseDraft(snap.data(), key);
+        // いま保管場所にある値を覚える（同じ値は書かない。無い控えを消しに行かない）
+        var q = storeQueue[key] || (storeQueue[key] = { busy: false, next: undefined, last: undefined });
+        if (!q.busy) q.last = snap && snap.exists ? remote : null;
+      }
+    } catch (error) { storeRefused(error); }
+    return EditorLogic.newerDraft(local, remote);
+  }
+  function withTimeout(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () { reject(new Error("timeout")); }, ms);
+      promise.then(function (v) { clearTimeout(timer); resolve(v); }, function (e) { clearTimeout(timer); reject(e); });
+    });
   }
 
   function isDirty() { return !!state.file && !state.readOnly && textEl.value !== state.loaded; }
@@ -1008,6 +1256,7 @@ var EditorLogic = (function () {
     vtextEl.appendChild(document.createElement("br"));
     var editable = state.readOnly ? "false" : "plaintext-only";
     try { vtextEl.contentEditable = editable; } catch (error) { vtextEl.contentEditable = state.readOnly ? "false" : "true"; }
+    scheduleCaret();
   }
   function showSurfaces() {
     var open = !!state.file;
@@ -1015,6 +1264,7 @@ var EditorLogic = (function () {
     textEl.hidden = !(open && writing && !state.vertical);
     vtextEl.hidden = !(open && writing && state.vertical);
     viewEl.hidden = !(open && state.mode === "read");
+    scheduleCaret();
   }
 
   /* ── 作品を読む ── */
@@ -1137,6 +1387,7 @@ var EditorLogic = (function () {
     vtextEl.hidden = true;
     viewEl.hidden = true;
     toolsEl.hidden = true;
+    scheduleCaret();
     draftPanelEl.hidden = true;
     diffPanelEl.hidden = true;
     updateBand();
@@ -1146,15 +1397,25 @@ var EditorLogic = (function () {
     話を開く。送ったあとまだ取り込まれていない本文があれば、それを重ねて見せる（続きを書ける）。
     続きを送るときは、前の記録の id（basedOn）と、前の記録と同じ「読んだときの本文」の印を添える
   */
+  var openSeq = 0;
   async function openEpisode(file) {
     setStatus("「" + file + "」を読んでいます…");
-    var read;
+    // 書きかけの控えは GitHub と並べて読む（保管場所の答えを待つあいだに GitHub も読み終える）
+    var seq = ++openSeq;
+    // 前の話の「止まってから控える」が、開いたあとの話に当たらないよう止める（移る前に控え終えている）
+    if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+    if (storeTimer) { clearTimeout(storeTimer); storeTimer = null; }
+    var draftPromise = readDraftFor(file);
+    var read, draft;
     try {
       read = await rd().readFile(repoPath(file));
     } catch (error) {
       setStatus(GitHubWorks.describeGithubError(error, file), true);
       return;
     }
+    draft = await draftPromise;
+    // 待っているあいだに別の話を開いたら、こちらは捨てる
+    if (seq !== openSeq) return;
     var entry = state.episodes.filter(function (e) { return e.file === file; })[0];
     state.file = file;
     episodeEl.value = file;
@@ -1184,7 +1445,7 @@ var EditorLogic = (function () {
     textEl.readOnly = !!state.readOnly;
     toolsEl.hidden = false;
     showDiffPanel();
-    offerDraft();
+    offerDraft(draft);
     pushToVertical();
     showSurfaces();
     setStatus(state.readOnly, !!state.readOnly);
@@ -1192,17 +1453,18 @@ var EditorLogic = (function () {
   }
 
   // 前に書きかけた分。同じ本文の上に書いていたら戻し、違えば見せて選ばせる
-  function offerDraft() {
+  // d は手元の覚えと保管場所の新しいほう（readDraftFor）。保管場所の控えは、同じ人の別の端末で書いたものでもある
+  function offerDraft(d) {
     draftPanelEl.hidden = true;
     if (state.readOnly) return;
-    var d = readDraft();
     if (!d || d.text === state.loaded) return;
+    var where = d.device && d.device !== deviceLabel() ? "（" + d.device + "で書いたもの）" : "";
     if (str(d.base) === state.base && str(d.basedOn) === state.basedOn) {
       textEl.value = d.text;
-      flash("送っていない書きかけを戻しました。");
+      flash("送っていない書きかけを戻しました。" + where);
       return;
     }
-    draftNoteEl.textContent = "この書きかけは、いま開いている本文とは別の版の上に書いたものです（" + formatTime(d.at) + "）。使うと、そのあとに変わった所は書きかけの内容に戻ります。";
+    draftNoteEl.textContent = "この書きかけは、いま開いている本文とは別の版の上に書いたものです（" + formatTime(d.at) + where + "）。使うと、そのあとに変わった所は書きかけの内容に戻ります。";
     draftTextEl.value = d.text;
     draftPanelEl.hidden = false;
   }
@@ -1348,7 +1610,7 @@ var EditorLogic = (function () {
   async function leaveIfClean() {
     if (!isDirty()) return true;
     var answer = await ask(
-      "「" + state.file + "」に、まだ送っていない書き直しがあります。書きかけはこの端末に控えてあり、次に開くと戻せます。",
+      "「" + state.file + "」に、まだ送っていない書き直しがあります。書きかけは控えてあり、次に開くと戻せます。",
       [
         { label: "送ってから移る", value: "send", primary: true },
         { label: "送らずに移る", value: "leave" },
@@ -1358,8 +1620,7 @@ var EditorLogic = (function () {
     if (answer === "stay") return false;
     if (answer === "send") return await sendToPc();
     // 控えを確かに残してから移る
-    if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
-    remember(draftKey(), JSON.stringify({ text: textEl.value, base: state.base, basedOn: state.basedOn, at: new Date().toISOString() }));
+    saveDraftNow();
     return true;
   }
 
@@ -1418,7 +1679,7 @@ var EditorLogic = (function () {
     state.latest = { record: record, stage: "sent", reason: "", currentBlobSha: "", box: name, time: Date.parse(record.at) };
     state.loaded = record.text;
     state.basedOn = record.id;
-    forget(draftKey());
+    dropDraft();
     diffPanelEl.hidden = true;
     draftPanelEl.hidden = true;
   }
@@ -1574,6 +1835,88 @@ var EditorLogic = (function () {
       sel.addRange(range);
     });
   }
+  /*
+    縦書きの欄のカーソルの印をページが描く。iPad は縦書きの欄で、字の入る所は正しいのに印をかなり
+    下に描いた（作者の実機、2026-10-24：iPad の置いた位置は y=337.6 と正しく取れていた）。
+    欄の印は CSS で透明にし（.vertical .vwrite の caret-color）、選択の位置へ細い横線を重ねる。
+    範囲を選んでいるとき・欄にフォーカスが無いとき・印が欄の見える所の外にあるときは描かない
+  */
+  var caretFrame = 0;
+  var caretLast = "";
+  /*
+    次の描画の前に1回だけ描く。描画が止まっている画面（裏に回った・隠れた枠）では
+    requestAnimationFrame が来ないので、短い時計でも描く（どちらか先の1回。来ないまま
+    「描く予定あり」で止まると、戻っても印が出なくなる）
+  */
+  function scheduleCaret() {
+    if (caretFrame) return;
+    caretFrame = 1;
+    var done = false;
+    function run() { if (done) return; done = true; caretFrame = 0; drawCaret(); }
+    requestAnimationFrame(run);
+    setTimeout(run, 50);
+  }
+  function hideCaret() {
+    vcaretEl.hidden = true;
+    caretLast = "";
+  }
+  // 1字の箱（縦書きでは、字の上の辺が「その字の前」、下の辺が「その字のうしろ」）
+  function charBox(node, start, end) {
+    var probe = document.createRange();
+    probe.setStart(node, start);
+    probe.setEnd(node, end);
+    var rects = probe.getClientRects();
+    return rects.length ? rects[0] : null;
+  }
+  // カーソルの位置の箱 { left, right, top }。潰れた範囲の箱が第一。取れなければ隣の字の辺から
+  function caretBox(range) {
+    var rects = range.getClientRects();
+    for (var i = 0; i < rects.length; i++) {
+      if (rects[i].width > 0 || rects[i].height > 0) return { left: rects[i].left, right: rects[i].right, top: rects[i].top };
+    }
+    var node = range.startContainer, off = range.startOffset;
+    if (node.nodeType !== 3) return null;
+    var b;
+    if (off < node.length && node.data.charAt(off) !== "\n" && (b = charBox(node, off, off + 1))) return { left: b.left, right: b.right, top: b.top };
+    if (off > 0 && node.data.charAt(off - 1) !== "\n" && (b = charBox(node, off - 1, off))) return { left: b.left, right: b.right, top: b.bottom };
+    if (off < node.length && (b = charBox(node, off, off + 1)) && b.width > 0) return { left: b.left, right: b.right, top: b.top };
+    return null;
+  }
+  function drawCaret() {
+    if (vtextEl.hidden || !state.vertical || vtextEl.contentEditable === "false" || document.activeElement !== vtextEl) { hideCaret(); return; }
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed || !vtextEl.contains(sel.anchorNode)) { hideCaret(); return; }
+    var box = caretBox(sel.getRangeAt(0));
+    if (!box) { hideCaret(); return; }
+    var area = vtextEl.getBoundingClientRect();
+    // 欄の見える所の外（横へ送った列の先など）では描かない
+    if (box.right <= area.left || box.left >= area.right || box.top < area.top || box.top > area.bottom) { hideCaret(); return; }
+    var base = paperEl.getBoundingClientRect();
+    var width = Math.max(8, box.right - box.left);
+    var left = box.left - base.left - paperEl.clientLeft;
+    var top = box.top - base.top - paperEl.clientTop - 1;
+    var spot = Math.round(left * 10) + ":" + Math.round(top * 10) + ":" + Math.round(width * 10);
+    vcaretEl.style.left = left + "px";
+    vcaretEl.style.top = top + "px";
+    vcaretEl.style.width = width + "px";
+    vcaretEl.hidden = false;
+    // 動いたら点滅を頭から（打っているあいだ印が消えて見えないように）
+    if (spot !== caretLast) {
+      vcaretEl.style.animation = "none";
+      void vcaretEl.offsetWidth;
+      vcaretEl.style.animation = "";
+    }
+    caretLast = spot;
+  }
+  // 既存の nudgeBeforeZwsp（見えない字の手前へ寄せる）のあとに描く。描くのは次の描画の前の1回にまとめる
+  document.addEventListener("selectionchange", scheduleCaret);
+  ["input", "focus", "blur", "scroll", "compositionend", "pointerup"].forEach(function (name) { vtextEl.addEventListener(name, scheduleCaret); });
+  window.addEventListener("resize", scheduleCaret);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", scheduleCaret);
+    window.visualViewport.addEventListener("scroll", scheduleCaret);
+  }
+
   modeWriteEl.addEventListener("click", function () { setMode("write"); });
   modeReadEl.addEventListener("click", function () { setMode("read"); });
   dirVEl.addEventListener("click", function () { setVertical(true); });
@@ -1585,16 +1928,23 @@ var EditorLogic = (function () {
     paint();
   });
   draftDropEl.addEventListener("click", function () {
-    forget(draftKey());
+    dropDraft();
     draftPanelEl.hidden = true;
   });
   diffCloseEl.addEventListener("click", function () { diffPanelEl.hidden = true; });
-  // 閉じるとき：送っていない書き直しがあれば止める（枠の中では出ないことがある。書きかけは控えてある）
+  // 閉じるとき：送っていない書き直しがあれば止める（枠の中・iPad では出ないことがある。書きかけは控えてある）
   window.addEventListener("beforeunload", function (event) {
     if (!isDirty()) return;
+    saveDraftNow();
     event.preventDefault();
     event.returnValue = "";
   });
+  /*
+    画面が隠れる・ページを離れるとき：止まるのを待たずに、すぐ控える。iPad では閉じるときの
+    beforeunload が届かず、待っていた控えが書かれないまま閉じることがあるため
+  */
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") saveDraftNow(); });
+  window.addEventListener("pagehide", function () { saveDraftNow(); });
 
   async function start() {
     var pageDefaults = document.querySelector(".wrap");
@@ -1607,6 +1957,7 @@ var EditorLogic = (function () {
       setStatus("この画面では GitHub を読めません。claude.ai の Claude アプリかブラウザで開いてください。", true);
       return;
     }
+    openDraftStore();
     state.mcp = await window.claude.use("mcp");
     if (!state.mcp) { setStatus(GitHubWorks.describeGithubError({ code: "not_granted" }), true); return; }
     if (repoEl.value.trim()) await loadRepo();

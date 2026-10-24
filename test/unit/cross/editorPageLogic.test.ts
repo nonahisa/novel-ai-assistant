@@ -64,6 +64,24 @@ interface EditorLogicShape {
     done: Array<{ name: string; box: unknown; result: unknown }>
   ): { stage: string; reason: string; currentBlobSha: string; record: { id: string } } | null;
   lineDiff(a: string, b: string): Array<{ type: string; text: string }>;
+  DRAFT_DOC_MAX_BYTES: number;
+  draftKeyOf(repo: { owner: string; name: string; branch: string } | null, workPath: string, file: string): string;
+  draftDocId(key: string): string;
+  makeDraft(key: string, fields: Record<string, unknown>): Draft;
+  parseDraft(value: unknown, key: string): Draft | null;
+  newerDraft(local: Draft | null, remote: Draft | null): Draft | null;
+  sameDraft(a: Draft | null, b: Draft | null): boolean;
+  utf8Bytes(text: string): number;
+  draftFitsStore(draft: Draft | null): boolean;
+}
+
+interface Draft {
+  key: string;
+  text: string;
+  base: string;
+  basedOn: string;
+  at: string;
+  device: string;
 }
 
 interface GitHubWorksShape {
@@ -278,6 +296,66 @@ describe("話の状態（取り込み待ち・取り込み済み・断られた�
   });
 });
 
+describe("書きかけの控え（保管場所と手元の覚え）", () => {
+  const repo = { owner: "someone", name: "novels", branch: "main" };
+  const key = logic.draftKeyOf(repo, "作品/星の海", "本文/001.txt");
+  const draft = (fields: Record<string, unknown>): Draft => plain(logic.makeDraft(key, fields));
+
+  it("鍵は 0.111.1 までの手元の覚えの名前と同じ形（前の書きかけも読める）", () => {
+    expect(key).toBe(["someone", "novels", "main", "作品/星の海", "本文/001.txt"].join("|"));
+  });
+
+  it("文書の名前は鍵から決まり、保管場所の道に使える字だけでできている", () => {
+    const id = logic.draftDocId(key);
+    expect(id).toBe(logic.draftDocId(key));
+    expect(id).toMatch(/^[A-Za-z0-9_.~:@+-]{1,200}$/);
+    expect(logic.draftDocId(logic.draftKeyOf(repo, "作品/星の海", "本文/002.txt"))).not.toBe(id);
+    expect(logic.draftDocId(logic.draftKeyOf({ ...repo, branch: "draft" }, "作品/星の海", "本文/001.txt"))).not.toBe(id);
+  });
+
+  it("読んだ値を検める：形の違うもの・別の話の鍵のものは捨てる。鍵の無い古い形は読む", () => {
+    const d = draft({ text: "書きかけ", base: "abc", at: "2026-10-24T01:00:00.000Z", device: "タブレット" });
+    expect(plain(logic.parseDraft(JSON.stringify(d), key))).toEqual(d);
+    expect(plain(logic.parseDraft(d, key))).toEqual(d);
+    expect(logic.parseDraft({ ...d, key: "someone|novels|main|作品/星の海|本文/002.txt" }, key)).toBeNull();
+    expect(logic.parseDraft("{壊れた", key)).toBeNull();
+    expect(logic.parseDraft({ text: 3 }, key)).toBeNull();
+    expect(logic.parseDraft(null, key)).toBeNull();
+    expect(logic.parseDraft([], key)).toBeNull();
+    const old = plain(logic.parseDraft('{"text":"前の形","base":"abc","basedOn":"","at":"2026-10-20T00:00:00.000Z"}', key));
+    expect(old).toMatchObject({ key, text: "前の形", base: "abc", device: "" });
+  });
+
+  it("手元の覚えと保管場所の、新しいほうを使う（片方だけならそれ）", () => {
+    const older = draft({ text: "古い", at: "2026-10-24T01:00:00.000Z" });
+    const newer = draft({ text: "新しい", at: "2026-10-24T02:00:00.000Z" });
+    expect(logic.newerDraft(older, newer)?.text).toBe("新しい");
+    expect(logic.newerDraft(newer, older)?.text).toBe("新しい");
+    expect(logic.newerDraft(null, older)?.text).toBe("古い");
+    expect(logic.newerDraft(older, null)?.text).toBe("古い");
+    expect(logic.newerDraft(null, null)).toBeNull();
+    // 時刻の読めない控えは、読める控えに負ける
+    expect(logic.newerDraft(draft({ text: "時刻なし", at: "" }), older)?.text).toBe("古い");
+  });
+
+  it("書く前に比べる：本文・版の印が同じなら、時刻が違っても書き直さない", () => {
+    const a = draft({ text: "同じ", base: "abc", at: "2026-10-24T01:00:00.000Z" });
+    expect(logic.sameDraft(a, draft({ text: "同じ", base: "abc", at: "2026-10-24T03:00:00.000Z" }))).toBe(true);
+    expect(logic.sameDraft(a, draft({ text: "違う", base: "abc", at: "2026-10-24T01:00:00.000Z" }))).toBe(false);
+    expect(logic.sameDraft(a, draft({ text: "同じ", base: "def" }))).toBe(false);
+    expect(logic.sameDraft(a, draft({ text: "同じ", base: "abc", basedOn: "b1" }))).toBe(false);
+    expect(logic.sameDraft(null, null)).toBe(true);
+    expect(logic.sameDraft(a, null)).toBe(false);
+  });
+
+  it("保管場所の1文書の上限（256 KiB）を超える本文は置かない", () => {
+    expect(logic.utf8Bytes("aé字😀")).toBe(1 + 2 + 3 + 4);
+    expect(logic.draftFitsStore(draft({ text: "字".repeat(70000) }))).toBe(true);
+    expect(logic.draftFitsStore(draft({ text: "字".repeat(90000) }))).toBe(false);
+    expect(logic.DRAFT_DOC_MAX_BYTES).toBeLessThan(256 * 1024);
+  });
+});
+
 describe("ページの決まり", () => {
   it("外から来た文字を HTML として差し込まない", () => {
     expect(EDITOR).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
@@ -287,10 +365,35 @@ describe("ページの決まり", () => {
     expect(EDITOR).not.toMatch(/<script[^>]*\ssrc=|<link\b|@import|<iframe|fetch\(/i);
   });
 
-  it("AI を使わない・保管庫も使わない（使う能力は GitHub のコネクターだけ）", () => {
+  it("AI を使わない。保管場所は、その人だけの場所に書きかけを控えるときだけ使う", () => {
     const uses = [...EDITOR.matchAll(/window\.claude\.use\("([a-z]+)"\)/g)].map((m) => m[1]);
-    expect(uses).toEqual(["mcp"]);
-    expect(EDITOR).not.toMatch(/sample|\.collection\(/);
+    expect([...new Set(uses)].sort()).toEqual(["db", "mcp", "user"]);
+    expect(EDITOR).not.toMatch(/sample/);
+    // 保管場所の道は data/users/<その人>/ の下だけ（共有の場所へ書かない）
+    const collections = [...EDITOR.matchAll(/\.collection\(([^)]*)\)/g)].map((m) => m[1]);
+    expect(collections).toEqual(['"data/users/" + draftStore.uid']);
+    expect(EDITOR).not.toMatch(/\bdb\.doc\(/);
+  });
+
+  it("書きかけは、閉じる・隠れるときにすぐ控え、送ったら両方から消す", () => {
+    expect(EDITOR).toMatch(/addEventListener\("visibilitychange"[^\n]*hidden[^\n]*saveDraftNow\(\)/);
+    expect(EDITOR).toMatch(/addEventListener\("pagehide"[^\n]*saveDraftNow\(\)/);
+    expect(EDITOR).toMatch(/function sentOk[\s\S]*?dropDraft\(\);/);
+    expect(EDITOR).toMatch(/draftDropEl\.addEventListener\("click", function \(\) \{\s*dropDraft\(\);/);
+    // 話を開くときは、手元の覚えと保管場所の新しいほうを渡す
+    expect(EDITOR).toMatch(/draft = await draftPromise;[\s\S]*?offerDraft\(draft\);/);
+  });
+
+  it("縦書きの欄だけ端末の印を隠し、ページが自分で描く（横書きの欄には効かない）", () => {
+    expect(EDITOR).toContain(".vertical .vwrite { caret-color: transparent; }");
+    expect(EDITOR).not.toMatch(/textarea[^{]*\{[^}]*caret-color/);
+    expect(EDITOR).toMatch(/@media \(prefers-reduced-motion: reduce\) \{ \.vcaret \{ animation: none; \} \}/);
+    // 印の要素は書く欄の外（欄の中身は打つたびに置き直され、本文として読まれるため）
+    const paper = EDITOR.slice(EDITOR.indexOf('<div id="paper">'), EDITOR.indexOf('<div class="dialog-back"'));
+    expect(paper).toMatch(/<div id="vtext"[^>]*><\/div>/);
+    expect(paper).toContain('<div id="vcaret" class="vcaret" aria-hidden="true" hidden></div>');
+    // 測るための表示は雛形に入れない
+    expect(EDITOR).not.toContain("ずれを測る表示");
   });
 
   it("呼ぶ GitHub の道具は3つだけ（スキルの capabilities と同じ）", () => {
@@ -299,7 +402,7 @@ describe("ページの決まり", () => {
     const skill = fs.readFileSync(nodePath.resolve("docs/skills/novel-assist.md"), "utf8");
     const section = skill.slice(skill.indexOf("## 出先の原稿エディター"), skill.indexOf("## 道具の早見表"));
     expect(section).toContain(
-      '{"mcp": {"servers": [{"server": "GitHub", "tools": ["get_file_contents", "list_commits", "create_or_update_file"]}]}}'
+      '{"db": {}, "user": {}, "mcp": {"servers": [{"server": "GitHub", "tools": ["get_file_contents", "list_commits", "create_or_update_file"]}]}}'
     );
     expect(section).toContain("editorTemplatePath");
   });
