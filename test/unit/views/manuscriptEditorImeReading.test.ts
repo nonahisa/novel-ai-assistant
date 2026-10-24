@@ -34,11 +34,46 @@ type Posted = {
   previous?: { kana: string; committed: string };
 };
 
-/** 作り物の面の中身（書く＝textarea の値と位置、組んで書く＝選択の位置） */
+/**
+ * 作り物の面の中身（書く＝textarea の値と位置、組んで書く＝選択の位置）。
+ * `compose` は組んで書く面そのもの（行の段落の親。行を見分けるのに要る）
+ */
 interface FaceEnv {
   write?: { value: string; selectionStart: number; selectionEnd: number };
   selection?: () => unknown;
+  compose?: FakeNode;
 }
+
+/**
+ * 組んで書く面の作り物の DOM。画面の受け口が辿るのは nodeType・data・
+ * parentNode・previousSibling・childNodes・textContent だけなので、それだけを持つ
+ */
+class FakeNode {
+  parentNode: FakeNode | null = null;
+  childNodes: FakeNode[] = [];
+  constructor(
+    readonly nodeType: number,
+    public data = ""
+  ) {}
+  get previousSibling(): FakeNode | null {
+    if (!this.parentNode) return null;
+    const siblings = this.parentNode.childNodes;
+    const at = siblings.indexOf(this);
+    return at > 0 ? (siblings[at - 1] ?? null) : null;
+  }
+  get textContent(): string {
+    return this.nodeType === 3 ? this.data : this.childNodes.map((c) => c.textContent).join("");
+  }
+  append(...children: FakeNode[]): this {
+    for (const child of children) {
+      child.parentNode = this;
+      this.childNodes.push(child);
+    }
+    return this;
+  }
+}
+const textNode = (data: string): FakeNode => new FakeNode(3, data);
+const element = (...children: FakeNode[]): FakeNode => new FakeNode(1).append(...children);
 
 /** 印の中を、作り物の2つの面の上で動かす */
 function harness(env: FaceEnv = {}): {
@@ -60,7 +95,7 @@ function harness(env: FaceEnv = {}): {
       return target;
     }
     const write = face("write", env.write);
-    const compose = face("compose");
+    const compose = face("compose", env.compose);
     const window = { getSelection: () => (env.selection ? env.selection() : null) };
     ${block()}
     return (name, type, event) => {
@@ -214,16 +249,19 @@ describe("続けて打った確定をつなげて送る（画面側）", () => {
     return { field, insert };
   }
 
-  /** 組んで書く面（contenteditable）：1つのテキストノードとカーソル */
+  /** 組んで書く面（contenteditable）：面の中の1行（段落）と、その中のテキストノードとカーソル */
   function editable(initial = "") {
-    const node = { nodeType: 3, data: initial };
-    const selection = { isCollapsed: true, focusNode: node as unknown, focusOffset: initial.length };
+    const compose = new FakeNode(1);
+    const node = textNode(initial);
+    const line = element(node);
+    compose.append(line);
+    const selection = { isCollapsed: true, focusNode: node, focusOffset: initial.length };
     const insert = (text: string): void => {
-      node.data =
-        node.data.slice(0, selection.focusOffset) + text + node.data.slice(selection.focusOffset);
+      const at = selection.focusNode;
+      at.data = at.data.slice(0, selection.focusOffset) + text + at.data.slice(selection.focusOffset);
       selection.focusOffset += text.length;
     };
-    return { selection, insert };
+    return { compose, line, selection, insert };
   }
 
   function typeOne(
@@ -268,8 +306,8 @@ describe("続けて打った確定をつなげて送る（画面側）", () => {
     it(`組んで書く面：続けて打つと、前の確定を添える（字が入るのが${when}）`, () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-10-24T21:54:33Z"));
-      const { selection, insert } = editable("　");
-      const { fire, posted } = harness({ selection: () => selection });
+      const { compose, selection, insert } = editable("　");
+      const { fire, posted } = harness({ compose, selection: () => selection });
       typeOne(fire, "compose", insert, "くろせ", "黒瀬", order);
       vi.setSystemTime(new Date("2026-10-24T21:54:41Z"));
       typeOne(fire, "compose", insert, "れん", "蓮", order);
@@ -316,23 +354,25 @@ describe("続けて打った確定をつなげて送る（画面側）", () => {
     expect(posted[1]).toEqual({ type: "imeReading", kana: "あかり", committed: "灯" });
   });
 
-  it("位置が離れた2つはつながない（組んで書く面。別のノードへ移った）", () => {
+  it("位置が離れた2つはつながない（組んで書く面。別の行へ移った）", () => {
     vi.useFakeTimers();
-    const first = editable();
-    const second = editable("ほかの行");
-    let current = first.selection;
-    const { fire, posted } = harness({ selection: () => current });
-    typeOne(fire, "compose", first.insert, "しらかば", "白樺");
-    current = second.selection;
-    typeOne(fire, "compose", second.insert, "あかり", "灯");
+    const { compose, selection, insert } = editable();
+    // 2行目も、行末が前の確定と同じ字で終わっている
+    const other = textNode("ほかの行の白樺");
+    compose.append(element(other));
+    const { fire, posted } = harness({ compose, selection: () => selection });
+    typeOne(fire, "compose", insert, "しらかば", "白樺");
+    selection.focusNode = other;
+    selection.focusOffset = other.data.length;
+    typeOne(fire, "compose", insert, "あかり", "灯");
     expect(posted[1]).toEqual({ type: "imeReading", kana: "あかり", committed: "灯" });
   });
 
   it("別の面で打った確定とはつながない", () => {
     vi.useFakeTimers();
     const { field, insert } = textarea();
-    const { selection, insert: insertCompose } = editable("白樺");
-    const { fire, posted } = harness({ write: field, selection: () => selection });
+    const { compose, selection, insert: insertCompose } = editable("白樺");
+    const { fire, posted } = harness({ write: field, compose, selection: () => selection });
     typeOne(fire, "write", insert, "しらかば", "白樺");
     typeOne(fire, "compose", insertCompose, "あかり", "灯");
     expect(posted[1]).toEqual({ type: "imeReading", kana: "あかり", committed: "灯" });
@@ -373,6 +413,162 @@ describe("続けて打った確定をつなげて送る（画面側）", () => {
     typeOne(fire, "write", insert, "しらかば", "白樺");
     typeOne(fire, "write", insert, "あかり", "灯");
     expect(posted).toHaveLength(2);
+  });
+
+  /*
+    **作者の実機（2026-10-24 22:44、MS-IME、組んで書く面）で、つなげなかった件の再現。**
+    画面の外の Chromium（CDP の IME 入力）では、確定の瞬間のカーソルは確定した字の
+    直後に畳まれていて、ノードも割れずにつながった。CDP の道は「字を入れてから
+    確定の知らせ」の1通りしか無いが、Windows の日本語入力（TSF）は確定の知らせの
+    瞬間の選択を IME の置いた形のまま残すことがあり（確定の字の範囲が選ばれたまま、
+    行の要素の上、など）、カーソルが字の直後へ動くのは知らせのあとになる。
+    確定の瞬間にカーソルを読む作りでは、そのどれでも「取れない」側に倒れて、
+    灯だけを拾う（作者の記録と同じ）。以下はその形を作り物の面で写したもの
+  */
+  describe("確定の瞬間の選択が、字の直後に畳まれていない（Windows の日本語入力の写し）", () => {
+    /** 確定の知らせの間だけ、選択を別の形にしておく */
+    function typeWithEndState(
+      fire: (face: "write" | "compose", type: string, data?: string) => void,
+      face: "write" | "compose",
+      insert: (text: string) => void,
+      kana: string,
+      committed: string,
+      during: () => () => void
+    ): void {
+      fire(face, "compositionstart", "");
+      fire(face, "compositionupdate", kana);
+      fire(face, "compositionupdate", committed);
+      insert(committed);
+      const restore = during();
+      fire(face, "compositionend", committed);
+      restore();
+    }
+
+    it("組んで書く面：確定の知らせの瞬間に、確定した字が選ばれたまま", () => {
+      vi.useFakeTimers();
+      const { compose, selection, insert } = editable("　ここに、名前を打って確かめてください。");
+      const { fire, posted } = harness({ compose, selection: () => selection });
+      const selectCommitted = (): (() => void) => {
+        selection.isCollapsed = false;
+        return () => {
+          selection.isCollapsed = true;
+        };
+      };
+      typeWithEndState(fire, "compose", insert, "しらかば", "白樺", selectCommitted);
+      typeWithEndState(fire, "compose", insert, "あかり", "灯", selectCommitted);
+      expect(posted[1]).toEqual({
+        type: "imeReading",
+        kana: "あかり",
+        committed: "灯",
+        previous: { kana: "しらかば", committed: "白樺" },
+      });
+    });
+
+    it("組んで書く面：確定の知らせの瞬間に、カーソルが行の要素の上にある", () => {
+      vi.useFakeTimers();
+      const { compose, line, selection, insert } = editable("");
+      const { fire, posted } = harness({ compose, selection: () => selection });
+      const onLine = (): (() => void) => {
+        const node = selection.focusNode;
+        const offset = selection.focusOffset;
+        selection.focusNode = line;
+        selection.focusOffset = line.childNodes.length;
+        return () => {
+          selection.focusNode = node;
+          selection.focusOffset = offset;
+        };
+      };
+      typeWithEndState(fire, "compose", insert, "くろせ", "黒瀬", onLine);
+      typeWithEndState(fire, "compose", insert, "れん", "蓮", onLine);
+      expect(posted[1]).toEqual({
+        type: "imeReading",
+        kana: "れん",
+        committed: "蓮",
+        previous: { kana: "くろせ", committed: "黒瀬" },
+      });
+    });
+
+    it("組んで書く面：次の変換が、前の確定とは別のテキストノードへ入る", () => {
+      vi.useFakeTimers();
+      const { compose, line, selection, insert } = editable("");
+      const { fire, posted } = harness({ compose, selection: () => selection });
+      typeOne(fire, "compose", insert, "しらかば", "白樺");
+      // 前の確定の後ろ（行の要素の上）から次の変換を始め、新しいノードに字が入った
+      selection.focusNode = line;
+      selection.focusOffset = line.childNodes.length;
+      fire("compose", "compositionstart", "");
+      const fresh = textNode("");
+      line.append(fresh);
+      selection.focusNode = fresh;
+      selection.focusOffset = 0;
+      fire("compose", "compositionupdate", "あかり");
+      fire("compose", "compositionupdate", "灯");
+      insert("灯");
+      fire("compose", "compositionend", "灯");
+      expect(posted[1]).toEqual({
+        type: "imeReading",
+        kana: "あかり",
+        committed: "灯",
+        previous: { kana: "しらかば", committed: "白樺" },
+      });
+    });
+
+    it("書く面：確定の知らせの瞬間に、確定した字が選ばれたまま", () => {
+      vi.useFakeTimers();
+      const { field, insert } = textarea("　");
+      const { fire, posted } = harness({ write: field });
+      const selectCommitted = (length: number) => (): (() => void) => {
+        const end = field.selectionEnd;
+        field.selectionStart = end - length;
+        return () => {
+          field.selectionStart = end;
+        };
+      };
+      typeWithEndState(fire, "write", insert, "しらかば", "白樺", selectCommitted(2));
+      typeWithEndState(fire, "write", insert, "あかり", "灯", selectCommitted(1));
+      expect(posted[1]).toEqual({
+        type: "imeReading",
+        kana: "あかり",
+        committed: "灯",
+        previous: { kana: "しらかば", committed: "白樺" },
+      });
+    });
+
+    it("組んで書く面：前の確定と次の変換の間に、色付けの要素などで分かれた字があってもよい", () => {
+      vi.useFakeTimers();
+      // 行：「…」（三点リーダの印）＋「白樺」。カーソルは行の要素の末尾
+      const tail = textNode("白樺");
+      const compose = new FakeNode(1);
+      const line = element(textNode("「"), element(textNode("…")), tail);
+      compose.append(line);
+      const selection = { isCollapsed: true, focusNode: tail, focusOffset: 2 };
+      const { fire, posted } = harness({ compose, selection: () => selection });
+      // 前の確定を覚えさせる（字はもう入っている体）
+      fire("compose", "compositionstart", "");
+      selection.focusNode = line;
+      selection.focusOffset = 2;
+      fire("compose", "compositionupdate", "しらかば");
+      fire("compose", "compositionupdate", "白樺");
+      fire("compose", "compositionend", "白樺");
+      selection.focusNode = line;
+      selection.focusOffset = 3;
+      fire("compose", "compositionstart", "");
+      fire("compose", "compositionupdate", "あかり");
+      fire("compose", "compositionupdate", "灯");
+      fire("compose", "compositionend", "灯");
+      expect(posted[1]?.previous).toEqual({ kana: "しらかば", committed: "白樺" });
+    });
+  });
+
+  it("続いているかは変換の始まりで読み、確定の瞬間にはカーソルを読まない", () => {
+    const source = block();
+    const start = source.slice(
+      source.indexOf("function imeReadingStart("),
+      source.indexOf("function imeReadingUpdate(")
+    );
+    expect(start).toContain("imeCaretContext(face)");
+    const end = source.slice(source.indexOf("function imeReadingEnd("));
+    expect(end).not.toMatch(/getSelection|selectionStart|selectionEnd|imeCaretContext/);
   });
 
   it("つなげる間の長さは、拡張機能側の定数と同じ", () => {

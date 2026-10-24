@@ -2000,71 +2000,99 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   */
   const IME_JOIN_GAP_MS = 15000;
   let imePrevious = null;
+  /*
+    **「続いているか」は、変換を始めた所で確かめる**（作者の実機、2026-10-24 22:44。
+    MS-IME・組んで書く面で、0.111.6 ではつながらなかった）。
+
+    0.111.6 は確定の知らせ（compositionend）の瞬間にカーソルを読んでいた。ところが
+    Windows の日本語入力（TSF）は、確定の知らせの瞬間の選択を IME が置いた形のまま
+    残すことがある——確定した字の範囲が選ばれたまま、カーソルが行の要素の上、など。
+    字の直後へカーソルが動くのは知らせのあとになる。どれも「取れない」側へ倒れて、
+    灯だけを拾った（画面の外の Chromium では、確定の瞬間のカーソルは字の直後に
+    畳まれていて再現しない）。
+
+    変換の始まり（compositionstart）なら、前の確定はもう本文へ落ち着いていて、
+    カーソルは「これから打つ所」にある。そこで1回だけ、カーソルの直前の字と位置を
+    覚える。**変換中（compositionupdate）では何も読まない**決まりは変えない
+    （設計書6.34.5）。読むのはカーソルのある1行の中だけで、全文は数えない
+  */
+  /** カーソルの直前に見えている字の、見る長さ（名前2つぶんより十分に長い） */
+  const IME_BEFORE_MAX = 130;
   /**
-   * カーソルの直前の字（確定のときに1回だけ読む）。**取れなければ null**——
-   * 選択に幅がある・カーソルが字の中にない（要素の境目）なら、つながない側に倒す。
+   * 変換を始めた所（変換の始まりに1回だけ読む）。**取れなければ null**
+   * ——選択に幅があるなら、つながない側に倒す。
    *
-   * 組んで書く面は、カーソルのあるテキストノードの中だけを見る。全文を数える
-   * 道（位置の一覧）は使わない——前の確定が別のノードに分かれていたら、つながない
-   * だけで済む
+   * - 書く面：カーソルの位置と、その直前の字
+   * - 組んで書く面：カーソルのある行（段落の要素）と、その行の中でカーソルより
+   *   前に見えている字。ルビ・傍点・印（三点リーダなど）の要素や、分かれた
+   *   テキストノードをまたいで、後ろから辿って集める。行の外へは出ない
    */
-  function imeTextBeforeCaret(face) {
+  function imeCaretContext(face) {
     if (face === write) {
       const end = write.selectionEnd;
       if (typeof end !== "number" || write.selectionStart !== end) return null;
       if (typeof write.value !== "string") return null;
-      return write.value.slice(Math.max(0, end - 130), end);
+      return {
+        line: null,
+        pos: end,
+        before: write.value.slice(Math.max(0, end - IME_BEFORE_MAX), end),
+      };
     }
     const selection = window.getSelection();
     if (!selection || !selection.isCollapsed) return null;
     const node = selection.focusNode;
-    if (!node || node.nodeType !== 3 || typeof node.data !== "string") return null;
-    return node.data.slice(0, selection.focusOffset);
-  }
-  /**
-   * いまの確定が、前の確定のすぐ後ろに続いているか。確定の字がもう入っている環境
-   * （前＋いまの字がカーソルの直前にある）と、まだ入っていない環境（Windows の日本語
-   * 入力では確定の知らせが先に来ることがある。前の字がカーソルの直前にある）の
-   * どちらでも見る。離れた所で打っていれば、どちらも成り立たない
-   */
-  function imeFollows(previous, face, committed, now) {
-    if (!previous || previous.face !== face) return false;
-    if (now - previous.at > IME_JOIN_GAP_MS) return false;
-    const before = imeTextBeforeCaret(face);
-    if (before === null) return false;
-    /*
-      書く面は位置の数も手元にあるので、それも合わせる（同じ字が本文の別の所に
-      あっても、そこへカーソルを動かして打ったものをつながない）。確定の字が
-      知らせの前に入るか後に入るかで、前の確定のときに覚えた位置と、いまの位置は
-      それぞれ確定の字の長さだけずれうるので、その4通りだけを認める
-    */
-    if (face === write) {
-      const end = imeCaretEnd(face);
-      if (end === null || previous.end === null) return false;
-      const step = end - previous.end;
-      const first = previous.committed.length;
-      if (
-        step !== 0 &&
-        step !== committed.length &&
-        step !== first &&
-        step !== first + committed.length
-      ) {
-        return false;
+    if (!node) return null;
+    // カーソルのある行（面の直下の段落）。面そのものの上なら行が決まらない
+    let line = node;
+    while (line && line !== compose && line.parentNode !== compose) line = line.parentNode;
+    if (!line || line === compose) return null;
+    let before = "";
+    if (node.nodeType === 3) {
+      if (typeof node.data !== "string") return null;
+      before = node.data.slice(0, selection.focusOffset);
+    } else {
+      // 要素の上のカーソル：focusOffset 番目の子の手前にいる
+      const children = node.childNodes || [];
+      for (let i = Math.min(selection.focusOffset, children.length) - 1; i >= 0; i--) {
+        before = (children[i].textContent || "") + before;
+        if (before.length >= IME_BEFORE_MAX) break;
       }
     }
-    return before.endsWith(previous.committed + committed) || before.endsWith(previous.committed);
+    // カーソルのノードから行まで上りながら、手前の兄弟の字を足す
+    for (let at = node; at && at !== line && before.length < IME_BEFORE_MAX; at = at.parentNode) {
+      for (
+        let sibling = at.previousSibling;
+        sibling && before.length < IME_BEFORE_MAX;
+        sibling = sibling.previousSibling
+      ) {
+        before = (sibling.textContent || "") + before;
+      }
+    }
+    return { line: line, pos: null, before: before.slice(-IME_BEFORE_MAX) };
   }
-  /** 書く面のカーソルの位置（組んで書く面は数えない＝null） */
-  function imeCaretEnd(face) {
-    if (face !== write) return null;
-    const end = write.selectionEnd;
-    return typeof end === "number" ? end : null;
+  /**
+   * いまの変換が、前の確定のすぐ後ろから始まったか。どちらも変換の始まりで覚えた
+   * 所で比べる——前の確定の始まりの直前の字＋前の確定が、いまの始まりの直前の字と
+   * 続いていること。書く面は位置の数も合わせ（同じ字が本文の別の所にあっても、
+   * そこへ動いて打ったものをつながない）、組んで書く面は同じ行であることを見る
+   */
+  function imeFollows(previous, face, start, now) {
+    if (!previous || previous.face !== face) return false;
+    if (now - previous.at > IME_JOIN_GAP_MS) return false;
+    if (!start || !previous.start) return false;
+    if (!start.before.endsWith(previous.committed)) return false;
+    if (face === write) {
+      return start.pos === previous.start.pos + previous.committed.length;
+    }
+    return start.line === previous.start.line;
   }
   let imeKana = "";
   let imeLast = "";
-  function imeReadingStart() {
+  let imeStart = null;
+  function imeReadingStart(face) {
     imeKana = "";
     imeLast = "";
+    imeStart = imeCaretContext(face);
   }
   function imeReadingUpdate(event) {
     const data = event ? event.data : undefined;
@@ -2075,22 +2103,25 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   function imeReadingEnd(event, face) {
     const committed = event && typeof event.data === "string" ? event.data : imeLast;
     const kana = imeKana;
+    const start = imeStart;
     imeKana = "";
     imeLast = "";
+    imeStart = null;
     const previous = imePrevious;
     imePrevious = null;
     // 取り消し（Esc）・かなを打たない確定は、前の確定とのつながりも切る
     if (!kana || !committed) return;
     if (kana.length > 64 || committed.length > 64) return;
     const now = Date.now();
-    const joined = imeFollows(previous, face, committed, now) ? previous : null;
+    // 確定の瞬間のカーソルは読まない（上の但し書き。IME の置いた形のままのことがある）
+    const joined = imeFollows(previous, face, start, now) ? previous : null;
     // かなのままの確定（助詞など）も、次の確定とつなぐために覚える
     imePrevious = {
       face: face,
       kana: kana,
       committed: committed,
       at: now,
-      end: imeCaretEnd(face),
+      start: start,
     };
     // かなのままの確定は、それだけでは名前に当たらないので、つなぐときだけ送る
     if (committed === kana && !joined) return;
@@ -2099,7 +2130,9 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     vscode.postMessage(message);
   }
   for (const face of [write, compose]) {
-    face.addEventListener("compositionstart", imeReadingStart);
+    face.addEventListener("compositionstart", function () {
+      imeReadingStart(face);
+    });
     face.addEventListener("compositionupdate", imeReadingUpdate);
     face.addEventListener("compositionend", function (event) {
       imeReadingEnd(event, face);
