@@ -80,6 +80,21 @@ describe("使い方の束（featureGuide）", () => {
     ).toBe(true);
   });
 
+  test("無料のAIで撃つときは、製品と同じく料金の一文を替える（P-21 v3.32）", () => {
+    const folder = workWithoutReader();
+    const question = "誤字脱字検知はどこから使えますか";
+
+    const free = chatPrompt({ folder, question, paid: false });
+    expect(
+      free.systemPrompt.startsWith(
+        buildWorkChatSystemPrompt({ featureIndex: true, paid: false })
+      )
+    ).toBe(true);
+    expect(free.systemPrompt).not.toMatch(/料金がかか/);
+    // 省いたときは有料の扱い（分からないときに「無料」へ倒さない）
+    expect(chatPrompt({ folder, question }).systemPrompt).toMatch(/料金がかか/);
+  });
+
   test("創作の相談では、製品と同じく目次を落とした束になる", () => {
     const folder = workWithoutReader();
     const question = "主人公の動機が弱い気がします。どう膨らませればいいでしょう";

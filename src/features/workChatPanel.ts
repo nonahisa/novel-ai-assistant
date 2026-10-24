@@ -1110,9 +1110,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
      * （設計書6.91.9）。話題で出し分けるのはここ1か所だけで、
      * 人柄・やり方・宛先は話題に関わらず送る
      */
-    question: string
+    question: string,
+    /**
+     * 相談に使うAIが有料か。**無料のAIに「料金がかかる」と添えさせない**
+     * （P-21 v3.32。手元の Ollama で「料金がかかります」と答えた。設計書6.27.9）
+     */
+    paid: boolean
   ): Promise<{ systemPrompt: string; readerReminder?: string }> {
-    const base = buildWorkChatSystemPrompt({ featureIndex });
+    const base = buildWorkChatSystemPrompt({ featureIndex, paid });
     const blocks: string[] = [];
     // システムプロンプトではなく、問いの直前（ユーザープロンプト側）へ置く要点
     let readerReminder: string | undefined;
@@ -2027,7 +2032,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const { systemPrompt, readerReminder } = await this.buildSystemPrompt(
         context?.work,
         withFeatureIndex,
-        question
+        question,
+        resolved.provider.isPaid
       );
 
       // **上限と、その出どころを一度に取る。** 切り詰められたときの案内は
@@ -2061,7 +2067,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const policyChars = Math.max(
         0,
         systemPrompt.length -
-          buildWorkChatSystemPrompt({ featureIndex: withFeatureIndex }).length
+          buildWorkChatSystemPrompt({
+            featureIndex: withFeatureIndex,
+            // 料金の一文も同じ組み方にする（違えると、その字数が方針に数えられる）
+            paid: resolved.provider.isPaid,
+          }).length
       );
 
       const call = (

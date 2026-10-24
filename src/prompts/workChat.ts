@@ -135,8 +135,12 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 // 3.31: 目次を渡さない回（創作の相談）のシステム指示へ、使い方の節の代わりに
 //       主な機能の短い一覧（`FEATURE_SHORTLIST_NAMES`、PDF出力など11件）を置いた
 //       （作者の裁定 2026-10-15 の8）。目次の無い相談で「PDF出力機能は無い」と
-//       作り話をした（26b、3回に1回）。目次を渡す回の送る本文は変わらない
-export const WORK_CHAT_VERSION = "3.31";
+//       作り話をした（26b、10-10 と 10-15 の計6回に1回）。目次を渡す回の送る本文は変わらない
+// 3.32: 使い方の節の「AIを使う操作は、料金がかかることを添えること」を、相談に使う
+//       AIが有料のとき（`AIProvider.isPaid`）だけ送る。無料のときは「お金の話は、
+//       聞かれたときだけにすること」に替える（手元の Ollama で「料金がかかります」と
+//       答えた。設計書6.27.9。2026-10-24）。有料の回と目次を渡さない回は変わらない
+export const WORK_CHAT_VERSION = "3.32";
 
 /** ［AIに相談］の依頼文に入れる一文・指摘の長さの上限（長い合本の行で膨らませない） */
 export const FINDING_ADVICE_QUOTE_MAX_CHARS = 300;
@@ -352,7 +356,20 @@ ${RUNNABLE_LIST}
  * （`core/featureGuide.ts` の `NO_INDEX_NOTICE`）。**切り替える条件は
  * 1つにする**——2つに割れると、片方だけ直る日が来る。
  */
-const FEATURE_GUIDE_SECTION = `【この拡張機能の使い方を聞かれたとき】
+/**
+ * 料金の一文。**有料のAIで相談しているときだけ**送る（3.32。2026-10-24）。
+ *
+ * 以前は有料・無料を問わず送っていて、手元の Ollama（gemma4:26b）でも
+ * 「料金がかかります」と答えた（設計書6.27.9）。無料の回は「無料です」とも
+ * 書かせない——相談のAIが無料でも、操作は機能別AI割当で別の有料のAIが
+ * 動くことがあり、そのときは押したところで確認が出る（`confirmPaidUsage`）。
+ * 指示の言葉は答えに返ってくるので、無料の回の文に「料金がかか」「有料」
+ * 「無料」の字を入れない（`workChatPaidNote.test.ts`）。
+ */
+const PAID_NOTE_LINE = "- AIを使う操作は、料金がかかることを添えること";
+const FREE_NOTE_LINE = "- お金の話は、聞かれたときだけにすること";
+
+const FEATURE_GUIDE_SECTION_TEMPLATE = `【この拡張機能の使い方を聞かれたとき】
 末尾に**操作の目次**と、**質問に関係しそうな説明**を渡してあります。
 「どうやるの」「そんな機能ある？」と聞かれたら、**そこに書いてあることだけを使って**
 答えてください。
@@ -365,18 +382,27 @@ const FEATURE_GUIDE_SECTION = `【この拡張機能の使い方を聞かれた�
   場所（分類→小分類→操作名）を答えたうえで、
   「詳細メニューでその操作にマウスを載せると説明が出ます」
   「ヘルプ→使い方（マニュアル）に全部の説明があります」と案内してください
-- AIを使う操作は、料金がかかることを添えること
+{{PRICE_NOTE}}
 - **目次に載っていない入口が1つあります。** 投稿サイトのバックアップ（ZIP・展開した .txt）や
   Word 原稿（.docx）は、この相談パネルへファイルを落とすと、どの作品のものかを確かめてから
   取り込めます（うまく落ちないときは Shift を押しながら落とす）。**バックアップや原稿の
   取り込み方を聞かれたときだけ**案内し、聞かれないのに自分から勧めないこと
 - 作品の内容について聞かれているときは、この目次に触れないこと`;
 
+/** 使い方の節。料金の一文だけが有料・無料で替わる（有料の回はこれまでと1字も変わらない） */
+function featureGuideSection(paid: boolean): string {
+  return FEATURE_GUIDE_SECTION_TEMPLATE.replace(
+    "{{PRICE_NOTE}}",
+    paid ? PAID_NOTE_LINE : FREE_NOTE_LINE
+  );
+}
+
 /**
  * 主な機能の短い一覧。**目次を渡さない回にだけ足す**（作者の裁定 2026-10-15 の8）。
  *
  * 発端は測定（2026-10-15、行6208）——目次を渡さない相談で、gemma4:26b が
- * 「この拡張機能自体にPDF出力機能は備わっていないようです」と答えた（3回に1回。
+ * 「この拡張機能自体にPDF出力機能は備わっていないようです」と答えた（10-15 の3回に1回、
+ * 10-10 と合わせて6回に1回。`docs/measurements/2026-10-15-ai-measure.md` の 6208。
  * 実際は PDF出力がある）。目次（2,000字超）を戻すと創作の相談の節約が消えるので、
  * 「無い」と言われやすい機能の名前だけを1行で渡す。
  *
@@ -450,18 +476,23 @@ const SYSTEM_PROMPT_TAIL = `【本文の場所を指すとき】
  * 出力の欄（edit・run・reloadRecord）の歯止めになっている節は必ず残す。
  *
  * 目次を渡す回では、これまでと**1文字も変わらない**（`workChat.test.ts`／
- * `chatTopic.test.ts` が字数で見張る）。
+ * `chatTopic.test.ts` が字数で見張る）。無料のAIの回だけ、料金の一文が替わる（3.32）。
  */
 export function buildWorkChatSystemPrompt(options?: {
   /** 末尾に操作の目次を渡す回か。既定は渡す */
   featureIndex?: boolean;
+  /**
+   * いま相談に使っているAIが有料か（`AIProvider.isPaid`）。**既定は有料の扱い**——
+   * 分からないときに「無料」へ倒さない（6.49.4 と同じ守り）
+   */
+  paid?: boolean;
 }): string {
   const sections = [SYSTEM_PROMPT_HEAD];
   // 目次を渡さない回は、使い方の節の代わりに主な機能の短い一覧を置く（3.31）。
   // 目次を渡す回は1文字も変えない（目次そのものが全部の機能の一覧なので）
   sections.push(
     options?.featureIndex !== false
-      ? FEATURE_GUIDE_SECTION
+      ? featureGuideSection(options?.paid !== false)
       : FEATURE_SHORTLIST_SECTION
   );
   sections.push(SYSTEM_PROMPT_TAIL);

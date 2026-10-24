@@ -276,6 +276,12 @@ export interface ChatPromptInput {
    * 組み方は製品と同じ（`core/chatFileRequest.ts` の `formatChatOverview`）。
    */
   overview?: boolean;
+  /**
+   * 答えるAIが有料か。**省くと有料の扱い**（製品も、分からないときに「無料」へ
+   * 倒さない）。`false` のときだけ使い方の節の料金の一文を替える（P-21 v3.32）。
+   * `chatRun` は runner が ollama のとき `false` を入れる（製品の Ollama も無料）
+   */
+  paid?: boolean;
 }
 
 /**
@@ -651,6 +657,7 @@ export function chatPrompt(
     input.featureIndex === false ? undefined : workChatFeatureGuide(input.question, history);
   const base = buildWorkChatSystemPrompt({
     featureIndex: guide?.featureIndex ?? false,
+    paid: input.paid,
   });
   const systemPrompt = joinWorkChatSystemPrompt(base, blocks);
 
@@ -971,9 +978,15 @@ async function askWithFollowUp(
   };
 }
 
-export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
+export async function chatRun(given: ChatRunInput): Promise<ChatRunResult> {
   // **省略を既定で埋めない**（設計書6.87.8 の5）
-  assertRunner(input.runner);
+  assertRunner(given.runner);
+  // 手元の Ollama は無料なので、製品と同じく料金の一文を替える（P-21 v3.32）。
+  // claude・sampling は呼び出し元のAIで、有料か分からないので有料の扱いのまま
+  const input: ChatRunInput =
+    given.runner === "ollama" && given.paid === undefined
+      ? { ...given, paid: false }
+      : given;
   const prompt = chatPrompt(input);
   // **明示が無ければ製品と同じ**（6.87.16）。決め方は `run.ts` に1つだけ
   const temperature = temperatureFor(input, prompt.temperature);

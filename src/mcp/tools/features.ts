@@ -258,7 +258,8 @@ const OPTIONS_TABLE =
   "episodePlot: plotPath※（単話プロットの相対パス）・chapterLabel。" +
   "episodePlotContrast: filePath※（照らす本文）・plotPath※・chapterLabel。" +
   "chat: question※・history・adviceAnswers・writerStyle・featureIndex・" +
-  "overview（省くと作品の全体像＝話の一覧と各話の場所・紹介文・プロットを添える。false で外す。製品と同じ材料）。" +
+  "overview（省くと作品の全体像＝話の一覧と各話の場所・紹介文・プロットを添える。false で外す。製品と同じ材料）・" +
+  "paid（答えるAIが有料か。省くと有料の扱い、runner が ollama なら無料。false で料金の一文を替える）。" +
   /*
     ollama／sampling は、AIが求めたファイル（needFiles）を読んで1回だけ聞き直す
     （0.85.1。製品と同じ）。claude の道はプロンプトを返すだけなので往復しない
@@ -955,6 +956,7 @@ function chatArgs(input: FeatureCallInput): {
   writerStyle?: Record<string, unknown>;
   featureIndex?: boolean;
   overview?: boolean;
+  paid?: boolean;
 } {
   return {
     folder: input.folder,
@@ -966,6 +968,8 @@ function chatArgs(input: FeatureCallInput): {
     writerStyle: option(input, "writerStyle", CHAT_WRITER_STYLE_SCHEMA),
     featureIndex: option(input, "featureIndex", z.boolean()),
     overview: option(input, "overview", z.boolean()),
+    // 測るとき、製品と同じ料金の一文で撃てるように（P-21 v3.32）
+    paid: option(input, "paid", z.boolean()),
   };
 }
 
