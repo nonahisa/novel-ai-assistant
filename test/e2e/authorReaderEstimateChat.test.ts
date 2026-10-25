@@ -28,6 +28,7 @@ import type { Frame, Page } from "playwright-core";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { AUTHOR_READER_PENDING_NOTE, authorReaderTypeLabel } from "../../src/core/authorReaderType";
 import { READER_NEUTRAL_SCORE } from "../../src/core/readerTargetValidation";
+import { SEARCH_TERMS_SYSTEM_PROMPT } from "../../src/prompts/searchTerms";
 import { sendChatQuestion } from "./support/chatInput";
 import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama, type FakeOllamaRequest } from "./support/fakeOllama";
 import { runCommand } from "./support/quickInput";
@@ -76,14 +77,16 @@ function chatAnswer(reply: string, authorReaderSignals: Record<string, number> |
 }
 
 function respond(request: FakeOllamaRequest): string {
-  if (SELF_QUESTIONS.some((question) => request.user.includes(question))) {
-    const question = SELF_QUESTIONS.find((item) => request.user.includes(item)) ?? "";
-    return chatAnswer(replyFor(question), { craving: 1 });
-  }
-  if (request.user.includes(REVERSE_QUESTION)) return chatAnswer(replyFor(REVERSE_QUESTION), { craving: -1 });
+  // 相談の頼みには前の会話も載るので、**いちばん後ろに出てくる問い**を今回の問いとする
+  // （先頭から探すと、2回目以降も1回目の問いに答えてしまう）
+  const latest = [...SELF_QUESTIONS, REVERSE_QUESTION, WORK_READER_QUESTION]
+    .map((question) => ({ question, at: request.user.lastIndexOf(question) }))
+    .filter((hit) => hit.at >= 0)
+    .sort((x, y) => y.at - x.at)[0]?.question;
+  if (latest !== undefined && (SELF_QUESTIONS as readonly string[]).includes(latest)) return chatAnswer(replyFor(latest), { craving: 1 });
+  if (latest === REVERSE_QUESTION) return chatAnswer(replyFor(REVERSE_QUESTION), { craving: -1 });
   // 作品の読者の話と、そのほか（場面探しなどが混ざったとき）には信号を返さない
-  const question = request.user.includes(WORK_READER_QUESTION) ? WORK_READER_QUESTION : "そのほか";
-  return chatAnswer(replyFor(question), null);
+  return chatAnswer(replyFor(latest ?? "そのほか"), null);
 }
 
 /**
@@ -187,7 +190,10 @@ test("9問に答えずに相談で読み方を話すと、層が離れるまで�
       const requestsBefore = fake.requests.length;
       await ask(page, side, WORK_READER_QUESTION);
       // 9問に答えていない作者の相談にも、読み方を推し量る頼みが添えられている
-      const sent = fake.requests.slice(requestsBefore).find((request) => request.user.includes(WORK_READER_QUESTION));
+      // 相談の前に、場面を探す検索語の頼み（SEARCH_TERMS_SYSTEM_PROMPT）にも同じ問いが載るので、それは除く
+      const sent = fake.requests
+        .slice(requestsBefore)
+        .find((request) => request.user.includes(WORK_READER_QUESTION) && !request.system.includes(SEARCH_TERMS_SYSTEM_PROMPT));
       expect(sent, `作品の読者の問いが偽のAIに届いていません（${describeFakeRequests(fake.requests, requestsBefore)}）`).toBeDefined();
       expect(
         `${sent?.system ?? ""}\n${sent?.user ?? ""}`,
