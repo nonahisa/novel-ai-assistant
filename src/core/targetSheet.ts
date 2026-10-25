@@ -11,7 +11,7 @@ import {
   type ReaderTypeId,
 } from "./readerTarget";
 import { READER_TYPE_IDS, readerTypeNeighbors } from "./readerTypeNeighbors";
-import { threeAxisLevel, type ThreeAxisLevel } from "./threeAxis";
+import { threeAxisLevelRank } from "./threeAxis";
 import type { ReaderScores } from "../models/readerProfile";
 
 /**
@@ -60,9 +60,6 @@ const CENTER_HIGH = 6;
 const CENTER_MID = 3;
 const CENTER_LOW = 0;
 
-/** 段階の重み。距離を測るためだけの数 */
-const LEVEL_RANK: Record<ThreeAxisLevel, number> = { low: 0, mid: 1, high: 2 };
-
 /**
  * 11型の中心（軸の空間での位置）。
  *
@@ -109,9 +106,8 @@ function flatScores(value: number): ReaderScores {
 /** 段階の差の和で測れる、いちばん遠い距離（軸3本 × 段階2つぶん） */
 const MAX_DISTANCE = READER_AXIS_ORDER.length * 2;
 
-function levelRank(score: number): number {
-  return LEVEL_RANK[threeAxisLevel(score)];
-}
+/** 段階の重みは `threeAxis.ts` の表を使う（写しを置かない） */
+const levelRank = threeAxisLevelRank;
 
 /**
  * 1つの型との一致度（0〜100の整数）。
