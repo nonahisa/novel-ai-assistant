@@ -210,6 +210,34 @@ describe("告知文の検査", () => {
     expect(validateAnnouncement(result(), composed)).toEqual([]);
   });
 
+  test("設定の作品URLが作者だけの開けるページなら、使うときに知らせる（保存値は書き換えない。2026-10-25）", () => {
+    const authorUrl = "https://kakuyomu.jp/my/works/1177354054890000000/episodes/new";
+    const composed = composeXPost({
+      body: result().xPost,
+      episodeLabel: "第3話",
+      hashtags: [],
+      workUrl: authorUrl,
+    });
+    const warnings = validateAnnouncement(result(), composed, authorUrl);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("読者は開けません");
+    // 直し先が分かるなら、読者向けの作品ページを添える
+    expect(warnings[0]).toContain("https://kakuyomu.jp/works/1177354054890000000");
+    // 投稿そのものは書き換えない（直すかは作者が決める）
+    expect(composed).toContain(authorUrl);
+  });
+
+  test("読者向けの作品ページなら、作品URLの注意は出ない", () => {
+    const readerUrl = "https://kakuyomu.jp/works/1177354054890000000";
+    const composed = composeXPost({
+      body: result().xPost,
+      episodeLabel: "第3話",
+      hashtags: [],
+      workUrl: readerUrl,
+    });
+    expect(validateAnnouncement(result(), composed, readerUrl)).toEqual([]);
+  });
+
   test("合成すると上限を超えるX用に注意する", () => {
     // **本文だけでは収まっていても、ハッシュタグとURLを足すと超える。**
     // 数えるのは合成したあとでなければ意味がない
@@ -459,16 +487,19 @@ describe("告知文の書き出し", () => {
     expect(markdown).toContain("## 伏せたもの");
   });
 
-  test("X用は引用（>）で置き、コード柵に入れない（作者の要望、2026-09-06「表示も折り返してね」）", () => {
-    // コード柵だとプレビューで折り返さず、横スクロールで読めなかった
-    expect(markdown).not.toContain("```");
-    // 行末の半角空白2つで、プレビューでも改行が見える（0.40.7。composedX には足さない）
+  test("X用は記号を付けずにそのまま置く。ファイルから写しても X用をコピーと同じ中身になる（2026-10-25 の実機確認）", () => {
+    // 引用（> ）で置いていたら、ファイルから写した作者の投稿に「>」が入った。
+    // 行末の空白2つも写るうえ X の字数に数えられる
     expect(markdown).toContain(
-      "> 第3話「灯を継ぐ」 更新しました  \n> 本文です。  \n> #創作  \n> {URL}  "
+      "\n\n第3話「灯を継ぐ」 更新しました\n本文です。\n#創作\n{URL}\n\n## 活動報告"
     );
+    expect(markdown).not.toMatch(/^>/mu);
+    expect(markdown).not.toMatch(/ {2}$/mu);
+    // コード柵だとプレビューで折り返さず、横スクロールで読めなかった（2026-09-06）
+    expect(markdown).not.toContain("```");
   });
 
-  test("引用の中の空行は「>」だけの行にする", () => {
+  test("X用の空行もそのまま置く", () => {
     const spaced = buildAnnouncementMarkdown({
       workTitle: "図書塔の魔女",
       episodeLabel: "第3話",
@@ -479,8 +510,17 @@ describe("告知文の書き出し", () => {
       spoilerCheck: null,
       warnings: [],
     });
-    expect(spaced).toContain(
-      "> 第3話 更新しました  \n>\n> 本文です。  \n>\n> {URL}  "
+    expect(spaced).toContain("\n\n第3話 更新しました\n\n本文です。\n\n{URL}\n\n## 活動報告");
+  });
+
+  test("X用の見出しのすぐ下に、どこを X に貼るかの案内を1行置く（活動報告用との取り違え）", () => {
+    const heading = `## X（旧Twitter）用（60/${X_WEIGHTED_LIMIT}）`;
+    const afterHeading = markdown.slice(markdown.indexOf(heading) + heading.length);
+    const [, guide] = afterHeading.split("\n");
+    expect(guide).toContain("X に貼");
+    // 案内は投稿の行より前に置く（投稿の中へ混ぜない）
+    expect(afterHeading.indexOf(guide)).toBeLessThan(
+      afterHeading.indexOf("第3話「灯を継ぐ」 更新しました")
     );
   });
 

@@ -1,4 +1,5 @@
 import type { WorkAnnounceConfig } from "../models/types";
+import { authorOnlyPage } from "./postingSiteUrls";
 
 /**
  * 更新告知（設計書6.41）の設定と履歴の読み方。**VS Code にも Node にも依存しない。**
@@ -47,6 +48,41 @@ export function parseAnnounceConfig(raw: unknown): WorkAnnounceConfig | undefine
     hashtags,
     workUrl: typeof value.workUrl === "string" ? value.workUrl.trim() : "",
   };
+}
+
+/**
+ * 「SNS告知設定」の作品URLの欄に、最初に出しておく値（2026-10-25 の実機確認）。
+ *
+ * 作者はクリップボードに残っていた作者用の投稿ページを入れ、告知に載った。
+ * 台帳（投稿状態.json）の作品の番号から読者向けの作品ページを組み立てられるなら、
+ * 欄の初期値に出しておけば、作者は Enter を押すだけで済む。
+ *
+ * - **保存してある値はそのまま出す。** 作者用のページでも差し替えない——欄の
+ *   初期値が保存値と違うと、開いただけで書き換えたように見える。作者用なら
+ *   欄の下の検査（`authorOnlyPageNotice`）が直す先を言う
+ * - **空のときは、候補が1つに決まるときだけ出す。** どのサイトへ誘導したいかは
+ *   その作者の都合で、こちらでは選ばない（`resolveWorkListUrl` と同じ考え）
+ * - 台帳の候補が作者用のページなら、読者向けへ直してから数える。直せなければ外す
+ *
+ * **初期値は下書きで、Enter を押すまで保存しない。**
+ *
+ * @param current 保存してある作品URL（未設定なら空）
+ * @param candidates 台帳から組み立てた作品ページのURL
+ */
+export function announceWorkUrlDraft(
+  current: string | undefined,
+  candidates: readonly string[]
+): string {
+  const saved = (current ?? "").trim();
+  if (saved) return saved;
+  const readerUrls = new Set(
+    candidates.flatMap((url) => {
+      const page = authorOnlyPage(url);
+      if (!page) return [url.trim()];
+      return page.readerUrl ? [page.readerUrl] : [];
+    })
+  );
+  return readerUrls.size === 1 ? [...readerUrls][0] : "";
 }
 
 /**

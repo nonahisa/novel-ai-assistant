@@ -14,6 +14,7 @@ import {
   type AnnounceResult,
 } from "../prompts/announce";
 import { findReaderTypeLabels, readerLeakNote } from "./publicityReader";
+import { authorOnlyPageNotice } from "./postingSiteUrls";
 
 /**
  * 更新告知文（P-30）の組み立てと検査。**純粋関数だけを置く。**
@@ -317,12 +318,26 @@ export function xPostWithUrl(composedX: string, url: string): string {
  * 作者が決める（P-06 の紹介文と同じ扱い）。
  *
  * @param composedX ハッシュタグとURLまで足したX用の投稿
+ * @param workUrl 告知の設定の作品URL（`announce.workUrl`）。作者だけが開ける
+ *   ページなら注意を出す（2026-10-25 の実機確認）
  */
 export function validateAnnouncement(
   result: AnnounceResult,
-  composedX: string
+  composedX: string,
+  workUrl?: string
 ): string[] {
   const warnings: string[] = [];
+
+  /*
+    **保存してある設定は書き換えず、使うときに知らせる**（実装ルール2）。
+    以前の版では作者用の投稿ページでも素通りで保存できたので、すでに入っている
+    作品がある。黙って読者向けへ差し替えると、作者の入れた値が知らないうちに
+    変わる。製品と MCP の告知文の両方がここを通るので、片方だけ漏れない
+  */
+  const authorOnly = authorOnlyPageNotice(workUrl);
+  if (authorOnly) {
+    warnings.push(`告知の設定の作品URLは、${authorOnly}［SNS告知設定］で直せます。`);
+  }
 
   const weighted = xWeightedLength(composedX);
   if (weighted > X_WEIGHTED_LIMIT) {
@@ -476,21 +491,29 @@ export function buildAnnouncementMarkdown(
 
   lines.push(
     `## X（旧Twitter）用（${input.weightedLength}/${X_WEIGHTED_LIMIT}）`,
+    // **どこを X に貼るかを1行で言う**（2026-10-25 の実機確認）。作者は縦に並ぶ
+    // 活動報告用の文を X 用と取り違えて貼った。案内は投稿の行の外に置く
+    "（この下から次の見出しの前までを、そのまま X に貼ります）",
     ""
   );
-  // **引用（>）で置く**（作者の要望、2026-09-06「表示も折り返してね」）。
-  // 0.40.2 まではコード柵で囲んでいたが、Markdown のプレビューでは
-  // 折り返さず横スクロールになり、画面の幅を超えた分が読めなかった。
-  // 引用なら折り返し、空行も「>」だけの行で保てる。ハッシュタグの
-  // 「#創作」は「#」の直後に空白が無いので見出しにはならない。
-  // コピーは通知の「X用をコピー」が composedX をそのまま渡す
-  for (const line of input.composedX.split("\n")) {
-    // **行末の半角空白2つで、プレビューでも改行を見せる**（0.40.7）。Markdown は
-    // 引用の中の続く行を1段落にまとめるので、無いと3行が1行につながって出る。
-    // 空白を足すのはこの書き出しだけで、composedX（X用をコピーの中身）には
-    // 足さない——X の280字に数えられてしまう
-    lines.push(line ? `> ${line}  ` : ">");
-  }
+  /*
+    **記号を付けずに、X用をコピーの中身（composedX）と1字違わず同じ行で置く**
+    （2026-10-25 の実機確認）。
+
+    0.40.2〜は行頭に「> 」（引用）と行末に空白2つを付けていた。だが作者は
+    プレビューではなく**開いたファイルの本文を選んで写す**ので、「>」がそのまま
+    X に入った。行末の空白も一緒に写り、X の280字に数えられる。
+
+    ほかの形を選ばなかった理由：
+    - コード柵：中の行は写せるが、Markdown のプレビューで折り返さず、
+      画面の幅を超えた分が読めなかった（2026-09-06「表示も折り返してね」で外した）
+    - 行末の空白2つ・「\」での改行：写すと記号まで入る
+
+    引き換えに、プレビューでは空行を挟まない文どうしが1段落につながって見える
+    （文ごとの改行が詰まる）。空行（題の次・ハッシュタグの前）は段落として残る。
+    ハッシュタグの「#創作」は「#」の直後に空白が無いので見出しにはならない
+  */
+  lines.push(...input.composedX.split("\n"));
   lines.push("");
 
   lines.push("## 活動報告・近況ノート用", "", input.activityReport, "");
