@@ -164,6 +164,21 @@ describe("移動の照合（旅の台・固定の事実）", () => {
     );
   });
 
+  /**
+   * 受け入れ条件：既存の台（`seeded/contradiction`、2/4・誤検出0）の成績を変えない。
+   * あちらの場所の記録には距離の関係が無いので、表は0組——移動の照合は
+   * 何も出さず、ほかの照合器へ渡る事実も並びも変わらない。
+   */
+  it("既存の矛盾の台では表が0組（移動の照合は何も足さない）", () => {
+    const dir = path.resolve(FIXTURE, "..", "contradiction", "設定", "locations");
+    const existing = fs
+      .readdirSync(dir)
+      .map((name) => parseLocation(JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"))));
+    expect(
+      buildTravelMaterial({ locations: existing, facts, places, episodes }).travelTimes
+    ).toEqual([]);
+  });
+
   /** 場所の記録に距離が1つも無ければ、黙らずに「していない」と書く */
   it("表が0組なら、移動の照合はしていないと書く", () => {
     const bare = buildTravelMaterial({
