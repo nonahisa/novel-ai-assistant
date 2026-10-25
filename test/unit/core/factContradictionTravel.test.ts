@@ -8,6 +8,7 @@ import {
   type FactRunSummary,
 } from "../../../src/core/factContradiction";
 import {
+  buildFactContradictionIssue,
   buildTravelMaterial,
   factVerifyPromptVersion,
   factVerifySourceOf,
@@ -244,6 +245,51 @@ describe("移動の照合（旅の台・固定の事実）", () => {
     expect(factVerifySourceOf({ origin: undefined })).toBe("settled");
   });
 
+  /**
+   * 作者の裁定（2026-10-25 夜）：e4b は判定を「採用」にしながら説明に「矛盾とは断定できない」
+   * と書いた。画面の補足に逆向きの説明を出さず、機械の根拠（所要時間）だけを添える。
+   * 指摘そのものは残す。移動の照合の候補だけに効かせる
+   */
+  it("採用なのに説明が逆向きなら、説明を伏せて機械の根拠だけを添える（移動の照合だけ）", () => {
+    const candidate = candidates.find((entry) => entry.right === "fact:6:12:1");
+    if (!candidate) throw new Error("第6話12行目の候補が無い");
+    const byId = new Map(facts.map((fact) => [fact.id, fact]));
+    const sides = {
+      left: byId.get(candidate.left) as StoryFact,
+      right: byId.get(candidate.right) as StoryFact,
+      place: places.get(candidate.right) as FactPlace,
+      rightInBody: true,
+    };
+    const noteWith = (explanation: string, travel = true) =>
+      buildFactContradictionIssue({ candidate: { ...candidate, origin: travel ? "travel" : undefined }, sides, explanation }).note;
+
+    for (const reversed of [
+      "「その頃」という表現は、時間経過の描写が省略されていることを示唆するため、矛盾とは断定できない。",
+      "「二日後」という記述は、物語上の経過時間として機能するため、矛盾とは言えない。",
+      "移動したので矛盾ではない。",
+      "時間が経っているので両立する。",
+    ]) {
+      const note = noteWith(reversed);
+      expect(note).not.toContain(reversed);
+      expect(note).not.toContain("判定:");
+      expect(note).toContain("長く見積もっても1日で移っている");
+      expect(note).toContain("場所の記録では、王都と港町のあいだは3日かかる");
+    }
+
+    // 向きの合った説明はそのまま。指示の文（「両立の理由になりません」「同時に成り立ちません」）を
+    // 写した採用の説明も、逆向きとは読まない（指示の言葉は答えに返ってくる）
+    for (const agreeing of [
+      "翌朝（1日後）に到着しており、移動手段の記述もないため矛盾している。",
+      "人物が場所を移ったこと自体は、この指摘の前提であって、両立の理由になりません。",
+      "書かれた経過が所要時間より短く、速く移る手段も本文に書かれていないなら、同時に成り立ちません。",
+    ]) {
+      expect(noteWith(agreeing)).toContain(`判定: ${agreeing}`);
+    }
+
+    // 移動の照合でない候補には効かせない（本命の候補の補足は変えない）
+    expect(noteWith("矛盾とは言えない。", false)).toContain("判定: 矛盾とは言えない。");
+  });
+
   /** 控えの鍵：移動の照合だけ版を分ける。本命の鍵は変えない（作者のクラウドAIの控えを作り直さない） */
   it("判定の控えの版は、移動の照合だけ travel の印が付く", () => {
     expect(factVerifyPromptVersion("settled")).toBe(CONTRADICTION_VERIFY_VERSION);
@@ -253,10 +299,11 @@ describe("移動の照合（旅の台・固定の事実）", () => {
   });
 
   /**
-   * 作者の選択③（含みで引く）。抽出が値を「港町の宿」「王都の城門の詰所」のように返しても、
-   * 仕込みに当たり、罠（回想の「王都の城門の前」は thought）に当たらない
+   * 作者の選択③（含みで引く）と、その夜の裁定（名前が2字以下の場所は含みで引かない）。
+   * この台の場所は「王都」「港町」と2字なので、値が「港町の宿」「王都の城門の詰所」の形だと
+   * 引けない。引けなかった分は照合しないだけで、罠（回想の「王都の城門の前」）には当たらない
    */
-  it("値が場所の名前そのものでなくても、名前を1つだけ含めば同じ採点になる", () => {
+  it("2字の名前の場所は、値が名前そのものでないと引かない（罠には当たらない）", () => {
     const loose: Record<string, string> = {
       "fact:2:2:1": "王都の城門の詰所",
       "fact:2:8:1": "港町の市場",
@@ -269,7 +316,8 @@ describe("移動の照合（旅の台・固定の事実）", () => {
       loose[fact.id] ? { ...fact, value: loose[fact.id] } : fact
     );
     const looseMaterial = buildTravelMaterial({ locations, facts: looseFacts, places, episodes });
-    expect(looseMaterial.stats.resolved).toBe(material.stats.resolved);
+    // 地の文の5件（回想の 5:8 はもとから数えない）が引けなくなる
+    expect(looseMaterial.stats.resolved).toBe(material.stats.resolved - 5);
     const looseFlagged = findContradictionCandidates({
       facts: looseFacts,
       travelTimes: looseMaterial.travelTimes,
@@ -277,7 +325,16 @@ describe("移動の照合（旅の台・固定の事実）", () => {
     })
       .filter((candidate) => candidate.predicate === "所在")
       .map((candidate) => places.get(candidate.right) as FactPlace);
-    expect(looseFlagged).toEqual(flagged);
+    for (const trap of answers.mustNotFlag) {
+      expect(
+        looseFlagged.filter(
+          (place) =>
+            place.filePath === trap.file &&
+            (!trap.lines || (place.line >= trap.lines.start && place.line <= trap.lines.end))
+        ),
+        trap.file
+      ).toEqual([]);
+    }
   });
 
   /**

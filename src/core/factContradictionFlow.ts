@@ -239,6 +239,18 @@ export function buildFactContradictionIssue(input: {
     right: input.sides.right,
     rightLineText: input.rightLineText,
   });
+  const explanation = input.explanation ?? "";
+  /*
+    **移動の照合の候補で、残したのに説明が「矛盾とは言えない」と逆を向いていたら、
+    説明だけ伏せる**（作者の裁定、2026-10-25 夜）。e4b は旅の台で判定を「採用」にしながら
+    「「その頃」という表現は…矛盾とは断定できない」と書いた。指摘は残し、補足には
+    機械の根拠（所要時間。経過はもとの補足の `reason` にある）だけを添える
+  */
+  const reversed =
+    factVerifySourceOf(input.candidate) === "travel" && isReversedAdoptionExplanation(explanation);
+  const note = reversed
+    ? appendBasis(issue.note, input.candidate.basis ?? "")
+    : appendNote(issue.note, explanation);
   return {
     filePath: input.sides.place.filePath,
     line: input.sides.place.line,
@@ -247,9 +259,31 @@ export function buildFactContradictionIssue(input: {
     category: issue.category,
     settingSays: issue.settingSays,
     textSays: issue.textSays,
-    note: appendNote(issue.note, input.explanation ?? ""),
+    note,
     confidence: input.candidate.confidence,
   };
+}
+
+/**
+ * 採用の判定に付いた説明が、矛盾ではないと言っているか（作者の裁定、2026-10-25 夜）。
+ *
+ * **語はごく小さな一覧に絞る。** 確かめの段へ送る文（「両立の理由になりません」「同時に
+ * 成り立ちません」）は、採用の説明にそのまま写って返ってくる（CLAUDE.md「繰り返し起きた
+ * 失敗」3番）。それを逆向きと読まないよう、否定の形（「両立しない」）や指示の文の言い回しには
+ * 当たらない語だけを置く
+ */
+const REVERSED_ADOPTION =
+  /矛盾とは(?:言え|いえ|断定でき|断言でき|限ら)ない|矛盾(?:では|じゃ)(?:ない|ありません)|矛盾(?:しない|しません|していない|していません)|両立(?:する|します|している|できる)|食い違って(?:い)?ない|問題(?:は)?ない/u;
+
+export function isReversedAdoptionExplanation(explanation: string): boolean {
+  return REVERSED_ADOPTION.test(explanation);
+}
+
+/** 機械の根拠を補足へ足す（判定の説明を伏せたとき） */
+function appendBasis(note: string, basis: string): string {
+  const extra = basis.trim();
+  if (!extra) return note;
+  return note.trim() ? `${note.trim()}（根拠: ${extra}）` : `根拠: ${extra}`;
 }
 
 /** 移動の照合へ渡す材料（`findContradictionCandidates` の `travelTimes`・`whereabouts`） */
