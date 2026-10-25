@@ -258,13 +258,24 @@ export function appendAuthorReaderHistory(
     return { ...next, history: previous.history ?? next.history };
   }
 
-  const tuned = isAuthorReaderTuned(previous);
-  const entry: AuthorReaderHistoryEntry = {
-    typeId: resolveReaderType(previous.scores),
-    scores: previous.scores,
-    updatedAt: tuned ? (previous.tunedAt ?? previous.updatedAt) : previous.updatedAt,
-    source: tuned ? "tuned" : previous.source,
-  };
+  // 積むのは「作者に見えていた前の状態」。微調整で層が答えから離れていれば
+  // 微調整したもの、離れていなければ9問の答えそのもの——層の変わらない
+  // 微調整は画面に断りを出していない（isAuthorReaderTypeShifted）ので、
+  // 作者には答えとして見えていた。ここで微調整の点数を積むと、答えた層が
+  // 履歴から消える（2026-10-25 夕の実機。答えの没入層が一度も載らなかった）
+  const entry: AuthorReaderHistoryEntry = isAuthorReaderTypeShifted(previous)
+    ? {
+        typeId: resolveReaderType(previous.scores),
+        scores: previous.scores,
+        updatedAt: previous.tunedAt ?? previous.updatedAt,
+        source: "tuned",
+      }
+    : {
+        typeId: resolveReaderType(authorReaderBaseScores(previous)),
+        scores: authorReaderBaseScores(previous),
+        updatedAt: previous.updatedAt,
+        source: previous.source,
+      };
   return {
     ...next,
     history: [entry, ...(previous.history ?? [])].slice(
