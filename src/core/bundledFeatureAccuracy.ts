@@ -36,6 +36,14 @@ export interface FeatureAccuracyRecord {
   readonly hits: number;
   /** 仕込みの数 */
   readonly total: number;
+  /**
+   * 台の罠（指摘が出てはいけない箇所）の数。**測った記録があるときだけ持つ**
+   * （作者の裁定 2026-10-25 夜、6.102-②）。当たりだけを添えると、何でも指摘する
+   * モデルが「当たりが多い」に見える（CLAUDE.md 失敗2）。`trapHits` と必ず一緒に置く
+   */
+  readonly traps?: number;
+  /** 罠に掛かった数（測定の「誤検出」）。`traps` と一緒に置く */
+  readonly trapHits?: number;
   /** 測ったときのプロンプトの版。**いまの版と違えば使わない** */
   readonly promptVersion: string;
   /** 測った日（ISO 8601 の日付） */
@@ -52,6 +60,20 @@ export interface FeatureAccuracyRecord {
  * 矛盾検知は**いまの製品の送り方**で測った値を置く——0.70.8 から、20B 未満の
  * モデルには抑制を残した版が行く（6.10.8）ので、`e4b`・`12b` はその版の成績
  * （1.5 の列）、`26b` はゆるめた版の成績である。
+ *
+ * **罠の欄（`traps`・`trapHits`）は、罠の結果を測った記録があるものだけ埋める**
+ * （作者の裁定 2026-10-25 夜、6.102-②）。数字の出どころ：
+ *
+ * - 矛盾検知：罠4（台の `mustNotFlag`。罠3＋矛盾の無い話1）。`26b` は引継ぎ書8章
+ *   0.70.7 の表（4/4・誤検出0、3回とも）、`e4b` は 0.70.8 の表（抑制を残す側
+ *   0/4・誤検出0）、`12b` は `docs/measurements/2026-09-19-contradiction-gemma4_12b.json`
+ *   （1.5・1/4・誤検出0、3回とも）。8章の「12b は罠に掛かった（2件）」は、
+ *   12b へは送らないゆるめた版の成績なのでここへは写さない
+ * - 誤字脱字：罠の数は測った日の台で数える。2026-10-08 に「｜霧鈴」を足して
+ *   18→19 になった。9月の2件は18、10-10 の2件は19。どれも誤検出0（各測定の
+ *   `typoFalsePositives`）
+ * - 推敲：空のまま。測定は「ひらいてはいけない語をひらいた」を数えているが、
+ *   罠の数（語の数か出てくる回数か）を記録に書いていないので、分母を作らない
  */
 export const BUNDLED_FEATURE_ACCURACY: readonly FeatureAccuracyRecord[] = [
   // ── 矛盾検知（仕込み4・罠4の台） ──
@@ -63,6 +85,8 @@ export const BUNDLED_FEATURE_ACCURACY: readonly FeatureAccuracyRecord[] = [
     total: 4,
     promptVersion: "1.6",
     measuredAt: "2026-09-20",
+    traps: 4,
+    trapHits: 0,
     bench: "答え付きの台（仕込み4）",
   },
   {
@@ -73,6 +97,8 @@ export const BUNDLED_FEATURE_ACCURACY: readonly FeatureAccuracyRecord[] = [
     total: 4,
     promptVersion: "1.6",
     measuredAt: "2026-09-20",
+    traps: 4,
+    trapHits: 0,
     bench: "答え付きの台（仕込み4）",
   },
   {
@@ -83,6 +109,8 @@ export const BUNDLED_FEATURE_ACCURACY: readonly FeatureAccuracyRecord[] = [
     total: 4,
     promptVersion: "1.6",
     measuredAt: "2026-09-20",
+    traps: 4,
+    trapHits: 0,
     bench: "答え付きの台（仕込み4）",
   },
   // ── 誤字脱字（仕込み12・罠18の台） ──
@@ -94,6 +122,8 @@ export const BUNDLED_FEATURE_ACCURACY: readonly FeatureAccuracyRecord[] = [
     total: 12,
     promptVersion: "1.1",
     measuredAt: "2026-09-20",
+    traps: 18,
+    trapHits: 0,
     bench: "答え付きの台（仕込み12）",
   },
   /*
@@ -109,6 +139,8 @@ export const BUNDLED_FEATURE_ACCURACY: readonly FeatureAccuracyRecord[] = [
     total: 12,
     promptVersion: "1.2",
     measuredAt: "2026-10-10",
+    traps: 19,
+    trapHits: 0,
     bench: "答え付きの台（仕込み12）",
   },
   /*
@@ -125,6 +157,8 @@ export const BUNDLED_FEATURE_ACCURACY: readonly FeatureAccuracyRecord[] = [
     total: 12,
     promptVersion: "1.1",
     measuredAt: "2026-10-10",
+    traps: 19,
+    trapHits: 0,
     bench: "答え付きの台（仕込み12）",
   },
   {
@@ -135,6 +169,8 @@ export const BUNDLED_FEATURE_ACCURACY: readonly FeatureAccuracyRecord[] = [
     total: 12,
     promptVersion: "1.1",
     measuredAt: "2026-09-20",
+    traps: 18,
+    trapHits: 0,
     bench: "答え付きの台（仕込み12）",
   },
   // ── 推敲・当て字（仕込み8の台） ──
@@ -219,13 +255,33 @@ export function describeAccuracyComparison(params: {
   if (current && accuracyRate(candidate) > accuracyRate(current)) {
     return (
       `${source}では、この機能の当たりが ${params.candidateModel} で ` +
-      `${candidate.hits}/${candidate.total}、いまの ${params.currentModel} で ` +
-      `${current.hits}/${current.total} でした（当たりが多い側です）。`
+      `${candidate.hits}/${candidate.total}${trapNote(candidate)}、いまの ${params.currentModel} で ` +
+      `${current.hits}/${current.total}${trapNote(current)} でした（当たりが多い側です）。`
     );
   }
+  // 括弧を2つ並べないよう、添え書きは1つの括弧にまとめる
+  const notes = [
+    trapText(candidate),
+    current ? undefined : `いまの ${params.currentModel} は測っていません`,
+  ].filter((note): note is string => note !== undefined);
   return (
     `${source}では、この機能で ${params.candidateModel} が ` +
     `${candidate.hits}/${candidate.total} を当てました` +
-    (current ? "。" : `（いまの ${params.currentModel} は測っていません）。`)
+    (notes.length > 0 ? `（${notes.join("・")}）` : "") +
+    "。"
   );
+}
+
+/**
+ * 罠に掛かった数。**罠の欄が無い記録では出さない**——測っていない罠を
+ * 「0」と言うと、当て推量が実測の顔をして並ぶ。
+ */
+function trapText(record: FeatureAccuracyRecord): string | undefined {
+  if (record.traps === undefined || record.trapHits === undefined) return undefined;
+  return `罠に掛かった数 ${record.trapHits}/${record.traps}`;
+}
+
+function trapNote(record: FeatureAccuracyRecord): string {
+  const text = trapText(record);
+  return text ? `（${text}）` : "";
 }
