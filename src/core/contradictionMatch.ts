@@ -67,6 +67,15 @@ export interface ContradictionCandidate {
   fingerprint: string;
   /** 作者が読む1文 */
   reason: string;
+  /**
+   * 設定資料の側の根拠（本文の事実の外から持ってきたもの）。判定（P-12b）の
+   * 「設定では」に添える。
+   *
+   * **移動の照合で要る。** 判定は所要時間を知らないので、「翌朝という時間の経過で
+   * 移動したことが示されている」と作中の変化で取り下げた（2026-10-25、gemma4:26b）。
+   * 指紋には混ぜない（同じ食い違いの鍵を変えない）
+   */
+  basis?: string;
 }
 
 /**
@@ -588,6 +597,9 @@ export function findTravelImpossibilities(
             `${formatPosition(positionOf(to.fact))}に『${to.entry.locationName}』。` +
             `${formatDays(minDays)}かかる道のりを、` +
             `${elapsedMax <= 0 ? "同じ日のうちに" : `長く見積もっても${elapsedMax}日で`}移っている`,
+          basis:
+            `場所の記録では、${from.entry.locationName}と${to.entry.locationName}のあいだは` +
+            `${formatDays(minDays)}かかる（書かれた所要時間のうち、いちばん速いもの）`,
         })
       );
     }
@@ -747,10 +759,12 @@ interface CandidateDraft extends FingerprintInput {
   /** 同じ日で前後が読めない組か。候補にはするが、確信度を1段下げる */
   unknownOrder: boolean;
   reason: string;
+  basis?: string;
 }
 
 function buildCandidate(draft: CandidateDraft): ContradictionCandidate {
   return {
+    ...(draft.basis ? { basis: draft.basis } : {}),
     type: draft.type,
     subject: draft.subject,
     predicate: draft.predicate,

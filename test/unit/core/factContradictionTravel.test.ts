@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { findContradictionCandidates } from "../../../src/core/contradictionMatch";
 import {
+  buildFactVerifyIssue,
   describeFactRun,
   type FactRunSummary,
 } from "../../../src/core/factContradiction";
@@ -162,6 +163,24 @@ describe("移動の照合（旅の台・固定の事実）", () => {
     expect(describeFactRun(summary)).toContain(
       "移動の照合（所在の事実 17件・場所に引けた 13件・時計に載った 13件・所要時間の表 2組）"
     );
+  });
+
+  /**
+   * 再現（2026-10-25、gemma4:26b）：判定（P-12b）は所要時間を知らないので、
+   * 「翌朝という時間の経過により移動したことが示されている」と作中の変化で取り下げた。
+   * 判定へ渡す「設定では」に、場所の記録の所要時間を添える
+   */
+  it("判定へ渡す設定の側に、場所の記録の所要時間が載る", () => {
+    const candidate = candidates.find((entry) => entry.right === "fact:6:12:1");
+    if (!candidate) throw new Error("第6話12行目の候補が無い");
+    const byId = new Map(facts.map((fact) => [fact.id, fact]));
+    const issue = buildFactVerifyIssue({
+      candidate,
+      left: byId.get(candidate.left) as StoryFact,
+      right: byId.get(candidate.right) as StoryFact,
+      rightLineText: "翌朝、エドは港町に着いた。",
+    });
+    expect(issue.settingSays).toContain("場所の記録では、王都と港町のあいだは3日かかる");
   });
 
   /**

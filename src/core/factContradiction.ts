@@ -147,7 +147,11 @@ export function buildFactVerifyIssue(input: {
       !isRecordFact(right) && quoted.length > 0
         ? quoted
         : describeFactSide(right),
-    settingSays: describeFactSide(left),
+    // 資料の側の根拠（移動の照合の所要時間）は「設定では」に添える。
+    // 判定は本文の前後しか見ないので、添えないと「時間が経ったので移動できた」と読む
+    settingSays: candidate.basis
+      ? `${describeFactSide(left)}。${candidate.basis}`
+      : describeFactSide(left),
     textSays: describeFactSide(right),
     note: `${candidate.reason}（確信度: ${CONFIDENCE_LABELS[candidate.confidence]}）`,
   };
