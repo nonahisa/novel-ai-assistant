@@ -40,9 +40,43 @@ import { blockAfter } from "../support/sourceBlock";
  */
 const NEEDS_EDITOR = new Map([
   ["src/features/ruby.ts", "選んだ範囲へルビを差し込む"],
-  // 相談の「そこを見せて」は 0.97.8 から本文へ飛ぶ1本の道（`revealLocation.ts`）を
-  // 通り、範囲も選ばなくなったので、例外から外した
+  /*
+    本文へ飛ぶ1本の道。原稿エディターが引き受けなかったときの逃げ道で、
+    開く列を決めて行の頭へカーソルを置くので実体が要る（相談の「そこを
+    見せて」もここを通る）。以前ここに「例外から外した」と書いてあったが、
+    見張りの正規表現が `path.toUri` の書き方を拾えず、素通りしていただけ
+    だった（2026-10-25 に見張りを広げて分かった）
+  */
+  ["src/features/revealLocation.ts", "原稿エディターが引き受けないときに、決めた列で行へ飛ぶ"],
+  ["src/features/similarScenes.ts", "2つ目の場面を隣の列へ出し、その行を選んで見せる"],
+  [
+    "src/features/plotModePanel.ts",
+    "目次から plot.md の行へ飛ぶときだけ（行へ飛ばないときは既定の画面で開く）",
+  ],
 ]);
+
+/**
+ * `openTextDocument(Uri)` の直後に画面へ出す呼び出しが無ければ、読むだけとみなす。
+ *
+ * **ファイル単位では許さない。** 読むだけの1か所のためにファイルごと許すと、
+ * 同じファイルに後から足された「素のエディターで開く」まで隠れる
+ * （3,000行を超える `workChatPanel.ts` に、読むだけと開くが両方あった）。
+ */
+const SHOW_WINDOW_LINES = 12;
+
+function displayedOpenCalls(text: string): number {
+  const pattern = /openTextDocument\(\s*(?:vscode\.Uri|(?:paths?\.)?toUri\()/g;
+  let count = 0;
+  for (const match of text.matchAll(pattern)) {
+    const after = text
+      .slice(match.index ?? 0)
+      .split("\n")
+      .slice(0, SHOW_WINDOW_LINES)
+      .join("\n");
+    if (/\.showTextDocument\(/.test(after)) count += 1;
+  }
+  return count;
+}
 
 function sources(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -65,9 +99,12 @@ describe("ファイルは既定のエディターで開く", () => {
     for (const file of files) {
       if (NEEDS_EDITOR.has(file)) continue;
       const text = readFileSync(file, "utf-8");
-      // `openTextDocument(` のあとに `vscode.Uri` が続く形だけを見る。
-      // `openTextDocument({content, language})` は画面上の文書なので対象外
-      if (/openTextDocument\(\s*\r?\n?\s*vscode\.Uri/.test(text)) {
+      // `openTextDocument(` のあとに `vscode.Uri`／`path.toUri(`／`paths.toUri(`
+      // が続く形を見る。以前は `vscode.Uri` だけを見ていて、`path.toUri` で
+      // 開く所が素通りしていた（2026-10-25）。
+      // `openTextDocument({content, language})` は画面上の文書なので対象外。
+      // 読むだけ（直後に showTextDocument が無い）の呼び出しも対象外
+      if (displayedOpenCalls(text) > 0) {
         offenders.push(file);
       }
     }

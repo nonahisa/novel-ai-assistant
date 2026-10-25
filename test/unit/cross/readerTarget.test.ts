@@ -211,6 +211,8 @@ describe("作家タイプと、判定の芯を分け合う", () => {
     expect(read("core/threeAxis.ts")).toContain("LEVEL_RANK");
     expect(read("core/advicePolicy.ts")).not.toContain("LEVEL_RANK");
     expect(read("core/readerTarget.ts")).not.toContain("LEVEL_RANK");
+    // ターゲットシートの距離も同じ重みで測る（写しが片方だけ直る元になる）
+    expect(read("core/targetSheet.ts")).not.toContain("LEVEL_RANK");
   });
 
   test("軸を強い順に並べる計算も、1か所にしかない", () => {

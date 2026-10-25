@@ -28,6 +28,16 @@ export type ThreeAxisLevel = "low" | "mid" | "high";
 const LEVEL_RANK: Record<ThreeAxisLevel, number> = { low: 0, mid: 1, high: 2 };
 
 /**
+ * 点数を段階の重み（低0・中1・高2）にする。
+ *
+ * **重みの表はここにしか置かない。** ターゲットシートの距離（`targetSheet.ts`）も
+ * これを通す。写しを置くと、段階を足したり重みを変えたりした日に片方だけ直る。
+ */
+export function threeAxisLevelRank(score: number): number {
+  return LEVEL_RANK[threeAxisLevel(score)];
+}
+
+/**
  * 合計点から段階を決める。
  *
  * 診断の答えは整数（0〜1＝低、2〜4＝中、5〜6＝高）だが、**推定で動いたあとは
@@ -98,8 +108,7 @@ function compareAxis<A extends string>(
   a: A,
   b: A
 ): number {
-  const byLevel =
-    LEVEL_RANK[threeAxisLevel(scores[a])] - LEVEL_RANK[threeAxisLevel(scores[b])];
+  const byLevel = threeAxisLevelRank(scores[a]) - threeAxisLevelRank(scores[b]);
   if (byLevel !== 0) return byLevel;
   const byScore = scores[a] - scores[b];
   if (byScore !== 0) return byScore;

@@ -37,7 +37,29 @@ const HOLDS_TURN: Array<[file: string, label: string]> = [
   ["checkForeshadows.ts", "伏線の回収の確認"],
   ["extractCharacters.ts", "設定資料の抽出"],
   ["generateSynopses.ts", "各話あらすじの生成"],
+  ["checkFactContradictions.ts", "矛盾の検知（事実の照合）"],
+  // 外部AIからの依頼（MCP の run.request）も、画面から押したときと同じ一括処理である
+  ["runRequestRunners.ts", "各話あらすじの生成（外部AIからの依頼）"],
+  ["runRequestSettings.ts", "設定資料の抽出（外部AIからの依頼）"],
+  /*
+    校正のまとめ実行（設計書6.80）。札を1枚取って、中の機能をまたぐ側である。
+    中の機能は alreadyHeld で取り直さない
+  */
+  ["proofreadingSuite.ts", "校正一括実行"],
 ];
+
+/**
+ * 札を取る側でも、素の進捗（withCancellableProgress）を使ってよいもの。
+ * **札の中で進捗を出している**か、**その進捗は札を取らない仕事**である。
+ */
+const RAW_PROGRESS_OK: ReadonlyMap<string, string> = new Map([
+  ["checkContradictions.ts", "2つの進捗（検出と検証）を1つの札でまたぐ"],
+  ["checkFactContradictions.ts", "抽出と判定を1つの札（withAiTurn）の中で回す"],
+  [
+    "runRequestRunners.ts",
+    "素の進捗は索引づくりのもの。索引づくりは札を取らない（設計書6.76 の15）",
+  ],
+]);
 
 /**
  * 札を取らない機能。**1〜数回で終わるもの**は、リクエストの関所だけを
@@ -70,6 +92,12 @@ const NO_TURN = [
     作者が読み上げの前に押す操作である。誤字脱字の裏で待たされると使えない。
   */
   "readingDictionary.ts",
+  /*
+    執筆統計の「AIに助言をもらう」（設計書6.79.7.3）。AIを呼ぶのは1回だけ。
+    札を取っていたのは自由回答へ変えたときの名残で、理由の記録は無かった
+    （2026-10-25 に外した）。
+  */
+  "readerAdvice.ts",
 ];
 
 describe("実行の札の配り先", () => {
@@ -82,9 +110,9 @@ describe("実行の札の配り先", () => {
 
   test("チャンクを繰り返す機能が、素の進捗のまま残っていない", () => {
     // `withCancellableProgress` をそのまま使うと札を取り損ねる。
-    // 矛盾検知だけは、2つの進捗を1つの札でまたぐので素のまま使う
+    // 例外は RAW_PROGRESS_OK（理由つき）だけ
     const offenders = HOLDS_TURN.map(([file]) => file)
-      .filter((file) => file !== "checkContradictions.ts")
+      .filter((file) => !RAW_PROGRESS_OK.has(file))
       .filter((file) => read(file).includes("withCancellableProgress("));
 
     expect(offenders).toEqual([]);
@@ -92,5 +120,21 @@ describe("実行の札の配り先", () => {
 
   test.each(NO_TURN)("%s は札を取らない（合間に滑り込める）", (file) => {
     expect(read(file)).not.toMatch(/from "\.\/aiTurn"/);
+  });
+
+  /*
+    網。一覧に載っていないファイルは、上のどの検査にも掛からず素通りする
+    （2026-10-25 に5ファイルが漏れていた）。札を取る機能を足したら、
+    ここが落ちて一覧へ載せることを求める。
+  */
+  test("src/features で ./aiTurn を引くファイルは、どれも一覧に載っている", () => {
+    const listed = new Set([...HOLDS_TURN.map(([file]) => file), ...NO_TURN]);
+    const unlisted = fs
+      .readdirSync(FEATURES)
+      .filter((file) => file.endsWith(".ts") && file !== "aiTurn.ts")
+      .filter((file) => /from "\.\/aiTurn"/.test(read(file)))
+      .filter((file) => !listed.has(file));
+
+    expect(unlisted).toEqual([]);
   });
 });

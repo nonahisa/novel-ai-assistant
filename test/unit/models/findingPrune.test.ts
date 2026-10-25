@@ -140,6 +140,35 @@ describe("期限切れ指摘消去", () => {
     expect(await new FindingStore(work).load()).toHaveLength(1);
   });
 
+  /**
+   * 提案パネルの「当てたもの（直近◯日）」は**判断した時刻**を起点に並べる。
+   * 検知の時刻だけで消すと、検知は古いが昨日当てた指摘が、欄に出ているのに
+   * ［戻す］ごと消える（6.11 の残る穴だった）。
+   */
+  test("検知は5日前でも、当てたのが1日前なら消さない", async () => {
+    await seed([
+      finding({ id: "f1", time: daysAgo(5) }),
+      { findingId: "f1", time: daysAgo(1), status: "accepted", note: "" },
+    ]);
+
+    const store = new FindingStore(work);
+    expect(await store.countExpired(3, NOW)).toBe(0);
+    expect(await store.prune(3, NOW)).toBe(0);
+    expect(rawLines()).toHaveLength(2);
+  });
+
+  test("検知も判断も期限を過ぎていれば、両方消す", async () => {
+    await seed([
+      finding({ id: "f1", time: daysAgo(5) }),
+      { findingId: "f1", time: daysAgo(4), status: "accepted", note: "" },
+    ]);
+
+    const store = new FindingStore(work);
+    expect(await store.countExpired(3, NOW)).toBe(1);
+    expect(await store.prune(3, NOW)).toBe(1);
+    expect(rawLines()).toEqual([]);
+  });
+
   test("無期限（0）のときは、何も消さない", async () => {
     await seed([finding({ id: "old", time: daysAgo(90) })]);
 

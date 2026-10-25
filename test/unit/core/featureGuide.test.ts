@@ -26,6 +26,12 @@ const bundles = buildGuideBundles();
 /** 束をすべてつないだもの。「どれかの束に入っているか」を見るのに使う */
 const bundleText = bundles.map((bundle) => bundle.text).join("\n");
 const index = buildFeatureIndex();
+/**
+ * 目次の字数の上限。上げた経緯は「相談へ渡す目次」の最初の検査の注記にある。
+ * **1つにしておく**——作品の質問へ渡すものは目次そのものなので、同じ上限で見る。
+ * 2か所に数字を書いていたら、目次だけ 2,700 へ上げて片方が 2,600 のまま残った。
+ */
+const INDEX_CHAR_LIMIT = 2700;
 
 function allActions() {
   return ACTION_TREE.flatMap((group) =>
@@ -310,7 +316,8 @@ describe("使い方の説明（目次と束）", () => {
 });
 
 describe("相談へ渡す目次", () => {
-  test("目次は1,800字未満", () => {
+  // 名前に数字を書かない（上げるたびに名前だけ古くなる。1,800 のまま 2,700 まで上がっていた）
+  test("目次は上限（INDEX_CHAR_LIMIT）の字数未満", () => {
     /*
       毎回送るのはこれと【この拡張機能の考え方】だけなので、ここが伸びると
       節約の意味が薄れる。**超えたら、まず説明が混ざっていないかを疑うこと。**
@@ -364,7 +371,7 @@ describe("相談へ渡す目次", () => {
       2,600→2,700：写真から原稿を起こす（設計書6.117）で操作が1つ増え、
       2,600 を数字ぶん越えた（**名前だけ**。説明は混ざっていない）。
     */
-    expect(index.length).toBeLessThan(2700);
+    expect(index.length).toBeLessThan(INDEX_CHAR_LIMIT);
   });
 
   test("原稿を勝手に書き換えない、という断りは必ず入る", () => {
@@ -526,7 +533,7 @@ describe("相談1回ぶんの組み立て", () => {
       const built = buildFeatureGuideForQuestion({ question });
       expect(built.reason, question).toBe("none");
       // 上限は目次と同じ（渡しているものが目次そのものなので、揃えておく）
-      expect(built.text.length, question).toBeLessThan(2600);
+      expect(built.text.length, question).toBeLessThan(INDEX_CHAR_LIMIT);
     }
   });
 
