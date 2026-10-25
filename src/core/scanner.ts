@@ -9,6 +9,11 @@ import {
 import { addCounts, emptyCounts } from "./charCount";
 import { countEpisodeChars, episodeBodyForCount } from "./episodeCharCount";
 import { parseEpisodeFileName } from "./episodeParser";
+import {
+  inferChapterHint,
+  toChapterHintNote,
+  type ChapterHintResult,
+} from "./episodeChapterHint";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { isWorkInfoFile } from "./workInfoFile";
@@ -250,6 +255,8 @@ export async function scanWork(work: WorkEntry): Promise<{
     let collected: CollectedEpisode[] | null = null;
     /** 残っているシーンメモの印（設計書6.40.5）。無ければ空文字 */
     let memoBadge = "";
+    /** 補った話数（設計書6.2）。規則で読めた話・読めないファイルでは null */
+    let chapterHint: ChapterHintResult | null = null;
     let meta = {
       hasMetadata: false,
       title: null as string | null,
@@ -297,6 +304,17 @@ export async function scanWork(work: WorkEntry): Promise<{
       // 進捗に足してしまう。実データの73万字の作品で1万字あった
       collected = parseCollectedFile(text);
 
+      // **ファイル名の規則で読めなかった話だけ**、ほかの要素から話数を補う
+      // （設計書6.2。`episodeChapterHint.ts`）。規則で読めた話・合本には
+      // 触らない——既存の話数を1つも動かさないため
+      if (parsed.kind === "不明" && !collected) {
+        chapterHint = inferChapterHint({
+          fileName,
+          metaTitle: parsedMeta.title,
+          body: parsedMeta.body,
+        });
+      }
+
       hasConflictMarkers = containsConflictMarkers(text);
       parseMs += performance.now() - parseStartedAt;
 
@@ -329,6 +347,10 @@ export async function scanWork(work: WorkEntry): Promise<{
       .map((episode) => episode.chapter)
       .filter((chapter): chapter is number => chapter !== null);
 
+    // 補えた話は本編として並べる。「不明」のままだと話数があっても一覧の
+    // 末尾へ回され（`compareEpisodes`）、「？」の印も消えない
+    const inferred = chapterHint?.status === "inferred" ? chapterHint : null;
+
     episodes.push({
       filePath,
       fileName,
@@ -336,14 +358,17 @@ export async function scanWork(work: WorkEntry): Promise<{
       chapterStart:
         collectedChapters.length > 0
           ? Math.min(...collectedChapters)
-          : parsed.chapterStart,
+          : (inferred?.chapter ?? parsed.chapterStart),
       chapterEnd:
         collectedChapters.length > 0
           ? Math.max(...collectedChapters)
-          : parsed.chapterEnd,
-      // ファイル名にサブタイトルが無ければメタデータのタイトルを使う
-      subtitle: parsed.subtitle ?? meta.title,
-      kind: parsed.kind,
+          : (inferred?.chapter ?? parsed.chapterEnd),
+      // ファイル名にサブタイトルが無ければメタデータのタイトルを使う。
+      // 補った話は、ファイル名から話数の印を落とした残りを題にする
+      // （読めなかった名前は、これまで一覧にファイル名ごと出ていた）
+      subtitle: parsed.subtitle ?? meta.title ?? inferred?.subtitle ?? null,
+      kind: inferred ? "本編" : parsed.kind,
+      ...(chapterHint ? { chapterHint: toChapterHintNote(chapterHint) } : {}),
       isInitialName: parsed.isInitialName,
       date: parsed.date,
       dateSeq: parsed.dateSeq,

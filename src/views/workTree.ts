@@ -13,6 +13,7 @@ import {
   formatChapterLabel,
   isCollectedFile,
 } from "../core/episodeLabel";
+import { describeChapterHint } from "../core/episodeChapterHint";
 import { workTypeContextValue } from "../core/workTypeVisibility";
 import { workRowLabel } from "../core/workRowLabel";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -1048,6 +1049,10 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       item.description = "⚠ 未解決の競合（文字数は未集計）";
     } else if (ep.isInitialName && !ep.metaTitle) {
       item.iconPath = new vscode.ThemeIcon("circle-outline");
+    } else if (ep.chapterHint?.status === "inferred") {
+      // **補った話数は印を変える**（設計書6.2）。規則で読んだ話と同じ印だと、
+      // ホバーを開くまで補ったことに気づけない
+      item.iconPath = new vscode.ThemeIcon("info");
     } else if (ep.kind === "不明" && node.format !== "memo") {
       // **創作メモ集では「？」を出さない**（設計書6.70）。番号を持たない
       // ファイルが普通なので、印を付けると全部のメモが不備に見える
@@ -1097,6 +1102,10 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           : node.format === "memo"
             ? null
             : "- 話数: 判定不能",
+        // **補った話数は、規則で読んだものと見分けられるように出す**
+        // （設計書6.2）。どこから読んだかが分かれば、違っていたときに
+        // ファイル名を直せばよいと分かる
+        describeChapterHint(ep.chapterHint),
         isCollectedFile(ep.collectedCount)
           ? `- 全話が1ファイルに入っています（${ep.collectedCount}話ぶん）。話ごとに分けて扱います`
           : null,

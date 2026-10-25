@@ -896,3 +896,81 @@ describe("数えなかったファイルの知らせ", () => {
     ).toBe("");
   });
 });
+
+/*
+  **話数の補い**（作者の裁定、2026-10-25。設計書6.2）。補う規則そのものは
+  `episodeChapterHint.test.ts` が見る。ここで見るのは、走査の結果へ届くこと
+  ——補った話が本編として並び、補った印が付き、規則で読めた話は1つも
+  変わらないこと。
+*/
+describe("話数の補い（走査）", () => {
+  beforeEach(() => {
+    workspace.getConfiguration = () => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    });
+  });
+
+  const bodies: Record<string, string> = {
+    "001.txt": "第9話\n灯が歩いた。",
+    "旅立ち.txt": "第三話　旅立ち\n\n　朝が来た。",
+    "続き.txt": "　灯が歩いた。",
+    "再会（第二話）.txt": "第五話　再会\n本文",
+  };
+
+  async function scanFixture() {
+    workspace.fs = {
+      readFile: vi.fn(async (uri: { fsPath: string }) => {
+        if (uri.fsPath.endsWith(".json")) {
+          throw new FileSystemError("設定なし", "FileNotFound");
+        }
+        const name = Object.keys(bodies).find((key) => uri.fsPath.endsWith(key));
+        return new TextEncoder().encode(name ? bodies[name] : "");
+      }),
+      stat: vi.fn(async () => {
+        throw new FileSystemError("本文なし", "FileNotFound");
+      }),
+      readDirectory: vi.fn(async () =>
+        Object.keys(bodies).map((name) => [name, FileType.File])
+      ),
+    };
+    return scanWork(work);
+  }
+
+  test("本文の最初の見出しから補った話は、本編として話数順に並ぶ", async () => {
+    const result = await scanFixture();
+    const byName = new Map(result.episodes.map((episode) => [episode.fileName, episode]));
+
+    const inferred = byName.get("旅立ち.txt");
+    expect(inferred?.chapterStart).toBe(3);
+    expect(inferred?.kind).toBe("本編");
+    expect(inferred?.chapterHint?.status).toBe("inferred");
+    // 題はファイル名から（これまで一覧にはファイル名ごと出ていた）
+    expect(inferred?.subtitle).toBe("旅立ち");
+    // 001（第1話）の後ろ、話数の読めない話の前
+    expect(result.episodes.map((episode) => episode.fileName).slice(0, 2)).toEqual([
+      "001.txt",
+      "旅立ち.txt",
+    ]);
+  });
+
+  test("規則で読めた話は、本文に別の話数の見出しがあっても変わらない", async () => {
+    const result = await scanFixture();
+    const numbered = result.episodes.find((episode) => episode.fileName === "001.txt");
+    expect(numbered?.chapterStart).toBe(1);
+    expect(numbered?.chapterHint).toBeUndefined();
+  });
+
+  test("要素の無い話・食い違う話は「不明」のまま", async () => {
+    const result = await scanFixture();
+    const byName = new Map(result.episodes.map((episode) => [episode.fileName, episode]));
+
+    expect(byName.get("続き.txt")?.kind).toBe("不明");
+    expect(byName.get("続き.txt")?.chapterStart).toBeNull();
+    expect(byName.get("続き.txt")?.chapterHint).toBeUndefined();
+
+    const conflicted = byName.get("再会（第二話）.txt");
+    expect(conflicted?.kind).toBe("不明");
+    expect(conflicted?.chapterStart).toBeNull();
+    expect(conflicted?.chapterHint?.status).toBe("conflict");
+  });
+});

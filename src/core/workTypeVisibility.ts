@@ -323,7 +323,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.manageKeepWords": "allTypes",
   "novelai.checkNotation": "allTypes",
   "novelai.checkProofread": "allTypes",
-  // 古い指摘の片づけ（設計書6.96.4）。どの検知の指摘も同じ置き場に
+  // 期限切れ指摘消去（設計書6.96.4）。どの検知の指摘も同じ置き場に
   // 溜まるので、物語向けの検知しか使わないタイプでも要る
   "novelai.pruneFindings": "allTypes",
   // 出先の原稿箱の取り込み（設計書6.115）。校正の指摘とメモはどのタイプにもある

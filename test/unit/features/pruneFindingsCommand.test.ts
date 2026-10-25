@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 /**
- * 「古い指摘を片づける」の操作そのもの（設計書6.96.4）。
+ * 「期限切れ指摘消去」の操作そのもの（設計書6.96.4）。
  *
  * **消す前に、何件消えるかを見せて確認を取る。** `.aiwriter/` は同期される
  * ので、消したことも同期される——消してから件数を告げても取り返せない。
@@ -127,7 +127,7 @@ beforeEach(() => {
   shownPicks.length = 0;
 });
 
-describe("古い指摘を片づける（操作）", () => {
+describe("期限切れ指摘消去（操作）", () => {
   test("消す前に件数を見せて、確認を取る", async () => {
     await new FindingStore(work).record([
       finding("old1", daysAgo(9)),
@@ -141,6 +141,27 @@ describe("古い指摘を片づける（操作）", () => {
     expect(asked).toHaveLength(1);
     expect(asked[0]).toContain("2件");
     expect(await new FindingStore(work).load()).toHaveLength(1);
+  });
+
+  /*
+    **確認・知らせの呼び名をメニューの名前に揃える**（作者の裁定、2026-10-25
+    「文言をメニューの名前に揃える」）。押した項目と窓の名前が食い違うと、
+    何の確認なのかを読み直すことになる。
+  */
+  test("確認・知らせ・作品を選ぶ窓が「期限切れ指摘消去」の名前で出る", async () => {
+    await new FindingStore(work).record([finding("old1", daysAgo(9))]);
+    answer = "消す";
+
+    await pruneFindings(work);
+    await chooseFindingsTarget([work]);
+
+    expect(asked[0]).toContain("期限切れ指摘消去");
+    expect(told.join("")).toContain("期限切れ指摘消去");
+    expect(asked.concat(told).join("")).not.toContain("片づけ");
+    const pick = (await import("vscode")).window.showQuickPick as unknown as {
+      mock: { calls: [unknown, { title?: string }][] };
+    };
+    expect(pick.mock.calls.at(-1)?.[1]?.title).toContain("期限切れ指摘消去");
   });
 
   test("断られたら、1件も消さない", async () => {
@@ -188,7 +209,7 @@ const work3: WorkEntry = {
   registeredAt: "2026-09-19T00:00:00.000Z",
 };
 
-describe("古い指摘を片づける：作品を選ぶ窓", () => {
+describe("期限切れ指摘消去：作品を選ぶ窓", () => {
   test("先頭に「すべての作品」があり、合計の件数が出る", async () => {
     await new FindingStore(work).record([finding("a", daysAgo(9)), finding("b", daysAgo(8))]);
     await new FindingStore(work2).record([finding("c", daysAgo(9))]);
@@ -213,9 +234,9 @@ describe("古い指摘を片づける：作品を選ぶ窓", () => {
 
     const perWork = shownPicks[0].slice(1, 3);
     expect(perWork[0].label).toBe("教科書チート");
-    expect(perWork[0].description).toBe("古い指摘 3件");
+    expect(perWork[0].description).toBe("期限切れの指摘 3件");
     expect(perWork[1].label).toBe("いじめられっ子");
-    expect(perWork[1].description).toBe("古い指摘 1件");
+    expect(perWork[1].description).toBe("期限切れの指摘 1件");
   });
 
   test("取りやめるが最後にある（出口の無い窓にしない）", async () => {
@@ -238,7 +259,7 @@ describe("古い指摘を片づける：作品を選ぶ窓", () => {
   });
 });
 
-describe("古い指摘を片づける：すべての作品をまとめて", () => {
+describe("期限切れ指摘消去：すべての作品をまとめて", () => {
   test("確認は1回だけ。合計と内訳を1枚で見せる", async () => {
     await new FindingStore(work).record([finding("a", daysAgo(9)), finding("b", daysAgo(8))]);
     await new FindingStore(work2).record([finding("c", daysAgo(9))]);
@@ -254,7 +275,7 @@ describe("古い指摘を片づける：すべての作品をまとめて", () =
     expect(askedDetail[0]).toContain("教科書チート　1件");
   });
 
-  test("消すと、どの作品からも古い指摘だけが消える（新しいものは残る）", async () => {
+  test("消すと、どの作品からも期限切れの指摘だけが消える（新しいものは残る）", async () => {
     await new FindingStore(work).record([finding("old", daysAgo(9)), finding("new", daysAgo(1))]);
     await new FindingStore(work2).record([finding("old2", daysAgo(9))]);
     answer = "消す";
@@ -277,7 +298,7 @@ describe("古い指摘を片づける：すべての作品をまとめて", () =
     expect(await new FindingStore(work2).load()).toHaveLength(1);
   });
 
-  test("古い指摘の無い作品は、内訳にも数にも入れない", async () => {
+  test("期限切れの指摘の無い作品は、内訳にも数にも入れない", async () => {
     await new FindingStore(work).record([finding("old", daysAgo(9))]);
     await new FindingStore(work3).record([finding("new", daysAgo(1))]);
     answer = "消す";

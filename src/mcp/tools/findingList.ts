@@ -29,7 +29,7 @@ import { McpToolError, readBody } from "./shared";
  *
  * **読むだけ。** 採る・退ける・片づける道は作らない（作者が VS Code で決める）。
  *
- * **数えられるのは置き場に残っている分だけ。** 「古い指摘を片づける」を
+ * **数えられるのは置き場に残っている分だけ。** 「期限切れ指摘消去」を
  * 押すと、期限切れの指摘は判断の行ごと消える（6.96.7）。長い期間の率は
  * `.aiwriter/history/ai-verdicts.jsonl`（6.49.7）のほうが正しい。
  */
@@ -158,7 +158,7 @@ export function findingList(input: FindingListInput): FindingListResult {
       "読むだけです。採用・却下・片づけはしていません。状態の決め方は提案パネルと同じ関数を通しています。" +
       `期限切れは ${retentionDays === 0 ? "無期限（隠さない）" : `${retentionDays}日`} で判定しました` +
       "（VS Code の設定 novelai.findings.retentionDays と違えば retentionDays に同じ値を渡すと画面と揃います）。" +
-      "「古い指摘を片づける」で消えた分は数えていません。",
+      "「期限切れ指摘消去」で消えた分は数えていません。",
   };
 }
 

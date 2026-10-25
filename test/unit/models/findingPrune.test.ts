@@ -5,7 +5,7 @@ import type { Finding, FindingDecision } from "../../../src/models/finding";
 import type { WorkEntry } from "../../../src/models/types";
 
 /**
- * 「古い指摘を片づける」（設計書6.96.4）。
+ * 「期限切れ指摘消去」（設計書6.96.4）。
  *
  * **期限切れは隠れているだけで、ファイルには在る。** 消えるのは作者が
  * 押したときだけで、機械は勝手に消さない——時計のずれや、ノートPCを
@@ -86,7 +86,7 @@ beforeEach(() => {
   };
 });
 
-describe("古い指摘を片づける", () => {
+describe("期限切れ指摘消去", () => {
   test("期限を過ぎた指摘だけを消し、新しいものは残す", async () => {
     await seed([
       finding({ id: "old", time: daysAgo(5) }),

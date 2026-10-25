@@ -6,7 +6,11 @@ import { cancelItem } from "../views/dialogs";
 import { FindingStore, findingsRetentionDays } from "./findingStore";
 
 /**
- * 「古い指摘を片づける」（設計書6.96.4）。
+ * 「期限切れ指摘消去」（設計書6.96.4）。
+ *
+ * **呼び名はメニューの名前に揃える**（作者の裁定、2026-10-25「文言をメニューの
+ * 名前に揃える」）。以前は確認・知らせの文言だけが「古い指摘を片づける」と
+ * 呼んでいて、押した項目と出てくる窓の名前が食い違っていた。
  *
  * ## 期限切れは、隠れているだけで在る
  *
@@ -36,7 +40,7 @@ export async function pruneFindings(work: WorkEntry): Promise<void> {
 
   if (!(days > 0)) {
     void vscode.window.showInformationMessage(
-      "保存日数が無期限（0）になっているため、古い指摘はありません。" +
+      "保存日数が無期限（0）になっているため、期限切れの指摘はありません。" +
         "設定の novelai.findings.retentionDays で日数を決めてください。"
     );
     return;
@@ -66,7 +70,7 @@ export async function pruneFindings(work: WorkEntry): Promise<void> {
     しか言わないと、設定を変えた作者が別の日数で消されたと感じる。
   */
   const answer = await vscode.window.showWarningMessage(
-    `「${work.title}」の古い指摘 ${expired}件を消します。` +
+    `期限切れ指摘消去：「${work.title}」の期限切れの指摘 ${expired}件を消します。` +
       `${days}日より前に見つかったもので、いまは一覧に並んでいません。` +
       "消すと元に戻せません。",
     { modal: true },
@@ -80,29 +84,29 @@ export async function pruneFindings(work: WorkEntry): Promise<void> {
   } catch (error) {
     noteFailure(work, error);
     void vscode.window.showErrorMessage(
-      "古い指摘を片づけられませんでした。ログに理由が残っています。"
+      "期限切れ指摘消去を終えられませんでした。ログに理由が残っています。"
     );
     return;
   }
 
   useLogFile(work.folderPath);
-  logLine(`古い指摘を片づけました（${removed}件、${days}日より前）。`);
+  logLine(`期限切れ指摘消去：${removed}件を消しました（${days}日より前）。`);
   void vscode.window.showInformationMessage(
-    `古い指摘 ${removed}件を片づけました。`
+    `期限切れ指摘消去：期限切れの指摘 ${removed}件を消しました。`
   );
 }
 
 /**
- * どの作品を片づけるかを訊く（作者の依頼、2026-09-23
+ * 期限切れ指摘消去で、どの作品から消すかを訊く（作者の依頼、2026-09-23
  * 「古い指摘を片づけるですが、全作品を選択できるようにしてください」）。
  *
  * **先頭に「すべての作品」を置く。** 作品ごとに1つずつ押していくと、
  * 16作品なら16回同じ確認を読むことになる。
  *
- * **作品ごとに古い指摘の件数を添え、多い順に並べる。** 件数の分からない
+ * **作品ごとに期限切れの指摘の件数を添え、多い順に並べる。** 件数の分からない
  * 窓では、どれを選べばよいか判断できない（`resolveWork` の `annotate` と
  * 同じ考え方。実機で発覚、2026-08-14）。数え損ねた作品も並べる——
- * 選べないと、その作品だけ片づける道が無くなる。
+ * 選べないと、その作品だけ消す道が無くなる。
  *
  * 戻り値：作品／`"all"`／取りやめ（`undefined`）
  */
@@ -129,7 +133,7 @@ export async function chooseFindingsTarget(
     .map(({ work, count }) => ({
       label: abbreviateTitle(work.title),
       description:
-        count === undefined ? "件数を読めませんでした" : `古い指摘 ${count}件`,
+        count === undefined ? "件数を読めませんでした" : `期限切れの指摘 ${count}件`,
       detail: isAbbreviated(work.title) ? work.title : undefined,
       target: work as WorkEntry | "all",
     }));
@@ -138,14 +142,14 @@ export async function chooseFindingsTarget(
     [
       {
         label: "$(layers) すべての作品",
-        description: `古い指摘 計${total}件（${works.length}作品）`,
+        description: `期限切れの指摘 計${total}件（${works.length}作品）`,
         target: "all" as WorkEntry | "all",
       },
       ...perWork,
       cancelItem(),
     ],
     {
-      title: "古い指摘を片づける作品",
+      title: "期限切れ指摘消去：消す作品を選ぶ",
       placeHolder: `${days > 0 ? `${days}日` : "保存日数"}を過ぎた指摘を消します`,
     }
   );
@@ -153,7 +157,7 @@ export async function chooseFindingsTarget(
 }
 
 /**
- * すべての作品の古い指摘を、**1回の確認で**まとめて片づける
+ * すべての作品の期限切れの指摘を、**1回の確認で**まとめて消す
  * （作者の依頼、2026-09-23）。
  *
  * ## 確認は1回、内訳は全部見せる
@@ -165,7 +169,7 @@ export async function chooseFindingsTarget(
  *
  * ## 1作品の失敗で全体を止めない
  *
- * 置き場を読めない作品があっても、ほかの作品は片づける。失敗した作品は
+ * 置き場を読めない作品があっても、ほかの作品からは消す。失敗した作品は
  * 最後にまとめて名前を出す（実装スタイル「チャンク単位の失敗で全体を
  * 止めない。失敗を記録して続行し、最後にまとめて報告する」）。
  */
@@ -175,7 +179,7 @@ export async function pruneFindingsAcrossWorks(
   const days = findingsRetentionDays();
   if (!(days > 0)) {
     void vscode.window.showInformationMessage(
-      "保存日数が無期限（0）になっているため、古い指摘はありません。" +
+      "保存日数が無期限（0）になっているため、期限切れの指摘はありません。" +
         "設定の novelai.findings.retentionDays で日数を決めてください。"
     );
     return;
@@ -206,7 +210,7 @@ export async function pruneFindingsAcrossWorks(
     .map(({ work, count }) => `・${abbreviateTitle(work.title)}　${count}件`)
     .join("\n");
   const answer = await vscode.window.showWarningMessage(
-    `古い指摘 計${total}件を消します（${targets.length}作品）。` +
+    `期限切れ指摘消去：期限切れの指摘 計${total}件を消します（${targets.length}作品）。` +
       `${days}日より前に見つかったもので、いまは一覧に並んでいません。` +
       "消すと元に戻せません。",
     { modal: true, detail: breakdown },
@@ -221,7 +225,7 @@ export async function pruneFindingsAcrossWorks(
       const count = await new FindingStore(work).prune(days);
       removed += count;
       useLogFile(work.folderPath);
-      logLine(`古い指摘を片づけました（${count}件、${days}日より前。すべての作品から）。`);
+      logLine(`期限切れ指摘消去：${count}件を消しました（${days}日より前。すべての作品から）。`);
     } catch (error) {
       noteFailure(work, error);
       failed.push(work);
@@ -229,8 +233,8 @@ export async function pruneFindingsAcrossWorks(
   }
 
   const message =
-    `古い指摘 計${removed}件を片づけました（${targets.length - failed.length}作品）。` +
-    failureNote("片づけられなかった作品", failed) +
+    `期限切れ指摘消去：期限切れの指摘 計${removed}件を消しました（${targets.length - failed.length}作品）。` +
+    failureNote("消せなかった作品", failed) +
     failureNote("件数を読めなかった作品", unreadable);
   if (failed.length > 0) {
     void vscode.window.showWarningMessage(message);
@@ -249,7 +253,7 @@ function failureNote(label: string, works: readonly WorkEntry[]): string {
 function noteFailure(work: WorkEntry, error: unknown): void {
   try {
     useLogFile(work.folderPath);
-    logFailure("古い指摘の片づけ", {
+    logFailure("期限切れ指摘消去", {
       作品: work.title,
       詳細: error instanceof Error ? error.message : String(error),
     });

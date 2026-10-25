@@ -121,7 +121,7 @@ import {
 } from "./features/primeFindings";
 // 外部AIが置いた章立て・伏線・予定の段の案（作者の裁定 2026-10-16 の5）
 import { countLedgerProposals, primeLedgerProposals } from "./features/ledgerProposals";
-// 古い指摘を片づける（設計書6.96.4）。**findings.jsonl を書き直す唯一の道**
+// 期限切れ指摘消去（設計書6.96.4）。**findings.jsonl を書き直す唯一の道**
 import {
   chooseFindingsTarget,
   pruneFindings,
@@ -5273,7 +5273,7 @@ export async function activate(
       }
     ),
     /*
-      古い指摘を片づける（設計書6.96.4）。
+      期限切れ指摘消去（設計書6.96.4）。
 
       **期限切れは隠れているだけで、ファイルには在る。** 消えるのはここを
       押したときだけで、機械は勝手に消さない——時計のずれや、ノートPCを

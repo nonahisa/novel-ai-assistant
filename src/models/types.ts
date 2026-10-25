@@ -93,6 +93,24 @@ export interface EpisodeFile {
    * 組み立てた `EpisodeFile`（試験の材料）が壊れないようにするためである。
    */
   hasMixedEol?: boolean;
+  /**
+   * ファイル名の規則で話数が読めなかったときに、ほかの要素から話数を
+   * 補ったか（`inferred`）、要素が食い違って補わなかったか（`conflict`）
+   * （設計書6.2。`core/episodeChapterHint.ts`）。**規則で読めた話には付かない。**
+   *
+   * 補った話数は規則で読んだものと見分けられるようにしておく——作者が
+   * 「なぜこの話数なのか」を一覧のホバーで確かめられるようにするため。
+   * `memoBadge` と同じく省略できる形にしてある。
+   */
+  chapterHint?: ChapterHintNote;
+}
+
+/** 補った話数の出どころ（`EpisodeFile.chapterHint`） */
+export interface ChapterHintNote {
+  /** `inferred`＝補った／`conflict`＝要素が食い違ったので補わなかった */
+  status: "inferred" | "conflict";
+  /** 作者に見せる説明（「ファイル名の「第三話」」など） */
+  evidence: string;
 }
 
 export type EpisodeKind = "本編" | "プロローグ" | "エピローグ" | "幕間" | "不明";

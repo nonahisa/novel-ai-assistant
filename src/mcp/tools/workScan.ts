@@ -1,6 +1,11 @@
 import * as nodePath from "node:path";
 import { parseCollectedFile } from "../../core/collectedFile";
 import { parseEpisodeFileName } from "../../core/episodeParser";
+import {
+  inferChapterHint,
+  toChapterHintNote,
+} from "../../core/episodeChapterHint";
+import type { ChapterHintNote } from "../../models/types";
 import { parseEpisodeMetadata } from "../../core/metadataParser";
 import { isWorkInfoFile } from "../../core/workInfoFile";
 import {
@@ -38,6 +43,12 @@ export interface ScannedEpisode {
   chars: number;
   /** 合本の中の1話か */
   insideCollected: boolean;
+  /**
+   * ファイル名の規則で読めず、ほかの要素から話数を補った（`inferred`）か、
+   * 要素が食い違って補わなかった（`conflict`）か（設計書6.2）。
+   * **規則で読めた話には付かない**
+   */
+  chapterHint?: ChapterHintNote;
 }
 
 export interface WorkScanResult {
@@ -126,15 +137,23 @@ export function workScan(input: { folder: string }): WorkScanResult {
     const parsed = parseEpisodeFileName(fileName);
     const meta = parseEpisodeMetadata(text);
     if (!meta.body.trim()) continue;
+    // **製品の走査（`scanner.ts`）と同じ補いを通す**（設計書6.2）。
+    // 揃えないと、一覧には第3話と出る話が外からは話数 null に見える
+    const hint =
+      parsed.kind === "不明"
+        ? inferChapterHint({ fileName, metaTitle: meta.title, body: meta.body })
+        : null;
+    const inferred = hint?.status === "inferred" ? hint : null;
     episodes.push({
       filePath: relative,
-      chapter: parsed.chapterStart,
+      chapter: inferred?.chapter ?? parsed.chapterStart,
       // **ファイル名に題が無ければ頭書きの題を使う**（製品の `scanner.ts` が
       // `parsed.subtitle ?? meta.title` でそうしている）。揃えないと、
       // `episode_0001.txt` のような名前の作品は全話の題が null になる
-      title: parsed.subtitle ?? meta.title,
+      title: parsed.subtitle ?? meta.title ?? inferred?.subtitle ?? null,
       chars: meta.body.length,
       insideCollected: false,
+      ...(hint ? { chapterHint: toChapterHintNote(hint) } : {}),
     });
   }
 
