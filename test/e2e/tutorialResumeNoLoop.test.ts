@@ -70,7 +70,7 @@ test("はじめの案内で「執筆を再開」を押すと、一覧を出し�
       await pickQuickPickRow(page, "続きを書く");
 
       await waitForQuickPick(page, STEP_TITLE, 20_000);
-      await pickQuickPickRow(page, "執筆を再開");
+      await pickQuickPickRow(page, "再開用資料");
 
       // 1. 紙ができる
       await waitUntil(async () => (await resumePapers(workFolder)).length === 1, "執筆再開の紙ができる", 30_000);

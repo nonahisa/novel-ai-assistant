@@ -90,20 +90,20 @@ test("段の行の右のボタンで「飛ばした」が付いて一覧に戻�
 
       const steps = await stepRowLabels(page);
       expect(steps.length, "段の行（右に飛ばすボタンのある行）がありません").toBeGreaterThan(0);
-      expect(steps.some((label) => label.includes("執筆を再開"))).toBe(true);
+      expect(steps.some((label) => label.includes("再開用資料"))).toBe(true);
       expect(await placeholder(page)).not.toBe(ALL_MARKED);
 
       // 1. 「執筆を再開」を飛ばす：操作は起きず（紙ができない）、同じ一覧に「飛ばした」が付く
-      await pressSkip(page, "執筆を再開");
+      await pressSkip(page, "再開用資料");
       await waitUntil(
-        async () => (await quickPickTitle(page)) === STEP_TITLE && (await descriptionOf(page, "執筆を再開")).includes("飛ばした"),
+        async () => (await quickPickTitle(page)) === STEP_TITLE && (await descriptionOf(page, "再開用資料")).includes("飛ばした"),
         "一覧に戻り、「執筆を再開」に「飛ばした」が付く",
         15_000
       );
       await holdsFor(async () => (await resumePapers(workFolder)).length === 0, "飛ばした段の操作が起きていない（執筆再開の紙が無い）", 3_000);
 
       // 2. 残りの段も全部飛ばすと、説明文が「全部の段に印が付きました…」に変わる
-      for (const label of steps.filter((name) => !name.includes("執筆を再開"))) {
+      for (const label of steps.filter((name) => !name.includes("再開用資料"))) {
         await pressSkip(page, label);
         await waitUntil(async () => (await descriptionOf(page, label)).includes("飛ばした"), `「${label}」に「飛ばした」が付く`, 15_000);
       }

@@ -854,7 +854,7 @@ function keepWritingAdvice(style: WriterStyle): TutorialAdvice {
   const steps: TutorialStep[] = [
     {
       command: "novelai.resumeWriting",
-      label: "執筆を再開（前回どこまで書いたか）",
+      label: "再開用資料（前回どこまで書いたか）",
       why: "前の話の終わりと、次に書くことの候補をまとめて出します",
     },
   ];
@@ -1063,7 +1063,7 @@ function unstickAdvice(style: WriterStyle): TutorialAdvice {
   const steps: TutorialStep[] = [
     {
       command: "novelai.resumeWriting",
-      label: "執筆を再開（前回どこまで書いたか）",
+      label: "再開用資料（前回どこまで書いたか）",
       why:
         "前の話の終わり・次に書くことの候補・張ったままの伏線が1枚に出ます。" +
         "思い出す手間が、ここで済みます",
