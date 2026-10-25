@@ -236,6 +236,27 @@ describe("句をいまの本文から求める", () => {
     expect(phrase?.wordStart).toBe(text.indexOf("\n") + 1);
   });
 
+  test("直前の字が分からない（画面が所を読めなかった）ときは、行頭を優先しない", () => {
+    const text = "あの港へ。\n港へ向かう。";
+    expect(phraseForImeWord(text, entry({ before: undefined }))).toBeUndefined();
+    expect(phraseForImeWord("あの港へ。", entry({ before: undefined }))?.wordStart).toBe(2);
+  });
+
+  test("直前の字が分からないまま控え、読み戻せる", () => {
+    const { file } = recordImeWordEntries(
+      { version: 1, entries: [] },
+      {
+        episode: "01.txt",
+        captures: [{ word: "港", reading: "みなと", offset: 0 }],
+        committed: "港",
+        before: undefined,
+        now: "2026-10-25T01:00:00Z",
+      }
+    );
+    expect(file.entries[0].before).toBeUndefined();
+    expect(parseImeWordReadingFile(JSON.stringify(file))).toEqual(file);
+  });
+
   test("句は行の中だけ・30字以内・語より長い", () => {
     const long = "あ".repeat(40);
     const text = `${long}古い港へ${long}\n次の行`;

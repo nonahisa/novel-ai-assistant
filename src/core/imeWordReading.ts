@@ -287,8 +287,12 @@ export interface ImeWordReadingEntry {
   committed: string;
   /** 確定の中での語の始まり */
   offset: number;
-  /** 最後に打ったとき、変換を始めた所の直前の字（末尾 `IME_WORD_BEFORE_MAX` 字） */
-  before: string;
+  /**
+   * 最後に打ったとき、変換を始めた所の直前の字（末尾 `IME_WORD_BEFORE_MAX` 字）。
+   * 空の字は「行頭で打った」。**無い（undefined）は「画面が所を読めなかった」**で、
+   * 行頭とは別に扱う（混ぜると、別の行の行頭の所を打った所と取り違える）
+   */
+  before?: string;
   count: number;
   /** 最後に打った日時（ISO） */
   lastSeen: string;
@@ -324,7 +328,7 @@ export function parseImeWordReadingFile(text: string): ImeWordReadingFile {
       typeof item.reading !== "string" ||
       typeof item.committed !== "string" ||
       typeof item.offset !== "number" ||
-      typeof item.before !== "string" ||
+      (item.before !== undefined && typeof item.before !== "string") ||
       typeof item.count !== "number" ||
       typeof item.lastSeen !== "string"
     ) {
@@ -336,7 +340,7 @@ export function parseImeWordReadingFile(text: string): ImeWordReadingFile {
       reading: item.reading,
       committed: item.committed,
       offset: item.offset,
-      before: item.before,
+      ...(typeof item.before === "string" ? { before: item.before } : {}),
       count: item.count,
       lastSeen: item.lastSeen,
     });
@@ -356,18 +360,19 @@ export function recordImeWordEntries(
     episode: string;
     captures: readonly ImeWordCapture[];
     committed: string;
-    before: string;
+    /** 無ければ「画面が所を読めなかった」（空の字の「行頭」とは別） */
+    before: string | undefined;
     now: string;
   }
 ): { file: ImeWordReadingFile; added: Array<{ word: string; reading: string }> } {
   const entries = [...file.entries];
   const added: Array<{ word: string; reading: string }> = [];
-  const before = input.before.slice(-IME_WORD_BEFORE_MAX);
+  const before = input.before?.slice(-IME_WORD_BEFORE_MAX);
   for (const capture of input.captures) {
     const fresh = {
       committed: input.committed,
       offset: capture.offset,
-      before,
+      ...(before === undefined ? {} : { before }),
       lastSeen: input.now,
     };
     const at = entries.findIndex(
@@ -377,7 +382,9 @@ export function recordImeWordEntries(
         entry.reading === capture.reading
     );
     if (at >= 0) {
-      entries[at] = { ...entries[at], ...fresh, count: entries[at].count + 1 };
+      // 直前の字は最後に打ったときのものだけを持つ（前の打鍵の字を残すと、別の所を指す）
+      const { before: _stale, ...rest } = entries[at];
+      entries[at] = { ...rest, ...fresh, count: entries[at].count + 1 };
       continue;
     }
     entries.push({
@@ -469,7 +476,7 @@ export interface ImeWordPhrase {
  * 控えの1項目から、いまの本文の中の句を求める。
  *
  * 1. 本文の中の確定の字の所を探し、控えた直前の字で終わる所を優先する（直前の字が
- *    空なら行頭で打ったので、行頭の所だけを見る）
+ *    空なら行頭で打ったので、行頭の所だけを見る。直前の字が無ければ優先しない）
  * 2. 無ければ1か所だけの所。どちらも無ければ出さない（どこに当てるか決まらない）
  * 3. 句はその行の中で、語の前後を `PHRASE_CONTEXT` 字まで。**句の中で語が先に出ない
  *    ようにする**——辞書は句の中の最初の所に読みを当てる（`readingSpansFor`）
@@ -488,10 +495,14 @@ export function phraseForImeWord(
   for (let at = text.indexOf(committed); at >= 0; at = text.indexOf(committed, at + 1)) {
     places.push(at);
   }
+  const before = entry.before;
+  // 直前の字が無い（画面が所を読めなかった）なら、優先する所は無い
   const followsBefore = (at: number): boolean =>
-    entry.before === ""
-      ? at === 0 || text[at - 1] === "\n"
-      : text.slice(0, at).endsWith(entry.before);
+    before === undefined
+      ? false
+      : before === ""
+        ? at === 0 || text[at - 1] === "\n"
+        : text.slice(0, at).endsWith(before);
   const place = places.find(followsBefore) ?? (places.length === 1 ? places[0] : undefined);
   if (place === undefined) return undefined;
 

@@ -262,7 +262,8 @@ async function recordWords(
         episode,
         captures,
         committed: committed.trim(),
-        before: context.before ?? "",
+        // 無いまま渡す（空の字は「行頭で打った」の意味になる）
+        before: context.before,
         now: new Date().toISOString(),
       });
       return { file: next.file, result: next.added };
