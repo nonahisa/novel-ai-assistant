@@ -204,8 +204,29 @@ function resolveActor(
   // **対応表に無い人物は、本文の表記そのまま通す**（P-37「表に無い人物は本文の表記そのまま」。
   // 本体の判断、0.46.2）。弾くと、対応表に無い新顔の事実が必ず落ちる。
   // 弾くのは、id の形をしているのに対応表に無いもの——モデルが作った id だけ
-  if (/^char_\d+$/u.test(value)) return undefined;
+  if (/^char_\d+$/u.test(value)) return sameNumberId(value, input.knownCharacterIds);
   return value;
+}
+
+/**
+ * 頭の0の数だけ違う id を、台帳の id に寄せる（2026-10-25、作者の選択②）。
+ *
+ * P-37 の見本の id は3桁（`char_006`）だが、台帳は4桁（`char_0001`）で作られる。
+ * 旅の台で 26b は `char_0003` を `char_003` と返し、第4話の事実が全部
+ * 「作られた人物id」で落ちた。**数が同じ id がちょうど1つのときだけ**寄せる——
+ * 数が違うもの（`char_030`）・台帳に無い番号は、いままでどおり作られた id として弾く。
+ * 2つ以上に当たる（台帳に `char_03` と `char_003` が並ぶ）ときも決めずに弾く。
+ */
+function sameNumberId(
+  value: string,
+  knownIds: ReadonlySet<string>
+): string | undefined {
+  const number = Number(value.slice("char_".length));
+  const matches = [...knownIds].filter((id) => {
+    const digits = /^char_(\d+)$/u.exec(id)?.[1];
+    return digits !== undefined && Number(digits) === number;
+  });
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 /**
