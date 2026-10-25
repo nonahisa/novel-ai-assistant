@@ -199,6 +199,37 @@ export function readHeadMarker(paragraph: string): HeadMarker | null {
   return null;
 }
 
+/**
+ * 段落の頭で時計が読んだ語と、その読み方を、判定（P-12b）へ渡す1句にする
+ * （「「その頃」（前の場面と同じ時と読みました）」）。印が無ければ空文字。
+ *
+ * 移動の照合の判定（travel 1.0、2026-10-25）は、「その頃」を同じ時と読まずに
+ * 「8行目で港町にいるのは移動として成立する」と取り下げた（26b）。時計がその語を
+ * どう読んだかを、本文の語のまま見せる。**読みの語は時計の決まり（下の正規表現）と
+ * 同じものを使う**——別に書くと、時計と判定の説明がずれる
+ */
+export function describeTimeCue(paragraph: string): string {
+  const text = paragraph.replace(/^[\s　]+/u, "");
+  if (isQuotedParagraph(text)) return "";
+  const marker = readHeadMarker(text);
+  if (!marker) return "";
+  // `readHeadMarker` と同じ順に試す（「その日」より先に「その頃」など、読みの順を揃える）
+  const word =
+    [SIMULTANEOUS, ...NEXT_DAY.map((rule) => rule.pattern), DAYS_LATER, CUT, SAME_DAY]
+      .map((pattern) => text.match(pattern)?.[0])
+      .find((matched): matched is string => matched !== undefined) ?? "";
+  if (!word) return "";
+  const meaning =
+    marker.kind === "simultaneous"
+      ? "前の場面と同じ時"
+      : marker.kind === "sameDay"
+        ? "前の場面と同じ日"
+        : marker.kind === "advance"
+          ? `前の場面の${marker.days}日後`
+          : "何日経ったか分からない";
+  return `「${word}」（${meaning}と読みました）`;
+}
+
 /** 頭の印を除いた残り（場面の途中の経過を探すのに使う） */
 function restAfterMarker(paragraph: string): string {
   const text = paragraph.replace(/^[\s　]+/u, "");

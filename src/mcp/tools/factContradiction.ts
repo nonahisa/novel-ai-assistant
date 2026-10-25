@@ -20,9 +20,12 @@ import {
   buildTravelMaterial,
   candidateSidesOf,
   collectFactsFromChunk,
+  factVerifyPromptVersion,
+  factVerifySourceOf,
   lineTextOf,
   parseFactJsonObject,
   TOPIC_CARRY_LIMIT,
+  travelVerifyMaterialOf,
   VERIFY_CONTEXT_LINES,
   type FactContradictionIssue,
   type FactPlace,
@@ -54,7 +57,6 @@ import {
   CONTRADICTION_VERIFY_SCHEMA,
   CONTRADICTION_VERIFY_SYSTEM_PROMPT,
   CONTRADICTION_VERIFY_TEMPERATURE,
-  CONTRADICTION_VERIFY_VERSION,
   type VerifyRejectReason,
 } from "../../prompts/contradictionVerify";
 import {
@@ -291,7 +293,8 @@ export function factContradictionPrompt(
   const context = loadFactWork(input);
   return {
     promptVersion: STORY_FACT_EXTRACT_VERSION,
-    verifyPromptVersion: CONTRADICTION_VERIFY_VERSION,
+    // 移動の照合の候補だけ文面が違う（travel 1.0）。両方の版が読める形で残す
+    verifyPromptVersion: factVerifyPromptVersion("travel"),
     systemPrompt: STORY_FACT_EXTRACT_SYSTEM_PROMPT,
     schema: STORY_FACT_EXTRACT_SCHEMA,
     temperature: STORY_FACT_EXTRACT_TEMPERATURE,
@@ -557,6 +560,18 @@ export async function factContradictionRun(
       rightLineText,
     });
 
+    // 移動の照合の候補だけ、所要時間・コードの読み・前側の前後を添える（travel 1.0。製品と同じ関数）
+    const leftPlace = places.get(sides.left.id);
+    const travel = travelVerifyMaterialOf({
+      candidate,
+      leftPlace,
+      leftSourceText: leftPlace
+        ? readSourceCached(input.folder, leftPlace.filePath, sourceCache)
+        : undefined,
+      rightPlace: sides.place,
+      rightLineText,
+    });
+
     let outcome: VerifyOutcome;
     try {
       const reply = await ask({
@@ -574,6 +589,8 @@ export async function factContradictionRun(
           // 見分けるのにこれを使う（前側が後の話なら怪しむ）
           settingKnownAt:
             sides.left.chapter !== null ? `第${sides.left.chapter}話` : "",
+          source: factVerifySourceOf(candidate),
+          travel,
         }),
         schema: CONTRADICTION_VERIFY_SCHEMA,
         temperature: temperatureFor(input, CONTRADICTION_VERIFY_TEMPERATURE),

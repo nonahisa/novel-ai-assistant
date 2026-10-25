@@ -1,6 +1,7 @@
 import {
   VERIFY_REJECT_REASONS,
   VERIFY_SPEECH_KEEP_SENTENCES,
+  VERIFY_TRAVEL_KEEP_SENTENCES,
   type VerifyRejectReason,
 } from "../prompts/contradictionVerify";
 import { normalizeForComparison } from "./groundedEvidence";
@@ -69,16 +70,17 @@ export function parseVerifyOutcome(text: string): VerifyOutcome {
 }
 
 /**
- * 説明が、口調の但し書き（P-12b 1.1）の「残せ」の文を丸ごと写しているか。
+ * 説明が、口調の但し書き（P-12b 1.1）か移動の照合の説明（travel 1.0）の「残せ」の文を
+ * 丸ごと写しているか。
  *
  * 文の一部の一致は見ない。「変わり型」「語尾」のような語は、罠（語尾は違うが
  * 話し方は同じ）の正しい却下の説明にも出るので、語で見ると正しい却下まで
- * 通してしまう。
+ * 通してしまう。移動の「前提」「所要時間」も、時計の読み違いを正しく却下する説明に出る
  */
 function echoesSpeechKeep(explanation: string): boolean {
   const field = normalizeForComparison(explanation);
   if (!field) return false;
-  return VERIFY_SPEECH_KEEP_SENTENCES.some((sentence) =>
+  return [...VERIFY_SPEECH_KEEP_SENTENCES, ...VERIFY_TRAVEL_KEEP_SENTENCES].some((sentence) =>
     field.includes(normalizeForComparison(sentence))
   );
 }

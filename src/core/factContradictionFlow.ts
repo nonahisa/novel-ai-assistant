@@ -10,9 +10,15 @@ import {
 } from "./storyFactValidation";
 import {
   buildFactVerifyIssue,
+  linesAround,
   type KnownCharacterTable,
   type TravelStageStats,
 } from "./factContradiction";
+import {
+  CONTRADICTION_VERIFY_TRAVEL_VERSION,
+  CONTRADICTION_VERIFY_VERSION,
+  type TravelVerifyMaterial,
+} from "../prompts/contradictionVerify";
 import type {
   ContradictionCandidate,
   TravelTime,
@@ -20,7 +26,11 @@ import type {
 } from "./contradictionMatch";
 import type { Location } from "../models/location";
 import { buildLocationResolver } from "./locationConsistency";
-import { buildSceneClock, type SceneClockEpisode } from "./sceneClock";
+import {
+  buildSceneClock,
+  describeTimeCue,
+  type SceneClockEpisode,
+} from "./sceneClock";
 import { buildTravelTable } from "./travelTable";
 import { buildWhereabouts } from "./whereabouts";
 
@@ -286,6 +296,65 @@ export function buildTravelMaterial(input: {
       ...whereabouts.stats,
       tablePairs: table.stats.comparedPairs,
     },
+  };
+}
+
+/** 移動の照合の判定へ渡す、前側の箇所の前後の行数（後ろ側の ±5行より狭くてよい。1文の所在を見せるだけ） */
+export const TRAVEL_LEFT_CONTEXT_LINES = 2;
+
+/**
+ * 候補を判定（P-12b）へ渡すときの文面の種類。移動の照合から来た候補だけ専用の文面
+ * （travel 1.0）にする。**拡張機能と MCP の両方がここで決める**（写しを作らない。6.88.10）
+ */
+export function factVerifySourceOf(
+  candidate: Pick<ContradictionCandidate, "origin">
+): "settled" | "travel" {
+  return candidate.origin === "travel" ? "travel" : "settled";
+}
+
+/**
+ * 判定の答えの控えの鍵に入れる版。**移動の照合の候補だけ** travel の版と印を足す。
+ * 本命の文面は変えていないので、ほかの候補の控えは作り直さない（実装ルール4。
+ * 直す前の判定が控えから返ると、直した文面を測れない）
+ */
+export function factVerifyPromptVersion(source: "settled" | "travel"): string {
+  return source === "travel"
+    ? `${CONTRADICTION_VERIFY_VERSION}:travel${CONTRADICTION_VERIFY_TRAVEL_VERSION}`
+    : CONTRADICTION_VERIFY_VERSION;
+}
+
+/**
+ * 移動の照合から来た候補の、判定へ渡す材料（travel 1.0）。ほかの候補なら undefined。
+ *
+ * 判定は後ろ側の ±5行しか見ないので、前側の所在（第2話2行目「リナは王都にいた」）が
+ * 窓の外にあると、何と食い違うのかが本文で確かめられない。前側が窓の外なら、その前後も渡す。
+ */
+export function travelVerifyMaterialOf(input: {
+  candidate: Pick<ContradictionCandidate, "origin" | "basis" | "reason">;
+  /** 前側の事実の本文の場所。資料由来なら省略 */
+  leftPlace?: FactPlace;
+  /** 前側の事実が書かれた本文（ファイルまるごと）。読めなければ省略 */
+  leftSourceText?: string;
+  /** 後ろ側の事実の本文の場所（判定の窓の中心） */
+  rightPlace: FactPlace;
+  /** 後ろ側の行の本文。段落の頭の時の手がかりを読む */
+  rightLineText?: string;
+}): TravelVerifyMaterial | undefined {
+  if (factVerifySourceOf(input.candidate) !== "travel") return undefined;
+  const { leftPlace, rightPlace } = input;
+  const leftInWindow =
+    leftPlace !== undefined &&
+    leftPlace.filePath === rightPlace.filePath &&
+    Math.abs(leftPlace.line - rightPlace.line) <= VERIFY_CONTEXT_LINES;
+  const leftContext =
+    leftPlace && !leftInWindow && input.leftSourceText !== undefined
+      ? linesAround(input.leftSourceText, leftPlace.line, TRAVEL_LEFT_CONTEXT_LINES)
+      : "";
+  return {
+    travelTime: input.candidate.basis ?? "",
+    reading: input.candidate.reason,
+    timeCue: describeTimeCue(input.rightLineText ?? ""),
+    leftContext,
   };
 }
 
