@@ -89,40 +89,74 @@ describe("場所を引く", () => {
    * 作者の選択③（2026-10-25）。旅の台で値が「港町の宿」「王都の城門」のように場所の名前で
    * なく、完全一致では引けなかった（26b：所在の事実15件→引けた10件）。
    */
+  /** 含みで引けるのは名前が3字以上の場所（作者の裁定 2026-10-25 夜。下のテスト） */
+  const long = buildLocationResolver([
+    place("loc_7", "ミレア港", ["潮見の町"]),
+    place("loc_8", "北の砦"),
+    place("loc_9", "リヴェルス", ["白の都"]),
+    place("loc_1", "王都"),
+  ]);
+
   it("台帳の名前（別名）がちょうど1つだけ含まれるなら、その場所に引く", () => {
-    expect(resolvePlace("港町の宿", resolver)).toBe("loc_2");
-    expect(resolvePlace("リヴェルスの城門の詰所", resolver)).toBe("loc_1");
+    expect(resolvePlace("ミレア港の宿", long)).toBe("loc_7");
+    expect(resolvePlace("白の都の城門の詰所", long)).toBe("loc_9");
     // 名前と別名が両方出ても、同じ場所なら1つ
-    expect(resolvePlace("王都リヴェルスの城門", resolver)).toBe("loc_1");
+    expect(resolvePlace("リヴェルス（白の都）の城門", long)).toBe("loc_9");
   });
 
   it("2か所の名前を含むもの・1つも含まないものは引かない", () => {
-    expect(resolvePlace("港町の宿で王都の手紙を読む", resolver)).toBeNull();
-    expect(resolvePlace("灯台の上", resolver)).toBeNull();
-    expect(resolvePlace("その人波の中", resolver)).toBeNull();
+    expect(resolvePlace("ミレア港の宿で北の砦の手紙を読む", long)).toBeNull();
+    // 2字の名前も「2か所目」としては数える（「北の砦から王都」を北の砦に引かない）
+    expect(resolvePlace("北の砦から王都の城門", long)).toBeNull();
+    expect(resolvePlace("灯台の上", long)).toBeNull();
+    expect(resolvePlace("その人波の中", long)).toBeNull();
+  });
+
+  /**
+   * 作者の裁定（2026-10-25 夜）：名前が2字以下の場所は含みで引かない。「港」は「空港」
+   * 「港湾」にも、「町」はどの町名にも入る。完全一致と別名の完全一致では引く
+   */
+  it("名前が2字以下の場所は、含みでは引かない（完全一致では引く）", () => {
+    const short = buildLocationResolver([
+      place("loc_3", "港", ["ミナ"]),
+      place("loc_5", "王都"),
+      place("loc_6", "灯台岬"),
+    ]);
+    expect(resolvePlace("港", short)).toBe("loc_3");
+    expect(resolvePlace("ミナ", short)).toBe("loc_3");
+    expect(resolvePlace("エドは港", short)).toBe("loc_3");
+    expect(resolvePlace("港の桟橋", short)).toBeNull();
+    expect(resolvePlace("空港の待合", short)).toBeNull();
+    expect(resolvePlace("王都の城門", short)).toBeNull();
+    // 3字以上はいまの決まりのまま
+    expect(resolvePlace("灯台岬の上", short)).toBe("loc_6");
+    // 名前が2字以下の場所は、別名が長くても含みでは引かない（完全一致と別名の完全一致だけ）
+    const aliased = buildLocationResolver([place("loc_1", "王都", ["リヴェルス"])]);
+    expect(resolvePlace("リヴェルスの城門", aliased)).toBeNull();
+    expect(resolvePlace("リヴェルス", aliased)).toBe("loc_1");
   });
 
   /** 「港町へ向かった」は向かった先にいたことを言っていない（着いた結びと同じ考え） */
   it("向かった・発った値は、名前を含んでいても引かない", () => {
-    expect(resolvePlace("港町へ向かった", resolver)).toBeNull();
-    expect(resolvePlace("王都を発った", resolver)).toBeNull();
-    expect(resolvePlace("港町を目指して", resolver)).toBeNull();
+    expect(resolvePlace("ミレア港へ向かった", long)).toBeNull();
+    expect(resolvePlace("北の砦を発った", long)).toBeNull();
+    expect(resolvePlace("ミレア港を目指して", long)).toBeNull();
   });
 
   /**
-   * 入れ子の組（港は港町の中）。「港町の宿」は字面では「港」も含むが、それは「港町」の
-   * 一部なので数えない。そうしないと例の「港町の宿」が2か所になって引けない
+   * 入れ子の組（ミレアはミレア港の中、など）。「ミレア港の宿」は字面では「ミレア」も含むが、
+   * それは「ミレア港」の一部なので数えない。そうしないと2か所に見えて引けない
    */
   it("長い名前の一部として出た短い名前は数えない", () => {
     const nested = buildLocationResolver([
-      place("loc_2", "港町"),
-      place("loc_3", "港"),
+      place("loc_2", "ミレア港"),
+      place("loc_3", "ミレア"),
     ]);
-    expect(resolvePlace("港町の宿", nested)).toBe("loc_2");
-    expect(resolvePlace("港の桟橋", nested)).toBe("loc_3");
-    // 港と港町が別々に出るのは2か所（含みの数え方は値まるごとで、切れ目のうしろは試さない）
-    expect(resolvePlace("港から港町の宿", nested)).toBeNull();
-    expect(resolvePlace("港と港町", nested)).toBeNull();
+    expect(resolvePlace("ミレア港の宿", nested)).toBe("loc_2");
+    expect(resolvePlace("ミレアの市場", nested)).toBe("loc_3");
+    // 別々に出るのは2か所（含みの数え方は値まるごとで、切れ目のうしろは試さない）
+    expect(resolvePlace("ミレアからミレア港の宿", nested)).toBeNull();
+    expect(resolvePlace("ミレアとミレア港", nested)).toBeNull();
   });
 
   it("主語や起点の後ろを試す。名前の中の字では割らない", () => {

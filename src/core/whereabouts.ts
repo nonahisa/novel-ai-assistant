@@ -1,3 +1,4 @@
+import { normalizeLocationName } from "../models/location";
 import type { StoryFact } from "../models/storyFact";
 import type { WhereaboutsEntry } from "./contradictionMatch";
 import type { LocationResolver } from "./locationConsistency";
@@ -142,8 +143,22 @@ function resolveContainedPlace(
 ): string | null {
   if (DEPARTURE_WORDS.test(text)) return null;
   const ids = resolver.idsIn(text);
-  return ids.length === 1 ? ids[0] : null;
+  if (ids.length !== 1) return null;
+  /*
+    **名前が2字以下の場所は含みで引かない**（作者の裁定、2026-10-25 夜）。「港」は「空港」
+    「港湾」に、「町」はどの町名にも入る。完全一致と別名の完全一致では引く（上の段）。
+    別名が長くても、場所の名前で決める。
+    短い名前も「2か所目」の数には入れたまま（`idsIn` が返す）——外すと
+    「北の砦から王都」が北の砦1か所に見える
+  */
+  if (normalizeLocationName(resolver.nameOf(ids[0])).length < CONTAINED_NAME_MIN_CHARS) {
+    return null;
+  }
+  return ids[0];
 }
+
+/** 含みで引ける場所の名前の、いちばん短い字数（作者の裁定、2026-10-25 夜：2字以下は引かない） */
+export const CONTAINED_NAME_MIN_CHARS = 3;
 
 export function buildWhereabouts(input: {
   facts: readonly StoryFact[];
