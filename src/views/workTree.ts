@@ -14,6 +14,11 @@ import {
   isCollectedFile,
 } from "../core/episodeLabel";
 import { describeChapterHint } from "../core/episodeChapterHint";
+import {
+  checkWorkEpisodeNumbers,
+  describeWorkEpisodeNumbers,
+  workEpisodeNumberMarks,
+} from "../core/episodeNumberCheck";
 import { workTypeContextValue } from "../core/workTypeVisibility";
 import { workRowLabel } from "../core/workRowLabel";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -830,7 +835,18 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       // **数はその作品のぶんだけ**——書庫では置き場ぜんぶの数が全部の行に並ぶ
       const badge = this.syncBadge?.(work.id);
       const workMeasure = measureKindCounts(node.kind, stats.totals)?.detail;
-      const marks = [conflictMark, badge];
+      // 話数の重複・欠番（設計書5.4.5）。**走査が持っている話の並びから決める**
+      // ——描画のたびにファイルを読まない。控えで描いた行（6.107）は並びを
+      // まだ持たないので、印も出ない（走査が終われば描き直される）。
+      // 同期・競合より後ろに置く：知らせるだけで、急ぎの手当てではないため
+      const loaded = this.cache.get(work.id);
+      const numberReport = loaded
+        ? checkWorkEpisodeNumbers(loaded.episodes, node.format)
+        : undefined;
+      const numberMarks = numberReport
+        ? workEpisodeNumberMarks(numberReport)
+        : [];
+      const marks = [conflictMark, badge, ...numberMarks];
       item.label = workRowLabel(work.title, marks);
       // 控えの値は**頭に「前回の値」と付ける**（設計書6.107）。行は後ろから
       // 切れるので、後ろに添えると長い作品名の行で読めなくなる
@@ -847,7 +863,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
             : null,
           // 題の前の［］が何かを、ここで言う（印は短くしか書けない）
           marks.some((mark) => mark)
-            ? "_題の前の［］は、同期や競合で手当てが要るものの印です（内訳は下）。_\n"
+            ? "_題の前の［］は、同期・競合・話数の重複や欠番など、手当てが要るものの印です（内訳は下）。_\n"
             : null,
           `- 純文字数: ${formatCount(stats.totals.net)} 字`,
           `- 総文字数: ${formatCount(stats.totals.gross)} 字`,
@@ -858,6 +874,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           // 種類ごとの目安（台本の分数・エッセイの読了時間。設計書6.109）
           ...(workMeasure ? [`- ${workMeasure}`] : []),
           ...(this.syncTooltip?.(work.id) ?? []),
+          ...(numberReport ? describeWorkEpisodeNumbers(numberReport) : []),
           stats.conflictedCount > 0
             ? `\n**未解決の競合が ${stats.conflictedCount} 件あります。**\n` +
               "これらは文字数に含めていません。解決してから執筆・AI処理を行ってください。"
