@@ -1,4 +1,7 @@
 import { isSameBodyText } from "./bodyCompare";
+import { episodeUnit } from "./episodeLabel";
+import type { WorkFormatKey } from "./workFormat";
+import type { EpisodeFile } from "../models/types";
 
 /**
  * 取り込む話の番号を点検する——重複と欠番（作者の指示、2026-09-19）。
@@ -27,6 +30,12 @@ import { isSameBodyText } from "./bodyCompare";
  * **アルファポリスで見つけた問題だが、点検は全サイト共通**である
  * （作者の指示）。なろうの合本にもカクヨムの複数ファイルにも同じ形で
  * 効く——入口（`workZip.ts`）が、どの道でもここを通す。
+ *
+ * ## 作品一覧にも出す
+ *
+ * 登録済みの作品の話数の重複・欠番は、作品一覧の作品の行に印で出す
+ * （設計書5.4.5。`checkWorkEpisodeNumbers`）。こちらは本文を読まず、
+ * 走査が持っている話数だけで決める。
  *
  * VS Code API には依存しない。
  */
@@ -184,11 +193,11 @@ export function describeEpisodeNumbers(
 }
 
 /** 「10話・11話」。多いときは頭だけ並べて件数を添える */
-function listNumbers(numbers: readonly number[]): string {
-  const head = numbers
-    .slice(0, LISTED_NUMBERS)
-    .map((number) => `${number}話`)
-    .join("・");
+function listNumbers(
+  numbers: readonly number[],
+  label: (number: number) => string = (number) => `${number}話`
+): string {
+  const head = numbers.slice(0, LISTED_NUMBERS).map(label).join("・");
   return numbers.length > LISTED_NUMBERS
     ? `${head} ほか（ぜんぶで${numbers.length}件）`
     : head;
@@ -198,4 +207,121 @@ function listNumbers(numbers: readonly number[]): string {
 function summarizeLabels(labels: readonly string[]): string {
   const head = labels.slice(0, 3).join("・");
   return labels.length > 3 ? `${head} ほか${labels.length - 3}件` : head;
+}
+
+/* ------------------------------------------------------------------ */
+/* 作品一覧に出す点検（設計書5.4.5、作者の裁定 2026-10-25 夜）          */
+/* ------------------------------------------------------------------ */
+
+/** 作品一覧の話数の点検の結果 */
+export interface WorkEpisodeNumberReport {
+  /** 2つ以上のファイルが名乗っている話数（小さい順） */
+  readonly duplicated: readonly number[];
+  /** 抜けている話数（いちばん小さい番号といちばん大きい番号のあいだ） */
+  readonly missing: readonly number[];
+  /** 話数の言い方（「第3話」「投稿3」）。作品の形式で変わる */
+  readonly format?: WorkFormatKey;
+}
+
+/**
+ * 合本1ファイルが名乗れる話数の幅の上限。
+ *
+ * 読み違いで「1〜999999話」のような幅が来たとき、1つずつ数えると
+ * 一覧の描画が止まる。実在する作品の話数はこれに遠く届かない。
+ */
+const MAX_COLLECTED_SPAN = 10000;
+
+/**
+ * 作品の話の並びから、話数の重複・欠番を見つける。
+ *
+ * **本文を読まない。** 取り込みの点検（`checkEpisodeNumbers`）は中身まで
+ * 比べるが、ここは作品一覧の描画から呼ばれる——走査が持っている話数だけで
+ * 決め、ファイルを読み直さない。外のツールで名前を付け直したときに
+ * 起きやすい食い違いを、作者が一覧で気づけるようにするのが目的である。
+ *
+ * 数えないもの（どれも数えると誤検出になる）：
+ * - **本編・不明以外の種別**（プロローグ・幕間など）。別の番号の並びを持つ
+ *   （`formatChapterLabel` と同じ線引き）
+ * - **日付で名付けた話**（SNS記事）。番号の並びではない
+ * - **話数の読めない話**。並び順で番号を埋めない
+ * - **創作メモ集の作品ぜんたい**。番号が無い・飛ぶのが普通で、不備ではない（6.70）
+ *
+ * **合本は範囲として数える**——1〜219話の合本1ファイルに「2〜218話が無い」と
+ * 言わないため。範囲が1話ずつのファイルと重なれば、重なった話数は重複である。
+ */
+export function checkWorkEpisodeNumbers(
+  episodes: readonly Pick<
+    EpisodeFile,
+    "kind" | "chapterStart" | "chapterEnd" | "date"
+  >[],
+  format?: WorkFormatKey
+): WorkEpisodeNumberReport {
+  if (format === "memo") return { duplicated: [], missing: [], format };
+
+  const seen = new Map<number, number>();
+  for (const episode of episodes) {
+    if (episode.date) continue;
+    if (episode.kind !== "本編" && episode.kind !== "不明") continue;
+    const start = episode.chapterStart;
+    if (start === null || !Number.isSafeInteger(start)) continue;
+    const end = episode.chapterEnd;
+    const last =
+      end !== null &&
+      Number.isSafeInteger(end) &&
+      end > start &&
+      end - start <= MAX_COLLECTED_SPAN
+        ? end
+        : start;
+    for (let number = start; number <= last; number++) {
+      seen.set(number, (seen.get(number) ?? 0) + 1);
+    }
+  }
+
+  const duplicated = [...seen.entries()]
+    .filter(([, count]) => count >= 2)
+    .map(([number]) => number)
+    .sort((a, b) => a - b);
+  return { duplicated, missing: missingNumbers(seen), format };
+}
+
+/**
+ * 作品の行の題の前に添える印（`core/workRowLabel.ts`）。**無ければ空。**
+ *
+ * 重複と欠番は直し方が違う（片方を改名する／抜けを確かめる）ので、
+ * 別々の印にする。
+ */
+export function workEpisodeNumberMarks(
+  report: WorkEpisodeNumberReport
+): string[] {
+  const marks: string[] = [];
+  if (report.duplicated.length > 0) {
+    marks.push(`話数の重複${report.duplicated.length}件`);
+  }
+  if (report.missing.length > 0) {
+    marks.push(`話数の欠番${report.missing.length}件`);
+  }
+  return marks;
+}
+
+/** 作品の行のホバーに並べる行（Markdown の箇条書き）。**無ければ空** */
+export function describeWorkEpisodeNumbers(
+  report: WorkEpisodeNumberReport
+): string[] {
+  const unit = episodeUnit(report.format);
+  const label = (number: number): string => unit.label(number);
+  const lines: string[] = [];
+  if (report.duplicated.length > 0) {
+    lines.push(
+      `- 話数の重複: ${listNumbers(report.duplicated, label)}` +
+        "（同じ話数のファイルが2つ以上あります。名前の付け直しで重なっていないか確かめてください）"
+    );
+  }
+  if (report.missing.length > 0) {
+    lines.push(
+      `- 話数の欠番: ${listNumbers(report.missing, label)}` +
+        // 下書き・非公開で番号は普通に飛ぶ。**知らせるだけ**で、直せとは言わない
+        "（下書きや非公開の話があると番号は飛びます。名前の付け直しで抜けていないか確かめてください）"
+    );
+  }
+  return lines;
 }
