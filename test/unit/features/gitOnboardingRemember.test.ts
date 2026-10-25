@@ -6,10 +6,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
   実機確認リスト「覚えられなかった場合、その旨のお知らせが出るか」。覚えられないのは本物の機械では起こしにくい
   （認証情報の置き場が使えない端末）ので、`rememberGithubCredential` が false を返す形を作って見る。
-  製品の `features/gitOnboarding.ts` は直していない。
+  2026-10-26 の裁定で、作る確認と1回目の送信の確認を1つにまとめたので、作ったあとそのまま送る。
+  知らせも「作って送った」1つになった。
 
-  - 覚えられた：知らせは「非公開のリポジトリ … を作り、送り先に設定しました。」だけ
-  - 覚えられなかった：同じ知らせに「（この端末では認証情報を覚えられませんでした。送信のときに一度聞かれます）」が付く
+  - 覚えられた：知らせは「非公開のリポジトリ … を作り、… を GitHub へ送りました。」だけ
+  - 覚えられなかった：同じ知らせに「（この端末では認証情報を覚えられませんでした。送信のときに一度聞かれることがあります）」が付く
   - 操作ログ（`logStep`）は、どちらも「認証情報の記憶: 成功／できず」で終わる
 */
 const remember = vi.fn<(token: string, url: string, folder: string) => Promise<boolean>>();
@@ -21,7 +22,12 @@ vi.mock("../../../src/core/gitSetup", async (importOriginal) => {
     ...actual,
     ghAvailable: async () => false,
     ensureGithubAuthToken: async () => "テスト用の合言葉",
-    createGithubRepositoryViaApi: async () => ({ ok: true, cloneUrl: "https://github.com/example/novel-test.git", detail: "" }),
+    hasGithubSession: async () => true,
+    // 名前は訊かなくなった（2026-10-26）。作った名前は作成の結果から知らせへ出る
+    createGithubRepositoryWithFreeName: async () => ({ ok: true, cloneUrl: "https://github.com/example/novel-test.git", name: "novel-test", isPrivate: true, detail: "" }),
+    hasCommits: async () => true,
+    currentBranch: async () => "main",
+    pushSetUpstream: async () => ({ ok: true }),
     addRemote: async () => ({ ok: true, detail: "" }),
     rememberGithubCredential: (token: string, url: string, folder: string) => remember(token, url, folder),
   };
@@ -53,7 +59,10 @@ beforeEach(() => {
   const window = vscode.window as unknown as {
     showQuickPick: (items: Array<{ action?: string }>) => Promise<unknown>;
     showInformationMessage: (message: string) => Promise<undefined>;
+    showWarningMessage: (message: string, ...rest: unknown[]) => Promise<string | undefined>;
   };
+  // まとめた確認（作って送る）は押す
+  window.showWarningMessage = async () => "作って送る";
   // 送り先は「VS Code のアカウントで新しく作る」を選ぶ
   window.showQuickPick = async (items) => items.find((item) => item.action === "vscodeAuth");
   window.showInformationMessage = async (message: string) => {
@@ -73,18 +82,18 @@ describe("リポジトリを作ったあとの、認証情報の記憶の知ら�
     const advanced = await runNoRemote();
     expect(advanced).toBe(true);
     expect(infoMessages).toHaveLength(1);
-    expect(infoMessages[0]).toContain("非公開のリポジトリ novel-test を作り、送り先に設定しました。");
+    expect(infoMessages[0]).toContain("非公開のリポジトリ novel-test を作り、書庫 を GitHub へ送りました。");
     expect(infoMessages[0]).not.toContain("覚えられませんでした");
     expect(logStep.mock.calls.map((call) => call[0]).join("\n")).toContain("認証情報の記憶: 成功");
   });
 
-  test("覚えられなかったときは、同じ知らせに「この端末では認証情報を覚えられませんでした。送信のときに一度聞かれます」が付き、操作ログは「できず」で終わる", async () => {
+  test("覚えられなかったときは、同じ知らせに「この端末では認証情報を覚えられませんでした。送信のときに一度聞かれることがあります」が付き、操作ログは「できず」で終わる", async () => {
     remember.mockResolvedValue(false);
     const advanced = await runNoRemote();
     expect(advanced, "覚えられなくてもリポジトリは作れているので、先へ進む").toBe(true);
     expect(infoMessages).toHaveLength(1);
-    expect(infoMessages[0]).toContain("非公開のリポジトリ novel-test を作り、送り先に設定しました。");
-    expect(infoMessages[0]).toContain("（この端末では認証情報を覚えられませんでした。送信のときに一度聞かれます）");
+    expect(infoMessages[0]).toContain("非公開のリポジトリ novel-test を作り、書庫 を GitHub へ送りました。");
+    expect(infoMessages[0]).toContain("（この端末では認証情報を覚えられませんでした。送信のときに一度聞かれることがあります）");
     expect(logStep.mock.calls.map((call) => call[0]).join("\n")).toContain("認証情報の記憶: できず");
     // 覚えさせる相手は、いま作ったリポジトリの URL と作品の置き場（合言葉は渡すが、知らせ・ログには出さない）
     expect(remember).toHaveBeenCalledWith("テスト用の合言葉", "https://github.com/example/novel-test.git", "/tmp/library");

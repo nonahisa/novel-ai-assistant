@@ -269,18 +269,61 @@ export function validateRepositoryUrl(input: string): string | undefined {
 }
 
 /**
- * 作品名からリポジトリ名を作る。
+ * 英数字だけの作品名を、そのままリポジトリ名の形にする。
  *
  * GitHubのリポジトリ名に使えるのは英数字と `-` `_` `.` だけ。
- * **日本語の作品名は変換できない**ので、その場合は空を返して
- * 作者に入力してもらう（勝手にローマ字へ直すと、意図しない名前になる）。
+ * **英数字以外が1字でも混ざる題からは作らない（空を返す）。** 以前は使えない字を
+ * 消すだけだったので、「GitHub試験_確認用」から切れ端の「GitHub_」が作られ、
+ * 作者は意味の分からない名前のまま作ってしまった（2026-10-26 の実機）。
+ * 勝手にローマ字へ直すのも、意図しない名前になるのでしない。
  */
-export function suggestRepositoryName(workTitle: string): string {
-  const cleaned = workTitle
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/[^A-Za-z0-9._-]/g, "");
-  return cleaned.replace(/^[-.]+|[-.]+$/g, "");
+export function asciiRepositoryName(workTitle: string): string {
+  const trimmed = workTitle.trim();
+  if (!/^[A-Za-z0-9._\s-]*$/.test(trimmed)) return "";
+  const cleaned = trimmed.replace(/\s+/g, "-");
+  // 端の記号は名前として意味を持たないので削る（`_` も。GitHub_ の再発を防ぐ）
+  return cleaned.replace(/^[-._]+|[-._]+$/g, "");
+}
+
+/**
+ * 新しく作るリポジトリの名前を決める（作者の裁定、2026-10-26「日付つき＋説明欄に題」）。
+ *
+ * **作者に名前を訊かない。** 英数字だけの題はそのまま、それ以外は
+ * `novel-YYYYMMDD` にする。日本語の題は名前に入れられない代わりに、
+ * リポジトリの説明欄（`description`）へ入れて GitHub の一覧で見分けられるようにする。
+ * 日付は**手元の暦**で組む（UTC で組むと、夜中に作った作品が前日の日付になる）。
+ */
+export function suggestRepositoryName(
+  workTitle: string,
+  now: Date = new Date()
+): string {
+  const ascii = asciiRepositoryName(workTitle);
+  if (ascii.length > 0) return ascii;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `novel-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+}
+
+/** 同じ名前があったときに試す名前の数（`-2` から `-9` まで） */
+const MAX_NAME_ATTEMPTS = 8;
+
+/** 同じ名前が既にあったときに試す、次の名前（`-2`、`-3`…） */
+export function repositoryNameCandidates(baseName: string): string[] {
+  const names = [baseName];
+  for (let i = 2; i <= MAX_NAME_ATTEMPTS + 1; i++) names.push(`${baseName}-${i}`);
+  return names;
+}
+
+/**
+ * GitHub の説明欄へ入れる文。改行などは1行へ畳み、長すぎる分は切る
+ * （GitHub の説明欄は350字まで。超えると作成そのものが断られる）。
+ */
+export function repositoryDescription(workTitle: string): string {
+  return workTitle.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+/** gh の失敗の文から「同じ名前がある」を見分ける */
+function ghNameTaken(detail: string): boolean {
+  return /already exists/i.test(detail);
 }
 
 /** GitHub CLI（gh）が使えて、認証も済んでいるか */
@@ -302,18 +345,39 @@ export async function ghAvailable(
 export async function ghCreateRepository(
   cwd: string,
   name: string,
-  run: CommandRunner = runCommand
-): Promise<GitSetupResult> {
-  const result = await run(
-    "gh",
-    ["repo", "create", name, "--private", "--source", ".", "--remote", "origin"],
-    cwd,
-    PUSH_TIMEOUT_MS
-  );
+  run: CommandRunner = runCommand,
+  description?: string
+): Promise<GitSetupResult & { nameTaken?: boolean }> {
+  const args = ["repo", "create", name, "--private", "--source", ".", "--remote", "origin"];
+  if (description) args.push("--description", description);
+  const result = await run("gh", args, cwd, PUSH_TIMEOUT_MS);
   if (result.code !== 0) {
-    return { ok: false, detail: (result.stderr || result.stdout).trim() };
+    const detail = (result.stderr || result.stdout).trim();
+    return { ok: false, detail, nameTaken: ghNameTaken(detail) };
   }
   return { ok: true };
+}
+
+/**
+ * gh で、空いている名前を探しながら作る（同じ名前があれば `-2`、`-3`…）。
+ *
+ * 名前を作者に訊かなくなったので、同じ日に2つ目の作品を送ると
+ * `novel-YYYYMMDD` がぶつかる。ぶつかったときだけ次の名前を試す。
+ */
+export async function ghCreateRepositoryWithFreeName(
+  cwd: string,
+  baseName: string,
+  description: string | undefined,
+  run: CommandRunner = runCommand
+): Promise<GitSetupResult & { name?: string }> {
+  let last: GitSetupResult = { ok: false };
+  for (const name of repositoryNameCandidates(baseName)) {
+    const created = await ghCreateRepository(cwd, name, run, description);
+    if (created.ok) return { ok: true, name };
+    last = created;
+    if (!created.nameTaken) return created;
+  }
+  return last;
 }
 
 /**
@@ -359,6 +423,25 @@ export async function ensureGithubAuthToken(
   }
 }
 
+/**
+ * repo の権限を持つ GitHub のサインインが、もう VS Code にあるか（窓を出さずに確かめる）。
+ *
+ * 無ければ、このあと VS Code の［許可］とブラウザの［Authorize］が出る。
+ * **出る前に一言断るため**に使う（作者の裁定、2026-10-26）。既にあるのに断ると、
+ * 出ない窓を作者が待ってしまうので、あるときは断らない。
+ * 確かめられないときは「無い」と答える（断りが余計に出るほうが、黙って窓が出るより害が小さい）。
+ */
+export async function hasGithubSession(
+  peek: GithubAuthenticate = (scopes) =>
+    vscode.authentication.getSession("github", scopes, { silent: true })
+): Promise<boolean> {
+  try {
+    return (await peek(GITHUB_OAUTH_SCOPES)) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 const GITHUB_API_BASE = "https://api.github.com";
 // GitHub APIはUser-Agentの無いリクエストを拒否する
 const GITHUB_USER_AGENT = "novel-ai-assistant-vscode-extension";
@@ -372,8 +455,16 @@ const GITHUB_USER_AGENT = "novel-ai-assistant-vscode-extension";
 export async function createGithubRepositoryViaApi(
   token: string,
   name: string,
-  fetchImpl: typeof fetch = fetch
-): Promise<GitSetupResult & { cloneUrl?: string }> {
+  fetchImpl: typeof fetch = fetch,
+  description?: string
+): Promise<
+  GitSetupResult & { cloneUrl?: string; nameTaken?: boolean; isPrivate?: boolean }
+> {
+  const payload: { name: string; private: true; description?: string } = {
+    name,
+    private: true,
+  };
+  if (description) payload.description = description;
   let response: Response;
   try {
     response = await fetchImpl(`${GITHUB_API_BASE}/user/repos`, {
@@ -385,7 +476,7 @@ export async function createGithubRepositoryViaApi(
         "User-Agent": GITHUB_USER_AGENT,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ name, private: true }),
+      body: JSON.stringify(payload),
     });
   } catch (error) {
     return {
@@ -395,12 +486,19 @@ export async function createGithubRepositoryViaApi(
   }
 
   if (!response.ok) {
-    return { ok: false, detail: await githubApiErrorDetail(response) };
+    let errorBody: unknown;
+    try {
+      errorBody = await response.json();
+    } catch {
+      // JSON以外の応答は、状態の番号だけで扱う
+    }
+    const classified = classifyGithubApiError(response.status, errorBody);
+    return { ok: false, detail: classified.detail, nameTaken: classified.nameTaken };
   }
 
-  let body: { clone_url?: string };
+  let body: { clone_url?: string; private?: boolean };
   try {
-    body = (await response.json()) as { clone_url?: string };
+    body = (await response.json()) as { clone_url?: string; private?: boolean };
   } catch {
     return { ok: false, detail: "GitHubの応答を解釈できませんでした。" };
   }
@@ -410,29 +508,86 @@ export async function createGithubRepositoryViaApi(
       detail: "GitHubの応答にリポジトリのURLが含まれていません。",
     };
   }
-  return { ok: true, cloneUrl: body.clone_url };
+  return {
+    ok: true,
+    cloneUrl: body.clone_url,
+    ...(typeof body.private === "boolean" ? { isPrivate: body.private } : {}),
+  };
 }
 
-/** GitHub APIのエラー応答から、作者に見せられる理由を取り出す */
-async function githubApiErrorDetail(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { message?: string };
-    if (body?.message) {
-      if (
-        response.status === 422 &&
-        /name already exists/i.test(body.message)
-      ) {
-        return "同じ名前のリポジトリが既にGitHub上にあります。別の名前を指定してください。";
-      }
-      if (response.status === 401) {
-        return "GitHubへのサインインが有効ではありません。もう一度お試しください。";
-      }
-      return `GitHub: ${body.message}`;
-    }
-  } catch {
-    // JSON以外の応答は下のdefaultへ落とす
+/**
+ * 空いている名前を探しながら、VS Code のアカウントで非公開リポジトリを作る。
+ *
+ * 名前を作者に訊かなくなった（2026-10-26 の裁定）ので、同じ日の2作品目は
+ * `novel-YYYYMMDD` がぶつかる。**ぶつかったときだけ**次の名前（`-2`…）を試し、
+ * ほかの失敗（サインイン切れ・回線）はその場で返す（名前を変えても直らない）。
+ */
+export async function createGithubRepositoryWithFreeName(
+  token: string,
+  baseName: string,
+  description: string | undefined,
+  fetchImpl: typeof fetch = fetch
+): Promise<GitSetupResult & { cloneUrl?: string; name?: string; isPrivate?: boolean }> {
+  let last: GitSetupResult = { ok: false };
+  for (const name of repositoryNameCandidates(baseName)) {
+    const created = await createGithubRepositoryViaApi(token, name, fetchImpl, description);
+    if (created.ok) return { ...created, name };
+    last = created;
+    if (!created.nameTaken) return created;
   }
-  return `HTTP ${response.status}`;
+  return last;
+}
+
+/**
+ * GitHub APIのエラー応答から、作者に見せられる理由を取り出す。
+ *
+ * **同じ名前の判定は `errors[]` も見る。** GitHub は 422 のとき、上の `message` には
+ * "Repository creation failed." とだけ書き、「name already exists on this account」は
+ * `errors[].message` に入れる。`message` だけを見ていたので、2026-09-21 に生の
+ * "Repository creation failed" がそのまま作者に出た。
+ */
+export function classifyGithubApiError(
+  status: number,
+  body: unknown
+): { detail: string; nameTaken: boolean } {
+  const record = isRecord(body) ? body : {};
+  const message = typeof record.message === "string" ? record.message : "";
+  const errors = Array.isArray(record.errors) ? record.errors.filter(isRecord) : [];
+  const nameTaken =
+    status === 422 &&
+    (/already exists/i.test(message) ||
+      errors.some(
+        (error) =>
+          (typeof error.message === "string" && /already exists/i.test(error.message)) ||
+          (error.code === "already_exists" && (error.field === undefined || error.field === "name"))
+      ));
+  if (nameTaken) {
+    return {
+      detail: "同じ名前のリポジトリが既にGitHub上にあります。別の名前を指定してください。",
+      nameTaken: true,
+    };
+  }
+  if (status === 401) {
+    return {
+      detail: "GitHubへのサインインが有効ではありません。もう一度お試しください。",
+      nameTaken: false,
+    };
+  }
+  if (message) {
+    // errors[] に理由があれば添える（message だけでは「失敗した」としか分からない）
+    const reasons = errors
+      .map((error) => (typeof error.message === "string" ? error.message : ""))
+      .filter((reason) => reason.length > 0);
+    return {
+      detail: `GitHub: ${message}${reasons.length > 0 ? `（${reasons.join("／")}）` : ""}`,
+      nameTaken: false,
+    };
+  }
+  return { detail: `HTTP ${status}`, nameTaken: false };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** gh のように git 以外のコマンドも呼べるようにした実行口（テストで差し替える） */
