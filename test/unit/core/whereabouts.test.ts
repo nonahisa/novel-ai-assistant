@@ -6,7 +6,7 @@ import {
   placeTextOf,
   resolvePlace,
 } from "../../../src/core/whereabouts";
-import type { Location } from "../../../src/models/location";
+import { parseLocation, type Location } from "../../../src/models/location";
 import type { StoryFact } from "../../../src/models/storyFact";
 
 /**
@@ -32,21 +32,7 @@ function fact(overrides: Partial<StoryFact> & { id: string }): StoryFact {
 }
 
 function place(id: string, name: string, aliases: string[] = []): Location {
-  return {
-    schemaVersion: "0.1",
-    id,
-    name,
-    aliases,
-    reading: null,
-    summary: null,
-    region: null,
-    description: null,
-    appearedChapters: [],
-    status: "登場済み",
-    spoilerLevel: "public",
-    evidence: null,
-    authorNotes: "",
-  } as Location;
+  return parseLocation({ id, name, aliases });
 }
 
 const resolver = buildLocationResolver([

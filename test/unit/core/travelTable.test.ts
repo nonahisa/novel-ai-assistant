@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildTravelTable, containmentOf } from "../../../src/core/travelTable";
-import type { Location, LocationRelation } from "../../../src/models/location";
+import {
+  parseLocation,
+  type Location,
+  type LocationRelation,
+} from "../../../src/models/location";
 
 /**
  * 移動の照合の所要時間の表（設計書6.88。作者の裁定 2026-10-25 夜：
@@ -29,23 +33,7 @@ function location(
   relations: LocationRelation[] = [],
   extra: Partial<Location> = {}
 ): Location {
-  return {
-    schemaVersion: "0.1",
-    id,
-    name,
-    aliases: [],
-    reading: null,
-    summary: null,
-    region: null,
-    description: null,
-    relations,
-    appearedChapters: [],
-    status: "登場済み",
-    spoilerLevel: "public",
-    evidence: null,
-    authorNotes: "",
-    ...extra,
-  } as Location;
+  return { ...parseLocation({ id, name }), relations, ...extra };
 }
 
 describe("所要時間の表", () => {
