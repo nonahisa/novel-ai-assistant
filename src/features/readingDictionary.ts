@@ -449,7 +449,10 @@ export async function manageReadingDictionary(
     const decided = lastDecision;
     lastDecision = undefined;
     if (decided !== undefined && proposals.length === 0) {
-      notifyDone(`${decided}IMEの読みの提案はすべて片づきました。`);
+      // **右下の通知にも出す**（作者の裁定、2026-10-25 夜「右下の通知に出す」）。
+      // ステータスバーの数秒だけでは、一覧が閉じた理由に気づけなかった
+      const doneText = `${decided}IMEの読みの提案はすべて片づきました。`;
+      notifyDone(doneText, [doneText]);
       return changed;
     }
 

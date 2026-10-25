@@ -43,10 +43,13 @@ vi.mock("../../../src/core/imeWordReadingStore", () => ({
 }));
 
 const doneNotes: string[] = [];
+/** 右下の通知に出した文（notifyDone の notes） */
+const popupNotes: string[] = [];
 
 vi.mock("../../../src/views/notify", () => ({
-  notifyDone: (message: string) => {
+  notifyDone: (message: string, notes: readonly string[] = []) => {
     doneNotes.push(message);
+    popupNotes.push(...notes);
   },
   warnWithLog: async () => undefined,
 }));
@@ -83,6 +86,7 @@ beforeEach(() => {
   dismissals = { version: 1, entries: [] };
   wordsBroken = false;
   doneNotes.length = 0;
+  popupNotes.length = 0;
   vi.restoreAllMocks();
 });
 
@@ -220,6 +224,8 @@ describe("片づけたあとの戻り方（作者の指摘、2026-10-25 夜）",
     // 一覧 → ［採る］ の2回だけ。3回目の一覧は出ない
     expect(shownLists).toHaveLength(2);
     expect(doneNotes).toEqual(["「港」を読みの辞書に入れました。IMEの読みの提案はすべて片づきました。"]);
+    // ステータスバーだけでは気づけない（作者の裁定、2026-10-25 夜「右下の通知に出す」）
+    expect(popupNotes).toEqual(["「港」を読みの辞書に入れました。IMEの読みの提案はすべて片づきました。"]);
   });
 
   test("最後の1件を見送っても、閉じて知らせる", async () => {
