@@ -3629,11 +3629,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         message: `相談メモを「${path.relative(work.folderPath, target)}」に保存しました。`,
       });
       // 保存しただけでは、何が残ったのか分からない。開いて見せる。
-      // **相談を続けられるよう、フォーカスは奪わない**
-      const document = await vscode.workspace.openTextDocument(
-        path.toUri(target)
-      );
-      await vscode.window.showTextDocument(document, {
+      // **相談を続けられるよう、フォーカスは奪わない**。
+      // メモは .md なので、作者が `*.md` に割り当てた画面で開く（設計書6.17.6）。
+      // 以前は素のテキストエディターで開いていた（2026-10-25 に見張りを広げて分かった）
+      await openInDefaultEditor(target, {
         preview: false,
         preserveFocus: true,
       });
