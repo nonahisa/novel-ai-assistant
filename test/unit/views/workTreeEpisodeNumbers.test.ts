@@ -116,6 +116,15 @@ describe("作品の行の話数の印（5.4.5）", () => {
     expect(item.description).not.toContain("話数");
   });
 
+  // 実機で見つかった不具合（2026-10-25 夜）：「話数の欠番9993件」と出た
+  test("確かめのために置いた第9998話・第9999話までの抜けは、欠番の印にしない", async () => {
+    const item = await itemFor([1, 2, 3, 4, 9998, 9999]);
+
+    expect(item.label).toBe("氷の街");
+    expect(item.tooltip?.value).not.toContain("話数の欠番");
+    expect(item.tooltip?.value).toContain("第9998話へ飛んでいます");
+  });
+
   test("連番なら印を出さない", async () => {
     const item = await itemFor([1, 2, 3]);
 

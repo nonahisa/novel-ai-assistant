@@ -217,8 +217,16 @@ function summarizeLabels(labels: readonly string[]): string {
 export interface WorkEpisodeNumberReport {
   /** 2つ以上のファイルが名乗っている話数（小さい順） */
   readonly duplicated: readonly number[];
-  /** 抜けている話数（いちばん小さい番号といちばん大きい番号のあいだ） */
+  /**
+   * 抜けている話数。**連番の並びの中の抜けだけ**——大きく飛んだ先までの
+   * 抜けは数えない（`jumps`）
+   */
   readonly missing: readonly number[];
+  /**
+   * 大きく飛んだところ（`from` の次が `to`）。欠番には数えず、印にも出さない。
+   * 作者が意図して離した番号（確かめ用の第9999話など）のことがあるため
+   */
+  readonly jumps: readonly { readonly from: number; readonly to: number }[];
   /** 話数の言い方（「第3話」「投稿3」）。作品の形式で変わる */
   readonly format?: WorkFormatKey;
 }
@@ -230,6 +238,20 @@ export interface WorkEpisodeNumberReport {
  * 一覧の描画が止まる。実在する作品の話数はこれに遠く届かない。
  */
 const MAX_COLLECTED_SPAN = 10000;
+
+/**
+ * 直前の話数からこれ以上先の番号は「飛んだ」とみなし、欠番に数えない。
+ *
+ * 確かめのために置いた第9998話・第9999話までの抜けを全部数え、
+ * 4話の作品に「話数の欠番9993件」と出た（実機、2026-10-25 夜）。
+ * 値は「予定の話を足す」の既定の話数で使う `OUTLYING_EPISODE_GAP`
+ * （`core/plotMode.ts`、作者の裁定 2026-09-26）と同じ 100 に揃える——
+ * ふつうの連載で番外編や欠番がそこまで離れることはまず無く、試験や仮置きの
+ * 番号（9999・1000）はそれより確実に遠い。同じ作品で「飛び離れた」の線が
+ * 機能ごとに違うと作者が戸惑う。plotMode を import しないのは、取り込みの
+ * 経路（`workZip.ts`）から本の設計図まで引き込まないため。
+ */
+const EPISODE_NUMBER_JUMP = 100;
 
 /**
  * 作品の話の並びから、話数の重複・欠番を見つける。
@@ -256,7 +278,7 @@ export function checkWorkEpisodeNumbers(
   >[],
   format?: WorkFormatKey
 ): WorkEpisodeNumberReport {
-  if (format === "memo") return { duplicated: [], missing: [], format };
+  if (format === "memo") return { duplicated: [], missing: [], jumps: [], format };
 
   const seen = new Map<number, number>();
   for (const episode of episodes) {
@@ -281,7 +303,35 @@ export function checkWorkEpisodeNumbers(
     .filter(([, count]) => count >= 2)
     .map(([number]) => number)
     .sort((a, b) => a - b);
-  return { duplicated, missing: missingNumbers(seen), format };
+  return { duplicated, ...missingWithinRuns(seen), format };
+}
+
+/**
+ * 連番の並びの中の抜けだけを拾う。
+ *
+ * 直前の話数から `EPISODE_NUMBER_JUMP` 以上先の番号では並びを切り、
+ * そのあいだは欠番に数えない（`jumps` へ）。切った先でも並びは続くので、
+ * 第9997話と第9999話のあいだの第9998話は欠番に数える。
+ *
+ * 抜けを1つずつ数えるのは切らなかった隙間だけなので、番号がどれだけ
+ * 離れていても仕事の量は話の数に比例する程度で収まる。
+ */
+function missingWithinRuns(
+  seen: ReadonlyMap<number, unknown>
+): Pick<WorkEpisodeNumberReport, "missing" | "jumps"> {
+  const numbers = [...seen.keys()].sort((a, b) => a - b);
+  const missing: number[] = [];
+  const jumps: { from: number; to: number }[] = [];
+  for (let i = 1; i < numbers.length; i++) {
+    const from = numbers[i - 1];
+    const to = numbers[i];
+    if (to - from >= EPISODE_NUMBER_JUMP) {
+      jumps.push({ from, to });
+      continue;
+    }
+    for (let number = from + 1; number < to; number++) missing.push(number);
+  }
+  return { missing, jumps };
 }
 
 /**
@@ -322,6 +372,17 @@ export function describeWorkEpisodeNumbers(
         // 下書き・非公開で番号は普通に飛ぶ。**知らせるだけ**で、直せとは言わない
         "（下書きや非公開の話があると番号は飛びます。名前の付け直しで抜けていないか確かめてください）"
     );
+  }
+  // 飛びは印に出さない（意図して離した番号のことがある）。ホバーで欠番に
+  // 数えなかったことだけ言い、名前の付け直しの誤りなら作者が気づけるようにする
+  const jumps = report.jumps;
+  for (const jump of jumps.slice(0, 3)) {
+    lines.push(
+      `- ${label(jump.from)}のあと${label(jump.to)}へ飛んでいます（欠番には数えていません）`
+    );
+  }
+  if (jumps.length > 3) {
+    lines.push(`- ほかに${jumps.length - 3}か所、番号が大きく飛んでいます（欠番には数えていません）`);
   }
   return lines;
 }
