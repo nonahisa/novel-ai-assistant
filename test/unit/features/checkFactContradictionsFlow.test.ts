@@ -71,6 +71,21 @@ const state = vi.hoisted(() => ({
   memory: new Map<string, unknown>(),
   /** 次の抽出の呼び出しを、この回数だけレート上限（429・待ち10ms）で弾く */
   rateLimitedCalls: 0,
+  /** 次の判定の呼び出しを、この回数だけレート上限（429・待ち60秒）で弾く */
+  verifyRateLimitedCalls: 0,
+  /** 判定の呼び出し回数（弾いた回も数える） */
+  verifyCalls: 0,
+  /** 待ちに入った長さ（ミリ秒）。実際には待たない */
+  sleeps: [] as number[],
+}));
+
+// 待ちは実際には待たない（長さだけ控える）。中止の信号はそのまま返す
+vi.mock("../../../src/features/rateLimitRetry", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  sleepUnlessAborted: vi.fn(async (ms: number, signal: AbortSignal) => {
+    state.sleeps.push(ms);
+    return !signal.aborted;
+  }),
 }));
 
 vi.mock("../../../src/ai/registry", () => ({
@@ -99,6 +114,13 @@ vi.mock("../../../src/ai/registry", () => ({
           if (name === "story_fact_extract" && state.rateLimitedCalls > 0) {
             state.rateLimitedCalls--;
             throw new AIError("上限", "rate_limited", "", 10);
+          }
+          if (name === "fact_contradiction_verify") {
+            state.verifyCalls++;
+            if (state.verifyRateLimitedCalls > 0) {
+              state.verifyRateLimitedCalls--;
+              throw new AIError("上限", "rate_limited", "", 60_000);
+            }
           }
           state.sent.push({ feature: name, userPrompt: request.userPrompt });
           let text = state.extractResponse;
@@ -314,6 +336,9 @@ beforeEach(() => {
   state.realCache = false;
   state.memory = new Map();
   state.rateLimitedCalls = 0;
+  state.verifyRateLimitedCalls = 0;
+  state.verifyCalls = 0;
+  state.sleeps = [];
   state.extractResponse = TWO_FACTS;
   state.verifyResponse = JSON.stringify({
     verdict: "採用",
@@ -383,6 +408,20 @@ describe("端から端まで", () => {
 
     expect(result?.acceptedFacts).toBe(2);
     expect(result?.issues).toHaveLength(1);
+  });
+
+  test("判定がレート上限（429・待ち時間つき）で弾かれても、待ってから送り直し、2回目の答えで判定される", async () => {
+    // 2026-10-26、さくらの Kimi。判定が素の呼び出しだったので、429 が
+    // 「判定できませんでした」のまま画面に残った（誤検出7件のうち6件）
+    state.verifyRateLimitedCalls = 1;
+
+    const result = await checkFactContradictions(work, registry());
+
+    expect(state.verifyCalls).toBe(2);
+    expect(state.sleeps).toEqual([61_000]);
+    expect(result?.issues).toHaveLength(1);
+    expect(result?.issues[0].note).toContain("両立しない");
+    expect(result?.verifyNote ?? "").not.toContain("判定できません");
   });
 
   test("抽出と判定で、別々の割当を引く", async () => {

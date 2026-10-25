@@ -42,6 +42,7 @@ import {
   rateLimitGiveUpNote,
   rateLimitWaitHooks,
   sleepUnlessAborted,
+  type RateLimitRetryHooks,
 } from "./rateLimitRetry";
 import {
   buildFutureFacts,
@@ -1286,7 +1287,19 @@ export async function checkContradictions(
               // 提案パネルにも同じ進みを出す（本文を読む段とは別の札で）
               options.onVerifyProgress?.(done, found.length);
 
-              const outcome = await verify(entry.issue, entry.chunk, entry, controller);
+              const outcome = await verify(
+                entry.issue,
+                entry.chunk,
+                entry,
+                controller,
+                // 待つあいだの表示は確かめの段の進み（何件目か）で出す
+                rateLimitWaitHooks({
+                  sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
+                  report: (message) => progress.report({ message }),
+                  log: log.step,
+                  position: () => `${done}/${found.length}`,
+                })
+              );
               if (outcome.undecided) verifyUndecided++;
               // あとの話から来た台詞が「発言者の誤り」で取り下げられたら、消さずに
               // 確信度 low で残す（2026-10-19。判断は core の1か所）
@@ -1786,7 +1799,8 @@ export async function checkContradictions(
     issue: AcceptedContradiction,
     chunk: Chunk,
     origin: VerifyOrigin,
-    controller: AbortController
+    controller: AbortController,
+    waitHooks: RateLimitRetryHooks
   ): Promise<VerifyOutcome> {
     const key = verifyCacheKey(issue, chunk, origin);
     const verifyKeyBase = verifyKeyBases[origin.source];
@@ -1798,7 +1812,18 @@ export async function checkContradictions(
     }
 
     try {
-      const response = await provider.generate({
+      /*
+        **確かめの段も、レート上限は示された時間だけ待って同じ1件を送り直す**
+        （2026-10-26、さくらの Kimi）。素の呼び出しだったので、429 が
+        「検証できませんでした」のまま画面に残った（誤検出7件のうち6件）。
+        待ちの状態は検出の段と同じものを使う——合計の上限は「最後に通ってから」
+        数えるので、段をまたいでも通っているあいだは諦めない。
+        送った回数・字数（sentCalls・sentChars）は、確認で示す量に確かめの段を
+        含めていないので、ここでも数えない（送り直しで数を増やさないのも検出の段と同じ）
+      */
+      const response = await callWithRateLimitWait(
+        () =>
+          provider.generate({
         systemPrompt: CONTRADICTION_VERIFY_SYSTEM_PROMPT,
         // 組み立ては MCP と同じ関数（`core/contradictionAssembly.ts`）
         userPrompt: buildContradictionVerifyUserPrompt({
@@ -1827,7 +1852,10 @@ export async function checkContradictions(
         // 指摘1件ごとに1回呼ぶ。**件数が多いと、本体より重くなりうる**ので
         // 別の機能名で数える
         meta: { feature: "contradiction_verify", workFolder: work.folderPath },
-      });
+          }),
+        rateLimit,
+        waitHooks
+      );
 
       if (response.truncated || !response.text.trim()) {
         return undecidedOutcome("応答が切り詰められました");
