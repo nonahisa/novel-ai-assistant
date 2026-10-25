@@ -526,3 +526,125 @@ describe("作品設定", () => {
     }
   });
 });
+
+describe("使った作品にだけ足す除外の行（作者の裁定、2026-10-25 夜）", () => {
+  /*
+    0.111.16 で IME の語の読みの控え（`.aiwriter/imeWordReadings.json`）を
+    起動時の一括の追記へ入れたところ、**起動のたびに全作品の .gitignore へ
+    1行が足され**、作品一覧が全作品「記録待ち1」になった。
+    裁定は「使った作品だけに足す」——控えを初めて書くときに足す。
+  */
+  const RULE = ".aiwriter/imeWordReadings.json";
+
+  /** 本物の置き場に読み書きする作り物（無いファイルは FileNotFound） */
+  function hostFs(): void {
+    workspace.fs = {
+      stat: async () => ({ type: FileType.Directory }),
+      readFile: async (uri: { fsPath: string }) => {
+        try {
+          return new Uint8Array(await readHostFile(uri.fsPath));
+        } catch {
+          throw new FileSystemError(uri.fsPath, "FileNotFound");
+        }
+      },
+      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        await writeHostFile(uri.fsPath, bytes);
+      },
+      rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
+        const { rename: renameHost } = await import("node:fs/promises");
+        await renameHost(from.fsPath, to.fsPath);
+      },
+      delete: async (uri: { fsPath: string }) => {
+        await rm(uri.fsPath, { force: true });
+      },
+    };
+  }
+
+  test("起動の整備では足さない", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "novelai-on-use-startup-"));
+    try {
+      const gitignorePath = path.join(root, ".gitignore");
+      await writeHostFile(gitignorePath, "# 作者のメモ\n");
+      hostFs();
+      const registered = {
+        id: "work_on_use",
+        title: "使っていない作品",
+        folderPath: root,
+        registeredAt: "2026-10-25T00:00:00.000Z",
+      };
+      const context = {
+        globalState: {
+          get: <T>(_key: string, _defaultValue: T): T => [registered] as T,
+          update: vi.fn(async () => undefined),
+        },
+      };
+      await new workRegistry.WorkRegistry(context as never).maintainWorks();
+
+      const text = await readHostFile(gitignorePath, "utf8");
+      expect(text).toContain(".novelai-recovery/");
+      expect(text).not.toContain(RULE);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("無ければ、作者の記述と改行の形を保ったまま末尾へ1行足す（2度呼んでも1行）", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "novelai-on-use-append-"));
+    try {
+      const gitignorePath = path.join(root, ".gitignore");
+      // 末尾に改行が無い・CRLF の作者のファイル
+      const authorBytes = new TextEncoder().encode("# 作者の設定\r\nprivate-notes/");
+      await writeHostFile(gitignorePath, authorBytes);
+      hostFs();
+
+      await workRegistry.ensureOnUseIgnoreRule(root, RULE);
+      await workRegistry.ensureOnUseIgnoreRule(root, RULE);
+
+      const after = new Uint8Array(await readHostFile(gitignorePath));
+      expect(after.slice(0, authorBytes.length)).toEqual(authorBytes);
+      expect(new TextDecoder().decode(after)).toBe(
+        `# 作者の設定\r\nprivate-notes/\r\n${RULE}\r\n`
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("既にあれば何もしない（前後の空白があっても）", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "novelai-on-use-present-"));
+    try {
+      const gitignorePath = path.join(root, ".gitignore");
+      const original = `# メモ\n  ${RULE}  \nprivate/\n`;
+      await writeHostFile(gitignorePath, original);
+      hostFs();
+
+      await workRegistry.ensureOnUseIgnoreRule(root, RULE);
+
+      expect(await readHostFile(gitignorePath, "utf8")).toBe(original);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test(".gitignore が無ければ、その1行だけで作る", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "novelai-on-use-create-"));
+    try {
+      hostFs();
+
+      await workRegistry.ensureOnUseIgnoreRule(root, RULE);
+
+      expect(await readHostFile(path.join(root, ".gitignore"), "utf8")).toBe(
+        `${RULE}\n`
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("一括の行の一覧には無い行しか受け付けない", async () => {
+    // 一括の行をここから足すと、起動の整備と二重の道になる
+    await expect(
+      workRegistry.ensureOnUseIgnoreRule("/nowhere", ".aiwriter/cache/")
+    ).rejects.toThrow();
+  });
+});
