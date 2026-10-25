@@ -21,7 +21,7 @@ import type { WorkFormatKey } from "./workFormat";
  *
  * 1. **ファイル名の別の形**——規則（先頭が番号）に合わない名前のうち、
  *    `再会（第三話）`・`【第3話】再会`・`第3話「再会」`・`題_3話`・`#3_題`・
- *    `題_ep3` のように、話数の印が付いたもの
+ *    `題_ep3`・`エピソード32` のように、話数の印が付いたもの
  * 2. **頭書きの題**——投稿サイトのダウンロードやバックアップの
  *    【タイトル】【エピソードタイトル】（`１話　転生`・`第12話 再会`）
  * 3. **本文の最初の見出し**——本文（頭書きを除いた部分）の最初の空でない行が
@@ -90,6 +90,18 @@ const NAME_HASH = /(?<![0-9A-Za-z])[#＃]\s*([0-9]+)(?![0-9])/gu;
  * 既に読んでいるので、ここに来るのは途中にあるものだけ
  */
 const NAME_EP = /(?<![A-Za-z])(?:ep|episode)\.?\s*[_-]?\s*([0-9]+)(?![0-9])/giu;
+/**
+ * ファイル名の「エピソード32」「エピソード 32」（全角数字は先に半角へ揃えてある）。
+ * 作者の作品（コールドスリープ）が `エピソード32.txt` の形で名付けており、
+ * 英語の ep と同じく話数の名乗りとして読む（母艦の実データの確認、2026-10-25）。
+ *
+ * **後ろは「話」と同じ線引き**（`エピソード3の構想` を読まない）。範囲
+ * （`エピソード3〜4`）も、後ろに区切りでない字が続くので読まない
+ */
+const NAME_EPISODE_KANA = new RegExp(
+  `エピソード[\\s_\\-]*([0-9]+)${AFTER_WA}`,
+  "gu"
+);
 
 /**
  * 1行の見出しの先頭にある話数。`第三話　旅立ち`・`## 第3話`・`【第3話】再会`・
@@ -212,7 +224,13 @@ function fileNameCandidates(base: string): {
 } {
   const candidates: Candidate[] = [];
   let rest = base;
-  for (const pattern of [NAME_WITH_DAI, NAME_WITHOUT_DAI, NAME_HASH, NAME_EP]) {
+  for (const pattern of [
+    NAME_WITH_DAI,
+    NAME_WITHOUT_DAI,
+    NAME_HASH,
+    NAME_EP,
+    NAME_EPISODE_KANA,
+  ]) {
     for (const match of base.matchAll(pattern)) {
       const chapter = positiveChapter(match[1]);
       if (chapter === null) continue;

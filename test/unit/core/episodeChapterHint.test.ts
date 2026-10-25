@@ -32,6 +32,10 @@ describe("補う（見逃さない）", () => {
     ["再会＃12.txt", 12],
     ["再会_ep3.txt", 3],
     ["再会 episode 4.txt", 4],
+    // 作者の作品（コールドスリープ）の名付け。カタカナ＋半角・全角・空白つき
+    ["エピソード32.txt", 32],
+    ["エピソード３３.txt", 33],
+    ["エピソード 34_目覚め.txt", 34],
   ])("ファイル名 %s → 第%i話", (fileName, chapter) => {
     expect(parseEpisodeFileName(fileName).kind, "規則では読めない名前であること").toBe("不明");
     expect(chapterOf({ fileName })).toBe(chapter);
@@ -88,6 +92,13 @@ describe("補わない（誤って補わない）", () => {
     ["再会_第3〜4話.txt"],
     // 英単語の一部の ep
     ["手順_step3.txt"],
+    // カタカナの「エピソード」も ep と同じ線引き（後ろが区切りでない・範囲・数字なし）
+    ["エピソード3の構想.txt"],
+    ["エピソード3〜4.txt"],
+    ["エピソード集.txt"],
+    // 投稿サイトの作品番号・作品情報は話数ではない（母艦の実データの確認）
+    ["N5078JI.txt"],
+    ["about.txt"],
   ])("ファイル名 %s は補わない", (fileName) => {
     expect(parseEpisodeFileName(fileName).kind).toBe("不明");
     expect(chapterOf({ fileName })).toBeNull();
