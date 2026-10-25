@@ -289,6 +289,7 @@ export interface Character {
    * （`withOptionalAliasReadings`）
    */
   aliasReadings?: AliasReadings;
+  /** 外部ツールが書いた値を落とさず持つだけ。画面と書き出しには出さない（作者の裁定 2026-10-25） */
   romaji: string | null;
   icon: string | null;
   iconSource: "external" | "generated" | "none";
