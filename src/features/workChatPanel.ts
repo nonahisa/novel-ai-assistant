@@ -2126,6 +2126,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           .reduce((sum, block) => sum + block.length, 0);
       // 診断の3つ（助言方針・執筆スタイル・読者タイプ）はシステムプロンプト
       // 側に足している。どれも診断していなければ素のプロンプトなので0になる
+      // ——ただし「読者としての好み」に答えていない作者には、推し量る頼みの
+      // 一段（設計書6.101）が乗るので、そのぶんはここに数えられる
       // 引く相手は、この回に組んだ素のプロンプト。使い方の節を外した回に
       // 全部入りの長さを引くと、方針のぶんが打ち消されて0に見える
       const policyChars = Math.max(
