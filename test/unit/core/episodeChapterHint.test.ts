@@ -125,6 +125,15 @@ describe("補わない（誤って補わない）", () => {
     expect(chapterOf({ fileName: "続き.txt", body: "　朝が来た。\n第3話\n" })).toBeNull();
   });
 
+  test("創作メモ集では補わない（メモは話ではない）", () => {
+    // 同じ名前でも、形式が分からない作品・小説では補う（線引きが形式だけであること）
+    expect(chapterOf({ fileName: "第三話 構想メモ.md" })).toBe(3);
+    expect(chapterOf({ fileName: "第三話 構想メモ.md", format: "memo" })).toBeNull();
+    expect(
+      inferChapterHint({ fileName: "構想.md", body: "第3話　再会", format: "memo" })
+    ).toBeNull();
+  });
+
   test("話数0は補わない", () => {
     expect(chapterOf({ fileName: "第〇話.txt" })).toBeNull();
     expect(chapterOf({ fileName: "続き.txt", body: "第0話　序" })).toBeNull();

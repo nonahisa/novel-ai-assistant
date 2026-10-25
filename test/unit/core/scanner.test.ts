@@ -960,6 +960,34 @@ describe("話数の補い（走査）", () => {
     expect(numbered?.chapterHint).toBeUndefined();
   });
 
+  test("創作メモ集（プロットの形式）では、要素があっても補わない", async () => {
+    // 形式の読みは作品ごとに覚えるので、ほかの試験と別の作品にする
+    const memoWork: WorkEntry = { ...work, id: "work_memo" };
+    workspace.fs = {
+      readFile: vi.fn(async (uri: { fsPath: string }) => {
+        if (uri.fsPath.endsWith("plot.md")) {
+          return new TextEncoder().encode("# プロット\n\n## 形式\n創作メモ集\n");
+        }
+        if (uri.fsPath.endsWith(".json")) {
+          throw new FileSystemError("設定なし", "FileNotFound");
+        }
+        return new TextEncoder().encode("第三話　旅立ち\n本文");
+      }),
+      stat: vi.fn(async () => {
+        throw new FileSystemError("本文なし", "FileNotFound");
+      }),
+      readDirectory: vi.fn(async () => [["第三話 構想メモ.md", FileType.File]]),
+    };
+
+    const result = await scanWork(memoWork);
+
+    const memo = result.episodes[0];
+    expect(memo.fileName).toBe("第三話 構想メモ.md");
+    expect(memo.kind).toBe("不明");
+    expect(memo.chapterStart).toBeNull();
+    expect(memo.chapterHint).toBeUndefined();
+  });
+
   test("要素の無い話・食い違う話は「不明」のまま", async () => {
     const result = await scanFixture();
     const byName = new Map(result.episodes.map((episode) => [episode.fileName, episode]));

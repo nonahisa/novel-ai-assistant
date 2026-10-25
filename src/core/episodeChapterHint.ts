@@ -4,6 +4,7 @@ import * as path from "./pathText";
 import { parseEpisodeFileName, toHalfWidthDigits } from "./episodeParser";
 import { toChapterNumber } from "./chapterCitations";
 import type { ChapterHintNote } from "../models/types";
+import type { WorkFormatKey } from "./workFormat";
 
 /**
  * ファイル名の規則（`parseEpisodeFileName`）で話数が読めなかった原稿に、
@@ -121,7 +122,15 @@ export function inferChapterHint(input: {
   readonly fileName: string;
   readonly metaTitle?: string | null;
   readonly body?: string | null;
+  /** 作品の形式（プロットの `## 形式`）。分からなければ省く */
+  readonly format?: WorkFormatKey;
 }): ChapterHintResult | null {
+  /*
+    **創作メモ集には補いを掛けない**（母艦の裁定、2026-10-25）。メモは話では
+    ないので、`第三話 構想メモ.md` から「メモ3」を作ると、話でないものに
+    話数を付けることになる。番号の無いメモが普通の形式でもある（設計書6.70）
+  */
+  if (input.format === "memo") return null;
   // 既存の規則で読めたもの（日付・番号・プロローグなど）は1つも変えない
   if (parseEpisodeFileName(input.fileName).kind !== "不明") return null;
 

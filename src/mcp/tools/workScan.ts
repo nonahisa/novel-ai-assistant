@@ -19,7 +19,15 @@ import {
   prerequisiteReasons,
   type EpisodePlotEntry,
 } from "./prerequisiteState";
-import { FOLDER_INPUT, bodyDirOf, listBodyFiles, readBody } from "./shared";
+import {
+  FOLDER_INPUT,
+  bodyDirOf,
+  listBodyFiles,
+  readBody,
+  readPlotMarkdown,
+} from "./shared";
+import { parsePlotMarkdown } from "../../core/plotDoc";
+import { matchWorkFormat, type WorkFormatKey } from "../../core/workFormat";
 
 /**
  * 作品フォルダーを走査する（設計書6.87.8 の4）。**読むだけ。**
@@ -93,6 +101,8 @@ export function workScan(input: { folder: string }): WorkScanResult {
   const episodes: ScannedEpisode[] = [];
   const skipped: Array<{ filePath: string; reason: string }> = [];
   const workInfoFiles: string[] = [];
+  /** 作品の形式。`null` はまだ読んでいない（補いの要る話が出たときだけ読む） */
+  let format: WorkFormatKey | undefined | null = null;
 
   for (const relative of files) {
     let text: string;
@@ -139,9 +149,16 @@ export function workScan(input: { folder: string }): WorkScanResult {
     if (!meta.body.trim()) continue;
     // **製品の走査（`scanner.ts`）と同じ補いを通す**（設計書6.2）。
     // 揃えないと、一覧には第3話と出る話が外からは話数 null に見える
+    // 創作メモ集では補わない（製品の走査と同じ。形式はプロットから1回だけ読む）
+    if (parsed.kind === "不明" && format === null) format = workFormatOf(input.folder);
     const hint =
       parsed.kind === "不明"
-        ? inferChapterHint({ fileName, metaTitle: meta.title, body: meta.body })
+        ? inferChapterHint({
+            fileName,
+            metaTitle: meta.title,
+            body: meta.body,
+            format: format ?? undefined,
+          })
         : null;
     const inferred = hint?.status === "inferred" ? hint : null;
     episodes.push({
@@ -170,6 +187,21 @@ export function workScan(input: { folder: string }): WorkScanResult {
     ),
     episodePlots: readEpisodePlotEntries(input.folder),
   };
+}
+
+/**
+ * 作品の形式（プロットの `## 形式`）。プロットが無い・読めなければ undefined
+ * （走査ぜんたいは止めない。`announce.ts` の `workFormatOf` と同じ読み方）
+ */
+function workFormatOf(folder: string): WorkFormatKey | undefined {
+  try {
+    const plot = readPlotMarkdown(folder);
+    return plot === undefined
+      ? undefined
+      : matchWorkFormat(parsePlotMarkdown(plot).sections.format);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

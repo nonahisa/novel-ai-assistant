@@ -14,6 +14,8 @@ import {
   toChapterHintNote,
   type ChapterHintResult,
 } from "./episodeChapterHint";
+import { readWorkFormat } from "./workFormatStore";
+import type { WorkFormatKey } from "./workFormat";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { isWorkInfoFile } from "./workInfoFile";
@@ -228,6 +230,14 @@ export async function scanWork(work: WorkEntry): Promise<{
     }
   };
 
+  /**
+   * 作品の形式（設計書6.4.5）。**補いの要る話が無ければ読まない**——
+   * 番号で名付けた作品（ほとんど）では、プロットを1回余計に読むことになる
+   */
+  let formatRead: Promise<WorkFormatKey | undefined> | undefined;
+  const formatOnce = (): Promise<WorkFormatKey | undefined> =>
+    (formatRead ??= readWorkFormat(work));
+
   for (const file of files) {
     const fileStartedAt = performance.now();
     const filePath = file.path;
@@ -312,6 +322,9 @@ export async function scanWork(work: WorkEntry): Promise<{
           fileName,
           metaTitle: parsedMeta.title,
           body: parsedMeta.body,
+          // 創作メモ集では補わない。形式はプロットに書いてあるので、
+          // 補いの要る話が出たときに初めて読む（読みは作品ごとに覚えてある）
+          format: await formatOnce(),
         });
       }
 
