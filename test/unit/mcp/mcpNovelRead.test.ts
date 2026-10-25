@@ -532,8 +532,8 @@ describe("novel.read——執筆量（writingStats）", () => {
 });
 
 /**
- * 投稿サイト用に変換した本文と題（棚卸しの8件目。2026-10-16）。製品の［投稿サイト用に
- * 変換してコピー］と同じ変換。**投稿はしない**（貼る文を返すだけ）。
+ * 投稿サイト用に変換した本文と題（棚卸しの8件目。2026-10-16）。製品の
+ * ［コピー（投稿サイト用）］と同じ変換。**投稿はしない**（貼る文を返すだけ）。
  */
 describe("novel.read——投稿サイト用（posting）", () => {
   function postingOf(input: Omit<Parameters<typeof novelRead>[0], "kind">) {

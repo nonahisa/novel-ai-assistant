@@ -971,7 +971,7 @@ export class OllamaProvider implements AIProvider {
   }
 
   /**
-   * `/api/chat` を**流しながら**受け取る（設計書6.63.1。開発ビルド限定）。
+   * `/api/chat` を**流しながら**受け取る（設計書6.63.1。0.42.0 から配布版でも通る。設定 `novelai.ollama.streaming` で切れる）。
    *
    * 受け取った断片を `ollamaStream.ts` が組み立て、`stream:false` の
    * 応答と同じ形（`ChatResponse`）にして返す。**呼ぶ側は違いを知らない。**

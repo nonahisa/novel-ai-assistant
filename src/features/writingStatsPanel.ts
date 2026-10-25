@@ -439,7 +439,7 @@ export async function readSiteRecords(
     const detail = error instanceof Error ? error.message : String(error);
     // **記録の直前に書き先を向ける**（0.43.3 と同じ）
     useLogFile(work.folderPath);
-    logFailure("執筆量パネルのサイトの記録の読み込み", {
+    logFailure("執筆統計のサイトの記録の読み込み", {
       作品: work.title,
       内容: detail,
     });

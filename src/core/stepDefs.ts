@@ -113,7 +113,7 @@ export const STEP_DEFS: readonly StepDef[] = [
         label: "執筆の場",
         icon: "book",
         commands: [
-          // **先頭は「執筆を再開」**（設計書6.36.4）。
+          // **先頭は「再開用資料」**（設計書6.36.4）。
           // 続きを書く日に最初に押すもので、AIを呼ばずにその場で出る
           "novelai.resumeWriting",
           "novelai.createEpisodePlot",

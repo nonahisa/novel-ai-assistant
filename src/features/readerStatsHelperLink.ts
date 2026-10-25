@@ -248,7 +248,7 @@ export class ReaderStatsHelperLink {
 
     const pool = pick.kind === "one" ? [pick.id] : pick.ids;
     if (trigger === "focus") {
-      // **もう取り込んであれば訊かない**（「貼り付けて取り込む」で入れたあと、など）
+      // **もう取り込んであれば訊かない**（「読者反応自動取込」で入れたあと、など）
       const already = candidates.some(
         (candidate) =>
           pool.includes(candidate.id) &&
@@ -287,7 +287,7 @@ export class ReaderStatsHelperLink {
   /**
    * まとめて渡された読者の反応（ヘルパー 0.9.0 の「まとめて渡す」）。
    *
-   * 取り込みそのものは `importReaderStatsBundle`（「貼り付けて取り込む」で
+   * 取り込みそのものは `importReaderStatsBundle`（「読者反応自動取込」で
    * 束を貼ったときと同じ）。ここが足すのは、窓に戻ったときに**訊くかどうか**だけ：
    * 作品の決まる画面のうち、まだ取り込んでいないものが1つも無ければ訊かない
    * （1件のときの「照合できる作品が無い」「もう取り込んである」と同じ）。

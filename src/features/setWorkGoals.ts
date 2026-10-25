@@ -90,7 +90,7 @@ export async function setWorkGoals(
           ? `${asOfLabel(goals.contest.imported.importedAt)}です。募集は変わることがあるので、` +
             "応募の前に募集要項で確かめてください。ここで締切・文字量・日間目標を直せます。"
           : "締切日・作品の文字量・日間目標を入れると、" +
-            "執筆量パネルに「あと何日・あと何字・1日あたり何字」が出ます。",
+            "執筆統計に「あと何日・あと何字・1日あたり何字」が出ます。",
         action: "contest" as const,
       },
       ...(contestUrl

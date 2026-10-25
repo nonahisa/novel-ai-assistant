@@ -82,7 +82,7 @@ function narouInspection(episodes: EpisodeSpec[] = EPISODES) {
   );
 }
 
-/** 分け済みの話ごとのファイル（「合本を話ごとに分ける」の形。区切り行が残る） */
+/** 分け済みの話ごとのファイル（「話ごとのファイルに分ける」の形。区切り行が残る） */
 function splitSources(episodes: EpisodeSpec[]): LocalManuscriptSource[] {
   return episodes.map((spec) => ({
     relPath: `本文/${String(spec.n).padStart(4, "0")}.txt`,
@@ -158,7 +158,7 @@ describe("章", () => {
       insideCollected: 1,
       missing: 0,
     });
-    expect(describeMergePlan(result).join("\n")).toContain("合本を話ごとに分ける");
+    expect(describeMergePlan(result).join("\n")).toContain("話ごとのファイルに分ける");
   });
 
   it("始まりの話が手元に無い章があれば、1つも立てない", () => {

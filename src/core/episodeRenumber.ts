@@ -371,7 +371,7 @@ export function planRemoval(
     // 中の話数とは合わない（6.67.2の「合本は動かさない」と同じ理由）
     throw new Error(
       `「${fileName}」は複数の話がまとまったファイル（合本）です。` +
-        "話数を詰められないため、先に「合本を話ごとに分ける」をお試しください。"
+        "話数を詰められないため、先に「話ごとのファイルに分ける」をお試しください。"
     );
   }
   const number = episodeNumberOf(fileName);
@@ -433,7 +433,7 @@ function buildPlan(
         reason: "range",
         detail:
           "複数の話がまとまったファイル（合本）です。" +
-          "話数の付け替えでは動かしません。先に「合本を話ごとに分ける」をお試しください。",
+          "話数の付け替えでは動かしません。先に「話ごとのファイルに分ける」をお試しください。",
       });
       stationary.add(path.normalizeForComparison(episode.filePath));
       continue;

@@ -66,7 +66,7 @@ export async function insertEpisodeBefore(
     // 合本の中には何話も入っている。その前に1話足しても、中の話数とは合わない
     void vscode.window.showWarningMessage(
       `「${episode.fileName}」は複数の話がまとまったファイル（合本）です。` +
-        "先に「合本を話ごとに分ける」をお試しください。"
+        "先に「話ごとのファイルに分ける」をお試しください。"
     );
     return { changed: false };
   }

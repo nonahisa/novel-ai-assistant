@@ -399,7 +399,7 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
     parts.push(`登録しないことにした作品IDの分（${declined.length}画面）は取り込んでいません。`);
   }
   if (added > 0) {
-    parts.push("執筆量パネルの「サイトの記録」で履歴を見られます。");
+    parts.push("執筆統計の「サイトの記録」で履歴を見られます。");
   }
   return {
     level: outcome.failures.length > 0 ? "warning" : "info",

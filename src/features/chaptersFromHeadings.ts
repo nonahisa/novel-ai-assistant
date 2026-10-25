@@ -93,7 +93,7 @@ export async function chaptersFromHeadings(work: WorkEntry): Promise<boolean> {
     **合本の途中に見出しがあれば、1章も立てずに止める。**
 
     ここで合本の頭の章だけを立てると、台帳が空でなくなる。すると後で
-    「合本を話ごとに分ける」を押しても、「既に章がある」として残りの章が
+    「話ごとのファイルに分ける」を押しても、「既に章がある」として残りの章が
     立たない（案Aの守り）——作者が一番欲しい全部の章を、こちらが先回りして
     塞ぐことになる。分けるときに章はまとめて立つので、そちらへ案内する。
   */
@@ -101,7 +101,7 @@ export async function chaptersFromHeadings(work: WorkEntry): Promise<boolean> {
     void vscode.window.showInformationMessage(
       `合本の途中に章の見出しが${reading.insideCollected}個あります。` +
         "章はファイルからしか始められないため、ここでは立てません。" +
-        "先に合本を右クリックして「合本を話ごとに分ける」を選んでください（分けるときに章も立ちます）。"
+        "先に合本を右クリックして「話ごとのファイルに分ける」を選んでください（分けるときに章も立ちます）。"
     );
     return false;
   }

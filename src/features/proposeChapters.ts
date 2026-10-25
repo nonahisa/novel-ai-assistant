@@ -118,7 +118,7 @@ const CHAPTER_APPLY_LABEL = "章にする";
  */
 export const INSIDE_COLLECTED_REASON =
   "合本の途中には章の区切りを置けません。" +
-  "「合本を話ごとに分ける」で分割してから、もう一度お試しください。";
+  "「話ごとのファイルに分ける」で分割してから、もう一度お試しください。";
 
 export interface ProposeChaptersOptions {
   /**

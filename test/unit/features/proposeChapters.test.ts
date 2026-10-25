@@ -486,7 +486,7 @@ describe("合本の途中を境目にした提案", () => {
       insideCollected: true,
     });
     expect(lines.join("\n")).toContain("合本の途中には章の区切りを置けません");
-    expect(lines.join("\n")).toContain("合本を話ごとに分ける");
+    expect(lines.join("\n")).toContain("話ごとのファイルに分ける");
   });
 
   test("断りの文言は1か所だけが持つ（説明と適用で食い違わせない）", () => {

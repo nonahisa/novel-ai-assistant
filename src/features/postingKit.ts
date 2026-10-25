@@ -642,7 +642,7 @@ async function askSiteProfiles(
         label: "$(edit) 作品ID・作品ページ・ジャンルも入れる",
         detail:
           "サイトごとに3つ訊きます（どれも空のままで構いません）。" +
-          "執筆量パネルの「サイトの記録」に出ます",
+          "執筆統計の「サイトの記録」に出ます",
         detailed: true,
       },
     ],
@@ -731,7 +731,7 @@ async function askSiteProfiles(
       title: `${info.label} の作品ページのURL`,
       prompt:
         "読者が見る作品ページのURLを貼ってください（空のままで構いません）。" +
-        "執筆量パネルからここを開けるようになります",
+        "執筆統計からここを開けるようになります",
       // URL を新しい作品IDへ合わせたなら、作品ページの下書きもそちらから導く
       value:
         current?.workUrl ||
@@ -840,7 +840,7 @@ export async function recordRanking(
 
   void vscode.window.showInformationMessage(
     `${info.label} ${board} ${rank}位 を記録しました。` +
-      "執筆量パネルの「サイトの記録」で履歴を見られます。"
+      "執筆統計の「サイトの記録」で履歴を見られます。"
   );
   return { changed: true };
 }

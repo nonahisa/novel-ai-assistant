@@ -2299,8 +2299,9 @@ export async function activate(
       stepProvider.setExpanded(stepNodeKey(event.element), false);
     }
   });
-  // 見出しにも対象の作品名を出す（作者の依頼、2026-08-27）。
-  // 最上段の選択窓はスクロールで画面の外へ流れるが、見出しは常に見える
+  // 見出しの薄字には、下の操作が使えない状態の注意（未登録・未選択）だけを出す。
+  // 作品名は出さない（2026-08-27 に出したが、翌日に作者が撤回。最上段の
+  // 「選択作品：〜」の行が代わりを務める。`stepViewDescription` を参照）
   const updateStepViewDescription = (): void => {
     stepView.description = stepViewDescription(
       stepProvider.selectedWork(),
@@ -7543,7 +7544,7 @@ export async function activate(
     ヘルパーからの受け口（設計書6.79.7「ヘルパーからの受け口」）。ヘルパーが読者の反応を
     クリップボードへ置いて `vscode://…/import-reader-stats` を開く呼び出しと、
     VS Code に戻ったときの「取り込みますか」。**取り込み自体は上の
-    「貼り付けて取り込む」と同じ処理**（`importReaderStats`）を通る。
+    「読者反応自動取込」と同じ処理**（`importReaderStats`）を通る。
   */
   context.subscriptions.push(
     ...registerReaderStatsHelperLink(

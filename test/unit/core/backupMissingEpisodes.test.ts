@@ -69,7 +69,7 @@ describe("なろうの合本から、手元に無い話を切り出す", () => {
       number: 3,
       part: "学園",
       renamable: true,
-      // 手元の流儀が読めないときは「合本を話ごとに分ける」と同じ名前
+      // 手元の流儀が読めないときは「話ごとのファイルに分ける」と同じ名前
       defaultFileName: "episode_0003_第3の題.txt",
     });
     if (file.content.kind !== "text") throw new Error("文字列のはず");

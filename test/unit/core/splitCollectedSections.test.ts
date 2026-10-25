@@ -288,7 +288,7 @@ function diskPath(filePath: string): string {
   return Uri.file(filePath).fsPath;
 }
 
-describe("「合本を話ごとに分ける」で章が立つ", () => {
+describe("「話ごとのファイルに分ける」で章が立つ", () => {
   const disk = new Map<string, Uint8Array>();
   let confirmDetail = "";
   let confirmAnswer: string | undefined = "分ける";

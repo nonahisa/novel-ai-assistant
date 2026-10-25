@@ -328,7 +328,7 @@ describe("「話の見出しから章を立てる」", () => {
 
     expect(ledger()).toBeNull();
     expect(confirmMessage).toBe("");
-    expect(infoMessages.join("")).toContain("合本を話ごとに分ける");
+    expect(infoMessages.join("")).toContain("話ごとのファイルに分ける");
   });
 
   test("見出しの無い作品では、何も書かずに見つからないと言う", async () => {

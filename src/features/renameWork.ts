@@ -34,7 +34,7 @@ export async function renameWork(
   work: WorkEntry
 ): Promise<boolean> {
   const answer = await askText({
-    title: "作品名を変更",
+    title: "作品名変更",
     prompt: "この作品の呼び名を変えます。フォルダー名は変わりません",
     value: work.title,
     validateInput: (value) =>

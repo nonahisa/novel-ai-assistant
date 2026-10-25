@@ -804,7 +804,7 @@ function describeChapterPlan(plan: ChapterMergePlan): string {
     case "blocked": {
       const why = [
         plan.insideCollected > 0
-          ? `手元の合本の途中から始まる章が${plan.insideCollected}個あります（章はファイルの頭からしか始められません。先に「合本を話ごとに分ける」を使うと、そのとき章も立ちます）`
+          ? `手元の合本の途中から始まる章が${plan.insideCollected}個あります（章はファイルの頭からしか始められません。先に「話ごとのファイルに分ける」を使うと、そのとき章も立ちます）`
           : "",
         plan.missing > 0
           ? `始まりの話が手元に見当たらない章が${plan.missing}個あります`

@@ -2074,7 +2074,7 @@
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "markdownDescription": "1か月の目標字数。`0` で目標なし。\n\n・執筆量パネルに達成率\n・残りの日で1日あたり何字書けばよいか"
+          "markdownDescription": "1か月の目標字数。`0` で目標なし。\n\n・執筆統計に達成率\n・残りの日で1日あたり何字書けばよいか"
         },
         "novelai.schedule.notify": {
           "type": "boolean",

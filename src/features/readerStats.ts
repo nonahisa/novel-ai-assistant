@@ -283,7 +283,7 @@ export async function importReaderStats(
         (repeated > 0
           ? `（${repeated}件は、取り込み済みの数と同じだったので積んでいません）`
           : "") +
-        "。執筆量パネルの「サイトの記録」で履歴を見られます。"
+        "。執筆統計の「サイトの記録」で履歴を見られます。"
     )
   );
   return { changed: true };
@@ -729,7 +729,7 @@ export async function recordReaderStats(
 
   void vscode.window.showInformationMessage(
     `${info.label} の読者の反応を記録しました（${formatReaderStatsMetrics(metrics)}）。` +
-      "執筆量パネルの「サイトの記録」で履歴を見られます。"
+      "執筆統計の「サイトの記録」で履歴を見られます。"
   );
   return { changed: true };
 }
