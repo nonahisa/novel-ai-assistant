@@ -5,8 +5,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  *
  * 確かめるのは3つ——①無ければ空・壊れていたら直さずに投げる、②書く直前に
  * 読み直して、読んだときと違えば書かない、③照合で弾かれたら1度だけ読み直して
- * 足し直す（同じ作品を開いた別の窓の回数を押し流さない）。④同期から外して
- * ある（作者の裁定、2026-10-24 夜）。
+ * 足し直す（同じ作品を開いた別の窓の回数を押し流さない）。④同期から外す
+ * 行は、控えを初めて書く前にその作品の .gitignore へだけ足す（作者の裁定、
+ * 2026-10-24 夜「同期から外す」、2026-10-26「使った作品だけに足す」）。
  */
 
 /** 作り物のファイルの置き場（パス → 中身） */
@@ -36,12 +37,20 @@ vi.mock("../../../src/core/paths", () => ({
   toUri: (p: string) => ({ fsPath: p }),
 }));
 
+/** 書いた順の記録（.gitignore を足すのが控えより先かを見る） */
+const events: string[] = [];
+
 vi.mock("../../../src/core/workRegistry", () => ({
-  workPaths: () => ({ aiwriter: "/w/.aiwriter" }),
+  workPaths: () => ({ root: "/w", aiwriter: "/w/.aiwriter" }),
+  IME_READINGS_IGNORE_RULE: ".aiwriter/imeReadings.json",
+  ensureOnUseIgnoreRule: async (folder: string, rule: string) => {
+    events.push(`gitignore:${folder}:${rule}`);
+  },
 }));
 
 vi.mock("../../../src/core/atomicWrite", () => ({
   atomicWriteFile: async (target: string, bytes: Uint8Array) => {
+    events.push(`write:${target}`);
     files.set(target, new TextDecoder().decode(bytes));
   },
 }));
@@ -60,6 +69,28 @@ const FILE = "/w/.aiwriter/imeReadings.json";
 
 beforeEach(() => {
   files.clear();
+  events.length = 0;
+});
+
+describe("控えの同期外しは、使った作品にだけ足す（作者の裁定、2026-10-26）", () => {
+  /*
+    これまでは起動のたびに全作品の .gitignore へ足していた（`IGNORED_PATHS`）。
+    語の控え（imeWordReadings.json、0.111.18）と同じく、控えを初めて書く
+    作品にだけ足す
+  */
+  const GITIGNORE = "gitignore:/w:.aiwriter/imeReadings.json";
+
+  test("初めて控えを書くときは、書く前に .gitignore へ足す", async () => {
+    // 控え→.gitignore の順だと、間に同期が挟まると控えが Git に入りうる
+    await updateImeReadings(work, (file) => file);
+    expect(events).toEqual([GITIGNORE, `write:${FILE}`]);
+  });
+
+  test("控えが既にあれば .gitignore には触らない", async () => {
+    files.set(FILE, JSON.stringify({ version: 1, entries: [] }));
+    await updateImeReadings(work, (file) => file);
+    expect(events).toEqual([`write:${FILE}`]);
+  });
 });
 
 describe("IMEの読みの控え", () => {

@@ -846,17 +846,12 @@ export const IGNORED_PATHS: readonly string[] = [
   */
   ".aiwriter/ai-instruction-usage.json",
   /*
-    IMEで打った名前の読みの控え（設計書6.42.2。0.111.4）。**同期しない**
-    （作者の裁定、2026-10-24 夜「同期から外す」）——名前を確定するたびに
-    書くので、同期すると2台で食い違いやすく、変更の記録が出続ける。
-    設定資料の読み（`reading`）に入った分は、設定資料と一緒に同期される。
-  */
-  ".aiwriter/imeReadings.json",
-  /*
-    IMEで打った語の読みの提案の控え（`.aiwriter/imeWordReadings.json`）は
-    **ここへ入れない**（`ON_USE_IGNORED_PATHS`）。0.111.16 でここへ入れたら、
-    起動のたびに全作品の .gitignore へ1行が足され、作品一覧が全作品
-    「記録待ち1」になった（作者の裁定、2026-10-25 夜「使った作品だけに足す」）。
+    IMEで打った読みの控え（名前の `.aiwriter/imeReadings.json`、語の
+    `.aiwriter/imeWordReadings.json`）は**ここへ入れない**（`ON_USE_IGNORED_PATHS`）。
+    0.111.16 で語の控えをここへ入れたら、起動のたびに全作品の .gitignore へ
+    1行が足され、作品一覧が全作品「記録待ち1」になった（作者の裁定、
+    2026-10-25 夜「使った作品だけに足す」）。名前の控えも同じ形に揃えた
+    （作者の裁定、2026-10-26）。これまでの版で足された行は消さない。
   */
   /*
     MCP の登録（設計書6.87.15 柱5）。**同期しない**——登録には束
@@ -887,7 +882,17 @@ export const IGNORED_PATHS: readonly string[] = [
 export const IME_WORD_READINGS_IGNORE_RULE = ".aiwriter/imeWordReadings.json";
 
 /**
- * **使った作品にだけ足す**除外の行（作者の裁定、2026-10-25 夜）。
+ * IMEで打った名前の読みの控え（設計書6.42.2。0.111.4）。**同期しない**
+ * （作者の裁定、2026-10-24 夜「同期から外す」）——名前を確定するたびに
+ * 書くので、同期すると2台で食い違いやすく、変更の記録が出続ける。
+ * 設定資料の読み（`reading`）に入った分は、設定資料と一緒に同期される。
+ * 除外の行は、その作品で控えを初めて書く前に足す（作者の裁定、2026-10-26）。
+ */
+export const IME_READINGS_IGNORE_RULE = ".aiwriter/imeReadings.json";
+
+/**
+ * **使った作品にだけ足す**除外の行（作者の裁定、2026-10-25 夜。名前の控えは
+ * 2026-10-26 に揃えた）。
  *
  * `IGNORED_PATHS` は起動のたびに全作品の .gitignore へ足す。そこへ機能の控えを
  * 1つ足すと、**その機能を使っていない作品まで .gitignore が書き換わり**、
@@ -895,7 +900,10 @@ export const IME_WORD_READINGS_IGNORE_RULE = ".aiwriter/imeWordReadings.json";
  * 控えを初めて書く口が `ensureOnUseIgnoreRule` を呼んで、その作品にだけ足す。
  * 既に足された行は消さない（.gitignore は追記しかしない）。
  */
-export const ON_USE_IGNORED_PATHS: readonly string[] = [IME_WORD_READINGS_IGNORE_RULE];
+export const ON_USE_IGNORED_PATHS: readonly string[] = [
+  IME_READINGS_IGNORE_RULE,
+  IME_WORD_READINGS_IGNORE_RULE,
+];
 
 /** キャッシュの除外規則と、それを打ち消す規則（設計書5.5.7） */
 export const CACHE_IGNORE_RULE = ".aiwriter/cache/";
@@ -958,7 +966,8 @@ async function isWorkFolderPresent(folderPath: string): Promise<boolean> {
  * 承認待ちの更新案（`.aiwriter/pending-characters/`）と設定資料・IME辞書は
  * わざと除外しない。作者の判断待ちや読み物であり、別の環境でも見たいため。
  * （ここでの IME辞書は書き出した辞書のこと。IMEで打った読みの控え
- * `.aiwriter/imeReadings.json` は除外している。`IGNORED_PATHS` を参照）
+ * `.aiwriter/imeReadings.json` は除外しているが、足すのは控えを初めて書く
+ * ときで、ここではない。`ON_USE_IGNORED_PATHS` を参照）
  */
 async function ensureRecoveryIgnoreRule(
   folderPath: string,

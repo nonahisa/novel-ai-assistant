@@ -4,7 +4,11 @@ import type { WorkEntry } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
 import { hashText } from "./hash";
 import { isNotFound } from "./fileRead";
-import { workPaths } from "./workRegistry";
+import {
+  ensureOnUseIgnoreRule,
+  IME_READINGS_IGNORE_RULE,
+  workPaths,
+} from "./workRegistry";
 import { parseImeReadingFile, type ImeReadingFile } from "./imeReading";
 
 /**
@@ -12,8 +16,10 @@ import { parseImeReadingFile, type ImeReadingFile } from "./imeReading";
  *
  * ## 同期しない
  *
- * `IGNORED_PATHS`（`workRegistry.ts`）に入れてある（作者の裁定、2026-10-24 夜
- * 「同期から外す」）。名前を確定するたびに書くので、同期すると2台で食い違い
+ * 作者の裁定（2026-10-24 夜「同期から外す」）。除外の行は起動の一括
+ * （`IGNORED_PATHS`）ではなく、**初めて控えを書く前にその作品の .gitignore へ
+ * 足す**（`ON_USE_IGNORED_PATHS`。作者の裁定、2026-10-26。語の控えと揃えた）。
+ * 名前を確定するたびに書くので、同期すると2台で食い違い
  * やすく、変更の記録が出続ける。**設定資料の読み（`reading`）に入った分は、
  * 設定資料と一緒にこれまでどおり同期される**——別の機械へ届けたい読みは
  * そちらで届く。0.111.4 では同期していた（読みの辞書と同じ扱いだった）。
@@ -73,6 +79,14 @@ export async function saveImeReadings(
   const now = await readTextOrUndefined(target);
   const nowHash = now === undefined ? undefined : hashText(now);
   if (nowHash !== expectedHash) throw new ImeReadingsChangedError();
+  if (now === undefined) {
+    // **初めて書くときだけ、その作品の .gitignore へ足す**（作者の裁定、
+    // 2026-10-26。語の控えと同じ形）。起動の一括で足すと、IMEで名前を打って
+    // いない作品まで .gitignore が書き換わり、「記録待ち」が出る。
+    // **控えより先に足す**——逆の順だと、間に同期が挟まると控えが Git に入る。
+    // 足せなければ控えも書かずに投げる（同期に入る形で書くよりよい）
+    await ensureOnUseIgnoreRule(workPaths(work).root, IME_READINGS_IGNORE_RULE);
+  }
 
   const text = `${JSON.stringify(file, null, 2)}\n`;
   await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
