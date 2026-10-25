@@ -369,7 +369,10 @@ describe("設定資料と本文の自動合流：設定資料と、途中でや�
     expect(git(root, "branch", "--list", "backup/*").trim()).toBe("");
   });
 
-  test("選ぶ画面へ進まない指定でも、自動保存で記録が進んだら枝は残す", async () => {
+  test("選ぶ画面へ進まない指定でも、書きかけは自動保存の記録に残り、使わなかった枝は増やさない", async () => {
+    // 2026-10-25 夜の裁定で「記録 → 枝 → 合わせる」の順になった。枝は自動保存の
+    // 記録と同じ位置にできるので、やめて戻した直後は先頭と同じ位置にあり、消える。
+    // 書きかけは先頭の記録（合わせる前の自動保存）に入っているので失われない
     分岐を作る(
       [["短編/本文/第5話.txt", "もとの本文。\n"]],
       [["短編/本文/第5話.txt", "むこうの直し。\n"]],
@@ -384,10 +387,12 @@ describe("設定資料と本文の自動合流：設定資料と、途中でや�
     );
 
     expect(result.ok).toBe(false);
-    // 書きかけは記録されて残り、記録する前へ戻れる枝もある
     expect(
       fs.readFileSync(nodePath.join(root, "短編/本文/第9話.txt"), "utf8")
     ).toBe("書きかけ。\n");
-    expect(git(root, "branch", "--list", "backup/*")).toContain("backup/");
+    expect(git(root, "status", "--porcelain").trim()).toBe("");
+    expect(git(root, "log", "-1", "--format=%s")).toContain("合わせる前の自動保存");
+    expect(git(root, "show", "HEAD:短編/本文/第9話.txt")).toBe("書きかけ。\n");
+    expect(git(root, "branch", "--list", "backup/*").trim()).toBe("");
   });
 });

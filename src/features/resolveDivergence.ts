@@ -523,16 +523,8 @@ export async function foldDivergence(
     }
   }
 
-  report("そろえる前の控えを作っています…");
-  const backup = backupBranchName();
-  const branched = await run(["branch", backup], root, 15_000);
-  if (branched.code !== 0) {
-    return {
-      ok: false,
-      reason: `そろえる前の控えを作れませんでした: ${branched.stderr.trim()}`,
-    };
-  }
-
+  // **記録してから枝を作る**（作者の裁定、2026-10-25 夜）。枝を先に作ると、
+  // 枝は書きかけの無い状態を指し、枝から戻したときに書きかけが消えて見える
   report("未記録の変更を記録しています…");
   // 自動の経路では記録しない（上で、残っているのは統計だけだと確かめてある）
   const pending = options.automatic ? 0 : await countTrackableFiles(root, run);
@@ -555,6 +547,16 @@ export async function foldDivergence(
         reason: `記録できませんでした: ${committed.detail ?? ""}`,
       };
     }
+  }
+
+  report("そろえる前の控えを作っています…");
+  const backup = backupBranchName();
+  const branched = await run(["branch", backup], root, 15_000);
+  if (branched.code !== 0) {
+    return {
+      ok: false,
+      reason: `そろえる前の控えを作れませんでした: ${branched.stderr.trim()}`,
+    };
   }
 
   report("原稿の指紋を控えています…");
@@ -978,8 +980,9 @@ async function cleanAppendOnlyMarkers(
  * 枝が1本ずつ増えると、戻したいときにどれが本物か分からなくなる。
  *
  * **消すのは、先頭が枝と同じ位置のときだけ**（`branch -d` なので、先頭に
- * 含まれていない枝は git が消さない）。合わせる前の自動保存で記録が1つ
- * 進んでいるときは、記録する前へ戻れる枝として残す。
+ * 含まれていない枝は git が消さない）。枝は合わせる前の自動保存を記録した
+ * あとに作る（2026-10-25 夜）ので、合わせるのをやめて戻した直後は先頭と同じ
+ * 位置にあり、ここで消える。書きかけは先頭の記録に残っているので失われない。
  */
 async function dropUnusedBackup(
   root: string,

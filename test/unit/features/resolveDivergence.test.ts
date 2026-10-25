@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { git } from "../support/gitTemplate";
+import { runGit, type GitCommandRunner } from "../../../src/core/git";
 import {
   answers,
   shown,
@@ -109,6 +110,31 @@ describe("分かれた分を合わせる", { timeout: 30_000 }, () => {
     expect(fs.readFileSync(nodePath.join(root, "短編/本文/第3話.txt"), "utf8")).toBe(
       "書きかけ。\n"
     );
+  });
+
+  test("書きかけを記録してから退避の枝を作る（枝から戻しても書きかけが残る）", async () => {
+    // 作者の裁定（2026-10-25 夜、5.5-①）：記録 → 枝 → 合わせる、の順。
+    // 枝を先に作ると、枝は書きかけの無い状態を指し、枝から戻すと書きかけが消えて見える
+    pushFromOtherMachine([["短編/本文/第2話.txt", "つづき。\n"]]);
+    commitHere([["短編/本文/第1話.txt", "こちら。\n"]], "こちらで加筆");
+    write(root, "短編/本文/第3話.txt", "書きかけ。\n");
+
+    const calls: string[] = [];
+    const spy: GitCommandRunner = (args, cwd, timeoutMs, options) => {
+      calls.push(args[0]);
+      return runGit(args, cwd, timeoutMs, options);
+    };
+
+    answers.push("そろえる");
+    await resolveDivergence({ ...deps(), run: spy });
+
+    // git の呼び順：commit → branch → merge
+    const order = calls.filter((c) => c === "commit" || c === "branch" || c === "merge");
+    expect(order.slice(0, 3)).toEqual(["commit", "branch", "merge"]);
+    // 退避の枝にも書きかけが入っている
+    const backup = git(root, "branch", "--list", "backup/*").replace("*", "").trim();
+    expect(backup).toContain("backup/");
+    expect(git(root, "show", `${backup}:短編/本文/第3話.txt`)).toBe("書きかけ。\n");
   });
 
   test("同じ原稿が両方で書き換えられていたら、作者に選ばせる（設計書5.5.18）", async () => {
