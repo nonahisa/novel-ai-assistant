@@ -83,6 +83,48 @@ describe("話数の重複・欠番を、話の並びから見つける", () => {
     expect(report.duplicated).toEqual([]);
   });
 
+  // 実機で見つかった不具合（2026-10-25 夜）：確かめのために置いた第9998話・
+  // 第9999話までの抜けを全部数え、「話数の欠番9993件」と出た
+  it("大きく飛んだ番号（第4話→第9998話）は欠番に数えず、印も出さない", () => {
+    const report = checkWorkEpisodeNumbers([
+      ep(1), ep(2), ep(3), ep(4), ep(9998), ep(9999),
+    ]);
+    expect(report.missing).toEqual([]);
+    expect(report.jumps).toEqual([{ from: 4, to: 9998 }]);
+    expect(workEpisodeNumberMarks(report)).toEqual([]);
+  });
+
+  it("第17話から第9998話へ飛んでも、欠番に数えない", () => {
+    const numbers = Array.from({ length: 17 }, (_, i) => ep(i + 1));
+    const report = checkWorkEpisodeNumbers([...numbers, ep(9998), ep(9999)]);
+    expect(report.missing).toEqual([]);
+    expect(workEpisodeNumberMarks(report)).toEqual([]);
+  });
+
+  it("飛んだ先の並びの中の抜けは、欠番に数える", () => {
+    const report = checkWorkEpisodeNumbers([
+      ep(1), ep(2), ep(4), ep(9997), ep(9999),
+    ]);
+    expect(report.missing).toEqual([3, 9998]);
+    expect(report.jumps).toEqual([{ from: 4, to: 9997 }]);
+  });
+
+  it("99話先までは欠番、100話以上先なら飛びとみなす（境目。plotMode と同じ）", () => {
+    // 第1話→第100話：99話先 → 抜けの98件は欠番
+    expect(checkWorkEpisodeNumbers([ep(1), ep(100)]).missing).toHaveLength(98);
+    // 第1話→第101話：100話先 → 飛び
+    const far = checkWorkEpisodeNumbers([ep(1), ep(101)]);
+    expect(far.missing).toEqual([]);
+    expect(far.jumps).toEqual([{ from: 1, to: 101 }]);
+  });
+
+  it("第1・2・4話なら、欠番は第3話の1件のまま", () => {
+    const report = checkWorkEpisodeNumbers([ep(1), ep(2), ep(4)]);
+    expect(report.missing).toEqual([3]);
+    expect(report.jumps).toEqual([]);
+    expect(workEpisodeNumberMarks(report)).toEqual(["話数の欠番1件"]);
+  });
+
   it("創作メモ集では点検しない（番号が無い・飛ぶのが普通）", () => {
     const report = checkWorkEpisodeNumbers([ep(1), ep(1), ep(5)], "memo");
     expect(report.duplicated).toEqual([]);
@@ -104,6 +146,13 @@ describe("一覧の印とホバーの言葉", () => {
     const lines = describeWorkEpisodeNumbers(report).join("\n");
     expect(lines).toContain("第2話");
     expect(lines).toContain("第3話・第4話");
+  });
+
+  it("飛んだ番号は、欠番ではないとホバーに1行添える", () => {
+    const report = checkWorkEpisodeNumbers([ep(1), ep(2), ep(3), ep(4), ep(9998)]);
+    const lines = describeWorkEpisodeNumbers(report).join("\n");
+    expect(lines).toContain("第4話のあと第9998話へ飛んでいます（欠番には数えていません）");
+    expect(lines).not.toContain("話数の欠番");
   });
 
   it("多いときは頭だけ並べて件数を添える", () => {
