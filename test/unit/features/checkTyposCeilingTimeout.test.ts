@@ -25,7 +25,7 @@ const state = vi.hoisted(() => ({
   truncatedFlag: true,
   logged: [] as string[],
   /** 何回目の呼び出しで、どの時間切れを投げるか（1始まり） */
-  throwCalls: new Map<number, "ceiling" | "plain">(),
+  throwCalls: new Map<number, "ceiling" | "plain" | "lookalike">(),
   sources: {} as Record<string, string>,
 }));
 
@@ -49,8 +49,16 @@ vi.mock("../../../src/ai/registry", () => ({
           const { AIError, AIFetchCeilingTimeoutError } = await import(
             "../../../src/ai/types"
           );
-          throw failure === "ceiling"
-            ? new AIFetchCeilingTimeoutError("壁で切れた", undefined, 302, 900)
+          if (failure === "ceiling") {
+            throw new AIFetchCeilingTimeoutError("壁で切れた", undefined, 302, 900);
+          }
+          // 文面だけ壁に似せた、ふつうの時間切れ。型で見分けているなら壁に数えない
+          throw failure === "lookalike"
+            ? new AIError(
+                "約300秒で切れました（UND_ERR_HEADERS_TIMEOUT）。一度に送る量を減らしてください",
+                "timeout",
+                "UND_ERR_BODY_TIMEOUT"
+              )
             : new AIError("待ち時間で切れた", "timeout");
         }
         if (state.truncateCalls.has(call)) {
@@ -242,6 +250,9 @@ describe("Node の上限で切れた時間切れを、チューニングの誘�
 
     expect(state.sent).toHaveLength(3);
     expect(result?.failedChunks).toBe(0);
+    // 時間切れなし：導線も壁の案内も出ない（今まで通り）
+    expect(result?.timedOutChunks).toBe(0);
+    expect(result?.ceilingTimedOutChunks).toBe(0);
   });
 
   test("壁で切れたチャンクは、時間切れには数えるが、壁の数にも入る", async () => {
@@ -265,5 +276,47 @@ describe("Node の上限で切れた時間切れを、チューニングの誘�
     expect(result?.failedChunks).toBe(2);
     expect(result?.timedOutChunks).toBe(2);
     expect(result?.ceilingTimedOutChunks).toBe(1);
+    // 混ざったとき：壁でない時間切れが1つでもあれば、チューニングへの導線は出す
+    expect(tuningOffered(result)).toBe(true);
+  });
+
+  test("全部が壁で切れたときは、チューニングへの導線を出さない", async () => {
+    state.throwCalls = new Map([
+      [1, "ceiling"],
+      [2, "ceiling"],
+      [3, "ceiling"],
+    ]);
+
+    const result = await checkTypos(work, registry);
+
+    expect(result?.timedOutChunks).toBe(3);
+    expect(result?.ceilingTimedOutChunks).toBe(3);
+    expect(tuningOffered(result)).toBe(false);
+  });
+
+  /**
+   * **文面から見分けていない証拠**（実装ルール5）。壁と同じ言葉を含む、ただの
+   * 時間切れ（`AIError`）は壁に数えず、導線を消さない
+   */
+  test("文面が壁に似ているだけの時間切れでは、導線を消さない", async () => {
+    state.throwCalls = new Map([[1, "lookalike"]]);
+
+    const result = await checkTypos(work, registry);
+
+    expect(result?.timedOutChunks).toBe(1);
+    expect(result?.ceilingTimedOutChunks).toBe(0);
+    expect(tuningOffered(result)).toBe(true);
   });
 });
+
+/**
+ * 完了通知がチューニングのボタンを出すかの判定。`extension.ts` の
+ * `reportTypoCheckResult` と同じ式（その式は `runCompletionNotice.test.ts` が
+ * 文字列で固定している）。ここでは数え方と組み合わせて結果を確かめる
+ */
+function tuningOffered(
+  result: { timedOutChunks: number; ceilingTimedOutChunks: number } | undefined
+): boolean {
+  if (!result) throw new Error("結果が返っていない");
+  return result.timedOutChunks - result.ceilingTimedOutChunks > 0;
+}
