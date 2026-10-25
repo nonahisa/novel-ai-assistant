@@ -192,6 +192,18 @@ describe("GitHub初期設定を1回押したときの問い（2026-10-26 の裁�
     expect(modalDetails[0]).toContain("［許可］／［Authorize］");
   });
 
+  test("英数字だけの題なら、その名前で作り、「日付で名前を付け」とは言わない", async () => {
+    const ascii = {
+      folderPath: "/tmp/My Novel 2",
+      label: "My Novel 2",
+      works: [{ title: "My Novel 2", folderPath: "/tmp/My Novel 2" }],
+    } as unknown as SyncTarget;
+    await runSetupFlow(ascii, await readStatus(), { readStatus, run: noRun as never });
+    expect(questions[2]).toContain("非公開のリポジトリ My-Novel-2 をGitHubに作り");
+    expect(modalDetails[0]).not.toContain("日付で名前を付け");
+    expect(modalDetails[0]).toContain("-2 などの番号");
+  });
+
   test("もうサインインしていれば、出ない窓のことは断らない", async () => {
     state.session = true;
     await runSetupFlow(target(), await readStatus(), { readStatus, run: noRun as never });

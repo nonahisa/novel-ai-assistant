@@ -27,6 +27,7 @@ import {
   repositoryDescription,
   setCommitIdentity,
   suggestRepositoryName,
+  asciiRepositoryName,
   validateRepositoryUrl,
 } from "../core/gitSetup";
 import { logFailure, logStep } from "../core/logger";
@@ -511,7 +512,9 @@ async function createAndSend(
   const detailLines = [
     ...(included ? [included] : []),
     "原稿と設定資料が外部のサービスへ渡ります。",
-    name === target.label.trim()
+    // 日付の名前になったかは、題から英数字の名前が作れたかで見る
+    // （「My Novel 2」は My-Novel-2 になり、題とは一致しないので比べない）
+    asciiRepositoryName(target.label) !== ""
       ? "同じ名前のリポジトリが既にあれば、末尾に -2 などの番号を足して作ります。"
       : `GitHubのリポジトリ名には日本語を使えないため、日付で名前を付け、題「${description}」は説明欄に入れます。` +
         "同じ名前が既にあれば、末尾に -2 などの番号を足して作ります。",
@@ -545,7 +548,8 @@ async function createAndSend(
       // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
       "以後は「GitHubと同期」で GitHub とそろえられます。" +
       (created.remembered === false
-        ? "（この端末では認証情報を覚えられませんでした。送信のときに一度聞かれることがあります）"
+        // 送り終えたあとの知らせなので、「次の送信」と言う（今回の送信は済んでいる）
+        ? "（この端末では認証情報を覚えられませんでした。次の送信で Git から一度聞かれることがあります）"
         : "")
   );
   return true;

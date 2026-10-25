@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
   知らせも「作って送った」1つになった。
 
   - 覚えられた：知らせは「非公開のリポジトリ … を作り、… を GitHub へ送りました。」だけ
-  - 覚えられなかった：同じ知らせに「（この端末では認証情報を覚えられませんでした。送信のときに一度聞かれることがあります）」が付く
+  - 覚えられなかった：同じ知らせに「（この端末では認証情報を覚えられませんでした。次の送信で Git から一度聞かれることがあります）」が付く
   - 操作ログ（`logStep`）は、どちらも「認証情報の記憶: 成功／できず」で終わる
 */
 const remember = vi.fn<(token: string, url: string, folder: string) => Promise<boolean>>();
@@ -87,13 +87,13 @@ describe("リポジトリを作ったあとの、認証情報の記憶の知ら�
     expect(logStep.mock.calls.map((call) => call[0]).join("\n")).toContain("認証情報の記憶: 成功");
   });
 
-  test("覚えられなかったときは、同じ知らせに「この端末では認証情報を覚えられませんでした。送信のときに一度聞かれることがあります」が付き、操作ログは「できず」で終わる", async () => {
+  test("覚えられなかったときは、同じ知らせに「この端末では認証情報を覚えられませんでした。次の送信で Git から一度聞かれることがあります」が付き、操作ログは「できず」で終わる", async () => {
     remember.mockResolvedValue(false);
     const advanced = await runNoRemote();
     expect(advanced, "覚えられなくてもリポジトリは作れているので、先へ進む").toBe(true);
     expect(infoMessages).toHaveLength(1);
     expect(infoMessages[0]).toContain("非公開のリポジトリ novel-test を作り、書庫 を GitHub へ送りました。");
-    expect(infoMessages[0]).toContain("（この端末では認証情報を覚えられませんでした。送信のときに一度聞かれることがあります）");
+    expect(infoMessages[0]).toContain("（この端末では認証情報を覚えられませんでした。次の送信で Git から一度聞かれることがあります）");
     expect(logStep.mock.calls.map((call) => call[0]).join("\n")).toContain("認証情報の記憶: できず");
     // 覚えさせる相手は、いま作ったリポジトリの URL と作品の置き場（合言葉は渡すが、知らせ・ログには出さない）
     expect(remember).toHaveBeenCalledWith("テスト用の合言葉", "https://github.com/example/novel-test.git", "/tmp/library");
