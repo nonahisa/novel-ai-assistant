@@ -555,8 +555,11 @@ describe("9問の答えを土台に微調整する（6.101）", () => {
     expect(lines.join("\n")).toContain(`答えは${baseLabel}、相談から${nowLabel}へ寄せています`);
     expect(authorReaderTypeDisplay(profile)).toContain(`9問の答えは${baseLabel}`);
     expect(authorReaderNote(profile)).toContain(`いまは${nowLabel}へ寄せています`);
-    // 層が変わったので履歴に積む。前の層は、答えを微調整したもの（1.5点）だった
-    expect(profile.history?.[0].source).toBe("tuned");
+    // 層が変わったので履歴に積む。前の層は答えと同じ層のまま（微調整の断りを
+    // 出していない）だったので、積むのは9問の答えそのもの（2026-10-25 夕の実機で、
+    // 微調整の点数を積んで答えが履歴から消えた）
+    expect(profile.history?.[0].source).toBe("diagnosis");
+    expect(profile.history?.[0].scores).toEqual(scoreReaderAnswers(LIGHT));
     expect(profile.history?.[0].typeId).toBe(resolveReaderType(scoreReaderAnswers(LIGHT)));
 
     // 層が変わらない微調整では、何も言わない
