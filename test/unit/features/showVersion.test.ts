@@ -52,6 +52,13 @@ describe("バージョンの表示", () => {
   test("版が取れなくても壊れない", () => {
     expect(buildVersionReport(info({ version: "（不明）" }))).toContain("（不明）");
   });
+
+  // 作者の依頼（2026-10-25）：ライセンスをヘルプにも明示する
+  test("ライセンスと同梱の表示ファイルの名前を書く", () => {
+    expect(buildVersionReport(info())).toContain(
+      "ライセンス: MIT（同梱の LICENSE.txt・THIRD-PARTY-NOTICES.md）"
+    );
+  });
 });
 
 /**

@@ -57,9 +57,18 @@ export function buildVersionReport(info: VersionInfo): string {
       ? `AI: ${info.ai.provider} / ${info.ai.model}${info.ai.paid ? "（有料）" : "（無料）"}`
       : "AI: 未設定",
     `意味検索: ${info.vectorSearch ? "入" : "切"}`,
+    // ライセンスもここで明示する（作者の依頼、2026-10-25「足してください」）。
+    // 法律上の条件は配布物に同梱した2つのファイルで満たしている。ここは見つけやすくするため
+    `ライセンス: MIT（同梱の ${LICENSE_FILES.join("・")}）`,
   ];
   return lines.join("\n");
 }
+
+/**
+ * 配布物に同梱するライセンスの表示（`scripts/releaseSupport.mjs` の許可リストと同じ名前）。
+ * リポジトリでは `LICENSE` だが、vsce が梱包するときに `LICENSE.txt` へ名前を変える
+ */
+const LICENSE_FILES = ["LICENSE.txt", "THIRD-PARTY-NOTICES.md"] as const;
 
 /**
  * 窓と機械の行。**版のすぐ下に置く**——2台で見比べるときに最初に要るのは
@@ -123,12 +132,19 @@ export async function showVersion(
 
   const copy = "コピー";
   const changelog = "変更履歴を見る";
+  const license = "ライセンスを見る";
   const picked = await vscode.window.showInformationMessage(
     report.split("\n")[0],
     { modal: true, detail: report.split("\n").slice(2).join("\n") },
     copy,
-    changelog
+    changelog,
+    license
   );
+
+  if (picked === license) {
+    await openLicenseFiles(context);
+    return;
+  }
 
   if (picked === copy) {
     await vscode.env.clipboard.writeText(report);
@@ -150,5 +166,35 @@ export async function showVersion(
         "変更履歴が見つかりませんでした。GitHubのCHANGELOG.mdをご覧ください。"
       );
     }
+  }
+}
+
+/**
+ * 同梱のライセンスの表示を開く（本体の MIT と、同梱ライブラリの表示）。
+ *
+ * 配布物では `LICENSE.txt`、拡張機能開発ホスト（リポジトリから起こした窓）では
+ * `LICENSE` なので、両方を順に探す。見つからなければ GitHub を案内する
+ */
+async function openLicenseFiles(context: vscode.ExtensionContext): Promise<void> {
+  const root = fromUri(context.extensionUri);
+  const candidates = [["LICENSE.txt", "LICENSE"], ["THIRD-PARTY-NOTICES.md"]];
+  let opened = 0;
+  for (const names of candidates) {
+    for (const name of names) {
+      const file = path.toUri(path.join(root, name));
+      try {
+        await vscode.workspace.fs.stat(file);
+        await vscode.commands.executeCommand("vscode.open", file);
+        opened++;
+        break;
+      } catch {
+        // 次の名前を試す
+      }
+    }
+  }
+  if (opened === 0) {
+    vscode.window.showWarningMessage(
+      "ライセンスの表示が見つかりませんでした。GitHubのLICENSEとTHIRD-PARTY-NOTICES.mdをご覧ください。"
+    );
   }
 }
