@@ -19,6 +19,7 @@ import {
 import { sha1Text } from "./hash";
 import { canonicalPredicate, isExclusivePredicate } from "./predicateArity";
 import { formatRelativeTime } from "./relativeTime";
+import type { SceneClockReading } from "./sceneClock";
 import { statesBeforeEvents } from "./stateFromEvent";
 
 /**
@@ -66,13 +67,47 @@ export interface ContradictionCandidate {
   fingerprint: string;
   /** 作者が読む1文 */
   reason: string;
+  /**
+   * 設定資料の側の根拠（本文の事実の外から持ってきたもの）。判定（P-12b）の
+   * 「設定では」に添える。
+   *
+   * **移動の照合で要る。** 判定は所要時間を知らないので、「翌朝という時間の経過で
+   * 移動したことが示されている」と作中の変化で取り下げた（2026-10-25、gemma4:26b）。
+   * 指紋には混ぜない（同じ食い違いの鍵を変えない）
+   */
+  basis?: string;
 }
 
-/** 場所どうしの最短の所要日数。**表が無ければ移動の照合はしない**（推測しない） */
+/**
+ * 場所どうしの最短の所要日数。**表が無ければ移動の照合はしない**（推測しない）。
+ *
+ * `from`・`to` は**場所の id**（`loc_0001`）。本文の自由文で引くと、
+ * 「港町」と「港町の宿」が別の場所になり、同じ場所の言い換えが移動に見える
+ * （2026-10-25 に直した）。組み立ては `core/travelTable.ts`。
+ */
 export interface TravelTime {
   from: string;
   to: string;
+  /** 日（小数あり。1.5＝1日半）。**1日に満たない組は照合しない** */
   minDays: number;
+}
+
+/**
+ * 所在の事実1件を、台帳の場所と時計に結び付けたもの（組み立ては `core/whereabouts.ts`）。
+ *
+ * **`StoryFact.storyTime` には書き込まない。** 書くと `orderFacts` を通じて
+ * ほかの照合器の並びまで変わる。時計は移動の照合だけが見る。
+ */
+export interface WhereaboutsEntry {
+  /** もとの事実の id。候補の `left`／`right` になる */
+  factId: string;
+  subject: string;
+  /** 台帳の場所の id。**名前と別名の完全一致で、1か所に決まったものだけ** */
+  locationId: string;
+  /** 作者に見せる場所の名前（台帳の名前） */
+  locationName: string;
+  /** 時計（`sceneClock.ts`）。読めなければ null（照合しない） */
+  clock: SceneClockReading | null;
 }
 
 /**
@@ -99,6 +134,8 @@ export interface MatchInput {
   /** 場面ごとの肉体・人格・身分の組（6.88.5。第2段） */
   scenes?: readonly SceneIdentity[];
   travelTimes?: readonly TravelTime[];
+  /** 所在の時計（場所の id と、作中のいつか）。無ければ移動の照合はしない */
+  whereabouts?: readonly WhereaboutsEntry[];
 }
 
 /** 指紋の材料。候補そのものは値を持たないので、作るときに渡す */
@@ -167,7 +204,11 @@ export function findContradictionCandidates(
       input.afterlives ?? []
     ),
     ...findKnowledgeViolations(facts),
-    ...findTravelImpossibilities(facts, input.travelTimes ?? []),
+    ...findTravelImpossibilities(
+      facts,
+      input.travelTimes ?? [],
+      input.whereabouts ?? []
+    ),
     ...findIdentityDrift(input.scenes ?? [], input.transitions ?? []),
   ];
 
@@ -459,28 +500,59 @@ export function findKnowledgeViolations(
 /**
  * 所要日数より短い間に、別の場所にいる。
  *
- * **所要時間の表が無ければ照合しない。** 作品ごとに地理も移動手段も違う
- * のに、こちらが日数を推測すると、転移門のある作品で毎回誤検出する。
+ * **所要時間の表と所在の時計が無ければ照合しない。** 作品ごとに地理も
+ * 移動手段も違うのに、こちらが日数を推測すると、転移門のある作品で毎回
+ * 誤検出する。表は場所の記録（`core/travelTable.ts`）、時計は本文の語と日付
+ * （`core/sceneClock.ts`）から、所在は事実を台帳の場所に引いて（`core/whereabouts.ts`）作る。
+ *
+ * ## 2026-10-25 に直した3つ
+ *
+ * - **経過を日でしか数えていなかった。** 徒歩10分（0.007日）の道を同じ日のうちに
+ *   移ると「0日 < 0.007日」で候補になり、同じ日の場所替わりが全部出た。
+ *   **1日に満たない道のりは比べない**（時計が時刻を読まないので、比べようがない）
+ * - **場所を自由文で比べていた**（`from.value === to.value`）。「港町」と「ミレア」
+ *   （別名）が別の場所になる。**台帳の場所の id で比べる**
+ * - **回想（`thought`）を除いていなかった。** 回想の中の場所は、その時点の所在ではない。
+ *   伝聞・嘘の疑いも同じく外す
+ *
+ * ## 経過は「上限」で比べる
+ *
+ * 時計は場面ごとに「早くて何日目・遅くて何日目」の幅を持つ。2つの所在の
+ * あいだに**長く見積もっても**所要日数に届かないときだけ候補にする。
+ * **同じ鎖に載っていない組（何日経ったか分からない）・同じ場面の中の組は比べない**
+ * ——同じ場面の中で時が流れる書き方（「三日かけて港町へ着いた」）を、時計は読まない。
  */
 export function findTravelImpossibilities(
   facts: readonly StoryFact[],
-  travelTimes: readonly TravelTime[] = []
+  travelTimes: readonly TravelTime[] = [],
+  whereabouts: readonly WhereaboutsEntry[] = []
 ): ContradictionCandidate[] {
-  if (travelTimes.length === 0) return [];
+  if (travelTimes.length === 0 || whereabouts.length === 0) return [];
 
   const table = new Map<string, number>();
   for (const entry of travelTimes) {
-    table.set(JSON.stringify([entry.from, entry.to]), entry.minDays);
+    // **1日に満たない道のりは比べない**（上の注の1つ目）
+    if (!(entry.minDays >= 1)) continue;
+    const key = placePairKey(entry.from, entry.to);
+    const known = table.get(key);
+    // 同じ組が2度来たら、速いほうを採る（いちばん速い値。作者の裁定）
+    if (known === undefined || entry.minDays < known) {
+      table.set(key, entry.minDays);
+    }
   }
+  if (table.size === 0) return [];
 
-  const bySubject = new Map<string, StoryFact[]>();
+  const entryByFact = new Map(whereabouts.map((entry) => [entry.factId, entry]));
+  const bySubject = new Map<string, Array<{ fact: StoryFact; entry: WhereaboutsEntry }>>();
   for (const fact of orderFacts(facts)) {
-    if (fact.predicate !== WHEREABOUTS) continue;
-    // 時期が読めない事実は、経過日数が出せないので照合しない
-    if (!fact.storyTime) continue;
-    const bucket = bySubject.get(fact.subject);
-    if (bucket) bucket.push(fact);
-    else bySubject.set(fact.subject, [fact]);
+    const entry = entryByFact.get(fact.id);
+    if (!entry || !entry.clock) continue;
+    // 回想・伝聞・嘘の疑いの中の場所は、その時点の所在ではない
+    if (fact.modality !== "narration" && fact.modality !== "dialogue") continue;
+    const bucket = bySubject.get(entry.subject);
+    const item = { fact, entry };
+    if (bucket) bucket.push(item);
+    else bySubject.set(entry.subject, [item]);
   }
 
   const candidates: ContradictionCandidate[] = [];
@@ -489,39 +561,64 @@ export function findTravelImpossibilities(
     for (let i = 1; i < list.length; i += 1) {
       const from = list[i - 1];
       const to = list[i];
-      if (from.value === to.value) continue;
-      // 道のりは向きで変わらないことが多いので、逆向きも見る
-      const minDays =
-        table.get(JSON.stringify([from.value, to.value])) ??
-        table.get(JSON.stringify([to.value, from.value]));
+      if (from.entry.locationId === to.entry.locationId) continue;
+      const fromClock = from.entry.clock as SceneClockReading;
+      const toClock = to.entry.clock as SceneClockReading;
+      if (fromClock.chain !== toClock.chain) continue;
+      if (fromClock.segment === toClock.segment) continue;
+
+      const minDays = table.get(
+        placePairKey(from.entry.locationId, to.entry.locationId)
+      );
       if (minDays === undefined) continue;
 
-      const elapsed =
-        (to.storyTime?.day ?? 0) - (from.storyTime?.day ?? 0);
-      if (elapsed >= minDays) continue;
+      // 向きは問わない（「その頃」は前の場面と同じ時を指す）。長く見積もった経過
+      const elapsedMax = Math.max(
+        toClock.dayHigh - fromClock.dayLow,
+        fromClock.dayHigh - toClock.dayLow
+      );
+      if (elapsedMax >= minDays) continue;
 
       candidates.push(
         buildCandidate({
           type: "時系列",
-          subject: from.subject,
+          subject: from.entry.subject,
           predicate: WHEREABOUTS,
-          values: [from.value, to.value],
-          left: from.id,
-          right: to.id,
+          values: [from.entry.locationName, to.entry.locationName],
+          left: from.fact.id,
+          right: to.fact.id,
           confidence: lowerConfidence(
-            confidenceFromModality(from.modality),
-            confidenceFromModality(to.modality)
+            confidenceFromModality(from.fact.modality),
+            confidenceFromModality(to.fact.modality)
           ),
-          unknownOrder: isFactOrderUnknown(positionOf(from), positionOf(to)),
+          unknownOrder: false,
           reason:
-            `${formatPosition(positionOf(from))}に『${from.value}』、` +
-            `${formatPosition(positionOf(to))}に『${to.value}』。` +
-            `${minDays}日かかる道のりを${elapsed}日で移っている`,
+            `${formatPosition(positionOf(from.fact))}に『${from.entry.locationName}』、` +
+            `${formatPosition(positionOf(to.fact))}に『${to.entry.locationName}』。` +
+            `${formatDays(minDays)}かかる道のりを、` +
+            `${elapsedMax <= 0 ? "同じ日のうちに" : `長く見積もっても${elapsedMax}日で`}移っている`,
+          basis:
+            `場所の記録では、${from.entry.locationName}と${to.entry.locationName}のあいだは` +
+            `${formatDays(minDays)}かかる（書かれた所要時間のうち、いちばん速いもの）`,
         })
       );
     }
   }
   return candidates;
+}
+
+/** 場所の組の鍵（向きは問わない） */
+function placePairKey(a: string, b: string): string {
+  return JSON.stringify(a < b ? [a, b] : [b, a]);
+}
+
+/** 日数を作者が読む形にする（1.5日→「1日半」） */
+function formatDays(days: number): string {
+  const whole = Math.floor(days);
+  const rest = days - whole;
+  if (rest === 0) return `${whole}日`;
+  if (rest === 0.5) return `${whole}日半`;
+  return `約${Math.round(days * 10) / 10}日`;
 }
 
 /**
@@ -662,10 +759,12 @@ interface CandidateDraft extends FingerprintInput {
   /** 同じ日で前後が読めない組か。候補にはするが、確信度を1段下げる */
   unknownOrder: boolean;
   reason: string;
+  basis?: string;
 }
 
 function buildCandidate(draft: CandidateDraft): ContradictionCandidate {
   return {
+    ...(draft.basis ? { basis: draft.basis } : {}),
     type: draft.type,
     subject: draft.subject,
     predicate: draft.predicate,

@@ -1,5 +1,7 @@
 import type { StoryFact } from "../../models/storyFact";
 import { parseCharacter } from "../../models/character";
+import { parseLocation, type Location } from "../../models/location";
+import type { TravelStageStats } from "../../core/factContradiction";
 import { withLineNumbers, type Chunk } from "../../core/chunker";
 import {
   buildFactVerifyIssue,
@@ -15,6 +17,7 @@ import {
 } from "../../core/factsFromRecords";
 import {
   buildFactContradictionIssue,
+  buildTravelMaterial,
   candidateSidesOf,
   collectFactsFromChunk,
   lineTextOf,
@@ -120,6 +123,10 @@ interface FactWorkContext {
   recordFacts: StoryFact[];
   /** 設定資料の宿り（心と体の記録）の印。「死亡後の登場」から外す人物（製品と同じ） */
   afterlives: AfterlifeMark[];
+  /** 場所の記録。移動の照合の所要時間の表と、所在の引き当てに使う（製品と同じ） */
+  locations: Location[];
+  /** 本文を読む順のファイル（相対パス）。移動の照合の時計に使う */
+  files: string[];
   chunks: Array<{ chunkId: string; chunk: Chunk; chapterLabel: string }>;
   /** 内訳から話数が引けないときの落とし先 */
   chapterByFile: Map<string, number | null>;
@@ -192,15 +199,26 @@ function loadFactWork(input: FactContradictionInput): FactWorkContext {
     }
   }
 
+  // 場所の記録は読めなくても止めない（無ければ移動の照合をしないだけ。製品と同じ）
+  const locations = readSettingsRecords(
+    input.folder,
+    SETTINGS_SUBDIRS.locations,
+    parseLocation
+  );
+
   return {
     table,
     recordFacts: factsFromCharacters(characters),
     afterlives: afterlifeMarksFromCharacters(characters),
+    locations: locations.records,
+    files: files.filter(
+      (filePath) => !unreadableFiles.some((entry) => entry.filePath === filePath)
+    ),
     // `chunkIndex` は**切り終えた並びの何番目か**（`selectChunks` と同じ数え方）
     chunks: selectFrom(chunks, input.chunkIndex),
     chapterByFile,
     chapterLabelByFile,
-    unreadableSettings: loaded.unreadable,
+    unreadableSettings: loaded.unreadable + locations.unreadable,
     unreadableFiles,
   };
 }
@@ -412,6 +430,8 @@ export type FactContradictionRunOutcome =
         candidateNote: string;
         kept: number;
         verifyNote: string;
+        /** 移動の照合の工程ごとの件数（所在→場所に引けた→時計に載った、表の組） */
+        travel: TravelStageStats;
       };
       unreadableFiles: Array<{ filePath: string; reason: string }>;
     };
@@ -484,6 +504,19 @@ export async function factContradictionRun(
 
   /* ── 第2・3段：機械照合（**AIを使わない**。設計書6.88.6）───── */
   const allFacts = [...facts, ...context.recordFacts];
+  /** 本文は1回だけ読む（時計と判定の両方が引く） */
+  const sourceCache = new Map<string, string | undefined>();
+  // 移動の照合の材料（所要時間の表・所在・時計）。製品と同じ関数で組む
+  const travel = buildTravelMaterial({
+    locations: context.locations,
+    facts,
+    places,
+    episodes: context.files.map((filePath) => ({
+      filePath,
+      chapter: context.chapterByFile.get(filePath) ?? null,
+      text: readSourceCached(input.folder, filePath, sourceCache) ?? "",
+    })),
+  });
   const candidates = filterAllowed(
     findContradictionCandidates({
       facts: allFacts,
@@ -491,6 +524,8 @@ export async function factContradictionRun(
       scenes: [],
       // 遷移の表は第5段まで空なので、幽霊・転生・憑依は設定資料の宿りで外す（製品と同じ）
       afterlives: context.afterlives,
+      travelTimes: travel.travelTimes,
+      whereabouts: travel.whereabouts,
     }),
     // 容認リスト（6.88.8）の保存は第5段の残り。いまは何も抑えない
     []
@@ -505,7 +540,6 @@ export async function factContradictionRun(
   >();
   const verifyRejected: Array<{ reason?: VerifyRejectReason }> = [];
   let verifyUndecided = 0;
-  const sourceCache = new Map<string, string | undefined>();
 
   for (const candidate of candidates) {
     const sides = candidateSidesOf({ candidate, factById, places });
@@ -624,6 +658,7 @@ export async function factContradictionRun(
       kept,
       verifyNote,
       cancelled: false,
+      travel: travel.stats,
     })}`,
     // **何で回したかを残す**（`num_ctx` と同じ扱い。6.87.16）
     temperature: {
@@ -648,6 +683,7 @@ export async function factContradictionRun(
       candidateNote,
       kept,
       verifyNote,
+      travel: travel.stats,
     },
     unreadableFiles: context.unreadableFiles,
   };

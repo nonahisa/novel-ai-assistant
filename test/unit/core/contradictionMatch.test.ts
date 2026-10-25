@@ -8,6 +8,8 @@ import {
   findPostDeathAppearances,
   findTravelImpossibilities,
   fingerprintOf,
+  type TravelTime,
+  type WhereaboutsEntry,
 } from "../../../src/core/contradictionMatch";
 import type {
   IdentityTransition,
@@ -531,6 +533,12 @@ describe("知識", () => {
   });
 });
 
+/**
+ * 移動可能性（2026-10-25 に材料の渡し方を変えた）。
+ *
+ * 所在は**台帳の場所の id と時計**（`WhereaboutsEntry`）で渡す。表も id で引く。
+ * 時計は `sceneClock.ts` の形（鎖・場面・早くて何日目・遅くて何日目）。
+ */
 describe("移動可能性", () => {
   const facts = [
     fact({
@@ -540,7 +548,6 @@ describe("移動可能性", () => {
       kind: "state",
       predicate: "所在",
       value: "王都",
-      storyTime: { day: 3, part: "朝" },
     }),
     fact({
       id: "m2",
@@ -549,14 +556,38 @@ describe("移動可能性", () => {
       kind: "state",
       predicate: "所在",
       value: "港町",
-      storyTime: { day: 4, part: "朝" },
     }),
   ];
 
+  /** 所在の時計。既定は「同じ鎖の別の場面、3日目→4日目」 */
+  function whereabouts(overrides: {
+    left?: Partial<WhereaboutsEntry>;
+    right?: Partial<WhereaboutsEntry>;
+  } = {}): WhereaboutsEntry[] {
+    return [
+      {
+        factId: "m1",
+        subject: "char_004",
+        locationId: "loc_0001",
+        locationName: "王都",
+        clock: { chain: "c", segment: "s1", dayLow: 3, dayHigh: 3 },
+        ...overrides.left,
+      },
+      {
+        factId: "m2",
+        subject: "char_004",
+        locationId: "loc_0002",
+        locationName: "港町",
+        clock: { chain: "c", segment: "s2", dayLow: 4, dayHigh: 4 },
+        ...overrides.right,
+      },
+    ];
+  }
+
+  const twoDays: TravelTime[] = [{ from: "loc_0001", to: "loc_0002", minDays: 2 }];
+
   it("所要2日の道のりを1日で移っていたら候補にする", () => {
-    const candidates = findTravelImpossibilities(facts, [
-      { from: "王都", to: "港町", minDays: 2 },
-    ]);
+    const candidates = findTravelImpossibilities(facts, twoDays, whereabouts());
     expect(candidates).toHaveLength(1);
     expect(candidates[0]).toMatchObject({
       type: "時系列",
@@ -564,34 +595,147 @@ describe("移動可能性", () => {
       left: "m1",
       right: "m2",
     });
-    expect(candidates[0].reason).toContain("2日かかる道のりを1日で移っている");
+    expect(candidates[0].reason).toContain(
+      "2日かかる道のりを、長く見積もっても1日で移っている"
+    );
+  });
+
+  /** 表は向きを問わない（港町→王都でも同じ道のり） */
+  it("表の向きが逆でも引ける", () => {
+    expect(
+      findTravelImpossibilities(
+        facts,
+        [{ from: "loc_0002", to: "loc_0001", minDays: 2 }],
+        whereabouts()
+      )
+    ).toHaveLength(1);
   });
 
   /** 作品ごとに地理も移動手段も違う。こちらが日数を推測しない */
   it("所要時間の表が無ければ照合しない", () => {
-    expect(findTravelImpossibilities(facts, [])).toEqual([]);
+    expect(findTravelImpossibilities(facts, [], whereabouts())).toEqual([]);
     expect(
-      findTravelImpossibilities(facts, [
-        { from: "王都", to: "山村", minDays: 5 },
-      ])
+      findTravelImpossibilities(
+        facts,
+        [{ from: "loc_0001", to: "loc_0009", minDays: 5 }],
+        whereabouts()
+      )
+    ).toEqual([]);
+  });
+
+  it("所在の時計が無ければ照合しない", () => {
+    expect(findTravelImpossibilities(facts, twoDays, [])).toEqual([]);
+    expect(
+      findTravelImpossibilities(
+        facts,
+        twoDays,
+        whereabouts({ right: { clock: null } })
+      )
     ).toEqual([]);
   });
 
   it("間に合っていれば候補にしない", () => {
     expect(
-      findTravelImpossibilities(facts, [
-        { from: "王都", to: "港町", minDays: 1 },
-      ])
+      findTravelImpossibilities(
+        facts,
+        [{ from: "loc_0001", to: "loc_0002", minDays: 1 }],
+        whereabouts()
+      )
     ).toEqual([]);
   });
 
-  it("時期が読めない事実は照合しない", () => {
-    const unreadable = facts.map((entry) => ({ ...entry, storyTime: null }));
+  /** 経過は上限で比べる。日付だけの話は「その日のいつか」なので幅を持つ */
+  it("経過の幅の上限が所要日数に届けば候補にしない", () => {
     expect(
-      findTravelImpossibilities(unreadable, [
-        { from: "王都", to: "港町", minDays: 2 },
-      ])
+      findTravelImpossibilities(
+        facts,
+        twoDays,
+        whereabouts({
+          left: { clock: { chain: "暦", segment: "s1", dayLow: 0, dayHigh: 1 } },
+          right: { clock: { chain: "暦", segment: "s2", dayLow: 1, dayHigh: 2 } },
+        })
+      )
     ).toEqual([]);
+  });
+
+  it("同じ時（その頃）に2か所にいれば、同じ日のうちと書く", () => {
+    const candidates = findTravelImpossibilities(
+      facts,
+      twoDays,
+      whereabouts({
+        right: { clock: { chain: "c", segment: "s2", dayLow: 3, dayHigh: 3 } },
+      })
+    );
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].reason).toContain("同じ日のうちに移っている");
+  });
+
+  /** 鎖が切れたところは、何日経ったか分からない */
+  it("別の鎖の組は比べない", () => {
+    expect(
+      findTravelImpossibilities(
+        facts,
+        twoDays,
+        whereabouts({
+          right: { clock: { chain: "d", segment: "s2", dayLow: 0, dayHigh: 0 } },
+        })
+      )
+    ).toEqual([]);
+  });
+
+  /** 同じ場面の中で時が流れる書き方（「三日かけて」）を、時計は読まない */
+  it("同じ場面の中の組は比べない", () => {
+    expect(
+      findTravelImpossibilities(
+        facts,
+        twoDays,
+        whereabouts({
+          right: { clock: { chain: "c", segment: "s1", dayLow: 3, dayHigh: 3 } },
+        })
+      )
+    ).toEqual([]);
+  });
+
+  /** 再現（2026-10-25）：経過を日でしか数えず、徒歩10分（0.007日）が同じ日の場所替わりを全部候補にした */
+  it("再現：1日に満たない道のりは、同じ日の場所替わりでも候補にしない", () => {
+    expect(
+      findTravelImpossibilities(
+        facts,
+        [{ from: "loc_0001", to: "loc_0002", minDays: 10 / 1440 }],
+        whereabouts({
+          right: { clock: { chain: "c", segment: "s2", dayLow: 3, dayHigh: 3 } },
+        })
+      )
+    ).toEqual([]);
+  });
+
+  /** 再現（2026-10-25）：場所を自由文で比べていた。別名で書かれた同じ場所を移動とみなす */
+  it("再現：同じ場所の別名どうしは移動にしない（場所の id で比べる）", () => {
+    const aliased = [facts[0], { ...facts[1], value: "リヴェルス" }];
+    expect(
+      findTravelImpossibilities(
+        aliased,
+        twoDays,
+        whereabouts({ right: { locationId: "loc_0001", locationName: "王都" } })
+      )
+    ).toEqual([]);
+  });
+
+  /** 再現（2026-10-25）：回想（thought）の中の場所を、その時点の所在として突き合わせていた */
+  it("再現：回想の中の場所は所在として突き合わせない", () => {
+    const recalled = [facts[0], { ...facts[1], modality: "thought" as const }];
+    expect(
+      findTravelImpossibilities(recalled, twoDays, whereabouts())
+    ).toEqual([]);
+  });
+
+  it("所在の時計を渡すと、findContradictionCandidates からも出る", () => {
+    const candidates = findContradictionCandidates({
+      facts,
+      travelTimes: twoDays,
+      whereabouts: whereabouts(),
+    });
+    expect(candidates.filter((c) => c.predicate === "所在")).toHaveLength(1);
   });
 });
 
