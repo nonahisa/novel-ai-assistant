@@ -65,6 +65,30 @@ vi.mock("../../../src/core/imeReadingStore", () => ({
   },
 }));
 
+/** 語の読みの提案の控えと見送りの印（設計書6.42.2。2026-10-25） */
+let wordFile: unknown = { version: 1, entries: [] };
+let dismissalFile: unknown = { version: 1, entries: [] };
+let wordFileBroken = false;
+
+vi.mock("../../../src/core/imeWordReadingStore", () => ({
+  updateImeWordReadings: async (
+    _work: unknown,
+    change: (file: unknown) => { file: unknown; result: unknown }
+  ) => {
+    // 本物は壊れた控えを直さずに投げる（imeWordReadingStore.test.ts）
+    if (wordFileBroken) throw new Error("IMEの読みの提案の控え（imeWordReadings.json）が読めません。");
+    const next = change(wordFile);
+    wordFile = next.file;
+    return next.result;
+  },
+  loadImeReadingDismissals: async () => ({ file: dismissalFile, hash: undefined }),
+}));
+
+vi.mock("../../../src/core/readingDictionaryStore", () => ({
+  episodeRelativePath: (_work: unknown, episodePath: string) =>
+    episodePath.replace(/^\/w\//, ""),
+}));
+
 import {
   imeNameReadingSpans,
   invalidateImeNameCache,
@@ -91,7 +115,66 @@ beforeEach(() => {
   locations.length = 0;
   saved.length = 0;
   imeFile = { version: 1, entries: [] };
+  wordFile = { version: 1, entries: [] };
+  dismissalFile = { version: 1, entries: [] };
+  wordFileBroken = false;
   invalidateImeNameCache();
+});
+
+describe("名前以外の語を、読みの辞書への提案として控える（作者の裁定、2026-10-25）", () => {
+  const context = { episodePath: "/w/01.txt", before: "古い" };
+
+  test("港へ → 新しく出た（話・語・読み）として返し、2度目は返さない", async () => {
+    const first = await recordImeComposition(work, "みなとへ", "港へ", undefined, context);
+    expect(first.words).toEqual([{ word: "港", reading: "みなと" }]);
+    const second = await recordImeComposition(work, "みなとに", "港に", undefined, context);
+    expect(second.words).toEqual([]);
+    expect(wordFile).toMatchObject({
+      entries: [{ episode: "01.txt", word: "港", reading: "みなと", count: 2, before: "古い" }],
+    });
+    // 辞書へも設定資料へも書かない（採るまでは提案）
+    expect(saved).toEqual([]);
+  });
+
+  test("読みが1通りの語は控えない（思う）", async () => {
+    const result = await recordImeComposition(work, "おもう", "思う", undefined, context);
+    expect(result.words).toEqual([]);
+    expect(wordFile).toEqual({ version: 1, entries: [] });
+  });
+
+  test("名前に当たった表記は語の提案にしない", async () => {
+    characters.push(item("char_1", "港"));
+    const result = await recordImeComposition(work, "みなとへ", "港へ", undefined, context);
+    expect(result.captures.map((c) => c.surface)).toEqual(["港"]);
+    expect(result.words).toEqual([]);
+  });
+
+  test("見送った語は、新しく出ても記録の行に出さない", async () => {
+    dismissalFile = {
+      version: 1,
+      entries: [{ episode: "01.txt", word: "港", reading: "みなと", at: "t" }],
+    };
+    const result = await recordImeComposition(work, "みなと", "港", undefined, context);
+    expect(result.words).toEqual([]);
+  });
+
+  test("控えが壊れていたら理由を返して止め（直さない）、名前の側は続ける", async () => {
+    wordFileBroken = true;
+    const result = await recordImeComposition(work, "みなとへ", "港へ", undefined, context);
+    expect(result.problems.join("")).toMatch(/読めません/);
+    expect(result.words).toEqual([]);
+    // 同じ壊れた控えのままでも、名前の読みは埋まる
+    characters.push(item("char_1", "東雲"));
+    invalidateImeNameCache();
+    const named = await recordImeComposition(work, "しののめは", "東雲は", undefined, context);
+    expect(named.filled.map((f) => f.name)).toEqual(["東雲"]);
+  });
+
+  test("話の手がかりが無ければ、語は拾わない（これまでどおり）", async () => {
+    const result = await recordImeComposition(work, "みなと", "港");
+    expect(result.words).toEqual([]);
+    expect(wordFile).toEqual({ version: 1, entries: [] });
+  });
 });
 
 describe("設定資料へ書く／書かない", () => {

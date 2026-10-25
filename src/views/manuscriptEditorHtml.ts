@@ -2019,6 +2019,11 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   /** カーソルの直前に見えている字の、見る長さ（名前2つぶんより十分に長い） */
   const IME_BEFORE_MAX = 130;
   /**
+   * 拡張機能へ添える直前の字の長さ。core の IME_WORD_BEFORE_MAX の写し（画面へは
+   * import できない。揃っていることはテストが見張る）
+   */
+  const IME_WORD_BEFORE_MAX = 12;
+  /**
    * 変換を始めた所（変換の始まりに1回だけ読む）。**取れなければ null**
    * ——選択に幅があるなら、つながない側に倒す。
    *
@@ -2127,6 +2132,13 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     if (committed === kana && !joined) return;
     const message = { type: "imeReading", kana: kana, committed: committed };
     if (joined) message.previous = { kana: joined.kana, committed: joined.committed };
+    /*
+      名前以外の語を読みの辞書への提案にするとき（core/imeWordReading.ts）、本文に
+      同じ確定の字が2か所以上あっても打った所の句を選べるよう、変換の始まりで
+      読み済みの直前の字の末尾を添える。新しく読む所は増やさない。行頭なら空の
+      字を送る（行頭で打った印）。所が読めなければ添えない
+    */
+    if (start) message.before = start.before.slice(-IME_WORD_BEFORE_MAX);
     vscode.postMessage(message);
   }
   for (const face of [write, compose]) {

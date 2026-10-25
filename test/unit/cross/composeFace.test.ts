@@ -2301,6 +2301,24 @@ describe("変換中の字に色を置かない（作者の依頼、2026-09-24）
     expect(block.match(/addEventListener\(\s*"compositionupdate"/g)).toHaveLength(1);
   });
 
+  /**
+   * 語の読みの提案（設計書6.42.2。2026-10-25）で直前の字を添えるようにしても、
+   * **変換中（compositionupdate）では何も読まない**決まりは変えない。直前の字は
+   * 変換の始まりの1回で読んだものを、確定のときに添えるだけ
+   */
+  it("直前の字を添えるのは確定のときで、変換中には読まない", () => {
+    const start = html.indexOf("/* ime-reading:start */");
+    const end = html.indexOf("/* ime-reading:end */");
+    const block = html.slice(start, end);
+    const update = block.slice(
+      block.indexOf("function imeReadingUpdate("),
+      block.indexOf("function imeReadingEnd(")
+    );
+    expect(update).not.toMatch(/before|getSelection|imeCaretContext|textContent/);
+    const commit = block.slice(block.indexOf("function imeReadingEnd("));
+    expect(commit).toContain("message.before = start.before");
+  });
+
   /** 変換の始まりでは印を立てるだけ（位置を読む・数える処理を置かない） */
   it("変換の始まりでは、変換中の印を立てるだけ", () => {
     const start = html.slice(

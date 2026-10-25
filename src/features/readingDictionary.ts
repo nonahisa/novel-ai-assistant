@@ -31,9 +31,22 @@ import {
   type ReadingSpan,
 } from "../core/readingDictionary";
 import {
+  episodeRelativePath,
   loadReadingDictionary,
   saveReadingDictionary,
+  type LoadedReadingDictionary,
 } from "../core/readingDictionaryStore";
+import {
+  adoptImeWordProposal,
+  dismissImeWord,
+  imeWordProposals,
+  type ImeWordProposal,
+} from "../core/imeWordReading";
+import {
+  loadImeReadingDismissals,
+  loadImeWordReadings,
+  updateImeReadingDismissals,
+} from "../core/imeWordReadingStore";
 import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
 import { hashText } from "../core/hash";
 import {
@@ -83,11 +96,38 @@ export interface ReadingDictionarySummary {
   missing: number;
   /** 辞書が読めなかったときの理由（読み上げは辞書なしで続ける） */
   problem?: string;
+  /** IMEで打った読みの提案の数（設計書6.42.2） */
+  imeSuggestions?: number;
+}
+
+/**
+ * その話の、いま一覧に出すIMEの読みの提案（設計書6.42.2）。
+ *
+ * 句は確定した時点では決めず、ここで**いまの本文から**求める（本文を直しても、
+ * 一覧を開いた時点の本文で句が決まる）。控え・見送りの印が読めなければ投げる
+ * （呼ぶ側が、提案なしで続けるか止めるかを決める）
+ */
+async function imeProposalsFor(
+  target: ReadingDictionaryTarget,
+  dictionary: readonly ReadingEntry[]
+): Promise<ImeWordProposal[]> {
+  const words = await loadImeWordReadings(target.work);
+  const dismissals = await loadImeReadingDismissals(target.work);
+  return imeWordProposals({
+    entries: words.file.entries,
+    dismissals: dismissals.file,
+    dictionary,
+    episode: episodeRelativePath(target.work, target.episodePath),
+    text: target.text,
+  });
 }
 
 /**
  * 読み上げに当てる範囲を求める。**失敗しても投げない**——辞書が読めない
  * からといって読み上げそのものを止めると、声で確かめる道具が使えなくなる。
+ *
+ * IMEの読みの提案は**読み上げに使わない**（採るまでは提案のまま）。数だけ数える。
+ * 控えが読めなくても数を0にするだけで、辞書の範囲は返す
  */
 export async function readingDictionarySummary(
   target: ReadingDictionaryTarget
@@ -95,10 +135,22 @@ export async function readingDictionarySummary(
   try {
     const { file } = await loadReadingDictionary(target.work, target.episodePath);
     const result = readingSpansFor(target.text, file.entries);
+    let imeSuggestions = 0;
+    try {
+      imeSuggestions = (await imeProposalsFor(target, file.entries)).length;
+    } catch (error) {
+      useLogFile(target.work.folderPath);
+      logStep(
+        `IMEの読みの提案を数えられませんでした（${
+          error instanceof Error ? error.message : String(error)
+        }）`
+      );
+    }
     return {
       spans: result.spans,
       active: file.entries.filter((entry) => !entry.removed).length,
       missing: result.missing.length,
+      imeSuggestions,
     };
   } catch (error) {
     return {
@@ -353,12 +405,15 @@ export async function runReadingDictionary(
  * **直した項目・消した項目は作者のものになる**（`source: "author"`）。
  * AIで作り直しても、上書きされない。
  *
+ * IMEで打った読みの提案（設計書6.42.2）も先頭に並べ、選ぶと［採る］／［見送る］。
+ *
  * 変えたら true（呼び手が画面の様子を出し直す）。
  */
 export async function manageReadingDictionary(
   target: ReadingDictionaryTarget
 ): Promise<boolean> {
   let changed = false;
+  let imeWarned = false;
   for (;;) {
     let loaded;
     try {
@@ -373,9 +428,27 @@ export async function manageReadingDictionary(
     const missing = new Set(
       readingSpansFor(target.text, live).missing.map(readingEntryKey)
     );
+    // IMEの読みの提案（設計書6.42.2）。控えが読めなくても辞書の一覧は出す
+    // （知らせは1度だけ。周回のたびに出さない）
+    let proposals: ImeWordProposal[] = [];
+    try {
+      proposals = await imeProposalsFor(target, loaded.file.entries);
+    } catch (error) {
+      if (!imeWarned) {
+        imeWarned = true;
+        void warnWithLog(error instanceof Error ? error.message : String(error));
+      }
+    }
 
     const picked = await vscode.window.showQuickPick(
       [
+        // 提案を先頭に置く（採るまで読み上げに使わないので、目に入る所へ）
+        ...proposals.map((proposal) => ({
+          label: `${proposal.word} → ${proposal.reading}（IMEで打った読み）`,
+          description: `「${proposal.quote}」`,
+          detail: proposal.aiReading ? `AIの読み：${proposal.aiReading}` : undefined,
+          proposal,
+        })),
         ...live.map((entry) => ({
           label: `${entry.word} → ${entry.reading}`,
           description: `「${entry.quote}」`,
@@ -391,15 +464,27 @@ export async function manageReadingDictionary(
         cancelItem("閉じる"),
       ],
       {
-        title: `読みの辞書（${live.length}件）`,
+        title:
+          proposals.length > 0
+            ? `読みの辞書（${live.length}件・IMEの読みの提案${proposals.length}件）`
+            : `読みの辞書（${live.length}件）`,
         placeHolder:
-          live.length === 0
+          live.length === 0 && proposals.length === 0
             ? "まだ1件もありません。［読みを確かめる（AI）］で作れます"
-            : "直したい項目を選んでください",
+            : proposals.length > 0
+              ? "提案は選ぶと［採る］／［見送る］を選べます。辞書の項目は選ぶと直せます"
+              : "直したい項目を選んでください",
         ignoreFocusOut: true,
       }
     );
-    if (!picked || isCancelItem(picked) || !("entry" in picked)) return changed;
+    if (!picked || isCancelItem(picked)) return changed;
+    if ("proposal" in picked) {
+      const result = await decideImeProposal(target, loaded, picked.proposal);
+      if (result === "failed") return changed;
+      if (result === "changed") changed = true;
+      continue;
+    }
+    if (!("entry" in picked)) return changed;
 
     const entry = picked.entry;
     const action = await vscode.window.showQuickPick(
@@ -441,5 +526,68 @@ export async function manageReadingDictionary(
       void warnWithLog(error instanceof Error ? error.message : String(error));
       return changed;
     }
+  }
+}
+
+/**
+ * IMEの読みの提案を1件、［採る］か［見送る］（作者の選択 Q3：まとめて採る道は
+ * 出さない。1件ずつ句を見て決める）。
+ *
+ * - ［採る］：その話の辞書へ作者の項目として書く。同じ語・同じ句のAIの項目は
+ *   置き換える。**読み込んだときのハッシュを渡す**（同期で別の機械の直しが
+ *   入っていたら書かずに止める）
+ * - ［見送る］：見送りの印（同期する）を足す。次から同じ（話・語・読み）は出ない
+ *
+ * @returns 書いたら changed、戻ったら kept、書けなかったら failed
+ */
+async function decideImeProposal(
+  target: ReadingDictionaryTarget,
+  loaded: LoadedReadingDictionary,
+  proposal: ImeWordProposal
+): Promise<"changed" | "kept" | "failed"> {
+  const action = await vscode.window.showQuickPick(
+    [
+      {
+        label: "採る",
+        description: "この句の読みとして辞書に入れます（AIで作り直しても残ります）",
+        action: "adopt" as const,
+      },
+      {
+        label: "見送る",
+        description: "辞書に入れず、この提案を次から出しません",
+        action: "dismiss" as const,
+      },
+      cancelItem("戻る"),
+    ],
+    {
+      title:
+        `${proposal.word} → ${proposal.reading}（「${proposal.quote}」）` +
+        (proposal.aiReading ? `　AIの読み：${proposal.aiReading}` : ""),
+      ignoreFocusOut: true,
+    }
+  );
+  if (!action || isCancelItem(action) || !("action" in action)) return "kept";
+  try {
+    if (action.action === "adopt") {
+      await saveReadingDictionary(
+        target.work,
+        target.episodePath,
+        { ...loaded.file, entries: adoptImeWordProposal(loaded.file.entries, proposal) },
+        loaded.hash
+      );
+    } else {
+      const episode = episodeRelativePath(target.work, target.episodePath);
+      await updateImeReadingDismissals(target.work, (file) =>
+        dismissImeWord(
+          file,
+          { episode, word: proposal.word, reading: proposal.reading },
+          new Date().toISOString()
+        )
+      );
+    }
+    return "changed";
+  } catch (error) {
+    void warnWithLog(error instanceof Error ? error.message : String(error));
+    return "failed";
   }
 }
