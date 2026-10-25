@@ -42,8 +42,12 @@ vi.mock("../../../src/core/imeWordReadingStore", () => ({
   },
 }));
 
+const doneNotes: string[] = [];
+
 vi.mock("../../../src/views/notify", () => ({
-  notifyDone: () => undefined,
+  notifyDone: (message: string) => {
+    doneNotes.push(message);
+  },
   warnWithLog: async () => undefined,
 }));
 
@@ -78,17 +82,38 @@ beforeEach(() => {
   };
   dismissals = { version: 1, entries: [] };
   wordsBroken = false;
+  doneNotes.length = 0;
   vi.restoreAllMocks();
 });
 
-/** 一覧と［採る］／［見送る］の選び方を、順に返す */
+/** 一覧と［採る］／［見送る］の選び方を、順に返す。出た画面の題と案内も控える */
+const shownLists: Array<{ title?: string; placeHolder?: string }> = [];
 function pickInOrder(...choices: Array<(items: Array<Record<string, unknown>>) => unknown>): void {
   let call = 0;
-  vi.spyOn(vscode.window, "showQuickPick").mockImplementation((async (items: unknown) => {
+  shownLists.length = 0;
+  vi.spyOn(vscode.window, "showQuickPick").mockImplementation((async (
+    items: unknown,
+    options?: { title?: string; placeHolder?: string }
+  ) => {
+    shownLists.push({ title: options?.title, placeHolder: options?.placeHolder });
     const choose = choices[call++];
     if (!choose) return undefined;
     return choose(items as Array<Record<string, unknown>>);
   }) as never);
+}
+
+/** 2件目の提案（「戻った」の「戻」→もど）を控えに足す */
+function addSecondProposal(): void {
+  (wordFile as { entries: unknown[] }).entries.push({
+    episode: "01.txt",
+    word: "戻",
+    reading: "もど",
+    committed: "戻った",
+    offset: 0,
+    before: "古い港へ",
+    count: 1,
+    lastSeen: "2026-10-25T00:00:00Z",
+  });
 }
 
 describe("列の数", () => {
@@ -181,5 +206,76 @@ describe("［読みの一覧］で採る・見送る", () => {
     });
     await manageReadingDictionary(target);
     expect(shown[0].detail).toBe("AIの読み：こう");
+  });
+});
+
+describe("片づけたあとの戻り方（作者の指摘、2026-10-25 夜）", () => {
+  test("最後の1件を採ると、一覧へ戻らずに閉じて「すべて片づきました」と知らせる", async () => {
+    pickInOrder(
+      (items) => items.find((item) => "proposal" in item),
+      (items) => items.find((item) => item.action === "adopt"),
+      () => undefined
+    );
+    expect(await manageReadingDictionary(target)).toBe(true);
+    // 一覧 → ［採る］ の2回だけ。3回目の一覧は出ない
+    expect(shownLists).toHaveLength(2);
+    expect(doneNotes).toEqual(["「港」を読みの辞書に入れました。IMEの読みの提案はすべて片づきました。"]);
+  });
+
+  test("最後の1件を見送っても、閉じて知らせる", async () => {
+    pickInOrder(
+      (items) => items.find((item) => "proposal" in item),
+      (items) => items.find((item) => item.action === "dismiss"),
+      () => undefined
+    );
+    expect(await manageReadingDictionary(target)).toBe(true);
+    expect(shownLists).toHaveLength(2);
+    expect(doneNotes).toEqual(["「港」の提案を見送りました。IMEの読みの提案はすべて片づきました。"]);
+  });
+
+  test("残りがあれば一覧へ戻り、題にいましたことと残りの件数を出す", async () => {
+    addSecondProposal();
+    pickInOrder(
+      (items) => items.find((item) => item.label === "港 → みなと（IMEで打った読み）"),
+      (items) => items.find((item) => item.action === "adopt"),
+      () => undefined
+    );
+    await manageReadingDictionary(target);
+    expect(shownLists).toHaveLength(3);
+    expect(shownLists[2].title).toBe("「港」を読みの辞書に入れました。IMEの読みの提案：残り1件");
+    expect(doneNotes).toEqual([]);
+  });
+
+  test("［戻る］で戻ったときは、題に「入れました」を出さない", async () => {
+    pickInOrder(
+      (items) => items.find((item) => "proposal" in item),
+      (items) => items[items.length - 1],
+      () => undefined
+    );
+    await manageReadingDictionary(target);
+    expect(shownLists).toHaveLength(3);
+    expect(shownLists[2].title).toBe("読みの辞書（0件・IMEの読みの提案1件）");
+  });
+
+  test("最初から提案が0件なら、今までどおり辞書の一覧を出す（知らせない）", async () => {
+    wordFile = { version: 1, entries: [] };
+    dictionary.entries.push({ word: "港", quote: "古い港", reading: "みなと", source: "author" });
+    pickInOrder(() => undefined);
+    await manageReadingDictionary(target);
+    expect(shownLists).toEqual([
+      { title: "読みの辞書（1件）", placeHolder: "直したい項目を選んでください" },
+    ]);
+    expect(doneNotes).toEqual([]);
+  });
+
+  test("閉じたあとの列の件数は0件に合う", async () => {
+    pickInOrder(
+      (items) => items.find((item) => "proposal" in item),
+      (items) => items.find((item) => item.action === "adopt")
+    );
+    await manageReadingDictionary(target);
+    const summary = await readingDictionarySummary(target);
+    expect(summary.imeSuggestions).toBe(0);
+    expect(readingDictionaryNote(summary)).toBe("読みの辞書：1件");
   });
 });

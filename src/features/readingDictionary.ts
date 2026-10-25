@@ -406,6 +406,10 @@ export async function runReadingDictionary(
  * AIで作り直しても、上書きされない。
  *
  * IMEで打った読みの提案（設計書6.42.2）も先頭に並べ、選ぶと［採る］／［見送る］。
+ * 決めたあと一覧へ戻るときは、題にいましたことと残りの件数を出す。**最後の1件を
+ * 片づけたら一覧へ戻らずに閉じて知らせる**——毎回同じ一覧へ戻ると、全部片づけても
+ * 終わったのか分からなかった（作者の指摘、2026-10-25 夜）。最初から提案が無い
+ * （辞書の項目を見に来た）ときは今までどおり一覧を出す。
  *
  * 変えたら true（呼び手が画面の様子を出し直す）。
  */
@@ -414,6 +418,9 @@ export async function manageReadingDictionary(
 ): Promise<boolean> {
   let changed = false;
   let imeWarned = false;
+  // 直前に片づけた提案の一言（「「港」を読みの辞書に入れました。」）。次の一覧の題に
+  // 1度だけ出す。辞書の項目を直したあとまで残すと、何の話か分からなくなる
+  let lastDecision: string | undefined;
   for (;;) {
     let loaded;
     try {
@@ -438,6 +445,12 @@ export async function manageReadingDictionary(
         imeWarned = true;
         void warnWithLog(error instanceof Error ? error.message : String(error));
       }
+    }
+    const decided = lastDecision;
+    lastDecision = undefined;
+    if (decided !== undefined && proposals.length === 0) {
+      notifyDone(`${decided}IMEの読みの提案はすべて片づきました。`);
+      return changed;
     }
 
     const picked = await vscode.window.showQuickPick(
@@ -465,7 +478,9 @@ export async function manageReadingDictionary(
       ],
       {
         title:
-          proposals.length > 0
+          decided !== undefined
+            ? `${decided}IMEの読みの提案：残り${proposals.length}件`
+            : proposals.length > 0
             ? `読みの辞書（${live.length}件・IMEの読みの提案${proposals.length}件）`
             : `読みの辞書（${live.length}件）`,
         placeHolder:
@@ -481,7 +496,13 @@ export async function manageReadingDictionary(
     if ("proposal" in picked) {
       const result = await decideImeProposal(target, loaded, picked.proposal);
       if (result === "failed") return changed;
-      if (result === "changed") changed = true;
+      if (result === "adopted") {
+        changed = true;
+        lastDecision = `「${picked.proposal.word}」を読みの辞書に入れました。`;
+      } else if (result === "dismissed") {
+        changed = true;
+        lastDecision = `「${picked.proposal.word}」の提案を見送りました。`;
+      }
       continue;
     }
     if (!("entry" in picked)) return changed;
@@ -538,13 +559,13 @@ export async function manageReadingDictionary(
  *   入っていたら書かずに止める）
  * - ［見送る］：見送りの印（同期する）を足す。次から同じ（話・語・読み）は出ない
  *
- * @returns 書いたら changed、戻ったら kept、書けなかったら failed
+ * @returns 採ったら adopted、見送ったら dismissed、戻ったら kept、書けなかったら failed
  */
 async function decideImeProposal(
   target: ReadingDictionaryTarget,
   loaded: LoadedReadingDictionary,
   proposal: ImeWordProposal
-): Promise<"changed" | "kept" | "failed"> {
+): Promise<"adopted" | "dismissed" | "kept" | "failed"> {
   const action = await vscode.window.showQuickPick(
     [
       {
@@ -584,8 +605,9 @@ async function decideImeProposal(
           new Date().toISOString()
         )
       );
+      return "dismissed";
     }
-    return "changed";
+    return "adopted";
   } catch (error) {
     void warnWithLog(error instanceof Error ? error.message : String(error));
     return "failed";
