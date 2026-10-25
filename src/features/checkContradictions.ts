@@ -172,8 +172,7 @@ import {
 // 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
 import { summarizeReasons } from "../core/checkRunCounts";
 import { hashText } from "../core/textFile";
-import { confirmRunOrChoose } from "../views/notify";
-import { findLargerModelOffer } from "./largerModelOffer";
+import { confirmRun } from "../views/notify";
 import { cancelItem } from "../views/dialogs";
 
 /**
@@ -882,24 +881,9 @@ export async function checkContradictions(
       // 足したことは、この確認の中にしか書かれていない
       log.step(`矛盾検知：まとめ実行のため確認を省略\n${detail}`);
     } else {
-      /*
-        **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
-        （A3④、2026-09-23）。矛盾検知は大きさで当たりが最も変わる機能
-        （e4b 0/4・26b 4/4）。まとめ実行では確認を出さないので案内もしない。
-        クラウドでは出ない（`findLargerModelOffer` が手元だけを見る）。
-      */
-      const offer = await findLargerModelOffer({
-        registry,
-        feature: "contradiction",
-        provider: resolved.provider,
-        model: resolved.model,
-        parameterSize: info.parameterSize,
-        speedFeature: "contradiction_check",
-        promptVersion: CONTRADICTION_CHECK_VERSION,
-        inputChars: sendChars,
-        workFolder: work.folderPath,
-      });
-      const answer = await confirmRunOrChoose(
+      // 大きいモデルの案内はここでは出さない（作者の裁定 2026-10-25
+      // 「誤字脱字だけ残す」。モデルを自分から勧めないため）
+      const confirmed = await confirmRun(
         cloudWhole
           ? `${work.title} の本文を、まるごと ${resolved.provider.displayName} へ送って矛盾を検知します。`
           : wholeRead
@@ -908,25 +892,13 @@ export async function checkContradictions(
         cloudWhole ? WHOLE_READ_CONSENT_LABEL : "実行",
         {
           kind: cloudWhole ? "warning" : undefined,
-          detail: [wholeNote, detail, offer?.detail ?? ""]
-            .filter(Boolean)
-            .join("\n\n"),
+          detail: [wholeNote, detail].filter(Boolean).join("\n\n"),
           remember: wholeRead ? undefined : { id: "ai.run.checkContradictions" },
           // 推し量った作品なら「訊かない」を覚えていても訊く
           work,
-          choices: offer?.choices,
         }
       );
-      if (!answer) return undefined;
-      if (answer.kind === "choice") {
-        // 割当を変えたら最初からやり直す——モデルが変われば、分け方も
-        // 資料の量も抑制の強さも変わるので、ここまでの準備は使えない
-        const next = await offer?.handle(answer.label);
-        return next === "rerun"
-          ? checkContradictions(work, registry, options)
-          : undefined;
-      }
-      if (offer) log.step(offer.logText);
+      if (!confirmed) return undefined;
     }
   }
 

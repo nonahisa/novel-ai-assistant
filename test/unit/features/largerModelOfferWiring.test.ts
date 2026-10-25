@@ -4,8 +4,12 @@ import { describe, expect, test } from "vitest";
 import { isMeasureTarget } from "../../../src/features/measureContext";
 
 /**
- * 大きいモデルの案内（A3④）を、**当たりがモデルの大きさで変わる3機能**の
- * 確認へつないであるか。
+ * 大きいモデルの案内（A3④）を、**誤字脱字の確認だけ**へつないであるか。
+ *
+ * もとは誤字脱字・矛盾検知・推敲の3機能の確認で案内していた。作者は
+ * 「モデルを自分から勧めない」と決めており、**2026-10-25 の裁定で
+ * 「誤字脱字だけ残す」**とした。矛盾検知と推敲は案内を外したので、
+ * うっかり戻らないよう「無いこと」も見張る。
  *
  * 決め方そのものは `largerModelAdvice.test.ts` が見る。ここで見るのは配線
  * ——それぞれを走らせるには画面の部品を大量に偽る必要があるので、書き方で
@@ -15,12 +19,13 @@ import { isMeasureTarget } from "../../../src/features/measureContext";
 const FEATURES = join(__dirname, "..", "..", "..", "src", "features");
 
 const WIRED = [
-  { file: "checkContradictions.ts", feature: "contradiction", self: "checkContradictions" },
   { file: "checkTypos.ts", feature: "typo", self: "checkTypos" },
-  { file: "checkProofread.ts", feature: "proofread", self: "checkProofread" },
 ] as const;
 
-describe("3機能の確認に、大きいモデルの案内をつないである", () => {
+/** 作者の裁定（2026-10-25）で案内を外した機能 */
+const UNWIRED = ["checkContradictions.ts", "checkProofread.ts"] as const;
+
+describe("誤字脱字の確認に、大きいモデルの案内をつないである", () => {
   test.each(WIRED)("$file", ({ file, feature, self }) => {
     const source = readFileSync(join(FEATURES, file), "utf8");
     const call = source.indexOf("findLargerModelOffer({");
@@ -39,6 +44,14 @@ describe("3機能の確認に、大きいモデルの案内をつないである
     );
     // 案内は確認と同じ窓に出す
     expect(source).toMatch(/choices: offer\?\.choices/);
+  });
+});
+
+describe("矛盾検知と推敲の確認では、大きいモデルを案内しない（2026-10-25 の裁定）", () => {
+  test.each(UNWIRED)("%s", (file) => {
+    const source = readFileSync(join(FEATURES, file), "utf8");
+    expect(source).not.toContain("findLargerModelOffer");
+    expect(source).not.toContain("largerModelOffer");
   });
 });
 

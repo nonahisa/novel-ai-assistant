@@ -77,12 +77,9 @@ vi.mock("../../../src/ai/registry", () => ({
   })),
 }));
 
-// 疎通の確かめと「大きいモデルの案内」は、ここで見ることではない
+// 疎通の確かめは、ここで見ることではない
 vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: vi.fn(async () => true),
-}));
-vi.mock("../../../src/features/largerModelOffer", () => ({
-  findLargerModelOffer: vi.fn(async () => undefined),
 }));
 
 /**
@@ -110,7 +107,7 @@ vi.mock("../../../src/views/notify", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../src/views/notify")>();
   return {
     ...actual,
-    confirmRunOrChoose: vi.fn(async () => ({ kind: "run" })),
+    confirmRun: vi.fn(async () => true),
     notifyDone: vi.fn(),
     suggestAction: vi.fn(async () => "run"),
   };
