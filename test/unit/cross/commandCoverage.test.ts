@@ -39,6 +39,15 @@ describe("コマンドごとの区分の表", () => {
     expect(stale, "消したコマンドは表からも外してください").toEqual([]);
   });
 
+  test("能力一覧のコマンドの題は、総称の既定「能力」にそろえる（6.5-②）", () => {
+    // package.json の題は作品ごとの総称（能力・スキルなど）に合わせて変えられない。
+    // 作者の裁定（2026-10-25 夜）で、既定の「能力」の名で固定する
+    const titles = pkg.contributes.commands as Array<{ command: string; title?: string }>;
+    const entry = titles.find((c) => c.command === "novelai.generateAbilityDocs");
+    expect(entry?.title).toBe("能力一覧を生成（AIを使わない）");
+    expect(COMMAND_COVERAGE["novelai.generateAbilityDocs"].label).toBe("能力一覧を生成");
+  });
+
   test("C4 には理由の種類があり、ほかの区分には無い", () => {
     for (const [command, entry] of Object.entries(COMMAND_COVERAGE)) {
       if (entry.class === "C4") {
