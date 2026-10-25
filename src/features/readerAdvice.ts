@@ -37,7 +37,7 @@ import {
 import { confirmRun } from "../views/notify";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { paidCostLines } from "../core/paidUsageNotice";
-import { withAiTurnProgress } from "./aiTurn";
+import { withCancellableProgress } from "../views/progress";
 
 /**
  * 執筆統計の「AIに助言をもらう」（設計書6.79.7.3。P-40）。
@@ -201,9 +201,10 @@ export async function requestReaderAdvice(
   );
   let outcome: ReaderAdviceOutcome = { kind: "cancelled" };
 
-  await withAiTurnProgress(
+  // 札（設計書6.76）は取らない。AIを呼ぶのは1回だけなので、一括処理の
+  // チャンクの合間へ滑り込める（ほかの単発の機能と同じ）
+  await withCancellableProgress(
     "読者の反応を読んでいます",
-    { label: "読者の反応の助言" },
     async (_progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => controller.abort());
