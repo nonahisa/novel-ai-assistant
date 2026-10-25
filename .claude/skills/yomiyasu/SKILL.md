@@ -18,7 +18,8 @@ AIが生成した文章の不自然な比喩、曖昧な主述関係、偏った
 > - 当てるのは、**外の読み手が読む説明文だけ**：`README.md`（Marketplace と GitHub の両方に出る）、`package.json` の `description`、GitHub のリポジトリの説明、GitHub Release のノート、**`CHANGELOG.md` の各版の項目**（Marketplace の「Changelog」タブにそのまま出る。新しい版の項目を書いたら、コミットの前に通す。過去の版の項目は書き直さない）、**Discord サーバーに貼る文章**（ボットのリポジトリの `content/server-texts.md` のルール・案内文・部屋の説明。作者の指示 2026-10-23）
 > - **当てないもの**：作者への返事・報告、設計書・引継ぎ書、画面の文言、プロンプト、コード内のコメント、小説の本文
 > - README の決まり（やり方とできることだけを書く。理由・経緯は書かない。キャッチコピーと「テスト中」は残す）が先に立つ。書き直しで決まりを崩さない。CHANGELOG も、何が変わったか・どう使うかだけを書く
-> - 同梱の `scripts/*.py` は Python 3 が要る。このパソコンには Python の本体が無い（2026-10-15 にも確かめた。`python` はストア版の入口だけ）ので、静的検査の手順は飛ばし、目で点検する
+> - 同梱の `scripts/*.py` は Python 3 が要る。**2026-10-25 に作者の指示で Python 3.14 を入れた**（winget、利用者の範囲）。本体は `%LOCALAPPDATA%\Programs\Python\Python314\python.exe`。入れる前から開いていたシェルでは `python` がストア版の入口のままなので、この道を直に書いて呼ぶ。PowerShell からは `$env:PYTHONIOENCODING = "utf-8"` を先に置く（日本語の出力が化けないように）
+> - `run` は原文（`--source`）か資料（`--material`）が要る。Release ノートは CHANGELOG の該当版や `git log --format=%B` を資料に渡す。検査の記録は `.yomiyasu/`（git には入らない・配布物からは `.vscodeignore` で外してある。2026-10-25 に一度 VSIX へ紛れ込んで検証が止めた）
 > - 元：https://github.com/nanaism/yomiyasu （MIT、v2.2.2・488dd37 の `skills/yomiyasu/` を写した（2026-10-23）。`LICENSE`・`UNICODE-LICENSE.txt` を同梱。前は v1.1.2・60bf877。補助スクリプト（`yomiyasu_hook.py` を含む）は写しただけで、フックには登録せず、実行もしない）
 
 ### 用途と表記の扱い
