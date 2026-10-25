@@ -76,6 +76,18 @@ export const CONTRADICTION_VERIFY_VERSION = "1.2";
 // 事実の文を渡さない呼び出し（`futureFacts` を省く）は 1.3 と同じ文面のまま
 export const CONTRADICTION_VERIFY_FUTURE_VERSION = "1.4";
 
+// travel 1.0（2026-10-25、作者の選択①）：**移動の照合（事実の照合の `findTravelImpossibilities`）
+// から来た指摘にだけ**、出どころの欄を置く。コードが照らした所要時間・コードの読み・
+// 時の手がかり・前側の箇所の前後を渡し、「場所を移ったこと自体はこの指摘の前提で、問うのは
+// 書かれた経過のあいだに移れるか」と書く。却下の理由から「まだ明かされていない」を外し、
+// 「作中の変化」「そもそも食い違っていない」を移動の照合の説明に差し替える。
+// 旅の台で 26b は3件とも「8行目で港町にいることは作中の変化（移動）として成立する」
+// 「前夜から翌朝にかけて移動した結果」で、e4b は「まだ明かされていない」で取り下げた
+// （docs/measurements/2026-10-25-travel-stage0-1.md）。
+// **本命（settled）と future の文面は1文字も変えていない**ので、その2つの版は据え置き、
+// 移動の照合の控えの鍵だけにこの版と `travel` の印を付ける（`factVerifyPromptVersion`）
+export const CONTRADICTION_VERIFY_TRAVEL_VERSION = "1.0";
+
 /**
  * 送るときの温度。指摘が本当に矛盾かを確かめるだけなので揺らさない。
  *
@@ -176,7 +188,12 @@ export interface ContradictionVerifyInput {
    * 「まだ明かされていない」を並べず、「作中の変化」を future 用の説明にする。
    * 大きいモデルにも小さいモデルにも同じ形を送る。
    */
-  source?: "settled" | "future";
+  source?: "settled" | "future" | "travel";
+  /**
+   * 移動の照合から来た指摘の材料（travel 1.0）。`source: "travel"` のときだけ使う。
+   * **どれもコードが組んだもの**（AI の文ではない）
+   */
+  travel?: TravelVerifyMaterial;
   /**
    * future の指摘が照らした、あとの話で判明する事実の文（1.4）。検出の段へ送った一覧と
    * 同じ書式の行（「宗一の紹介（第5話で判明）: …」）。**コードが選んだもの**
@@ -305,11 +322,13 @@ const REJECT_REASON_TEXTS: Record<VerifyRejectReason, string> = {
 export function verifyRejectReasonsFor(input: {
   settingKnownAt: string;
   smallModel?: boolean;
-  source?: "settled" | "future";
+  source?: "settled" | "future" | "travel";
 }): readonly VerifyRejectReason[] {
   // **future では大小とも並べない**（1.3）。設定が対象の話より後に分かるのが
-  // この照合の前提なので、この理由は前提そのもので当たりを消す（26b の瀬戸）
-  if (input.source === "future") {
+  // この照合の前提なので、この理由は前提そのもので当たりを消す（26b の瀬戸）。
+  // **移動の照合でも並べない**（travel 1.0）。両側とも本文に書かれた所在で、
+  // 明かされる・明かされないの話ではない（e4b は旅の台でこの理由で取り下げた）
+  if (input.source === "future" || input.source === "travel") {
     return VERIFY_REJECT_REASONS.filter((reason) => reason !== "まだ明かされていない");
   }
   if (!(input.smallModel ?? false) || input.settingKnownAt) return VERIFY_REJECT_REASONS;
@@ -337,22 +356,112 @@ function futureSourceBlock(input: ContradictionVerifyInput): string {
   );
 }
 
+/** 移動の照合から来た指摘の材料（travel 1.0）。どれもコードが組んだ文 */
+export interface TravelVerifyMaterial {
+  /** 場所の記録の所要時間（候補の `basis`。「場所の記録では、王都と港町のあいだは3日かかる…」） */
+  travelTime: string;
+  /** コードの読み（候補の `reason`。「第2話2行目に『王都』、第2話8行目に『港町』。…移っている」） */
+  reading: string;
+  /**
+   * 後ろ側の段落の頭で時計が読んだ語と、その読み方（「「その頃」（前の場面と同じ時）」）。
+   * 読めなければ空
+   */
+  timeCue: string;
+  /** 前側の事実の箇所の前後（行番号付き）。後ろ側の前後に入っているとき・本文に無いときは空 */
+  leftContext: string;
+}
+
+/**
+ * 移動の照合から来た指摘の、出どころの説明（travel 1.0）。
+ *
+ * 26b は「8行目で港町にいることは作中の変化（移動）として成立する」と、移動したこと
+ * そのものを両立の理由にした。**移動はこの照合の前提で、問いは「間に合うか」**だと先に言う。
+ * **そのまま答えに返ってくる前提で書く**（CLAUDE.md「繰り返し起きた失敗」3番）——
+ * 却下の理由の語（「作中の変化」「食い違っていない」など）を含めない。2文目
+ * （`VERIFY_TRAVEL_KEEP_SENTENCES`）を写したまま却下してきたら、読み取りは判断
+ * できなかったものとして通す（`parseVerifyOutcome`）
+ */
+export const VERIFY_TRAVEL_SOURCE_NOTE =
+  "この指摘は、場所の記録の所要時間と、本文の時の手がかりを、コードが突き合わせて挙げたものです。";
+
+/**
+ * 移動の照合の「残せ」と言っている文（travel 1.0）。却下の説明にこれを丸ごと写してきたら、
+ * 自分で前提だと書きながら移動を理由に消そうとしているので、却下として受け取らない
+ */
+export const VERIFY_TRAVEL_KEEP_SENTENCES: readonly string[] = [
+  "人物が場所を移ったこと自体は、この指摘の前提であって、両立の理由になりません。",
+  "書かれた経過が所要時間より短く、速く移る手段も本文に書かれていないなら、同時に成り立ちません。",
+];
+
+/** 移動の照合で問うことの説明（travel 1.0）。経過と所要時間を比べさせる */
+const VERIFY_TRAVEL_QUESTION =
+  "問うのは、書かれた時の経過のあいだに、その道のりを移れるかです。" +
+  VERIFY_TRAVEL_KEEP_SENTENCES[0] +
+  "本文に、記録より速く移る手段（転移・飛行など）や、もっと長い時が経ったことが書かれていれば両立します。" +
+  VERIFY_TRAVEL_KEEP_SENTENCES[1];
+
+/**
+ * 移動の照合の「作中の変化」の説明（travel 1.0）。1.2 の説明（「人物の身の上が先へ進むのは
+ * 矛盾ではありません」）は、移動をそのまま身の上の変化と読ませる（26b の第6話「前夜から
+ * 翌朝にかけて移動した結果」）
+ */
+const TRAVEL_CHANGE_TEXT = `**作中の変化** … 本文に、記録より速く移る手段や、コードの読みより長い時の経過が書かれている場合だけ。
+   移動したことだけでは、これに当たりません。`;
+
+/**
+ * 移動の照合の「そもそも食い違っていない」の説明（travel 1.0）。口調の但し書きは要らない。
+ * 時計の読み違い（「その頃」が別の日を指すと本文から分かる、など）は正しい却下として残す
+ */
+const TRAVEL_NO_CONFLICT_TEXT = `**そもそも食い違っていない** … コードの読み（どの場所か・時がどれだけ経ったか）が本文と違っていて、両立する場合。`;
+
+/** 移動の照合の【採用すべき場合】に足す1文（travel 1.0） */
+const TRAVEL_ADOPT_LINE =
+  "\n移動の指摘では、本文の時の経過が場所の記録の所要時間より短く、速く移る手段も書かれていない場合も矛盾です。";
+
+/** 移動の照合の、出どころと材料の欄（travel 1.0） */
+function travelSourceBlock(material: TravelVerifyMaterial | undefined): string {
+  const lines = [`\n【指摘の出どころ】\n${VERIFY_TRAVEL_SOURCE_NOTE}\n${VERIFY_TRAVEL_QUESTION}\n`];
+  if (material?.travelTime.trim()) {
+    lines.push(`\n【所要時間（場所の記録）】\n${material.travelTime.trim()}\n`);
+  }
+  if (material?.reading.trim()) {
+    lines.push(`\n【コードの読み】\n${material.reading.trim()}\n`);
+  }
+  if (material?.timeCue.trim()) {
+    lines.push(`\n【時の手がかり（引用の段落の頭）】\n${material.timeCue.trim()}\n`);
+  }
+  if (material?.leftContext.trim()) {
+    lines.push(`\n【前側の箇所の前後】\n${material.leftContext.trim()}\n`);
+  }
+  return lines.join("");
+}
+
 export function buildContradictionVerifyPrompt(
   input: ContradictionVerifyInput
 ): string {
   const small = input.smallModel ?? false;
   const future = input.source === "future";
+  const travel = input.source === "travel";
   const knownAt =
     input.settingKnownAt ||
     (future ? VERIFY_KNOWN_AT_NONE_FUTURE : small ? VERIFY_KNOWN_AT_NONE_SMALL : "（不明）");
   const reasons = verifyRejectReasonsFor(input);
-  const reasonText = (reason: VerifyRejectReason): string =>
-    future && reason === "作中の変化" ? FUTURE_CHANGE_TEXT : REJECT_REASON_TEXTS[reason];
+  const reasonText = (reason: VerifyRejectReason): string => {
+    if (future && reason === "作中の変化") return FUTURE_CHANGE_TEXT;
+    if (travel && reason === "作中の変化") return TRAVEL_CHANGE_TEXT;
+    if (travel && reason === "そもそも食い違っていない") return TRAVEL_NO_CONFLICT_TEXT;
+    return REJECT_REASON_TEXTS[reason];
+  };
   const reasonItems = reasons
     .map((reason, index) => `${index + 1}. ${reasonText(reason)}`)
     .join("\n");
   // 本命（settled）では何も足さない。1.2 と1文字も変えないため、欄ごと出さない
-  const sourceBlock = future ? futureSourceBlock(input) : "";
+  const sourceBlock = future
+    ? futureSourceBlock(input)
+    : travel
+      ? travelSourceBlock(input.travel)
+      : "";
+  const adoptExtra = travel ? TRAVEL_ADOPT_LINE : "";
   return `次の指摘が、本当に矛盾かどうかを判断してください。
 
 【対象の話】${input.chapterLabel}
@@ -376,7 +485,7 @@ ${reasonItems}
 **両方が同時に成り立たないときだけ**です。とくに、
 地の文（語り手の記述）どうしが食い違っている場合は矛盾です。
 台詞が、話している人物の設定と違う一人称・丁寧さの段・話し方の種類で話していて、
-本文にきっかけが描かれていない場合も矛盾です。
+本文にきっかけが描かれていない場合も矛盾です。${adoptExtra}
 
 迷ったら却下してください。
 

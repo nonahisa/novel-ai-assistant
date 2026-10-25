@@ -174,6 +174,48 @@ describe("弾くもの", () => {
     expect(result.accepted[0]?.subject).toBe("見知らぬ誰か");
   });
 
+  test("頭の0の数だけ違う id は、台帳のその人物とみなす（2026-10-25、作者の選択②）", () => {
+    // 旅の台で、台帳は4桁（char_0003）なのに 26b は char_003 を6件返し、
+    // 第4話（ゴドー）の事実が全部「作られた人物id」で落ちた。P-37 の見本の id が3桁のため
+    const ledger = input({
+      knownCharacterIds: new Set(["char_0001", "char_0003"]),
+      knownNames: new Map(),
+    });
+    const result = validateStoryFactResult(
+      {
+        facts: [
+          fact({ subject: "char_003", modality: "dialogue", speaker: "char_3", pov: "char_00001" }),
+        ],
+      },
+      ledger
+    );
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted[0]).toMatchObject({
+      subject: "char_0003",
+      speaker: "char_0003",
+      pov: "char_0001",
+    });
+
+    // 数が違えば、いままでどおり作られた id として弾く（char_030 は30番）
+    const reasonIn = (subject: string) =>
+      validateStoryFactResult({ facts: [fact({ subject })] }, ledger).rejected[0]?.reason;
+    expect(reasonIn("char_030")).toBe("unknown_subject");
+    expect(reasonIn("char_0002")).toBe("unknown_subject");
+    expect(reasonIn("char_999")).toBe("unknown_subject");
+  });
+
+  test("頭の0を外すと2人に当たる id は、どちらとも決めず弾く", () => {
+    // 台帳に char_03 と char_003 が並ぶ作品は無いはずだが、あれば推測で寄せない
+    const ledger = input({
+      knownCharacterIds: new Set(["char_03", "char_003"]),
+      knownNames: new Map(),
+    });
+    expect(
+      validateStoryFactResult({ facts: [fact({ subject: "char_3" })] }, ledger).rejected[0]
+        ?.reason
+    ).toBe("unknown_subject");
+  });
+
   test("中身の無い値を弾く", () => {
     // 「不明」「記述なし」はプロンプトでも禁じているが、指示だけでは守られない
     expect(reasonOf(fact({ value: "不明" }))).toBe("empty_value");

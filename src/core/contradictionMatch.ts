@@ -76,6 +76,12 @@ export interface ContradictionCandidate {
    * 指紋には混ぜない（同じ食い違いの鍵を変えない）
    */
   basis?: string;
+  /**
+   * どの照合器から来たか。いまは移動の照合（`findTravelImpossibilities`）だけが付ける。
+   * 判定（P-12b）は、移動の照合から来た候補に専用の文面を送る（travel 1.0、2026-10-25）。
+   * 指紋には混ぜない
+   */
+  origin?: "travel";
 }
 
 /**
@@ -600,6 +606,7 @@ export function findTravelImpossibilities(
           basis:
             `場所の記録では、${from.entry.locationName}と${to.entry.locationName}のあいだは` +
             `${formatDays(minDays)}かかる（書かれた所要時間のうち、いちばん速いもの）`,
+          origin: "travel",
         })
       );
     }
@@ -760,11 +767,13 @@ interface CandidateDraft extends FingerprintInput {
   unknownOrder: boolean;
   reason: string;
   basis?: string;
+  origin?: "travel";
 }
 
 function buildCandidate(draft: CandidateDraft): ContradictionCandidate {
   return {
     ...(draft.basis ? { basis: draft.basis } : {}),
+    ...(draft.origin ? { origin: draft.origin } : {}),
     type: draft.type,
     subject: draft.subject,
     predicate: draft.predicate,

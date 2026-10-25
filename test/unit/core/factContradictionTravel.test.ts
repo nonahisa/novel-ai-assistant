@@ -9,8 +9,15 @@ import {
 } from "../../../src/core/factContradiction";
 import {
   buildTravelMaterial,
+  factVerifyPromptVersion,
+  factVerifySourceOf,
+  travelVerifyMaterialOf,
   type FactPlace,
 } from "../../../src/core/factContradictionFlow";
+import {
+  CONTRADICTION_VERIFY_TRAVEL_VERSION,
+  CONTRADICTION_VERIFY_VERSION,
+} from "../../../src/prompts/contradictionVerify";
 import { parseLocation, type Location } from "../../../src/models/location";
 import type { FactKind, FactModality, StoryFact } from "../../../src/models/storyFact";
 
@@ -181,6 +188,96 @@ describe("移動の照合（旅の台・固定の事実）", () => {
       rightLineText: "翌朝、エドは港町に着いた。",
     });
     expect(issue.settingSays).toContain("場所の記録では、王都と港町のあいだは3日かかる");
+  });
+
+  /**
+   * 判定（P-12b travel 1.0）へ渡す材料。26b は第2話の「その頃」を同じ時と読まずに
+   * 「8行目で港町にいるのは移動として成立する」と取り下げた。判定は後ろ側の ±5行しか
+   * 見ないので、前側（2行目「リナは王都にいた」）が窓の外にあった
+   */
+  it("移動の照合の候補には、時の手がかりと前側の前後を添える", () => {
+    const read = (file: string) => episodes.find((episode) => episode.filePath === file)?.text;
+    const materialFor = (rightId: string, rightLineText: string) => {
+      const candidate = candidates.find((entry) => entry.right === rightId);
+      if (!candidate) throw new Error(`${rightId} の候補が無い`);
+      expect(factVerifySourceOf(candidate)).toBe("travel");
+      const leftPlace = places.get(candidate.left) as FactPlace;
+      return travelVerifyMaterialOf({
+        candidate,
+        leftPlace,
+        leftSourceText: read(leftPlace.filePath),
+        rightPlace: places.get(rightId) as FactPlace,
+        rightLineText,
+      });
+    };
+
+    const second = materialFor("fact:2:8:1", "　その頃、リナは港町にいた。朝に揚がったばかりの魚を、市場で選んでいる。");
+    expect(second?.timeCue).toBe("「その頃」（前の場面と同じ時と読みました）");
+    expect(second?.leftContext).toContain("2: 　リナは王都にいた。");
+    expect(second?.travelTime).toContain("王都と港町のあいだは3日かかる");
+    // 第2話は「四月九日」の日付で暦に載り、その日のいつか分からないので幅1日をとる
+    expect(second?.reading).toContain("長く見積もっても1日で移っている");
+
+    const sixth = materialFor("fact:6:12:1", "　翌朝、エドは港町に着いた。");
+    expect(sixth?.timeCue).toBe("「翌朝」（前の場面の1日後と読みました）");
+    expect(sixth?.leftContext).toContain("6: 　王都に戻ったエドは");
+
+    const fourth = materialFor("fact:4:8:1", "　二日後、ゴドーは王都に到着した。");
+    expect(fourth?.timeCue).toBe("「二日後」（前の場面の2日後と読みました）");
+  });
+
+  it("前側が判定の窓（±5行）に入っていれば、前後を重ねて渡さない。移動の照合でない候補には材料を作らない", () => {
+    const candidate = candidates[0];
+    const inWindow = travelVerifyMaterialOf({
+      candidate,
+      leftPlace: { filePath: "本文/x.txt", line: 7 },
+      leftSourceText: "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12",
+      rightPlace: { filePath: "本文/x.txt", line: 12 },
+    });
+    expect(inWindow?.leftContext).toBe("");
+    expect(
+      travelVerifyMaterialOf({
+        candidate: { ...candidate, origin: undefined },
+        rightPlace: { filePath: "本文/x.txt", line: 12 },
+      })
+    ).toBeUndefined();
+    expect(factVerifySourceOf({ origin: undefined })).toBe("settled");
+  });
+
+  /** 控えの鍵：移動の照合だけ版を分ける。本命の鍵は変えない（作者のクラウドAIの控えを作り直さない） */
+  it("判定の控えの版は、移動の照合だけ travel の印が付く", () => {
+    expect(factVerifyPromptVersion("settled")).toBe(CONTRADICTION_VERIFY_VERSION);
+    expect(factVerifyPromptVersion("travel")).toBe(
+      `${CONTRADICTION_VERIFY_VERSION}:travel${CONTRADICTION_VERIFY_TRAVEL_VERSION}`
+    );
+  });
+
+  /**
+   * 作者の選択③（含みで引く）。抽出が値を「港町の宿」「王都の城門の詰所」のように返しても、
+   * 仕込みに当たり、罠（回想の「王都の城門の前」は thought）に当たらない
+   */
+  it("値が場所の名前そのものでなくても、名前を1つだけ含めば同じ採点になる", () => {
+    const loose: Record<string, string> = {
+      "fact:2:2:1": "王都の城門の詰所",
+      "fact:2:8:1": "港町の市場",
+      "fact:3:1:1": "港町の宿",
+      "fact:5:1:1": "港町の灯台の下",
+      "fact:5:8:1": "王都の城門の前",
+      "fact:6:1:1": "港町の宿",
+    };
+    const looseFacts = facts.map((fact) =>
+      loose[fact.id] ? { ...fact, value: loose[fact.id] } : fact
+    );
+    const looseMaterial = buildTravelMaterial({ locations, facts: looseFacts, places, episodes });
+    expect(looseMaterial.stats.resolved).toBe(material.stats.resolved);
+    const looseFlagged = findContradictionCandidates({
+      facts: looseFacts,
+      travelTimes: looseMaterial.travelTimes,
+      whereabouts: looseMaterial.whereabouts,
+    })
+      .filter((candidate) => candidate.predicate === "所在")
+      .map((candidate) => places.get(candidate.right) as FactPlace);
+    expect(looseFlagged).toEqual(flagged);
   });
 
   /**

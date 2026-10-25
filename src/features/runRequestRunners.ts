@@ -49,6 +49,7 @@ import { TYPO_CHECK_VERSION } from "../prompts/typoCheck";
 import { PROOFREAD_VERSION } from "../prompts/proofread";
 import { CONTRADICTION_CHECK_VERSION } from "../prompts/contradictionCheck";
 import { CONTRADICTION_VERIFY_VERSION } from "../prompts/contradictionVerify";
+import { factVerifyPromptVersion } from "../core/factContradictionFlow";
 import { FORESHADOW_DETECT_VERSION } from "../prompts/foreshadowDetect";
 import { DEVIATION_CHECK_VERSION } from "../prompts/deviationCheck";
 import { checkTypos } from "./checkTypos";
@@ -677,7 +678,8 @@ async function runFeature(
       if (!result) return notStarted;
       return {
         ok: true,
-        promptVersion: `${STORY_FACT_EXTRACT_VERSION}|verify:${CONTRADICTION_VERIFY_VERSION}`,
+        // 移動の照合の候補は判定の文面が違う（travel 1.0）ので、その版も並べる
+        promptVersion: `${STORY_FACT_EXTRACT_VERSION}|verify:${factVerifyPromptVersion("travel")}`,
         findings: result.issues.map((issue) => toFinding(issue, work)),
         dropped: {
           count: result.rejectedFacts,

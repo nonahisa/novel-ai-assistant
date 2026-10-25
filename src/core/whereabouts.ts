@@ -17,9 +17,10 @@ import type { SceneClock } from "./sceneClock";
  *
  * ## 場所の引き方（母艦の判断、2026-10-25）
  *
- * **台帳の名前と別名の完全一致だけ**（`buildLocationResolver`）。2か所に当たる
- * 名前・当たらない名前は照合しない。部分一致（「港町の宿」→港町）は
- * 誤検出の元なので、いまはしない。
+ * **まず台帳の名前と別名の完全一致**（`buildLocationResolver`）。2か所に当たる
+ * 名前・当たらない名前は照合しない。完全一致で引けなければ、**名前がちょうど
+ * 1か所だけ含まれる値**をその場所とみなす（「港町の宿」→港町。作者の選択③、
+ * 2026-10-25。最初は誤検出の元として含みでは引かなかった）。
  *
  * ## 地の文だけを使う
  *
@@ -115,7 +116,33 @@ export function resolvePlace(
     const id = resolver.resolve(candidate, null);
     if (id) return id;
   }
-  return null;
+  return resolveContainedPlace(text, resolver);
+}
+
+/**
+ * 向かった・発った・目指した を言う語。**含みで引くときだけ**見る（完全一致の
+ * 「〜へ着いた」は `placeTextOf` が着いた先だけを切り出してから来る）。
+ * 「港町へ向かった」の港町は、その人がいる場所ではない
+ */
+const DEPARTURE_WORDS = /向か|発っ|発つ|発ち|出発|を出|目指|旅立|行っ|行く|行き/u;
+
+/**
+ * 完全一致で引けなかった値の退き先（作者の選択③、2026-10-25）：台帳の名前（別名）が
+ * **値まるごとの中にちょうど1か所だけ**出てくるなら、その場所とみなす（「港町の宿」→港町）。
+ *
+ * 旅の台で、値は「港町の宿」「王都の城門」「灯台の上」のように場所の名前そのもので
+ * ないことが多く、完全一致では26bの所在の事実15件のうち5件が引けなかった。
+ * 2か所を含むもの・含まないものは引かない。入れ子の組（港と港町）は、長い名前の
+ * 一部として出た短い名前を数えない（`LocationResolver.idsIn`）。所要時間の表での
+ * 入れ子の扱い（1日に満たない組は比べない）はそのまま
+ */
+function resolveContainedPlace(
+  text: string,
+  resolver: LocationResolver
+): string | null {
+  if (DEPARTURE_WORDS.test(text)) return null;
+  const ids = resolver.idsIn(text);
+  return ids.length === 1 ? ids[0] : null;
 }
 
 export function buildWhereabouts(input: {

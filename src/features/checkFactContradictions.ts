@@ -67,6 +67,9 @@ import {
   buildTravelMaterial,
   candidateSidesOf,
   collectFactsFromChunk,
+  factVerifyPromptVersion,
+  factVerifySourceOf,
+  travelVerifyMaterialOf,
   lineTextOf,
   parseFactJsonObject,
   TOPIC_CARRY_LIMIT,
@@ -86,7 +89,7 @@ import {
   CONTRADICTION_VERIFY_SCHEMA,
   CONTRADICTION_VERIFY_SYSTEM_PROMPT,
   CONTRADICTION_VERIFY_TEMPERATURE,
-  CONTRADICTION_VERIFY_VERSION,
+  type TravelVerifyMaterial,
   type VerifyRejectReason,
 } from "../prompts/contradictionVerify";
 import {
@@ -291,9 +294,13 @@ export async function checkFactContradictions(
     判定のAIは候補が出てから引くので、鍵もそのときに組む。判定は別の
     プロンプトなので、版も別に持つ
   */
-  const verifyKeyFor = (verifier: { provider: AIProvider; model: string }) => ({
+  const verifyKeyFor = (
+    verifier: { provider: AIProvider; model: string },
+    // 移動の照合の候補は文面が違う（travel 1.0）ので、版も分ける
+    source: "settled" | "travel" = "settled"
+  ) => ({
     feature: "fact_contradiction_verify",
-    promptVersion: CONTRADICTION_VERIFY_VERSION,
+    promptVersion: factVerifyPromptVersion(source),
     providerId: verifier.provider.id,
     model: verifier.model,
   });
@@ -711,9 +718,10 @@ export async function checkFactContradictions(
         確かめないまま送ることになる。覚えた判定だけで済むなら送らないので
         確かめない
       */
-      const verifyKeyBase = verifyKeyFor(verifier);
+      const verifyKeyOf = (candidate: ContradictionCandidate) =>
+        verifyKeyFor(verifier, factVerifySourceOf(candidate));
       const unverified = candidates.filter(
-        (candidate) => cache.get(candidate.fingerprint, verifyKeyBase) === undefined
+        (candidate) => cache.get(candidate.fingerprint, verifyKeyOf(candidate)) === undefined
       ).length;
       if (unverified > 0) {
         const alreadyReached =
@@ -783,7 +791,18 @@ export async function checkFactContradictions(
               right: sides.right,
               rightLineText: sides.rightLineText,
             });
+            // 移動の照合の候補だけ、所要時間・コードの読み・前側の前後を添える（travel 1.0）
+            const leftPlace = factPlaces.get(sides.left.id);
+            const travel = travelVerifyMaterialOf({
+              candidate,
+              leftPlace,
+              leftSourceText: leftPlace ? await readSource(leftPlace.filePath) : undefined,
+              rightPlace: sides.place,
+              rightLineText: sides.rightLineText,
+            });
             const outcome = await verify({
+              source: factVerifySourceOf(candidate),
+              travel,
               provider: verifier.provider,
               model: verifier.model,
               chapterLabel:
@@ -795,7 +814,7 @@ export async function checkFactContradictions(
               knownAt:
                 sides.left.chapter !== null ? `第${sides.left.chapter}話` : "",
               fingerprint: candidate.fingerprint,
-              cacheKey: verifyKeyBase,
+              cacheKey: verifyKeyOf(candidate),
               controller,
             });
 
@@ -934,6 +953,10 @@ export async function checkFactContradictions(
     context: string;
     issue: ReturnType<typeof buildFactVerifyIssue>;
     knownAt: string;
+    /** 文面の種類（`factVerifySourceOf`）。移動の照合なら travel */
+    source: "settled" | "travel";
+    /** 移動の照合の材料（`travelVerifyMaterialOf`）。ほかの候補なら undefined */
+    travel: TravelVerifyMaterial | undefined;
     fingerprint: string;
     /** 判定の覚えの鍵（`verifyKeyFor`。判定のAIのもの） */
     cacheKey: ReturnType<typeof verifyKeyFor>;
@@ -959,6 +982,8 @@ export async function checkFactContradictions(
           textSays: input.issue.textSays,
           category: input.issue.category,
           settingKnownAt: input.knownAt,
+          source: input.source,
+          travel: input.travel,
         }),
         model: input.model,
         temperature: CONTRADICTION_VERIFY_TEMPERATURE,
