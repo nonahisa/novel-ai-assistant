@@ -136,7 +136,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.exportSettingsForAudience": { class: "C2", label: "提供先別出力" },
   "novelai.generateCharacterDocs": { class: "C2", label: "人物一覧を生成" },
   "novelai.generateLocationDocs": { class: "C2", label: "場所一覧を生成" },
-  "novelai.generateAbilityDocs": { class: "C2", label: "スキル一覧を生成" },
+  "novelai.generateAbilityDocs": { class: "C2", label: "能力一覧を生成" },
   "novelai.generateWorldDocs": { class: "C2", label: "世界観一覧を生成" },
   // ── 設定資料
   "novelai.extractSettings": { class: "A", label: "一括抽出", via: "run.request feature: settings" },

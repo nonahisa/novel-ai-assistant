@@ -1063,7 +1063,7 @@
       },
       {
         "command": "novelai.generateAbilityDocs",
-        "title": "スキル一覧を生成（AIを使わない）",
+        "title": "能力一覧を生成（AIを使わない）",
         "category": "小説執筆",
         "icon": "$(zap)"
       },

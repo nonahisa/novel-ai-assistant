@@ -551,6 +551,7 @@ async function runTutorial(
           goal,
           advice: goal.advice,
           advicePolicy: describeAdviceDefault(deps),
+          adviceInUse: deps.adviceInUse?.(),
         }),
         { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }
       );
