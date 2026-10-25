@@ -8,6 +8,7 @@ import {
   IGNORED_PATHS,
   lastCacheDirective,
   missingIgnoreRules,
+  ON_USE_IGNORED_PATHS,
 } from "../../../src/core/workRegistry";
 import {
   isGitAvailable,
@@ -172,10 +173,16 @@ describe("同期対象から外す規則", () => {
 
   test("IMEの読みの提案の控えは同期せず、見送りの印は同期する（作者の選択 Q2、2026-10-25）", () => {
     // 控えは確定のたびに書く（名前の控えと同じ理由）。見送りは作者の判断なので、
-    // 別の機械で同じ提案が出直さないよう同期する
-    expect(missingIgnoreRules(encode("# 作者のメモ\n"))).toContain(
+    // 別の機械で同じ提案が出直さないよう同期する。
+    // **控えの行は起動の一括では足さず、使った作品にだけ足す**（作者の裁定、
+    // 2026-10-25 夜。0.111.16 で全作品の .gitignore へ1行足され、作品一覧が
+    // 全作品「記録待ち1」になった）。足すのは imeWordReadingStore.ts
+    expect(ON_USE_IGNORED_PATHS).toContain(".aiwriter/imeWordReadings.json");
+    expect(IGNORED_PATHS).not.toContain(".aiwriter/imeWordReadings.json");
+    expect(missingIgnoreRules(encode("# 作者のメモ\n"))).not.toContain(
       ".aiwriter/imeWordReadings.json"
     );
+    expect(ON_USE_IGNORED_PATHS).not.toContain(".aiwriter/imeReadingDismissals.json");
     expect(IGNORED_PATHS).not.toContain(".aiwriter/imeReadingDismissals.json");
     expect(
       IGNORED_PATHS.some((rule) => ".aiwriter/imeReadingDismissals.json".startsWith(rule))
@@ -211,9 +218,8 @@ describe("同期対象から外す規則", () => {
       // IMEで打った名前の読みの控え（設計書6.42.2、作者の裁定 2026-10-24 夜）。
       // 確定のたびに書くので、同期すると2台で食い違い、差分が出続ける
       ".aiwriter/imeReadings.json",
-      // IMEで打った語の読みの提案の控え（設計書6.42.2、作者の選択 Q2 2026-10-25）。
-      // 名前の控えと同じ理由で同期しない（見送りの印は同期する）
-      ".aiwriter/imeWordReadings.json",
+      // IMEで打った語の読みの提案の控え（imeWordReadings.json）はここに無い。
+      // 起動の一括では足さず、使った作品にだけ足す（作者の裁定、2026-10-25 夜）
       // MCP の登録（設計書6.87.15 柱5、0.70.11）。束への絶対パスが
       // 入っているので、同期すると別の機械には**存在しないパスを指す
       // 登録**が届く

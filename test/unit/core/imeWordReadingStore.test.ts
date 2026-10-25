@@ -35,12 +35,20 @@ vi.mock("../../../src/core/paths", () => ({
   toUri: (p: string) => ({ fsPath: p }),
 }));
 
+/** 書いた順の記録（.gitignore を足すのが控えより先かを見る） */
+const events: string[] = [];
+
 vi.mock("../../../src/core/workRegistry", () => ({
-  workPaths: () => ({ aiwriter: "/w/.aiwriter" }),
+  workPaths: () => ({ root: "/w", aiwriter: "/w/.aiwriter" }),
+  IME_WORD_READINGS_IGNORE_RULE: ".aiwriter/imeWordReadings.json",
+  ensureOnUseIgnoreRule: async (folder: string, rule: string) => {
+    events.push(`gitignore:${folder}:${rule}`);
+  },
 }));
 
 vi.mock("../../../src/core/atomicWrite", () => ({
   atomicWriteFile: async (target: string, bytes: Uint8Array) => {
+    events.push(`write:${target}`);
     files.set(target, new TextDecoder().decode(bytes));
   },
 }));
@@ -68,6 +76,28 @@ const input = {
 
 beforeEach(() => {
   files.clear();
+  events.length = 0;
+});
+
+describe("控えの同期外しは、使った作品にだけ足す（作者の裁定、2026-10-25 夜）", () => {
+  const GITIGNORE = "gitignore:/w:.aiwriter/imeWordReadings.json";
+
+  test("初めて控えを書くときは、書く前に .gitignore へ足す", async () => {
+    // 控え→.gitignore の順だと、間に同期が挟まると控えが Git に入りうる
+    await updateImeWordReadings(work, (file) => ({ file, result: undefined }));
+    expect(events).toEqual([GITIGNORE, `write:${WORDS}`]);
+  });
+
+  test("控えが既にあれば .gitignore には触らない", async () => {
+    files.set(WORDS, JSON.stringify({ version: 1, entries: [] }));
+    await updateImeWordReadings(work, (file) => ({ file, result: undefined }));
+    expect(events).toEqual([`write:${WORDS}`]);
+  });
+
+  test("見送りの印は同期するので、.gitignore には足さない", async () => {
+    await updateImeReadingDismissals(work, (file) => file);
+    expect(events).toEqual([`write:${DISMISSALS}`]);
+  });
 });
 
 describe("IMEの読みの提案の控え", () => {

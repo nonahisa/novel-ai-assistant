@@ -4,7 +4,11 @@ import type { WorkEntry } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
 import { hashText } from "./hash";
 import { isNotFound } from "./fileRead";
-import { workPaths } from "./workRegistry";
+import {
+  ensureOnUseIgnoreRule,
+  IME_WORD_READINGS_IGNORE_RULE,
+  workPaths,
+} from "./workRegistry";
 import {
   parseImeWordDismissalFile,
   parseImeWordReadingFile,
@@ -18,7 +22,9 @@ import {
  *
  * ## 2つに分けて置く
  *
- * - **控え** `.aiwriter/imeWordReadings.json`——**同期しない**（`IGNORED_PATHS`）。
+ * - **控え** `.aiwriter/imeWordReadings.json`——**同期しない**。除外の行は
+ *   起動の一括（`IGNORED_PATHS`）ではなく、**初めて控えを書く前にその作品の
+ *   .gitignore へ足す**（`ON_USE_IGNORED_PATHS`。作者の裁定、2026-10-25 夜）。
  *   漢字を含む語を確定するたびに書くので、同期すると2台で食い違い、変更の記録が
  *   出続ける（名前の控え `imeReadings.json` と同じ理由）。回数・直前の字は
  *   その機械で打った事実で、別の機械へ届けなくてよい（作者の選択 Q2）
@@ -54,11 +60,14 @@ interface JsonFile<T> {
   label: string;
   parse: (text: string) => T;
   empty: () => T;
+  /** 同期から外すなら、初めて書く前に .gitignore へ足す行 */
+  ignoreRule?: string;
 }
 
 const WORDS: JsonFile<ImeWordReadingFile> = {
   name: WORDS_FILE,
   label: "IMEの読みの提案の控え",
+  ignoreRule: IME_WORD_READINGS_IGNORE_RULE,
   parse: parseImeWordReadingFile,
   empty: () => ({ version: 1, entries: [] }),
 };
@@ -108,6 +117,14 @@ async function save<T>(
   const now = await readTextOrUndefined(target);
   const nowHash = now === undefined ? undefined : hashText(now);
   if (nowHash !== expectedHash) throw new ImeWordFileChangedError(kind.label);
+  if (kind.ignoreRule !== undefined && now === undefined) {
+    // **初めて書くときだけ、その作品の .gitignore へ足す**（作者の裁定、
+    // 2026-10-25 夜「使った作品だけに足す」）。起動の一括で足すと、使っていない
+    // 作品まで .gitignore が書き換わり、全作品に「記録待ち」が出た。
+    // **控えより先に足す**——逆の順だと、間に同期が挟まると控えが Git に入る。
+    // 足せなければ控えも書かずに投げる（同期に入る形で書くよりよい）
+    await ensureOnUseIgnoreRule(workPaths(work).root, kind.ignoreRule);
+  }
   const text = `${JSON.stringify(file, null, 2)}\n`;
   await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
   await atomicWriteFile(target, new TextEncoder().encode(text));

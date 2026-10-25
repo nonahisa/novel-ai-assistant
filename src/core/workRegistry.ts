@@ -853,15 +853,11 @@ export const IGNORED_PATHS: readonly string[] = [
   */
   ".aiwriter/imeReadings.json",
   /*
-    IMEで打った語の読みの提案の控え（設計書6.42.2。作者の選択 Q2、2026-10-25）。
-    **同期しない**——名前の控えと同じく、漢字を含む語を確定するたびに書くので、
-    同期すると2台で食い違い、変更の記録が出続ける。回数・直前の字はその機械で
-    打った事実で、別の機械へ届けなくてよい。**見送りの印
-    （`.aiwriter/imeReadingDismissals.json`）はここへ入れない**——作者の判断なので
-    同期して、別の機械で同じ提案が出直さないようにする。採った読みは読みの辞書
-    （`.aiwriter/readings/`）へ入り、そちらで同期される。
+    IMEで打った語の読みの提案の控え（`.aiwriter/imeWordReadings.json`）は
+    **ここへ入れない**（`ON_USE_IGNORED_PATHS`）。0.111.16 でここへ入れたら、
+    起動のたびに全作品の .gitignore へ1行が足され、作品一覧が全作品
+    「記録待ち1」になった（作者の裁定、2026-10-25 夜「使った作品だけに足す」）。
   */
-  ".aiwriter/imeWordReadings.json",
   /*
     MCP の登録（設計書6.87.15 柱5）。**同期しない**——登録には束
     （`dist/mcp-server.mjs`）への**絶対パス**が入っており、束の場所は
@@ -880,6 +876,26 @@ export const IGNORED_PATHS: readonly string[] = [
   ".novelai-recovery/",
   "exports/",
 ];
+
+/**
+ * IMEで打った語の読みの提案の控え（設計書6.42.2。作者の選択 Q2、2026-10-25）。
+ * **同期しない**——漢字を含む語を確定するたびに書くので、同期すると2台で
+ * 食い違い、変更の記録が出続ける。回数・直前の字はその機械で打った事実で、
+ * 別の機械へ届けなくてよい。**見送りの印（`.aiwriter/imeReadingDismissals.json`）
+ * は同期する**——作者の判断なので、別の機械で同じ提案が出直さないようにする。
+ */
+export const IME_WORD_READINGS_IGNORE_RULE = ".aiwriter/imeWordReadings.json";
+
+/**
+ * **使った作品にだけ足す**除外の行（作者の裁定、2026-10-25 夜）。
+ *
+ * `IGNORED_PATHS` は起動のたびに全作品の .gitignore へ足す。そこへ機能の控えを
+ * 1つ足すと、**その機能を使っていない作品まで .gitignore が書き換わり**、
+ * 全作品に「記録待ち」が出る（0.111.16 で16作品すべてがそうなった）。
+ * 控えを初めて書く口が `ensureOnUseIgnoreRule` を呼んで、その作品にだけ足す。
+ * 既に足された行は消さない（.gitignore は追記しかしない）。
+ */
+export const ON_USE_IGNORED_PATHS: readonly string[] = [IME_WORD_READINGS_IGNORE_RULE];
 
 /** キャッシュの除外規則と、それを打ち消す規則（設計書5.5.7） */
 export const CACHE_IGNORE_RULE = ".aiwriter/cache/";
@@ -948,6 +964,51 @@ async function ensureRecoveryIgnoreRule(
   folderPath: string,
   options: { syncCache?: boolean } = {}
 ): Promise<void> {
+  await appendMissingIgnoreRules(folderPath, (bytes) =>
+    missingIgnoreRules(bytes, options)
+  );
+}
+
+/**
+ * **使った作品にだけ足す**除外の行（`ON_USE_IGNORED_PATHS`）を、その作品の
+ * .gitignore へ足す。既にあれば何もしない。足し方は起動の整備と同じ
+ * （作者の記述をバイト単位で保ち、末尾の改行の形に合わせて追記する）。
+ *
+ * 呼ぶのは控えを**初めて書く前**。書いてから足すと、間に同期が挟まったとき
+ * 控えが Git に入りうる。
+ */
+export async function ensureOnUseIgnoreRule(
+  folderPath: string,
+  rule: string
+): Promise<void> {
+  // 一括の行（`IGNORED_PATHS`）をここから足すと、起動の整備と道が二重になり
+  // どちらが足したか追えなくなる。使った作品にだけ足す行に限る
+  if (!ON_USE_IGNORED_PATHS.includes(rule)) {
+    throw new Error(`使った作品にだけ足す除外の行ではありません: ${rule}`);
+  }
+  await appendMissingIgnoreRules(folderPath, (bytes) =>
+    lineSet(bytes).has(rule) ? [] : [rule]
+  );
+}
+
+function lineSet(bytes: Uint8Array): Set<string> {
+  return new Set(
+    new TextDecoder()
+      .decode(bytes)
+      .split(/\r\n|\n|\r/)
+      .map((line) => line.trim())
+  );
+}
+
+/**
+ * `.gitignore` へ、`missingOf` が足りないと言う行だけを追記する（無ければ作る）。
+ * 書いたあと読み直し、作者の記述が先頭にそのまま残り、足りない行が無くなった
+ * ことを確かめる。
+ */
+async function appendMissingIgnoreRules(
+  folderPath: string,
+  missingOf: (bytes: Uint8Array) => string[]
+): Promise<void> {
   const gitignorePath = path.join(folderPath, ".gitignore");
   const uri = path.toUri(gitignorePath);
   let existing: Uint8Array;
@@ -961,7 +1022,7 @@ async function ensureRecoveryIgnoreRule(
     if (!isNotFound(error)) {
       throw error;
     }
-    const initial = missingIgnoreRules(new Uint8Array(), options);
+    const initial = missingOf(new Uint8Array());
     await atomicWriteFile(
       gitignorePath,
       new TextEncoder().encode(`${initial.join("\n")}\n`),
@@ -971,7 +1032,7 @@ async function ensureRecoveryIgnoreRule(
   }
 
   const text = new TextDecoder().decode(existing);
-  const missing = missingIgnoreRules(existing, options);
+  const missing = missingOf(existing);
   if (missing.length === 0) {
     return;
   }
@@ -987,7 +1048,7 @@ async function ensureRecoveryIgnoreRule(
   if (
     migrated.length < existing.length ||
     !sameBytes(migrated.subarray(0, existing.length), existing) ||
-    missingIgnoreRules(migrated, options).length > 0
+    missingOf(migrated).length > 0
   ) {
     throw new Error(".gitignore の作者記述を保持したmigrationを確認できませんでした。");
   }
@@ -1052,12 +1113,7 @@ export function missingIgnoreRules(
   bytes: Uint8Array,
   options: { syncCache?: boolean } = {}
 ): string[] {
-  const written = new Set(
-    new TextDecoder()
-      .decode(bytes)
-      .split(/\r\n|\n|\r/)
-      .map((line) => line.trim())
-  );
+  const written = lineSet(bytes);
   const syncCache = options.syncCache ?? false;
   const current = lastCacheDirective(bytes);
 
