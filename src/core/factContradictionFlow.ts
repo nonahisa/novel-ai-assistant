@@ -11,8 +11,18 @@ import {
 import {
   buildFactVerifyIssue,
   type KnownCharacterTable,
+  type TravelStageStats,
 } from "./factContradiction";
-import type { ContradictionCandidate } from "./contradictionMatch";
+import type {
+  ContradictionCandidate,
+  TravelTime,
+  WhereaboutsEntry,
+} from "./contradictionMatch";
+import type { Location } from "../models/location";
+import { buildLocationResolver } from "./locationConsistency";
+import { buildSceneClock, type SceneClockEpisode } from "./sceneClock";
+import { buildTravelTable } from "./travelTable";
+import { buildWhereabouts } from "./whereabouts";
 
 /**
  * 矛盾検知（事実の照合。設計書6.88）の**道筋そのもの**のうち、
@@ -229,6 +239,53 @@ export function buildFactContradictionIssue(input: {
     textSays: issue.textSays,
     note: appendNote(issue.note, input.explanation ?? ""),
     confidence: input.candidate.confidence,
+  };
+}
+
+/** 移動の照合へ渡す材料（`findContradictionCandidates` の `travelTimes`・`whereabouts`） */
+export interface TravelMaterial {
+  travelTimes: TravelTime[];
+  whereabouts: WhereaboutsEntry[];
+  /** 工程ごとの件数。完了報告（`describeFactRun` の `travel`）へそのまま渡す */
+  stats: TravelStageStats;
+}
+
+/**
+ * 移動の照合の材料を組む（設計書6.88。**AIを使わない**第1段）。
+ *
+ * - 所要時間の表：場所の記録の距離の関係から（`travelTable.ts`）
+ * - 所在：事実を台帳の場所に引き、着いた出来事からも導く（`whereabouts.ts`）
+ * - 時計：各話の日付と段落の頭の語から（`sceneClock.ts`）
+ *
+ * **拡張機能（`features/checkFactContradictions.ts`）と MCP
+ * （`mcp/tools/factContradiction.ts`）の両方がここを呼ぶ。** 写しを作ると、
+ * 製品と測定がずれる（6.88.10）。ファイルを読むのは呼ぶ側の仕事で、
+ * ここは渡された中身だけで決める。
+ *
+ * `episodes` の `filePath` は**事実の置き場所（`places`）と同じ書き方**で渡す
+ * ——時計は「どのファイルの何行目か」で引く。
+ */
+export function buildTravelMaterial(input: {
+  locations: readonly Location[];
+  facts: readonly StoryFact[];
+  places: ReadonlyMap<string, FactPlace>;
+  episodes: readonly SceneClockEpisode[];
+}): TravelMaterial {
+  const table = buildTravelTable(input.locations);
+  const clock = buildSceneClock(input.episodes);
+  const whereabouts = buildWhereabouts({
+    facts: input.facts,
+    places: input.places,
+    resolver: buildLocationResolver(input.locations),
+    clock,
+  });
+  return {
+    travelTimes: table.travelTimes,
+    whereabouts: whereabouts.entries,
+    stats: {
+      ...whereabouts.stats,
+      tablePairs: table.stats.comparedPairs,
+    },
   };
 }
 

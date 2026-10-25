@@ -218,6 +218,35 @@ export interface FactRunSummary {
   kept: number;
   verifyNote: string;
   cancelled: boolean;
+  /**
+   * 移動の照合の工程ごとの件数（`buildTravelMaterial`）。組まなかった回は省略。
+   *
+   * **表が0組なら、照合していないと書く。** 黙っていると「移動の食い違いは
+   * 無かった」と読める——場所の記録に距離が1つも無いだけかもしれない。
+   */
+  travel?: TravelStageStats;
+}
+
+/** 移動の照合の材料が、どの工程で何件残ったか */
+export interface TravelStageStats {
+  /** 所在の形をした事実（居場所の項目名・着いた出来事） */
+  whereaboutsFacts: number;
+  /** 地の文で、台帳の場所に引けたもの */
+  resolved: number;
+  /** 時計（作中のいつか）に載ったもの */
+  clocked: number;
+  /** 所要時間の表の組（1日以上） */
+  tablePairs: number;
+}
+
+/** 移動の照合の工程を、作者が読む1句にする */
+export function describeTravelStages(travel: TravelStageStats): string {
+  const counts =
+    `所在の事実 ${travel.whereaboutsFacts}件・場所に引けた ${travel.resolved}件・` +
+    `時計に載った ${travel.clocked}件`;
+  return travel.tablePairs === 0
+    ? `所要時間の表が0組なので移動の照合はしていません（${counts}）`
+    : `移動の照合（${counts}・所要時間の表 ${travel.tablePairs}組）`;
 }
 
 /**
@@ -243,6 +272,7 @@ export function describeFactRun(summary: FactRunSummary): string {
     // AIが見たうえで全部落としたように読める
     summary.candidates > 0 ? `採用 ${summary.kept}件` : "",
     summary.verifyNote,
+    summary.travel ? describeTravelStages(summary.travel) : "",
     summary.failedChunks > 0 ? `読み取れなかった ${summary.failedChunks}件` : "",
     summary.skippedChunks > 0
       ? `処理済み ${summary.skippedChunks}件はスキップ`

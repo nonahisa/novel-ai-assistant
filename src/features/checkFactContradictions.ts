@@ -31,6 +31,10 @@ import {
   sleepUnlessAborted,
 } from "./rateLimitRetry";
 import { CharacterStore } from "../core/characterStore";
+import { createLocationStore } from "../core/abilityStore";
+import type { Location } from "../models/location";
+import type { TravelStageStats } from "../core/factContradiction";
+import type { SceneClockEpisode } from "../core/sceneClock";
 import { readTextFile } from "../core/textFile";
 import {
   afterlifeMarksFromCharacters,
@@ -60,6 +64,7 @@ import {
 */
 import {
   buildFactContradictionIssue,
+  buildTravelMaterial,
   candidateSidesOf,
   collectFactsFromChunk,
   lineTextOf,
@@ -229,6 +234,8 @@ export async function checkFactContradictions(
   // 2026-10-24「設定資料から除く」）。遷移の表は第5段まで空なので、幽霊・転生・
   // 憑依の除外はいまはこれだけが効く
   const afterlives = afterlifeMarksFromCharacters(characters);
+  // 場所の記録（移動の照合の所要時間の表と、所在の引き当て）。読めなくても止めない
+  const locations = await loadLocations(work);
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする。**
   // 見込みの定数を置くと、プロンプトの改訂に置いていかれて必ず追い越される
@@ -413,6 +420,8 @@ export async function checkFactContradictions(
   const verifyRejected: Array<{ reason?: VerifyRejectReason }> = [];
   let verifyUndecided = 0;
   let candidates: ContradictionCandidate[] = [];
+  /** 移動の照合の工程ごとの件数（照合まで進まなかった回は無い） */
+  let travelStats: TravelStageStats | undefined;
   const readSource = createSourceReader();
 
   // **抽出と判定は、ひと続きの仕事として1つの札で回す**（設計書6.76）。
@@ -635,12 +644,27 @@ export async function checkFactContradictions(
       // 遷移・場面は第5段以降で供給するので、いまは空で呼ぶ。
       // その代わり、設定資料の宿りの印で幽霊・転生・憑依を外す（上の afterlives）
       const allFacts = [...facts, ...recordFacts];
+      // 移動の照合の材料（所要時間の表・所在・時計）。MCP の口と同じ関数で組む。
+      // 時計は本文の行で引くので、事実の置き場所と同じファイル名で本文を渡す
+      const episodes: SceneClockEpisode[] = [];
+      for (const [filePath, chapter] of chapterByFile) {
+        episodes.push({ filePath, chapter, text: (await readSource(filePath)) ?? "" });
+      }
+      const travel = buildTravelMaterial({
+        locations,
+        facts,
+        places: factPlaces,
+        episodes,
+      });
+      travelStats = travel.stats;
       candidates = filterAllowed(
         findContradictionCandidates({
           facts: allFacts,
           transitions: [],
           scenes: [],
           afterlives,
+          travelTimes: travel.travelTimes,
+          whereabouts: travel.whereabouts,
         }),
         // 容認リスト（6.88.8）の保存は第5段。いまは何も抑えない
         []
@@ -822,6 +846,7 @@ export async function checkFactContradictions(
       kept: issues.length,
       verifyNote,
       cancelled,
+      travel: travelStats,
     })
   );
 
@@ -990,6 +1015,31 @@ async function loadCharacters(work: WorkEntry) {
     return loaded.characters.filter((character) => !character.isMob);
   } catch (error) {
     logFailure("矛盾検知（事実の照合）：人物の読み込み", {
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
+/**
+ * 場所の記録を読む。
+ *
+ * **読めなくても止めない。** 場所は移動の照合の材料で、無ければ移動の照合を
+ * しないだけである（完了報告に「表が0組」と出る）。壊れた1件は直さずに飛ばす
+ * （`loadAll` が読めたものだけを返す）。
+ */
+async function loadLocations(work: WorkEntry): Promise<Location[]> {
+  try {
+    const loaded = await createLocationStore(work).loadAll();
+    for (const error of loaded.errors) {
+      logFailure("矛盾検知（事実の照合）：場所の読み込み", {
+        ファイル: error.file,
+        詳細: error.message,
+      });
+    }
+    return loaded.records;
+  } catch (error) {
+    logFailure("矛盾検知（事実の照合）：場所の読み込み", {
       詳細: error instanceof Error ? error.message : String(error),
     });
     return [];

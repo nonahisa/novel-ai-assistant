@@ -1,0 +1,22 @@
+{
+  "note": "移動の照合の第1段（AIを使わない段）を、決まった答えで採点するための固定の事実（設計書6.88.11 の流し方）。事実の抽出（P-37）が正しく返したときの形を手で書いたもの。回想は thought、手紙と台詞は dialogue。地の文でない事実と、台帳で引けない値（「市場」）も混ぜてある。test/unit/core/factContradictionTravel.test.ts が読む。",
+  "facts": [
+    { "file": "本文/001_王都を発つ.txt", "id": "fact:1:1:1", "line": 1, "subject": "char_0001", "predicate": "所在", "value": "王都", "kind": "state", "modality": "narration" },
+    { "file": "本文/001_王都を発つ.txt", "id": "fact:1:9:1", "line": 9, "subject": "char_0001", "predicate": "移動", "value": "港町に着いた", "kind": "event", "modality": "narration" },
+    { "file": "本文/002_港町の市場.txt", "id": "fact:2:2:1", "line": 2, "subject": "char_0002", "predicate": "所在", "value": "王都", "kind": "state", "modality": "narration" },
+    { "file": "本文/002_港町の市場.txt", "id": "fact:2:8:1", "line": 8, "subject": "char_0002", "predicate": "所在", "value": "港町", "kind": "state", "modality": "narration" },
+    { "file": "本文/002_港町の市場.txt", "id": "fact:2:11:1", "line": 11, "subject": "char_0001", "predicate": "所在", "value": "市場", "kind": "state", "modality": "narration" },
+    { "file": "本文/003_翌朝の港.txt", "id": "fact:3:1:1", "line": 1, "subject": "char_0001", "predicate": "所在", "value": "港町", "kind": "state", "modality": "narration" },
+    { "file": "本文/003_翌朝の港.txt", "id": "fact:3:4:1", "line": 4, "subject": "char_0002", "predicate": "所在", "value": "王都", "kind": "state", "modality": "dialogue" },
+    { "file": "本文/003_翌朝の港.txt", "id": "fact:3:7:1", "line": 7, "subject": "char_0001", "predicate": "移動", "value": "王都に帰った", "kind": "event", "modality": "dialogue" },
+    { "file": "本文/003_翌朝の港.txt", "id": "fact:3:12:1", "line": 12, "subject": "char_0001", "predicate": "所在", "value": "港", "kind": "state", "modality": "narration" },
+    { "file": "本文/004_砦からの道.txt", "id": "fact:4:1:1", "line": 1, "subject": "char_0003", "predicate": "所在", "value": "北の砦", "kind": "state", "modality": "narration" },
+    { "file": "本文/004_砦からの道.txt", "id": "fact:4:8:1", "line": 8, "subject": "char_0003", "predicate": "移動", "value": "王都に到着した", "kind": "event", "modality": "narration" },
+    { "file": "本文/005_灯台の冬.txt", "id": "fact:5:1:1", "line": 1, "subject": "char_0002", "predicate": "所在", "value": "港町", "kind": "state", "modality": "narration" },
+    { "file": "本文/005_灯台の冬.txt", "id": "fact:5:8:1", "line": 8, "subject": "char_0002", "predicate": "所在", "value": "王都", "kind": "state", "modality": "thought" },
+    { "file": "本文/005_灯台の冬.txt", "id": "fact:5:14:1", "line": 14, "subject": "char_0002", "predicate": "移動", "value": "王都に戻った", "kind": "event", "modality": "narration" },
+    { "file": "本文/006_帰り道.txt", "id": "fact:6:1:1", "line": 1, "subject": "char_0001", "predicate": "所在", "value": "港町", "kind": "state", "modality": "narration" },
+    { "file": "本文/006_帰り道.txt", "id": "fact:6:6:1", "line": 6, "subject": "char_0001", "predicate": "移動", "value": "王都に戻った", "kind": "event", "modality": "narration" },
+    { "file": "本文/006_帰り道.txt", "id": "fact:6:12:1", "line": 12, "subject": "char_0001", "predicate": "移動", "value": "港町に着いた", "kind": "event", "modality": "narration" }
+  ]
+}
