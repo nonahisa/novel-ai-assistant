@@ -3,6 +3,8 @@ import type * as vscode from "vscode";
 import {
   ADVICE_HISTORY_MAX,
   ADVICE_REDIAGNOSE_DAYS,
+  MAX_AXIS_SCORE,
+  SIGNAL_STEP,
 } from "../../../src/core/advicePolicy";
 import {
   READER_QUESTIONS,
@@ -11,8 +13,14 @@ import {
   scoreReaderAnswers,
 } from "../../../src/core/readerTarget";
 import {
+  applyAuthorReaderSignals,
   authorReaderProfileFromAnswers,
+  authorReaderTypeDisplay,
+  AUTHOR_READER_ESTIMATE_NOTE,
   describeAuthorReaderChange,
+  describeAuthorReaderEstimate,
+  isAnsweredAuthorReader,
+  parseAuthorReaderSignals,
   recordEstimatedAuthorReaderType,
   AUTHOR_READER_HISTORY_MAX,
   AUTHOR_READER_QUESTIONS,
@@ -167,25 +175,193 @@ describe("履歴と再診断の目安は 6.86 に揃える", () => {
     const diagnosed = authorReaderProfileFromAnswers(LIGHT, NOW);
     expect(diagnosed.source).toBe("diagnosis");
 
+    // 推定から推定へ（2026-10-25 からは、答えた値の上には推定を書かない）
+    const first = recordEstimatedAuthorReaderType(
+      undefined,
+      scoreReaderAnswers(LIGHT),
+      NOW
+    );
     const estimated = recordEstimatedAuthorReaderType(
-      diagnosed,
+      first,
       scoreReaderAnswers(LORE),
       NOW
     );
     expect(estimated.source).toBe("estimated");
+    expect(estimated.answers).toBeUndefined();
     // 前の状態は履歴に残る（消さない）
-    expect(estimated.history?.[0].source).toBe("diagnosis");
-    expect(estimated.history?.[0].scores).toEqual(diagnosed.scores);
+    expect(estimated.history?.[0].source).toBe("estimated");
+    expect(estimated.history?.[0].scores).toEqual(first.scores);
+
+    // 推定のあとに9問へ答えると、推定は履歴へ「推定」として積まれる
+    const answered = authorReaderProfileFromAnswers(LIGHT, NOW, estimated);
+    expect(answered.source).toBe("diagnosis");
+    expect(answered.history?.[0].source).toBe("estimated");
   });
 
   test("推定でタイプが変わらなければ、履歴を積まない", () => {
-    const diagnosed = authorReaderProfileFromAnswers(LIGHT, NOW);
-    const same = recordEstimatedAuthorReaderType(
-      diagnosed,
-      diagnosed.scores,
+    const first = recordEstimatedAuthorReaderType(
+      undefined,
+      scoreReaderAnswers(LIGHT),
       NOW
     );
+    const same = recordEstimatedAuthorReaderType(first, first.scores, NOW);
     expect(same.history ?? []).toEqual([]);
+  });
+});
+
+/**
+ * **作者自身の読者タイプの推定**（設計書6.101。作者の裁定、2026-10-25
+ * 「推定を作る」）。守るのは4つ。
+ *
+ * 1. **9問の答えが常に勝つ**——答えた値の上には推定を書かない
+ * 2. **推定は推定として区別して残す**（`source: "estimated"`・答えを持たない）
+ * 3. **AIの出力を信用しない**——軸の -1・0・+1 以外と、層の名前は捨てる
+ * 4. **動きは 6.86 と同じ速さ**（±0.5、0〜6）
+ */
+describe("相談から推し量る（6.101）", () => {
+  test("9問に答えていたら、推定しない（同じものを返す）", () => {
+    const answered = authorReaderProfileFromAnswers(LIGHT, NOW);
+    const after = applyAuthorReaderSignals(
+      answered,
+      { familiarity: 1, posture: 1, craving: 1 },
+      NOW
+    );
+    expect(after).toBe(answered);
+    expect(isAnsweredAuthorReader(answered)).toBe(true);
+  });
+
+  test("推定は答えを上書きしない（下の口も、答えた値には書かない）", () => {
+    const answered = authorReaderProfileFromAnswers(LIGHT, NOW);
+    const after = recordEstimatedAuthorReaderType(
+      answered,
+      scoreReaderAnswers(LORE),
+      NOW
+    );
+    expect(after).toBe(answered);
+    expect(after.source).toBe("diagnosis");
+    expect(after.answers).toEqual(LIGHT);
+  });
+
+  test("出どころが食い違っていても、答えが残っていれば答えた値として守る", () => {
+    const odd: AuthorReaderProfile = {
+      scores: scoreReaderAnswers(LIGHT),
+      answers: LIGHT,
+      source: "estimated",
+      updatedAt: NOW.toISOString(),
+    };
+    expect(applyAuthorReaderSignals(odd, { craving: 1 }, NOW)).toBe(odd);
+  });
+
+  test("まだ何も無ければ、3軸とも中ほど（3点）から ±0.5 で動かす", () => {
+    const after = applyAuthorReaderSignals(
+      undefined,
+      { familiarity: 1, craving: -1 },
+      NOW
+    );
+    expect(after?.source).toBe("estimated");
+    expect(after?.answers).toBeUndefined();
+    expect(after?.scores).toEqual({
+      familiarity: 3 + SIGNAL_STEP,
+      posture: 3,
+      craving: 3 - SIGNAL_STEP,
+    });
+    expect(after?.updatedAt).toBe(NOW.toISOString());
+  });
+
+  test("0〜6 に収める。端に張り付いたら動かない（同じものを返す）", () => {
+    const top: AuthorReaderProfile = {
+      scores: { familiarity: MAX_AXIS_SCORE, posture: 3, craving: 3 },
+      source: "estimated",
+      updatedAt: NOW.toISOString(),
+    };
+    expect(applyAuthorReaderSignals(top, { familiarity: 1 }, NOW)).toBe(top);
+    expect(applyAuthorReaderSignals(top, { familiarity: 0 }, NOW)).toBe(top);
+    expect(applyAuthorReaderSignals(top, undefined, NOW)).toBe(top);
+  });
+
+  test("何も読み取れなければ、無いものは無いまま（推測で作らない）", () => {
+    expect(applyAuthorReaderSignals(undefined, { posture: 0 }, NOW)).toBeUndefined();
+  });
+
+  test("推定を重ねると、タイプが変わった回だけ履歴に積む", () => {
+    let profile: AuthorReaderProfile | undefined;
+    const types: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      profile = applyAuthorReaderSignals(profile, { familiarity: 1 }, NOW);
+      if (profile) types.push(resolveReaderType(profile.scores));
+    }
+    // 3 → 6 まで動き、どこかで雑食層から別の層へ移る
+    expect(profile?.scores.familiarity).toBe(MAX_AXIS_SCORE);
+    const changes = types.filter((type, i) => i > 0 && type !== types[i - 1]);
+    expect(profile?.history ?? []).toHaveLength(changes.length);
+    expect(changes.length).toBeGreaterThan(0);
+    for (const entry of profile?.history ?? []) {
+      expect(entry.source).toBe("estimated");
+    }
+  });
+
+  test("AIの値は -1・0・+1 だけを通す。層の名前や指示語は捨てる", () => {
+    expect(parseAuthorReaderSignals({ familiarity: 1, posture: -1, craving: 0 })).toEqual({
+      familiarity: 1,
+      posture: -1,
+      craving: 0,
+    });
+    // 指示語がそのまま返ってきた形・範囲の外・小数
+    expect(parseAuthorReaderSignals({ familiarity: "+1" })).toBeUndefined();
+    expect(parseAuthorReaderSignals({ familiarity: 3, posture: 0.5 })).toBeUndefined();
+    // **層の名前を言ってきても使わない**（名前はコードが点数から決める）
+    expect(parseAuthorReaderSignals({ type: "考察層" })).toBeUndefined();
+    expect(parseAuthorReaderSignals({ type: "考察層", craving: 1 })).toEqual({
+      craving: 1,
+    });
+    expect(parseAuthorReaderSignals(null)).toBeUndefined();
+    expect(parseAuthorReaderSignals([1, 1, 1])).toBeUndefined();
+    expect(parseAuthorReaderSignals("familiarity")).toBeUndefined();
+  });
+
+  test("推し量ったタイプの名前は、いまの表（11タイプ）の中にしか出ない", () => {
+    const known = new Set(Object.keys(READER_TYPES));
+    const values = [-1, 0, 1] as const;
+    let profile: AuthorReaderProfile | undefined;
+    for (let i = 0; i < 60; i++) {
+      const signal = {
+        familiarity: values[i % 3],
+        posture: values[(i * 2) % 3],
+        craving: values[(i * 5 + 1) % 3],
+      };
+      profile = applyAuthorReaderSignals(profile, signal, NOW);
+      if (profile) {
+        expect(known.has(resolveReaderType(profile.scores))).toBe(true);
+      }
+    }
+  });
+
+  test("初めて推し量ったら言う。出発点の中ほど（雑食層）のうちは言わない", () => {
+    const neutralStep = applyAuthorReaderSignals(undefined, { craving: 1 }, NOW);
+    // 3.5 は「中」のまま——どの軸にもまだ傾きが無いので言わない
+    expect(describeAuthorReaderEstimate(undefined, neutralStep)).toEqual([]);
+
+    let profile = neutralStep;
+    let lines: string[] = [];
+    for (let i = 0; i < 4 && lines.length === 0; i++) {
+      const next = applyAuthorReaderSignals(profile, { craving: 1 }, NOW);
+      lines = describeAuthorReaderEstimate(profile, next);
+      profile = next;
+    }
+    const text = lines.join("\n");
+    expect(text).toContain("推し量りました");
+    expect(text).toContain(
+      READER_TYPES[resolveReaderType(profile!.scores)].label
+    );
+    expect(text).toContain(AUTHOR_READER_ESTIMATE_NOTE);
+  });
+
+  test("画面の呼び名は、推し量ったものならそう分かる", () => {
+    const estimated = applyAuthorReaderSignals(undefined, { craving: 1 }, NOW)!;
+    expect(authorReaderTypeDisplay(estimated)).toContain("推し量った");
+    const answered = authorReaderProfileFromAnswers(LIGHT, NOW);
+    expect(authorReaderTypeDisplay(answered)).not.toContain("推し量った");
+    expect(AUTHOR_READER_ESTIMATE_NOTE).toContain("あなたが決めたものではありません");
   });
 });
 
@@ -214,12 +390,17 @@ describe("変わったら必ず作者に見せる（3点）", () => {
   });
 
   test("推定で変わったときは、そう読み取った理由をそう書く", () => {
+    const estimatedBefore = recordEstimatedAuthorReaderType(
+      undefined,
+      scoreReaderAnswers(LIGHT),
+      NOW
+    );
     const estimated: AuthorReaderProfile = recordEstimatedAuthorReaderType(
-      before,
+      estimatedBefore,
       scoreReaderAnswers(LORE),
       NOW
     );
-    const text = describeAuthorReaderChange(before, estimated).join("\n");
+    const text = describeAuthorReaderChange(estimatedBefore, estimated).join("\n");
     expect(text).toContain("相談");
     expect(text).not.toContain("9問のお答え");
   });

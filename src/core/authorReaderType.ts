@@ -3,15 +3,19 @@ import {
   ADVICE_REDIAGNOSE_DAYS,
   adviceDiagnosisDate,
   isDiagnosisStale,
+  MAX_AXIS_SCORE,
+  SIGNAL_STEP,
 } from "./advicePolicy";
+import { READER_NEUTRAL_SCORE } from "./readerTargetValidation";
 import {
+  READER_AXIS_ORDER,
   READER_QUESTIONS,
   READER_TYPES,
   resolveReaderType,
   scoreReaderAnswers,
   type ReaderQuestion,
 } from "./readerTarget";
-import type { ReaderScores } from "../models/readerProfile";
+import type { ReaderAxis, ReaderScores } from "../models/readerProfile";
 import type { ReaderTypeId } from "./readerTarget";
 
 /**
@@ -246,31 +250,39 @@ export function authorReaderProfileFromAnswers(
 }
 
 /**
- * 推定で読み取った点数を書き入れる口（設計書6.101、**次の段**）。
+ * 作者が9問で答えた値か（推定で動かしてはいけない値か）。
  *
- * **いま、この関数を呼ぶところは無い。** 推定そのもの——相談の発言から
- * 読者としての好みを読み取る仕掛け——は、この作業では作っていない。
- * ここにあるのは「推定で入った値を、診断で入った値と取り違えずに
- * しまう道」だけである。
+ * `source` だけでなく `answers` も見る。古い記録や手で直された記録で
+ * 出どころが食い違っていても、**答えが残っているなら答えた値として守る**
+ * ——取り違えたときに失うのは作者が答えた手間のほうだからである。
+ */
+export function isAnsweredAuthorReader(
+  profile: AuthorReaderProfile | undefined
+): boolean {
+  if (!profile) return false;
+  return profile.source === "diagnosis" || (profile.answers?.length ?? 0) > 0;
+}
+
+/**
+ * 推定で読み取った点数を書き入れる口（設計書6.101）。
  *
- * **口だけ用意して「推定できます」と言わない**のが、この置き方の眼目である。
- * 作者に見せる文言も画面も、いまは診断（9問）の道しか通らない。
- * 推定を作る段になったら、点数を計算してここへ渡せば、履歴・出どころ・
- * 変化のお知らせはそのまま効く。
+ * 呼ぶのは `applyAuthorReaderSignals`（相談の答えから）だけ。
  *
- * 点数の動かし方（6.86 の `applyProfileSignals` にあたる±0.5の刻み）は、
- * **わざと置いていない。** 刻み幅は、何を材料に推定するかが決まってから
- * でないと決められない。
+ * **作者が9問で答えた値の上には書かない**（作者の裁定、2026-10-25
+ * 「推定を作る」。CLAUDE.md 実装ルール2の精神）。答えた値が渡されたら、
+ * そのまま返す——呼ぶ側は同一性で「動かなかった」と分かる。
+ * 推定が働くのは、まだ9問に答えていない作者だけである。
  */
 export function recordEstimatedAuthorReaderType(
   previous: AuthorReaderProfile | undefined,
   scores: ReaderScores,
   now: Date
 ): AuthorReaderProfile {
+  if (previous && isAnsweredAuthorReader(previous)) return previous;
+
   const next: AuthorReaderProfile = {
     scores,
-    // 9問の答えは引き継がない（推定の点数に、前の答えの印を付けない）
-    answers: previous?.answers,
+    // 9問の答えは持たない（推定の点数に、答えの印を付けない）
     source: "estimated",
     updatedAt: now.toISOString(),
     history: previous?.history,
@@ -287,9 +299,153 @@ export function recordEstimatedAuthorReaderType(
   return next;
 }
 
+/**
+ * 相談の答えから読み取った、作者の読み方の弱い傾向（設計書6.101）。
+ *
+ * 軸ごとに -1・0・+1 だけ。**AIにタイプの名前を言わせない**（6.86 の
+ * `profileSignals`、6.91.6 の P-38 と同じ考え方）。1回の会話で人の読み方は
+ * 決められないし、名前を選ばせると点数が名前に引きずられる。名前は
+ * 点数から `resolveReaderType` が決めるので、いまの表（`READER_TYPE_TABLE`
+ * と全中・全低）に無い層が作者に見えることは、作りの上で起きない。
+ */
+export type AuthorReaderSignals = Partial<Record<ReaderAxis, -1 | 0 | 1>>;
+
+/**
+ * AIが返した `authorReaderSignals` を、使える形に絞る。
+ *
+ * **壊れた値は捨てる**（実装ルール3）。AIは指示語をそのまま返すことがあり
+ * （`"+1"`・`"familiarity"`）、層の名前（`"type": "考察層"`）を勝手に
+ * 足してくることもある。軸の鍵に -1・0・+1 が入ったものだけを通し、
+ * 1つも残らなければ「読み取れなかった」として `undefined` を返す。
+ */
+export function parseAuthorReaderSignals(
+  value: unknown
+): AuthorReaderSignals | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const signals: AuthorReaderSignals = {};
+  for (const axis of READER_AXIS_ORDER) {
+    const raw = record[axis];
+    // 0.7 や 3 のような値は読み違いなので捨てる（6.86 と同じ）
+    if (raw === -1 || raw === 0 || raw === 1) signals[axis] = raw;
+  }
+  return Object.keys(signals).length > 0 ? signals : undefined;
+}
+
+/**
+ * まだ何も分かっていない作者の出発点（3軸とも「どちらとも言えない」）。
+ *
+ * 本文の実像を測れなかった軸に置く値（`READER_NEUTRAL_SCORE`、6.91.6）と
+ * 同じ考え方で、**どちらへも寄せていない場所**から始める。
+ */
+const NEUTRAL_SCORES: ReaderScores = {
+  familiarity: READER_NEUTRAL_SCORE,
+  posture: READER_NEUTRAL_SCORE,
+  craving: READER_NEUTRAL_SCORE,
+};
+
+/**
+ * 相談から読み取った傾向を、作者の読者タイプへ反映する（設計書6.101）。
+ *
+ * - **9問に答えていたら何もしない**（渡された値をそのまま返す）。
+ *   答えた値が常に勝つ（作者の裁定、2026-10-25）
+ * - まだ何も無ければ、3軸とも中ほど（3点）から始める
+ * - 動かす幅は 6.86 と同じ ±0.5（`SIGNAL_STEP`）、0〜6 に収める
+ *   ——段階が1つ動くまでにおよそ数回〜10回の相談がかかる。1回の会話で
+ *   読み方が決まったことにしない速さである
+ *
+ * 何も動かなければ `previous` をそのまま返す（同じ内容を書き戻さない。
+ * 呼ぶ側は同一性で見分ける）。
+ */
+export function applyAuthorReaderSignals(
+  previous: AuthorReaderProfile | undefined,
+  signals: AuthorReaderSignals | undefined,
+  now: Date
+): AuthorReaderProfile | undefined {
+  if (!signals) return previous;
+  if (isAnsweredAuthorReader(previous)) return previous;
+
+  const scores: ReaderScores = { ...(previous?.scores ?? NEUTRAL_SCORES) };
+  let moved = false;
+  for (const axis of READER_AXIS_ORDER) {
+    const signal = signals[axis];
+    if (typeof signal !== "number" || signal === 0) continue;
+    const next = Math.min(
+      MAX_AXIS_SCORE,
+      Math.max(0, scores[axis] + SIGNAL_STEP * signal)
+    );
+    if (next === scores[axis]) continue; // 端に張り付いている
+    scores[axis] = next;
+    moved = true;
+  }
+  if (!moved) return previous;
+
+  return recordEstimatedAuthorReaderType(previous, scores, now);
+}
+
+/**
+ * 推定で動いたことを作者へ知らせる文（設計書6.101）。
+ *
+ * **黙って作らない・黙って変えない。** ただし初めて推し量った回は
+ * `describeAuthorReaderChange` が何も言わない（前が無い）ので、ここで
+ * 「推し量りました」を言う。
+ *
+ * 出発点の中ほど（雑食層）にいるあいだは、初回を言わない。どの軸にも
+ * まだ傾きが見えていない状態で「雑食層と推し量りました」と言うと、
+ * 1回の相談で読み方を決めたように聞こえる。
+ */
+export function describeAuthorReaderEstimate(
+  before: AuthorReaderProfile | undefined,
+  after: AuthorReaderProfile | undefined
+): string[] {
+  if (!after || after === before || after.source !== "estimated") return [];
+
+  const afterType = resolveReaderType(after.scores);
+  const neutralType = resolveReaderType(NEUTRAL_SCORES);
+  const firstTime =
+    !before ||
+    (before.source === "estimated" &&
+      (before.history ?? []).length === 0 &&
+      resolveReaderType(before.scores) === neutralType);
+
+  if (!firstTime) return describeAuthorReaderChange(before, after);
+  if (afterType === neutralType) return [];
+
+  return [
+    `相談でのお話から、読者としてのあなたを「${READER_TYPES[afterType].label}」と推し量りました。`,
+    AUTHOR_READER_ESTIMATE_NOTE,
+  ];
+}
+
+/**
+ * 推し量った値であることの断り（画面と紙で共用する）。
+ *
+ * **作者が決めたものとして扱わない**（実装ルール2の精神）。9問に答えれば
+ * 答えのほうに替わり、以後は推し量らないことも併せて言う。
+ */
+export const AUTHOR_READER_ESTIMATE_NOTE =
+  "これは相談でのお話から推し量ったもので、あなたが決めたものではありません。" +
+  "作家タイプ診断の「読者としての好み」（9問）に答えると、そちらに替わります（以後は推し量りません）。";
+
 /** いまのタイプの呼び名（「考察層」） */
 export function authorReaderTypeLabel(profile: AuthorReaderProfile): string {
   return READER_TYPES[resolveReaderType(profile.scores)].label;
+}
+
+/**
+ * 画面に出す呼び名。**推し量ったものなら、そう分かる言い方にする**
+ * （「考察層（相談から推し量ったもの）」）。
+ *
+ * 記録（ログ）には `authorReaderTypeLabel` を使ってよいが、作者の目に
+ * 触れる所ではこちらを使う。
+ */
+export function authorReaderTypeDisplay(profile: AuthorReaderProfile): string {
+  const label = authorReaderTypeLabel(profile);
+  return profile.source === "estimated"
+    ? `${label}（相談から推し量ったもの）`
+    : label;
 }
 
 /**

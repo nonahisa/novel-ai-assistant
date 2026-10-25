@@ -5,10 +5,14 @@ import {
 } from "../../../src/prompts/settingsChat";
 import {
   WORK_CHAT_SYSTEM_PROMPT,
+  WORK_CHAT_SCHEMA,
   WORK_CHAT_VERSION,
+  buildAuthorReaderSignalPrompt,
   buildWorkChatSystemPrompt,
   parseWorkChatAnswer,
 } from "../../../src/prompts/workChat";
+import { applyAuthorReaderSignals } from "../../../src/core/authorReaderType";
+import { READER_TYPES } from "../../../src/core/readerTarget";
 import { detectChatTopic } from "../../../src/core/chatTopic";
 import { buildGuideBundles } from "../../../src/core/featureGuide";
 import { applyWriterStyleSignals } from "../../../src/core/writerStyle";
@@ -253,7 +257,9 @@ describe("版", () => {
     // 3.30（2026-10-10）：その誤字脱字の行に、割当の画面から外した案内の数（e4b 3件）を足した
     // 3.31（2026-10-15）：目次を渡さない回に、主な機能の短い一覧を置いた（作者の裁定の8）
     // 3.32（2026-10-24）：料金の一文を、相談のAIが有料のときだけ送る（無料なら替える）
-    expect(WORK_CHAT_VERSION).toBe("3.32");
+    // 3.33（2026-10-25）：作者自身の読者タイプの推定の欄 authorReaderSignals を足した
+    // （頼む文は9問に答えていない作者にだけ送る。設計書6.101）
+    expect(WORK_CHAT_VERSION).toBe("3.33");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });
@@ -298,5 +304,29 @@ describe("出力形式の例が写されて返っても、書き方も方針も�
     expect(applyWriterStyleSignals(profile, answer.writerStyleSignals)).toBe(
       profile
     );
+  });
+
+  test("作者自身の読者タイプの欄（3.33）も例では null で、写されても推定は動かない", () => {
+    const raw = JSON.parse(example ?? "{}") as Record<string, unknown>;
+    expect(raw).toHaveProperty("authorReaderSignals", null);
+    expect(WORK_CHAT_SCHEMA.required).toContain("authorReaderSignals");
+
+    const answer = parseWorkChatAnswer(example ?? "");
+    expect(answer.authorReaderSignals).toBeUndefined();
+    // 何も無い作者に、推測で読者タイプを作らない
+    expect(
+      applyAuthorReaderSignals(undefined, answer.authorReaderSignals, new Date())
+    ).toBeUndefined();
+  });
+
+  test("頼む文は、層の名前を入れさせず、作品の読者の話から判断させない", () => {
+    const note = buildAuthorReaderSignalPrompt();
+    expect(note).toContain("authorReaderSignals");
+    expect(note).toContain("層の名前は入れないこと");
+    expect(note).toContain("その作品の読者の話からは判断しないこと");
+    // 11タイプの名前を1つも書かない（書くと、そのまま返ってくる）
+    for (const info of Object.values(READER_TYPES)) {
+      expect(note).not.toContain(info.label);
+    }
   });
 });

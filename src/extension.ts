@@ -2916,7 +2916,7 @@ export async function activate(
       const panel = await openSettingsPanel(context, work, aiRegistry);
       await panel.reloadRecordFromChat(kind, recordId, notes);
     },
-  }, advicePolicies, writerProfiles);
+  }, advicePolicies, writerProfiles, authorReaderTypes);
   // 選んだ作品を VS Code を閉じても覚えておく（残課題 R7）。
   // 登録から外れた作品かどうかは、パネルが使うたびに確かめる
   workChatPanel.setSelectedWorkMemory({

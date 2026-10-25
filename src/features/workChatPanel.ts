@@ -126,6 +126,14 @@ import {
 } from "../core/writerStyle";
 import type { WriterProfileStore } from "../core/writerProfileStore";
 import {
+  applyAuthorReaderSignals,
+  authorReaderTypeLabel,
+  describeAuthorReaderEstimate,
+  isAnsweredAuthorReader,
+  type AuthorReaderSignals,
+} from "../core/authorReaderType";
+import type { AuthorReaderTypeStore } from "../core/authorReaderTypeStore";
+import {
   readerTypeChatLogLines,
   readerTypeGlossaryEntries,
   type ReaderTypeGlossaryEntry,
@@ -160,6 +168,7 @@ import {
   type ChatContextKind,
 } from "../core/chatContext";
 import {
+  buildAuthorReaderSignalPrompt,
   buildWorkChatPrompt,
   buildWorkChatSystemPrompt,
   parseWorkChatAnswer,
@@ -792,7 +801,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
      * **作者ごと**なので、作品を特定できない相談にも足せる。
      * 省略できる（試験や、まだ診断していない作者では何も足さない）。
      */
-    private readonly writerProfiles?: WriterProfileStore
+    private readonly writerProfiles?: WriterProfileStore,
+    /**
+     * 作者自身の読者タイプ（設計書6.101）。
+     *
+     * **9問に答えていない作者だけ、相談の発言から推し量る**（作者の裁定、
+     * 2026-10-25）。省略できる（試験では何も足さない）。
+     */
+    private readonly authorReaderTypes?: AuthorReaderTypeStore
   ) {
     this.lastSource = sourceOfEditor(vscode.window.activeTextEditor);
     this.selectionListener = this.ai.onDidChangeSelection(
@@ -1152,6 +1168,17 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       blocks.push(buildWriterStylePrompt(writerProfile));
     }
 
+    // 作者自身の読者タイプの推定（設計書6.101）。**9問に答えた作者には
+    // 頼まない**——答えた値は推定で動かさないので、頼んでも使い道が無く、
+    // 送る本文が増えるだけになる
+    if (
+      this.authorReaderTypes &&
+      !isAnsweredAuthorReader(this.authorReaderTypes.get())
+    ) {
+      logStep("相談: 読者としての作者の読み方を推し量る頼みを添えた（9問は未回答）");
+      blocks.push(buildAuthorReaderSignalPrompt());
+    }
+
     /*
       ターゲット読者（設計書6.91.9）。**作品ごとのファイルにあるので非同期。**
 
@@ -1294,6 +1321,42 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
     const message = describeWriterStyleChange(before, after);
     if (message) {
+      notifyDone(message);
+      this.postAll({ type: "note", message });
+    }
+  }
+
+  /**
+   * 相談の答えから読み取った読み方の傾向を、作者自身の読者タイプへ反映する
+   * （設計書6.101。作者の裁定、2026-10-25「推定を作る」）。
+   *
+   * **9問に答えていたら動かさない**（`applyAuthorReaderSignals` が同じものを
+   * 返す）。頼む文も送っていないが、AIが勝手に欄を埋めてくることはある。
+   *
+   * **作品は要らない。** 作者ごとに1つ持つ値である。
+   */
+  private async updateAuthorReaderType(
+    signals: AuthorReaderSignals | undefined
+  ): Promise<void> {
+    if (!signals || !this.authorReaderTypes) return;
+
+    // **送る直前に読んだ値ではなく、保存庫から読み直す**（助言方針と同じ）。
+    // 答えを待っているあいだに、作者が9問に答えていることがある
+    const before = this.authorReaderTypes.get();
+    const after = applyAuthorReaderSignals(before, signals, new Date());
+    if (!after || after === before) return;
+
+    await this.authorReaderTypes.set(after);
+    logStep(
+      `相談: 読者としての作者の読み方を推し量った（${authorReaderTypeLabel(after)}。` +
+        `読み慣れ ${after.scores.familiarity}・読む姿勢 ${after.scores.posture}・` +
+        `求めるもの ${after.scores.craving}）`
+    );
+
+    // **黙って作らない・黙って変えない。** 初めて推し量った回も言う
+    const lines = describeAuthorReaderEstimate(before, after);
+    if (lines.length > 0) {
+      const message = lines.join("\n");
       notifyDone(message);
       this.postAll({ type: "note", message });
     }
@@ -2393,6 +2456,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 消えないよう、順番を先にしない（推定は次回に持ち越せる）
       await this.updateAdvicePolicy(context?.work, answer.profileSignals);
       await this.updateWriterStyle(answer.writerStyleSignals);
+      await this.updateAuthorReaderType(answer.authorReaderSignals);
     } catch (error) {
       /*
         **タイムアウトだけは、その場で直せる札を添える**（2026-09-23）。

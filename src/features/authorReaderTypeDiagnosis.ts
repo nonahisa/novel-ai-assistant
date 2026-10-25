@@ -4,6 +4,7 @@ import type { AuthorReaderTypeStore } from "../core/authorReaderTypeStore";
 import {
   authorReaderProfileFromAnswers,
   authorReaderTypeLabel,
+  AUTHOR_READER_ESTIMATE_NOTE,
   describeAuthorReaderChange,
   describeAuthorReaderHistory,
   AUTHOR_READER_QUESTIONS,
@@ -96,15 +97,20 @@ async function chooseAction(
   profile: AuthorReaderProfile
 ): Promise<TypeAction | undefined> {
   const type = READER_TYPES[resolveReaderType(profile.scores)];
-  const stale = isAuthorReaderStale(profile, new Date());
+  // 推し量ったもの（相談から）は、まだ答えていない。「答え直す」「古い」と
+  // 言うと、作者は自分が答えたことがあると思う（設計書6.101）
+  const estimated = profile.source === "estimated";
+  const stale = !estimated && isAuthorReaderStale(profile, new Date());
 
   const picked = await vscode.window.showQuickPick(
     [
       {
-        label: "$(refresh) 答え直す",
-        detail: stale
-          ? `前にお答えいただいてから${AUTHOR_READER_REDIAGNOSE_DAYS}日以上たっています。読むものは変わります`
-          : "9問にもう一度お答えいただきます（前回の答えに印が付きます）",
+        label: estimated ? "$(refresh) 9問に答える" : "$(refresh) 答え直す",
+        detail: estimated
+          ? "答えると、推し量ったものに替わります（以後は推し量りません）"
+          : stale
+            ? `前にお答えいただいてから${AUTHOR_READER_REDIAGNOSE_DAYS}日以上たっています。読むものは変わります`
+            : "9問にもう一度お答えいただきます（前回の答えに印が付きます）",
         action: "redo" as const,
       },
       {
@@ -122,7 +128,9 @@ async function chooseAction(
     ],
     {
       title: "あなた自身の読者タイプ",
-      placeHolder: `いまは「${type.label}」としてお預かりしています`,
+      placeHolder: estimated
+        ? `いまは相談でのお話から「${type.label}」と推し量っています（まだお答えいただいていません）`
+        : `いまは「${type.label}」としてお預かりしています`,
       ignoreFocusOut: true,
     }
   );
@@ -236,6 +244,15 @@ export async function showAuthorReaderResult(
 
   const comparison = work ? await compareWithWork(profile, work) : undefined;
   if (comparison) lines.push("", `${work?.title}との突き合わせ`, ...comparison);
+
+  // 推し量ったもの（相談から）なら、作者が決めたものとして見せない（設計書6.101）
+  // 突き合わせの行にも同じ断りが入るので、2度は並べない
+  if (
+    profile.source === "estimated" &&
+    !lines.includes(AUTHOR_READER_ESTIMATE_NOTE)
+  ) {
+    lines.push("", AUTHOR_READER_ESTIMATE_NOTE);
+  }
 
   lines.push(
     "",

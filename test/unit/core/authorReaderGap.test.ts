@@ -5,7 +5,10 @@ import {
   resolveReaderType,
 } from "../../../src/core/readerTarget";
 import type { ReaderProfile, ReaderScores } from "../../../src/models/readerProfile";
-import { authorReaderProfileFromAnswers } from "../../../src/core/authorReaderType";
+import {
+  AUTHOR_READER_ESTIMATE_NOTE,
+  authorReaderProfileFromAnswers,
+} from "../../../src/core/authorReaderType";
 import type { AuthorReaderProfile } from "../../../src/core/authorReaderType";
 import { compareAuthorReader } from "../../../src/core/authorReaderGap";
 import { buildReaderGuide } from "../../../src/core/readerTargetDoc";
@@ -243,5 +246,33 @@ describe("読者像の紙（設計書6.91）にも出す", () => {
     });
     expect(paper).toContain("## 向けているつもりと、書けているもの");
     expect(paper).toContain("## あなた自身の読み方と、この作品の宛先");
+  });
+});
+
+/**
+ * 作者の読者タイプが**推し量ったもの**（相談から）なら、突き合わせの行に
+ * そう断る（設計書6.101。作者の裁定、2026-10-25）。
+ */
+describe("推し量った読者タイプとの突き合わせ", () => {
+  const estimated = (value: ReaderScores): AuthorReaderProfile => ({
+    scores: value,
+    source: "estimated",
+    updatedAt: "2026-10-25T00:00:00.000Z",
+  });
+
+  test("離れていても重なっていても、推し量ったものだと断る", () => {
+    for (const [mine, theirs] of [
+      [LIGHT, LORE_DEEP],
+      [LORE_DEEP, LORE_DEEP],
+    ] as const) {
+      const lines = compareAuthorReader(estimated(mine), work(theirs))?.lines ?? [];
+      expect(lines).toContain(AUTHOR_READER_ESTIMATE_NOTE);
+    }
+  });
+
+  test("9問に答えた値なら断らない", () => {
+    const lines = compareAuthorReader(author(LIGHT), work(LORE_DEEP))?.lines ?? [];
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines).not.toContain(AUTHOR_READER_ESTIMATE_NOTE);
   });
 });

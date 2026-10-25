@@ -238,9 +238,14 @@ describe("使い方の節も、目次と一緒に外す", () => {
     **7,465字へ更新した（2026-09-24・v3.20）。** 使い方の節へ、相談パネルへ
     バックアップを落とす入口（隠し機能。聞かれたときだけ案内し自分から勧めない）の
     1項目を足したぶん（197字）。
+
+    **7,516字へ更新した（2026-10-25・v3.33）。** 【出力形式】の例に
+    `, "authorReaderSignals": null`（29字）を足し、断り書きを
+    「profileSignals と writerStyleSignals と authorReaderSignals は」（22字増）に
+    したぶん（設計書6.101。頼む一段そのものは、9問に答えていない作者の回だけ別に足す）。
   */
   test("目次を渡す回のシステム指示は、割る前と同じ長さ", () => {
-    expect(WORK_CHAT_SYSTEM_PROMPT.length).toBe(7465);
+    expect(WORK_CHAT_SYSTEM_PROMPT.length).toBe(7516);
   });
 
   test("外れるのは、使い方の節だけ", () => {

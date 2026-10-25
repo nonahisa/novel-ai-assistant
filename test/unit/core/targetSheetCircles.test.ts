@@ -5,6 +5,7 @@ import {
 } from "../../../src/core/targetSheetCircles";
 import { READER_TYPES, resolveReaderType } from "../../../src/core/readerTarget";
 import { readerTypeNeighbors } from "../../../src/core/readerTypeNeighbors";
+import { AUTHOR_READER_ESTIMATE_NOTE } from "../../../src/core/authorReaderType";
 import type { ReaderActual, ReaderScores } from "../../../src/models/readerProfile";
 
 /**
@@ -154,6 +155,34 @@ describe("材料の無い輪は、推測で埋めない", () => {
 
     expect(circles.edges).toEqual([]);
     expect(circles.missing).toHaveLength(3);
+  });
+});
+
+/**
+ * 読者としてのあなたが**推し量ったもの**（相談から）なら、そう断る
+ * （設計書6.101。作者の裁定、2026-10-25）。作者が決めたものとして並べない。
+ */
+describe("推し量った読者タイプの断り", () => {
+  test("推し量ったものなら、節に1回だけ断りを付ける", () => {
+    const circles = targetSheetCircles({
+      authorReader: { scores: LIGHT, source: "estimated" },
+      aim: ["lore_deep"],
+      actual: actualOf(LORE_DEEP),
+    });
+    expect(circles.authorNote).toBe(AUTHOR_READER_ESTIMATE_NOTE);
+    // 辺の行には写さない（同じ断りが3回並ばないように）
+    const edgeText = circles.edges.flatMap((edge) => edge.lines).join("\n");
+    expect(edgeText).not.toContain(AUTHOR_READER_ESTIMATE_NOTE);
+  });
+
+  test("9問に答えた値（出どころの無い古い形も）なら、断りは付けない", () => {
+    for (const source of ["diagnosis", undefined] as const) {
+      const circles = targetSheetCircles({
+        authorReader: { scores: LIGHT, source },
+        aim: ["lore_deep"],
+      });
+      expect(circles.authorNote).toBeUndefined();
+    }
   });
 });
 

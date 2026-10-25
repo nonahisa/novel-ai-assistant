@@ -595,6 +595,8 @@ function circlesSection(circles: TargetSheetCircles | undefined): string[] {
       "——効く相手が違うだけです。",
     "",
   ];
+  // 読者としてのあなたが推し量ったものなら、辺より先に断る（設計書6.101）
+  if (circles.authorNote) lines.push(circles.authorNote, "");
   for (const edge of circles.edges) {
     lines.push(`### ${edge.heading}`, "", ...edge.lines, "");
   }

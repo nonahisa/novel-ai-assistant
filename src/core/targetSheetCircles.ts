@@ -5,6 +5,10 @@ import {
   type ReaderTypeId,
 } from "./readerTarget";
 import { compareAuthorReader } from "./authorReaderGap";
+import {
+  AUTHOR_READER_ESTIMATE_NOTE,
+  type AuthorReaderSource,
+} from "./authorReaderType";
 import { neighborToward, readerTypeNeighbors } from "./readerTypeNeighbors";
 import {
   affinityRank,
@@ -77,6 +81,12 @@ export interface TargetSheetCircles {
    * （`needsBridge`。紙の側は節ごと出さない）。
    */
   readonly bridge?: TargetSheetBridge;
+  /**
+   * 読者としてのあなたが**推し量ったもの**（相談から）のときの断り。
+   * 9問に答えた値なら `undefined`（設計書6.101。作者の裁定、2026-10-25）。
+   * 辺ごとに書くと同じ断りが3回並ぶので、節に1回だけ出す。
+   */
+  readonly authorNote?: string;
 }
 
 /** 近づける道の1つ（どの輪を動かすか） */
@@ -96,7 +106,11 @@ export interface TargetSheetBridge {
 
 export interface TargetSheetCirclesInput {
   /** 作者自身の読者タイプ（6.101の1）。**未診断なら渡さない** */
-  readonly authorReader?: { readonly scores: ReaderScores };
+  readonly authorReader?: {
+    readonly scores: ReaderScores;
+    /** 出どころ。推し量ったもの（`estimated`）なら、紙にそう断る */
+    readonly source?: AuthorReaderSource;
+  };
   /** 狙い（作者の欄の1行目） */
   readonly aim: readonly ReaderTypeId[];
   /** 本文の実像（3段目）。**宣言では代えない**——輪の中身が違う */
@@ -139,7 +153,14 @@ export function targetSheetCircles(
   const bridge = needsBridge(edges)
     ? targetSheetBridge(input, edges.length)
     : undefined;
-  return bridge ? { edges, missing, bridge } : { edges, missing };
+  const authorNote =
+    authorReader?.source === "estimated" ? AUTHOR_READER_ESTIMATE_NOTE : undefined;
+  return {
+    edges,
+    missing,
+    ...(bridge ? { bridge } : {}),
+    ...(authorNote ? { authorNote } : {}),
+  };
 }
 
 /**

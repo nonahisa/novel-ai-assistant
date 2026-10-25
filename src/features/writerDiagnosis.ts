@@ -43,6 +43,7 @@ import {
 import {
   AUTHOR_READER_QUESTIONS,
   authorReaderProfileFromAnswers,
+  authorReaderTypeDisplay,
   authorReaderTypeLabel,
   type AuthorReaderProfile,
 } from "../core/authorReaderType";
@@ -261,7 +262,8 @@ async function choosePart(
       },
       {
         label: `$(book) 読者としての好み（${AUTHOR_READER_QUESTIONS.length}問）`,
-        description: reader ? `いま：${authorReaderTypeLabel(reader)}` : undefined,
+        // 推し量ったものなら、そう分かる呼び名で出す（設計書6.101）
+        description: reader ? `いま：${authorReaderTypeDisplay(reader)}` : undefined,
         detail:
           "作品の宛先ではなく、あなた自身が読むときに求めるもの。作品のターゲット読者との違いが見えます",
         choice: "reader" as const,

@@ -7,7 +7,10 @@ import {
   type ReaderChatSource,
   type ReaderTypeId,
 } from "./readerTarget";
-import type { AuthorReaderProfile } from "./authorReaderType";
+import {
+  AUTHOR_READER_ESTIMATE_NOTE,
+  type AuthorReaderProfile,
+} from "./authorReaderType";
 import type { ReaderProfile } from "../models/readerProfile";
 
 /**
@@ -98,7 +101,7 @@ export function compareAuthorReader(
       authorType,
       workType,
       workSource: basis.source,
-      lines: overlapLines(authorType),
+      lines: withEstimateNote(author, overlapLines(authorType)),
     };
   }
 
@@ -113,8 +116,25 @@ export function compareAuthorReader(
     authorType,
     workType,
     workSource: basis.source,
-    lines: gapLines(authorType, workType, basis.source),
+    lines: withEstimateNote(
+      author,
+      gapLines(authorType, workType, basis.source)
+    ),
   };
+}
+
+/**
+ * 作者の読者タイプが推し量ったもの（相談から）なら、そう断る行を添える
+ * （設計書6.101。作者の裁定、2026-10-25）。**作者が決めたものとして並べない**
+ * ——9問の答えと同じ書きぶりで出すと、作者は自分が答えたと思う。
+ */
+function withEstimateNote(
+  author: AuthorReaderProfile,
+  lines: string[]
+): string[] {
+  return author.source === "estimated"
+    ? [...lines, AUTHOR_READER_ESTIMATE_NOTE]
+    : lines;
 }
 
 /**

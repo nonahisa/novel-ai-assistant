@@ -9,6 +9,10 @@ import {
   parseWriterStyleSignals,
   type WriterStyleSignals,
 } from "../core/writerStyle";
+import {
+  parseAuthorReaderSignals,
+  type AuthorReaderSignals,
+} from "../core/authorReaderType";
 // 途中で切れたJSONを閉じる部品。プロット逸脱検知でも使うので core へ移した
 import { closeTruncatedJson } from "../core/truncatedResponse";
 
@@ -140,7 +144,44 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 //       AIが有料のとき（`AIProvider.isPaid`）だけ送る。無料のときは「お金の話は、
 //       聞かれたときだけにすること」に替える（手元の Ollama で「料金がかかります」と
 //       答えた。設計書6.27.9。2026-10-24）。有料の回と目次を渡さない回は変わらない
-export const WORK_CHAT_VERSION = "3.32";
+// 3.33: 作者自身の読者タイプの推定（設計書6.101、作者の裁定 2026-10-25「推定を作る」）。
+//       答えに authorReaderSignals（読み慣れ・読む姿勢・求めるものの弱い傾向）の欄を足し、
+//       出力形式の例に null を足した。**頼む文は9問に答えていない作者にだけ送る**
+//       （`buildAuthorReaderSignalPrompt`）。答えた作者の回は、例の1語が増えるだけ
+export const WORK_CHAT_VERSION = "3.33";
+
+/**
+ * 作者自身の読者タイプを推し量るための頼み（設計書6.101。作者の裁定
+ * 2026-10-25「推定を作る」）。
+ *
+ * **相談の往復に相乗りする。** 新しくAIを呼ばない——相談の答えに欄を
+ * 1つ足すだけなので、回数も費用も増えず、手元のAIでもそのまま動く
+ * （助言方針の `profileSignals`、直す時期の `writerStyleSignals` と同じ形）。
+ *
+ * **9問に答えていない作者にだけ送る**（呼ぶ側の `workChatPanel.ts`）。
+ * 答えた値は推定で動かさないので、答えた作者に頼んでも使い道が無い。
+ *
+ * **層の名前を言わせない。** 軸ごとの弱い傾向だけを報告させ、名前は
+ * コードが点数から決める（P-36・P-38 と同じ考え方）。
+ *
+ * **作品の読者の話と取り違えさせない。** 相談では「この作品の読者」の
+ * 話が多い。そこから作者自身の読み方を読むと、作品の宛先が作者の好みに
+ * すり替わる（6.101 が見たいのは、その2つのズレである）。
+ */
+const AUTHOR_READER_SIGNAL_NOTE = `【authorReaderSignals（読者としての作者の読み方）】
+**作者が、自分が読者として読むときの好みを語ったときだけ**、authorReaderSignals に読み取った傾向を -1・0・1 で入れてください。
+- familiarity（読み慣れ）：お約束を読み慣れていて説明は要らない → 1／初めての題材で、ていねいな説明がほしい → -1
+- posture（読む姿勢）：長くても腰を据えて読む → 1／移動中の隙間に読み、引きが無いと止まる → -1
+- craving（求めるもの）：苦くても揺さぶられ、読後に引きずりたい → 1／すっきり気持ちよく終わってほしい → -1
+- 入れてよいのは、**作者が自分の読み方を語ったとき**だけです（好きな作品のどこが好きか、テンプレを読み飛ばす、など）。
+- **作者が書いている作品の中身や、その作品の読者の話からは判断しないこと。** 作者自身が何を読みたいかとは別のことです。
+- 層の名前は入れないこと。読み取れない軸は null にしてください。毎回入れる必要はありません。
+- あなたが値を決めるのではありません。**読み取れたことを報告するだけ**で、どう覚えるかは拡張機能が決めます。`;
+
+/** 9問に答えていない作者の相談へ足す一段（設計書6.101） */
+export function buildAuthorReaderSignalPrompt(): string {
+  return AUTHOR_READER_SIGNAL_NOTE;
+}
 
 /** ［AIに相談］の依頼文に入れる一文・指摘の長さの上限（長い合本の行で膨らませない） */
 export const FINDING_ADVICE_QUOTE_MAX_CHARS = 300;
@@ -463,9 +504,9 @@ const SYSTEM_PROMPT_TAIL = `【本文の場所を指すとき】
   提案として並び、作者が選んだものだけが反映されます
 
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "${EXAMPLE_PERSON.fullName}", "notes": "他の登場人物『${EXAMPLE_OTHER.fullName}』の情報が混入しています。"}, "profileSignals": null, "writerStyleSignals": null}
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "${EXAMPLE_PERSON.fullName}", "notes": "他の登場人物『${EXAMPLE_OTHER.fullName}』の情報が混入しています。"}, "profileSignals": null, "writerStyleSignals": null, "authorReaderSignals": null}
 
-**profileSignals と writerStyleSignals は、末尾に説明があるときだけ使ってください。** 説明が無ければ必ず null にしてください。`;
+**profileSignals と writerStyleSignals と authorReaderSignals は、末尾に説明があるときだけ使ってください。** 説明が無ければ必ず null にしてください。`;
 
 /**
  * システムの指示を組み立てる。
@@ -742,6 +783,21 @@ export const WORK_CHAT_SCHEMA = {
         revise: { type: ["string", "null"] },
       },
     },
+    /*
+      作者自身の読者タイプの推定（設計書6.101）。
+
+      **層の名前の欄を作らない。** 軸ごとの弱い傾向（-1・0・+1）だけを受け、
+      名前はコードが点数から決める（`core/authorReaderType.ts`）。
+      **頼む文は9問に答えていない作者にだけ送る**ので、答えた作者の回は null が返る。
+    */
+    authorReaderSignals: {
+      type: ["object", "null"],
+      properties: {
+        familiarity: { type: ["number", "null"] },
+        posture: { type: ["number", "null"] },
+        craving: { type: ["number", "null"] },
+      },
+    },
   },
   required: [
     "reply",
@@ -753,6 +809,7 @@ export const WORK_CHAT_SCHEMA = {
     "reloadRecord",
     "profileSignals",
     "writerStyleSignals",
+    "authorReaderSignals",
   ],
 } as const;
 
@@ -804,6 +861,13 @@ export interface WorkChatAnswer {
    * 返ってきた値を通してはいけない。
    */
   writerStyleSignals: WriterStyleSignals | undefined;
+  /**
+   * 作者自身の読者タイプの推定（設計書6.101）。
+   *
+   * **ここで形を絞ってから返す**（`parseAuthorReaderSignals`）。層の名前や
+   * `"+1"` のような値は通さない。
+   */
+  authorReaderSignals: AuthorReaderSignals | undefined;
   /** どう読み取れたか。呼ぶ側の案内が変わる（`WorkChatAnswerSource`） */
   source: WorkChatAnswerSource;
 }
@@ -858,6 +922,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     reloadRecord: undefined,
     profileSignals: undefined,
     writerStyleSignals: undefined,
+    authorReaderSignals: undefined,
     source: "raw",
   };
 }
@@ -885,6 +950,7 @@ function readAnswer(
     reloadRecord?: unknown;
     profileSignals?: unknown;
     writerStyleSignals?: unknown;
+    authorReaderSignals?: unknown;
   };
   if (typeof record.reply !== "string") return undefined;
   return {
@@ -903,6 +969,7 @@ function readAnswer(
     reloadRecord: record.reloadRecord,
     profileSignals: parseProfileSignals(record.profileSignals),
     writerStyleSignals: parseWriterStyleSignals(record.writerStyleSignals),
+    authorReaderSignals: parseAuthorReaderSignals(record.authorReaderSignals),
     source,
   };
 }

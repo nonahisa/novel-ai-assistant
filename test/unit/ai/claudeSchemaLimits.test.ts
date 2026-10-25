@@ -253,10 +253,14 @@ describe("Claude 向けのスキーマ変換：全機能のスキーマ", () => 
  * 設計書の「null 許容の配列・object のスキーマ変換」）。スキーマの記憶は
  * スキーマ単位なので、ほかの機能は巻き込まない。スキーマは割らない
  * （割るなら null 許容の扱いを変える設計判断になる）。
+ *
+ * 相談は 19 → 23（2026-10-25・v3.33）。作者自身の読者タイプの推定の欄
+ * `authorReaderSignals`（object|null と、中の3軸の number|null）を足したぶん。
+ * もともと上限を超えていて、外して送り直す道を通るのは変わらない。
  */
 const KNOWN_OVER_UNION_LIMIT: string[] = [
   "characterExtract.ts:CHARACTER_EXTRACT_SCHEMA=33",
-  "workChat.ts:WORK_CHAT_SCHEMA=19",
+  "workChat.ts:WORK_CHAT_SCHEMA=23",
 ];
 
 describe("スキーマ受理の覚え方（モデル×スキーマ）", () => {
