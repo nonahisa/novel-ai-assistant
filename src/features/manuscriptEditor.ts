@@ -119,6 +119,7 @@ import {
 } from "../core/readAloud";
 import type { ReadingSpan } from "../core/readingDictionary";
 import { IME_TEXT_MAX, mergeReadingSpans } from "../core/imeReading";
+import { IME_WORD_BEFORE_MAX } from "../core/imeWordReading";
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
 import { copyEmphasisFor } from "../core/postingCopyTargets";
@@ -1743,13 +1744,16 @@ type Incoming =
    * 変換を1回確定した（設計書6.42.2）。`kana` は変換中に最後にかなだけだった字、
    * `committed` は確定した字。**確定のときに1回だけ届く**（変換中の1字ごとには来ない）。
    * `previous` は、この確定が直前の確定のすぐ後ろへ間を置かずに続いたときだけ付く
-   * 前の確定（姓と名を分けて確定する打ち方。拡張機能の側でつないで名前と照らす）
+   * 前の確定（姓と名を分けて確定する打ち方。拡張機能の側でつないで名前と照らす）。
+   * `before` は変換を始めた所の直前に見えていた字（末尾 `IME_WORD_BEFORE_MAX` 字）。
+   * 名前以外の語を読みの辞書への提案にするとき、句を打った所から求めるのに使う
    */
   | {
       type: "imeReading";
       kana: string;
       committed: string;
       previous?: { kana: string; committed: string };
+      before?: string;
     }
   /**
    * 「noteに貼ったときの見た目」の面を開いた・閉じた（設計書6.69）。
@@ -1945,12 +1949,16 @@ export interface ManuscriptEditorDeps {
   nameReadings?: {
     /** 読み上げに当てる、名前の読みの範囲（設定資料の読み、無ければIMEで打った読み） */
     spans(filePath: string, text: string): Promise<ReadingSpan[]>;
-    /** 変換1回ぶんを控えへ足し、裁定どおりに設定資料の読みを埋める（失敗しても投げない） */
+    /**
+     * 変換1回ぶんを控えへ足し、裁定どおりに設定資料の読みを埋める。名前以外の語は
+     * 読みの辞書への提案として控える（失敗しても投げない）
+     */
     record(
       filePath: string,
       kana: string,
       committed: string,
-      previous?: { kana: string; committed: string }
+      previous?: { kana: string; committed: string },
+      before?: string
     ): Promise<void>;
   };
   /**
@@ -3161,7 +3169,8 @@ export class ManuscriptEditorProvider
               message.committed,
               isImeTextPair(previous)
                 ? { kana: previous.kana, committed: previous.committed }
-                : undefined
+                : undefined,
+              imeBeforeOf(message.before)
             );
           }
           break;
@@ -4885,6 +4894,11 @@ export interface ReadingDictionaryView {
   missing: number;
   /** 辞書が読めなかったときの理由 */
   problem?: string;
+  /**
+   * IMEで打った読みの提案の数（設計書6.42.2。［読みの一覧］で採る・見送る）。
+   * 省くと0とみる
+   */
+  imeSuggestions?: number;
 }
 
 /**
@@ -4892,16 +4906,24 @@ export interface ReadingDictionaryView {
  *
  * **見当たらない項目があれば作り直しを促す**——本文を直して句が消えると、
  * その場所の読みは効かなくなる（効かない項目を黙って抱えたままにしない）。
+ * IMEの読みの提案があれば、その数を横に出す（辞書が空でも出す。提案は
+ * ［読みの一覧］で採るまで読み上げに使わないので、気づける所に数を置く）。
  */
 export function readingDictionaryNote(view: ReadingDictionaryView): string {
   if (view.problem) return view.problem;
-  if (view.active === 0) return "";
-  const head = `読みの辞書：${view.active}件`;
-  if (view.missing === 0) return head;
-  return (
-    `${head}（本文に見当たらない${view.missing}件。` +
-    "本文を直したなら［読みを確かめる］で作り直せます）"
-  );
+  const parts: string[] = [];
+  if (view.active > 0) {
+    const head = `読みの辞書：${view.active}件`;
+    parts.push(
+      view.missing === 0
+        ? head
+        : `${head}（本文に見当たらない${view.missing}件。` +
+            "本文を直したなら［読みを確かめる］で作り直せます）"
+    );
+  }
+  const suggestions = view.imeSuggestions ?? 0;
+  if (suggestions > 0) parts.push(`IMEの読みの提案：${suggestions}件`);
+  return parts.join("　");
 }
 
 /** いまのテーマに合う色を選ぶ */
@@ -4933,6 +4955,16 @@ function isImeTextPair(value: unknown): value is { kana: string; committed: stri
     kana.length <= IME_TEXT_MAX &&
     committed.length <= IME_TEXT_MAX
   );
+}
+
+/**
+ * 画面から届いた「変換を始めた所の直前の字」（設計書6.42.2）。**画面から届く値を
+ * 信用しない**——文字列でなければ無かったことにし、長ければ末尾だけを使う
+ * （句を探す手がかりで、無くても句は1か所だけの所から求まる）
+ */
+export function imeBeforeOf(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.slice(-IME_WORD_BEFORE_MAX);
 }
 
 function createNonce(): string {

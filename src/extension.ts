@@ -1864,15 +1864,30 @@ export async function activate(
         }
         return result.spans;
       },
-      record: async (filePath, kana, committed, previous) => {
+      record: async (filePath, kana, committed, previous, before) => {
         const work = workOfPath(registry, filePath);
         if (!work) return;
         try {
           const { recordImeComposition } = await import("./features/imeReadings.js");
           imeReadingsLoaded = true;
-          const result = await recordImeComposition(work, kana, committed, previous);
-          if (result.captures.length === 0) return;
+          const result = await recordImeComposition(work, kana, committed, previous, {
+            episodePath: filePath,
+            before,
+          });
+          if (
+            result.captures.length === 0 &&
+            result.words.length === 0 &&
+            result.problems.length === 0
+          ) {
+            return;
+          }
           useLogFile(work.folderPath);
+          // 名前以外の語は読みの辞書への提案（設計書6.42.2）。新しく出たときだけ1行
+          for (const word of result.words) {
+            logLine(
+              `IMEの読み：「${word.word}」を「${word.reading}」と打ちました（読みの辞書への提案）`
+            );
+          }
           for (const capture of result.captures) {
             // 別名の読みを埋めたものは別名で、名前の読みを埋めたものは名前で、拾った字と対応させる
             const filled = result.filled.filter(

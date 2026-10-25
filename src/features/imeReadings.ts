@@ -19,6 +19,12 @@ import {
   type ImeCapture,
 } from "../core/imeReading";
 import { loadImeReadings, updateImeReadings } from "../core/imeReadingStore";
+import { captureImeWords, recordImeWordEntries } from "../core/imeWordReading";
+import {
+  loadImeReadingDismissals,
+  updateImeWordReadings,
+} from "../core/imeWordReadingStore";
+import { episodeRelativePath } from "../core/readingDictionaryStore";
 import type { ReadingSpan } from "../core/readingDictionary";
 import { expandNameVariants } from "../core/termIndex";
 import {
@@ -153,8 +159,22 @@ export interface ImeRecordResult {
    * `alias` があれば、名前の読みではなくその別名の読み（`aliasReadings`）を埋めた
    */
   filled: Array<{ kind: SettingsKind; id: string; name: string; reading: string; alias?: string }>;
+  /**
+   * 読みの辞書への提案として**新しく出た**語（設計書6.42.2。作者の裁定、2026-10-25）。
+   * 同じ（話・語・読み）を前にも打っていたもの・見送ったものは入らない（記録の行を
+   * 打つたびに出さない）
+   */
+  words: Array<{ word: string; reading: string }>;
   /** 書けなかった理由（あれば） */
   problems: string[];
+}
+
+/** 変換1回ぶんに添える、語の提案のための手がかり */
+export interface ImeWordContext {
+  /** 打った話のファイル（提案は話ごとに出す。読みの辞書が話ごとなので） */
+  episodePath: string;
+  /** 変換を始めた所の直前の字（句を求めるとき、打った所を選ぶ） */
+  before?: string;
 }
 
 /**
@@ -170,16 +190,24 @@ export interface ImeRecordResult {
  * 加えて、つないだ組でも引き当てる（`captureJoinedImeReading`）。つないで当たった
  * のが別名なら、別名の読みの決まりにそのまま乗る。前の確定だけでの引き当ては、
  * 前の確定が届いたときに済んでいるので、ここではしない（二重に数えない）
+ *
+ * `wordContext` があれば、名前以外の語の読みも読みの辞書への提案として控える
+ * （`recordWords`。いまの確定だけを見て、前の確定とはつながない）
  */
 export function recordImeComposition(
   work: WorkEntry,
   kana: string,
   committed: string,
-  previous?: CompositionPair
+  previous?: CompositionPair,
+  wordContext?: ImeWordContext
 ): Promise<ImeRecordResult> {
   return enqueue(work.id, async () => {
     const records = await loadNameRecords(work);
     const surfaces = records.flatMap((record) => [record.name, ...record.aliases]);
+    const result: ImeRecordResult = { captures: [], filled: [], words: [], problems: [] };
+    // 語の提案は名前とは別に拾う（名前に当たらない確定でも拾う）。失敗は理由へ積み、
+    // 名前の側を止めない
+    if (wordContext) await recordWords(work, kana, committed, surfaces, wordContext, result);
     const found: ImeCapture[] = [];
     const single = captureImeReading(kana, committed, surfaces);
     if (single) found.push(single);
@@ -192,7 +220,6 @@ export function recordImeComposition(
     ) {
       found.push(joined);
     }
-    const result: ImeRecordResult = { captures: [], filled: [], problems: [] };
     if (found.length === 0) return result;
 
     // 控えへは1回で書く（2回に分けると、間に別の書き込みが入る余地ができる）
@@ -210,6 +237,60 @@ export function recordImeComposition(
     if (result.filled.length > 0) invalidateImeNameCache(work.id);
     return result;
   });
+}
+
+/**
+ * 名前以外の語の読みを、読みの辞書への提案として控えへ足す（設計書6.42.2）。
+ *
+ * **辞書へは書かない。** 入れるのは作者が［採る］を押したときだけ
+ * （`features/readingDictionary.ts`）。ここは控え（同期しない）を書くだけ
+ */
+async function recordWords(
+  work: WorkEntry,
+  kana: string,
+  committed: string,
+  names: readonly string[],
+  context: ImeWordContext,
+  result: ImeRecordResult
+): Promise<void> {
+  const captures = captureImeWords(kana, committed, names);
+  if (captures.length === 0) return;
+  const episode = episodeRelativePath(work, context.episodePath);
+  try {
+    const added = await updateImeWordReadings(work, (file) => {
+      const next = recordImeWordEntries(file, {
+        episode,
+        captures,
+        committed: committed.trim(),
+        before: context.before ?? "",
+        now: new Date().toISOString(),
+      });
+      return { file: next.file, result: next.added };
+    });
+    if (added.length === 0) return;
+    // 見送った語は記録にも出さない。印が読めなければ出すほうに倒す（記録の1行だけのこと）
+    let dismissed: Array<{ episode: string; word: string; reading: string }> = [];
+    try {
+      dismissed = (await loadImeReadingDismissals(work)).file.entries;
+    } catch {
+      dismissed = [];
+    }
+    result.words.push(
+      ...added.filter(
+        (item) =>
+          !dismissed.some(
+            (mark) =>
+              mark.episode === episode && mark.word === item.word && mark.reading === item.reading
+          )
+      )
+    );
+  } catch (error) {
+    result.problems.push(
+      `読みの提案を控えへ足せませんでした（${
+        error instanceof Error ? error.message : String(error)
+      }）`
+    );
+  }
 }
 
 /** 拾った1つぶんについて、名前の読み・別名の読みを裁定どおりに埋める */

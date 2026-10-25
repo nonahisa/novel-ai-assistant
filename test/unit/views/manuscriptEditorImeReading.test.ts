@@ -5,6 +5,7 @@ import {
   readingFromComposition,
   type CompositionEvent,
 } from "../../../src/core/imeReading";
+import { IME_WORD_BEFORE_MAX } from "../../../src/core/imeWordReading";
 
 /**
  * 原稿エディターでIMEの読みを拾う画面側（設計書6.42.2）。画面へ渡る本物の
@@ -42,6 +43,11 @@ interface FaceEnv {
   write?: { value: string; selectionStart: number; selectionEnd: number };
   selection?: () => unknown;
   compose?: FakeNode;
+  /**
+   * 送った知らせの `before`（直前の字。語の読みの提案のため）を残すか。つなげ方を
+   * 確かめる試験では見ないので、既定では外して比べる
+   */
+  keepBefore?: boolean;
 }
 
 /**
@@ -85,7 +91,13 @@ function harness(env: FaceEnv = {}): {
     "posted",
     "env",
     `
-    const vscode = { postMessage: (message) => posted.push(message) };
+    const vscode = {
+      postMessage: (message) => {
+        const copy = Object.assign({}, message);
+        if (!env.keepBefore) delete copy.before;
+        posted.push(copy);
+      },
+    };
     const handlers = {};
     function face(name, base) {
       const target = base || {};
@@ -573,5 +585,65 @@ describe("続けて打った確定をつなげて送る（画面側）", () => {
 
   it("つなげる間の長さは、拡張機能側の定数と同じ", () => {
     expect(block()).toContain(`IME_JOIN_GAP_MS = ${IME_JOIN_GAP_MS}`);
+  });
+});
+
+/**
+ * 名前以外の語を読みの辞書への提案にするため（設計書6.42.2。作者の裁定、2026-10-25）、
+ * 変換の始まりで読み済みの直前の字の末尾を `before` として添える。拡張機能の側は
+ * これで、本文に確定の字が2か所以上あっても打った所の句を選ぶ。
+ * **新しく読む所は増やさない**（変換の始まりの1回で読んだものを使うだけ）
+ */
+describe("直前の字を添える（語の読みの提案）", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("書く面：変換を始めた所の直前の字の末尾を添える", () => {
+    const field = { value: "あいうえおかきくけこさしすせそ古い", selectionStart: 17, selectionEnd: 17 };
+    const { fire, posted } = harness({ write: field, keepBefore: true });
+    fire("write", "compositionstart", "");
+    fire("write", "compositionupdate", "みなと");
+    fire("write", "compositionupdate", "港");
+    fire("write", "compositionend", "港");
+    expect(posted).toEqual([
+      {
+        type: "imeReading",
+        kana: "みなと",
+        committed: "港",
+        before: "うえおかきくけこさしすせそ古い".slice(-IME_WORD_BEFORE_MAX),
+      },
+    ]);
+  });
+
+  it("組んで書く面の行頭では、空の直前の字を添える（行頭で打った印になる）", () => {
+    const compose = new FakeNode(1);
+    const node = textNode("");
+    compose.append(element(node));
+    const selection = { isCollapsed: true, focusNode: node, focusOffset: 0 };
+    const { fire, posted } = harness({ compose, selection: () => selection, keepBefore: true });
+    fire("compose", "compositionstart", "");
+    fire("compose", "compositionupdate", "みなと");
+    fire("compose", "compositionend", "港");
+    expect(posted).toEqual([{ type: "imeReading", kana: "みなと", committed: "港", before: "" }]);
+  });
+
+  it("所が読めなければ添えない（拡張機能は1か所だけの所から句を求める）", () => {
+    const { fire, posted } = harness({ keepBefore: true });
+    fire("write", "compositionstart", "");
+    fire("write", "compositionupdate", "みなと");
+    fire("write", "compositionend", "港");
+    expect(posted).toEqual([{ type: "imeReading", kana: "みなと", committed: "港" }]);
+  });
+
+  it("確定の瞬間には読まず、変換の始まりで覚えた字を使う", () => {
+    const source = block();
+    const end = source.slice(source.indexOf("function imeReadingEnd("));
+    expect(end).toContain("start.before");
+    expect(end).not.toMatch(/getSelection|selectionStart|selectionEnd|imeCaretContext/);
+  });
+
+  it("添える長さは、拡張機能側の定数と同じ", () => {
+    expect(block()).toContain(`IME_WORD_BEFORE_MAX = ${IME_WORD_BEFORE_MAX}`);
   });
 });
