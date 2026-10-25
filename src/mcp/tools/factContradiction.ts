@@ -1,5 +1,16 @@
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import type { StoryFact } from "../../models/storyFact";
+import { AIWRITER_DIR } from "../../models/types";
 import { parseCharacter } from "../../models/character";
+import {
+  PENDING_SETTINGS_DIR,
+  buildPendingSettingsPayload,
+  combinePendingSettingsPayloads,
+  parsePendingSettingsPayload,
+  pendingSettingsFileName,
+} from "../../core/pendingSettingsMerge";
+import { runTravelCues, type TravelDistanceProposal } from "../../core/travelCues";
 import { parseLocation, type Location } from "../../models/location";
 import type { TravelStageStats } from "../../core/factContradiction";
 import { withLineNumbers, type Chunk } from "../../core/chunker";
@@ -17,7 +28,6 @@ import {
 } from "../../core/factsFromRecords";
 import {
   buildFactContradictionIssue,
-  buildTravelMaterial,
   candidateSidesOf,
   collectFactsFromChunk,
   factVerifyPromptVersion,
@@ -303,7 +313,8 @@ export function factContradictionPrompt(
     note:
       "本文から「事実」を取り出す段（P-37）のプロンプトです。" +
       "食い違いの照合と判定は拡張機能側が行うため、" +
-      "この段の応答だけでは矛盾は出ません（novel.run が4段を続けて通します）。",
+      "この段の応答だけでは矛盾は出ません（novel.run が4段と、移動の照合の手がかり" +
+      "（P-51 本文の距離・P-52 場面の頭の時の経過）を続けて通します）。",
     chunks: context.chunks.map((item) => ({
       chunkId: item.chunkId,
       index: item.chunk.index,
@@ -422,6 +433,11 @@ export type FactContradictionRunOutcome =
       failures: Array<{ chunkId: string; reason: string }>;
       /** 失敗を理由ごとに畳んだもの（`run.ts` の `summarizeFailures`）。失敗した回だけ付く */
       failureSummary?: FailureGroup[];
+      /**
+       * 本文から読んだ距離を置いた承認待ちのファイル（作品フォルダーからの相対パス。
+       * 設計書6.88.13）。作者が「設定資料更新分反映」で採るまで台帳は変わらない
+       */
+      pendingProposals: string[];
       /** 工程ごとの数（どこで減ったのかが分からないと、直す場所が決まらない） */
       stages: {
         chunks: number;
@@ -509,8 +525,14 @@ export async function factContradictionRun(
   const allFacts = [...facts, ...context.recordFacts];
   /** 本文は1回だけ読む（時計と判定の両方が引く） */
   const sourceCache = new Map<string, string | undefined>();
-  // 移動の照合の材料（所要時間の表・所在・時計）。製品と同じ関数で組む
-  const travel = buildTravelMaterial({
+  /** 移動の照合の手がかり（P-51・P-52）と、距離の提案を置くときの失敗 */
+  const travelFailures: Array<{ chunkId: string; reason: string }> = [];
+  /*
+    移動の照合の材料（所要時間の表・所在・時計）と、AIの手がかり（P-51 本文の距離・
+    P-52 場面の頭の時の経過。設計書6.88.13）。**製品と同じ関数で回す**——ここがするのは
+    AIの呼び方を渡すことと、距離の提案を承認待ちへ書くことだけ
+  */
+  const cues = await runTravelCues({
     locations: context.locations,
     facts,
     places,
@@ -519,7 +541,33 @@ export async function factContradictionRun(
       chapter: context.chapterByFile.get(filePath) ?? null,
       text: readSourceCached(input.folder, filePath, sourceCache) ?? "",
     })),
+    chunks: context.chunks.map((item) => item.chunk),
+    ask: async (request) => {
+      try {
+        const reply = await ask({
+          systemPrompt: request.systemPrompt,
+          userPrompt: request.userPrompt,
+          schema: request.schema,
+          temperature: temperatureFor(input, request.temperature),
+        });
+        models.add(reply.model);
+        const raw = parseFactJsonObject(reply.text);
+        if (!raw) throw new McpToolError("応答を読み取れません（JSONの形ではありません）");
+        return raw;
+      } catch (error) {
+        // 1回の失敗で全体を止めない（数えるのは runTravelCues。理由はここで残す）。
+        // 抽出のチャンクの失敗とは別に持つ（チャンクの「何件できたか」の数を狂わせない）
+        travelFailures.push({
+          chunkId: request.stage === "distance" ? "移動の照合：本文の距離" : "移動の照合：場面の頭の時の経過",
+          reason: describeError(error),
+        });
+        return undefined;
+      }
+    },
   });
+  const travel = cues.material;
+  const pendingFiles = stageTravelProposalsFs(input.folder, cues.proposals, travelFailures);
+  cues.stats.proposedLocations = pendingFiles.length;
   const candidates = filterAllowed(
     findContradictionCandidates({
       facts: allFacts,
@@ -570,6 +618,8 @@ export async function factContradictionRun(
         : undefined,
       rightPlace: sides.place,
       rightLineText,
+      // 判定へ渡す時の手がかりも、時計に入れた AI の読みと同じもの（製品と同じ）
+      aiMarkers: cues.material.aiMarkers,
     });
 
     let outcome: VerifyOutcome;
@@ -687,9 +737,10 @@ export async function factContradictionRun(
         ? [...models].join(" / ")
         : (input.model ?? "（不明）"),
     results,
-    failures,
+    failures: [...failures, ...travelFailures],
     // 理由ごとの要約（チャンクを回すほかの道と同じ形。設計書6.87.15 の柱2の4）
-    ...failureSummaryOf(failures),
+    ...failureSummaryOf([...failures, ...travelFailures]),
+    pendingProposals: pendingFiles,
     stages: {
       chunks: context.chunks.length,
       acceptedFacts: facts.length,
@@ -746,6 +797,63 @@ function askerOf(
     });
     return { text: response.text, model: response.model };
   };
+}
+
+/**
+ * 本文から読んだ距離の案を、承認待ち（`.aiwriter/pending-settings/`）へ書く（設計書6.88.13）。
+ *
+ * MCP の束は `vscode` を持てないので、製品の `PendingSettingsUpdateStore.stage` を通らず
+ * Node の `fs` で**同じ形と同じ合わせ方**（`buildPendingSettingsPayload`・
+ * `combinePendingSettingsPayloads`）を書く（`proposeRecord.ts`・`extractCommit.ts` と同じ考え）。
+ *
+ * - 同じ場所の案がもうあれば、差し替えずに合わせる
+ * - 先の案が壊れていたら、**直さず・上書きせずに**飛ばして失敗に数える（CLAUDE.md 規則2）
+ * - 一時ファイルへ書いてから置き換える（拡張機能が書きかけを読まないように）
+ *
+ * 返すのは置けたファイル（作品フォルダーからの相対パス）。
+ */
+function stageTravelProposalsFs(
+  folder: string,
+  proposals: readonly TravelDistanceProposal[],
+  failures: Array<{ chunkId: string; reason: string }>
+): string[] {
+  if (proposals.length === 0) return [];
+  const directory = nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, PENDING_SETTINGS_DIR);
+  const written: string[] = [];
+  for (const proposal of proposals) {
+    const target = nodePath.join(directory, pendingSettingsFileName(proposal.record));
+    try {
+      const incoming = buildPendingSettingsPayload("location", proposal.record, {
+        source: "fact",
+        reason: proposal.reason,
+      });
+      let payload = incoming;
+      if (fs.existsSync(target)) {
+        let existing;
+        try {
+          existing = parsePendingSettingsPayload(JSON.parse(fs.readFileSync(target, "utf8")) as unknown);
+        } catch (error) {
+          throw new McpToolError(
+            `承認待ちの案（${nodePath.basename(target)}）が読めないため、上書きせずに飛ばしました: ${describeError(error)}`
+          );
+        }
+        payload = combinePendingSettingsPayloads(existing, incoming);
+      }
+      // 製品の出口が読める形かを、書く前に確かめる（製品と同じ検証を通す）
+      parsePendingSettingsPayload(JSON.parse(JSON.stringify(payload)) as unknown);
+      fs.mkdirSync(directory, { recursive: true });
+      const temporary = `${target}.${process.pid}.tmp`;
+      fs.writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+      fs.renameSync(temporary, target);
+      written.push(nodePath.relative(nodePath.resolve(folder), target).split(nodePath.sep).join("/"));
+    } catch (error) {
+      failures.push({
+        chunkId: `移動の照合：距離の提案（${proposal.record.name}）`,
+        reason: describeError(error),
+      });
+    }
+  }
+  return written;
 }
 
 /** 本文は1回だけ読む。判定は同じファイルを何度も引く */

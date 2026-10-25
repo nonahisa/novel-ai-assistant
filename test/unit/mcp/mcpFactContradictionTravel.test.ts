@@ -98,12 +98,19 @@ describe("事実の照合——移動の照合の配線（MCP）", () => {
       "004_砦からの道.txt:8",
       "006_帰り道.txt:12",
     ]);
-    expect(outcome.stages.travel).toEqual({
+    expect(outcome.stages.travel).toMatchObject({
       whereaboutsFacts: 17,
       resolved: 13,
       clocked: 13,
       tablePairs: 2,
     });
     expect(outcome.note).toContain("所要時間の表 2組");
+    // AIの手がかり（P-51・P-52）も同じ道で回る。作り物のAIは距離を返さないので、提案は置かない
+    expect(outcome.stages.travel.aiCues).toMatchObject({
+      noLocations: false,
+      distancesAccepted: 0,
+      proposedLocations: 0,
+    });
+    expect(outcome.pendingProposals).toEqual([]);
   });
 });
