@@ -143,4 +143,19 @@ describe("危ない操作は覚えない", () => {
 
     expect(hits.map((entry) => entry.id)).toEqual([]);
   });
+
+  /*
+    チャットの提案を原稿へ書き込む確認（workChatPanel）も覚えない。
+    ただし語「workChat」を上の FORBIDDEN へ足すと、相談の料金の確認
+    （ai.paid.workChat。取り返しのつく確認）に当たって落ちるので、別に見る。
+    **等しいことを見る**——「ai.paid.workChat 以外が無い」だけだと、
+    拾い方が壊れて空になったときにも通ってしまう。
+  */
+  test("workChat を含む id は、相談の料金の確認（ai.paid.workChat）だけ", () => {
+    const hits = REMEMBERABLE_CONFIRMS.filter((entry) =>
+      entry.id.toLowerCase().includes("workchat")
+    );
+
+    expect(hits.map((entry) => entry.id)).toEqual(["ai.paid.workChat"]);
+  });
 });
