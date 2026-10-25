@@ -427,6 +427,12 @@ export function isFindingExpired(
  * 探さない）。**1行でも期限内のものがあれば残す**——`resolveFindings` は
  * 後から来たほうを採るので、期限内の行があればそれがいまの中身である。
  * 古い行だけを見て消すと、**まだ3日経っていない指摘が消える。**
+ *
+ * **判断の行が期限内なら、その指摘も残す。** 提案パネルの「当てたもの
+ * （直近◯日）」は判断した時刻を起点に並べるので、検知の時刻だけで消すと、
+ * 検知は古いが昨日当てた指摘が、欄に出ているのに［戻す］ごと消える。
+ * 当てたか退けたかは区別しない——どちらも作者が最近その指摘を見た印で、
+ * 退けた記録だけ先に消えると、検知し直したときに退けたはずのものが戻る。
  */
 export function expiredFindingIds(
   lines: readonly FindingLine[],
@@ -436,7 +442,12 @@ export function expiredFindingIds(
   const doomed = new Set<string>();
   const alive = new Set<string>();
   for (const line of lines) {
-    if (line.kind !== "finding") continue;
+    if (line.kind !== "finding") {
+      if (!isFindingExpired(line.time, retentionDays, now)) {
+        alive.add(line.findingId);
+      }
+      continue;
+    }
     if (isFindingExpired(line.time, retentionDays, now)) doomed.add(line.id);
     else alive.add(line.id);
   }
