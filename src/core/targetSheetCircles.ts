@@ -6,7 +6,9 @@ import {
 } from "./readerTarget";
 import { compareAuthorReader } from "./authorReaderGap";
 import {
-  AUTHOR_READER_ESTIMATE_NOTE,
+  AUTHOR_READER_PENDING_NOTE,
+  authorReaderNote,
+  shownAuthorReader,
   type AuthorReaderSource,
 } from "./authorReaderType";
 import { neighborToward, readerTypeNeighbors } from "./readerTypeNeighbors";
@@ -82,8 +84,9 @@ export interface TargetSheetCircles {
    */
   readonly bridge?: TargetSheetBridge;
   /**
-   * 読者としてのあなたが**推し量ったもの**（相談から）のときの断り。
-   * 9問に答えた値なら `undefined`（設計書6.101。作者の裁定、2026-10-25）。
+   * 読者としてのあなたが**推し量ったもの**（相談から）、または9問の答えを
+   * **相談から微調整しているもの**のときの断り。9問の答えそのままなら
+   * `undefined`（設計書6.101。作者の裁定、2026-10-25・同日昼）。
    * 辺ごとに書くと同じ断りが3回並ぶので、節に1回だけ出す。
    */
   readonly authorNote?: string;
@@ -108,8 +111,15 @@ export interface TargetSheetCirclesInput {
   /** 作者自身の読者タイプ（6.101の1）。**未診断なら渡さない** */
   readonly authorReader?: {
     readonly scores: ReaderScores;
-    /** 出どころ。推し量ったもの（`estimated`）なら、紙にそう断る */
+    /**
+     * 出どころ。推し量ったもの（`estimated`）なら、紙にそう断る。
+     * **まだ推し量れていなければ、未診断と同じく輪に入れない**
+     */
     readonly source?: AuthorReaderSource;
+    /** 9問の答え。あれば推し量りの線と関係なく輪に入れる */
+    readonly answers?: number[];
+    /** 9問の答えの点数（微調整の土台）。動いていれば紙にそう断る */
+    readonly baseScores?: ReaderScores;
   };
   /** 狙い（作者の欄の1行目） */
   readonly aim: readonly ReaderTypeId[];
@@ -118,15 +128,22 @@ export interface TargetSheetCirclesInput {
 }
 
 export function targetSheetCircles(
-  input: TargetSheetCirclesInput
+  rawInput: TargetSheetCirclesInput
 ): TargetSheetCircles {
-  const { authorReader, aim, actual } = input;
+  // まだ相談から推し量れていない値は、未診断と同じく輪に入れない（設計書6.101。
+  // 作者の裁定、2026-10-25 昼「推し量れるまで隠す」）。近づける道
+  // （`targetSheetBridge`）にも渡さないよう、入力ごと差し替える
+  const authorReader = shownAuthorReader(rawInput.authorReader);
+  const input: TargetSheetCirclesInput = { ...rawInput, authorReader };
+  const { aim, actual } = input;
   const edges: TargetSheetCircleEdge[] = [];
   const missing: string[] = [];
 
   if (!authorReader) {
     missing.push(
-      "書きたいもの（読者としてのあなた）：「あなた自身の読者タイプ」に答えると出ます。"
+      rawInput.authorReader
+        ? `書きたいもの（読者としてのあなた）：${AUTHOR_READER_PENDING_NOTE}。「あなた自身の読者タイプ」に答えると出ます。`
+        : "書きたいもの（読者としてのあなた）：「あなた自身の読者タイプ」に答えると出ます。"
     );
   }
   if (aim.length === 0) {
@@ -153,8 +170,7 @@ export function targetSheetCircles(
   const bridge = needsBridge(edges)
     ? targetSheetBridge(input, edges.length)
     : undefined;
-  const authorNote =
-    authorReader?.source === "estimated" ? AUTHOR_READER_ESTIMATE_NOTE : undefined;
+  const authorNote = authorReader ? authorReaderNote(authorReader) : undefined;
   return {
     edges,
     missing,

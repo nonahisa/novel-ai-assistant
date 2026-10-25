@@ -5,7 +5,10 @@ import {
 } from "../../../src/core/targetSheetCircles";
 import { READER_TYPES, resolveReaderType } from "../../../src/core/readerTarget";
 import { readerTypeNeighbors } from "../../../src/core/readerTypeNeighbors";
-import { AUTHOR_READER_ESTIMATE_NOTE } from "../../../src/core/authorReaderType";
+import {
+  AUTHOR_READER_ESTIMATE_NOTE,
+  AUTHOR_READER_PENDING_NOTE,
+} from "../../../src/core/authorReaderType";
 import type { ReaderActual, ReaderScores } from "../../../src/models/readerProfile";
 
 /**
@@ -173,6 +176,39 @@ describe("推し量った読者タイプの断り", () => {
     // 辺の行には写さない（同じ断りが3回並ばないように）
     const edgeText = circles.edges.flatMap((edge) => edge.lines).join("\n");
     expect(edgeText).not.toContain(AUTHOR_READER_ESTIMATE_NOTE);
+  });
+
+  test("まだ推し量れていない（真ん中のまま）なら、輪に入れず、推し量れていないと言う", () => {
+    const circles = targetSheetCircles({
+      authorReader: {
+        scores: { familiarity: 3, posture: 3.5, craving: 4.5 },
+        source: "estimated",
+      },
+      aim: ["lore_deep"],
+      actual: actualOf(LORE_DEEP),
+    });
+    expect(circles.authorNote).toBeUndefined();
+    expect(circles.edges.map((edge) => edge.key)).not.toContain("author-actual");
+    expect(circles.edges.flatMap((edge) => edge.lines).join("\n")).not.toContain(
+      READER_TYPES.omnivore.label
+    );
+    expect(circles.missing.join("\n")).toContain(AUTHOR_READER_PENDING_NOTE);
+  });
+
+  test("9問の答えを微調整しているなら、土台の答えの層を添えて断る", () => {
+    const circles = targetSheetCircles({
+      authorReader: {
+        scores: { ...LIGHT, craving: LIGHT.craving + 0.5 },
+        baseScores: LIGHT,
+        answers: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+        source: "diagnosis",
+      },
+      aim: ["lore_deep"],
+    });
+    expect(circles.authorNote).toContain("微調整");
+    expect(circles.authorNote).toContain(
+      `9問の答え（${READER_TYPES[resolveReaderType(LIGHT)].label}）を土台に`
+    );
   });
 
   test("9問に答えた値（出どころの無い古い形も）なら、断りは付けない", () => {

@@ -62,35 +62,68 @@ export const AUTHOR_READER_SOURCE_LABELS: Record<AuthorReaderSource, string> = {
   estimated: "相談での発言からの推定",
 };
 
+/**
+ * 履歴に残す出どころ。
+ *
+ * いまの点数の出どころ（`AuthorReaderSource`）に「微調整」を足したもの。
+ * 9問に答えた作者の点数は、相談から微調整されても出どころは「9問のお答え」
+ * のまま（答えたことは消えない）だが、履歴では「答えそのもの」と
+ * 「答えを土台に微調整したもの」を見分けて出す。
+ */
+export type AuthorReaderHistorySource = AuthorReaderSource | "tuned";
+
+const AUTHOR_READER_HISTORY_SOURCE_LABELS: Record<AuthorReaderHistorySource, string> = {
+  ...AUTHOR_READER_SOURCE_LABELS,
+  tuned: "9問のお答えを相談から微調整したもの",
+};
+
 /** 過去のタイプ。**人は変化する**ので、上書きせずに積む */
 export interface AuthorReaderHistoryEntry {
   typeId: ReaderTypeId;
   scores: ReaderScores;
   /** その状態がいつの時点のものか（ISO） */
   updatedAt: string;
-  source: AuthorReaderSource;
+  source: AuthorReaderHistorySource;
 }
 
 export interface AuthorReaderProfile {
+  /**
+   * いまの点数。9問に答えた作者では、答えの点数（`baseScores`）に
+   * 相談からの微調整が乗ったもの。
+   */
   scores: ReaderScores;
   /**
    * 9問の答え（各0/1/2）。
    *
    * 点数だけでなく答えも残す。やり直すときに前回を初期値にできると、
    * 「1問だけ変えたい」が最短で済む。**推定で入ったときは無い。**
+   * **微調整では書き換えない**（作者の裁定、2026-10-25 昼）。
    */
   answers?: number[];
+  /**
+   * 9問の答えから出した点数（微調整の土台。設計書6.86 の `baseScores` と
+   * 同じ考え方）。
+   *
+   * 答えた直後は持たない（`scores` がそのまま答えの点数）。相談から初めて
+   * 微調整したときに、動く前の点数をここへ控える。**答え直したら、新しい
+   * 答えの点数が土台になる**（`authorReaderProfileFromAnswers` が作り直す）。
+   */
+  baseScores?: ReaderScores;
   /** いまの点数の出どころ */
   source: AuthorReaderSource;
   /**
    * いつの時点のものか（ISO）。
    *
-   * 6.86 の `AdviceProfile.updatedAt` と違い、**推定で動いたときも
-   * ここを動かす。** あちらは診断した日を別に持つ必要があったが
-   * （やり直しの目安のため）、こちらは `source` でどちらか分かるので、
-   * 「いつの読み取りか」を1つ持てば足りる。
+   * - 9問に答えた作者：**答えた日のまま。微調整では動かさない**
+   *   （6.86 と同じ。動かすと、答え直しの目安の30日が永久に来なくなり、
+   *   似た1問の写し（`sharedDiagnosisQuestion.ts`）がどちらの答えが新しいかを
+   *   取り違える）。微調整した日は `tunedAt` に持つ
+   * - 推し量っているだけの作者：最後に推し量った日（答えた日が無いので、
+   *   「いつの読み取りか」を1つ持てば足りる）
    */
   updatedAt: string;
+  /** 最後に相談から微調整した日時（ISO）。9問に答えた作者だけが持つ */
+  tunedAt?: string;
   /** 過去のタイプ（新しいものが先。最大 `AUTHOR_READER_HISTORY_MAX` 件） */
   history?: AuthorReaderHistoryEntry[];
 }
@@ -211,18 +244,26 @@ export const AUTHOR_READER_QUESTIONS: ReaderQuestion[] = READER_QUESTIONS.map(
 /**
  * 前回を履歴へ積む。**前回を消さない**——変化そのものが作者への情報で、
  * 「前はすきま層だった」と見えることに意味がある。
+ *
+ * **まだ見せていない推定は積まない**（作者の裁定、2026-10-25 昼「推し量れる
+ * まで隠す」）。積むと、隠していた出発点の「雑食層」が、線を越えたあとや
+ * 9問に答えたあとの履歴に現れる。
  */
 export function appendAuthorReaderHistory(
   previous: AuthorReaderProfile | undefined,
   next: AuthorReaderProfile
 ): AuthorReaderProfile {
   if (!previous) return next;
+  if (!shownAuthorReader(previous)) {
+    return { ...next, history: previous.history ?? next.history };
+  }
 
+  const tuned = isAuthorReaderTuned(previous);
   const entry: AuthorReaderHistoryEntry = {
     typeId: resolveReaderType(previous.scores),
     scores: previous.scores,
-    updatedAt: previous.updatedAt,
-    source: previous.source,
+    updatedAt: tuned ? (previous.tunedAt ?? previous.updatedAt) : previous.updatedAt,
+    source: tuned ? "tuned" : previous.source,
   };
   return {
     ...next,
@@ -257,10 +298,12 @@ export function authorReaderProfileFromAnswers(
  * ——取り違えたときに失うのは作者が答えた手間のほうだからである。
  */
 export function isAnsweredAuthorReader(
-  profile: AuthorReaderProfile | undefined
+  profile: Partial<Pick<AuthorReaderProfile, "source" | "answers">> | undefined
 ): boolean {
   if (!profile) return false;
-  return profile.source === "diagnosis" || (profile.answers?.length ?? 0) > 0;
+  // 出どころの無い記録（古い形・3つの輪へ点数だけ渡す形）も答えた値として扱う。
+  // 「推し量ったもの」と言えるのは、そう印の付いたものだけである
+  return profile.source !== "estimated" || (profile.answers?.length ?? 0) > 0;
 }
 
 /**
@@ -268,10 +311,10 @@ export function isAnsweredAuthorReader(
  *
  * 呼ぶのは `applyAuthorReaderSignals`（相談の答えから）だけ。
  *
- * **作者が9問で答えた値の上には書かない**（作者の裁定、2026-10-25
- * 「推定を作る」。CLAUDE.md 実装ルール2の精神）。答えた値が渡されたら、
- * そのまま返す——呼ぶ側は同一性で「動かなかった」と分かる。
- * 推定が働くのは、まだ9問に答えていない作者だけである。
+ * **9問に答えていない作者のための口である。** 答えた値が渡されたら、
+ * そのまま返す——答えた作者の点数は `recordTunedAuthorReaderType`
+ * （答えを土台にした微調整）の側が動かし、ここで推定の点数に置き換えると
+ * 9問の答えの印が消える（CLAUDE.md 実装ルール2の精神）。
  */
 export function recordEstimatedAuthorReaderType(
   previous: AuthorReaderProfile | undefined,
@@ -297,6 +340,59 @@ export function recordEstimatedAuthorReaderType(
     return appendAuthorReaderHistory(previous, next);
   }
   return next;
+}
+
+/**
+ * 9問に答えた作者の点数を、相談から微調整する口（設計書6.101。作者の裁定、
+ * 2026-10-25 昼「微調整した上で、微調整している旨を表示してください」）。
+ *
+ * - **9問の答え（`answers`）と出どころは書き換えない。** 動くのは `scores`
+ *   だけで、動く前の答えの点数を `baseScores` に控える（6.86 と同じ持ち方）
+ * - `updatedAt`（答えた日）は動かさない。微調整した日は `tunedAt`
+ * - 層が変わったときだけ履歴へ積む（点数の揺れをすべて積むと枠が埋まる）
+ */
+export function recordTunedAuthorReaderType(
+  previous: AuthorReaderProfile,
+  scores: ReaderScores,
+  now: Date
+): AuthorReaderProfile {
+  const next: AuthorReaderProfile = {
+    ...previous,
+    scores,
+    baseScores: authorReaderBaseScores(previous),
+    tunedAt: now.toISOString(),
+  };
+  if (resolveReaderType(previous.scores) !== resolveReaderType(scores)) {
+    return appendAuthorReaderHistory(previous, next);
+  }
+  return next;
+}
+
+/**
+ * 見せ方を決めるのに要る項目だけの形（3つの輪のように、点数と出どころだけを
+ * 運ぶ所でも同じ判定を通せるようにする）
+ */
+export type AuthorReaderView = Pick<AuthorReaderProfile, "scores"> &
+  Partial<Pick<AuthorReaderProfile, "source" | "answers" | "baseScores">>;
+
+/**
+ * 9問の答えの点数（微調整の土台）。
+ *
+ * 控えが無ければ（答えた直後・古い記録）いまの点数を土台とみなす
+ * （6.86 の `baseScores ?? scores` と同じ）。
+ */
+export function authorReaderBaseScores(profile: AuthorReaderProfile): ReaderScores {
+  return profile.baseScores ?? profile.scores;
+}
+
+/** 9問の答えを土台に、相談から微調整されているか（どれかの軸が土台から動いたか） */
+export function isAuthorReaderTuned(
+  profile: AuthorReaderView
+): boolean {
+  if (!isAnsweredAuthorReader(profile)) return false;
+  const base = profile.baseScores;
+  if (!base) return false;
+  return READER_AXIS_ORDER.some((axis) => base[axis] !== profile.scores[axis]);
 }
 
 /**
@@ -346,11 +442,64 @@ const NEUTRAL_SCORES: ReaderScores = {
   craving: READER_NEUTRAL_SCORE,
 };
 
+/** 出発点の層（3軸とも中ほど＝雑食層）。「推し量れた」の線に使う */
+const NEUTRAL_TYPE: ReaderTypeId = resolveReaderType(NEUTRAL_SCORES);
+
+/**
+ * 推し量っているだけの値を、画面に出してよいところまで推し量れたか
+ * （「推し量れた」の線。作者の裁定、2026-10-25 昼「推し量れるまで隠した上で、
+ * 推定である旨記載してください」）。
+ *
+ * **線は「層が出発点（雑食層）から離れたか」の1つだけにする。** 出発点の
+ * 3点から ±0.5 ずつ動くので、同じ向きの発言が下へは3回（1.5点で「低」）、
+ * 上へは4回（5点で「高」）積もると層が変わる——1〜2回の相談の言い回しで
+ * 出さない速さである。点数の幅で別の数を持たないのは、段階の境目
+ * （`threeAxis.ts` の 2・5）を写すことになり、上向きの作者には 4.5点でも
+ * 「雑食層（推し量ったもの）」が出てしまうためである。
+ *
+ * 9問に答えた値は、この線と関係なく常に出す（答えたものだから）。
+ */
+export function isAuthorReaderEstimateSettled(
+  profile: Pick<AuthorReaderProfile, "scores">
+): boolean {
+  return resolveReaderType(profile.scores) !== NEUTRAL_TYPE;
+}
+
+/**
+ * 画面に出してよい作者の読者タイプ。**まだ推し量れていなければ `undefined`**
+ * （未診断と同じ扱いにする）。
+ *
+ * 作者の目に触れる所（ターゲットシートの3つの輪・作品の読者との突き合わせ・
+ * 作家タイプ診断の入口・結果の画面）は、すべてここを通す。1か所ずつ
+ * `source` を見て隠すと、片方だけ直る所が出る。
+ */
+export function shownAuthorReader<
+  T extends AuthorReaderView,
+>(profile: T | undefined): T | undefined {
+  if (!profile) return undefined;
+  if (isAnsweredAuthorReader(profile)) return profile;
+  return isAuthorReaderEstimateSettled(profile) ? profile : undefined;
+}
+
+/**
+ * まだ推し量れていない推定だけがあるか（9問にも答えていない）。
+ * 画面ごとに「まだ相談から推し量れていません」の断りを出す見分けに使う。
+ */
+export function isAuthorReaderEstimatePending(
+  profile: AuthorReaderProfile | undefined
+): boolean {
+  return profile !== undefined && shownAuthorReader(profile) === undefined;
+}
+
+/** 推し量れていないことの短い断り（画面で共用する） */
+export const AUTHOR_READER_PENDING_NOTE = "まだ相談から推し量れていません";
+
 /**
  * 相談から読み取った傾向を、作者の読者タイプへ反映する（設計書6.101）。
  *
- * - **9問に答えていたら何もしない**（渡された値をそのまま返す）。
- *   答えた値が常に勝つ（作者の裁定、2026-10-25）
+ * - **9問に答えていたら、答えを土台に微調整する**（作者の裁定、2026-10-25 昼。
+ *   0.111.8 の「答えた値が常に勝つ」を改めた）。答えそのもの（`answers`）は
+ *   書き換えず、動く前の答えの点数を `baseScores` に控える
  * - まだ何も無ければ、3軸とも中ほど（3点）から始める
  * - 動かす幅は 6.86 と同じ ±0.5（`SIGNAL_STEP`）、0〜6 に収める
  *   ——段階が1つ動くまでにおよそ数回〜10回の相談がかかる。1回の会話で
@@ -365,7 +514,6 @@ export function applyAuthorReaderSignals(
   now: Date
 ): AuthorReaderProfile | undefined {
   if (!signals) return previous;
-  if (isAnsweredAuthorReader(previous)) return previous;
 
   const scores: ReaderScores = { ...(previous?.scores ?? NEUTRAL_SCORES) };
   let moved = false;
@@ -382,70 +530,135 @@ export function applyAuthorReaderSignals(
   }
   if (!moved) return previous;
 
+  if (previous && isAnsweredAuthorReader(previous)) {
+    return recordTunedAuthorReaderType(previous, scores, now);
+  }
   return recordEstimatedAuthorReaderType(previous, scores, now);
 }
 
 /**
- * 推定で動いたことを作者へ知らせる文（設計書6.101）。
+ * 相談で動いたことを作者へ知らせる文（設計書6.101）。
  *
- * **黙って作らない・黙って変えない。** ただし初めて推し量った回は
- * `describeAuthorReaderChange` が何も言わない（前が無い）ので、ここで
- * 「推し量りました」を言う。
+ * **黙って作らない・黙って変えない。** 言うのは、画面に出る層が変わった
+ * ときだけ（同じことを毎回言わない）。
  *
- * 出発点の中ほど（雑食層）にいるあいだは、初回を言わない。どの軸にも
- * まだ傾きが見えていない状態で「雑食層と推し量りました」と言うと、
- * 1回の相談で読み方を決めたように聞こえる。
+ * - 推し量っているだけの作者：線（`isAuthorReaderEstimateSettled`）を
+ *   越えて初めて出る回に「推し量りました」を言う。線の手前では黙る——
+ *   どの軸にもまだ傾きが見えていない状態で「雑食層と推し量りました」と
+ *   言うと、1回の相談で読み方を決めたように聞こえる。出していた層が
+ *   線の手前へ戻ったら、出すのをやめたことを言う（黙って消さない）
+ * - 9問に答えた作者：微調整で層が変わったら「答えは〇〇層、相談から
+ *   〇〇層へ寄せています」。答えの層へ戻ったら、戻ったことを言う
  */
 export function describeAuthorReaderEstimate(
   before: AuthorReaderProfile | undefined,
   after: AuthorReaderProfile | undefined
 ): string[] {
-  if (!after || after === before || after.source !== "estimated") return [];
+  if (!after || after === before) return [];
 
-  const afterType = resolveReaderType(after.scores);
-  const neutralType = resolveReaderType(NEUTRAL_SCORES);
-  const firstTime =
-    !before ||
-    (before.source === "estimated" &&
-      (before.history ?? []).length === 0 &&
-      resolveReaderType(before.scores) === neutralType);
+  if (isAnsweredAuthorReader(after)) {
+    if (!before) return [];
+    const beforeType = resolveReaderType(before.scores);
+    const afterType = resolveReaderType(after.scores);
+    if (beforeType === afterType) return [];
+    const baseType = resolveReaderType(authorReaderBaseScores(after));
+    const baseLabel = READER_TYPES[baseType].label;
+    const undo =
+      "違うと感じたら、「自分の読者タイプ」から9問に答え直すと、新しい答えを土台にやり直します。";
+    if (afterType === baseType) {
+      return [
+        `読者としてのあなたは、相談からの微調整が、9問の答え（${baseLabel}）へ戻りました。`,
+        undo,
+      ];
+    }
+    return [
+      `読者としてのあなたは、答えは${baseLabel}、相談から${READER_TYPES[afterType].label}へ寄せています。`,
+      undo,
+    ];
+  }
 
-  if (!firstTime) return describeAuthorReaderChange(before, after);
-  if (afterType === neutralType) return [];
-
-  return [
-    `相談でのお話から、読者としてのあなたを「${READER_TYPES[afterType].label}」と推し量りました。`,
-    AUTHOR_READER_ESTIMATE_NOTE,
-  ];
+  const beforeShown = shownAuthorReader(before);
+  const afterShown = shownAuthorReader(after);
+  if (!beforeShown && !afterShown) return [];
+  if (!beforeShown) {
+    return [
+      `相談でのお話から、読者としてのあなたを「${authorReaderTypeLabel(after)}」と推し量りました。`,
+      AUTHOR_READER_ESTIMATE_NOTE,
+    ];
+  }
+  if (!afterShown) {
+    return [
+      `相談でのお話から推し量っていた読者としてのあなた（${authorReaderTypeLabel(beforeShown)}）は、` +
+        "傾きが真ん中へ戻ったので、いったん出すのをやめました。",
+    ];
+  }
+  return describeAuthorReaderChange(before, after);
 }
 
 /**
  * 推し量った値であることの断り（画面と紙で共用する）。
  *
  * **作者が決めたものとして扱わない**（実装ルール2の精神）。9問に答えれば
- * 答えのほうに替わり、以後は推し量らないことも併せて言う。
+ * 答えが土台になり、そのあとは相談から微調整することも併せて言う。
  */
 export const AUTHOR_READER_ESTIMATE_NOTE =
   "これは相談でのお話から推し量ったもので、あなたが決めたものではありません。" +
-  "作家タイプ診断の「読者としての好み」（9問）に答えると、そちらに替わります（以後は推し量りません）。";
+  "作家タイプ診断の「読者としての好み」（9問）に答えると、その答えが土台になります（そのあとは相談から微調整します）。";
+
+/**
+ * 微調整していることの断り（作者の裁定、2026-10-25 昼）。
+ *
+ * **土台の答えの層を必ず名指しする。** いまの層だけを出すと、作者は
+ * 「そう答えた覚えは無い」になる（6.86 の「いま：」と同じ用心）。
+ */
+export function authorReaderTuningNote(
+  profile: Pick<AuthorReaderProfile, "scores" | "baseScores">
+): string {
+  const baseLabel = READER_TYPES[resolveReaderType(profile.baseScores ?? profile.scores)].label;
+  const nowLabel = READER_TYPES[resolveReaderType(profile.scores)].label;
+  return (
+    `9問の答え（${baseLabel}）を土台に、相談から微調整しています` +
+    (nowLabel === baseLabel ? "。" : `（いまは${nowLabel}へ寄せています）。`) +
+    "答え直すと、新しい答えを土台にやり直します。"
+  );
+}
+
+/**
+ * 作者の読者タイプに添える断り（推し量ったもの／微調整しているもの／無し）。
+ *
+ * 断りを出す所（突き合わせの行・3つの輪の節・結果の画面）は、すべてここを
+ * 通す。**まだ推し量れていない値には呼ばない**（`shownAuthorReader` で先に外す）。
+ */
+export function authorReaderNote(
+  profile: AuthorReaderView
+): string | undefined {
+  if (!isAnsweredAuthorReader(profile)) return AUTHOR_READER_ESTIMATE_NOTE;
+  return isAuthorReaderTuned(profile) ? authorReaderTuningNote(profile) : undefined;
+}
 
 /** いまのタイプの呼び名（「考察層」） */
-export function authorReaderTypeLabel(profile: AuthorReaderProfile): string {
+export function authorReaderTypeLabel(profile: Pick<AuthorReaderProfile, "scores">): string {
   return READER_TYPES[resolveReaderType(profile.scores)].label;
 }
 
 /**
- * 画面に出す呼び名。**推し量ったものなら、そう分かる言い方にする**
- * （「考察層（相談から推し量ったもの）」）。
+ * 画面に出す呼び名。**推し量ったもの・微調整しているものなら、そう分かる
+ * 言い方にする**（「考察層（相談から推し量ったもの）」
+ * 「考察層（9問の答えは雑食層。相談から微調整しています）」）。
+ * **まだ推し量れていなければ** `AUTHOR_READER_PENDING_NOTE` を返す。
  *
  * 記録（ログ）には `authorReaderTypeLabel` を使ってよいが、作者の目に
  * 触れる所ではこちらを使う。
  */
 export function authorReaderTypeDisplay(profile: AuthorReaderProfile): string {
+  if (!shownAuthorReader(profile)) return AUTHOR_READER_PENDING_NOTE;
   const label = authorReaderTypeLabel(profile);
-  return profile.source === "estimated"
-    ? `${label}（相談から推し量ったもの）`
-    : label;
+  if (!isAnsweredAuthorReader(profile)) return `${label}（相談から推し量ったもの）`;
+  if (!isAuthorReaderTuned(profile)) return label;
+  const baseLabel = READER_TYPES[resolveReaderType(authorReaderBaseScores(profile))].label;
+  return baseLabel === label
+    ? `${label}（9問の答えを土台に、相談から微調整しています）`
+    : `${label}（9問の答えは${baseLabel}。相談から微調整しています）`;
 }
 
 /**
@@ -454,17 +667,22 @@ export function authorReaderTypeDisplay(profile: AuthorReaderProfile): string {
  *
  * **黙って変えない**（6.86 と同じ約束）。変わっていなければ空配列——
  * 同じことを繰り返し言わない。
+ *
+ * 前がまだ推し量れていない値なら、何も言わない——作者に一度も見せて
+ * いない「雑食層」から変わったと言うと、隠していた出発点が出てしまう。
  */
 export function describeAuthorReaderChange(
   before: AuthorReaderProfile | undefined,
   after: AuthorReaderProfile
 ): string[] {
-  if (!before) return [];
+  if (!before || !shownAuthorReader(before)) return [];
   const beforeLabel = authorReaderTypeLabel(before);
   const afterLabel = authorReaderTypeLabel(after);
   if (beforeLabel === afterLabel) return [];
 
-  const when = adviceDiagnosisDate(before.updatedAt);
+  const when = adviceDiagnosisDate(
+    isAuthorReaderTuned(before) ? (before.tunedAt ?? before.updatedAt) : before.updatedAt
+  );
   return [
     `読者としてのあなたの読み取りが変わりました：${beforeLabel}` +
       `${when ? `（${when}）` : ""} → ${afterLabel}`,
@@ -498,13 +716,13 @@ export function describeAuthorReaderHistory(
   if (history.length === 0) return [];
 
   const head =
-    `${adviceDiagnosisDate(profile.updatedAt) ?? "日付不明"} ` +
+    `${adviceDiagnosisDate(isAuthorReaderTuned(profile) ? (profile.tunedAt ?? profile.updatedAt) : profile.updatedAt) ?? "日付不明"} ` +
     `${authorReaderTypeLabel(profile)}（いま）`;
   const past = history.slice(0, AUTHOR_READER_HISTORY_MAX).map(
     (entry) =>
       `${adviceDiagnosisDate(entry.updatedAt) ?? "日付不明"} ` +
       `${READER_TYPES[entry.typeId].label}` +
-      `（${AUTHOR_READER_SOURCE_LABELS[entry.source]}）`
+      `（${AUTHOR_READER_HISTORY_SOURCE_LABELS[entry.source] ?? AUTHOR_READER_SOURCE_LABELS.diagnosis}）`
   );
   return [head, ...past];
 }

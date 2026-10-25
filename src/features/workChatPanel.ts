@@ -805,8 +805,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     /**
      * 作者自身の読者タイプ（設計書6.101）。
      *
-     * **9問に答えていない作者だけ、相談の発言から推し量る**（作者の裁定、
-     * 2026-10-25）。省略できる（試験では何も足さない）。
+     * 9問に答えていない作者は相談の発言から推し量り（作者の裁定、2026-10-25）、
+     * 答えた作者は答えを土台に微調整する（同日昼）。省略できる（試験では何も足さない）。
      */
     private readonly authorReaderTypes?: AuthorReaderTypeStore
   ) {
@@ -1168,14 +1168,15 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       blocks.push(buildWriterStylePrompt(writerProfile));
     }
 
-    // 作者自身の読者タイプの推定（設計書6.101）。**9問に答えた作者には
-    // 頼まない**——答えた値は推定で動かさないので、頼んでも使い道が無く、
-    // 送る本文が増えるだけになる
-    if (
-      this.authorReaderTypes &&
-      !isAnsweredAuthorReader(this.authorReaderTypes.get())
-    ) {
-      logStep("相談: 読者としての作者の読み方を推し量る頼みを添えた（9問は未回答）");
+    // 作者自身の読者タイプの推定・微調整（設計書6.101）。**9問に答えた作者にも
+    // 頼む**（作者の裁定、2026-10-25 昼「微調整した上で、微調整している旨を
+    // 表示してください」）——答えた作者は、答えを土台に相談から微調整する
+    if (this.authorReaderTypes) {
+      logStep(
+        isAnsweredAuthorReader(this.authorReaderTypes.get())
+          ? "相談: 読者としての作者の読み方を微調整する頼みを添えた（9問の答えが土台）"
+          : "相談: 読者としての作者の読み方を推し量る頼みを添えた（9問は未回答）"
+      );
       blocks.push(buildAuthorReaderSignalPrompt());
     }
 
@@ -1330,8 +1331,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 相談の答えから読み取った読み方の傾向を、作者自身の読者タイプへ反映する
    * （設計書6.101。作者の裁定、2026-10-25「推定を作る」）。
    *
-   * **9問に答えていたら動かさない**（`applyAuthorReaderSignals` が同じものを
-   * 返す）。頼む文も送っていないが、AIが勝手に欄を埋めてくることはある。
+   * **9問に答えていたら、答えを土台に微調整する**（作者の裁定、2026-10-25 昼。
+   * 答えそのものは書き換えない。`applyAuthorReaderSignals`）。
    *
    * **作品は要らない。** 作者ごとに1つ持つ値である。
    */
@@ -1341,19 +1342,21 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (!signals || !this.authorReaderTypes) return;
 
     // **送る直前に読んだ値ではなく、保存庫から読み直す**（助言方針と同じ）。
-    // 答えを待っているあいだに、作者が9問に答えていることがある
+    // 答えを待っているあいだに、作者が9問に答え直していることがある——
+    // そのときは新しい答えを土台に微調整する
     const before = this.authorReaderTypes.get();
     const after = applyAuthorReaderSignals(before, signals, new Date());
     if (!after || after === before) return;
 
     await this.authorReaderTypes.set(after);
     logStep(
-      `相談: 読者としての作者の読み方を推し量った（${authorReaderTypeLabel(after)}。` +
+      `相談: 読者としての作者の読み方を${isAnsweredAuthorReader(after) ? "微調整した" : "推し量った"}` +
+        `（${authorReaderTypeLabel(after)}。` +
         `読み慣れ ${after.scores.familiarity}・読む姿勢 ${after.scores.posture}・` +
         `求めるもの ${after.scores.craving}）`
     );
 
-    // **黙って作らない・黙って変えない。** 初めて推し量った回も言う
+    // **黙って作らない・黙って変えない。** 画面に出る層が変わった回だけ言う
     const lines = describeAuthorReaderEstimate(before, after);
     if (lines.length > 0) {
       const message = lines.join("\n");
@@ -2126,8 +2129,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           .reduce((sum, block) => sum + block.length, 0);
       // 診断の3つ（助言方針・執筆スタイル・読者タイプ）はシステムプロンプト
       // 側に足している。どれも診断していなければ素のプロンプトなので0になる
-      // ——ただし「読者としての好み」に答えていない作者には、推し量る頼みの
-      // 一段（設計書6.101）が乗るので、そのぶんはここに数えられる
+      // ——ただし作者の読者タイプを推し量る・微調整する頼みの一段（設計書6.101。
+      // 2026-10-25 昼から、9問に答えた作者にも乗る）は、ここに数えられる
       // 引く相手は、この回に組んだ素のプロンプト。使い方の節を外した回に
       // 全部入りの長さを引くと、方針のぶんが打ち消されて0に見える
       const policyChars = Math.max(

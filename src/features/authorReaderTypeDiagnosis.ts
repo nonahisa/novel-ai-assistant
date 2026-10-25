@@ -3,12 +3,16 @@ import type { WorkEntry } from "../models/types";
 import type { AuthorReaderTypeStore } from "../core/authorReaderTypeStore";
 import {
   authorReaderProfileFromAnswers,
+  authorReaderNote,
+  authorReaderTypeDisplay,
   authorReaderTypeLabel,
-  AUTHOR_READER_ESTIMATE_NOTE,
+  AUTHOR_READER_PENDING_NOTE,
   describeAuthorReaderChange,
   describeAuthorReaderHistory,
   AUTHOR_READER_QUESTIONS,
   AUTHOR_READER_REDIAGNOSE_DAYS,
+  isAnsweredAuthorReader,
+  isAuthorReaderEstimatePending,
   isAuthorReaderStale,
   type AuthorReaderProfile,
 } from "../core/authorReaderType";
@@ -99,38 +103,50 @@ async function chooseAction(
   const type = READER_TYPES[resolveReaderType(profile.scores)];
   // 推し量ったもの（相談から）は、まだ答えていない。「答え直す」「古い」と
   // 言うと、作者は自分が答えたことがあると思う（設計書6.101）
-  const estimated = profile.source === "estimated";
+  const estimated = !isAnsweredAuthorReader(profile);
+  // まだ推し量れていない値は、層の名前を出さない（作者の裁定、2026-10-25 昼
+  // 「推し量れるまで隠す」）。「見る」も出さない——見せる層が無い
+  const pending = isAuthorReaderEstimatePending(profile);
   const stale = !estimated && isAuthorReaderStale(profile, new Date());
+
+  const placeHolder = pending
+    ? `${AUTHOR_READER_PENDING_NOTE}（まだお答えいただいていません）`
+    : estimated
+      ? `いまは相談でのお話から「${type.label}」と推し量っています（まだお答えいただいていません）`
+      : `いまは「${authorReaderTypeDisplay(profile)}」としてお預かりしています`;
 
   const picked = await vscode.window.showQuickPick(
     [
       {
         label: estimated ? "$(refresh) 9問に答える" : "$(refresh) 答え直す",
         detail: estimated
-          ? "答えると、推し量ったものに替わります（以後は推し量りません）"
+          ? "答えると、その答えが土台になります（そのあとは相談から微調整します）"
           : stale
             ? `前にお答えいただいてから${AUTHOR_READER_REDIAGNOSE_DAYS}日以上たっています。読むものは変わります`
-            : "9問にもう一度お答えいただきます（前回の答えに印が付きます）",
+            : "9問にもう一度お答えいただきます（前回の答えに印が付きます。新しい答えを土台に微調整をやり直します）",
         action: "redo" as const,
       },
-      {
-        label: "$(eye) いまの読者タイプを見る",
-        detail: `${type.label}：${type.summary}`,
-        action: "show" as const,
-      },
+      ...(pending
+        ? []
+        : [
+            {
+              label: "$(eye) いまの読者タイプを見る",
+              detail: `${type.label}：${type.summary}`,
+              action: "show" as const,
+            },
+          ]),
       {
         label: "$(trash) 消す",
-        detail:
-          "答えを消します。作品のファイルや設定資料には影響しません",
+        detail: estimated
+          ? "相談から推し量った途中の値を消します。作品のファイルや設定資料には影響しません"
+          : "答えを消します。作品のファイルや設定資料には影響しません",
         action: "clear" as const,
       },
       cancelItem(),
     ],
     {
       title: "あなた自身の読者タイプ",
-      placeHolder: estimated
-        ? `いまは相談でのお話から「${type.label}」と推し量っています（まだお答えいただいていません）`
-        : `いまは「${type.label}」としてお預かりしています`,
+      placeHolder,
       ignoreFocusOut: true,
     }
   );
@@ -245,14 +261,11 @@ export async function showAuthorReaderResult(
   const comparison = work ? await compareWithWork(profile, work) : undefined;
   if (comparison) lines.push("", `${work?.title}との突き合わせ`, ...comparison);
 
-  // 推し量ったもの（相談から）なら、作者が決めたものとして見せない（設計書6.101）
+  // 推し量ったもの（相談から）なら、作者が決めたものとして見せない（設計書6.101）。
+  // 9問の答えを微調整しているなら、土台の答えの層を添えて断る（2026-10-25 昼）。
   // 突き合わせの行にも同じ断りが入るので、2度は並べない
-  if (
-    profile.source === "estimated" &&
-    !lines.includes(AUTHOR_READER_ESTIMATE_NOTE)
-  ) {
-    lines.push("", AUTHOR_READER_ESTIMATE_NOTE);
-  }
+  const note = authorReaderNote(profile);
+  if (note && !lines.includes(note)) lines.push("", note);
 
   lines.push(
     "",

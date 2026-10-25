@@ -14,9 +14,11 @@ import type { WorkEntry } from "../../../src/models/types";
  * 規則そのもの（答えが勝つ・±0.5・表に無い値を捨てる）は
  * `core/authorReaderType.test.ts` が見ている。ここは本物のパネルで、
  *
- * 1. **頼む文は、9問に答えていない作者にだけ送る**（答えた作者の送る本文を増やさない）
- * 2. **答えの欄が届いたら、推定として保存庫へしまう**——答えた作者の値は動かさない
- * 3. 初めて推し量ったときも、相談パネルへ一言出す（黙って作らない）
+ * 1. **頼む文は、9問に答えた作者にも送る**（2026-10-25 昼から。答えを土台に微調整する）
+ * 2. **答えの欄が届いたら、推定として保存庫へしまう**——答えた作者は、答えを
+ *    書き換えずに点数だけを微調整する
+ * 3. 線を越えて初めて推し量ったとき・微調整で層が変わったときは、相談パネルへ
+ *    一言出す（黙って作らない・黙って変えない）
  *
  * を確かめる。
  */
@@ -103,7 +105,7 @@ describe("頼む文を送る相手", () => {
     expect(systemPrompt).toContain(HEADING);
   });
 
-  test("9問に答えた作者には足さない（送る本文を増やさない）", async () => {
+  test("9問に答えた作者にも足す（答えを土台に微調整する。2026-10-25 昼）", async () => {
     const store = new AuthorReaderTypeStore(memento());
     await store.set(authorReaderProfileFromAnswers(LIGHT, new Date()));
     const { panel } = openPanel(store);
@@ -112,14 +114,14 @@ describe("頼む文を送る相手", () => {
       false,
       "最近は短い話ばかり読んでいます"
     );
-    expect(systemPrompt).not.toContain(HEADING);
+    expect(systemPrompt).toContain(HEADING);
   });
 });
 
 describe("答えの欄が届いたとき", () => {
-  test("推定としてしまう（答えは持たない）", async () => {
+  test("推定としてしまう（答えは持たない）。線の手前では何も言わない", async () => {
     const store = new AuthorReaderTypeStore(memento());
-    const { panel } = openPanel(store);
+    const { panel, posted } = openPanel(store);
 
     await panel.updateAuthorReaderType({ craving: 1 });
 
@@ -127,9 +129,10 @@ describe("答えの欄が届いたとき", () => {
     expect(saved?.source).toBe("estimated");
     expect(saved?.answers).toBeUndefined();
     expect(saved?.scores.craving).toBe(3.5);
+    expect(posted.some((message) => message.type === "note")).toBe(false);
   });
 
-  test("9問に答えた作者の値は動かさない", async () => {
+  test("9問に答えた作者は、答えを書き換えずに微調整する", async () => {
     const store = new AuthorReaderTypeStore(memento());
     const answered = authorReaderProfileFromAnswers(LIGHT, new Date());
     await store.set(answered);
@@ -137,8 +140,31 @@ describe("答えの欄が届いたとき", () => {
 
     await panel.updateAuthorReaderType({ familiarity: 1, posture: 1, craving: 1 });
 
-    expect(store.get()).toEqual(answered);
+    const saved = store.get() as AuthorReaderProfile;
+    expect(saved.answers).toEqual(LIGHT);
+    expect(saved.source).toBe("diagnosis");
+    expect(saved.baseScores).toEqual(answered.scores);
+    expect(saved.scores).toEqual({ familiarity: 0.5, posture: 0.5, craving: 0.5 });
+    expect(saved.updatedAt).toBe(answered.updatedAt);
+    // 層は変わっていない（すきま層のまま）ので、知らせは出さない
     expect(posted.some((message) => message.type === "note")).toBe(false);
+  });
+
+  test("微調整で層が変わったら「答えは〇〇層、相談から〇〇層へ寄せています」と出す", async () => {
+    const store = new AuthorReaderTypeStore(memento());
+    await store.set(authorReaderProfileFromAnswers(LIGHT, new Date()));
+    const { panel, posted } = openPanel(store);
+
+    // 0 → 2 まで上げると「中」に入り、すきま層から動く
+    for (let i = 0; i < 4; i++) {
+      await panel.updateAuthorReaderType({ craving: 1 });
+    }
+
+    const notes = posted
+      .filter((message) => message.type === "note")
+      .map((message) => message.message ?? "");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatch(/答えは.+層、相談から.+層へ寄せています/);
   });
 
   test("層が見えたら「推し量りました」と相談パネルへ出す", async () => {

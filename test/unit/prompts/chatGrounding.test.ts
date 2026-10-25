@@ -259,7 +259,8 @@ describe("版", () => {
     // 3.32（2026-10-24）：料金の一文を、相談のAIが有料のときだけ送る（無料なら替える）
     // 3.33（2026-10-25）：作者自身の読者タイプの推定の欄 authorReaderSignals を足した
     // （頼む文は9問に答えていない作者にだけ送る。設計書6.101）
-    expect(WORK_CHAT_VERSION).toBe("3.33");
+    // 3.34（2026-10-25 昼）：その頼む文を、9問に答えた作者にも送る（答えを土台に微調整）
+    expect(WORK_CHAT_VERSION).toBe("3.34");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });

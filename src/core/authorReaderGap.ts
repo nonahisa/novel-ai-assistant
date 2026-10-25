@@ -8,7 +8,8 @@ import {
   type ReaderTypeId,
 } from "./readerTarget";
 import {
-  AUTHOR_READER_ESTIMATE_NOTE,
+  authorReaderNote,
+  shownAuthorReader,
   type AuthorReaderProfile,
 } from "./authorReaderType";
 import type { ReaderProfile } from "../models/readerProfile";
@@ -85,9 +86,12 @@ const WORK_SOURCE_PHRASES: Record<ReaderChatSource, string> = {
  *    （`READER_GAP_THRESHOLD` の考え方をそのまま借りる）
  */
 export function compareAuthorReader(
-  author: AuthorReaderProfile | undefined,
+  authorInput: AuthorReaderProfile | undefined,
   work: ReaderProfile | undefined
 ): AuthorReaderComparison | undefined {
+  // まだ相談から推し量れていない値は、未診断と同じく黙る（設計書6.101。
+  // 作者の裁定、2026-10-25 昼「推し量れるまで隠す」）
+  const author = shownAuthorReader(authorInput);
   if (!author) return undefined;
   const basis = chatReaderBasis(work);
   if (!basis) return undefined;
@@ -127,14 +131,15 @@ export function compareAuthorReader(
  * 作者の読者タイプが推し量ったもの（相談から）なら、そう断る行を添える
  * （設計書6.101。作者の裁定、2026-10-25）。**作者が決めたものとして並べない**
  * ——9問の答えと同じ書きぶりで出すと、作者は自分が答えたと思う。
+ * 9問の答えを相談から微調整しているときは、土台の答えの層を添えて断る
+ * （作者の裁定、2026-10-25 昼）。断りの文は `authorReaderNote` が1か所で持つ。
  */
 function withEstimateNote(
   author: AuthorReaderProfile,
   lines: string[]
 ): string[] {
-  return author.source === "estimated"
-    ? [...lines, AUTHOR_READER_ESTIMATE_NOTE]
-    : lines;
+  const note = authorReaderNote(author);
+  return note ? [...lines, note] : lines;
 }
 
 /**

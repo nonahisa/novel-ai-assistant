@@ -14,12 +14,19 @@ import {
 } from "../../../src/core/readerTarget";
 import {
   applyAuthorReaderSignals,
+  authorReaderBaseScores,
+  authorReaderNote,
   authorReaderProfileFromAnswers,
   authorReaderTypeDisplay,
   AUTHOR_READER_ESTIMATE_NOTE,
+  AUTHOR_READER_PENDING_NOTE,
   describeAuthorReaderChange,
   describeAuthorReaderEstimate,
   isAnsweredAuthorReader,
+  isAuthorReaderEstimatePending,
+  isAuthorReaderEstimateSettled,
+  isAuthorReaderTuned,
+  shownAuthorReader,
   parseAuthorReaderSignals,
   recordEstimatedAuthorReaderType,
   AUTHOR_READER_HISTORY_MAX,
@@ -211,23 +218,35 @@ describe("履歴と再診断の目安は 6.86 に揃える", () => {
 
 /**
  * **作者自身の読者タイプの推定**（設計書6.101。作者の裁定、2026-10-25
- * 「推定を作る」）。守るのは4つ。
+ * 「推定を作る」、同日昼「推し量れるまで隠す」「微調整する」）。守るのは4つ。
  *
- * 1. **9問の答えが常に勝つ**——答えた値の上には推定を書かない
+ * 1. **9問の答えが土台**——答えそのものは書き換えず、微調整はその上に乗る
  * 2. **推定は推定として区別して残す**（`source: "estimated"`・答えを持たない）
  * 3. **AIの出力を信用しない**——軸の -1・0・+1 以外と、層の名前は捨てる
  * 4. **動きは 6.86 と同じ速さ**（±0.5、0〜6）
  */
 describe("相談から推し量る（6.101）", () => {
-  test("9問に答えていたら、推定しない（同じものを返す）", () => {
+  test("9問に答えていたら、答えは書き換えず、点数だけを微調整する", () => {
     const answered = authorReaderProfileFromAnswers(LIGHT, NOW);
+    const later = new Date("2026-09-20T10:00:00.000Z");
     const after = applyAuthorReaderSignals(
       answered,
       { familiarity: 1, posture: 1, craving: 1 },
-      NOW
+      later
     );
-    expect(after).toBe(answered);
     expect(isAnsweredAuthorReader(answered)).toBe(true);
+    expect(after).not.toBe(answered);
+    expect(after?.source).toBe("diagnosis");
+    expect(after?.answers).toEqual(LIGHT);
+    expect(after?.baseScores).toEqual(scoreReaderAnswers(LIGHT));
+    expect(after?.scores).toEqual({
+      familiarity: SIGNAL_STEP,
+      posture: SIGNAL_STEP,
+      craving: SIGNAL_STEP,
+    });
+    // 答えた日は動かさない（答え直しの目安が来なくなる）。微調整の日は別に持つ
+    expect(after?.updatedAt).toBe(NOW.toISOString());
+    expect(after?.tunedAt).toBe(later.toISOString());
   });
 
   test("推定は答えを上書きしない（下の口も、答えた値には書かない）", () => {
@@ -249,7 +268,11 @@ describe("相談から推し量る（6.101）", () => {
       source: "estimated",
       updatedAt: NOW.toISOString(),
     };
-    expect(applyAuthorReaderSignals(odd, { craving: 1 }, NOW)).toBe(odd);
+    const after = applyAuthorReaderSignals(odd, { craving: 1 }, NOW);
+    // 推定の点数に置き換えず、答えを土台にした微調整として扱う
+    expect(after?.answers).toEqual(LIGHT);
+    expect(after?.baseScores).toEqual(odd.scores);
+    expect(isAnsweredAuthorReader(after)).toBe(true);
   });
 
   test("まだ何も無ければ、3軸とも中ほど（3点）から ±0.5 で動かす", () => {
@@ -283,21 +306,33 @@ describe("相談から推し量る（6.101）", () => {
     expect(applyAuthorReaderSignals(undefined, { posture: 0 }, NOW)).toBeUndefined();
   });
 
-  test("推定を重ねると、タイプが変わった回だけ履歴に積む", () => {
+  test("推定を重ねると、見せていた層が変わった回だけ履歴に積む", () => {
     let profile: AuthorReaderProfile | undefined;
     const types: string[] = [];
-    for (let i = 0; i < 6; i++) {
-      profile = applyAuthorReaderSignals(profile, { familiarity: 1 }, NOW);
+    // 読み慣れを上へ4回（5点で「高」）→ 求めるものを上へ4回
+    const signals = [
+      ...Array(4).fill({ familiarity: 1 }),
+      ...Array(4).fill({ craving: 1 }),
+    ];
+    for (const signal of signals) {
+      profile = applyAuthorReaderSignals(profile, signal, NOW);
       if (profile) types.push(resolveReaderType(profile.scores));
     }
-    // 3 → 6 まで動き、どこかで雑食層から別の層へ移る
-    expect(profile?.scores.familiarity).toBe(MAX_AXIS_SCORE);
+    expect(profile?.scores.familiarity).toBe(5);
+    // 雑食層 → （線を越えて）読み慣れの層 → 別の層、と2回変わるが、
+    // 隠していた雑食層からの変化は積まない（作者に見せていない）
     const changes = types.filter((type, i) => i > 0 && type !== types[i - 1]);
-    expect(profile?.history ?? []).toHaveLength(changes.length);
-    expect(changes.length).toBeGreaterThan(0);
+    expect(changes.length).toBe(2);
+    expect(profile?.history ?? []).toHaveLength(1);
     for (const entry of profile?.history ?? []) {
       expect(entry.source).toBe("estimated");
+      expect(entry.typeId).not.toBe("omnivore");
     }
+    // 上の端まで動かしても 6 で止まる
+    for (let i = 0; i < 4; i++) {
+      profile = applyAuthorReaderSignals(profile, { familiarity: 1 }, NOW);
+    }
+    expect(profile?.scores.familiarity).toBe(MAX_AXIS_SCORE);
   });
 
   test("AIの値は -1・0・+1 だけを通す。層の名前や指示語は捨てる", () => {
@@ -356,12 +391,162 @@ describe("相談から推し量る（6.101）", () => {
     expect(text).toContain(AUTHOR_READER_ESTIMATE_NOTE);
   });
 
-  test("画面の呼び名は、推し量ったものならそう分かる", () => {
-    const estimated = applyAuthorReaderSignals(undefined, { craving: 1 }, NOW)!;
-    expect(authorReaderTypeDisplay(estimated)).toContain("推し量った");
+  test("画面の呼び名は、推し量ったものならそう分かる。推し量れるまでは層を出さない", () => {
+    const pending = applyAuthorReaderSignals(undefined, { craving: 1 }, NOW)!;
+    expect(authorReaderTypeDisplay(pending)).toBe(AUTHOR_READER_PENDING_NOTE);
+    expect(authorReaderTypeDisplay(pending)).not.toContain(READER_TYPES.omnivore.label);
+
+    const settled = recordEstimatedAuthorReaderType(undefined, scoreReaderAnswers(LORE), NOW);
+    expect(authorReaderTypeDisplay(settled)).toContain("推し量った");
     const answered = authorReaderProfileFromAnswers(LIGHT, NOW);
     expect(authorReaderTypeDisplay(answered)).not.toContain("推し量った");
     expect(AUTHOR_READER_ESTIMATE_NOTE).toContain("あなたが決めたものではありません");
+  });
+});
+
+/**
+ * **推し量れるまで隠す**（作者の裁定、2026-10-25 昼「推し量れるまで隠した上で、
+ * 推定である旨記載してください」）。
+ *
+ * 出発点が3点（真ん中＝雑食層）なので、隠さないと、はじめはほぼ必ず
+ * 「雑食層（推し量ったもの）」が出る。線は「層が出発点から離れたか」。
+ */
+describe("推し量れるまで出さない（6.101）", () => {
+  /** 求めるものだけを n 回上へ動かした推定 */
+  function cravingUp(times: number): AuthorReaderProfile | undefined {
+    let profile: AuthorReaderProfile | undefined;
+    for (let i = 0; i < times; i++) {
+      profile = applyAuthorReaderSignals(profile, { craving: 1 }, NOW);
+    }
+    return profile;
+  }
+
+  test("線の手前（上へ3回＝4.5点）は出さず、越えたら（4回＝5点）出す", () => {
+    const before = cravingUp(3)!;
+    expect(before.scores.craving).toBe(4.5);
+    expect(isAuthorReaderEstimateSettled(before)).toBe(false);
+    expect(shownAuthorReader(before)).toBeUndefined();
+    expect(isAuthorReaderEstimatePending(before)).toBe(true);
+
+    const after = cravingUp(4)!;
+    expect(after.scores.craving).toBe(5);
+    expect(isAuthorReaderEstimateSettled(after)).toBe(true);
+    expect(shownAuthorReader(after)).toBe(after);
+    expect(isAuthorReaderEstimatePending(after)).toBe(false);
+  });
+
+  test("下へは3回（1.5点で「低」）で層が変わり、出る", () => {
+    let profile: AuthorReaderProfile | undefined;
+    for (let i = 0; i < 2; i++) {
+      profile = applyAuthorReaderSignals(profile, { posture: -1 }, NOW);
+    }
+    expect(shownAuthorReader(profile)).toBeUndefined();
+    profile = applyAuthorReaderSignals(profile, { posture: -1 }, NOW);
+    expect(shownAuthorReader(profile)).toBeDefined();
+  });
+
+  test("9問に答えた値は、真ん中（雑食層）でも出す", () => {
+    const middle = authorReaderProfileFromAnswers([1, 1, 1, 1, 1, 1, 1, 1, 1], NOW);
+    expect(resolveReaderType(middle.scores)).toBe("omnivore");
+    expect(shownAuthorReader(middle)).toBe(middle);
+  });
+
+  test("線を越えた回に初めて「推し量りました」と言う。手前では黙る", () => {
+    for (let n = 1; n <= 3; n++) {
+      expect(describeAuthorReaderEstimate(cravingUp(n - 1), cravingUp(n))).toEqual([]);
+    }
+    const text = describeAuthorReaderEstimate(cravingUp(3), cravingUp(4)).join("\n");
+    expect(text).toContain("推し量りました");
+    expect(text).toContain(AUTHOR_READER_ESTIMATE_NOTE);
+  });
+
+  test("出していた層が線の手前へ戻ったら、出すのをやめたと言う（黙って消さない）", () => {
+    const shown = cravingUp(4)!;
+    const back = applyAuthorReaderSignals(shown, { craving: -1 }, NOW)!;
+    expect(shownAuthorReader(back)).toBeUndefined();
+    const text = describeAuthorReaderEstimate(shown, back).join("\n");
+    expect(text).toContain("出すのをやめました");
+  });
+
+  test("隠していた雑食層は、線の手前で9問に答えても履歴に残らない", () => {
+    const answered = authorReaderProfileFromAnswers(LORE, NOW, cravingUp(2));
+    expect(answered.history ?? []).toEqual([]);
+    expect(describeAuthorReaderChange(cravingUp(2), answered)).toEqual([]);
+  });
+});
+
+/**
+ * **9問の答えを土台に、相談から微調整する**（作者の裁定、2026-10-25 昼
+ * 「微調整した上で、微調整している旨を表示してください」）。
+ */
+describe("9問の答えを土台に微調整する（6.101）", () => {
+  test("何度動いても、土台は最初の答えの点数のまま", () => {
+    let profile: AuthorReaderProfile | undefined = authorReaderProfileFromAnswers(LIGHT, NOW);
+    for (let i = 0; i < 5; i++) {
+      profile = applyAuthorReaderSignals(profile, { craving: 1 }, NOW);
+    }
+    expect(profile?.baseScores).toEqual(scoreReaderAnswers(LIGHT));
+    expect(profile?.answers).toEqual(LIGHT);
+    expect(profile?.scores.craving).toBe(5 * SIGNAL_STEP);
+    expect(isAuthorReaderTuned(profile!)).toBe(true);
+    expect(authorReaderBaseScores(profile!)).toEqual(scoreReaderAnswers(LIGHT));
+  });
+
+  test("答え直すと、新しい答えが土台になる（微調整は捨てる）", () => {
+    let profile: AuthorReaderProfile | undefined = authorReaderProfileFromAnswers(LIGHT, NOW);
+    profile = applyAuthorReaderSignals(profile, { craving: 1 }, NOW)!;
+    const redo = authorReaderProfileFromAnswers(LORE, NOW, profile);
+    expect(redo.baseScores).toBeUndefined();
+    expect(redo.scores).toEqual(scoreReaderAnswers(LORE));
+    expect(authorReaderBaseScores(redo)).toEqual(scoreReaderAnswers(LORE));
+    expect(isAuthorReaderTuned(redo)).toBe(false);
+    // 答え直したあとの微調整は、新しい答えを土台にする
+    const tuned = applyAuthorReaderSignals(redo, { posture: 1 }, NOW)!;
+    expect(tuned.baseScores).toEqual(scoreReaderAnswers(LORE));
+  });
+
+  test("表示に「微調整」と土台の層が出る", () => {
+    const base = authorReaderProfileFromAnswers(LIGHT, NOW);
+    const baseLabel = READER_TYPES[resolveReaderType(base.scores)].label;
+    expect(authorReaderNote(base)).toBeUndefined();
+    expect(authorReaderTypeDisplay(base)).toBe(baseLabel);
+
+    const small = applyAuthorReaderSignals(base, { craving: 1 }, NOW)!;
+    // 層は変わっていない（0.5点）が、微調整していることは言う
+    expect(resolveReaderType(small.scores)).toBe(resolveReaderType(base.scores));
+    expect(authorReaderTypeDisplay(small)).toContain("微調整");
+    const note = authorReaderNote(small)!;
+    expect(note).toContain("微調整");
+    expect(note).toContain(`9問の答え（${baseLabel}）を土台に`);
+  });
+
+  test("微調整で層が変わったら「答えは〇〇層、相談から〇〇層へ寄せています」と知らせる", () => {
+    let profile: AuthorReaderProfile = authorReaderProfileFromAnswers(LIGHT, NOW);
+    const baseLabel = READER_TYPES[resolveReaderType(profile.scores)].label;
+    let lines: string[] = [];
+    for (let i = 0; i < 6 && lines.length === 0; i++) {
+      const next = applyAuthorReaderSignals(profile, { craving: 1 }, NOW)!;
+      lines = describeAuthorReaderEstimate(profile, next);
+      profile = next;
+    }
+    const nowLabel = READER_TYPES[resolveReaderType(profile.scores)].label;
+    expect(nowLabel).not.toBe(baseLabel);
+    expect(lines.join("\n")).toContain(`答えは${baseLabel}、相談から${nowLabel}へ寄せています`);
+    expect(authorReaderTypeDisplay(profile)).toContain(`9問の答えは${baseLabel}`);
+    expect(authorReaderNote(profile)).toContain(`いまは${nowLabel}へ寄せています`);
+    // 層が変わったので履歴に積む。前の層は、答えを微調整したもの（1.5点）だった
+    expect(profile.history?.[0].source).toBe("tuned");
+    expect(profile.history?.[0].typeId).toBe(resolveReaderType(scoreReaderAnswers(LIGHT)));
+
+    // 層が変わらない微調整では、何も言わない
+    const same = applyAuthorReaderSignals(profile, { familiarity: 1 }, NOW)!;
+    if (resolveReaderType(same.scores) === resolveReaderType(profile.scores)) {
+      expect(describeAuthorReaderEstimate(profile, same)).toEqual([]);
+    }
+
+    // 答えの層へ戻ったら、戻ったことを言う
+    const back = applyAuthorReaderSignals(profile, { craving: -1 }, NOW)!;
+    expect(describeAuthorReaderEstimate(profile, back).join("\n")).toContain("戻りました");
   });
 });
 

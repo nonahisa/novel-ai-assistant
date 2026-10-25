@@ -275,4 +275,26 @@ describe("推し量った読者タイプとの突き合わせ", () => {
     expect(lines.length).toBeGreaterThan(0);
     expect(lines).not.toContain(AUTHOR_READER_ESTIMATE_NOTE);
   });
+
+  test("まだ推し量れていない（真ん中のまま）なら、突き合わせごと黙る（2026-10-25 昼）", () => {
+    // 作品は雑食層（真ん中）。隠さなければ「重なっています」が出てしまう
+    const middle = scores(3, 3, 3);
+    expect(compareAuthorReader(estimated(scores(3, 3.5, 4.5)), work(middle))).toBeUndefined();
+    expect(compareAuthorReader(estimated(scores(3, 3.5, 4.5)), work(LORE_DEEP))).toBeUndefined();
+    // 線を越えた推定なら出る
+    expect(compareAuthorReader(estimated(LIGHT), work(LORE_DEEP))).toBeDefined();
+  });
+
+  test("9問の答えを微調整しているなら、土台の答えの層を添えて断る", () => {
+    const tuned: AuthorReaderProfile = {
+      ...author(LIGHT),
+      scores: scores(0, 0, 0.5),
+      baseScores: LIGHT,
+    };
+    const lines = compareAuthorReader(tuned, work(LORE_DEEP))?.lines ?? [];
+    const text = lines.join("\n");
+    expect(text).toContain("相談から微調整しています");
+    expect(text).toContain(`9問の答え（${READER_TYPES[resolveReaderType(LIGHT)].label}）を土台に`);
+    expect(lines).not.toContain(AUTHOR_READER_ESTIMATE_NOTE);
+  });
 });
