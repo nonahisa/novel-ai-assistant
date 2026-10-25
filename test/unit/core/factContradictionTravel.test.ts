@@ -184,6 +184,34 @@ describe("移動の照合（旅の台・固定の事実）", () => {
   });
 
   /**
+   * 作者の選択③（含みで引く）。抽出が値を「港町の宿」「王都の城門の詰所」のように返しても、
+   * 仕込みに当たり、罠（回想の「王都の城門の前」は thought）に当たらない
+   */
+  it("値が場所の名前そのものでなくても、名前を1つだけ含めば同じ採点になる", () => {
+    const loose: Record<string, string> = {
+      "fact:2:2:1": "王都の城門の詰所",
+      "fact:2:8:1": "港町の市場",
+      "fact:3:1:1": "港町の宿",
+      "fact:5:1:1": "港町の灯台の下",
+      "fact:5:8:1": "王都の城門の前",
+      "fact:6:1:1": "港町の宿",
+    };
+    const looseFacts = facts.map((fact) =>
+      loose[fact.id] ? { ...fact, value: loose[fact.id] } : fact
+    );
+    const looseMaterial = buildTravelMaterial({ locations, facts: looseFacts, places, episodes });
+    expect(looseMaterial.stats.resolved).toBe(material.stats.resolved);
+    const looseFlagged = findContradictionCandidates({
+      facts: looseFacts,
+      travelTimes: looseMaterial.travelTimes,
+      whereabouts: looseMaterial.whereabouts,
+    })
+      .filter((candidate) => candidate.predicate === "所在")
+      .map((candidate) => places.get(candidate.right) as FactPlace);
+    expect(looseFlagged).toEqual(flagged);
+  });
+
+  /**
    * 受け入れ条件：既存の台（`seeded/contradiction`、2/4・誤検出0）の成績を変えない。
    * あちらの場所の記録には距離の関係が無いので、表は0組——移動の照合は
    * 何も出さず、ほかの照合器へ渡る事実も並びも変わらない。

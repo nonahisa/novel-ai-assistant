@@ -226,6 +226,15 @@ export interface LocationInconsistency {
 export interface LocationResolver {
   resolve(name: string, targetId: string | null): string | null;
   nameOf(key: string): string;
+  /**
+   * 文の中に名前（別名）が出てくる場所の id（重なりなし・出てきた順）。
+   *
+   * **長い名前の一部として出た短い名前は数えない**（「港町の宿」の「港」）。数えると、
+   * 入れ子の組（港は港町の中）の長いほうを含む文が、いつも2か所に見える。
+   * 2か所に当たる名前は、その2つともを返す（呼ぶ側が「1つだけ」で決める）。
+   * 所在の引き当て（`whereabouts.ts` の `resolvePlace`）の退き先だけが使う
+   */
+  idsIn(text: string): string[];
 }
 
 export function buildLocationResolver(locations: readonly Location[]): LocationResolver {
@@ -250,6 +259,33 @@ export function buildLocationResolver(locations: readonly Location[]): LocationR
     },
     nameOf(key) {
       return byId.get(key)?.name ?? key;
+    },
+    idsIn(text) {
+      const haystack = normalizeLocationName(text);
+      if (!haystack) return [];
+      const spans: Array<{ start: number; end: number; ids: Set<string> }> = [];
+      for (const [key, ids] of byName) {
+        for (let at = haystack.indexOf(key); at >= 0; at = haystack.indexOf(key, at + 1)) {
+          spans.push({ start: at, end: at + key.length, ids });
+        }
+      }
+      const found: string[] = [];
+      spans
+        .filter(
+          (span) =>
+            !spans.some(
+              (other) =>
+                other !== span &&
+                other.end - other.start > span.end - span.start &&
+                other.start <= span.start &&
+                other.end >= span.end
+            )
+        )
+        .sort((a, b) => a.start - b.start)
+        .forEach((span) => {
+          for (const id of span.ids) if (!found.includes(id)) found.push(id);
+        });
+      return found;
     },
   };
 }

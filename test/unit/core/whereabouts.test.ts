@@ -80,11 +80,49 @@ describe("値から場所の名前を取り出す", () => {
 });
 
 describe("場所を引く", () => {
-  it("名前と別名の完全一致だけ", () => {
+  it("名前と別名の完全一致", () => {
     expect(resolvePlace("王都", resolver)).toBe("loc_1");
     expect(resolvePlace("リヴェルス", resolver)).toBe("loc_1");
-    expect(resolvePlace("港町の宿", resolver)).toBeNull();
-    expect(resolvePlace("王都の北", resolver)).toBeNull();
+  });
+
+  /**
+   * 作者の選択③（2026-10-25）。旅の台で値が「港町の宿」「王都の城門」のように場所の名前で
+   * なく、完全一致では引けなかった（26b：所在の事実15件→引けた10件）。
+   */
+  it("台帳の名前（別名）がちょうど1つだけ含まれるなら、その場所に引く", () => {
+    expect(resolvePlace("港町の宿", resolver)).toBe("loc_2");
+    expect(resolvePlace("リヴェルスの城門の詰所", resolver)).toBe("loc_1");
+    // 名前と別名が両方出ても、同じ場所なら1つ
+    expect(resolvePlace("王都リヴェルスの城門", resolver)).toBe("loc_1");
+  });
+
+  it("2か所の名前を含むもの・1つも含まないものは引かない", () => {
+    expect(resolvePlace("港町の宿で王都の手紙を読む", resolver)).toBeNull();
+    expect(resolvePlace("灯台の上", resolver)).toBeNull();
+    expect(resolvePlace("その人波の中", resolver)).toBeNull();
+  });
+
+  /** 「港町へ向かった」は向かった先にいたことを言っていない（着いた結びと同じ考え） */
+  it("向かった・発った値は、名前を含んでいても引かない", () => {
+    expect(resolvePlace("港町へ向かった", resolver)).toBeNull();
+    expect(resolvePlace("王都を発った", resolver)).toBeNull();
+    expect(resolvePlace("港町を目指して", resolver)).toBeNull();
+  });
+
+  /**
+   * 入れ子の組（港は港町の中）。「港町の宿」は字面では「港」も含むが、それは「港町」の
+   * 一部なので数えない。そうしないと例の「港町の宿」が2か所になって引けない
+   */
+  it("長い名前の一部として出た短い名前は数えない", () => {
+    const nested = buildLocationResolver([
+      place("loc_2", "港町"),
+      place("loc_3", "港"),
+    ]);
+    expect(resolvePlace("港町の宿", nested)).toBe("loc_2");
+    expect(resolvePlace("港の桟橋", nested)).toBe("loc_3");
+    // 港と港町が別々に出るのは2か所（含みの数え方は値まるごとで、切れ目のうしろは試さない）
+    expect(resolvePlace("港から港町の宿", nested)).toBeNull();
+    expect(resolvePlace("港と港町", nested)).toBeNull();
   });
 
   it("主語や起点の後ろを試す。名前の中の字では割らない", () => {
