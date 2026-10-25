@@ -116,7 +116,10 @@ export type RejectedRelationVia =
   | "extraction"
   | "external"
   | "plot"
-  | "chat";
+  | "chat"
+  // 事実の照合（P-51）はいま場所の距離しか積まないので人物では出ないが、
+  // `PendingUpdateSource` と同じ区分に揃えておく（片方だけ増えると型が合わない）
+  | "fact";
 
 export const REJECTED_RELATION_VIAS: readonly RejectedRelationVia[] = [
   "panel",
@@ -124,6 +127,7 @@ export const REJECTED_RELATION_VIAS: readonly RejectedRelationVia[] = [
   "external",
   "plot",
   "chat",
+  "fact",
 ];
 
 /**

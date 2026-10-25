@@ -53,8 +53,26 @@ function pairKey(a: string, b: string): string {
   return JSON.stringify(a < b ? [a, b] : [b, a]);
 }
 
+/**
+ * 承認待ちの距離（P-51 が本文から読み、検算を通ったもの。設計書6.88.13）。
+ * 場所は台帳の id で持つ（検算が台帳で引き当ててある）
+ */
+export interface PendingTravelDistance {
+  fromId: string;
+  toId: string;
+  /** 本文の言い方のまま（「馬で三日」） */
+  value: string;
+  /** 本文の引用。指摘の根拠に「承認待ち」と添えて出す */
+  evidence: string;
+}
+
 export function buildTravelTable(
-  locations: readonly Location[]
+  locations: readonly Location[],
+  /**
+   * 承認待ちの距離（作者の判断②：承認前の距離もその回の照合に使う）。
+   * **設定資料の値と同じ速さなら、設定資料の値を採る**（根拠に作者の記録を見せる）
+   */
+  pendingDistances: readonly PendingTravelDistance[] = []
 ): TravelTableResult {
   const resolver = buildLocationResolver(locations);
   const stats: TravelTableStats = {
@@ -64,7 +82,33 @@ export function buildTravelTable(
     comparedPairs: 0,
   };
 
-  const fastest = new Map<string, { a: string; b: string; minutes: number }>();
+  const fastest = new Map<
+    string,
+    { a: string; b: string; minutes: number; pendingEvidence?: string }
+  >();
+  const offer = (
+    a: string,
+    b: string,
+    minutes: number,
+    pendingEvidence?: string
+  ): void => {
+    const key = pairKey(a, b);
+    const known = fastest.get(key);
+    if (
+      !known ||
+      minutes < known.minutes ||
+      (minutes === known.minutes &&
+        known.pendingEvidence !== undefined &&
+        pendingEvidence === undefined)
+    ) {
+      fastest.set(key, {
+        a,
+        b,
+        minutes,
+        ...(pendingEvidence !== undefined ? { pendingEvidence } : {}),
+      });
+    }
+  };
   for (const location of locations) {
     for (const relation of location.relations ?? []) {
       if (relation.kind !== "distance") continue;
@@ -74,12 +118,14 @@ export function buildTravelTable(
       const travel = normalizeTravel(relation.value);
       if (!travel) continue;
       stats.readable += 1;
-      const key = pairKey(location.id, target);
-      const known = fastest.get(key);
-      if (!known || travel.minutes < known.minutes) {
-        fastest.set(key, { a: location.id, b: target, minutes: travel.minutes });
-      }
+      offer(location.id, target, travel.minutes);
     }
+  }
+  for (const pending of pendingDistances) {
+    if (pending.fromId === pending.toId) continue;
+    const travel = normalizeTravel(pending.value);
+    if (!travel) continue;
+    offer(pending.fromId, pending.toId, travel.minutes, pending.evidence);
   }
   stats.pairs = fastest.size;
 
@@ -93,6 +139,9 @@ export function buildTravelTable(
       from: entry.a,
       to: entry.b,
       minDays: entry.minutes / TRAVEL_COMPARE_MIN_MINUTES,
+      ...(entry.pendingEvidence !== undefined
+        ? { pendingEvidence: entry.pendingEvidence }
+        : {}),
     });
   }
   stats.comparedPairs = travelTimes.length;

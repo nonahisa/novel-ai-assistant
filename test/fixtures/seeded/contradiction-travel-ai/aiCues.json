@@ -1,0 +1,28 @@
+{
+  "note": "P-51（本文の距離）と P-52（場面の頭の時の経過）の、手で書いた正しい答え。AIが正しく読んだときの答えの形そのもの（distances は P-51 のスキーマ、timeCues は P-52 のスキーマに file と line を足したもの）。trapDistances と trapTimeCues は、AIが読み違えたときに返しそうな答えで、検算で捨てる（cut にする）べきもの。test/unit/core/travelCues.test.ts が読む。",
+  "distances": [
+    { "file": "本文/001_馬で三日.txt", "from": "王都", "to": "港町", "value": "馬で三日", "evidence": "王都から港町までは、馬で三日の道のりだ", "line": 2, "dialogue": false },
+    { "file": "本文/002_二日目の砦.txt", "from": "王都", "to": "北の砦", "value": "馬で三日", "evidence": "王都から北の砦までは、馬で三日かかる", "line": 2, "dialogue": false },
+    { "file": "本文/004_港町の宿.txt", "from": "港町", "to": "北の砦", "value": "徒歩で十日", "evidence": "港町から北の砦までは、徒歩で十日はかかるそうだ", "line": 3, "dialogue": true }
+  ],
+  "trapDistances": [
+    { "file": "本文/005_港へ下りる.txt", "from": "港町", "to": "港", "value": "徒歩ですぐ", "evidence": "港町から港までは、歩いてすぐだ", "line": 2, "why": "港は港町の中（入れ子）。値も所要時間として読めない" },
+    { "file": "本文/004_港町の宿.txt", "from": "港町", "to": "王都", "value": "三日三晩", "evidence": "エドとは三日三晩語り合った", "line": 2, "why": "経過であって道のりではない。王都の名も引用に無い" }
+  ],
+  "timeCues": [
+    { "file": "本文/002_二日目の砦.txt", "line": 7, "kind": "advance", "days": 2, "evidence": "王都を出て二日目" },
+    { "file": "本文/003_城門へ帰る.txt", "line": 1, "kind": "advance", "days": 1, "evidence": "翌朝" },
+    { "file": "本文/004_港町の宿.txt", "line": 1, "kind": null, "days": 0, "evidence": "" },
+    { "file": "本文/004_港町の宿.txt", "line": 8, "kind": "cut", "days": 0, "evidence": "三日三晩語り明かしたあと" },
+    { "file": "本文/005_港へ下りる.txt", "line": 1, "kind": null, "days": 0, "evidence": "" },
+    { "file": "本文/006_灯台の下.txt", "line": 1, "kind": null, "days": 0, "evidence": "" },
+    { "file": "本文/006_灯台の下.txt", "line": 6, "kind": "cut", "days": 0, "evidence": "数日後" }
+  ],
+  "trapTimeCues": [
+    { "file": "本文/004_港町の宿.txt", "line": 8, "kind": "advance", "days": 3, "evidence": "三日三晩語り明かしたあと", "why": "「三日三晩」は場面の中で過ごした長さ。経過の数として読まない" },
+    { "file": "本文/004_港町の宿.txt", "line": 8, "kind": "sameDay", "days": 0, "evidence": "三日三晩語り明かしたあと", "why": "同じ日を言う語が無い" },
+    { "file": "本文/006_灯台の下.txt", "line": 6, "kind": "advance", "days": 3, "evidence": "数日後", "why": "「数日」は日数が書かれていない" },
+    { "file": "本文/006_灯台の下.txt", "line": 1, "kind": "advance", "days": 3, "evidence": "三年前", "why": "回想の年。最初の段落にも無い" },
+    { "file": "本文/003_城門へ帰る.txt", "line": 1, "kind": "advance", "days": 2, "evidence": "翌朝", "why": "翌朝は1日。数が合わない" }
+  ]
+}

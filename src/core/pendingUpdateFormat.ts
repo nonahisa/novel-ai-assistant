@@ -43,8 +43,11 @@ export const PENDING_CREATION_ID = "char_000";
  *   出どころは**作者自身の発言**である（根拠の引用を会話と照合している）
  * external: 外部AIが MCP の `settings.propose` で置いたもの（設計書6.87.16）。
  *   **製品の外から来た案**なので、承認するときにいちばん疑ってよい
+ * fact: 矛盾検知（事実の照合）の移動の照合が、本文から読んだ所要時間
+ *   （P-51。設計書6.88.13）。いまは場所の位置関係（距離）だけを運ぶ。
+ *   **作者が確定させた場所にも、関係だけを足す**（作者の判断①）
  */
-export type PendingUpdateSource = "plot" | "chat" | "external";
+export type PendingUpdateSource = "plot" | "chat" | "external" | "fact";
 
 /** 出どころの短い呼び名。画面に出す文言はここだけが持つ */
 export function pendingSourceLabel(
@@ -53,6 +56,7 @@ export function pendingSourceLabel(
   if (source === "plot") return "プロットから";
   if (source === "chat") return "相談から";
   if (source === "external") return "外部AIから";
+  if (source === "fact") return "事実の照合から";
   return "";
 }
 
@@ -125,7 +129,10 @@ export function readSource(parsed: unknown): PendingUpdateSource | undefined {
   const source = (parsed as { source?: unknown }).source;
   // 知らない値は「出どころ無し」として読む。**捨てずに残す**のではなく
   // 落とすのは、画面に出す文言を持たないものを表示できないため
-  return source === "plot" || source === "chat" || source === "external"
+  return source === "plot" ||
+    source === "chat" ||
+    source === "external" ||
+    source === "fact"
     ? source
     : undefined;
 }

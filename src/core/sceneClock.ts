@@ -69,11 +69,52 @@ export interface SceneClockStats {
   unmarkedBreaks: number;
   /** 時計の付いた行の数 */
   clockedLines: number;
+  /** AIの読み（P-52）を印として使った場面の頭の数 */
+  aiMarkers: number;
+}
+
+/**
+ * 場面の頭の時の経過を、AI（P-52、設計書6.88.13）が読んだもの。
+ *
+ * `evidence` は本文の引用（検算で、その段落の地の文にあることを確かめてある）。
+ * 時計はこの引用を「場面の途中の経過」と読み違えないよう、経過の語探しから外す
+ */
+export interface SceneTimeMarker {
+  kind: HeadMarker["kind"];
+  /** `advance` のときの日数。ほかは 0 */
+  days: number;
+  evidence: string;
+}
+
+/** 場面の頭の行 → AIの読み。鍵は `sceneTimeMarkerKey` */
+export type SceneTimeMarkers = ReadonlyMap<string, SceneTimeMarker>;
+
+/** AIの読みの鍵（どのファイルの何行目か）。区切りは NUL（ファイル名に入らない字） */
+export function sceneTimeMarkerKey(filePath: string, line: number): string {
+  return `${filePath}\u0000${line}`;
+}
+
+/** 場面の頭1つ（P-52 へ何を訊くかを決めるのに使う） */
+export interface SceneHead {
+  filePath: string;
+  /** 場面の最初の段落の行（1始まり） */
+  line: number;
+  segment: string;
+  /**
+   * ここで新しい鎖が始まったか。**前の場面から何日経ったか読めなかった所**で、
+   * AIに訊く値打ちがあるのはここだけ（話の頭・区切りのあとに印が無い・前の場面の
+   * 終わりが読めない）
+   */
+  chainStart: boolean;
+  /** AIの読みを印として使った場面か */
+  aiMarked: boolean;
 }
 
 export interface SceneClock {
   /** その行の「いつか」。読めなければ null */
   readingAt(filePath: string, line: number): SceneClockReading | null;
+  /** 場面の頭を、時計が読んだ順（話の順）に並べたもの */
+  heads: readonly SceneHead[];
   stats: SceneClockStats;
 }
 
@@ -81,7 +122,7 @@ export interface SceneClock {
 export const CALENDAR_CHAIN = "暦";
 
 /** 段落の頭の印 */
-type HeadMarker =
+export type HeadMarker =
   | { kind: "simultaneous" }
   | { kind: "sameDay" }
   | { kind: "advance"; days: number }
@@ -163,8 +204,11 @@ const KANJI_DIGITS: Readonly<Record<string, number>> = {
   九: 9,
 };
 
-/** 「三」「十二」「3」「１２」を数にする。読めなければ null */
-function parseSmallNumber(text: string): number | null {
+/**
+ * 「三」「十二」「3」「１２」を数にする。読めなければ null。
+ * P-52 の検算（引用の数と日数が合うか）も同じ読み方を使う（`travelCues.ts`）
+ */
+export function parseSmallNumber(text: string): number | null {
   const half = text.replace(/[０-９]/gu, (c) =>
     String.fromCharCode(c.charCodeAt(0) - 0xfee0)
   );
@@ -208,11 +252,18 @@ export function readHeadMarker(paragraph: string): HeadMarker | null {
  * どう読んだかを、本文の語のまま見せる。**読みの語は時計の決まり（下の正規表現）と
  * 同じものを使う**——別に書くと、時計と判定の説明がずれる
  */
-export function describeTimeCue(paragraph: string): string {
+export function describeTimeCue(
+  paragraph: string,
+  /**
+   * その段落に付いたAIの読み（P-52）。**正規表現の印が先**——印のある段落では
+   * 時計もAIの読みを使っていないので、判定へ見せる読みも時計に揃える
+   */
+  aiMarker?: SceneTimeMarker
+): string {
   const text = paragraph.replace(/^[\s　]+/u, "");
   if (isQuotedParagraph(text)) return "";
   const marker = readHeadMarker(text);
-  if (!marker) return "";
+  if (!marker) return aiMarker ? describeAiTimeCue(aiMarker) : "";
   // `readHeadMarker` と同じ順に試す（「その日」より先に「その頃」など、読みの順を揃える）
   const word =
     [SIMULTANEOUS, ...NEXT_DAY.map((rule) => rule.pattern), DAYS_LATER, CUT, SAME_DAY]
@@ -230,6 +281,27 @@ export function describeTimeCue(paragraph: string): string {
   return `「${word}」（${meaning}と読みました）`;
 }
 
+/**
+ * AIの読みを、判定（P-12b）と作者へ見せる1句にする
+ * （「「王都を出て二日目」（AIの読み：前の場面から2日後）」）。
+ *
+ * **「AIの読み」と書き分ける。** 時計の決まりで読んだ語と同じ書き方にすると、
+ * AIの読み違いがそのまま機械の読みとして伝わる。経過の読めない印（cut）は
+ * 時計を切るだけで候補を作らないので、見せる読みも無い
+ */
+function describeAiTimeCue(marker: SceneTimeMarker): string {
+  const meaning =
+    marker.kind === "simultaneous"
+      ? "前の場面と同じ時"
+      : marker.kind === "sameDay"
+        ? "前の場面と同じ日"
+        : marker.kind === "advance"
+          ? `前の場面から${marker.days}日後`
+          : "";
+  if (!meaning || !marker.evidence) return "";
+  return `「${marker.evidence}」（AIの読み：${meaning}）`;
+}
+
 /** 頭の印を除いた残り（場面の途中の経過を探すのに使う） */
 function restAfterMarker(paragraph: string): string {
   const text = paragraph.replace(/^[\s　]+/u, "");
@@ -245,7 +317,7 @@ function restAfterMarker(paragraph: string): string {
 }
 
 /** 台詞・手紙の引用で始まる段落か。**ここに出る経過の語は地の文の時ではない** */
-function isQuotedParagraph(text: string): boolean {
+export function isQuotedParagraph(text: string): boolean {
   return /^[「『（(〈《―]/u.test(text);
 }
 
@@ -263,19 +335,15 @@ interface OpenSegment {
  *
  * **話の順に読む。** 話数の無い本文は最後に回し、前の話からの続きも日付も使わない。
  */
-export function buildSceneClock(
-  episodes: readonly SceneClockEpisode[]
-): SceneClock {
-  const readings = new Map<string, Array<SceneClockReading | null>>();
-  const stats: SceneClockStats = {
-    episodes: episodes.length,
-    datedEpisodes: 0,
-    markers: { simultaneous: 0, advance: 0, sameDay: 0, cut: 0 },
-    unmarkedBreaks: 0,
-    clockedLines: 0,
-  };
-
-  const ordered = episodes
+/**
+ * 時計が本文を読む順（話の順。話数の無い本文は最後、同じ話数は渡された順）。
+ * **P-52 へ渡す前の場面の終わりも、この順で引く**（時計と別の順で引くと、
+ * 時計がつないだ前の場面と、AIに見せた前の場面が食い違う）
+ */
+export function orderSceneClockEpisodes<T extends SceneClockEpisode>(
+  episodes: readonly T[]
+): T[] {
+  return episodes
     .map((episode, index) => ({ episode, index }))
     .sort((a, b) => {
       const chapterA = a.episode.chapter ?? Number.MAX_SAFE_INTEGER;
@@ -284,6 +352,36 @@ export function buildSceneClock(
       return a.index - b.index;
     })
     .map((entry) => entry.episode);
+}
+
+/** 場面の区切りの行（記号だけの行・合本の話の見出し）か */
+export function isSceneBreakLine(raw: string): boolean {
+  return SEPARATOR_LINE.test(raw) || EPISODE_HEADING.test(raw);
+}
+
+export function buildSceneClock(
+  episodes: readonly SceneClockEpisode[],
+  /**
+   * 場面の頭の時の経過を AI が読んだもの（P-52。設計書6.88.13）。
+   *
+   * **正規表現の印が先。** AIの読みを使うのは、印が無く「」の外の段落が
+   * 場面の頭（話の頭・区切りのあと）に来たときだけ——場面の途中の段落に
+   * 当てると、1つの場面を勝手に割ることになる
+   */
+  aiMarkers?: SceneTimeMarkers
+): SceneClock {
+  const readings = new Map<string, Array<SceneClockReading | null>>();
+  const heads: SceneHead[] = [];
+  const stats: SceneClockStats = {
+    episodes: episodes.length,
+    datedEpisodes: 0,
+    markers: { simultaneous: 0, advance: 0, sameDay: 0, cut: 0 },
+    unmarkedBreaks: 0,
+    clockedLines: 0,
+    aiMarkers: 0,
+  };
+
+  const ordered = orderSceneClockEpisodes(episodes);
 
   // **日付は本文だけから読む**（あらすじは渡していない。小さく始める）
   const dated = new Map<number, number>();
@@ -354,7 +452,7 @@ export function buildSceneClock(
       const lineNumber = index + 1;
       const text = raw.replace(/^[\s　]+/u, "");
       if (!text) return;
-      if (SEPARATOR_LINE.test(raw) || EPISODE_HEADING.test(raw)) {
+      if (isSceneBreakLine(raw)) {
         breakPending = true;
         separatorSeen = true;
         base = current;
@@ -362,7 +460,20 @@ export function buildSceneClock(
       }
 
       const quoted = isQuotedParagraph(text);
-      const marker = quoted ? null : readHeadMarker(text);
+      const headMarker = quoted ? null : readHeadMarker(text);
+      // AIの読みは「印が無く、「」の外で、場面の頭に来た段落」だけ（上の注）
+      const aiMarker =
+        headMarker === null && !quoted && (breakPending || current === null)
+          ? aiMarkers?.get(sceneTimeMarkerKey(episode.filePath, lineNumber))
+          : undefined;
+      const marker: HeadMarker | null =
+        headMarker ??
+        (aiMarker === undefined
+          ? null
+          : aiMarker.kind === "advance"
+            ? { kind: "advance", days: aiMarker.days }
+            : { kind: aiMarker.kind });
+      if (aiMarker !== undefined) stats.aiMarkers += 1;
       if (marker) {
         const anchor = current ?? base;
         if (marker.kind === "cut" || !anchor || anchor.endUnknown) {
@@ -395,7 +506,27 @@ export function buildSceneClock(
       base = current;
 
       const segment = current as OpenSegment;
-      if (!quoted && ELAPSED_IN_TEXT.test(restAfterMarker(text))) {
+      if (heads[heads.length - 1]?.segment !== segment.segment) {
+        heads.push({
+          filePath: episode.filePath,
+          line: lineNumber,
+          segment: segment.segment,
+          // 新しい鎖は、鎖の名前が場面の名前そのもの（`newSegment(null)`）
+          chainStart: segment.chain === segment.segment,
+          aiMarked: aiMarker !== undefined,
+        });
+      }
+      /*
+        **AIの読みの引用は、場面の途中の経過として数えない。** 「王都を出て二日目の
+        夕方」は経過の語（「日目」）を含むので、そのままだと場面の終わりが読めない
+        扱いになり、次の場面（翌朝）を数えられなくなる。引用はこの場面の頭の時として
+        もう使ったので、その部分だけを外して残りを探す
+      */
+      const rest =
+        aiMarker !== undefined
+          ? text.split(aiMarker.evidence).join("")
+          : restAfterMarker(text);
+      if (!quoted && ELAPSED_IN_TEXT.test(rest)) {
         segment.endUnknown = true;
       }
       lineReadings[lineNumber] = {
@@ -414,6 +545,7 @@ export function buildSceneClock(
     readingAt(filePath, line) {
       return readings.get(filePath)?.[line] ?? null;
     },
+    heads,
     stats,
   };
 }
