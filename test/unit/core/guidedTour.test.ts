@@ -1,4 +1,6 @@
+import * as path from "path";
 import { describe, expect, test } from "vitest";
+import { SRC, chainTo, walkStaticImports } from "../support/importGraph";
 import {
   currentStep,
   describeStep,
@@ -224,5 +226,23 @@ describe("製品の手順書きが、そのまま案内にできる", () => {
       state?.steps.length,
       "段が落ちている（誘い文句の手順数がずれる）"
     ).toBe(3);
+  });
+});
+
+describe("案内の判断の置き場", () => {
+  test("`vscode` へ静的 import で届かない", () => {
+    /*
+      **案内の進み方の判断は `core` の住人である。** 画面の外（MCP など）から
+      同じ判断を測れるように、`vscode` を持ち込まない（設計書6.104）。
+      `core` に置くだけでは守られない（`core` にも `vscode` を引くファイルが
+      ある）。`mcpReach.test.ts` の起点（`scripts/coreEntries.mjs`）にはまだ
+      挙げていないので、`procedures.test.ts` と同じ歩き方をここでする。
+    */
+    const reach = walkStaticImports([path.join(SRC, "core", "guidedTour.ts")]);
+    const offenders = reach.bare
+      .filter((bare) => bare.spec === "vscode")
+      .map((bare) => `${chainTo(reach, bare.file)} -> vscode`);
+
+    expect(offenders).toEqual([]);
   });
 });
