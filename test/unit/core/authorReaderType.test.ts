@@ -26,6 +26,7 @@ import {
   isAuthorReaderEstimatePending,
   isAuthorReaderEstimateSettled,
   isAuthorReaderTuned,
+  isAuthorReaderTypeShifted,
   shownAuthorReader,
   parseAuthorReaderSignals,
   recordEstimatedAuthorReaderType,
@@ -460,12 +461,16 @@ describe("推し量れるまで出さない（6.101）", () => {
     expect(text).toContain(AUTHOR_READER_ESTIMATE_NOTE);
   });
 
-  test("出していた層が線の手前へ戻ったら、出すのをやめたと言う（黙って消さない）", () => {
+  test("出していた層が線の手前へ戻ったら、黙って隠す（作者の判断、2026-10-25 昼「黙って隠す」）", () => {
     const shown = cravingUp(4)!;
+    expect(authorReaderTypeDisplay(shown)).toContain("推し量った");
     const back = applyAuthorReaderSignals(shown, { craving: -1 }, NOW)!;
     expect(shownAuthorReader(back)).toBeUndefined();
-    const text = describeAuthorReaderEstimate(shown, back).join("\n");
-    expect(text).toContain("出すのをやめました");
+    // 知らせは出さない
+    expect(describeAuthorReaderEstimate(shown, back)).toEqual([]);
+    // 見え方は、推し量れていないときと同じに戻る
+    expect(authorReaderTypeDisplay(back)).toBe(AUTHOR_READER_PENDING_NOTE);
+    expect(isAuthorReaderEstimatePending(back)).toBe(true);
   });
 
   test("隠していた雑食層は、線の手前で9問に答えても履歴に残らない", () => {
@@ -505,19 +510,35 @@ describe("9問の答えを土台に微調整する（6.101）", () => {
     expect(tuned.baseScores).toEqual(scoreReaderAnswers(LORE));
   });
 
-  test("表示に「微調整」と土台の層が出る", () => {
+  test("層が答えと同じうちは、答えた層だけを出す（作者の判断、2026-10-25 昼「層が変わったときだけ出す」）", () => {
     const base = authorReaderProfileFromAnswers(LIGHT, NOW);
     const baseLabel = READER_TYPES[resolveReaderType(base.scores)].label;
     expect(authorReaderNote(base)).toBeUndefined();
     expect(authorReaderTypeDisplay(base)).toBe(baseLabel);
 
     const small = applyAuthorReaderSignals(base, { craving: 1 }, NOW)!;
-    // 層は変わっていない（0.5点）が、微調整していることは言う
+    // 点数は動いた（記録の上では微調整）が、層は変わっていない（0.5点）
+    expect(isAuthorReaderTuned(small)).toBe(true);
     expect(resolveReaderType(small.scores)).toBe(resolveReaderType(base.scores));
-    expect(authorReaderTypeDisplay(small)).toContain("微調整");
-    const note = authorReaderNote(small)!;
-    expect(note).toContain("微調整");
-    expect(note).toContain(`9問の答え（${baseLabel}）を土台に`);
+    expect(isAuthorReaderTypeShifted(small)).toBe(false);
+    // 答えたときと同じ見え方。「微調整しています」は出さない
+    expect(authorReaderTypeDisplay(small)).toBe(baseLabel);
+    expect(authorReaderNote(small)).toBeUndefined();
+  });
+
+  test("層が答えと変わったら、断りに土台の答えの層を名指しする", () => {
+    let profile: AuthorReaderProfile = authorReaderProfileFromAnswers(LIGHT, NOW);
+    const baseLabel = READER_TYPES[resolveReaderType(profile.scores)].label;
+    while (!isAuthorReaderTypeShifted(profile)) {
+      profile = applyAuthorReaderSignals(profile, { craving: 1 }, NOW)!;
+    }
+    const nowLabel = READER_TYPES[resolveReaderType(profile.scores)].label;
+    expect(authorReaderTypeDisplay(profile)).toBe(
+      `${nowLabel}（9問の答えは${baseLabel}。相談から微調整しています）`
+    );
+    const note = authorReaderNote(profile)!;
+    expect(note).toContain(`9問の答え（${baseLabel}）を土台に、相談から微調整しています`);
+    expect(note).toContain(`いまは${nowLabel}へ寄せています`);
   });
 
   test("微調整で層が変わったら「答えは〇〇層、相談から〇〇層へ寄せています」と知らせる", () => {
@@ -544,9 +565,14 @@ describe("9問の答えを土台に微調整する（6.101）", () => {
       expect(describeAuthorReaderEstimate(profile, same)).toEqual([]);
     }
 
-    // 答えの層へ戻ったら、戻ったことを言う
+    // 答えの層へ戻ったら、戻ったことを言う（変わって見えていた層が戻るので）。
+    // 見え方は答えた層だけに戻る
     const back = applyAuthorReaderSignals(profile, { craving: -1 }, NOW)!;
-    expect(describeAuthorReaderEstimate(profile, back).join("\n")).toContain("戻りました");
+    expect(describeAuthorReaderEstimate(profile, back).join("\n")).toContain(
+      `相談からの微調整が、9問の答え（${baseLabel}）へ戻りました`
+    );
+    expect(authorReaderTypeDisplay(back)).toBe(baseLabel);
+    expect(authorReaderNote(back)).toBeUndefined();
   });
 });
 

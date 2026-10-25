@@ -18,7 +18,8 @@ import type { WorkEntry } from "../../../src/models/types";
  * 2. **答えの欄が届いたら、推定として保存庫へしまう**——答えた作者は、答えを
  *    書き換えずに点数だけを微調整する
  * 3. 線を越えて初めて推し量ったとき・微調整で層が変わったときは、相談パネルへ
- *    一言出す（黙って作らない・黙って変えない）
+ *    一言出す（黙って作らない・黙って変えない）。推し量っていた層が真ん中へ
+ *    戻ったときは黙って隠し、ログにだけ残す（2026-10-25 昼）
  *
  * を確かめる。
  */
@@ -27,9 +28,13 @@ vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
+/** パネルが残したログの行（隠したことがログにだけ残るのを見る） */
+const logged = vi.hoisted(() => [] as string[]);
 vi.mock("../../../src/core/logger", () => ({
   logFailure: () => undefined,
-  logStep: () => undefined,
+  logStep: (line: string) => {
+    logged.push(line);
+  },
   logLine: () => undefined,
   useLogFile: () => undefined,
 }));
@@ -184,5 +189,23 @@ describe("答えの欄が届いたとき", () => {
     expect(notes[0]).toContain("あなたが決めたものではありません");
     const saved = store.get() as AuthorReaderProfile;
     expect(saved.scores.craving).toBe(5);
+  });
+
+  test("推し量っていた層が真ん中へ戻ったら、黙って隠す（ログにだけ残す。作者の判断、2026-10-25 昼）", async () => {
+    const store = new AuthorReaderTypeStore(memento());
+    const { panel, posted } = openPanel(store);
+    for (let i = 0; i < 4; i++) {
+      await panel.updateAuthorReaderType({ craving: 1 });
+    }
+    expect(posted.filter((message) => message.type === "note")).toHaveLength(1);
+    logged.length = 0;
+
+    await panel.updateAuthorReaderType({ craving: -1 });
+
+    // 知らせは増えない（「出すのをやめました」を言わない）
+    const notes = posted.filter((message) => message.type === "note");
+    expect(notes).toHaveLength(1);
+    expect(notes.some((message) => (message.message ?? "").includes("やめました"))).toBe(false);
+    expect(logged.some((line) => line.includes("真ん中へ戻ったので、画面から隠した"))).toBe(true);
   });
 });

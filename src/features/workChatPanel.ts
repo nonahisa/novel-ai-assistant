@@ -130,6 +130,7 @@ import {
   authorReaderTypeLabel,
   describeAuthorReaderEstimate,
   isAnsweredAuthorReader,
+  shownAuthorReader,
   type AuthorReaderSignals,
 } from "../core/authorReaderType";
 import type { AuthorReaderTypeStore } from "../core/authorReaderTypeStore";
@@ -1355,6 +1356,15 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         `読み慣れ ${after.scores.familiarity}・読む姿勢 ${after.scores.posture}・` +
         `求めるもの ${after.scores.craving}）`
     );
+
+    // 推し量っていた層が真ん中へ戻ったときは、作者へは黙って隠す（作者の判断、
+    // 2026-10-25 昼「黙って隠す」）。あとから辿れるよう、ログにだけ残す
+    const shownBefore = shownAuthorReader(before);
+    if (shownBefore && !shownAuthorReader(after)) {
+      logStep(
+        `相談: 推し量っていた読者としての作者の層（${authorReaderTypeLabel(shownBefore)}）が真ん中へ戻ったので、画面から隠した（知らせは出さない）`
+      );
+    }
 
     // **黙って作らない・黙って変えない。** 画面に出る層が変わった回だけ言う
     const lines = describeAuthorReaderEstimate(before, after);

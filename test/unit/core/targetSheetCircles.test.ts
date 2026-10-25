@@ -195,10 +195,12 @@ describe("推し量った読者タイプの断り", () => {
     expect(circles.missing.join("\n")).toContain(AUTHOR_READER_PENDING_NOTE);
   });
 
-  test("9問の答えを微調整しているなら、土台の答えの層を添えて断る", () => {
+  test("微調整で層が答えと変わっているなら、土台の答えの層を添えて断る", () => {
+    const shifted = { ...LIGHT, craving: 3 };
+    expect(resolveReaderType(shifted)).not.toBe(resolveReaderType(LIGHT));
     const circles = targetSheetCircles({
       authorReader: {
-        scores: { ...LIGHT, craving: LIGHT.craving + 0.5 },
+        scores: shifted,
         baseScores: LIGHT,
         answers: [0, 0, 0, 0, 0, 0, 0, 0, 0],
         source: "diagnosis",
@@ -209,6 +211,19 @@ describe("推し量った読者タイプの断り", () => {
     expect(circles.authorNote).toContain(
       `9問の答え（${READER_TYPES[resolveReaderType(LIGHT)].label}）を土台に`
     );
+  });
+
+  test("微調整しても層が答えと同じなら、断りは付けない（作者の判断、2026-10-25 昼「層が変わったときだけ出す」）", () => {
+    const circles = targetSheetCircles({
+      authorReader: {
+        scores: { ...LIGHT, craving: LIGHT.craving + 0.5 },
+        baseScores: LIGHT,
+        answers: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+        source: "diagnosis",
+      },
+      aim: ["lore_deep"],
+    });
+    expect(circles.authorNote).toBeUndefined();
   });
 
   test("9問に答えた値（出どころの無い古い形も）なら、断りは付けない", () => {

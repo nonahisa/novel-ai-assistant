@@ -396,6 +396,23 @@ export function isAuthorReaderTuned(
 }
 
 /**
+ * 微調整で、層が9問の答えと変わったか（画面に微調整の断りを出す線）。
+ *
+ * **層が変わったときだけ断る**（作者の判断、2026-10-25 昼「層が変わったとき
+ * だけ出す」）。答えと同じ層のうちは、点数が少し動いていても、答えたときと
+ * 同じ見え方にする——作者に見えるのは層なので、層の変わらない動きまで
+ * 「微調整しています」と言うと、何が変わったのか分からない断りになる。
+ * 履歴の出どころ（`tuned`）は点数が動いたかで分けたままにする（記録なので）。
+ */
+export function isAuthorReaderTypeShifted(profile: AuthorReaderView): boolean {
+  if (!isAuthorReaderTuned(profile)) return false;
+  return (
+    resolveReaderType(profile.scores) !==
+    resolveReaderType(profile.baseScores ?? profile.scores)
+  );
+}
+
+/**
  * 相談の答えから読み取った、作者の読み方の弱い傾向（設計書6.101）。
  *
  * 軸ごとに -1・0・+1 だけ。**AIにタイプの名前を言わせない**（6.86 の
@@ -546,9 +563,13 @@ export function applyAuthorReaderSignals(
  *   越えて初めて出る回に「推し量りました」を言う。線の手前では黙る——
  *   どの軸にもまだ傾きが見えていない状態で「雑食層と推し量りました」と
  *   言うと、1回の相談で読み方を決めたように聞こえる。出していた層が
- *   線の手前へ戻ったら、出すのをやめたことを言う（黙って消さない）
+ *   線の手前（出発点の雑食層）へ戻ったら、**黙って隠す**（作者の判断、
+ *   2026-10-25 昼「黙って隠す」）。見え方は推し量れていないときと同じに
+ *   戻る。戻ったことは呼ぶ側のログにだけ残す
  * - 9問に答えた作者：微調整で層が変わったら「答えは〇〇層、相談から
  *   〇〇層へ寄せています」。答えの層へ戻ったら、戻ったことを言う
+ *   ——こちらは画面に「△△層（9問の答えは〇〇層…）」と出していたものが
+ *   答えの層の見え方へ戻るので、黙ると見えていた層が理由なく消える
  */
 export function describeAuthorReaderEstimate(
   before: AuthorReaderProfile | undefined,
@@ -579,17 +600,12 @@ export function describeAuthorReaderEstimate(
 
   const beforeShown = shownAuthorReader(before);
   const afterShown = shownAuthorReader(after);
-  if (!beforeShown && !afterShown) return [];
+  // 出していた層が真ん中へ戻ったとき（!afterShown）も、ここで黙る
+  if (!afterShown) return [];
   if (!beforeShown) {
     return [
       `相談でのお話から、読者としてのあなたを「${authorReaderTypeLabel(after)}」と推し量りました。`,
       AUTHOR_READER_ESTIMATE_NOTE,
-    ];
-  }
-  if (!afterShown) {
-    return [
-      `相談でのお話から推し量っていた読者としてのあなた（${authorReaderTypeLabel(beforeShown)}）は、` +
-        "傾きが真ん中へ戻ったので、いったん出すのをやめました。",
     ];
   }
   return describeAuthorReaderChange(before, after);
@@ -610,6 +626,8 @@ export const AUTHOR_READER_ESTIMATE_NOTE =
  *
  * **土台の答えの層を必ず名指しする。** いまの層だけを出すと、作者は
  * 「そう答えた覚えは無い」になる（6.86 の「いま：」と同じ用心）。
+ * 出すのは層が答えと変わったときだけ（`isAuthorReaderTypeShifted`。
+ * 呼ぶのは `authorReaderNote`）。
  */
 export function authorReaderTuningNote(
   profile: Pick<AuthorReaderProfile, "scores" | "baseScores">
@@ -618,7 +636,7 @@ export function authorReaderTuningNote(
   const nowLabel = READER_TYPES[resolveReaderType(profile.scores)].label;
   return (
     `9問の答え（${baseLabel}）を土台に、相談から微調整しています` +
-    (nowLabel === baseLabel ? "。" : `（いまは${nowLabel}へ寄せています）。`) +
+    `（いまは${nowLabel}へ寄せています）。` +
     "答え直すと、新しい答えを土台にやり直します。"
   );
 }
@@ -633,7 +651,8 @@ export function authorReaderNote(
   profile: AuthorReaderView
 ): string | undefined {
   if (!isAnsweredAuthorReader(profile)) return AUTHOR_READER_ESTIMATE_NOTE;
-  return isAuthorReaderTuned(profile) ? authorReaderTuningNote(profile) : undefined;
+  // 答えと同じ層のうちは、答えたときと同じ見え方（断りなし）にする
+  return isAuthorReaderTypeShifted(profile) ? authorReaderTuningNote(profile) : undefined;
 }
 
 /** いまのタイプの呼び名（「考察層」） */
@@ -654,11 +673,10 @@ export function authorReaderTypeDisplay(profile: AuthorReaderProfile): string {
   if (!shownAuthorReader(profile)) return AUTHOR_READER_PENDING_NOTE;
   const label = authorReaderTypeLabel(profile);
   if (!isAnsweredAuthorReader(profile)) return `${label}（相談から推し量ったもの）`;
-  if (!isAuthorReaderTuned(profile)) return label;
+  // 層が答えと同じうちは、答えたときと同じ見え方（作者の判断、2026-10-25 昼）
+  if (!isAuthorReaderTypeShifted(profile)) return label;
   const baseLabel = READER_TYPES[resolveReaderType(authorReaderBaseScores(profile))].label;
-  return baseLabel === label
-    ? `${label}（9問の答えを土台に、相談から微調整しています）`
-    : `${label}（9問の答えは${baseLabel}。相談から微調整しています）`;
+  return `${label}（9問の答えは${baseLabel}。相談から微調整しています）`;
 }
 
 /**

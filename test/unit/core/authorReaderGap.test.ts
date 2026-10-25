@@ -285,16 +285,28 @@ describe("推し量った読者タイプとの突き合わせ", () => {
     expect(compareAuthorReader(estimated(LIGHT), work(LORE_DEEP))).toBeDefined();
   });
 
-  test("9問の答えを微調整しているなら、土台の答えの層を添えて断る", () => {
+  test("微調整で層が答えと変わっているなら、土台の答えの層を添えて断る", () => {
+    const tuned: AuthorReaderProfile = {
+      ...author(LIGHT),
+      scores: scores(0, 0, 3),
+      baseScores: LIGHT,
+    };
+    expect(resolveReaderType(tuned.scores)).not.toBe(resolveReaderType(LIGHT));
+    const lines = compareAuthorReader(tuned, work(LORE_DEEP))?.lines ?? [];
+    const text = lines.join("\n");
+    expect(text).toContain("相談から微調整しています");
+    expect(text).toContain(`9問の答え（${READER_TYPES[resolveReaderType(LIGHT)].label}）を土台に`);
+    expect(lines).not.toContain(AUTHOR_READER_ESTIMATE_NOTE);
+  });
+
+  test("微調整しても層が答えと同じなら、答えたときと同じに断らない（作者の判断、2026-10-25 昼）", () => {
     const tuned: AuthorReaderProfile = {
       ...author(LIGHT),
       scores: scores(0, 0, 0.5),
       baseScores: LIGHT,
     };
     const lines = compareAuthorReader(tuned, work(LORE_DEEP))?.lines ?? [];
-    const text = lines.join("\n");
-    expect(text).toContain("相談から微調整しています");
-    expect(text).toContain(`9問の答え（${READER_TYPES[resolveReaderType(LIGHT)].label}）を土台に`);
-    expect(lines).not.toContain(AUTHOR_READER_ESTIMATE_NOTE);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.join("\n")).not.toContain("微調整");
   });
 });
