@@ -137,6 +137,40 @@ describe("はじめの案内の紙", () => {
     expect(withPolicy).toContain("このタイプだと、何が変わりますか");
   });
 
+  test("相談で使うタイプが答えたタイプと違うときだけ、紙に1行断る（6.90-②）", () => {
+    // 作者の裁定（2026-10-25 夜）：紙は答えたタイプ、選ぶ画面の「いま：」は相談で
+    // 動いたタイプを出す。黙っていると、紙と画面で違うタイプが出て見える
+    const style = styleOf();
+    const goal = tutorialGoals(style, false)[0];
+    const advice = tutorialAdvice(style, goal.goal);
+    const answered = policyOf(TASTE_READER);
+    const moved = policyOf([1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    const movedLabel = ADVICE_TYPES[resolveAdviceType(moved.scores)].label;
+    // 前提：2つは違うタイプである
+    expect(movedLabel).not.toBe(ADVICE_TYPES[resolveAdviceType(answered.scores)].label);
+
+    const differs = buildWriterGuide({
+      style,
+      goal,
+      advice,
+      advicePolicy: answered,
+      adviceInUse: moved,
+    });
+    expect(differs).toContain(`相談の中で推定が動いています（いま：${movedLabel}）`);
+
+    const same = buildWriterGuide({
+      style,
+      goal,
+      advice,
+      advicePolicy: answered,
+      adviceInUse: answered,
+    });
+    expect(same).not.toContain("相談の中で推定が動いています");
+
+    const none = buildWriterGuide({ style, goal, advice, advicePolicy: answered });
+    expect(none).not.toContain("相談の中で推定が動いています");
+  });
+
   test("**タイプが、いちばん上に来る**（作者の指摘、2026-09-13）", () => {
     // 「タイプ診断なのに、スタイルが一番上に来ています」。
     // 名乗っているのはタイプ診断なので、最初に目に入るのは名前である

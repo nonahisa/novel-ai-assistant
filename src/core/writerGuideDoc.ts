@@ -50,11 +50,29 @@ export function buildWriterGuide(input: {
    * 出せない——**タイプ診断の紙で、いちばん見たいのはそこ**である。
    */
   advicePolicy?: AdviceProfile;
+  /**
+   * 相談で実際に使う助言方針（`effectiveAdviceProfile`）。
+   *
+   * 紙は答えたタイプ（`advicePolicy`）で書く。相談の推定で動いて違うタイプに
+   * なっていれば、それを1行だけ断る（作者の裁定 2026-10-25 夜）——選ぶ画面の
+   * 「いま：」は動いたほうを出すので、黙っていると紙と画面でタイプが食い違って見える。
+   */
+  adviceInUse?: AdviceProfile;
 }): string {
   const { style, goal, advice } = input;
   const type = input.advicePolicy
     ? ADVICE_TYPES[resolveAdviceType(input.advicePolicy.scores)]
     : undefined;
+  const inUseType = input.adviceInUse
+    ? ADVICE_TYPES[resolveAdviceType(input.adviceInUse.scores)]
+    : undefined;
+  const movedNote =
+    type && inUseType && inUseType.label !== type.label
+      ? [
+          `相談の中で推定が動いています（いま：${inUseType.label}）。この紙は、9問に答えたときのタイプで書いています。`,
+          "",
+        ]
+      : [];
 
   const parts: string[] = [`# ${WRITER_GUIDE_TITLE}`, ""];
 
@@ -73,6 +91,7 @@ export function buildWriterGuide(input: {
       "",
       `> ${type.summary}`,
       "",
+      ...movedNote,
       ...axisTable(input.advicePolicy!.scores),
       "",
       ...whyThisName(input.advicePolicy!.scores),
