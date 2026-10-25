@@ -84,8 +84,13 @@ export function placeTextOf(fact: StoryFact): string | null {
   );
   const arrival = value.match(ARRIVAL_ENDING);
   if (arrival) return value.slice(0, arrival.index);
-  // 着いた出来事でない出来事は、居場所の項目名でも読まない（「王都を発った」）
-  if (fact.kind === "event") return null;
+  /*
+    居場所の項目名なら、出来事でも値を読む。P-37 は「その頃、リナは港町にいた」を
+    「所在＝港町（event）」で返した（2026-10-25、gemma4:26b。旅の台の仕込みの1件）。
+    「王都を発った」のような値は、場所の引き当てが完全一致なので当たらない。
+    **移動のような項目名の出来事は、着いた結びが無ければ読まない**——「移動＝港町」は
+    向かった先か発った元か決められない
+  */
   return isWhereabouts ? value : null;
 }
 

@@ -59,9 +59,23 @@ describe("値から場所の名前を取り出す", () => {
       placeTextOf(fact({ id: "a", predicate: "移動", kind: "event", value: "王都を発った" }))
     ).toBeNull();
     expect(
-      placeTextOf(fact({ id: "b", predicate: "所在", kind: "event", value: "港町へ向かった" }))
+      placeTextOf(fact({ id: "b", predicate: "移動", kind: "event", value: "港町" }))
     ).toBeNull();
     expect(placeTextOf(fact({ id: "c", predicate: "所持品", value: "王都" }))).toBeNull();
+    // 居場所の項目名の出来事は値を読むが、「向かった」は完全一致で引けない
+    expect(
+      resolvePlace(
+        placeTextOf(fact({ id: "d", predicate: "所在", kind: "event", value: "港町へ向かった" })) ?? "",
+        resolver
+      )
+    ).toBeNull();
+  });
+
+  /** gemma4:26b は「その頃、リナは港町にいた」を「所在＝港町（event）」で返した（2026-10-25） */
+  it("居場所の項目名なら、出来事でも値を読む", () => {
+    expect(
+      placeTextOf(fact({ id: "a", predicate: "所在", kind: "event", value: "港町" }))
+    ).toBe("港町");
   });
 });
 
