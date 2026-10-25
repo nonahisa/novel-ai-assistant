@@ -533,8 +533,11 @@ describe("使った作品にだけ足す除外の行（作者の裁定、2026-10
     起動時の一括の追記へ入れたところ、**起動のたびに全作品の .gitignore へ
     1行が足され**、作品一覧が全作品「記録待ち1」になった。
     裁定は「使った作品だけに足す」——控えを初めて書くときに足す。
+    名前の読みの控え（`.aiwriter/imeReadings.json`）も同じ形に揃えた
+    （作者の裁定、2026-10-26）。
   */
   const RULE = ".aiwriter/imeWordReadings.json";
+  const NAME_RULE = ".aiwriter/imeReadings.json";
 
   /** 本物の置き場に読み書きする作り物（無いファイルは FileNotFound） */
   function hostFs(): void {
@@ -583,6 +586,52 @@ describe("使った作品にだけ足す除外の行（作者の裁定、2026-10
       const text = await readHostFile(gitignorePath, "utf8");
       expect(text).toContain(".novelai-recovery/");
       expect(text).not.toContain(RULE);
+      expect(text).not.toContain(NAME_RULE);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("既に名前の控えの行がある作品からは、起動の整備でも消さない", async () => {
+    // 足すのをやめるだけ。これまでの版で足された行は残す（.gitignore は追記しかしない）
+    const root = await mkdtemp(path.join(os.tmpdir(), "novelai-on-use-keep-"));
+    try {
+      const gitignorePath = path.join(root, ".gitignore");
+      const original = `# 作者のメモ\n${NAME_RULE}\n`;
+      await writeHostFile(gitignorePath, original);
+      hostFs();
+      const registered = {
+        id: "work_on_use_keep",
+        title: "前の版で行が足された作品",
+        folderPath: root,
+        registeredAt: "2026-10-26T00:00:00.000Z",
+      };
+      const context = {
+        globalState: {
+          get: <T>(_key: string, _defaultValue: T): T => [registered] as T,
+          update: vi.fn(async () => undefined),
+        },
+      };
+      await new workRegistry.WorkRegistry(context as never).maintainWorks();
+
+      const text = await readHostFile(gitignorePath, "utf8");
+      expect(text.startsWith(original)).toBe(true);
+      expect(text).toContain(".novelai-recovery/");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("名前の控えの行も、使った作品にだけ足す一覧から足せる", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "novelai-on-use-name-"));
+    try {
+      hostFs();
+
+      await workRegistry.ensureOnUseIgnoreRule(root, NAME_RULE);
+
+      expect(await readHostFile(path.join(root, ".gitignore"), "utf8")).toBe(
+        `${NAME_RULE}\n`
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

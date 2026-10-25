@@ -162,13 +162,14 @@ describe("同期対象から外す規則", () => {
 
   test("IMEで打った読みの控えは同期しない（作者の裁定、2026-10-24 夜）", () => {
     // 名前を確定するたびに書くので、同期すると2台で食い違いやすく、
-    // 変更の記録が出続ける。既にある作品の .gitignore にも追記で届く
-    expect(missingIgnoreRules(encode("# 作者のメモ\n"))).toContain(
+    // 変更の記録が出続ける。
+    // **行は起動の一括では足さず、使った作品にだけ足す**（作者の裁定、
+    // 2026-10-26。語の控えと揃えた）。足すのは imeReadingStore.ts
+    expect(ON_USE_IGNORED_PATHS).toContain(".aiwriter/imeReadings.json");
+    expect(IGNORED_PATHS).not.toContain(".aiwriter/imeReadings.json");
+    expect(missingIgnoreRules(encode("# 作者のメモ\n"))).not.toContain(
       ".aiwriter/imeReadings.json"
     );
-    expect(
-      missingIgnoreRules(encode(".aiwriter/imeReadings.json\n"))
-    ).not.toContain(".aiwriter/imeReadings.json");
   });
 
   test("IMEの読みの提案の控えは同期せず、見送りの印は同期する（作者の選択 Q2、2026-10-25）", () => {
@@ -215,11 +216,9 @@ describe("同期対象から外す規則", () => {
       // （設計書6.87.14 の末尾、0.66.9）。**その機械での決めごと**なので
       // 同期しない
       ".aiwriter/ai-instruction-usage.json",
-      // IMEで打った名前の読みの控え（設計書6.42.2、作者の裁定 2026-10-24 夜）。
-      // 確定のたびに書くので、同期すると2台で食い違い、差分が出続ける
-      ".aiwriter/imeReadings.json",
-      // IMEで打った語の読みの提案の控え（imeWordReadings.json）はここに無い。
-      // 起動の一括では足さず、使った作品にだけ足す（作者の裁定、2026-10-25 夜）
+      // IMEで打った名前の読みの控え（imeReadings.json、作者の裁定 2026-10-26）と
+      // 語の読みの提案の控え（imeWordReadings.json、2026-10-25 夜）はここに無い。
+      // 起動の一括では足さず、使った作品にだけ足す
       // MCP の登録（設計書6.87.15 柱5、0.70.11）。束への絶対パスが
       // 入っているので、同期すると別の機械には**存在しないパスを指す
       // 登録**が届く
