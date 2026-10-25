@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  announceWorkUrlDraft,
   normalizeHashtag,
   parseAnnounceConfig,
   parseAnnouncementHistory,
@@ -29,5 +30,37 @@ describe("更新告知の設定と履歴の読み方", () => {
     expect(parseAnnouncementHistory(JSON.stringify(["a", 1, "b"]))).toEqual(["a", "b"]);
     expect(parseAnnouncementHistory("{")).toEqual([]);
     expect(parseAnnouncementHistory("{}")).toEqual([]);
+  });
+});
+
+/**
+ * 「SNS告知設定」の作品URLの欄の初期値（2026-10-25 の実機確認）。
+ * 作者用の投稿ページが入って告知に載ったので、組み立てられるなら読者向けの作品ページを出す。
+ */
+describe("作品URLの欄の初期値", () => {
+  const reader = "https://kakuyomu.jp/works/1177354054934574437";
+  const author = "https://kakuyomu.jp/my/works/1177354054934574437/episodes/new";
+
+  test("保存してある値は、作者用のページでもそのまま出す（書き換えない）", () => {
+    expect(announceWorkUrlDraft(author, [reader])).toBe(author);
+    expect(announceWorkUrlDraft("https://example.com/w", [reader])).toBe("https://example.com/w");
+  });
+
+  test("空なら、台帳から組み立てた読者向けの作品ページが1つに決まるときだけ出す", () => {
+    expect(announceWorkUrlDraft("", [reader])).toBe(reader);
+    expect(announceWorkUrlDraft("  ", [reader])).toBe(reader);
+    expect(announceWorkUrlDraft("", [])).toBe("");
+    // どのサイトへ誘導したいかは作者が決める（勝手に1つを選ばない）
+    expect(
+      announceWorkUrlDraft("", [reader, "https://ncode.syosetu.com/n1234ab/"])
+    ).toBe("");
+  });
+
+  test("台帳の候補が作者用のページなら、読者向けへ直してから出す（直せなければ出さない）", () => {
+    expect(announceWorkUrlDraft("", [author])).toBe(reader);
+    expect(announceWorkUrlDraft("", [author, reader])).toBe(reader);
+    expect(
+      announceWorkUrlDraft("", ["https://www.alphapolis.co.jp/novel/manage/000000/0000"])
+    ).toBe("");
   });
 });

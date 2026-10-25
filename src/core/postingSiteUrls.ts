@@ -262,6 +262,86 @@ export function followNewEpisodeUrl(
   );
 }
 
+/** 作者だけが開けるページだと分かったときの答え */
+export interface AuthorOnlyPage {
+  site: PostingSiteId;
+  /** 同じ作品の、読者が開ける作品ページ。作品の番号を読めなければ入れない */
+  readerUrl?: string;
+}
+
+/**
+ * 作者だけが開けるページ（投稿・管理・編集の画面）かを見分ける（2026-10-25 の実機確認）。
+ *
+ * 作者は告知に載せる作品ページの欄へ、クリップボードに残っていたカクヨムの
+ * 投稿ページ（`/my/works/…/episodes/new`）を入れ、そのまま告知に載った。
+ * 読者が押すとログインを求められるか、開けないページである。
+ *
+ * **作者用と言い切れる形だけを拾う。** 読者向けのページを作者用と取り違えて
+ * 止めると、正しいURLが入らなくなる。拾うのは次の形だけ：
+ *
+ * - カクヨム：`/my/` の下（作者の管理画面はすべてここ。読者向けは `/works/…`）
+ * - なろう：`ncode.` の付かない `syosetu.com` の、`usernovelmanage`・`draftepisode`
+ *   などで始まる管理画面（読者向けは `ncode.syosetu.com`。`deriveSiteProfile` と同じ形）
+ * - アルファポリス：パスに `manage` を含む管理画面（投稿画面のパスは実機未確認で
+ *   2つの形が並んでいるので、区画の並びには頼らない）
+ * - note：編集画面の `editor.note.com`
+ *
+ * 読者向けの作品ページを組み立てるのは、作品の番号の形が確かめられた
+ * カクヨムとなろうだけ（`deriveSiteProfile` に任せる）。
+ *
+ * @returns 作者用でなければ undefined
+ */
+export function authorOnlyPage(value: string | null | undefined): AuthorOnlyPage | undefined {
+  const trimmed = (value ?? "").trim();
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+  const host = url.hostname.toLowerCase();
+  const parts = pathParts(url);
+
+  const withReader = (site: PostingSiteId): AuthorOnlyPage => {
+    const readerUrl = deriveSiteProfile(site, trimmed).pageUrl;
+    return readerUrl ? { site, readerUrl } : { site };
+  };
+
+  if (host === "kakuyomu.jp" && parts[0] === "my") return withReader("kakuyomu");
+  if (
+    (host === "syosetu.com" || host === "www.syosetu.com") &&
+    /^(user|draft)/u.test(parts[0] ?? "")
+  ) {
+    return withReader("narou");
+  }
+  if (
+    (host === "alphapolis.co.jp" || host.endsWith(".alphapolis.co.jp")) &&
+    parts.includes("manage")
+  ) {
+    return { site: "alphapolis" };
+  }
+  if (host === "editor.note.com") return { site: "note" };
+  return undefined;
+}
+
+/**
+ * 作者用のページだったときに、入力欄の下や告知文の注意へ出す1文。
+ *
+ * **直す先が分かるときは、そのURLを文に入れる**（作者はそれを写せば済む）。
+ * 分からないサイトは、読者向けのページを貼ってもらう。
+ *
+ * @returns 作者用でなければ undefined
+ */
+export function authorOnlyPageNotice(value: string | null | undefined): string | undefined {
+  const page = authorOnlyPage(value);
+  if (!page) return undefined;
+  const head = `${postingSiteInfo(page.site).label}の作者だけが開けるページで、読者は開けません。`;
+  return page.readerUrl
+    ? `${head}読者向けの作品ページは ${page.readerUrl} です。`
+    : `${head}読者が開ける作品ページのURLを貼ってください。`;
+}
+
 /**
  * そのサイトのURLとして読めるかを確かめて返す。
  *

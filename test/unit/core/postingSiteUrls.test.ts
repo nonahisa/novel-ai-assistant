@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
+  authorOnlyPage,
+  authorOnlyPageNotice,
   deriveSiteProfile,
   followNewEpisodeUrl,
   NEW_EPISODE_URL_FOLLOW_QUESTION,
@@ -304,5 +306,77 @@ describe("投稿ページのURLの下書きと、作品IDを変えたときの�
       { site: "kakuyomu", newEpisodeUrl: kakuyomuUrl("222") },
       sites[1],
     ]);
+  });
+});
+
+/**
+ * 作者だけが開けるページを、読者向けの作品ページと見分ける（2026-10-25 の実機確認）。
+ *
+ * 作者は「SNS告知設定」の作品ページの欄へ、クリップボードに残っていた
+ * カクヨムの投稿ページ（`/my/works/…/episodes/new`）を入れ、そのまま告知に載った。
+ * 読者が押しても開けないページである。
+ */
+describe("作者だけが開けるページ", () => {
+  test("カクヨムの投稿ページは作者用。読者向けの作品ページへ直す先を返す", () => {
+    expect(authorOnlyPage(実機.newEpisodeUrl)).toEqual({
+      site: "kakuyomu",
+      readerUrl: 実機.workUrl,
+    });
+  });
+
+  test("カクヨムの /my/ の下はどれも作者用（作品の番号が無ければ直す先は出さない）", () => {
+    expect(authorOnlyPage(`https://kakuyomu.jp/my/works/${実機.workId}`)).toEqual({
+      site: "kakuyomu",
+      readerUrl: 実機.workUrl,
+    });
+    expect(authorOnlyPage("https://kakuyomu.jp/my/")).toEqual({ site: "kakuyomu" });
+  });
+
+  test("なろうの管理画面は作者用。Nコードから作品トップを返す", () => {
+    expect(
+      authorOnlyPage("https://syosetu.com/usernovelmanage/top/ncode/N1234AB/")
+    ).toEqual({ site: "narou", readerUrl: "https://ncode.syosetu.com/n1234ab/" });
+    expect(authorOnlyPage("https://syosetu.com/draftepisode/input/")).toEqual({
+      site: "narou",
+    });
+  });
+
+  test("アルファポリスの管理画面・note の編集画面も作者用", () => {
+    expect(
+      authorOnlyPage("https://www.alphapolis.co.jp/novel/manage/000000/0000")
+    ).toEqual({ site: "alphapolis" });
+    expect(
+      authorOnlyPage("https://www.alphapolis.co.jp/manage/novel/123/episode/new")
+    ).toEqual({ site: "alphapolis" });
+    expect(authorOnlyPage("https://editor.note.com/notes/abc/edit/")).toEqual({
+      site: "note",
+    });
+  });
+
+  test("読者向けの作品ページ・ほかのサイト・URLでないものは作者用と言わない", () => {
+    for (const url of [
+      実機.workUrl,
+      `${実機.workUrl}/episodes/16816452219000000000`,
+      "https://ncode.syosetu.com/n1234ab/",
+      "https://ncode.syosetu.com/n1234ab/13/",
+      "https://www.alphapolis.co.jp/novel/123456789/987654321",
+      "https://note.com/someone/m/abc",
+      "https://example.com/my/works/1",
+      "",
+      "作品ページ",
+    ]) {
+      expect(authorOnlyPage(url), url).toBeUndefined();
+    }
+  });
+
+  test("知らせの文：読者は開けないことと、直す先を言う", () => {
+    const notice = authorOnlyPageNotice(実機.newEpisodeUrl);
+    expect(notice).toContain("読者は開けません");
+    expect(notice).toContain(実機.workUrl);
+    // 直す先が分からないサイトは、読者向けのページを貼ってもらう
+    expect(
+      authorOnlyPageNotice("https://www.alphapolis.co.jp/novel/manage/000000/0000")
+    ).toContain("読者が開ける作品ページ");
+    expect(authorOnlyPageNotice(実機.workUrl)).toBeUndefined();
   });
 });

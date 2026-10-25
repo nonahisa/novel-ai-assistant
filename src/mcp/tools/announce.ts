@@ -269,7 +269,7 @@ export function announceValidate(input: AnnouncePromptInput & { response: string
     workUrl: config.workUrl,
   });
   // **注意が出ても切り詰めない**（製品と同じ）。直すかどうかは作者が決める
-  const warnings = validateAnnouncement(parsed, composedX);
+  const warnings = validateAnnouncement(parsed, composedX, config.workUrl);
   // **採用したかどうかに関わらず覚える**（製品と同じ。目的は同じ言い回しを避けること）。
   // 足すのは製品と同じく X用の本文（定型句・タグ・URLを足す前のもの）
   const historyAdded = addToAnnouncementHistory(input.folder, parsed.xPost);

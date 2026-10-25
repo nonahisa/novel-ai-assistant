@@ -36,6 +36,8 @@ import {
 } from "../core/announcement";
 import { workListUrl, X_SHARE_LABEL, xIntentUrl } from "../core/snsShare";
 import { isOpenableWorkUrl } from "../core/postingSiteRecords";
+import { authorOnlyPageNotice } from "../core/postingSiteUrls";
+import { announceWorkUrlDraft } from "../core/announceConfig";
 import { PostingStore } from "../core/postingStore";
 import {
   POSTING_SITES,
@@ -235,7 +237,7 @@ export async function generateAnnouncement(
     workUrl: announce.workUrl,
   });
   // **注意が出ても切り詰めない。** そのまま見せて作者に判断させる
-  const warnings = validateAnnouncement(parsed, composedX);
+  const warnings = validateAnnouncement(parsed, composedX, announce.workUrl);
 
   // **採用したかどうかに関わらず覚える。** 目的は「同じ言い回しを避ける」
   // ことなので、貼らなかった案も次は避ける対象になる
@@ -422,11 +424,15 @@ async function askShareUrl(): Promise<string | undefined> {
       "空のまま確定すると、URLを付けずに告知文だけを貼ります",
     placeHolder: "https://ncode.syosetu.com/n1234ab/",
     ignoreFocusOut: true,
-    // **空は通す**（URL無しで貼るという答え）。形だけを確かめる
-    validateInput: (input) =>
-      !input.trim() || isOpenableWorkUrl(input)
-        ? undefined
-        : "http:// か https:// から始まるURLを貼ってください。",
+    // **空は通す**（URL無しで貼るという答え）。形と、作者だけが開ける
+    // 投稿・管理の画面でないことを確かめる（2026-10-25、投稿ページが告知に載った）
+    validateInput: (input) => {
+      if (!input.trim()) return undefined;
+      if (!isOpenableWorkUrl(input)) {
+        return "http:// か https:// から始まるURLを貼ってください。";
+      }
+      return authorOnlyPageNotice(input);
+    },
   });
   if (value === undefined) return undefined;
   return value.trim();
@@ -510,11 +516,22 @@ export async function configureAnnouncement(
   // という作者の指定で、Esc は「やめる」である
   if (hashtagsInput === undefined) return undefined;
 
+  // 空なら、台帳の作品の番号から組み立てた読者向けの作品ページを下書きに出す
+  // （保存してある値は差し替えない。決め方は `announceWorkUrlDraft`）
+  const draftUrl = current?.workUrl
+    ? current.workUrl
+    : announceWorkUrlDraft(
+        "",
+        (await workListUrlCandidates(work)).map((candidate) => candidate.url)
+      );
   const workUrlInput = await askText({
     title: `${work.title} の作品ページのURL`,
-    value: current?.workUrl ?? "",
+    value: draftUrl,
     prompt: "告知の末尾に付けます。空のままなら告知文に目印（{URL}）を残します",
     ignoreFocusOut: true,
+    // **作者だけが開ける投稿・管理の画面は通さない**（2026-10-25、投稿ページが
+    // 告知に載った）。直す先が分かれば、検査の文に読者向けのURLを出す
+    validateInput: (input) => authorOnlyPageNotice(input),
   });
   if (workUrlInput === undefined) return undefined;
 
