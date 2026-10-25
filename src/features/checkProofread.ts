@@ -77,8 +77,7 @@ import {
 // 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
 import { summarizeReasons } from "../core/checkRunCounts";
 import { KeepWordStore } from "../core/keepWordStore";
-import { confirmRunOrChoose } from "../views/notify";
-import { findLargerModelOffer } from "./largerModelOffer";
+import { confirmRun } from "../views/notify";
 import {
   buildStyleNote,
   collectWorkStyle,
@@ -269,42 +268,19 @@ export async function checkProofread(
       // この確認の中にしか書かれていない
       log.step(`推敲：まとめ実行のため確認を省略\n${detail}`);
     } else {
-      /*
-        **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
-        （A3④、2026-09-23）。推敲は 12b 4/8・26b 6/8（当て字、同梱の測定）。
-        見積もりは上の目安と同じ字数で出す（写しを作らない）。
-      */
-      const offer = await findLargerModelOffer({
-        registry,
-        feature: "proofread",
-        provider: resolved.provider,
-        model: resolved.model,
-        parameterSize: info.parameterSize,
-        speedFeature: "proofread",
-        promptVersion: PROOFREAD_VERSION,
-        inputChars: pending.map((chunk) => chunk.text.length),
-        workFolder: work.folderPath,
-      });
-      const answer = await confirmRunOrChoose(
+      // 大きいモデルの案内はここでは出さない（作者の裁定 2026-10-25
+      // 「誤字脱字だけ残す」。モデルを自分から勧めないため）
+      const confirmed = await confirmRun(
         `${work.title} の推敲を行います。`,
         "実行",
         {
-          detail: offer ? `${detail}\n\n${offer.detail}` : detail,
+          detail,
           remember: { id: "ai.run.checkProofread" },
           // 推し量った作品なら「訊かない」を覚えていても訊く
           work,
-          choices: offer?.choices,
         }
       );
-      if (!answer) return undefined;
-      if (answer.kind === "choice") {
-        // 割当を変えたら最初からやり直す（分け方も資料の見込みも変わる）
-        const next = await offer?.handle(answer.label);
-        return next === "rerun"
-          ? checkProofread(work, registry, options)
-          : undefined;
-      }
-      if (offer) log.step(offer.logText);
+      if (!confirmed) return undefined;
     }
   }
 

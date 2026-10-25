@@ -163,10 +163,6 @@ vi.mock("../../../src/features/aiTurn", () => ({
   withAiTurn: async (_options: unknown, run: () => Promise<void>) => run(),
 }));
 
-vi.mock("../../../src/features/largerModelOffer", () => ({
-  findLargerModelOffer: vi.fn(async () => undefined),
-}));
-
 const { checkContradictions } = await import("../../../src/features/checkContradictions");
 
 const work: WorkEntry = {
