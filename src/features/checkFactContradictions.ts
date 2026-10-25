@@ -29,6 +29,7 @@ import {
   rateLimitGiveUpNote,
   rateLimitWaitHooks,
   sleepUnlessAborted,
+  type RateLimitRetryHooks,
 } from "./rateLimitRetry";
 import { CharacterStore } from "../core/characterStore";
 import { createLocationStore } from "../core/abilityStore";
@@ -816,6 +817,13 @@ export async function checkFactContradictions(
               fingerprint: candidate.fingerprint,
               cacheKey: verifyKeyOf(candidate),
               controller,
+              // 待つあいだの表示は確かめの段の進み（何件目か）で出す
+              waitHooks: rateLimitWaitHooks({
+                sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
+                report: (message) => progress.report({ message }),
+                log: log.step,
+                position: () => `${done}/${candidates.length}`,
+              }),
             });
 
             if (outcome.undecided) verifyUndecided++;
@@ -961,6 +969,8 @@ export async function checkFactContradictions(
     /** 判定の覚えの鍵（`verifyKeyFor`。判定のAIのもの） */
     cacheKey: ReturnType<typeof verifyKeyFor>;
     controller: AbortController;
+    /** レート上限の待ち（中止できる待ち・表示・ログ） */
+    waitHooks: RateLimitRetryHooks;
   }): Promise<VerifyOutcome> {
     // 指紋は（型・主語・項目・両側の値）から作るので、同じ食い違いなら
     // 同じ値になる。判定をやり直さずに済む
@@ -972,7 +982,14 @@ export async function checkFactContradictions(
     }
 
     try {
-      const response = await input.provider.generate({
+      /*
+        **判定も、レート上限は示された時間だけ待って同じ1件を送り直す**
+        （2026-10-26、さくらの Kimi。矛盾検知の確かめの段と同じ穴）。
+        待ちの状態は抽出の段と同じものを使う（合計の上限は「最後に通ってから」）
+      */
+      const response = await callWithRateLimitWait(
+        () =>
+          input.provider.generate({
         systemPrompt: CONTRADICTION_VERIFY_SYSTEM_PROMPT,
         userPrompt: buildContradictionVerifyPrompt({
           chapterLabel: input.chapterLabel,
@@ -1004,7 +1021,10 @@ export async function checkFactContradictions(
           feature: "fact_contradiction_verify",
           workFolder: work.folderPath,
         },
-      });
+          }),
+        rateLimit,
+        input.waitHooks
+      );
 
       if (response.truncated || !response.text.trim()) {
         return undecidedOutcome("応答が切り詰められました");
