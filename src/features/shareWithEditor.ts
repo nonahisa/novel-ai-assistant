@@ -10,7 +10,7 @@ import {
   hasCommits,
   initRepository,
   pushSetUpstream,
-  suggestRepositoryName,
+  asciiRepositoryName,
 } from "../core/gitSetup";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import {
@@ -704,14 +704,14 @@ export function shareNoticeFor(
 /**
  * GitHubに作るリポジトリの名前を聞く。
  *
- * **日本語の作品名からは名前を作れない。** `suggestRepositoryName` は
- * ASCII以外を落とすので、日本語だけの題では空になる。空のときは作者に
+ * **日本語の作品名からは名前を作れない。** `asciiRepositoryName` は
+ * 英数字以外が混ざる題では空を返す（切れ端を使わない）。空のときは作者に
  * 入力してもらう。
  */
 async function askRepositoryName(
   workTitle: string
 ): Promise<string | undefined> {
-  const suggested = suggestRepositoryName(workTitle);
+  const suggested = asciiRepositoryName(workTitle);
   const name = await askText({
     title: "GitHubに作るリポジトリの名前",
     prompt: "編集部へ渡す非公開リポジトリの名前（半角英数）",

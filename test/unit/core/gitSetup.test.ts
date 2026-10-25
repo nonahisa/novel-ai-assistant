@@ -14,8 +14,11 @@ vi.mock("vscode", () => ({
 
 import {
   DEFAULT_BRANCH,
+  classifyGithubApiError,
   commitAll,
   createGithubRepositoryViaApi,
+  createGithubRepositoryWithFreeName,
+  repositoryNameCandidates,
   currentBranch,
   describeNetworkFailure,
   ensureGithubAuthToken,
@@ -221,8 +224,118 @@ describe("リポジトリ名の候補", () => {
     expect(suggestRepositoryName("My Novel 2")).toBe("My-Novel-2");
   });
 
-  test("日本語の作品名からは作らない（勝手にローマ字へ直さない）", () => {
-    expect(suggestRepositoryName("いじめられっ子")).toBe("");
+  // 作者が試した時刻（手元の暦で 2026-10-26 0:09。UTC で組むと前日になる）
+  const night = new Date(2026, 9, 26, 0, 9);
+
+  test("日本語の作品名は勝手にローマ字へ直さず、日付つきの名前にする（2026-10-26 の裁定）", () => {
+    expect(suggestRepositoryName("いじめられっ子", night)).toBe("novel-20261026");
+  });
+
+  test("英字と日本語が混ざった題から、切れ端の「GitHub_」を作らない（2026-10-26 の実機の再現）", () => {
+    expect(suggestRepositoryName("GitHub試験_確認用", night)).not.toBe("GitHub_");
+    expect(suggestRepositoryName("GitHub試験_確認用", night)).toBe("novel-20261026");
+  });
+
+  test("英数字だけの題でも、端の _ - . は削る", () => {
+    expect(suggestRepositoryName("my_novel_", night)).toBe("my_novel");
+    expect(suggestRepositoryName("_draft.", night)).toBe("draft");
+  });
+
+  test("記号だけで名前が残らない題も、日付つきの名前にする", () => {
+    expect(suggestRepositoryName("___", night)).toBe("novel-20261026");
+  });
+
+  test("同じ名前があったときは -2、-3 … の順に試す", () => {
+    expect(repositoryNameCandidates("novel-20261026").slice(0, 3)).toEqual([
+      "novel-20261026",
+      "novel-20261026-2",
+      "novel-20261026-3",
+    ]);
+  });
+});
+
+describe("GitHub API の失敗の読み分け", () => {
+  test("同じ名前の理由が errors[] に入っている形も拾う（2026-09-21 に生の Repository creation failed が出た）", () => {
+    const classified = classifyGithubApiError(422, {
+      message: "Repository creation failed.",
+      errors: [
+        {
+          resource: "Repository",
+          code: "custom",
+          field: "name",
+          message: "name already exists on this account",
+        },
+      ],
+    });
+    expect(classified.nameTaken).toBe(true);
+    expect(classified.detail).toContain("既にGitHub上にあります");
+    expect(classified.detail).not.toContain("Repository creation failed");
+  });
+
+  test("code が already_exists の形も同じ名前として扱う", () => {
+    expect(
+      classifyGithubApiError(422, {
+        message: "Validation Failed",
+        errors: [{ resource: "Repository", code: "already_exists", field: "name" }],
+      }).nameTaken
+    ).toBe(true);
+  });
+
+  test("ほかの 422 は同じ名前と決めつけず、errors[] の理由を添えて見せる", () => {
+    const classified = classifyGithubApiError(422, {
+      message: "Repository creation failed.",
+      errors: [{ resource: "Repository", code: "custom", field: "name", message: "name is too long" }],
+    });
+    expect(classified.nameTaken).toBe(false);
+    expect(classified.detail).toContain("name is too long");
+  });
+
+  test("同じ名前でぶつかったら -2 で作り直し、説明欄に題を入れる", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: Parameters<typeof fetch>[0], init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      bodies.push(body);
+      if (body.name === "novel-20261026") {
+        return new Response(
+          JSON.stringify({
+            message: "Repository creation failed.",
+            errors: [{ field: "name", code: "custom", message: "name already exists on this account" }],
+          }),
+          { status: 422 }
+        );
+      }
+      return new Response(
+        JSON.stringify({ clone_url: `https://github.com/x/${String(body.name)}.git`, private: true }),
+        { status: 201 }
+      );
+    });
+
+    const result = await createGithubRepositoryWithFreeName(
+      "tok",
+      "novel-20261026",
+      "GitHub試験_確認用",
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.name).toBe("novel-20261026-2");
+    expect(result.isPrivate).toBe(true);
+    expect(bodies.map((body) => body.name)).toEqual(["novel-20261026", "novel-20261026-2"]);
+    expect(bodies[1]).toEqual({ name: "novel-20261026-2", private: true, description: "GitHub試験_確認用" });
+  });
+
+  test("同じ名前以外の失敗では、名前を変えて試し直さない", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401 })
+    );
+    const result = await createGithubRepositoryWithFreeName(
+      "tok",
+      "novel-20261026",
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+    expect(result.ok).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -2,24 +2,32 @@ import * as vscode from "vscode";
 import type { SyncTarget } from "../core/syncTarget";
 import { describeIncludedWorks, describeSyncTarget } from "../core/syncTarget";
 import { syncCommitMessage } from "../core/syncAllPlan";
-import { runGit, type GitCommandRunner, type GitSyncStatus } from "../core/git";
+import {
+  readSyncStatus,
+  runGit,
+  type GitCommandRunner,
+  type GitSyncStatus,
+} from "../core/git";
 import {
   addRemote,
   commitAll,
   countTrackableFiles,
-  createGithubRepositoryViaApi,
+  createGithubRepositoryWithFreeName,
   rememberGithubCredential,
   currentBranch,
   describeNetworkFailure,
   ensureGithubAuthToken,
   ghAvailable,
-  ghCreateRepository,
+  ghCreateRepositoryWithFreeName,
   hasCommitIdentity,
   hasCommits,
+  hasGithubSession,
   initRepository,
   pushSetUpstream,
+  repositoryDescription,
   setCommitIdentity,
   suggestRepositoryName,
+  asciiRepositoryName,
   validateRepositoryUrl,
 } from "../core/gitSetup";
 import { logFailure, logStep } from "../core/logger";
@@ -167,6 +175,43 @@ async function useTargetLog(target: SyncTarget): Promise<void> {
   await useSyncLog(target.folderPath, target.works);
 }
 
+/** 続けて進める段の上限（管理を始める・送り先・送信の3段に、余裕を1つ） */
+const MAX_SETUP_STEPS = 4;
+
+/**
+ * 「次の一手」を、止まらずに最後まで続けて進める（作者の裁定、2026-10-26）。
+ *
+ * これまで入口（`novelai.setupGithub`）は押すたびに1手だけ進めて止まり、
+ * 作者はメニューを3回押す必要があった。止まった所で「次はGitHubと
+ * つなげます」と出るのに進まないので、作者は別の書庫の同期を誤って押した。
+ *
+ * **1手ごとに状態を読み直してから次を出す**（同じ問いを2度出さないため。
+ * 状態が変わらなかったら、そこで止める）。作者が取りやめた段・この端末だけで
+ * 使うと決めた段では、その先へ進まない。進んだ段が1つでもあれば true。
+ */
+export async function runSetupFlow(
+  target: SyncTarget,
+  firstStatus: GitSyncStatus,
+  deps: {
+    readStatus?: (cwd: string, run: GitCommandRunner) => Promise<GitSyncStatus>;
+    run?: GitCommandRunner;
+  } = {}
+): Promise<boolean> {
+  const readStatus = deps.readStatus ?? readSyncStatus;
+  const run = deps.run ?? runGit;
+  let status = firstStatus;
+  let advancedAny = false;
+  for (let i = 0; i < MAX_SETUP_STEPS; i++) {
+    if (!nextSetupStep(status)) break;
+    if (!(await runSetupStep(target, status, run))) break;
+    advancedAny = true;
+    const before = status.kind;
+    status = await readStatus(target.folderPath, run);
+    if (status.kind === before) break;
+  }
+  return advancedAny;
+}
+
 /** 「次の一手」を実行する。進んだら true */
 export async function runSetupStep(
   target: SyncTarget,
@@ -234,14 +279,26 @@ async function startTracking(
   // 作品ごとに分かれると読めてしまう
   const scope =
     target.works.length > 1
-      ? `「${target.label}」に履歴を作り、中の${target.works.length}作品をまとめて残します。\n`
+      ? `「${target.label}」に履歴を作り、中の${target.works.length}作品をまとめて1つ目の記録として残します。\n`
       : "作品フォルダーに履歴を作り、今ある原稿を1つ目の記録として残します。\n";
 
+  /*
+    **［始める］と［記録する］を1つの問いにする**（作者の裁定、2026-10-26）。
+    以前は「管理しますか」と「N件を記録します」を続けて訊いていた。
+    記録の確認が言っていたこと（何を残すか・同期しないものは除く・残した記録は
+    消さない）は、この1つの窓の文に残す。**残したものは消さない**（設計書5.5）ので
+    警告の顔で訊く（0.35.4）。
+
+    件数はこの窓には出せない——数えるには `git init` が要り、訊く前に init すると
+    取りやめても `.git` が残る。件数は記録のあとの知らせへ回した。
+  */
   const confirmed = await confirmRun(
     `${describeSyncTarget(target)} をGitで管理しますか？\n` +
       scope +
+      "キャッシュなど、同期しない設定のものは除きます。残した記録は、あとから消しません。\n" +
       "この時点ではまだ外部へ何も送りません。",
-    "始める"
+    "始める",
+    { kind: "warning" }
   );
   if (!confirmed) return false;
 
@@ -257,14 +314,6 @@ async function startTracking(
   }
 
   const count = await countTrackableFiles(target.folderPath, run);
-  const recordConfirmed = await confirmRun(
-    `${count} 件のファイルを1つ目の記録として残します。\n` +
-      "（キャッシュなど、同期しない設定のものは除いています）",
-    "記録する",
-    // **履歴に残したものは消さない**（設計書5.5）ので警告の顔で訊く（0.35.4）
-    { kind: "warning" }
-  );
-  if (!recordConfirmed) return false;
 
   const committed = await commitAll(
     target.folderPath,
@@ -286,8 +335,9 @@ async function startTracking(
   }
 
   logStep(`Gitで管理を開始: ${target.label}（${count}件）`);
+  // 次の段（送り先）は `runSetupFlow` が続けて出すので、ここでは止めない
   notifyDone(
-    `${target.label} をGitで管理し始めました。次はGitHubのリポジトリとつなげます。`
+    `${target.label} をGitで管理し始めました（${count} 件を記録）。続けてGitHubのリポジトリとつなげます。`
   );
   return true;
 }
@@ -406,16 +456,8 @@ async function connectRemote(
     return false;
   }
 
-  if (picked.action === "vscodeAuth") {
-    const name = await askRepositoryName(target);
-    if (!name) return false;
-    return createRepositoryViaVscodeAccount(target, name, run);
-  }
-
-  if (picked.action === "gh") {
-    const name = await askRepositoryName(target);
-    if (!name) return false;
-    return createRepositoryViaGh(target, name);
+  if (picked.action === "vscodeAuth" || picked.action === "gh") {
+    return createAndSend(target, picked.action, run);
   }
 
   const url = await askText({
@@ -436,21 +478,81 @@ async function connectRemote(
   return true;
 }
 
-/** 新しいリポジトリの名前を聞く。日本語の作品名からは作れないので空欄から入力してもらう */
-async function askRepositoryName(target: SyncTarget): Promise<string | undefined> {
-  const suggested = suggestRepositoryName(target.label);
-  const name = await askText({
-    title: "新しいリポジトリの名前",
-    value: suggested,
-    prompt: "英数字と - _ . が使えます",
-    ignoreFocusOut: true,
-    validateInput: (value) =>
-      /^[A-Za-z0-9._-]+$/.test(value.trim())
-        ? undefined
-        : "英数字と - _ . だけが使えます。",
-  });
-  const trimmed = name?.trim();
-  return trimmed ? trimmed : undefined;
+/**
+ * 新しくリポジトリを作り、そのまま1回目を送る（作者の裁定、2026-10-26）。
+ *
+ * **作る確認と送る確認を1つにまとめる。送る前の確認そのものは残す**（設計書5.5.9）。
+ * 以前は名前の入力 → 作成 →（もう一度押して）［送信する］と分かれていた。
+ * 作るのは送るためなので、作者にとっては1つの判断である。
+ *
+ * - **名前は訊かない**（`suggestRepositoryName`。日本語の題は説明欄へ）。同じ名前が
+ *   あれば `-2` … で作るので、確認の文にもそう書き、作った名前は知らせで言う
+ * - VS Code のアカウントの道で、まだ repo の権限のサインインが無ければ、
+ *   このあと出る VS Code の［許可］とブラウザの［Authorize］を確認の中で前置きする
+ *   （この2つは VS Code と GitHub の問いで、こちらからは消せない）
+ * - **確認はモーダルのまま**（5.5.9「送信の前には…確認を取る（モーダル）」）
+ */
+async function createAndSend(
+  target: SyncTarget,
+  via: "vscodeAuth" | "gh",
+  run: GitCommandRunner
+): Promise<boolean> {
+  if (!(await hasCommits(target.folderPath, run))) {
+    vscode.window.showWarningMessage(
+      "まだ記録が1つもありません。先に「Gitで管理を始める」を実行してください。"
+    );
+    return false;
+  }
+
+  const name = suggestRepositoryName(target.label);
+  const description = repositoryDescription(target.label);
+  const needsSignIn = via === "vscodeAuth" && !(await hasGithubSession());
+
+  const included = describeIncludedWorks(target);
+  const detailLines = [
+    ...(included ? [included] : []),
+    "原稿と設定資料が外部のサービスへ渡ります。",
+    // 日付の名前になったかは、題から英数字の名前が作れたかで見る
+    // （「My Novel 2」は My-Novel-2 になり、題とは一致しないので比べない）
+    asciiRepositoryName(target.label) !== ""
+      ? "同じ名前のリポジトリが既にあれば、末尾に -2 などの番号を足して作ります。"
+      : `GitHubのリポジトリ名には日本語を使えないため、日付で名前を付け、題「${description}」は説明欄に入れます。` +
+        "同じ名前が既にあれば、末尾に -2 などの番号を足して作ります。",
+    ...(needsSignIn
+      ? [
+          "次に VS Code の許可と、ブラウザで GitHub の承認を求められます。" +
+            "どちらも［許可］／［Authorize］を押してください。",
+        ]
+      : []),
+  ];
+  const sendLabel = "作って送る";
+  const confirm = await vscode.window.showWarningMessage(
+    `非公開のリポジトリ ${name} をGitHubに作り、${describeSyncTarget(target)} を送ります。`,
+    { modal: true, detail: detailLines.join("\n\n") },
+    sendLabel
+  );
+  if (confirm !== sendLabel) return false;
+
+  const created =
+    via === "vscodeAuth"
+      ? await createViaVscodeAccount(target, name, description, run)
+      : await createViaGh(target, name, description, run);
+  if (!created) return false;
+
+  const branch = await currentBranch(target.folderPath, run);
+  const sent = await sendFirst(target, branch, created.url, run);
+  if (!sent) return false;
+
+  vscode.window.showInformationMessage(
+    `非公開のリポジトリ ${created.name} を作り、${target.label} を GitHub へ送りました。` +
+      // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
+      "以後は「GitHubと同期」で GitHub とそろえられます。" +
+      (created.remembered === false
+        // 送り終えたあとの知らせなので、「次の送信」と言う（今回の送信は済んでいる）
+        ? "（この端末では認証情報を覚えられませんでした。次の送信で Git から一度聞かれることがあります）"
+        : "")
+  );
+  return true;
 }
 
 /**
@@ -460,11 +562,12 @@ async function askRepositoryName(target: SyncTarget): Promise<string | undefined
  * 作成したリポジトリのURLは、ここで`git remote add`まで行う
  * （ghと違い、API呼び出し自体はリモート登録まで面倒を見てくれないため）。
  */
-async function createRepositoryViaVscodeAccount(
+async function createViaVscodeAccount(
   target: SyncTarget,
   name: string,
+  description: string,
   run: GitCommandRunner
-): Promise<boolean> {
+): Promise<{ name: string; url: string; remembered: boolean } | undefined> {
   const token = await withProgress("GitHubへサインインしています", () =>
     ensureGithubAuthToken()
   );
@@ -472,21 +575,22 @@ async function createRepositoryViaVscodeAccount(
     vscode.window.showWarningMessage(
       "GitHubへのサインインが完了しなかったため、作成を中止しました。"
     );
-    return false;
+    return undefined;
   }
 
   const created = await withProgress("リポジトリを作っています", () =>
-    createGithubRepositoryViaApi(token, name)
+    createGithubRepositoryWithFreeName(token, name, description)
   );
   if (!created.ok || !created.cloneUrl) {
     reportFailure("リポジトリの作成", created.detail);
-    return false;
+    return undefined;
   }
+  const createdName = created.name ?? name;
 
   const added = await addRemote(target.folderPath, created.cloneUrl, run);
   if (!added.ok) {
     reportFailure("送り先の登録", added.detail);
-    return false;
+    return undefined;
   }
 
   // **鍵をgit側にも覚えさせる**（設計書5.5.12）。これをしないと、
@@ -498,36 +602,51 @@ async function createRepositoryViaVscodeAccount(
     target.folderPath
   );
   logStep(
-    `GitHubにリポジトリを作成（VS Codeアカウント）: ${name}（private）` +
+    `GitHubにリポジトリを作成（VS Codeアカウント）: ${createdName}（private）` +
       `／認証情報の記憶: ${remembered ? "成功" : "できず"}`
   );
 
-  vscode.window.showInformationMessage(
-    `非公開のリポジトリ ${name} を作り、送り先に設定しました。` +
-      (remembered
-        ? ""
-        : "（この端末では認証情報を覚えられませんでした。送信のときに一度聞かれます）")
-  );
-  return true;
+  /*
+    **非公開で作られたと GitHub が答えたときだけ、そのまま送る。**
+    以前は送る前の確認で「非公開かどうかをGitHubの画面で確かめて」と作者に
+    頼んでいた。作成の確認と送信の確認を1つにまとめたので、確かめるのは
+    こちらが応答で行う。答えが無い・違うときは送らずに止める（送り先は登録済み
+    なので、作者が GitHub の画面で確かめてから「はじめて送信する」で送れる）
+  */
+  if (created.isPrivate !== true) {
+    logFailure("リポジトリの作成", {
+      内容: `非公開で作られたことを確かめられなかったため送信を止めた: ${createdName}`,
+    });
+    void warnWithLog(
+      `リポジトリ ${createdName} が非公開で作られたことを確かめられなかったため、送らずに止めました。` +
+        "GitHubの画面で非公開になっているかを確かめてから、もう一度「GitHub初期設定」を押してください。"
+    );
+    return undefined;
+  }
+
+  return { name: createdName, url: created.cloneUrl, remembered };
 }
 
 /** GitHub CLI（gh）でリポジトリを作る。remoteの登録もgh側で完結する */
-async function createRepositoryViaGh(
+async function createViaGh(
   target: SyncTarget,
-  name: string
-): Promise<boolean> {
+  name: string,
+  description: string,
+  run: GitCommandRunner
+): Promise<{ name: string; url: string; remembered?: boolean } | undefined> {
   const created = await withProgress("リポジトリを作っています", () =>
-    ghCreateRepository(target.folderPath, name)
+    ghCreateRepositoryWithFreeName(target.folderPath, name, description)
   );
   if (!created.ok) {
     reportFailure("リポジトリの作成", created.detail);
-    return false;
+    return undefined;
   }
-  logStep(`GitHubにリポジトリを作成: ${name}（private）`);
-  vscode.window.showInformationMessage(
-    `非公開のリポジトリ ${name} を作り、送り先に設定しました。`
-  );
-  return true;
+  const createdName = created.name ?? name;
+  logStep(`GitHubにリポジトリを作成: ${createdName}（private）`);
+  // gh の道は `--private` を必ず付けて作り、送り先も gh が登録する。
+  // 記録に残す送り先は、gh が登録したものを読む
+  const remote = await run(["remote", "get-url", "origin"], target.folderPath, 15_000);
+  return { name: createdName, url: remote.stdout.trim() || createdName };
 }
 
 /** はじめての送信。原稿が外部へ渡ることを明示して確認する */
@@ -558,6 +677,9 @@ async function firstPush(
   const included = describeIncludedWorks(target);
   const scope = included ? `\n${included}` : "";
 
+  // ここへ来るのは、送り先を URL で登録した（自分で作ったリポジトリ）ときと、
+  // 作ったあとの送信が途中で止まったとき。どちらもこちらが非公開を確かめて
+  // いないので、確かめてもらう一文は残す
   const confirm = await vscode.window.showWarningMessage(
     `${describeSyncTarget(target)} をGitHubへ送ります。\n\n` +
       `送り先: ${remoteUrl}${scope}\n\n` +
@@ -568,6 +690,26 @@ async function firstPush(
   );
   if (confirm !== "送信する") return false;
 
+  if (!(await sendFirst(target, branch, remoteUrl, run))) return false;
+  vscode.window.showInformationMessage(
+    // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
+    `${target.label} を GitHub へ送りました。以後は「GitHubと同期」で GitHub とそろえられます。`
+  );
+  return true;
+}
+
+/**
+ * 1回目の送信の本体（確認は呼ぶ側が済ませている）。
+ *
+ * 確認の出し方が2通り（作って送る／登録済みの送り先へ送る）になったので、
+ * 送る所だけを1つにしておく。
+ */
+async function sendFirst(
+  target: SyncTarget,
+  branch: string,
+  remoteLabel: string,
+  run: GitCommandRunner
+): Promise<boolean> {
   const result = await withProgress("GitHubへ送信しています", () =>
     pushSetUpstream(target.folderPath, branch, run)
   );
@@ -575,12 +717,7 @@ async function firstPush(
     reportFailure("送信", result.detail);
     return false;
   }
-
-  logStep(`はじめての送信: ${target.label} → ${remoteUrl}（${branch}）`);
-  vscode.window.showInformationMessage(
-    // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
-    `${target.label} を GitHub へ送りました。以後は「GitHubと同期」で GitHub とそろえられます。`
-  );
+  logStep(`はじめての送信: ${target.label} → ${redactUrlCredentials(remoteLabel)}（${branch}）`);
   return true;
 }
 

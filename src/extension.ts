@@ -245,7 +245,7 @@ import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
 import { isSyncBusyCommand } from "./core/autoResendPlan";
 import { handleStaleBundleFailure } from "./features/staleBundleNotice";
-// nextSetupStep, runSetupStep も core/git.ts 経由。動的importする
+// nextSetupStep, runSetupFlow も core/git.ts 経由。動的importする
 
 import { resolveDeviceId } from "./core/device";
 import {
@@ -4034,7 +4034,7 @@ export async function activate(
           return;
         }
         const { describeStatus } = await import("./features/gitSync.js");
-        const { nextSetupStep, runSetupStep } = await import(
+        const { nextSetupStep, runSetupFlow } = await import(
           "./features/gitOnboarding.js"
         );
         // **どこを1つの置き場にするかを先に決める**（設計書5.7.9）。
@@ -4056,7 +4056,10 @@ export async function activate(
           );
           return;
         }
-        if (await runSetupStep(target, status)) {
+        // **1回押せば最後まで続けて進む**（作者の裁定、2026-10-26）。
+        // 1手ごとに止まると、作者はメニューを3回押すことになり、止まった所で
+        // 別の書庫の同期を誤って押した
+        if (await runSetupFlow(target, status)) {
           await gitSync.refresh(work, { fetch: true, notify: false });
         }
       }
