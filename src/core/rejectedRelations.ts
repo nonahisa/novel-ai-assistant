@@ -269,5 +269,7 @@ export function rejectedRelationViaLabel(via: RejectedRelationVia): string {
       return "プロットからの更新案を承認して";
     case "chat":
       return "相談からの更新案を承認して";
+    case "fact":
+      return "事実の照合からの更新案を承認して";
   }
 }

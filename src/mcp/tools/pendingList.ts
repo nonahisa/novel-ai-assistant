@@ -100,10 +100,11 @@ export const PENDING_LIST_INPUT = {
         "finding＝承認待ちの代わりに提案パネルの指摘（誤字脱字・推敲・矛盾など）を状態つきで返す（未処理・採用・却下・期限切れ・陳腐化。出どころとモデルごとの集計つき）"
     ),
   source: z
-    .enum([EXTRACTION, "plot", "chat", "external"])
+    .enum([EXTRACTION, "plot", "chat", "external", "fact"])
     .optional()
     .describe(
-      "出どころで絞る（extraction＝抽出・plot＝プロットから・chat＝相談から・external＝外部AIから）。省略すると全部"
+      "出どころで絞る（extraction＝抽出・plot＝プロットから・chat＝相談から・external＝外部AIから・" +
+        "fact＝事実の照合から（矛盾検知が本文から読んだ場所の所要時間））。省略すると全部"
     ),
   limit: z
     .number()

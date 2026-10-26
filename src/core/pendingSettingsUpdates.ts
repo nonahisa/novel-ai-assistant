@@ -6,8 +6,11 @@ import type { PendingUpdateSource } from "./pendingUpdateFormat";
 import {
   PENDING_SETTINGS_DIR,
   buildPendingSettingsPayload,
+  combinePendingSettingsPayloads,
+  parsePendingSettingsPayload,
   pendingSettingsFileName,
   type PendingSettingsKind,
+  type PendingSettingsPayload,
   type PendingSettingsRecord,
 } from "./pendingSettingsMerge";
 // **1件の読み方と並べ方は `pendingReview.ts` が持つ**（0.85.1。MCP の
@@ -45,8 +48,12 @@ export class PendingSettingsUpdateStore {
   }
 
   /**
-   * 更新案を積む。同じレコードの案は差し替える（承認待ちは作者の原稿では
-   * ないので上書きしてよい。同じ場所の案が2つ並んでも作者が困るだけ）。
+   * 更新案を積む。**同じレコードの案がもうあれば、差し替えずに合わせる**
+   * （`combinePendingSettingsPayloads`。設計書6.88.13）。同じ場所の案が2つ並んでも
+   * 作者が困るだけなので1つのファイルにまとめるが、作者がまだ見ていない先の案の
+   * 中身は消さない。
+   *
+   * 先の案が壊れていて読めなければ、**直さず・上書きせずに投げる**（CLAUDE.md 規則2）。
    */
   async stage(
     recordKind: PendingSettingsKind,
@@ -57,10 +64,42 @@ export class PendingSettingsUpdateStore {
     await vscode.workspace.fs.createDirectory(path.toUri(this.directory));
     for (const record of records) {
       const target = path.join(this.directory, pendingSettingsFileName(record));
-      const payload = buildPendingSettingsPayload(recordKind, record, options);
+      const incoming = buildPendingSettingsPayload(recordKind, record, options);
+      const existing = await this.readExisting(target);
+      const payload = existing
+        ? combinePendingSettingsPayloads(existing, incoming)
+        : incoming;
       await atomicWriteFile(
         target,
         new TextEncoder().encode(`${JSON.stringify(payload, null, 2)}\n`)
+      );
+    }
+  }
+
+  /** 同じ名前の案。無ければ undefined。壊れていたら投げる（読み直して直さない） */
+  private async readExisting(
+    filePath: string
+  ): Promise<PendingSettingsPayload | undefined> {
+    let bytes: Uint8Array;
+    try {
+      bytes = await vscode.workspace.fs.readFile(path.toUri(filePath));
+    } catch (error) {
+      if (
+        error instanceof vscode.FileSystemError &&
+        error.code === "FileNotFound"
+      ) {
+        return undefined;
+      }
+      throw error;
+    }
+    try {
+      return parsePendingSettingsPayload(
+        JSON.parse(new TextDecoder().decode(bytes))
+      );
+    } catch (error) {
+      throw new Error(
+        `承認待ちの案（${path.basename(filePath)}）が読めないため、上書きせずに止めました: ` +
+          (error instanceof Error ? error.message : String(error))
       );
     }
   }

@@ -36,6 +36,16 @@ import { createLocationStore } from "../core/abilityStore";
 import type { Location } from "../models/location";
 import type { TravelStageStats } from "../core/factContradiction";
 import type { SceneClockEpisode } from "../core/sceneClock";
+import {
+  isTravelDistanceChunk,
+  plannedTravelCueCalls,
+  runTravelCues,
+  sceneTimeCueCacheKey,
+  travelDistanceCacheKey,
+  travelDistanceChunkId,
+  type TravelCueAskRequest,
+} from "../core/travelCues";
+import { PendingSettingsUpdateStore } from "../core/pendingSettingsUpdates";
 import { readTextFile } from "../core/textFile";
 import {
   afterlifeMarksFromCharacters,
@@ -65,7 +75,6 @@ import {
 */
 import {
   buildFactContradictionIssue,
-  buildTravelMaterial,
   candidateSidesOf,
   collectFactsFromChunk,
   factVerifyPromptVersion,
@@ -315,6 +324,30 @@ export async function checkFactContradictions(
   let reached: { providerId: string; model: string } | undefined;
 
   const pending = chunks.filter((chunk) => !cache.get(chunk.hash, extractKeyBase));
+  /*
+    移動の照合の AI の手がかり（P-51・P-52。設計書6.88.13）。抽出と同じ割当で回す。
+    **P-51 の処理済みでない送り先も、送る前の確認の条件に入れる**——P-37 が全部
+    処理済みでも、場所の一覧が変わった回などは P-51 だけを送ることがある
+  */
+  const travelDistanceKey = travelDistanceCacheKey({ providerId: provider.id, model });
+  const timeCueKey = sceneTimeCueCacheKey({ providerId: provider.id, model });
+  const travelPlan = plannedTravelCueCalls(chunks, locations);
+  const travelPending =
+    travelPlan.distance === 0
+      ? 0
+      : chunks.filter(
+          (chunk) =>
+            isTravelDistanceChunk(chunk, locations) &&
+            cache.get(travelDistanceChunkId(chunk, locations), travelDistanceKey) === undefined
+        ).length;
+  const travelDetail =
+    travelPlan.distance > 0
+      ? `移動の照合の手がかりとして、本文の距離の読み取り ${travelPending}回（処理済みはスキップ）と、` +
+        `場面の頭の時の経過の読み取り 最大${travelPlan.timeCue}回を同じAIで行います。` +
+        "読み取った距離は、設定資料へ承認待ちの提案として置きます。"
+      : "";
+  /** 移動の手がかりで実際に AI へ送った回数（進みの表示用。控えから返したものは数えない） */
+  let travelAsked = 0;
   /**
    * AIへ送る前の確認を、この回に通ったか（2026-09-23）。
    *
@@ -324,7 +357,7 @@ export async function checkFactContradictions(
    * まとめ実行から来たときは、まとめ実行が先に確認している（設計書6.80）
    */
   let confirmedToSend = options.suiteConfirmed === true;
-  if (pending.length > 0) {
+  if (pending.length > 0 || travelPending > 0) {
     // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
     // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
     if (
@@ -359,6 +392,7 @@ export async function checkFactContradictions(
       // 確認のダイアログは素のテキストである。Markdownの記号を混ぜると
       // そのまま「**」が見える（`plainTextUi.test.ts`）
       "本文は書き換えません。",
+      travelDetail,
       // 判定だけ別のAIになりうることを黙らない（有料のAIなら料金にも効く）
       "見つかった候補は、矛盾検知に割り当てたAIが1件ずつ確かめます。",
       provider.isPaid
@@ -658,13 +692,56 @@ export async function checkFactContradictions(
       for (const [filePath, chapter] of chapterByFile) {
         episodes.push({ filePath, chapter, text: (await readSource(filePath)) ?? "" });
       }
-      const travel = buildTravelMaterial({
-        locations,
-        facts,
-        places: factPlaces,
-        episodes,
-      });
+      // 移動の照合の AI の手がかり（P-51・P-52。設計書6.88.13）。MCP の口と同じ関数で回す。
+      // 場所の記録が2つ未満なら AI を呼ばずに第1段の材料だけを返す（作者の判断③）
+      const cues = await withCancellableProgress(
+        "移動の手がかりを読んでいます",
+        async (progress, token) => {
+          const controller = new AbortController();
+          token.onCancellationRequested(() => {
+            cancelled = true;
+            controller.abort();
+          });
+          return runTravelCues({
+            locations,
+            facts,
+            places: factPlaces,
+            episodes,
+            chunks,
+            isCancelled: () => cancelled || Boolean(fatalFailure),
+            ask: (request) =>
+              askTravelCue(request, controller, (message) =>
+                progress.report({ message })
+              ),
+          });
+        }
+      );
+      if (cancelled) return;
+      const travel = cues.material;
       travelStats = travel.stats;
+      // 判定へ渡す時の手がかりも、時計に入れた AI の読みと同じものを使う
+      const travelMarkers = travel.aiMarkers;
+      // 読み取った距離を、設定資料へ承認待ちの提案として置く（同じ場所の案は合わせる）
+      if (cues.proposals.length > 0) {
+        const store = new PendingSettingsUpdateStore(work);
+        let staged = 0;
+        for (const proposal of cues.proposals) {
+          try {
+            await store.stage("location", [proposal.record], {
+              source: "fact",
+              reason: proposal.reason,
+            });
+            staged += 1;
+          } catch (error) {
+            // 置けなくても照合は続ける（承認待ちが壊れていたら直さずに止めた結果）
+            log.failure("矛盾検知（事実の照合）", {
+              場所: proposal.record.name,
+              理由: `距離の提案を承認待ちへ置けませんでした: ${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
+        }
+        cues.stats.proposedLocations = staged;
+      }
       candidates = filterAllowed(
         findContradictionCandidates({
           facts: allFacts,
@@ -800,6 +877,7 @@ export async function checkFactContradictions(
               leftSourceText: leftPlace ? await readSource(leftPlace.filePath) : undefined,
               rightPlace: sides.place,
               rightLineText: sides.rightLineText,
+              aiMarkers: travelMarkers,
             });
             const outcome = await verify({
               source: factVerifySourceOf(candidate),
@@ -890,6 +968,124 @@ export async function checkFactContradictions(
     verifyNote,
     candidateNote,
   };
+
+  /**
+   * 移動の照合の AI の手がかり（P-51・P-52）を1回訊く。`runTravelCues` の `ask`。
+   *
+   * - 控え（チャンクキャッシュ）にあれば送らない。鍵は内容の指紋＋プロバイダ＋モデル＋版
+   * - **確認を通らずに送る道を作らない。** P-52 は比べられない組が出てから決まるので、
+   *   P-37・P-51 が全部処理済みだった回は、最初に送る前にここで確認する
+   * - 1回の失敗で全体を止めない（undefined を返し、数えるのは `runTravelCues`）。
+   *   待っても直らない失敗を掴んだら、残りは送らない
+   */
+  async function askTravelCue(
+    request: TravelCueAskRequest,
+    controller: AbortController,
+    report: (message: string) => void
+  ): Promise<unknown | undefined> {
+    const key = request.stage === "distance" ? travelDistanceKey : timeCueKey;
+    const cached = cache.get(request.cacheId, key);
+    if (cached !== undefined) return cached;
+    if (fatalFailure || cancelled) return undefined;
+    if (!confirmedToSend) {
+      if (
+        !(await confirmProviderReachable(provider, "矛盾検知（事実の照合）", model))
+      ) {
+        cancelled = true;
+        return undefined;
+      }
+      reached = { providerId: provider.id, model };
+      const confirmed = await confirmRun(
+        `${work.title} の移動の照合の手がかりを読み取ります。`,
+        "実行",
+        {
+          detail: [
+            "本文から事実を取り出す段は処理済みです。",
+            `場面の頭の時の経過を、最大${travelPlan.timeCue}回 AI（${provider.displayName} / ${model}）に読み取らせます。`,
+            "送るのは場面の切り替わりの前後の数段落だけです。本文は書き換えません。",
+            provider.isPaid ? `\n${paidCostLines(provider.displayName).join("\n")}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          // 取り出しから始まる回と同じ id——「以降は訊かない」の答えを揃える
+          remember: { id: "ai.run.checkFactContradictions" },
+          work,
+        }
+      );
+      if (!confirmed) {
+        cancelled = true;
+        return undefined;
+      }
+      confirmedToSend = true;
+    }
+
+    const feature =
+      request.stage === "distance" ? "travel_distance_extract" : "scene_time_cue";
+    travelAsked += 1;
+    report(
+      `${request.stage === "distance" ? "本文の距離" : "場面の頭の時の手がかり"} ${travelAsked}回目`
+    );
+    try {
+      const response = await callWithRateLimitWait(
+        () =>
+          provider.generate({
+            systemPrompt: request.systemPrompt,
+            userPrompt: request.userPrompt,
+            model,
+            temperature: request.temperature,
+            maxOutputTokens: resolveOutputTokensForSend(provider.id, model, feature),
+            plannedOutputTokens: resolveOutputTokensForPlanning(provider.id, model, feature),
+            jsonSchema: request.schema as object,
+            disableThinking: true,
+            signal: controller.signal,
+            meta: { feature, workFolder: work.folderPath },
+          }),
+        rateLimit,
+        rateLimitWaitHooks({
+          sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
+          report,
+          log: log.step,
+          position: () => feature,
+        })
+      );
+      if (response.truncated || !response.text.trim()) {
+        log.failure("矛盾検知（事実の照合）", {
+          段: feature,
+          理由: "応答が上限で切り詰められました",
+        });
+        return undefined;
+      }
+      const parsed = parseFactJsonObject(response.text);
+      if (!parsed) {
+        log.failure("矛盾検知（事実の照合）", {
+          段: feature,
+          理由: "応答を読み取れません",
+          応答: responseExcerptForLog(response.text),
+        });
+        return undefined;
+      }
+      await cache.set(request.cacheId, key, parsed, {
+        stoppedEarly: response.stoppedEarly,
+      });
+      return parsed;
+    } catch (error) {
+      if (error instanceof AIError && error.kind === "aborted") return undefined;
+      if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
+        fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
+        log.step(`残りの手がかりは読みません: ${fatalFailure}`);
+      }
+      log.failure("矛盾検知（事実の照合）", {
+        段: feature,
+        詳細:
+          error instanceof AIError
+            ? `${error.message} ${recoveryForAIError(error)}`
+            : error instanceof Error
+              ? error.message
+              : String(error),
+      });
+      return undefined;
+    }
+  }
 
   /** 候補の両側と、本文から読み取った引用・前後 */
   interface ResolvedSides {

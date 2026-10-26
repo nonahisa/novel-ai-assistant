@@ -96,6 +96,15 @@ export interface TravelTime {
   to: string;
   /** 日（小数あり。1.5＝1日半）。**1日に満たない組は照合しない** */
   minDays: number;
+  /**
+   * 設定資料にまだ入っていない、承認待ちの距離から来た値なら、その本文の引用
+   * （P-51。設計書6.88.13、作者の判断②）。
+   *
+   * 承認前の距離もその回の照合に使うが、**指摘の根拠に「承認待ち」と出す**——
+   * AIの読み違いがそのまま指摘になりうるので、作者が見分けられるようにする。
+   * 指紋には混ぜない（承認しても同じ食い違いの鍵が変わらないように）
+   */
+  pendingEvidence?: string;
 }
 
 /**
@@ -535,15 +544,27 @@ export function findTravelImpossibilities(
 ): ContradictionCandidate[] {
   if (travelTimes.length === 0 || whereabouts.length === 0) return [];
 
-  const table = new Map<string, number>();
+  const table = new Map<string, { minDays: number; pendingEvidence?: string }>();
   for (const entry of travelTimes) {
     // **1日に満たない道のりは比べない**（上の注の1つ目）
     if (!(entry.minDays >= 1)) continue;
     const key = placePairKey(entry.from, entry.to);
     const known = table.get(key);
-    // 同じ組が2度来たら、速いほうを採る（いちばん速い値。作者の裁定）
-    if (known === undefined || entry.minDays < known) {
-      table.set(key, entry.minDays);
+    // 同じ組が2度来たら、速いほうを採る（いちばん速い値。作者の裁定）。
+    // 同じ速さなら設定資料の値を採る（承認待ちの読みより、作者の記録を根拠に見せる）
+    if (
+      known === undefined ||
+      entry.minDays < known.minDays ||
+      (entry.minDays === known.minDays &&
+        known.pendingEvidence !== undefined &&
+        entry.pendingEvidence === undefined)
+    ) {
+      table.set(key, {
+        minDays: entry.minDays,
+        ...(entry.pendingEvidence !== undefined
+          ? { pendingEvidence: entry.pendingEvidence }
+          : {}),
+      });
     }
   }
   if (table.size === 0) return [];
@@ -573,10 +594,11 @@ export function findTravelImpossibilities(
       if (fromClock.chain !== toClock.chain) continue;
       if (fromClock.segment === toClock.segment) continue;
 
-      const minDays = table.get(
+      const known = table.get(
         placePairKey(from.entry.locationId, to.entry.locationId)
       );
-      if (minDays === undefined) continue;
+      if (known === undefined) continue;
+      const minDays = known.minDays;
 
       // 向きは問わない（「その頃」は前の場面と同じ時を指す）。長く見積もった経過
       const elapsedMax = Math.max(
@@ -604,8 +626,12 @@ export function findTravelImpossibilities(
             `${formatDays(minDays)}かかる道のりを、` +
             `${elapsedMax <= 0 ? "同じ日のうちに" : `長く見積もっても${elapsedMax}日で`}移っている`,
           basis:
-            `場所の記録では、${from.entry.locationName}と${to.entry.locationName}のあいだは` +
-            `${formatDays(minDays)}かかる（書かれた所要時間のうち、いちばん速いもの）`,
+            known.pendingEvidence !== undefined
+              ? // 作者の判断②：承認前の距離を使ったことを、根拠の頭に出す
+                `承認待ちの距離（本文「${known.pendingEvidence}」からAIが読んだもの。設定資料にはまだ入っていません）では、` +
+                `${from.entry.locationName}と${to.entry.locationName}のあいだは${formatDays(minDays)}かかる`
+              : `場所の記録では、${from.entry.locationName}と${to.entry.locationName}のあいだは` +
+                `${formatDays(minDays)}かかる（書かれた所要時間のうち、いちばん速いもの）`,
           origin: "travel",
         })
       );

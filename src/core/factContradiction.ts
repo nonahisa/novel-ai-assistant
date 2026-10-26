@@ -241,6 +241,58 @@ export interface TravelStageStats {
   clocked: number;
   /** 所要時間の表の組（1日以上） */
   tablePairs: number;
+  /** AIで抜いた手がかり（P-51・P-52。設計書6.88.13）。AIの段を通らなかった回は無い */
+  aiCues?: TravelCueStats;
+}
+
+/** 移動の照合で AI に抜かせた手がかりの数（`core/travelCues.ts` の `runTravelCues`） */
+export interface TravelCueStats {
+  /**
+   * 場所の記録が2つ未満で、AIの段をしなかった（作者の判断③）。
+   * 距離を置く先が無いので、設定資料の抽出へ案内する
+   */
+  noLocations: boolean;
+  /** P-51 を送った（控えから返したものを含む）チャンク */
+  distanceChunks: number;
+  /** 検算を通った距離 */
+  distancesAccepted: number;
+  /** 検算で捨てた距離 */
+  distancesRejected: number;
+  /** 承認待ちへ置いた場所（距離を足す案の数） */
+  proposedLocations: number;
+  /** P-52 を送った場面の頭（上限まで） */
+  timeCueRequests: number;
+  /** 上限（30回）を超えて訊かなかった場面の頭 */
+  timeCueSkipped: number;
+  /** 時計に入れたAIの読み（経過の分かったもの） */
+  timeCuesApplied: number;
+  /** 検算に通らず「分からない」として扱ったもの */
+  timeCuesCut: number;
+  /** AIへ送れなかった・読めなかった回 */
+  failures: number;
+}
+
+/** 場所の記録が無い作品で、AIの段をしなかったときの案内（作者の判断③） */
+export const TRAVEL_CUES_NO_LOCATIONS_NOTE =
+  "距離を置く場所の記録がありません（設定資料の抽出で場所を作ってください）";
+
+/** AIの手がかりの段を、作者が読む1句にする */
+export function describeTravelCues(cues: TravelCueStats): string {
+  if (cues.noLocations) return TRAVEL_CUES_NO_LOCATIONS_NOTE;
+  const parts = [
+    `本文の距離 ${cues.distancesAccepted}件` +
+      (cues.distancesRejected > 0 ? `（捨てた ${cues.distancesRejected}件）` : ""),
+    cues.proposedLocations > 0
+      ? `設定資料へ提案 ${cues.proposedLocations}か所（承認待ち）`
+      : "",
+    cues.timeCueRequests > 0
+      ? `場面の頭の時の手がかり ${cues.timeCuesApplied}/${cues.timeCueRequests}件` +
+        (cues.timeCuesCut > 0 ? `（分からないとした ${cues.timeCuesCut}件）` : "")
+      : "",
+    cues.timeCueSkipped > 0 ? `上限で訊かなかった場面 ${cues.timeCueSkipped}件` : "",
+    cues.failures > 0 ? `AIの失敗 ${cues.failures}回` : "",
+  ].filter(Boolean);
+  return `AIの手がかり（${parts.join("・")}）`;
 }
 
 /** 移動の照合の工程を、作者が読む1句にする */
@@ -248,9 +300,11 @@ export function describeTravelStages(travel: TravelStageStats): string {
   const counts =
     `所在の事実 ${travel.whereaboutsFacts}件・場所に引けた ${travel.resolved}件・` +
     `時計に載った ${travel.clocked}件`;
-  return travel.tablePairs === 0
-    ? `所要時間の表が0組なので移動の照合はしていません（${counts}）`
-    : `移動の照合（${counts}・所要時間の表 ${travel.tablePairs}組）`;
+  const stages =
+    travel.tablePairs === 0
+      ? `所要時間の表が0組なので移動の照合はしていません（${counts}）`
+      : `移動の照合（${counts}・所要時間の表 ${travel.tablePairs}組）`;
+  return travel.aiCues ? `${stages} / ${describeTravelCues(travel.aiCues)}` : stages;
 }
 
 /**

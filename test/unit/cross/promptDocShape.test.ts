@@ -120,6 +120,8 @@ describe("プロンプト設計書の形", () => {
     ["P-48", "src/prompts/photoTranscribe.ts", "PHOTO_TRANSCRIBE_VERSION"],
     ["P-49", "src/prompts/photoOrient.ts", "PHOTO_ORIENT_VERSION"],
     ["P-50", "src/prompts/readingDictionary.ts", "READING_DICTIONARY_VERSION"],
+    ["P-51", "src/prompts/travelDistanceExtract.ts", "TRAVEL_DISTANCE_EXTRACT_VERSION"],
+    ["P-52", "src/prompts/sceneTimeCue.ts", "SCENE_TIME_CUE_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(

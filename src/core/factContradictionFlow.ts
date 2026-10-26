@@ -29,9 +29,12 @@ import { buildLocationResolver } from "./locationConsistency";
 import {
   buildSceneClock,
   describeTimeCue,
+  sceneTimeMarkerKey,
+  type SceneClock,
   type SceneClockEpisode,
+  type SceneTimeMarkers,
 } from "./sceneClock";
-import { buildTravelTable } from "./travelTable";
+import { buildTravelTable, type PendingTravelDistance } from "./travelTable";
 import { buildWhereabouts } from "./whereabouts";
 
 /**
@@ -292,6 +295,10 @@ export interface TravelMaterial {
   whereabouts: WhereaboutsEntry[];
   /** 工程ごとの件数。完了報告（`describeFactRun` の `travel`）へそのまま渡す */
   stats: TravelStageStats;
+  /** 組んだ時計。P-52 へ何を訊くか（`travelCues.ts` の `planTimeCueRequests`）が場面の頭を引く */
+  clock: SceneClock;
+  /** 時計に入れたAIの読み（P-52）。判定へ渡す時の手がかりにも同じものを使う */
+  aiMarkers?: SceneTimeMarkers;
 }
 
 /**
@@ -314,9 +321,13 @@ export function buildTravelMaterial(input: {
   facts: readonly StoryFact[];
   places: ReadonlyMap<string, FactPlace>;
   episodes: readonly SceneClockEpisode[];
+  /** 承認待ちの距離（P-51。設計書6.88.13）。無ければ設定資料の距離だけ */
+  pendingDistances?: readonly PendingTravelDistance[];
+  /** 場面の頭のAIの読み（P-52）。無ければ時計は決まった語と日付だけで読む */
+  aiMarkers?: SceneTimeMarkers;
 }): TravelMaterial {
-  const table = buildTravelTable(input.locations);
-  const clock = buildSceneClock(input.episodes);
+  const table = buildTravelTable(input.locations, input.pendingDistances);
+  const clock = buildSceneClock(input.episodes, input.aiMarkers);
   const whereabouts = buildWhereabouts({
     facts: input.facts,
     places: input.places,
@@ -330,6 +341,8 @@ export function buildTravelMaterial(input: {
       ...whereabouts.stats,
       tablePairs: table.stats.comparedPairs,
     },
+    clock,
+    ...(input.aiMarkers ? { aiMarkers: input.aiMarkers } : {}),
   };
 }
 
@@ -373,6 +386,8 @@ export function travelVerifyMaterialOf(input: {
   rightPlace: FactPlace;
   /** 後ろ側の行の本文。段落の頭の時の手がかりを読む */
   rightLineText?: string;
+  /** 時計に入れたAIの読み（`TravelMaterial.aiMarkers`）。後ろ側の行に付いていれば手がかりに出す */
+  aiMarkers?: SceneTimeMarkers;
 }): TravelVerifyMaterial | undefined {
   if (factVerifySourceOf(input.candidate) !== "travel") return undefined;
   const { leftPlace, rightPlace } = input;
@@ -387,7 +402,10 @@ export function travelVerifyMaterialOf(input: {
   return {
     travelTime: input.candidate.basis ?? "",
     reading: input.candidate.reason,
-    timeCue: describeTimeCue(input.rightLineText ?? ""),
+    timeCue: describeTimeCue(
+      input.rightLineText ?? "",
+      input.aiMarkers?.get(sceneTimeMarkerKey(rightPlace.filePath, rightPlace.line))
+    ),
     leftContext,
   };
 }

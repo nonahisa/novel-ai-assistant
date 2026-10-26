@@ -290,7 +290,7 @@ export function characterSchema(): Record<string, unknown> {
           rejectedAt: { type: "string" },
           via: {
             type: "string",
-            enum: ["panel", "extraction", "external", "plot", "chat"],
+            enum: ["panel", "extraction", "external", "plot", "chat", "fact"],
           },
         },
         required: ["target", "relation"],
