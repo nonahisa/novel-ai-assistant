@@ -145,8 +145,19 @@ describe("AIへの注意書き", () => {
     expect(readme).toContain(`${SUMMARY_MAX_CHARS}字以内`);
   });
 
-  test("承認待ちになることを伝える", () => {
-    // すぐ反映されないと知らないと、AIは書けていないと判断して書き直す
+  test("直接の書き換えを「承認待ちになる」と書かない", () => {
+    // 拡張機能は外部ツールの書き換えを止めず、書き戻しもしない（設計書5.4.9）。
+    // 「承認待ちになる・すぐ反映されない」と書くと、外部AIは書いた内容が
+    // 作者の確認を経ると思い込み、確かめずに書き込んでしまう
+    expect(readme).not.toContain("外部からの変更は「承認待ち」");
+    expect(readme).not.toContain("すぐには反映されません");
+    expect(readme).toContain("そのまま正本");
+  });
+
+  test("承認待ちに入るのは MCP の提案の道だけだと書く", () => {
+    // 作者の確認を経させたいときの道を示す。区別が無いと、直接書くか
+    // 提案するかを外部AIが選べない
+    expect(readme).toContain("novel.propose");
     expect(readme).toContain("承認待ち");
   });
 
