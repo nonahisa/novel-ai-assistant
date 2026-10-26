@@ -582,7 +582,8 @@ function settingsTargets(review: PendingSettingsReview): ApplyTarget[] {
       await review.pendingStore.discard(item.update.filePath);
       return 0;
     },
-    discard: () => review.pendingStore.discard(item.update.filePath),
+    // 見送る：場所の案なら距離を覚えてから片付ける（次の事実の照合で同じ距離を出さない。6.88.13）
+    discard: () => review.pendingStore.dismiss(item.update),
   }));
 }
 

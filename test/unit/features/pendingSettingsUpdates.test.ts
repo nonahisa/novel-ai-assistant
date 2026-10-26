@@ -1,11 +1,16 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { applyPendingCharacterUpdates } from "../../../src/features/applyPendingUpdates";
-import { PendingSettingsUpdateStore } from "../../../src/core/pendingSettingsUpdates";
+import {
+  PendingSettingsUpdateStore,
+  TravelDistanceDismissedHistory,
+} from "../../../src/core/pendingSettingsUpdates";
+import { travelDistanceDismissKey } from "../../../src/core/travelCues";
 import {
   emptyLocation,
   locationFileName,
   type Location,
+  type LocationRelation,
 } from "../../../src/models/location";
 import type { WorkEntry } from "../../../src/models/types";
 import {
@@ -66,6 +71,19 @@ function seedLocation(overrides: Partial<Location> = {}): {
   const file = path.join(locationDir, locationFileName(record));
   disk.set(file, bytesFor(record));
   return { record, file };
+}
+
+/** 事実の照合が置く形の距離の関係（`buildTravelDistanceProposals` と同じ作り） */
+function distanceTo(targetId: string, target: string, value: string): LocationRelation {
+  return {
+    kind: "distance",
+    target,
+    targetId,
+    value,
+    chapters: [1],
+    evidence: `王都から${target}までは、${value}の道のりだ`,
+    authorLocked: false,
+  };
 }
 
 function fakePanel() {
@@ -259,6 +277,51 @@ describe("場所の更新案を「更新分を反映」で確かめる", () => {
     expect(outcome.ok).toBe(true);
     expect(read(file).description).toBe("城壁の都");
     expect([...disk.keys()].filter((key) => key.startsWith(pendingDir))).toEqual([]);
+  });
+
+  /**
+   * 見送った距離はもう出さない（作者の裁定 2026-10-26）。事実の照合が置いた距離の案を
+   * 見送ったら、同じ2か所・同じ値を控えに覚える。控えは台帳（設定/）ではなく
+   * `.aiwriter/cache/` に置く——作者のデータには書かない
+   */
+  test("距離の案を見送ると、距離を控えに覚えてから片付ける（台帳には書かない）", async () => {
+    const { record, file } = seedLocation();
+    await new PendingSettingsUpdateStore(work).stage(
+      "location",
+      [{ ...record, relations: [distanceTo("loc_002", "港町", "馬で三日")] }],
+      { source: "fact", reason: "事実の照合で本文から読んだ所要時間" }
+    );
+
+    const { panel, captured } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never);
+    const outcome = await captured.dismiss!(captured.items[0].id);
+
+    expect(outcome.ok).toBe(true);
+    expect([...disk.keys()].filter((key) => key.startsWith(pendingDir))).toEqual([]);
+    expect(read(file).relations).toBeUndefined();
+    const remembered = await new TravelDistanceDismissedHistory(work).load();
+    expect([...remembered]).toEqual([travelDistanceDismissKey("loc_001", "loc_002", "馬で三日")]);
+  });
+
+  test("控えに覚えられなければ、見送りは失敗として案を残す（覚えないまま消さない）", async () => {
+    const { record } = seedLocation();
+    await new PendingSettingsUpdateStore(work).stage(
+      "location",
+      [{ ...record, relations: [distanceTo("loc_002", "港町", "馬で三日")] }],
+      { source: "fact" }
+    );
+    const { panel, captured } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never);
+    const write = workspace.fs.writeFile;
+    workspace.fs.writeFile = (async (uri: { fsPath: string }, bytes: Uint8Array) => {
+      if (uri.fsPath.includes(`${path.sep}cache${path.sep}`)) throw new Error("書けません");
+      return write(uri as never, bytes as never);
+    }) as never;
+
+    const outcome = await captured.dismiss!(captured.items[0].id);
+
+    expect(outcome.ok).toBe(false);
+    expect([...disk.keys()].filter((key) => key.startsWith(pendingDir))).toHaveLength(1);
   });
 
   test("台帳に読めない場所があれば、その種類の案は出さず、消しもしない", async () => {

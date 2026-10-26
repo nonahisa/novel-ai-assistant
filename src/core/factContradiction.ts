@@ -258,6 +258,11 @@ export interface TravelCueStats {
   distancesAccepted: number;
   /** 検算で捨てた距離 */
   distancesRejected: number;
+  /**
+   * 作者が前に見送った距離に当たり、提案も照合もしなかったもの（鍵ごとに1件。
+   * 作者の裁定 2026-10-26「見送ったものはもう出さない」）。黙って落とさず数を出す
+   */
+  distancesDismissed: number;
   /** 承認待ちへ置いた場所（距離を足す案の数） */
   proposedLocations: number;
   /** P-52 を送った場面の頭（上限まで） */
@@ -282,6 +287,7 @@ export function describeTravelCues(cues: TravelCueStats): string {
   const parts = [
     `本文の距離 ${cues.distancesAccepted}件` +
       (cues.distancesRejected > 0 ? `（捨てた ${cues.distancesRejected}件）` : ""),
+    cues.distancesDismissed > 0 ? `前に見送った距離 ${cues.distancesDismissed}件は出していません` : "",
     cues.proposedLocations > 0
       ? `設定資料へ提案 ${cues.proposedLocations}か所（承認待ち）`
       : "",

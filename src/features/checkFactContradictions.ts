@@ -45,7 +45,10 @@ import {
   travelDistanceChunkId,
   type TravelCueAskRequest,
 } from "../core/travelCues";
-import { PendingSettingsUpdateStore } from "../core/pendingSettingsUpdates";
+import {
+  PendingSettingsUpdateStore,
+  TravelDistanceDismissedHistory,
+} from "../core/pendingSettingsUpdates";
 import { readTextFile } from "../core/textFile";
 import {
   afterlifeMarksFromCharacters,
@@ -694,6 +697,8 @@ export async function checkFactContradictions(
       }
       // 移動の照合の AI の手がかり（P-51・P-52。設計書6.88.13）。MCP の口と同じ関数で回す。
       // 場所の記録が2つ未満なら AI を呼ばずに第1段の材料だけを返す（作者の判断③）
+      // 作者が前に見送った距離は、提案も照合もしない（作者の裁定 2026-10-26）
+      const dismissedKeys = await new TravelDistanceDismissedHistory(work).load();
       const cues = await withCancellableProgress(
         "移動の手がかりを読んでいます",
         async (progress, token) => {
@@ -709,6 +714,7 @@ export async function checkFactContradictions(
             episodes,
             chunks,
             isCancelled: () => cancelled || Boolean(fatalFailure),
+            dismissedKeys,
             ask: (request) =>
               askTravelCue(request, controller, (message) =>
                 progress.report({ message })
