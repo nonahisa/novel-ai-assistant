@@ -199,6 +199,7 @@ export async function checkProofread(
     narrativeStyle,
     keepWords,
     styleNote,
+    archaicWork,
     narratorSlips,
     viewpointNarrator,
   } = prepared;
@@ -410,7 +411,9 @@ export async function checkProofread(
           raw,
           chunk,
           keepWords,
-          viewpointNarrator
+          viewpointNarrator,
+          // 文語調の作品では漢字ひらきを落とす（プロンプト設計書 P-10）
+          archaicWork
         );
         rejectedCount += validated.rejected.length;
         // **落とした理由を残す**（設計書6.8）。総数だけでは、指摘が少ないのが
@@ -658,6 +661,11 @@ async function collectChunks(
       keepWords: KeepWord[];
       /** AIへ渡す作法の説明 */
       styleNote: string;
+      /**
+       * 作品が文語調か（文体メモと同じ判定）。検算で漢字ひらきを落とすのに使う。
+       * 文体メモと同じ値から取るので、AIへ伝えた前提と検算の前提がずれない
+       */
+      archaicWork: boolean;
       /** コードで見つけた、語り手の名前が地の文に出る所（設計書6.9.2） */
       narratorSlips: ProofreadIssue[];
       /**
@@ -713,15 +721,14 @@ async function collectChunks(
 
   // **誤字脱字と同じ作法を渡す**（設計書6.8.14）。片方だけに渡すと、
   // 同じ本文について機能ごとに違う前提で判断することになる
-  const styleNote = buildStyleNote(
-    collectWorkStyle({
-      // 全話を繋いで見る。1話だけでは一人称も文語かも決められない。
-      // **シーンメモは落とす**（`splitIntoChunks` が本文から消すのと同じ）
-      bodyText: sources.map((source) => blankMemoLines(source.body)).join("\n"),
-      narrativePerson: narrativeStyle,
-      keepWords: keepWords.map((entry) => entry.word),
-    })
-  );
+  const workStyle = collectWorkStyle({
+    // 全話を繋いで見る。1話だけでは一人称も文語かも決められない。
+    // **シーンメモは落とす**（`splitIntoChunks` が本文から消すのと同じ）
+    bodyText: sources.map((source) => blankMemoLines(source.body)).join("\n"),
+    narrativePerson: narrativeStyle,
+    keepWords: keepWords.map((entry) => entry.word),
+  });
+  const styleNote = buildStyleNote(workStyle);
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // `maxIssues` は本文の長さで変わるが、桁は変わらない（数字1つ）ので0で測る
@@ -771,6 +778,7 @@ async function collectChunks(
     narrativeStyle,
     keepWords,
     styleNote,
+    archaicWork: workStyle.archaic,
     narratorSlips,
     viewpointNarrator,
   };

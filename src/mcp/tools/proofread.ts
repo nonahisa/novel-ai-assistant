@@ -437,7 +437,9 @@ function validateAgainst(
     parsed,
     chunk,
     style.keepWords,
-    narrator
+    narrator,
+    // 文体メモと同じ判定。文語の作品では漢字ひらきを落とす（製品と同じ）
+    style.archaic
   );
   return {
     chunkId,
