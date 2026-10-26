@@ -364,6 +364,39 @@ function narratorSection(input: ContradictionCheckInput): string {
  * 別に決める。** 小さいモデルでは原則1も抑制版になるので、ここは二重に
  * 抑える形になるが、それも意図どおりである（6.10.8）。
  */
+/**
+ * 【あとの話で判明する事実】の欄の版。**future の控えの鍵にだけ入る**
+ * （`contradictionFuturePromptVersion`）。
+ *
+ * この欄は future の向きにしか出ないので、`CONTRADICTION_CHECK_VERSION` を上げると
+ * 文面の変わらない本命（settled）の処理済みまで道連れで飛ぶ（【この話の語り手】
+ * 【作中の日付】と同じ判断）。印の無い鍵が 1.0 にあたる。
+ *
+ * 1.1: 「読者がまだ知らなくても照らしてよい」の一文を足した（2026-10-26、
+ *      `FUTURE_READER_UNAWARE_NOTE`）
+ */
+export const CONTRADICTION_FUTURE_SECTION_VERSION = "1.1";
+
+/** future の控えの鍵の版。本命の版の後ろに欄の版の印を付ける */
+export function contradictionFuturePromptVersion(promptVersion: string): string {
+  return `${promptVersion}|future:${CONTRADICTION_FUTURE_SECTION_VERSION}`;
+}
+
+/**
+ * 読者がまだ知らなくても、あとの話の事実は照らしてよい（1.1、2026-10-26）。
+ *
+ * さくら Kimi-K2.6 が「第5話時点で読者は知らないため、ここでは矛盾として扱わない
+ * （後の話の情報を前に当てはめない原則）」と書いて、台詞の仕込みを自分で落とした
+ * （`docs/measurements/2026-10-26-future-facts-sakura-kimi.md` 156行）。この欄は
+ * まさに「あとの話の情報を前に当てはめる」ためのものだと書いていなかった。
+ *
+ * **そのまま答えに返ってくる前提で書く**（CLAUDE.md「繰り返し起きた失敗」3番）。
+ * 「矛盾ではない」「扱わない」のような打ち消しの語を入れない——写された note が
+ * 検算（`deniesContradiction`）で落ちる。
+ */
+export const FUTURE_READER_UNAWARE_NOTE =
+  "上の事実は、対象の話の時点で読者や登場人物がまだ知らないことでも、照らし合わせに使ってください。本文がその事実と両立しなければ、下のとおり挙げてください。";
+
 function futureSection(input: ContradictionCheckInput): string {
   const facts = input.futureFacts?.trim();
   if (!facts) return "";
@@ -374,6 +407,7 @@ ${facts}
 
 【この項目についての判断】
 上の事実と、対象本文が**両立するか**だけを見てください。
+${FUTURE_READER_UNAWARE_NOTE}
 
 - **触れていないのは矛盾ではありません。** この時点の登場人物や語り手が
   まだ知らないことは、書かれていなくて当然です。
