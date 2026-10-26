@@ -1,0 +1,122 @@
+{
+  "note": "推敲P-10 文語対照の口語台。mustOpen=ひらいてよい副詞・接続詞・連体詞・副助詞（プロンプトの対象）。形式名詞（事・様）と補助動詞（置いて・見て）は別枠で README に記す。mustNotOpen は人名・固有名・かな済みの語。",
+  "episodes": [
+    {
+      "file": "本文/001_放課後.txt",
+      "mustOpen": [
+        {
+          "word": "暫く",
+          "reading": "しばらく",
+          "count": 1
+        },
+        {
+          "word": "大分",
+          "reading": "だいぶ",
+          "count": 1
+        },
+        {
+          "word": "恐らく",
+          "reading": "おそらく",
+          "count": 1
+        },
+        {
+          "word": "又",
+          "reading": "また",
+          "count": 1
+        },
+        {
+          "word": "然し",
+          "reading": "しかし",
+          "count": 1
+        },
+        {
+          "word": "但し",
+          "reading": "ただし",
+          "count": 1
+        },
+        {
+          "word": "迄",
+          "reading": "まで",
+          "count": 1
+        },
+        {
+          "word": "程",
+          "reading": "ほど",
+          "count": 1
+        }
+      ],
+      "mustNotOpen": [
+        {
+          "word": "海斗",
+          "count": 8
+        },
+        {
+          "word": "港",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "file": "本文/002_図書館.txt",
+      "mustOpen": [
+        {
+          "word": "大分",
+          "reading": "だいぶ",
+          "count": 1
+        },
+        {
+          "word": "又",
+          "reading": "また",
+          "count": 1
+        },
+        {
+          "word": "所謂",
+          "reading": "いわゆる",
+          "count": 1
+        },
+        {
+          "word": "色んな",
+          "reading": "いろんな",
+          "count": 1
+        },
+        {
+          "word": "程",
+          "reading": "ほど",
+          "count": 1
+        }
+      ],
+      "mustNotOpen": [
+        {
+          "word": "海斗",
+          "count": 8
+        },
+        {
+          "word": "港",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "file": "本文/003_祖父の日誌.txt",
+      "mustOpen": [],
+      "mustNotOpen": [
+        {
+          "word": "大丈夫",
+          "count": 1
+        },
+        {
+          "word": "素敵",
+          "count": 1
+        },
+        {
+          "word": "海斗",
+          "count": 5
+        },
+        {
+          "word": "港",
+          "count": 1
+        }
+      ]
+    }
+  ]
+}
