@@ -151,7 +151,8 @@ describe("登場人物抽出の品質ゲート", () => {
     // 文言は同じだが、**上げる**——上限ちょうどで語の途中で切れた答えが
     // キャッシュに残っており、上げないとそれが返り続ける。
     // 版が変わるとキャッシュが無効になり、次回の抽出でAIを呼び直す。
-    expect(CHARACTER_EXTRACT_VERSION).toBe("5.11");
+    // 5.12で呼称の区分と一人称の説明を足し、一人称を必須にした（作者の裁定 2026-10-26）。
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.12");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
