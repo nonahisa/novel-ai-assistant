@@ -1,0 +1,337 @@
+{
+  "measuredAt": "2026-10-26T04:24:18.296Z",
+  "feature": "factContradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "numCtxDecision": {
+    "numCtx": 32768,
+    "source": "--num-ctx で指定"
+  },
+  "temperature": {
+    "extract": 0,
+    "verify": 0
+  },
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "parameterSize": "25.2B",
+    "bundled": {
+      "thinkingSeen": true,
+      "thinkingOffWorks": true,
+      "thinkingMeasuredAt": "2026-09-26",
+      "typoAccuracy": {
+        "hits": 5,
+        "total": 7,
+        "falsePositives": 0,
+        "wrongFixes": 0,
+        "trapHits": 0,
+        "trapTotal": 5,
+        "promptVersion": "1.2",
+        "smallPrompt": false,
+        "sampleVersion": "2",
+        "measuredAt": "2026-09-26T06:31:27+09:00"
+      },
+      "measuredAt": "2026-09-26"
+    },
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 1784,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "givenOptions": {},
+  "modelSize": null,
+  "modelSizeDecision": {
+    "sizeDependent": false,
+    "decided": false,
+    "reason": "この機能は製品がモデルの大きさで頼み方を変えません"
+  },
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.112.4",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.0",
+  "verifyPromptVersion": "1.2:travel1.1|1.2:identity1.0",
+  "plans": [
+    {
+      "chunkId": "本文\\001_前世.txt#1-0@8027",
+      "chars": 130,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_目覚め.txt#2-0@8027",
+      "chars": 162,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_同居.txt#3-0@8027",
+      "chars": 123,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_別人みたい.txt#4-0@8027",
+      "chars": 95,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_台所.txt#5-0@8027",
+      "chars": 82,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\006_名乗り.txt#6-0@8027",
+      "chars": 92,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\b4c377fe-7220-490b-8528-2cd60e4a1156\\scratchpad\\idw\\contradiction-identity",
+    "targets": [
+      "（作品ぜんたい）"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\b4c377fe-7220-490b-8528-2cd60e4a1156\\scratchpad\\idw\\contradiction-identity\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 134605,
+      "temperature": {
+        "extract": 0,
+        "verify": 0
+      },
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 1,
+        "seededContradictionsTotal": 3,
+        "missedContradictions": 2,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 1,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 134605
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "状態": {
+            "found": 1,
+            "total": 3
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/005_台所.txt",
+            "kind": "状態",
+            "where": "朝、台所でハツが味噌汁を作っていた。"
+          },
+          {
+            "file": "本文/006_名乗り.txt",
+            "kind": "状態",
+            "where": "その夜、鏡の前の文佳の体で、太志がもう一度名乗った。"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "（作品ぜんたい）",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。 矛盾検知（事実の照合）を終了: 6/6（事実 38件 / 設定資料から 10件 / 候補 1件（状態 1件） / 採用 1件 / 所要時間の表が0組なので移動の照合はしていません（所在の事実 11件・場所に引けた 0件・時計に載った 0件） / 距離を置く場所の記録がありません（設定資料の抽出で場所を作ってください） / 体と心の照合（心と体の記録 2組・訊いたチャンク 6件・場面の読み 9件・本文の遷移 5件・記録の無い組 3件）。本文で別の心が入っている読み（第2話「その晩、文佳の体を動かしていたのは、灯に宿っているはずの千早だった。」（密倉文佳の体に宮下千早の心）、第6話「その夜、鏡の前の文佳の体で、太志がもう一度名乗った。」（密倉文佳の体に三門太志の心）、第6話「その夜、鏡の前の文佳の体で、太志がもう一度名乗った。」（密倉文佳の体に三門太志の心））が心と体の記録にありません）",
+            "temperature": {
+              "extract": 0,
+              "verify": 0
+            },
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\002_目覚め.txt",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "filePath": "本文\\002_目覚め.txt",
+                    "line": 11,
+                    "chunkHash": "09f12dda752aba455358aaf9ee781043e702c299",
+                    "excerpt": "その晩、文佳の体を動かしていたのは、灯に宿っているはずの千早だった。",
+                    "category": "状態",
+                    "settingSays": "第2話 1行目・地の文：人格＝三門太志。心と体の記録（作者が人物の編集で付けたもの）では、密倉文佳の体に宿る心は三門太志（第2話から第4話）だけ",
+                    "textSays": "第2話 11行目・地の文：人格＝宮下千早",
+                    "note": "第2話 11行目、密倉文佳の体に〈宮下千早〉の心がいる。心と体の記録に無い組で、本文に心が入る描写も無い（確信度: 高）（判定: 設定では文佳の心は太志のみだが、本文では千早が動かしており、入れ替わりの描写もないため矛盾している。）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "pendingProposals": [],
+            "stages": {
+              "chunks": 6,
+              "acceptedFacts": 38,
+              "recordFacts": 10,
+              "rejectedFacts": 0,
+              "rejectionNote": "",
+              "candidates": 1,
+              "candidateNote": "状態 1件",
+              "kept": 1,
+              "verifyNote": "",
+              "travel": {
+                "whereaboutsFacts": 11,
+                "resolved": 0,
+                "clocked": 0,
+                "tablePairs": 0,
+                "aiCues": {
+                  "noLocations": true,
+                  "distanceChunks": 0,
+                  "distancesAccepted": 0,
+                  "distancesRejected": 0,
+                  "distancesDismissed": 0,
+                  "proposedLocations": 0,
+                  "timeCueRequests": 0,
+                  "timeCueSkipped": 0,
+                  "timeCuesApplied": 0,
+                  "timeCuesCut": 0,
+                  "failures": 0
+                }
+              },
+              "identity": {
+                "noDwellings": false,
+                "pairs": 2,
+                "unlinkedDwellings": 0,
+                "chunks": 6,
+                "readings": 9,
+                "unknownReadings": 0,
+                "rejected": 0,
+                "transitions": 5,
+                "reassignedFacts": 0,
+                "excludedFacts": 0,
+                "unrecorded": [
+                  {
+                    "chapter": 2,
+                    "evidence": "その晩、文佳の体を動かしていたのは、灯に宿っているはずの千早だった。",
+                    "bodyName": "密倉文佳",
+                    "mindName": "宮下千早"
+                  },
+                  {
+                    "chapter": 6,
+                    "evidence": "その夜、鏡の前の文佳の体で、太志がもう一度名乗った。",
+                    "bodyName": "密倉文佳",
+                    "mindName": "三門太志"
+                  },
+                  {
+                    "chapter": 6,
+                    "evidence": "その夜、鏡の前の文佳の体で、太志がもう一度名乗った。",
+                    "bodyName": "密倉文佳",
+                    "mindName": "三門太志"
+                  }
+                ],
+                "unrecordedTotal": 3,
+                "failures": 0
+              }
+            },
+            "unreadableFiles": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "missedContradictions": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        134605
+      ],
+      "min": 134605,
+      "max": 134605
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 1/3",
+    "見逃し（拾えなかった仕込み）: 2",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 1",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 134.6秒",
+    "num_ctx: 32768（--num-ctx で指定）",
+    "temperature: extract 0・verify 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 1.8秒"
+  ]
+}
