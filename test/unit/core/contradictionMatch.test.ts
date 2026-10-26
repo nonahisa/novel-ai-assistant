@@ -543,6 +543,10 @@ describe("死亡後の登場", () => {
       for (const word of DEATH_EVENT_EXCLUDED_WORDS) {
         expect(isDeathEventFact(lifeDeath(word)), word).toBe(false);
       }
+      // 打ち消し・未遂は、数える語と重なっても数えない（除く語を先に見ていることの見張り）
+      for (const value of ["死亡していない", "死亡未遂", "死亡ではない", "亡くなっていなかった", "仮死状態で死んだように見えた"]) {
+        expect(isDeathEventFact(lifeDeath(value)), value).toBe(false);
+      }
       for (const value of ["死にかけた", "瀕死の重傷", "死んだふりをした", "死んだと思われた", "生死不明", "生きている", "必死に逃げた"]) {
         expect(isDeathEventFact(lifeDeath(value)), value).toBe(false);
         expect(findPostDeathAppearances([lifeDeath(value), later()]), value).toEqual([]);
