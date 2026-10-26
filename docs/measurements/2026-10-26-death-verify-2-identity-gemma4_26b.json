@@ -1,0 +1,525 @@
+{
+  "measuredAt": "2026-10-26T05:43:55.966Z",
+  "feature": "factContradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "numCtxDecision": {
+    "numCtx": 32768,
+    "source": "--num-ctx で指定"
+  },
+  "temperature": {
+    "extract": 0,
+    "verify": 0
+  },
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "parameterSize": "25.2B",
+    "bundled": {
+      "thinkingSeen": true,
+      "thinkingOffWorks": true,
+      "thinkingMeasuredAt": "2026-09-26",
+      "typoAccuracy": {
+        "hits": 5,
+        "total": 7,
+        "falsePositives": 0,
+        "wrongFixes": 0,
+        "trapHits": 0,
+        "trapTotal": 5,
+        "promptVersion": "1.2",
+        "smallPrompt": false,
+        "sampleVersion": "2",
+        "measuredAt": "2026-09-26T06:31:27+09:00"
+      },
+      "measuredAt": "2026-09-26"
+    },
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 24112,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "givenOptions": {},
+  "modelSize": null,
+  "modelSizeDecision": {
+    "sizeDependent": false,
+    "decided": false,
+    "reason": "この機能は製品がモデルの大きさで頼み方を変えません"
+  },
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.112.6",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.0",
+  "verifyPromptVersion": "1.2:travel1.1|1.2:identity1.0|1.2:death1.1",
+  "plans": [
+    {
+      "chunkId": "本文\\001_前世.txt#1-0@8027",
+      "chars": 130,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_目覚め.txt#2-0@8027",
+      "chars": 162,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_同居.txt#3-0@8027",
+      "chars": 123,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_別人みたい.txt#4-0@8027",
+      "chars": 120,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_台所.txt#5-0@8027",
+      "chars": 82,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\006_名乗り.txt#6-0@8027",
+      "chars": 92,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\c--Users-nonah-Documents-novel-ai-assistant\\b4c377fe-7220-490b-8528-2cd60e4a1156\\scratchpad\\dv2\\id",
+    "targets": [
+      "（作品ぜんたい）"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\c--Users-nonah-Documents-novel-ai-assistant\\b4c377fe-7220-490b-8528-2cd60e4a1156\\scratchpad\\dv2\\id\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 148000,
+      "temperature": {
+        "extract": 0,
+        "verify": 0
+      },
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 3,
+        "seededContradictionsTotal": 3,
+        "missedContradictions": 0,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 3,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 148000
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "状態": {
+            "found": 3,
+            "total": 3
+          }
+        },
+        "missedContradictions": [],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "（作品ぜんたい）",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。 矛盾検知（事実の照合）を終了: 6/6（事実 40件 / 設定資料から 10件 / 候補 3件（状態 3件） / 採用 3件 / 所要時間の表が0組なので移動の照合はしていません（所在の事実 11件・場所に引けた 0件・時計に載った 0件） / 距離を置く場所の記録がありません（設定資料の抽出で場所を作ってください） / 体と心の照合（心と体の記録 2組・訊いたチャンク 6件・場面の読み 9件（捨てた 1件）・本文の遷移 4件・記録の無い組 2件）。本文で別の心が入っている読み（第2話「その晩、文佳の体を動かしていたのは、灯に宿っているはずの千早だった。」（密倉文佳の体に宮下千早の心）、第6話「その夜、鏡の前の文佳の体で、太志がもう一度名乗った。」（密倉文佳の体に三門太志の心））が心と体の記録にありません）",
+            "temperature": {
+              "extract": 0,
+              "verify": 0
+            },
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\002_目覚め.txt",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "filePath": "本文\\002_目覚め.txt",
+                    "line": 11,
+                    "chunkHash": "09f12dda752aba455358aaf9ee781043e702c299",
+                    "excerpt": "その晩、文佳の体を動かしていたのは、灯に宿っているはずの千早だった。",
+                    "category": "状態",
+                    "settingSays": "第2話 1行目・地の文：人格＝三門太志。心と体の記録（作者が人物の編集で付けたもの）では、密倉文佳の体に宿る心は三門太志（第2話から第4話）だけ",
+                    "textSays": "第2話 11行目・地の文：人格＝宮下千早",
+                    "note": "第2話 11行目、密倉文佳の体に〈宮下千早〉の心がいる。心と体の記録に無い組で、本文に心が入る描写も無い（確信度: 高）（判定: 設定では文佳の心は太志のみだが、本文では千早が動かしており、入れ替わりの描写もないため矛盾している。）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              },
+              {
+                "chunkId": "本文\\005_台所.txt",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "filePath": "本文\\005_台所.txt",
+                    "line": 1,
+                    "chunkHash": "3c0f8feb626cb96c1feca2faf76c85e3e2cf8a74",
+                    "excerpt": "朝、台所でハツが味噌汁を作っていた。",
+                    "category": "状態",
+                    "settingSays": "第2話 7行目・地の文：生死＝息を引き取った",
+                    "textSays": "第5話 1行目・地の文：所在＝台所",
+                    "note": "第2話 7行目に死亡の記録がある。第5話 1行目に『所在＝台所』が出てくる（確信度: 高）（判定: 第2話で死亡したハツが、第5話の地の文で生存しているかのように行動しており、幽霊等の説明も存在しないため。）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              },
+              {
+                "chunkId": "本文\\006_名乗り.txt",
+                "chapterLabel": "第6話",
+                "accepted": [
+                  {
+                    "filePath": "本文\\006_名乗り.txt",
+                    "line": 6,
+                    "chunkHash": "7a7fac360c9cf5b4a56f01e6b6f3d217a607d3f6",
+                    "excerpt": "その夜、鏡の前の文佳の体で、太志がもう一度名乗った。",
+                    "category": "状態",
+                    "settingSays": "第4話 3行目・地の文：人格＝三門太志。心と体の記録（作者が人物の編集で付けたもの）では、三門太志の心が密倉文佳の体にいるのは第2話から第4話",
+                    "textSays": "第6話 6行目・地の文：人格＝三門太志",
+                    "note": "第6話 6行目、密倉文佳の体に〈三門太志〉の心がいる。心と体の記録の範囲（第2話から第4話）の外で、本文に心が入る描写も無い（確信度: 高）（判定: 記録では第4話までで終了しており、第6話で再び太志の心が文佳の体にいる描写（入れ替わり等）が本文に存在しないため。）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "pendingProposals": [],
+            "stages": {
+              "chunks": 6,
+              "acceptedFacts": 40,
+              "recordFacts": 10,
+              "rejectedFacts": 0,
+              "rejectionNote": "",
+              "candidates": 3,
+              "candidateNote": "状態 3件",
+              "kept": 3,
+              "verifyNote": "",
+              "travel": {
+                "whereaboutsFacts": 11,
+                "resolved": 0,
+                "clocked": 0,
+                "tablePairs": 0,
+                "aiCues": {
+                  "noLocations": true,
+                  "distanceChunks": 0,
+                  "distancesAccepted": 0,
+                  "distancesRejected": 0,
+                  "distancesDismissed": 0,
+                  "proposedLocations": 0,
+                  "timeCueRequests": 0,
+                  "timeCueSkipped": 0,
+                  "timeCuesApplied": 0,
+                  "timeCuesCut": 0,
+                  "failures": 0
+                }
+              },
+              "identity": {
+                "noDwellings": false,
+                "pairs": 2,
+                "unlinkedDwellings": 0,
+                "chunks": 6,
+                "readings": 9,
+                "unknownReadings": 0,
+                "rejected": 1,
+                "transitions": 4,
+                "reassignedFacts": 0,
+                "excludedFacts": 0,
+                "unrecorded": [
+                  {
+                    "chapter": 2,
+                    "evidence": "その晩、文佳の体を動かしていたのは、灯に宿っているはずの千早だった。",
+                    "bodyName": "密倉文佳",
+                    "mindName": "宮下千早"
+                  },
+                  {
+                    "chapter": 6,
+                    "evidence": "その夜、鏡の前の文佳の体で、太志がもう一度名乗った。",
+                    "bodyName": "密倉文佳",
+                    "mindName": "三門太志"
+                  }
+                ],
+                "unrecordedTotal": 2,
+                "failures": 0,
+                "details": {
+                  "readings": [
+                    {
+                      "chapter": 1,
+                      "line": 1,
+                      "body": "密倉文佳",
+                      "mind": "密倉文佳",
+                      "evidence": "密倉文佳は鏡の前で髪を結んだ。"
+                    },
+                    {
+                      "chapter": 1,
+                      "line": 12,
+                      "body": "早瀬灯",
+                      "mind": "宮下千早",
+                      "evidence": "早瀬灯の体で、千早は窓の外を眺めていた。"
+                    },
+                    {
+                      "chapter": 2,
+                      "line": 1,
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "evidence": "目を覚ますと、文佳の体の中にいたのは太志"
+                    },
+                    {
+                      "chapter": 2,
+                      "line": 11,
+                      "body": "密倉文佳",
+                      "mind": "宮下千早",
+                      "evidence": "その晩、文佳の体を動かしていたのは、灯に"
+                    },
+                    {
+                      "chapter": 3,
+                      "line": 1,
+                      "body": "密倉文佳",
+                      "mind": "密倉文佳",
+                      "evidence": "朝の文佳は、文佳自身の心で目を覚ました。"
+                    },
+                    {
+                      "chapter": 3,
+                      "line": 3,
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "evidence": "昼になると、同じ体で太志が顔を出した。"
+                    },
+                    {
+                      "chapter": 3,
+                      "line": 5,
+                      "body": "密倉文佳",
+                      "mind": "密倉文佳",
+                      "evidence": "夕方には、また文佳が戻ってきた。"
+                    },
+                    {
+                      "chapter": 4,
+                      "line": 3,
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "evidence": "文佳の体の太志は、笑ってごまかした。"
+                    },
+                    {
+                      "chapter": 6,
+                      "line": 6,
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "evidence": "その夜、鏡の前の文佳の体で、太志がもう一"
+                    }
+                  ],
+                  "transitions": [
+                    {
+                      "chapter": 2,
+                      "line": 1,
+                      "kind": "possession",
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "evidence": "目を覚ますと、文佳の体の中にいたのは太志"
+                    },
+                    {
+                      "chapter": 3,
+                      "line": 3,
+                      "kind": "possession",
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "evidence": "昼になると、同じ体で太志が顔を出した。"
+                    },
+                    {
+                      "chapter": 3,
+                      "line": 5,
+                      "kind": "switch",
+                      "body": "密倉文佳",
+                      "mind": "密倉文佳",
+                      "evidence": "夕方には、また文佳が戻ってきた。"
+                    },
+                    {
+                      "chapter": 5,
+                      "line": 6,
+                      "kind": "ghost",
+                      "body": null,
+                      "mind": "宮下千早",
+                      "evidence": "その夜、千早の幽霊が、灯の枕元に現れた。"
+                    }
+                  ],
+                  "rejectedByReason": {
+                    "no_transition_word": 1
+                  },
+                  "scenes": [
+                    {
+                      "chapter": 2,
+                      "line": 1,
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "verdict": "in_range"
+                    },
+                    {
+                      "chapter": 2,
+                      "line": 11,
+                      "body": "密倉文佳",
+                      "mind": "宮下千早",
+                      "verdict": "flagged"
+                    },
+                    {
+                      "chapter": 3,
+                      "line": 3,
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "verdict": "in_range"
+                    },
+                    {
+                      "chapter": 4,
+                      "line": 3,
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "verdict": "in_range"
+                    },
+                    {
+                      "chapter": 6,
+                      "line": 6,
+                      "body": "密倉文佳",
+                      "mind": "三門太志",
+                      "verdict": "flagged"
+                    },
+                    {
+                      "chapter": 1,
+                      "line": 12,
+                      "body": "早瀬灯",
+                      "mind": "宮下千早",
+                      "verdict": "in_range"
+                    }
+                  ],
+                  "mindFacts": []
+                }
+              },
+              "death": {
+                "deaths": 3,
+                "deathSubjects": [
+                  "三門太志",
+                  "密倉ハツ",
+                  "宮下千早"
+                ],
+                "revivedSubjects": [
+                  "三門太志",
+                  "宮下千早"
+                ],
+                "postDeathFacts": 2,
+                "postDeathThoughts": 0,
+                "candidates": 1,
+                "deathLikeFacts": {},
+                "unlinkedSubjects": [
+                  "真央"
+                ],
+                "unlinkedTotal": 1
+              }
+            },
+            "unreadableFiles": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "missedContradictions": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        148000
+      ],
+      "min": 148000,
+      "max": 148000
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 3/3",
+    "見逃し（拾えなかった仕込み）: 0",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 3",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 148.0秒",
+    "num_ctx: 32768（--num-ctx で指定）",
+    "temperature: extract 0・verify 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 24.1秒"
+  ]
+}
