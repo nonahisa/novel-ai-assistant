@@ -236,7 +236,14 @@ export interface RejectedProofreadIssue {
      * 修正案だけ空にして残すと、作者には「ひらがなにできます」とだけ出て、
      * どこの何をひらくのか分からない
      */
-    | "opens_no_kanji";
+    | "opens_no_kanji"
+    /**
+     * 「漢字ひらき」の札だが、**作品が文語調**（`looksArchaicText`）である
+     * （プロンプト設計書 P-10、2026-10-26 の測定）。文語の文では漢字表記が
+     * 正しい。プロンプトと文体メモで止めていたが、gemma4:e4b・26b とも
+     * 文語の台で漢字ひらきを出し、検算を通っていた
+     */
+    | "archaic_work";
 }
 
 const LEVELS = new Set(["high", "medium", "low"]);
@@ -1811,7 +1818,13 @@ export function validateProofreadIssues(
    * 人物の資料が読めない作品では渡さない（今までどおり、一人称の語が
    * 数えられる場面でしか視点の札を出さない）
    */
-  narrator: ViewpointNarrator | null = null
+  narrator: ViewpointNarrator | null = null,
+  /**
+   * 作品が文語調か。**文体メモと同じ判定**（`collectWorkStyle` の `archaic`）を
+   * 作品全体の本文で取って渡す。チャンク1つでは短くて判定できないので、
+   * ここで本文から数え直さない。渡さなければ今までどおり（口語として扱う）
+   */
+  archaicWork = false
 ): {
   accepted: AcceptedProofreadIssue[];
   rejected: RejectedProofreadIssue[];
@@ -1892,6 +1905,17 @@ export function validateProofreadIssues(
     // こちらの都合で分類し直す意味は無い
     if (isKeptWord(original, keepWords)) {
       rejected.push({ raw: item, reason: "kept_word" });
+      continue;
+    }
+    // **文語調の作品では、漢字ひらきを札ごと出さない**（プロンプト設計書 P-10）。
+    // 文語の文では「然し」「所謂」「恐らく」の漢字表記が正しい。頼み方
+    // （プロンプトの禁止と文体メモ）では e4b も 26b も守らなかった
+    // （2026-10-26 の測定）ので、検算で守らせる。
+    // **ひらく語の一覧（`suggestsOpeningKanji`）で絞らない。** 一覧に載るのは
+    // 当て字が中心で、測定で通った5語のうち載っていたのは「殆ど」だけだった。
+    // 難読の漢字も、文語の文では漢字のままが正しいことに変わりはない
+    if (reason === "漢字ひらき" && archaicWork) {
+      rejected.push({ raw: item, reason: "archaic_work" });
       continue;
     }
     // **「長文」だけは数で決まるので、確かめられる。**
