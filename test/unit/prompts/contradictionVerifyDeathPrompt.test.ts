@@ -43,7 +43,7 @@ const S5 = {
   death: { reading: READING, deathContext: DEATH_CONTEXT },
 };
 
-describe("死亡後の登場の文面（death 1.0）", () => {
+describe("死亡後の登場の文面（death 1.1）", () => {
   const prompt = buildContradictionVerifyPrompt(S5);
 
   it("出どころ・問い・コードの読み・死亡の箇所の前後を渡す", () => {
@@ -59,6 +59,20 @@ describe("死亡後の登場の文面（death 1.0）", () => {
     // ほかの照合の文面は混ぜない
     expect(prompt).not.toContain(VERIFY_TRAVEL_SOURCE_NOTE);
     expect(prompt).not.toContain(VERIFY_IDENTITY_SOURCE_NOTE);
+  });
+
+  /*
+    death 1.1：e4b は仕込み②（第5話のハツ）を「指摘の根拠となる「幽霊」の描写（第5話6行目）が
+    あるため」と「作中の変化」で取り下げた。第5話6行目の幽霊は別の人物（千早）のもの
+    （docs/measurements/2026-10-26-death-verify.md）
+  */
+  it("幽霊・回想の描写が指摘された人物自身のものかを確かめさせる（別の人物の描写は理由にならない）", () => {
+    expect(VERIFY_DEATH_KEEP_SENTENCES.some((s) => s.includes("指摘された人物自身"))).toBe(true);
+    expect(VERIFY_DEATH_KEEP_SENTENCES.some((s) => s.includes("別の人物の描写"))).toBe(true);
+    expect(prompt).toContain("指摘された人物自身");
+    expect(prompt).toContain("別の人物の描写は、両立の理由になりません。");
+    // 「作中の変化」の説明も、その人物自身の描写に限る
+    expect(prompt).toContain("本文に、その人物自身の幽霊・転生・憑依・生き返り");
   });
 
   it("死亡の箇所の前後が無ければ、その欄を出さない", () => {
@@ -110,10 +124,11 @@ describe("死亡後の登場の文面（death 1.0）", () => {
 });
 
 describe("死亡後の登場の候補の振り分けと控えの鍵", () => {
-  it("origin が death の候補だけ death の文面と版（1.2:death1.0）", () => {
-    expect(CONTRADICTION_VERIFY_DEATH_VERSION).toBe("1.0");
+  it("origin が death の候補だけ death の文面と版（1.2:death1.1）", () => {
+    // 1.1：幽霊・回想の描写が指摘された人物自身のものかを確かめる文を足した（2026-10-26）
+    expect(CONTRADICTION_VERIFY_DEATH_VERSION).toBe("1.1");
     expect(factVerifySourceOf({ origin: "death" })).toBe("death");
-    expect(factVerifyPromptVersion("death")).toBe(`${CONTRADICTION_VERIFY_VERSION}:death1.0`);
+    expect(factVerifyPromptVersion("death")).toBe(`${CONTRADICTION_VERIFY_VERSION}:death1.1`);
     // 本命・体と心の版は変えない
     expect(factVerifyPromptVersion("settled")).toBe(CONTRADICTION_VERIFY_VERSION);
     expect(factVerifyPromptVersion("identity")).toBe(`${CONTRADICTION_VERIFY_VERSION}:identity1.0`);

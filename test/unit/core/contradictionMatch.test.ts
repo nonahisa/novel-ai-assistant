@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildAttributeIntervals } from "../../../src/core/attributeIntervals";
 import {
+  DEATH_EVENT_EXCLUDED_WORDS,
+  DEATH_EVENT_VALUE_WORDS,
+  isDeathEventFact,
   filterAllowed,
   findContradictionCandidates,
   findIntervalConflicts,
@@ -502,6 +505,64 @@ describe("死亡後の登場", () => {
       expect(stats.deathLikeFacts).toEqual({ "生死（state）": 1, "死亡（state）": 1 });
       expect(stats.unlinkedSubjects).toEqual(["祖母"]);
       expect(stats.unlinkedTotal).toBe(1);
+    });
+  });
+
+  /*
+    gemma4:26b は P-37 で死を項目「生死」・種類 event で返した（stages.death の
+    deathLikeFacts に「生死（event）」3件、deaths 0。2026-10-26 death-verify の実測）。
+    出来事として死を書いているので、値が死亡を表すなら死亡の事実として数える
+  */
+  describe("「生死」などの項目の出来事（event）で書かれた死", () => {
+    const lifeDeath = (value: string, subject = "char_009") =>
+      fact({ id: "g1", subject, chapter: 2, kind: "event", predicate: "生死", value, storyTime: { day: 3, part: "夕" } });
+    const later = (subject = "char_009") =>
+      fact({ id: "a1", subject, chapter: 5, kind: "event", predicate: "行動", value: "味噌汁を作っていた", storyTime: { day: 9, part: "朝" } });
+
+    it("値が死亡を表せば、死亡の事実として候補にし、内訳でも死亡に数える", () => {
+      const facts = [lifeDeath("死亡"), later()];
+      expect(findPostDeathAppearances(facts)).toHaveLength(1);
+      const stats = postDeathStageStats({ facts });
+      expect(stats.deaths).toBe(1);
+      expect(stats.deathSubjects).toEqual(["char_009"]);
+      expect(stats.candidates).toBe(1);
+      // 死亡に数えたものは「数えなかった死の事実」に重ねて出さない
+      expect(stats.deathLikeFacts).toEqual({});
+    });
+
+    it("数える語は、どれも死亡の事実になる", () => {
+      for (const word of DEATH_EVENT_VALUE_WORDS) {
+        expect(isDeathEventFact(lifeDeath(word)), word).toBe(true);
+      }
+      for (const value of ["死んだ", "亡くなった", "息を引き取った"]) {
+        expect(isDeathEventFact(lifeDeath(value)), value).toBe(true);
+      }
+    });
+
+    it("除く語を含む値は数えない（「死んだふり」は「死んだ」を含む）", () => {
+      for (const word of DEATH_EVENT_EXCLUDED_WORDS) {
+        expect(isDeathEventFact(lifeDeath(word)), word).toBe(false);
+      }
+      // 打ち消し・未遂は、数える語と重なっても数えない（除く語を先に見ていることの見張り）
+      for (const value of ["死亡していない", "死亡未遂", "死亡ではない", "亡くなっていなかった", "仮死状態で死んだように見えた"]) {
+        expect(isDeathEventFact(lifeDeath(value)), value).toBe(false);
+      }
+      for (const value of ["死にかけた", "瀕死の重傷", "死んだふりをした", "死んだと思われた", "生死不明", "生きている", "必死に逃げた"]) {
+        expect(isDeathEventFact(lifeDeath(value)), value).toBe(false);
+        expect(findPostDeathAppearances([lifeDeath(value), later()]), value).toEqual([]);
+      }
+    });
+
+    it("種類が state のときは、いままでどおり数えない", () => {
+      const state = fact({ id: "g1", subject: "char_009", chapter: 2, kind: "state", predicate: "生死", value: "死亡" });
+      expect(isDeathEventFact(state)).toBe(false);
+      expect(findPostDeathAppearances([state, later()])).toEqual([]);
+    });
+
+    it("人物に結べない主語は数えない", () => {
+      const facts = [lifeDeath("死亡", "祖母"), later("祖母")];
+      expect(findPostDeathAppearances(facts)).toEqual([]);
+      expect(postDeathStageStats({ facts }).deaths).toBe(0);
     });
   });
 });
