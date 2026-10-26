@@ -122,7 +122,13 @@ export const CONTRADICTION_VERIFY_IDENTITY_VERSION = "1.0";
 // 「そもそも食い違っていない」で取り下げた（docs/measurements/2026-10-26-identity-cues-2.md）。
 // **本命・future・travel・identity の文面は1文字も変えていない**ので、その版は据え置き、
 // 死亡後の登場の控えの鍵だけにこの版と `death` の印を付ける（`factVerifyPromptVersion`）
-export const CONTRADICTION_VERIFY_DEATH_VERSION = "1.0";
+//
+// death 1.1（2026-10-26、death 1.0 の実測）：e4b は仕込み②を「指摘の根拠となる「幽霊」の描写
+// （第5話6行目）があるため」と「作中の変化」で取り下げた。第5話6行目の幽霊は**別の人物（千早）**の
+// もの。「残せ」の文に「幽霊・回想などの描写は、指摘された人物自身のものかを確かめる。別の人物の
+// 描写は両立の理由にならない」を足し、「作中の変化」の説明を「その人物自身の」描写に限った
+// （docs/measurements/2026-10-26-death-verify.md）。ほかの文面は変えていない
+export const CONTRADICTION_VERIFY_DEATH_VERSION = "1.1";
 
 /**
  * 送るときの温度。指摘が本当に矛盾かを確かめるだけなので揺らさない。
@@ -600,6 +606,8 @@ export const VERIFY_DEATH_SOURCE_NOTE =
 export const VERIFY_DEATH_KEEP_SENTENCES: readonly string[] = [
   "死亡の記述がその時点の出来事を書いたものであること自体は、この指摘の前提であって、両立の理由になりません。",
   "死んだあとにその人物が地の文で行動していて、それを説明する描写が本文に無いなら、同時に成り立ちません。",
+  // death 1.1：e4b は、同じ話の別の人物（千早）の幽霊の描写を理由に取り下げた
+  "幽霊・回想などの描写は、指摘された人物自身のものかを確かめてください。別の人物の描写は、両立の理由になりません。",
 ];
 
 /** 死亡後の登場で問うことの説明（death 1.0） */
@@ -607,13 +615,14 @@ const VERIFY_DEATH_QUESTION =
   "問うのは、死亡のあとに、地の文でその人物が行動していることが両立するかです。" +
   VERIFY_DEATH_KEEP_SENTENCES[0] +
   "本文に、幽霊・回想・夢・転生・憑依・噂・誤報（実は生きていた）などの描写があれば両立します。" +
+  VERIFY_DEATH_KEEP_SENTENCES[2] +
   VERIFY_DEATH_KEEP_SENTENCES[1];
 
 /**
  * 死亡後の登場の「作中の変化」の説明（death 1.0）。1.2 の説明（「人物の身の上が先へ進むのは
  * 矛盾ではありません」）は、死んだ人が出てくることまで身の上の変化と読ませうる
  */
-const DEATH_CHANGE_TEXT = `**作中の変化** … 本文に、幽霊・転生・憑依・生き返り・実は生きていた（誤報）などの描写が書かれている場合だけ。
+const DEATH_CHANGE_TEXT = `**作中の変化** … 本文に、その人物自身の幽霊・転生・憑依・生き返り・実は生きていた（誤報）などの描写が書かれている場合だけ。
    死んだあとに出てくることだけでは、これに当たりません。`;
 
 /**

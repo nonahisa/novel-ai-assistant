@@ -394,7 +394,7 @@ export function factVerifyPromptVersion(
   if (source === "identity") {
     return `${CONTRADICTION_VERIFY_VERSION}:identity${CONTRADICTION_VERIFY_IDENTITY_VERSION}`;
   }
-  // 死亡後の登場の候補は death の版と印（`1.2:death1.0`）。本命の控えは作り直さない
+  // 死亡後の登場の候補は death の版と印（`1.2:death1.1`）。本命の控えは作り直さない
   if (source === "death") {
     return `${CONTRADICTION_VERIFY_VERSION}:death${CONTRADICTION_VERIFY_DEATH_VERSION}`;
   }

@@ -476,11 +476,70 @@ export function findPostDeathAppearances(
   return candidates;
 }
 
+/**
+ * 「生死」などの項目の出来事で、値に含まれていれば死亡と読む語。
+ * gemma4:26b は P-37 で死を項目「生死」・種類 event で返し、照合に乗らなかった
+ * （2026-10-26 death-verify の実測。deathLikeFacts に「生死（event）」3件、deaths 0）
+ */
+export const DEATH_EVENT_VALUE_WORDS: readonly string[] = [
+  "死亡",
+  "死んだ",
+  "死んで",
+  "死去",
+  "逝去",
+  "他界",
+  "亡くなっ",
+  "亡くなる",
+  "息を引き取",
+];
+
+/**
+ * 値に含まれていれば、死亡の語があっても死亡と読まない語。**数える語より先に見る**
+ * （「死んだふり」「死んだと思われた」は「死んだ」を含む）。死んでいない／死んだか
+ * 分からないものを死亡に数えると、生きている人物の登場を全部指摘してしまう
+ */
+export const DEATH_EVENT_EXCLUDED_WORDS: readonly string[] = [
+  "死にかけ",
+  "瀕死",
+  "仮死",
+  "死んだふり",
+  "死んだと思われ",
+  "死んだはず",
+  "未遂",
+  "ていない",
+  "ではない",
+  "なかった",
+];
+
+/** 値が死を書いていれば死亡の出来事と読む項目名（`isDeathLike` と同じ顔ぶれ） */
+const LIFE_STATE_PREDICATES = new Set(["生死", "安否", "状態"]);
+
+/** 人物の id の形（対応表に無い人物は本文の表記のまま通る。storyFactValidation の resolveActor） */
+const CHARACTER_ID = /^char_\d+$/u;
+
+/**
+ * 死亡の出来事として数える事実か。照合器（`firstDeaths`）と内訳（`postDeathStageStats`）が
+ * 同じ判定を使う——別に書くと、数えたものが「数えなかった死の事実」にも出てずれる。
+ *
+ * - 項目「死亡」の出来事は、いままでどおり数える（主語も問わない）
+ * - 項目「生死」「安否」「状態」の出来事は、値が死亡を表し、主語が人物に結べたときだけ数える。
+ *   結べない主語（「祖母」のような本文の表記）は、ほかの事実とも結べないので数えない
+ * - 種類が state のものは数えない（いままでどおり。内訳の deathLikeFacts にだけ出る）
+ */
+export function isDeathEventFact(fact: StoryFact): boolean {
+  if (fact.kind !== "event") return false;
+  if (fact.predicate === DEATH) return true;
+  if (!LIFE_STATE_PREDICATES.has(fact.predicate)) return false;
+  if (!CHARACTER_ID.test(fact.subject)) return false;
+  if (DEATH_EVENT_EXCLUDED_WORDS.some((word) => fact.value.includes(word))) return false;
+  return DEATH_EVENT_VALUE_WORDS.some((word) => fact.value.includes(word));
+}
+
 /** 人物ごとの最初の死亡の出来事（本文の順に並べた事実から） */
 function firstDeaths(ordered: readonly StoryFact[]): Map<string, StoryFact> {
   const deaths = new Map<string, StoryFact>();
   for (const fact of ordered) {
-    if (fact.kind !== "event" || fact.predicate !== DEATH) continue;
+    if (!isDeathEventFact(fact)) continue;
     if (!deaths.has(fact.subject)) deaths.set(fact.subject, fact);
   }
   return deaths;
@@ -529,7 +588,7 @@ function isAfterDeath(death: StoryFact, fact: StoryFact): boolean {
 
 /** 死亡の突き合わせの内訳（MCP の `stages.death`）。人物は名前で出す */
 export interface DeathStageStats {
-  /** 「死亡」の出来事（event）の事実の件数 */
+  /** 死亡の出来事（event）の事実の件数（`isDeathEventFact`。「生死＝死亡」の出来事も含む） */
   deaths: number;
   /** 死亡の出来事がある人物（本文の順） */
   deathSubjects: string[];
@@ -544,7 +603,8 @@ export interface DeathStageStats {
   /**
    * 死を書いているのに「死亡」の出来事として数えなかった事実（「項目名（種類）」ごとの件数）。
    * P-37 は「生死」を state の例に挙げるので、死を state で返すと照合に乗らない。
-   * **照合は変えずに数だけ出す**——実際にそう返したかは、まだ実測で確かめていない
+   * state は**照合を変えずに数だけ出す**。event の「生死」などで値が死亡を表すものは、
+   * 26b の実測（2026-10-26）を受けて死亡に数えるようにした（`isDeathEventFact`）ので、ここには出ない
    */
   deathLikeFacts: Record<string, number>;
   /** 人物の id に結べなかった主語（本文の表記のまま。先頭の数件） */
@@ -558,8 +618,10 @@ const UNLINKED_SUBJECTS_SHOWN = 10;
 
 /** 「死亡」の出来事でなくても、項目名だけで死を書いていると読めるもの */
 const DEATH_PREDICATES = new Set(["死亡", "死去", "死"]);
-/** 値が死を書いていれば死と読む項目名（「生死＝生きている」は数えない） */
-const LIFE_STATE_PREDICATES = new Set(["生死", "安否", "状態"]);
+/**
+ * 値が死を書いていれば死と読む（「生死＝生きている」は数えない）。内訳に出すための粗い網で、
+ * 照合には使わない（「必死」「生死不明」も拾う）。照合は `isDeathEventFact` の語の表
+ */
 const DEATH_LIKE_VALUE = /死|亡くな|息を引き取|他界|逝/u;
 
 function isDeathLike(fact: StoryFact): boolean {
@@ -593,14 +655,13 @@ export function postDeathStageStats(
   const unlinked: string[] = [];
   let deathEvents = 0;
   for (const fact of ordered) {
-    const isDeathEvent = fact.kind === "event" && fact.predicate === DEATH;
-    if (isDeathEvent) deathEvents += 1;
+    if (isDeathEventFact(fact)) deathEvents += 1;
     else if (isDeathLike(fact)) {
       const key = `${fact.predicate}（${fact.kind}）`;
       deathLikeFacts[key] = (deathLikeFacts[key] ?? 0) + 1;
     }
     // 対応表に無い人物は本文の表記のまま通る（storyFactValidation の resolveActor）
-    if (!/^char_\d+$/u.test(fact.subject) && !unlinked.includes(fact.subject)) {
+    if (!CHARACTER_ID.test(fact.subject) && !unlinked.includes(fact.subject)) {
       unlinked.push(fact.subject);
     }
     const death = deaths.get(fact.subject);
