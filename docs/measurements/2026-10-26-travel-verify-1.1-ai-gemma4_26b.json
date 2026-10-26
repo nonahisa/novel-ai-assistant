@@ -1,0 +1,336 @@
+{
+  "measuredAt": "2026-10-26T01:27:29.522Z",
+  "feature": "factContradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "numCtxDecision": {
+    "numCtx": 32768,
+    "source": "既定（2段めのプロンプトの長さが分からないので決めませんでした）"
+  },
+  "temperature": {
+    "extract": 0,
+    "verify": 0
+  },
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "parameterSize": "25.2B",
+    "bundled": {
+      "thinkingSeen": true,
+      "thinkingOffWorks": true,
+      "thinkingMeasuredAt": "2026-09-26",
+      "typoAccuracy": {
+        "hits": 5,
+        "total": 7,
+        "falsePositives": 0,
+        "wrongFixes": 0,
+        "trapHits": 0,
+        "trapTotal": 5,
+        "promptVersion": "1.2",
+        "smallPrompt": false,
+        "sampleVersion": "2",
+        "measuredAt": "2026-09-26T06:31:27+09:00"
+      },
+      "measuredAt": "2026-09-26"
+    },
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 20053,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "givenOptions": {},
+  "modelSize": null,
+  "modelSizeDecision": {
+    "sizeDependent": false,
+    "decided": false,
+    "reason": "この機能は製品がモデルの大きさで頼み方を変えません"
+  },
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.112.3",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.0",
+  "verifyPromptVersion": "1.2:travel1.1",
+  "plans": [
+    {
+      "chunkId": "本文\\001_馬で三日.txt#1-0@8027",
+      "chars": 166,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_二日目の砦.txt#2-0@8027",
+      "chars": 151,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_城門へ帰る.txt#3-0@8027",
+      "chars": 78,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_港町の宿.txt#4-0@8027",
+      "chars": 119,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_港へ下りる.txt#5-0@8027",
+      "chars": 50,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\006_灯台の下.txt#6-0@8027",
+      "chars": 92,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\b4c377fe-7220-490b-8528-2cd60e4a1156\\scratchpad\\w2\\ai",
+    "targets": [
+      "（作品ぜんたい）"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\b4c377fe-7220-490b-8528-2cd60e4a1156\\scratchpad\\w2\\ai\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 129308,
+      "temperature": {
+        "extract": 0,
+        "verify": 0
+      },
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 2,
+        "seededContradictionsTotal": 3,
+        "missedContradictions": 1,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 2,
+        "rejected": 1,
+        "rejected.そもそも食い違っていない": 1,
+        "failures": 0,
+        "elapsedMs": 129308
+      },
+      "detail": {
+        "rejectedReasons": {
+          "そもそも食い違っていない": 1
+        },
+        "failures": [],
+        "seededContradictions": {
+          "時系列": {
+            "found": 2,
+            "total": 3
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/003_城門へ帰る.txt",
+            "kind": "時系列",
+            "where": "ゴドーが王都の城門に着いたのは、翌朝のことだった"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "（作品ぜんたい）",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。 矛盾検知（事実の照合）を終了: 6/6（事実 36件 / 設定資料から 6件 / 候補 3件（時系列 2件、状態 1件） / 採用 2件 / 検証で 1件を取り下げ（そもそも食い違っていない 1件） / 移動の照合（所在の事実 9件・場所に引けた 5件・時計に載った 5件・所要時間の表 3組） / AIの手がかり（本文の距離 3件・設定資料へ提案 2か所（承認待ち）・場面の頭の時の手がかり 2/7件（分からないとした 4件）））",
+            "temperature": {
+              "extract": 0,
+              "verify": 0
+            },
+            "model": "gemma4:26b",
+            "results": [
+              {
+                "chunkId": "本文\\001_馬で三日.txt",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "filePath": "本文\\001_馬で三日.txt",
+                    "line": 8,
+                    "chunkHash": "9ef4b414da4b2a370c2c5964ab56963f20c91a81",
+                    "excerpt": "翌日、エドは港町に着いた。",
+                    "category": "時系列",
+                    "settingSays": "第1話 1行目・地の文：所在＝王都。承認待ちの距離（本文「王都から港町までは、馬で三日の道のりだ。」からAIが読んだもの。設定資料にはまだ入っていません）では、王都と港町のあいだは3日かかる",
+                    "textSays": "第1話 8行目・地の文・1日目：移動＝港町に着いた",
+                    "note": "第1話 1行目に『王都』、1日目に『港町』。3日かかる道のりを、長く見積もっても1日で移っている（確信度: 高）（判定: 王都から港町まで馬で3日かかる設定に対し、翌日に到着しており、移動手段の補足もないため矛盾している。）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              },
+              {
+                "chunkId": "本文\\002_二日目の砦.txt",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "filePath": "本文\\002_二日目の砦.txt",
+                    "line": 7,
+                    "chunkHash": "436b16cba001853b7c1d07f99b8dfd3966b6ecca",
+                    "excerpt": "王都を出て二日目の夕方、リナは北の砦に着いた。",
+                    "category": "時系列",
+                    "settingSays": "第2話 1行目・地の文：所在＝王都。承認待ちの距離（本文「王都から北の砦までは、馬で三日かかる。」からAIが読んだもの。設定資料にはまだ入っていません）では、王都と北の砦のあいだは3日かかる",
+                    "textSays": "第2話 7行目・地の文：所在＝北の砦",
+                    "note": "第2話 1行目に『王都』、第2話 7行目に『北の砦』。3日かかる道のりを、長く見積もっても2日で移っている（確信度: 高）（判定: 馬で3日かかる道のりを、二日目の夕方に到着しており矛盾している。）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "リナは王都にいた。城門の詰所で、通行証を一枚ずつ確かめている。",
+                    "explanation": "騎士が城門の警備（詰所での通行証確認）を行うことは矛盾せず、役割の範囲内として両立するため。"
+                  }
+                ]
+              }
+            ],
+            "failures": [],
+            "pendingProposals": [
+              ".aiwriter/pending-settings/loc_0001.json",
+              ".aiwriter/pending-settings/loc_0002.json"
+            ],
+            "stages": {
+              "chunks": 6,
+              "acceptedFacts": 36,
+              "recordFacts": 6,
+              "rejectedFacts": 0,
+              "rejectionNote": "",
+              "candidates": 3,
+              "candidateNote": "時系列 2件、状態 1件",
+              "kept": 2,
+              "verifyNote": "検証で 1件を取り下げ（そもそも食い違っていない 1件）",
+              "travel": {
+                "whereaboutsFacts": 9,
+                "resolved": 5,
+                "clocked": 5,
+                "tablePairs": 3,
+                "aiCues": {
+                  "noLocations": false,
+                  "distanceChunks": 5,
+                  "distancesAccepted": 3,
+                  "distancesRejected": 0,
+                  "distancesDismissed": 0,
+                  "proposedLocations": 2,
+                  "timeCueRequests": 7,
+                  "timeCueSkipped": 0,
+                  "timeCuesApplied": 2,
+                  "timeCuesCut": 4,
+                  "failures": 0
+                }
+              }
+            },
+            "unreadableFiles": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "missedContradictions": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.そもそも食い違っていない": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        129308
+      ],
+      "min": 129308,
+      "max": 129308
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 2/3",
+    "見逃し（拾えなかった仕込み）: 1",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 2",
+    "落とした（検算で弾いたもの）: 1",
+    "　└ 落とした理由：そもそも食い違っていない: 1",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 129.3秒",
+    "num_ctx: 32768（既定（2段めのプロンプトの長さが分からないので決めませんでした））",
+    "temperature: extract 0・verify 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 20.1秒"
+  ]
+}
