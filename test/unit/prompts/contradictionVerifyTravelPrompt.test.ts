@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { parseVerifyOutcome } from "../../../src/core/contradictionVerifyValidation";
 import {
   buildContradictionVerifyPrompt,
+  CONTRADICTION_VERIFY_TRAVEL_VERSION,
+  VERIFY_TRAVEL_PENDING_SENTENCE,
   VERIFY_REJECT_REASONS,
   VERIFY_SPEECH_NOTE,
   VERIFY_TRAVEL_KEEP_SENTENCES,
@@ -90,6 +92,50 @@ describe("移動の照合の文面（travel 1.0）", () => {
     for (const text of [VERIFY_TRAVEL_SOURCE_NOTE, ...VERIFY_TRAVEL_KEEP_SENTENCES]) {
       for (const reason of VERIFY_REJECT_REASONS) expect(text).not.toContain(reason);
     }
+  });
+});
+
+/**
+ * travel 1.1（作者の裁定 2026-10-26「1文足して測り直す」）：e4b が、承認待ちの距離を
+ * 根拠にした候補を「所要時間は設定資料にない情報であり、本文の記述を優先すべき」
+ * （設定が古い）で取り下げた（docs/measurements/2026-10-26-travel-ai-cues.md）。
+ * 承認待ちの距離も根拠として扱うと、移動の照合の文面にだけ1文足す
+ */
+describe("承認待ちの距離の扱い（travel 1.1）", () => {
+  it("版は 1.1", () => {
+    expect(CONTRADICTION_VERIFY_TRAVEL_VERSION).toBe("1.1");
+  });
+
+  it("移動の照合の文面に、承認待ちの距離も根拠として扱う1文を置く", () => {
+    const prompt = buildContradictionVerifyPrompt(T6);
+    expect(prompt).toContain(VERIFY_TRAVEL_PENDING_SENTENCE);
+    // 写して却下してきたら判断できなかったものとして通す見張り（下の読み取り）に入れる
+    expect(VERIFY_TRAVEL_KEEP_SENTENCES).toContain(VERIFY_TRAVEL_PENDING_SENTENCE);
+  });
+
+  it("本命（settled）と future の文面には出さない", () => {
+    const { travel: _travel, ...rest } = T6;
+    for (const source of ["settled", "future"] as const) {
+      expect(buildContradictionVerifyPrompt({ ...rest, source })).not.toContain(
+        VERIFY_TRAVEL_PENDING_SENTENCE
+      );
+    }
+  });
+
+  /**
+   * 指示の言葉は答えに返ってくる（CLAUDE.md「繰り返し起きた失敗」3番）。e4b の却下の
+   * 説明の型に、この1文をそのまま足して返してきたら、却下として受け取らない
+   */
+  it("この1文を写したまま「設定が古い」で却下してきたら、判断できなかったものとして通す", () => {
+    const outcome = parseVerifyOutcome(
+      JSON.stringify({
+        verdict: "却下",
+        reason: "設定が古い",
+        explanation: `${VERIFY_TRAVEL_PENDING_SENTENCE}所要時間は設定資料にない情報であり、本文の記述を優先すべき。`,
+        confidence: "high",
+      })
+    );
+    expect(outcome).toMatchObject({ keep: true, undecided: true });
   });
 });
 
