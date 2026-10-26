@@ -66,7 +66,7 @@ CLAUDE.md から移した手順書（2026-09-17）。文章は移す前のまま
 
 yomiyasu は外部の MIT のスキル（https://github.com/nanaism/yomiyasu）。**2026-10-25 からプラグインとして入れている**（作者の依頼「マーケットプレースからインストールすると自動的にバージョンアップできる」）。`~/.claude/settings.json` の `extraKnownMarketplaces.yomiyasu.autoUpdate: true` で自動更新。名前は `yomiyasu:yomiyasu`（`yomiyasu` だけだと Unknown skill）。前はリポジトリの `.claude/skills/yomiyasu` に写して持っていた（v2.2.2）が、更新のたびに写し直す手間をなくすため外した。
 
-- 当てるのは**外の読み手が読む説明文だけ**（作者の裁定、2026-10-04「マーケットプレースやGithubの説明文のみで考えています」。2026-10-15 に CHANGELOG を加えた）：`README.md`、`package.json` の `description`、GitHub のリポジトリの説明、GitHub Release のノート、`CHANGELOG.md` の新しい版の項目、Discord サーバーに貼る文章（ボットのリポジトリの `content/server-texts.md`。作者の指示 2026-10-23）
+- 当てるのは**外の読み手が読む説明文だけ**（作者の裁定、2026-10-04「マーケットプレースやGithubの説明文のみで考えています」。2026-10-15 に CHANGELOG を加えた）：`README.md`、`package.json` の `description`、GitHub のリポジトリの説明、GitHub Release のノート、`CHANGELOG.md` の新しい版の項目、Discord サーバーに貼る文章（ボットのリポジトリの `content/server-texts.md`。作者の指示 2026-10-23）、**共通設計書**（`docs/共通設計書.md`）と **Android の詳細設計書**（作者の裁定 2026-10-27「共通設計書にも当てる」。拡張機能の設計書・プロンプト設計書には今までどおり当てない）
 - **当てないもの**：作者への返事・報告、設計書・引継ぎ書、画面の文言、プロンプト、コード内のコメント、小説の本文
 - README の決まり（やり方とできることだけを書く。理由・経緯は書かない。キャッチコピーと「テスト中」は残す）が先に立つ。CHANGELOG も、何が変わったか・どう使うかだけを書く
 - 検査のスクリプトは Python 3 が要る（2026-10-25 に作者の指示で Python 3.14 を入れた。本体は `%LOCALAPPDATA%\Programs\Python\Python314\python.exe`。入れる前から開いていたシェルでは `python` がストア版の入口のままなので、この道を直に書く）。PowerShell からは `$env:PYTHONIOENCODING = "utf-8"` を先に置く
