@@ -167,6 +167,8 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.checkContradictions": { class: "A", label: "矛盾検知" },
   "novelai.checkFactContradictions": { class: "A", label: "矛盾検知（事実の照合）", via: "run.request feature: factContradiction" },
   "novelai.checkLocationConsistency": { class: "A", label: "位置関係の照合" },
+  // 見送りを取り消すのは作者の判断（母艦の指示 2026-10-26「拡張機能だけでよい」）
+  "novelai.restoreDismissedTravelDistances": { class: "C4", label: "見送った距離の提案を戻す", reason: "作者の判断" },
   "novelai.checkDeviations": { class: "A", label: "プロット逸脱検知" },
   "novelai.checkForeshadows": { class: "A", label: "伏線検知" },
   "novelai.checkForeshadowResolution": { class: "A", label: "伏線回収確認" },

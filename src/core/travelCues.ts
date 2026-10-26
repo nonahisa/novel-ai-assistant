@@ -467,6 +467,19 @@ export function travelDistanceDismissKeysOf(record: Pick<Location, "id" | "relat
   return keys;
 }
 
+/**
+ * 鍵を、画面に並べる形へ戻す（「見送った距離を戻す」）。2か所は id のままなので、
+ * 名前は呼ぶ側が場所の記録から引く。値は比べるためにそろえた形（空白を詰めたもの）。
+ * 形の崩れた鍵は undefined
+ */
+export function parseTravelDistanceDismissKey(
+  key: string
+): { aId: string; bId: string; value: string } | undefined {
+  const parts = key.split("\u0000");
+  if (parts.length !== 3 || parts.some((part) => !part)) return undefined;
+  return { aId: parts[0], bId: parts[1], value: parts[2] };
+}
+
 /** 控えのファイルの中身を読む。形が違えば空（覚えていないのと同じ。見送った案がまた出るだけ） */
 export function parseTravelDistanceDismissed(raw: unknown): Set<string> {
   if (!Array.isArray(raw)) return new Set();

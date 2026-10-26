@@ -221,7 +221,20 @@ export class TravelDistanceDismissedHistory {
   /** 鍵を足す。**失敗したら投げる**（呼ぶ側は覚えられたときだけ案を片付ける） */
   async add(keys: readonly string[]): Promise<void> {
     if (keys.length === 0) return;
-    const merged = mergeTravelDistanceDismissed(await this.load(), keys);
+    await this.write(mergeTravelDistanceDismissed(await this.load(), keys));
+  }
+
+  /**
+   * 鍵を外す（「見送った距離を戻す」。作者の裁定 2026-10-26）。外した距離は、次の
+   * 事実の照合で本文にあればまた提案される。失敗したら投げる（外れたと言わない）
+   */
+  async remove(keys: readonly string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const drop = new Set(keys);
+    await this.write([...(await this.load())].filter((key) => !drop.has(key)));
+  }
+
+  private async write(merged: readonly string[]): Promise<void> {
     const target = this.filePath();
     await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
     await atomicWriteFile(

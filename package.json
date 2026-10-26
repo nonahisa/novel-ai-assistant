@@ -792,6 +792,11 @@
         "icon": "$(location)"
       },
       {
+        "command": "novelai.restoreDismissedTravelDistances",
+        "title": "見送った距離の提案を戻す",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.checkDeviations",
         "title": "プロット逸脱検知",
         "category": "小説執筆",
