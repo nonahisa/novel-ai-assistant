@@ -20,6 +20,9 @@ describe("呼称の区分の値を受け取る", () => {
     }
     // 設計書の例にある自由記述（区分名の一覧に無い言い方）も捨てない
     expect(cleanAddressCategory("名前呼び捨て")).toBe("名前呼び捨て");
+    // 区分名を含むが一覧の写しではない組み合わせ（「名＋敬称」を字として含む）
+    expect(cleanAddressCategory("あだ名＋敬称")).toBe("あだ名＋敬称");
+    expect(cleanAddressCategory("役職・肩書き")).toBe("役職・肩書き");
   });
 
   test("空・不在の文言は null", () => {
@@ -46,6 +49,7 @@ describe("呼称の区分の値を受け取る", () => {
     expect(cleanAddressCategory(`${first.label}／${second.label}`)).toBeNull();
     expect(cleanAddressCategory(`${first.label}、${second.label}`)).toBeNull();
     expect(cleanAddressCategory("区分名")).toBeNull();
+    expect(cleanAddressCategory("区分")).toBeNull();
   });
 });
 

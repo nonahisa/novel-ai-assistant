@@ -29,7 +29,7 @@ export const ADDRESS_CATEGORY_GUIDES: ReadonlyArray<{
 ];
 
 /** 指示の文にしか出ない言い回し。値に入っていたら指示の写しである */
-const INSTRUCTION_ECHO = /区分名|区分の名前|当たらなければ/u;
+const INSTRUCTION_ECHO = /区分|当たらなければ/u;
 
 /**
  * AIが返した呼称の区分を、資料に入れてよい形にする。入れないものは null。
@@ -47,9 +47,11 @@ export function cleanAddressCategory(value: unknown): string | null {
     return null;
   }
   // 区分名を2つ以上並べた形は、1つを選べていない（一覧の写し）。
-  // 「名の呼び捨て」は「姓の呼び捨て」と字が重ならないので、包含で数えてよい
-  const labels = ADDRESS_CATEGORY_GUIDES.filter((guide) =>
-    text.includes(guide.label)
+  // **区切りで割った欠片が区分名と丸ごと一致するものだけを数える**——包含で数えると、
+  // 「あだ名＋敬称」が「あだ名」と「名＋敬称」の2つに当たり、正当な組み合わせを落とす
+  const pieces = text.split(/[／/、・，,\s]+/u).filter((piece) => piece);
+  const labels = pieces.filter((piece) =>
+    ADDRESS_CATEGORY_GUIDES.some((guide) => guide.label === piece)
   );
   if (labels.length >= 2) return null;
   return text;
