@@ -16,10 +16,12 @@ import {
   type TravelStageStats,
 } from "./factContradiction";
 import {
+  CONTRADICTION_VERIFY_DEATH_VERSION,
   CONTRADICTION_VERIFY_IDENTITY_VERSION,
   CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION,
   CONTRADICTION_VERIFY_TRAVEL_VERSION,
   CONTRADICTION_VERIFY_VERSION,
+  type DeathVerifyMaterial,
   type IdentityVerifyMaterial,
   type TravelVerifyMaterial,
 } from "../prompts/contradictionVerify";
@@ -366,11 +368,13 @@ export function factVerifySourceOf(
   if (candidate.origin === "travel") return "travel";
   // 体と心の照合から来た候補も専用の文面（identity 1.0。母艦の判断④）
   if (candidate.origin === "identity") return "identity";
+  // 死亡後の登場から来た候補も専用の文面（death 1.0。2026-10-26 の実測 2回目）
+  if (candidate.origin === "death") return "death";
   return "settled";
 }
 
 /** 判定（P-12b）へ送る文面の種類 */
-export type FactVerifySource = "settled" | "travel" | "identity";
+export type FactVerifySource = "settled" | "travel" | "identity" | "death";
 
 /**
  * 判定の答えの控えの鍵に入れる版。**移動の照合の候補だけ** travel の版と印を足す。
@@ -389,6 +393,10 @@ export function factVerifyPromptVersion(
   // 体と心の照合の候補は identity の版と印（`1.2:identity1.0`）。本命の控えは作り直さない
   if (source === "identity") {
     return `${CONTRADICTION_VERIFY_VERSION}:identity${CONTRADICTION_VERIFY_IDENTITY_VERSION}`;
+  }
+  // 死亡後の登場の候補は death の版と印（`1.2:death1.0`）。本命の控えは作り直さない
+  if (source === "death") {
+    return `${CONTRADICTION_VERIFY_VERSION}:death${CONTRADICTION_VERIFY_DEATH_VERSION}`;
   }
   if (source !== "travel") return CONTRADICTION_VERIFY_VERSION;
   const travel =
@@ -449,6 +457,35 @@ export function identityVerifyMaterialOf(
 ): IdentityVerifyMaterial | undefined {
   if (factVerifySourceOf(candidate) !== "identity") return undefined;
   return { record: candidate.basis ?? "", reading: candidate.reason };
+}
+
+/**
+ * 死亡後の登場から来た候補の、判定へ渡す材料（death 1.0）。ほかの候補なら undefined。
+ *
+ * 判定は後ろ側（あとで出てくる箇所）の ±5行しか見ないので、死亡の箇所（第2話7行目
+ * 「祖母のハツが息を引き取った」）が窓の外にあると、誰がどう死んだと書かれたかを本文で
+ * 確かめられない。窓の外なら、その前後も渡す（移動の照合の前側の前後と同じ組み方）
+ */
+export function deathVerifyMaterialOf(input: {
+  candidate: Pick<ContradictionCandidate, "origin" | "reason">;
+  /** 死亡の事実の本文の場所。資料由来なら省略 */
+  leftPlace?: FactPlace;
+  /** 死亡の事実が書かれた本文（ファイルまるごと）。読めなければ省略 */
+  leftSourceText?: string;
+  /** あとで出てくる事実の本文の場所（判定の窓の中心） */
+  rightPlace: FactPlace;
+}): DeathVerifyMaterial | undefined {
+  if (factVerifySourceOf(input.candidate) !== "death") return undefined;
+  const { leftPlace, rightPlace } = input;
+  const leftInWindow =
+    leftPlace !== undefined &&
+    leftPlace.filePath === rightPlace.filePath &&
+    Math.abs(leftPlace.line - rightPlace.line) <= VERIFY_CONTEXT_LINES;
+  const deathContext =
+    leftPlace && !leftInWindow && input.leftSourceText !== undefined
+      ? linesAround(input.leftSourceText, leftPlace.line, TRAVEL_LEFT_CONTEXT_LINES)
+      : "";
+  return { reading: input.candidate.reason, deathContext };
 }
 
 /** その行の本文。範囲の外なら undefined */

@@ -6,6 +6,7 @@ import { STORY_FACT_EXTRACT_SYSTEM_PROMPT } from "../../../src/prompts/storyFact
 import { SCENE_MIND_EXTRACT_SYSTEM_PROMPT } from "../../../src/prompts/sceneMindExtract";
 import {
   CONTRADICTION_VERIFY_SYSTEM_PROMPT,
+  VERIFY_DEATH_SOURCE_NOTE,
   VERIFY_IDENTITY_SOURCE_NOTE,
 } from "../../../src/prompts/contradictionVerify";
 
@@ -126,6 +127,28 @@ describe("事実の照合——体と心の照合（MCP）", () => {
     expect(identityPrompts[0]).toContain("【心と体の記録】");
     expect(identityPrompts[0]).toContain("【コードの読み】");
     expect(identityPrompts[0]).not.toContain("まだ明かされていない");
+
+    // 死亡後の登場（第5話のハツ）の確かめには death の文面と、第2話の死亡の箇所の前後が届く
+    // （P-12b death 1.0。e4b が「死亡はその時点の事実の記述」で取り下げた仕込み②）
+    const deathPrompts = verifyPrompts.filter((prompt) => prompt.includes(VERIFY_DEATH_SOURCE_NOTE));
+    expect(deathPrompts).toHaveLength(1);
+    expect(deathPrompts[0]).toContain("朝、台所でハツが味噌汁を作っていた。");
+    expect(deathPrompts[0]).toContain("【死亡の箇所の前後】");
+    expect(deathPrompts[0]).toContain("祖母のハツが息を引き取ったのは、その夕方のことだった。");
+    expect(deathPrompts[0]).not.toContain(VERIFY_IDENTITY_SOURCE_NOTE);
+
+    // 死亡と死亡後の登場の突き合わせの内訳（26b で候補にならなかった原因を追うため）
+    expect(outcome.stages.death).toEqual({
+      deaths: 3,
+      deathSubjects: ["三門太志", "密倉ハツ", "宮下千早"],
+      revivedSubjects: ["三門太志", "宮下千早"],
+      postDeathFacts: 1,
+      postDeathThoughts: 1,
+      candidates: 1,
+      deathLikeFacts: {},
+      unlinkedSubjects: [],
+      unlinkedTotal: 0,
+    });
 
     // 人物の記録（作者のデータ）は書き換えない
     expect(fs.readFileSync(nodePath.join(WORK, "設定", "characters", "char_0002.json"), "utf8")).toBe(before);

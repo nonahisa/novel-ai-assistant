@@ -112,6 +112,18 @@ export const CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION = "1.0";
 // 照合の控えの鍵だけにこの版と `identity` の印を付ける（`factVerifyPromptVersion`）
 export const CONTRADICTION_VERIFY_IDENTITY_VERSION = "1.0";
 
+// death 1.0（2026-10-26、体と心の組の実測 2回目）：**死亡後の登場（事実の照合の
+// `findPostDeathAppearances`）から来た指摘にだけ**、出どころの欄を置く。コードの読みと、
+// 死亡が書かれた箇所の前後を渡し、「死亡のあとに地の文でその人物が行動していることが両立するか。
+// 幽霊・回想・夢・転生・憑依・噂・誤報などの描写があれば両立」と問う。却下の理由から
+// 「まだ明かされていない」を外し、「作中の変化」「そもそも食い違っていない」を死亡後の登場の
+// 説明に差し替える。e4b は台の仕込み②（第2話で死んだハツが第5話の地の文で味噌汁を作る）を、
+// 「「死亡」という設定は、その時点での事実の記述であり、行動の描写とは矛盾しない」と
+// 「そもそも食い違っていない」で取り下げた（docs/measurements/2026-10-26-identity-cues-2.md）。
+// **本命・future・travel・identity の文面は1文字も変えていない**ので、その版は据え置き、
+// 死亡後の登場の控えの鍵だけにこの版と `death` の印を付ける（`factVerifyPromptVersion`）
+export const CONTRADICTION_VERIFY_DEATH_VERSION = "1.0";
+
 /**
  * 送るときの温度。指摘が本当に矛盾かを確かめるだけなので揺らさない。
  *
@@ -177,6 +189,9 @@ export const VERIFY_SPEECH_NOTE = [
   ...VERIFY_SPEECH_KEEP_SENTENCES,
 ].join("");
 
+/** 指摘がどの突き合わせから来たか（文面の種類）。省けば本命（settled） */
+export type VerifySource = "settled" | "future" | "travel" | "identity" | "death";
+
 export interface ContradictionVerifyInput {
   /** その話の見出し */
   chapterLabel: string;
@@ -212,7 +227,12 @@ export interface ContradictionVerifyInput {
    * 「まだ明かされていない」を並べず、「作中の変化」を future 用の説明にする。
    * 大きいモデルにも小さいモデルにも同じ形を送る。
    */
-  source?: "settled" | "future" | "travel" | "identity";
+  source?: VerifySource;
+  /**
+   * 死亡後の登場から来た指摘の材料（death 1.0）。`source: "death"` のときだけ使う。
+   * **どれもコードが組んだもの**（AI の文ではない）
+   */
+  death?: DeathVerifyMaterial;
   /**
    * 体と心の照合から来た指摘の材料（identity 1.0）。`source: "identity"` のときだけ使う。
    * **どれもコードが組んだもの**（AI の文ではない）
@@ -351,7 +371,7 @@ const REJECT_REASON_TEXTS: Record<VerifyRejectReason, string> = {
 export function verifyRejectReasonsFor(input: {
   settingKnownAt: string;
   smallModel?: boolean;
-  source?: "settled" | "future" | "travel" | "identity";
+  source?: VerifySource;
 }): readonly VerifyRejectReason[] {
   // **future では大小とも並べない**（1.3）。設定が対象の話より後に分かるのが
   // この照合の前提なので、この理由は前提そのもので当たりを消す（26b の瀬戸）。
@@ -359,7 +379,13 @@ export function verifyRejectReasonsFor(input: {
   // 明かされる・明かされないの話ではない（e4b は旅の台でこの理由で取り下げた）
   // **体と心の照合でも並べない**（identity 1.0）。両側とも本文の場面の読みと作者の記録で、
   // 明かされる・明かされないの話ではない
-  if (input.source === "future" || input.source === "travel" || input.source === "identity") {
+  // **死亡後の登場でも並べない**（death 1.0）。死亡もあとの登場も本文に書かれている
+  if (
+    input.source === "future" ||
+    input.source === "travel" ||
+    input.source === "identity" ||
+    input.source === "death"
+  ) {
     return VERIFY_REJECT_REASONS.filter((reason) => reason !== "まだ明かされていない");
   }
   if (!(input.smallModel ?? false) || input.settingKnownAt) return VERIFY_REJECT_REASONS;
@@ -547,6 +573,72 @@ function identitySourceBlock(material: IdentityVerifyMaterial | undefined): stri
   return lines.join("");
 }
 
+/** 死亡後の登場から来た指摘の材料（death 1.0）。どれもコードが組んだ文 */
+export interface DeathVerifyMaterial {
+  /** コードの読み（候補の `reason`。「第2話 7行目に死亡の記録がある。第5話 1行目に『…』が出てくる」） */
+  reading: string;
+  /**
+   * 死亡が書かれた箇所の前後（行番号付き）。確かめの窓（後ろ側の ±5行）に入っているとき・
+   * 本文に無いときは空。**窓の外の死亡の行を見せないと、何が死んだと書かれたかを確かめられない**
+   */
+  deathContext: string;
+}
+
+/**
+ * 死亡後の登場から来た指摘の、出どころの説明（death 1.0）。
+ * **却下の理由の語（「作中の変化」「食い違っていない」など）を含めない**——指示の言葉は
+ * そのまま答えに返ってくる（CLAUDE.md「繰り返し起きた失敗」3番）
+ */
+export const VERIFY_DEATH_SOURCE_NOTE =
+  "この指摘は、本文で死亡が書かれた人物が、そのあとの箇所の地の文にも出てくることを、コードが突き合わせて挙げたものです。";
+
+/**
+ * 死亡後の登場の「残せ」と言っている文（death 1.0）。却下の説明にこれを丸ごと写してきたら、
+ * 自分で前提だと書きながら死亡の記述を理由に消そうとしているので、却下として受け取らない。
+ * 1文目は e4b の取り下げ文（「死亡はその時点の事実の記述で、行動の描写とは矛盾しない」）への答え
+ */
+export const VERIFY_DEATH_KEEP_SENTENCES: readonly string[] = [
+  "死亡の記述がその時点の出来事を書いたものであること自体は、この指摘の前提であって、両立の理由になりません。",
+  "死んだあとにその人物が地の文で行動していて、それを説明する描写が本文に無いなら、同時に成り立ちません。",
+];
+
+/** 死亡後の登場で問うことの説明（death 1.0） */
+const VERIFY_DEATH_QUESTION =
+  "問うのは、死亡のあとに、地の文でその人物が行動していることが両立するかです。" +
+  VERIFY_DEATH_KEEP_SENTENCES[0] +
+  "本文に、幽霊・回想・夢・転生・憑依・噂・誤報（実は生きていた）などの描写があれば両立します。" +
+  VERIFY_DEATH_KEEP_SENTENCES[1];
+
+/**
+ * 死亡後の登場の「作中の変化」の説明（death 1.0）。1.2 の説明（「人物の身の上が先へ進むのは
+ * 矛盾ではありません」）は、死んだ人が出てくることまで身の上の変化と読ませうる
+ */
+const DEATH_CHANGE_TEXT = `**作中の変化** … 本文に、幽霊・転生・憑依・生き返り・実は生きていた（誤報）などの描写が書かれている場合だけ。
+   死んだあとに出てくることだけでは、これに当たりません。`;
+
+/**
+ * 死亡後の登場の「そもそも食い違っていない」の説明（death 1.0）。口調の但し書きは要らない。
+ * 2行目は e4b の取り下げ文をそのまま当てはまらないと書く
+ */
+const DEATH_NO_CONFLICT_TEXT = `**そもそも食い違っていない** … コードの読み（誰が死んだか・あとで出てくるのが同じ人物か・回想や夢の中か）が本文と違っていて、両立する場合。
+   死亡がその時点の事実の記述であることだけでは、これに当たりません。`;
+
+/** 死亡後の登場の【採用すべき場合】に足す1文（death 1.0） */
+const DEATH_ADOPT_LINE =
+  "\n死亡の指摘では、死んだ人物があとの話の地の文で行動していて、それを説明する描写が本文に無い場合も矛盾です。";
+
+/** 死亡後の登場の、出どころと材料の欄（death 1.0） */
+function deathSourceBlock(material: DeathVerifyMaterial | undefined): string {
+  const lines = [`\n【指摘の出どころ】\n${VERIFY_DEATH_SOURCE_NOTE}\n${VERIFY_DEATH_QUESTION}\n`];
+  if (material?.reading.trim()) {
+    lines.push(`\n【コードの読み】\n${material.reading.trim()}\n`);
+  }
+  if (material?.deathContext.trim()) {
+    lines.push(`\n【死亡の箇所の前後】\n${material.deathContext.trim()}\n`);
+  }
+  return lines.join("");
+}
+
 export function buildContradictionVerifyPrompt(
   input: ContradictionVerifyInput
 ): string {
@@ -554,6 +646,7 @@ export function buildContradictionVerifyPrompt(
   const future = input.source === "future";
   const travel = input.source === "travel";
   const identity = input.source === "identity";
+  const death = input.source === "death";
   const knownAt =
     input.settingKnownAt ||
     (future ? VERIFY_KNOWN_AT_NONE_FUTURE : small ? VERIFY_KNOWN_AT_NONE_SMALL : "（不明）");
@@ -564,6 +657,8 @@ export function buildContradictionVerifyPrompt(
     if (travel && reason === "そもそも食い違っていない") return TRAVEL_NO_CONFLICT_TEXT;
     if (identity && reason === "作中の変化") return IDENTITY_CHANGE_TEXT;
     if (identity && reason === "そもそも食い違っていない") return IDENTITY_NO_CONFLICT_TEXT;
+    if (death && reason === "作中の変化") return DEATH_CHANGE_TEXT;
+    if (death && reason === "そもそも食い違っていない") return DEATH_NO_CONFLICT_TEXT;
     return REJECT_REASON_TEXTS[reason];
   };
   const reasonItems = reasons
@@ -576,8 +671,16 @@ export function buildContradictionVerifyPrompt(
       ? travelSourceBlock(input.travel)
       : identity
         ? identitySourceBlock(input.identity)
+        : death
+          ? deathSourceBlock(input.death)
+          : "";
+  const adoptExtra = travel
+    ? TRAVEL_ADOPT_LINE
+    : identity
+      ? IDENTITY_ADOPT_LINE
+      : death
+        ? DEATH_ADOPT_LINE
         : "";
-  const adoptExtra = travel ? TRAVEL_ADOPT_LINE : identity ? IDENTITY_ADOPT_LINE : "";
   return `次の指摘が、本当に矛盾かどうかを判断してください。
 
 【対象の話】${input.chapterLabel}

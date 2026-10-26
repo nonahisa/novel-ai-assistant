@@ -96,6 +96,7 @@ import {
   factVerifyPromptVersion,
   factVerifySourceOf,
   identityVerifyMaterialOf,
+  deathVerifyMaterialOf,
   travelVerifyMaterialOf,
   lineTextOf,
   type FactVerifySource,
@@ -117,6 +118,7 @@ import {
   CONTRADICTION_VERIFY_SCHEMA,
   CONTRADICTION_VERIFY_SYSTEM_PROMPT,
   CONTRADICTION_VERIFY_TEMPERATURE,
+  type DeathVerifyMaterial,
   type IdentityVerifyMaterial,
   type TravelVerifyMaterial,
   type VerifyRejectReason,
@@ -966,6 +968,13 @@ export async function checkFactContradictions(
               travel,
               // 体と心の照合の候補だけ、心と体の記録とコードの読みを添える（identity 1.0）
               identity: identityVerifyMaterialOf(candidate),
+              // 死亡後の登場の候補だけ、コードの読みと死亡の箇所の前後を添える（death 1.0）
+              death: deathVerifyMaterialOf({
+                candidate,
+                leftPlace,
+                leftSourceText: leftPlace ? await readSource(leftPlace.filePath) : undefined,
+                rightPlace: sides.place,
+              }),
               provider: verifier.provider,
               model: verifier.model,
               chapterLabel:
@@ -1269,12 +1278,17 @@ export async function checkFactContradictions(
     context: string;
     issue: ReturnType<typeof buildFactVerifyIssue>;
     knownAt: string;
-    /** 文面の種類（`factVerifySourceOf`）。移動の照合なら travel、体と心の照合なら identity */
+    /**
+     * 文面の種類（`factVerifySourceOf`）。移動の照合なら travel、体と心の照合なら identity、
+     * 死亡後の登場なら death
+     */
     source: FactVerifySource;
     /** 移動の照合の材料（`travelVerifyMaterialOf`）。ほかの候補なら undefined */
     travel: TravelVerifyMaterial | undefined;
     /** 体と心の照合の材料（`identityVerifyMaterialOf`）。ほかの候補なら undefined */
     identity: IdentityVerifyMaterial | undefined;
+    /** 死亡後の登場の材料（`deathVerifyMaterialOf`）。ほかの候補なら undefined */
+    death: DeathVerifyMaterial | undefined;
     fingerprint: string;
     /** 判定の覚えの鍵（`verifyKeyFor`。判定のAIのもの） */
     cacheKey: ReturnType<typeof verifyKeyFor>;
@@ -1312,6 +1326,7 @@ export async function checkFactContradictions(
           source: input.source,
           travel: input.travel,
           identity: input.identity,
+          death: input.death,
         }),
         model: input.model,
         temperature: CONTRADICTION_VERIFY_TEMPERATURE,
