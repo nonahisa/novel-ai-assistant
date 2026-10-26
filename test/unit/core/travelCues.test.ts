@@ -5,6 +5,7 @@ import type { Chunk } from "../../../src/core/chunker";
 import { findContradictionCandidates } from "../../../src/core/contradictionMatch";
 import {
   describeFactRun,
+  describeTravelCues,
   TRAVEL_CUES_NO_LOCATIONS_NOTE,
 } from "../../../src/core/factContradiction";
 import {
@@ -26,6 +27,8 @@ import {
   planTimeCueRequests,
   plannedTravelCueCalls,
   runTravelCues,
+  travelDistanceDismissKey,
+  travelDistanceDismissKeysOf,
   validateSceneTimeCue,
   validateTravelDistances,
   type TravelCueAskRequest,
@@ -252,6 +255,12 @@ describe("AIの手がかりの台（手で書いた正しい答えで採点）",
   it("根拠に「承認待ち」と本文の引用が出る（作者の判断②）", () => {
     for (const candidate of candidates) {
       expect(candidate.basis).toContain("承認待ち");
+      // 確かめの段の文面（travel 1.1 の1文）を分ける印も付く。材料へもそのまま渡る
+      expect(candidate.pendingDistance).toBe(true);
+      expect(
+        travelVerifyMaterialOf({ candidate, rightPlace: places.get(candidate.right) as FactPlace })
+          ?.pendingDistance
+      ).toBe(true);
     }
     const first = candidates.find((candidate) => candidate.right === "fact:1:8:1");
     expect(first?.basis).toContain("本文「王都から港町までは、馬で三日の道のりだ」");
@@ -291,6 +300,7 @@ describe("AIの手がかりの台（手で書いた正しい答えで採点）",
           distanceChunks: 5,
           distancesAccepted: 3,
           distancesRejected: 1,
+          distancesDismissed: 0,
           proposedLocations: 2,
           timeCueRequests: 7,
           timeCueSkipped: 0,
@@ -608,6 +618,73 @@ describe("通し（runTravelCues）", () => {
       travel: result.material.stats,
     });
     expect(line).toContain(TRAVEL_CUES_NO_LOCATIONS_NOTE);
+  });
+
+  /**
+   * 見送った距離はもう出さない（作者の裁定 2026-10-26「見送ったものはもう出さない」）。
+   * 場所の記録に却下の欄が無いので、見送るたびに次の実行で同じ提案が積まれていた
+   */
+  it("見送った距離は、同じ2か所・同じ値なら提案せず、照合にも使わない", async () => {
+    const dismissedKeys = new Set([travelDistanceDismissKey("loc_0002", "loc_0001", "馬で三日")]);
+    const result = await runTravelCues({
+      locations,
+      facts,
+      places,
+      episodes,
+      chunks,
+      ask: fakeAsk([]),
+      dismissedKeys,
+    });
+    const capital = result.proposals.find((proposal) => proposal.record.id === "loc_0001");
+    // 王都→港町の「馬で三日」は出ない。同じ記録の北の砦はそのまま出る
+    expect(capital?.record.relations?.map((relation) => relation.target)).toEqual(["北の砦"]);
+    expect(result.distances.some((d) => d.fromId === "loc_0001" && d.toId === "loc_0002")).toBe(false);
+    expect(result.stats.distancesDismissed).toBe(1);
+    expect(result.stats.distancesAccepted).toBe(2);
+    // 黙って落とさない：完了報告に数を出す
+    expect(describeTravelCues(result.stats)).toContain("前に見送った距離 1件は出していません");
+    // 見送った距離を根拠にした指摘（第1話8行目）は立たない
+    const { flagged } = flaggedOf(result.material);
+    expect(flagged.map((place) => `${place.filePath}:${place.line}`)).not.toContain(
+      "本文/001_馬で三日.txt:8"
+    );
+  });
+
+  it("本文の値が変わったら、見送ったものとは別の提案として出す", async () => {
+    const dismissedKeys = new Set([travelDistanceDismissKey("loc_0001", "loc_0002", "馬で四日")]);
+    const result = await runTravelCues({
+      locations,
+      facts,
+      places,
+      episodes,
+      chunks,
+      ask: fakeAsk([]),
+      dismissedKeys,
+    });
+    const capital = result.proposals.find((proposal) => proposal.record.id === "loc_0001");
+    expect(capital?.record.relations?.map((relation) => relation.target)).toEqual(["港町", "北の砦"]);
+    expect(result.stats.distancesDismissed).toBe(0);
+  });
+
+  it("見送った承認待ちの案から、距離の鍵を取り出す（相手が引けない関係は覚えない）", () => {
+    const { distances } = materialFromAnswers();
+    const [capital] = buildTravelDistanceProposals(distances, locations);
+    const record = structuredClone(capital.record);
+    record.relations = [
+      ...(record.relations ?? []),
+      // 相手のidが無い関係は、どの2か所か決められないので覚えない
+      { kind: "distance", target: "どこか", targetId: null, value: "一日", chapters: [], evidence: null, authorLocked: false },
+      // 距離でない関係は対象外
+      { kind: "direction", target: "港町", targetId: "loc_0002", value: "東", chapters: [], evidence: null, authorLocked: false },
+    ];
+    expect(travelDistanceDismissKeysOf(record)).toEqual([
+      travelDistanceDismissKey("loc_0001", "loc_0002", "馬で三日"),
+      travelDistanceDismissKey("loc_0001", "loc_0004", "馬で三日"),
+    ]);
+    // 向きは問わず、空白や全角の揺れもそろえる
+    expect(travelDistanceDismissKey("loc_0002", "loc_0001", "馬で　三日")).toBe(
+      travelDistanceDismissKey("loc_0001", "loc_0002", "馬で三日")
+    );
   });
 
   it("中止されたら、それ以上訊かない", async () => {

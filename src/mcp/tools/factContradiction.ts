@@ -10,7 +10,12 @@ import {
   parsePendingSettingsPayload,
   pendingSettingsFileName,
 } from "../../core/pendingSettingsMerge";
-import { runTravelCues, type TravelDistanceProposal } from "../../core/travelCues";
+import {
+  TRAVEL_DISTANCE_DISMISSED_FILE,
+  parseTravelDistanceDismissed,
+  runTravelCues,
+  type TravelDistanceProposal,
+} from "../../core/travelCues";
 import { parseLocation, type Location } from "../../models/location";
 import type { TravelStageStats } from "../../core/factContradiction";
 import { withLineNumbers, type Chunk } from "../../core/chunker";
@@ -542,6 +547,8 @@ export async function factContradictionRun(
       text: readSourceCached(input.folder, filePath, sourceCache) ?? "",
     })),
     chunks: context.chunks.map((item) => item.chunk),
+    // 作者が拡張機能の提案パネルで見送った距離は、ここでも提案も照合もしない（製品と同じ）
+    dismissedKeys: readTravelDistanceDismissedFs(input.folder),
     ask: async (request) => {
       try {
         const reply = await ask({
@@ -812,6 +819,22 @@ function askerOf(
  *
  * 返すのは置けたファイル（作品フォルダーからの相対パス）。
  */
+function readTravelDistanceDismissedFs(folder: string): Set<string> {
+  try {
+    return parseTravelDistanceDismissed(
+      JSON.parse(
+        fs.readFileSync(
+          nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, "cache", TRAVEL_DISTANCE_DISMISSED_FILE),
+          "utf8"
+        )
+      ) as unknown
+    );
+  } catch {
+    // 無い・読めないときは覚えていないのと同じ（見送った距離がまた提案されるだけ。製品と同じ）
+    return new Set();
+  }
+}
+
 function stageTravelProposalsFs(
   folder: string,
   proposals: readonly TravelDistanceProposal[],

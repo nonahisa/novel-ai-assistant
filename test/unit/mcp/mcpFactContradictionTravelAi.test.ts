@@ -5,6 +5,10 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { STORY_FACT_EXTRACT_SYSTEM_PROMPT } from "../../../src/prompts/storyFactExtract";
 import { TRAVEL_DISTANCE_EXTRACT_SYSTEM_PROMPT } from "../../../src/prompts/travelDistanceExtract";
 import { SCENE_TIME_CUE_SYSTEM_PROMPT } from "../../../src/prompts/sceneTimeCue";
+import {
+  TRAVEL_DISTANCE_DISMISSED_FILE,
+  travelDistanceDismissKey,
+} from "../../../src/core/travelCues";
 
 /**
  * MCP の口（`novel.run` の factContradiction）が、移動の照合の AI の手がかり
@@ -141,5 +145,43 @@ describe("事実の照合——移動の照合の AI の手がかり（MCP）", 
     ) as { reason: string; record: { relations: unknown[] } };
     expect(again.record.relations).toHaveLength(2);
     expect(again.reason).toBe(pending.reason);
+  });
+
+  /**
+   * 作者が拡張機能の提案パネルで見送った距離は、MCP の口でも出さない
+   * （作者の裁定 2026-10-26「見送ったものはもう出さない」。控えは製品と同じファイル）
+   */
+  it("見送った距離の控えがあれば、その距離は提案せず照合にも使わない", async () => {
+    const work = fs.mkdtempSync(nodePath.join(os.tmpdir(), "travel-ai-dismissed-"));
+    try {
+      fs.cpSync(SOURCE, work, { recursive: true });
+      const cache = nodePath.join(work, ".aiwriter", "cache");
+      fs.mkdirSync(cache, { recursive: true });
+      fs.writeFileSync(
+        nodePath.join(cache, TRAVEL_DISTANCE_DISMISSED_FILE),
+        JSON.stringify([travelDistanceDismissKey("loc_0001", "loc_0002", "馬で三日")]),
+        "utf8"
+      );
+      const { factContradictionRun } = await import("../../../src/mcp/tools/factContradiction");
+      const outcome = await factContradictionRun({
+        folder: work,
+        numCtx: 32768,
+        runner: "ollama",
+        model: "fake",
+      });
+      if (outcome.runner === "claude") throw new Error("ollama で回したはず");
+
+      expect(outcome.stages.travel.aiCues).toMatchObject({ distancesAccepted: 2, distancesDismissed: 1 });
+      const pending = JSON.parse(
+        fs.readFileSync(nodePath.join(work, ".aiwriter", "pending-settings", "loc_0001.json"), "utf8")
+      ) as { record: { relations: Array<{ target: string }> } };
+      expect(pending.record.relations.map((relation) => relation.target)).toEqual(["北の砦"]);
+      const flagged = outcome.results.flatMap((result) =>
+        result.accepted.map((issue) => `${nodePath.basename(issue.filePath)}:${issue.line}`)
+      );
+      expect(flagged).not.toContain("001_馬で三日.txt:8");
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true });
+    }
   });
 });

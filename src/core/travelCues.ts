@@ -421,6 +421,79 @@ function relationKey(kind: string, target: string, value: string | null): string
   return [kind, normalizeLocationName(target), normalizeLocationName(value ?? "")].join("\u0000");
 }
 
+/* ── 見送った距離 ─────────────────────────────────────── */
+
+/**
+ * 見送った距離の鍵の置き場（`.aiwriter/cache/` の下）。
+ *
+ * 作者の裁定 2026-10-26「見送ったものはもう出さない」。場所の記録には人物の
+ * `rejectedRelations` のような却下の欄が無く、承認待ちで見送っても次の実行で同じ
+ * 距離がまた提案されていた。**場所の記録（作者のデータ、`設定/`）には書かない**——
+ * 見送りは「提案しない」という AI の側の控えで、記録の中身ではない。移す案の見送り
+ * （`NARRATOR_MOVE_DISMISSED_FILE`）と同じ作りにそろえる。
+ */
+export const TRAVEL_DISTANCE_DISMISSED_FILE = "travel_distance_dismissed.json";
+
+/** 覚えておく件数。際限なく育てない（移す案の見送りと同じ） */
+export const MAX_TRAVEL_DISTANCE_DISMISSED = 500;
+
+/**
+ * 見送った距離1件の鍵。**同じ2か所（向きは問わない）・同じ値**なら同じ鍵になる。
+ * 値は `normalizeLocationName` でそろえる（空白・全角数字の揺れで別物にしない）。
+ * 本文の値が変われば鍵も変わり、新しい提案として出る（作者の裁定）。
+ * 区切りのNULは、場所のidにも値にも現れない文字（ソースにはエスケープで書く）
+ */
+export function travelDistanceDismissKey(fromId: string, toId: string, value: string): string {
+  const [a, b] = fromId < toId ? [fromId, toId] : [toId, fromId];
+  return [a, b, normalizeLocationName(value)].join("\u0000");
+}
+
+/**
+ * 見送った場所の承認待ちの案から、距離の鍵を取り出す。
+ *
+ * 出発の場所は案のレコードそのもの（`record.id`）。**相手のidが無い関係は覚えない**
+ * ——どの2か所かを名前から推し量ると、別の場所の距離まで止める。止め損ねても作者に
+ * 見えるが、止めすぎたものは誰にも見えない（退けた関係と同じく、迷ったら止めない側）。
+ * 出どころ（`source`）は問わない：同じ場所の案は1つのファイルへ合わさり、出どころは
+ * 先に積んだ側のものが残るので、事実の照合の距離が外部AIの案に混ざっていることがある。
+ */
+export function travelDistanceDismissKeysOf(record: Pick<Location, "id" | "relations">): string[] {
+  const keys: string[] = [];
+  for (const relation of record.relations ?? []) {
+    if (relation.kind !== "distance" || !relation.targetId || !relation.value?.trim()) continue;
+    const key = travelDistanceDismissKey(record.id, relation.targetId, relation.value);
+    if (!keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * 鍵を、画面に並べる形へ戻す（「見送った距離を戻す」）。2か所は id のままなので、
+ * 名前は呼ぶ側が場所の記録から引く。値は比べるためにそろえた形（空白を詰めたもの）。
+ * 形の崩れた鍵は undefined
+ */
+export function parseTravelDistanceDismissKey(
+  key: string
+): { aId: string; bId: string; value: string } | undefined {
+  const parts = key.split("\u0000");
+  if (parts.length !== 3 || parts.some((part) => !part)) return undefined;
+  return { aId: parts[0], bId: parts[1], value: parts[2] };
+}
+
+/** 控えのファイルの中身を読む。形が違えば空（覚えていないのと同じ。見送った案がまた出るだけ） */
+export function parseTravelDistanceDismissed(raw: unknown): Set<string> {
+  if (!Array.isArray(raw)) return new Set();
+  return new Set(raw.filter((item): item is string => typeof item === "string"));
+}
+
+/** 鍵を足した中身（古いものから落とす） */
+export function mergeTravelDistanceDismissed(
+  existing: ReadonlySet<string>,
+  keys: readonly string[]
+): string[] {
+  return [...new Set([...existing, ...keys])].slice(-MAX_TRAVEL_DISTANCE_DISMISSED);
+}
+
 /* ── P-52 場面の頭の時の経過 ──────────────────────────────── */
 
 /** P-52 へ訊く1件 */
@@ -692,12 +765,19 @@ export async function runTravelCues(input: {
   /** 中止されたら true。訊く前に毎回見る */
   isCancelled?: () => boolean;
   timeCueLimit?: number;
+  /**
+   * 作者が承認待ちで見送った距離の鍵（`travelDistanceDismissKey`）。
+   * 一致したものは**提案せず、その回の照合にも使わない**——作者が退けた距離を
+   * 「承認待ちの距離」として指摘の根拠に出すと、見送ったものがまた出ることになる
+   */
+  dismissedKeys?: ReadonlySet<string>;
 }): Promise<TravelCuesResult> {
   const stats: TravelCueStats = {
     noLocations: false,
     distanceChunks: 0,
     distancesAccepted: 0,
     distancesRejected: 0,
+    distancesDismissed: 0,
     proposedLocations: 0,
     timeCueRequests: 0,
     timeCueSkipped: 0,
@@ -718,6 +798,9 @@ export async function runTravelCues(input: {
   const names = locationNamesForPrompt(input.locations);
   const distances: AcceptedTravelDistance[] = [];
   const seen = new Set<string>();
+  const dismissed = input.dismissedKeys ?? new Set<string>();
+  /** 見送った距離に当たった鍵（何チャンクで当たっても1件に数える） */
+  const dismissedHit = new Set<string>();
   for (const chunk of input.chunks) {
     if (cancelled()) break;
     if (!isTravelDistanceChunk(chunk, input.locations)) continue;
@@ -739,6 +822,11 @@ export async function runTravelCues(input: {
     const checked = validateTravelDistances(raw, chunk, input.locations);
     stats.distancesRejected += checked.rejected.length;
     for (const distance of checked.accepted) {
+      const dismissKey = travelDistanceDismissKey(distance.fromId, distance.toId, distance.value);
+      if (dismissed.has(dismissKey)) {
+        dismissedHit.add(dismissKey);
+        continue;
+      }
       const key = [distance.fromId, distance.toId, normalizeLocationName(distance.value)].join("\u0000");
       if (seen.has(key)) continue;
       seen.add(key);
@@ -746,6 +834,7 @@ export async function runTravelCues(input: {
     }
   }
   stats.distancesAccepted = distances.length;
+  stats.distancesDismissed = dismissedHit.size;
   const proposals = buildTravelDistanceProposals(distances, input.locations);
   stats.proposedLocations = proposals.length;
   const pendingDistances = pendingDistancesOf(distances);

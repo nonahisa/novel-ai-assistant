@@ -3,6 +3,13 @@ import * as path from "./paths";
 import { AIWRITER_DIR, type WorkEntry } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
 import type { PendingUpdateSource } from "./pendingUpdateFormat";
+import type { Location } from "../models/location";
+import {
+  TRAVEL_DISTANCE_DISMISSED_FILE,
+  mergeTravelDistanceDismissed,
+  parseTravelDistanceDismissed,
+  travelDistanceDismissKeysOf,
+} from "./travelCues";
 import {
   PENDING_SETTINGS_DIR,
   buildPendingSettingsPayload,
@@ -150,6 +157,23 @@ export class PendingSettingsUpdateStore {
     return { updates, errors };
   }
 
+  /**
+   * 作者が「見送る」を押した案を片付ける。**場所の案なら、含まれる距離を先に覚える**
+   * （作者の裁定 2026-10-26「見送ったものはもう出さない」。設計書6.88.13）。
+   *
+   * 覚えられなかったら投げて、案は残す——覚えないまま消すと、次の事実の照合で
+   * 同じ距離がまた提案される（移す案の見送り `dismissPendingNarratorMove` と同じ順）。
+   * 古くなった案の片付けはここを通さない（作者が見送ったのではない）。
+   */
+  async dismiss(update: PendingSettingsUpdate): Promise<void> {
+    if (update.recordKind === "location") {
+      await new TravelDistanceDismissedHistory(this.work).add(
+        travelDistanceDismissKeysOf(update.record as Location)
+      );
+    }
+    await this.discard(update.filePath);
+  }
+
   async discard(filePath: string): Promise<void> {
     try {
       await vscode.workspace.fs.delete(path.toUri(filePath));
@@ -169,5 +193,53 @@ export class PendingSettingsUpdateStore {
       counts[update.recordKind] = (counts[update.recordKind] ?? 0) + 1;
     }
     return counts;
+  }
+}
+
+/**
+ * 見送った距離の控え（`.aiwriter/cache/travel_distance_dismissed.json`）。
+ * 形と鍵は `travelCues.ts`（MCP は同じ関数で Node の `fs` から読む）。
+ * 作者の原稿でも設定資料でもないので、①の経路（一時ファイル → 置き換え）で書く。
+ */
+export class TravelDistanceDismissedHistory {
+  constructor(private readonly work: WorkEntry) {}
+
+  private filePath(): string {
+    return path.join(this.work.folderPath, AIWRITER_DIR, "cache", TRAVEL_DISTANCE_DISMISSED_FILE);
+  }
+
+  /** 読めなければ空（覚えていないのと同じ。見送った距離がまた提案されるだけ） */
+  async load(): Promise<Set<string>> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(path.toUri(this.filePath()));
+      return parseTravelDistanceDismissed(JSON.parse(new TextDecoder().decode(bytes)));
+    } catch {
+      return new Set();
+    }
+  }
+
+  /** 鍵を足す。**失敗したら投げる**（呼ぶ側は覚えられたときだけ案を片付ける） */
+  async add(keys: readonly string[]): Promise<void> {
+    if (keys.length === 0) return;
+    await this.write(mergeTravelDistanceDismissed(await this.load(), keys));
+  }
+
+  /**
+   * 鍵を外す（「見送った距離を戻す」。作者の裁定 2026-10-26）。外した距離は、次の
+   * 事実の照合で本文にあればまた提案される。失敗したら投げる（外れたと言わない）
+   */
+  async remove(keys: readonly string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const drop = new Set(keys);
+    await this.write([...(await this.load())].filter((key) => !drop.has(key)));
+  }
+
+  private async write(merged: readonly string[]): Promise<void> {
+    const target = this.filePath();
+    await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
+    await atomicWriteFile(
+      target,
+      new TextEncoder().encode(`${JSON.stringify(merged, null, 2)}\n`)
+    );
   }
 }

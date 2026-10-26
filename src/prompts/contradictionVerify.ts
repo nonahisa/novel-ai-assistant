@@ -86,7 +86,19 @@ export const CONTRADICTION_VERIFY_FUTURE_VERSION = "1.4";
 // （docs/measurements/2026-10-25-travel-stage0-1.md）。
 // **本命（settled）と future の文面は1文字も変えていない**ので、その2つの版は据え置き、
 // 移動の照合の控えの鍵だけにこの版と `travel` の印を付ける（`factVerifyPromptVersion`）
-export const CONTRADICTION_VERIFY_TRAVEL_VERSION = "1.0";
+//
+// travel 1.1（2026-10-26、作者の裁定「1文足して測り直す」）：【指摘の出どころ】に、
+// **承認待ちの距離も根拠として扱う**1文（`VERIFY_TRAVEL_PENDING_SENTENCE`）を足す。
+// **根拠に承認待ちの距離を使った候補にだけ**置く（同日の測り直しで、全部に置くと旅の台の
+// e4b が 2/3→1/3 に下がった）。使わない候補の文面は 1.0 と同じなので、その控えの鍵は
+// 1.0 のまま（`CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION`、`factVerifyPromptVersion`）。
+// 0.112.2 で根拠に承認待ちの距離（本文から AI が読んだ所要時間）が出るようになり、
+// e4b は「所要時間は設定資料にない情報であり、本文の記述を優先すべき」（設定が古い）で
+// 取り下げた。26b は正しく扱った（docs/measurements/2026-10-26-travel-ai-cues.md）。
+// 本命と future の文面はこの版でも変えていない
+export const CONTRADICTION_VERIFY_TRAVEL_VERSION = "1.1";
+/** 承認待ちの距離を使わない移動の候補の文面の版（1.1 で変えていない＝1.0 のまま） */
+export const CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION = "1.0";
 
 /**
  * 送るときの温度。指摘が本当に矛盾かを確かめるだけなので揺らさない。
@@ -369,6 +381,11 @@ export interface TravelVerifyMaterial {
   timeCue: string;
   /** 前側の事実の箇所の前後（行番号付き）。後ろ側の前後に入っているとき・本文に無いときは空 */
   leftContext: string;
+  /**
+   * 所要時間に承認待ちの距離（P-51 が本文から読んだもの）を使った候補か（travel 1.1）。
+   * 真のときだけ `VERIFY_TRAVEL_PENDING_SENTENCE` を置く。省くと 1.0 と同じ文面
+   */
+  pendingDistance?: boolean;
 }
 
 /**
@@ -388,9 +405,19 @@ export const VERIFY_TRAVEL_SOURCE_NOTE =
  * 移動の照合の「残せ」と言っている文（travel 1.0）。却下の説明にこれを丸ごと写してきたら、
  * 自分で前提だと書きながら移動を理由に消そうとしているので、却下として受け取らない
  */
+/**
+ * 承認待ちの距離の扱い（travel 1.1）。根拠の頭の「設定資料にはまだ入っていません」を、
+ * e4b は「設定資料にない情報だから本文を優先」と読んで取り下げた。
+ * **却下の理由の語（「設定が古い」など）を含めない**——指示の言葉はそのまま答えに返る
+ * （CLAUDE.md「繰り返し起きた失敗」3番）。写したまま却下してきたら通す見張りにも入れる
+ */
+export const VERIFY_TRAVEL_PENDING_SENTENCE =
+  "承認待ちの距離は、本文からAIが読み取った所要時間で設定資料にまだ載っていないだけなので、場所の記録の所要時間と同じ根拠として扱ってください。";
+
 export const VERIFY_TRAVEL_KEEP_SENTENCES: readonly string[] = [
   "人物が場所を移ったこと自体は、この指摘の前提であって、両立の理由になりません。",
   "書かれた経過が所要時間より短く、速く移る手段も本文に書かれていないなら、同時に成り立ちません。",
+  VERIFY_TRAVEL_PENDING_SENTENCE,
 ];
 
 /** 移動の照合で問うことの説明（travel 1.0）。経過と所要時間を比べさせる */
@@ -420,7 +447,11 @@ const TRAVEL_ADOPT_LINE =
 
 /** 移動の照合の、出どころと材料の欄（travel 1.0） */
 function travelSourceBlock(material: TravelVerifyMaterial | undefined): string {
-  const lines = [`\n【指摘の出どころ】\n${VERIFY_TRAVEL_SOURCE_NOTE}\n${VERIFY_TRAVEL_QUESTION}\n`];
+  // travel 1.1 の1文は、根拠に承認待ちの距離を使った候補にだけ置く。使わない候補の文面は
+  // 1.0 と1文字も変えない——全部に置いたら、旅の台の e4b が承認待ちと関係の無い候補を
+  // 「作中の変化」で取り下げ、2/3→1/3 に下がった（docs/measurements/2026-10-26-travel-verify-1.1.md）
+  const pending = material?.pendingDistance === true ? VERIFY_TRAVEL_PENDING_SENTENCE : "";
+  const lines = [`\n【指摘の出どころ】\n${VERIFY_TRAVEL_SOURCE_NOTE}\n${VERIFY_TRAVEL_QUESTION}${pending}\n`];
   if (material?.travelTime.trim()) {
     lines.push(`\n【所要時間（場所の記録）】\n${material.travelTime.trim()}\n`);
   }

@@ -335,6 +335,7 @@ import type { SettingsKind } from "./core/settingsSummary";
 // 矛盾検知のもう1つの道（設計書6.88）。入口は「矛盾検知」1つで、
 // 押したときに選ぶ（2026-09-23）。コマンドはパレットと関門の代わりの道に残す
 import { checkFactContradictions } from "./features/checkFactContradictions";
+import { restoreDismissedTravelDistances } from "./features/restoreDismissedTravelDistances";
 import { checkProofread } from "./features/checkProofread";
 import { checkDeviations } from "./features/checkDeviations";
 // 単話プロットのAI判定2種（P-27・P-28。設計書6.36.3）
@@ -6821,6 +6822,15 @@ export async function activate(
             : "AIは使っていません。",
       });
       return CHECK_COMPLETED;
+    })
+  );
+
+  // 事実の照合で見送った距離を、見送りの記録から外す（作者の裁定 2026-10-26。設計書6.88.13）
+  context.subscriptions.push(
+    registerCommand("novelai.restoreDismissedTravelDistances", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry, { preferLast: true });
+      if (!work) return;
+      await restoreDismissedTravelDistances(work);
     })
   );
 

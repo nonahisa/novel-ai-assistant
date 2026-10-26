@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseVerifyOutcome } from "../../../src/core/contradictionVerifyValidation";
 import {
   buildContradictionVerifyPrompt,
+  CONTRADICTION_VERIFY_TRAVEL_VERSION,
+  VERIFY_TRAVEL_PENDING_SENTENCE,
   VERIFY_REJECT_REASONS,
   VERIFY_SPEECH_NOTE,
   VERIFY_TRAVEL_KEEP_SENTENCES,
@@ -36,12 +39,17 @@ const T6 = {
   },
 };
 
+const sha = (text: string): string => createHash("sha256").update(text).digest("hex");
+
 describe("移動の照合の文面（travel 1.0）", () => {
   const prompt = buildContradictionVerifyPrompt(T6);
 
   it("出どころ・所要時間・コードの読み・時の手がかり・前側の前後を渡す", () => {
     expect(prompt).toContain(VERIFY_TRAVEL_SOURCE_NOTE);
-    for (const sentence of VERIFY_TRAVEL_KEEP_SENTENCES) expect(prompt).toContain(sentence);
+    // 承認待ちの1文（travel 1.1）は承認待ちの距離を使った候補にだけ出る（下の travel 1.1 の項）
+    for (const sentence of VERIFY_TRAVEL_KEEP_SENTENCES) {
+      if (sentence !== VERIFY_TRAVEL_PENDING_SENTENCE) expect(prompt).toContain(sentence);
+    }
     expect(prompt).toContain("【所要時間（場所の記録）】\n場所の記録では、王都と港町のあいだは3日かかる");
     expect(prompt).toContain("【コードの読み】\n第6話6行目に『王都』");
     expect(prompt).toContain("【時の手がかり（引用の段落の頭）】\n「翌朝」（前の場面の1日後と読みました）");
@@ -90,6 +98,82 @@ describe("移動の照合の文面（travel 1.0）", () => {
     for (const text of [VERIFY_TRAVEL_SOURCE_NOTE, ...VERIFY_TRAVEL_KEEP_SENTENCES]) {
       for (const reason of VERIFY_REJECT_REASONS) expect(text).not.toContain(reason);
     }
+  });
+});
+
+/**
+ * travel 1.1（作者の裁定 2026-10-26「1文足して測り直す」）：e4b が、承認待ちの距離を
+ * 根拠にした候補を「所要時間は設定資料にない情報であり、本文の記述を優先すべき」
+ * （設定が古い）で取り下げた（docs/measurements/2026-10-26-travel-ai-cues.md）。
+ * 承認待ちの距離も根拠として扱うと、移動の照合の文面にだけ1文足す
+ */
+describe("承認待ちの距離の扱い（travel 1.1）", () => {
+  it("版は 1.1", () => {
+    expect(CONTRADICTION_VERIFY_TRAVEL_VERSION).toBe("1.1");
+  });
+
+  it("根拠に承認待ちの距離を使った候補にだけ、承認待ちの距離も根拠として扱う1文を置く", () => {
+    const prompt = buildContradictionVerifyPrompt({
+      ...T6,
+      travel: { ...T6.travel, pendingDistance: true },
+    });
+    expect(prompt).toContain(VERIFY_TRAVEL_PENDING_SENTENCE);
+    expect(buildContradictionVerifyPrompt(T6)).not.toContain(VERIFY_TRAVEL_PENDING_SENTENCE);
+    // 写して却下してきたら判断できなかったものとして通す見張り（下の読み取り）に入れる
+    expect(VERIFY_TRAVEL_KEEP_SENTENCES).toContain(VERIFY_TRAVEL_PENDING_SENTENCE);
+  });
+
+  /**
+   * 旅の台の e4b が 2/3→1/3 に下がった（承認待ちを使わない候補を「作中の変化」で取り下げ。
+   * docs/measurements/2026-10-26-travel-verify-1.1.md）。承認待ちを使わない候補の文面は
+   * travel 1.0 と1文字も変えない。ハッシュは travel 1.0 の文面（a0433e0f）から取った
+   */
+  it("承認待ちの距離を使わない候補の文面は、travel 1.0 と1文字も同じ", () => {
+    const pinned = {
+      ...T6,
+      travel: {
+        ...T6.travel,
+        leftContext: "4: 　＊\n5: \n6: 　王都に戻ったエドは、厩舎の親方に馬を返した。",
+      },
+    };
+    const TRAVEL_1_0 = "2e88b7ee9a49c624429f03f5292ce901b5b2052b6e7b3e0ba6160e0b806ca2fe";
+    for (const smallModel of [false, true]) {
+      expect(sha(buildContradictionVerifyPrompt({ ...pinned, smallModel }))).toBe(TRAVEL_1_0);
+      expect(
+        sha(
+          buildContradictionVerifyPrompt({
+            ...pinned,
+            smallModel,
+            travel: { ...pinned.travel, pendingDistance: false },
+          })
+        )
+      ).toBe(TRAVEL_1_0);
+    }
+  });
+
+  it("本命（settled）と future の文面には出さない", () => {
+    const { travel: _travel, ...rest } = T6;
+    for (const source of ["settled", "future"] as const) {
+      expect(buildContradictionVerifyPrompt({ ...rest, source })).not.toContain(
+        VERIFY_TRAVEL_PENDING_SENTENCE
+      );
+    }
+  });
+
+  /**
+   * 指示の言葉は答えに返ってくる（CLAUDE.md「繰り返し起きた失敗」3番）。e4b の却下の
+   * 説明の型に、この1文をそのまま足して返してきたら、却下として受け取らない
+   */
+  it("この1文を写したまま「設定が古い」で却下してきたら、判断できなかったものとして通す", () => {
+    const outcome = parseVerifyOutcome(
+      JSON.stringify({
+        verdict: "却下",
+        reason: "設定が古い",
+        explanation: `${VERIFY_TRAVEL_PENDING_SENTENCE}所要時間は設定資料にない情報であり、本文の記述を優先すべき。`,
+        confidence: "high",
+      })
+    );
+    expect(outcome).toMatchObject({ keep: true, undecided: true });
   });
 });
 

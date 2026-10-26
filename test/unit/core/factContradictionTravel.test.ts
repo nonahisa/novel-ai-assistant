@@ -299,6 +299,17 @@ describe("移動の照合（旅の台・固定の事実）", () => {
   });
 
   /**
+   * travel 1.1 の1文は承認待ちの距離を使った候補にだけ置くので、使わない候補の文面は
+   * 1.0 と同じ。**控えも 1.0 の鍵のまま使う**（同じ文面の答えを作り直さない。実装ルール4）
+   */
+  it("承認待ちの距離を使わない移動の候補は 1.0 の鍵、使う候補は 1.1 の鍵", () => {
+    expect(factVerifyPromptVersion("travel", false)).toBe(`${CONTRADICTION_VERIFY_VERSION}:travel1.0`);
+    expect(factVerifyPromptVersion("travel", true)).toBe(`${CONTRADICTION_VERIFY_VERSION}:travel1.1`);
+    // 本命は承認待ちの印に関わらず変わらない
+    expect(factVerifyPromptVersion("settled", true)).toBe(CONTRADICTION_VERIFY_VERSION);
+  });
+
+  /**
    * 作者の選択③（含みで引く）と、その夜の裁定（名前が2字以下の場所は含みで引かない）。
    * この台の場所は「王都」「港町」と2字なので、値が「港町の宿」「王都の城門の詰所」の形だと
    * 引けない。引けなかった分は照合しないだけで、罠（回想の「王都の城門の前」）には当たらない
