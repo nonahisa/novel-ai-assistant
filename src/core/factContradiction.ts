@@ -296,6 +296,32 @@ export interface IdentityCueStats {
   unrecordedTotal: number;
   /** AIへ送れなかった・読めなかった回 */
   failures: number;
+  /**
+   * 測定で原因を追うための内訳（MCP の `stages.identity` に出る。完了の知らせには出さない）。
+   * 引用は頭の20字だけ（作者の原稿の本文を長く出さない）。人物は名前で出す
+   */
+  details: IdentityCueDetails;
+}
+
+/** 体と心の照合の内訳（`IdentityCueStats.details`） */
+export interface IdentityCueDetails {
+  /** 検算を通った場面の読み（「分からない」は mind が "分からない"） */
+  readings: Array<{ chapter: number | null; line: number; body: string; mind: string; evidence: string }>;
+  /** 検算を通った本文の遷移（体が書かれていなければ body は null） */
+  transitions: Array<{ chapter: number | null; line: number; kind: string; body: string | null; mind: string; evidence: string }>;
+  /** 検算で捨てた読みと遷移の、理由ごとの数 */
+  rejectedByReason: Record<string, number>;
+  /**
+   * 体の持ち主でない心がいる場面ごとの判定（`dwellingSceneVerdicts`）。
+   * in_range＝記録の範囲の中／described＝本文の遷移あり／carried＝遷移で入った心が続いている／flagged＝候補
+   */
+  scenes: Array<{ chapter: number | null; line: number; body: string; mind: string; verdict: string }>;
+  /**
+   * 組の体の名で抜かれた心の項目（一人称・口調・話し方・性格）の扱い（作者の判断⑥）。
+   * reassigned＝心の側へ付け替え／excluded＝心が決まらず外した／owner＝場面の心が体の持ち主／
+   * out_of_range＝記録の範囲の外（本人のまま）
+   */
+  mindFacts: Array<{ chapter: number | null; line: number; subject: string; predicate: string; outcome: string }>;
 }
 
 /** 心と体の記録が無い作品で、AIの段をしなかったときの案内（作者の判断①） */

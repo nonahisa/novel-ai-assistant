@@ -113,7 +113,7 @@ describe("事実の照合——体と心の照合（MCP）", () => {
       chunks: 6,
       readings: 11,
       transitions: 4,
-      reassignedFacts: 2,
+      reassignedFacts: 3,
       excludedFacts: 2,
       unrecordedTotal: 2,
     });

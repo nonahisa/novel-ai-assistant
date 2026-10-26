@@ -28,6 +28,9 @@
   "trapTransitions": [
     { "file": "本文/004_別人みたい.txt", "kind": "switch", "body": "文佳", "toMind": "太志", "evidence": "今日の文佳、まるで別人みたい", "line": 2, "reason": "dialogue", "why": "台詞の「まるで別人」は出来事ではない" },
     { "file": "本文/005_台所.txt", "kind": "ghost", "body": "", "toMind": "千早", "evidence": "「灯、泣かないで」", "line": 7, "reason": "dialogue", "why": "台詞だけでは幽霊の出来事の裏付けにならない" },
-    { "file": "本文/002_目覚め.txt", "kind": "possession", "body": "文佳", "toMind": "文佳", "evidence": "目を覚ますと、文佳の体の中にいたのは太志だった", "line": 1, "reason": "same_person", "why": "体の持ち主が自分の体に憑依することはない" }
+    { "file": "本文/002_目覚め.txt", "kind": "possession", "body": "文佳", "toMind": "文佳", "evidence": "目を覚ますと、文佳の体の中にいたのは太志だった", "line": 1, "reason": "same_person", "why": "体の持ち主が自分の体に憑依することはない" },
+    { "file": "本文/006_名乗り.txt", "kind": "switch", "body": "文佳", "toMind": "太志", "evidence": "その夜、鏡の前の文佳の体で、太志がもう一度名乗った", "line": 6, "reason": "no_transition_word", "why": "名乗っただけで、心が入る・戻る出来事ではない（gemma4:26b の実測 2026-10-26 で、この読みが仕込みを消した）" },
+    { "file": "本文/002_目覚め.txt", "kind": "possession", "body": "文佳", "toMind": "千早", "evidence": "その晩、文佳の体を動かしていたのは、灯に宿っているはずの千早だった", "line": 11, "reason": "no_transition_word", "why": "心がいる場面の描写で、入る出来事ではない（「宿っている」は灯の体のこと）" },
+    { "file": "本文/006_名乗り.txt", "kind": "possession", "body": "文佳", "toMind": "太志", "evidence": "文佳は「山田花子」と名乗って、駅前の喫茶店に入った", "line": 1, "reason": "unnamed", "why": "引用に入る心（太志）の名が無い（「入った」は店に入っただけ）" }
   ]
 }

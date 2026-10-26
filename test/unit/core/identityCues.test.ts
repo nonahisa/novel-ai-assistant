@@ -463,6 +463,7 @@ describe("心の項目の付け替え（作者の判断⑥）", () => {
     expect([...moved.reassigned].map(([id, entry]) => `${id}>${entry.mindName}`)).toEqual([
       "fact:2:2:1>三門太志",
       "fact:2:12:1>宮下千早",
+      "fact:4:5:1>三門太志",
     ]);
     expect(moved.excluded).toEqual(["fact:3:2:1", "fact:3:4:1"]);
     // 事実の id と行はそのまま（飛び先を変えない）。範囲の外（第1話の「私」）は本人のまま
@@ -479,7 +480,7 @@ describe("心の項目の付け替え（作者の判断⑥）", () => {
     expect(moved.excluded).toContain("fact:2:2:1");
     const none = reassignMindFacts({ facts, places, episodes, readings: [], ledger });
     expect(none.reassigned.size).toBe(0);
-    expect(none.excluded).toEqual(["fact:2:2:1", "fact:2:12:1", "fact:3:2:1", "fact:3:4:1"]);
+    expect(none.excluded).toEqual(["fact:2:2:1", "fact:2:12:1", "fact:3:2:1", "fact:3:4:1", "fact:4:5:1"]);
   });
 
   it("付け替えた事実には、候補の根拠で分かる印が付く", () => {
@@ -510,9 +511,9 @@ describe("体と心の台（手で書いた正しい答えで採点）", () => {
     expect(candidates.filter((candidate) => candidate.origin === "identity")).toHaveLength(2);
   });
 
-  it("罠6件（範囲の中の憑依・同居・幽霊の描写のある死者・回想の死者・台詞の別人・変装の偽名）には当たらない", async () => {
+  it("罠7件（範囲の中の憑依・同居・幽霊の描写のある死者・回想の死者・台詞の別人・変装の偽名・体の持ち主の名で書いた憑依の台詞）には当たらない", async () => {
     const { flagged } = await runLikeProduct();
-    expect(answers.mustNotFlag).toHaveLength(6);
+    expect(answers.mustNotFlag).toHaveLength(7);
     for (const trap of answers.mustNotFlag) {
       expect(hits(flagged, trap.file, trap.lines), trap.file).toEqual([]);
     }
@@ -534,7 +535,7 @@ describe("体と心の台（手で書いた正しい答えで採点）", () => {
       chunks: 6,
       readings: 11,
       transitions: 4,
-      reassignedFacts: 2,
+      reassignedFacts: 3,
       excludedFacts: 2,
       unrecordedTotal: 2,
       failures: 0,
@@ -556,7 +557,7 @@ describe("体と心の台（手で書いた正しい答えで採点）", () => {
       identity: result.stats,
     });
     expect(line).toContain("体と心の照合（心と体の記録 2組・訊いたチャンク 6件・場面の読み 11件・本文の遷移 4件");
-    expect(line).toContain("心の側へ付け替えた事実 2件");
+    expect(line).toContain("心の側へ付け替えた事実 3件");
     expect(line).toContain("心が決まらず照合から外した事実 2件");
     expect(line).toContain(
       "本文で別の心が入っている読み（第2話「その晩、文佳の体を動かしていたのは、灯に宿っているはずの千早だった」（密倉文佳の体に宮下千早の心）"
@@ -590,6 +591,73 @@ describe("体と心の台（手で書いた正しい答えで採点）", () => {
       isCancelled: () => asked >= 2,
     });
     expect(asked).toBe(2);
+  });
+});
+
+/**
+ * 実接続の測定（2026-10-26、gemma4:26b・e4b）で、仕込みの「範囲が切れたあとの太志」「記録に無い
+ * 千早」が候補にならなかった。AI が場面の描写の1文（「太志がもう一度名乗った」「文佳の体を
+ * 動かしていたのは…千早だった」）を遷移としても返し、その遷移が同じ場面を「描写あり」で許していた。
+ * 26b の案内では、同じ読みが場面と遷移から二重に並んだ
+ */
+describe("再現：実測の読み違えの遷移", () => {
+  it("場面の描写を遷移とも読んだ答えが混ざっても、仕込み3件に当たる", async () => {
+    const { flagged } = await runLikeProduct(cues.minds, [...cues.transitions, ...cues.trapTransitions]);
+    for (const target of [
+      { file: "本文/002_目覚め.txt", start: 11, end: 12 },
+      { file: "本文/006_名乗り.txt", start: 6, end: 7 },
+      { file: "本文/005_台所.txt", start: 1, end: 1 },
+    ]) {
+      expect(hits(flagged, target.file, target), target.file).toHaveLength(1);
+    }
+  });
+
+  it("体の書かれない幽霊の遷移は、ほかの体にいる心を許さない", () => {
+    const spans: DwellingSpan[] = [{ bodyId: "char_0001", mindId: "char_0002", fromChapter: 2, untilChapter: 4 }];
+    const ghost: IdentityTransition = {
+      subject: "char_0004",
+      kind: "ghost",
+      at: { storyTime: null, chapter: 5, line: 3 },
+      toPersona: "char_0004",
+    };
+    const scenes = [scene("a", 5, 1, "char_0001"), scene("b", 5, 6, "char_0004")];
+    expect(findDwellingDrift(scenes, [ghost], spans)).toHaveLength(1);
+  });
+
+  it("記録に無い読みの案内は、場面と遷移で同じ読みを二重に並べない", async () => {
+    // 太志の記録を第3話からにすると、第2話1行目の読みと憑依の遷移が、どちらも記録に無い読みになる
+    const later = characters.map((character) =>
+      character.id === "char_0002"
+        ? { ...character, dwellings: [{ body: "密倉文佳", fromChapter: 3, untilChapter: 4 }] }
+        : character
+    );
+    const result = await runIdentityCues({
+      characters: later, facts, places, episodes, chunks,
+      ask: fakeAsk(cues.minds, cues.transitions),
+    });
+    // 第2話1行目（読みと遷移が同じ1文）・第2話11行目・第6話6行目の3件。二重なら4件になる
+    expect(result.stats.unrecordedTotal).toBe(3);
+    const evidences = result.stats.unrecorded.map((entry) => entry.evidence);
+    expect(new Set(evidences).size).toBe(evidences.length);
+  });
+});
+
+describe("測定で原因を追う内訳（stages.identity.details）", () => {
+  it("検算を通った読みと遷移・捨てた理由・場面ごとの判定・心の項目の扱いを出す", async () => {
+    const { result } = await runLikeProduct(cues.minds, [...cues.transitions, ...cues.trapTransitions]);
+    const details = result.stats.details;
+    expect(details.readings).toContainEqual({
+      chapter: 6, line: 6, body: "密倉文佳", mind: "三門太志", evidence: "その夜、鏡の前の文佳の体で、太志がもう一",
+    });
+    expect(details.transitions).toContainEqual({
+      chapter: 5, line: 6, kind: "ghost", body: null, mind: "宮下千早", evidence: "その夜、千早の幽霊が、灯の枕元に現れた",
+    });
+    expect(details.rejectedByReason).toEqual({ dialogue: 2, same_person: 1, no_transition_word: 2, unnamed: 1 });
+    expect(details.scenes).toContainEqual({ chapter: 6, line: 6, body: "密倉文佳", mind: "三門太志", verdict: "flagged" });
+    expect(details.scenes).toContainEqual({ chapter: 3, line: 3, body: "密倉文佳", mind: "三門太志", verdict: "in_range" });
+    expect(details.mindFacts).toContainEqual({ chapter: 4, line: 5, subject: "密倉文佳", predicate: "一人称", outcome: "reassigned" });
+    expect(details.mindFacts).toContainEqual({ chapter: 3, line: 2, subject: "密倉文佳", predicate: "一人称", outcome: "excluded" });
+    expect(details.mindFacts).toContainEqual({ chapter: 1, line: 2, subject: "密倉文佳", predicate: "一人称", outcome: "out_of_range" });
   });
 });
 

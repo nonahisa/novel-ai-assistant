@@ -8,7 +8,7 @@ import {
 } from "../models/storyFact";
 import { dwellingLinks, ownAppellations } from "./characterDwelling";
 import { withLineNumbers, type Chunk } from "./chunker";
-import type { DwellingSpan } from "./contradictionMatch";
+import { dwellingSceneVerdicts, type DwellingSpan } from "./contradictionMatch";
 import type { IdentityCueStats, MindReassignment } from "./factContradiction";
 import type { FactPlace } from "./factContradictionFlow";
 import { normalizeForComparison } from "./groundedEvidence";
@@ -66,6 +66,42 @@ export const MIND_PREDICATES: ReadonlySet<string> = new Set(["一人称", "口�
 
 /** 完了の知らせに並べる「記録に無い読み」の件数 */
 const UNRECORDED_SHOWN = 3;
+
+/**
+ * 遷移の引用が含むべき語（心が入る・出る・戻る・入れ替わる・生まれ変わる・幽霊として現れる）。
+ *
+ * 実接続の測定（2026-10-26）で、26b・e4b は場面の描写の1文（「太志がもう一度名乗った」
+ * 「文佳の体を動かしていたのは…千早だった」）を遷移としても返し、その遷移が同じ場面を
+ * 「描写あり」で許して仕込みを消した。P-52 の検算と同じく、**出来事の語が引用に無ければ
+ * 遷移として受け取らない**。足りなくて落とした本物の遷移は、候補として出て確かめの段
+ * （identity 1.0：入る・戻る描写があれば両立）が見る——読み違えが黙って仕込みを消すより害が小さい。
+ * 「宿」は入れない（「灯に宿っているはずの千早」のように、いまいる体を言う語でもある）
+ */
+export const IDENTITY_TRANSITION_CUE_WORDS: readonly string[] = [
+  "乗り移",
+  "憑",
+  "入り込",
+  "入っ",
+  "入る",
+  "入れ替わ",
+  "入れかわ",
+  "戻っ",
+  "戻る",
+  "戻り",
+  "代わっ",
+  "替わっ",
+  "交代",
+  "目を覚ま",
+  "目覚め",
+  "顔を出",
+  "生まれ変わ",
+  "転生",
+  "幽霊",
+  "亡霊",
+];
+
+/** 内訳に載せる引用の頭の字数（作者の原稿の本文を長く出さない） */
+const DETAIL_EVIDENCE_CHARS = 20;
 
 /* ── 記録（AIを使わない段） ─────────────────────────────── */
 
@@ -253,7 +289,11 @@ export type SceneMindRejection =
   /** 引用が本文に一続きで無い・長すぎる */
   | "ungrounded"
   /** 遷移の引用が台詞（「」の中）にある（「まるで別人」で除外が効かないように） */
-  | "dialogue";
+  | "dialogue"
+  /** 遷移の引用に、前へ出る心の名前が無い */
+  | "unnamed"
+  /** 遷移の引用に、心が入る・戻るなどの出来事の語が無い（場面の描写を遷移と読んだ） */
+  | "no_transition_word";
 
 export interface SceneMindValidation {
   readings: AcceptedMindReading[];
@@ -283,6 +323,8 @@ function textField(entry: Record<string, unknown>, key: string): string {
  * - 見本と同じ名前・引用は捨てる（見本は本文に出ない名前）
  * - 遷移は引用が「」の外のときだけ（台詞の「まるで別人」で除外が効かないように）。
  *   憑依・入れ替わりで、入る心が体の持ち主と同じものは捨てる
+ * - 遷移の引用は、前へ出る心の名前と、出来事の語（`IDENTITY_TRANSITION_CUE_WORDS`）を
+ *   含むこと（場面の描写の1文を遷移と読んだ答えで、仕込みが消えないように）
  */
 export function validateSceneMinds(
   raw: unknown,
@@ -377,6 +419,15 @@ export function validateSceneMinds(
     const place = locateQuote(chunk, evidence, typeof entry.line === "number" ? entry.line : null);
     if (place.dialogue) {
       rejected.push({ reason: "dialogue", what: "transition" });
+      continue;
+    }
+    const flat = evidence.replace(/[\s　]/gu, "");
+    if (!appellationsOf(ledger, toMindId).some((name) => flat.includes(name))) {
+      rejected.push({ reason: "unnamed", what: "transition" });
+      continue;
+    }
+    if (!IDENTITY_TRANSITION_CUE_WORDS.some((word) => flat.includes(word))) {
+      rejected.push({ reason: "no_transition_word", what: "transition" });
       continue;
     }
     transitions.push({
@@ -498,7 +549,13 @@ export function reassignMindFacts(input: {
   episodes: readonly SceneClockEpisode[];
   readings: readonly AcceptedMindReading[];
   ledger: IdentityLedger;
-}): { facts: StoryFact[]; reassigned: Map<string, MindReassignment>; excluded: string[] } {
+}): {
+  facts: StoryFact[];
+  reassigned: Map<string, MindReassignment>;
+  excluded: string[];
+  /** 心の項目ごとの扱い（測定の内訳。組の体の名で抜かれたものだけ） */
+  outcomes: Array<{ fact: StoryFact; outcome: "reassigned" | "excluded" | "owner" | "out_of_range" }>;
+} {
   const { ledger } = input;
   const sceneOf = sceneIndexOf(input.episodes);
   const mindsByScene = new Map<string, Set<string>>();
@@ -513,12 +570,14 @@ export function reassignMindFacts(input: {
   const facts: StoryFact[] = [];
   const reassigned = new Map<string, MindReassignment>();
   const excluded: string[] = [];
+  const outcomes: Array<{ fact: StoryFact; outcome: "reassigned" | "excluded" | "owner" | "out_of_range" }> = [];
   for (const fact of input.facts) {
+    const mindItem = ledger.bodies.has(fact.subject) && MIND_PREDICATES.has(canonicalPredicate(fact.predicate));
     const target =
-      ledger.bodies.has(fact.subject) &&
-      MIND_PREDICATES.has(canonicalPredicate(fact.predicate)) &&
+      mindItem &&
       ledger.spans.some((span) => span.bodyId === fact.subject && spanCoversChapter(span, fact.chapter));
     if (!target) {
+      if (mindItem) outcomes.push({ fact, outcome: "out_of_range" });
       facts.push(fact);
       continue;
     }
@@ -529,12 +588,15 @@ export function reassignMindFacts(input: {
     const only = minds && minds.size === 1 ? [...minds][0] : undefined;
     if (!only || only === SCENE_MIND_UNKNOWN) {
       excluded.push(fact.id);
+      outcomes.push({ fact, outcome: "excluded" });
       continue;
     }
     if (only === fact.subject) {
       facts.push(fact);
+      outcomes.push({ fact, outcome: "owner" });
       continue;
     }
+    outcomes.push({ fact, outcome: "reassigned" });
     facts.push({ ...fact, subject: only });
     reassigned.set(fact.id, {
       bodyId: fact.subject,
@@ -543,7 +605,7 @@ export function reassignMindFacts(input: {
       mindName: ledger.displayNames.get(only) ?? only,
     });
   }
-  return { facts, reassigned, excluded };
+  return { facts, reassigned, excluded, outcomes };
 }
 
 /* ── 通し ───────────────────────────────────────────────── */
@@ -608,7 +670,13 @@ function emptyStats(): IdentityCueStats {
     unrecorded: [],
     unrecordedTotal: 0,
     failures: 0,
+    details: { readings: [], transitions: [], rejectedByReason: {}, scenes: [], mindFacts: [] },
   };
+}
+
+/** 内訳に載せる引用（頭だけ） */
+function evidenceHead(evidence: string): string {
+  return [...evidence].slice(0, DETAIL_EVIDENCE_CHARS).join("");
 }
 
 /**
@@ -677,6 +745,9 @@ export async function runIdentityCues(input: {
     }
     const checked = validateSceneMinds(raw, chunk, ledger);
     stats.rejected += checked.rejected.length;
+    for (const entry of checked.rejected) {
+      stats.details.rejectedByReason[entry.reason] = (stats.details.rejectedByReason[entry.reason] ?? 0) + 1;
+    }
     for (const reading of checked.readings) {
       // まとめたチャンクの重なりで同じ読みが2度来ても、1件に数える
       const key = [reading.bodyId, reading.mindId ?? "", reading.filePath, reading.line].join("\u0000");
@@ -733,12 +804,21 @@ export async function runIdentityCues(input: {
     ledger.spans.some(
       (span) => span.bodyId === bodyId && span.mindId === mindId && spanCoversChapter(span, chapter)
     );
+  // 場面の読みと遷移が同じ1文を返すことがあるので、（体・心・話・引用）で1件にまとめる
+  // （26b の実測で第6話の同じ読みが二重に並んだ）。幽霊・転生は体に宿る記録の話ではないので並べない
+  const seenUnrecorded = new Set<string>();
   const unrecorded = [
     ...named.map((reading) => ({ bodyId: reading.bodyId, mindId: reading.mindId, chapter: reading.chapter, evidence: reading.evidence })),
     ...moves
-      .filter((move) => move.bodyId !== undefined)
+      .filter((move) => move.bodyId !== undefined && move.kind !== "ghost" && move.kind !== "reincarnation")
       .map((move) => ({ bodyId: move.bodyId as string, mindId: move.toMindId, chapter: move.chapter, evidence: move.evidence })),
-  ].filter((entry) => !recorded(entry.bodyId, entry.mindId, entry.chapter));
+  ].filter((entry) => {
+    if (recorded(entry.bodyId, entry.mindId, entry.chapter)) return false;
+    const key = [entry.bodyId, entry.mindId, entry.chapter ?? "", normalizeForComparison(quoteCore(entry.evidence))].join("\u0000");
+    if (seenUnrecorded.has(key)) return false;
+    seenUnrecorded.add(key);
+    return true;
+  });
   stats.unrecordedTotal = unrecorded.length;
   stats.unrecorded = unrecorded.slice(0, UNRECORDED_SHOWN).map((entry) => ({
     chapter: entry.chapter,
@@ -747,12 +827,47 @@ export async function runIdentityCues(input: {
     mindName: ledger.displayNames.get(entry.mindId) ?? entry.mindId,
   }));
 
+  // 測定で原因を追うための内訳（MCP の stages.identity に出る）
+  const nameOf = (id: string) => ledger.displayNames.get(id) ?? id;
+  stats.details.readings = readings.map((reading) => ({
+    chapter: reading.chapter,
+    line: reading.line,
+    body: nameOf(reading.bodyId),
+    mind: reading.mindId === null ? SCENE_MIND_UNKNOWN : nameOf(reading.mindId),
+    evidence: evidenceHead(reading.evidence),
+  }));
+  stats.details.transitions = moves.map((move) => ({
+    chapter: move.chapter,
+    line: move.line,
+    kind: move.kind,
+    body: move.bodyId ? nameOf(move.bodyId) : null,
+    mind: nameOf(move.toMindId),
+    evidence: evidenceHead(move.evidence),
+  }));
+  const allTransitions = [...transitionsFromDwellings(ledger.spans), ...textTransitions];
+  stats.details.scenes = dwellingSceneVerdicts(registered.scenes, allTransitions, ledger.spans).map(
+    (verdict) => ({
+      chapter: verdict.current.chapter,
+      line: verdict.current.lineRange[0],
+      body: nameOf(verdict.body),
+      mind: nameOf(verdict.mind),
+      verdict: verdict.verdict,
+    })
+  );
+  stats.details.mindFacts = moved.outcomes.map(({ fact, outcome }) => ({
+    chapter: fact.chapter,
+    line: fact.lineRange[0],
+    subject: nameOf(fact.subject),
+    predicate: fact.predicate,
+    outcome,
+  }));
+
   return {
     facts: moved.facts,
     sceneFacts: registered.sceneFacts,
     scenePlaces: registered.places,
     scenes: registered.scenes,
-    transitions: [...transitionsFromDwellings(ledger.spans), ...textTransitions],
+    transitions: allTransitions,
     dwellings: ledger.spans,
     names: ledger.displayNames,
     reassigned: moved.reassigned,

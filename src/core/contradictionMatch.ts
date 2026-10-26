@@ -802,16 +802,85 @@ export function findDwellingDrift(
   dwellings: readonly DwellingSpan[],
   names: ReadonlyMap<string, string> = new Map()
 ): ContradictionCandidate[] {
-  const textTransitions = transitions.filter((transition) => !transition.fromDwelling);
   const nameOf = (id: string) => names.get(id) ?? id;
+  const candidates: ContradictionCandidate[] = [];
+  for (const verdict of dwellingSceneVerdicts(scenes, transitions, dwellings)) {
+    if (verdict.verdict !== "flagged") continue;
+    const { body, mind, current, previous } = verdict;
+    const at = scenePosition(current);
+    const spans = dwellings.filter((span) => span.bodyId === body && span.mindId === mind);
+    const range = spans.map(describeSpan).join("、");
+    const reason =
+      spans.length > 0
+        ? `${formatPosition(at)}、${nameOf(body)}の体に〈${nameOf(mind)}〉の心がいる。` +
+          `心と体の記録の範囲（${range}）の外で、本文に心が入る描写も無い`
+        : `${formatPosition(at)}、${nameOf(body)}の体に〈${nameOf(mind)}〉の心がいる。` +
+          `心と体の記録に無い組で、本文に心が入る描写も無い`;
+    const recorded = dwellings
+      .filter((span) => span.bodyId === body)
+      .map((span) => `${nameOf(span.mindId)}（${describeSpan(span)}）`);
+    const basis =
+      spans.length > 0
+        ? `心と体の記録（作者が人物の編集で付けたもの）では、${nameOf(mind)}の心が${nameOf(body)}の体にいるのは${range}`
+        : recorded.length > 0
+          ? `心と体の記録（作者が人物の編集で付けたもの）では、${nameOf(body)}の体に宿る心は${recorded.join("・")}だけ`
+          : `心と体の記録（作者が人物の編集で付けたもの）には、${nameOf(body)}の体に宿る心が無い`;
+    candidates.push(
+      buildCandidate({
+        type: "状態",
+        subject: body,
+        predicate: PERSONA,
+        values: [previous?.triple.personaId ?? body, mind],
+        left: previous?.source ?? current.source,
+        right: current.source,
+        // 場面の組は地の文から読むもの（誰かの台詞ではない）ので narration 相当
+        confidence: confidenceFromModality("narration"),
+        unknownOrder: previous
+          ? isFactOrderUnknown(scenePosition(previous), at)
+          : false,
+        reason,
+        basis,
+        origin: "identity",
+      })
+    );
+  }
+  return candidates;
+}
+
+/** 体の持ち主でない心がいる場面1つの判定（`dwellingSceneVerdicts`） */
+export interface DwellingSceneVerdict {
+  body: string;
+  mind: string;
+  current: SceneIdentity;
+  previous?: SceneIdentity;
+  /**
+   * in_range＝記録の範囲の中／described＝前の場面からのあいだに本文の遷移がある／
+   * carried＝本文の遷移で入った心が続いている／flagged＝候補にする
+   */
+  verdict: "in_range" | "described" | "carried" | "flagged";
+}
+
+/**
+ * `findDwellingDrift` の判定を、場面ごとに返す（候補にならなかった理由を測定で追うため。
+ * MCP の `stages.identity` に出す）。**判定はここ1か所**——内訳のために別に書くと、
+ * 内訳と候補が食い違う。体の持ち主の心の場面は返さない（いつでもよいので）。
+ *
+ * 遷移で許すのは、**同じ体が書かれた本文の遷移**だけ。体の書かれない幽霊・転生の遷移は、
+ * その体に心が入った描写ではない（どの体の場面でも許してしまう）
+ */
+export function dwellingSceneVerdicts(
+  scenes: readonly SceneIdentity[],
+  transitions: readonly IdentityTransition[],
+  dwellings: readonly DwellingSpan[]
+): DwellingSceneVerdict[] {
+  const textTransitions = transitions.filter((transition) => !transition.fromDwelling);
   const groups = new Map<string, SceneIdentity[]>();
   for (const scene of orderScenes(scenes)) {
     const bucket = groups.get(scene.triple.bodyId);
     if (bucket) bucket.push(scene);
     else groups.set(scene.triple.bodyId, [scene]);
   }
-
-  const candidates: ContradictionCandidate[] = [];
+  const verdicts: DwellingSceneVerdict[] = [];
   for (const body of [...groups.keys()].sort()) {
     const list = groups.get(body) ?? [];
     /** 本文の遷移で入った心。範囲の外でも、別の心に替わるまでは続いているとみなす */
@@ -820,66 +889,39 @@ export function findDwellingDrift(
       const current = list[i];
       const previous = i > 0 ? list[i - 1] : undefined;
       const mind = current.triple.personaId;
-      const at = scenePosition(current);
       if (mind === body) {
         carried = null;
         continue;
       }
+      const base = { body, mind, current, ...(previous ? { previous } : {}) };
       const spans = dwellings.filter((span) => span.bodyId === body && span.mindId === mind);
-      if (spans.some((span) => spanCovers(span, current.chapter))) continue;
+      if (spans.some((span) => spanCovers(span, current.chapter))) {
+        verdicts.push({ ...base, verdict: "in_range" });
+        continue;
+      }
       // 前の場面（無ければこの話の頭）からこの場面までのあいだの、本文の遷移
       const from: FactPosition = previous
         ? scenePosition(previous)
         : { storyTime: null, chapter: current.chapter, line: 0 };
       const described = textTransitions.some(
         (transition) =>
-          coversBody(transition, body) &&
-          within(transition.at, from, at) &&
+          transition.body === body &&
+          within(transition.at, from, scenePosition(current)) &&
           transitionToPersona(transition) === mind
       );
       if (described) {
         carried = mind;
+        verdicts.push({ ...base, verdict: "described" });
         continue;
       }
-      if (carried === mind) continue;
-
-      const range = spans.map(describeSpan).join("、");
-      const reason =
-        spans.length > 0
-          ? `${formatPosition(at)}、${nameOf(body)}の体に〈${nameOf(mind)}〉の心がいる。` +
-            `心と体の記録の範囲（${range}）の外で、本文に心が入る描写も無い`
-          : `${formatPosition(at)}、${nameOf(body)}の体に〈${nameOf(mind)}〉の心がいる。` +
-            `心と体の記録に無い組で、本文に心が入る描写も無い`;
-      const recorded = dwellings
-        .filter((span) => span.bodyId === body)
-        .map((span) => `${nameOf(span.mindId)}（${describeSpan(span)}）`);
-      const basis =
-        spans.length > 0
-          ? `心と体の記録（作者が人物の編集で付けたもの）では、${nameOf(mind)}の心が${nameOf(body)}の体にいるのは${range}`
-          : recorded.length > 0
-            ? `心と体の記録（作者が人物の編集で付けたもの）では、${nameOf(body)}の体に宿る心は${recorded.join("・")}だけ`
-            : `心と体の記録（作者が人物の編集で付けたもの）には、${nameOf(body)}の体に宿る心が無い`;
-      candidates.push(
-        buildCandidate({
-          type: "状態",
-          subject: body,
-          predicate: PERSONA,
-          values: [previous?.triple.personaId ?? body, mind],
-          left: previous?.source ?? current.source,
-          right: current.source,
-          // 場面の組は地の文から読むもの（誰かの台詞ではない）ので narration 相当
-          confidence: confidenceFromModality("narration"),
-          unknownOrder: previous
-            ? isFactOrderUnknown(scenePosition(previous), at)
-            : false,
-          reason,
-          basis,
-          origin: "identity",
-        })
-      );
+      if (carried === mind) {
+        verdicts.push({ ...base, verdict: "carried" });
+        continue;
+      }
+      verdicts.push({ ...base, verdict: "flagged" });
     }
   }
-  return candidates;
+  return verdicts;
 }
 
 /** 記録の範囲がその話を含むか。話数が分からなければ、範囲に縛りが無いときだけ含むとみなす */
