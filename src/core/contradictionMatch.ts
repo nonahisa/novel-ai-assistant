@@ -136,9 +136,9 @@ export interface WhereaboutsEntry {
  * 設定資料から分かる「死んだあとも心が別の体で出てくる人物」の印（2026-10-24）。
  *
  * 作者が付けた心と体の記録（宿り、`Character.dwellings`。設計書6.5.13）の心の側から
- * 組む（`factsFromRecords.ts` の `afterlifeMarksFromCharacters`）。遷移の表
- * （`transitions`）は第5段まで製品の道で空なので、幽霊・転生・憑依の除外は
- * いまはこの印だけが効く（作者の裁定「設定資料から除く」）。
+ * 組む（`factsFromRecords.ts` の `afterlifeMarksFromCharacters`）。作者の裁定「設定資料から除く」。
+ * 遷移の表（`transitions`）は、心と体の記録がある作品でだけ製品の道から渡る（6.88.14）。
+ * 記録の無い作品では、幽霊・転生・憑依の除外はこの印だけが効く。
  */
 export interface AfterlifeMark {
   /** 人物の id（事実の `subject` と同じ） */

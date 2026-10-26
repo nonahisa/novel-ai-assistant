@@ -268,8 +268,8 @@ export async function checkFactContradictions(
    */
   const recordFacts = factsFromCharacters(characters);
   // 心と体の記録（宿り）がある人物は「死亡後の登場」から外す（作者の裁定
-  // 2026-10-24「設定資料から除く」）。遷移の表は第5段まで空なので、幽霊・転生・
-  // 憑依の除外はいまはこれだけが効く
+  // 2026-10-24「設定資料から除く」）。体と心の照合（6.88.14）が渡す遷移と合わせて効く
+  // （記録の範囲が死んだ話より前に終わる人物は、本文の幽霊・転生の遷移でしか外れない）
   const afterlives = afterlifeMarksFromCharacters(characters);
   // 場所の記録（移動の照合の所要時間の表と、所在の引き当て）。読めなくても止めない
   const locations = await loadLocations(work);
