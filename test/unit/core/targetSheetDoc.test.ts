@@ -16,6 +16,7 @@ import {
   type TargetSheetCircles,
 } from "../../../src/core/targetSheetCircles";
 import type { TargetSheetWrittenRecord } from "../../../src/core/targetSheetWritten";
+import { circlesFigureMarkdown } from "../../../src/core/targetSheetCirclesFigure";
 import {
   TITLE_FIT_SCHEMA_VERSION,
   type TitleFitRecord,
@@ -290,6 +291,81 @@ describe("統合した1枚", () => {
       circles,
     });
     expect(doc).not.toContain("3つの輪の紙");
+  });
+
+  /*
+    3つの輪の図（作者の依頼、2026-10-26）。節の中に1枚だけ置き、
+    図の下に説明の一文を置かない（作者「下の一文は不要です」）。
+  */
+  describe("3つの輪の図", () => {
+    const AUTHOR = "狙い：考察層\n\n理由：謎解きが好きな人に\nメモ：図の前後で消えないか";
+
+    function figureDoc(): string {
+      return buildFull({
+        authorBlock: AUTHOR,
+        profile: PROFILE,
+        circles: targetSheetCircles({
+          authorReader: { scores: { familiarity: 6, posture: 4, craving: 0 } },
+          aim: ["lore_deep"],
+          actual: PROFILE.actual,
+        }),
+      });
+    }
+
+    test("3つの輪の節に図が1枚だけ入る", () => {
+      const doc = figureDoc();
+      const lines = doc.split("\n");
+      const figures = lines.filter((line) => line === circlesFigureMarkdown());
+      expect(figures).toHaveLength(1);
+      const at = lines.indexOf(circlesFigureMarkdown());
+      const sectionAt = lines.indexOf("## 3つの輪");
+      expect(sectionAt).toBeGreaterThanOrEqual(0);
+      expect(at).toBeGreaterThan(sectionAt);
+      // 次の ## 見出しより前（節の中）にある
+      const nextSection = lines.findIndex(
+        (line, index) => index > sectionAt && line.startsWith("## ")
+      );
+      if (nextSection >= 0) expect(at).toBeLessThan(nextSection);
+    });
+
+    test("図のすぐ下は見出しで、説明の一文を置かない", () => {
+      const lines = figureDoc().split("\n");
+      const at = lines.indexOf(circlesFigureMarkdown());
+      const next = lines.slice(at + 1).find((line) => line.trim() !== "");
+      expect(next?.startsWith("### ")).toBe(true);
+    });
+
+    test("図は段落として独立する（前後が空行。前の文にくっつかない）", () => {
+      const lines = figureDoc().split("\n");
+      const at = lines.indexOf(circlesFigureMarkdown());
+      expect(lines[at - 1]).toBe("");
+      expect(lines[at + 1]).toBe("");
+    });
+
+    test("作者の欄は図を足しても1字も変わらない", () => {
+      const doc = figureDoc();
+      expect(extractAuthorBlock(doc)).toBe(AUTHOR);
+      // 作り直し（運び直し）を2回くり返しても同じ
+      const again = buildFull({
+        authorBlock: extractAuthorBlock(doc),
+        profile: PROFILE,
+      });
+      expect(extractAuthorBlock(again)).toBe(AUTHOR);
+      expect(isTargetSheetDoc(doc)).toBe(true);
+    });
+
+    test("図は作者の欄の外（欄の印より後ろ）にある", () => {
+      const doc = figureDoc();
+      expect(doc.indexOf(circlesFigureMarkdown())).toBeGreaterThan(
+        doc.indexOf(AUTHOR_BLOCK_END)
+      );
+    });
+
+    test("3つの輪を渡されなければ、図も出さない", () => {
+      const doc = buildFull({ authorBlock: AUTHOR, profile: PROFILE });
+      expect(doc).not.toContain(circlesFigureMarkdown());
+      expect(doc).not.toContain("data:image/");
+    });
   });
 
   /*
