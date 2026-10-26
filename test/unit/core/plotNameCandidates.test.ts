@@ -112,3 +112,83 @@ describe("人物ごとの候補を絞る", () => {
     expect(result.people[1].dropped[0].reason).toContain("系統が揃っていません");
   });
 });
+
+/**
+ * 漢字のあいだの「ノ」「ヶ」「ケ」（作者の裁定 2026-10-26「直す」）。
+ *
+ * プロンプト設計書 P-45 の測定（2026-09-25）で、26b の「一ノ瀬 莉子」が
+ * 「カタカナを含む」で落ちた。プロットモードの道（系統を全員で決める →
+ * `fitNameCandidates` → 読みを揃える → 響き）を通しても残ることを見張る。
+ * 作者が系統を選ばず、人物名から漢字の作品と決まる計画で確かめる。
+ */
+describe("漢字のあいだの「ノ」「ヶ」「ケ」は和名の一部として残す", () => {
+  const KANJI_WORK = planNameOrigin({
+    existingNames: ["相馬誠", "白井澪"],
+    setting: "",
+  });
+
+  it("一ノ瀬・二ノ宮・霞ヶ関・三ケ田は、どの人物の候補でも落とさない", () => {
+    const result = screenPlotNameCandidates(
+      [
+        {
+          id: "1",
+          label: "主人公",
+          candidates: [
+            candidate("一ノ瀬 莉子", "いちのせ りこ"),
+            candidate("二ノ宮 湊", "にのみや みなと"),
+          ],
+        },
+        {
+          id: "2",
+          label: "班長",
+          candidates: [
+            candidate("霞ヶ関 蒼", "かすみがせき あおい"),
+            candidate("三ケ田 勝", "みけた まさる"),
+          ],
+        },
+      ],
+      KANJI_WORK,
+      []
+    );
+
+    expect(result.origin).toBe("和風");
+    expect(result.people[0].kept.map((entry) => entry.name)).toEqual([
+      "一ノ瀬 莉子",
+      "二ノ宮 湊",
+    ]);
+    expect(result.people[1].kept.map((entry) => entry.name)).toEqual([
+      "霞ヶ関 蒼",
+      "三ケ田 勝",
+    ]);
+    expect(result.people.flatMap((person) => person.dropped)).toEqual([]);
+  });
+
+  it("カタカナの名前・カタカナ混じりの名前は、これまでどおり落とす", () => {
+    const result = screenPlotNameCandidates(
+      [
+        {
+          id: "1",
+          candidates: [
+            candidate("アリス", "ありす"),
+            // 「ケ」「ノ」でも、漢字に挟まれていなければ名前の一部ではない
+            candidate("佐藤ケン", "さとう けん"),
+            candidate("ノ瀬 莉子", "のせ りこ"),
+            candidate("結城 紬", "ゆうき つむぎ"),
+          ],
+        },
+      ],
+      KANJI_WORK,
+      []
+    );
+
+    expect(result.people[0].kept.map((entry) => entry.name)).toEqual(["結城 紬"]);
+    expect(result.people[0].dropped.map((entry) => entry.name)).toEqual([
+      "アリス",
+      "佐藤ケン",
+      "ノ瀬 莉子",
+    ]);
+    for (const entry of result.people[0].dropped) {
+      expect(entry.reason).toContain("カタカナを含む");
+    }
+  });
+});
