@@ -1,0 +1,33 @@
+{
+  "note": "P-53（場面の体と心）の、手で書いた正しい答え。AIが正しく読んだときの答えの形そのもの（minds と transitions は P-53 のスキーマに file を足したもの）。trapMinds と trapTransitions は、AIが読み違えたときに返しそうな答えで、検算で捨てるべきもの（why に捨てる理由）。test/unit/core/identityCues.test.ts と test/unit/mcp/mcpFactContradictionIdentity.test.ts が読む。",
+  "minds": [
+    { "file": "本文/001_前世.txt", "body": "文佳", "mind": "文佳", "evidence": "密倉文佳は鏡の前で髪を結んだ", "line": 1 },
+    { "file": "本文/001_前世.txt", "body": "灯", "mind": "千早", "evidence": "早瀬灯の体で、千早は窓の外を眺めていた", "line": 12 },
+    { "file": "本文/002_目覚め.txt", "body": "文佳", "mind": "太志", "evidence": "目を覚ますと、文佳の体の中にいたのは太志だった", "line": 1 },
+    { "file": "本文/002_目覚め.txt", "body": "文佳", "mind": "千早", "evidence": "その晩、文佳の体を動かしていたのは、灯に宿っているはずの千早だった", "line": 11 },
+    { "file": "本文/003_同居.txt", "body": "文佳", "mind": "文佳", "evidence": "朝の文佳は、文佳自身の心で目を覚ました", "line": 1 },
+    { "file": "本文/003_同居.txt", "body": "文佳", "mind": "太志", "evidence": "昼になると、同じ体で太志が顔を出した", "line": 3 },
+    { "file": "本文/003_同居.txt", "body": "文佳", "mind": "文佳", "evidence": "夕方には、また文佳が戻ってきた", "line": 5 },
+    { "file": "本文/004_別人みたい.txt", "body": "文佳", "mind": "太志", "evidence": "文佳の体の太志は、笑ってごまかした", "line": 3 },
+    { "file": "本文/005_台所.txt", "body": "文佳", "mind": "文佳", "evidence": "文佳は湯気の向こうの背中を、黙って見ていた", "line": 2 },
+    { "file": "本文/006_名乗り.txt", "body": "文佳", "mind": "文佳", "evidence": "文佳は「山田花子」と名乗って、駅前の喫茶店に入った", "line": 1 },
+    { "file": "本文/006_名乗り.txt", "body": "文佳", "mind": "太志", "evidence": "その夜、鏡の前の文佳の体で、太志がもう一度名乗った", "line": 6 }
+  ],
+  "transitions": [
+    { "file": "本文/002_目覚め.txt", "kind": "possession", "body": "文佳", "toMind": "太志", "evidence": "目を覚ますと、文佳の体の中にいたのは太志だった", "line": 1 },
+    { "file": "本文/003_同居.txt", "kind": "switch", "body": "文佳", "toMind": "太志", "evidence": "昼になると、同じ体で太志が顔を出した", "line": 3 },
+    { "file": "本文/003_同居.txt", "kind": "switch", "body": "文佳", "toMind": "文佳", "evidence": "夕方には、また文佳が戻ってきた", "line": 5 },
+    { "file": "本文/005_台所.txt", "kind": "ghost", "body": "", "toMind": "千早", "evidence": "その夜、千早の幽霊が、灯の枕元に現れた", "line": 6 }
+  ],
+  "trapMinds": [
+    { "file": "本文/006_名乗り.txt", "body": "文佳", "mind": "山田花子", "evidence": "文佳は「山田花子」と名乗って、駅前の喫茶店に入った", "line": 1, "reason": "unknown_name", "why": "変装の偽名は心ではない（身分は扱わない。母艦の判断⑤）。組の人物に引けない" },
+    { "file": "本文/004_別人みたい.txt", "body": "真央", "mind": "文佳", "evidence": "教室で、友人の真央が文佳の顔をのぞきこんだ", "line": 1, "reason": "unknown_name", "why": "真央は組の体ではない" },
+    { "file": "本文/004_別人みたい.txt", "body": "文佳", "mind": "太志", "evidence": "文佳の体の太志は、笑ってごまかしていた", "line": 3, "reason": "ungrounded", "why": "引用が本文と違う（本文は「笑ってごまかした」）" },
+    { "file": "本文/001_前世.txt", "body": "霞野まどか", "mind": "柊木こはる", "evidence": "まどかの口を借りて、こはるが笑った", "line": 12, "reason": "example_echo", "why": "見本がそのまま返ってきた" }
+  ],
+  "trapTransitions": [
+    { "file": "本文/004_別人みたい.txt", "kind": "switch", "body": "文佳", "toMind": "太志", "evidence": "今日の文佳、まるで別人みたい", "line": 2, "reason": "dialogue", "why": "台詞の「まるで別人」は出来事ではない" },
+    { "file": "本文/005_台所.txt", "kind": "ghost", "body": "", "toMind": "千早", "evidence": "「灯、泣かないで」", "line": 7, "reason": "dialogue", "why": "台詞だけでは幽霊の出来事の裏付けにならない" },
+    { "file": "本文/002_目覚め.txt", "kind": "possession", "body": "文佳", "toMind": "文佳", "evidence": "目を覚ますと、文佳の体の中にいたのは太志だった", "line": 1, "reason": "same_person", "why": "体の持ち主が自分の体に憑依することはない" }
+  ]
+}

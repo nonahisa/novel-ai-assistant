@@ -287,7 +287,7 @@ export function validateTravelDistances(
 }
 
 /** 引用の前後の括弧・句点を落とす（引用の写し方の揺れ） */
-function quoteCore(evidence: string): string {
+export function quoteCore(evidence: string): string {
   return evidence
     .replace(/^[「『"'“”‘’（(\s…]+/u, "")
     .replace(/[」』"'“”‘’）)\s…。．.]+$/u, "");
@@ -298,8 +298,10 @@ function quoteCore(evidence: string): string {
  *
  * 行は AI の答えた番号を信用せず、引用の入っている行を探す（見つからなければ
  * 答えの番号、それも外れていればチャンクの頭）。
+ *
+ * 体と心の照合（`identityCues.ts` の P-53 の検算）も同じ関数で引く（写しを作ると片方だけ直る）
  */
-function locateQuote(
+export function locateQuote(
   chunk: Chunk,
   evidence: string,
   answeredLine: number | null
@@ -330,7 +332,7 @@ function locateQuote(
  * 段落の中で、その引用が「」『』の中にあるか。見つからなければ、段落が
  * 台詞で始まるかで決める
  */
-function insideQuotation(paragraph: string, quote: string): boolean {
+export function insideQuotation(paragraph: string, quote: string): boolean {
   const at = paragraph.indexOf(quote);
   if (at < 0) return isQuotedParagraph(paragraph.replace(/^[\s　]+/u, ""));
   const before = paragraph.slice(0, at);

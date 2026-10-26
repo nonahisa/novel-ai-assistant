@@ -1,0 +1,19 @@
+{
+  "note": "体と心の照合（P-53。設計書6.88.14）を、決まった答えで採点するための固定の事実。事実の抽出（P-37）が返したときの形を手で書いたもの。憑依の場面の台詞の一人称は、体の持ち主（文佳）の名で抜かれた形にしてある（P-37 は体の持ち主と心の側のどちらにも付けうる。作者の判断⑥の付け替えを確かめるため）。回想は thought。test/unit/core/identityCues.test.ts が読む。",
+  "facts": [
+    { "file": "本文/001_前世.txt", "id": "fact:1:2:1", "line": 2, "subject": "char_0001", "predicate": "一人称", "value": "私", "kind": "static", "modality": "dialogue" },
+    { "file": "本文/001_前世.txt", "id": "fact:1:7:1", "line": 7, "subject": "char_0002", "predicate": "一人称", "value": "俺", "kind": "static", "modality": "dialogue" },
+    { "file": "本文/001_前世.txt", "id": "fact:1:8:1", "line": 8, "subject": "char_0002", "predicate": "死亡", "value": "", "kind": "event", "modality": "narration" },
+    { "file": "本文/002_目覚め.txt", "id": "fact:2:2:1", "line": 2, "subject": "char_0001", "predicate": "一人称", "value": "俺", "kind": "static", "modality": "dialogue" },
+    { "file": "本文/002_目覚め.txt", "id": "fact:2:7:1", "line": 7, "subject": "char_0005", "predicate": "死亡", "value": "", "kind": "event", "modality": "narration" },
+    { "file": "本文/002_目覚め.txt", "id": "fact:2:12:1", "line": 12, "subject": "char_0001", "predicate": "一人称", "value": "あたし", "kind": "static", "modality": "dialogue" },
+    { "file": "本文/003_同居.txt", "id": "fact:3:2:1", "line": 2, "subject": "char_0001", "predicate": "一人称", "value": "私", "kind": "static", "modality": "dialogue" },
+    { "file": "本文/003_同居.txt", "id": "fact:3:4:1", "line": 4, "subject": "char_0001", "predicate": "一人称", "value": "俺", "kind": "static", "modality": "dialogue" },
+    { "file": "本文/003_同居.txt", "id": "fact:3:9:1", "line": 9, "subject": "char_0004", "predicate": "死亡", "value": "", "kind": "event", "modality": "narration" },
+    { "file": "本文/004_別人みたい.txt", "id": "fact:4:4:1", "line": 4, "subject": "char_0005", "predicate": "行動", "value": "味噌汁を作っていた", "kind": "event", "modality": "thought" },
+    { "file": "本文/005_台所.txt", "id": "fact:5:1:1", "line": 1, "subject": "char_0005", "predicate": "行動", "value": "味噌汁を作っていた", "kind": "event", "modality": "narration" },
+    { "file": "本文/005_台所.txt", "id": "fact:5:6:1", "line": 6, "subject": "char_0004", "predicate": "所在", "value": "灯の枕元", "kind": "state", "modality": "narration" },
+    { "file": "本文/006_名乗り.txt", "id": "fact:6:1:1", "line": 1, "subject": "char_0001", "predicate": "偽名", "value": "山田花子", "kind": "state", "modality": "narration" },
+    { "file": "本文/006_名乗り.txt", "id": "fact:6:7:1", "line": 7, "subject": "char_0002", "predicate": "一人称", "value": "俺", "kind": "static", "modality": "dialogue" }
+  ]
+}
