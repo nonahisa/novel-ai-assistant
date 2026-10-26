@@ -1,0 +1,352 @@
+{
+  "measuredAt": "2026-10-26T00:25:32.096Z",
+  "feature": "factContradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:e4b",
+  "numCtx": 32768,
+  "numCtxDecision": {
+    "numCtx": 32768,
+    "source": "既定（2段めのプロンプトの長さが分からないので決めませんでした）"
+  },
+  "temperature": {
+    "extract": 0,
+    "verify": 0
+  },
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 131072,
+    "parameterSize": "8.0B",
+    "bundled": {
+      "thinkingSeen": true,
+      "thinkingOffWorks": true,
+      "thinkingMeasuredAt": "2026-09-26",
+      "typoAccuracy": {
+        "hits": 3,
+        "total": 7,
+        "falsePositives": 0,
+        "wrongFixes": 0,
+        "trapHits": 0,
+        "trapTotal": 5,
+        "promptVersion": "1.1",
+        "smallPrompt": true,
+        "sampleVersion": "2",
+        "measuredAt": "2026-09-26T06:29:55+09:00"
+      },
+      "measuredAt": "2026-09-26"
+    },
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 888,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "givenOptions": {},
+  "modelSize": null,
+  "modelSizeDecision": {
+    "sizeDependent": false,
+    "decided": false,
+    "reason": "この機能は製品がモデルの大きさで頼み方を変えません"
+  },
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.112.0",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.0",
+  "verifyPromptVersion": "1.2:travel1.0",
+  "plans": [
+    {
+      "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+      "chars": 1235,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+      "chars": 1218,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+      "chars": 1211,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+      "chars": 1246,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+      "chars": 1216,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\b4c377fe-7220-490b-8528-2cd60e4a1156\\scratchpad\\works\\board",
+    "targets": [
+      "（作品ぜんたい）"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\b4c377fe-7220-490b-8528-2cd60e4a1156\\scratchpad\\works\\board\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 434385,
+      "temperature": {
+        "extract": 0,
+        "verify": 0
+      },
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 0,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 4,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 0,
+        "rejected": 4,
+        "rejected.そもそも食い違っていない": 3,
+        "rejected.まだ明かされていない": 1,
+        "failures": 0,
+        "elapsedMs": 434385
+      },
+      "detail": {
+        "rejectedReasons": {
+          "そもそも食い違っていない": 3,
+          "まだ明かされていない": 1
+        },
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 0,
+            "total": 2
+          },
+          "状態": {
+            "found": 0,
+            "total": 1
+          },
+          "時系列": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/003_窓口の椅子.txt",
+            "kind": "人物",
+            "where": "僕は判子を押す手を止めた"
+          },
+          {
+            "file": "本文/004_ギプスが外れた日.txt",
+            "kind": "状態",
+            "where": "右足のギプスが外れたのは"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "人物",
+            "where": "左目の下のほくろが、鏡の中で滲んだ"
+          },
+          {
+            "file": "本文/005_初雪の窓口.txt",
+            "kind": "時系列",
+            "where": "足を折ってから、ちょうど二週間が過ぎた"
+          }
+        ],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "（作品ぜんたい）",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。 矛盾検知（事実の照合）を終了: 5/5（事実 188件 / 設定資料から 12件 / 弾いた 55件（作られた人物id 55件） / 候補 4件（状態 3件、設定 1件） / 採用 0件 / 検証で 4件を取り下げ（そもそも食い違っていない 3件、まだ明かされていない 1件） / 所要時間の表が0組なので移動の照合はしていません（所在の事実 5件・場所に引けた 0件・時計に載った 0件） / AIの手がかり（本文の距離 0件（捨てた 3件）））",
+            "temperature": {
+              "extract": 0,
+              "verify": 0
+            },
+            "model": "gemma4:e4b",
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "千夏は俺と同じ年に局へ入った。窓口に立つのが千夏の仕事で、坂を上るのが俺の仕事だ。",
+                    "explanation": "「役割」は「仕事内容」の記述であり、矛盾ではないため。"
+                  },
+                  {
+                    "reason": "まだ明かされていない",
+                    "excerpt": "千夏は俺と同じ年に局へ入った。窓口に立つのが千夏の仕事で、坂を上るのが俺の仕事だ。",
+                    "explanation": "設定資料は「〜が出られないときは、代わりに鳶ヶ丘を回る」と限定的であり、本文の記述は「窓口に立つのが千夏の仕事」という現在の役割を示しているため。"
+                  },
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "紺の半纏を着た白髪の老人が、縁側で新聞をひろげていた。",
+                    "explanation": "本文の記述は設定と一致しており、矛盾は生じていません。"
+                  }
+                ]
+              },
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt",
+                "chapterLabel": "第5話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "reason": "そもそも食い違っていない",
+                    "excerpt": "昼を過ぎて局へ戻ると、窓口が混んでいた。",
+                    "explanation": "地の文の場所の描写は、時間経過による状況描写であり、矛盾ではない。"
+                  }
+                ]
+              }
+            ],
+            "failures": [],
+            "pendingProposals": [],
+            "stages": {
+              "chunks": 5,
+              "acceptedFacts": 188,
+              "recordFacts": 12,
+              "rejectedFacts": 55,
+              "rejectionNote": "作られた人物id 55件",
+              "candidates": 4,
+              "candidateNote": "状態 3件、設定 1件",
+              "kept": 0,
+              "verifyNote": "検証で 4件を取り下げ（そもそも食い違っていない 3件、まだ明かされていない 1件）",
+              "travel": {
+                "whereaboutsFacts": 5,
+                "resolved": 0,
+                "clocked": 0,
+                "tablePairs": 0,
+                "aiCues": {
+                  "noLocations": false,
+                  "distanceChunks": 5,
+                  "distancesAccepted": 0,
+                  "distancesRejected": 3,
+                  "proposedLocations": 0,
+                  "timeCueRequests": 0,
+                  "timeCueSkipped": 0,
+                  "timeCuesApplied": 0,
+                  "timeCuesCut": 0,
+                  "failures": 0
+                }
+              }
+            },
+            "unreadableFiles": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "missedContradictions": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "rejected": {
+      "values": [
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "rejected.そもそも食い違っていない": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "rejected.まだ明かされていない": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        434385
+      ],
+      "min": 434385,
+      "max": 434385
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 0/4",
+    "見逃し（拾えなかった仕込み）: 4",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 0",
+    "落とした（検算で弾いたもの）: 4",
+    "　└ 落とした理由：そもそも食い違っていない: 3",
+    "　└ 落とした理由：まだ明かされていない: 1",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 434.4秒",
+    "num_ctx: 32768（既定（2段めのプロンプトの長さが分からないので決めませんでした））",
+    "temperature: extract 0・verify 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 0.9秒"
+  ]
+}
