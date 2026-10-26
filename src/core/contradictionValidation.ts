@@ -234,6 +234,72 @@ export function deniesContradiction(text: string): boolean {
 }
 
 /**
+ * 「地の文との矛盾ではない」——比べる相手を地の文に限った打ち消し。
+ *
+ * 台詞について「地の文とは食い違わない」と言っているだけで、あとの話の事実と
+ * 両立すると言っているのではない。`keepsFutureSpeechDenial` が、これを取り除いた
+ * 残りに打ち消しがあるかを見る。
+ */
+const NARRATION_ONLY_DENIAL =
+  /地の文(と|との|とは|における)?(の)?(矛盾|食い違い)(と)?(で|に)?は(あり)?(ない|ません|なく)|地の文と(は)?(矛盾|食い違わ)(し)?(ない|ません)/g;
+
+/** 発言者が知らない・偽っている、という断り（検出の段へ頼んだ言い回しとその言い換え） */
+const SPEAKER_CAVEAT = /発言者|嘘|偽っ|偽り|思い違い|勘違い/;
+
+/**
+ * 引用が台詞か。引用に括弧があるか、本文で括弧の中にあれば台詞と読む
+ * （AI は括弧を落として引くことがある）。
+ */
+function isSpeechExcerpt(excerpt: string, chunkText: string): boolean {
+  if (/[「『]/.test(excerpt)) return true;
+  const at = chunkText.indexOf(excerpt.trim());
+  if (at < 0) return false;
+  const before = chunkText.slice(0, at);
+  const open = Math.max(before.lastIndexOf("「"), before.lastIndexOf("『"));
+  const close = Math.max(before.lastIndexOf("」"), before.lastIndexOf("』"));
+  return open >= 0 && open > close;
+}
+
+/**
+ * あとの話から来た台詞の指摘で、打ち消しが「地の文との矛盾ではない」の形だけなら、
+ * self_denied で落とさない（作者の裁定 2026-10-26「直してから閉じる」。設計書6.10.5）。
+ *
+ * 検出の段は、あとの話の事実と台詞が食い違うとき「low にして、発言者が知らない／
+ * 偽っている可能性と書け」と頼む（6.10.4）。さくら Kimi-K2.6 はそのとおり断りを
+ * 書いたうえで「発言者が偽っている可能性があるため、地の文との矛盾ではない」と
+ * 結び、ここで消えていた（`docs/measurements/2026-10-26-future-facts-sakura-kimi.md`
+ * 114行、S1 base 試行2）。言っているのは「台詞なので地の文の矛盾ではない」で、
+ * 頼んだ扱い（low で残す）そのものである。
+ *
+ * **誤検出を増やさないよう狭く取る。** 次の全部がそろうときだけ通す：
+ * ①あとの話との突き合わせ（future）から来た、②引用が台詞、③同じ指摘に発言者の
+ * 断りがある、④「地の文との矛盾ではない」の形を取り除くと、打ち消しが残らない。
+ * 地の文の指摘、断りの無いもの、「矛盾とは言えない」のようなふつうの打ち消しは、
+ * 今までどおり落とす。
+ */
+function keepsFutureSpeechDenial(
+  combined: string,
+  note: string,
+  excerpt: string,
+  chunkText: string
+): boolean {
+  if (!SPEAKER_CAVEAT.test(note)) return false;
+  if (!isSpeechExcerpt(excerpt, chunkText)) return false;
+  const rest = combined.replace(NARRATION_ONLY_DENIAL, "");
+  if (rest === combined) return false;
+  return !deniesContradiction(rest);
+}
+
+/** 検算の呼び方。どの突き合わせから来た答えかで、扱いが1か所だけ変わる */
+export interface ValidateContradictionsOptions {
+  /**
+   * 本命（settled）か、あとで判明する事実との突き合わせ（future）か。
+   * 省くと本命として扱う（MCP の道には future の段が無い）
+   */
+  source?: "settled" | "future";
+}
+
+/**
  * 設定の側が、実は設定を述べていないものを見分ける。
  *
  * **実データで返ってきた。**「設定情報なし」「本文からは読み取れない」を
@@ -387,7 +453,8 @@ function excerptInChunk(
 
 export function validateContradictions(
   raw: unknown,
-  chunk: Chunk
+  chunk: Chunk,
+  options?: ValidateContradictionsOptions
 ): {
   accepted: AcceptedContradiction[];
   rejected: RejectedContradiction[];
@@ -434,9 +501,21 @@ export function validateContradictions(
     // **設定の欄も見る**（2026-09-25）。gemma4:e4b が設定の欄に「この発言は
     // 設定と合致している」と書いた指摘を並べてきた。設定の欄は設定を述べる
     // 所で、そこで食い違いを否定しているなら指摘として成り立たない
-    if (deniesContradiction(`${settingSays} ${textSays} ${asString(item.note)}`)) {
-      rejected.push({ raw: item, reason: "self_denied" });
-      continue;
+    //
+    // ただし、あとの話から来た台詞で「地の文との矛盾ではない」と断っただけのものは
+    // 落とさず low で残す（`keepsFutureSpeechDenial`、2026-10-26）
+    const combined = `${settingSays} ${textSays} ${asString(item.note)}`;
+    let forceLow = false;
+    if (deniesContradiction(combined)) {
+      if (
+        options?.source === "future" &&
+        keepsFutureSpeechDenial(combined, asString(item.note), excerpt, chunk.text)
+      ) {
+        forceLow = true;
+      } else {
+        rejected.push({ raw: item, reason: "self_denied" });
+        continue;
+      }
     }
     // **設定の側が「設定が無い」と言っているものを通さない。**
     // 照らし合わせる相手が無いのだから、それは矛盾ではない
@@ -484,7 +563,8 @@ export function validateContradictions(
       note: decodeByteFallback(asString(item.note)),
       // 読めない値は low に寄せる。**強い指摘として扱わない**
       severity: level(item.severity),
-      confidence: level(item.confidence),
+      // 台詞の食い違いは low の決まり（6.10.4）。残した理由と揃える
+      confidence: forceLow ? "low" : level(item.confidence),
       filePath: chunk.filePath,
       chunkHash: chunk.hash,
     });

@@ -121,6 +121,7 @@ import {
   CONTRADICTION_CHECK_VERSION,
   CONTRADICTION_TOM_TOOLS,
   LIGHT_CATEGORIES,
+  contradictionFuturePromptVersion,
   replyToContradictionToolCall,
   type ContradictionCategory,
 } from "../prompts/contradictionCheck";
@@ -662,8 +663,11 @@ export async function checkContradictions(
   };
 
   // **向きが違えば答えも違う。** 同じ鍵に入れると、片方が他方を上書きする
+  // 【あとの話で判明する事実】の欄は future にしか出ないので、その版はこちらの鍵にだけ
+  // 入れる（本命の処理済みを道連れにしない。`contradictionFuturePromptVersion`）
   const futureKeyBase = {
     ...cacheKeyBase,
+    promptVersion: contradictionFuturePromptVersion(cacheKeyBase.promptVersion),
     feature: "contradiction_future",
   };
   // 検証は別のプロンプトなので、版も別に持つ。
@@ -1114,7 +1118,8 @@ export async function checkContradictions(
 
         /** 応答を検証して、どのチャンクの指摘かを覚えておく */
         function collect(raw: unknown, chunk: Chunk, origin: VerifyOrigin): void {
-          const validated = validateContradictions(raw, chunk);
+          // 出どころを渡す——future の台詞だけ、検算の扱いが1か所変わる（設計書6.10.5）
+          const validated = validateContradictions(raw, chunk, { source: origin.source });
           rejectedCount += validated.rejected.length;
           rejectedReasons.push(
             ...validated.rejected.map((entry) => entry.reason)
@@ -1771,7 +1776,8 @@ export async function checkContradictions(
     const sentFuture = new Set(sendPlan.future.map((chunk) => chunk.hash));
     const keys = new Set<string>();
     const add = (raw: unknown, chunk: Chunk, origin: VerifyOrigin): void => {
-      for (const issue of validateContradictions(raw, chunk).accepted) {
+      // 輪の `collect` と同じ検算にする（数えた件数と送る件数を食い違わせない）
+      for (const issue of validateContradictions(raw, chunk, { source: origin.source }).accepted) {
         const key = verifyCacheKey(issue, chunk, origin);
         // 本命と future で鍵の版が違うので、出どころも混ぜて数える
         if (cache.get(key, verifyKeyBases[origin.source]) === undefined) {
