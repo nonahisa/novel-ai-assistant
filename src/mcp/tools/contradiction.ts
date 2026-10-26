@@ -1020,7 +1020,10 @@ function validateAgainst(
       "応答を読み取れませんでした（矛盾検知のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
     );
   }
-  const result = validateContradictions(parsed, chunk);
+  // 出どころを渡す（拡張機能の `collect` と揃える。設計書6.10.5）。この道には
+  // 「あとで判明する事実」の段が無いので本命に決まるが、既定に頼らず明示する
+  // ——future の段を足したとき、ここの渡し忘れで `keepsFutureSpeechDenial` が黙って効かなくなる
+  const result = validateContradictions(parsed, chunk, { source: "settled" });
   return {
     chunkId,
     chapterLabel: chapterLabelOf(chunk),
