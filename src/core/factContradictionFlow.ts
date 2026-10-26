@@ -12,12 +12,15 @@ import {
   buildFactVerifyIssue,
   linesAround,
   type KnownCharacterTable,
+  type MindReassignment,
   type TravelStageStats,
 } from "./factContradiction";
 import {
+  CONTRADICTION_VERIFY_IDENTITY_VERSION,
   CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION,
   CONTRADICTION_VERIFY_TRAVEL_VERSION,
   CONTRADICTION_VERIFY_VERSION,
+  type IdentityVerifyMaterial,
   type TravelVerifyMaterial,
 } from "../prompts/contradictionVerify";
 import type {
@@ -236,12 +239,15 @@ export function buildFactContradictionIssue(input: {
   rightLineText?: string;
   /** 判定（P-12b）で分かったこと。判定していなければ省略 */
   explanation?: string;
+  /** 体と心の照合で心の側へ付け替えた事実（作者の判断⑥）。両側の書き方に印を添える */
+  reassigned?: ReadonlyMap<string, MindReassignment>;
 }): FactContradictionIssue {
   const issue = buildFactVerifyIssue({
     candidate: input.candidate,
     left: input.sides.left,
     right: input.sides.right,
     rightLineText: input.rightLineText,
+    reassigned: input.reassigned,
   });
   const explanation = input.explanation ?? "";
   /*
@@ -356,9 +362,15 @@ export const TRAVEL_LEFT_CONTEXT_LINES = 2;
  */
 export function factVerifySourceOf(
   candidate: Pick<ContradictionCandidate, "origin">
-): "settled" | "travel" {
-  return candidate.origin === "travel" ? "travel" : "settled";
+): FactVerifySource {
+  if (candidate.origin === "travel") return "travel";
+  // 体と心の照合から来た候補も専用の文面（identity 1.0。母艦の判断④）
+  if (candidate.origin === "identity") return "identity";
+  return "settled";
 }
+
+/** 判定（P-12b）へ送る文面の種類 */
+export type FactVerifySource = "settled" | "travel" | "identity";
 
 /**
  * 判定の答えの控えの鍵に入れる版。**移動の照合の候補だけ** travel の版と印を足す。
@@ -366,7 +378,7 @@ export function factVerifySourceOf(
  * 直す前の判定が控えから返ると、直した文面を測れない）
  */
 export function factVerifyPromptVersion(
-  source: "settled" | "travel",
+  source: FactVerifySource,
   /**
    * 承認待ちの距離を使った候補か（`ContradictionCandidate.pendingDistance`）。
    * 省くと最新の travel の版（版を並べて見せる所が使う）。**控えの鍵を組む所は必ず渡す**——
@@ -374,6 +386,10 @@ export function factVerifyPromptVersion(
    */
   pendingDistance?: boolean
 ): string {
+  // 体と心の照合の候補は identity の版と印（`1.2:identity1.0`）。本命の控えは作り直さない
+  if (source === "identity") {
+    return `${CONTRADICTION_VERIFY_VERSION}:identity${CONTRADICTION_VERIFY_IDENTITY_VERSION}`;
+  }
   if (source !== "travel") return CONTRADICTION_VERIFY_VERSION;
   const travel =
     pendingDistance === false
@@ -422,6 +438,17 @@ export function travelVerifyMaterialOf(input: {
     // 承認待ちの距離を使った候補だけ、判定に1文足す（travel 1.1）。使わない候補は 1.0 の文面
     ...(input.candidate.pendingDistance ? { pendingDistance: true } : {}),
   };
+}
+
+/**
+ * 体と心の照合から来た候補の、判定へ渡す材料（identity 1.0）。ほかの候補なら undefined。
+ * 心と体の記録（`basis`）とコードの読み（`reason`）。どちらもコードが組んだ文
+ */
+export function identityVerifyMaterialOf(
+  candidate: Pick<ContradictionCandidate, "origin" | "basis" | "reason">
+): IdentityVerifyMaterial | undefined {
+  if (factVerifySourceOf(candidate) !== "identity") return undefined;
+  return { record: candidate.basis ?? "", reading: candidate.reason };
 }
 
 /** その行の本文。範囲の外なら undefined */

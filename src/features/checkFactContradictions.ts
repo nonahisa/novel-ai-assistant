@@ -34,7 +34,12 @@ import {
 import { CharacterStore } from "../core/characterStore";
 import { createLocationStore } from "../core/abilityStore";
 import type { Location } from "../models/location";
-import type { TravelStageStats } from "../core/factContradiction";
+import {
+  describeIdentityCues,
+  type IdentityCueStats,
+  type MindReassignment,
+  type TravelStageStats,
+} from "../core/factContradiction";
 import type { SceneClockEpisode } from "../core/sceneClock";
 import {
   isTravelDistanceChunk,
@@ -45,6 +50,14 @@ import {
   travelDistanceChunkId,
   type TravelCueAskRequest,
 } from "../core/travelCues";
+import {
+  buildIdentityLedger,
+  identityChunkId,
+  isIdentityChunk,
+  runIdentityCues,
+  sceneMindCacheKey,
+  type IdentityCueAskRequest,
+} from "../core/identityCues";
 import {
   PendingSettingsUpdateStore,
   TravelDistanceDismissedHistory,
@@ -82,8 +95,10 @@ import {
   collectFactsFromChunk,
   factVerifyPromptVersion,
   factVerifySourceOf,
+  identityVerifyMaterialOf,
   travelVerifyMaterialOf,
   lineTextOf,
+  type FactVerifySource,
   parseFactJsonObject,
   TOPIC_CARRY_LIMIT,
   VERIFY_CONTEXT_LINES,
@@ -102,6 +117,7 @@ import {
   CONTRADICTION_VERIFY_SCHEMA,
   CONTRADICTION_VERIFY_SYSTEM_PROMPT,
   CONTRADICTION_VERIFY_TEMPERATURE,
+  type IdentityVerifyMaterial,
   type TravelVerifyMaterial,
   type VerifyRejectReason,
 } from "../prompts/contradictionVerify";
@@ -195,6 +211,11 @@ export interface FactContradictionRunResult {
   verifyNote: string;
   /** 候補の型ごとの内訳。0件なら空文字 */
   candidateNote: string;
+  /**
+   * 体と心の照合の1句（`describeIdentityCues`。設計書6.88.14）。完了の知らせに出す——
+   * 心の側へ付け替えた件数と、心と体の記録に無い読みの案内（作者の判断③⑥）。照合まで進まなければ空文字
+   */
+  identityNote: string;
 }
 
 export interface CheckFactContradictionsOptions extends SuiteAwareOptions {
@@ -309,8 +330,8 @@ export async function checkFactContradictions(
   */
   const verifyKeyFor = (
     verifier: { provider: AIProvider; model: string },
-    // 移動の照合の候補は文面が違う（travel 1.0）ので、版も分ける
-    source: "settled" | "travel" = "settled",
+    // 移動の照合・体と心の照合の候補は文面が違う（travel 1.0／identity 1.0）ので、版も分ける
+    source: FactVerifySource = "settled",
     // 承認待ちの距離を使った移動の候補だけ文面が 1.1。使わない候補は 1.0 の控えをそのまま使う
     pendingDistance = false
   ) => ({
@@ -351,6 +372,21 @@ export async function checkFactContradictions(
         `場面の頭の時の経過の読み取り 最大${travelPlan.timeCue}回を同じAIで行います。` +
         "読み取った距離は、設定資料へ承認待ちの提案として置きます。"
       : "";
+  /*
+    体と心の照合（P-53。設計書6.88.14）。抽出と同じ割当で回す。心と体の記録が無い作品では
+    1回も送らない（作者の判断①）。処理済みでない送り先も、送る前の確認の条件に入れる
+  */
+  const sceneMindKey = sceneMindCacheKey({ providerId: provider.id, model });
+  const identityLedger = buildIdentityLedger(characters);
+  const identityTargets = chunks.filter((chunk) => isIdentityChunk(chunk, identityLedger));
+  const identityPending = identityTargets.filter(
+    (chunk) => cache.get(identityChunkId(chunk, identityLedger), sceneMindKey) === undefined
+  ).length;
+  const identityDetail =
+    identityTargets.length > 0
+      ? `体と心の照合として、心と体の記録の名前を含む本文 ${identityPending}件（処理済みはスキップ）から、` +
+        "場面ごとに体を動かしている心を同じAIで読み取ります。人物の記録は書き換えません。"
+      : "";
   /** 移動の手がかりで実際に AI へ送った回数（進みの表示用。控えから返したものは数えない） */
   let travelAsked = 0;
   /**
@@ -362,7 +398,7 @@ export async function checkFactContradictions(
    * まとめ実行から来たときは、まとめ実行が先に確認している（設計書6.80）
    */
   let confirmedToSend = options.suiteConfirmed === true;
-  if (pending.length > 0 || travelPending > 0) {
+  if (pending.length > 0 || travelPending > 0 || identityPending > 0) {
     // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
     // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
     if (
@@ -398,6 +434,7 @@ export async function checkFactContradictions(
       // そのまま「**」が見える（`plainTextUi.test.ts`）
       "本文は書き換えません。",
       travelDetail,
+      identityDetail,
       // 判定だけ別のAIになりうることを黙らない（有料のAIなら料金にも効く）
       "見つかった候補は、矛盾検知に割り当てたAIが1件ずつ確かめます。",
       provider.isPaid
@@ -469,6 +506,10 @@ export async function checkFactContradictions(
   let candidates: ContradictionCandidate[] = [];
   /** 移動の照合の工程ごとの件数（照合まで進まなかった回は無い） */
   let travelStats: TravelStageStats | undefined;
+  /** 体と心の照合の件数（照合まで進まなかった回は無い） */
+  let identityStats: IdentityCueStats | undefined;
+  /** 心の側へ付け替えた事実（作者の判断⑥）。候補の両側の書き方に印を添える */
+  let reassigned: ReadonlyMap<string, MindReassignment> = new Map();
   const readSource = createSourceReader();
 
   // **抽出と判定は、ひと続きの仕事として1つの札で回す**（設計書6.76）。
@@ -687,10 +728,9 @@ export async function checkFactContradictions(
 
       // ── 機械照合（設計書6.88.6。**AIを使わない**）──────────
       //
-      // 既にある人物レコードから組んだ事実も混ぜる（6.88.5の第2段）。
-      // 遷移・場面は第5段以降で供給するので、いまは空で呼ぶ。
-      // その代わり、設定資料の宿りの印で幽霊・転生・憑依を外す（上の afterlives）
-      const allFacts = [...facts, ...recordFacts];
+      // 既にある人物レコードから組んだ事実も混ぜる（6.88.5の第2段。下の matchFacts）。
+      // 場面の組と遷移は、心と体の記録と P-53 から組む（6.88.14。下の runIdentityCues）。
+      // 設定資料の宿りの印でも幽霊・転生・憑依を外す（上の afterlives）
       // 移動の照合の材料（所要時間の表・所在・時計）。MCP の口と同じ関数で組む。
       // 時計は本文の行で引くので、事実の置き場所と同じファイル名で本文を渡す
       const episodes: SceneClockEpisode[] = [];
@@ -750,11 +790,42 @@ export async function checkFactContradictions(
         }
         cues.stats.proposedLocations = staged;
       }
+      // 体と心の照合（P-53。設計書6.88.14）。MCP の口と同じ関数で回す。
+      // 心と体の記録が無い作品では AI を呼ばずに案内だけ返す（作者の判断①）
+      const identity = await withCancellableProgress(
+        "体と心の場面を読んでいます",
+        async (progress, token) => {
+          const controller = new AbortController();
+          token.onCancellationRequested(() => {
+            cancelled = true;
+            controller.abort();
+          });
+          return runIdentityCues({
+            characters,
+            facts,
+            places: factPlaces,
+            episodes,
+            chunks,
+            isCancelled: () => cancelled || Boolean(fatalFailure),
+            ask: (request) =>
+              askTravelCue(request, controller, (message) => progress.report({ message })),
+          });
+        }
+      );
+      if (cancelled) return;
+      identityStats = identity.stats;
+      reassigned = identity.reassigned;
+      // 場面の表示用の事実の場所を足す（候補の飛び先。事実の列には入れない）
+      for (const [id, place] of identity.scenePlaces) factPlaces.set(id, place);
+      // 照合へ渡す本文の事実は、心の項目を付け替え・外したあとの写し（作者の判断⑥）
+      const matchFacts = [...identity.facts, ...recordFacts];
       candidates = filterAllowed(
         findContradictionCandidates({
-          facts: allFacts,
-          transitions: [],
-          scenes: [],
+          facts: matchFacts,
+          transitions: identity.transitions,
+          scenes: identity.scenes,
+          dwellings: identity.dwellings,
+          names: identity.names,
           afterlives,
           travelTimes: travel.travelTimes,
           whereabouts: travel.whereabouts,
@@ -762,7 +833,9 @@ export async function checkFactContradictions(
         // 容認リスト（6.88.8）の保存は第5段。いまは何も抑えない
         []
       );
-      const factById = new Map(allFacts.map((fact) => [fact.id, fact]));
+      const factById = new Map(
+        [...matchFacts, ...identity.sceneFacts].map((fact) => [fact.id, fact])
+      );
 
       // ── 判定（既存の1件ずつの検証。設計書6.10.5）──────────
       //
@@ -876,6 +949,7 @@ export async function checkFactContradictions(
               left: sides.left,
               right: sides.right,
               rightLineText: sides.rightLineText,
+              reassigned,
             });
             // 移動の照合の候補だけ、所要時間・コードの読み・前側の前後を添える（travel 1.0）
             const leftPlace = factPlaces.get(sides.left.id);
@@ -890,6 +964,8 @@ export async function checkFactContradictions(
             const outcome = await verify({
               source: factVerifySourceOf(candidate),
               travel,
+              // 体と心の照合の候補だけ、心と体の記録とコードの読みを添える（identity 1.0）
+              identity: identityVerifyMaterialOf(candidate),
               provider: verifier.provider,
               model: verifier.model,
               chapterLabel:
@@ -960,6 +1036,7 @@ export async function checkFactContradictions(
       verifyNote,
       cancelled,
       travel: travelStats,
+      identity: identityStats,
     })
   );
 
@@ -975,10 +1052,12 @@ export async function checkFactContradictions(
     rejectionNote,
     verifyNote,
     candidateNote,
+    identityNote: identityStats ? describeIdentityCues(identityStats) : "",
   };
 
   /**
-   * 移動の照合の AI の手がかり（P-51・P-52）を1回訊く。`runTravelCues` の `ask`。
+   * 移動の照合の AI の手がかり（P-51・P-52）と、体と心の照合の場面の読み（P-53）を1回訊く。
+   * `runTravelCues`・`runIdentityCues` の `ask`。
    *
    * - 控え（チャンクキャッシュ）にあれば送らない。鍵は内容の指紋＋プロバイダ＋モデル＋版
    * - **確認を通らずに送る道を作らない。** P-52 は比べられない組が出てから決まるので、
@@ -987,11 +1066,16 @@ export async function checkFactContradictions(
    *   待っても直らない失敗を掴んだら、残りは送らない
    */
   async function askTravelCue(
-    request: TravelCueAskRequest,
+    request: TravelCueAskRequest | IdentityCueAskRequest,
     controller: AbortController,
     report: (message: string) => void
   ): Promise<unknown | undefined> {
-    const key = request.stage === "distance" ? travelDistanceKey : timeCueKey;
+    const key =
+      request.stage === "distance"
+        ? travelDistanceKey
+        : request.stage === "sceneMind"
+          ? sceneMindKey
+          : timeCueKey;
     const cached = cache.get(request.cacheId, key);
     if (cached !== undefined) return cached;
     if (fatalFailure || cancelled) return undefined;
@@ -1003,14 +1087,23 @@ export async function checkFactContradictions(
         return undefined;
       }
       reached = { providerId: provider.id, model };
+      // P-53 の送り先は最初の確認の条件に入っているので、ここへ来るのはふつう P-52 だけ。
+      // それでも P-53 で来たときに、違う中身を確かめさせない
+      const sceneMind = request.stage === "sceneMind";
       const confirmed = await confirmRun(
-        `${work.title} の移動の照合の手がかりを読み取ります。`,
+        sceneMind
+          ? `${work.title} の体と心の照合の場面を読み取ります。`
+          : `${work.title} の移動の照合の手がかりを読み取ります。`,
         "実行",
         {
           detail: [
             "本文から事実を取り出す段は処理済みです。",
-            `場面の頭の時の経過を、最大${travelPlan.timeCue}回 AI（${provider.displayName} / ${model}）に読み取らせます。`,
-            "送るのは場面の切り替わりの前後の数段落だけです。本文は書き換えません。",
+            sceneMind
+              ? `心と体の記録の名前を含む本文 ${identityPending}件から、場面ごとに体を動かしている心を AI（${provider.displayName} / ${model}）に読み取らせます。`
+              : `場面の頭の時の経過を、最大${travelPlan.timeCue}回 AI（${provider.displayName} / ${model}）に読み取らせます。`,
+            sceneMind
+              ? "本文も人物の記録も書き換えません。"
+              : "送るのは場面の切り替わりの前後の数段落だけです。本文は書き換えません。",
             provider.isPaid ? `\n${paidCostLines(provider.displayName).join("\n")}` : "",
           ]
             .filter(Boolean)
@@ -1028,10 +1121,20 @@ export async function checkFactContradictions(
     }
 
     const feature =
-      request.stage === "distance" ? "travel_distance_extract" : "scene_time_cue";
+      request.stage === "distance"
+        ? "travel_distance_extract"
+        : request.stage === "sceneMind"
+          ? "scene_mind_extract"
+          : "scene_time_cue";
     travelAsked += 1;
     report(
-      `${request.stage === "distance" ? "本文の距離" : "場面の頭の時の手がかり"} ${travelAsked}回目`
+      `${
+        request.stage === "distance"
+          ? "本文の距離"
+          : request.stage === "sceneMind"
+            ? "体と心の場面"
+            : "場面の頭の時の手がかり"
+      } ${travelAsked}回目`
     );
     try {
       const response = await callWithRateLimitWait(
@@ -1154,6 +1257,7 @@ export async function checkFactContradictions(
       sides,
       rightLineText: sides.rightLineText,
       explanation,
+      reassigned,
     });
   }
 
@@ -1165,10 +1269,12 @@ export async function checkFactContradictions(
     context: string;
     issue: ReturnType<typeof buildFactVerifyIssue>;
     knownAt: string;
-    /** 文面の種類（`factVerifySourceOf`）。移動の照合なら travel */
-    source: "settled" | "travel";
+    /** 文面の種類（`factVerifySourceOf`）。移動の照合なら travel、体と心の照合なら identity */
+    source: FactVerifySource;
     /** 移動の照合の材料（`travelVerifyMaterialOf`）。ほかの候補なら undefined */
     travel: TravelVerifyMaterial | undefined;
+    /** 体と心の照合の材料（`identityVerifyMaterialOf`）。ほかの候補なら undefined */
+    identity: IdentityVerifyMaterial | undefined;
     fingerprint: string;
     /** 判定の覚えの鍵（`verifyKeyFor`。判定のAIのもの） */
     cacheKey: ReturnType<typeof verifyKeyFor>;
@@ -1205,6 +1311,7 @@ export async function checkFactContradictions(
           settingKnownAt: input.knownAt,
           source: input.source,
           travel: input.travel,
+          identity: input.identity,
         }),
         model: input.model,
         temperature: CONTRADICTION_VERIFY_TEMPERATURE,

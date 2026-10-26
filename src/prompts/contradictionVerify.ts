@@ -100,6 +100,18 @@ export const CONTRADICTION_VERIFY_TRAVEL_VERSION = "1.1";
 /** 承認待ちの距離を使わない移動の候補の文面の版（1.1 で変えていない＝1.0 のまま） */
 export const CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION = "1.0";
 
+// identity 1.0（2026-10-26、母艦の判断④）：**体と心の照合（事実の照合の `findDwellingDrift`）
+// から来た指摘にだけ**、出どころの欄を置く。コードが照らした心と体の記録（作者が付けた、
+// どの心がどの体にいるか）と、コードの読み（その場面で体を動かしている心）を渡し、
+// 「体と心が別の人物であること自体はこの指摘の前提で、問うのは記録の外で心がその体に
+// いることを本文が説明しているか」と書く。却下の理由から「まだ明かされていない」を外し、
+// 「作中の変化」「そもそも食い違っていない」を体と心の照合の説明に差し替える。
+// 移動の照合は文面を分けるまで、全件が「作中の変化」で取り下げられていた（travel 1.0 の測定）。
+// 体と心の照合も、心が別の体にいることそのものを「作中の変化」と読まれうるので、最初から分ける。
+// **本命・future・travel の文面は1文字も変えていない**ので、その版は据え置き、体と心の
+// 照合の控えの鍵だけにこの版と `identity` の印を付ける（`factVerifyPromptVersion`）
+export const CONTRADICTION_VERIFY_IDENTITY_VERSION = "1.0";
+
 /**
  * 送るときの温度。指摘が本当に矛盾かを確かめるだけなので揺らさない。
  *
@@ -200,7 +212,12 @@ export interface ContradictionVerifyInput {
    * 「まだ明かされていない」を並べず、「作中の変化」を future 用の説明にする。
    * 大きいモデルにも小さいモデルにも同じ形を送る。
    */
-  source?: "settled" | "future" | "travel";
+  source?: "settled" | "future" | "travel" | "identity";
+  /**
+   * 体と心の照合から来た指摘の材料（identity 1.0）。`source: "identity"` のときだけ使う。
+   * **どれもコードが組んだもの**（AI の文ではない）
+   */
+  identity?: IdentityVerifyMaterial;
   /**
    * 移動の照合から来た指摘の材料（travel 1.0）。`source: "travel"` のときだけ使う。
    * **どれもコードが組んだもの**（AI の文ではない）
@@ -334,13 +351,15 @@ const REJECT_REASON_TEXTS: Record<VerifyRejectReason, string> = {
 export function verifyRejectReasonsFor(input: {
   settingKnownAt: string;
   smallModel?: boolean;
-  source?: "settled" | "future" | "travel";
+  source?: "settled" | "future" | "travel" | "identity";
 }): readonly VerifyRejectReason[] {
   // **future では大小とも並べない**（1.3）。設定が対象の話より後に分かるのが
   // この照合の前提なので、この理由は前提そのもので当たりを消す（26b の瀬戸）。
   // **移動の照合でも並べない**（travel 1.0）。両側とも本文に書かれた所在で、
   // 明かされる・明かされないの話ではない（e4b は旅の台でこの理由で取り下げた）
-  if (input.source === "future" || input.source === "travel") {
+  // **体と心の照合でも並べない**（identity 1.0）。両側とも本文の場面の読みと作者の記録で、
+  // 明かされる・明かされないの話ではない
+  if (input.source === "future" || input.source === "travel" || input.source === "identity") {
     return VERIFY_REJECT_REASONS.filter((reason) => reason !== "まだ明かされていない");
   }
   if (!(input.smallModel ?? false) || input.settingKnownAt) return VERIFY_REJECT_REASONS;
@@ -467,12 +486,74 @@ function travelSourceBlock(material: TravelVerifyMaterial | undefined): string {
   return lines.join("");
 }
 
+/** 体と心の照合から来た指摘の材料（identity 1.0）。どれもコードが組んだ文 */
+export interface IdentityVerifyMaterial {
+  /**
+   * 心と体の記録の根拠（候補の `basis`。「心と体の記録（作者が人物の編集で付けたもの）では、
+   * 三門太志の心が密倉文佳の体にいるのは第2話から第4話」）
+   */
+  record: string;
+  /** コードの読み（候補の `reason`。「第6話 6行目、密倉文佳の体に〈三門太志〉の心がいる。…」） */
+  reading: string;
+}
+
+/**
+ * 体と心の照合から来た指摘の、出どころの説明（identity 1.0）。
+ * **却下の理由の語（「作中の変化」「食い違っていない」など）を含めない**——指示の言葉は
+ * そのまま答えに返ってくる（CLAUDE.md「繰り返し起きた失敗」3番）
+ */
+export const VERIFY_IDENTITY_SOURCE_NOTE =
+  "この指摘は、作者が付けた人物の心と体の記録（どの心がどの体にいるか）と、本文のその場面で体を動かしている心を、コードが突き合わせて挙げたものです。";
+
+/**
+ * 体と心の照合の「残せ」と言っている文（identity 1.0）。却下の説明にこれを丸ごと写してきたら、
+ * 自分で前提だと書きながら、心が別の体にいることを理由に消そうとしているので、却下として受け取らない
+ */
+export const VERIFY_IDENTITY_KEEP_SENTENCES: readonly string[] = [
+  "体の持ち主と別の人物の心がその体にいること自体は、この指摘の前提であって、両立の理由になりません。",
+  "記録の外でその心がその体にいて、心が入る・戻る描写も本文に無いなら、同時に成り立ちません。",
+];
+
+/** 体と心の照合で問うことの説明（identity 1.0） */
+const VERIFY_IDENTITY_QUESTION =
+  "問うのは、記録の範囲の外や記録に無い組で、その心がその体にいることを本文が説明しているかです。" +
+  VERIFY_IDENTITY_KEEP_SENTENCES[0] +
+  "本文に、その心がその体に入る・戻る・入れ替わる描写（憑依・交代・入れ替わりなど）が書かれていれば両立します。" +
+  VERIFY_IDENTITY_KEEP_SENTENCES[1];
+
+/**
+ * 体と心の照合の「作中の変化」の説明（identity 1.0）。1.2 の説明（「人物の身の上が先へ進むのは
+ * 矛盾ではありません」）は、心が別の体にいることをそのまま身の上の変化と読ませる
+ */
+const IDENTITY_CHANGE_TEXT = `**作中の変化** … 本文に、その心がその体に入る・戻る・入れ替わる描写が書かれている場合だけ。
+   心が別の体にいることだけでは、これに当たりません。`;
+
+/** 体と心の照合の「そもそも食い違っていない」の説明（identity 1.0）。口調の但し書きは要らない */
+const IDENTITY_NO_CONFLICT_TEXT = `**そもそも食い違っていない** … コードの読み（その場面でどの心がその体を動かしているか）が本文と違っていて、両立する場合。`;
+
+/** 体と心の照合の【採用すべき場合】に足す1文（identity 1.0） */
+const IDENTITY_ADOPT_LINE =
+  "\n体と心の指摘では、記録の外の心がその体にいて、心が入る・戻る描写も本文に無い場合も矛盾です。";
+
+/** 体と心の照合の、出どころと材料の欄（identity 1.0） */
+function identitySourceBlock(material: IdentityVerifyMaterial | undefined): string {
+  const lines = [`\n【指摘の出どころ】\n${VERIFY_IDENTITY_SOURCE_NOTE}\n${VERIFY_IDENTITY_QUESTION}\n`];
+  if (material?.record.trim()) {
+    lines.push(`\n【心と体の記録】\n${material.record.trim()}\n`);
+  }
+  if (material?.reading.trim()) {
+    lines.push(`\n【コードの読み】\n${material.reading.trim()}\n`);
+  }
+  return lines.join("");
+}
+
 export function buildContradictionVerifyPrompt(
   input: ContradictionVerifyInput
 ): string {
   const small = input.smallModel ?? false;
   const future = input.source === "future";
   const travel = input.source === "travel";
+  const identity = input.source === "identity";
   const knownAt =
     input.settingKnownAt ||
     (future ? VERIFY_KNOWN_AT_NONE_FUTURE : small ? VERIFY_KNOWN_AT_NONE_SMALL : "（不明）");
@@ -481,6 +562,8 @@ export function buildContradictionVerifyPrompt(
     if (future && reason === "作中の変化") return FUTURE_CHANGE_TEXT;
     if (travel && reason === "作中の変化") return TRAVEL_CHANGE_TEXT;
     if (travel && reason === "そもそも食い違っていない") return TRAVEL_NO_CONFLICT_TEXT;
+    if (identity && reason === "作中の変化") return IDENTITY_CHANGE_TEXT;
+    if (identity && reason === "そもそも食い違っていない") return IDENTITY_NO_CONFLICT_TEXT;
     return REJECT_REASON_TEXTS[reason];
   };
   const reasonItems = reasons
@@ -491,8 +574,10 @@ export function buildContradictionVerifyPrompt(
     ? futureSourceBlock(input)
     : travel
       ? travelSourceBlock(input.travel)
-      : "";
-  const adoptExtra = travel ? TRAVEL_ADOPT_LINE : "";
+      : identity
+        ? identitySourceBlock(input.identity)
+        : "";
+  const adoptExtra = travel ? TRAVEL_ADOPT_LINE : identity ? IDENTITY_ADOPT_LINE : "";
   return `次の指摘が、本当に矛盾かどうかを判断してください。
 
 【対象の話】${input.chapterLabel}

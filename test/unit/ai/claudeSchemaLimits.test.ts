@@ -48,6 +48,10 @@ const BUILDER_ARGS: Record<string, unknown[][]> = {
     ],
   ],
   buildEnrichSchema: SETTINGS_KINDS.map((kind) => [kind]),
+  // P-53 場面の体と心（心と体の記録の名前で列挙を組む）
+  buildSceneMindExtractSchema: [
+    [{ bodyNames: ["密倉文佳", "文佳"], mindNames: ["密倉文佳", "文佳", "三門太志", "太志"] }],
+  ],
 };
 
 async function collectSchemas(): Promise<Array<{ name: string; schema: unknown }>> {
