@@ -3654,7 +3654,7 @@ export async function activate(
     registerCommand("novelai.importWorkFromZip", async () => {
       // **登録は「フォルダから追加」と同じ道を通す。** 取り込み側は
       // 場所と題を決めるところまでで、そこから先（集計・一覧の更新）は
-      // 写さない（設計書6.98）。**書庫の見分けだけは通らない**——
+      // 写さない（設計書6.99）。**書庫の見分けだけは通らない**——
       // その作品フォルダーを作ったのは取り込み自身なので、
       // 「書庫かもしれない」と訊く相手がいない（6.99）
       const { importWorkFromZip } = await import(

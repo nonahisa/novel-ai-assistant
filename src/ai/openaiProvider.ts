@@ -18,6 +18,7 @@ import { openAiUserContent } from "./imageInput";
 import { forgetSecret, registerSecret } from "../core/logger";
 import {
   resolveContextWindow,
+  DEFAULT_TIMEOUT_SECONDS,
   resolveTimeoutMs,
   type ContextWindowSource,
 } from "../core/modelTuning";
@@ -141,7 +142,7 @@ export class OpenAIProvider implements ApiKeyProvider {
 
   /** 1回の呼び出しで待つミリ秒。台帳（AIチューニング）→ 設定 → 既定 の順 */
   private requestTimeoutMs(model: string): number {
-    return resolveTimeoutMs(this.id, model, 180);
+    return resolveTimeoutMs(this.id, model, DEFAULT_TIMEOUT_SECONDS);
   }
 
   /** コンテキスト長。台帳（AIチューニング）→ 設定 → 既定 の順 */

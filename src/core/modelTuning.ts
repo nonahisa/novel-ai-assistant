@@ -569,13 +569,28 @@ function typoAccuracyFromBundle(
 }
 
 /**
- * 待ち時間の下限。**いまの既定（180秒）を下回らせない。**
+ * AIチューニングが勧める待ち時間の下限（180秒。もとは既定と同じ値だった）。
+ *
+ * 既定は2026-10-26に300秒へ揃えた（`DEFAULT_TIMEOUT_SECONDS`）が、この下限は
+ * 据え置いている——上げると勧める値の決め方が変わるので、別に判断する。
  *
  * 測定で使う合言葉の出力は極端に短いので、そのまま採ると
  * 「30秒で足りる」という結論になりかねない。実際の機能（誤字脱字の
  * 指摘一覧など）はもっと長い出力を返すので、測定が速くても縮めない。
  */
 export const MIN_TIMEOUT_SECONDS = 180;
+
+/**
+ * 1回の呼び出しで待つ秒数の既定。**6つのプロバイダすべて同じ**
+ * （作者の裁定 2026-10-26「300秒に揃える」。設計書6.48）。
+ *
+ * それまでは Ollama・LM Studio・Claude が300秒、ChatGPT・Gemini・さくらが180秒で、
+ * 長い本文で180秒の側だけが先に切れていた。`package.json` の各
+ * `novelai.<プロバイダ>.timeoutSeconds` の `default` と同じ値にする
+ * （食い違うと、設定を宣言していない場面——試験など——でだけ待ち時間が変わる。
+ * `timeoutDefaults.test.ts` が見張る）。作者が設定に書いた値は、これより常に勝つ。
+ */
+export const DEFAULT_TIMEOUT_SECONDS = 300;
 
 /**
  * **クラウドのAI**の、待ち時間の上限。これ以上待たせるくらいなら、
@@ -1375,14 +1390,14 @@ export function tunedTimeoutSeconds(
  * 「Ollamaでは効くのにClaudeでは効かない」という食い違いが静かに生まれる。
  *
  * `fallbackSeconds` は**そのプロバイダのpackage.json上の既定**を渡す
- * （Claudeだけ300秒で、ほかは180秒）。設定が宣言されている限りVS Codeが
- * その既定を返すので実行時には使われないが、渡す値を変えると
- * 試験の中だけ挙動が変わってしまう。
+ * （2026-10-26 から全プロバイダ300秒。`DEFAULT_TIMEOUT_SECONDS`）。設定が
+ * 宣言されている限りVS Codeがその既定を返すので実行時には使われないが、
+ * 渡す値を変えると試験の中だけ挙動が変わってしまう。
  */
 export function resolveTimeoutSeconds(
   providerId: string,
   model: string,
-  fallbackSeconds: number = MIN_TIMEOUT_SECONDS
+  fallbackSeconds: number = DEFAULT_TIMEOUT_SECONDS
 ): number {
   // **探索の線は、どの出どころ（台帳・設定・既定）にも同じく掛ける**
   // （`PROBE_SEARCH_TIMEOUT_SECONDS`）。ふだんは掛かっていない
@@ -1524,7 +1539,7 @@ export function resolveContextWindow(
 export function resolveTimeoutMs(
   providerId: string,
   model: string,
-  fallbackSeconds: number = MIN_TIMEOUT_SECONDS
+  fallbackSeconds: number = DEFAULT_TIMEOUT_SECONDS
 ): number {
   return resolveTimeoutSeconds(providerId, model, fallbackSeconds) * 1000;
 }
