@@ -49,6 +49,7 @@ import {
   modelTuning,
   modelTuningRaw,
   preferMeasuredContextWindow,
+  DEFAULT_TIMEOUT_SECONDS,
   resolveTimeoutMs,
 } from "../core/modelTuning";
 import { customEndpointNotice } from "../core/endpointNotice";
@@ -341,7 +342,7 @@ export class OllamaProvider implements AIProvider {
    * 設定1つでは、どちらかが必ず切れる。台帳に無ければ従来どおり設定を読む。
    */
   private requestTimeoutMs(model: string): number {
-    return resolveTimeoutMs(this.id, model, 180);
+    return resolveTimeoutMs(this.id, model, DEFAULT_TIMEOUT_SECONDS);
   }
 
   /**

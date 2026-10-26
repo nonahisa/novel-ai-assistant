@@ -241,7 +241,8 @@ describe("待ち時間がまだ上限未満のとき", () => {
     await ask(panel, "この作品の弱いところはどこですか");
 
     const error = posted.find((m) => m.type === "error")!;
-    expect(error.actions?.[0].label).toBe("タイムアウトを360秒にする");
+    // 既定300秒（2026-10-26 に全プロバイダで揃えた）の倍。クラウドの上限600秒に収まる
+    expect(error.actions?.[0].label).toBe("タイムアウトを600秒にする");
     expect(error.message).toContain("延ば");
     expect(error.message).not.toContain("チャンク");
   });

@@ -2284,7 +2284,7 @@
         },
         "novelai.openai.timeoutSeconds": {
           "type": "number",
-          "default": 180,
+          "default": 300,
           "minimum": 10,
           "description": "ChatGPTの1回の呼び出しのタイムアウト（秒）。"
         },
@@ -2302,7 +2302,7 @@
         },
         "novelai.gemini.timeoutSeconds": {
           "type": "number",
-          "default": 180,
+          "default": 300,
           "minimum": 10,
           "description": "Geminiの1回の呼び出しのタイムアウト（秒）。"
         },
@@ -2426,7 +2426,7 @@
         },
         "novelai.sakura.timeoutSeconds": {
           "type": "number",
-          "default": 180,
+          "default": 300,
           "minimum": 10,
           "description": "さくらのAI Engineの1回の呼び出しのタイムアウト（秒）。"
         },

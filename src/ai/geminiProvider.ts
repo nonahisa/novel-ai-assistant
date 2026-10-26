@@ -15,7 +15,7 @@ import { toGeminiSchema } from "./jsonSchema";
 import { geminiUserParts } from "./imageInput";
 import { aiCallLog, forgetSecret, logLine, registerSecret } from "../core/logger";
 import { verifiedState } from "../core/verifiedMemento";
-import { resolveTimeoutMs } from "../core/modelTuning";
+import { DEFAULT_TIMEOUT_SECONDS, resolveTimeoutMs } from "../core/modelTuning";
 import { customEndpointNotice } from "../core/endpointNotice";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
@@ -121,7 +121,7 @@ export class GeminiProvider implements ApiKeyProvider {
    * 「取れている正しい値」を潰すことになる（設計書6.49）。
    */
   private requestTimeoutMs(model: string): number {
-    return resolveTimeoutMs(this.id, model, 180);
+    return resolveTimeoutMs(this.id, model, DEFAULT_TIMEOUT_SECONDS);
   }
 
   private async headers(): Promise<Record<string, string>> {

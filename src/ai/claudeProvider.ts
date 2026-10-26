@@ -5,7 +5,7 @@ import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 import { aiCallLog, forgetSecret, logLine, registerSecret } from "../core/logger";
 import { verifiedState } from "../core/verifiedMemento";
-import { resolveTimeoutMs } from "../core/modelTuning";
+import { DEFAULT_TIMEOUT_SECONDS, resolveTimeoutMs } from "../core/modelTuning";
 import { isWebRuntime } from "../core/runtime";
 import { hashText } from "../core/hash";
 import { claudeUserContent } from "./imageInput";
@@ -140,16 +140,16 @@ export class ClaudeProvider implements ApiKeyProvider {
   /**
    * 1回の呼び出しで待つミリ秒。台帳（AIチューニング）→ 設定 → 既定 の順。
    *
-   * **既定が300秒なのはClaudeだけ**（package.json）。ここへ渡す数も
-   * それに合わせる——180にすると、設定を宣言していない場面（試験など）で
-   * 黙って短くなる。
+   * 既定は package.json と同じ300秒（2026-10-26 に全プロバイダで揃えた。
+   * `DEFAULT_TIMEOUT_SECONDS`）。ここへ渡す数を package.json とずらすと、
+   * 設定を宣言していない場面（試験など）でだけ黙って長さが変わる。
    *
    * **上限のほうは台帳を見ない。** Claudeはモデル一覧が
    * `max_input_tokens` を返すので、測った値で上書きすると
    * 「取れている正しい値」を潰すことになる（設計書6.49）。
    */
   private requestTimeoutMs(model: string): number {
-    return resolveTimeoutMs(this.id, model, 300);
+    return resolveTimeoutMs(this.id, model, DEFAULT_TIMEOUT_SECONDS);
   }
 
   /**

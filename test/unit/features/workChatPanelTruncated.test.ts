@@ -260,9 +260,10 @@ describe("タイムアウトは、その場で直せる", () => {
     expect(written).toHaveLength(1);
     // **鍵はプロバイダごと。** さくらの相談でOllamaの設定を書かない
     expect(written[0].key).toBe("sakura.timeoutSeconds");
-    expect(written[0].value).toBe(360);
+    // 既定300秒（2026-10-26 に全プロバイダで揃えた）の倍
+    expect(written[0].value).toBe(600);
     const note = h.posted.find(
-      (m) => m.type === "note" && (m.message ?? "").includes("360秒")
+      (m) => m.type === "note" && (m.message ?? "").includes("600秒")
     );
     expect(note, "書いたことを伝えていない").toBeTruthy();
   });
@@ -354,7 +355,7 @@ describe("失敗の回にも、画面の案内を誘う", () => {
     expect(error?.tour?.key, "誘いが出ていない").toBe("polish");
     expect(error?.tour?.title).toBe("推敲して仕上げる");
     // **並べて出す。** 誘いのせいで直し方の札が消えてはいけない
-    expect(error?.actions?.[0].label).toBe("タイムアウトを360秒にする");
+    expect(error?.actions?.[0].label).toBe("タイムアウトを600秒にする");
   });
 
   test("時間切れ以外の失敗でも出る（当たりはAIの失敗の種類に依らない）", async () => {
