@@ -15,6 +15,7 @@ import {
   type TravelStageStats,
 } from "./factContradiction";
 import {
+  CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION,
   CONTRADICTION_VERIFY_TRAVEL_VERSION,
   CONTRADICTION_VERIFY_VERSION,
   type TravelVerifyMaterial,
@@ -364,10 +365,21 @@ export function factVerifySourceOf(
  * 本命の文面は変えていないので、ほかの候補の控えは作り直さない（実装ルール4。
  * 直す前の判定が控えから返ると、直した文面を測れない）
  */
-export function factVerifyPromptVersion(source: "settled" | "travel"): string {
-  return source === "travel"
-    ? `${CONTRADICTION_VERIFY_VERSION}:travel${CONTRADICTION_VERIFY_TRAVEL_VERSION}`
-    : CONTRADICTION_VERIFY_VERSION;
+export function factVerifyPromptVersion(
+  source: "settled" | "travel",
+  /**
+   * 承認待ちの距離を使った候補か（`ContradictionCandidate.pendingDistance`）。
+   * 省くと最新の travel の版（版を並べて見せる所が使う）。**控えの鍵を組む所は必ず渡す**——
+   * 承認待ちを使わない候補の文面は 1.0 と同じなので、1.0 の控えをそのまま使う
+   */
+  pendingDistance?: boolean
+): string {
+  if (source !== "travel") return CONTRADICTION_VERIFY_VERSION;
+  const travel =
+    pendingDistance === false
+      ? CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION
+      : CONTRADICTION_VERIFY_TRAVEL_VERSION;
+  return `${CONTRADICTION_VERIFY_VERSION}:travel${travel}`;
 }
 
 /**
@@ -377,7 +389,7 @@ export function factVerifyPromptVersion(source: "settled" | "travel"): string {
  * 窓の外にあると、何と食い違うのかが本文で確かめられない。前側が窓の外なら、その前後も渡す。
  */
 export function travelVerifyMaterialOf(input: {
-  candidate: Pick<ContradictionCandidate, "origin" | "basis" | "reason">;
+  candidate: Pick<ContradictionCandidate, "origin" | "basis" | "reason" | "pendingDistance">;
   /** 前側の事実の本文の場所。資料由来なら省略 */
   leftPlace?: FactPlace;
   /** 前側の事実が書かれた本文（ファイルまるごと）。読めなければ省略 */
@@ -407,6 +419,8 @@ export function travelVerifyMaterialOf(input: {
       input.aiMarkers?.get(sceneTimeMarkerKey(rightPlace.filePath, rightPlace.line))
     ),
     leftContext,
+    // 承認待ちの距離を使った候補だけ、判定に1文足す（travel 1.1）。使わない候補は 1.0 の文面
+    ...(input.candidate.pendingDistance ? { pendingDistance: true } : {}),
   };
 }
 

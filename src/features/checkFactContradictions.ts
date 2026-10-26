@@ -310,10 +310,12 @@ export async function checkFactContradictions(
   const verifyKeyFor = (
     verifier: { provider: AIProvider; model: string },
     // 移動の照合の候補は文面が違う（travel 1.0）ので、版も分ける
-    source: "settled" | "travel" = "settled"
+    source: "settled" | "travel" = "settled",
+    // 承認待ちの距離を使った移動の候補だけ文面が 1.1。使わない候補は 1.0 の控えをそのまま使う
+    pendingDistance = false
   ) => ({
     feature: "fact_contradiction_verify",
-    promptVersion: factVerifyPromptVersion(source),
+    promptVersion: factVerifyPromptVersion(source, pendingDistance),
     providerId: verifier.provider.id,
     model: verifier.model,
   });
@@ -803,7 +805,7 @@ export async function checkFactContradictions(
         確かめない
       */
       const verifyKeyOf = (candidate: ContradictionCandidate) =>
-        verifyKeyFor(verifier, factVerifySourceOf(candidate));
+        verifyKeyFor(verifier, factVerifySourceOf(candidate), candidate.pendingDistance === true);
       const unverified = candidates.filter(
         (candidate) => cache.get(candidate.fingerprint, verifyKeyOf(candidate)) === undefined
       ).length;

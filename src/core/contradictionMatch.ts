@@ -82,6 +82,12 @@ export interface ContradictionCandidate {
    * 指紋には混ぜない
    */
   origin?: "travel";
+  /**
+   * 移動の照合で、所要時間に承認待ちの距離（P-51 が本文から読んだもの）を使ったか。
+   * 判定（P-12b travel 1.1）は、これが付いた候補にだけ「承認待ちの距離も根拠として扱う」
+   * 1文を送り、控えの版も分ける。指紋には混ぜない
+   */
+  pendingDistance?: true;
 }
 
 /**
@@ -633,6 +639,7 @@ export function findTravelImpossibilities(
               : `場所の記録では、${from.entry.locationName}と${to.entry.locationName}のあいだは` +
                 `${formatDays(minDays)}かかる（書かれた所要時間のうち、いちばん速いもの）`,
           origin: "travel",
+          ...(known.pendingEvidence !== undefined ? { pendingDistance: true as const } : {}),
         })
       );
     }
@@ -794,12 +801,14 @@ interface CandidateDraft extends FingerprintInput {
   reason: string;
   basis?: string;
   origin?: "travel";
+  pendingDistance?: true;
 }
 
 function buildCandidate(draft: CandidateDraft): ContradictionCandidate {
   return {
     ...(draft.basis ? { basis: draft.basis } : {}),
     ...(draft.origin ? { origin: draft.origin } : {}),
+    ...(draft.pendingDistance ? { pendingDistance: true as const } : {}),
     type: draft.type,
     subject: draft.subject,
     predicate: draft.predicate,

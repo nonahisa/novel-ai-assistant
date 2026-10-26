@@ -255,6 +255,12 @@ describe("AIの手がかりの台（手で書いた正しい答えで採点）",
   it("根拠に「承認待ち」と本文の引用が出る（作者の判断②）", () => {
     for (const candidate of candidates) {
       expect(candidate.basis).toContain("承認待ち");
+      // 確かめの段の文面（travel 1.1 の1文）を分ける印も付く。材料へもそのまま渡る
+      expect(candidate.pendingDistance).toBe(true);
+      expect(
+        travelVerifyMaterialOf({ candidate, rightPlace: places.get(candidate.right) as FactPlace })
+          ?.pendingDistance
+      ).toBe(true);
     }
     const first = candidates.find((candidate) => candidate.right === "fact:1:8:1");
     expect(first?.basis).toContain("本文「王都から港町までは、馬で三日の道のりだ」");

@@ -89,11 +89,16 @@ export const CONTRADICTION_VERIFY_FUTURE_VERSION = "1.4";
 //
 // travel 1.1（2026-10-26、作者の裁定「1文足して測り直す」）：【指摘の出どころ】に、
 // **承認待ちの距離も根拠として扱う**1文（`VERIFY_TRAVEL_PENDING_SENTENCE`）を足す。
+// **根拠に承認待ちの距離を使った候補にだけ**置く（同日の測り直しで、全部に置くと旅の台の
+// e4b が 2/3→1/3 に下がった）。使わない候補の文面は 1.0 と同じなので、その控えの鍵は
+// 1.0 のまま（`CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION`、`factVerifyPromptVersion`）。
 // 0.112.2 で根拠に承認待ちの距離（本文から AI が読んだ所要時間）が出るようになり、
 // e4b は「所要時間は設定資料にない情報であり、本文の記述を優先すべき」（設定が古い）で
 // 取り下げた。26b は正しく扱った（docs/measurements/2026-10-26-travel-ai-cues.md）。
 // 本命と future の文面はこの版でも変えていない
 export const CONTRADICTION_VERIFY_TRAVEL_VERSION = "1.1";
+/** 承認待ちの距離を使わない移動の候補の文面の版（1.1 で変えていない＝1.0 のまま） */
+export const CONTRADICTION_VERIFY_TRAVEL_BASE_VERSION = "1.0";
 
 /**
  * 送るときの温度。指摘が本当に矛盾かを確かめるだけなので揺らさない。
@@ -376,6 +381,11 @@ export interface TravelVerifyMaterial {
   timeCue: string;
   /** 前側の事実の箇所の前後（行番号付き）。後ろ側の前後に入っているとき・本文に無いときは空 */
   leftContext: string;
+  /**
+   * 所要時間に承認待ちの距離（P-51 が本文から読んだもの）を使った候補か（travel 1.1）。
+   * 真のときだけ `VERIFY_TRAVEL_PENDING_SENTENCE` を置く。省くと 1.0 と同じ文面
+   */
+  pendingDistance?: boolean;
 }
 
 /**
@@ -415,9 +425,7 @@ const VERIFY_TRAVEL_QUESTION =
   "問うのは、書かれた時の経過のあいだに、その道のりを移れるかです。" +
   VERIFY_TRAVEL_KEEP_SENTENCES[0] +
   "本文に、記録より速く移る手段（転移・飛行など）や、もっと長い時が経ったことが書かれていれば両立します。" +
-  VERIFY_TRAVEL_KEEP_SENTENCES[1] +
-  // travel 1.1：承認待ちの距離も根拠として扱う
-  VERIFY_TRAVEL_PENDING_SENTENCE;
+  VERIFY_TRAVEL_KEEP_SENTENCES[1];
 
 /**
  * 移動の照合の「作中の変化」の説明（travel 1.0）。1.2 の説明（「人物の身の上が先へ進むのは
@@ -439,7 +447,11 @@ const TRAVEL_ADOPT_LINE =
 
 /** 移動の照合の、出どころと材料の欄（travel 1.0） */
 function travelSourceBlock(material: TravelVerifyMaterial | undefined): string {
-  const lines = [`\n【指摘の出どころ】\n${VERIFY_TRAVEL_SOURCE_NOTE}\n${VERIFY_TRAVEL_QUESTION}\n`];
+  // travel 1.1 の1文は、根拠に承認待ちの距離を使った候補にだけ置く。使わない候補の文面は
+  // 1.0 と1文字も変えない——全部に置いたら、旅の台の e4b が承認待ちと関係の無い候補を
+  // 「作中の変化」で取り下げ、2/3→1/3 に下がった（docs/measurements/2026-10-26-travel-verify-1.1.md）
+  const pending = material?.pendingDistance === true ? VERIFY_TRAVEL_PENDING_SENTENCE : "";
+  const lines = [`\n【指摘の出どころ】\n${VERIFY_TRAVEL_SOURCE_NOTE}\n${VERIFY_TRAVEL_QUESTION}${pending}\n`];
   if (material?.travelTime.trim()) {
     lines.push(`\n【所要時間（場所の記録）】\n${material.travelTime.trim()}\n`);
   }
