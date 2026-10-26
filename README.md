@@ -405,12 +405,12 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 | `novelai.lmstudio.cliPath` | `""`（自動検出） | LM Studioのコマンド（`lms`）の場所 |
 | `novelai.lmstudio.loadContextLength` | `0`（モデルの最大） | モデルを読み込むときの文脈の長さ |
 | `novelai.gemini.endpoint` | `https://generativelanguage.googleapis.com/v1beta` | GeminiのURL |
-| `novelai.gemini.timeoutSeconds` | `180` | Geminiの1回の呼び出しのタイムアウト |
+| `novelai.gemini.timeoutSeconds` | `300` | Geminiの1回の呼び出しのタイムアウト |
 | `novelai.openai.endpoint` | `https://api.openai.com/v1` | ChatGPTのURL |
-| `novelai.openai.timeoutSeconds` | `180` | ChatGPTの1回の呼び出しのタイムアウト |
+| `novelai.openai.timeoutSeconds` | `300` | ChatGPTの1回の呼び出しのタイムアウト |
 | `novelai.openai.contextWindow` | `128000` | ChatGPTのコンテキスト長。実際より大きいと入力が切り捨てられます |
 | `novelai.sakura.endpoint` | `https://api.ai.sakura.ad.jp/v1` | さくらのAI EngineのURL |
-| `novelai.sakura.timeoutSeconds` | `180` | さくらのAI Engineの1回の呼び出しのタイムアウト |
+| `novelai.sakura.timeoutSeconds` | `300` | さくらのAI Engineの1回の呼び出しのタイムアウト |
 | `novelai.sakura.contextWindow` | `32000` | さくらのAI Engineのコンテキスト長。実際に合わせてください |
 | `novelai.claude.timeoutSeconds` | `300` | Claudeの1回の呼び出しのタイムアウト |
 | `novelai.cloudMaxTimeoutSeconds` | `600` | クラウドのAIで待つ時間の上限。最大1800秒まで延ばせます |
