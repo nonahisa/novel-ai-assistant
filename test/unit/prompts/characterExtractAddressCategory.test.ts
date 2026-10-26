@@ -53,8 +53,8 @@ describe("呼称の区分（addressTerms.category）の説明", () => {
 });
 
 describe("一人称（firstPerson）", () => {
-  test("必須にした（null は許す）", () => {
-    expect(personRequired).toContain("firstPerson");
+  test("必須にしない（5.13。必須にすると別名が押し出された）、null は許す", () => {
+    expect(personRequired).not.toContain("firstPerson");
     const field =
       CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties.firstPerson;
     expect(field.type).toContain("null");
@@ -89,5 +89,5 @@ describe("必須にしない欄（理由はスキーマのコメントと設計�
 });
 
 test("版を上げた", () => {
-  expect(CHARACTER_EXTRACT_VERSION).toBe("5.12");
+  expect(CHARACTER_EXTRACT_VERSION).toBe("5.13");
 });
