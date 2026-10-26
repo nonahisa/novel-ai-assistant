@@ -5,6 +5,7 @@ import {
   EXAMPLE_SUMMARY,
 } from "../core/exampleNames";
 import { WORLD_THING_GUIDES } from "../core/settingsExtractionValidation";
+import { ADDRESS_CATEGORY_GUIDES } from "../core/addressCategory";
 import {
   SPEECH_STYLE_ASPECTS,
   SPEECH_STYLE_EXAMPLE,
@@ -72,7 +73,15 @@ import type { ForeignNarratorNote } from "../core/sceneNarrators";
 //      （作者の裁定 2026-10-17「再読込と同じ直し方」。`schemaMaxLength`）。上限
 //      ちょうどだと Ollama が語の途中で書くのを止める。頼みの本文は 5.10 と同じで、
 //      超えた分は検算が文の切れ目で切る（`clampSpeechStyle`）
-export const CHARACTER_EXTRACT_VERSION = "5.11";
+// 5.12: 呼称の区分（addressTerms.category）の説明と、一人称（firstPerson）の書き方を
+//      足し、一人称をスキーマの必須に入れた（作者の裁定 2026-10-26「直して測ってから
+//      入れる」）。区分は欄があるだけで説明が無く、一人称は説明も必須も無かった。
+//      区分の説明は検算と同じ表（`ADDRESS_CATEGORY_GUIDES`）から組み、説明の写しや
+//      「不明」は検算が null にする（`cleanAddressCategory`）。一人称の空・指示語の写しも同じ
+// 5.13: 一人称を必須から外した（説明と検算は残す）。5.12 の測り比べで、26b の別名が
+//      3回とも減ったため（必須が任意の欄を押し出したとみた）。頼みの本文は 5.12 と同じだが、
+//      スキーマの意味が変わるので上げる（5.12 の答えがキャッシュから返らないように）
+export const CHARACTER_EXTRACT_VERSION = "5.13";
 
 /**
  * 送るときの温度。本文から拾うだけだが、書きぶりの揺れを少しだけ許す。
@@ -167,6 +176,10 @@ export function buildCharacterExtractPrompt(
   // 種族・品物の案内は検算と同じ表から組む（写しを見張るため。`WORLD_THING_GUIDES`）
   const worldThingLines = WORLD_THING_GUIDES.map(
     (guide) => `   ・${guide.kind}（${guide.examples}）：${guide.aspects}`
+  ).join("\n");
+  // 呼称の区分も検算と同じ表から組む（説明の写しを検算が見分けるため。5.12）
+  const addressCategoryLines = ADDRESS_CATEGORY_GUIDES.map(
+    (guide) => `   ・${guide.label}：${guide.meaning}`
   ).join("\n");
   const abilityTermNote = input.abilityTerm
     ? `この作品では能力を「${input.abilityTerm}」と総称します。abilitySystem.abilityTerm には同じ語を使ってください。`
@@ -279,6 +292,10 @@ ${knownWorld}
   ・台詞が無い人物、話し方に特徴が読み取れない人物は、speechStyle と speechEvidence を null にすること。
   ・性格を書く欄ではない。口調は「どう話すか」、personality は「どういう人か」である。
 
+- firstPerson には、その人物が自分を指すときに使う語を、本文の表記のまま1つ入れること。
+  台詞・心内語・その人物が語り手の地の文から取る。いくつかあれば最もよく使うものにする。
+  本文に出てこなければ null にすること。
+
 - personality 以外の項目は、本文に手掛かりが無ければ推測で埋めてはならない。
   「〜だろう」「〜と思われる」と書きたくなる内容は null にすること。
 
@@ -301,6 +318,9 @@ ${knownWorld}
    本文に出てきた形のまま記録すること。
 6. 「君」「お前」「あなた」など特定の相手を持たない一般的な呼びかけは
    defaultSecondPerson に入れ、addressTerms には入れないこと。
+7. category には、その呼び方の型を次の区分から1つ選んで、区分の名前だけを書くこと。
+${addressCategoryLines}
+   どれにも当たらなければ null にすること。
 
 【関係の抽出ルール】（重要）
 関係とは、その人物と他の人物との結びつきです。**その人物のレコードから見た**
@@ -556,6 +576,19 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           "relations",
           "evidence",
         ],
+        // 必須にしないもの（5.12 で決め、5.13 で一人称を足した。作者の裁定 2026-10-26）：
+        // - firstPerson：5.12 で必須にすると一人称は大きく埋まった（捏造0）が、
+        //   26b で別名が3回とも減った（5・7・12 → 0・1・2。
+        //   `docs/measurements/2026-10-26-character-extract-5.12.md`）。
+        //   必須が任意の欄を押し出したとみて外した。書き方の説明は頼み方に残す
+        // - aliases・addressTerms：必須に入れても別名は増えず、欄が空で出るだけだった
+        //   （2026-09-08 09:40 の実測。増えたのはモデルを大きくしたとき）。
+        //   必須を増やすほど小さいモデルは任意の欄を出さなくなる、という同日の記録もある
+        // - reading：仮名の名前はコードが名前から埋める（`fillReading`）。必須にすると
+        //   漢字の名前に推測の読みが増え、読みの食い違い（たいし／たし）が増える
+        // - isMob：null の無い真偽値。必須にすると毎回 true か false を選ばせることになり、
+        //   誤った true は人物を一覧の脇へ回す（5.8）。省けば false と同じ
+        // - defaultSecondPerson：特定の相手を持たない呼びかけで、出る人物が少ない
       },
     },
     abilities: {

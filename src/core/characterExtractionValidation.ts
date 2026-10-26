@@ -6,6 +6,8 @@ import {
   PRONOUN_WORDS,
 } from "./genericPersonWords";
 import { isReadingInconsistentWithName } from "./readingCheck";
+// 互いに import し合うが、どちらも関数の中でしか相手を呼ばないので読み込み順に依らない
+import { cleanAddressCategory } from "./addressCategory";
 import { stripHonorific } from "./nameHonorific";
 import { familyNameCandidates } from "./familyName";
 import { chaptersForCandidate, isGroundedInChunk } from "./groundedEvidence";
@@ -1557,6 +1559,12 @@ export const EXTRACTED_TEXT_FIELDS = [
   "evidence",
 ] as const;
 
+/**
+ * 一人称の頼み方（P-04a 5.12）の言葉が値に返ってきた形。
+ * 「自分」は一人称として正しい語なので、それ単独では落とさない
+ */
+const FIRST_PERSON_INSTRUCTION_ECHO = /一人称|指す|表記|語り手/u;
+
 /** AI応答を後段が安全に扱える形へ正規化する。 */
 export function normalizeExtractedCharacter(
   raw: Record<string, unknown>
@@ -1590,6 +1598,16 @@ export function normalizeExtractedCharacter(
   for (const key of EXTRACTED_TEXT_FIELDS) {
     copyNullableString(character, raw, key);
   }
+  // 一人称は 5.12 で必須にした。必須の欄は、分からないときに「不明」や
+  // 指示の語（「一人称」）で埋められやすい。マージは値があれば一人称の
+  // 揺れとして積むので、ここで空と同じ扱いにする
+  if (
+    character.firstPerson &&
+    (!isMeaningfulValue(character.firstPerson) ||
+      FIRST_PERSON_INSTRUCTION_ECHO.test(character.firstPerson))
+  ) {
+    character.firstPerson = null;
+  }
 
   if ("addressTerms" in raw) {
     character.addressTerms = Array.isArray(raw.addressTerms)
@@ -1602,7 +1620,8 @@ export function normalizeExtractedCharacter(
             {
               targetName,
               term,
-              category: cleanNullableString(item.category),
+              // 区分は 5.12 で頼み方に説明を足した。説明の写しはここで落とす
+              category: cleanAddressCategory(item.category),
               context: cleanNullableString(item.context),
               evidence: cleanNullableString(item.evidence),
             },
