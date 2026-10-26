@@ -17,7 +17,9 @@ import {
   type TravelDistanceProposal,
 } from "../../core/travelCues";
 import { parseLocation, type Location } from "../../models/location";
-import type { TravelStageStats } from "../../core/factContradiction";
+import type { Character } from "../../models/character";
+import type { IdentityCueStats, TravelStageStats } from "../../core/factContradiction";
+import { runIdentityCues } from "../../core/identityCues";
 import { withLineNumbers, type Chunk } from "../../core/chunker";
 import {
   buildFactVerifyIssue,
@@ -37,6 +39,7 @@ import {
   collectFactsFromChunk,
   factVerifyPromptVersion,
   factVerifySourceOf,
+  identityVerifyMaterialOf,
   lineTextOf,
   parseFactJsonObject,
   TOPIC_CARRY_LIMIT,
@@ -140,6 +143,8 @@ interface FactWorkContext {
   recordFacts: StoryFact[];
   /** 設定資料の宿り（心と体の記録）の印。「死亡後の登場」から外す人物（製品と同じ） */
   afterlives: AfterlifeMark[];
+  /** 人物の記録（モブを除く）。体と心の照合が心と体の記録を読む（製品と同じ） */
+  characters: Character[];
   /** 場所の記録。移動の照合の所要時間の表と、所在の引き当てに使う（製品と同じ） */
   locations: Location[];
   /** 本文を読む順のファイル（相対パス）。移動の照合の時計に使う */
@@ -227,6 +232,7 @@ function loadFactWork(input: FactContradictionInput): FactWorkContext {
     table,
     recordFacts: factsFromCharacters(characters),
     afterlives: afterlifeMarksFromCharacters(characters),
+    characters,
     locations: locations.records,
     files: files.filter(
       (filePath) => !unreadableFiles.some((entry) => entry.filePath === filePath)
@@ -308,8 +314,8 @@ export function factContradictionPrompt(
   const context = loadFactWork(input);
   return {
     promptVersion: STORY_FACT_EXTRACT_VERSION,
-    // 移動の照合の候補だけ文面が違う（travel 1.0）。両方の版が読める形で残す
-    verifyPromptVersion: factVerifyPromptVersion("travel"),
+    // 移動の照合・体と心の照合の候補だけ文面が違う（travel・identity）。どの版も読める形で残す
+    verifyPromptVersion: `${factVerifyPromptVersion("travel")}|${factVerifyPromptVersion("identity")}`,
     systemPrompt: STORY_FACT_EXTRACT_SYSTEM_PROMPT,
     schema: STORY_FACT_EXTRACT_SCHEMA,
     temperature: STORY_FACT_EXTRACT_TEMPERATURE,
@@ -319,7 +325,8 @@ export function factContradictionPrompt(
       "本文から「事実」を取り出す段（P-37）のプロンプトです。" +
       "食い違いの照合と判定は拡張機能側が行うため、" +
       "この段の応答だけでは矛盾は出ません（novel.run が4段と、移動の照合の手がかり" +
-      "（P-51 本文の距離・P-52 場面の頭の時の経過）を続けて通します）。",
+      "（P-51 本文の距離・P-52 場面の頭の時の経過）と、体と心の照合（P-53 場面の体と心。" +
+      "心と体の記録がある作品だけ）を続けて通します）。",
     chunks: context.chunks.map((item) => ({
       chunkId: item.chunkId,
       index: item.chunk.index,
@@ -456,6 +463,11 @@ export type FactContradictionRunOutcome =
         verifyNote: string;
         /** 移動の照合の工程ごとの件数（所在→場所に引けた→時計に載った、表の組） */
         travel: TravelStageStats;
+        /**
+         * 体と心の照合の件数（設計書6.88.14）。心と体の記録の組・訊いたチャンク・場面の読み
+         * （捨てた数）・本文の遷移・付け替えた心の項目・記録の無い組
+         */
+        identity: IdentityCueStats;
       };
       unreadableFiles: Array<{ filePath: string; reason: string }>;
     };
@@ -527,10 +539,9 @@ export async function factContradictionRun(
   }
 
   /* ── 第2・3段：機械照合（**AIを使わない**。設計書6.88.6）───── */
-  const allFacts = [...facts, ...context.recordFacts];
   /** 本文は1回だけ読む（時計と判定の両方が引く） */
   const sourceCache = new Map<string, string | undefined>();
-  /** 移動の照合の手がかり（P-51・P-52）と、距離の提案を置くときの失敗 */
+  /** 移動の照合の手がかり（P-51・P-52）・体と心の照合（P-53）と、距離の提案を置くときの失敗 */
   const travelFailures: Array<{ chunkId: string; reason: string }> = [];
   /*
     移動の照合の材料（所要時間の表・所在・時計）と、AIの手がかり（P-51 本文の距離・
@@ -575,12 +586,51 @@ export async function factContradictionRun(
   const travel = cues.material;
   const pendingFiles = stageTravelProposalsFs(input.folder, cues.proposals, travelFailures);
   cues.stats.proposedLocations = pendingFiles.length;
+  /*
+    体と心の照合（P-53。設計書6.88.14）。**製品と同じ関数で回す**——ここがするのは
+    AIの呼び方を渡すことだけ。心と体の記録が無い作品では AI を呼ばない（作者の判断①）
+  */
+  const identity = await runIdentityCues({
+    characters: context.characters,
+    facts,
+    places,
+    episodes: context.files.map((filePath) => ({
+      filePath,
+      chapter: context.chapterByFile.get(filePath) ?? null,
+      text: readSourceCached(input.folder, filePath, sourceCache) ?? "",
+    })),
+    chunks: context.chunks.map((item) => item.chunk),
+    ask: async (request) => {
+      try {
+        const reply = await ask({
+          systemPrompt: request.systemPrompt,
+          userPrompt: request.userPrompt,
+          schema: request.schema,
+          temperature: temperatureFor(input, request.temperature),
+        });
+        models.add(reply.model);
+        const raw = parseFactJsonObject(reply.text);
+        if (!raw) throw new McpToolError("応答を読み取れません（JSONの形ではありません）");
+        return raw;
+      } catch (error) {
+        // 1回の失敗で全体を止めない（数えるのは runIdentityCues。理由はここで残す）
+        travelFailures.push({ chunkId: "体と心の照合：場面の体と心", reason: describeError(error) });
+        return undefined;
+      }
+    },
+  });
+  // 場面の表示用の事実の場所を足す（候補の飛び先。事実の列には入れない。製品と同じ）
+  for (const [id, place] of identity.scenePlaces) places.set(id, place);
+  // 照合へ渡す本文の事実は、心の項目を付け替え・外したあとの写し（作者の判断⑥。製品と同じ）
+  const matchFacts = [...identity.facts, ...context.recordFacts];
   const candidates = filterAllowed(
     findContradictionCandidates({
-      facts: allFacts,
-      transitions: [],
-      scenes: [],
-      // 遷移の表は第5段まで空なので、幽霊・転生・憑依は設定資料の宿りで外す（製品と同じ）
+      facts: matchFacts,
+      transitions: identity.transitions,
+      scenes: identity.scenes,
+      dwellings: identity.dwellings,
+      names: identity.names,
+      // 設定資料の宿りの印でも幽霊・転生・憑依を外す（製品と同じ）
       afterlives: context.afterlives,
       travelTimes: travel.travelTimes,
       whereabouts: travel.whereabouts,
@@ -588,7 +638,7 @@ export async function factContradictionRun(
     // 容認リスト（6.88.8）の保存は第5段の残り。いまは何も抑えない
     []
   );
-  const factById = new Map(allFacts.map((fact) => [fact.id, fact]));
+  const factById = new Map([...matchFacts, ...identity.sceneFacts].map((fact) => [fact.id, fact]));
 
   /* ── 第4段：候補を1件ずつ確かめる（P-12b）───────────── */
   const issuesByFile = new Map<string, FactContradictionIssue[]>();
@@ -613,6 +663,7 @@ export async function factContradictionRun(
       left: sides.left,
       right: sides.right,
       rightLineText,
+      reassigned: identity.reassigned,
     });
 
     // 移動の照合の候補だけ、所要時間・コードの読み・前側の前後を添える（travel 1.0。製品と同じ関数）
@@ -648,6 +699,8 @@ export async function factContradictionRun(
             sides.left.chapter !== null ? `第${sides.left.chapter}話` : "",
           source: factVerifySourceOf(candidate),
           travel,
+          // 体と心の照合の候補だけ、心と体の記録とコードの読みを添える（identity 1.0。製品と同じ関数）
+          identity: identityVerifyMaterialOf(candidate),
         }),
         schema: CONTRADICTION_VERIFY_SCHEMA,
         temperature: temperatureFor(input, CONTRADICTION_VERIFY_TEMPERATURE),
@@ -677,6 +730,7 @@ export async function factContradictionRun(
         sides,
         rightLineText,
         explanation: outcome.explanation,
+        reassigned: identity.reassigned,
       })
     );
   }
@@ -733,6 +787,7 @@ export async function factContradictionRun(
       verifyNote,
       cancelled: false,
       travel: travel.stats,
+      identity: identity.stats,
     })}`,
     // **何で回したかを残す**（`num_ctx` と同じ扱い。6.87.16）
     temperature: {
@@ -759,6 +814,7 @@ export async function factContradictionRun(
       kept,
       verifyNote,
       travel: travel.stats,
+      identity: identity.stats,
     },
     unreadableFiles: context.unreadableFiles,
   };

@@ -148,6 +148,14 @@ export interface IdentityTransition {
   toPersona?: string;
   /** 遷移のあとの社会的な身分。変わらない／読めなければ null */
   identity?: string | null;
+  /**
+   * 作者の心と体の記録（宿り）から組んだ遷移か（設計書6.88.14）。
+   *
+   * 体と心の照合は、記録の範囲を範囲そのもの（`DwellingSpan`）で見る。記録から組んだ
+   * 遷移まで「本文の描写」として数えると、範囲の頭の憑依1つが、範囲の外の場面まで
+   * 許してしまう。死亡後の登場の除外には、これまでどおり効く
+   */
+  fromDwelling?: true;
 }
 
 /** `parseStoryFact` が返す失敗。例外にしないのは、1件の不良で抽出全体を捨てないため */

@@ -77,11 +77,12 @@ export interface ContradictionCandidate {
    */
   basis?: string;
   /**
-   * どの照合器から来たか。いまは移動の照合（`findTravelImpossibilities`）だけが付ける。
-   * 判定（P-12b）は、移動の照合から来た候補に専用の文面を送る（travel 1.0、2026-10-25）。
-   * 指紋には混ぜない
+   * どの照合器から来たか。移動の照合（`findTravelImpossibilities`）は travel、
+   * 体と心の照合（`findDwellingDrift`）は identity を付ける。
+   * 判定（P-12b）は、それぞれ専用の文面を送る（travel 1.0、2026-10-25／identity 1.0、
+   * 2026-10-26）。指紋には混ぜない
    */
-  origin?: "travel";
+  origin?: "travel" | "identity";
   /**
    * 移動の照合で、所要時間に承認待ちの距離（P-51 が本文から読んだもの）を使ったか。
    * 判定（P-12b travel 1.1）は、これが付いた候補にだけ「承認待ちの距離も根拠として扱う」
@@ -135,9 +136,9 @@ export interface WhereaboutsEntry {
  * 設定資料から分かる「死んだあとも心が別の体で出てくる人物」の印（2026-10-24）。
  *
  * 作者が付けた心と体の記録（宿り、`Character.dwellings`。設計書6.5.13）の心の側から
- * 組む（`factsFromRecords.ts` の `afterlifeMarksFromCharacters`）。遷移の表
- * （`transitions`）は第5段まで製品の道で空なので、幽霊・転生・憑依の除外は
- * いまはこの印だけが効く（作者の裁定「設定資料から除く」）。
+ * 組む（`factsFromRecords.ts` の `afterlifeMarksFromCharacters`）。作者の裁定「設定資料から除く」。
+ * 遷移の表（`transitions`）は、心と体の記録がある作品でだけ製品の道から渡る（6.88.14）。
+ * 記録の無い作品では、幽霊・転生・憑依の除外はこの印だけが効く。
  */
 export interface AfterlifeMark {
   /** 人物の id（事実の `subject` と同じ） */
@@ -146,8 +147,30 @@ export interface AfterlifeMark {
   untilChapter?: number;
 }
 
+/**
+ * 作者の心と体の記録（宿り）1件を、体と心の id に結んだもの（設計書6.88.14）。
+ * 組み立ては `core/identityCues.ts` の `buildIdentityLedger`。
+ */
+export interface DwellingSpan {
+  /** 体の持ち主の人物 id */
+  bodyId: string;
+  /** 宿る心の人物 id */
+  mindId: string;
+  /** 何話から。無ければ決めない（最初から） */
+  fromChapter?: number;
+  /** 何話まで。無ければ今も */
+  untilChapter?: number;
+}
+
 export interface MatchInput {
   facts: readonly StoryFact[];
+  /**
+   * 心と体の記録（6.88.14）。**1件でもあれば、体と心の照合は記録の範囲で見る**
+   * （`findDwellingDrift`）。無ければこれまでの `findIdentityDrift`
+   */
+  dwellings?: readonly DwellingSpan[];
+  /** 人物 id → 作者が読む名前。理由の文にだけ使う（指紋は id のまま） */
+  names?: ReadonlyMap<string, string>;
   /** 6.88.5。「死亡後の登場」の除外と、組の変化が正当かの判断に使う */
   transitions?: readonly IdentityTransition[];
   /** 設定資料の宿りの印。「死亡後の登場」の除外にだけ使う */
@@ -230,7 +253,14 @@ export function findContradictionCandidates(
       input.travelTimes ?? [],
       input.whereabouts ?? []
     ),
-    ...findIdentityDrift(input.scenes ?? [], input.transitions ?? []),
+    ...((input.dwellings ?? []).length > 0
+      ? findDwellingDrift(
+          input.scenes ?? [],
+          input.transitions ?? [],
+          input.dwellings ?? [],
+          input.names
+        )
+      : findIdentityDrift(input.scenes ?? [], input.transitions ?? [])),
   ];
 
   const seen = new Set<string>();
@@ -748,6 +778,172 @@ export function findIdentityDrift(
 }
 
 /**
+ * 心と体の記録（宿り）があるときの、体と心の照合（設計書6.88.14。作者の判断②）。
+ *
+ * `findIdentityDrift` は「隣り合う2場面で人格が変わったら、あいだに遷移が要る」と見る。
+ * それでは**同居**（第17話から文佳の心も戻り、2人の心が行き来する）が表せない——
+ * 行き来のたびに遷移が要り、作者の記録どおりの場面が全部候補になる。逆に、範囲が
+ * 切れたあとも心が体に残っている場面は、人格が変わらないので拾えない。
+ *
+ * そこで、体ごとに場面を時期順にたどり、**場面1つずつ**「この心がこの体にいてよいか」を見る。
+ *
+ * - 体の持ち主の心：いつでもよい（戻ったことは描かれていなくても出さない）
+ * - 記録の範囲の中の宿る心：よい（同居の行き来も含めて出さない）
+ * - それ以外（範囲の外の宿る心・組に無い第三の心）：**本文の遷移**が前の場面から
+ *   この場面までのあいだにあればよく、そのあと同じ心が続くあいだもよい。無ければ候補
+ *
+ * 記録から組んだ遷移（`fromDwelling`）は本文の描写として数えない——範囲の頭の憑依
+ * 1つが、範囲の外の場面まで許してしまう。身分（偽名・変装）はここでは見ない
+ * （母艦の判断⑤）。
+ */
+export function findDwellingDrift(
+  scenes: readonly SceneIdentity[],
+  transitions: readonly IdentityTransition[],
+  dwellings: readonly DwellingSpan[],
+  names: ReadonlyMap<string, string> = new Map()
+): ContradictionCandidate[] {
+  const nameOf = (id: string) => names.get(id) ?? id;
+  const candidates: ContradictionCandidate[] = [];
+  for (const verdict of dwellingSceneVerdicts(scenes, transitions, dwellings)) {
+    if (verdict.verdict !== "flagged") continue;
+    const { body, mind, current, previous } = verdict;
+    const at = scenePosition(current);
+    const spans = dwellings.filter((span) => span.bodyId === body && span.mindId === mind);
+    const range = spans.map(describeSpan).join("、");
+    const reason =
+      spans.length > 0
+        ? `${formatPosition(at)}、${nameOf(body)}の体に〈${nameOf(mind)}〉の心がいる。` +
+          `心と体の記録の範囲（${range}）の外で、本文に心が入る描写も無い`
+        : `${formatPosition(at)}、${nameOf(body)}の体に〈${nameOf(mind)}〉の心がいる。` +
+          `心と体の記録に無い組で、本文に心が入る描写も無い`;
+    const recorded = dwellings
+      .filter((span) => span.bodyId === body)
+      .map((span) => `${nameOf(span.mindId)}（${describeSpan(span)}）`);
+    const basis =
+      spans.length > 0
+        ? `心と体の記録（作者が人物の編集で付けたもの）では、${nameOf(mind)}の心が${nameOf(body)}の体にいるのは${range}`
+        : recorded.length > 0
+          ? `心と体の記録（作者が人物の編集で付けたもの）では、${nameOf(body)}の体に宿る心は${recorded.join("・")}だけ`
+          : `心と体の記録（作者が人物の編集で付けたもの）には、${nameOf(body)}の体に宿る心が無い`;
+    candidates.push(
+      buildCandidate({
+        type: "状態",
+        subject: body,
+        predicate: PERSONA,
+        values: [previous?.triple.personaId ?? body, mind],
+        left: previous?.source ?? current.source,
+        right: current.source,
+        // 場面の組は地の文から読むもの（誰かの台詞ではない）ので narration 相当
+        confidence: confidenceFromModality("narration"),
+        unknownOrder: previous
+          ? isFactOrderUnknown(scenePosition(previous), at)
+          : false,
+        reason,
+        basis,
+        origin: "identity",
+      })
+    );
+  }
+  return candidates;
+}
+
+/** 体の持ち主でない心がいる場面1つの判定（`dwellingSceneVerdicts`） */
+export interface DwellingSceneVerdict {
+  body: string;
+  mind: string;
+  current: SceneIdentity;
+  previous?: SceneIdentity;
+  /**
+   * in_range＝記録の範囲の中／described＝前の場面からのあいだに本文の遷移がある／
+   * carried＝本文の遷移で入った心が続いている／flagged＝候補にする
+   */
+  verdict: "in_range" | "described" | "carried" | "flagged";
+}
+
+/**
+ * `findDwellingDrift` の判定を、場面ごとに返す（候補にならなかった理由を測定で追うため。
+ * MCP の `stages.identity` に出す）。**判定はここ1か所**——内訳のために別に書くと、
+ * 内訳と候補が食い違う。体の持ち主の心の場面は返さない（いつでもよいので）。
+ *
+ * 遷移で許すのは、**同じ体が書かれた本文の遷移**だけ。体の書かれない幽霊・転生の遷移は、
+ * その体に心が入った描写ではない（どの体の場面でも許してしまう）
+ */
+export function dwellingSceneVerdicts(
+  scenes: readonly SceneIdentity[],
+  transitions: readonly IdentityTransition[],
+  dwellings: readonly DwellingSpan[]
+): DwellingSceneVerdict[] {
+  const textTransitions = transitions.filter((transition) => !transition.fromDwelling);
+  const groups = new Map<string, SceneIdentity[]>();
+  for (const scene of orderScenes(scenes)) {
+    const bucket = groups.get(scene.triple.bodyId);
+    if (bucket) bucket.push(scene);
+    else groups.set(scene.triple.bodyId, [scene]);
+  }
+  const verdicts: DwellingSceneVerdict[] = [];
+  for (const body of [...groups.keys()].sort()) {
+    const list = groups.get(body) ?? [];
+    /** 本文の遷移で入った心。範囲の外でも、別の心に替わるまでは続いているとみなす */
+    let carried: string | null = null;
+    for (let i = 0; i < list.length; i += 1) {
+      const current = list[i];
+      const previous = i > 0 ? list[i - 1] : undefined;
+      const mind = current.triple.personaId;
+      if (mind === body) {
+        carried = null;
+        continue;
+      }
+      const base = { body, mind, current, ...(previous ? { previous } : {}) };
+      const spans = dwellings.filter((span) => span.bodyId === body && span.mindId === mind);
+      if (spans.some((span) => spanCovers(span, current.chapter))) {
+        verdicts.push({ ...base, verdict: "in_range" });
+        continue;
+      }
+      // 前の場面（無ければこの話の頭）からこの場面までのあいだの、本文の遷移
+      const from: FactPosition = previous
+        ? scenePosition(previous)
+        : { storyTime: null, chapter: current.chapter, line: 0 };
+      const described = textTransitions.some(
+        (transition) =>
+          transition.body === body &&
+          within(transition.at, from, scenePosition(current)) &&
+          transitionToPersona(transition) === mind
+      );
+      if (described) {
+        carried = mind;
+        verdicts.push({ ...base, verdict: "described" });
+        continue;
+      }
+      if (carried === mind) {
+        verdicts.push({ ...base, verdict: "carried" });
+        continue;
+      }
+      verdicts.push({ ...base, verdict: "flagged" });
+    }
+  }
+  return verdicts;
+}
+
+/** 記録の範囲がその話を含むか。話数が分からなければ、範囲に縛りが無いときだけ含むとみなす */
+function spanCovers(span: DwellingSpan, chapter: number | null): boolean {
+  if (span.fromChapter === undefined && span.untilChapter === undefined) return true;
+  if (chapter === null) return false;
+  if (span.fromChapter !== undefined && chapter < span.fromChapter) return false;
+  if (span.untilChapter !== undefined && chapter > span.untilChapter) return false;
+  return true;
+}
+
+/** 記録の範囲を作者が読む形にする（「第2話から第4話」） */
+function describeSpan(span: DwellingSpan): string {
+  if (span.fromChapter !== undefined && span.untilChapter !== undefined) {
+    return `第${span.fromChapter}話から第${span.untilChapter}話`;
+  }
+  if (span.fromChapter !== undefined) return `第${span.fromChapter}話から`;
+  if (span.untilChapter !== undefined) return `第${span.untilChapter}話まで`;
+  return "話数の決まり無し";
+}
+
+/**
  * 容認リスト（6.88.8）の鍵。
  *
  * 値は昇順に並べてから混ぜる。**どちらを左に置いたかで指紋が変わると、
@@ -800,7 +996,7 @@ interface CandidateDraft extends FingerprintInput {
   unknownOrder: boolean;
   reason: string;
   basis?: string;
-  origin?: "travel";
+  origin?: "travel" | "identity";
   pendingDistance?: true;
 }
 

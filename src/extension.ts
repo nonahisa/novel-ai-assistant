@@ -6888,6 +6888,9 @@ export async function activate(
             : "機械が挙げた候補 0件"
         );
         if (result.verifyNote) parts.push(result.verifyNote);
+        // 体と心の照合（設計書6.88.14）。心の側へ付け替えた件数と、心と体の記録に
+        // 無い読みの案内を出す（作者の判断③⑥。人物の記録には書かない）
+        if (result.identityNote) parts.push(result.identityNote);
         if (result.failedChunks > 0) {
           parts.push(`読み取れなかった ${result.failedChunks}件`);
         }

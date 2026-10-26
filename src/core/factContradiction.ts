@@ -97,14 +97,41 @@ function valueLabel(fact: StoryFact): string {
  * 話の先頭（0行目）に置いてあるだけで、そこに本文があるわけではない。
  * 「第3話 0行目」と書くと、作者はありもしない行を見に行く。
  */
-export function describeFactSide(fact: StoryFact): string {
+export function describeFactSide(
+  fact: StoryFact,
+  /** 体と心の照合で、心の側へ付け替えた事実（6.88.14、作者の判断⑥）。印を添える */
+  reassigned?: ReadonlyMap<string, MindReassignment>
+): string {
   if (isRecordFact(fact)) return `設定資料では『${valueLabel(fact)}』`;
   const place =
     fact.chapter !== null
       ? `第${fact.chapter}話 ${fact.lineRange[0]}行目`
       : `${fact.lineRange[0]}行目`;
   const time = fact.storyTime ? `・${formatRelativeTime(fact.storyTime)}` : "";
-  return `${place}・${MODALITY_LABELS[fact.modality]}${time}：${valueLabel(fact)}`;
+  const moved = reassigned?.get(fact.id);
+  const mark = moved ? `（${describeMindReassignment(moved)}）` : "";
+  return `${place}・${MODALITY_LABELS[fact.modality]}${time}：${valueLabel(fact)}${mark}`;
+}
+
+/**
+ * 体と心の照合で、体の持ち主の名で抜かれた心の項目（一人称・口調・性格）を、
+ * その場面で体を動かしていた心の側の人物へ付け替えたことの印（作者の判断⑥）。
+ *
+ * **事実そのものに欄は足さない**（6.88.3 の形を保つ）。付け替えは照合のための写しの
+ * 上だけで、作者の人物の記録には書かない
+ */
+export interface MindReassignment {
+  /** 体の持ち主（事実がもともと付いていた人物）の id と名前 */
+  bodyId: string;
+  bodyName: string;
+  /** 付け替えた先（その場面の心）の id と名前 */
+  mindId: string;
+  mindName: string;
+}
+
+/** 付け替えの印を、作者が読む1句にする */
+export function describeMindReassignment(moved: MindReassignment): string {
+  return `${moved.bodyName}の体で${moved.mindName}の心が話している場面なので、${moved.mindName}の事実として照合`;
 }
 
 /** 検証（P-12b）へ渡す「指摘」の形。既存の `AcceptedContradiction` と同じ並び */
@@ -137,8 +164,10 @@ export function buildFactVerifyIssue(input: {
    * 本物の候補まで落ちる。読めなかった・資料由来のときは省略する。
    */
   rightLineText?: string;
+  /** 体と心の照合で心の側へ付け替えた事実（作者の判断⑥）。両側の書き方に印を添える */
+  reassigned?: ReadonlyMap<string, MindReassignment>;
 }): FactVerifyIssue {
-  const { candidate, left, right } = input;
+  const { candidate, left, right, reassigned } = input;
   const quoted = input.rightLineText?.trim() ?? "";
   return {
     category: candidate.type,
@@ -146,13 +175,13 @@ export function buildFactVerifyIssue(input: {
     excerpt:
       !isRecordFact(right) && quoted.length > 0
         ? quoted
-        : describeFactSide(right),
+        : describeFactSide(right, reassigned),
     // 資料の側の根拠（移動の照合の所要時間）は「設定では」に添える。
     // 判定は本文の前後しか見ないので、添えないと「時間が経ったので移動できた」と読む
     settingSays: candidate.basis
-      ? `${describeFactSide(left)}。${candidate.basis}`
-      : describeFactSide(left),
-    textSays: describeFactSide(right),
+      ? `${describeFactSide(left, reassigned)}。${candidate.basis}`
+      : describeFactSide(left, reassigned),
+    textSays: describeFactSide(right, reassigned),
     note: `${candidate.reason}（確信度: ${CONFIDENCE_LABELS[candidate.confidence]}）`,
   };
 }
@@ -229,6 +258,111 @@ export interface FactRunSummary {
    * 無かった」と読める——場所の記録に距離が1つも無いだけかもしれない。
    */
   travel?: TravelStageStats;
+  /** 体と心の照合の件数（`runIdentityCues`。6.88.14）。組まなかった回は省略 */
+  identity?: IdentityCueStats;
+}
+
+/** 体と心の照合で数えたもの（`core/identityCues.ts` の `runIdentityCues`） */
+export interface IdentityCueStats {
+  /**
+   * 心と体の記録が無く、AIを呼ばなかった（作者の判断①）。人物の編集の
+   * 「心と体が別の人物」へ案内する
+   */
+  noDwellings: boolean;
+  /** 体と心の id に結べた記録の組 */
+  pairs: number;
+  /** 体の持ち主が人物の記録に見つからず、照合に使えなかった記録 */
+  unlinkedDwellings: number;
+  /** P-53 を送った（控えから返したものを含む）チャンク */
+  chunks: number;
+  /** 検算を通った場面の読み（「分からない」は含まない） */
+  readings: number;
+  /** 「分からない」と答えた読み */
+  unknownReadings: number;
+  /** 検算で捨てた読みと遷移 */
+  rejected: number;
+  /** 検算を通った本文の遷移 */
+  transitions: number;
+  /** 心の側へ付け替えた心の項目（一人称・口調・性格。作者の判断⑥） */
+  reassignedFacts: number;
+  /** 心が1人に決まらず、照合から外した心の項目 */
+  excludedFacts: number;
+  /**
+   * 心と体の記録に無い読み（組が無い・範囲の外）。完了の知らせで案内する（作者の判断③）。
+   * 先頭の数件だけ持つ
+   */
+  unrecorded: Array<{ chapter: number | null; evidence: string; bodyName: string; mindName: string }>;
+  /** 記録に無い読みの総数（`unrecorded` は先頭だけ） */
+  unrecordedTotal: number;
+  /** AIへ送れなかった・読めなかった回 */
+  failures: number;
+  /**
+   * 測定で原因を追うための内訳（MCP の `stages.identity` に出る。完了の知らせには出さない）。
+   * 引用は頭の20字だけ（作者の原稿の本文を長く出さない）。人物は名前で出す
+   */
+  details: IdentityCueDetails;
+}
+
+/** 体と心の照合の内訳（`IdentityCueStats.details`） */
+export interface IdentityCueDetails {
+  /** 検算を通った場面の読み（「分からない」は mind が "分からない"） */
+  readings: Array<{ chapter: number | null; line: number; body: string; mind: string; evidence: string }>;
+  /** 検算を通った本文の遷移（体が書かれていなければ body は null） */
+  transitions: Array<{ chapter: number | null; line: number; kind: string; body: string | null; mind: string; evidence: string }>;
+  /** 検算で捨てた読みと遷移の、理由ごとの数 */
+  rejectedByReason: Record<string, number>;
+  /**
+   * 体の持ち主でない心がいる場面ごとの判定（`dwellingSceneVerdicts`）。
+   * in_range＝記録の範囲の中／described＝本文の遷移あり／carried＝遷移で入った心が続いている／flagged＝候補
+   */
+  scenes: Array<{ chapter: number | null; line: number; body: string; mind: string; verdict: string }>;
+  /**
+   * 組の体の名で抜かれた心の項目（一人称・口調・話し方・性格）の扱い（作者の判断⑥）。
+   * reassigned＝心の側へ付け替え／excluded＝心が決まらず外した／owner＝場面の心が体の持ち主／
+   * out_of_range＝記録の範囲の外（本人のまま）
+   */
+  mindFacts: Array<{ chapter: number | null; line: number; subject: string; predicate: string; outcome: string }>;
+}
+
+/** 心と体の記録が無い作品で、AIの段をしなかったときの案内（作者の判断①） */
+export const IDENTITY_CUES_NO_DWELLINGS_NOTE =
+  "心と体の記録が無いので体と心の照合はしていません（人物の編集の「心と体が別の人物」で記録してください）";
+
+/**
+ * 記録に無い読みの案内（作者の判断③）。**宿りは提案しない**——作者だけが付け外しする欄で、
+ * 承認待ちに置いても取り込みで落ちる（6.5.13）。作者のデータには何も書かない
+ */
+export function describeUnrecordedReadings(stats: IdentityCueStats): string {
+  if (stats.unrecordedTotal === 0) return "";
+  const shown = stats.unrecorded
+    .map(
+      (entry) =>
+        `${entry.chapter !== null ? `第${entry.chapter}話` : ""}「${entry.evidence}」` +
+        `（${entry.bodyName}の体に${entry.mindName}の心）`
+    )
+    .join("、");
+  const more = stats.unrecordedTotal > stats.unrecorded.length ? `ほか${stats.unrecordedTotal - stats.unrecorded.length}件` : "";
+  return `本文で別の心が入っている読み（${shown}${more}）が心と体の記録にありません`;
+}
+
+/** 体と心の照合の段を、作者が読む1句にする */
+export function describeIdentityCues(stats: IdentityCueStats): string {
+  if (stats.noDwellings) return IDENTITY_CUES_NO_DWELLINGS_NOTE;
+  const parts = [
+    `心と体の記録 ${stats.pairs}組`,
+    stats.unlinkedDwellings > 0 ? `体の持ち主が見つからない記録 ${stats.unlinkedDwellings}件` : "",
+    `訊いたチャンク ${stats.chunks}件`,
+    `場面の読み ${stats.readings}件` +
+      (stats.unknownReadings > 0 ? `（分からない ${stats.unknownReadings}件）` : "") +
+      (stats.rejected > 0 ? `（捨てた ${stats.rejected}件）` : ""),
+    `本文の遷移 ${stats.transitions}件`,
+    stats.reassignedFacts > 0 ? `心の側へ付け替えた事実 ${stats.reassignedFacts}件` : "",
+    stats.excludedFacts > 0 ? `心が決まらず照合から外した事実 ${stats.excludedFacts}件` : "",
+    stats.unrecordedTotal > 0 ? `記録の無い組 ${stats.unrecordedTotal}件` : "",
+    stats.failures > 0 ? `AIの失敗 ${stats.failures}回` : "",
+  ].filter(Boolean);
+  const guide = describeUnrecordedReadings(stats);
+  return `体と心の照合（${parts.join("・")}）${guide ? `。${guide}` : ""}`;
 }
 
 /** 移動の照合の材料が、どの工程で何件残ったか */
@@ -337,6 +471,7 @@ export function describeFactRun(summary: FactRunSummary): string {
     summary.candidates > 0 ? `採用 ${summary.kept}件` : "",
     summary.verifyNote,
     summary.travel ? describeTravelStages(summary.travel) : "",
+    summary.identity ? describeIdentityCues(summary.identity) : "",
     summary.failedChunks > 0 ? `読み取れなかった ${summary.failedChunks}件` : "",
     summary.skippedChunks > 0
       ? `処理済み ${summary.skippedChunks}件はスキップ`

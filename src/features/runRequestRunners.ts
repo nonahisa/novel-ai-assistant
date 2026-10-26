@@ -678,8 +678,8 @@ async function runFeature(
       if (!result) return notStarted;
       return {
         ok: true,
-        // 移動の照合の候補は判定の文面が違う（travel 1.0）ので、その版も並べる
-        promptVersion: `${STORY_FACT_EXTRACT_VERSION}|verify:${factVerifyPromptVersion("travel")}`,
+        // 移動の照合・体と心の照合の候補は判定の文面が違う（travel・identity）ので、その版も並べる
+        promptVersion: `${STORY_FACT_EXTRACT_VERSION}|verify:${factVerifyPromptVersion("travel")}|verify:${factVerifyPromptVersion("identity")}`,
         findings: result.issues.map((issue) => toFinding(issue, work)),
         dropped: {
           count: result.rejectedFacts,
