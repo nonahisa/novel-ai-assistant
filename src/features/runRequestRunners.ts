@@ -678,8 +678,8 @@ async function runFeature(
       if (!result) return notStarted;
       return {
         ok: true,
-        // 移動の照合・体と心の照合の候補は判定の文面が違う（travel・identity）ので、その版も並べる
-        promptVersion: `${STORY_FACT_EXTRACT_VERSION}|verify:${factVerifyPromptVersion("travel")}|verify:${factVerifyPromptVersion("identity")}`,
+        // 移動の照合・体と心の照合・死亡後の登場の候補は判定の文面が違う（travel・identity・death）ので、その版も並べる
+        promptVersion: `${STORY_FACT_EXTRACT_VERSION}|verify:${factVerifyPromptVersion("travel")}|verify:${factVerifyPromptVersion("identity")}|verify:${factVerifyPromptVersion("death")}`,
         findings: result.issues.map((issue) => toFinding(issue, work)),
         dropped: {
           count: result.rejectedFacts,

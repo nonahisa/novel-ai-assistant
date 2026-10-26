@@ -8,6 +8,7 @@ import {
   findPostDeathAppearances,
   findTravelImpossibilities,
   fingerprintOf,
+  postDeathStageStats,
   type TravelTime,
   type WhereaboutsEntry,
 } from "../../../src/core/contradictionMatch";
@@ -315,6 +316,8 @@ describe("死亡後の登場", () => {
       subject: "char_009",
       left: "d1",
       right: "a1",
+      // 確かめの段（P-12b death 1.0）へ専用の文面を送るための印
+      origin: "death",
     });
   });
 
@@ -447,6 +450,59 @@ describe("死亡後の登場", () => {
     const candidates = findPostDeathAppearances(facts);
     expect(candidates).toHaveLength(1);
     expect(candidates[0].right).toBe("a1");
+  });
+
+  /*
+    gemma4:26b では仕込み（第2話で死んだ祖母が第5話の地の文に出る）が候補にならず、
+    死亡の事実が抜けなかったのか、人物の id に結べなかったのか、照合で落ちたのかを
+    出力から区別できなかった（2026-10-26 の実測 2回目）。照合器と同じ判定で数える
+  */
+  describe("突き合わせの内訳（postDeathStageStats）", () => {
+    const names = new Map([
+      ["char_009", "宗一"],
+      ["char_010", "千早"],
+    ]);
+    const nameOf = (id: string) => names.get(id) ?? id;
+
+    it("死亡の事実・外した人物・死亡後の事実（回想は別）・候補を数える", () => {
+      const ghostDeath = fact({ ...death, id: "d2", subject: "char_010" });
+      const facts = [
+        death,
+        ghostDeath,
+        fact({ id: "a1", subject: "char_009", chapter: 6, predicate: "所在", value: "教室", storyTime: { day: 12, part: "朝" } }),
+        fact({ id: "a2", subject: "char_009", chapter: 7, predicate: "所在", value: "校庭", storyTime: { day: 13, part: "朝" } }),
+        fact({ id: "a3", subject: "char_009", chapter: 7, modality: "thought", predicate: "所在", value: "庭", storyTime: { day: 13, part: "朝" } }),
+        fact({ id: "a4", subject: "char_010", chapter: 7, predicate: "所在", value: "枕元", storyTime: { day: 13, part: "朝" } }),
+      ];
+      expect(postDeathStageStats({ facts, afterlives: [{ subject: "char_010" }] }, nameOf)).toEqual({
+        deaths: 2,
+        deathSubjects: ["宗一", "千早"],
+        revivedSubjects: ["千早"],
+        postDeathFacts: 2,
+        postDeathThoughts: 1,
+        candidates: 1,
+        deathLikeFacts: {},
+        unlinkedSubjects: [],
+        unlinkedTotal: 0,
+      });
+    });
+
+    it("「死亡」の出来事でない死の事実と、id に結べなかった主語を出す（照合は変えない）", () => {
+      const facts = [
+        // 指示（P-37）の「生死」は state の例なので、死を state で返すことがありうる
+        fact({ id: "s1", subject: "char_009", chapter: 2, kind: "state", predicate: "生死", value: "死亡" }),
+        fact({ id: "s2", subject: "char_009", chapter: 2, kind: "state", predicate: "死亡", value: "息を引き取った" }),
+        fact({ id: "s3", subject: "char_009", chapter: 2, kind: "state", predicate: "生死", value: "生きている" }),
+        fact({ id: "u1", subject: "祖母", chapter: 5, predicate: "行動", value: "味噌汁を作っていた" }),
+        fact({ id: "u2", subject: "祖母", chapter: 5, predicate: "所在", value: "台所" }),
+      ];
+      const stats = postDeathStageStats({ facts }, nameOf);
+      expect(stats.deaths).toBe(0);
+      expect(stats.candidates).toBe(0);
+      expect(stats.deathLikeFacts).toEqual({ "生死（state）": 1, "死亡（state）": 1 });
+      expect(stats.unlinkedSubjects).toEqual(["祖母"]);
+      expect(stats.unlinkedTotal).toBe(1);
+    });
   });
 });
 

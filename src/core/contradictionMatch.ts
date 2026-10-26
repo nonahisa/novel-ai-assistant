@@ -54,6 +54,9 @@ export type CandidateType =
 
 export type CandidateConfidence = "high" | "medium" | "low";
 
+/** 専用の確かめの文面を持つ照合器の印（`ContradictionCandidate.origin`） */
+export type CandidateOrigin = "travel" | "identity" | "death";
+
 export interface ContradictionCandidate {
   type: CandidateType;
   subject: string;
@@ -78,11 +81,12 @@ export interface ContradictionCandidate {
   basis?: string;
   /**
    * どの照合器から来たか。移動の照合（`findTravelImpossibilities`）は travel、
-   * 体と心の照合（`findDwellingDrift`）は identity を付ける。
-   * 判定（P-12b）は、それぞれ専用の文面を送る（travel 1.0、2026-10-25／identity 1.0、
-   * 2026-10-26）。指紋には混ぜない
+   * 体と心の照合（`findDwellingDrift`）は identity、死亡後の登場
+   * （`findPostDeathAppearances`）は death を付ける。
+   * 判定（P-12b）は、それぞれ専用の文面を送る（travel 1.0、2026-10-25／identity 1.0・
+   * death 1.0、2026-10-26）。指紋には混ぜない
    */
-  origin?: "travel" | "identity";
+  origin?: CandidateOrigin;
   /**
    * 移動の照合で、所要時間に承認待ちの距離（P-51 が本文から読んだもの）を使ったか。
    * 判定（P-12b travel 1.1）は、これが付いた候補にだけ「承認待ちの距離も根拠として扱う」
@@ -427,14 +431,70 @@ export function findPostDeathAppearances(
 ): ContradictionCandidate[] {
   const ordered = orderFacts(facts);
 
+  const deaths = firstDeaths(ordered);
+  if (deaths.size === 0) return [];
+
+  // 死んだあとに遷移が記録されている人物は、そもそも照合しない
+  const revived = revivedSubjects(deaths, transitions, afterlives);
+
+  const reported = new Set<string>();
+  const candidates: ContradictionCandidate[] = [];
+  for (const fact of ordered) {
+    if (revived.has(fact.subject) || reported.has(fact.subject)) continue;
+    // 回想は、死んだあとに書かれていても「死後の登場」ではない
+    if (fact.modality === "thought") continue;
+    const death = deaths.get(fact.subject);
+    if (!death || !isAfterDeath(death, fact)) continue;
+
+    reported.add(fact.subject);
+    const unknownOrder = isFactOrderUnknown(
+      positionOf(death),
+      positionOf(fact)
+    );
+    candidates.push(
+      buildCandidate({
+        type: "状態",
+        subject: fact.subject,
+        predicate: DEATH,
+        values: [factLabel(death), factLabel(fact)],
+        left: death.id,
+        right: fact.id,
+        confidence: lowerConfidence(
+          confidenceFromModality(death.modality),
+          confidenceFromModality(fact.modality)
+        ),
+        unknownOrder,
+        reason:
+          `${formatPosition(positionOf(death))}に死亡の記録がある。` +
+          `${formatPosition(positionOf(fact))}に『${factLabel(fact)}』が出てくる`,
+        // 確かめの段（P-12b death 1.0）は専用の文面を送る。本命の文面では e4b が
+        // 「死亡はその時点の事実の記述で、行動の描写とは矛盾しない」で取り下げた（2026-10-26）
+        origin: "death",
+      })
+    );
+  }
+  return candidates;
+}
+
+/** 人物ごとの最初の死亡の出来事（本文の順に並べた事実から） */
+function firstDeaths(ordered: readonly StoryFact[]): Map<string, StoryFact> {
   const deaths = new Map<string, StoryFact>();
   for (const fact of ordered) {
     if (fact.kind !== "event" || fact.predicate !== DEATH) continue;
     if (!deaths.has(fact.subject)) deaths.set(fact.subject, fact);
   }
-  if (deaths.size === 0) return [];
+  return deaths;
+}
 
-  // 死んだあとに遷移が記録されている人物は、そもそも照合しない
+/**
+ * 死んだあとに出てきても矛盾にならない人物（遷移の表・設定資料の宿り）。
+ * 照合器と内訳（`postDeathStageStats`）が同じ判定を使う——別に書くとずれる
+ */
+function revivedSubjects(
+  deaths: ReadonlyMap<string, StoryFact>,
+  transitions: readonly IdentityTransition[],
+  afterlives: readonly AfterlifeMark[]
+): Set<string> {
   const revived = new Set<string>();
   for (const transition of transitions) {
     if (!REVIVAL_KINDS.includes(transition.kind)) continue;
@@ -458,42 +518,108 @@ export function findPostDeathAppearances(
       revived.add(mark.subject);
     }
   }
+  return revived;
+}
 
-  const reported = new Set<string>();
-  const candidates: ContradictionCandidate[] = [];
+/** その事実が、死亡の出来事より後に書かれているか（死亡そのものは含めない） */
+function isAfterDeath(death: StoryFact, fact: StoryFact): boolean {
+  if (fact.id === death.id) return false;
+  return compareFactPosition(positionOf(death), positionOf(fact)) < 0;
+}
+
+/** 死亡の突き合わせの内訳（MCP の `stages.death`）。人物は名前で出す */
+export interface DeathStageStats {
+  /** 「死亡」の出来事（event）の事実の件数 */
+  deaths: number;
+  /** 死亡の出来事がある人物（本文の順） */
+  deathSubjects: string[];
+  /** 遷移（幽霊・転生・憑依）や設定資料の宿りで、照合から外した人物 */
+  revivedSubjects: string[];
+  /** 外していない人物の、死亡より後の回想でない事実（候補になりうるもの） */
+  postDeathFacts: number;
+  /** 外していない人物の、死亡より後の回想（thought。候補にしない） */
+  postDeathThoughts: number;
+  /** 死亡後の登場の候補 */
+  candidates: number;
+  /**
+   * 死を書いているのに「死亡」の出来事として数えなかった事実（「項目名（種類）」ごとの件数）。
+   * P-37 は「生死」を state の例に挙げるので、死を state で返すと照合に乗らない。
+   * **照合は変えずに数だけ出す**——実際にそう返したかは、まだ実測で確かめていない
+   */
+  deathLikeFacts: Record<string, number>;
+  /** 人物の id に結べなかった主語（本文の表記のまま。先頭の数件） */
+  unlinkedSubjects: string[];
+  /** 人物の id に結べなかった主語の種類の数（`unlinkedSubjects` は先頭だけ） */
+  unlinkedTotal: number;
+}
+
+/** 内訳に出す、結べなかった主語の上限 */
+const UNLINKED_SUBJECTS_SHOWN = 10;
+
+/** 「死亡」の出来事でなくても、項目名だけで死を書いていると読めるもの */
+const DEATH_PREDICATES = new Set(["死亡", "死去", "死"]);
+/** 値が死を書いていれば死と読む項目名（「生死＝生きている」は数えない） */
+const LIFE_STATE_PREDICATES = new Set(["生死", "安否", "状態"]);
+const DEATH_LIKE_VALUE = /死|亡くな|息を引き取|他界|逝/u;
+
+function isDeathLike(fact: StoryFact): boolean {
+  if (DEATH_PREDICATES.has(fact.predicate)) return true;
+  return LIFE_STATE_PREDICATES.has(fact.predicate) && DEATH_LIKE_VALUE.test(fact.value);
+}
+
+/**
+ * 死亡後の登場の照合で、どこまで来て何件残ったか（設計書6.88.6）。
+ *
+ * gemma4:26b で仕込み（第2話で死んだ祖母が第5話の地の文に出る）が候補にならず、
+ * 死亡の事実が抜けなかったのか、人物の id に結べなかったのか、照合で落ちたのかを
+ * 出力から区別できなかった（2026-10-26 の実測 2回目）。**照合器と同じ判定で数える**。
+ * 入力は `findContradictionCandidates` と同じもの（項目名の寄せもここで当てる）
+ */
+export function postDeathStageStats(
+  input: Pick<MatchInput, "facts" | "transitions" | "afterlives">,
+  nameOf: (subject: string) => string = (subject) => subject
+): DeathStageStats {
+  const facts = input.facts.map((fact) => {
+    const predicate = canonicalPredicate(fact.predicate);
+    return predicate === fact.predicate ? fact : { ...fact, predicate };
+  });
+  const ordered = orderFacts(facts);
+  const deaths = firstDeaths(ordered);
+  const revived = revivedSubjects(deaths, input.transitions ?? [], input.afterlives ?? []);
+
+  let postDeathFacts = 0;
+  let postDeathThoughts = 0;
+  const deathLikeFacts: Record<string, number> = {};
+  const unlinked: string[] = [];
+  let deathEvents = 0;
   for (const fact of ordered) {
+    const isDeathEvent = fact.kind === "event" && fact.predicate === DEATH;
+    if (isDeathEvent) deathEvents += 1;
+    else if (isDeathLike(fact)) {
+      const key = `${fact.predicate}（${fact.kind}）`;
+      deathLikeFacts[key] = (deathLikeFacts[key] ?? 0) + 1;
+    }
+    // 対応表に無い人物は本文の表記のまま通る（storyFactValidation の resolveActor）
+    if (!/^char_\d+$/u.test(fact.subject) && !unlinked.includes(fact.subject)) {
+      unlinked.push(fact.subject);
+    }
     const death = deaths.get(fact.subject);
-    if (!death || fact.id === death.id) continue;
-    if (revived.has(fact.subject) || reported.has(fact.subject)) continue;
-    // 回想は、死んだあとに書かれていても「死後の登場」ではない
-    if (fact.modality === "thought") continue;
-    if (compareFactPosition(positionOf(death), positionOf(fact)) >= 0) continue;
-
-    reported.add(fact.subject);
-    const unknownOrder = isFactOrderUnknown(
-      positionOf(death),
-      positionOf(fact)
-    );
-    candidates.push(
-      buildCandidate({
-        type: "状態",
-        subject: fact.subject,
-        predicate: DEATH,
-        values: [factLabel(death), factLabel(fact)],
-        left: death.id,
-        right: fact.id,
-        confidence: lowerConfidence(
-          confidenceFromModality(death.modality),
-          confidenceFromModality(fact.modality)
-        ),
-        unknownOrder,
-        reason:
-          `${formatPosition(positionOf(death))}に死亡の記録がある。` +
-          `${formatPosition(positionOf(fact))}に『${factLabel(fact)}』が出てくる`,
-      })
-    );
+    if (!death || revived.has(fact.subject) || !isAfterDeath(death, fact)) continue;
+    if (fact.modality === "thought") postDeathThoughts += 1;
+    else postDeathFacts += 1;
   }
-  return candidates;
+
+  return {
+    deaths: deathEvents,
+    deathSubjects: [...deaths.keys()].map(nameOf),
+    revivedSubjects: [...deaths.keys()].filter((subject) => revived.has(subject)).map(nameOf),
+    postDeathFacts,
+    postDeathThoughts,
+    candidates: findPostDeathAppearances(facts, input.transitions ?? [], input.afterlives ?? []).length,
+    deathLikeFacts,
+    unlinkedSubjects: unlinked.slice(0, UNLINKED_SUBJECTS_SHOWN),
+    unlinkedTotal: unlinked.length,
+  };
 }
 
 /**
@@ -996,7 +1122,7 @@ interface CandidateDraft extends FingerprintInput {
   unknownOrder: boolean;
   reason: string;
   basis?: string;
-  origin?: "travel" | "identity";
+  origin?: CandidateOrigin;
   pendingDistance?: true;
 }
 

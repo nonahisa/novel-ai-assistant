@@ -1,6 +1,7 @@
 import {
   VERIFY_REJECT_REASONS,
   VERIFY_SPEECH_KEEP_SENTENCES,
+  VERIFY_DEATH_KEEP_SENTENCES,
   VERIFY_IDENTITY_KEEP_SENTENCES,
   VERIFY_TRAVEL_KEEP_SENTENCES,
   type VerifyRejectReason,
@@ -81,11 +82,12 @@ export function parseVerifyOutcome(text: string): VerifyOutcome {
 function echoesSpeechKeep(explanation: string): boolean {
   const field = normalizeForComparison(explanation);
   if (!field) return false;
-  // 体と心の照合の「残せ」の文（identity 1.0）も同じ扱い
+  // 体と心の照合（identity 1.0）・死亡後の登場（death 1.0）の「残せ」の文も同じ扱い
   return [
     ...VERIFY_SPEECH_KEEP_SENTENCES,
     ...VERIFY_TRAVEL_KEEP_SENTENCES,
     ...VERIFY_IDENTITY_KEEP_SENTENCES,
+    ...VERIFY_DEATH_KEEP_SENTENCES,
   ].some((sentence) =>
     field.includes(normalizeForComparison(sentence))
   );

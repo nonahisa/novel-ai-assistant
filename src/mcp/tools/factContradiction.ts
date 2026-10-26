@@ -39,6 +39,7 @@ import {
   collectFactsFromChunk,
   factVerifyPromptVersion,
   factVerifySourceOf,
+  deathVerifyMaterialOf,
   identityVerifyMaterialOf,
   lineTextOf,
   parseFactJsonObject,
@@ -51,7 +52,9 @@ import {
 import {
   filterAllowed,
   findContradictionCandidates,
+  postDeathStageStats,
   type AfterlifeMark,
+  type DeathStageStats,
 } from "../../core/contradictionMatch";
 import {
   describeStoryFactRejections,
@@ -314,8 +317,8 @@ export function factContradictionPrompt(
   const context = loadFactWork(input);
   return {
     promptVersion: STORY_FACT_EXTRACT_VERSION,
-    // 移動の照合・体と心の照合の候補だけ文面が違う（travel・identity）。どの版も読める形で残す
-    verifyPromptVersion: `${factVerifyPromptVersion("travel")}|${factVerifyPromptVersion("identity")}`,
+    // 移動の照合・体と心の照合・死亡後の登場の候補だけ文面が違う（travel・identity・death）。どの版も読める形で残す
+    verifyPromptVersion: `${factVerifyPromptVersion("travel")}|${factVerifyPromptVersion("identity")}|${factVerifyPromptVersion("death")}`,
     systemPrompt: STORY_FACT_EXTRACT_SYSTEM_PROMPT,
     schema: STORY_FACT_EXTRACT_SCHEMA,
     temperature: STORY_FACT_EXTRACT_TEMPERATURE,
@@ -468,6 +471,11 @@ export type FactContradictionRunOutcome =
          * （捨てた数）・本文の遷移・付け替えた心の項目・記録の無い組
          */
         identity: IdentityCueStats;
+        /**
+         * 死亡と死亡後の登場の突き合わせの内訳（`postDeathStageStats`）。死亡の事実・外した人物・
+         * 死亡後の事実・候補・「死亡」の出来事でない死の事実・id に結べなかった主語
+         */
+        death: DeathStageStats;
       };
       unreadableFiles: Array<{ filePath: string; reason: string }>;
     };
@@ -639,6 +647,8 @@ export async function factContradictionRun(
     []
   );
   const factById = new Map([...matchFacts, ...identity.sceneFacts].map((fact) => [fact.id, fact]));
+  /** 内訳（`stages.death`）で人物を名前で出すための表 */
+  const nameById = new Map(context.characters.map((character) => [character.id, character.name]));
 
   /* ── 第4段：候補を1件ずつ確かめる（P-12b）───────────── */
   const issuesByFile = new Map<string, FactContradictionIssue[]>();
@@ -701,6 +711,15 @@ export async function factContradictionRun(
           travel,
           // 体と心の照合の候補だけ、心と体の記録とコードの読みを添える（identity 1.0。製品と同じ関数）
           identity: identityVerifyMaterialOf(candidate),
+          // 死亡後の登場の候補だけ、コードの読みと死亡の箇所の前後を添える（death 1.0。製品と同じ関数）
+          death: deathVerifyMaterialOf({
+            candidate,
+            leftPlace,
+            leftSourceText: leftPlace
+              ? readSourceCached(input.folder, leftPlace.filePath, sourceCache)
+              : undefined,
+            rightPlace: sides.place,
+          }),
         }),
         schema: CONTRADICTION_VERIFY_SCHEMA,
         temperature: temperatureFor(input, CONTRADICTION_VERIFY_TEMPERATURE),
@@ -815,6 +834,15 @@ export async function factContradictionRun(
       verifyNote,
       travel: travel.stats,
       identity: identity.stats,
+      // 照合器と同じ入力・同じ判定で数える（26b で死亡後の登場が候補にならなかった原因を追うため）
+      death: postDeathStageStats(
+        {
+          facts: matchFacts,
+          transitions: identity.transitions,
+          afterlives: context.afterlives,
+        },
+        (subject) => nameById.get(subject) ?? subject
+      ),
     },
     unreadableFiles: context.unreadableFiles,
   };
