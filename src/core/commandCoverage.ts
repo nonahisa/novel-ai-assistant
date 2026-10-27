@@ -167,7 +167,10 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.checkContradictions": { class: "A", label: "矛盾検知" },
   "novelai.checkFactContradictions": { class: "A", label: "矛盾検知（事実の照合）", via: "run.request feature: factContradiction" },
   "novelai.checkLocationConsistency": { class: "A", label: "位置関係の照合" },
-  // 見送りを取り消すのは作者の判断（母艦の指示 2026-10-26「拡張機能だけでよい」）
+  // 見送りを取り消すのは作者の判断（母艦の指示 2026-10-26「拡張機能だけでよい」）。
+  // 2026-10-27 に詳細メニューへ載せた（作者の裁定「載せる」）が、この表は外部AIから
+  // 届くかの区分なので C4 のまま——メニューに載っても MCP の口は開けない
+  // （指摘対象外管理と同じ立場）
   "novelai.restoreDismissedTravelDistances": { class: "C4", label: "見送った距離の提案を戻す", reason: "作者の判断" },
   "novelai.checkDeviations": { class: "A", label: "プロット逸脱検知" },
   "novelai.checkForeshadows": { class: "A", label: "伏線検知" },
