@@ -15,7 +15,8 @@ import {
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import type { ProposalPanel, ProposalViewItem } from "./proposalPanel";
 import { notifyDone } from "../views/notify";
-import { useLogFile } from "../core/logger";
+import { logFailure, useLogFile } from "../core/logger";
+import { canRunProcesses } from "../core/runtime";
 import { activeTabFileUri } from "./manuscriptTab";
 
 /**
@@ -246,7 +247,29 @@ export async function acceptProposal(
     file: path.basename(proposal.file),
     detail: `${proposal.line}行 「${proposal.target}」→「${proposal.suggestion}」`,
   });
+  startReturnIfFinished(work);
   return { ok: true };
+}
+
+/**
+ * 採否を決め終えていれば、編集部へ静かに送り返す（作者の裁定、2026-10-28）。
+ *
+ * **待たない。** 送り返しは回線を使うので、提案パネルの操作を待たせない。
+ * 失敗は中で知らせてログへ残し、**採否そのものは成功のまま**にする。
+ * `shareWithEditor` は Node（git）を使うので、ブラウザ版の束に入れないよう
+ * 動的 import にする（実装ルール7）。
+ */
+function startReturnIfFinished(work: WorkEntry): void {
+  if (isEditorMode() || !canRunProcesses()) return;
+  void import("./editingAutomation.js")
+    .then((module) => module.returnDecisionsIfFinished(work))
+    .catch((error: unknown) => {
+      useLogFile(work.folderPath);
+      logFailure("採否の送り返し", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    });
 }
 
 /** 却下する。**本文には触らない** */
@@ -271,4 +294,5 @@ export async function rejectProposal(
     file: fileName,
     detail: "",
   });
+  startReturnIfFinished(work);
 }

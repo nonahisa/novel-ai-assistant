@@ -611,14 +611,27 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.shareWithEditor",
-            label: "編集部共有",
+            label: "編集部へ渡す",
             icon: "repo-push",
             requiresWork: true,
             detail:
-              "この作品だけの非公開リポジトリを作って送る\n\n" +
+              "この作品だけの非公開リポジトリを作って送り、編集部を招く\n\n" +
+              "・置き場と名前は自動。初回だけ編集部の GitHub 名を訊く\n\n" +
               "・送るのは本文と設定資料\n\n" +
               "・ほかの作品は渡らない\n\n" +
               "編集部が書けるのは提案だけ。本文は書き換わらない。",
+          },
+          {
+            kind: "action",
+            command: "novelai.joinAsEditor",
+            label: "編集部として参加",
+            icon: "organization",
+            requiresWork: false,
+            detail:
+              "作者から届いたリンクを貼って、編集部として参加する\n\n" +
+              "・招待の受諾・取り寄せ・登録まで1回で済む\n\n" +
+              "・続けて、この環境を編集者モードにする\n\n" +
+              "編集者モードでは本文を書き換えず、提案として置く。",
           },
           // **以前は「校正・校閲」のいちばん下に置いていた**（作者の指示、
           // 2026-08-22）。作者が1人で回す検知と、相手のいる作業を分けるため
@@ -639,6 +652,18 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・作者が直そうとすると、誰がいつから見ているかが出る\n\n" +
               "・ファイル単位。他の話は今までどおり書ける\n\n" +
               "・終わったらもう一度押して外す",
+          },
+          {
+            kind: "action",
+            command: "novelai.finishReviewAndReturn",
+            label: "校閲を終えて返す",
+            icon: "check-all",
+            requiresWork: true,
+            detail:
+              "押さえている校閲のロックを外し、提案を作者へ返す\n\n" +
+              "・送るのは提案・ロック・編集履歴だけ\n\n" +
+              "・本文に未記録の変更があれば、送らずに止める\n\n" +
+              "編集者モードで使う。",
           },
           {
             kind: "action",

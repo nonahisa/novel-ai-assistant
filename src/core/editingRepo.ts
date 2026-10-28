@@ -1,3 +1,5 @@
+import * as pathText from "./pathText";
+
 /**
  * 編集用リポジトリ（設計書5.7.5）。
  *
@@ -138,4 +140,73 @@ export function replacedDirectories(
   // 同じ名前を2回消しにいかない（`manuscriptDir` と `settingsDir` を
   // 同じにしている作品がありうる）
   return [...new Set([manuscriptDir, settingsDir])];
+}
+
+/** 編集部用の置き場にまとめるフォルダー名（既定の置き場の下に作る） */
+export const EDITING_HOME_FOLDER = "編集部";
+
+/**
+ * 編集用フォルダーの置き場を、作者に訊かずに決める（作者の裁定、2026-10-28）。
+ *
+ * **`<既定の置き場>/編集部/<編集用フォルダー名>`。** 作品フォルダーの隣ではなく
+ * 「編集部」の下にまとめるのは、書庫と並べたときに編集用が作品に見えないようにするため。
+ *
+ * @param suffix 同じ名前が既にあったときの番号（`2` なら `…-編集用-2`）
+ */
+export function autoEditingDestination(
+  homeParent: string,
+  workTitle: string,
+  suffix?: number
+): string {
+  const name = editingFolderName(workTitle);
+  return pathText.join(
+    homeParent,
+    EDITING_HOME_FOLDER,
+    suffix && suffix > 1 ? `${name}-${suffix}` : name
+  );
+}
+
+/**
+ * 編集部として参加するときの置き場（`<既定の置き場>/編集部/<リポジトリ名>`）。
+ * 同じ名前があれば呼ぶ側が止めて理由を出す（上書きしない）。
+ */
+export function joinEditorDestination(
+  homeParent: string,
+  repositoryName: string
+): string {
+  return pathText.join(homeParent, EDITING_HOME_FOLDER, repositoryName);
+}
+
+/** 編集部が書いてよい台帳の置き場（作品フォルダーからの相対） */
+export const LEDGER_DIRECTORY = ".aiwriter";
+
+/**
+ * 変わったファイルのうち、台帳（`.aiwriter`）の外にあるもの。
+ *
+ * 「校閲を終えて返す」は台帳だけを送る。**本文に未記録の変更があれば送らずに止める**
+ * ために、その有無をここで見る。道は `/` と `\` のどちらで来ても同じに扱う。
+ */
+export function changesOutsideLedger(changed: readonly string[]): string[] {
+  return changed.filter((file) => {
+    const normalized = file.replace(/\\/g, "/");
+    return !(
+      normalized === LEDGER_DIRECTORY ||
+      normalized.startsWith(`${LEDGER_DIRECTORY}/`)
+    );
+  });
+}
+
+/**
+ * 採否を決め終えたとき、編集部へ自動で送り返すか（作者の裁定、2026-10-28）。
+ *
+ * - その作品に編集用フォルダーの記録（pointer）があること
+ * - 未決の提案が 0 件であること（1件でも残っていれば、まだ決め終えていない）
+ * - 編集者モードでは何もしない（採否を決めるのは作者である）
+ */
+export function shouldReturnDecisions(input: {
+  hasPointer: boolean;
+  pendingCount: number;
+  editorMode: boolean;
+}): boolean {
+  return !input.editorMode && input.hasPointer && input.pendingCount === 0;
 }

@@ -232,7 +232,9 @@ export const STEP_DEFS: readonly StepDef[] = [
       "編集部は本文を書き換えず、提案として置く。",
     entries: [
       "novelai.switchMode",
+      "novelai.joinAsEditor",
       "novelai.toggleReviewLock",
+      "novelai.finishReviewAndReturn",
       "novelai.collectEditorProposals",
       "novelai.reviewProposals",
       "novelai.showEditHistory",

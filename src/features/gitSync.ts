@@ -1836,9 +1836,13 @@ export async function showGitSyncActions(
     }
     return;
   }
-  if (picked.action === "pull") await monitor.pull(work);
-  else if (picked.action === "push") await monitor.push(work);
-  else if (picked.action === "refresh") {
+  if (picked.action === "pull") {
+    await monitor.pull(work);
+    await collectEditorInboxAfterSync(monitor);
+  } else if (picked.action === "push") {
+    await monitor.push(work);
+    await collectEditorInboxAfterSync(monitor);
+  } else if (picked.action === "refresh") {
     // 作者が「数を確かめたい」と押す所なので、置き場ぜんぶを読み直す。
     // 1作品だけでは、知らせは「同期が取れています」なのにステータスバーは
     // 「未記録 9」のまま、という食い違いが出た（2026-10-05）
@@ -1850,4 +1854,24 @@ export async function showGitSyncActions(
       )}。`
     );
   } else if (picked.action === "log") showLog();
+}
+
+/**
+ * 同期のあとに、編集部から届いた提案を取り込む（作者の裁定、2026-10-28）。
+ *
+ * 編集用リポジトリは書庫の同期の対象に入っていないので、別口で取り寄せる。
+ * **失敗しても本来の同期は終わっている。** 例外は外へ出さず、ログへ残す。
+ * Node（git）を使う部品は動的 import で読む（実装ルール7）。
+ */
+async function collectEditorInboxAfterSync(
+  monitor: GitSyncMonitor
+): Promise<void> {
+  try {
+    const automation = await import("./editingAutomation.js");
+    await automation.collectEditorInboxQuietly(monitor.knownWorks());
+  } catch (error) {
+    logFailure("同期のあとの編集部の提案の取り込み", {
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+  }
 }

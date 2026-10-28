@@ -442,9 +442,9 @@ export async function hasGithubSession(
   }
 }
 
-const GITHUB_API_BASE = "https://api.github.com";
+export const GITHUB_API_BASE = "https://api.github.com";
 // GitHub APIはUser-Agentの無いリクエストを拒否する
-const GITHUB_USER_AGENT = "novel-ai-assistant-vscode-extension";
+export const GITHUB_USER_AGENT = "novel-ai-assistant-vscode-extension";
 
 /**
  * GitHub REST APIで非公開リポジトリを作る（`gh`コマンドを使わない経路）。
@@ -549,7 +549,7 @@ export async function createGithubRepositoryWithFreeName(
 export function classifyGithubApiError(
   status: number,
   body: unknown
-): { detail: string; nameTaken: boolean } {
+): { detail: string; nameTaken: boolean; kind: GithubApiErrorKind } {
   const record = isRecord(body) ? body : {};
   const message = typeof record.message === "string" ? record.message : "";
   const errors = Array.isArray(record.errors) ? record.errors.filter(isRecord) : [];
@@ -565,14 +565,30 @@ export function classifyGithubApiError(
     return {
       detail: "同じ名前のリポジトリが既にGitHub上にあります。別の名前を指定してください。",
       nameTaken: true,
+      kind: "nameTaken",
     };
   }
   if (status === 401) {
     return {
       detail: "GitHubへのサインインが有効ではありません。もう一度お試しください。",
       nameTaken: false,
+      kind: "unauthorized",
     };
   }
+  /*
+    **エラー文から原因を当てにいかない**（実装ルール5）。分けるのは状態の番号だけ。
+    403 は権限が足りない、404 は「その名前の人／リポジトリが無い」か「見えない」
+    （GitHub は権限の無い非公開リポジトリにも 404 を返す）。どちらかは番号からは
+    決められないので、呼ぶ側が文脈（招待か、リポジトリの確認か）に合わせて言い直す。
+  */
+  const kind: GithubApiErrorKind =
+    status === 403
+      ? "forbidden"
+      : status === 404
+        ? "notFound"
+        : status === 422
+          ? "validation"
+          : "other";
   if (message) {
     // errors[] に理由があれば添える（message だけでは「失敗した」としか分からない）
     const reasons = errors
@@ -581,10 +597,20 @@ export function classifyGithubApiError(
     return {
       detail: `GitHub: ${message}${reasons.length > 0 ? `（${reasons.join("／")}）` : ""}`,
       nameTaken: false,
+      kind,
     };
   }
-  return { detail: `HTTP ${status}`, nameTaken: false };
+  return { detail: `HTTP ${status}`, nameTaken: false, kind };
 }
+
+/** GitHub API の失敗を、状態の番号で大きく分けたもの */
+export type GithubApiErrorKind =
+  | "nameTaken"
+  | "unauthorized"
+  | "forbidden"
+  | "notFound"
+  | "validation"
+  | "other";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

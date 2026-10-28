@@ -8,7 +8,7 @@ import * as path from "node:path";
  * 実機確認リストで「`**` が出ていないか」を人が見て確かめた項目だが、
  * 文言が変わったら誰も止めないので、機械の見張りを置いた（2026-09-21）。
  *
- * `describe()`（`src/features/switchMode.ts`）はエクスポートされていないので、
+ * `describeModeChange()`（`src/features/switchMode.ts`）は画面を伴うので、
  * `dialogCancel.test.ts` の「取りやめ方を、製品からは書かない」と同じく
  * ソースを読んで文字列リテラルを調べる形にする。
  */
@@ -22,7 +22,7 @@ function extractDescribeBody(src: string): string {
   const withoutBlockComments = src.replace(/\/\*[\s\S]*?\*\//g, "");
   const withoutLineComments = withoutBlockComments.replace(/\/\/.*$/gm, "");
 
-  const startMarker = "function describe(next: WorkMode): string {";
+  const startMarker = "function describeModeChange(next: WorkMode): string {";
   const start = withoutLineComments.indexOf(startMarker);
   if (start === -1) {
     throw new Error(

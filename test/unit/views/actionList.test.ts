@@ -951,11 +951,13 @@ describe("校正・校閲の並び", () => {
   test("編集部とのやり取りは、作品管理の「編集部連携」に集める", () => {
     const found = sectionOf("編集部連携");
     expect(found.group).toBe("作品管理");
-    // 並びは作業の順：切替 → 渡す → 札を掛ける → 取り寄せる → 1件ずつ決める
+    // 並びは作業の順：切替 → 渡す → 参加する → 札を掛ける → 返す → 取り寄せる → 1件ずつ決める
     expect(found.section.items.map((item) => item.command)).toEqual([
       "novelai.switchMode",
       "novelai.shareWithEditor",
+      "novelai.joinAsEditor",
       "novelai.toggleReviewLock",
+      "novelai.finishReviewAndReturn",
       "novelai.collectEditorProposals",
       "novelai.reviewProposals",
     ]);

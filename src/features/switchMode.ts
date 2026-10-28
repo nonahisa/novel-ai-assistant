@@ -28,11 +28,22 @@ export async function switchMode(): Promise<void> {
     now === "author"
       ? "この環境を「編集者」として使いますか。"
       : "この環境を「作者」に戻しますか。",
-    { modal: true, detail: describe(next) },
+    { modal: true, detail: describeModeChange(next) },
     now === "author" ? "編集者にする" : "作者に戻す"
   );
   if (!answer) return;
 
+  await applyMode(next);
+}
+
+/**
+ * 確認なしでモードを書き、結果を知らせる。
+ *
+ * **確認は呼ぶ側が済ませている前提。** 「編集部として参加」は、取り寄せと登録の
+ * あとで切り替える（先に切り替えると作品1つの制限に当たる）ので、確認を最初の
+ * 1回にまとめ、ここは書くだけにする（作者の裁定、2026-10-28）。
+ */
+export async function applyMode(next: WorkMode): Promise<void> {
   // **環境ごとの設定である。** 作品ごとではない
   await vscode.workspace
     .getConfiguration("novelai")
@@ -62,7 +73,7 @@ export function modeLabel(): string {
  * **できなくなることを具体的に書く。** 「機能が制限されます」では、
  * 何が消えるのか分からないまま押すことになる。
  */
-function describe(next: WorkMode): string {
+export function describeModeChange(next: WorkMode): string {
   if (next === "author") {
     return (
       "すべての機能が使えるようになります。\n\n" +
