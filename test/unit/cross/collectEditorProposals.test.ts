@@ -24,6 +24,7 @@ import type { WorkEntry } from "../../../src/models/types";
 vi.mock("../../../src/core/git", () => ({
   // 取り寄せは通ったことにする。ここで見たいのは取り寄せの後である
   pullFastForward: vi.fn(async () => ({ ok: true, detail: "" })),
+  pullFastForwardAutostash: vi.fn(async () => ({ ok: true })),
   runGit: vi.fn(async () => ({ ok: true, stdout: "", stderr: "" })),
 }));
 
@@ -161,6 +162,7 @@ describe("編集部の提案を取り込む", () => {
     await collectEditorProposals(work());
 
     expect(messages.join("\n")).toContain("まだ編集部へ渡していません");
+    expect(messages.join("\n")).toContain("「編集部へ渡す」");
     // 台帳を作らない（空のファイルを置き去りにしない）
     await expect(read(root, PROPOSAL_RELATIVE)).rejects.toThrow();
   });

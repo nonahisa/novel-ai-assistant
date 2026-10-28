@@ -57,6 +57,10 @@ const EDITOR_ALLOWED = new Set<string>([
   // **校閲の要**。ファイルを押さえ、提案の行方を見る
   "novelai.toggleReviewLock",
   "novelai.reviewProposals",
+  // 編集部として参加する（作者モードの環境からも、編集者モードの環境からも押せる）。
+  // 校閲を終えたら、提案とロックの外れた記録を作者へ返す
+  "novelai.joinAsEditor",
+  "novelai.finishReviewAndReturn",
 
   // **戻る道を必ず残す。** 入ったら出られない、が起きてはならない
   "novelai.switchMode",

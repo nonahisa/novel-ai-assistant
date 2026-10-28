@@ -236,6 +236,10 @@ export const SYNC_BUSY_COMMANDS: readonly string[] = [
   "novelai.gitRestore",
   "novelai.resolveConflicts",
   "novelai.resolveDivergence",
+  // 編集用リポジトリへ書いて送る。送り直しが同じ時に走ると push がぶつかる
+  "novelai.shareWithEditor",
+  "novelai.finishReviewAndReturn",
+  "novelai.revokeEditorAccess",
 ];
 
 export function isSyncBusyCommand(id: string): boolean {

@@ -213,5 +213,7 @@ export function describePreferOpenDocumentFailure(
       return `${label}の置き場に同じ名前の別のものがあるため、書くのを止めました。`;
     case "encoding_error":
       return `${label}の文字コードで書けない文字があるため、書くのを止めました。`;
+    case "editor_locked":
+      return `${label}は編集部が校閲中のため、書くのを止めました。`;
   }
 }

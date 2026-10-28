@@ -241,6 +241,7 @@ import { startLoopLagMeter, type LoopLagReport } from "./core/loopLag";
 import { startStartupProfile } from "./core/startupProfiler";
 import { readerKind, type ReaderKind } from "./core/fileRead";
 import { describeProcessesBlocked } from "./core/processAvailability";
+import { installEditorLockGuard } from "./features/editorLockGuard";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
 import { isSyncBusyCommand } from "./core/autoResendPlan";
@@ -1197,6 +1198,10 @@ export async function activate(
   startupTiming.mark("ビューの表示");
 
   const registry = new WorkRegistry(context);
+
+  // 編集部が校閲中の話を、作者が書けないようにする関所と、素のエディターへの警告
+  // （作者の裁定、2026-10-28。ブラウザ版でも動く＝git を使わない）
+  context.subscriptions.push(installEditorLockGuard(registry));
 
   /**
    * 作品一覧のビュー。**走査中の件数を見出しの右へ出す**ために持つ。
@@ -7395,7 +7400,55 @@ export async function activate(
         const { shareWithEditor } = await import(
           "./features/shareWithEditor.js"
         );
-        await shareWithEditor(work);
+        // 登録済みの作品を渡す（既定の置き場を決めるとき、作品の中を避けるため）
+        await shareWithEditor(work, registry.list());
+      }
+    ),
+    // 編集部として参加する（招待の受諾・取り寄せ・登録・編集者モードまで1回で）
+    registerCommand("novelai.joinAsEditor", async () => {
+      if (!canRunProcesses()) {
+        vscode.window.showWarningMessage(
+          describeProcessesBlocked("novelai.joinAsEditor")
+        );
+        return;
+      }
+      const { joinAsEditor } = await import("./features/joinAsEditor.js");
+      await joinAsEditor(registry);
+    }),
+    // 編集部との連携を解除する（作者モード専用。決裂したときの、作者側からの解除）
+    registerCommand(
+      "novelai.revokeEditorAccess",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            describeProcessesBlocked("novelai.revokeEditorAccess")
+          );
+          return;
+        }
+        const { revokeEditorAccessFlow } = await import(
+          "./features/revokeEditorAccess.js"
+        );
+        await revokeEditorAccessFlow(work);
+      }
+    ),
+    // 校閲を終えて返す（編集者モード専用）
+    registerCommand(
+      "novelai.finishReviewAndReturn",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            describeProcessesBlocked("novelai.finishReviewAndReturn")
+          );
+          return;
+        }
+        const { finishReviewAndReturn } = await import(
+          "./features/finishReview.js"
+        );
+        await finishReviewAndReturn(work);
       }
     ),
     registerCommand(
@@ -7929,6 +7982,18 @@ export async function activate(
         startupHandoffRunning = false;
       }
       noteStartupHandoffDone("点検 終了");
+
+      // 編集部から提案が届いていれば知らせて提案パネルを開く（作者の裁定、2026-10-28）。
+      // 編集用リポジトリは書庫の同期の対象外なので、別口で取り寄せる。
+      // **失敗しても点検（本来の同期）は止めない**——中で例外を外へ出さない
+      try {
+        const automation = await import("./features/editingAutomation.js");
+        await automation.collectEditorInboxQuietly(registry.list());
+      } catch (error) {
+        logFailure("開いたときの編集部の提案の取り込み", {
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      }
     })().catch((error) => {
       // 点検で落ちても拡張機能の起動は止めない
       logFailure("開いたときの点検", {

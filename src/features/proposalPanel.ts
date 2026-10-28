@@ -4320,8 +4320,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   /**
    * 編集部が校閲中でないかを確かめる。
    *
-   * **作者は自分の判断で進められる。** 止めるのではなく、
-   * 誰がいつから見ているかを伝えて選ばせる。
+   * **校閲中の話は断る**（2026-10-28 に作り替え。以前は「それでも直す」を選べた）。
+   * 誰がいつから見ているかを伝え、決裂したときの解く手段（連携の解除）を添える。
    */
   private async confirmNotLocked(
     filePath: string,
@@ -4331,12 +4331,18 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const lock = await new FileLockStore(work).lockFor(relative);
     if (!lock || lock.holderKind !== "editor") return true;
 
-    const answer = await vscode.window.showWarningMessage(
-      `${path.basename(filePath)} は校閲中です。`,
+    // **断る**（作者の裁定、2026-10-28「校閲中の範囲は書けなくする」）。以前は
+    // 「それでも直す」を選べたが、校閲中の話は本文への書き込みの入口で断られる。
+    // 解く手段は「編集部連携を解除」（編集部と決裂したとき）
+    const action = await vscode.window.showWarningMessage(
+      `${path.basename(filePath)} は編集部が校閲中のため、適用できません。`,
       { modal: true, detail: describeLock(lock) },
-      "それでも直す"
+      "連携を解除…"
     );
-    return answer === "それでも直す";
+    if (action === "連携を解除…") {
+      await vscode.commands.executeCommand("novelai.revokeEditorAccess", { type: "work", work });
+    }
+    return false;
   }
 
   private async dismissIssue(id: string): Promise<void> {

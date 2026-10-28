@@ -40,6 +40,11 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
   { id: "novelai.gitSync", label: "GitHubと同期" },
   { id: "novelai.resolveConflicts", label: "競合解決" },
   { id: "novelai.resolveDivergence", label: "分岐合流" },
+  // 編集用リポジトリへ書いて送る系。同じ置き場へ2本走らせない
+  { id: "novelai.shareWithEditor", label: "編集部へ渡す" },
+  { id: "novelai.finishReviewAndReturn", label: "校閲を終えて返す" },
+  { id: "novelai.joinAsEditor", label: "編集部として参加" },
+  { id: "novelai.revokeEditorAccess", label: "編集部連携を解除" },
 
   // AIを長く回す系。2回ぶん送れば2回ぶん待ち、クラウドAIなら2回ぶん課金される
   { id: "novelai.checkTypos", label: "誤字脱字検知" },

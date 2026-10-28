@@ -104,6 +104,8 @@ function describeWriteFailure(reason: WriteTextFailureReason, detail?: string): 
       return "この文字コード（Shift_JIS）で表せない文字が含まれているため、書きませんでした。";
     case "path_conflict":
       return `書き込めませんでした。${detail ?? ""}`.trim();
+    case "editor_locked":
+      return detail ?? "編集部が校閲中の話のため、書きませんでした。";
   }
 }
 

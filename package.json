@@ -1439,9 +1439,27 @@
       },
       {
         "command": "novelai.shareWithEditor",
-        "title": "編集部共有",
+        "title": "編集部へ渡す",
         "category": "小説執筆",
         "icon": "$(repo-push)"
+      },
+      {
+        "command": "novelai.joinAsEditor",
+        "title": "編集部として参加",
+        "category": "小説執筆",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "novelai.revokeEditorAccess",
+        "title": "編集部連携を解除",
+        "category": "小説執筆",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "novelai.finishReviewAndReturn",
+        "title": "校閲を終えて返す",
+        "category": "小説執筆",
+        "icon": "$(check-all)"
       },
       {
         "command": "novelai.collectEditorProposals",

@@ -122,6 +122,8 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   const plans = planSyncAll(states);
   const doing = actionablePlans(plans);
   if (doing.length === 0) {
+    // 書庫に同期するものが無くても、編集部の提案は届いているかもしれない
+    await collectEditorInboxAfterSync(works);
     void vscode.window.showInformationMessage(
       `同期するものはありませんでした。${describeSyncSkips(plans)}`
     );
@@ -167,7 +169,26 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   // ためた「N件のファイルが更新されました」を、ここで1回だけ出す
   await flushNotices?.();
 
+  // 編集部から提案が届いていれば知らせて提案パネルを開く（作者の裁定、2026-10-28）。
+  // 編集用リポジトリは書庫の同期の対象外なので別口で取り寄せる。
+  // **失敗しても同期の報告を止めない**
+  await collectEditorInboxAfterSync(works);
+
   await report(outcomes, plans);
+}
+
+/** 同期のあとの、編集部の提案の取り込み。例外は外へ出さない */
+async function collectEditorInboxAfterSync(
+  works: readonly WorkEntry[]
+): Promise<void> {
+  try {
+    const automation = await import("./editingAutomation.js");
+    await automation.collectEditorInboxQuietly(works);
+  } catch (error) {
+    logFailure("同期のあとの編集部の提案の取り込み", {
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /** 置き場ごとの状態を集める */

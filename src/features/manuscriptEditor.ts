@@ -7,6 +7,9 @@ import { markFontFor } from "../core/markFont";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import * as paths from "../core/paths";
 import { fromUri } from "../core/paths";
+import { isEditorMode } from "../core/actorContext";
+import { editorLockOf } from "../core/fileLockStore";
+import { describeLock } from "../models/fileLock";
 import { scanWork } from "../core/scanner";
 import { pathExists } from "../core/fileSystem";
 import { nextEpisodeFileNameLike } from "../core/episodeRenumber";
@@ -2666,6 +2669,38 @@ export class ManuscriptEditorProvider
      * 今の文書へ当て直し、重なって当て直せなければ当てずに画面へ控えさせる。
      */
     const applyScreenEdit = async (item: SentEdit): Promise<ApplyOutcome> => {
+      /*
+        **編集部が校閲中の話は、文書へ入れない**（作者の裁定、2026-10-28「書けなくする」）。
+        打った字は画面の控えへ回し、画面へ本文を送り直して見た目を文書に合わせる。
+        鍵が読めないときは書かせる側へ倒す（作者の原稿を触れなくしない）。
+        判断は下の「読んでから当てるまで待ちを挟まない」区間の前に済ませる
+      */
+      if (await this.lockedByEditor(document)) {
+        void this.logForDocument(
+          document,
+          `原稿エディタ：編集部が校閲中の話なので、打った字（${item.text.length}字）を原稿へ入れずに画面の控えへ回しました`
+        );
+        /*
+          **拡張機能の側にも控える**（読み取り専用の道と同じ。作者の裁定、2026-10-15 23時）。
+          画面の控えだけだと、タブを閉じたときに打った字が消える。閉じても、7日のうちに
+          同じ話を開けば［戻す］で画面へ戻せる。原稿は書き換えない
+        */
+        const lockedBefore = toLf(document.getText());
+        if (readonlyBase === undefined) readonlyBase = lockedBefore;
+        void this.writeReadonlyRescues(
+          putReadonlyRescue(
+            this.readReadonlyRescues(),
+            makeReadonlyRescue(key, item.text, readonlyBase, Date.now()),
+            Date.now()
+          )
+        );
+        const lockedDecision = ledger.decide(item, lockedBefore);
+        if (lockedDecision.kind !== "conflict") {
+          ledger.rememberRejected(item.text, lockedDecision.baseKey);
+        }
+        sendNow();
+        return "conflict";
+      }
       // 読んでから当てるまで待ちを挟まない（間に本体の変更が入ると、判断が古くなる）
       // 当てる前の本文（読み取り専用と分かったときの控えの元にも使う。readonlyBase）
       const before = toLf(document.getText());
@@ -2788,6 +2823,8 @@ export class ManuscriptEditorProvider
         }
 
         case "ready":
+          // 編集部が校閲中の話なら、開いたときに知らせる（［連携を解除…］つき）
+          void this.lockedByEditor(document);
           /*
             **開くときの見た目は、最初の update に添えて渡す**（設計書6.25.5）。
             画面が覚えていた値（message.saved）はここで初めて届く。
@@ -3656,6 +3693,41 @@ export class ManuscriptEditorProvider
       return "ignored";
     }
     return "applied";
+  }
+
+  /**
+   * 編集部が校閲中の話か（作者モードのときだけ）。**開いたとき・打ったときに確かめ、
+   * 打ったときは知らせる**（1分に1回まで。［連携を解除…］を添える）。
+   */
+  private async lockedByEditor(document: vscode.TextDocument): Promise<boolean> {
+    if (isEditorMode()) return false;
+    const filePath = fromUri(document.uri);
+    const work = this.deps.workOf(filePath);
+    if (!work) return false;
+    let lock;
+    try {
+      lock = await editorLockOf(work, filePath);
+    } catch {
+      return false;
+    }
+    if (!lock) return false;
+    const key = `locked:${document.uri.toString()}`;
+    const now = Date.now();
+    const last = this.editRejectedNotified.get(key);
+    if (last === undefined || now - last >= 60_000) {
+      this.editRejectedNotified.set(key, now);
+      void vscode.window
+        .showWarningMessage(
+          `「${paths.basename(filePath)}」は編集部が校閲中のため、書けません（${describeLock(lock)}）。`,
+          "連携を解除…"
+        )
+        .then((action) => {
+          if (action === "連携を解除…") {
+            void vscode.commands.executeCommand("novelai.revokeEditorAccess", { type: "work", work });
+          }
+        });
+    }
+    return true;
   }
 
   /** 最後に「入れられませんでした」と知らせた時刻（原稿ごと） */

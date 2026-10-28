@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
+import { runSerialized } from "./ledgerQueue";
+import { mergeProposalJsonl } from "./editingRepo";
 import { workPaths } from "./workRegistry";
 import {
   resolveProposals,
@@ -72,7 +74,36 @@ export class ProposalStore {
       .length;
   }
 
-  private async appendLines(lines: ProposalLine[]): Promise<void> {
+  /**
+   * 編集部から届いた台帳の行を混ぜる。**追記の鎖に通す**（`appendLines` と同じ鎖）。
+   *
+   * 取り込みと採否の書き込みが重なると、後から書いたほうが先の行を巻き戻して
+   * 行が消える。ここで鎖に載せて1本ずつ通す。足した行数を返す。
+   */
+  async mergeIncoming(incoming: string): Promise<number> {
+    const target = this.filePath;
+    return runSerialized(target, async () => {
+      const uri = path.toUri(target);
+      let existing = "";
+      try {
+        existing = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+      } catch {
+        // まだ無い
+      }
+      const merged = mergeProposalJsonl(existing, incoming);
+      if (merged.text.length === 0) return 0;
+      if (merged.added === 0 && merged.text === existing) return 0;
+      await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(merged.text));
+      return merged.added;
+    });
+  }
+
+  private appendLines(lines: ProposalLine[]): Promise<void> {
+    return runSerialized(this.filePath, () => this.appendLinesNow(lines));
+  }
+
+  private async appendLinesNow(lines: ProposalLine[]): Promise<void> {
     if (lines.length === 0) return;
     const target = this.filePath;
     const text = lines.map((line) => JSON.stringify(line)).join("\n") + "\n";

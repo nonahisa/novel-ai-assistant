@@ -1,9 +1,12 @@
 import * as vscode from "vscode";
 import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
+import { runSerialized } from "./ledgerQueue";
+import { mergeProposalJsonl } from "./editingRepo";
 import { workPaths } from "./workRegistry";
 import {
   lockOf,
+  normalizeFile,
   parseLockEvents,
   resolveLocks,
   type FileLock,
@@ -78,19 +81,63 @@ export class FileLockStore {
     holderKind: LockHolderKind,
     note = ""
   ): Promise<void> {
+    /*
+      **解除の時刻は `max(今, その鍵の since + 1ms)`。** いちばん新しい記録が勝つ作りなので、
+      端末の時計が遅れていると、解除の行のほうが古いと読まれ、解除したのに鍵が残る
+      （作者が書けないままになる）。鍵より必ず新しい時刻を付ける。
+    */
+    const held = await this.load();
+    const now = Date.now();
     await this.append(
-      files.map((file) => ({
-        kind: "release" as const,
-        file,
-        holder,
-        holderKind,
-        time: new Date().toISOString(),
-        note,
-      }))
+      files.map((file) => {
+        const since = Date.parse(held.get(normalizeFile(file))?.since ?? "");
+        const time = Number.isNaN(since) ? now : Math.max(now, since + 1);
+        return {
+          kind: "release" as const,
+          file,
+          holder,
+          holderKind,
+          time: new Date(time).toISOString(),
+          note,
+        };
+      })
     );
   }
 
-  private async append(events: LockEvent[]): Promise<void> {
+  /** 台帳の絶対パス（編集用フォルダーとの突き合わせに使う） */
+  get ledgerPath(): string {
+    return this.filePath;
+  }
+
+  /**
+   * 編集部から届いた台帳の行を混ぜる（中身を見ない汎用の JSONL の混ぜ方）。
+   * **書き込みの鎖に通す**（`append` と同じ鎖。取り込みと同時でも行が消えない）。
+   * 足した行数を返す。
+   */
+  async mergeIncoming(incoming: string): Promise<number> {
+    const target = this.filePath;
+    return runSerialized(target, async () => {
+      const uri = path.toUri(target);
+      let existing = "";
+      try {
+        existing = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+      } catch {
+        // まだ無い
+      }
+      const merged = mergeProposalJsonl(existing, incoming);
+      if (merged.text.length === 0) return 0;
+      if (merged.added === 0 && merged.text === existing) return 0;
+      await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(merged.text));
+      return merged.added;
+    });
+  }
+
+  private append(events: LockEvent[]): Promise<void> {
+    return runSerialized(this.filePath, () => this.appendNow(events));
+  }
+
+  private async appendNow(events: LockEvent[]): Promise<void> {
     if (events.length === 0) return;
     const target = this.filePath;
     const text = events.map((event) => JSON.stringify(event)).join("\n") + "\n";
@@ -118,3 +165,18 @@ export class FileLockStore {
   触らない側へ移した。これまでどおりここからも使える
 */
 export { parseLockEvents };
+
+/**
+ * 作者の側から見て、そのファイルに**編集部の鍵**がかかっているか。
+ *
+ * 作者の書き込みを断る共通の入口と、原稿エディターが使う。鍵が読めなければ
+ * 「かかっていない」（作者の原稿を触れなくする側へは倒さない）。
+ */
+export async function editorLockOf(
+  work: WorkEntry,
+  filePath: string
+): Promise<FileLock | undefined> {
+  const relative = normalizeFile(path.relative(work.folderPath, filePath));
+  const lock = await new FileLockStore(work).lockFor(relative);
+  return lock && lock.holderKind === "editor" ? lock : undefined;
+}

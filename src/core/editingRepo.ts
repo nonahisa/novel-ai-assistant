@@ -1,3 +1,7 @@
+import * as pathText from "./pathText";
+import { parseEpisodeFileName } from "./episodeParser";
+import { isNestedLocation } from "./locationCompare";
+
 /**
  * 編集用リポジトリ（設計書5.7.5）。
  *
@@ -138,4 +142,166 @@ export function replacedDirectories(
   // 同じ名前を2回消しにいかない（`manuscriptDir` と `settingsDir` を
   // 同じにしている作品がありうる）
   return [...new Set([manuscriptDir, settingsDir])];
+}
+
+/** 編集部用の置き場にまとめるフォルダー名（既定の置き場の下に作る） */
+export const EDITING_HOME_FOLDER = "編集部";
+
+/**
+ * 編集用フォルダーの置き場を、作者に訊かずに決める（作者の裁定、2026-10-28）。
+ *
+ * **`<既定の置き場>/編集部/<編集用フォルダー名>`。** 作品フォルダーの隣ではなく
+ * 「編集部」の下にまとめるのは、書庫と並べたときに編集用が作品に見えないようにするため。
+ *
+ * @param suffix 同じ名前が既にあったときの番号（`2` なら `…-編集用-2`）
+ */
+export function autoEditingDestination(
+  homeParent: string,
+  workTitle: string,
+  suffix?: number
+): string {
+  const name = editingFolderName(workTitle);
+  return pathText.join(
+    homeParent,
+    EDITING_HOME_FOLDER,
+    suffix && suffix > 1 ? `${name}-${suffix}` : name
+  );
+}
+
+/**
+ * 編集部として参加するときの置き場（`<既定の置き場>/編集部/<リポジトリ名>`）。
+ * 同じ名前があれば呼ぶ側が止めて理由を出す（上書きしない）。
+ */
+export function joinEditorDestination(
+  homeParent: string,
+  repositoryName: string
+): string {
+  return pathText.join(homeParent, EDITING_HOME_FOLDER, repositoryName);
+}
+
+/**
+ * 編集用フォルダーごとの順番待ちの鍵。手動の「渡す」・自動の送り返し・取り込み・
+ * 連携の解除を**すべて同じ鎖に通す**（同じフォルダーで git と写しが重ならないように）。
+ */
+export function editingQueueKey(folder: string): string {
+  return `editing:${pathText.normalizeForComparison(folder)}`;
+}
+
+/**
+ * 両方向で混ぜる台帳（作品フォルダーからの相対）。提案・校閲の鍵・編集履歴。
+ * 追記だけの JSONL なので、どちらの側の行も消さずに混ぜられる。
+ */
+export const LEDGER_FILES = [
+  ".aiwriter/proposals/proposals.jsonl",
+  ".aiwriter/locks/locks.jsonl",
+  ".aiwriter/history/edits.jsonl",
+] as const;
+
+/**
+ * 編集用フォルダーの置き場として使えない場所か。
+ *
+ * - `insideWork` … どれかの作品の**中**（リポジトリが入れ子になり、書庫の側へ巻き込まれる）
+ * - `containsWork` … どれかの作品を**含む**（書庫そのものや、その上の階層。ここを編集用リポジトリに
+ *   すると、合わせ直し（`reset --hard`）が書庫に走りうる）
+ *
+ * 大文字小文字・区切りの違いは `isNestedLocation` が吸収する。
+ */
+export function editingPlaceProblem(
+  destination: string,
+  workFolders: readonly string[]
+): "insideWork" | "containsWork" | undefined {
+  for (const folder of workFolders) {
+    if (isNestedLocation(destination, folder)) return "insideWork";
+  }
+  for (const folder of workFolders) {
+    if (isNestedLocation(folder, destination)) return "containsWork";
+  }
+  return undefined;
+}
+
+/** 相対パスの区切りを `/` に揃える（Windows と他の機械で同じ形にする。控え・鍵の突き合わせの鍵） */
+export function normalizeRelativeKey(relative: string): string {
+  return relative.replace(/\\/g, "/");
+}
+
+/**
+ * 校閲中の範囲を人の言葉で言う（「第3話〜第5話」）。
+ *
+ * ファイル名から話数が読めるものはその最小〜最大で言い、読めないものが
+ * 混ざるときはファイル名を挙げる（話数を当て推量で言わない）。
+ */
+export function describeLockRange(files: readonly string[]): string {
+  if (files.length === 0) return "（範囲なし）";
+  const numbers: number[] = [];
+  let allParsed = true;
+  for (const file of files) {
+    const parsed = parseEpisodeFileName(pathText.basename(normalizeRelativeKey(file)));
+    const start = parsed.chapterStart;
+    const end = parsed.chapterEnd ?? start;
+    if (start === null || end === null) {
+      allParsed = false;
+      break;
+    }
+    numbers.push(start, end);
+  }
+  if (allParsed) {
+    const low = Math.min(...numbers);
+    const high = Math.max(...numbers);
+    return low === high ? `第${low}話` : `第${low}話〜第${high}話`;
+  }
+  const names = files.map((file) => pathText.basename(normalizeRelativeKey(file)));
+  return names.length <= 3 ? names.join("、") : `${names.slice(0, 3).join("、")} ほか`;
+}
+
+/**
+ * 「渡す」の送り先をどう用意するか。
+ *
+ * - `reuse`  … この機械に編集用フォルダーがある（pointer の場所）。そこを使う
+ * - `clone`  … この機械には無いが、**送り先の URL が同期される場所に覚えてある**
+ *              （別の機械で渡した）。2つ目のリポジトリを作らず、そのリポジトリを取り寄せる
+ * - `create` … どちらも無い。新しく作る
+ */
+export function planShareSource(input: {
+  pointerFolderExists: boolean;
+  rememberedRemoteUrl: string | undefined;
+}): "reuse" | "clone" | "create" {
+  if (input.pointerFolderExists) return "reuse";
+  return input.rememberedRemoteUrl ? "clone" : "create";
+}
+
+/** 編集部が書いてよい台帳の置き場（作品フォルダーからの相対） */
+export const LEDGER_DIRECTORY = ".aiwriter";
+
+/**
+ * 変わったファイルのうち、台帳（`.aiwriter`）の外にあるもの。
+ *
+ * 「校閲を終えて返す」は台帳だけを送る。**本文に未記録の変更があれば送らずに止める**
+ * ために、その有無をここで見る。道は `/` と `\` のどちらで来ても同じに扱う。
+ */
+export function changesOutsideLedger(changed: readonly string[]): string[] {
+  return changed.filter((file) => {
+    const normalized = file.replace(/\\/g, "/");
+    // `.gitignore` は拡張機能が整える作業用の設定で、本文ではない。見逃し、記録にも入れない
+    // （編集部の側は本文を書かないので、これで「返す」が止まり続けることになっていた）
+    return !(
+      normalized === ".gitignore" ||
+      normalized === LEDGER_DIRECTORY ||
+      normalized.startsWith(`${LEDGER_DIRECTORY}/`)
+    );
+  });
+}
+
+/**
+ * 採否を決め終えたとき、編集部へ自動で送り返すか（作者の裁定、2026-10-28）。
+ *
+ * - その作品に編集用フォルダーの記録（pointer）があること
+ * - 未決の提案が 0 件であること（1件でも残っていれば、まだ決め終えていない）
+ * - 編集者モードでは何もしない（採否を決めるのは作者である）
+ */
+export function shouldReturnDecisions(input: {
+  hasPointer: boolean;
+  pendingCount: number;
+  editorMode: boolean;
+}): boolean {
+  return !input.editorMode && input.hasPointer && input.pendingCount === 0;
 }

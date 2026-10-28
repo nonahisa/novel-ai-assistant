@@ -35,6 +35,9 @@ const REQUIRES_PROCESSES = new Set<string>([
   "novelai.selectOllamaExecutable",
   "novelai.shareWithEditor",
   "novelai.collectEditorProposals",
+  "novelai.joinAsEditor",
+  "novelai.finishReviewAndReturn",
+  "novelai.revokeEditorAccess",
   // **すべて同期はgitコマンドを直に打つ**ので、ブラウザでは動かせない。
   // 1作品ずつの `novelai.gitSync` と違い、ソース管理へ案内して代わりに
   // させる形にできない（置き場ごとに記録・取り込み・送信を順に行うため）
@@ -141,7 +144,13 @@ export function describeProcessesBlocked(command: string): string {
       "手元のVS Codeからお使いください。"
     );
   }
-  if (command === "novelai.shareWithEditor" || command === "novelai.collectEditorProposals") {
+  if (
+    command === "novelai.shareWithEditor" ||
+    command === "novelai.collectEditorProposals" ||
+    command === "novelai.joinAsEditor" ||
+    command === "novelai.finishReviewAndReturn" ||
+    command === "novelai.revokeEditorAccess"
+  ) {
     return (
       "編集部とのやり取りはgitコマンドを使うため、ブラウザ版では使えません。" +
       "手元のVS Codeをお使いください。"

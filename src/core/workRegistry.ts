@@ -239,6 +239,10 @@ export class WorkRegistry {
       let workIgnoreMs = 0;
       if (!present) {
         missingWorks.push(work);
+      } else if (currentMode() === "editor") {
+        // **編集者モードでは `.gitignore` を整えない。** 整えると作者の側の `.gitignore` と
+        // 食い違う未記録の変更ができ、「校閲を終えて返す」が止まり続ける
+        // （編集部は本文も設定も書かない。整えるのは作者の側の仕事）
       } else {
         const ignoreStartedAt = performance.now();
         try {
@@ -561,9 +565,12 @@ export class WorkRegistry {
     // 起動時の `maintainWorks()` は最初からこれを失敗しても続ける作りに
     // してあり、次の起動でもう一度試される。ここも同じ扱いに揃える。
     try {
-      await ensureRecoveryIgnoreRule(normalized, {
-        syncCache: isCacheSyncEnabled(),
-      });
+      // 編集者モードでは整えない（理由は maintainWorks の同じ分岐）
+      if (currentMode() !== "editor") {
+        await ensureRecoveryIgnoreRule(normalized, {
+          syncCache: isCacheSyncEnabled(),
+        });
+      }
     } catch (error) {
       void vscode.window.showWarningMessage(
         `「${entry.title}」を登録しました。ただし .gitignore を整えられませんでした` +
