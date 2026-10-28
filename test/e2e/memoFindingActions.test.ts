@@ -7,9 +7,10 @@
  *    押すと原稿のその行の頭へカーソルが来る（行の場所を押したときと同じ道。2枚目を
  *    作らない）。本文は変わらず、提案パネルも開かない。提案パネルへは上の
  *    ［提案パネル］から移れて、その指摘が並ぶ（作者の裁定 2026-10-04。以前は［提案へ］）
- * 2. **校閲ロックの掛かった話**で［直す］を押すと、提案パネルの［適用］と同じ
- *    「校閲中です」の確認が出る。止めれば本文は変わらず、指摘も残る。
- *    「それでも直す」を選べば当たる（確認の画面が道を塞いでいるだけで、壊れていない念押し）
+ * 2. **編集部の校閲ロックの掛かった話**で［直す］を押すと、提案パネルの［適用］と同じ
+ *    「校閲中のため、適用できません」の断りの窓が出る。閉じれば本文は変わらず、指摘も残る。
+ *    以前の「それでも直す」は無い（作者の裁定 2026-10-28「校閲中の範囲は書けなくする」。
+ *    解く手段は［連携を解除…］で、その流れは editorModeReviewLock.test.ts が見る）
  *
  * **AI は呼ばない。** 指摘は `.aiwriter/findings.jsonl` へ、ロックは
  * `.aiwriter/locks/locks.jsonl` へ、製品が読む形で見本を置く。
@@ -36,7 +37,6 @@ import {
   dialogText,
   editorGroupTabs,
   countTabsNamed,
-  pressDialogButton,
 } from "./support/workbenchDom";
 
 const EPISODE = "001_駅.txt";
@@ -161,7 +161,7 @@ test("修正案の無い指摘（矛盾）の［本文へ］で、原稿のそ�
   );
 });
 
-test("校閲ロックの掛かった話で［直す］を押すと「校閲中です」の確認が出て、止めれば本文は変わらず、それでも直すなら当たる", async () => {
+test("編集部の校閲ロックの掛かった話で［直す］を押すと「校閲中のため、適用できません」と断られ、本文は変わらない", async () => {
   const sample: SampleFinding = {
     episode: EPISODE,
     text: TEXT,
@@ -197,31 +197,23 @@ test("校閲ロックの掛かった話で［直す］を押すと「校閲中�
       const memo = await openMemoPanel(page, 'button[data-act="fix"]');
       await clearNotifications(page);
 
-      // ── ［直す］→「校閲中です」の確認が出る ──
+      // ── ［直す］→ 編集部が校閲中のため断られる（作者の裁定 2026-10-28。以前の「それでも直す」は無い）──
       await memo.locator('button[data-act="fix"]').first().click();
       let shown: string | undefined;
-      await waitUntil(async () => (shown = await dialogText(page)) !== undefined, "校閲中の確認が出る", 10_000);
-      expect(shown).toContain(`${EPISODE} は校閲中です`);
+      await waitUntil(async () => (shown = await dialogText(page)) !== undefined, "校閲中の断りの窓が出る", 10_000);
+      expect(shown).toContain(`${EPISODE} は編集部が校閲中のため、適用できません。`);
+      expect(shown, "断りの窓に、解く手段［連携を解除…］がありません").toContain("連携を解除…");
+      expect(shown, "断られるはずなのに、まだ「それでも直す」が残っています").not.toContain("それでも直す");
 
-      // ── 止める（Esc）→ 本文は変わらず、指摘も［直す］のまま残る ──
+      // ── 閉じる（Esc）→ 本文は変わらず、指摘も［直す］のまま残り、判断の行も入らない ──
       await closeDialog(page);
-      await holdsFor(async () => (await fileText(session)) === TEXT, "止めたあとも本文が変わらない", 2_000);
+      await holdsFor(
+        async () => (await fileText(session)) === TEXT && (await decisions(session, sample)).length === 0,
+        "閉じたあとも本文が変わらず、判断の行も入らない",
+        3_000
+      );
       expect(await countIn(memo, 'button[data-act="fix"]')).toBe(1);
-      expect(await decisions(session, sample)).toEqual([]);
-
-      // ── 念押し：もう一度押して「それでも直す」なら当たる ──
-      await memo.locator('button[data-act="fix"]').first().click();
-      await waitUntil(async () => (await dialogText(page)) !== undefined, "もう一度、校閲中の確認が出る", 10_000);
-      await pressDialogButton(page, "それでも直す");
-      await waitUntil(async () => (await fileText(session)) === FIXED_TEXT, "それでも直すと、直した字がファイルに入る");
-      // 判断の行は本文を書いたあとに足される。少し遅れるので待つ（4回に1回、読むのが早すぎて空だった）
-      await waitUntil(
-        async () => JSON.stringify(await decisions(session, sample)) === JSON.stringify(["accepted"]),
-        "置き場に「採った」の判断の行が1つ入る",
-        5_000
-      ).catch(async (error: unknown) => {
-        throw new Error(`${String(error)}（判断の行：${JSON.stringify(await decisions(session, sample))}）`);
-      });
+      expect(await fileText(session)).not.toBe(FIXED_TEXT);
     },
     OPEN_PROPOSALS_LAUNCH
   );
