@@ -17,7 +17,7 @@
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { openEpisode } from "./support/manuscriptFrame";
-import { turnVertical } from "./support/verticalFace";
+import { turnVertical, VERTICAL_LAUNCH } from "./support/verticalFace";
 import { withVsCode } from "./support/vscodeApp";
 
 const EPISODE = "001_診察.md";
@@ -103,6 +103,7 @@ for (const vertical of [false, true]) {
       expect(sweep.tcy, "テストの前提（数字に縦中横の印が付く）が崩れています").toBeGreaterThan(0);
       expect(sweep.wrapped, `テストの前提（段落が折り返す）が崩れています：${JSON.stringify(sweep)}`).toBeGreaterThan(sweep.tried / 2);
       expect(sweep.early, `早く折れた幅があります（${sweep.tried}通り振った）`).toEqual([]);
-    });
+      // 縦書きにするキーは、使い捨ての keybindings.json に足して起こしたときだけ効く
+    }, vertical ? VERTICAL_LAUNCH : {});
   });
 }
