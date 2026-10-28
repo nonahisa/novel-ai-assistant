@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { workspace } from "../support/vscodeStub";
 import {
+  inviteEditor,
   setUpAndPush,
   shareNoticeFor,
 } from "../../../src/features/shareWithEditor";
@@ -239,5 +240,47 @@ describe("渡し終わったときの知らせ", () => {
     const notice = shareNoticeFor("pushed", "氷の街");
     expect(notice.message).toContain("送り直しました");
     expect(notice.message).not.toContain("招待");
+  });
+});
+
+describe("編集部の招待に使う鍵（gh だけの作者にも招待まで自動）", () => {
+  const ref = { owner: "hisa", repo: "novel-20261028-editing" };
+  const invited = vi.fn(async () => ({ ok: true as const, outcome: "invited" as const }));
+
+  beforeEach(() => invited.mockClear());
+
+  test("VS Code のサインインが無ければ、gh の鍵を借りて招く（新しい窓は出さない）", async () => {
+    const accountToken = vi.fn(async () => "account");
+    const result = await inviteEditor("kmizu", ref, false, {
+      token: accountToken,
+      hasSession: async () => false,
+      ghToken: async () => "gh-token",
+      invite: invited as never,
+    });
+    expect(accountToken).not.toHaveBeenCalled();
+    expect(invited).toHaveBeenCalledWith("gh-token", ref, "kmizu");
+    expect(result.kind).toBe("invited");
+  });
+
+  test("サインインがあれば、その鍵で招く（gh の鍵は使わない）", async () => {
+    const ghToken = vi.fn(async () => "gh-token");
+    await inviteEditor("kmizu", ref, false, {
+      token: async () => "account",
+      hasSession: async () => true,
+      ghToken,
+      invite: invited as never,
+    });
+    expect(ghToken).not.toHaveBeenCalled();
+    expect(invited).toHaveBeenCalledWith("account", ref, "kmizu");
+  });
+
+  test("どちらの鍵も無ければ、招かずに手で招く案内へ落とす", async () => {
+    const result = await inviteEditor("kmizu", ref, false, {
+      hasSession: async () => false,
+      ghToken: async () => undefined,
+      invite: invited as never,
+    });
+    expect(invited).not.toHaveBeenCalled();
+    expect(result.kind).toBe("skipped");
   });
 });

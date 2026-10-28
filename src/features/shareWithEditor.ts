@@ -330,21 +330,28 @@ export type InviteNotice =
  * 編集部を招く。トークンは VS Code の GitHub アカウントから取る。
  *
  * **サインインの窓を新しく出さない。** アカウントの道で作ったか、すでに
- * サインインがあるときだけ招く。`gh` だけで作った場合は、手で招く案内に落とす。
+ * サインインがあるときはその鍵で招く。無ければ `gh` が持っている鍵
+ * （`gh auth token`）を借りる——`gh` だけで作った作者にも「招待まで自動」を
+ * 通すため（作者の裁定 2026-10-28）。どちらも無ければ、手で招く案内に落とす。
  */
-async function inviteEditor(
+export async function inviteEditor(
   login: string | undefined,
   ref: GithubRepoRef,
   viaAccount: boolean,
   deps: {
     token?: () => Promise<string | undefined>;
+    hasSession?: () => Promise<boolean>;
+    ghToken?: () => Promise<string | undefined>;
     invite?: typeof inviteCollaborator;
   } = {}
 ): Promise<InviteNotice> {
   if (!login) return { kind: "skipped" };
   const getToken = deps.token ?? ensureGithubAuthToken;
-  if (!viaAccount && !(await hasGithubSession())) return { kind: "skipped" };
-  const token = await getToken();
+  const hasSession = deps.hasSession ?? (() => hasGithubSession());
+  const token =
+    viaAccount || (await hasSession())
+      ? await getToken()
+      : await (deps.ghToken ?? ghAuthToken)();
   if (!token) return { kind: "skipped" };
 
   const invited = await (deps.invite ?? inviteCollaborator)(token, ref, login);
@@ -826,6 +833,18 @@ async function ghRepositoryIsPrivate(
   if (text === "true") return true;
   if (text === "false") return false;
   return undefined;
+}
+
+/**
+ * `gh` がサインインに使っている鍵を借りる（招待の口を叩くため）。
+ * `gh` が無い・サインインしていなければ `undefined`
+ */
+async function ghAuthToken(): Promise<string | undefined> {
+  if (!(await ghAvailable())) return undefined;
+  const result = await runCommand("gh", ["auth", "token"], undefined, 15_000);
+  if (result.code !== 0) return undefined;
+  const token = result.stdout.trim();
+  return token.length > 0 ? token : undefined;
 }
 
 /**
