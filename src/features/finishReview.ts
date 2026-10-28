@@ -13,7 +13,13 @@ import {
 } from "../core/git";
 import { FileLockStore } from "../core/fileLockStore";
 import { ProposalStore } from "../core/proposalStore";
-import { changesOutsideLedger, LEDGER_DIRECTORY } from "../core/editingRepo";
+import {
+  changesOutsideLedger,
+  editingQueueKey,
+  LEDGER_DIRECTORY,
+} from "../core/editingRepo";
+import { runSerialized } from "../core/ledgerQueue";
+import { pushWasRejected, reconcileDiverged } from "./shareWithEditor";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
 import { notifyDone } from "../views/notify";
@@ -128,42 +134,7 @@ export async function finishReviewAndReturn(
       }
     }
 
-    const staged = await runGitForPaths(
-      run,
-      ["add", "-A"],
-      [LEDGER_DIRECTORY],
-      work.folderPath,
-      15_000
-    );
-    if (staged.code !== 0) return `記録の準備に失敗しました: ${staged.stderr.trim()}`;
-
-    // 記録するものがあるときだけ記録する（`.aiwriter` に変わりが無いこともある）
-    const quiet = await run(
-      ["diff", "--cached", "--quiet", "--", LEDGER_DIRECTORY],
-      work.folderPath,
-      15_000
-    );
-    if (quiet.code !== 0) {
-      const committed = await commitPaths(
-        run,
-        "校閲を終えて返す",
-        [LEDGER_DIRECTORY],
-        work.folderPath,
-        15_000
-      );
-      if (committed.code !== 0) {
-        return `記録に失敗しました: ${(committed.stderr || committed.stdout).trim()}`;
-      }
-    }
-
-    const sent = await push(work.folderPath, run);
-    if (!sent.ok) {
-      return (
-        `送信に失敗しました: ${sent.detail ?? "（詳細なし）"}。` +
-        "作者が先に更新していたなら、「GitHubと同期」で取り込んでから、もう一度押してください。"
-      );
-    }
-    return undefined;
+    return publishLedgerQuietly(work, "校閲を終えて返す", run);
   });
   if (done) return fail(work, done);
 
@@ -171,6 +142,83 @@ export async function finishReviewAndReturn(
   logStep(`校閲を終えて返した（${work.title}／鍵 ${mine.length}件・提案 ${proposals}件）`);
   notifyDone(`校閲を終えて、提案 ${proposals} 件を作者へ返しました。`);
   return { kind: "done", released: mine.length, proposals };
+}
+
+/** `.aiwriter` だけを記録する。変わりが無ければ何もしない。失敗の理由、無ければ `undefined` */
+async function commitLedger(
+  work: WorkEntry,
+  message: string,
+  run: GitCommandRunner
+): Promise<string | undefined> {
+  const staged = await runGitForPaths(
+    run,
+    ["add", "-A"],
+    [LEDGER_DIRECTORY],
+    work.folderPath,
+    15_000
+  );
+  if (staged.code !== 0) return `記録の準備に失敗しました: ${staged.stderr.trim()}`;
+
+  // 記録するものがあるときだけ記録する（`.aiwriter` に変わりが無いこともある）
+  const quiet = await run(
+    ["diff", "--cached", "--quiet", "--", LEDGER_DIRECTORY],
+    work.folderPath,
+    15_000
+  );
+  if (quiet.code !== 0) {
+    const committed = await commitPaths(
+      run,
+      message,
+      [LEDGER_DIRECTORY],
+      work.folderPath,
+      15_000
+    );
+    if (committed.code !== 0) {
+      return `記録に失敗しました: ${(committed.stderr || committed.stdout).trim()}`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 台帳（`.aiwriter`）だけを記録して送る。失敗の理由、無ければ `undefined`。
+ *
+ * **断られたら（fetch して相手が先に進んでいたら）、台帳を混ぜて合わせ直して、
+ * もう1回だけ送る。** 編集部の側は本文を書かないので、本文は相手の側をそのまま使う
+ * （作者が先に送り直していても、ここで止まったまま分かれない）。
+ */
+export async function publishLedger(
+  work: WorkEntry,
+  message: string,
+  run: GitCommandRunner = runGit
+): Promise<string | undefined> {
+  const committed = await commitLedger(work, message, run);
+  if (committed) return committed;
+
+  let sent = await push(work.folderPath, run);
+  if (!sent.ok && (await pushWasRejected(work.folderPath, run))) {
+    logStep(`送信が断られたので、台帳を混ぜて合わせ直して送り直す（${work.title}）`);
+    const reconciled = await reconcileDiverged(work.folderPath, run);
+    if (!reconciled.ok) return reconciled.detail;
+    const again = await commitLedger(work, message, run);
+    if (again) return again;
+    sent = await push(work.folderPath, run);
+  }
+  if (!sent.ok) {
+    return `送信に失敗しました: ${sent.detail ?? "（詳細なし）"}`;
+  }
+  return undefined;
+}
+
+/** `publishLedger` を、編集用フォルダーの順番待ちに載せて呼ぶ（記録して知らせるだけの静かな口） */
+export function publishLedgerQuietly(
+  work: WorkEntry,
+  message: string,
+  run: GitCommandRunner = runGit
+): Promise<string | undefined> {
+  return runSerialized(editingQueueKey(work.folderPath), () =>
+    publishLedger(work, message, run)
+  );
 }
 
 async function confirmWithModal(

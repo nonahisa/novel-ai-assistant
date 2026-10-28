@@ -50,6 +50,8 @@ export function cloneUrlOf(ref: GithubRepoRef): string {
   return `${repositoryWebUrl(ref)}.git`;
 }
 
+type CallMethod = "GET" | "PUT" | "PATCH" | "DELETE";
+
 type CallResult =
   | { ok: true; status: number; body: unknown }
   | {
@@ -61,7 +63,7 @@ type CallResult =
 
 async function callGithub(
   token: string,
-  method: "GET" | "PUT" | "PATCH",
+  method: CallMethod,
   endpoint: string,
   fetchImpl: typeof fetch,
   body?: unknown
@@ -197,6 +199,117 @@ export async function inviteCollaborator(
     default:
       return { ok: false, reason: "other", detail: result.detail };
   }
+}
+
+/** 権利を外せなかった理由。番号から決められる分だけ分ける */
+export type RevokeFailureReason =
+  | "noPermission"
+  | "unauthorized"
+  | "network"
+  | "other";
+
+export type RevokeResult =
+  | {
+      ok: true;
+      /**
+       * `removed`＝共同編集者から外した（204）／`invitationCancelled`＝まだ受けていない
+       * 招待を取り消した／`notCollaborator`＝もう共同編集者ではなかった（404）
+       */
+      outcome: "removed" | "invitationCancelled" | "notCollaborator";
+    }
+  | { ok: false; reason: RevokeFailureReason; detail: string };
+
+function repoEndpoint(ref: GithubRepoRef): string {
+  return `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`;
+}
+
+/**
+ * 編集部の書き込みの権利を外す（作者の側からの連携の解除。作者の裁定、2026-10-28）。
+ *
+ * **招待を先に探す。** まだ受けていない招待は、共同編集者を外す口では消えず、
+ * あとで受けられてしまう。見つかれば `DELETE /repos/{owner}/{repo}/invitations/{id}`、
+ * 無ければ `DELETE /repos/{owner}/{repo}/collaborators/{login}`（204）。
+ * 失敗は状態の番号で分ける。
+ */
+export async function revokeEditorAccess(
+  token: string,
+  ref: GithubRepoRef,
+  login: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<RevokeResult> {
+  const wanted = login.toLowerCase();
+  const listed = await callGithub(
+    token,
+    "GET",
+    `${repoEndpoint(ref)}/invitations?per_page=100`,
+    fetchImpl
+  );
+  if (listed.ok && Array.isArray(listed.body)) {
+    for (const row of listed.body) {
+      const record = asRecord(row);
+      const invitee = asRecord(record.invitee).login;
+      if (
+        typeof record.id === "number" &&
+        typeof invitee === "string" &&
+        invitee.toLowerCase() === wanted
+      ) {
+        const cancelled = await callGithub(
+          token,
+          "DELETE",
+          `${repoEndpoint(ref)}/invitations/${record.id}`,
+          fetchImpl
+        );
+        if (cancelled.ok) return { ok: true, outcome: "invitationCancelled" };
+        return revokeFailure(cancelled);
+      }
+    }
+  }
+
+  const removed = await callGithub(
+    token,
+    "DELETE",
+    `${repoEndpoint(ref)}/collaborators/${encodeURIComponent(login)}`,
+    fetchImpl
+  );
+  if (removed.ok) return { ok: true, outcome: "removed" };
+  // 404＝その人はもう共同編集者ではない（外す対象が無い）。権利は無いので成功とみなす
+  if (removed.kind === "notFound") return { ok: true, outcome: "notCollaborator" };
+  return revokeFailure(removed);
+}
+
+function revokeFailure(result: Extract<CallResult, { ok: false }>): RevokeResult {
+  switch (result.kind) {
+    case "forbidden":
+      return {
+        ok: false,
+        reason: "noPermission",
+        detail: "このリポジトリの権利を外す権限がありません（GitHubのアカウントを確かめてください）。",
+      };
+    case "unauthorized":
+      return { ok: false, reason: "unauthorized", detail: result.detail };
+    case "network":
+      return { ok: false, reason: "network", detail: result.detail };
+    default:
+      return { ok: false, reason: "other", detail: result.detail };
+  }
+}
+
+/**
+ * リポジトリが非公開かを GitHub に訊く（`GET /repos/{owner}/{repo}` の `private`）。
+ * 確かめられなければ `isPrivate` は付かない——呼ぶ側は送らない側へ倒す。
+ */
+export async function fetchRepositoryPrivacy(
+  token: string,
+  ref: GithubRepoRef,
+  fetchImpl: typeof fetch = fetch
+): Promise<{ ok: true; isPrivate: boolean } | { ok: false; detail: string }> {
+  const result = await callGithub(token, "GET", repoEndpoint(ref), fetchImpl);
+  if (!result.ok) return { ok: false, detail: result.detail };
+  const value = asRecord(result.body).private;
+  if (typeof value !== "boolean") {
+    return { ok: false, detail: "GitHubの応答に非公開かどうかが含まれていません。" };
+  }
+  return { ok: true, isPrivate: value };
 }
 
 /** 自分宛ての招待の1件 */

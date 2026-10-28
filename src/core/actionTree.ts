@@ -678,6 +678,18 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           },
           {
             kind: "action",
+            command: "novelai.revokeEditorAccess",
+            label: "編集部連携を解除",
+            icon: "debug-disconnect",
+            requiresWork: true,
+            detail:
+              "編集部と決裂したときに、作者の側から連携を解く\n\n" +
+              "・校閲中の印を外す\n\n" +
+              "・GitHub で編集部の書き込みの権利を外す\n\n" +
+              "作者モードで使う。",
+          },
+          {
+            kind: "action",
             command: "novelai.reviewProposals",
             label: "編集部提案確認",
             icon: "inbox",

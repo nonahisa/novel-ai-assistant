@@ -4,8 +4,10 @@ import {
   cloneUrlOf,
   editingRepositoryBaseName,
   fetchAuthenticatedLogin,
+  fetchRepositoryPrivacy,
   invitationsUrl,
   inviteCollaborator,
+  revokeEditorAccess,
 } from "../../../src/core/githubCollaboration";
 import { parseGithubRepoRef } from "../../../src/core/githubRepoRef";
 
@@ -127,6 +129,83 @@ describe("招待の受諾", () => {
     );
     const result = await acceptEditorInvitation("t", ref, fetchImpl as unknown as typeof fetch);
     expect(result.ok === false && result.reason).toBe("acceptFailed");
+  });
+});
+
+describe("編集部の権利を外す（作者の側からの解除）", () => {
+  test("共同編集者なら DELETE collaborators。204 で成功", async () => {
+    const calls: Array<[string, string]> = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push([init?.method ?? "GET", url]);
+      // 受けていない招待は無い
+      if (url.includes("/invitations")) return json(200, []);
+      return json(204);
+    });
+    const result = await revokeEditorAccess("t", ref, "octocat", fetchImpl as unknown as typeof fetch);
+
+    expect(result).toEqual({ ok: true, outcome: "removed" });
+    expect(calls).toContainEqual([
+      "DELETE",
+      "https://api.github.com/repos/hisa/novel-editing/collaborators/octocat",
+    ]);
+  });
+
+  test("404 は、もう共同編集者ではない（外す対象が無い）。成功とみなす", async () => {
+    const fetchImpl = vi.fn(async (url: string) =>
+      url.includes("/invitations") ? json(200, []) : json(404, { message: "Not Found" })
+    );
+    const result = await revokeEditorAccess("t", ref, "octocat", fetchImpl as unknown as typeof fetch);
+    expect(result).toEqual({ ok: true, outcome: "notCollaborator" });
+  });
+
+  test("招待を受ける前なら、招待を探して DELETE invitations（共同編集者の口は叩かない）", async () => {
+    const calls: Array<[string, string]> = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push([init?.method ?? "GET", url]);
+      if ((init?.method ?? "GET") === "GET") {
+        return json(200, [
+          { id: 5, invitee: { login: "someone" } },
+          { id: 9, invitee: { login: "Octocat" } },
+        ]);
+      }
+      return json(204);
+    });
+    const result = await revokeEditorAccess("t", ref, "octocat", fetchImpl as unknown as typeof fetch);
+
+    expect(result).toEqual({ ok: true, outcome: "invitationCancelled" });
+    expect(calls).toContainEqual([
+      "DELETE",
+      "https://api.github.com/repos/hisa/novel-editing/invitations/9",
+    ]);
+    expect(calls.some(([, url]) => url.includes("/collaborators/"))).toBe(false);
+  });
+
+  test("403 は権限が無い、401 はサインイン切れ、回線の失敗は network（番号で分ける）", async () => {
+    const make = (status: number) =>
+      (async (url: string) =>
+        url.includes("/invitations") ? json(200, []) : json(status, { message: "x" })) as unknown as typeof fetch;
+    const forbidden = await revokeEditorAccess("t", ref, "a", make(403));
+    const unauthorized = await revokeEditorAccess("t", ref, "a", make(401));
+    const offline = await revokeEditorAccess("t", ref, "a", (async () => {
+      throw new Error("ECONNRESET");
+    }) as unknown as typeof fetch);
+    expect(forbidden.ok === false && forbidden.reason).toBe("noPermission");
+    expect(unauthorized.ok === false && unauthorized.reason).toBe("unauthorized");
+    // 招待の一覧が読めなくても、共同編集者の口へ進む（そちらも回線で落ちる）
+    expect(offline.ok === false && offline.reason).toBe("network");
+  });
+
+  test("リポジトリの非公開の確認：private を読む。読めなければ付けない", async () => {
+    expect(
+      await fetchRepositoryPrivacy("t", ref, async () => json(200, { private: true }))
+    ).toEqual({ ok: true, isPrivate: true });
+    expect(
+      await fetchRepositoryPrivacy("t", ref, async () => json(200, { private: false }))
+    ).toEqual({ ok: true, isPrivate: false });
+    const unknown = await fetchRepositoryPrivacy("t", ref, async () => json(200, {}));
+    expect(unknown.ok).toBe(false);
+    const missing = await fetchRepositoryPrivacy("t", ref, async () => json(404, { message: "Not Found" }));
+    expect(missing.ok).toBe(false);
   });
 });
 

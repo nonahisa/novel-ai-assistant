@@ -17,6 +17,8 @@ import type { ProposalPanel, ProposalViewItem } from "./proposalPanel";
 import { notifyDone } from "../views/notify";
 import { logFailure, useLogFile } from "../core/logger";
 import { canRunProcesses } from "../core/runtime";
+import { scanWork } from "../core/scanner";
+import { describeLockRange } from "../core/editingRepo";
 import { activeTabFileUri } from "./manuscriptTab";
 
 /**
@@ -100,6 +102,20 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
   // 空になる（2026-10-12）。タブが読めない環境のために素のエディタへも落とす
   const uri =
     activeTabFileUri() ?? vscode.window.activeTextEditor?.document.uri;
+
+  /*
+    **編集者モードの「開始」は、話数の範囲を選ばせる**（作者の裁定、2026-10-28）。
+    作品丸ごとではなく、校閲する範囲だけを押さえる。開いている話がすでに押さえられて
+    いるときは、これまでどおり外す問いへ進む（終了）。
+  */
+  if (isEditorMode()) {
+    const held = uri ? await heldByEditorFile(work, uri) : false;
+    if (!held) {
+      await startRangeReview(work, uri);
+      return;
+    }
+  }
+
   if (!uri) {
     void vscode.window.showWarningMessage(
       "校閲するファイルを開いてから実行してください。"
@@ -162,6 +178,116 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
     `${path.basename(relative)} を押さえました。` +
       "同期すると、作者側にも伝わります。終わったらもう一度押して外してください。"
   );
+}
+
+/** 開いているファイルが、すでに押さえられているか */
+async function heldByEditorFile(work: WorkEntry, uri: vscode.Uri): Promise<boolean> {
+  const filePath = fromUri(uri);
+  if (!path.isPathInside(work.folderPath, filePath)) return false;
+  const relative = normalizeFile(path.relative(work.folderPath, filePath));
+  return (await new FileLockStore(work).lockFor(relative)) !== undefined;
+}
+
+/** 範囲選びの1項目 */
+interface EpisodePickItem extends vscode.QuickPickItem {
+  /** 作品フォルダーからの相対パス（鍵の名前） */
+  relative: string;
+}
+
+/**
+ * 校閲する話の範囲を、始めの話と終わりの話の2つの選択で決めて、まとめて押さえる。
+ *
+ * 話の並びは作品一覧と同じ（`scanWork` の順）。最初の候補は前に出ているタブの話。
+ * 間の話をまとめて `acquire` する（鍵は話ごとに1行ずつ）。
+ */
+async function startRangeReview(
+  work: WorkEntry,
+  activeUri: vscode.Uri | undefined
+): Promise<void> {
+  const { episodes } = await scanWork(work);
+  if (episodes.length === 0) {
+    void vscode.window.showWarningMessage("この作品には、校閲できる話がありません。");
+    return;
+  }
+  const items: EpisodePickItem[] = episodes.map((episode) => ({
+    label:
+      episode.chapterStart !== null
+        ? `第${episode.chapterStart}話${episode.subtitle ? `　${episode.subtitle}` : ""}`
+        : episode.fileName,
+    description: episode.fileName,
+    relative: normalizeFile(path.relative(work.folderPath, episode.filePath)),
+  }));
+  const activeRelative =
+    activeUri && path.isPathInside(work.folderPath, fromUri(activeUri))
+      ? normalizeFile(path.relative(work.folderPath, fromUri(activeUri)))
+      : undefined;
+  const activeIndex = Math.max(
+    0,
+    items.findIndex((item) => item.relative === activeRelative)
+  );
+
+  const first = await pickEpisode("校閲する範囲：始めの話を選びます", items, activeIndex, "開いている話");
+  if (!first) return;
+  const firstIndex = items.indexOf(first);
+  const rest = items.slice(firstIndex);
+  const last = await pickEpisode("校閲する範囲：終わりの話を選びます", rest, 0, "始めの話だけ");
+  if (!last) return;
+  const files = items
+    .slice(firstIndex, items.indexOf(last) + 1)
+    .map((item) => item.relative);
+
+  const note = await pickNote();
+  if (note === undefined) return;
+
+  const who = (await tryGitUserName(work.folderPath)) ?? "";
+  await new FileLockStore(work).acquire(files, who, "editor", note);
+  const range = describeLockRange(files);
+  await recordEdit(work, {
+    actor: "editor",
+    action: "校閲のロックをかけた",
+    file: range,
+    detail: note,
+  });
+  useLogFile(work.folderPath);
+  notifyDone(`${range}を校閲中にしました。`);
+  // 作者の側が書き続けないよう、鍵はすぐ届ける（記録して送る。失敗しても校閲は始められる）
+  if (!canRunProcesses()) return;
+  void import("./finishReview.js")
+    .then((module) => module.publishLedgerQuietly(work, "校閲の範囲を知らせる"))
+    .then((detail) => {
+      if (detail) {
+        void vscode.window.showInformationMessage(
+          "校閲の範囲を作者へ知らせられませんでした。同期すると届きます。"
+        );
+      }
+    })
+    .catch(() => undefined);
+}
+
+/** 話を1つ選ばせる。最初の候補は `activeIndex`（並びは変えない） */
+async function pickEpisode(
+  title: string,
+  items: EpisodePickItem[],
+  activeIndex: number,
+  shortcutNote: string
+): Promise<EpisodePickItem | undefined> {
+  /*
+    **最初の候補は、前に出ているタブの話。** `showQuickPick` は最初に選ばれている項目を
+    指定できないので、先頭に「開いている話」の近道を1行置き、そのあとに作品一覧と同じ並びで
+    全部の話を出す。
+  */
+  const shortcut: EpisodePickItem | undefined = items[activeIndex]
+    ? { ...items[activeIndex], description: `${shortcutNote}（${items[activeIndex].description ?? ""}）` }
+    : undefined;
+  const entries: vscode.QuickPickItem[] = [...(shortcut ? [shortcut] : []), ...items];
+  const picked = await vscode.window.showQuickPick([...entries, cancelItem()], {
+    title,
+    matchOnDescription: true,
+    ignoreFocusOut: true,
+  });
+  if (!picked || isCancelItem(picked) || !("relative" in picked)) return undefined;
+  const relative = (picked as EpisodePickItem).relative;
+  return items.find((item) => item.relative === relative);
 }
 
 async function pickNote(): Promise<string | undefined> {

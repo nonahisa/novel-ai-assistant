@@ -32,7 +32,23 @@ export async function readTextFile(
   return decodeBytes(bytes);
 }
 
+/**
+ * 本文への書き込みの共通の入口の関所（作者の裁定、2026-10-28「校閲中の範囲は書けなくする」）。
+ *
+ * 編集部が校閲中の話は、作者の本文への書き込み（AI の書き戻し・提案の適用・改行の統一…）を
+ * 断る。拡張機能の起動時に `features/editorLockGuard.ts` が差し込む（ここは鍵の置き場や
+ * 作品の登録簿を知らない）。**断る理由の文を返す**。書いてよければ `undefined`。
+ */
+export type BodyWriteGuard = (filePath: string) => Promise<string | undefined>;
+
+let bodyWriteGuard: BodyWriteGuard | undefined;
+
+export function setBodyWriteGuard(guard: BodyWriteGuard | undefined): void {
+  bodyWriteGuard = guard;
+}
+
 export type WriteTextFailureReason =
+  | "editor_locked"
   | "modified_externally"
   | "path_conflict"
   | "conflict_markers"
@@ -85,6 +101,12 @@ export async function writeTextFilePreservingFormat(
   options: WriteTextFileOptions = {}
 ): Promise<WriteTextFileResult> {
   const uri = path.toUri(filePath);
+
+  // 編集部が校閲中の話は書かない（理由を返す。どの道で断ったかは関所がログへ残す）
+  if (bodyWriteGuard) {
+    const refusal = await bodyWriteGuard(filePath);
+    if (refusal) return { ok: false, reason: "editor_locked", detail: refusal };
+  }
 
   if (hasUnsavedChanges(filePath)) {
     return { ok: false, reason: "unsaved_changes" };

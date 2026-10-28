@@ -959,6 +959,7 @@ describe("校正・校閲の並び", () => {
       "novelai.toggleReviewLock",
       "novelai.finishReviewAndReturn",
       "novelai.collectEditorProposals",
+      "novelai.revokeEditorAccess",
       "novelai.reviewProposals",
     ]);
 

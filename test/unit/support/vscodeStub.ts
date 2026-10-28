@@ -9,6 +9,9 @@ export const workspace = {
   getConfiguration: () => ({
     get: <T>(_key: string, defaultValue: T): T => defaultValue,
   }),
+  /** 文書を開いた／保存した知らせの購読。試験では何も起きないので、外せるだけ返す */
+  onDidOpenTextDocument: (_listener: unknown) => ({ dispose() {} }),
+  onDidSaveTextDocument: (_listener: unknown) => ({ dispose() {} }),
   /**
    * 文書への当て込み。**既定は「入った」**——入らなかったときの道を
    * 見るテストは false を返す形へ差し替える。
@@ -462,6 +465,14 @@ export class CancellationTokenSource {
 
   dispose(): void {
     this.listeners.length = 0;
+  }
+}
+
+/** 後始末の入れ物（購読をまとめて外すのに使う） */
+export class Disposable {
+  constructor(private readonly callOnDispose: () => void) {}
+  dispose(): void {
+    this.callOnDispose();
   }
 }
 

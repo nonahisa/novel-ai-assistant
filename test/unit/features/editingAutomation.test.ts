@@ -107,6 +107,41 @@ describe("採否を決め終えたときの自動の送り返し", () => {
   });
 });
 
+describe("採否をまとめて決めたとき", () => {
+  test("決めた回数だけ走らず、待っているのは1本に畳まれる（走行中は1回、あと1回で足りる）", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const deps = returnDeps({
+      resend: vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) await gate;
+        return { ok: true, detail: "" };
+      }),
+    });
+
+    // 1件目で走り出し、走っている間に9件が決まる
+    const runs = Array.from({ length: 10 }, () =>
+      returnDecisionsIfFinished(work("batch"), deps)
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    release();
+    await Promise.all(runs);
+
+    // 走り出した1回と、取りこぼしを拾う1回だけ（10回ではない）
+    expect(deps.resend).toHaveBeenCalledTimes(2);
+  });
+
+  test("走り終えたあとの呼び出しは、新しく1回走る", async () => {
+    const deps = returnDeps();
+    await returnDecisionsIfFinished(work("again"), deps);
+    await returnDecisionsIfFinished(work("again"), deps);
+    expect(deps.resend).toHaveBeenCalledTimes(2);
+  });
+});
+
 function inboxDeps(over: Partial<InboxDeps> = {}): InboxDeps {
   return {
     isEditorMode: () => false,
@@ -114,6 +149,8 @@ function inboxDeps(over: Partial<InboxDeps> = {}): InboxDeps {
       status: "done" as const,
       pullFailed: false,
       hadIncoming: true,
+      locksAcquired: [] as string[],
+      locksReleased: [] as string[],
       added: 0,
     })),
     notify: vi.fn(),
@@ -136,6 +173,8 @@ describe("同期のあとの、編集部の提案の取り込み", () => {
         status: "done" as const,
         pullFailed: false,
         hadIncoming: true,
+        locksAcquired: [] as string[],
+        locksReleased: [] as string[],
         added: 3,
       })),
     });
@@ -160,6 +199,8 @@ describe("同期のあとの、編集部の提案の取り込み", () => {
           status: "done" as const,
           pullFailed: false,
           hadIncoming: true,
+          locksAcquired: [] as string[],
+          locksReleased: [] as string[],
           added: 1,
         };
       }),

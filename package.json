@@ -1450,6 +1450,12 @@
         "icon": "$(organization)"
       },
       {
+        "command": "novelai.revokeEditorAccess",
+        "title": "編集部連携を解除",
+        "category": "小説執筆",
+        "icon": "$(debug-disconnect)"
+      },
+      {
         "command": "novelai.finishReviewAndReturn",
         "title": "校閲を終えて返す",
         "category": "小説執筆",

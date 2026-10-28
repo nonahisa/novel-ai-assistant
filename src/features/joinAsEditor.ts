@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { readWorkConfig } from "../core/workRegistry";
@@ -11,12 +10,10 @@ import {
   cloneUrlOf,
 } from "../core/githubCollaboration";
 import { describeRepoRefProblem, parseGithubRepoRef } from "../core/githubRepoRef";
-import { cloneRepository, cloneWithGh } from "../core/gitClone";
+import { cloneWithCredential } from "./shareWithEditor";
 import { isGitAvailable } from "../core/git";
 import {
   ensureGithubAuthToken,
-  ghAvailable,
-  rememberGithubCredential,
 } from "../core/gitSetup";
 import { pathExists } from "../core/fileSystem";
 // ログの書き先：作品が定まらない
@@ -48,11 +45,17 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
 
   // 編集者モードの環境は作品1つまで。**取り寄せる前に**止める（取り寄せたあとで
   // 登録を断られると、置き場に中途半端なフォルダーが残る）
-  if (mode === "editor" && registered.length >= EDITOR_WORK_LIMIT) {
+  // **作者モードからでも同じ。** 登録してからモードを切り替えるので、先に数えないと
+  // 作品が複数のまま編集者モードになり、「作品は1つまで」の仕切りをすり抜ける
+  if (registered.length >= EDITOR_WORK_LIMIT) {
     void vscode.window.showWarningMessage(
-      `編集者モードの環境で登録できる作品は ${EDITOR_WORK_LIMIT} つまでです` +
-        `（いまは「${registered[0]?.title ?? "登録済みの作品"}」）。` +
-        "別の作品に参加するには、先にその作品の登録を外してください。"
+      mode === "editor"
+        ? `編集者モードの環境で登録できる作品は ${EDITOR_WORK_LIMIT} つまでです` +
+            `（いまは「${registered[0]?.title ?? "登録済みの作品"}」）。` +
+            "別の作品に参加するには、先にその作品の登録を外してください。"
+        : `編集部として参加すると、この環境は編集者モード（作品は ${EDITOR_WORK_LIMIT} つまで）になります。` +
+            `いま ${registered.length} 件の作品が登録されているため、このままでは参加できません。` +
+            "登録を外すか、別の VS Code の環境（プロファイル）で参加してください。"
     );
     return;
   }
@@ -179,7 +182,16 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   // 題は、取り寄せた作品の config.json から。無ければリポジトリ名
   const title = await titleOf(destination, ref.repo);
   const entry = await registry.addExisting(destination, title);
-  if (!entry) return;
+  if (!entry) {
+    // 登録の側が断った理由（重複・作品数の上限）は、登録簿が別に知らせている。
+    // ここでは、取り寄せた場所が残っていることと、次の手を言う
+    void vscode.window.showWarningMessage(
+      "取り寄せは終わりましたが、作品として登録できませんでした。" +
+        `取り寄せた場所は ${destination} です。登録の理由は直前の知らせを確かめ、` +
+        "解決したら「フォルダから追加」で登録してください（編集者モードへは切り替えていません）。"
+    );
+    return;
+  }
 
   // **登録のあとでモードを切り替える**（先だと作品1つの制限に当たる）
   if (switching) await applyMode("editor");
@@ -196,25 +208,11 @@ async function cloneIntoPlace(
   ref: { owner: string; repo: string },
   destination: string
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
-  const parent = path.dirname(destination);
-  await vscode.workspace.fs.createDirectory(path.toUri(parent));
-
-  const url = cloneUrlOf(ref);
-  // `git credential approve` の作業ディレクトリは、あるフォルダーでなければならない
-  await rememberGithubCredential(token, url, parent);
-
-  let result = await withProgress("作品を取り寄せています…", () =>
-    cloneRepository(url, destination)
+  // 鍵を覚えさせ、取り寄せる。**失敗したら途中のフォルダーを消す**（残ると次の回が
+  // 「すでに存在します」で止まる。取り寄せる前にこの場所が無かったことは確かめてある）
+  return withProgress("作品を取り寄せています…", () =>
+    cloneWithCredential(token, cloneUrlOf(ref), destination)
   );
-  // 保管の仕組みが無い環境では、鍵が効かず認証で断られる。gh が使えるなら回す
-  if (!result.ok && result.needsAuth && (await ghAvailable())) {
-    result = await withProgress("GitHub CLIで取り寄せています…", () =>
-      cloneWithGh(url, destination)
-    );
-  }
-  return result.ok
-    ? { ok: true }
-    : { ok: false, detail: result.detail ?? "理由は不明です" };
 }
 
 async function titleOf(folder: string, fallback: string): Promise<string> {

@@ -6,6 +6,7 @@ import { ProposalStore } from "../core/proposalStore";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { notifyDone } from "../views/notify";
 import {
+  describeLockChanges,
   importEditorProposalsQuietly,
   readPointer,
   resendDecisionsQuietly,
@@ -53,8 +54,17 @@ const defaultReturnDeps: ReturnDeps = {
 
 export type ReturnOutcome = "sent" | "skipped" | "failed";
 
-/** 作品ごとの順番待ち。**飛ばさず後ろへ繋ぐ**（走行中に書かれた最後の決定を漏らさない） */
-const returnChains = new Map<string, Promise<unknown>>();
+/**
+ * 作品ごとの走りの状態。**待っているのは1本まで**に畳む。
+ *
+ * 採否をまとめて決めると、決めた回数だけ呼ばれる。走っている間に来た呼び出しは旗
+ * （`again`）を立てるだけにし、走り終えたあとに**1回だけ**もう一度走る
+ * （走行中に書かれた最後の決定を漏らさず、回数ぶんの送信もしない）。
+ */
+const returnStates = new Map<
+  string,
+  { running?: Promise<ReturnOutcome>; again: boolean }
+>();
 
 /**
  * 採否を決め終えていれば、編集部へ静かに送り返す。
@@ -66,19 +76,27 @@ export function returnDecisionsIfFinished(
   work: WorkEntry,
   deps: ReturnDeps = defaultReturnDeps
 ): Promise<ReturnOutcome> {
-  const previous = returnChains.get(work.id) ?? Promise.resolve();
-  const run = previous.then(
-    () => runReturn(work, deps),
-    () => runReturn(work, deps)
-  );
-  returnChains.set(
-    work.id,
-    run.then(
-      () => undefined,
-      () => undefined
-    )
-  );
-  return run;
+  let state = returnStates.get(work.id);
+  if (!state) {
+    state = { again: false };
+    returnStates.set(work.id, state);
+  }
+  const current = state;
+  if (current.running) {
+    current.again = true;
+    return current.running;
+  }
+  current.running = (async () => {
+    let outcome: ReturnOutcome;
+    do {
+      current.again = false;
+      outcome = await runReturn(work, deps);
+    } while (current.again);
+    return outcome;
+  })().finally(() => {
+    current.running = undefined;
+  });
+  return current.running;
 }
 
 async function runReturn(work: WorkEntry, deps: ReturnDeps): Promise<ReturnOutcome> {
@@ -175,6 +193,8 @@ async function runInbox(
         useLogFile(work.folderPath);
         logStep(`編集部の提案の取り寄せに失敗（手元の分だけ取り込み）: ${work.title}`);
       }
+      // 鍵が動いたら知らせる（校閲が始まった／終わった）
+      for (const text of describeLockChanges(result)) deps.notify(text);
       if (result.added <= 0) continue;
       total += result.added;
       deps.notify(

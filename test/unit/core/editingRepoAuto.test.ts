@@ -65,6 +65,12 @@ describe("校閲を終えて返すときの、本文の未記録の検査", () =
     ).toEqual(["本文/001.txt", "設定/a.json"]);
   });
 
+  test("`.gitignore` は拡張機能が整える作業用の設定なので、本文の変更に数えない（B3）", () => {
+    expect(changesOutsideLedger([".gitignore", ".aiwriter/locks/locks.jsonl"])).toEqual([]);
+    // 本文の変更が一緒にあれば、そちらだけが残る
+    expect(changesOutsideLedger([".gitignore", "本文/001.txt"])).toEqual(["本文/001.txt"]);
+  });
+
   test("名前が似ているだけの .aiwriter-old は台帳ではない", () => {
     expect(changesOutsideLedger([".aiwriter-old/x.txt"])).toEqual([".aiwriter-old/x.txt"]);
   });

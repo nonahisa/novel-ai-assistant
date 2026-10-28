@@ -236,6 +236,7 @@ export const STEP_DEFS: readonly StepDef[] = [
       "novelai.toggleReviewLock",
       "novelai.finishReviewAndReturn",
       "novelai.collectEditorProposals",
+      "novelai.revokeEditorAccess",
       "novelai.reviewProposals",
       "novelai.showEditHistory",
     ],

@@ -44,6 +44,7 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
   { id: "novelai.shareWithEditor", label: "編集部へ渡す" },
   { id: "novelai.finishReviewAndReturn", label: "校閲を終えて返す" },
   { id: "novelai.joinAsEditor", label: "編集部として参加" },
+  { id: "novelai.revokeEditorAccess", label: "編集部連携を解除" },
 
   // AIを長く回す系。2回ぶん送れば2回ぶん待ち、クラウドAIなら2回ぶん課金される
   { id: "novelai.checkTypos", label: "誤字脱字検知" },
