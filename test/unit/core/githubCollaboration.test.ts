@@ -150,12 +150,36 @@ describe("編集部の権利を外す（作者の側からの解除）", () => {
     ]);
   });
 
-  test("404 は、もう共同編集者ではない（外す対象が無い）。成功とみなす", async () => {
+  test("404 でも、リポジトリが見える（200）と確かめたあとだけ「もう共同編集者ではない」とみなす", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/invitations")) return json(200, []);
+      if (init?.method === "DELETE") return json(404, { message: "Not Found" });
+      return json(200, { id: 1 }); // GET /repos/{owner}/{repo}
+    });
+    const result = await revokeEditorAccess("t", ref, "octocat", fetchImpl as unknown as typeof fetch);
+    expect(result).toEqual({ ok: true, outcome: "notCollaborator" });
+  });
+
+  test("404 で、リポジトリも見えないなら、外せたと言わない（鍵のアカウント違いの見込み）", async () => {
     const fetchImpl = vi.fn(async (url: string) =>
       url.includes("/invitations") ? json(200, []) : json(404, { message: "Not Found" })
     );
     const result = await revokeEditorAccess("t", ref, "octocat", fetchImpl as unknown as typeof fetch);
-    expect(result).toEqual({ ok: true, outcome: "notCollaborator" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.detail).toContain("別のGitHubアカウント");
+  });
+
+  test("招待の一覧が読めなければ、外せたと言わない（受けていない招待が残りうる）", async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.includes("/invitations")) return json(403, { message: "Forbidden" });
+      return json(204);
+    });
+    const result = await revokeEditorAccess("t", ref, "octocat", fetchImpl as unknown as typeof fetch);
+    expect(result.ok).toBe(false);
+    // 共同編集者の口へ進んで「成功」にしない
+    expect(calls.some((call) => call.startsWith("DELETE"))).toBe(false);
   });
 
   test("招待を受ける前なら、招待を探して DELETE invitations（共同編集者の口は叩かない）", async () => {

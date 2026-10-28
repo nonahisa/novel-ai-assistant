@@ -9,6 +9,7 @@ import {
   describeLockChanges,
   importEditorProposalsQuietly,
   readPointer,
+  rememberRegisteredWorks,
   resendDecisionsQuietly,
   type ImportResult,
   type PushOutcome,
@@ -168,6 +169,8 @@ export function collectEditorInboxQuietly(
   works: readonly WorkEntry[],
   deps: InboxDeps = defaultInboxDeps
 ): Promise<number> {
+  // 合わせ直し（reset）の前に「置き場が書庫を含まないか」を確かめるため、登録済みの作品を覚えておく
+  rememberRegisteredWorks(works);
   if (inboxRunning) return inboxRunning;
   const run = runInbox(works, deps).finally(() => {
     inboxRunning = undefined;

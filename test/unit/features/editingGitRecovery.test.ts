@@ -19,6 +19,8 @@ const {
   pushWasRejected,
   verifyKnownDestination,
   cloneWithCredential,
+  importEditorProposalsQuietly,
+  rememberRegisteredWorks,
 } = await import("../../../src/features/shareWithEditor");
 const { publishLedger } = await import("../../../src/features/finishReview");
 
@@ -285,34 +287,163 @@ describe("編集用リポジトリの立ち直り", () => {
       expect(refused?.detail).toContain("GitHub のリポジトリとして読めません");
     });
   });
-});
 
-describe("取り寄せに失敗したときの後始末（B9）", () => {
-  test("途中のフォルダーを消す", async () => {
-    const base = await fsp.mkdtemp(nodePath.join(os.tmpdir(), "novelai-clonefail-"));
-    workspace.fs = {
-      createDirectory: async (uri: { fsPath: string }) => {
-        await fsp.mkdir(uri.fsPath, { recursive: true });
-      },
-      delete: async (uri: { fsPath: string }, options?: { recursive?: boolean }) => {
-        await fsp.rm(uri.fsPath, { recursive: options?.recursive ?? false, force: true });
-      },
-    } as unknown as typeof workspace.fs;
-    const destination = nodePath.join(base, "編集部", "x-editing");
-    try {
-      // 存在しない送り先：git が失敗し、途中のフォルダーが残る場合がある
-      await fsp.mkdir(destination, { recursive: true });
-      await fsp.writeFile(nodePath.join(destination, "途中.txt"), "x");
+  describe("レビュー2回目の指摘", () => {
+    const workIn = (folder: string): WorkEntry => ({
+      id: `w_${nodePath.basename(folder)}`,
+      title: nodePath.basename(folder),
+      folderPath: folder,
+      registeredAt: "2026-10-29T00:00:00.000Z",
+    });
+
+    test("1：取り寄せの宛先が既にあれば断り、中身を消さない", async () => {
+      const existing = nodePath.join(base, "作者のフォルダー");
+      await put(existing, "大事な原稿.txt", "消してはいけない");
+
       const result = await cloneWithCredential(
         undefined,
         nodePath.join(base, "存在しない.git"),
-        destination
+        existing
       );
+
       expect(result.ok).toBe(false);
-      await expect(fsp.stat(destination)).rejects.toThrow();
-    } finally {
-      workspace.fs = {} as typeof workspace.fs;
-      await fsp.rm(base, { recursive: true, force: true }).catch(() => undefined);
-    }
+      expect(await read(existing, "大事な原稿.txt")).toBe("消してはいけない");
+    });
+
+    test("1：自分で作る宛先なら、失敗したあとに途中のフォルダーが残らない", async () => {
+      const fresh = nodePath.join(base, "編集部", "x-editing");
+      const result = await cloneWithCredential(undefined, nodePath.join(base, "存在しない.git"), fresh);
+      expect(result.ok).toBe(false);
+      await expect(fsp.stat(fresh)).rejects.toThrow();
+    });
+
+    test("3：台帳以外の変更が残っていれば、reset せずに止める（編集部の側）", async () => {
+      const editor = await cloneInto("editor");
+      const author = await cloneInto("author");
+      await put(author, PROPOSALS, '{"kind":"decision","proposalId":"a1"}\n');
+      await commitAll(author, "作者");
+      await git(author, "push");
+      // 編集部の作業フォルダーに、台帳でない未記録の変更がある
+      await put(editor, "本文/メモ.txt", "消えてはいけない書きかけ");
+      await put(editor, PROPOSALS, '{"kind":"proposal","id":"e1"}\n');
+      await commitAll(editor, "ledger");
+
+      const result = await reconcileDiverged(editor, runGit, { ledgerOnly: true });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.detail).toContain("GitHubと同期");
+      expect(await read(editor, "本文/メモ.txt")).toBe("消えてはいけない書きかけ");
+    });
+
+    test("3：台帳以外に触れた「送れていない記録」があっても止める", async () => {
+      const editor = await cloneInto("editor");
+      const author = await cloneInto("author");
+      await put(author, PROPOSALS, '{"kind":"decision","proposalId":"a1"}\n');
+      await commitAll(author, "作者");
+      await git(author, "push");
+      await put(editor, "本文/001.txt", "編集部の送れていない記録");
+      await commitAll(editor, "本文に触れた記録");
+
+      const result = await reconcileDiverged(editor, runGit, { ledgerOnly: true });
+
+      expect(result.ok).toBe(false);
+      expect(await read(editor, "本文/001.txt")).toBe("編集部の送れていない記録");
+    });
+
+    test("3：publishLedger は、頭で本文などの未記録の変更を見つけたら何も送らない", async () => {
+      const editor = await cloneInto("editor");
+      await put(editor, "本文/001.txt", "書きかけ");
+      await put(editor, PROPOSALS, '{"kind":"proposal","id":"e1"}\n');
+
+      const failure = await publishLedger(workIn(editor), "テスト", runGit);
+
+      expect(failure).toContain("未記録の変更");
+      const log = await git(editor, "log", "--oneline", "origin/main..HEAD");
+      expect(log).toBe("");
+    });
+
+    test("8：置き場が書庫そのもの（作品を含む）なら、reset を走らせない", async () => {
+      // 書庫そのものがリポジトリで、作品フォルダーを含む。分かれている
+      const library = await cloneInto("書庫");
+      const editor = await cloneInto("editor");
+      await put(editor, "本文/002.txt", "別の機械の書き込み");
+      await commitAll(editor, "別の機械");
+      await git(editor, "push");
+      await put(library, "作品A/本文/001.txt", "作者が書いた未送信の原稿");
+      await commitAll(library, "作者の原稿");
+
+      const result = await reconcileDiverged(library, runGit, {
+        registeredWorks: [workIn(nodePath.join(library, "作品A"))],
+      });
+
+      expect(result.ok).toBe(false);
+      // 原稿は消えていない。HEAD も動いていない
+      expect(await read(library, "作品A/本文/001.txt")).toBe("作者が書いた未送信の原稿");
+      expect(await git(library, "log", "--oneline", "origin/main..HEAD")).not.toBe("");
+    });
+
+    test("8：作品の中の置き場にも走らせない", async () => {
+      const inside = await cloneInto("作品A");
+      const result = await reconcileDiverged(inside, runGit, {
+        registeredWorks: [workIn(inside)],
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    test("7：分かれたままの編集用フォルダーでも、取り込みは相手の最新の鍵を読む", async () => {
+      const editingX = await cloneInto("editing");
+      const editor = await cloneInto("editor");
+      const workRoot = nodePath.join(base, "作品");
+      await put(workRoot, nodePath.join(".aiwriter", "cache", "editing.json"), JSON.stringify({ folderPath: editingX }));
+      const acquire =
+        '{"kind":"acquire","file":"本文/001.txt","holder":"編集部","holderKind":"editor","time":"2026-10-29T10:00:00.000Z","note":""}';
+      const release =
+        '{"kind":"release","file":"本文/001.txt","holder":"編集部","holderKind":"editor","time":"2026-10-29T12:00:00.000Z","note":""}';
+
+      // 作者の写しが送れていない（ahead）間に、編集部が鍵を取って解いて先に送った（behind）
+      await put(editingX, LOCKS, `${acquire}\n`);
+      await put(editingX, "本文/003.txt", "作者の写し");
+      await commitAll(editingX, "作者の写し");
+      await put(editor, LOCKS, `${acquire}\n${release}\n`);
+      await commitAll(editor, "編集部");
+      await git(editor, "push");
+
+      rememberRegisteredWorks([workIn(workRoot)]);
+      const result = await importEditorProposalsQuietly(workIn(workRoot), runGit);
+
+      expect(result.status).toBe("done");
+      const ledger = await read(workRoot, LOCKS);
+      expect(ledger).toContain('"kind":"release"');
+      rememberRegisteredWorks([]);
+    });
+
+    test("7：合わせ直せないとき（置き場が書庫を含む）も、上流の鍵を混ぜて読む", async () => {
+      const editingX = await cloneInto("editing");
+      const editor = await cloneInto("editor");
+      const workRoot = nodePath.join(editingX, "作品");
+      await fsp.mkdir(workRoot, { recursive: true });
+      // 編集用フォルダーが、登録済みの作品を含んでいる（reset を走らせてはいけない形）
+      await put(workRoot, nodePath.join(".aiwriter", "cache", "editing.json"), JSON.stringify({ folderPath: editingX }));
+      const acquire =
+        '{"kind":"acquire","file":"本文/001.txt","holder":"編集部","holderKind":"editor","time":"2026-10-29T10:00:00.000Z","note":""}';
+      const release =
+        '{"kind":"release","file":"本文/001.txt","holder":"編集部","holderKind":"editor","time":"2026-10-29T12:00:00.000Z","note":""}';
+      await put(editingX, LOCKS, `${acquire}\n`);
+      await put(editingX, "作品/原稿.txt", "作者の未送信の原稿");
+      await commitAll(editingX, "作者");
+      await put(editor, LOCKS, `${acquire}\n${release}\n`);
+      await commitAll(editor, "編集部");
+      await git(editor, "push");
+
+      rememberRegisteredWorks([workIn(workRoot)]);
+      await importEditorProposalsQuietly(workIn(workRoot), runGit);
+      rememberRegisteredWorks([]);
+
+      // reset は走っていない（原稿は残る）
+      expect(await read(editingX, "作品/原稿.txt")).toBe("作者の未送信の原稿");
+      // それでも上流の解除は読めている
+      expect(await read(workRoot, LOCKS)).toContain('"kind":"release"');
+    });
   });
 });
+

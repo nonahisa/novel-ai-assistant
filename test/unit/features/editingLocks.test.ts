@@ -193,6 +193,72 @@ describe("校閲の範囲", () => {
     });
   });
 
+  describe("大文字を含む道（鍵は小文字で記録される）", () => {
+    // 作品の本文フォルダーは `Manuscript`、話は `Chapter03.txt`。鍵の `file` は
+    // `normalizeFile` で小文字にして記録される（`manuscript/chapter03.txt`）
+    const config = {
+      schemaVersion: "1",
+      workTitle: "氷の街",
+      manuscriptDir: "Manuscript",
+      settingsDir: "設定",
+      createdAt: "2026-10-29T00:00:00.000Z",
+    };
+    const shareUpper = () =>
+      copyForEditor(workPaths(work(), config), editing, "Manuscript", undefined);
+
+    beforeEach(async () => {
+      for (const name of ["Chapter03", "Chapter04"]) {
+        await put(editing, nodePath.join("Manuscript", `${name}.txt`), `前回-${name}`);
+      }
+      await put(
+        editing,
+        LOCKS,
+        [
+          lockLine("acquire", "manuscript/chapter03.txt", "editor", "2026-10-28T10:00:00.000Z"),
+          // 作品のどこにも無い話の鍵。実際には何も飛ばしていない
+          lockLine("acquire", "manuscript/chapter99.txt", "editor", "2026-10-28T10:00:01.000Z"),
+        ].join("\n") + "\n"
+      );
+    });
+
+    test("校閲中の話を上書きしない。範囲外は写り、飛ばした話だけが載る", async () => {
+      await put(root, nodePath.join("Manuscript", "Chapter03.txt"), "新-Chapter03");
+      await put(root, nodePath.join("Manuscript", "Chapter04.txt"), "新-Chapter04");
+
+      const result = await shareUpper();
+
+      expect(await read(editing, nodePath.join("Manuscript", "Chapter03.txt"))).toBe("前回-Chapter03");
+      expect(await read(editing, nodePath.join("Manuscript", "Chapter04.txt"))).toBe("新-Chapter04");
+      // 実際に飛ばしたものだけ（鍵だけあって何も無い chapter99 は載せない）
+      expect(result.skippedLocked).toEqual(["Manuscript/Chapter03.txt"]);
+    });
+
+    test("作者の側で消えていても、校閲中の話は消さない", async () => {
+      await put(root, nodePath.join("Manuscript", "Chapter04.txt"), "新-Chapter04");
+
+      await shareUpper();
+
+      expect(await has(editing, nodePath.join("Manuscript", "Chapter03.txt"))).toBe(true);
+    });
+  });
+
+  describe("解除の時刻（時計のずれ）", () => {
+    test("鍵より時計が遅れていても、解除の行のほうが新しくなり、書けるようになる", async () => {
+      const future = new Date(Date.now() + 3 * 3600_000).toISOString();
+      await put(root, nodePath.join("本文", "002.txt"), "あめ");
+      await put(root, LOCKS, `${lockLine("acquire", "本文/002.txt", "editor", future)}\n`);
+      expect(await editorLockOf(work(), nodePath.join(root, "本文", "002.txt"))).toBeDefined();
+
+      await new FileLockStore(work()).release(["本文/002.txt"], "作者", "author", "連携を解除");
+
+      expect(await editorLockOf(work(), nodePath.join(root, "本文", "002.txt"))).toBeUndefined();
+      const last = (await read(root, LOCKS)).trim().split("\n").pop() ?? "";
+      expect(Date.parse((JSON.parse(last) as { time: string }).time)).toBeGreaterThan(
+        Date.parse(future)
+      );
+    });
+  });
+
   describe("鍵の取り込み", () => {
     beforeEach(async () => {
       await put(root, POINTER, JSON.stringify({ folderPath: editing }));

@@ -244,7 +244,10 @@ export async function revokeEditorAccess(
     `${repoEndpoint(ref)}/invitations?per_page=100`,
     fetchImpl
   );
-  if (listed.ok && Array.isArray(listed.body)) {
+  // **招待の一覧が読めなければ、外せたと言わない。** まだ受けていない招待が残っていれば、
+  // あとで受けられてしまう。読めなかった理由は番号で返す
+  if (!listed.ok) return revokeFailure(listed);
+  if (Array.isArray(listed.body)) {
     for (const row of listed.body) {
       const record = asRecord(row);
       const invitee = asRecord(record.invitee).login;
@@ -272,8 +275,19 @@ export async function revokeEditorAccess(
     fetchImpl
   );
   if (removed.ok) return { ok: true, outcome: "removed" };
-  // 404＝その人はもう共同編集者ではない（外す対象が無い）。権利は無いので成功とみなす
-  if (removed.kind === "notFound") return { ok: true, outcome: "notCollaborator" };
+  // 404 は「その人はもう共同編集者ではない」とは限らない（GitHub は、見えないリポジトリにも
+  // 404 を返す）。**リポジトリが見える（200）と確かめたあとだけ**、外す対象が無いとみなす。
+  // 見えなければ、鍵のアカウントが違う見込みなので、失敗にして手で外す案内へ落とす
+  if (removed.kind === "notFound") {
+    const seen = await callGithub(token, "GET", repoEndpoint(ref), fetchImpl);
+    if (seen.ok) return { ok: true, outcome: "notCollaborator" };
+    return {
+      ok: false,
+      reason: "other",
+      detail:
+        "リポジトリを確かめられませんでした（別のGitHubアカウントでサインインしている見込みです）。",
+    };
+  }
   return revokeFailure(removed);
 }
 

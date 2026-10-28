@@ -7,13 +7,14 @@ import {
   runGit,
   pullFastForward,
   pullFastForwardAutostash,
+  parseStatusPorcelainPaths,
   type GitCommandRunner,
 } from "../core/git";
 import { cloneRepository, cloneWithGh } from "../core/gitClone";
 import { runSerialized } from "../core/ledgerQueue";
 import { FileLockStore } from "../core/fileLockStore";
 import { ProposalStore } from "../core/proposalStore";
-import { parseLockEvents, resolveLocks } from "../models/fileLock";
+import { normalizeFile, parseLockEvents, resolveLocks } from "../models/fileLock";
 import {
   addRemote,
   commitAll,
@@ -35,9 +36,11 @@ import {
   autoEditingDestination,
   describeLockRange,
   editingFolderName,
+  editingPlaceProblem,
   editingQueueKey,
   LEDGER_FILES,
   mergeProposalJsonl,
+  normalizeRelativeKey,
   planShareSource,
   replacedDirectories,
   SHARED_FILES,
@@ -253,6 +256,7 @@ export async function shareWithEditor(
   }
 
   const run = runGit;
+  rememberRegisteredWorks(works);
 
   const pointer = await readPointer(work);
   const site = await readSite(work);
@@ -347,7 +351,7 @@ export async function shareWithEditor(
         const cloned = await cloneEditingRepository(cloneFrom, target);
         if (!cloned.ok) return { ok: false, detail: cloned.detail };
       }
-      return sendToEditor(work, target, { run, pointer, site });
+      return sendToEditor(work, target, { run, pointer, site, works });
     })
   );
 
@@ -500,7 +504,7 @@ async function decideDestination(
       if (!(await exists(candidate))) return candidate;
     }
   }
-  return chooseDestination(work);
+  return chooseDestination(work, works);
 }
 
 /**
@@ -513,7 +517,8 @@ async function decideDestination(
  */
 export async function prepareEditingFolder(
   folder: string,
-  run: GitCommandRunner
+  run: GitCommandRunner,
+  registeredWorks?: readonly WorkEntry[]
 ): Promise<PushOutcome | undefined> {
   if (!(await hasOrigin(folder, run))) return undefined;
   const status = await readSyncStatus(folder, run);
@@ -526,7 +531,7 @@ export async function prepareEditingFolder(
   if (pulled.failure.kind === "diverged") {
     // 編集用フォルダーの中身は、提案・鍵の台帳以外すべて作者の側から作り直せる。
     // 両方の台帳を混ぜて取っておき、相手の最新へ合わせてから台帳を戻す
-    const reconciled = await reconcileDiverged(folder, run);
+    const reconciled = await reconcileDiverged(folder, run, { registeredWorks });
     return reconciled.ok ? undefined : { ok: false, detail: reconciled.detail };
   }
   return {
@@ -550,13 +555,58 @@ export async function prepareEditingFolder(
  * 台帳以外（本文・設定資料）は、作者の側が写し直す／編集部の側は書かないので、
  * 相手の側をそのまま使ってよい。
  */
+export interface ReconcileOptions {
+  /**
+   * 台帳3本（提案・鍵・編集履歴）以外に、変更か送れていない記録があれば**止める**
+   * （編集部の側。`reset --hard` は黙って消すので、消えるものが無いと確かめてからだけ走らせる）。
+   * 作者の側の編集用フォルダーは、提案・鍵の台帳以外すべて作者の側から作り直せるので付けない。
+   */
+  ledgerOnly?: boolean;
+  /**
+   * 登録済みの作品。**どの作品も含まず、どの作品の中でもない**フォルダーにだけ
+   * `reset --hard` を走らせる（作者が選んだ置き場が書庫そのものだったとき、書庫に走らせない）。
+   */
+  registeredWorks?: readonly WorkEntry[];
+}
+
 export async function reconcileDiverged(
   folder: string,
-  run: GitCommandRunner
+  run: GitCommandRunner,
+  options: ReconcileOptions = {}
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
+  // **reset の前に確かめる**（消えてからでは遅い）
+  if (options.registeredWorks) {
+    const problem = editingPlaceProblem(
+      folder,
+      options.registeredWorks.map((one) => one.folderPath)
+    );
+    if (problem) {
+      return {
+        ok: false,
+        detail:
+          "この場所は登録済みの作品を含む／作品の中にあるため、合わせ直し（reset）を走らせませんでした。" +
+          "編集用フォルダーは、作品とは別の新しい場所にしてください。",
+      };
+    }
+  }
   const fetched = await fetchRemote(folder, run);
   if (!fetched.ok) {
     return { ok: false, detail: fetched.detail ?? "GitHub から取り寄せられませんでした" };
+  }
+  if (options.ledgerOnly) {
+    const outside = await changesBeyondLedgers(folder, run);
+    if (outside === undefined || outside.length > 0) {
+      return {
+        ok: false,
+        detail:
+          outside === undefined
+            ? "作業フォルダーの状態を読めなかったため、合わせ直しませんでした。"
+            : `台帳（提案・鍵・編集履歴）以外に、変更か送れていない記録があるため、合わせ直さずに止めました（${outside
+                .slice(0, 3)
+                .join("、")}${outside.length > 3 ? " ほか" : ""}）。` +
+              "先に「GitHubと同期」で取り込んでから、もう一度押してください。",
+      };
+    }
   }
   const merged = new Map<string, string>();
   for (const relative of LEDGER_FILES) {
@@ -583,6 +633,32 @@ export async function reconcileDiverged(
 }
 
 /**
+ * 台帳3本以外の、変更か送れていない記録のパス。読めなければ `undefined`。
+ *
+ * `status --porcelain`（作業ツリーの変更）と、`@{u}...HEAD`（上流との分かれ目から
+ * 手元の側で触ったパス＝送れていない記録）を合わせて見る。
+ */
+export async function changesBeyondLedgers(
+  folder: string,
+  run: GitCommandRunner
+): Promise<string[] | undefined> {
+  const working = await run(
+    ["status", "--porcelain", "-z", "--untracked-files=all"],
+    folder,
+    15_000
+  );
+  if (working.code !== 0) return undefined;
+  const unpushed = await run(["diff", "--name-only", "-z", "@{u}...HEAD"], folder, 15_000);
+  if (unpushed.code !== 0) return undefined;
+  const changed = [
+    ...parseStatusPorcelainPaths(working.stdout),
+    ...unpushed.stdout.split(String.fromCharCode(0)).filter((name) => name !== ""),
+  ];
+  const ledgers = new Set<string>(LEDGER_FILES);
+  return [...new Set(changed.map(normalizeRelativeKey))].filter((name) => !ledgers.has(name));
+}
+
+/**
  * 送信が断られたか。**fetch してから、相手が先に進んでいる（behind）かで見る**
  * （エラー文から原因を当てない）。
  */
@@ -596,8 +672,33 @@ export async function pushWasRejected(
   return status.kind === "tracked" && status.behind > 0;
 }
 
+/**
+ * 登録済みの作品（直近に分かったもの）。送り返しなど、作品を1つしか受け取らない入口でも
+ * 「置き場が書庫を含まないか」を確かめられるよう、分かった時点で覚えておく。
+ */
+let knownWorks: readonly WorkEntry[] = [];
+
+export function rememberRegisteredWorks(works: readonly WorkEntry[]): void {
+  knownWorks = works;
+}
+
+/** この作品と、覚えている登録済みの作品（重複は道で除く） */
+function worksFor(work: WorkEntry, given?: readonly WorkEntry[]): WorkEntry[] {
+  const seen = new Set<string>();
+  const result: WorkEntry[] = [];
+  for (const one of [work, ...(given ?? []), ...knownWorks]) {
+    const key = one.folderPath;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(one);
+  }
+  return result;
+}
+
 /** 送り返しの付き物：渡し方の細部（試験で差し替える） */
 export interface SendContext {
+  /** 登録済みの作品（置き場の安全の確認に使う） */
+  works?: readonly WorkEntry[];
   run: GitCommandRunner;
   pointer?: EditingPointer;
   site: EditingSite;
@@ -668,9 +769,26 @@ export async function sendToEditor(
   const config = await readWorkConfig(work);
   const paths = workPaths(work, config ?? undefined);
 
+  // **写す前に、置き場が作品を含まない・作品の中でもないと確かめる。** 写しは置き換え対象の
+  // フォルダーを消し、合わせ直しは `reset --hard` を走らせる。置き場が書庫そのものだと両方が
+  // 作者の原稿に届く
+  const registered = worksFor(work, ctx.works);
+  const placeProblem = editingPlaceProblem(
+    destination,
+    registered.map((one) => one.folderPath)
+  );
+  if (placeProblem) {
+    return {
+      ok: false,
+      detail:
+        "この編集用フォルダーは、登録済みの作品を含む／作品の中にあるため、使えません" +
+        "（作者の原稿を巻き込むおそれがあります）。作品とは別の新しい場所へ渡し直してください。",
+    };
+  }
+
   const verified = await verifyKnownDestination(destination, ctx.site, run, ctx.verify);
   if (verified) return verified;
-  const prepared = await prepareEditingFolder(destination, run);
+  const prepared = await prepareEditingFolder(destination, run, registered);
   if (prepared) return prepared;
 
   let copied = await copyForEditor(paths, destination, config?.manuscriptDir, config?.settingsDir);
@@ -691,9 +809,9 @@ export async function sendToEditor(
   let result = await setUpAndPush(work, destination, setUp);
   if (!result.ok && (await pushWasRejected(destination, run))) {
     logStep(`編集用フォルダーへの送信が断られたので、台帳を混ぜて合わせ直して送り直す（${work.title}）`);
-    const reconciled = await reconcileDiverged(destination, run);
+    const reconciled = await reconcileDiverged(destination, run, { registeredWorks: registered });
     if (!reconciled.ok) return { ok: false, detail: reconciled.detail };
-    copied = await copyForEditor(paths, destination, config?.manuscriptDir, config?.settingsDir);
+    copied =await copyForEditor(paths, destination, config?.manuscriptDir, config?.settingsDir);
     result = await setUpAndPush(work, destination, setUp);
   }
   return { ...result, skippedLocked: copied.skippedLocked };
@@ -705,6 +823,15 @@ export async function cloneWithCredential(
   url: string,
   destination: string
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
+  // **宛先が既にあれば取り寄せない。** 失敗のあとの後始末で宛先を消すので、作者が選んだ
+  // 既存のフォルダーを丸ごと消さないよう、消してよいのは**この関数が自分で作ったとき
+  // だけ**にする（先に無いことを確かめる）
+  if (await exists(destination)) {
+    return {
+      ok: false,
+      detail: `「${destination}」はすでに存在します。中身を失わないため、取り寄せませんでした。`,
+    };
+  }
   const parent = path.dirname(destination);
   await vscode.workspace.fs.createDirectory(path.toUri(parent));
   // `git credential approve` の作業ディレクトリは、あるフォルダーでなければならない
@@ -744,7 +871,10 @@ export function skippedLockedMessage(skipped: readonly string[]): string {
 }
 
 /** 置き場所を聞く。**作品フォルダーの中には置かせない**（入れ子のリポジトリになる） */
-async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
+export async function chooseDestination(
+  work: WorkEntry,
+  works: readonly WorkEntry[] = [work]
+): Promise<string | undefined> {
   // **既定の場所を明示する**（設計書6.97.6）。渡さないとVS Codeは
   // 「最後に使った場所」を開く。見出しで「書庫の外を勧めます」と書いておいて、
   // 窓が作品フォルダーの中で開くのでは案内になっていない。
@@ -780,10 +910,30 @@ async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
   // **判定は `isNestedLocation` に任せる**——以前はここで独自に比べており、
   // 大文字小文字の違いを見ていなかった（置き場は作者がダイアログで選ぶので、
   // 登録時の `work.folderPath` と綴りだけが違う道になりうる）
-  if (isNestedLocation(destination, work.folderPath)) {
+  const problem = editingPlaceProblem(destination, [
+    work.folderPath,
+    ...works.map((one) => one.folderPath),
+  ]);
+  if (problem === "insideWork") {
     void vscode.window.showErrorMessage(
       "作品フォルダーの中には置けません。リポジトリが入れ子になり、" +
         "書庫の側へ巻き込まれます。別の場所を選んでください。"
+    );
+    return undefined;
+  }
+  if (problem === "containsWork") {
+    void vscode.window.showErrorMessage(
+      "作品を含むフォルダー（書庫そのものなど）は、編集用フォルダーにできません。" +
+        "別の場所を選んでください。"
+    );
+    return undefined;
+  }
+  // **すでにある場所は断る。** 取り寄せの失敗の後始末や、合わせ直しが、作者の既存の
+  // フォルダーの中身を消しうる。新しい名前の場所だけを使う
+  if (await exists(destination)) {
+    void vscode.window.showErrorMessage(
+      `「${destination}」はすでに存在します。中身を失わないため、使えません。` +
+        "まだ無い名前を指定してください。"
     );
     return undefined;
   }
@@ -820,10 +970,18 @@ export async function copyForEditor(
     );
   }
   const locked = await editorLockedPaths(destination);
-  const isLocked = (relative: string): boolean => locked.has(manifestKey(relative));
+  // **突き合わせは `normalizeFile`（小文字・区切りの統一）に揃える。** 鍵の `file` は
+  // 小文字で記録されるので、`Manuscript/Chapter03.txt` のように大文字を含む道が素通りして
+  // 校閲中の話を上書き・削除していた
+  const isLocked = (relative: string): boolean => locked.has(normalizeFile(relative));
+  /** 実際に飛ばした話（作品の綴りのまま）。鍵があっても何もしなかったものは載せない */
+  const skipped = new Map<string, string>();
+  const skip = (relative: string): void => {
+    skipped.set(normalizeFile(relative), manifestKey(relative));
+  };
   /** この置き換え対象のフォルダーの中に、校閲中の話があるか */
   const hasLockedUnder = (name: string): boolean => {
-    const prefix = `${manifestKey(name)}/`;
+    const prefix = `${normalizeFile(name)}/`;
     return [...locked].some((key) => key.startsWith(prefix));
   };
 
@@ -857,7 +1015,10 @@ export async function copyForEditor(
     if (hasLockedUnder(name)) {
       // 範囲があるときは、校閲中でない話だけを消す（校閲中の話は残す）
       for (const file of await walkFiles(target)) {
-        if (isLocked(`${manifestKey(name)}/${file}`)) continue;
+        if (isLocked(`${manifestKey(name)}/${file}`)) {
+          skip(`${manifestKey(name)}/${file}`);
+          continue;
+        }
         await vscode.workspace.fs.delete(path.toUri(path.join(target, ...file.split("/"))), {
           useTrash: false,
         });
@@ -886,7 +1047,10 @@ export async function copyForEditor(
   for (const previous of previousManifest) {
     if (keep.has(manifestKey(previous))) continue;
     // 校閲中の話は、作者の側で消えていても消さない
-    if (isLocked(previous)) continue;
+    if (isLocked(previous)) {
+      if (await exists(path.join(destination, ...previous.split("/")))) skip(previous);
+      continue;
+    }
     const target = path.join(destination, ...previous.split("/"));
     if (!(await exists(target))) continue;
     await vscode.workspace.fs.delete(path.toUri(target), { useTrash: false });
@@ -904,7 +1068,10 @@ export async function copyForEditor(
     if (hasLockedUnder(name)) {
       // 範囲があるときは、本文を1件ずつ写す（校閲中の話は写さない）
       for (const file of await walkFiles(source)) {
-        if (isLocked(`${manifestKey(name)}/${file}`)) continue;
+        if (isLocked(`${manifestKey(name)}/${file}`)) {
+          skip(`${manifestKey(name)}/${file}`);
+          continue;
+        }
         const to = path.join(target, ...file.split("/"));
         await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(to)));
         await vscode.workspace.fs.copy(
@@ -929,7 +1096,10 @@ export async function copyForEditor(
   // 編集部の側も `config.json` は同じ（`manuscriptDir: 本文`）で、本文
   // フォルダーが無いので同じ決め方で直下を歩き、同じ話が見える
   for (const relative of rootCopies) {
-    if (isLocked(relative)) continue;
+    if (isLocked(relative)) {
+      skip(relative);
+      continue;
+    }
     const target = path.join(destination, relative);
     await vscode.workspace.fs.createDirectory(
       path.toUri(path.dirname(target))
@@ -967,7 +1137,7 @@ export async function copyForEditor(
 
   // 提案と鍵の台帳は、冒頭で混ぜてある（承認・却下は作者が書くので、置き換えると
   // 編集部の提案が消える）
-  return { skippedLocked: [...locked] };
+  return { skippedLocked: [...skipped.values()] };
 }
 
 /** 鍵の台帳の、作品フォルダーからの相対パス */
@@ -981,7 +1151,8 @@ export async function editorLockedPaths(folder: string): Promise<Set<string>> {
   const text = await readTextIfAny(path.join(folder, LOCK_RELATIVE));
   const locked = new Set<string>();
   for (const lock of resolveLocks(parseLockEvents(text)).values()) {
-    if (lock.holderKind === "editor") locked.add(manifestKey(lock.file));
+    // 鍵の台帳は `normalizeFile`（小文字）で突き合わせる
+    if (lock.holderKind === "editor") locked.add(normalizeFile(lock.file));
   }
   return locked;
 }
@@ -1521,10 +1692,42 @@ export async function importEditorProposalsQuietly(
   }
   const folder = pointer.folderPath;
   return runSerialized(editingQueueKey(folder), async (): Promise<ImportResult> => {
-    const pulled = await pullFastForward(folder, run);
+    const runner = run ?? runGit;
+    const pulled = await pullFastForward(folder, runner);
 
-    const incoming = await readTextIfAny(path.join(folder, PROPOSAL_RELATIVE));
-    const incomingLocks = await readTextIfAny(path.join(folder, LOCK_RELATIVE));
+    /*
+      **取り寄せが断られたとき、手元の台帳は古いかもしれない。** 分かれたままの編集用フォルダー
+      （作者の写しが送れていない間に、編集部が先に送った）は、早送りできず、古い鍵を読み続ける
+      （解除や新しい範囲が届かない）。状態で見分ける（エラー文は見ない）：
+      - 分かれている（ahead と behind の両方）なら、台帳を混ぜて合わせ直す（`reconcileDiverged`。
+        登録済みの作品を含む置き場には走らせない）
+      - 合わせ直せない／遅れているだけで取り込めないときは、上流の台帳（`@{u}`）も混ぜて読む
+    */
+    let behindUpstream = false;
+    if (!pulled.ok) {
+      const status = await readSyncStatus(folder, runner);
+      if (status.kind === "tracked" && status.behind > 0) {
+        behindUpstream = true;
+        if (status.ahead > 0) {
+          const reconciled = await reconcileDiverged(folder, runner, {
+            registeredWorks: worksFor(work),
+          });
+          if (reconciled.ok) behindUpstream = false;
+        }
+      }
+    }
+    const readLedger = async (relative: string): Promise<string> => {
+      const local = await readTextIfAny(path.join(folder, relative));
+      if (!behindUpstream) return local;
+      const shown = await runner(
+        ["show", `@{u}:${normalizeRelativeKey(relative)}`],
+        folder,
+        15_000
+      );
+      return shown.code === 0 ? mergeProposalJsonl(local, shown.stdout).text : local;
+    };
+    const incoming = await readLedger(PROPOSAL_RELATIVE);
+    const incomingLocks = await readLedger(LOCK_RELATIVE);
 
     const added =
       incoming.trim().length > 0

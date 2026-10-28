@@ -2680,6 +2680,24 @@ export class ManuscriptEditorProvider
           document,
           `原稿エディタ：編集部が校閲中の話なので、打った字（${item.text.length}字）を原稿へ入れずに画面の控えへ回しました`
         );
+        /*
+          **拡張機能の側にも控える**（読み取り専用の道と同じ。作者の裁定、2026-10-15 23時）。
+          画面の控えだけだと、タブを閉じたときに打った字が消える。閉じても、7日のうちに
+          同じ話を開けば［戻す］で画面へ戻せる。原稿は書き換えない
+        */
+        const lockedBefore = toLf(document.getText());
+        if (readonlyBase === undefined) readonlyBase = lockedBefore;
+        void this.writeReadonlyRescues(
+          putReadonlyRescue(
+            this.readReadonlyRescues(),
+            makeReadonlyRescue(key, item.text, readonlyBase, Date.now()),
+            Date.now()
+          )
+        );
+        const lockedDecision = ledger.decide(item, lockedBefore);
+        if (lockedDecision.kind !== "conflict") {
+          ledger.rememberRejected(item.text, lockedDecision.baseKey);
+        }
         sendNow();
         return "conflict";
       }

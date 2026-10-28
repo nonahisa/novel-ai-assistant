@@ -192,13 +192,27 @@ export async function publishLedger(
   message: string,
   run: GitCommandRunner = runGit
 ): Promise<string | undefined> {
+  // **頭で、本文などの未記録の変更が無いか確かめる**（「返す」の確認と同じ検査）。
+  // 「校閲の範囲を知らせる」など、ほかの入口から呼ばれても、台帳の外には触れない
+  const working = await run(
+    ["status", "--porcelain", "-z", "--untracked-files=all"],
+    work.folderPath,
+    15_000
+  );
+  if (working.code !== 0) return "作業フォルダーの状態を読めませんでした";
+  const outside = changesOutsideLedger(parseStatusPorcelainPaths(working.stdout));
+  if (outside.length > 0) {
+    return `本文などに未記録の変更があるため、送りませんでした（${outside.slice(0, 3).join("、")}）`;
+  }
+
   const committed = await commitLedger(work, message, run);
   if (committed) return committed;
 
   let sent = await push(work.folderPath, run);
   if (!sent.ok && (await pushWasRejected(work.folderPath, run))) {
     logStep(`送信が断られたので、台帳を混ぜて合わせ直して送り直す（${work.title}）`);
-    const reconciled = await reconcileDiverged(work.folderPath, run);
+    // 台帳3本以外に変更か送れていない記録があれば、reset せずに止める（黙って消さない）
+    const reconciled = await reconcileDiverged(work.folderPath, run, { ledgerOnly: true });
     if (!reconciled.ok) return reconciled.detail;
     const again = await commitLedger(work, message, run);
     if (again) return again;

@@ -81,15 +81,26 @@ export class FileLockStore {
     holderKind: LockHolderKind,
     note = ""
   ): Promise<void> {
+    /*
+      **解除の時刻は `max(今, その鍵の since + 1ms)`。** いちばん新しい記録が勝つ作りなので、
+      端末の時計が遅れていると、解除の行のほうが古いと読まれ、解除したのに鍵が残る
+      （作者が書けないままになる）。鍵より必ず新しい時刻を付ける。
+    */
+    const held = await this.load();
+    const now = Date.now();
     await this.append(
-      files.map((file) => ({
-        kind: "release" as const,
-        file,
-        holder,
-        holderKind,
-        time: new Date().toISOString(),
-        note,
-      }))
+      files.map((file) => {
+        const since = Date.parse(held.get(normalizeFile(file))?.since ?? "");
+        const time = Number.isNaN(since) ? now : Math.max(now, since + 1);
+        return {
+          kind: "release" as const,
+          file,
+          holder,
+          holderKind,
+          time: new Date(time).toISOString(),
+          note,
+        };
+      })
     );
   }
 

@@ -1,5 +1,6 @@
 import * as pathText from "./pathText";
 import { parseEpisodeFileName } from "./episodeParser";
+import { isNestedLocation } from "./locationCompare";
 
 /**
  * 編集用リポジトリ（設計書5.7.5）。
@@ -195,6 +196,28 @@ export const LEDGER_FILES = [
   ".aiwriter/locks/locks.jsonl",
   ".aiwriter/history/edits.jsonl",
 ] as const;
+
+/**
+ * 編集用フォルダーの置き場として使えない場所か。
+ *
+ * - `insideWork` … どれかの作品の**中**（リポジトリが入れ子になり、書庫の側へ巻き込まれる）
+ * - `containsWork` … どれかの作品を**含む**（書庫そのものや、その上の階層。ここを編集用リポジトリに
+ *   すると、合わせ直し（`reset --hard`）が書庫に走りうる）
+ *
+ * 大文字小文字・区切りの違いは `isNestedLocation` が吸収する。
+ */
+export function editingPlaceProblem(
+  destination: string,
+  workFolders: readonly string[]
+): "insideWork" | "containsWork" | undefined {
+  for (const folder of workFolders) {
+    if (isNestedLocation(destination, folder)) return "insideWork";
+  }
+  for (const folder of workFolders) {
+    if (isNestedLocation(folder, destination)) return "containsWork";
+  }
+  return undefined;
+}
 
 /** 相対パスの区切りを `/` に揃える（Windows と他の機械で同じ形にする。控え・鍵の突き合わせの鍵） */
 export function normalizeRelativeKey(relative: string): string {
