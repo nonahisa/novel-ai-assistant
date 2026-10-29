@@ -1,3 +1,5 @@
+import { escapeRegExp } from "./regexEscape";
+
 /**
  * 語り手の名前が地の文の主語に立つ形（「名前＋は／が／も」）。
  *
@@ -24,8 +26,4 @@ export function narratorNameSubjectPattern(forms: readonly string[]): RegExp {
       "(?![、，]と)",
     "gu"
   );
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -1,4 +1,5 @@
 import { redactUrlCredentials } from "./redactUrl";
+import { escapeRegExp } from "./regexEscape";
 
 /**
  * 障害報告用の記録（設計書8.5。作者の裁定 2026-10-17）。
@@ -217,10 +218,6 @@ const MIN_NAME_CHARS = 2;
 const MIN_QUOTED_BODY_CHARS = 16;
 /** 1行の上限（英数字だけの長い行も、読める長さに切る） */
 const MAX_LINE_CHARS = 2000;
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /** 「A, B, …, Z, AA, AB …」 */
 function letterLabel(index: number): string {

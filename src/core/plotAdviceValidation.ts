@@ -12,6 +12,7 @@ import {
 } from "./plotInterview";
 import { similarity } from "./plotDialogueValidation";
 import { stripCodeFence } from "./synopsisValidation";
+import { escapeRegExp } from "./regexEscape";
 
 /**
  * プロットモードのAI助言（P-01、設計書6.4.10）の答えを、コードで確かめる。
@@ -393,10 +394,6 @@ const FIELD_WRITE_PATTERN = new RegExp(
   String.raw`(?:${FIELD_WORDS.map(escapeRegExp).join("|")})(?:の欄|欄)?(?:に|へ)(?:${WRITE_VERBS})[、,]`,
   "u"
 );
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
 
 export function isPlotAdviceWriteRequest(text: string): boolean {
   const body = text.normalize("NFKC");
