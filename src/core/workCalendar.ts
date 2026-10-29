@@ -223,10 +223,6 @@ export function dayCapacity(calendar: WorkCalendar, dateKey: string): number {
   return dayWeight(dateKey, calendar.settings, calendar.holidays) / calendar.meanWeight;
 }
 
-export function holidayNameOf(calendar: WorkCalendar, dateKey: string): string | null {
-  return calendar.holidays.dates[dateKey] ?? null;
-}
-
 /**
  * 重なったときの速さ（1つの作業あたり、ひとりで進めるときを1として）。
  *
