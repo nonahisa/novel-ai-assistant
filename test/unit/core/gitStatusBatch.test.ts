@@ -232,3 +232,48 @@ describe("使い回しは、失敗した答えを覚えない（母艦のレビ�
     expect(count(git.calls, "remote")).toBe(2);
   });
 });
+
+describe("使い回しの再レビュー（母艦 2026-10-30 2回目）", () => {
+  test("切り離された HEAD（symbolic-ref が非ゼロ）は正常な答えなので、一巡で1回しか読まない", async () => {
+    const git = recordingGit((key) =>
+      key === "symbolic-ref --quiet --short HEAD" ? { code: 1 } : libraryReply(key)
+    );
+    const batch = createSyncStatusBatch();
+
+    const first = await readSyncStatus("/library/短編", git.run, batch);
+    await readSyncStatus("/library/長編", git.run, batch);
+
+    expect(first.kind).toBe("detached");
+    expect(count(git.calls, "symbolic-ref --quiet --short HEAD")).toBe(1);
+  });
+
+  test("上流なし（@{upstream} が非ゼロ）も正常な答えなので、一巡で1回しか読まない", async () => {
+    const key = "rev-parse --abbrev-ref --symbolic-full-name @{upstream}";
+    const git = recordingGit((k) => (k === key ? { code: 128 } : libraryReply(k)));
+    const batch = createSyncStatusBatch();
+
+    const first = await readSyncStatus("/library/短編", git.run, batch);
+    await readSyncStatus("/library/長編", git.run, batch);
+
+    expect(first.kind).toBe("no_upstream");
+    expect(count(git.calls, key)).toBe(1);
+  });
+
+  test("git を起こせずに約束が拒否されても、覚えずに次の作品で読み直す", async () => {
+    let throwOnce = true;
+    const base = recordingGit(libraryReply);
+    const run: GitCommandRunner = async (args, cwd, timeout, options) => {
+      if (throwOnce && args.join(" ") === "remote") {
+        throwOnce = false;
+        throw new Error("spawn に失敗");
+      }
+      return base.run(args, cwd, timeout, options);
+    };
+    const batch = createSyncStatusBatch();
+
+    await expect(readSyncStatus("/library/短編", run, batch)).rejects.toThrow("spawn");
+    const second = await readSyncStatus("/library/長編", run, batch);
+
+    expect(second.kind).toBe("tracked");
+  });
+});

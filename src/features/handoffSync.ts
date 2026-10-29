@@ -139,9 +139,17 @@ export async function runStartupHandoff(deps: HandoffDeps): Promise<void> {
   // **ここでは取りに行かない**（たった今取ってきたばかりである）
   await deps.monitor.refreshAll({ fetch: false });
   await refreshUnsentMark(deps);
-  // 点検の取り込みで承認待ちや設定資料が届いたかもしれない（メニューの印の数え直し。
-  // 起動直後の数えは点検より先に走っている。2026-10-30、母艦のレビュー）
-  deps.monitor.notifyRepositoryChanged?.();
+  // 点検で取り込んだときだけ、承認待ちや設定資料が届いたかもしれないと知らせる
+  // （メニューの印の数え直し。起動直後の数えは点検より先に走っている）。
+  // 送っただけ・何もしなかった回は、印に効くものが変わっていない（2026-10-30、母艦の再レビュー）
+  if (
+    outcomes.some(
+      (outcome) =>
+        outcome.done && (outcome.action.kind === "take" || outcome.action.kind === "fold")
+    )
+  ) {
+    deps.monitor.notifyRepositoryChanged?.();
+  }
 
   await reportStartup(deps, previous, outcomes, deferred.length);
 }

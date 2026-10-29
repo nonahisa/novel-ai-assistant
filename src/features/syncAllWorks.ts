@@ -125,8 +125,6 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   if (doing.length === 0) {
     // 書庫に同期するものが無くても、編集部の提案は届いているかもしれない
     await collectEditorInboxAfterSync(works);
-    // 取り寄せ（fetch）しかしていないが、編集部の提案は届いたかもしれない（メニューの印）
-    deps.monitor.notifyRepositoryChanged?.();
     void vscode.window.showInformationMessage(
       `同期するものはありませんでした。${describeSyncSkips(plans)}`
     );
@@ -176,7 +174,8 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   // 編集用リポジトリは書庫の同期の対象外なので別口で取り寄せる。
   // **失敗しても同期の報告を止めない**
   await collectEditorInboxAfterSync(works);
-  // 取り込みで承認待ち・設定資料・編集部の提案が届いたかもしれない。
+  // 取り込みで承認待ちや設定資料が届いたかもしれない（編集部の提案は印の数え手が
+  // 見る置き場に入っていないので、合図の理由にしない）。
   // git が書いたファイルは見張りに乗らないことがあるので、メニューの印を数え直させる
   // （2026-10-30、母艦のレビュー）
   deps.monitor.notifyRepositoryChanged?.();
@@ -207,6 +206,11 @@ async function collectStates(
 ): Promise<SyncTargetState[]> {
   const states: SyncTargetState[] = [];
   const seen = new Set<string>();
+  /** 根は分かるのに状態が読めなかった作品（根の鍵 → 最初の1件）。下の説明 */
+  const held = new Map<
+    string,
+    { work: WorkEntry; root: string; status: SyncTargetState["status"] }
+  >();
 
   // **まず全作品の根だけを（同時に）調べる**（2026-10-29 の測定）。
   // 以前は作品ごとに状態を全部読んでから「同じ置き場はもう見た」と
@@ -236,6 +240,17 @@ async function collectStates(
     // リポジトリの根が分かるなら、そこを置き場にする。
     // 根が読めなかった作品は、状態（リポジトリでない・git が無い）の
     // ためにそのフォルダーを置き場として残す。**同じ根の作品を二度処理しない**
+    /*
+      **根は読めたのに状態の読みが根なしで失敗した作品は、すぐには項目にしない**
+      （2026-10-30、母艦の再レビュー）。同じ置き場のほかの作品で読めれば、その
+      置き場の項目に入るので、失敗の項目を足すと報告に同じ作品が2回出る。
+      最後まで同じ置き場が読めなかったときだけ、失敗の項目として残す
+    */
+    if (known !== undefined && !("root" in status && status.root)) {
+      const heldKey = known.toLowerCase();
+      if (!held.has(heldKey)) held.set(heldKey, { work, root: work.folderPath, status });
+      continue;
+    }
     const root = "root" in status && status.root ? status.root : work.folderPath;
     const key = root.toLowerCase();
     if (seen.has(key)) continue;
@@ -249,6 +264,12 @@ async function collectStates(
       seen.add(known.toLowerCase());
     }
     firsts.push({ work, root, status });
+  }
+  // 最後まで同じ置き場が読めなかった作品だけ、失敗の項目として残す（上の \`held\`）
+  for (const [heldKey, entry] of held) {
+    if (seen.has(heldKey)) continue;
+    seen.add(entry.root.toLowerCase());
+    firsts.push(entry);
   }
 
   // **遅れの件数は、リモートを取りに行ったあとでないと当てにならない**

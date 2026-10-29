@@ -181,7 +181,8 @@ export class ActionDecorationProvider
     for (const id of [...this.workCounts.keys()]) {
       if (!known.has(id)) {
         this.workCounts.delete(id);
-        this.countSequence.delete(id);
+        // 番号（`countSequence`）は消さない。消すと、同じ作品が登録し直されたとき
+        // 番号が1から振り直され、外れる前に始めた古い数え直しと同じ番号になりうる
         changed = true;
       }
     }

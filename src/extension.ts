@@ -2114,6 +2114,8 @@ export async function activate(
           "./features/resolveDivergence.js"
         );
         await resolveDivergence({ registry, monitor: gitSync }, work);
+        // 合わせ直しで承認待ちや設定資料が届いたかもしれない（メニューの印。2026-10-30、母艦の再レビュー）
+        gitSync.notifyRepositoryChanged?.();
       }
     ),
     registerCommand("novelai.openVertical", async () => {
@@ -2358,10 +2360,22 @@ export async function activate(
     取り込み・全作品同期・開いたときの点検・同期のあとの編集部の取り込みで、
     承認待ちや設定資料が届くことがある。どの作品に届いたかは分からないので全部数える
   */
-  const repositoryChanged = gitSync.onDidChangeRepositoryContents?.(() =>
-    refreshActionBadges()
-  );
+  // **続けて届いた合図は1回へ畳む**（2026-10-30、母艦の再レビュー）。1回の操作の
+  // 中で取り込みの終わりと同期の終わりが続くと、全作品の数え直しが2回走っていた
+  let repositoryChangeTimer: ReturnType<typeof setTimeout> | undefined;
+  const repositoryChanged = gitSync.onDidChangeRepositoryContents?.(() => {
+    if (repositoryChangeTimer) clearTimeout(repositoryChangeTimer);
+    repositoryChangeTimer = setTimeout(() => {
+      repositoryChangeTimer = undefined;
+      refreshActionBadges();
+    }, 500);
+  });
   if (repositoryChanged) context.subscriptions.push(repositoryChanged);
+  context.subscriptions.push(
+    new vscode.Disposable(() => {
+      if (repositoryChangeTimer) clearTimeout(repositoryChangeTimer);
+    })
+  );
   // **Ollama の流し受信の設定を、純粋な部品へ差し込む**（設計書6.63.1、0.42.0）。
   // `ai/ollamaStream.ts` は VS Code に依存しないので、設定の読み方はここで渡す
   setStreamingSettingReader(() =>
@@ -4219,10 +4233,10 @@ export async function activate(
       stepProvider.selectWork(picked.work.id);
       // **末尾の件数は選んだ作品のもの**なので、切り替えたら出し直す
       // （そうしないと、前の作品の件数が並んだままになる）。
-      // **選んだ作品だけを数え直す**（2026-10-29 の測定：以前は全作品を読み直していた）。
-      // 数えてあっても数え直す——MCP サーバー（別のプロセス）が承認待ちを
-      // 書いた作品は、こちらに合図が来ない（2026-10-30、母艦のレビュー）
-      refreshActionBadges(picked.work.id);
+      // **選び直したら全作品を数え直す**（86fcc341 より前と同じ。2026-10-30、母艦の再レビュー）。
+      // MCP サーバー（別のプロセス）が承認待ちを書いた作品は、選んでいない作品でも
+      // こちらに合図が来ない。選び直しは押す回数の少ない操作なので、見張りを足すより軽い
+      refreshActionBadges();
     })
   );
 

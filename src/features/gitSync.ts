@@ -1931,6 +1931,4 @@ async function collectEditorInboxAfterSync(
       詳細: error instanceof Error ? error.message : String(error),
     });
   }
-  // 編集部の提案が届いたかもしれない（メニューの印の数え直し）。送信のあとも通る
-  monitor.notifyRepositoryChanged();
 }

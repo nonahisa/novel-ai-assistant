@@ -75,12 +75,14 @@ export class NullGitSyncMonitor implements GitSyncMonitorLike {
 
   readonly onDidChange = this.changed.event;
   readonly onDidChangeFiles = this.filesChanged.event;
-  // git が無いので置き場の中身は入れ替わらない。受け口だけ持つ（何も起きない）
-  readonly onDidChangeRepositoryContents = this.changed.event;
+  // git が無いので置き場の中身は入れ替わらない。受け口だけ持つ（発しない）
+  private readonly repositoryChanged = new vscode.EventEmitter<void>();
+  readonly onDidChangeRepositoryContents = this.repositoryChanged.event;
 
   dispose(): void {
     this.changed.dispose();
     this.filesChanged.dispose();
+    this.repositoryChanged.dispose();
   }
 
   statusFor(): GitSyncStatus | undefined {

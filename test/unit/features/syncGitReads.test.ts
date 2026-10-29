@@ -235,7 +235,8 @@ describe("母艦のレビュー（2026-10-30）", () => {
     expect(calls.filter((key) => key.startsWith("fetch"))).toHaveLength(1);
   });
 
-  test("作品をすべて同期の終わりに、置き場の中身が変わったことを知らせる（メニューの印の数え直し）", async () => {
+  test("同期するものが無かった回は、置き場の中身が変わったと知らせない（印を数え直さない）", async () => {
+    // 取り寄せ（fetch）しかしていない。編集部の提案は印の数え手が見る置き場に入っていない
     const registry = { list: () => threeWorks } as unknown as WorkRegistry;
     let notified = 0;
     const monitor = {
@@ -247,10 +248,62 @@ describe("母艦のレビュー（2026-10-30）", () => {
 
     await syncAllWorks({ registry, monitor, run: libraryGit() });
 
-    expect(notified).toBeGreaterThanOrEqual(1);
+    expect(notified).toBe(0);
   });
 
-  test("開いたときの点検の終わりに、置き場の中身が変わったことを知らせる", async () => {
+  test("最初の作品の読みが一時的に失敗しても、同じ置き場が見つかれば、その失敗を報告に出さない", async () => {
+    const registry = { list: () => threeWorks } as unknown as WorkRegistry;
+    const monitor = { refreshAll: async () => {} } as unknown as GitSyncMonitorLike;
+    const base = libraryGit();
+    let failOnce = true;
+    const run: GitCommandRunner = async (args, cwd, timeout, options) => {
+      if (failOnce && args.join(" ") === "rev-parse --is-inside-work-tree --show-toplevel") {
+        failOnce = false;
+        return { code: 0, stdout: "true\n", stderr: "" };
+      }
+      return base(args, cwd, timeout, options);
+    };
+    const shown: string[] = [];
+    Object.assign(window, {
+      showInformationMessage: async (message: string) => {
+        shown.push(message);
+        return undefined;
+      },
+    });
+
+    await syncAllWorks({ registry, monitor, run });
+
+    // 書庫は「同期するもの無し」。1作品目の一時的な失敗は、同じ書庫が読めたので出さない
+    expect(shown.join("\n")).toContain("同期するものはありませんでした。");
+    expect(shown.join("\n")).not.toContain("次は同期しません");
+  });
+
+  test("同じ置き場が最後まで読めなかったときは、その失敗を報告に残す", async () => {
+    const only = threeWorks.slice(0, 1);
+    const registry = { list: () => only } as unknown as WorkRegistry;
+    const monitor = { refreshAll: async () => {} } as unknown as GitSyncMonitorLike;
+    const base = libraryGit();
+    // 根だけの読みは通るが、状態の読みは毎回根なしで失敗する
+    const run: GitCommandRunner = async (args, cwd, timeout, options) => {
+      if (args.join(" ") === "rev-parse --is-inside-work-tree --show-toplevel") {
+        return { code: 0, stdout: "true\n", stderr: "" };
+      }
+      return base(args, cwd, timeout, options);
+    };
+    const shown: string[] = [];
+    Object.assign(window, {
+      showInformationMessage: async (message: string) => {
+        shown.push(message);
+        return undefined;
+      },
+    });
+
+    await syncAllWorks({ registry, monitor, run });
+
+    expect(shown.join("\n")).toContain("次は同期しません");
+  });
+
+  test("開いたときの点検で何も取り込まなかったときは、置き場の中身が変わったと知らせない", async () => {
     const registry = { list: () => threeWorks } as unknown as WorkRegistry;
     let notified = 0;
     const monitor = {
@@ -274,6 +327,46 @@ describe("母艦のレビュー（2026-10-30）", () => {
       run: libraryGit(),
     });
 
+    expect(notified).toBe(0);
+  });
+
+  test("開いたときの点検で取り込んだときは、置き場の中身が変わったと1回知らせる", async () => {
+    const registry = { list: () => threeWorks } as unknown as WorkRegistry;
+    let notified = 0;
+    const monitor = {
+      refreshAll: async () => {},
+      statusFor: () => undefined,
+      notifyRepositoryChanged: () => {
+        notified += 1;
+      },
+    } as unknown as GitSyncMonitorLike;
+    const store: Record<string, unknown> = {};
+    const base = libraryGit();
+    // 取り寄せのあと、1件遅れている（黙って取り込む形）
+    let fetched = false;
+    const run: GitCommandRunner = async (args, cwd, timeout, options) => {
+      const key = args.join(" ");
+      if (key.startsWith("fetch")) fetched = true;
+      if (fetched && key === "rev-list --left-right --count origin/main...HEAD") {
+        calls.push(key);
+        return { code: 0, stdout: "1\t0\n", stderr: "" };
+      }
+      return base(args, cwd, timeout, options);
+    };
+
+    await runStartupHandoff({
+      registry,
+      monitor,
+      storage: {
+        get: <T>(key: string) => store[key] as T | undefined,
+        update: async (key: string, value: unknown) => {
+          store[key] = value;
+        },
+      },
+      run,
+    });
+
+    expect(calls.some((key) => key.startsWith("pull"))).toBe(true);
     expect(notified).toBe(1);
   });
 
@@ -289,7 +382,8 @@ describe("母艦のレビュー（2026-10-30）", () => {
 
     await monitor.pull(work);
 
-    expect(notified).toBeGreaterThanOrEqual(1);
+    // 取り込みの終わりの1回だけ（編集部の取り込みのあとには出さない）
+    expect(notified).toBe(1);
     monitor.dispose();
   });
 });

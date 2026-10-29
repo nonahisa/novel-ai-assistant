@@ -373,6 +373,9 @@ export function createSyncStatusBatch(): SyncStatusBatch {
  * 場所に関わらず置き場の根からの形で出る（git の取り決め）うえ、ここでは
  * 件数しか使わない。
  */
+/** 非ゼロが失敗を意味する、置き場ぜんぶの命令（覚えずに読み直す） */
+const TRANSIENT_ON_NONZERO: ReadonlySet<string> = new Set(["status", "remote", "rev-list"]);
+
 function runWholeRepo(
   args: string[],
   cwd: string,
@@ -400,11 +403,23 @@ function runWholeRepo(
     読み直す。捨てるのは自分の約束がまだ残っているときだけ（forget のあとに
     入った別の約束を消さない）
   */
-  void started.then((result) => {
-    if (result.code !== 0 && byCommand.get(commandKey) === started) {
-      byCommand.delete(commandKey);
-    }
-  });
+  const forgetIfStillMine = (): void => {
+    if (byCommand?.get(commandKey) === started) byCommand.delete(commandKey);
+  };
+  /*
+    **非ゼロが正常な答えの命令は覚える**（2026-10-30、母艦の再レビュー）。
+    切り離された HEAD の `symbolic-ref`、上流なしの `@{upstream}` は、非ゼロが
+    その置き場の状態そのものなので、作品ごとに読み直さない。覚えないのは
+    非ゼロが失敗を意味する命令（`status`・`remote`・`rev-list`）だけ。
+    git を起こせずに約束が拒否されたときは、どの命令でも覚えない
+  */
+  const failureIsTransient = TRANSIENT_ON_NONZERO.has(args[0] ?? "");
+  started.then(
+    (result) => {
+      if (result.code !== 0 && failureIsTransient) forgetIfStillMine();
+    },
+    forgetIfStillMine
+  );
   return started;
 }
 
