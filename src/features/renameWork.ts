@@ -3,6 +3,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { renamePlotHeading } from "../core/plotDoc";
+import { messageOf } from "../core/errorMessage";
 import { plotPath } from "../core/plotFile";
 import { readTextFile, type WriteTextFileResult } from "../core/textFile";
 import { writeTextFilePreferringOpenDocument } from "../core/openDocumentEdit";
@@ -99,7 +100,7 @@ async function updateConfigTitle(
     useLogFile(work.folderPath);
     logFailure("作品名の変更（作品の設定ファイル）", {
       作品: work.title,
-      理由: describeError(error),
+      理由: messageOf(error),
     });
     return [
       "作品の設定ファイル（.aiwriter/config.json）は書き換えられませんでした。",
@@ -126,7 +127,7 @@ async function updatePlotTitle(
     useLogFile(work.folderPath);
     logFailure("作品名の変更（プロットの場所）", {
       作品: newTitle,
-      理由: describeError(error),
+      理由: messageOf(error),
     });
     return [];
   }
@@ -163,7 +164,7 @@ async function updatePlotTitle(
     useLogFile(work.folderPath);
     logFailure("作品名の変更（プロットの見出し）", {
       作品: newTitle,
-      理由: describeError(error),
+      理由: messageOf(error),
     });
     return ["プロットの見出しは書き換えられませんでした。"];
   }
@@ -190,8 +191,4 @@ function describeWriteFailure(result: WriteTextFileResult): string {
     default:
       return result.detail ?? "書き込めませんでした";
   }
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
