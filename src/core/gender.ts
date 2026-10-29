@@ -29,6 +29,3 @@ export function normalizeGender(value: string | null | undefined): string | null
   if (FEMALE_FORMS.has(text)) return "女性";
   return text;
 }
-
-/** 画面で選ばせる候補。作者は自由に入力もできる */
-export const GENDER_SUGGESTIONS = ["男性", "女性", "不明"] as const;
