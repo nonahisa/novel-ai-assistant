@@ -12,7 +12,7 @@ description: 「VSIX化して」と言われたとき、配布の区切りがで
 | **GitHub Release** | **全段**。パッチを上げるたびに出す |
 | **Marketplace** | **1段目（メジャー）・2段目（マイナー）が動いたときだけ** |
 
-**どちらも指示を待たずに自走してよい。** この機械に vsce の PAT は無いが、**作者の Chrome からなら上げられる**（手順3）。
+**どちらも指示を待たずに自走してよい。** この機械に vsce の PAT は無い。Marketplace へは **GitHub Actions の Trusted Publishing（手順3の A）** で上げる。作者の Chrome から上げる道（手順3の B）は、A が使えないときの代わり。
 
 **3段目（パッチ）だけの版は Marketplace へ上げない。** 出るのは GitHub Release までで、**次にマイナーが動いたときに、溜まったパッチごと Marketplace へ届く。**
 
@@ -55,6 +55,22 @@ gh release create v<版> "release/novel-ai-assistant-<版>.vsix" --target <完�
 - **全段で出すので、溜めない**（パッチごとに出す）。**配布のために版を上げ直さない**
 
 ### 3. Marketplace へ公開する（**1段目・2段目が動いたときは指示を待たず自走**）
+
+#### A. GitHub Actions の Trusted Publishing（2026-10-30〜。こちらが先）
+
+手順2で GitHub Release に VSIX を付け、ノートの末尾に `SHA-256：<64桁>` を書いてあること。
+
+```bash
+gh workflow run publish-marketplace.yml -f version=<版>
+```
+
+- 手順のファイルは `.github/workflows/publish-marketplace.yml`。Release の VSIX を**作り直さずに**取り寄せ、ノートの SHA-256・VSIX の中の版と照らしてから `vsce publish --packagePath … --oidc` で上げる。**3段目（パッチ）だけの版は断る**
+- **作者の承認で止まる**（GitHub の Environment `marketplace`。承認者は nonahisa、動かせるのは main だけ）。動かしたら作者に「GitHub の Actions の画面で［Review deployments］→［Approve］を押してください」と頼む。**承認は作者が押す**（こちらから押さない。公開は取り消せない）。押す前に、上げるもの・バイト数・SHA-256・実機確認の済み具合を作者に示す
+- Marketplace 側の登録は、管理画面の「信頼できる出版」の `novel-ai-assistant-publish`（リポジトリ nonahisa/novel-ai-assistant・手順 publish-marketplace.yml・Environment marketplace）。**手順のファイルの名前か Environment を変えたら、この登録も直す**（食い違うと鍵の交換で断られる。PAT へは落ちない）
+- 終わったら手順8（`node scripts/checkMarketplace.mjs`）で反映を確かめる
+- vsce は 4.0.2 以降が要る（devDependencies と手順のファイルの `npx @vscode/vsce@<版>` をそろえる）
+
+#### B. 作者の Chrome から管理画面へ上げる（A が使えないときの代わり）
 
 > **目をつぶって座標を押さない。** メニューは **Update / Unpublish / Remove** の順で、**Update の 20px 下が Unpublish**。
 > **タブの描画が応答しなくなることがある**（`screenshot` が30秒で切れる）。そうなったら押すのをやめて、作者に Chrome の上げ直しを頼む。`zoom`（`region` 指定）は応答しないタブでも動くことがあるので、**押す前に必ず位置を測る。**
