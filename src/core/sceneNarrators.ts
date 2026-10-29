@@ -360,20 +360,6 @@ export interface NarrationSource {
 }
 
 /**
- * 本文の抜粋ごとに、その抜粋に入っている主人公でない場面の一人称を返す
- * （再読込の頼み方の印に使う）。見つからない抜粋は空。
- */
-export function foreignFormsOfExcerpts(
-  excerpts: ReadonlyArray<{ label: string; text: string }>,
-  sources: readonly NarrationSource[],
-  narratorFirstPerson: string
-): string[][] {
-  return foreignScenesOfExcerpts(excerpts, sources, narratorFirstPerson).map(
-    (scenes) => [...new Set(scenes.map((scene) => scene.firstPerson))]
-  );
-}
-
-/**
  * 本文の抜粋ごとに、その抜粋に重なる主人公でない場面（場面の本文つき）を返す。
  * 抜粋は出典の本文の一部をそのまま切ったものなので、出典の中で位置を探して
  * 場面と重ねる。見つからない抜粋は空。
