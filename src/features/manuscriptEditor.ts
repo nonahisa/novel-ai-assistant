@@ -170,6 +170,7 @@ import {
   type ReadonlyRescueStore,
   type ReadonlyRescueWrite,
 } from "../core/manuscriptReadonlyRescue";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 原稿エディタ（設計書6.25）。
@@ -5037,14 +5038,4 @@ function isImeTextPair(value: unknown): value is { kana: string; committed: stri
 export function imeBeforeOf(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   return value.slice(-IME_WORD_BEFORE_MAX);
-}
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let text = "";
-  for (let i = 0; i < 32; i++) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
 }

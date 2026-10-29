@@ -29,6 +29,7 @@ import {
   layoutEgo,
   type GraphLayout,
 } from "../core/relationGraphLayout";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 人物相関図（設計書6.38）。
@@ -631,14 +632,4 @@ async function freshExportPath(directory: string, at: Date): Promise<string> {
     }
   }
   throw new Error("書き出し先の名前を決められませんでした。");
-}
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 32; index++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
 }

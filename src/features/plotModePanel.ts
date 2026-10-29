@@ -79,6 +79,7 @@ import {
   type PlotNamesView,
 } from "./plotNameSuggest";
 import { PlotAdviceSession, type PlotAdviceView } from "./plotAdvice";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * プロットモードの画面（設計書6.4.8）。
@@ -1282,14 +1283,4 @@ function aiActions(): Array<{
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let text = "";
-  for (let i = 0; i < 32; i++) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
 }

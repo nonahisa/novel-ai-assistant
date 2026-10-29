@@ -63,6 +63,7 @@ import {
   offerCelebration,
   streakSummaryFor,
 } from "./celebrations";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 執筆量パネル（設計書6.3）。
@@ -445,14 +446,4 @@ export async function readSiteRecords(
     });
     return { records: [], error: detail };
   }
-}
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 32; index++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
 }

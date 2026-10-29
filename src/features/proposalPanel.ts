@@ -117,6 +117,7 @@ import {
   type BackupHunkProposal,
   type LineBlock,
 } from "../core/backupHunks";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 提案パネル（誤字脱字）。
@@ -4766,13 +4767,3 @@ function episodePlotContrastNote(finding: {
 
 // 「まだ手を付けていないか」の判定は `core/proposalBuckets.ts` にある
 // （分類ごとの件数を数えるのにも使うため、VS Codeに依らない側へ置いた）
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let i = 0; i < 32; i++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
-}

@@ -69,6 +69,7 @@ import {
   removeMemoLineInOpenManuscript,
   restoreMemoLineInOpenManuscript,
 } from "./manuscriptEditor";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * シーンメモのパネル（設計書6.40.4）。
@@ -1855,14 +1856,4 @@ function isDarkTheme(): boolean {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let text = "";
-  for (let i = 0; i < 32; i++) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
 }

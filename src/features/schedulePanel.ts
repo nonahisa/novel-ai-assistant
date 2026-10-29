@@ -34,6 +34,7 @@ import { columnForLocation, wideViewColumn } from "./editorColumn";
 import { loadScheduleBoard, scheduleToday } from "./scheduleData";
 import { importHolidays, loadHolidays } from "./holidayImport";
 import { exportScheduleIcs } from "./scheduleCalendarExport";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * スケジュールの画面（設計書6.111）。**全作品を1枚に並べる**（縦が時間、横が作品）。
@@ -375,13 +376,4 @@ function reportError(error: unknown): void {
     logFailure("スケジュール：画面の操作に失敗した", { error: message });
   }
   void vscode.window.showErrorMessage(message);
-}
-
-function createNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 32; index++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
 }

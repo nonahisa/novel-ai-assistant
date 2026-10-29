@@ -8,6 +8,7 @@ import { describeExternalAccessPermission } from "../core/externalAccessPermissi
 import { describeAiInstructionUsage } from "../core/aiInstructionUsage";
 import { AiInstructionUsageStore } from "../core/aiInstructionUsageStore";
 import { buildEditHistoryHtml } from "../views/editHistoryPanelHtml";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 編集履歴の画面（設計書5.6）。
@@ -87,14 +88,4 @@ async function postHistory(
     // **1つでも許可している接続元があるか**（画面の印の出し分けに使う）
     allowed: permission.clients.length > 0,
   });
-}
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let nonce = "";
-  for (let index = 0; index < 32; index++) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
 }

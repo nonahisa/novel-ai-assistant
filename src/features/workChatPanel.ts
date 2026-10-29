@@ -279,6 +279,7 @@ import {
 } from "../core/backupFileKinds";
 import type { ImportAsNewWork, ShowBackupProposals } from "./backupDrop";
 import { showBackupOpenDialog } from "./backupPickFolder";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 相談パネル（P-21）。
@@ -5355,13 +5356,3 @@ const PLOT_ADVICE_OPTIONS = [
   "プロットに何を書いておくと、あとで迷わずに済みますか？",
   "似た題材の作品と、どこで差を付ければよいでしょうか",
 ] as const;
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 32; index++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
-}
