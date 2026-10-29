@@ -1,4 +1,5 @@
 import { isPlaceholderText } from "./placeholderText";
+import { isRecord } from "./isRecord";
 
 /**
  * AIが並べた応募先を、コードで確かめる（設計書6.3.6.5、P-42）。
@@ -146,8 +147,4 @@ function parseJson(text: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

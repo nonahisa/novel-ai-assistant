@@ -37,6 +37,7 @@ import {
   type ForeignNarrationScene,
   type WorkNarratorContext,
 } from "./sceneNarrators";
+import { isRecord } from "./isRecord";
 
 export type CharacterRejectionReason =
   | "invalid_shape"
@@ -1880,10 +1881,6 @@ function isCollectiveName(name: string): boolean {
   if (!name.endsWith("達") && !name.endsWith("ら")) return false;
   const singular = name.slice(0, -1);
   return GENERIC_ROLES.has(singular) || PRONOUNS.has(singular);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function cleanRequiredString(value: unknown): string | null {

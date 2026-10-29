@@ -6,6 +6,7 @@ import {
   type ReaderScores,
 } from "../models/readerProfile";
 import { READER_AXIS_ORDER, READER_QUESTIONS } from "./readerTarget";
+import { isRecord } from "./isRecord";
 
 /**
  * ターゲット読者の台帳（`設定/読者像.json`）を**読み解く**部分だけ
@@ -22,10 +23,6 @@ import { READER_AXIS_ORDER, READER_QUESTIONS } from "./readerTarget";
  *
  * VS Code APIに依存しない。
  */
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * 点数を読み解く。

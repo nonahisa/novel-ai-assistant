@@ -1,4 +1,5 @@
 import type { AIToolCall } from "./types";
+import { isRecord } from "../core/isRecord";
 
 /**
  * モデルが呼んだ道具（tool）を扱う小さな部品。
@@ -11,10 +12,6 @@ import type { AIToolCall } from "./types";
 
 /** 道具に返す既定の返事。受け手が文言を持たないときに使う */
 export const TOOL_CALL_ACK = "了解しました。続けてください。";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * Ollama が返した `tool_calls` を、こちらの形（`AIToolCall`）へ揃える。

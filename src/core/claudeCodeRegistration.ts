@@ -9,6 +9,8 @@
  * VS Code API にも Node にも依存しない（道の連結は呼び出し側が渡す）。
  */
 
+import { isRecord } from "./isRecord";
+
 /** VS Code 版の Claude Code の拡張機能ID */
 export const CLAUDE_CODE_EXTENSION_ID = "anthropic.claude-code";
 
@@ -97,10 +99,6 @@ function sameStrings(value: unknown, expected: readonly string[]): boolean {
     value.length === expected.length &&
     value.every((entry, index) => entry === expected[index])
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   type PrintPreset,
 } from "./printHtml";
 import { GRID_MARGINS, GRID_PAPERS, gridHeaderFooter, type GridPaper } from "./printGridHtml";
+import { isRecord } from "./isRecord";
 
 /**
  * ［PDF出力］の前回の設定（`.aiwriter/config.json` の `pdfExport`）の読み方と使い方。
@@ -159,10 +160,6 @@ function parseRange(raw: unknown): WorkPdfExportConfig["range"] | undefined {
 
 function isGridNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= GRID_MIN && value <= GRID_MAX;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** 外部AIの依頼で使う設定（確認の窓に並べるものと、実際に組むものが同じになるように1つにする） */

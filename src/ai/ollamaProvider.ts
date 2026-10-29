@@ -27,6 +27,7 @@ import { resolveFeatureOutputCap } from "./outputLimit";
 import { featureOutputTuningRaw } from "../core/featureOutputTokens";
 import { withOutputMargin } from "../core/outputCeiling";
 import { ollamaUserMessage } from "./imageInput";
+import { isRecord } from "../core/isRecord";
 
 /**
  * 流す道の締め切り（`OllamaProvider.outputDeadline`）。
@@ -285,10 +286,6 @@ function durationUsage(res: {
     ...(inputDurationMs !== undefined ? { inputDurationMs } : {}),
     ...(outputDurationMs !== undefined ? { outputDurationMs } : {}),
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isChatResponse(value: unknown): value is ChatResponse {

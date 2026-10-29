@@ -1,5 +1,6 @@
 import { normalizeName } from "./characterMerge";
 import { isPlaceholderText } from "./placeholderText";
+import { isRecord } from "./isRecord";
 
 /**
  * 相談パネルからの「AIで再読込」の提案（P-21の `reloadRecord`、設計書6.31.3）。
@@ -134,8 +135,4 @@ export function describeChatReload(name: string): string {
 
 function isReloadKind(value: string): value is ChatReloadKind {
   return RELOAD_KINDS.has(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
