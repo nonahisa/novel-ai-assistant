@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { resolveExecutable } from "./ollamaLauncher";
 import { childProcessEnv } from "./childProcessEnv";
 import { logFailure, logStep } from "../core/logger";
+import { delay } from "../core/delay";
 
 /**
  * LM Studioのローカルサーバーの起動を支援する（設計書6.24）。
@@ -344,10 +345,6 @@ async function defaultProbe(endpoint: string): Promise<boolean> {
   } finally {
     clearTimeout(timer);
   }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

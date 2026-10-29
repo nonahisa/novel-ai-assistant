@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { childProcessEnv } from "./childProcessEnv";
 import { logFailure, logStep } from "../core/logger";
+import { delay } from "../core/delay";
 
 /**
  * Ollamaサーバーの起動を支援する。
@@ -568,10 +569,6 @@ async function defaultProbe(endpoint: string): Promise<boolean> {
   } finally {
     clearTimeout(timer);
   }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
