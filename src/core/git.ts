@@ -3,6 +3,9 @@ import { execFile } from "node:child_process";
 // 以前は「編集部へ渡す」側に別の判定があり、片方だけが大文字小文字を
 // そろえていた（`locationCompare.ts` の冒頭に経緯がある）
 import { isSameLocation } from "./locationCompare";
+// 一巡の使い回し（`SyncStatusBatch`）の鍵。見張り側（`rootKey`）と同じ正規化で
+// そろえ、区切りや大小文字の違いで同じ置き場を割らない
+import { folderKeyForComparison } from "./pathText";
 
 /**
  * gitコマンドの薄い層。
@@ -309,46 +312,169 @@ export async function isGitAvailable(
 }
 
 /**
+ * そのフォルダーが入っている置き場（リポジトリ）の根だけを読む。
+ *
+ * **git 1回で済む。** 書庫の作品を置き場でまとめるのに、状態を全部
+ * 読む（`readSyncStatus`、git 7〜9回）必要は無い（2026-10-29 の測定。
+ * 写しの「全作品同期」で、確認の窓まで git 73回・1.3秒）。
+ *
+ * リポジトリでない・git が無い・読めないは区別せず undefined を返す。
+ * 区別が要る呼び出し側は、その作品で `readSyncStatus` を読む。
+ */
+export async function readRepoRoot(
+  cwd: string,
+  run: GitCommandRunner = runGit
+): Promise<string | undefined> {
+  const result = await run(["rev-parse", "--show-toplevel"], cwd, LOCAL_TIMEOUT_MS);
+  if (result.code !== 0) return undefined;
+  const root = result.stdout.trim();
+  return root.length > 0 ? root : undefined;
+}
+
+/**
+ * 一巡（1つの関数呼び出しの中のループ）のあいだだけ、**置き場ぜんぶ**の
+ * 読みを覚えておく入れ物（2026-10-29 の測定）。
+ *
+ * 書庫では、作品ごとに `readSyncStatus` を読むと、置き場ぜんぶの数
+ * （`status` 全体・`remote`・枝・上流・`rev-list` 全体）を作品の数だけ
+ * 読み直す。どの作品から訊いても同じ答えなので、根ごとに1回にする。
+ *
+ * - **覚えるのは置き場ぜんぶの命令だけ。** 根の確かめと、その作品の中だけの
+ *   数（`status -- .`・`rev-list ... -- .`）は毎回 git に読ませる。パスを
+ *   自分で切り分けない方針（`readWorkingTree` の理由）はそのまま
+ * - **一巡が済んだら捨てる。** モジュールの大域には置かない——長く持つと、
+ *   記録や取り込みのあとに古い数を返す
+ * - **取り寄せ（fetch）のあとは `forget` する。** 上流の位置が変わり、
+ *   覚えた `rev-list` 全体が古くなる
+ */
+export interface SyncStatusBatch {
+  /** その置き場について覚えた読みを捨てる（根を渡さなければ全部） */
+  forget(root?: string): void;
+  /** @internal `readSyncStatus` だけが使う */
+  readonly shared: Map<string, Map<string, Promise<GitCommandResult>>>;
+}
+
+export function createSyncStatusBatch(): SyncStatusBatch {
+  const shared = new Map<string, Map<string, Promise<GitCommandResult>>>();
+  return {
+    shared,
+    forget(root?: string): void {
+      if (root === undefined) shared.clear();
+      else shared.delete(folderKeyForComparison(root));
+    },
+  };
+}
+
+/**
+ * 置き場ぜんぶの命令を走らせる。入れ物を渡されていれば、同じ根の同じ命令は
+ * 1回だけ走らせて答えを分ける（同時に訊かれても1回で済むよう、約束ごと覚える）。
+ *
+ * どの作品から訊いても答えは同じ——`status --porcelain` の道は作業ツリーの
+ * 場所に関わらず置き場の根からの形で出る（git の取り決め）うえ、ここでは
+ * 件数しか使わない。
+ */
+/** 非ゼロが失敗を意味する、置き場ぜんぶの命令（覚えずに読み直す） */
+const TRANSIENT_ON_NONZERO: ReadonlySet<string> = new Set(["status", "remote", "rev-list"]);
+
+function runWholeRepo(
+  args: string[],
+  cwd: string,
+  root: string,
+  run: GitCommandRunner,
+  batch: SyncStatusBatch | undefined
+): Promise<GitCommandResult> {
+  if (!batch) return run(args, cwd, LOCAL_TIMEOUT_MS);
+  const rootKeyText = folderKeyForComparison(root);
+  let byCommand = batch.shared.get(rootKeyText);
+  if (!byCommand) {
+    byCommand = new Map();
+    batch.shared.set(rootKeyText, byCommand);
+  }
+  // 区切りに制御文字を使わない（規則4）。JSON にすれば引数の境目が崩れない
+  const commandKey = JSON.stringify(args);
+  const known = byCommand.get(commandKey);
+  if (known) return known;
+  const started = run(args, cwd, LOCAL_TIMEOUT_MS);
+  byCommand.set(commandKey, started);
+  /*
+    **失敗した答えは覚えない**（2026-10-30、母艦のレビュー）。ほかの git が
+    index を握っていた等の一時的な失敗を覚えると、同じ置き場の残りの作品が
+    みな同じ失敗になる。いま待っている呼び手には同じ答えを返し、次の作品は
+    読み直す。捨てるのは自分の約束がまだ残っているときだけ（forget のあとに
+    入った別の約束を消さない）
+  */
+  const forgetIfStillMine = (): void => {
+    if (byCommand?.get(commandKey) === started) byCommand.delete(commandKey);
+  };
+  /*
+    **非ゼロが正常な答えの命令は覚える**（2026-10-30、母艦の再レビュー）。
+    切り離された HEAD の `symbolic-ref`、上流なしの `@{upstream}` は、非ゼロが
+    その置き場の状態そのものなので、作品ごとに読み直さない。覚えないのは
+    非ゼロが失敗を意味する命令（`status`・`remote`・`rev-list`）だけ。
+    git を起こせずに約束が拒否されたときは、どの命令でも覚えない
+  */
+  const failureIsTransient = TRANSIENT_ON_NONZERO.has(args[0] ?? "");
+  started.then(
+    (result) => {
+      if (result.code !== 0 && failureIsTransient) forgetIfStillMine();
+    },
+    forgetIfStillMine
+  );
+  return started;
+}
+
+/**
  * 作品フォルダーの同期状態を調べる。
  *
  * ここではネットワークに触れない。取得済みの情報だけで判定するので、
  * 最新かどうかは直前に fetch したかで決まる。
+ *
+ * `batch` を渡すと、置き場ぜんぶの読みをその一巡のあいだ使い回す
+ * （`createSyncStatusBatch`）。渡さなければ毎回 git に読ませる。
  */
 export async function readSyncStatus(
   cwd: string,
-  run: GitCommandRunner = runGit
+  run: GitCommandRunner = runGit,
+  batch?: SyncStatusBatch
 ): Promise<GitSyncStatus> {
-  const inside = await run(
-    ["rev-parse", "--is-inside-work-tree"],
+  // 作業ツリーの中かどうかと根を**1回で**読む（2行出る）。
+  // 分けて2回走らせていたが、git の起動が待ちのほぼ全部なので1回にした
+  // （2026-10-29 の測定）。答えの分かれ方は分けていたときと同じにする
+  const located = await run(
+    ["rev-parse", "--is-inside-work-tree", "--show-toplevel"],
     cwd,
     LOCAL_TIMEOUT_MS
   );
-  if (inside.code !== 0) {
+  const [insideLine = "", rootLine = ""] = located.stdout.split(/\r?\n/);
+  const inside = insideLine.trim();
+  if (located.code !== 0) {
+    // 作業ツリーの中なのに根が読めない——分けていたころの
+    // 「`--show-toplevel` だけ失敗した」形。異常なので失敗として返す
+    if (inside === "true") {
+      return { kind: "failed", detail: describeFailure(located) };
+    }
+    // `.git` の中は "false" を出してから失敗で終わる。分けていたころは
+    // 1回目が "false" を返して「リポジトリでない」になっていた
+    if (inside === "false") return { kind: "not_a_repo" };
     // gitが無い場合と、リポジトリでない場合を区別する。
     // 「リポジトリでない」は正常な状態なので、警告として扱わない
     if (!(await isGitAvailable(run, cwd))) return { kind: "git_missing" };
     return { kind: "not_a_repo" };
   }
-  if (inside.stdout.trim() !== "true") return { kind: "not_a_repo" };
-
-  const topLevel = await run(
-    ["rev-parse", "--show-toplevel"],
-    cwd,
-    LOCAL_TIMEOUT_MS
-  );
-  if (topLevel.code !== 0) {
-    return { kind: "failed", detail: describeFailure(topLevel) };
+  if (inside !== "true") return { kind: "not_a_repo" };
+  const root = rootLine.trim();
+  if (!root) {
+    return { kind: "failed", detail: "置き場の根を読めませんでした" };
   }
-  const root = topLevel.stdout.trim();
 
   // **作業ツリーの状態は、どの分かれ道でも要る。** リモートが無くても
   // 「記録していない変更が何件あるか」は作者に見せたい
-  const working = await readWorkingTree(cwd, root, run);
+  const working = await readWorkingTree(cwd, root, run, batch);
   if (!working) {
     return { kind: "failed", detail: "作業ツリーの状態を読めませんでした" };
   }
 
-  const remotes = await run(["remote"], cwd, LOCAL_TIMEOUT_MS);
+  const remotes = await runWholeRepo(["remote"], cwd, root, run, batch);
   if (remotes.code !== 0) {
     return { kind: "failed", detail: describeFailure(remotes) };
   }
@@ -357,19 +483,23 @@ export async function readSyncStatus(
   }
 
   // --quiet を付けるのは、切り離されたHEADでエラー文を出さないため
-  const branchResult = await run(
+  const branchResult = await runWholeRepo(
     ["symbolic-ref", "--quiet", "--short", "HEAD"],
     cwd,
-    LOCAL_TIMEOUT_MS
+    root,
+    run,
+    batch
   );
   if (branchResult.code !== 0) return { kind: "detached", root };
   const branch = branchResult.stdout.trim();
   if (!branch) return { kind: "detached", root };
 
-  const upstreamResult = await run(
+  const upstreamResult = await runWholeRepo(
     ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
     cwd,
-    LOCAL_TIMEOUT_MS
+    root,
+    run,
+    batch
   );
   if (upstreamResult.code !== 0) {
     return {
@@ -382,10 +512,12 @@ export async function readSyncStatus(
   }
   const upstream = upstreamResult.stdout.trim();
 
-  const counts = await run(
+  const counts = await runWholeRepo(
     ["rev-list", "--left-right", "--count", `${upstream}...HEAD`],
     cwd,
-    LOCAL_TIMEOUT_MS
+    root,
+    run,
+    batch
   );
   if (counts.code !== 0) {
     return { kind: "failed", detail: describeFailure(counts) };
@@ -447,9 +579,12 @@ export async function readSyncStatus(
 async function readWorkingTree(
   cwd: string,
   root: string,
-  run: GitCommandRunner
+  run: GitCommandRunner,
+  batch: SyncStatusBatch | undefined
 ): Promise<{ dirty: number; dirtyHere: number; unmerged: number } | undefined> {
-  const whole = await run(["status", "--porcelain"], cwd, LOCAL_TIMEOUT_MS);
+  // 置き場ぜんぶの数は、一巡のあいだ使い回せる（`SyncStatusBatch`）。
+  // その作品の中だけの数（下の `-- .`）は毎回読む
+  const whole = await runWholeRepo(["status", "--porcelain"], cwd, root, run, batch);
   if (whole.code !== 0) return undefined;
   const counted = parseStatusPorcelain(whole.stdout);
 

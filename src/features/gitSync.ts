@@ -18,11 +18,13 @@ import {
   readAutoCrlf,
   rewritesLineEndings,
   push,
+  createSyncStatusBatch,
   readSyncStatus,
   runGit,
   type DivergenceConflicts,
   type GitCommandRunner,
   type GitSyncStatus,
+  type SyncStatusBatch,
 } from "../core/git";
 import { readDivergenceConflicts } from "../core/divergenceScan";
 import {
@@ -268,6 +270,16 @@ export interface GitSyncOptions {
 }
 
 /**
+ * 一巡（`refreshAll`・`refreshFolderGroup`・`refreshRoot` の兄弟のループ）の
+ * あいだだけ使う入れ物。置き場ぜんぶの読みと、一巡で共有する読みの番号
+ * （`GitSyncMonitor.startRefreshBatch` の理由）。
+ */
+export interface RefreshBatch {
+  reads: SyncStatusBatch;
+  sequence: number;
+}
+
+/**
  * 設定資料の見張りを、取り込みのあいだ止める（設計書5.5.18）。
  *
  * 作者の指摘（2026-09-10）：「同期時、設定資料の変更で再読み込みを
@@ -372,6 +384,19 @@ export class GitSyncMonitor implements vscode.Disposable {
   /** 状態が変わったとき。ツリーの作り直しに使う */
   readonly onDidChange = this.changed.event;
 
+  private readonly repositoryChanged = new vscode.EventEmitter<void>();
+  /**
+   * 置き場の中身が git で入れ替わったかもしれないとき（2026-10-30、母艦のレビュー）。
+   * `extension.ts` がメニューの印（承認待ちの件数など）を全部数え直すのに使う。
+   * `onDidChange` は状態を読むたびに起きるので、印の数え直しには使わない
+   */
+  readonly onDidChangeRepositoryContents = this.repositoryChanged.event;
+
+  /** `GitSyncMonitorLike.notifyRepositoryChanged` の説明 */
+  notifyRepositoryChanged(): void {
+    this.repositoryChanged.fire();
+  }
+
   /**
    * Gitの操作（pull / checkout / merge）でファイルが入れ替わったとき。
    * 走査結果と用語の索引を作り直すのに使う（設計書5.5.8）。
@@ -434,6 +459,7 @@ export class GitSyncMonitor implements vscode.Disposable {
     this.folderRefreshTimers.clear();
     this.changed.dispose();
     this.filesChanged.dispose();
+    this.repositoryChanged.dispose();
   }
 
   /**
@@ -522,9 +548,26 @@ export class GitSyncMonitor implements vscode.Disposable {
       this.scheduleFolderRefresh(first.id);
       return;
     }
+    // 同じ置き場の作品なので、置き場ぜんぶの読みを一巡のあいだ使い回す
+    const batch = this.startRefreshBatch();
     for (const work of works) {
-      await this.refresh(work, { fetch: false, notify: false });
+      await this.refresh(work, { fetch: false, notify: false }, batch);
     }
+  }
+
+  /**
+   * 一巡ぶんの使い回し（2026-10-29 の測定）。**番号は一巡で1つ**にする。
+   *
+   * 使い回す置き場ぜんぶの数は、一巡の**最初の作品を読んだ時点**のもの。
+   * 作品ごとに新しい番号を取ると、「番号は3作品目の開始、中身は1作品目の
+   * 開始」になり、途中で割り込んだ新しい読み（記録のあとの数え直しなど）に
+   * 番号で勝って古い数を書いてしまう（2026-10-05「未記録9」と同じ形）。
+   * 一巡の作品がみな同じ番号を持てば、割り込んだ読みに負け、負けた作品は
+   * 使い回しなしで読み直す（`rereadAfterSiblingWon`）。
+   * 同じ番号どうしは負けにならない（`isStaleRead` は「より大きい」で比べる）。
+   */
+  private startRefreshBatch(): RefreshBatch {
+    return { reads: createSyncStatusBatch(), sequence: ++this.readSequence };
   }
 
   /**
@@ -578,8 +621,11 @@ export class GitSyncMonitor implements vscode.Disposable {
 
   /** 起動時に全作品を一度確かめる */
   async refreshAll(options: { fetch: boolean }): Promise<void> {
+    // 書庫では、置き場ぜんぶの数（status 全体・remote・枝・上流・rev-list 全体）を
+    // 作品の数だけ読み直していた（2026-10-29 の測定）。一巡のあいだ使い回す
+    const batch = this.startRefreshBatch();
     for (const work of this.registry.list()) {
-      await this.refresh(work, { fetch: options.fetch, notify: false });
+      await this.refresh(work, { fetch: options.fetch, notify: false }, batch);
     }
   }
 
@@ -592,16 +638,19 @@ export class GitSyncMonitor implements vscode.Disposable {
    */
   async refresh(
     work: WorkEntry,
-    options: { fetch: boolean; notify: boolean }
+    options: { fetch: boolean; notify: boolean },
+    /** 内部用。一巡の使い回し（`startRefreshBatch`）。外からは渡さない */
+    batch?: RefreshBatch
   ): Promise<GitSyncStatus> {
     // **走行中の印を立てる**（設計書6.15.1）。フォルダーの見張りは、
     // 取り込みの最中に入れ替わるファイルでも起きるので、重ならないよう
     // 見張り側がこの印を見て待ち直す
     this.refreshing.add(work.id);
-    // 番号は**読み始める前に**取る。返ってきた順ではなく始めた順で新旧を決める
-    const sequence = ++this.readSequence;
+    // 番号は**読み始める前に**取る。返ってきた順ではなく始めた順で新旧を決める。
+    // 一巡の中なら、一巡を始めたときの番号（使い回す数を読み始めた時点）
+    const sequence = batch?.sequence ?? ++this.readSequence;
     try {
-      return await this.runRefresh(work, options, sequence);
+      return await this.runRefresh(work, options, sequence, 0, batch);
     } finally {
       this.refreshing.delete(work.id);
     }
@@ -624,9 +673,12 @@ export class GitSyncMonitor implements vscode.Disposable {
   ): Promise<GitSyncStatus> {
     const status = await this.refresh(work, options);
     const key = this.refreshGroupKey(work);
+    // 兄弟は置き場ぜんぶの読みを使い回す。**押した作品の読み（取り寄せつき）の
+    // あとに作る**——取り寄せ前の読みを使い回さないため
+    const batch = this.startRefreshBatch();
     for (const sibling of this.worksInRefreshGroup(key, work.id)) {
       if (sibling.id === work.id) continue;
-      await this.refresh(sibling, { fetch: false, notify: false });
+      await this.refresh(sibling, { fetch: false, notify: false }, batch);
     }
     return this.statuses.get(work.id) ?? status;
   }
@@ -649,7 +701,8 @@ export class GitSyncMonitor implements vscode.Disposable {
     work: WorkEntry,
     options: { fetch: boolean; notify: boolean },
     sequence: number,
-    staleRetries = 0
+    staleRetries = 0,
+    batch?: RefreshBatch
   ): Promise<GitSyncStatus> {
     // **取りに行く前に、取りに行ける作品かを確かめる。**
     // Gitを使わずに書いている作品でもfetchを試みていたため、
@@ -657,7 +710,7 @@ export class GitSyncMonitor implements vscode.Disposable {
     // 作者は進み具合を見るためにログを開くので、
     // 直しようのない失敗が混ざると、本当の失敗が埋もれる。
     // この確認はローカルのgitに聞くだけでネットワークには出ない
-    let status = await readSyncStatus(work.folderPath, this.options.run);
+    let status = await readSyncStatus(work.folderPath, this.options.run, batch?.reads);
 
     if (
       options.fetch &&
@@ -677,8 +730,10 @@ export class GitSyncMonitor implements vscode.Disposable {
           詳細: result.detail ?? "（詳細なし）",
         });
       }
-      // 取り込んだぶんを反映するので読み直す
-      status = await readSyncStatus(work.folderPath, this.options.run);
+      // 取り込んだぶんを反映するので読み直す。**一巡で覚えた取り寄せ前の
+      // 読みは捨てる**（上流の位置が変わり、遅れの数が古くなる）
+      if ("root" in status) batch?.reads.forget(status.root);
+      status = await readSyncStatus(work.folderPath, this.options.run, batch?.reads);
     }
 
     // **分かれているなら、同じ箇所の衝突が何件あるかまで数える**（設計書5.5.18）。
@@ -1108,6 +1163,8 @@ export class GitSyncMonitor implements vscode.Disposable {
         // 数え直しの失敗で取り込みの結果を覆さない（次の契機で読み直す）
       }
       this.operating -= 1;
+      // 取り込みで承認待ちや設定資料が届いたかもしれない（メニューの印の数え直し）
+      this.notifyRepositoryChanged();
     }
   }
 

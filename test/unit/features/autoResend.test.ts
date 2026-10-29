@@ -68,8 +68,9 @@ let pushGate: Promise<void> | undefined;
 const fakeGit: GitCommandRunner = async (args) => {
   calls.push(args);
   const joined = args.join(" ");
-  if (joined === "rev-parse --is-inside-work-tree") {
-    return { code: 0, stdout: "true", stderr: "" };
+  // 作業ツリーの中かと根は1回で読む（2行出る。2026-10-29）
+  if (joined === "rev-parse --is-inside-work-tree --show-toplevel") {
+    return { code: 0, stdout: `true\n${library}`, stderr: "" };
   }
   if (joined === "rev-parse --show-toplevel") {
     return { code: 0, stdout: library, stderr: "" };

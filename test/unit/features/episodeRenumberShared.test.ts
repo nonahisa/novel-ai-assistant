@@ -59,8 +59,8 @@ function episodePath(fileName: string): string {
 /** `readSyncStatus` が「リモート無しのリポジトリ」と判定するまでの応答列 */
 function noRemoteRepoResponses(): Array<Partial<GitCommandResult>> {
   return [
-    { code: 0, stdout: "true" }, // rev-parse --is-inside-work-tree
-    { code: 0, stdout: work.folderPath }, // rev-parse --show-toplevel
+    // rev-parse --is-inside-work-tree --show-toplevel（1回で2行出る。2026-10-29）
+    { code: 0, stdout: `true\n${work.folderPath}` },
     { code: 0, stdout: "" }, // status --porcelain
     { code: 0, stdout: "" }, // remote（空＝リモート無し）
   ];
@@ -261,7 +261,10 @@ describe("名前だけの独立コミット", () => {
     const run: GitCommandRunner = async (args, _cwd, _timeout, options) => {
       const named = pathsOf(args, options?.input);
       calls.push({ args, paths: named });
-      if (args.includes("--is-inside-work-tree")) return { code: 0, stdout: "true", stderr: "" };
+      // 作業ツリーの中かと根は1回で読む（2行出る。2026-10-29）
+      if (args.includes("--is-inside-work-tree")) {
+        return { code: 0, stdout: `true\n${longWork.folderPath}`, stderr: "" };
+      }
       if (args.includes("--show-toplevel")) {
         return { code: 0, stdout: longWork.folderPath, stderr: "" };
       }

@@ -55,7 +55,7 @@ const COUNTED = "novelai.applyPendingUpdates";
 
 describe("案内が指している項目の印（ActionDecorationProvider）", () => {
   test("指している間だけ▶が付き、外すと消える", async () => {
-    const decorations = new ActionDecorationProvider(async () => 0);
+    const decorations = new ActionDecorationProvider(async () => 0, () => [work.id]);
     const uri = actionResourceUri(actionNode(GUIDED));
 
     decorations.setSpotlight(GUIDED);
@@ -76,14 +76,14 @@ describe("案内が指している項目の印（ActionDecorationProvider）", (
 
   test("簡単ステップメニュー側の目印にも同じ印が出る", () => {
     // 鍵はどちらもコマンドIDなので、1つ持つだけで両方のメニューに出る
-    const decorations = new ActionDecorationProvider(async () => 0);
+    const decorations = new ActionDecorationProvider(async () => 0, () => [work.id]);
     decorations.setSpotlight(GUIDED);
     const uri = stepActionResourceUri(actionNode(GUIDED), work.id);
     expect(decorations.provideFileDecoration(uri)?.badge).toBe("▶");
   });
 
   test("案内の印は、件数の印に勝つ（1つしか出せないため）", async () => {
-    const decorations = new ActionDecorationProvider(async () => 3);
+    const decorations = new ActionDecorationProvider(async () => 3, () => [work.id]);
     await decorations.refresh();
     const uri = actionResourceUri(actionNode(COUNTED));
     expect(
@@ -100,14 +100,14 @@ describe("案内が指している項目の印（ActionDecorationProvider）", (
   });
 
   test("指していない項目には出ない", () => {
-    const decorations = new ActionDecorationProvider(async () => 0);
+    const decorations = new ActionDecorationProvider(async () => 0, () => [work.id]);
     decorations.setSpotlight(GUIDED);
     const other = actionResourceUri(actionNode("novelai.postNewEpisode"));
     expect(decorations.provideFileDecoration(other)?.badge).not.toBe("▶");
   });
 
   test("同じものを指し直しても描き直させない（画面がちらつく）", () => {
-    const decorations = new ActionDecorationProvider(async () => 0);
+    const decorations = new ActionDecorationProvider(async () => 0, () => [work.id]);
     let fired = 0;
     decorations.onDidChangeFileDecorations(() => {
       fired += 1;

@@ -84,9 +84,11 @@ describe("作品フォルダーの見張り（未送信の常時表示の契機�
 
     expect(refresh).toHaveBeenCalledTimes(1);
     // **ネットへは出ない。知らせも出さない。** 印が変わるだけ
+    // 3つ目は一巡の使い回し（置き場ぜんぶの読みを作品のあいだで分ける。2026-10-29）
     expect(refresh).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w1" }),
-      { fetch: false, notify: false }
+      { fetch: false, notify: false },
+      expect.objectContaining({ sequence: expect.any(Number) })
     );
     monitor.dispose();
   });
@@ -194,7 +196,10 @@ describe("書庫の見張り（置き場ごとにまとめて作り直す）", (
         stdout,
         stderr: "",
       });
-      if (key === "rev-parse --is-inside-work-tree") return reply("true\n");
+      // 作業ツリーの中かと根は1回で読む（2行出る。2026-10-29）
+      if (key === "rev-parse --is-inside-work-tree --show-toplevel") {
+        return reply(`true\n${rootFor(cwd)}\n`);
+      }
       if (key === "rev-parse --show-toplevel") return reply(`${rootFor(cwd)}\n`);
       if (key === "remote") return reply("origin\n");
       if (key === "symbolic-ref --quiet --short HEAD") return reply("main\n");
@@ -291,9 +296,16 @@ describe("書庫の見張り（置き場ごとにまとめて作り直す）", (
     watcherFor(WORK_B.folderPath).fireChange(`${WORK_B.folderPath}\\001.txt`);
     await vi.advanceTimersByTimeAsync(2000);
 
-    // 待ちは置き場ごとに1本なので、まとまって1回ぶんだけ走る
-    expect(statusRuns(git.calls, WORK_A.folderPath)).toBe(1);
-    expect(statusRuns(git.calls, WORK_B.folderPath)).toBe(1);
+    // 待ちは置き場ごとに1本なので、まとまって1回ぶんだけ走る。
+    // その作品の中だけの数（`-- .`）は作品ごとに1回、置き場ぜんぶの数は
+    // 一巡で1回だけ読む（作品のあいだで使い回す。2026-10-29）
+    const hereRuns = (folderPath: string): number =>
+      git.calls.filter(
+        (call) => call.key === "status --porcelain -- ." && call.cwd === folderPath
+      ).length;
+    expect(hereRuns(WORK_A.folderPath)).toBe(1);
+    expect(hereRuns(WORK_B.folderPath)).toBe(1);
+    expect(git.calls.filter((call) => call.key === "status --porcelain")).toHaveLength(1);
     monitor.dispose();
   });
 });

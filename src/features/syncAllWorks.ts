@@ -6,6 +6,7 @@ import {
   pullFastForward,
   push,
   readPendingPaths,
+  readRepoRoot,
   readSyncStatus,
   runGit,
   type GitCommandRunner,
@@ -173,6 +174,11 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   // 編集用リポジトリは書庫の同期の対象外なので別口で取り寄せる。
   // **失敗しても同期の報告を止めない**
   await collectEditorInboxAfterSync(works);
+  // 取り込みで承認待ちや設定資料が届いたかもしれない（編集部の提案は印の数え手が
+  // 見る置き場に入っていないので、合図の理由にしない）。
+  // git が書いたファイルは見張りに乗らないことがあるので、メニューの印を数え直させる
+  // （2026-10-30、母艦のレビュー）
+  deps.monitor.notifyRepositoryChanged?.();
 
   await report(outcomes, plans);
 }
@@ -200,26 +206,83 @@ async function collectStates(
 ): Promise<SyncTargetState[]> {
   const states: SyncTargetState[] = [];
   const seen = new Set<string>();
+  /** 根は分かるのに状態が読めなかった作品（根の鍵 → 最初の1件）。下の説明 */
+  const held = new Map<
+    string,
+    { work: WorkEntry; root: string; status: SyncTargetState["status"] }
+  >();
 
-  for (const work of works) {
-    if (token.isCancellationRequested) break;
+  // **まず全作品の根だけを（同時に）調べる**（2026-10-29 の測定）。
+  // 以前は作品ごとに状態を全部読んでから「同じ置き場はもう見た」と
+  // 飛ばしていたので、書庫では作品の数だけ git が並んだ（写しの7作品で、
+  // 確認の窓まで git 73回・1.3秒）。根が分かれば、同じ置き場の2作品目
+  // からは状態を読まずに済む
+  if (token.isCancellationRequested) return states;
+  const roots = await Promise.all(
+    works.map((work) => readRepoRoot(work.folderPath, deps.run))
+  );
+
+  // 置き場ごとの最初の作品で、状態を読む。並びは今までと同じ（最初に現れた順）
+  const firsts: Array<{
+    work: WorkEntry;
+    root: string;
+    status: SyncTargetState["status"];
+  }> = [];
+  for (const [index, work] of works.entries()) {
+    if (token.isCancellationRequested) return states;
+    const known = roots[index];
+    if (known !== undefined && seen.has(known.toLowerCase())) continue;
     progress.report({ message: work.title });
 
-    let status = await readSyncStatus(work.folderPath, deps.run);
+    // **最初の作品のフォルダーで読む**（今までと同じ）。根で読むと
+    // 「その作品のぶん」（`…Here`）の値が変わる
+    const status = await readSyncStatus(work.folderPath, deps.run);
     // リポジトリの根が分かるなら、そこを置き場にする。
-    // **同じ根の作品を二度処理しない**
+    // 根が読めなかった作品は、状態（リポジトリでない・git が無い）の
+    // ためにそのフォルダーを置き場として残す。**同じ根の作品を二度処理しない**
+    /*
+      **根は読めたのに状態の読みが根なしで失敗した作品は、すぐには項目にしない**
+      （2026-10-30、母艦の再レビュー）。同じ置き場のほかの作品で読めれば、その
+      置き場の項目に入るので、失敗の項目を足すと報告に同じ作品が2回出る。
+      最後まで同じ置き場が読めなかったときだけ、失敗の項目として残す
+    */
+    if (known !== undefined && !("root" in status && status.root)) {
+      const heldKey = known.toLowerCase();
+      if (!held.has(heldKey)) held.set(heldKey, { work, root: work.folderPath, status });
+      continue;
+    }
     const root = "root" in status && status.root ? status.root : work.folderPath;
     const key = root.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
+    /*
+      **根の鍵は、この作品の読みで根が読めたときだけ「見た」にする**
+      （2026-10-30、母艦のレビュー）。読みが一時的に失敗（根なし）でも
+      根の鍵を入れると、同じ置き場のほかの作品がこの回の同期から外れる
+    */
+    if (known !== undefined && "root" in status && status.root) {
+      seen.add(known.toLowerCase());
+    }
+    firsts.push({ work, root, status });
+  }
+  // 最後まで同じ置き場が読めなかった作品だけ、失敗の項目として残す（上の \`held\`）
+  for (const [heldKey, entry] of held) {
+    if (seen.has(heldKey)) continue;
+    seen.add(entry.root.toLowerCase());
+    firsts.push(entry);
+  }
 
-    // **遅れの件数は、リモートを取りに行ったあとでないと当てにならない**
-    // （設計書5.5.18）。記録より先に早送りできるかどうかがこの数で決まる
-    // ため、ここで読み直す。**fetchは置き場ごとに1回だけ**——作品ごとに
-    // 走らせると、書庫では作品の数だけ回線を使う。
-    // 取りに行けなくても止めない。手元が知っている範囲で進めるだけで、
-    // いまより悪くはならない
-    if (canFetch(status)) {
+  // **遅れの件数は、リモートを取りに行ったあとでないと当てにならない**
+  // （設計書5.5.18）。記録より先に早送りできるかどうかがこの数で決まる
+  // ため、取りに行ってから読み直す。**fetchは置き場ごとに1回だけ**——作品ごとに
+  // 走らせると、書庫では作品の数だけ回線を使う。
+  // **置き場どうしは同時に取りに行く**（回線の待ちを置き場の数だけ重ねない）。
+  // 取りに行けなくても止めない。手元が知っている範囲で進めるだけで、
+  // いまより悪くはならない
+  if (token.isCancellationRequested) return states;
+  const fetchedRoots = await Promise.all(
+    firsts.map(async ({ root, status }) => {
+      if (!canFetch(status)) return false;
       const fetched = await fetchRemote(root, deps.run);
       if (!fetched.ok) {
         logFailure("すべて同期：状態を調べる前のfetchに失敗", {
@@ -227,6 +290,17 @@ async function collectStates(
           詳細: fetched.detail ?? "（詳細なし）",
         });
       }
+      return true;
+    })
+  );
+
+  for (const [index, first] of firsts.entries()) {
+    if (token.isCancellationRequested) break;
+    const { work, root } = first;
+    let status = first.status;
+    progress.report({ message: work.title });
+
+    if (fetchedRoots[index]) {
       status = await readSyncStatus(root, deps.run);
     }
 
