@@ -11,6 +11,7 @@ import {
   type ProposalLine,
   type ProposalView,
 } from "../models/proposal";
+import { stringOrEmpty } from "./stringOrEmpty";
 
 /**
  * 編集部からの提案の置き場（設計書5.6）。
@@ -152,28 +153,28 @@ function toLine(value: unknown): ProposalLine | undefined {
   const record = value as Record<string, unknown>;
 
   if (record.kind === "proposal") {
-    const id = str(record.id);
-    const file = str(record.file);
-    const target = str(record.target);
+    const id = stringOrEmpty(record.id);
+    const file = stringOrEmpty(record.file);
+    const target = stringOrEmpty(record.target);
     // **どこを直すのか分からない提案は、作者が判断できない**
     if (!id || !file || !target) return undefined;
     return {
       kind: "proposal",
       id,
-      time: str(record.time),
-      proposer: str(record.proposer),
+      time: stringOrEmpty(record.time),
+      proposer: stringOrEmpty(record.proposer),
       file,
       line: typeof record.line === "number" ? record.line : 0,
-      original: str(record.original),
+      original: stringOrEmpty(record.original),
       target,
-      suggestion: str(record.suggestion),
-      reason: str(record.reason),
-      category: str(record.category),
+      suggestion: stringOrEmpty(record.suggestion),
+      reason: stringOrEmpty(record.reason),
+      category: stringOrEmpty(record.category),
     };
   }
 
   if (record.kind === "decision") {
-    const proposalId = str(record.proposalId);
+    const proposalId = stringOrEmpty(record.proposalId);
     const status = record.status;
     if (!proposalId || (status !== "accepted" && status !== "rejected")) {
       return undefined;
@@ -181,15 +182,11 @@ function toLine(value: unknown): ProposalLine | undefined {
     return {
       kind: "decision",
       proposalId,
-      time: str(record.time),
-      decidedBy: str(record.decidedBy),
+      time: stringOrEmpty(record.time),
+      decidedBy: stringOrEmpty(record.decidedBy),
       status,
-      note: str(record.note),
+      note: stringOrEmpty(record.note),
     };
   }
   return undefined;
-}
-
-function str(value: unknown): string {
-  return typeof value === "string" ? value : "";
 }

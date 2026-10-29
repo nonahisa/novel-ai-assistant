@@ -1,4 +1,5 @@
 import { FACT_CONTRADICTION_CATEGORY } from "./factContradiction";
+import { stringOrEmpty } from "./stringOrEmpty";
 
 /**
  * 作者が採った・退けた指摘を、**指摘を出したモデルと機能ごとに**数える
@@ -159,9 +160,9 @@ export function parseVerdictLines(text: string): VerdictLine[] {
 function toVerdictLine(value: unknown): VerdictLine | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;
-  const subject = str(record.subject);
-  const providerId = str(record.providerId);
-  const model = str(record.model);
+  const subject = stringOrEmpty(record.subject);
+  const providerId = stringOrEmpty(record.providerId);
+  const model = stringOrEmpty(record.model);
   const feature = record.feature;
   const status = record.status;
   if (!subject || !providerId || !model) return undefined;
@@ -171,7 +172,7 @@ function toVerdictLine(value: unknown): VerdictLine | undefined {
     return undefined;
   }
   return {
-    time: str(record.time),
+    time: stringOrEmpty(record.time),
     subject,
     providerId,
     model,
@@ -358,8 +359,4 @@ function isOlder(candidate: string, current: string): boolean {
   const right = Date.parse(current);
   if (Number.isNaN(left) || Number.isNaN(right)) return false;
   return left < right;
-}
-
-function str(value: unknown): string {
-  return typeof value === "string" ? value : "";
 }
