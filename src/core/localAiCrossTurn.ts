@@ -60,6 +60,7 @@ import {
   type LeaseIdentity,
   type LeaseRecord,
 } from "./localAiLease";
+import { messageOf } from "./errorMessage";
 
 /** 3つのファイルそれぞれの環境（時計やプロセスの生死は同じものを渡してよい） */
 export interface CrossTurnEnvironments {
@@ -94,10 +95,6 @@ export type CrossTurnKind = "run" | "single";
 
 export interface EnterCrossTurnOptions extends EnterLeaseOptions {
   readonly kind: CrossTurnKind;
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -160,7 +157,7 @@ class InterruptMarker {
     try {
       current = await this.env.ops.read();
     } catch (error) {
-      this.logFailure(`単発の印を読めません（${describe(error)}）`);
+      this.logFailure(`単発の印を読めません（${messageOf(error)}）`);
       return undefined;
     }
     if (!current) return undefined;
@@ -177,7 +174,7 @@ class InterruptMarker {
       try {
         await this.env.ops.removeIfSame(current.text);
       } catch (error) {
-        this.logFailure(`古い単発の印を消せません（${describe(error)}）`);
+        this.logFailure(`古い単発の印を消せません（${messageOf(error)}）`);
       }
       return undefined;
     }
@@ -213,7 +210,7 @@ class InterruptMarker {
       .removeIfSame(text)
       .then(() => undefined)
       .catch((error: unknown) => {
-        this.logFailure(`単発の印を消せません（${describe(error)}）`);
+        this.logFailure(`単発の印を消せません（${messageOf(error)}）`);
       });
     this.pendingRemoval = removal;
     void removal.finally(() => {
@@ -274,7 +271,7 @@ class InterruptMarker {
       // "held"：別のプロセスの単発が出している。それで用は足りる
     } catch (error) {
       // **印が出せなくても、単発は今までどおり待つ**（合間に入れないだけ）
-      this.logFailure(`単発の印を出せません（${describe(error)}）`);
+      this.logFailure(`単発の印を出せません（${messageOf(error)}）`);
     } finally {
       this.busy = false;
     }
@@ -329,7 +326,7 @@ export class CrossProcessTurn {
     try {
       return await readLastSendEndedMs(ops);
     } catch (error) {
-      this.envs.send.log?.(`最後に送り終えた時刻を読めません（${describe(error)}）`);
+      this.envs.send.log?.(`最後に送り終えた時刻を読めません（${messageOf(error)}）`);
       return undefined;
     }
   }

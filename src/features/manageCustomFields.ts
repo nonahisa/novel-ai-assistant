@@ -26,6 +26,7 @@ import {
 } from "../models/customField";
 import { logFailure, useLogFile } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 設定資料に作者が項目を足す・外す。
@@ -74,7 +75,7 @@ export async function manageCustomFields(work: WorkEntry): Promise<void> {
     const message =
       error instanceof CustomFieldStoreError
         ? error.message
-        : `項目の定義を読めませんでした: ${errorMessage(error)}`;
+        : `項目の定義を読めませんでした: ${messageOf(error)}`;
     // **記録の直前に書き先を向ける**（0.43.3 と同じ）
     useLogFile(work.folderPath);
     logFailure("customFields.load", { work: work.title, message });
@@ -136,7 +137,7 @@ export async function manageCustomFields(work: WorkEntry): Promise<void> {
     const message =
       error instanceof CustomFieldStoreError
         ? error.message
-        : `項目を保存できませんでした: ${errorMessage(error)}`;
+        : `項目を保存できませんでした: ${messageOf(error)}`;
     useLogFile(work.folderPath);
     logFailure("customFields.save", { work: work.title, message });
     void vscode.window.showErrorMessage(message);
@@ -239,7 +240,7 @@ async function collectUsedKeys(
   try {
     loaded = await loadRecordsOf(work, choice.kind);
   } catch (error) {
-    const message = `${choice.label}の資料を読めませんでした: ${errorMessage(error)}`;
+    const message = `${choice.label}の資料を読めませんでした: ${messageOf(error)}`;
     useLogFile(work.folderPath);
     logFailure("customFields.scanValues", { work: work.title, message });
     void vscode.window.showErrorMessage(message);
@@ -404,7 +405,7 @@ async function pickFieldToRestore(
     useLogFile(work.folderPath);
     logFailure("customFields.restoreScan", {
       work: work.title,
-      message: errorMessage(error),
+      message: messageOf(error),
     });
   }
 
@@ -469,8 +470,4 @@ async function pickFieldToRemove(
   if (!picked || !("key" in picked)) return undefined;
 
   return picked.key;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
