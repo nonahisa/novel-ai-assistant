@@ -30,6 +30,8 @@
  * VS Code APIに依存しない。
  */
 
+import { escapeHtml } from "./htmlEscape";
+
 /** 拡張機能の中で使う記法 `{漢字|かんじ}` */
 const INTERNAL = /\{([^{}|\r\n]+)\|([^{}|\r\n]*)\}/g;
 
@@ -640,12 +642,4 @@ export function validateRuby(base: string, reading: string): string | null {
   if (base.length > 30) return "ルビを振る文字が長すぎます（30文字まで）。";
   if (reading.length > 30) return "読み仮名が長すぎます（30文字まで）。";
   return null;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

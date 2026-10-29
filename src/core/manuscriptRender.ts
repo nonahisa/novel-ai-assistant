@@ -5,6 +5,10 @@ import {
 } from "./ruby";
 import { TermIndex, type TermKind, type TermMatch } from "./termIndex";
 import { memoLineRanges } from "./sceneMemo";
+import { escapeHtml } from "./htmlEscape";
+
+// 外から `manuscriptRender` 経由で読んでいる所（notePreview・printGridHtml）を壊さないための再公開
+export { escapeHtml };
 
 /**
  * 原稿エディタの表示の土台——記法の切り出し・用語の位置・記法の判定（設計書6.25）。
@@ -169,14 +173,6 @@ export function tokenizeLine(
   }
   if (last < line.length) tokens.push({ kind: "plain", text: line.slice(last) });
   return tokens;
-}
-
-export function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 /*
