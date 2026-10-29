@@ -24,6 +24,7 @@ import {
 import { logFailure, useLogFile } from "../core/logger";
 import { openInDefaultEditor } from "../views/openDocument";
 import { createEpisodePlot } from "./resumeWriting";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 単話プロットへの行き来（設計書6.36・6.25。作者の依頼、2026-09-23
@@ -307,8 +308,4 @@ export async function followManuscriptEpisode(
     preserveFocus: true,
     preview: true,
   });
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

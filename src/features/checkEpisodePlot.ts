@@ -80,6 +80,7 @@ import {
   workLog,
   type WorkLog,
 } from "../core/logger";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 単話プロットのAI判定2種（P-27・P-28、設計書6.36.3）。
@@ -928,8 +929,4 @@ async function ask(options: {
     });
     return undefined;
   }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

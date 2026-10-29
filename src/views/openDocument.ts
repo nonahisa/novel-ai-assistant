@@ -11,6 +11,7 @@ import {
 } from "../core/generatedFiles";
 import { workPaths } from "../core/workRegistry";
 import type { WorkEntry } from "../models/types";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 作者の既定のエディターでファイルを開く（設計書6.17.6）。
@@ -255,10 +256,6 @@ async function openUntitledMarkdown(
   // 無題文書は `vscode.open` では開けない（実在するファイルとして
   // 解決しようとして失敗する）。素のテキストで開く
   await vscode.window.showTextDocument(document, options);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**

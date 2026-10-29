@@ -80,6 +80,7 @@ import {
 } from "./plotNameSuggest";
 import { PlotAdviceSession, type PlotAdviceView } from "./plotAdvice";
 import { createNonce } from "../core/webviewNonce";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * プロットモードの画面（設計書6.4.8）。
@@ -1279,8 +1280,4 @@ function aiActions(): Array<{
       },
     ];
   });
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

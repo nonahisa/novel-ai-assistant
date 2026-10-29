@@ -70,6 +70,7 @@ import {
   restoreMemoLineInOpenManuscript,
 } from "./manuscriptEditor";
 import { createNonce } from "../core/webviewNonce";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * シーンメモのパネル（設計書6.40.4）。
@@ -1852,8 +1853,4 @@ function isDarkTheme(): boolean {
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark ||
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast
   );
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

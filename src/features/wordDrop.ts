@@ -24,6 +24,7 @@ import { withProgress } from "../views/progress";
 import { nameNewEpisodes, writeNewEpisodes, type WorkScan } from "./addEpisodeFiles";
 import type { BackupDropDeps, BackupDropResult } from "./backupDrop";
 import { pickDropTarget } from "./dropTargetPick";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 相談パネルへ落とされた Word 原稿（.docx）を受け取る（作者の裁定、2026-09-23
@@ -409,8 +410,4 @@ function describeMatchForLog(match: WordMatch): string {
     case "none":
       return "当たりなし";
   }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

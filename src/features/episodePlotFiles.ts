@@ -19,6 +19,7 @@ import { pathExists } from "../core/fileSystem";
 import { logFailure, useLogFile } from "../core/logger";
 import { openInDefaultEditor } from "../views/openDocument";
 import { episodePlotsDirOf, listEpisodePlotChapters } from "./episodePlotNav";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 単話プロットのファイルの名前と見出しを付け替える口（設計書6.36・6.4.8）。
@@ -341,8 +342,4 @@ function collisionText(collisions: readonly EpisodePlotRename[]): string {
 function logFollowFailure(work: WorkEntry, context: string, detail: string): void {
   useLogFile(work.folderPath);
   logFailure(context, { 作品: work.title, 内容: detail });
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

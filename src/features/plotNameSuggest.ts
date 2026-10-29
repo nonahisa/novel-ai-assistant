@@ -74,6 +74,7 @@ import {
   responseExcerptForLog,
   useLogFile,
 } from "../core/logger";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * プロットモードの「名前の候補を出す」（設計書6.4.8。作者の依頼、2026-09-25）。
@@ -838,8 +839,4 @@ function isDirtyDocument(filePath: string): boolean {
     (document) =>
       document.isDirty && paths.isSamePath(paths.fromUri(document.uri), filePath)
   );
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
