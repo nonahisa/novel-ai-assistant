@@ -830,14 +830,6 @@ export function widenProbeSearchTimeout(
   });
 }
 
-/** いま、そのモデルに掛かっている探索の線（秒）。探索の最中でなければ undefined */
-export function probeSearchTimeoutCap(
-  providerId: string,
-  model: string
-): number | undefined {
-  return probeSearchCaps.get(modelTuningKey(providerId, model))?.seconds;
-}
-
 /**
  * これを下回るコンテキスト長は、台帳に入っていても使わない。
  *
