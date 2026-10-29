@@ -7,6 +7,7 @@ import {
   type NarratorMoveItem,
   type NarratorMoveKind,
 } from "./narratorMoves";
+import { isRecord } from "./isRecord";
 
 /**
  * 語り手の取り違えで主人公に入った値を「別の人物へ移す案」を、提案パネルの
@@ -96,14 +97,14 @@ export function readPendingNarratorMoveFile(
   parsed: unknown,
   filePath: string
 ): PendingNarratorMove {
-  if (!isObject(parsed) || parsed.kind !== "narratorMove") {
+  if (!isRecord(parsed) || parsed.kind !== "narratorMove") {
     throw new Error("移す案の形ではありません（kind が narratorMove でない）");
   }
   const { sourceId, sourceName, item, stagedAt } = parsed;
   if (typeof sourceId !== "string" || !sourceId) {
     throw new Error("移す案に sourceId がありません");
   }
-  if (!isObject(item)) throw new Error("移す案に item がありません");
+  if (!isRecord(item)) throw new Error("移す案に item がありません");
   if (!MOVE_KINDS.includes(item.kind as NarratorMoveKind)) {
     throw new Error(`移す案の種類が分かりません（${String(item.kind)}）`);
   }
@@ -113,7 +114,7 @@ export function readPendingNarratorMoveFile(
   if (!Array.isArray(item.chapters) || !item.chapters.every(Number.isSafeInteger)) {
     throw new Error("移す案の話数が読めません");
   }
-  if (!isObject(item.destination) || !Array.isArray(item.destination.candidates)) {
+  if (!isRecord(item.destination) || !Array.isArray(item.destination.candidates)) {
     throw new Error("移す案の移し先が読めません");
   }
   const move = item as unknown as NarratorMoveItem;
@@ -286,6 +287,3 @@ export function narratorMoveValueForLog(item: NarratorMoveItem): string {
     : `${item.label}「${item.value}」（${chapters}）`;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}

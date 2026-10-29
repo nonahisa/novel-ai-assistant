@@ -6,6 +6,7 @@ import {
   type ExportSectionKind,
 } from "./settingsExportProfiles";
 import { formatDayTime } from "./timestampedFileName";
+import { isRecord } from "./isRecord";
 
 /**
  * 提供先別の設定資料の「前回書き出した時点との差分」（F6、設計書6.75.1）。
@@ -126,19 +127,19 @@ export function parseSnapshot(text: string): ExportSnapshot | null {
   } catch {
     return null;
   }
-  if (!isObject(value)) return null;
+  if (!isRecord(value)) return null;
   if (value.version !== SNAPSHOT_VERSION) return null;
   if (!EXPORT_AUDIENCES.includes(value.audience as ExportAudience)) return null;
   if (value.chapter !== null && typeof value.chapter !== "number") return null;
   if (typeof value.exportedAt !== "string") return null;
   if (!Array.isArray(value.sections)) return null;
   for (const section of value.sections) {
-    if (!isObject(section) || typeof section.kind !== "string") return null;
+    if (!isRecord(section) || typeof section.kind !== "string") return null;
     if (typeof section.title !== "string" || !Array.isArray(section.records)) {
       return null;
     }
     for (const record of section.records) {
-      if (!isObject(record)) return null;
+      if (!isRecord(record)) return null;
       if (typeof record.key !== "string" || typeof record.name !== "string") {
         return null;
       }
@@ -164,10 +165,6 @@ export function parseSnapshot(text: string): ExportSnapshot | null {
     }
   }
   return value as unknown as ExportSnapshot;
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export interface FieldChange {
