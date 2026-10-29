@@ -4,6 +4,7 @@ import { READER_AXIS_ORDER, type ReaderTypeId } from "./readerTarget";
 import type { ReaderChatSource } from "./readerTarget";
 import type { ReaderScores } from "../models/readerProfile";
 import type { TargetSheet } from "./targetSheet";
+import { pad2 } from "./pad2";
 
 /**
  * ターゲットシートの控えと推移（設計書6.108.5）。
@@ -261,8 +262,4 @@ export function targetSheetHistoryNameCandidates(
     names.push(`${base}-${n}.json`);
   }
   return names.slice(0, Math.max(tries, 1));
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
 }

@@ -1,5 +1,6 @@
 import { redactUrlCredentials } from "./redactUrl";
 import { escapeRegExp } from "./regexEscape";
+import { pad2 } from "./pad2";
 
 /**
  * 障害報告用の記録（設計書8.5。作者の裁定 2026-10-17）。
@@ -75,10 +76,6 @@ export const ISSUE_REPORT_RANGES: ReadonlyArray<{ hours: number; label: string }
 ];
 
 const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
-
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
-}
 
 function defaultRandomBytes(count: number): Uint8Array {
   const bytes = new Uint8Array(count);
