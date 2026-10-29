@@ -81,12 +81,6 @@ export function responseInput() {
     .describe(`AIの応答（JSONの文字列）。${VALIDATE_NOTE}`);
 }
 
-export function chunkIdInput() {
-  return z
-    .string()
-    .describe("`prompt` か `run` が返した chunkId。そのまま渡してください");
-}
-
 export interface ClaudeRunResult<P> {
   runner: "claude";
   note: string;

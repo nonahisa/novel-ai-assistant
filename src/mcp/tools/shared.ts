@@ -111,29 +111,6 @@ export const FOLDER_INPUT = {
 };
 
 /**
- * 本文を切るときに要る入力。
- *
- * **チャンクの大きさは固定しない**（CLAUDE.md 規則6）。モデルの上限から
- * `decideChunkSize` で決めるので、使うモデルの上限（`num_ctx`）を必ずもらう。
- */
-export const CHUNK_INPUT = {
-  filePath: z
-    .string()
-    .describe("作品フォルダーからの相対パス（`work.scan` が返すもの）"),
-  numCtx: z
-    .number()
-    .int()
-    .positive()
-    .describe("使うモデルのコンテキスト長。チャンクの大きさをここから決めます"),
-  chunkIndex: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe("そのチャンクだけを対象にする。省略すると全チャンク"),
-};
-
-/**
  * 本文の行き先は、呼ぶ側が明示する（設計書6.87.6 の2）。
  *
  * **既定を作らない。** `ollama` なら原稿は機械の外へ出ないが、`claude` は
