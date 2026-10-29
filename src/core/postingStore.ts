@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isFileNotFound } from "./fsErrors";
 import * as path from "./paths";
 import { fromUri } from "./paths";
 import type { WorkEntry } from "../models/types";
@@ -341,11 +342,5 @@ function externalChangeMessage(reason: string): string {
     "こちらの内容で上書きしないよう保存を中止しました。" +
     "ほかの操作（同期・ヘルパーからの取り込み・手での編集など）が先に書き換えています。" +
     "もう一度お試しください（読み直してから保存します）。"
-  );
-}
-
-function isFileNotFound(error: unknown): boolean {
-  return (
-    error instanceof vscode.FileSystemError && error.code === "FileNotFound"
   );
 }

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isFileNotFound } from "./fsErrors";
 import * as path from "./paths";
 import { fromUri } from "./paths";
 import type { WorkEntry } from "../models/types";
@@ -224,11 +225,5 @@ function externalChangeMessage(reason: string): string {
   return (
     `設定/${READER_PROFILE_FILE} が${reason}。上書きを避けるため保存しませんでした。` +
     "　開き直してから、もう一度お試しください。"
-  );
-}
-
-function isFileNotFound(error: unknown): boolean {
-  return (
-    error instanceof vscode.FileSystemError && error.code === "FileNotFound"
   );
 }
