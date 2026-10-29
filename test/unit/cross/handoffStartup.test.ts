@@ -50,7 +50,10 @@ function fakeRepo(over: {
     const joined = args.join(" ");
     const ok = (stdout = "") => ({ code: 0, stdout, stderr: "" });
     if (args[0] === "--version") return ok("git version 2.55");
-    if (joined === "rev-parse --is-inside-work-tree") return ok("true");
+    // 作業ツリーの中かと根は1回で読む（2行出る。2026-10-29）
+    if (joined === "rev-parse --is-inside-work-tree --show-toplevel") {
+      return ok(`true\n${library}`);
+    }
     if (joined === "rev-parse --show-toplevel") return ok(library);
     if (joined === "remote") return ok("origin");
     if (args[0] === "symbolic-ref") return ok("main");

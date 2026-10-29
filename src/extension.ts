@@ -2195,13 +2195,13 @@ export async function activate(
   // 操作の末尾に出す印（「AI」と未反映の件数）。
   // 詳細メニューの件数は全作品を合わせて数える。作品を選ばずにメニューを見るため、
   // 「どこかに溜まっている」ことが分かればよい。
-  // **簡単ステップメニューは作品を1つ渡してくる**（最上段で選ぶ画面なので、
-  // 合算を出すと選択作品の件数に見える。作者の実機報告、2026-09-05）
+  // 簡単ステップメニューは選んだ作品だけを出す（最上段で選ぶ画面なので、
+  // 合算を出すと選択作品の件数に見える。作者の実機報告、2026-09-05）。
+  // **ここでは1作品ずつ数え、合計は印の側が作品ごとの和で作る**
+  // （2026-10-29 の測定。選び直すたびに全作品の資料を読み直していた）
   const actionDecorations = new ActionDecorationProvider(async (counter, workId) => {
     let total = 0;
-    for (const work of workId === undefined
-      ? registry.list()
-      : registry.list().filter((entry) => entry.id === workId)) {
+    for (const work of registry.list().filter((entry) => entry.id === workId)) {
       try {
         if (counter === "pendingUpdates") {
           total += await new PendingUpdateStore(work).count();
@@ -2233,7 +2233,7 @@ export async function activate(
       }
     }
     return total;
-  });
+  }, () => registry.list().map((work) => work.id));
   context.subscriptions.push(
     actionDecorations,
     vscode.window.registerFileDecorationProvider(actionDecorations)
@@ -2336,18 +2336,19 @@ export async function activate(
   );
   context.subscriptions.push(stepView);
 
-  /** 未反映の件数を数え直す。抽出・反映のあと、作品を選び直したあとに呼ぶ */
-  const refreshActionBadges = (): void => {
-    void actionDecorations.refresh().then(() => {
+  /**
+   * 未反映の件数を数え直す。抽出・反映のあと、作品を選び直したあとに呼ぶ。
+   *
+   * **作品が分かる呼び出しは `workId` を渡す**——その作品だけ数え直し、
+   * 合計は覚えている他の作品との和で作る（2026-10-29 の測定）。渡さなければ
+   * 全作品を数える（起動直後・登録簿の変化・提案パネルの戻り・外部アクセスの見張り）
+   */
+  const refreshActionBadges = (workId?: string): void => {
+    void actionDecorations.refresh(workId).then(() => {
       actionProvider.refresh();
       // 同じ操作が2つのメニューに出るので、両方を引き直す
       stepProvider.refresh();
     });
-    // 簡単ステップメニューは選んだ作品だけを数えるので、別に数え直す
-    // （合算からその作品ぶんは割り出せない）
-    void actionDecorations
-      .refreshWork(stepProvider.selectedWork()?.id)
-      .then(() => stepProvider.refresh());
   };
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
   refreshActionBadges();
@@ -2417,7 +2418,7 @@ export async function activate(
     // **控えを捨てたあとに呼ぶ**（先に呼ぶと古い控えから送ってしまう）
     refreshAllManuscriptTerms();
     treeProvider.refresh(work.id);
-    refreshActionBadges();
+    refreshActionBadges(work.id);
     // 開いている相関図も読み直す（関係欄を直したら線の言葉が変わる。作者の依頼「B3」）。
     // 開いていなければ何もしない。承認待ちの反映や外での書き換えは、
     // 相関図の側の見張りが拾う（`relationGraphPanel.ts`）
@@ -4022,7 +4023,7 @@ export async function activate(
         // 原稿が入れ替わったので、文字数もハイライトも作り直す
         treeProvider.refresh(work.id);
         highlighter.invalidate();
-        refreshActionBadges();
+        refreshActionBadges(work.id);
       }
     )
   );
@@ -4207,9 +4208,15 @@ export async function activate(
       );
       if (!picked || !("work" in picked)) return;
       stepProvider.selectWork(picked.work.id);
-      // **末尾の件数は選んだ作品のもの**なので、切り替えたら数え直す
-      // （そうしないと、前の作品の件数が並んだままになる）
-      refreshActionBadges();
+      // **末尾の件数は選んだ作品のもの**なので、切り替えたら出し直す
+      // （そうしないと、前の作品の件数が並んだままになる）。
+      // 選び直しで資料は変わらないので、**もう数えてある作品なら数え直さない**
+      // （2026-10-29 の測定：選び直すたびに全作品の資料を読み直していた）
+      if (actionDecorations.hasCounted(picked.work.id)) {
+        stepProvider.refresh();
+      } else {
+        refreshActionBadges(picked.work.id);
+      }
     })
   );
 
@@ -5025,7 +5032,7 @@ export async function activate(
         await exportImeDictionary(work, verifiedState(context.globalState));
         // 書き出したので「辞書が古い」の印を消す。
         // 残ったままだと、押しても消えない印を作者が気にし続けることになる
-        refreshActionBadges();
+        refreshActionBadges(work.id);
       }
     )
   );
@@ -5121,7 +5128,7 @@ export async function activate(
         // 名前や別名が変われば、本文で光る範囲も変わる
         highlighter.invalidate();
         // 承認待ちが減ったので、操作メニューの件数を数え直す
-        refreshActionBadges();
+        refreshActionBadges(work.id);
         // 古い案の片付けで件数が変わる。設定資料パネルの入口も数え直す
         await findOpenSettingsPanel(work.id)?.refreshFromDisk();
         return CHECK_COMPLETED;
@@ -5169,7 +5176,7 @@ export async function activate(
         // 開いたままのパネルは自分では気づかない。
         // 消えたはずの人物が一覧に残り続ける
         await findOpenSettingsPanel(work.id)?.refreshFromDisk();
-        refreshActionBadges();
+        refreshActionBadges(work.id);
         // 校正・メモパネルの「人物の重複の候補が N組」も数え直す（設計書6.40.4）
         await refreshSceneMemoMergeNotice(work.id);
         return CHECK_COMPLETED;
@@ -5454,7 +5461,7 @@ export async function activate(
         await generateSettingsDocs(work, { kinds: [kind] });
         treeProvider.refresh(work.id);
         highlighter.invalidate();
-        refreshActionBadges();
+        refreshActionBadges(work.id);
       })
     );
   }
@@ -5531,7 +5538,7 @@ export async function activate(
         });
         treeProvider.refresh(work.id);
         // 抽出で承認待ちが増えることがある。押さなくても気づけるよう数え直す
-        refreshActionBadges();
+        refreshActionBadges(work.id);
         // 抽出で増えた用語を本文のハイライトへ反映する。
         // 設定JSONは拡張機能が直接書くのでエディタの保存イベントが起きず、
         // ここで作り直さないと再読み込みまで古い索引のままになる
@@ -6146,7 +6153,7 @@ export async function activate(
 
         highlighter.invalidate();
         treeProvider.refresh(work.id);
-        refreshActionBadges();
+        refreshActionBadges(work.id);
         await refreshNameCheckPanel(work);
         // 開きっぱなしの相関図は、旧名のノードを出したままになる（6.38）
         await refreshRelationGraph(work.id);

@@ -116,8 +116,9 @@ function alreadyRepo(root: string): GitCommandRunner {
     if (args[0] === "--version") {
       return { code: 0, stdout: "git version 2.55", stderr: "" };
     }
+    // 作業ツリーの中かと根は1回で読む（2行出る。2026-10-29）
     if (args[0] === "rev-parse" && args[1] === "--is-inside-work-tree") {
-      return { code: 0, stdout: "true", stderr: "" };
+      return { code: 0, stdout: `true\n${root}`, stderr: "" };
     }
     if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
       return { code: 0, stdout: root, stderr: "" };

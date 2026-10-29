@@ -101,15 +101,24 @@ export class ActionDecorationProvider
   >();
   readonly onDidChangeFileDecorations = this._onDidChange.event;
 
+  /** 全作品の合計（詳細メニュー用）。**作品ごとの件数の和**として作る */
   private readonly counts = new Map<ActionCounter, number>();
 
   /**
-   * 作品ごとの件数（簡単ステップメニュー用）。
+   * 作品ごとの件数（簡単ステップメニュー用。合計の元でもある）。
    *
-   * 合算とは別に持つ。**合算から作品ごとの数は割り出せない**ので、
-   * 選んだ作品を数え直す（`refreshWork`）。
+   * 以前は合計と作品ごとを別々に数えていて、作品を選び直すだけで全作品の
+   * 資料を読み直していた（2026-10-29 の測定：写しで1回93ms・ファイル431回）。
+   * 作品ごとに覚えて、合計はその和にする。数え直すのは変わった作品だけ。
    */
   private readonly workCounts = new Map<string, Map<ActionCounter, number>>();
+
+  /**
+   * 作品ごとの数え直しの番号。**後から始めた数え直しが残る**ようにする。
+   * 数え直しは await せずに重なる（抽出のあと・反映のあとなど）ので、
+   * 遅れて返った古い数が新しい数を上書きしないため
+   */
+  private readonly countSequence = new Map<string, number>();
 
   /**
    * いま案内（設計書6.104）が指している操作のコマンドID。
@@ -121,60 +130,105 @@ export class ActionDecorationProvider
   private spotlighted: string | undefined;
 
   /**
-   * @param load 件数を数える。数え方そのものはここに持たない
+   * @param load その作品だけの件数を数える。数え方そのものはここに持たない
    *   （作品の登録状況に依存するため）。
-   *   `workId` を渡さなければ**作品をまたいで合算した値**、
-   *   渡せば**その作品だけ**の値を返す。
+   * @param listWorkIds 登録されている作品。合計に入れる作品と、
+   *   全部数えるときの範囲を決める。
    */
   constructor(
     private readonly load: (
       counter: ActionCounter,
-      workId?: string
-    ) => Promise<number>
+      workId: string
+    ) => Promise<number>,
+    private readonly listWorkIds: () => readonly string[]
   ) {}
 
-  /** 数え直して、変わっていれば描き直させる */
-  async refresh(): Promise<void> {
+  /**
+   * 数え直して、変わっていれば描き直させる。
+   *
+   * `workId` を渡すと**その作品だけ**数え直す（抽出・反映など、作品の分かる
+   * 操作のあと）。渡さなければ全作品を数える（起動直後・登録簿の変化など、
+   * どの作品が変わったか分からないとき）。
+   * **まだ数えていない作品があれば、作品を渡されても全部数える**——
+   * 合計が欠けたまま出ないようにするため。
+   */
+  async refresh(workId?: string): Promise<void> {
+    const listed = this.listWorkIds();
+    const all =
+      workId === undefined || listed.some((id) => !this.workCounts.has(id));
+    const targets = all ? [...listed] : [workId];
+    const results = await Promise.all(targets.map((id) => this.countWork(id)));
+
     let changed = false;
-    for (const counter of usedCounters()) {
-      let next = 0;
-      try {
-        next = await this.load(counter);
-      } catch {
-        // 数えられなくてもメニューは出す。印が出ないだけ
-        next = 0;
+    for (const [index, id] of targets.entries()) {
+      const next = results[index];
+      // 後から始めた数え直しに追い越された（`countSequence`）
+      if (!next) continue;
+      const before = this.workCounts.get(id);
+      if (!before || [...next].some(([counter, count]) => before.get(counter) !== count)) {
+        changed = true;
       }
-      if (this.counts.get(counter) !== next) {
-        this.counts.set(counter, next);
+      this.workCounts.set(id, next);
+    }
+    // 登録から外れた作品は覚えておかない（合計にも入れない）
+    const known = new Set(this.listWorkIds());
+    for (const id of [...this.workCounts.keys()]) {
+      if (!known.has(id)) {
+        this.workCounts.delete(id);
+        this.countSequence.delete(id);
         changed = true;
       }
     }
+    if (this.recountTotals(known)) changed = true;
     if (changed) this._onDidChange.fire(undefined);
   }
 
   /**
-   * 1つの作品だけを数え直す。**簡単ステップメニューで作品を選び直したときに呼ぶ。**
-   *
-   * 未選択（undefined）のときは数えるものが無い。印も出さないので何もしない。
+   * その作品をもう数えたか。**簡単ステップメニューで作品を選び直したとき**、
+   * 数えてあれば数え直さずに描き直すだけにする（選び直しで資料は変わらない）。
+   * 未選択（undefined）は数えるものが無いので、数えたものとして扱う。
    */
-  async refreshWork(workId: string | undefined): Promise<void> {
-    if (workId === undefined) return;
-    const before = this.workCounts.get(workId);
+  hasCounted(workId: string | undefined): boolean {
+    return workId === undefined || this.workCounts.has(workId);
+  }
+
+  /**
+   * 1作品を数える。後から同じ作品の数え直しが始まっていれば undefined
+   * （古い数で上書きしない）
+   */
+  private async countWork(
+    workId: string
+  ): Promise<Map<ActionCounter, number> | undefined> {
+    const sequence = (this.countSequence.get(workId) ?? 0) + 1;
+    this.countSequence.set(workId, sequence);
     const next = new Map<ActionCounter, number>();
-    let changed = before === undefined;
     for (const counter of usedCounters()) {
       let count = 0;
       try {
         count = await this.load(counter, workId);
       } catch {
-        // 合算と同じ扱い。読めない作品は0件（印が出ないだけ）
+        // 数えられなくてもメニューは出す。読めない作品は0件（印が出ないだけ）
         count = 0;
       }
       next.set(counter, count);
-      if (before?.get(counter) !== count) changed = true;
     }
-    this.workCounts.set(workId, next);
-    if (changed) this._onDidChange.fire(undefined);
+    return this.countSequence.get(workId) === sequence ? next : undefined;
+  }
+
+  /** 合計を作品ごとの件数の和で作り直す。変わったら true */
+  private recountTotals(listed: ReadonlySet<string>): boolean {
+    let changed = false;
+    for (const counter of usedCounters()) {
+      let total = 0;
+      for (const [id, byCounter] of this.workCounts) {
+        if (listed.has(id)) total += byCounter.get(counter) ?? 0;
+      }
+      if (this.counts.get(counter) !== total) {
+        this.counts.set(counter, total);
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   /**

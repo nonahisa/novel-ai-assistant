@@ -49,8 +49,8 @@ function fakeGit(
 }
 
 const TRACKED_BASE = {
-  "rev-parse --is-inside-work-tree": { stdout: "true\n" },
-  "rev-parse --show-toplevel": { stdout: "/work\n" },
+  // 作業ツリーの中かと根は1回で読む（2行出る。2026-10-29）
+  "rev-parse --is-inside-work-tree --show-toplevel": { stdout: "true\n/work\n" },
   remote: { stdout: "origin\n" },
   "symbolic-ref --quiet --short HEAD": { stdout: "main\n" },
   "rev-parse --abbrev-ref --symbolic-full-name @{upstream}": {
@@ -312,7 +312,7 @@ describe("同期状態の判定", () => {
     // 実データでは11作品すべてに「送信待ち13」と出た（作者の指摘）
     const run = fakeGit({
       ...TRACKED_BASE,
-      "rev-parse --show-toplevel": { stdout: "/library\n" },
+      "rev-parse --is-inside-work-tree --show-toplevel": { stdout: "true\n/library\n" },
       "rev-list --left-right --count origin/main...HEAD -- .": {
         stdout: "0\t2\n",
       },
@@ -340,7 +340,7 @@ describe("同期状態の判定", () => {
     // 送信は置き場が単位で、1つ送れば同じ置き場の作品はまとめて出ていく
     const run = fakeGit({
       ...TRACKED_BASE,
-      "rev-parse --show-toplevel": { stdout: "/library\n" },
+      "rev-parse --is-inside-work-tree --show-toplevel": { stdout: "true\n/library\n" },
       "rev-list --left-right --count origin/main...HEAD -- .": {
         stdout: "0\t2\n",
       },

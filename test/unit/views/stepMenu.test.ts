@@ -698,7 +698,7 @@ describe("AIと件数の印", () => {
       stepActionResourceUri(decorationNode(command), workId)
     )?.badge as string | undefined;
 
-  /** 作品ごとに違う件数を返す口。合算（作品を渡さない）は26件 */
+  /** 作品ごとに違う件数を返す口。合算は作品ごとの和（2 + 24 = 26件） */
   const perWorkCounts = async (
     _counter: ActionCounter,
     workId?: string
@@ -709,21 +709,21 @@ describe("AIと件数の印", () => {
   };
 
   test("選んだ作品の件数だけを出す", async () => {
-    const decorations = new ActionDecorationProvider(perWorkCounts);
+    const decorations = new ActionDecorationProvider(perWorkCounts, () => ["wA", "wB"]);
 
-    await decorations.refreshWork("wA");
+    await decorations.refresh("wA");
     expect(badgeOf(decorations, "novelai.unifyCharacters", "wA")).toBe("2");
 
-    await decorations.refreshWork("wB");
+    await decorations.refresh("wB");
     expect(badgeOf(decorations, "novelai.unifyCharacters", "wB")).toBe("24");
   });
 
   test("作品を選んでいなければ件数を出さない", async () => {
     // どの作品の数字か分からないものを出すと、選択中の作品の件数に見える。
     // 「どこかに溜まっている」の気づきは詳細メニュー（全作品合計）が担う
-    const decorations = new ActionDecorationProvider(perWorkCounts);
+    const decorations = new ActionDecorationProvider(perWorkCounts, () => ["wA", "wB"]);
     await decorations.refresh();
-    await decorations.refreshWork("wA");
+    await decorations.refresh("wA");
 
     expect(badgeOf(decorations, "novelai.unifyCharacters", undefined)).toBeUndefined();
     // AIの印は作品に関わらないので、選んでいなくても出す
@@ -731,8 +731,8 @@ describe("AIと件数の印", () => {
   });
 
   test("ツールチップで、どの範囲の数字かが分かる", async () => {
-    const decorations = new ActionDecorationProvider(perWorkCounts);
-    await decorations.refreshWork("wA");
+    const decorations = new ActionDecorationProvider(perWorkCounts, () => ["wA", "wB"]);
+    await decorations.refresh("wA");
 
     const tooltip = decorations.provideFileDecoration(
       stepActionResourceUri(

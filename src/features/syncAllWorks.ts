@@ -6,6 +6,7 @@ import {
   pullFastForward,
   push,
   readPendingPaths,
+  readRepoRoot,
   readSyncStatus,
   runGit,
   type GitCommandRunner,
@@ -201,25 +202,53 @@ async function collectStates(
   const states: SyncTargetState[] = [];
   const seen = new Set<string>();
 
-  for (const work of works) {
-    if (token.isCancellationRequested) break;
+  // **まず全作品の根だけを（同時に）調べる**（2026-10-29 の測定）。
+  // 以前は作品ごとに状態を全部読んでから「同じ置き場はもう見た」と
+  // 飛ばしていたので、書庫では作品の数だけ git が並んだ（写しの7作品で、
+  // 確認の窓まで git 73回・1.3秒）。根が分かれば、同じ置き場の2作品目
+  // からは状態を読まずに済む
+  if (token.isCancellationRequested) return states;
+  const roots = await Promise.all(
+    works.map((work) => readRepoRoot(work.folderPath, deps.run))
+  );
+
+  // 置き場ごとの最初の作品で、状態を読む。並びは今までと同じ（最初に現れた順）
+  const firsts: Array<{
+    work: WorkEntry;
+    root: string;
+    status: SyncTargetState["status"];
+  }> = [];
+  for (const [index, work] of works.entries()) {
+    if (token.isCancellationRequested) return states;
+    const known = roots[index];
+    if (known !== undefined && seen.has(known.toLowerCase())) continue;
     progress.report({ message: work.title });
 
-    let status = await readSyncStatus(work.folderPath, deps.run);
+    // **最初の作品のフォルダーで読む**（今までと同じ）。根で読むと
+    // 「その作品のぶん」（`…Here`）の値が変わる
+    const status = await readSyncStatus(work.folderPath, deps.run);
     // リポジトリの根が分かるなら、そこを置き場にする。
-    // **同じ根の作品を二度処理しない**
+    // 根が読めなかった作品は、状態（リポジトリでない・git が無い）の
+    // ためにそのフォルダーを置き場として残す。**同じ根の作品を二度処理しない**
     const root = "root" in status && status.root ? status.root : work.folderPath;
     const key = root.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
+    if (known !== undefined) seen.add(known.toLowerCase());
+    firsts.push({ work, root, status });
+  }
 
-    // **遅れの件数は、リモートを取りに行ったあとでないと当てにならない**
-    // （設計書5.5.18）。記録より先に早送りできるかどうかがこの数で決まる
-    // ため、ここで読み直す。**fetchは置き場ごとに1回だけ**——作品ごとに
-    // 走らせると、書庫では作品の数だけ回線を使う。
-    // 取りに行けなくても止めない。手元が知っている範囲で進めるだけで、
-    // いまより悪くはならない
-    if (canFetch(status)) {
+  // **遅れの件数は、リモートを取りに行ったあとでないと当てにならない**
+  // （設計書5.5.18）。記録より先に早送りできるかどうかがこの数で決まる
+  // ため、取りに行ってから読み直す。**fetchは置き場ごとに1回だけ**——作品ごとに
+  // 走らせると、書庫では作品の数だけ回線を使う。
+  // **置き場どうしは同時に取りに行く**（回線の待ちを置き場の数だけ重ねない）。
+  // 取りに行けなくても止めない。手元が知っている範囲で進めるだけで、
+  // いまより悪くはならない
+  if (token.isCancellationRequested) return states;
+  const fetchedRoots = await Promise.all(
+    firsts.map(async ({ root, status }) => {
+      if (!canFetch(status)) return false;
       const fetched = await fetchRemote(root, deps.run);
       if (!fetched.ok) {
         logFailure("すべて同期：状態を調べる前のfetchに失敗", {
@@ -227,6 +256,17 @@ async function collectStates(
           詳細: fetched.detail ?? "（詳細なし）",
         });
       }
+      return true;
+    })
+  );
+
+  for (const [index, first] of firsts.entries()) {
+    if (token.isCancellationRequested) break;
+    const { work, root } = first;
+    let status = first.status;
+    progress.report({ message: work.title });
+
+    if (fetchedRoots[index]) {
       status = await readSyncStatus(root, deps.run);
     }
 

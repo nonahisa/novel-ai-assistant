@@ -474,7 +474,7 @@ describe("AIの印", () => {
 describe("件数の印", () => {
   test("0件のときは何も出さない", () => {
     // 「0」と出ていると、何かあると思って開いてしまう
-    const provider = new ActionDecorationProvider(async () => 0);
+    const provider = new ActionDecorationProvider(async () => 0, () => ["w1"]);
 
     expect(
       provider.provideFileDecoration(
@@ -484,7 +484,7 @@ describe("件数の印", () => {
   });
 
   test("溜まっていれば件数を出す", async () => {
-    const provider = new ActionDecorationProvider(async () => 3);
+    const provider = new ActionDecorationProvider(async () => 3, () => ["w1"]);
     await provider.refresh();
 
     expect(
@@ -502,7 +502,7 @@ describe("件数の印", () => {
   test("分類と操作の間の小分類にも出す", async () => {
     // 分類を開いた作者に見えるのは小分類の行だけ。そこに印が無いと、
     // どれを開けば件数の元があるのか辿れない（実機で発覚、2026-08-14）
-    const provider = new ActionDecorationProvider(async () => 3);
+    const provider = new ActionDecorationProvider(async () => 3, () => ["w1"]);
     await provider.refresh();
 
     expect(
@@ -513,7 +513,7 @@ describe("件数の印", () => {
   });
 
   test("件数を持たない小分類には出さない", async () => {
-    const provider = new ActionDecorationProvider(async () => 3);
+    const provider = new ActionDecorationProvider(async () => 3, () => ["w1"]);
     await provider.refresh();
 
     expect(
@@ -525,7 +525,7 @@ describe("件数の印", () => {
 
   test("3桁以上は99で止める", async () => {
     // 印は2文字までしか出せない。切れた数字を見せるより上限で止める
-    const provider = new ActionDecorationProvider(async () => 128);
+    const provider = new ActionDecorationProvider(async () => 128, () => ["w1"]);
     await provider.refresh();
 
     expect(
@@ -536,7 +536,7 @@ describe("件数の印", () => {
   });
 
   test("AIを呼ぶ操作には「AI」と出す", () => {
-    const provider = new ActionDecorationProvider(async () => 0);
+    const provider = new ActionDecorationProvider(async () => 0, () => ["w1"]);
 
     expect(
       provider.provideFileDecoration(
@@ -553,9 +553,11 @@ describe("件数の印", () => {
   test("詳細メニューは全作品を合わせて数える", async () => {
     // **作品を選ばずに見るメニュー**なので、「どこかに溜まっている」ことが
     // 分かればよい（設計書6.17）。簡単ステップメニューが選択中の作品だけを
-    // 数えるようになっても（2026-09-05）、こちらは合算のままにする
-    const provider = new ActionDecorationProvider(async (_counter, workId) =>
-      workId === undefined ? 26 : 2
+    // 数えるようになっても（2026-09-05）、こちらは合算のままにする。
+    // 合算は作品ごとの件数の和で作る（2026-10-29。選び直しのたびに全作品を読み直さないため）
+    const provider = new ActionDecorationProvider(
+      async (_counter, workId) => (workId === "wA" ? 2 : 24),
+      () => ["wA", "wB"]
     );
     await provider.refresh();
 
@@ -572,9 +574,12 @@ describe("件数の印", () => {
 
   test("数えられなくてもメニューは出す", async () => {
     // 設定JSONが壊れていても、操作そのものは押せるべき
-    const provider = new ActionDecorationProvider(async () => {
-      throw new Error("読めません");
-    });
+    const provider = new ActionDecorationProvider(
+      async () => {
+        throw new Error("読めません");
+      },
+      () => ["w1"]
+    );
 
     await expect(provider.refresh()).resolves.toBeUndefined();
     expect(provider.countOf("pendingUpdates")).toBe(0);

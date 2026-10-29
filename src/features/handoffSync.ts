@@ -7,6 +7,7 @@ import {
   fetchRemote,
   pullFastForward,
   push,
+  readRepoRoot,
   readSyncStatus,
   runGit,
   type GitCommandRunner,
@@ -146,26 +147,46 @@ export async function runStartupHandoff(deps: HandoffDeps): Promise<void> {
 async function collectTargets(deps: HandoffDeps): Promise<HandoffTarget[]> {
   const works = deps.registry.list();
   const byRoot = new Map<string, HandoffTarget>();
+  /** 根を先に調べた作品の、根 → 状態を読んだ置き場（同じ置き場を二度読まない） */
+  const targetOfRoot = new Map<string, HandoffTarget>();
 
-  for (const work of works) {
+  // **まず全作品の根だけを（同時に）調べる**（2026-10-29 の測定）。
+  // 以前は作品ごとに状態を全部読んでから置き場でまとめていたので、
+  // 書庫では作品の数だけ git が並んだ。状態は置き場ごとに最初の作品で1回だけ読む
+  const roots = await Promise.all(
+    works.map((work) => readRepoRoot(work.folderPath, deps.run))
+  );
+
+  for (const [index, work] of works.entries()) {
+    const known = roots[index];
+    const already = known !== undefined ? targetOfRoot.get(known) : undefined;
+    if (already) {
+      already.works.push(work);
+      continue;
+    }
     const status = await readSyncStatus(work.folderPath, deps.run);
     if (!("root" in status)) continue;
     const found = byRoot.get(status.root);
     if (found) {
       found.works.push(work);
+      if (known !== undefined) targetOfRoot.set(known, found);
       continue;
     }
     const ahead = status.kind === "tracked" ? status.ahead : 0;
     const dirty = "dirty" in status ? status.dirty : 0;
-    byRoot.set(status.root, {
+    const target: HandoffTarget = {
       root: status.root,
       label: buildSyncTarget(status.root, works).label,
       works: [work],
       status,
       pending: ahead > 0 || dirty > 0,
-    });
+    };
+    byRoot.set(status.root, target);
+    if (known !== undefined) targetOfRoot.set(known, target);
   }
 
+  // 置き場の点検（`handleTarget`）は**順に**回す（呼び出し側）。同時にすると、
+  // ログの書き先を大域で切り替える `useSyncLog` が置き場どうしで混ざる
   return [...byRoot.values()];
 }
 

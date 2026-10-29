@@ -52,8 +52,9 @@ const busyRepo: GitCommandRunner = async (args) => {
   if (args[0] === "--version") {
     return { code: 0, stdout: "git version 2.55", stderr: "" };
   }
-  if (joined === "rev-parse --is-inside-work-tree") {
-    return { code: 0, stdout: "true", stderr: "" };
+  // 作業ツリーの中かと根は1回で読む（2行出る。2026-10-29）
+  if (joined === "rev-parse --is-inside-work-tree --show-toplevel") {
+    return { code: 0, stdout: `true\n${library}`, stderr: "" };
   }
   if (joined === "rev-parse --show-toplevel") {
     return { code: 0, stdout: library, stderr: "" };
@@ -336,7 +337,9 @@ describe("早送りで書きかけと食い違ったとき", () => {
     const ok = (stdout: string) => ({ code: 0, stdout, stderr: "" });
 
     if (args[0] === "--version") return ok("git version 2.55");
-    if (joined === "rev-parse --is-inside-work-tree") return ok("true");
+    if (joined === "rev-parse --is-inside-work-tree --show-toplevel") {
+      return ok(`true\n${root}`);
+    }
     if (joined === "rev-parse --show-toplevel") return ok(root);
     if (joined === "status --porcelain --untracked-files=all") {
       return ok(" M 本文/001.txt\n");
@@ -527,6 +530,11 @@ describe("記録の前の保存", () => {
         calls.push([tag, ...args]);
         return { code: 0, stdout: tag === "A" ? "C:/書庫A" : "C:/書庫B", stderr: "" };
       }
+      // 状態を読むときの根の確かめ（作業ツリーの中かと根を1回で読む。2026-10-29）
+      if (args.join(" ") === "rev-parse --is-inside-work-tree --show-toplevel") {
+        calls.push([tag, ...args]);
+        return { code: 0, stdout: tag === "A" ? "true\nC:/書庫A" : "true\nC:/書庫B", stderr: "" };
+      }
       const result = await busyRepo(args, cwd, timeout);
       calls[calls.length - 1] = [tag, ...args];
       return result;
@@ -574,6 +582,11 @@ describe("同期の途中で中止する", () => {
       if (args.join(" ") === "rev-parse --show-toplevel") {
         calls.push([tag, ...args]);
         return { code: 0, stdout: tag === "A" ? "C:/書庫A" : "C:/書庫B", stderr: "" };
+      }
+      // 状態を読むときの根の確かめ（作業ツリーの中かと根を1回で読む。2026-10-29）
+      if (args.join(" ") === "rev-parse --is-inside-work-tree --show-toplevel") {
+        calls.push([tag, ...args]);
+        return { code: 0, stdout: tag === "A" ? "true\nC:/書庫A" : "true\nC:/書庫B", stderr: "" };
       }
       const result = await busyRepo(args, cwd, timeout);
       calls[calls.length - 1] = [tag, ...args];
