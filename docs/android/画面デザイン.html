@@ -1,0 +1,690 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Android版 画面デザイン</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Shippori+Mincho:wght@400;600&display=swap">
+<style>
+/* 並べ方：説明の列（65字幅）の下に、実寸の画面を縮めて並べる。画面の中の色は、すべて下の印から取る */
+:root {
+  --paper: #f4f6f9;      /* ページの地 */
+  --surface: #ffffff;    /* 画面の地 */
+  --sunk: #eceff4;       /* 一段沈んだ所（一覧の地・キーボード） */
+  --ink: #1b2130;        /* 文字 */
+  --muted: #5b6475;      /* 補いの文字 */
+  --line: #d6dbe4;       /* 罫 */
+  --accent: #2c4a8c;     /* 藍：押せるもの・いまの場所 */
+  --accent-soft: #e3e9f6;
+  --shu: #b8432e;        /* 朱：校正の指摘（意味の色） */
+  --shu-soft: #f8e6e1;
+  --ok: #2f7a4f;         /* 済んだ・保存済み（意味の色） */
+  --warn: #9a6700;       /* 注意（意味の色） */
+  --warn-soft: #fbf0d4;
+  --device: #22262e;     /* 端末の縁 */
+  --select: #c9d6f2;     /* 選んだ範囲 */
+  --font-ui: "BIZ UDPGothic", "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
+  --font-ms: "Shippori Mincho", "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #101319; --surface: #181c24; --sunk: #20252f; --ink: #e5e8ef; --muted: #9ba3b3;
+    --line: #2d3440; --accent: #93abe8; --accent-soft: #24304a; --shu: #f0846d; --shu-soft: #3a2420;
+    --ok: #74c69a; --warn: #e2b44f; --warn-soft: #3a3020; --device: #000000; --select: #2e4472;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #101319; --surface: #181c24; --sunk: #20252f; --ink: #e5e8ef; --muted: #9ba3b3;
+  --line: #2d3440; --accent: #93abe8; --accent-soft: #24304a; --shu: #f0846d; --shu-soft: #3a2420;
+  --ok: #74c69a; --warn: #e2b44f; --warn-soft: #3a3020; --device: #000000; --select: #2e4472;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: var(--font-ui); font-size: 15px; line-height: 1.75;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+.page { max-width: 1320px; margin: 0 auto; display: grid; gap: 56px; }
+.prose { max-width: 42em; display: grid; gap: 12px; }
+.prose p { margin: 0; }
+h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 700; }
+h1 { font-size: 28px; line-height: 1.4; }
+h2 { font-size: 21px; line-height: 1.5; padding-top: 12px; border-top: 1px solid var(--line); }
+h3 { font-size: 16px; }
+.eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--muted); }
+.decided { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
+  font-size: 13px; background: var(--accent-soft); color: var(--accent); }
+.chip.plan { background: var(--warn-soft); color: var(--warn); }
+.note { color: var(--muted); font-size: 13.5px; }
+code { font-size: .92em; background: var(--sunk); padding: 0 4px; border-radius: 3px; }
+
+/* 段の境目の図 */
+.ruler { display: grid; gap: 6px; max-width: 760px; }
+.ruler .bar { display: grid; grid-template-columns: 600fr 240fr 440fr; height: 40px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+.ruler .bar div { display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--ink); }
+.ruler .bar div:nth-child(1) { background: var(--surface); }
+.ruler .bar div:nth-child(2) { background: var(--accent-soft); }
+.ruler .bar div:nth-child(3) { background: var(--sunk); }
+.ruler .ticks { display: grid; grid-template-columns: 600fr 240fr 440fr; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ruler .ticks span:nth-child(2), .ruler .ticks span:nth-child(3) { border-left: 1px solid var(--muted); padding-left: 4px; }
+
+/* 画面の並び */
+.row { display: flex; flex-wrap: wrap; gap: 28px 24px; align-items: flex-start; }
+figure { margin: 0; display: grid; gap: 10px; min-width: 0; }
+figure.phone-fig { width: min(100%, 372px); }
+figure.wide-fig { width: 100%; }
+figcaption { font-size: 13.5px; color: var(--muted); line-height: 1.65; max-width: 42em; }
+figcaption b { color: var(--ink); font-weight: 700; }
+.fit { position: relative; width: 100%; overflow: hidden; }
+.device { position: absolute; top: 0; left: 0; transform-origin: top left;
+  background: var(--surface); border: 6px solid var(--device); border-radius: 30px; overflow: hidden;
+  display: flex; flex-direction: column; color: var(--ink); font-size: 14px; line-height: 1.6; }
+.device.tab { border-radius: 22px; border-width: 10px; }
+.status { height: 24px; flex: none; display: flex; justify-content: space-between; align-items: center;
+  padding: 0 18px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 上のバー */
+.topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 4px; border-bottom: 1px solid var(--line); }
+.topbar .title { flex: 1; min-width: 0; font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .title small { display: block; font-weight: 400; font-size: 11px; color: var(--muted); line-height: 1.2; }
+.ibtn { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 20px; color: var(--ink); }
+.ibtn svg { width: 22px; height: 22px; }
+.pill { flex: none; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink); background: var(--surface); white-space: nowrap; }
+.pill.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.saved { flex: none; font-size: 11px; color: var(--ok); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.saved::before { content: ""; width: 6px; height: 6px; border-radius: 3px; background: var(--ok); }
+
+/* 下のタブ */
+.tabs { height: 64px; flex: none; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); background: var(--surface); }
+.tabs div { display: grid; place-items: center; align-content: center; gap: 2px; font-size: 11px; color: var(--muted); position: relative; }
+.tabs div svg { width: 22px; height: 22px; }
+.tabs div.on { color: var(--accent); font-weight: 700; }
+.tabs div.on svg { background: var(--accent-soft); border-radius: 12px; padding: 2px 14px; width: 52px; height: 28px; }
+.badge { position: absolute; top: 6px; left: calc(50% + 6px); min-width: 18px; height: 18px; border-radius: 9px; background: var(--shu); color: var(--surface); font-size: 10.5px; display: grid; place-items: center; padding: 0 5px; font-weight: 700; }
+
+/* 一覧 */
+.body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.scroll { flex: 1; min-height: 0; overflow: hidden; padding: 12px; display: grid; gap: 10px; align-content: start; background: var(--sunk); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 6px; }
+.card h4 { margin: 0; font-size: 16px; font-family: var(--font-ms); font-weight: 600; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.flag { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); justify-self: start; }
+.flag.shu { background: var(--shu-soft); color: var(--shu); }
+.flag.ok { background: var(--accent-soft); color: var(--accent); }
+.fab { align-self: end; justify-self: end; margin: 0 16px 16px 0; padding: 14px 18px; border-radius: 16px; background: var(--accent); color: var(--surface); font-weight: 700; font-size: 14px; display: inline-flex; gap: 8px; align-items: center; }
+
+.list { flex: 1; min-height: 0; overflow: hidden; background: var(--surface); }
+.list .chap { padding: 10px 16px 4px; font-size: 12px; color: var(--muted); letter-spacing: .08em; }
+.ep { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 4px 8px; padding: 9px 16px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.ep .no { font-size: 12px; color: var(--muted); }
+.ep .name { font-family: var(--font-ms); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ep .chars { font-size: 12px; color: var(--muted); text-align: right; }
+.ep .marks { grid-column: 2 / 4; display: flex; gap: 6px; }
+.ep.cur { background: var(--accent-soft); }
+.ep.cur .name { color: var(--accent); font-weight: 600; }
+.newep { margin: 10px 16px; padding: 10px 12px; border: 1px dashed var(--accent); border-radius: 10px; color: var(--accent); font-size: 13.5px; }
+
+/* 原稿：縦書き */
+.ms-wrap { flex: 1; min-height: 0; position: relative; background: var(--surface); }
+.ms { position: absolute; inset: 0; writing-mode: vertical-rl; text-orientation: mixed; overflow: hidden;
+  font-family: var(--font-ms); font-size: 17px; line-height: 1.95; padding: 18px 16px; color: var(--ink);
+  text-spacing-trim: space-all; text-underline-position: right; }
+.ms p { margin: 0; }
+.ms rt { font-size: 8.5px; font-family: var(--font-ms); }
+.tcy { text-combine-upright: all; }
+.term { color: var(--accent); }
+.compose { text-decoration: underline dotted var(--ink); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.caret { display: inline-block; width: 18px; height: 2px; background: var(--accent); vertical-align: middle; }
+.sel { background: var(--select); }
+.ms.h { writing-mode: horizontal-tb; overflow: hidden; line-height: 1.9; font-size: 16.5px; }
+.ms.h p { text-indent: 0; }
+
+/* 長押しの帯 */
+.band { position: absolute; display: flex; background: var(--ink); color: var(--surface); border-radius: 10px; font-size: 13px; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+.band span { padding: 9px 11px; white-space: nowrap; }
+.band span + span { border-left: 1px solid color-mix(in srgb, var(--surface) 22%, transparent); }
+.band span.mine { font-weight: 700; }
+.handle { position: absolute; width: 14px; height: 14px; border-radius: 7px 7px 7px 0; background: var(--accent); }
+
+/* 道具帯・候補・キーボード */
+.tools { height: 44px; flex: none; display: flex; align-items: center; gap: 3px; padding: 0 5px; border-top: 1px solid var(--line); background: var(--surface); overflow: hidden; }
+.tools span { flex: none; min-width: 30px; height: 34px; padding: 0 5px; display: grid; place-items: center; border-radius: 8px; font-size: 13.5px; color: var(--ink); background: var(--sunk); white-space: nowrap; }
+.tools span.ms-glyph { font-family: var(--font-ms); font-size: 15px; }
+.tools span.dir { background: var(--accent-soft); color: var(--accent); font-weight: 700; margin-left: auto; }
+.cands { height: 40px; flex: none; display: flex; align-items: center; gap: 0; background: var(--sunk); border-top: 1px solid var(--line); font-size: 15px; overflow: hidden; }
+.cands span { padding: 0 14px; border-right: 1px solid var(--line); white-space: nowrap; }
+.cands span:first-child { font-weight: 700; }
+.kbd { height: 236px; flex: none; background: var(--sunk); display: grid; grid-template-columns: 1fr 3fr 1fr; gap: 6px; padding: 8px 6px 10px; }
+.kbd .side, .kbd .main { display: grid; gap: 6px; }
+.kbd .side { grid-template-rows: repeat(4, 1fr); }
+.kbd .main { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); }
+.kbd span { background: var(--surface); border-radius: 8px; display: grid; place-items: center; font-size: 17px; color: var(--ink); box-shadow: 0 1px 0 var(--line); }
+.kbd .side span { font-size: 12px; color: var(--muted); }
+
+/* 提案 */
+.prop { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; }
+.prop .kind { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
+.prop .kind b { color: var(--shu); font-weight: 700; }
+.prop .quote { font-family: var(--font-ms); font-size: 15px; line-height: 1.7; }
+.prop .quote del { color: var(--shu); text-decoration-color: var(--shu); }
+.prop .quote ins { text-decoration: none; background: var(--accent-soft); color: var(--accent); padding: 0 2px; border-radius: 3px; }
+.prop .why { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+.prop .acts { display: flex; gap: 8px; justify-content: flex-end; }
+.btn { font-size: 13px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); white-space: nowrap; }
+.btn.pri { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 700; }
+.seg { display: flex; gap: 6px; padding: 10px 12px 0; background: var(--sunk); flex-wrap: wrap; }
+
+/* 知らせ・下から出る板 */
+.notice { position: absolute; left: 10px; right: 10px; top: 10px; z-index: 2; background: var(--warn-soft); color: var(--ink); border: 1px solid var(--warn); border-radius: 12px; padding: 12px; display: grid; gap: 10px; font-size: 13px; line-height: 1.6; }
+.notice .acts { display: flex; gap: 8px; justify-content: flex-end; }
+.scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--ink) 38%, transparent); }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--surface); border-radius: 20px 20px 0 0; padding: 10px 18px 20px; display: grid; gap: 12px; }
+.sheet .grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line); justify-self: center; }
+.sheet h4 { margin: 0; font-size: 17px; }
+.est { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.est dt { color: var(--muted); }
+.est dd { margin: 0; }
+.paid { color: var(--warn); font-weight: 700; }
+.sheet .acts { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* 中・広い段の並び */
+.split { flex: 1; min-height: 0; display: flex; }
+.pane { min-width: 0; display: flex; flex-direction: column; }
+.pane + .pane { border-left: 1px solid var(--line); }
+.pane .head { height: 44px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.pane .head b { color: var(--ink); font-size: 14px; }
+.stabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); flex: none; }
+.stabs span { flex: 1; text-align: center; padding: 10px 0; font-size: 13px; color: var(--muted); }
+.stabs span.on { color: var(--accent); font-weight: 700; box-shadow: inset 0 -2px 0 var(--accent); }
+.mini-term { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 4px; font-size: 13px; }
+.mini-term h5 { margin: 0; font-size: 15px; font-family: var(--font-ms); }
+.mine-note { border-left: 3px solid var(--ok); padding-left: 8px; color: var(--ink); }
+
+.legend { display: grid; gap: 8px; max-width: 42em; }
+.legend div { display: grid; grid-template-columns: 7em 1fr; gap: 12px; font-size: 14px; }
+.legend dt { font-weight: 700; }
+.todo { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; max-width: 42em; }
+</style>
+
+<div class="page">
+
+<header class="prose">
+  <div class="eyebrow">統合小説執筆環境 ／ Android 版 ／ 下書き 2026-10-29</div>
+  <h1>Android版 画面デザイン</h1>
+  <p>Android 詳細設計書（同じフォルダーの <code>Android詳細設計書.md</code>）の4章・5章を、画面の見本にしたものです。作品と本文はすべて見本で、作者の原稿は使っていません。</p>
+  <div class="decided">
+    <span class="chip">決定：幅で3段（2026-10-29）</span>
+    <span class="chip">決定：スマホでも縦書きのまま打てる（2026-10-29）</span>
+    <span class="chip plan">案：それ以外の並び・文言・道具帯</span>
+  </div>
+</header>
+
+<section class="prose" aria-labelledby="s1">
+  <h2 id="s1">段の境目</h2>
+  <p>画面の幅で、1枚・2枚・3枚を切り替えます。境目は Android が窓の大きさを分ける区分と同じ 600dp と 840dp です。端末の種類では決めないので、タブレットを分割画面で半分にすれば、スマホと同じ並びになります。</p>
+  <div class="ruler" role="img" aria-label="600dp未満は1枚、600から840dpは2枚、840dp以上は3枚">
+    <div class="bar"><div>狭い：1枚</div><div>中：2枚</div><div>広い：3枚</div></div>
+    <div class="ticks"><span>0</span><span>600dp</span><span>840dp</span></div>
+  </div>
+</section>
+
+<section aria-labelledby="s2" style="display:grid;gap:20px">
+  <div class="prose">
+    <h2 id="s2">狭い段（スマホの縦）</h2>
+    <p>下のタブは「作品・書く・提案・ほか」の4つです。作品を開いたあとはほとんど「書く」にいるので、「書く」は最後に開いた話をそのまま開きます。原稿を打つあいだは下のタブを隠し、キーボードの上に道具帯を出します。</p>
+  </div>
+  <div class="row">
+
+    <figure class="phone-fig">
+      <div class="fit"><div class="device" data-w="360" data-h="760">
+        <div class="status"><span>9:41</span><span>Wi-Fi ・ 82%</span></div>
+        <div class="topbar">
+          <div class="ibtn"></div>
+          <div class="title">作品</div>
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg></div>
+        </div>
+        <div class="body">
+          <div class="scroll">
+            <div class="card">
+              <h4>灯台守の手紙（見本）</h4>
+              <div class="meta"><span>19話</span><span>41,200字</span><span>最後に書いた日：今日</span></div>
+              <span class="flag">送っていない話：1</span>
+            </div>
+            <div class="card">
+              <h4>雨の駅で待つ人（見本）</h4>
+              <div class="meta"><span>7話</span><span>15,830字</span><span>最後に書いた日：10月21日</span></div>
+              <span class="flag ok">同期済み</span>
+            </div>
+            <div class="card">
+              <h4>短編集・冬（見本）</h4>
+              <div class="meta"><span>4話</span><span>9,410字</span><span>最後に書いた日：9月30日</span></div>
+              <span class="flag shu">競合：1話（選んでください）</span>
+            </div>
+          </div>
+          <div class="fab" style="position:absolute;right:0;bottom:64px">＋ 作品を取り込む</div>
+        </div>
+        <div class="tabs">
+          <div class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h6v14H4zM14 5h6v14h-6z"/></svg>作品</div>
+          <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg>書く</div>
+          <div><span class="badge">3</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h14v12H9l-4 4z"/></svg>提案</div>
+          <div><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18" cy="12" r="1.8"/></svg>ほか</div>
+        </div>
+      </div></div>
+      <figcaption><b>A 作品一覧。</b>題・話数・字数・最後に書いた日と、同期の状態を出します。送っていない話の数を出すのは、送るのは作者が押したときだけなので、押し忘れに気づけるようにするためです。</figcaption>
+    </figure>
+
+    <figure class="phone-fig">
+      <div class="fit"><div class="device" data-w="360" data-h="760">
+        <div class="status"><span>9:41</span><span>Wi-Fi ・ 82%</span></div>
+        <div class="topbar">
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></div>
+          <div class="title">灯台守の手紙（見本）<small>19話 ・ 41,200字</small></div>
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="6" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18" r="1.8"/></svg></div>
+        </div>
+        <div class="body">
+          <div class="list">
+            <div class="newep">第19話の続きを書く ／ ＋ 新しい話（第20話）</div>
+            <div class="chap">第三章　灯の数え方</div>
+            <div class="ep cur"><span class="no">第19話</span><span class="name">十二秒の約束</span><span class="chars">2,180字</span><span class="marks"><span class="flag">送っていない</span></span></div>
+            <div class="ep"><span class="no">第18話</span><span class="name">舟を漕ぎ出す</span><span class="chars">2,310字</span></div>
+            <div class="ep"><span class="no">第17話</span><span class="name">姉の手紙</span><span class="chars">2,045字</span></div>
+            <div class="ep"><span class="no">第16話</span><span class="name">霧笛</span><span class="chars">1,990字</span></div>
+            <div class="chap">第二章　港</div>
+            <div class="ep"><span class="no">第15話</span><span class="name">潮の名前</span><span class="chars">2,260字</span></div>
+            <div class="ep"><span class="no">第14話</span><span class="name">灯台の階段は百二十段</span><span class="chars">2,120字</span></div>
+            <div class="ep"><span class="no">第13話</span><span class="name">帰らない船</span><span class="chars">2,205字</span></div>
+            <div class="ep"><span class="no">第12話</span><span class="name">雨の日の点検</span><span class="chars">1,870字</span></div>
+          </div>
+        </div>
+        <div class="tabs">
+          <div class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h6v14H4zM14 5h6v14h-6z"/></svg>作品</div>
+          <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg>書く</div>
+          <div><span class="badge">3</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h14v12H9l-4 4z"/></svg>提案</div>
+          <div><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18" cy="12" r="1.8"/></svg>ほか</div>
+        </div>
+      </div></div>
+      <figcaption><b>B 話の一覧。</b>章ごとに新しい話を上に並べ、いちばん上に「続きを書く」を置きます。話ごとの印は、送っていない・校閲中の鍵・競合・話数の重複や欠番です。</figcaption>
+    </figure>
+
+    <figure class="phone-fig">
+      <div class="fit"><div class="device" data-w="360" data-h="760">
+        <div class="status"><span>9:41</span><span>Wi-Fi ・ 82%</span></div>
+        <div class="topbar">
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></div>
+          <div class="title">第19話 十二秒の約束<small>2,186字</small></div>
+          <span class="saved">保存済み</span>
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="6" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18" r="1.8"/></svg></div>
+        </div>
+        <div class="ms-wrap">
+          <div class="ms">
+            <p><span class="term">灯台</span>の<ruby>灯<rt>ひ</rt></ruby>は、今夜も十二秒に一度まわった。</p>
+            <p>　<span class="term">ミナト</span>は窓辺に肘をついて、光が海を<ruby>撫<rt>な</rt></ruby>でていくのを数えていた。</p>
+            <p>「また数えてるの」</p>
+            <p>　背中から<span class="term">姉</span>の声がした。午前<span class="tcy">2</span>時。</p>
+            <p>「<span class="compose">かぞえて</span><span class="caret"></span></p>
+          </div>
+        </div>
+        <div class="tools">
+          <span>↶</span><span>↷</span><span>ルビ</span><span>傍点</span><span class="ms-glyph">「」</span><span class="ms-glyph">――</span><span class="ms-glyph">……</span><span class="dir">横で書く</span>
+        </div>
+        <div class="cands"><span>数えて</span><span>かぞえて</span><span>数えって</span><span>カゾエテ</span></div>
+        <div class="kbd">
+          <div class="side"><span>⌫</span><span>空白</span><span>改行</span><span>あa1</span></div>
+          <div class="main"><span>あ</span><span>か</span><span>さ</span><span>た</span><span>な</span><span>は</span><span>ま</span><span>や</span><span>ら</span><span>゛゜</span><span>わ</span><span>、。</span></div>
+          <div class="side"><span>←</span><span>→</span><span>確定</span><span>音声</span></div>
+        </div>
+      </div></div>
+      <figcaption><b>C 原稿エディター（縦書きで打つ）。</b>組んで書く面で、ルビ（灯・撫）と縦中横（2時）を組んだまま打ちます。変換中の字の傍線は行の右に引きます。キーボードの上の道具帯には、スマホで打ちにくい「――」「……」と、いつでも横へ逃げられる［横で書く］を置きます。上のバーには保存の状態を出します。</figcaption>
+    </figure>
+
+    <figure class="phone-fig">
+      <div class="fit"><div class="device" data-w="360" data-h="760">
+        <div class="status"><span>9:41</span><span>Wi-Fi ・ 82%</span></div>
+        <div class="topbar">
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></div>
+          <div class="title">第19話 十二秒の約束<small>2,186字</small></div>
+          <span class="saved">保存済み</span>
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="6" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18" r="1.8"/></svg></div>
+        </div>
+        <div class="ms-wrap">
+          <div class="ms">
+            <p><span class="term">灯台</span>の<ruby>灯<rt>ひ</rt></ruby>は、今夜も十二秒に一度まわった。</p>
+            <p>　<span class="term">ミナト</span>は窓辺に肘をついて、光が海を<ruby>撫<rt>な</rt></ruby>でていくのを数えていた。</p>
+            <p>「また数えてるの」</p>
+            <p>　背中から<span class="term">姉</span>の声がした。振り向かなくても、湯気の匂いで分かる。</p>
+            <p>「数えないと、眠れないんだ」</p>
+            <p>　十二まで数えると、光はまた戻ってくる。それは<span class="sel">約束</span>のようなものだった。</p>
+            <p>　<span class="term">姉</span>は黙って、窓の外の暗い海を見た。</p>
+            <p>「父さんも、そう言ってた」</p>
+          </div>
+          <div class="handle" style="left:132px;top:446px"></div>
+          <div class="band" style="left:12px;top:356px"><span>コピー</span><span class="mine">ルビ</span><span class="mine">傍点</span><span class="mine">資料</span><span class="mine">AIに訊く</span></div>
+        </div>
+        <div class="tools">
+          <span>↶</span><span>↷</span><span>ルビ</span><span>傍点</span><span class="ms-glyph">「」</span><span class="ms-glyph">――</span><span class="ms-glyph">……</span><span class="dir">横で書く</span>
+        </div>
+        <div class="tabs">
+          <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h6v14H4zM14 5h6v14h-6z"/></svg>作品</div>
+          <div class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg>書く</div>
+          <div><span class="badge">3</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h14v12H9l-4 4z"/></svg>提案</div>
+          <div><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18" cy="12" r="1.8"/></svg>ほか</div>
+        </div>
+      </div></div>
+      <figcaption><b>長押しの帯（右クリックの代わり）。</b>字を選ぶと、近くに帯を出します。太字の4つ（ルビ・傍点・資料・AIに訊く）がこのアプリの項目です。Android の選択の帯そのものに足せるかは試作で確かめ、足せなければこの形の自前の帯にします。</figcaption>
+    </figure>
+
+    <figure class="phone-fig">
+      <div class="fit"><div class="device" data-w="360" data-h="760">
+        <div class="status"><span>9:41</span><span>Wi-Fi ・ 82%</span></div>
+        <div class="topbar">
+          <div class="ibtn"></div>
+          <div class="title">提案<small>灯台守の手紙（見本） ・ 未決 3件</small></div>
+          <span class="pill">まとめて</span>
+        </div>
+        <div class="body">
+          <div class="seg"><span class="pill on">すべて 3</span><span class="pill">誤字脱字 1</span><span class="pill">推敲 1</span><span class="pill">矛盾 1</span></div>
+          <div class="scroll">
+            <div class="prop">
+              <div class="kind"><span><b>表記ゆれ</b> ・ 第18話</span><span>誤字脱字</span></div>
+              <div class="quote">夜明け前に、<del>舟をこぎだす</del> <ins>舟を漕ぎ出す</ins>。</div>
+              <div class="why">題と第18話の3か所は「漕ぎ出す」と書いています。</div>
+              <div class="acts"><span class="btn">見送る</span><span class="btn pri">採る</span></div>
+            </div>
+            <div class="prop">
+              <div class="kind"><span><b>くり返し</b> ・ 第19話</span><span>推敲</span></div>
+              <div class="quote">「数えていた」が5行のうちに3回あります。</div>
+              <div class="why">直し方が何通りもあるため、修正案は出していません。</div>
+              <div class="acts"><span class="btn">見送る</span><span class="btn">本文で見る</span></div>
+            </div>
+            <div class="prop">
+              <div class="kind"><span><b>設定との食い違い</b> ・ 第19話</span><span>矛盾</span></div>
+              <div class="quote">今夜も十二秒に一度まわった。</div>
+              <div class="why">設定資料「岬の灯台」には「十秒に一度」とあります（作者のメモ）。どちらに合わせるかを選んでください。</div>
+              <div class="acts"><span class="btn">資料を見る</span><span class="btn">見送る</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="tabs">
+          <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h6v14H4zM14 5h6v14h-6z"/></svg>作品</div>
+          <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg>書く</div>
+          <div class="on"><span class="badge">3</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h14v12H9l-4 4z"/></svg>提案</div>
+          <div><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18" cy="12" r="1.8"/></svg>ほか</div>
+        </div>
+      </div></div>
+      <figcaption><b>D 提案。</b>誤字脱字・推敲・矛盾・編集部の提案を1か所に集めます。修正案のあるものだけに［採る］を出し、直し方が何通りもあるものは本文へ案内するだけにします。朱は校正の指摘にだけ使う色です。</figcaption>
+    </figure>
+
+  </div>
+</section>
+
+<section aria-labelledby="s3" style="display:grid;gap:20px">
+  <div class="prose">
+    <h2 id="s3">縦書きが崩れたときと、AI を走らせる前</h2>
+    <p>縦書きの入力欄が端末と日本語入力の組み合わせで崩れても、書き続けられるようにします。打った字が本文へ届いたかを毎回確かめ、食い違ったら知らせて［横で書く］へ案内します。打っている最中に面を勝手に替えると変換中の字を失うので、移るのは作者が押したときだけです。</p>
+  </div>
+  <div class="row">
+
+    <figure class="phone-fig">
+      <div class="fit"><div class="device" data-w="360" data-h="760">
+        <div class="status"><span>9:41</span><span>Wi-Fi ・ 82%</span></div>
+        <div class="topbar">
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></div>
+          <div class="title">第19話 十二秒の約束<small>2,186字</small></div>
+          <span class="saved">保存済み</span>
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="6" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18" r="1.8"/></svg></div>
+        </div>
+        <div class="ms-wrap">
+          <div class="notice" role="status">
+            <div>この端末では、縦書きの入力が崩れることがあります。打った字は控えてあるので失われていません。横で書くと確実です。</div>
+            <div class="acts"><span class="btn">このまま縦で</span><span class="btn pri">横で書く</span></div>
+          </div>
+          <div class="ms">
+            <p><span class="term">灯台</span>の<ruby>灯<rt>ひ</rt></ruby>は、今夜も十二秒に一度まわった。</p>
+            <p>　<span class="term">ミナト</span>は窓辺に肘をついて、光が海を<ruby>撫<rt>な</rt></ruby>でていくのを数えていた。</p>
+            <p>「また数えてるの」</p>
+            <p>　背中から<span class="term">姉</span>の声がした。振り向かなくても、湯気の匂いで分かる。</p>
+            <p>「数えないと、眠れないんだ」</p>
+          </div>
+        </div>
+        <div class="tools">
+          <span>↶</span><span>↷</span><span>ルビ</span><span>傍点</span><span class="ms-glyph">「」</span><span class="ms-glyph">――</span><span class="ms-glyph">……</span><span class="dir">横で書く</span>
+        </div>
+        <div class="cands"><span>眠れない</span><span>ねむれない</span><span>眠れ無い</span></div>
+        <div class="kbd">
+          <div class="side"><span>⌫</span><span>空白</span><span>改行</span><span>あa1</span></div>
+          <div class="main"><span>あ</span><span>か</span><span>さ</span><span>た</span><span>な</span><span>は</span><span>ま</span><span>や</span><span>ら</span><span>゛゜</span><span>わ</span><span>、。</span></div>
+          <div class="side"><span>←</span><span>→</span><span>確定</span><span>音声</span></div>
+        </div>
+      </div></div>
+      <figcaption><b>崩れたときの知らせ。</b>原稿の上に重ねて出し、原稿は隠しきらないようにします。［横で書く］は同じ話の同じ位置のまま横書きへ移ります。崩れた組み合わせは端末に覚え、次からは開いたときに一度だけ知らせます。</figcaption>
+    </figure>
+
+    <figure class="phone-fig">
+      <div class="fit"><div class="device" data-w="360" data-h="760">
+        <div class="status"><span>9:41</span><span>Wi-Fi ・ 82%</span></div>
+        <div class="topbar">
+          <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></div>
+          <div class="title">第19話 十二秒の約束<small>2,186字</small></div>
+          <span class="saved">保存済み</span>
+          <span class="pill on">横</span>
+        </div>
+        <div class="ms-wrap">
+          <div class="ms h">
+            <p><span class="term">灯台</span>の<ruby>灯<rt>ひ</rt></ruby>は、今夜も十二秒に一度まわった。</p>
+            <p>　<span class="term">ミナト</span>は窓辺に肘をついて、光が海を<ruby>撫<rt>な</rt></ruby>でていくのを数えていた。</p>
+            <p>「また数えてるの」</p>
+            <p>　背中から<span class="term">姉</span>の声がした。振り向かなくても、湯気の匂いで分かる。</p>
+            <p>「数えないと、眠れないんだ」</p>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grip"></div>
+            <h4>誤字脱字を調べる</h4>
+            <dl class="est">
+              <dt>範囲</dt><dd>第15話〜第19話（前回から書いた分）</dd>
+              <dt>量</dt><dd>約10,800字 ・ 6回に分けて送る</dd>
+              <dt>AI</dt><dd>Gemini <span class="paid">（クラウド・料金がかかります）</span></dd>
+              <dt>目安</dt><dd>数分。前に調べた2話は控えを使うので送りません</dd>
+            </dl>
+            <div class="note">途中でアプリを閉じても、済んだ所は次に飛ばします。</div>
+            <div class="acts"><span class="btn">やめる</span><span class="btn pri">調べる</span></div>
+          </div>
+        </div>
+      </div></div>
+      <figcaption><b>横書き と F 走らせる前の見積もり。</b>横書きの面は同じ本文を同じ組み方で出します。AI は走らせる前に、範囲・量・どの AI か・目安の4行を1枚に出し、料金がかかる AI ははっきり書きます。費用の数字の出し方は拡張機能と同じ部品を使います（ここの値は見本）。</figcaption>
+    </figure>
+
+  </div>
+</section>
+
+<section aria-labelledby="s4" style="display:grid;gap:20px">
+  <div class="prose">
+    <h2 id="s4">中の段（スマホの横・小さいタブレット）</h2>
+    <p>左に話の一覧、右に原稿の2枚です。提案と資料は右から半分の幅で重ねる引き出しにして、原稿を隠しきりません。左の一覧は畳めて、畳むと原稿が全幅になります。</p>
+  </div>
+  <figure class="wide-fig" style="max-width:800px">
+    <div class="fit"><div class="device tab" data-w="780" data-h="600">
+      <div class="status"><span>9:41</span><span>Wi-Fi ・ 82%</span></div>
+      <div class="topbar">
+        <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg></div>
+        <div class="title">灯台守の手紙（見本）<small>第19話 十二秒の約束 ・ 2,186字</small></div>
+        <span class="saved">保存済み</span>
+        <span class="pill">提案 3</span>
+        <span class="pill">資料</span>
+        <span class="pill on">縦</span>
+        <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="6" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18" r="1.8"/></svg></div>
+      </div>
+      <div class="split">
+        <div class="pane" style="width:280px;flex:none">
+          <div class="list">
+            <div class="chap">第三章　灯の数え方</div>
+            <div class="ep cur"><span class="no">第19話</span><span class="name">十二秒の約束</span><span class="chars">2,186字</span><span class="marks"><span class="flag">送っていない</span></span></div>
+            <div class="ep"><span class="no">第18話</span><span class="name">舟を漕ぎ出す</span><span class="chars">2,310字</span></div>
+            <div class="ep"><span class="no">第17話</span><span class="name">姉の手紙</span><span class="chars">2,045字</span></div>
+            <div class="ep"><span class="no">第16話</span><span class="name">霧笛</span><span class="chars">1,990字</span></div>
+            <div class="chap">第二章　港</div>
+            <div class="ep"><span class="no">第15話</span><span class="name">潮の名前</span><span class="chars">2,260字</span></div>
+            <div class="ep"><span class="no">第14話</span><span class="name">灯台の階段は百二十段</span><span class="chars">2,120字</span></div>
+            <div class="ep"><span class="no">第13話</span><span class="name">帰らない船</span><span class="chars">2,205字</span></div>
+          </div>
+        </div>
+        <div class="pane" style="flex:1">
+          <div class="ms-wrap">
+            <div class="ms" style="font-size:18px">
+              <p><span class="term">灯台</span>の<ruby>灯<rt>ひ</rt></ruby>は、今夜も十二秒に一度まわった。</p>
+              <p>　<span class="term">ミナト</span>は窓辺に肘をついて、光が海を<ruby>撫<rt>な</rt></ruby>でていくのを数えていた。一、二、三。</p>
+              <p>「また数えてるの」</p>
+              <p>　背中から<span class="term">姉</span>の声がした。振り向かなくても、湯気の匂いで分かる。午前<span class="tcy">2</span>時。</p>
+              <p>「数えないと、眠れないんだ」</p>
+              <p>　十二まで数えると、光はまた戻ってくる。それは約束のようなものだった。</p>
+              <p>　<span class="term">姉</span>は黙って、窓の外の暗い海を見た。</p>
+              <p>「父さんも、そう言ってた」</p>
+              <p>　マグカップを二つ置いて、<span class="term">姉</span>は<span class="term">ミナト</span>の隣に座った。</p>
+            </div>
+          </div>
+          <div class="tools">
+            <span>↶</span><span>↷</span><span>ルビ</span><span>傍点</span><span class="ms-glyph">「」</span><span class="ms-glyph">――</span><span class="ms-glyph">……</span><span class="dir">横で書く</span>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <figcaption><b>中の段。</b>例は幅 780dp（折りたたみを開いた状態やスマホの横）。下のタブはやめ、提案と資料は上のバーから引き出しで開きます。キーボードを出しても段は変えず、原稿の高さだけを縮めます。</figcaption>
+  </figure>
+</section>
+
+<section aria-labelledby="s5" style="display:grid;gap:20px">
+  <div class="prose">
+    <h2 id="s5">広い段（大きいタブレット）</h2>
+    <p>左に話の一覧、中に原稿、右に横の板の3枚です。横の板は［提案］［資料］［メモ］のタブで切り替え、原稿で選んだ語の資料や指摘の場所へ、横の板から飛べます。</p>
+  </div>
+  <figure class="wide-fig">
+    <div class="fit"><div class="device tab" data-w="1280" data-h="800">
+      <div class="status"><span>9:41</span><span>Wi-Fi ・ 82%</span></div>
+      <div class="topbar">
+        <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></div>
+        <div class="title">灯台守の手紙（見本）<small>19話 ・ 41,206字 ・ 今日 +1,140字</small></div>
+        <span class="saved">保存済み</span>
+        <span class="pill">組んで書く</span>
+        <span class="pill on">縦</span>
+        <span class="pill">GitHub へ送る（1話）</span>
+        <div class="ibtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="6" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18" r="1.8"/></svg></div>
+      </div>
+      <div class="split">
+        <div class="pane" style="width:260px;flex:none">
+          <div class="list">
+            <div class="newep">＋ 新しい話（第20話）</div>
+            <div class="chap">第三章　灯の数え方</div>
+            <div class="ep cur"><span class="no">第19話</span><span class="name">十二秒の約束</span><span class="chars">2,186字</span><span class="marks"><span class="flag">送っていない</span></span></div>
+            <div class="ep"><span class="no">第18話</span><span class="name">舟を漕ぎ出す</span><span class="chars">2,310字</span></div>
+            <div class="ep"><span class="no">第17話</span><span class="name">姉の手紙</span><span class="chars">2,045字</span></div>
+            <div class="ep"><span class="no">第16話</span><span class="name">霧笛</span><span class="chars">1,990字</span></div>
+            <div class="chap">第二章　港</div>
+            <div class="ep"><span class="no">第15話</span><span class="name">潮の名前</span><span class="chars">2,260字</span></div>
+            <div class="ep"><span class="no">第14話</span><span class="name">灯台の階段は百二十段</span><span class="chars">2,120字</span></div>
+            <div class="ep"><span class="no">第13話</span><span class="name">帰らない船</span><span class="chars">2,205字</span></div>
+            <div class="ep"><span class="no">第12話</span><span class="name">雨の日の点検</span><span class="chars">1,870字</span></div>
+            <div class="ep"><span class="no">第11話</span><span class="name">はじめての当直</span><span class="chars">2,030字</span></div>
+          </div>
+        </div>
+        <div class="pane" style="flex:1">
+          <div class="ms-wrap">
+            <div class="ms" style="font-size:19px;padding:28px 32px">
+              <p><span class="term">灯台</span>の<ruby>灯<rt>ひ</rt></ruby>は、今夜も十二秒に一度まわった。</p>
+              <p>　<span class="term">ミナト</span>は窓辺に肘をついて、光が海を<ruby>撫<rt>な</rt></ruby>でていくのを数えていた。一、二、三。</p>
+              <p>「また数えてるの」</p>
+              <p>　背中から<span class="term">姉</span>の声がした。振り向かなくても、湯気の匂いで分かる。午前<span class="tcy">2</span>時。</p>
+              <p>「数えないと、眠れないんだ」</p>
+              <p>　十二まで数えると、光はまた戻ってくる。それは約束のようなものだった。</p>
+              <p>　<span class="term">姉</span>は黙って、窓の外の暗い海を見た。</p>
+              <p>「父さんも、そう言ってた」</p>
+              <p>　マグカップを二つ置いて、<span class="term">姉</span>は<span class="term">ミナト</span>の隣に座った。</p>
+              <p>　光がまた、二人の顔を撫でていった。</p>
+              <p>「明日、手紙を出そうと思う」</p>
+              <p>「誰に」</p>
+              <p>「<span class="compose">とうだいもり</span><span class="caret"></span></p>
+            </div>
+          </div>
+          <div class="tools">
+            <span>↶</span><span>↷</span><span>ルビ</span><span>傍点</span><span class="ms-glyph">「」</span><span class="ms-glyph">――</span><span class="ms-glyph">……</span><span class="dir">横で書く</span>
+          </div>
+        </div>
+        <div class="pane" style="width:320px;flex:none;background:var(--sunk)">
+          <div class="stabs"><span class="on">提案 3</span><span>資料</span><span>メモ</span></div>
+          <div class="scroll">
+            <div class="prop">
+              <div class="kind"><span><b>設定との食い違い</b> ・ 第19話</span><span>矛盾</span></div>
+              <div class="quote">今夜も十二秒に一度まわった。</div>
+              <div class="why">設定資料「岬の灯台」には「十秒に一度」とあります。</div>
+              <div class="acts"><span class="btn">見送る</span><span class="btn">資料を見る</span></div>
+            </div>
+            <div class="mini-term">
+              <h5>岬の灯台（場所）</h5>
+              <div class="meta"><span>初出 第2話</span><span>登場 14話</span></div>
+              <div>白い塔。階段は百二十段。光は十秒に一度まわる。</div>
+              <div class="mine-note">作者のメモ：第19話で周期が変わった理由を書くか検討中</div>
+            </div>
+            <div class="prop">
+              <div class="kind"><span><b>表記ゆれ</b> ・ 第18話</span><span>誤字脱字</span></div>
+              <div class="quote">夜明け前に、<del>舟をこぎだす</del> <ins>舟を漕ぎ出す</ins>。</div>
+              <div class="acts"><span class="btn">見送る</span><span class="btn pri">採る</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <figcaption><b>広い段。</b>例は幅 1280dp。キーボードの付いたタブレットでは、拡張機能と同じショートカット（Ctrl+S・Ctrl+Z など）が効きます。横の板の資料で、緑の線を引いた所は作者が書いた欄で、AI も自動の処理も書き換えません。</figcaption>
+  </figure>
+</section>
+
+<section class="prose" aria-labelledby="s6">
+  <h2 id="s6">色と書体の決まり</h2>
+  <dl class="legend">
+    <div><dt>藍</dt><dd>押せるもの・いまいる場所・用語の色。</dd></div>
+    <div><dt>朱</dt><dd>校正の指摘だけに使います。提案の数・食い違い・競合。</dd></div>
+    <div><dt>緑</dt><dd>保存済み・作者が書いた欄。</dd></div>
+    <div><dt>黄土</dt><dd>注意：送っていない話・料金がかかる AI・崩れたときの知らせ。</dd></div>
+    <div><dt>書体</dt><dd>原稿と題は明朝（見本では しっぽり明朝）。画面の文字は読みやすさを優先した BIZ UDPゴシック。アプリに同梱する明朝は Noto Serif JP を案にしています。</dd></div>
+  </dl>
+  <p class="note">暗い画面にも対応します。端末を暗い設定にすると、この見本も暗い色で出ます。</p>
+</section>
+
+<section class="prose" aria-labelledby="s7">
+  <h2 id="s7">まだ決めていないこと</h2>
+  <ol class="todo">
+    <li>Android の文字選択の帯に、ルビ・傍点・資料・AIに訊く を足せるか（試作で確かめる）</li>
+    <li>道具帯の並び（いまの案：取り消し・やり直し・ルビ・傍点・「」・――・……・横で書く）</li>
+    <li>明朝をアプリに同梱するか（アプリが十数MB重くなる）</li>
+    <li>中の段で、提案と資料を引き出しにするか、話の一覧と入れ替えるか</li>
+    <li>「ほか」のタブに入れるもの（設定資料・同期・設定・執筆統計）の順番</li>
+  </ol>
+</section>
+
+</div>
+
+<script>
+// 実寸（dp＝CSSの px）で組んだ画面を、置き場の幅に合わせて縮める。縮めずに置くと、スマホではページが横にはみ出すため
+(function () {
+  function fit() {
+    document.querySelectorAll('.fit').forEach(function (box) {
+      var d = box.querySelector('.device');
+      if (!d) return;
+      var w = +d.dataset.w, h = +d.dataset.h;
+      d.style.width = w + 'px';
+      d.style.height = h + 'px';
+      var s = Math.min(1, box.clientWidth / w);
+      d.style.transform = 'scale(' + s + ')';
+      box.style.height = Math.ceil(h * s) + 'px';
+    });
+  }
+  fit();
+  window.addEventListener('resize', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+})();
+</script>
