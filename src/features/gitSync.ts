@@ -384,6 +384,19 @@ export class GitSyncMonitor implements vscode.Disposable {
   /** 状態が変わったとき。ツリーの作り直しに使う */
   readonly onDidChange = this.changed.event;
 
+  private readonly repositoryChanged = new vscode.EventEmitter<void>();
+  /**
+   * 置き場の中身が git で入れ替わったかもしれないとき（2026-10-30、母艦のレビュー）。
+   * `extension.ts` がメニューの印（承認待ちの件数など）を全部数え直すのに使う。
+   * `onDidChange` は状態を読むたびに起きるので、印の数え直しには使わない
+   */
+  readonly onDidChangeRepositoryContents = this.repositoryChanged.event;
+
+  /** `GitSyncMonitorLike.notifyRepositoryChanged` の説明 */
+  notifyRepositoryChanged(): void {
+    this.repositoryChanged.fire();
+  }
+
   /**
    * Gitの操作（pull / checkout / merge）でファイルが入れ替わったとき。
    * 走査結果と用語の索引を作り直すのに使う（設計書5.5.8）。
@@ -446,6 +459,7 @@ export class GitSyncMonitor implements vscode.Disposable {
     this.folderRefreshTimers.clear();
     this.changed.dispose();
     this.filesChanged.dispose();
+    this.repositoryChanged.dispose();
   }
 
   /**
@@ -1149,6 +1163,8 @@ export class GitSyncMonitor implements vscode.Disposable {
         // 数え直しの失敗で取り込みの結果を覆さない（次の契機で読み直す）
       }
       this.operating -= 1;
+      // 取り込みで承認待ちや設定資料が届いたかもしれない（メニューの印の数え直し）
+      this.notifyRepositoryChanged();
     }
   }
 
@@ -1915,4 +1931,6 @@ async function collectEditorInboxAfterSync(
       詳細: error instanceof Error ? error.message : String(error),
     });
   }
+  // 編集部の提案が届いたかもしれない（メニューの印の数え直し）。送信のあとも通る
+  monitor.notifyRepositoryChanged();
 }

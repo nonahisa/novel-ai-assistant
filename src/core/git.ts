@@ -393,6 +393,18 @@ function runWholeRepo(
   if (known) return known;
   const started = run(args, cwd, LOCAL_TIMEOUT_MS);
   byCommand.set(commandKey, started);
+  /*
+    **失敗した答えは覚えない**（2026-10-30、母艦のレビュー）。ほかの git が
+    index を握っていた等の一時的な失敗を覚えると、同じ置き場の残りの作品が
+    みな同じ失敗になる。いま待っている呼び手には同じ答えを返し、次の作品は
+    読み直す。捨てるのは自分の約束がまだ残っているときだけ（forget のあとに
+    入った別の約束を消さない）
+  */
+  void started.then((result) => {
+    if (result.code !== 0 && byCommand.get(commandKey) === started) {
+      byCommand.delete(commandKey);
+    }
+  });
   return started;
 }
 

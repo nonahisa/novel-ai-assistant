@@ -161,9 +161,15 @@ export class ActionDecorationProvider
 
     let changed = false;
     for (const [index, id] of targets.entries()) {
-      const next = results[index];
-      // 後から始めた数え直しに追い越された（`countSequence`）
-      if (!next) continue;
+      const result = results[index];
+      /*
+        後から始めた数え直しに追い越された（`countSequence`）。**書く直前にも
+        確かめる**（2026-10-30、母艦のレビュー）。その作品を数え終えた時点では
+        いちばん新しくても、ほかの作品を待つ `Promise.all` の間に同じ作品の
+        数え直しが始まって済んでいれば、ここで書くと古い数で上書きする
+      */
+      if (!result || this.countSequence.get(id) !== result.sequence) continue;
+      const next = result.counts;
       const before = this.workCounts.get(id);
       if (!before || [...next].some(([counter, count]) => before.get(counter) !== count)) {
         changed = true;
@@ -184,21 +190,12 @@ export class ActionDecorationProvider
   }
 
   /**
-   * その作品をもう数えたか。**簡単ステップメニューで作品を選び直したとき**、
-   * 数えてあれば数え直さずに描き直すだけにする（選び直しで資料は変わらない）。
-   * 未選択（undefined）は数えるものが無いので、数えたものとして扱う。
-   */
-  hasCounted(workId: string | undefined): boolean {
-    return workId === undefined || this.workCounts.has(workId);
-  }
-
-  /**
    * 1作品を数える。後から同じ作品の数え直しが始まっていれば undefined
    * （古い数で上書きしない）
    */
   private async countWork(
     workId: string
-  ): Promise<Map<ActionCounter, number> | undefined> {
+  ): Promise<{ sequence: number; counts: Map<ActionCounter, number> } | undefined> {
     const sequence = (this.countSequence.get(workId) ?? 0) + 1;
     this.countSequence.set(workId, sequence);
     const next = new Map<ActionCounter, number>();
@@ -212,7 +209,7 @@ export class ActionDecorationProvider
       }
       next.set(counter, count);
     }
-    return this.countSequence.get(workId) === sequence ? next : undefined;
+    return this.countSequence.get(workId) === sequence ? { sequence, counts: next } : undefined;
   }
 
   /** 合計を作品ごとの件数の和で作り直す。変わったら true */

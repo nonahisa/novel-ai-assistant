@@ -43,6 +43,15 @@ export interface GitSyncMonitorLike extends vscode.Disposable {
    * **代役は持たない**（同じ理由）
    */
   setBeforeOperation?(wait: (() => Promise<unknown>) | undefined): void;
+  /**
+   * 置き場の中身が git で入れ替わったかもしれないことを知らせる（2026-10-30）。
+   * 取り込み・全作品同期・開いたときの点検・同期のあとの編集部の取り込みが済んだ所で呼ぶ。
+   * 届いた承認待ちや設定資料はファイルの見張りに乗らないことがあるので、
+   * `extension.ts` はこれを受けてメニューの印を全部数え直す
+   */
+  notifyRepositoryChanged?(): void;
+  /** `notifyRepositoryChanged` の受け口 */
+  readonly onDidChangeRepositoryContents?: vscode.Event<void>;
 }
 
 /**
@@ -66,6 +75,8 @@ export class NullGitSyncMonitor implements GitSyncMonitorLike {
 
   readonly onDidChange = this.changed.event;
   readonly onDidChangeFiles = this.filesChanged.event;
+  // git が無いので置き場の中身は入れ替わらない。受け口だけ持つ（何も起きない）
+  readonly onDidChangeRepositoryContents = this.changed.event;
 
   dispose(): void {
     this.changed.dispose();

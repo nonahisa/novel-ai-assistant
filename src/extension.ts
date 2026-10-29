@@ -2353,6 +2353,15 @@ export async function activate(
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
   refreshActionBadges();
   registry.onDidChange(() => refreshActionBadges());
+  /*
+    **git で置き場の中身が入れ替わったら、全部数え直す**（2026-10-30、母艦のレビュー）。
+    取り込み・全作品同期・開いたときの点検・同期のあとの編集部の取り込みで、
+    承認待ちや設定資料が届くことがある。どの作品に届いたかは分からないので全部数える
+  */
+  const repositoryChanged = gitSync.onDidChangeRepositoryContents?.(() =>
+    refreshActionBadges()
+  );
+  if (repositoryChanged) context.subscriptions.push(repositoryChanged);
   // **Ollama の流し受信の設定を、純粋な部品へ差し込む**（設計書6.63.1、0.42.0）。
   // `ai/ollamaStream.ts` は VS Code に依存しないので、設定の読み方はここで渡す
   setStreamingSettingReader(() =>
@@ -4210,13 +4219,10 @@ export async function activate(
       stepProvider.selectWork(picked.work.id);
       // **末尾の件数は選んだ作品のもの**なので、切り替えたら出し直す
       // （そうしないと、前の作品の件数が並んだままになる）。
-      // 選び直しで資料は変わらないので、**もう数えてある作品なら数え直さない**
-      // （2026-10-29 の測定：選び直すたびに全作品の資料を読み直していた）
-      if (actionDecorations.hasCounted(picked.work.id)) {
-        stepProvider.refresh();
-      } else {
-        refreshActionBadges(picked.work.id);
-      }
+      // **選んだ作品だけを数え直す**（2026-10-29 の測定：以前は全作品を読み直していた）。
+      // 数えてあっても数え直す——MCP サーバー（別のプロセス）が承認待ちを
+      // 書いた作品は、こちらに合図が来ない（2026-10-30、母艦のレビュー）
+      refreshActionBadges(picked.work.id);
     })
   );
 

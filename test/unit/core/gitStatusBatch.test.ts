@@ -209,3 +209,26 @@ describe("一巡のあいだ、置き場ぜんぶの読みを使い回す（crea
     expect(count(git.calls, "status --porcelain")).toBe(2);
   });
 });
+
+describe("使い回しは、失敗した答えを覚えない（母艦のレビュー 2026-10-30）", () => {
+  test("一度失敗した置き場ぜんぶの命令は、次の作品で読み直す", async () => {
+    let remoteFailures = 1;
+    const git = recordingGit((key) => {
+      // 一時的に `git remote` が失敗する（ほかの git が index を握っていた等）
+      if (key === "remote" && remoteFailures > 0) {
+        remoteFailures -= 1;
+        return { code: 128, stderr: "fatal: 一時的な失敗" };
+      }
+      return libraryReply(key);
+    });
+    const batch = createSyncStatusBatch();
+
+    const first = await readSyncStatus("/library/短編", git.run, batch);
+    const second = await readSyncStatus("/library/長編", git.run, batch);
+
+    expect(first.kind).toBe("failed");
+    // 失敗した答えを使い回すと、同じ置き場の作品がみな失敗になる
+    expect(second.kind).toBe("tracked");
+    expect(count(git.calls, "remote")).toBe(2);
+  });
+});

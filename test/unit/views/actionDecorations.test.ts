@@ -51,17 +51,6 @@ describe("メニューの印を作品ごとに覚える", () => {
     COUNTS.wA = 2;
   });
 
-  test("数えた作品を選び直しても、数え直さなくてよいと分かる", async () => {
-    const { provider } = setup();
-    expect(provider.hasCounted("wA")).toBe(false);
-
-    await provider.refresh();
-
-    expect(provider.hasCounted("wA")).toBe(true);
-    expect(provider.hasCounted("wB")).toBe(true);
-    expect(provider.hasCounted(undefined)).toBe(true);
-  });
-
   test("まだ数えていない作品があれば、1作品の頼みでも全部数える", async () => {
     // 起動直後の数えが済む前に作品を選び直した、など。合計が欠けないように
     const { provider, loadedWorks } = setup();
@@ -107,5 +96,38 @@ describe("メニューの印を作品ごとに覚える", () => {
       expect(provider.countOfWork("wA", counter), counter).toBe(9);
     }
     COUNTS.wA = 2;
+  });
+});
+
+describe("数え直しが重なっても、古い数で上書きしない（母艦のレビュー 2026-10-30）", () => {
+  test("全部の数え直しが待っている間に1作品を数え直すと、その作品は新しい数のまま残る", async () => {
+    // 全部の数え直しは wB が遅く、Promise.all がそろうまで待つ。その間に
+    // wA だけの数え直し（作業のあと）が先に済む。そろったあとで、全部の
+    // 数え直しが先に読んだ wA の古い数を書いてはいけない
+    let releaseB: () => void = () => {};
+    const gateB = new Promise<void>((resolve) => {
+      releaseB = resolve;
+    });
+    const values: Record<string, number> = { wA: 2, wB: 24 };
+    let slowB = true;
+    const load = vi.fn(async (_counter: ActionCounter, workId?: string) => {
+      if (workId === "wB" && slowB) await gateB;
+      return values[workId ?? ""] ?? 0;
+    });
+    const provider = new ActionDecorationProvider(load, () => ["wA", "wB"]);
+
+    const whole = provider.refresh();
+    // 全部の数え直しの wA が読み終わるまで待つ
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    values.wA = 7;
+    slowB = false;
+    await provider.refresh("wA");
+    expect(provider.countOfWork("wA", "mergeCandidates")).toBe(7);
+
+    releaseB();
+    await whole;
+
+    expect(provider.countOfWork("wA", "mergeCandidates")).toBe(7);
+    expect(provider.countOf("mergeCandidates")).toBe(7 + 24);
   });
 });

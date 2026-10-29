@@ -211,3 +211,85 @@ describe("見張りの作り直し（GitSyncMonitor.refreshAll）", () => {
     monitor.dispose();
   });
 });
+
+describe("母艦のレビュー（2026-10-30）", () => {
+  test("最初の作品の読みが一時的に失敗しても、同じ置き場のほかの作品で同期の対象に入る", async () => {
+    const registry = { list: () => threeWorks } as unknown as WorkRegistry;
+    const monitor = { refreshAll: async () => {} } as unknown as GitSyncMonitorLike;
+    const base = libraryGit();
+    let failOnce = true;
+    // 根だけの読み（readRepoRoot）は通るが、最初の作品の状態の読みが一度だけ失敗する
+    const run: GitCommandRunner = async (args, cwd, timeout, options) => {
+      if (failOnce && args.join(" ") === "rev-parse --is-inside-work-tree --show-toplevel") {
+        failOnce = false;
+        calls.push(args.join(" "));
+        // 中なのに根が出てこない＝readSyncStatus は failed（根なし）を返す
+        return { code: 0, stdout: "true\n", stderr: "" };
+      }
+      return base(args, cwd, timeout, options);
+    };
+
+    await syncAllWorks({ registry, monitor, run });
+
+    // 置き場（書庫）は2作品目で読めたので、取り寄せまで進む
+    expect(calls.filter((key) => key.startsWith("fetch"))).toHaveLength(1);
+  });
+
+  test("作品をすべて同期の終わりに、置き場の中身が変わったことを知らせる（メニューの印の数え直し）", async () => {
+    const registry = { list: () => threeWorks } as unknown as WorkRegistry;
+    let notified = 0;
+    const monitor = {
+      refreshAll: async () => {},
+      notifyRepositoryChanged: () => {
+        notified += 1;
+      },
+    } as unknown as GitSyncMonitorLike;
+
+    await syncAllWorks({ registry, monitor, run: libraryGit() });
+
+    expect(notified).toBeGreaterThanOrEqual(1);
+  });
+
+  test("開いたときの点検の終わりに、置き場の中身が変わったことを知らせる", async () => {
+    const registry = { list: () => threeWorks } as unknown as WorkRegistry;
+    let notified = 0;
+    const monitor = {
+      refreshAll: async () => {},
+      statusFor: () => undefined,
+      notifyRepositoryChanged: () => {
+        notified += 1;
+      },
+    } as unknown as GitSyncMonitorLike;
+    const store: Record<string, unknown> = {};
+
+    await runStartupHandoff({
+      registry,
+      monitor,
+      storage: {
+        get: <T>(key: string) => store[key] as T | undefined,
+        update: async (key: string, value: unknown) => {
+          store[key] = value;
+        },
+      },
+      run: libraryGit(),
+    });
+
+    expect(notified).toBe(1);
+  });
+
+  test("取り込み（pull）の終わりに、見張りが置き場の中身の変化を知らせる", async () => {
+    const registry = new WorkRegistry(fakeContext(threeWorks) as never);
+    const monitor = new GitSyncMonitor(registry, { run: libraryGit() });
+    let notified = 0;
+    monitor.onDidChangeRepositoryContents(() => {
+      notified += 1;
+    });
+    const work = registry.list()[0];
+    if (!work) throw new Error("作品がそろっていない");
+
+    await monitor.pull(work);
+
+    expect(notified).toBeGreaterThanOrEqual(1);
+    monitor.dispose();
+  });
+});

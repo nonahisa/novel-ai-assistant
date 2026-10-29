@@ -125,6 +125,8 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   if (doing.length === 0) {
     // 書庫に同期するものが無くても、編集部の提案は届いているかもしれない
     await collectEditorInboxAfterSync(works);
+    // 取り寄せ（fetch）しかしていないが、編集部の提案は届いたかもしれない（メニューの印）
+    deps.monitor.notifyRepositoryChanged?.();
     void vscode.window.showInformationMessage(
       `同期するものはありませんでした。${describeSyncSkips(plans)}`
     );
@@ -174,6 +176,10 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   // 編集用リポジトリは書庫の同期の対象外なので別口で取り寄せる。
   // **失敗しても同期の報告を止めない**
   await collectEditorInboxAfterSync(works);
+  // 取り込みで承認待ち・設定資料・編集部の提案が届いたかもしれない。
+  // git が書いたファイルは見張りに乗らないことがあるので、メニューの印を数え直させる
+  // （2026-10-30、母艦のレビュー）
+  deps.monitor.notifyRepositoryChanged?.();
 
   await report(outcomes, plans);
 }
@@ -234,7 +240,14 @@ async function collectStates(
     const key = root.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    if (known !== undefined) seen.add(known.toLowerCase());
+    /*
+      **根の鍵は、この作品の読みで根が読めたときだけ「見た」にする**
+      （2026-10-30、母艦のレビュー）。読みが一時的に失敗（根なし）でも
+      根の鍵を入れると、同じ置き場のほかの作品がこの回の同期から外れる
+    */
+    if (known !== undefined && "root" in status && status.root) {
+      seen.add(known.toLowerCase());
+    }
     firsts.push({ work, root, status });
   }
 
