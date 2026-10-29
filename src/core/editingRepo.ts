@@ -124,9 +124,10 @@ export function editingFolderName(workTitle: string): string {
  * **キャッシュとログは持っていかない。** 作り直せるうえに大きく、
  * 端末ごとの事情（モデル名など）が混じる。回復用の退避も同じ。
  *
- * 返すのは作品フォルダーからの相対パス。フォルダーは中身ごと写す。
+ * 返すのは作品フォルダーからの相対パス。ファイルはまるごと写す。
+ * 提案と鍵の台帳（`.aiwriter/proposals/`・`.aiwriter/locks/`）は写さず、
+ * 両側の行を混ぜる（`shareWithEditor.ts` の `copyForEditor`）。
  */
-export const SHARED_DIRECTORIES = [".aiwriter/proposals"] as const;
 export const SHARED_FILES = [".aiwriter/config.json", ".gitignore"] as const;
 
 /**
