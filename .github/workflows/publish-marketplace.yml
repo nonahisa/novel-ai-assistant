@@ -1,0 +1,71 @@
+name: Marketplace へ公開
+# Trusted Publishing（OIDC）で、GitHub Release に付けた VSIX をそのまま Marketplace へ上げる
+# （作者の裁定 2026-10-30「すすめて良いです」。手順はスキル `release` の手順3）。
+#
+# - **作り直さない。** 検査一式・画面テストは手元で通した VSIX を Release に付けてある。
+#   ここで作り直すと、テストしたものと公開するものが別のファイルになる
+# - **鍵（PAT）を置かない。** GitHub の一時の鍵を Marketplace の15分の鍵と交換する。
+#   交換に失敗しても PAT へは落ちない（vsce の作り）
+# - **作者の承認を挟む。** Environment `marketplace` の承認者が［承認］を押すまで止まる。
+#   公開は取り消せない（非公開にはできるが、その間に入れた人には届く）
+# - **パッチの版は断る。** Marketplace へ出すのは1段目・2段目が動いた版だけ（2026-09-21 の決まり）
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "出す版（例: 0.116.0）。GitHub Release v<版> に VSIX が付いていること"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: publish-marketplace
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: 版の形と段を確かめる（パッチだけの版は出さない）
+        run: |
+          if ! [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::版は 0.116.0 の形で入れてください（入れた値: $VERSION）"; exit 1
+          fi
+          if [ "${BASH_REMATCH[3]}" != "0" ]; then
+            echo "::error::$VERSION は3段目（パッチ）の版です。Marketplace へは1段目・2段目が動いた版だけを出します"; exit 1
+          fi
+      - name: GitHub Release から VSIX を取り寄せる
+        run: |
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --pattern "novel-ai-assistant-$VERSION.vsix" --dir release
+      - name: Release ノートの SHA-256 と照らす
+        # ノートの末尾に「SHA-256：<64桁>」を書く決まり（スキル `release` の手順2）。
+        # 照らせなければ出さない——テストしたファイルと同じだと言えないため
+        run: |
+          expected=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json body -q .body \
+            | grep 'SHA-256' | grep -oE '[0-9a-f]{64}' | head -n 1)
+          actual=$(sha256sum "release/novel-ai-assistant-$VERSION.vsix" | cut -d' ' -f1)
+          echo "ノートの SHA-256: ${expected:-（見つからない）}"
+          echo "VSIX の SHA-256:  $actual"
+          if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+            echo "::error::Release ノートの SHA-256 と VSIX が一致しません。出さずに止めます"; exit 1
+          fi
+      - name: VSIX の中の版を確かめる
+        run: |
+          inner=$(unzip -p "release/novel-ai-assistant-$VERSION.vsix" extension/package.json | jq -r .version)
+          if [ "$inner" != "$VERSION" ]; then
+            echo "::error::VSIX の中の版（$inner）が $VERSION と違います"; exit 1
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Marketplace へ公開する（OIDC）
+        # vsce の版は package.json の devDependencies と同じに固定する（4.0.2 以降が要る）
+        run: npx --yes @vscode/vsce@4.1.0 publish --packagePath "release/novel-ai-assistant-$VERSION.vsix" --oidc
