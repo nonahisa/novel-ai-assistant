@@ -64,6 +64,7 @@ import { defaultParentForNewFolder, pickNewFolderParent } from "./pickFolder";
 import { RECOVERY_DIRECTORY_NAME } from "../core/atomicWrite";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
+import { whenNoticePicked } from "../views/notify";
 import { askText } from "../views/dialogs";
 import { isEditorMode } from "../core/actorContext";
 
@@ -359,14 +360,19 @@ export async function shareWithEditor(
     // **記録の直前に書き先を向ける**（0.43.3 と同じ）
     useLogFile(work.folderPath);
     logFailure("編集部へ渡す", { 作品: work.title, 詳細: result.detail });
-    const action = await vscode.window.showErrorMessage(
-      `編集部へ渡せませんでした: ${result.detail}`,
-      "ログを表示",
-      "閉じる"
+    whenNoticePicked(
+      vscode.window.showErrorMessage(
+        `編集部へ渡せませんでした: ${result.detail}`,
+        "ログを表示",
+        "閉じる"
+      ),
+      async (action) => {
+        if (action === "ログを表示") {
+          await vscode.commands.executeCommand("novelai.showLog");
+        }
+      },
+      { label: "編集部へ渡す", workFolder: work.folderPath }
     );
-    if (action === "ログを表示") {
-      await vscode.commands.executeCommand("novelai.showLog");
-    }
     return;
   }
 
@@ -404,15 +410,21 @@ export async function shareWithEditor(
   // 「編集部を招いてください」と出していたため、`gh` が無くて送れて
   // いないときにも招けと言い、［GitHubで開く］は何もしないボタンだった
   const notice = shareNoticeFor(result.outcome ?? "pushed", work.title, invite);
-  const next = await vscode.window.showInformationMessage(
-    notice.message,
-    ...notice.actions
+  // **ボタンが押されるのを待たずに戻る**（`whenNoticePicked`）。待つと、知らせが
+  // 通知センターへ沈んだあいだ「『編集部へ渡す』はいま動いています」が出続け、
+  // 自動の送り返しも札を見て控え続ける（作者の実機、2026-10-30）
+  const repositoryUrl = result.repositoryUrl;
+  whenNoticePicked(
+    vscode.window.showInformationMessage(notice.message, ...notice.actions),
+    async (next) => {
+      if (next === "リンクを写す" && notice.link) {
+        await vscode.env.clipboard.writeText(notice.link);
+      } else if (next === "GitHubで開く" && repositoryUrl) {
+        await vscode.env.openExternal(vscode.Uri.parse(repositoryUrl));
+      }
+    },
+    { label: "編集部へ渡す", workFolder: work.folderPath }
   );
-  if (next === "リンクを写す" && notice.link) {
-    await vscode.env.clipboard.writeText(notice.link);
-  } else if (next === "GitHubで開く" && result.repositoryUrl) {
-    await vscode.env.openExternal(vscode.Uri.parse(result.repositoryUrl));
-  }
 }
 
 /** 招待の結末（知らせの文を組むために持ち回る） */
@@ -1821,18 +1833,23 @@ export async function collectEditorProposals(work: WorkEntry): Promise<void> {
     return;
   }
 
-  const next = await vscode.window.showInformationMessage(
-    `編集部からの提案を${result.added}件取り込みました。`,
-    "提案を見る",
-    "閉じる"
+  whenNoticePicked(
+    vscode.window.showInformationMessage(
+      `編集部からの提案を${result.added}件取り込みました。`,
+      "提案を見る",
+      "閉じる"
+    ),
+    async (next) => {
+      if (next === "提案を見る") {
+        // いま取り込んだ作品の提案を見る。引数無しだと作品選択からやり直させる
+        await vscode.commands.executeCommand("novelai.reviewProposals", {
+          type: "work",
+          work,
+        });
+      }
+    },
+    { label: "編集部提案取込", workFolder: work.folderPath }
   );
-  if (next === "提案を見る") {
-    // いま取り込んだ作品の提案を見る。引数無しだと作品選択からやり直させる
-    await vscode.commands.executeCommand("novelai.reviewProposals", {
-      type: "work",
-      work,
-    });
-  }
 }
 
 /**

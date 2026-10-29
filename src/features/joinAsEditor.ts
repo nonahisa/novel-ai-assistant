@@ -22,7 +22,7 @@ import { pathExists } from "../core/fileSystem";
 import { logFailure, logStep } from "../core/logger";
 import { askText } from "../views/dialogs";
 import { withProgress } from "../views/progress";
-import { notifyDone } from "../views/notify";
+import { notifyDone, whenNoticePicked } from "../views/notify";
 import { defaultParentForNewFolder, pickNewFolderParent } from "./pickFolder";
 import { applyMode, describeModeChange } from "./switchMode";
 
@@ -61,16 +61,22 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   }
 
   if (!(await isGitAvailable())) {
-    const action = await vscode.window.showInformationMessage(
-      "Gitが見つかりませんでした。作品を取り寄せるにはGitが必要です。",
-      "導入方法を見る",
-      "閉じる"
+    // ボタンが押されるのを待たずに戻る（`whenNoticePicked`。待つと「いま動いています」が出続ける）
+    whenNoticePicked(
+      vscode.window.showInformationMessage(
+        "Gitが見つかりませんでした。作品を取り寄せるにはGitが必要です。",
+        "導入方法を見る",
+        "閉じる"
+      ),
+      async (action) => {
+        if (action === "導入方法を見る") {
+          await vscode.env.openExternal(
+            vscode.Uri.parse("https://git-scm.com/downloads")
+          );
+        }
+      },
+      { label: "編集部として参加" }
     );
-    if (action === "導入方法を見る") {
-      await vscode.env.openExternal(
-        vscode.Uri.parse("https://git-scm.com/downloads")
-      );
-    }
     return;
   }
 
@@ -168,14 +174,19 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
       リポジトリ: `${ref.owner}/${ref.repo}`,
       詳細: cloned.detail,
     });
-    const action = await vscode.window.showErrorMessage(
-      `取り寄せられませんでした: ${cloned.detail}`,
-      "ログを表示",
-      "閉じる"
+    whenNoticePicked(
+      vscode.window.showErrorMessage(
+        `取り寄せられませんでした: ${cloned.detail}`,
+        "ログを表示",
+        "閉じる"
+      ),
+      async (action) => {
+        if (action === "ログを表示") {
+          await vscode.commands.executeCommand("novelai.showLog");
+        }
+      },
+      { label: "編集部として参加" }
     );
-    if (action === "ログを表示") {
-      await vscode.commands.executeCommand("novelai.showLog");
-    }
     return;
   }
 

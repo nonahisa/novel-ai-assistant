@@ -28,6 +28,14 @@ const SYNC_FILES = [
   "src/features/resolveDivergence.ts",
   "src/features/syncAllWorks.ts",
   "src/features/handoffSync.ts",
+  // 編集部連携も同じ札（`SYNC_BUSY_COMMANDS`・`EXCLUSIVE_COMMANDS`）を持つ。
+  // 「編集部へ渡す」の終わりの知らせを待ったまま、通知センターへ沈むと
+  // 「いま動いています」が出続けた（作者の実機、2026-10-30）
+  "src/features/shareWithEditor.ts",
+  "src/features/joinAsEditor.ts",
+  "src/features/finishReview.ts",
+  "src/features/revokeEditorAccess.ts",
+  "src/features/editingAutomation.ts",
 ];
 
 /**
