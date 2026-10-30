@@ -38,6 +38,7 @@ import {
   writeSynopsisStash,
   type EpisodeSynopsisStashEntry,
 } from "./synopsisStash";
+import { relativeToRoot } from "./relativeTo";
 
 /**
  * 外部AIが作った各話あらすじ・作品紹介文を、**拡張機能のボタンと同じ形で**
@@ -268,7 +269,7 @@ function commitEpisodes(folder: string, root: string, dryRun: boolean): Episodes
     created.push(where);
   }
 
-  const relativeTarget = relativeTo(root, target);
+  const relativeTarget = relativeToRoot(root, target);
   const failed: EpisodesCommitResult["failed"] = [];
   let recoveryPath: string | null = null;
   let wrote = false;
@@ -298,7 +299,7 @@ function commitEpisodes(folder: string, root: string, dryRun: boolean): Episodes
     discarded,
     failed,
     file: wrote ? relativeTarget : null,
-    recoveryPath: recoveryPath ? relativeTo(root, recoveryPath) : null,
+    recoveryPath: recoveryPath ? relativeToRoot(root, recoveryPath) : null,
     stashCleared,
     nextStep: dryRun
       ? "dryRun です。何も書いていません。dryRun を外すと、この内訳で保存します。"
@@ -448,7 +449,7 @@ function commitBlurb(folder: string, root: string, dryRun: boolean): BlurbCommit
     );
   }
   const target = nodePath.join(root, DEFAULT_SETTINGS_DIR, SYNOPSIS_FILE);
-  const file = relativeTo(root, target);
+  const file = relativeToRoot(root, target);
   const measured = measureBlurb(entry.blurb);
   const refused: BlurbCommitResult["refused"] = [];
   const failed: BlurbCommitResult["failed"] = [];
@@ -563,9 +564,4 @@ function baseVersionOf(version: string): string {
 
 function labelOf(chapter: number | null, fileName: string): string {
   return chapter !== null ? `第${chapter}話` : fileName;
-}
-
-/** 作品フォルダーからの相対。区切りは読みやすいほうへ揃える */
-function relativeTo(root: string, target: string): string {
-  return nodePath.relative(root, target).split(nodePath.sep).join("/");
 }
