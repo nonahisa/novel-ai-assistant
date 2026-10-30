@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "./paths";
 import { AIWRITER_DIR } from "../models/types";
 import { formatLogTime, redactSecrets } from "./logger";
+import { concatBytes } from "./concatBytes";
 
 /**
  * AIへ1回送るごとに、送った量を1行だけ残す。
@@ -158,7 +159,7 @@ export function appendUsageLog(workFolder: string, entry: UsageLogEntry): void {
               ...new TextEncoder().encode(usageLogHeader(workFolder)),
               ...addition,
             ])
-          : concat(existing, addition);
+          : concatBytes(existing, addition);
       await vscode.workspace.fs.writeFile(uri, merged);
     })
     .catch(() => undefined);
@@ -279,11 +280,4 @@ function num(value: number): string {
  */
 function clean(text: string): string {
   return redactSecrets(text).replace(/\r?\n/g, " ").replace(/\|/g, "／").trim();
-}
-
-function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
-  const merged = new Uint8Array(left.byteLength + right.byteLength);
-  merged.set(left, 0);
-  merged.set(right, left.byteLength);
-  return merged;
 }

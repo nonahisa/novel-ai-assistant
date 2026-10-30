@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "./paths";
 import { redactUrlCredentials } from "./redactUrl";
+import { concatBytes } from "./concatBytes";
 
 /**
  * 診断用のログ。
@@ -157,17 +158,10 @@ function appendToFile(text: string, target: string | undefined): void {
       const merged =
         existing.byteLength + addition.byteLength > MAX_ACTION_LOG_BYTES
           ? addition
-          : concat(existing, addition);
+          : concatBytes(existing, addition);
       await vscode.workspace.fs.writeFile(uri, merged);
     })
     .catch(() => undefined);
-}
-
-function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
-  const merged = new Uint8Array(left.byteLength + right.byteLength);
-  merged.set(left, 0);
-  merged.set(right, left.byteLength);
-  return merged;
 }
 
 export function outputChannel(): vscode.OutputChannel {
