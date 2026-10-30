@@ -1,3 +1,4 @@
+import { dot } from "./vectorIndexFormat";
 /**
  * ベクトル検索の索引を「相談以外」で使うための計算（設計書6.19.10）。
  *
@@ -23,13 +24,6 @@ function unit(vector: Float32Array): Float32Array | undefined {
   const out = new Float32Array(vector.length);
   for (let i = 0; i < vector.length; i++) out[i] = vector[i] / length;
   return out;
-}
-
-function dot(a: Float32Array, b: Float32Array): number {
-  let sum = 0;
-  const length = Math.min(a.length, b.length);
-  for (let i = 0; i < length; i++) sum += a[i] * b[i];
-  return sum;
 }
 
 export interface RankOptions {
