@@ -657,7 +657,7 @@ export function tutorialGoals(
     goals.push({
       goal: "review",
       label: "人の作品を見る側で使う",
-      why: "「編集・校閲で使う」と答えていただいたためです",
+      why: `「${WRITER_SITUATION_LABELS.editing}」と答えていただいたためです`,
     });
   }
 
@@ -669,14 +669,14 @@ export function tutorialGoals(
         why:
           style.situation === "posted"
             ? "投稿サイトに作品があると答えていただいたためです"
-            : "原稿のファイルがあると答えていただいたためです",
+            : `${WRITER_SITUATION_LABELS.have_files}と答えていただいたためです`,
       });
     }
     if (style.situation === "starting") {
       goals.push({
         goal: "start_new",
         label: "新しく書き始める",
-        why: "これから書き始めると答えていただいたためです",
+        why: `${WRITER_SITUATION_LABELS.starting}と答えていただいたためです`,
       });
       // **書き出せない、も行き先にする。** 始め方が分かっていても
       // 手が動かないことはある
