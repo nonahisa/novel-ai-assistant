@@ -6,6 +6,7 @@ import type { WorkEntry } from "../models/types";
 import { readWorkConfig } from "../core/workRegistry";
 import { scanWork } from "../core/scanner";
 import { openGeneratedMarkdown } from "../views/openDocument";
+import { markdownTableCellOneLine } from "../core/markdownTableCell";
 
 /**
  * いまの環境で、ファイルに何ができるかを実際に試して並べる（設計書5.8.11）。
@@ -87,7 +88,7 @@ export async function diagnoseWeb(
   lines.push("| 操作 | 結果 | これが駄目だと |", "|---|---|---|");
   for (const r of results) {
     const mark = r.ok ? "○" : "×";
-    const detail = r.detail ? `<br>${escapeCell(r.detail)}` : "";
+    const detail = r.detail ? `<br>${markdownTableCellOneLine(r.detail)}` : "";
     lines.push(`| ${r.name} | ${mark}${detail} | ${r.impact} |`);
   }
 
@@ -145,7 +146,7 @@ async function appendRegisteredWorks(
       const loaded = await readWorkConfig(work);
       config = loaded ? `○ 本文=${loaded.manuscriptDir}` : "無し（既定を使う）";
     } catch (error) {
-      config = `**×** ${escapeCell(describeError(error))}`;
+      config = `**×** ${markdownTableCellOneLine(describeError(error))}`;
     }
 
     // **一覧と同じ道をたどる。** ここが失敗すると、以前は一覧全体が
@@ -155,11 +156,11 @@ async function appendRegisteredWorks(
       const result = await scanWork(work);
       scan = `○ ${result.episodes.length}話`;
     } catch (error) {
-      scan = `**×** ${escapeCell(describeError(error))}`;
+      scan = `**×** ${markdownTableCellOneLine(describeError(error))}`;
     }
 
     lines.push(
-      `| ${escapeCell(work.title)} | ${config} | ${scan} | \`${escapeCell(
+      `| ${markdownTableCellOneLine(work.title)} | ${config} | ${scan} | \`${markdownTableCellOneLine(
         work.folderPath
       )}\` |`
     );
@@ -230,7 +231,7 @@ async function appendWorkScan(lines: string[], base: string): Promise<void> {
       lines.push("", "| 作品 | 設定ファイル |", "|---|---|");
       for (const w of scan.works) {
         // 題に縦棒が入っていても表の列がずれないよう、ほかの欄と同じく逃がす
-        lines.push(`| ${escapeCell(w.title)} | ${w.hasConfig ? "あり" : "なし"} |`);
+        lines.push(`| ${markdownTableCellOneLine(w.title)} | ${w.hasConfig ? "あり" : "なし"} |`);
       }
     } else if (scan.kind === "no_works") {
       // なぜ見つからないのかを、子フォルダーごとに出す
@@ -243,7 +244,7 @@ async function appendWorkScan(lines: string[], base: string): Promise<void> {
           if (name.startsWith(".")) continue;
           const child = path.join(base, name);
           lines.push(
-            `| ${escapeCell(name)} | ${await mark(child, "本文")} | ${await mark(child, "設定")}` +
+            `| ${markdownTableCellOneLine(name)} | ${await mark(child, "本文")} | ${await mark(child, "設定")}` +
               ` | ${await mark(child, ".aiwriter")} |`
           );
         }
@@ -400,11 +401,6 @@ function describeUiKind(): string {
   return vscode.env.uiKind === vscode.UIKind.Web
     ? "ブラウザ"
     : "デスクトップアプリ";
-}
-
-/** 表の中で改行や縦棒が崩れないようにする */
-function escapeCell(text: string): string {
-  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }
 
 async function show(markdown: string): Promise<void> {
