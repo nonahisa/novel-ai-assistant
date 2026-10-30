@@ -12,6 +12,7 @@ import {
   type RecordChange,
   type RecordConflict,
 } from "../models/jsonValidation";
+import { firstChapter } from "./firstChapter";
 
 /**
  * 食い違いを「作中での変化」へ昇格させる（設計書6.18）。
@@ -919,8 +920,4 @@ function lastChapterOfValue(
     .filter((change) => change.field === field && change.value === value)
     .flatMap((change) => change.chapters);
   return chapters.length > 0 ? Math.max(...chapters) : undefined;
-}
-
-function firstChapter(chapters: number[]): number {
-  return chapters.length > 0 ? Math.min(...chapters) : -1;
 }

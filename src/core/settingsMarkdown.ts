@@ -21,6 +21,7 @@ import {
   WORLD_CATEGORY_LABELS,
   type WorldItem,
 } from "../models/world";
+import { firstChapter } from "./firstChapter";
 
 /**
  * 設定資料としてそのまま渡せるMarkdownを組み立てる。
@@ -697,11 +698,6 @@ function foldSameChanges(changes: RecordChange[]): RecordChange[] {
     seen.add(key);
     return true;
   });
-}
-
-/** 並べ替え用。話数が無いものは、気づく前からあった値なので先に置く */
-function firstChapter(chapters: number[]): number {
-  return chapters.length > 0 ? Math.min(...chapters) : -1;
 }
 
 /**
