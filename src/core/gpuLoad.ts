@@ -1,3 +1,4 @@
+import { median } from "./median";
 /**
  * 手元のAIへ送る前に、**管理の外の負荷**が無いかを見る（設計書6.76.2）。
  *
@@ -293,14 +294,6 @@ export interface ExternalLoadJudgement {
   readonly reasons: readonly string[];
   /** ログへ残す1行（見た数字をそのまま） */
   readonly summary: string;
-}
-
-function median(values: readonly number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1
-    ? sorted[middle]
-    : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function gib(mib: number): string {
