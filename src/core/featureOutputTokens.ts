@@ -5,6 +5,7 @@ import { logLine } from "./logger";
 // ここでも使うので import を併記する（再輸出だけではこのファイルの中で使えない）
 import { FEATURE_OUTPUT_KEY_PREFIX } from "./tuningStoreNames";
 import { MIN_FEATURE_OUTPUT_SAMPLES, ceilingOfFeatureOutput } from "./outputCeiling";
+import { positiveNumber } from "./positiveNumber";
 export { FEATURE_OUTPUT_KEY_PREFIX };
 
 /**
@@ -493,14 +494,4 @@ export async function rememberTimeFitChunkChars(
         `${error instanceof Error ? error.message : String(error)}`
     );
   }
-}
-
-/**
- * 正の有限数のときだけ返す（`core/modelTuning.ts` の `positiveNumber` と
- * 同じ約束。**あちらは `vscode` を引き込むので、借りずに置く**）。
- */
-function positiveNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : undefined;
 }
