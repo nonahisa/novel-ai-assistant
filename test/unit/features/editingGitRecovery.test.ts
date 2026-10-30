@@ -35,7 +35,12 @@ const git = async (cwd: string, ...args: string[]) => {
   return result.stdout.trim();
 };
 
-describe("編集用リポジトリの立ち直り", () => {
+// **本物の git を何度も起こすので、時間の上限を延ばす**（gitPathArgs.test.ts と同じ）。
+// GitHub の CI（windows-latest）では git を起こすのが遅く、既定の5秒（準備は10秒）を
+// 越えて4件が落ちた（2026-10-30、0.115.2 の CI）
+const REAL_GIT_TIMEOUT_MS = 60_000;
+
+describe("編集用リポジトリの立ち直り", { timeout: REAL_GIT_TIMEOUT_MS }, () => {
   let base = "";
   let remote = "";
 
@@ -109,12 +114,12 @@ describe("編集用リポジトリの立ち直り", () => {
       showWarningMessage: vi.fn(async () => undefined),
       createOutputChannel: () => ({ appendLine() {}, show() {}, dispose() {} }),
     });
-  });
+  }, REAL_GIT_TIMEOUT_MS);
 
   afterEach(async () => {
     workspace.fs = {} as typeof workspace.fs;
     await fsp.rm(base, { recursive: true, force: true }).catch(() => undefined);
-  });
+  }, REAL_GIT_TIMEOUT_MS);
 
   test("B1：上流がまだ無い（初回の送信が止まった）フォルダーは、取り寄せで止まらない", async () => {
     // 送り先は登録してあるが、一度も push していない
