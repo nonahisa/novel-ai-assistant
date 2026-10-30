@@ -1,3 +1,4 @@
+import { normalizeLabel } from "./normalizeLabel";
 /**
  * 小説投稿サイトのダウンロードツールが付与するメタデータヘッダーを解析する。
  *
@@ -251,11 +252,6 @@ function splitHeaderBlocks(text: string): {
   flush();
 
   return { blocks, bodyEndedByLabel };
-}
-
-/** 「本文（69行）」→「本文」のように括弧部分を落とす */
-function normalizeLabel(label: string): string {
-  return label.replace(/[（(].*?[）)]\s*$/, "").trim();
 }
 
 /** 「1,826文字」→ 1826 */

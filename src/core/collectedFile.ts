@@ -1,3 +1,4 @@
+import { normalizeLabel } from "./normalizeLabel";
 /**
  * 1ファイルに全話が入ったダウンロードファイル（合本）を、話ごとに分ける。
  *
@@ -201,11 +202,6 @@ function isKnownLabel(label: string): boolean {
 function labelOf(line: string): string | null {
   const m = /^【([^】]+)】\s*$/.exec(line.trim());
   return m ? normalizeLabel(m[1]) : null;
-}
-
-/** 「本文（69行）」→「本文」 */
-function normalizeLabel(label: string): string {
-  return label.replace(/[（(].*?[）)]\s*$/, "").trim();
 }
 
 function bodyLabelIn(blocks: Map<string, string>): string {

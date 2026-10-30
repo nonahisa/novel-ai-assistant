@@ -1,3 +1,4 @@
+import { normalizeLabel } from "./normalizeLabel";
 /**
  * 作品情報（`about.txt`）の中身を読み取る（設計書6.99）。
  *
@@ -52,11 +53,6 @@ export function parseLabeledBlocks(rawText: string): LabeledBlock[] {
   flush();
 
   return blocks;
-}
-
-/** 「紹介文（9行）」→「紹介文」（`metadataParser.ts` と同じ落とし方） */
-function normalizeLabel(label: string): string {
-  return label.replace(/[（(].*?[）)]\s*$/, "").trim();
 }
 
 /**
