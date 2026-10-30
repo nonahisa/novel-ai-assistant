@@ -1,5 +1,6 @@
 import { AIWRITER_DIR } from "../models/types";
 import { isRecord } from "./isRecord";
+import { isStringArray } from "./isStringArray";
 
 /**
  * 拡張機能が出した知らせの記録（MCP の道具 `notices.recent`。作者の承認、2026-09-24）。
@@ -232,10 +233,6 @@ export function noticeLogFileName(pid: number, startedAt: Date): string {
 
 export function serializeNoticeLog(file: NoticeLogFile): string {
   return `${JSON.stringify(file, null, 2)}\n`;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 const SEVERITIES: readonly NoticeSeverity[] = ["info", "warning", "error"];

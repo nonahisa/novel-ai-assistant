@@ -4,6 +4,7 @@ import { AIWRITER_DIR } from "../models/types";
 import * as path from "./pathText";
 import { findLibraries } from "./libraryHome";
 import { isRecord } from "./isRecord";
+import { isStringArray } from "./isStringArray";
 
 /**
  * 作品の登録簿の写し（MCP の道具 `works.list`。作者の承認、2026-09-24）。
@@ -168,10 +169,6 @@ export function buildWorksSnapshot(
 
 export function serializeWorksSnapshot(snapshot: WorksSnapshot): string {
   return `${JSON.stringify(snapshot, null, 2)}\n`;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function parseEntry(value: unknown): WorksSnapshotEntry | undefined {

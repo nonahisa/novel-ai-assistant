@@ -8,6 +8,7 @@ import {
   type ManuscriptEditorsCard,
   type ManuscriptEditorsCardView,
 } from "./manuscriptEditorStatus";
+import { isStringArray } from "./isStringArray";
 
 /**
  * 窓の札（MCP の道具 `windows.list`。作者の依頼、2026-09-22）。
@@ -296,10 +297,6 @@ export function createWindowCardWriteGate(): WindowCardWriteGate {
       last = windowCardChangeKey(card);
     },
   };
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 /** 相談中の作品の項目を読む。無ければ `null`、形が違えば `false`（壊れた札） */
