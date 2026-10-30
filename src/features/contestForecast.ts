@@ -4,7 +4,7 @@ import type { DeviceWritingStats } from "../models/writingStats";
 import { readWorkGoals } from "../core/workGoalsStore";
 import { targetCharsOf, daysUntil } from "../core/contestProgress";
 import { scanWork } from "../core/scanner";
-import { mergeDailyStats, statsDayKey } from "../core/writingStats";
+import { mergeDailyStats } from "../core/writingStats";
 import { WritingStatsStore } from "../core/writingStatsStore";
 import {
   chooseCruisingPace,
@@ -20,7 +20,7 @@ import { CONTEST_SOURCE_LABELS } from "../core/contestListing";
 import type { WorkProfile } from "../core/contestMatchText";
 import { useLogFile } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
-import { boundaryHour } from "./writingProgress";
+import { todayKey } from "./writingProgress";
 import { confirmAndSave, loadContestInbox, type ContestImportDeps } from "./contestImport";
 import { readWorkProfile } from "./contestWorkProfile";
 import {
@@ -68,10 +68,6 @@ const BASIS_LABELS: Record<ForecastPlan["basis"], string> = {
   allWorks: `全作品の直近${PACE_WINDOW_DAYS}日の平均`,
   manual: "入れた字数",
 };
-
-function todayKey(): string {
-  return statsDayKey(new Date(), boundaryHour());
-}
 
 const count = (value: number) => Math.round(value).toLocaleString("ja-JP");
 

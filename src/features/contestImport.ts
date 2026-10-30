@@ -3,7 +3,6 @@ import type { WorkEntry } from "../models/types";
 import { isDateKey, type ContestGoal, type WorkGoals } from "../models/workGoals";
 import { readWorkGoals, writeWorkGoals } from "../core/workGoalsStore";
 import { scanWork } from "../core/scanner";
-import { statsDayKey } from "../core/writingStats";
 import { logLine, useLogFile } from "../core/logger";
 import {
   CONTEST_SOURCE_LABELS,
@@ -27,7 +26,7 @@ import {
   type StoredContest,
 } from "../core/contestInbox";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
-import { boundaryHour } from "./writingProgress";
+import { todayKey } from "./writingProgress";
 import { reportContest } from "./contestGoalReport";
 
 /**
@@ -83,10 +82,6 @@ export interface ContestImportDeps {
 const PASTE_GUIDE =
   "一覧のページで文章を全部選んでコピー（Ctrl+A → Ctrl+C）し、" +
   "「作品目標設定」→「公募の一覧を貼り付けて取り込む」から入れてください。";
-
-function todayKey(): string {
-  return statsDayKey(new Date(), boundaryHour());
-}
 
 export function loadContestInbox(memory: ContestMemory): StoredContest[] {
   return normalizeContestInbox(memory.get<unknown>(CONTEST_INBOX_KEY, []));
