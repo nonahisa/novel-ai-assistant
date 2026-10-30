@@ -17,6 +17,7 @@
  */
 
 import type { FinishRunSummary, FinishStepResult } from "./finishNewWork";
+import { markdownTableCell } from "./markdownTableCell";
 
 /** 結果の1枚の題（生成文書の種類名。ファイル名の前置きにもなる） */
 export const FINISH_REPORT_KIND = "ひと通り仕上げました";
@@ -38,12 +39,12 @@ export function describeFinishReport(summary: FinishRunSummary): string {
   ];
 
   for (const step of summary.done) {
-    lines.push(`| ${cell(step.label)} | ${cell(resultOf(step))} |`);
+    lines.push(`| ${markdownTableCell(step.label)} | ${markdownTableCell(resultOf(step))} |`);
   }
   // **中止で走らせなかった段も、同じ表に並べる。** 表から消すと、
   // 走って何も出なかったのか、そもそも走っていないのかが分からない
   for (const label of summary.remaining) {
-    lines.push(`| ${cell(label)} | 走らせていません（途中で中止したため） |`);
+    lines.push(`| ${markdownTableCell(label)} | 走らせていません（途中で中止したため） |`);
   }
 
   const counted = summary.done.filter(
@@ -93,13 +94,4 @@ function resultOf(step: FinishStepResult): string {
   if (step.failed) return "失敗しました";
   if (step.count === undefined) return "できました";
   return `できました（指摘 ${step.count}件）`;
-}
-
-/**
- * 表の升目に入れる形へ直す。
- *
- * 縦棒がそのまま入ると、そこで列が増えて表が崩れる。中身は消さずに逃がす。
- */
-function cell(text: string): string {
-  return text.split("|").join("\\|");
 }

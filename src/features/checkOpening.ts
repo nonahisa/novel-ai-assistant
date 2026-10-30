@@ -55,6 +55,7 @@ import {
   useLogFile,
 } from "../core/logger";
 import { warnWithLog } from "../views/notify";
+import { markdownTableCell } from "../core/markdownTableCell";
 
 /**
  * 冒頭診断（P-24、設計書6.30）。
@@ -415,7 +416,7 @@ export function renderOpeningCheck(report: OpeningCheckReport): string {
   for (const element of OPENING_ELEMENTS) {
     const judgement = byElement.get(element);
     lines.push(
-      `| ${element} | ${elementMark(judgement)} | ${cell(reason(judgement))} |`
+      `| ${element} | ${elementMark(judgement)} | ${markdownTableCell(reason(judgement))} |`
     );
   }
 
@@ -556,13 +557,3 @@ function reason(judgement: OpeningElementJudgement | undefined): string {
   if (!judgement) return "判定が返りませんでした。";
   return judgement.note || "説明が返りませんでした。";
 }
-
-/**
- * 表の升目に入れる形へ直す。
- *
- * 縦棒がそのまま入ると、そこで列が増えて表が崩れる。中身は消さずに逃がす。
- */
-function cell(text: string): string {
-  return text.split("|").join("\\|");
-}
-
