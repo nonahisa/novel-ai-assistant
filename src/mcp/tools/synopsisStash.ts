@@ -6,6 +6,7 @@ import { splitEpisodeBodyParts, type EpisodeBodyPart } from "../../core/episodeB
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import { parseEpisodeMetadata } from "../../core/metadataParser";
 import { McpToolError, describeError, readBody } from "./shared";
+import { relativeTo } from "./relativeTo";
 
 /**
  * 外部AIが作った各話あらすじと作品紹介文の貯め場所（2026-10-02、作者の裁定
@@ -245,11 +246,4 @@ export function needsSubtitleOf(episode: ResolvedEpisode): boolean {
 
 function normalizeRelative(relative: string): string {
   return relative.replace(/\\/g, "/");
-}
-
-function relativeTo(folder: string, target: string): string {
-  return nodePath
-    .relative(nodePath.resolve(folder), target)
-    .split(nodePath.sep)
-    .join("/");
 }

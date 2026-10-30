@@ -14,6 +14,7 @@ import {
   withStashEntries,
   type ExtractStashEntry,
 } from "../../core/externalExtractStash";
+import { relativeTo } from "./relativeTo";
 
 /**
  * 外部AIが抽出した答えの貯め場所（2026-10-02、作者の裁定）。
@@ -123,11 +124,4 @@ function writeStash(folder: string, entries: StashEntry[]): void {
 export function clearExtractStash(folder: string): void {
   const file = extractStashFileOf(folder);
   if (fs.existsSync(file)) fs.rmSync(file);
-}
-
-function relativeTo(folder: string, target: string): string {
-  return nodePath
-    .relative(nodePath.resolve(folder), target)
-    .split(nodePath.sep)
-    .join("/");
 }

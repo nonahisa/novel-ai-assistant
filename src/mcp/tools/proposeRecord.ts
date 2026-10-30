@@ -35,6 +35,7 @@ import {
   type PendingSettingsRecord,
 } from "../../core/pendingSettingsMerge";
 import { McpToolError, SETTINGS_SUBDIRS, chunkFromId, readSettingsRecords } from "./shared";
+import { relativeTo } from "./relativeTo";
 
 /**
  * 人物以外（能力・組織・場所・世界観）の更新案を、承認待ちへ置く
@@ -544,12 +545,4 @@ function notFoundMessage(
       ? `（${kindLabel}の台帳に読めないファイルが ${unreadable} 件あります。その中に居るのかもしれません）`
       : "")
   );
-}
-
-/** 作品フォルダーからの相対。区切りは読みやすいほうへ揃える */
-function relativeTo(folder: string, target: string): string {
-  return nodePath
-    .relative(nodePath.resolve(folder), target)
-    .split(nodePath.sep)
-    .join("/");
 }
