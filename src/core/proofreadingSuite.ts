@@ -18,6 +18,7 @@ import {
   describeCallTimeEstimate,
   type CallTimeEstimate,
 } from "./etaEstimate";
+import { withCommas } from "./withCommas";
 
 export type ProofreadingCheckId =
   | "notation"
@@ -562,22 +563,6 @@ export function buildSuiteConfirm(
     message: `${input.workTitle} の校正をまとめて実行します。`,
     detail: lines.join("\n"),
   };
-}
-
-/**
- * 3桁ごとに区切る。
- *
- * `toLocaleString()` は環境の地域設定で区切りが変わるので使わない
- * （試験の期待値が端末によって変わる）。
- */
-function withCommas(value: number): string {
-  const digits = String(Math.trunc(Math.abs(value)));
-  let out = "";
-  for (let i = 0; i < digits.length; i++) {
-    if (i > 0 && (digits.length - i) % 3 === 0) out += ",";
-    out += digits[i];
-  }
-  return value < 0 ? `-${out}` : out;
 }
 
 /**
