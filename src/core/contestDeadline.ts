@@ -1,4 +1,5 @@
 import { isDateKey } from "../models/workGoals";
+import { pad2 } from "./pad2";
 
 /**
  * 公募の締切の書き方から、日付（YYYY-MM-DD）だけを取り出す（設計書6.3.6.1）。
@@ -26,7 +27,7 @@ export function readDeadlines(text: string | null | undefined): string[] {
   while ((match = DATE.exec(source)) !== null) {
     const [, year, month, day, endOfMonth] = match;
     const dayNumber = endOfMonth ? lastDayOf(Number(year), Number(month)) : Number(day);
-    const key = `${year}-${pad(Number(month))}-${pad(dayNumber)}`;
+    const key = `${year}-${pad2(Number(month))}-${pad2(dayNumber)}`;
     if (isDateKey(key) && !dates.includes(key)) dates.push(key);
   }
   return dates;
@@ -48,8 +49,4 @@ export function upcomingDeadline(
 function lastDayOf(year: number, month: number): number {
   if (month < 1 || month > 12) return 0;
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, "0");
 }
