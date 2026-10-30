@@ -9,6 +9,7 @@ import {
   type AdviceHistorySource,
   type AdviceTypeId,
 } from "./advicePolicy";
+import { isFiniteNumber } from "./isFiniteNumber";
 
 /**
  * 助言方針の控え（設計書6.86.7・6.87.15）。
@@ -326,10 +327,6 @@ function parseHistory(value: unknown): AdviceHistoryEntry[] {
     });
   }
   return entries;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
 }
 
 /**

@@ -1,6 +1,7 @@
 // `paths.ts` ではなく純粋な部分を直に指す——ここは窓の札（`windowCard.ts`）を
 // 通して MCP の束からも読まれ、`vscode` へ届いてはいけない（`mcpReach.test.ts`）
 import { isPathInside, relative } from "./pathText";
+import { isFiniteNumber } from "./isFiniteNumber";
 
 /**
  * 原稿エディターの未送信の状態を、窓の札（MCP の `windows.list`）へ載せる形
@@ -40,10 +41,6 @@ export interface ManuscriptStatusReport {
   lengthGap: number | null;
   /** 画面の状態（`setState` の `rescue`）に控えがあるか */
   rescueKept: boolean;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
 }
 
 /**
