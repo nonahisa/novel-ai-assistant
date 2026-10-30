@@ -33,6 +33,8 @@ import {
   type EpisodeBodySource,
 } from "../../core/episodeChunks";
 import { decideChunkSize, type Chunk } from "../../core/chunker";
+import { matchWorkFormat, type WorkFormatKey } from "../../core/workFormat";
+import { parsePlotMarkdown } from "../../core/plotDoc";
 import { externalChunkIdOf, externalChunksOfText } from "../../core/externalExtractStash";
 
 /**
@@ -492,6 +494,15 @@ export function readPlotMarkdown(folder: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * 作品の形式（プロットの `## 形式`）。製品の `readWorkFormat` と同じ読み方。
+ * 話の見出しの形が変わる（`announce`・`read` の道具が使う）
+ */
+export function workFormatOf(folder: string): WorkFormatKey | undefined {
+  const plot = readPlotMarkdown(folder);
+  return plot === undefined ? undefined : matchWorkFormat(parsePlotMarkdown(plot).sections.format);
 }
 
 /**
