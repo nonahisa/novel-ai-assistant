@@ -6,6 +6,7 @@ import {
   regionStatement,
   type LocationResolver,
 } from "./locationConsistency";
+import { pairKey } from "./pairKey";
 
 /**
  * 場所の記録から、移動の照合に使う所要時間の表を組む（設計書6.88。AIを使わない）。
@@ -46,11 +47,6 @@ export interface TravelTableStats {
 export interface TravelTableResult {
   travelTimes: TravelTime[];
   stats: TravelTableStats;
-}
-
-/** 組の鍵。向きで変わらないよう、id を並べて作る */
-function pairKey(a: string, b: string): string {
-  return JSON.stringify(a < b ? [a, b] : [b, a]);
 }
 
 /**

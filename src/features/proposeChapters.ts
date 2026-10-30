@@ -8,6 +8,7 @@ import {
   type ChapterSet,
 } from "../models/chapter";
 import { ChapterStore, ChapterStoreError } from "../core/chapterStore";
+import { messageOf } from "../core/errorMessage";
 import { episodePathFor } from "../core/bookStore";
 import {
   groupEpisodesByChapter,
@@ -196,7 +197,7 @@ export class ChapterProposalApplier {
     try {
       await this.store.save(next);
     } catch (error) {
-      const detail = describeError(error);
+      const detail = messageOf(error);
       logFailure("章立ての提案の反映", {
         章: entry.name,
         開始の話: entry.startEpisodePath,
@@ -230,7 +231,7 @@ export class ChapterProposalApplier {
       this.set = await this.store.load();
     } catch (reloadError) {
       logFailure("章立ての提案の反映（読み直し）", {
-        内容: describeError(reloadError),
+        内容: messageOf(reloadError),
       });
       return detail;
     }
@@ -1010,7 +1011,7 @@ async function readMaterialFiles(
     } catch (error) {
       logFailure("章立ての材料：合本を読めなかった", {
         ファイル: file.fileName,
-        内容: describeError(error),
+        内容: messageOf(error),
       });
       files.push({ file, collected: null });
     }
@@ -1223,15 +1224,11 @@ async function reportStoreFailure(
   work: WorkEntry,
   error: unknown
 ): Promise<void> {
-  const message = describeError(error);
+  const message = messageOf(error);
   logFailure(what, {
     作品: work.title,
     種類: error instanceof ChapterStoreError ? error.kind : "unknown",
     内容: message,
   });
   await vscode.window.showErrorMessage(message);
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

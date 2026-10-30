@@ -30,6 +30,7 @@ import {
   streakSummaryFor,
 } from "./celebrations";
 import { COMMON_GOALS_MESSAGE, editCommonWritingGoals } from "./commonWritingGoals";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 全作品の執筆量パネル（作者の要望、2026-08-13）。
@@ -212,14 +213,4 @@ async function buildAllWorksStatsPanelData(
         : "記録は本文を保存したときに増えます。ファイルの追加・削除や競合の解消は、" +
           "書いた量ではないので数えません。",
   };
-}
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 32; index++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
 }

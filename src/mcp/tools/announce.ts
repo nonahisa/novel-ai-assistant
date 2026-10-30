@@ -27,8 +27,6 @@ import {
 } from "../../core/announceConfig";
 import { splitEpisodeBodyParts } from "../../core/episodeBodyParts";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "../../core/synopsisDoc";
-import { matchWorkFormat, type WorkFormatKey } from "../../core/workFormat";
-import { parsePlotMarkdown } from "../../core/plotDoc";
 import {
   findReaderTypeLabels,
   publicityReaderMark,
@@ -41,11 +39,11 @@ import {
   McpToolError,
   SYNOPSES_FILE,
   readBody,
-  readPlotMarkdown,
   readPublicityReader,
   readSettingsFile,
   resolveInsideFolder,
   settingsDirOf,
+  workFormatOf,
   workTitleOf,
 } from "./shared";
 import { readEpisodeFiles } from "./episodeFiles";
@@ -90,12 +88,6 @@ interface AnnounceEpisode {
   label: string;
   chapter: number | null;
   body: string;
-}
-
-/** 作品の形式（プロットの `## 形式`）。話の見出しの形が変わる */
-function workFormatOf(folder: string): WorkFormatKey | undefined {
-  const plot = readPlotMarkdown(folder);
-  return plot === undefined ? undefined : matchWorkFormat(parsePlotMarkdown(plot).sections.format);
 }
 
 /**

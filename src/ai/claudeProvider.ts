@@ -9,6 +9,7 @@ import { DEFAULT_TIMEOUT_SECONDS, resolveTimeoutMs } from "../core/modelTuning";
 import { isWebRuntime } from "../core/runtime";
 import { hashText } from "../core/hash";
 import { claudeUserContent } from "./imageInput";
+import { isRecord } from "../core/isRecord";
 
 /**
  * Claude（Anthropic API）アダプタ。
@@ -963,10 +964,6 @@ function isClaudeMessage(value: unknown): value is ClaudeMessage {
 
 function isClaudeStopReason(value: unknown): boolean {
   return value === null || (typeof value === "string" && CLAUDE_STOP_REASONS.has(value));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

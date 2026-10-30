@@ -1,5 +1,6 @@
 import type { Chunk } from "./chunker";
 import type { AcceptedTypoIssue } from "./typoCheckValidation";
+import { escapeRegExp } from "./regexEscape";
 
 /**
  * 文章作法のチェック（三点リーダー・ダッシュの偶数使用、鉤括弧内文末の句点、
@@ -229,8 +230,4 @@ function findMissingSpaceAfterMark(
     });
   }
   return findings;
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

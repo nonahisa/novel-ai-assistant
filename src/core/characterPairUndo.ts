@@ -7,6 +7,7 @@ import {
   type PendingCharacterWriter,
   type UnifyUndoTicket,
 } from "./characterPairDecision";
+import { messageOf } from "./errorMessage";
 
 /**
  * 重複の候補の［戻す］（設計書6.5.4「押した直後の帯の［戻す］」。作者の裁定 2026-10-20・10-22）。
@@ -319,8 +320,4 @@ function isAmbiguous(error: unknown): boolean {
     error !== null &&
     (error as { persistenceState?: unknown }).persistenceState === "ambiguous"
   );
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

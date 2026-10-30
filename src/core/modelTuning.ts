@@ -31,6 +31,7 @@ export type { TuningWriteOutcome };
 // 台帳が測定の仕組みを抱え込むことにはならない。それでも写しは作らない
 // ——「tokens か words か」の定義は `core/contextProbe.ts` の1つだけ
 import type { ProbeMeasureMethod } from "./contextProbe";
+import { positiveNumber } from "./positiveNumber";
 
 /**
  * AIチューニング——**モデルごと**の上限と待ち時間の台帳（設計書6.49）。
@@ -830,14 +831,6 @@ export function widenProbeSearchTimeout(
   });
 }
 
-/** いま、そのモデルに掛かっている探索の線（秒）。探索の最中でなければ undefined */
-export function probeSearchTimeoutCap(
-  providerId: string,
-  model: string
-): number | undefined {
-  return probeSearchCaps.get(modelTuningKey(providerId, model))?.seconds;
-}
-
 /**
  * これを下回るコンテキスト長は、台帳に入っていても使わない。
  *
@@ -1057,18 +1050,6 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
   }
 
   return result;
-}
-
-/**
- * 正の有限数のときだけ返す。
- *
- * 0や負や `"131072"` のような文字列は、**読まずに捨てる。** 半端に
- * 読むと「上限0トークン」のような、送る前から失敗が決まった値になる。
- */
-function positiveNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : undefined;
 }
 
 /** 0以上の有限数のときだけ返す（0に意味がある欄のため） */

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isFileNotFound } from "./fsErrors";
 import * as path from "./paths";
 import { fromUri } from "./paths";
 import type { WorkEntry } from "../models/types";
@@ -379,10 +380,4 @@ function unwrapDraft(raw: unknown): { draft: unknown; base: DraftBase } {
     return { draft: record.draft, base: { kind: "unknown" } };
   }
   return { draft: raw, base: { kind: "unknown" } };
-}
-
-function isFileNotFound(error: unknown): boolean {
-  return (
-    error instanceof vscode.FileSystemError && error.code === "FileNotFound"
-  );
 }

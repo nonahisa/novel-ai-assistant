@@ -9,6 +9,7 @@ import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { buildLocationSketch, type LocationSketch } from "../core/locationSketch";
 import { buildLocationSketchPanelHtml } from "../views/locationSketchPanelHtml";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 場所の略図（設計書6.93.10。作者の裁定 2026-10-09 夜）。
@@ -288,12 +289,3 @@ type PanelMessage =
   | { type: "origin"; id: string | null }
   | { type: "openRecord"; id: string }
   | { type: "conflict"; index: number };
-
-function createNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 32; index++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
-}

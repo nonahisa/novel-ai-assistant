@@ -41,6 +41,7 @@
  */
 
 import { AiQueueAbortError } from "./aiSequence";
+import { messageOf } from "./errorMessage";
 
 /**
  * 保管庫の中の置き場（`globalStorage/<拡張機能ID>/local-ai/`）。
@@ -324,10 +325,6 @@ type LoopOutcome =
   | { kind: "unavailable"; reason: string }
   | { kind: "abandoned" };
 
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function noop(): void {
   // 何もしない（札を扱えなかったときの抜け口）
 }
@@ -440,7 +437,7 @@ export class ProcessLease {
     try {
       await this.env.ops.removeIfSame(text);
     } catch (error) {
-      this.env.log?.(`手元のAIの札を片づけられませんでした：${describe(error)}`);
+      this.env.log?.(`手元のAIの札を片づけられませんでした：${messageOf(error)}`);
     }
     this.options.onDropped?.();
   }
@@ -452,7 +449,7 @@ export class ProcessLease {
     try {
       await before();
     } catch (error) {
-      this.env.log?.(`手元のAIの札を離す前の記録を残せませんでした：${describe(error)}`);
+      this.env.log?.(`手元のAIの札を離す前の記録を残せませんでした：${messageOf(error)}`);
     }
   }
 
@@ -482,7 +479,7 @@ export class ProcessLease {
     const removal = removing
       .then(() => undefined)
       .catch((error: unknown) => {
-        this.env.log?.(`手元のAIの札を消せませんでした：${describe(error)}`);
+        this.env.log?.(`手元のAIの札を消せませんでした：${messageOf(error)}`);
       });
     this.pendingRemoval = removal;
     void removal.finally(() => {
@@ -528,7 +525,7 @@ export class ProcessLease {
       try {
         created = await this.env.ops.tryCreate(text);
       } catch (error) {
-        return { kind: "unavailable", reason: `札を作れません（${describe(error)}）` };
+        return { kind: "unavailable", reason: `札を作れません（${messageOf(error)}）` };
       }
 
       if (created) {
@@ -537,7 +534,7 @@ export class ProcessLease {
         try {
           back = await this.env.ops.read();
         } catch (error) {
-          return { kind: "unavailable", reason: `札を読めません（${describe(error)}）` };
+          return { kind: "unavailable", reason: `札を読めません（${messageOf(error)}）` };
         }
         if (back?.text === text) {
           this.heldText = text;
@@ -555,7 +552,7 @@ export class ProcessLease {
       try {
         current = await this.env.ops.read();
       } catch (error) {
-        return { kind: "unavailable", reason: `札を読めません（${describe(error)}）` };
+        return { kind: "unavailable", reason: `札を読めません（${messageOf(error)}）` };
       }
       if (!current) {
         // 作ろうとした瞬間にはあり、読もうとしたら消えていた。少し置いて取り直す
@@ -593,7 +590,7 @@ export class ProcessLease {
         try {
           await this.env.ops.removeIfSame(current.text);
         } catch (error) {
-          return { kind: "unavailable", reason: `古い札を消せません（${describe(error)}）` };
+          return { kind: "unavailable", reason: `古い札を消せません（${messageOf(error)}）` };
         }
         continue;
       }
@@ -646,7 +643,7 @@ export class ProcessLease {
       }
       await this.env.ops.touch();
     } catch (error) {
-      this.env.log?.(`手元のAIの札の生存の印を打てませんでした：${describe(error)}`);
+      this.env.log?.(`手元のAIの札の生存の印を打てませんでした：${messageOf(error)}`);
     }
   }
 }

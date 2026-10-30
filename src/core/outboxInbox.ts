@@ -1,5 +1,6 @@
 import { AIWRITER_DIR } from "../models/types";
 import type { OutboxImportItem, OutboxImportOutcome, OutboxRecord } from "./outboxImport";
+import { stringOrEmpty } from "./stringOrEmpty";
 
 /**
  * 原稿箱の受け取り箱（設計書6.115「GitHub 経由」）。
@@ -106,7 +107,7 @@ export function parseInboxFile(text: string): ParsedInbox {
   if (!Array.isArray(box.records)) {
     return { ok: false, reason: "記録（records）がありません" };
   }
-  const writer = safeWriter(str(box.writer));
+  const writer = safeWriter(stringOrEmpty(box.writer));
   const records: OutboxRecord[] = [];
   let skipped = 0;
   for (const raw of box.records) {
@@ -114,14 +115,14 @@ export function parseInboxFile(text: string): ParsedInbox {
     if (record) records.push(record);
     else skipped += 1;
   }
-  return { ok: true, sentAt: str(box.sentAt), device: str(box.device), writer, records, skipped };
+  return { ok: true, sentAt: stringOrEmpty(box.sentAt), device: stringOrEmpty(box.device), writer, records, skipped };
 }
 
 function toRecord(raw: unknown, writer: string): OutboxRecord | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const value = raw as Record<string, unknown>;
-  const id = str(value.id);
-  const kind = str(value.kind);
+  const id = stringOrEmpty(value.id);
+  const kind = stringOrEmpty(value.kind);
   if (!id || !KINDS.has(kind)) return undefined;
   const record: OutboxRecord = { id, writer, kind: kind as OutboxRecord["kind"] };
   for (const key of ["at", "device", "episode", "findingId", "text", "original", "baseHash", "baseBlobSha", "basedOn"] as const) {
@@ -252,18 +253,18 @@ export function parseInboxResult(
   const results = Array.isArray(file.results) ? file.results : [];
   return {
     ok: true,
-    box: str(file.box),
-    importedAt: str(file.importedAt),
+    box: stringOrEmpty(file.box),
+    importedAt: stringOrEmpty(file.importedAt),
     results: results.flatMap((raw) => {
       if (typeof raw !== "object" || raw === null) return [];
       const item = raw as Record<string, unknown>;
       const status = item.status;
-      if (!str(item.id) || (status !== "imported" && status !== "already" && status !== "refused")) return [];
-      const current = str(item.currentBlobSha);
+      if (!stringOrEmpty(item.id) || (status !== "imported" && status !== "already" && status !== "refused")) return [];
+      const current = stringOrEmpty(item.currentBlobSha);
       return [
         current
-          ? { id: str(item.id), status, reason: str(item.reason), currentBlobSha: current }
-          : { id: str(item.id), status, reason: str(item.reason) },
+          ? { id: stringOrEmpty(item.id), status, reason: stringOrEmpty(item.reason), currentBlobSha: current }
+          : { id: stringOrEmpty(item.id), status, reason: stringOrEmpty(item.reason) },
       ];
     }),
   };
@@ -279,8 +280,4 @@ export function describeInboxImport(
   if (outcome.alreadyCount > 0) parts.push(`${outcome.alreadyCount}件は前に入れ済みでした`);
   if (brokenCount > 0) parts.push(`読めない箱が${brokenCount}つあります（受け取り箱に残しました）`);
   return `原稿箱から${parts.join("。")}。`;
-}
-
-function str(value: unknown): string {
-  return typeof value === "string" ? value : "";
 }

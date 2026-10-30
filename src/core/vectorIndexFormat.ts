@@ -103,7 +103,8 @@ export function cosine(a: Float32Array, b: Float32Array): number {
   return na === 0 || nb === 0 ? 0 : dot(a, b) / (na * nb);
 }
 
-function dot(a: Float32Array, b: Float32Array): number {
+/** 内積（短いほうの長さまで）。`semanticRank.ts` もここから読む */
+export function dot(a: Float32Array, b: Float32Array): number {
   let sum = 0;
   const length = Math.min(a.length, b.length);
   for (let i = 0; i < length; i++) sum += a[i] * b[i];

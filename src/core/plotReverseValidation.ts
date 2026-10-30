@@ -1,5 +1,6 @@
 import type { PlotSectionKey, PlotSections } from "./plotDoc";
 import { emptyPlotSections } from "./plotDoc";
+import { isRecord } from "./isRecord";
 
 /**
  * P-02（プロット逆算生成）のAI出力を検証し、プロットの各項目へ変換する。
@@ -171,10 +172,6 @@ function cleanCharacters(
     if (maxItems !== undefined && items.length >= maxItems) break;
   }
   return items;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function extractBraces(text: string): string | null {

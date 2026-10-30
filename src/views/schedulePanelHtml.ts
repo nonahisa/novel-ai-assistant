@@ -1,3 +1,5 @@
+import { STEP_ACTOR_LABELS } from "../models/schedule";
+
 /**
  * スケジュールの画面（設計書6.111.7）。**縦が時間、横が作品。**
  *
@@ -216,7 +218,7 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
   document.getElementById("exportIcs").addEventListener("click", function () { post({ type: "exportIcs" }); });
   document.getElementById("importHolidays").addEventListener("click", function () { post({ type: "importHolidays" }); });
   document.getElementById("workloadSettings").addEventListener("click", function () { post({ type: "openWorkloadSettings" }); });
-  var ACTOR = { self: "自分で進める", others: "人に頼む" };
+  var ACTOR = ${JSON.stringify(STEP_ACTOR_LABELS)};
 
   // 見出しの行は、ボタンと断りの数で折り返して高さが変わる。下の画面をその分だけ縮める
   function fitLayout() {

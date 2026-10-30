@@ -67,6 +67,7 @@ import {
   type WorkLog,
 } from "../core/logger";
 import { warnWithLog } from "../views/notify";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 名前の点検（設計書6.37.5）。
@@ -738,16 +739,6 @@ async function readSetting(work: WorkEntry): Promise<string> {
 
 /** 画面へ渡す候補の型を、外からも使えるようにする（テスト・報告用） */
 export type { NameCandidate };
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 32; index++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
-}
 
 /**
  * 引用から、いまの本文の行を割り出す。

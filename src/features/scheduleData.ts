@@ -23,6 +23,7 @@ import type { HolidaySet } from "../core/holidays";
 import { logFailure, useLogFile } from "../core/logger";
 import { boundaryHour } from "./writingProgress";
 import { episodePlotsDirOf, listEpisodePlotChapters } from "./episodePlotNav";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * スケジュールの画面と知らせに要る材料を集める（設計書6.111）。
@@ -219,8 +220,4 @@ async function serialEpisodeFacts(
   }
 
   return buildEpisodeFacts(scannedLike, plannedTitles);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

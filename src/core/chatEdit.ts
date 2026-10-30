@@ -1,5 +1,6 @@
 import { PLOT_SECTIONS, type PlotSectionKey } from "./plotDoc";
 import { isPlaceholderContent } from "./plotInterview";
+import { isRecord } from "./isRecord";
 
 /**
  * 相談パネルからの加筆修正（P-21の`edit`）の解釈。
@@ -409,10 +410,6 @@ function splitOnce(text: string, separator: string): [string, string | undefined
   const at = text.indexOf(separator);
   if (at === -1) return [text, undefined];
   return [text.slice(0, at), text.slice(at + separator.length)];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

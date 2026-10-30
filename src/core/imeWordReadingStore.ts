@@ -79,14 +79,6 @@ const DISMISSALS: JsonFile<ImeWordDismissalFile> = {
   empty: () => ({ version: 1, entries: [] }),
 };
 
-export function imeWordReadingsPath(work: WorkEntry): string {
-  return path.join(workPaths(work).aiwriter, WORDS_FILE);
-}
-
-export function imeReadingDismissalsPath(work: WorkEntry): string {
-  return path.join(workPaths(work).aiwriter, DISMISSALS_FILE);
-}
-
 export interface Loaded<T> {
   file: T;
   /** 読んだ時点のハッシュ（ファイルが無ければ undefined） */

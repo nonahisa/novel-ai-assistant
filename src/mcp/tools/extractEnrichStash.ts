@@ -6,6 +6,7 @@ import { SETTINGS_ENRICH_VERSION } from "../../prompts/settingsEnrich";
 import { hashText } from "../../core/hash";
 import type { SettingsKind } from "../../core/settingsSummary";
 import { McpToolError, describeError } from "./shared";
+import { relativeTo } from "./relativeTo";
 
 /**
  * 抽出の保存の前に外部AIがまとめ直した値（「まとめ」）の貯め場所
@@ -173,11 +174,4 @@ export function staleReasonOf(
     return "まとめたあとで抽出の貯めが変わり、この記録の中身も変わりました（まとめ直してください）";
   }
   return undefined;
-}
-
-function relativeTo(folder: string, target: string): string {
-  return nodePath
-    .relative(nodePath.resolve(folder), target)
-    .split(nodePath.sep)
-    .join("/");
 }

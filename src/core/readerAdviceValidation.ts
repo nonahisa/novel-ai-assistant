@@ -6,6 +6,7 @@ import {
   formatReaderAdviceMaterial,
 } from "../prompts/readerAdvice";
 import type { ReaderAdviceMaterial } from "./readerAdvice";
+import { isRecord } from "./isRecord";
 
 /**
  * 読者の反応の助言（P-40）の答えを確かめる（実装ルール3「AIの出力を信用しない」）。
@@ -262,8 +263,4 @@ function parseJson(text: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

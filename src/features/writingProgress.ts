@@ -276,6 +276,11 @@ export function boundaryHour(): number {
     .get<number>("stats.dayBoundaryHour", 4);
 }
 
+/** 今日の日付の鍵（一日の区切りの時刻 `boundaryHour` で切る）。公募の画面などが使う */
+export function todayKey(): string {
+  return statsDayKey(new Date(), boundaryHour());
+}
+
 export function weekStart(): number {
   const value = vscode.workspace
     .getConfiguration("novelai")

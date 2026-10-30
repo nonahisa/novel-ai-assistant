@@ -1,4 +1,5 @@
 import { AIWRITER_DIR } from "../models/types";
+import { isRecord } from "./isRecord";
 
 /**
  * 機能ごとのAIの割り当ての写し（MCP の道具 `ai.settings`。作者の裁定、2026-10-01）。
@@ -102,10 +103,6 @@ export interface AiAssignmentsSource {
   vectorSearch?: unknown;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function nonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -120,7 +117,7 @@ function choiceOf(provider: unknown, model: unknown): AiChoice | null {
 }
 
 function choiceFromRecord(value: unknown): AiChoice | null {
-  if (!isObject(value)) return null;
+  if (!isRecord(value)) return null;
   return choiceOf(value.provider, value.model);
 }
 
@@ -137,7 +134,7 @@ export function buildAiAssignmentsSnapshot(
   now: Date
 ): AiAssignmentsSnapshot {
   const defaultAi = choiceOf(source.defaultProvider, source.defaultModel);
-  const table = isObject(source.assignments) ? source.assignments : {};
+  const table = isRecord(source.assignments) ? source.assignments : {};
   const features = source.features.map((feature): AiAssignmentRow => {
     const assigned = choiceFromRecord(table[feature.key]);
     return {
@@ -163,7 +160,7 @@ export function buildAiAssignmentsSnapshot(
 
 /** 意味検索の設定を名指しで拾う。どれかが欠けていれば undefined（写さない） */
 function vectorSearchOf(value: unknown): VectorSearchSetting | undefined {
-  if (!isObject(value)) return undefined;
+  if (!isRecord(value)) return undefined;
   if (typeof value.enabled !== "boolean" || !nonEmpty(value.model) || !nonEmpty(value.endpoint)) {
     return undefined;
   }
@@ -182,7 +179,7 @@ export function serializeAiAssignmentsSnapshot(snapshot: AiAssignmentsSnapshot):
 /** `null` か、2つの名前がそろった選択か。**それ以外は壊れている**（`undefined`） */
 function parseChoice(value: unknown): AiChoice | null | undefined {
   if (value === null) return null;
-  if (!isObject(value)) return undefined;
+  if (!isRecord(value)) return undefined;
   if (typeof value.provider !== "string" || typeof value.model !== "string") return undefined;
   return { provider: value.provider, model: value.model };
 }
@@ -201,12 +198,12 @@ export function parseAiAssignmentsSnapshot(text: string): AiAssignmentsSnapshot 
   } catch {
     return undefined;
   }
-  if (!isObject(raw)) return undefined;
+  if (!isRecord(raw)) return undefined;
   if (raw.schema !== AI_ASSIGNMENTS_SNAPSHOT_SCHEMA) return undefined;
   if (typeof raw.writtenAt !== "string") return undefined;
   const writer = raw.writtenBy;
   if (
-    !isObject(writer) ||
+    !isRecord(writer) ||
     (writer.pid !== null && typeof writer.pid !== "number") ||
     typeof writer.extensionVersion !== "string" ||
     (writer.machineName !== null && typeof writer.machineName !== "string")
@@ -218,7 +215,7 @@ export function parseAiAssignmentsSnapshot(text: string): AiAssignmentsSnapshot 
   if (!Array.isArray(raw.features)) return undefined;
   const features: AiAssignmentRow[] = [];
   for (const item of raw.features) {
-    if (!isObject(item) || typeof item.feature !== "string" || typeof item.label !== "string") {
+    if (!isRecord(item) || typeof item.feature !== "string" || typeof item.label !== "string") {
       return undefined;
     }
     const assigned = parseChoice(item.assigned);

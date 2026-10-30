@@ -136,6 +136,7 @@ import { openInDefaultEditor } from "../views/openDocument";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { exportEpub } from "./exportEpub";
 import { logFailure, useLogFile } from "../core/logger";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * EPUBエディター（設計書6.65.6。第2段）。
@@ -3566,14 +3567,4 @@ async function reportSaveFailure(
   });
   panel.webview.postMessage({ type: "status", text: message, isError: true });
   await vscode.window.showErrorMessage(message);
-}
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 32; index++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
 }

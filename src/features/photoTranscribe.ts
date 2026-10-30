@@ -49,6 +49,7 @@ import { nameNewEpisodes, writeNewEpisodes } from "./addEpisodeFiles";
 import { describeAIError } from "./reportAIError";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { isInsideWork, lastManuscriptCaret, openManuscriptTabUris } from "./manuscriptEditor";
+import { createNonce } from "../core/webviewNonce";
 
 /**
  * 写真から原稿を起こす（設計書6.117）。作品ごとに1枚の画面。
@@ -887,13 +888,4 @@ export function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(index, index + CHUNK));
   }
   return btoa(binary);
-}
-
-function createNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let nonce = "";
-  for (let index = 0; index < 32; index++) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
 }

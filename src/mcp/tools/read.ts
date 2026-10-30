@@ -10,7 +10,7 @@ import { parseLocation, type Location } from "../../models/location";
 import { DEFAULT_SETTINGS_DIR, type EpisodeFile } from "../../models/types";
 import { decodeBytes } from "../../core/textDecode";
 import { expandNameVariants } from "../../core/termIndex";
-import { matchWorkFormat, type WorkFormatKey } from "../../core/workFormat";
+import { type WorkFormatKey } from "../../core/workFormat";
 import { isBlankPlotSection, parsePlotMarkdown } from "../../core/plotDoc";
 import { findLatestEpisode } from "../../core/latestEpisode";
 import { pickCount } from "../../core/countMode";
@@ -98,6 +98,7 @@ import {
   readPlotMarkdown,
   readSettingsRecords,
   settingsDirOf,
+  workFormatOf,
   workTitleOf,
 } from "./shared";
 
@@ -552,12 +553,6 @@ function readLedger<T>(
  * `vscode` を import しているので名前だけ写す（`shared.ts` の `SETTINGS_SUBDIRS` と同じ事情）
  */
 const TIMELINE_FILE = "timeline.json";
-
-/** 作品の形式（プロットの `## 形式`）。製品の `readWorkFormat` と同じ読み方 */
-function workFormatOf(folder: string): WorkFormatKey | undefined {
-  const plot = readPlotMarkdown(folder);
-  return plot === undefined ? undefined : matchWorkFormat(parsePlotMarkdown(plot).sections.format);
-}
 
 function readCharacters(folder: string, notices: string[]): Character[] {
   const loaded = readSettingsRecords(folder, SETTINGS_SUBDIRS.characters, parseCharacter);

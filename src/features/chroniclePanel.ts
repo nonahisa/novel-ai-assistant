@@ -29,6 +29,8 @@ import { chronicleToMarkdown, CHRONICLE_TITLE } from "../core/chronicleMarkdown"
 import { buildChroniclePanelHtml } from "../views/chroniclePanelHtml";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
+import { createNonce } from "../core/webviewNonce";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 年表（設計書6.39）。
@@ -453,17 +455,3 @@ type PanelMessage =
   | { type: "openEpisode"; filePath: string }
   | { type: "edit" }
   | { type: "export" };
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function createNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let value = "";
-  for (let index = 0; index < 32; index++) {
-    value += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return value;
-}

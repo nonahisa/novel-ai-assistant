@@ -18,6 +18,7 @@ import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import type { ForeshadowFromContradiction } from "./proposalPanel";
 import { notifyDone } from "../views/notify";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 伏線追跡のうち、**AIを使わない口**（設計書6.35）。
@@ -415,8 +416,4 @@ export async function registerForeshadowFromContradiction(
     });
     return { ok: false, reason: detail };
   }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

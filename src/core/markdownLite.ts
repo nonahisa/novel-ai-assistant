@@ -18,7 +18,7 @@ export function renderMarkdownLite(text: string): string {
   // 存在しない取り置きを参照して `<code>undefined</code>` と表示される。
   // 前提にせず、ここで落としておく
   const withoutMarkers = String(text ?? "").replace(/\u0000/gu, "");
-  const escaped = escapeHtml(withoutMarkers);
+  const escaped = escapeHtmlText(withoutMarkers);
 
   const html: string[] = [];
   let listItems: string[] = [];
@@ -60,7 +60,8 @@ export function renderMarkdownLite(text: string): string {
   return html.join("");
 }
 
-function escapeHtml(text: string): string {
+// 属性値には入れず要素の本文にだけ入れるので `"` は逃がさない（htmlEscape.ts の escapeHtml とは別物）
+function escapeHtmlText(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

@@ -34,6 +34,7 @@ import {
   type TargetSheetWrittenRecord,
 } from "../core/targetSheetWritten";
 import { logFailure } from "../core/logger";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * ターゲットシートの「書けたものの実績」の材料を集める（設計書6.108.6）。
@@ -252,8 +253,4 @@ async function readReactions(
     return undefined;
   }
   return collectReactions(ledger);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

@@ -111,6 +111,7 @@ import {
   chatRun,
   chatValidate,
 } from "./chat";
+import { isRecord } from "../../core/isRecord";
 
 /**
  * 束ねた道具の中身（設計書6.87.15 の柱1。0.66.7）。
@@ -1082,10 +1083,6 @@ function withValidateNext(input: FeatureCallInput, result: unknown): unknown {
       : [{ args: { ...base, response: RESPONSE_SLOT } }];
   const next: ValidateNext = { tool: "novel.validate", fill: "response", note: NEXT_NOTE, calls };
   return { ...result, next };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** `novel.validate` の `stash: true` を受け付ける機能 */

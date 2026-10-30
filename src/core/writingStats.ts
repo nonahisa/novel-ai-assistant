@@ -8,6 +8,7 @@ import {
   WritingMeasurement,
 } from "../models/writingStats";
 import { isValidDeviceId } from "./device";
+import { pad2 } from "./pad2";
 
 /**
  * 執筆量の集計（設計書6.3）。
@@ -818,8 +819,4 @@ export function dailyPaceNeeded(
   const day = Number(today.slice(8, 10));
   const remainingDays = Math.max(1, total - day + 1);
   return Math.ceil(remaining / remainingDays);
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
 }

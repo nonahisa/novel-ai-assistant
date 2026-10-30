@@ -3,6 +3,7 @@ import {
   CHAPTER_NAME_MAX_CHARS,
   CHAPTER_PROPOSE_HINTS,
 } from "../prompts/chapterPropose";
+import { isRecord } from "./isRecord";
 
 /**
  * 章立ての提案（P-31）の応答の検証（設計書6.66.4）。
@@ -409,10 +410,6 @@ function normalizeForHintMatch(text: string): string {
       /[、。，．,.:：;；!！?？「」『』（）()〔〕【】《》〈〉[\]{}｛｝“”"'’‘]/gu,
       ""
     );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseObject(text: string): Record<string, unknown> | null {

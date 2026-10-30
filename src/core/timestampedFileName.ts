@@ -1,3 +1,4 @@
+import { pad2 } from "./pad2";
 /**
  * 「いつ作ったか」で名前が決まるファイルの、名前の候補を並べる。
  *
@@ -63,8 +64,4 @@ export function formatDayStamp(at: Date): string {
 /** 「2026-08-28 02:49」。文書の中に書く、人が読むための時刻 */
 export function formatDayTime(at: Date): string {
   return `${formatDayStamp(at)} ${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
 }

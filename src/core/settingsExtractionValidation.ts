@@ -34,6 +34,7 @@ import {
 // 「（記述なし）」のような不在を述べる文の判定は人物側と共有する。
 // 片方だけ直しても、もう片方から同じ文言が入り込む
 import { isMeaningfulValue } from "./characterExtractionValidation";
+import { isRecord } from "./isRecord";
 
 /**
  * 能力・組織・場所のAI出力を検証する。
@@ -1207,8 +1208,4 @@ function cleanStringArray(value: unknown): string[] {
     if (trimmed.length > 0) seen.add(trimmed);
   }
   return [...seen];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

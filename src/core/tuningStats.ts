@@ -10,6 +10,7 @@ import {
   MIN_CHARS_PER_TOKEN_SAMPLES,
   resolveCharsPerToken,
 } from "./sizeBudget";
+import { markdownTableCellOneLine } from "./markdownTableCell";
 
 /**
  * AIチューニングの実測を、1枚の表にして見せる（作者の要望、2026-09-06
@@ -175,8 +176,8 @@ export function buildTuningStatsMarkdown(
     lines.push(
       "| " +
         [
-          escapeCell(entry.providerLabel),
-          escapeCell(entry.model),
+          markdownTableCellOneLine(entry.providerLabel),
+          markdownTableCellOneLine(entry.model),
           speedCell(entry.tuning.outputTokensPerSecond, index === fastest),
           speedSourceCell(entry.tuning.speedSource),
           formatMeasuredAt(entry.tuning.speedMeasuredAt),
@@ -211,7 +212,7 @@ function typoAccuracySection(entries: readonly TuningStatsEntry[]): string[] {
     const text = describeTypoAccuracyRecord(entry.tuning);
     return text === undefined
       ? []
-      : [`- ${escapeCell(entry.providerLabel)} / ${escapeCell(entry.model)}：${text}`];
+      : [`- ${markdownTableCellOneLine(entry.providerLabel)} / ${markdownTableCellOneLine(entry.model)}：${text}`];
   });
   if (items.length === 0) return [];
   return [
@@ -565,9 +566,4 @@ function pickWriteLength(tuning: ModelTuning | undefined): string | undefined {
   return chars === undefined
     ? `書ける ${tokens.toLocaleString("ja-JP")}トークン${suffix}`
     : `書ける 約${chars.toLocaleString("ja-JP")}字${suffix}`;
-}
-
-/** 表の中で縦棒が区切りに化けないようにする（`features/diagnoseWeb.ts` と同じ手） */
-function escapeCell(text: string): string {
-  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }

@@ -21,6 +21,7 @@ import {
   NEW_JSON_FILE_FORMAT,
   type JsonFileFormat,
 } from "./jsonFileFormat";
+import { messageOf } from "./errorMessage";
 
 interface CharacterSnapshot {
   filePath: string;
@@ -327,7 +328,7 @@ export class CharacterStore {
       );
     } catch (error) {
       throw new CharacterStoreError(
-        `人物「${id}」のファイルを退避できませんでした: ${errorMessage(error)}`,
+        `人物「${id}」のファイルを退避できませんでした: ${messageOf(error)}`,
         "io_error",
         { recoveryPaths: [snapshot.filePath] }
       );
@@ -379,7 +380,7 @@ export class CharacterStore {
       character = parseCharacter(JSON.parse(new TextDecoder().decode(bytes)));
     } catch (error) {
       throw new CharacterStoreError(
-        `回復用の場所のファイルを人物として読めません: ${errorMessage(error)}`,
+        `回復用の場所のファイルを人物として読めません: ${messageOf(error)}`,
         "io_error",
         { recoveryPaths: [recoveryPath] }
       );
@@ -411,7 +412,7 @@ export class CharacterStore {
         });
       }
       throw new CharacterStoreError(
-        `人物「${character.id}」を元の場所へ戻せませんでした: ${errorMessage(error)}`,
+        `人物「${character.id}」を元の場所へ戻せませんでした: ${messageOf(error)}`,
         "io_error",
         { recoveryPaths: [recoveryPath] }
       );
@@ -515,7 +516,7 @@ export class CharacterStore {
         });
       }
       throw new CharacterStoreError(
-        `人物設定の一時ファイルを書き込めませんでした: ${errorMessage(error)}`,
+        `人物設定の一時ファイルを書き込めませんでした: ${messageOf(error)}`,
         "io_error"
       );
     }
@@ -526,7 +527,7 @@ export class CharacterStore {
         sourceBeforeRetire = await this.readFileIfExists(sourcePath);
       } catch (error) {
         throw this.manualRecoveryError(
-          `人物「${prepared.character.id}」の旧ファイルを新しい保存先の配置後に確認できませんでした: ${errorMessage(error)}`,
+          `人物「${prepared.character.id}」の旧ファイルを新しい保存先の配置後に確認できませんでした: ${messageOf(error)}`,
           [sourcePath, prepared.destinationPath]
         );
       }
@@ -545,7 +546,7 @@ export class CharacterStore {
         recoveryPath = await createManagedRecoveryPath(sourcePath);
       } catch (error) {
         throw this.manualRecoveryError(
-          `旧ファイルの回復先を準備できませんでした: ${errorMessage(error)}`,
+          `旧ファイルの回復先を準備できませんでした: ${messageOf(error)}`,
           [sourcePath, prepared.destinationPath]
         );
       }
@@ -557,7 +558,7 @@ export class CharacterStore {
         );
       } catch (error) {
         throw this.manualRecoveryError(
-          `旧ファイルを回復パスへ移動できませんでした: ${errorMessage(error)}`,
+          `旧ファイルを回復パスへ移動できませんでした: ${messageOf(error)}`,
           [sourcePath, prepared.destinationPath, recoveryPath]
         );
       }
@@ -567,7 +568,7 @@ export class CharacterStore {
         recoveryBytes = await this.readFileIfExists(recoveryPath);
       } catch (error) {
         throw this.manualRecoveryError(
-          `回復ファイルを確認できませんでした: ${errorMessage(error)}`,
+          `回復ファイルを確認できませんでした: ${messageOf(error)}`,
           [prepared.destinationPath, recoveryPath]
         );
       }
@@ -583,7 +584,7 @@ export class CharacterStore {
         destinationBytes = await this.readFileIfExists(prepared.destinationPath);
       } catch (error) {
         throw this.manualRecoveryError(
-          `旧ファイル退避後に新しい保存先を確認できませんでした: ${errorMessage(error)}`,
+          `旧ファイル退避後に新しい保存先を確認できませんでした: ${messageOf(error)}`,
           [prepared.destinationPath, recoveryPath]
         );
       }
@@ -735,8 +736,3 @@ function asCharacterStoreError(error: unknown): CharacterStoreError {
     "io_error"
   );
 }
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-

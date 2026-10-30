@@ -83,6 +83,7 @@ import {
   describeSharedFirstPersonNotices,
   findSharedFirstPersonNotices,
 } from "../../core/sharedFirstPersonNotice";
+import { relativeToRoot } from "./relativeTo";
 
 /**
  * 外部AIが行った設定資料の抽出を、**拡張機能の［設定資料を抽出］と同じ形で**
@@ -278,7 +279,7 @@ export function extractCommit(input: ExtractCommitInput): ExtractCommitResult {
   const failed: ExtractCommitResult["failed"] = [];
 
   for (const write of writes) {
-    const file = relativeTo(root, write.target);
+    const file = relativeToRoot(root, write.target);
     if (fs.existsSync(write.target)) {
       refused.push({
         kind: write.kind,
@@ -905,9 +906,4 @@ function emptyByKind(): Record<RecordKind, string[]> {
 
 function countOf(byKind: Record<RecordKind, string[]>): number {
   return Object.values(byKind).reduce((sum, names) => sum + names.length, 0);
-}
-
-/** 作品フォルダーからの相対。区切りは読みやすいほうへ揃える */
-function relativeTo(root: string, target: string): string {
-  return nodePath.relative(root, target).split(nodePath.sep).join("/");
 }

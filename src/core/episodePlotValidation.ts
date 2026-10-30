@@ -17,6 +17,7 @@ import {
   EPISODE_PLOT_CONTRAST_KINDS,
   type EpisodePlotContrastKind,
 } from "../prompts/episodePlotContrast";
+import { isRecord } from "./isRecord";
 
 /**
  * 単話プロットのAI判定（P-27・P-28、設計書6.36.3）の応答の検証。
@@ -991,10 +992,6 @@ function normalizeForHintMatch(text: string): string {
 
 function asString(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function extractBraces(text: string): string | null {

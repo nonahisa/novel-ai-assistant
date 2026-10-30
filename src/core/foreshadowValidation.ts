@@ -8,6 +8,7 @@ import {
   FORESHADOW_LABEL_MAX_CHARS,
 } from "../prompts/foreshadowDetect";
 import { FORESHADOW_RESOLVE_HINTS } from "../prompts/foreshadowResolve";
+import { isRecord } from "./isRecord";
 
 /**
  * 伏線の検知（P-25 / P-26）の応答の検証（設計書6.35.2・6.35.3）。
@@ -615,10 +616,6 @@ function usableNote(note: string, hints: readonly string[]): string {
 
 function asString(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseObject(text: string): Record<string, unknown> | null {

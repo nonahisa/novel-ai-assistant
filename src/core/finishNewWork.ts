@@ -39,6 +39,7 @@ import {
 } from "./proofreadingSuite";
 import { prerequisiteInfo, type Prerequisite } from "./prerequisites";
 import { paidPriceLine } from "./paidUsageNotice";
+import { withCommas } from "./withCommas";
 
 /** まとめの入口。`package.json` と詳細メニューが同じIDを使う */
 export const FINISH_NEW_WORK_COMMAND = "novelai.finishNewWork";
@@ -406,20 +407,4 @@ export function describeFinishStep(
   label: string
 ): string {
   return `${done}/${total}：${label}`;
-}
-
-/**
- * 3桁ごとに区切る。
- *
- * `toLocaleString()` は環境の地域設定で区切りが変わるので使わない
- * （試験の期待値が端末によって変わる）。
- */
-function withCommas(value: number): string {
-  const digits = String(Math.trunc(Math.abs(value)));
-  let out = "";
-  for (let i = 0; i < digits.length; i++) {
-    if (i > 0 && (digits.length - i) % 3 === 0) out += ",";
-    out += digits[i];
-  }
-  return value < 0 ? `-${out}` : out;
 }

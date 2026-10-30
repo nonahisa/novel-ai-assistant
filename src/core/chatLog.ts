@@ -3,6 +3,7 @@ import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
 import { formatLogTime, redactSecrets } from "./logger";
+import { concatBytes } from "./concatBytes";
 
 /**
  * 相談のやり取りを、読める形で残す。
@@ -141,7 +142,7 @@ export function appendChatLog(work: WorkEntry, entry: ChatLogEntry): void {
               ...new TextEncoder().encode(header(work)),
               ...addition,
             ])
-          : concat(existing, addition);
+          : concatBytes(existing, addition);
       await vscode.workspace.fs.writeFile(uri, merged);
     })
     .catch(() => undefined);
@@ -156,13 +157,6 @@ function header(work: WorkEntry): string {
     "残したくない場合は設定 `novelai.chatLog.enabled` を切ってください。",
     "",
   ].join("\n");
-}
-
-function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
-  const merged = new Uint8Array(left.byteLength + right.byteLength);
-  merged.set(left, 0);
-  merged.set(right, left.byteLength);
-  return merged;
 }
 
 /**

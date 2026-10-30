@@ -1,4 +1,5 @@
 import { normalizeForComparison } from "./groundedEvidence";
+import { escapeRegExp } from "./regexEscape";
 
 /**
  * 場所の位置関係「中にある」（within）の**向き**を、引用の文の形から確かめる
@@ -98,11 +99,6 @@ export function withinDirectionFromQuote(
     CONTAINER_THEN_CONTAINED,
     AFTER_CONTAINER
   );
-}
-
-/** 正規表現の中で字そのものとして使う */
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 /**

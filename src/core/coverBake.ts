@@ -33,6 +33,7 @@ import { imageMediaType } from "./epubPackage";
   こちらは `vscode` を使うので MCP から import できない）。ここからも今までどおり取れる
 */
 import { BAKED_COVER_FILES, type CoverSide } from "./coverBakeFiles";
+import { pad2 } from "./pad2";
 export { BAKED_COVER_FILES, type CoverSide } from "./coverBakeFiles";
 
 /**
@@ -283,12 +284,8 @@ function toBase64(bytes: Uint8Array): string {
  * 同じ日に何度も焼き直すので、**分まで**出す。
  */
 export function describeBakedAt(at: Date): string {
-  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const time = `${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
   return `${at.getFullYear()}年${at.getMonth() + 1}月${at.getDate()}日 ${time}`;
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, "0");
 }
 
 /**

@@ -56,6 +56,7 @@ import {
   type SceneTimeCueKind,
 } from "../prompts/sceneTimeCue";
 import { LOCATION_RELATION_VALUE_MAX_CHARS } from "../models/location";
+import { pairKey } from "./pairKey";
 
 /**
  * 移動の照合で、時の手がかり（P-52）と本文の距離（P-51）を AI で抜く（設計書6.88.13）。
@@ -588,10 +589,6 @@ export function planTimeCueRequests(input: {
     });
   }
   return { requests, skipped: Math.max(0, ordered.length - limit) };
-}
-
-function pairKey(a: string, b: string): string {
-  return JSON.stringify(a < b ? [a, b] : [b, a]);
 }
 
 /**

@@ -9,6 +9,8 @@
  * Claude向けの変換だけは歴史的な経緯で `claudeProvider.ts` にある。
  */
 
+import { isRecord } from "../core/isRecord";
+
 /**
  * OpenAIの構造化出力（Structured Outputs）向けに変換する。
  *
@@ -79,8 +81,4 @@ export function toGeminiSchema(schema: unknown): unknown {
   }
 
   return out;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

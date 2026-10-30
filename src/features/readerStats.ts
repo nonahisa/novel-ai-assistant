@@ -50,6 +50,7 @@ import {
   showNoticeWithRegister,
   type ReaderStatsRegisterOptions,
 } from "./readerStatsRegister";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 読者の反応を台帳へ入れる2つの入口（設計書6.79.7）。
@@ -410,7 +411,7 @@ export async function importReaderStatsBundle(
         logBundleFailure(`${entry.work.title} への取り込み`, error, entry.work);
         failures.push({
           label: readerStatsBundleItemLabel(envelope),
-          reason: `記録にできませんでした（${errorMessage(error)}）。`,
+          reason: `記録にできませんでした（${messageOf(error)}）。`,
           fixByWorkId: false,
         });
       }
@@ -423,7 +424,7 @@ export async function importReaderStatsBundle(
         logBundleFailure(`${entry.work.title} の投稿状態の保存`, error, entry.work);
         failures.push({
           label: `「${entry.work.title}」の${screens}画面`,
-          reason: `保存できませんでした（${errorMessage(error)}）。`,
+          reason: `保存できませんでした（${messageOf(error)}）。`,
           fixByWorkId: false,
         });
         continue;
@@ -494,10 +495,6 @@ function announceResult(work: WorkEntry, message: string): void {
   void vscode.window.showInformationMessage(message);
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /** 束の取り込みの失敗を記録する（知らせは最後に1つにまとめるので、ここでは出さない） */
 function logBundleFailure(what: string, error: unknown, work: WorkEntry): void {
   // **記録の直前に書き先を向ける**（0.43.3 と同じ）
@@ -505,7 +502,7 @@ function logBundleFailure(what: string, error: unknown, work: WorkEntry): void {
   logFailure(what, {
     作品: work.title,
     種類: error instanceof PostingStoreError ? error.kind : "unknown",
-    内容: errorMessage(error),
+    内容: messageOf(error),
   });
 }
 

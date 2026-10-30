@@ -143,13 +143,6 @@ export function parseSceneIdentity(
   }
 }
 
-/** 検証に落ちたか。`isStoryFactError` と同じ見分け方 */
-export function isIdentityError(
-  value: IdentityTransition | SceneIdentity | StoryFactError
-): value is StoryFactError {
-  return (value as StoryFactError).error !== undefined;
-}
-
 /** 行の範囲。書かれていなければ先頭（0行目）に置く */
 function parseLineRange(value: unknown): [number, number] {
   if (value === undefined || value === null) return [0, 0];

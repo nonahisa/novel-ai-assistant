@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 import type { GitCommandResult, GitCommandRunner } from "./git";
+import { isRecord } from "./isRecord";
 
 /**
  * GitHub同期を**始める**ための操作。
@@ -611,10 +612,6 @@ export type GithubApiErrorKind =
   | "notFound"
   | "validation"
   | "other";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** gh のように git 以外のコマンドも呼べるようにした実行口（テストで差し替える） */
 export type CommandRunner = (

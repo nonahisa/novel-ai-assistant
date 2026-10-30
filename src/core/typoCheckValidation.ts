@@ -13,6 +13,7 @@ import {
   SITE_RUBY_BARE_SOURCE,
   SITE_RUBY_BAR_SOURCE,
 } from "./ruby";
+import { isRecord } from "./isRecord";
 
 /**
  * P-09 誤字脱字検知のAI出力を検証する。
@@ -1071,10 +1072,6 @@ function decodeByteTokens(text: string): string {
       return run;
     }
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function extractBraces(text: string): string | null {

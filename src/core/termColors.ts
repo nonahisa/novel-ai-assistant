@@ -32,6 +32,3 @@ export const TERM_COLORS: Record<TermKind, TermColorPair> = {
   // 組織は橙。人名・地名・能力のどれとも混ざらない色相にする
   organization: { light: "#9a5b00", dark: "#e8b06a" },
 };
-
-/** 色分けのある種類（並びも画面で揃える） */
-export const TERM_COLOR_KINDS = Object.keys(TERM_COLORS) as TermKind[];

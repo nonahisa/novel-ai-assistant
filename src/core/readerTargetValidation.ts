@@ -8,6 +8,7 @@ import type {
   ReaderEvidence,
   ReaderScores,
 } from "../models/readerProfile";
+import { isRecord } from "./isRecord";
 
 /**
  * P-38 の答えを検算する（設計書6.91）。
@@ -37,10 +38,6 @@ export interface ReaderTargetReading {
   unmeasured: string[];
   /** 捨てた理由。作者向けではなく、ログと開発のための記録 */
   notes: string[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

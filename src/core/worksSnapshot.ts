@@ -3,6 +3,8 @@ import { AIWRITER_DIR } from "../models/types";
 // `vscode` へ届いてはいけない（`mcpReach.test.ts` が見張る）
 import * as path from "./pathText";
 import { findLibraries } from "./libraryHome";
+import { isRecord } from "./isRecord";
+import { isStringArray } from "./isStringArray";
 
 /**
  * 作品の登録簿の写し（MCP の道具 `works.list`。作者の承認、2026-09-24）。
@@ -169,16 +171,8 @@ export function serializeWorksSnapshot(snapshot: WorksSnapshot): string {
   return `${JSON.stringify(snapshot, null, 2)}\n`;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
 function parseEntry(value: unknown): WorksSnapshotEntry | undefined {
-  if (!isObject(value)) return undefined;
+  if (!isRecord(value)) return undefined;
   if (
     typeof value.id !== "string" ||
     typeof value.title !== "string" ||
@@ -214,12 +208,12 @@ export function parseWorksSnapshot(text: string): WorksSnapshot | undefined {
   } catch {
     return undefined;
   }
-  if (!isObject(raw)) return undefined;
+  if (!isRecord(raw)) return undefined;
   if (raw.schema !== WORKS_SNAPSHOT_SCHEMA) return undefined;
   if (typeof raw.writtenAt !== "string") return undefined;
   const writer = raw.writtenBy;
   if (
-    !isObject(writer) ||
+    !isRecord(writer) ||
     (writer.pid !== null && typeof writer.pid !== "number") ||
     typeof writer.extensionVersion !== "string" ||
     (writer.machineName !== null && typeof writer.machineName !== "string")
@@ -236,14 +230,14 @@ export function parseWorksSnapshot(text: string): WorksSnapshot | undefined {
   if (!Array.isArray(raw.libraries) || !Array.isArray(raw.duplicates)) return undefined;
   const libraries: WorksSnapshot["libraries"] = [];
   for (const item of raw.libraries) {
-    if (!isObject(item) || typeof item.folderPath !== "string" || typeof item.workCount !== "number") {
+    if (!isRecord(item) || typeof item.folderPath !== "string" || typeof item.workCount !== "number") {
       return undefined;
     }
     libraries.push({ folderPath: item.folderPath, workCount: item.workCount });
   }
   const duplicates: WorksSnapshot["duplicates"] = [];
   for (const item of raw.duplicates) {
-    if (!isObject(item) || typeof item.folderPath !== "string" || !isStringArray(item.ids)) {
+    if (!isRecord(item) || typeof item.folderPath !== "string" || !isStringArray(item.ids)) {
       return undefined;
     }
     duplicates.push({ folderPath: item.folderPath, ids: item.ids });

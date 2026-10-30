@@ -13,6 +13,7 @@ import {
   type LocationInconsistencyKind,
   type LocationStatement,
 } from "./locationConsistency";
+import { median } from "./median";
 
 /**
  * 場所の略図——方角と距離で場所を置く（設計書6.93.10。作者の裁定 2026-10-09 夜）。
@@ -618,12 +619,6 @@ function latest<T extends { chapter: number; order: number }>(facts: readonly T[
   );
 }
 
-function median(values: readonly number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
 /** 島でいちばん多く使われている乗り物（同数なら速さの表の順） */
 function dominantOf(pairs: readonly Pair[]): string {
   const counts = new Map<string, number>();
@@ -780,4 +775,3 @@ function boundsOf(
     maxY: Math.max(...ys),
   };
 }
-

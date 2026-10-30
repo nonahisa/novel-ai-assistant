@@ -36,6 +36,7 @@ import {
   SETTINGS_SUBDIRS,
   readSettingsRecords,
 } from "./shared";
+import { relativeTo } from "./relativeTo";
 
 /**
  * 設定資料の更新案を、承認待ちへ置く（設計書6.87.16）。
@@ -714,12 +715,4 @@ function applyRelations(
   if (same) return false;
   target.relations = next;
   return true;
-}
-
-/** 作品フォルダーからの相対。区切りは読みやすいほうへ揃える */
-function relativeTo(folder: string, target: string): string {
-  return nodePath
-    .relative(nodePath.resolve(folder), target)
-    .split(nodePath.sep)
-    .join("/");
 }

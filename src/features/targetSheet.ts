@@ -49,6 +49,7 @@ import {
   TITLE_FIT_FILE,
   type TitleFitRecord,
 } from "../core/titleFit";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 「ターゲット読者」の入口の名前。**写しを作らない**——相談の案内
@@ -431,8 +432,4 @@ async function readTextIfExists(
   } catch {
     return undefined;
   }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

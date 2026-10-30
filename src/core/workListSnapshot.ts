@@ -16,6 +16,7 @@
 import type { CharCounts, WorkEntry, WorkKindKey } from "../models/types";
 import { WORK_FORMATS, type WorkFormatKey } from "./workFormat";
 import { WORK_KINDS } from "./workKind";
+import { isRecord } from "./isRecord";
 
 /** 保管庫の鍵 */
 export const WORK_LIST_SNAPSHOT_KEY = "novelai.workList.snapshot";
@@ -62,10 +63,6 @@ export function buildWorkListSnapshot(
     savedAt,
     works: works.map((w) => ({ ...w, totals: { ...w.totals } })),
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isCount(value: unknown): value is number {

@@ -6,6 +6,7 @@ import { workPaths } from "./workRegistry";
 import { atomicWriteFile } from "./atomicWrite";
 import { formatLogTime } from "./logger";
 import type { AcceptedTypoIssue } from "./typoCheckValidation";
+import { isRecord } from "./isRecord";
 
 /**
  * 提案（誤字脱字など）の「無視」履歴と、承認・却下の操作ログ。
@@ -194,10 +195,6 @@ export async function loadAppliedFixKeys(
     // ログが無い（初回実行など）場合も空集合のまま返す
   }
   return keys;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export interface AiActionLogEntry {

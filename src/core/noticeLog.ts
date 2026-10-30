@@ -1,4 +1,6 @@
 import { AIWRITER_DIR } from "../models/types";
+import { isRecord } from "./isRecord";
+import { isStringArray } from "./isStringArray";
 
 /**
  * 拡張機能が出した知らせの記録（MCP の道具 `notices.recent`。作者の承認、2026-09-24）。
@@ -144,16 +146,12 @@ export function clipNoticeText(
   };
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /**
  * ボタン（`MessageItem`）か。VS Code は文字列か `{ title }` を受ける。
  */
 function itemTitle(value: unknown): string | undefined {
   if (typeof value === "string") return value;
-  if (isObject(value) && typeof value.title === "string") return value.title;
+  if (isRecord(value) && typeof value.title === "string") return value.title;
   return undefined;
 }
 
@@ -186,7 +184,7 @@ export function describeNoticeCall(
   let modal = false;
   let detail: string | null = null;
   const first = rest[0];
-  if (isObject(first) && typeof first.title !== "string") {
+  if (isRecord(first) && typeof first.title !== "string") {
     modal = first.modal === true;
     // 説明は200字のまま（AIが原稿から書いた文が入る。NOTICE_RECORD_MAX_CHARS の断り書き）
     detail = typeof first.detail === "string" ? clip(first.detail, NOTICE_TEXT_MAX_CHARS) : null;
@@ -237,22 +235,18 @@ export function serializeNoticeLog(file: NoticeLogFile): string {
   return `${JSON.stringify(file, null, 2)}\n`;
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
 const SEVERITIES: readonly NoticeSeverity[] = ["info", "warning", "error"];
 
 function parseAnswer(value: unknown): NoticeAnswer | null | undefined {
   if (value === null) return null;
-  if (!isObject(value)) return undefined;
+  if (!isRecord(value)) return undefined;
   if (typeof value.at !== "string") return undefined;
   if (value.choice !== null && typeof value.choice !== "string") return undefined;
   return { at: value.at, choice: value.choice };
 }
 
 function parseEntry(value: unknown): NoticeEntry | undefined {
-  if (!isObject(value)) return undefined;
+  if (!isRecord(value)) return undefined;
   if (typeof value.seq !== "number" || !Number.isInteger(value.seq)) return undefined;
   if (typeof value.at !== "string") return undefined;
   if (!SEVERITIES.includes(value.severity as NoticeSeverity)) return undefined;
@@ -289,7 +283,7 @@ export function parseNoticeLog(text: string): NoticeLogFile | undefined {
   } catch {
     return undefined;
   }
-  if (!isObject(raw)) return undefined;
+  if (!isRecord(raw)) return undefined;
   if (raw.schema !== NOTICE_LOG_SCHEMA) return undefined;
   if (typeof raw.pid !== "number" || !Number.isInteger(raw.pid)) return undefined;
   if (raw.machineName !== null && typeof raw.machineName !== "string") return undefined;

@@ -53,6 +53,7 @@ import {
   resolveOutputTokensForSend,
 } from "../ai/outputLimit";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * プロットモードのAI助言（P-01、設計書6.4.10。作者の裁定 2026-10-08「作る」）。
@@ -722,8 +723,4 @@ function describeWriteFailure(result: WriteTextFileResult): string {
 
 function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

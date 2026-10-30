@@ -64,6 +64,7 @@ import { pickDropTarget } from "./dropTargetPick";
 import { saveGeneratedMarkdown } from "../views/openDocument";
 import { withProgress } from "../views/progress";
 import type { PickedBackup } from "./importWorkFromZip";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 相談パネルへ持ち込まれたバックアップを受け取る（作者の依頼、2026-09-23）。
@@ -801,8 +802,4 @@ function describeMatchForLog(match: BackupMatch): string {
     case "none":
       return "当たりなし";
   }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

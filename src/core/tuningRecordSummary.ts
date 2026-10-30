@@ -1,5 +1,6 @@
 import { FEATURE_OUTPUT_KEY_PREFIX } from "./tuningStoreNames";
 import { isTypoAccuracyCurrent, type TypoAccuracyRecord } from "./tuningAccuracy";
+import { isRecord } from "./isRecord";
 
 /**
  * AIチューニングの記録（保管庫の `model-tuning.json`）を、MCP の `ai.settings`
@@ -138,10 +139,6 @@ const BOOLEAN_FIELDS: readonly (readonly [string, keyof TuningRecordSummary])[] 
   ["thinkingOffWorks", "thinkingOffWorks"],
 ];
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function numberOf(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -249,7 +246,7 @@ export function summarizeTuningTable(table: Record<string, unknown>): TuningTabl
     // 鍵は `プロバイダID/モデル名`。モデル名に `/` が入ることがある
     // （`hf.co/作者/モデル:q4`）ので、**最初の `/` だけ**で分ける
     const slash = key.indexOf("/");
-    if (!isObject(entry) || slash <= 0 || slash === key.length - 1) {
+    if (!isRecord(entry) || slash <= 0 || slash === key.length - 1) {
       unreadableKeys.push(key);
       continue;
     }

@@ -70,6 +70,7 @@ import {
   vectorReadiness,
   vectorSetupHint,
 } from "./vectorSearch";
+import { messageOf } from "../core/errorMessage";
 
 /**
  * 執筆再開支援と単話プロット（設計書6.36）のうち、**AIを使わない口**。
@@ -705,8 +706,4 @@ async function todayGoal(
     notices.push(`今日の執筆量を読めませんでした：${messageOf(error)}`);
     return null;
   }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
