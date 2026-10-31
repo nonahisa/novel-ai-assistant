@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { ActionListProvider, ActionNode } from "../views/actionList";
 import type { StepMenuProvider, StepNode } from "../views/stepMenu";
+import { SpotlightWorkBinding } from "../core/spotlightWork";
 
 /**
  * 押すべき項目を、サイドバーで光らせる（設計書6.104）。
@@ -43,6 +44,16 @@ import type { StepMenuProvider, StepNode } from "../views/stepMenu";
  * メニューの作品をそちらへ合わせる**（`StepMenuProvider.alignWorkForSpotlight`）。
  * 合わせたことは `alignedWork` で返し、相談が会話に1行出す
  * （最上段の「選択作品：」の行も描き直しで替わる）。
+ *
+ * ## 詳細メニューで光らせたときも、相談の作品で走らせる（作者の判断、2026-11-01）
+ *
+ * 詳細メニューの項目は作品を持たず、押すと `pickHintedWork`（作品一覧の選択 →
+ * 相談の作品 → 訊く）で決まる。作品一覧で別の作品を選んでいると、相談から
+ * 光らせた項目がそちらで走っていた。**作品一覧の選択は動かさず**、光らせた
+ * 項目に相談の作品を結んでおき（`SpotlightWorkBinding`）、押された1回だけ
+ * `extension.ts` の包みが `takeWorkFor` で受け取って当てどころの先頭に置く。
+ * 結ぶのは作品の要る項目（`requiresWork`）だけ。押せば別の作品で走るはずだった
+ * ときは `detailWork` で返し、相談が会話に1行出す。
  */
 export type SpotlightResult =
   | {
@@ -50,6 +61,11 @@ export type SpotlightResult =
       readonly view: "steps" | "actions";
       /** 簡単ステップメニューの作品を、渡された作品へ合わせたときだけ入る */
       readonly alignedWork?: { readonly id: string; readonly title: string };
+      /**
+       * 詳細メニューの項目を相談の作品に結び、**しかも結ばなければ別の作品で
+       * 走るはずだった**ときだけ入る（会話に1行出すため）
+       */
+      readonly detailWork?: { readonly id: string; readonly title: string };
     }
   | { readonly shown: false };
 
@@ -66,6 +82,20 @@ export interface ActionSpotlight {
   show(command: string, options?: SpotlightOptions): Promise<SpotlightResult>;
   /** 印を外す。**案内が終わった／やめたときに呼ぶ** */
   clear(): void;
+}
+
+/**
+ * 光らせる仕組みの本体が持つ口（`createActionSpotlight` の戻り値）。
+ *
+ * **`ActionSpotlight` には足さない。** 相談・案内・外部AIの見張りは光らせて
+ * 外すだけで、押された操作を受け取るのはコマンドの包み（`extension.ts`）だけである。
+ */
+export interface ActionSpotlightHost extends ActionSpotlight {
+  /**
+   * 押された操作が、相談から詳細メニューで光らせた項目なら、結んだ相談の作品を
+   * 返す（**1回で消える**）。コマンドの包み（`extension.ts`）が押されるたびに呼ぶ
+   */
+  takeWorkFor(command: string): string | undefined;
 }
 
 /**
@@ -91,6 +121,16 @@ export interface SpotlightTargets {
    * 最上段で選び直したとき（`novelai.chooseStepWork`）と同じことをする
    */
   readonly onStepWorkAligned?: (workId: string) => void;
+  /**
+   * 詳細メニューの項目を相談の作品に結べるか（作者の判断、2026-11-01）。
+   *
+   * 登録にある作品なら題名と、**結ばずに押したら別の作品で走るか**（`differs`。
+   * 作品一覧の選択が別の作品のとき・作品を訊くとき）を返す。登録に無ければ
+   * undefined（結ばない）。渡さなければ詳細メニューの項目には結ばない
+   */
+  readonly detailWork?: (
+    workId: string
+  ) => { readonly title: string; readonly differs: boolean } | undefined;
 }
 
 /** 瞬きの間合い。**目が動くだけの長さ**が要る（短すぎると1回に見える） */
@@ -105,17 +145,21 @@ export interface SpotlightTiming {
 export function createActionSpotlight(
   targets: SpotlightTargets,
   timing: SpotlightTiming = {}
-): ActionSpotlight {
+): ActionSpotlightHost {
   const blinkMs = timing.blinkMs ?? SPOTLIGHT_BLINK_MS;
   const sleep =
     timing.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const binding = new SpotlightWorkBinding();
 
   return {
     async show(
       command: string,
       options: SpotlightOptions = {}
     ): Promise<SpotlightResult> {
+      // **光らせ直したら前の結びつきは捨てる。** 光っているのは1つだけで、
+      // 前に光らせた項目を押しても、もう相談が指した項目ではない
+      binding.clear();
       // **先に印を付ける。** 瞬いている間も「どれか」が見えている
       targets.marker?.setSpotlight(command);
 
@@ -131,21 +175,43 @@ export function createActionSpotlight(
         ? { alignedWork: { id: aligned.id, title: aligned.title } }
         : {};
 
-      const result = await revealIn(command, alignedWork);
+      const result = await revealIn(command, alignedWork, options.workId);
       // **後始末は瞬かせたあと。** 件数の数え直しは木をもう一度描き直すので、
       // 瞬きの途中に重なると選択が外れて光が見えにくくなる
       if (aligned) targets.onStepWorkAligned?.(aligned.id);
       return result;
     },
     clear(): void {
+      binding.clear();
       targets.marker?.setSpotlight(undefined);
     },
+    takeWorkFor(command: string): string | undefined {
+      return binding.take(command);
+    },
   };
+
+  /**
+   * 詳細メニューで光らせた項目に、相談の作品を結ぶ。
+   *
+   * **作品の要る項目だけ。** 作品を使わない操作（新しい作品を作る等）に結んでも
+   * 意味が無く、「相談の作品で走ります」と言えば嘘になる。
+   */
+  function bindDetailWork(
+    node: ActionNode,
+    workId: string | undefined
+  ): { detailWork?: { id: string; title: string } } {
+    if (!workId || node.type !== "action" || !node.item.requiresWork) return {};
+    const found = targets.detailWork?.(workId);
+    if (!found) return {};
+    binding.bind(node.item.command, workId);
+    return found.differs ? { detailWork: { id: workId, title: found.title } } : {};
+  }
 
   /** 先に簡単ステップメニュー、無ければ詳細メニューで光らせる */
   async function revealIn(
     command: string,
-    alignedWork: { alignedWork?: { id: string; title: string } }
+    alignedWork: { alignedWork?: { id: string; title: string } },
+    workId: string | undefined
   ): Promise<SpotlightResult> {
     const stepNode = targets.stepProvider.findActionNode(command);
     if (
@@ -173,7 +239,12 @@ export function createActionSpotlight(
     ) {
       // 合わせたのに詳細メニューへ回った（合わせた作品のタイプで消える段）
       // ときも、合わせたことは伝える。メニューの作品は替わっている
-      return { shown: true, view: "actions", ...alignedWork };
+      return {
+        shown: true,
+        view: "actions",
+        ...alignedWork,
+        ...bindDetailWork(actionNode, workId),
+      };
     }
     // **どちらにも無ければ印も外す。** 押す場所が無いのに印だけ
     // 残ると、前の段を指したままになる
@@ -245,6 +316,16 @@ export function describeSpotlight(result: SpotlightResult): string {
  * どの作品になったかを会話に残す。合わせていなければ undefined。
  */
 export function describeAlignedWork(result: SpotlightResult): string | undefined {
-  if (!result.shown || !result.alignedWork) return undefined;
-  return `簡単ステップメニューの作品を、相談の作品「${result.alignedWork.title}」に合わせました。`;
+  if (!result.shown) return undefined;
+  const lines = [
+    result.alignedWork
+      ? `簡単ステップメニューの作品を、相談の作品「${result.alignedWork.title}」に合わせました。`
+      : undefined,
+    // 詳細メニューは作品一覧の選択を動かしていないので「合わせました」とは言わない。
+    // 押した先がどの作品になるかを伝える（作者の判断、2026-11-01）
+    result.detailWork
+      ? `詳細メニューの項目は、相談の作品「${result.detailWork.title}」で走ります。`
+      : undefined,
+  ].filter((line): line is string => line !== undefined);
+  return lines.length > 0 ? lines.join("") : undefined;
 }

@@ -21,6 +21,8 @@ export interface ChatAnswerParts {
   options?: string[];
   edit?: { target: string; content: string; label: string | null } | null;
   run?: string | null;
+  /** 今すぐ動かす印（設計書6.6.3。作者の判断 2026-10-31）。載せなければ項目ごと置かない */
+  runNow?: boolean;
   locate?: { path: string | null; text: string | null; label: string | null } | null;
   reloadRecord?: { kind: string; name: string; notes: string | null } | null;
 }
@@ -33,6 +35,8 @@ export function chatAnswer(parts: ChatAnswerParts): string {
     needFiles: null,
     edit: parts.edit ?? null,
     run: parts.run ?? null,
+    // 載せない件はこれまでの答えの形のまま（項目を足さない）
+    ...(parts.runNow !== undefined ? { runNow: parts.runNow } : {}),
     locate: parts.locate ?? null,
     reloadRecord: parts.reloadRecord ?? null,
     profileSignals: null,

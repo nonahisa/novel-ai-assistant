@@ -37,6 +37,15 @@ export interface WorkTargetHints {
   treeSelectedId?: string;
   /** 相談パネルがいま対象にしている作品のID（開いていないときは渡さない） */
   chatTargetId?: string;
+  /**
+   * 相談から光らせた詳細メニューの項目を押したときの、相談の作品のID
+   * （作者の判断 2026-11-01。`SpotlightWorkBinding`）。
+   *
+   * **作品一覧の選択より先に見る。** 作者は相談で「この作品の、この項目」と
+   * 示されて押しているので、作品一覧に残っている別の選択で走らせない。
+   * 光らせた項目を押した1回だけ渡す（ふだんの順は変えない）。
+   */
+  spotlightWorkId?: string;
 }
 
 /**
@@ -58,6 +67,12 @@ export function pickHintedWork(
   // **1作品しか無いなら、そこしかない。** 画面で何を指していても同じ
   if (hints.registeredIds.length === 1) {
     return { workId: hints.registeredIds[0], source: "single" };
+  }
+
+  // 相談から光らせた項目を押した1回は、相談の作品が先（推し量った印は「chat」。
+  // 確認の窓には作品名が出る）
+  if (hints.spotlightWorkId && registered.has(hints.spotlightWorkId)) {
+    return { workId: hints.spotlightWorkId, source: "chat" };
   }
 
   // **ツリーの選択が先。** 作品一覧は「いまどの作品を見ているか」を

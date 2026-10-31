@@ -10,7 +10,12 @@ import {
   type GroupStateStore,
 } from "../../../src/views/actionList";
 import { StepMenuProvider, type StepNode } from "../../../src/views/stepMenu";
-import { createActionSpotlight } from "../../../src/features/actionSpotlight";
+import {
+  createActionSpotlight,
+  describeAlignedWork,
+  describeSpotlight,
+} from "../../../src/features/actionSpotlight";
+import { pickHintedWork } from "../../../src/core/workTarget";
 import type { WorkEntry } from "../../../src/models/types";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
 
@@ -416,5 +421,165 @@ describe("相談の作品に合わせて光らせる（作者の報告、2026-10
       { workId: chatWork.id }
     );
     expect(aligned).toEqual([chatWork.id]);
+  });
+});
+
+/**
+ * 相談から光らせた**詳細メニューの項目**も、押すと相談の作品で走る
+ * （作者の判断 2026-11-01「合わせる」。設計書6.104）。
+ *
+ * 詳細メニューの項目は作品を持たず、押すと `pickHintedWork`（作品一覧の選択 →
+ * 相談の作品 → 訊く）で決まる。0.116.1 では、作品一覧で別の作品を選んでいると、
+ * 相談から光らせた項目が作品一覧の作品で走っていた（残した食い違い）。
+ *
+ * 押したときの作品の決め方は `extension.ts` の包み（命令名を知っているのは
+ * そこだけ）が `takeWorkFor` → `pickHintedWork` の順で行う。ここではその2つを
+ * 同じ順でつないで確かめる。
+ */
+describe("相談から光らせた詳細メニューの項目も相談の作品で走る（作者の判断、2026-11-01）", () => {
+  const chatWork: WorkEntry = {
+    id: "textbook",
+    title: "教科書チート",
+    folderPath: "C:/works/textbook",
+    registeredAt: "2026-11-01T00:00:00.000Z",
+  };
+  const treeWork: WorkEntry = {
+    id: "tayutau",
+    title: "たゆたう鉛実験用",
+    folderPath: "C:/works/tayutau",
+    registeredAt: "2026-11-01T00:00:00.000Z",
+  };
+  /** 簡単ステップメニューに置いていない、作品の要る操作（詳細メニューで光る） */
+  const DETAIL_ONLY = "novelai.addWorkMemo";
+  /** 簡単ステップメニューに置いていない、作品の要らない操作 */
+  const NO_WORK = "novelai.openExtensionSettings";
+  const registeredIds = [chatWork.id, treeWork.id];
+
+  function setup(treeSelectedId: string | undefined = treeWork.id): {
+    spotlight: ReturnType<typeof createActionSpotlight>;
+    /** 光らせた項目を押したとき、どの作品で走るか（包みと同じ順で決める） */
+    press: (command: string) => string | undefined;
+  } {
+    const registry = {
+      list: () => [chatWork, treeWork],
+      onDidChange: () => ({ dispose() {} }),
+    } as unknown as WorkRegistry;
+    let saved: string | undefined = chatWork.id;
+    const steps = new StepMenuProvider(
+      registry,
+      {
+        get: () => saved,
+        set: (id) => {
+          saved = id;
+        },
+      },
+      noStore,
+      undefined,
+      async () => undefined,
+      async () => undefined
+    );
+    const spotlight = createActionSpotlight(
+      {
+        stepView: fakeView<StepNode>([]),
+        stepProvider: steps,
+        actionView: fakeView<ActionNode>([]),
+        actionProvider: new ActionListProvider(registry, noStore),
+        // 光らせなければ押したときにどの作品になるか（作品一覧の選択が先）
+        detailWork: (workId) => {
+          const found = registry.list().find((entry) => entry.id === workId);
+          if (!found) return undefined;
+          const usual = pickHintedWork({
+            registeredIds,
+            treeSelectedId,
+            chatTargetId: chatWork.id,
+          });
+          return { title: found.title, differs: usual?.workId !== workId };
+        },
+      },
+      noWait
+    );
+    return {
+      spotlight,
+      press: (command) =>
+        pickHintedWork({
+          registeredIds,
+          treeSelectedId,
+          chatTargetId: chatWork.id,
+          spotlightWorkId: spotlight.takeWorkFor(command),
+        })?.workId,
+    };
+  }
+
+  test("作品一覧の選択が別の作品でも、光らせた項目は相談の作品で走る（再現）", async () => {
+    const { spotlight, press } = setup();
+    const result = await spotlight.show(DETAIL_ONLY, { workId: chatWork.id });
+    expect(result).toMatchObject({ shown: true, view: "actions" });
+    expect(press(DETAIL_ONLY), "作品一覧の作品で走った").toBe(chatWork.id);
+  });
+
+  test("合わせたことを会話に1行出す", async () => {
+    const { spotlight } = setup();
+    const result = await spotlight.show(DETAIL_ONLY, { workId: chatWork.id });
+    expect(describeAlignedWork(result)).toBe(
+      "詳細メニューの項目は、相談の作品「教科書チート」で走ります。"
+    );
+    expect(describeSpotlight(result)).toContain("詳細メニューで光らせました。");
+  });
+
+  test("もとから相談の作品で走るなら、1行は出さない（それでも結びつきは持つ）", async () => {
+    const { spotlight, press } = setup(chatWork.id);
+    const result = await spotlight.show(DETAIL_ONLY, { workId: chatWork.id });
+    expect(describeAlignedWork(result)).toBeUndefined();
+    expect(press(DETAIL_ONLY)).toBe(chatWork.id);
+  });
+
+  test("相談と関係なく押したときは、ふだんどおり作品一覧の作品で走る", () => {
+    const { press } = setup();
+    expect(press(DETAIL_ONLY)).toBe(treeWork.id);
+  });
+
+  test("結びつきは1回で消える（押し直したら、ふだんの決め方へ戻る）", async () => {
+    const { spotlight, press } = setup();
+    await spotlight.show(DETAIL_ONLY, { workId: chatWork.id });
+    expect(press(DETAIL_ONLY)).toBe(chatWork.id);
+    expect(press(DETAIL_ONLY)).toBe(treeWork.id);
+  });
+
+  test("光らせていない別の操作には効かない（光らせた結びつきも残る）", async () => {
+    const { spotlight, press } = setup();
+    await spotlight.show(DETAIL_ONLY, { workId: chatWork.id });
+    expect(press("novelai.checkContradictions")).toBe(treeWork.id);
+    expect(press(DETAIL_ONLY)).toBe(chatWork.id);
+  });
+
+  test("外部AIの光らせ（作品を添えない）では結ばない", async () => {
+    const { spotlight, press } = setup();
+    await spotlight.show(DETAIL_ONLY);
+    expect(press(DETAIL_ONLY)).toBe(treeWork.id);
+  });
+
+  test("光らせ直したら前の結びつきは捨てる・clear でも捨てる", async () => {
+    const { spotlight, press } = setup();
+    await spotlight.show(DETAIL_ONLY, { workId: chatWork.id });
+    await spotlight.show(NO_WORK, { workId: chatWork.id });
+    expect(press(DETAIL_ONLY)).toBe(treeWork.id);
+
+    await spotlight.show(DETAIL_ONLY, { workId: chatWork.id });
+    spotlight.clear();
+    expect(press(DETAIL_ONLY)).toBe(treeWork.id);
+  });
+
+  test("作品の要らない操作には結ばず、1行も出さない", async () => {
+    const { spotlight } = setup();
+    const result = await spotlight.show(NO_WORK, { workId: chatWork.id });
+    expect(result).toEqual({ shown: true, view: "actions" });
+    expect(spotlight.takeWorkFor(NO_WORK)).toBeUndefined();
+  });
+
+  test("簡単ステップメニューで光った項目には結ばない（項目が作品を持っている）", async () => {
+    const { spotlight } = setup();
+    const result = await spotlight.show(GUIDED, { workId: chatWork.id });
+    expect(result).toMatchObject({ shown: true, view: "steps" });
+    expect(spotlight.takeWorkFor(GUIDED)).toBeUndefined();
   });
 });

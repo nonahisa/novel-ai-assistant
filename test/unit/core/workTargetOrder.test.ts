@@ -65,6 +65,31 @@ describe("作品の当てどころ", () => {
     ).toEqual({ workId: "w-1", source: "single" });
   });
 
+  /*
+    相談から光らせた詳細メニューの項目を押した1回（作者の判断 2026-11-01）。
+    作品一覧の選択より先に相談の作品を使う
+  */
+  test("光らせた項目を押した1回は、作品一覧の選択より相談の作品が先", () => {
+    expect(
+      pickHintedWork({
+        registeredIds: ["w-1", "w-2", "w-3"],
+        treeSelectedId: "w-3",
+        chatTargetId: "w-2",
+        spotlightWorkId: "w-2",
+      })
+    ).toEqual({ workId: "w-2", source: "chat" });
+  });
+
+  test("光らせた作品が登録から外れていれば、ふだんの順へ戻る", () => {
+    expect(
+      pickHintedWork({
+        registeredIds: ["w-1", "w-2", "w-3"],
+        treeSelectedId: "w-3",
+        spotlightWorkId: "w-9",
+      })
+    ).toEqual({ workId: "w-3", source: "tree" });
+  });
+
   test("作品が1つも無ければ、当てどころは無い", () => {
     expect(pickHintedWork({ registeredIds: [] })).toBeUndefined();
   });
@@ -87,5 +112,29 @@ describe("作品の当てどころ", () => {
     expect(hints).toContain("worksView?.visible");
     expect(hints).toContain("workChatPanel.isVisible()");
     expect(hints).toContain("workChatPanel.currentWorkId()");
+  });
+
+  /*
+    相談から光らせた詳細メニューの項目（作者の判断 2026-11-01）。命令名を知って
+    いるのはコマンドの包みだけなので、包みが光らせた項目かを見分けて当てどころへ渡す。
+    渡す先が作品を訊く場面（`workTargetHints`）であることをソースの形で押さえる
+  */
+  test("コマンドの包みが光らせた項目を見分け、作品を訊く場面へ渡している", () => {
+    const source = readFileSync(
+      resolve(__dirname, "../../../src/extension.ts"),
+      "utf8"
+    );
+    const wrapper = source.slice(
+      source.indexOf("const registerCommand: typeof vscode.commands.registerCommand")
+    );
+    const litAt = wrapper.indexOf("spotlightWorkFor?.(command)");
+    expect(litAt, "包みが光らせた項目を見ていない").toBeGreaterThan(0);
+    // 関門より先（前提の関門が作品を訊く場面でも同じ作品になるように）
+    expect(litAt).toBeLessThan(wrapper.indexOf("guardWorkKind(command, args)"));
+    expect(wrapper.slice(litAt, litAt + 200)).toContain("args[0] === undefined");
+
+    const hints = source.slice(source.indexOf("workTargetHints = () => ({"));
+    expect(hints.slice(0, 1500)).toContain("spotlightWorkId:");
+    expect(source).toContain("actionSpotlight.takeWorkFor(command)");
   });
 });
