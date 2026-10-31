@@ -184,6 +184,22 @@ describe("相談は、操作を実行したふりをしない", () => {
     expect(WORK_CHAT_SYSTEM_PROMPT).toContain("1回に1つだけ");
   });
 
+  /*
+    3.36（作者の判断 2026-11-01「『〜てくれる？』は動かす」）。訊く形を借りた頼みは
+    立てる側、能力や方法を訊く文は立てない側として、**対で**並べてあることを見る。
+    コード側（`isExplicitRunRequest`）と同じ線を引いておかないと、片方だけ動く
+  */
+  test("「〜てくれる？」は立てる側、「〜ってできる？」「どうやるの？」は立てない側として並べてある", () => {
+    const start = WORK_CHAT_SYSTEM_PROMPT.indexOf("【作業を頼まれたとき】");
+    const section = WORK_CHAT_SYSTEM_PROMPT.slice(start);
+    const yes = section.indexOf("「抽出してくれる？」「表記ゆれを検知してもらえますか？」");
+    const no = section.indexOf("「抽出ってできる？」「表記ゆれってどうやるの？」");
+    expect(yes, "立てる側の例が無い").toBeGreaterThan(-1);
+    expect(no, "立てない側の例が無い").toBeGreaterThan(-1);
+    expect(section.slice(yes, no)).toContain("runNow を true にしてください");
+    expect(section.slice(no)).toMatch(/^[^\n]*\n?[^\n]*では runNow を false/);
+  });
+
   test("実行したふりを禁じている", () => {
     expect(WORK_CHAT_SYSTEM_PROMPT).toContain("実行したふりをしない");
   });
@@ -275,7 +291,8 @@ describe("版", () => {
     // （頼む文は9問に答えていない作者にだけ送る。設計書6.101）
     // 3.34（2026-10-25 昼）：その頼む文を、9問に答えた作者にも送る（答えを土台に微調整）
     // 3.35（2026-10-31）：はっきり頼まれたら押すのを待たずに動かす印 runNow を足した（作者の判断）
-    expect(WORK_CHAT_VERSION).toBe("3.35");
+    // 3.36（2026-11-01）：「〜てくれる？」で結ぶ問いの形も頼みとして runNow を立てさせる（作者の判断）
+    expect(WORK_CHAT_VERSION).toBe("3.36");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });

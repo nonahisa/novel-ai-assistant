@@ -1016,6 +1016,30 @@ export async function activate(
   let onCommandFinished: ((command: string) => void) | undefined;
 
   /**
+   * 相談から光らせた詳細メニューの項目に結んだ、相談の作品を受け取る口
+   * （作者の判断 2026-11-01。設計書6.104）。
+   *
+   * 光らせる仕組み（`createActionSpotlight`）と相談パネルはこの包みより後で
+   * 組み立てるので、`onCommandFinished` と同じく後から差し込む。
+   * **命令名を知っているのはこの包みだけ**なので、押された操作が光らせた項目かを
+   * ここで見分け、作品を訊く場面（`workTargetHints` → `pickHintedWork`）へ渡す。
+   */
+  let spotlightWorkFor: ((command: string) => string | undefined) | undefined;
+  /**
+   * いま押された操作のための、相談の作品（光らせた項目を押したときだけ入る）。
+   *
+   * 結びつきは押された時点で消える（1回だけ。押し直したら、ふだんの決め方へ戻る）。
+   * 使うのは**作品を渡されずに押されたとき**（詳細メニュー・コマンドパレット）だけで、
+   * 右クリックや簡単ステップメニューから作品つきで来たなら、その作品が正しい。
+   * **関門より先に置く**——前提の関門が作品を訊く場面でも同じ作品になるように。
+   *
+   * **押されるたびに置き直す**（光らせた項目でなければ空にする）。関門で止まって
+   * 消し損ねても、次に何かを押した時点で古い値は残らない。作品を訊く側でも、
+   * 相談の作品と同じときだけ使う（`workTargetHints`）。
+   */
+  let spotlightWorkHint: string | undefined;
+
+  /**
    * 原稿エディターのキーから来た印（`{ source: "manuscriptEditor" }`）を、
    * **前面の原稿の作品・話の節点**へ直す（設計書6.25.10）。
    *
@@ -1093,6 +1117,9 @@ export async function activate(
         if (!resolved) return undefined;
         args = resolved;
       }
+      // 光らせた詳細メニューの項目なら相談の作品で（`spotlightWorkHint`）
+      const litWork = spotlightWorkFor?.(command);
+      spotlightWorkHint = args[0] === undefined ? litWork : undefined;
       // 種類の関門（設計書6.109.7）は前提の関門より先に通す。歌詞の作品で
       // 「先に人物を抽出しますか」と訊いても意味が無い
       const kindGate = await guardWorkKind(command, args);
@@ -1160,6 +1187,11 @@ export async function activate(
         // 二度と押せなくなる（重複起動より重い壊れ方）
         endCommand(runningCommands, command);
         if (syncBusy) syncCommandsRunning -= 1;
+        // この操作のために置いた相談の作品は、終わったら片づける
+        // （ほかの操作が置き直していれば触らない）
+        if (litWork !== undefined && spotlightWorkHint === litWork) {
+          spotlightWorkHint = undefined;
+        }
       }
     });
 
@@ -3085,8 +3117,32 @@ export async function activate(
     // 相談から光らせて作品を合わせたとき（作者の報告、2026-10-31）。
     // 最上段で選び直したとき（`novelai.chooseStepWork`）と同じく全作品を数え直す
     onStepWorkAligned: () => refreshActionBadges(),
+    /*
+      詳細メニューの項目を相談の作品に結ぶとき（作者の判断、2026-11-01）。
+      **結ばずに押したらどの作品になったか**は、作品を訊く場面と同じ当てどころ
+      （見えている作品一覧の選択 → 相談の作品）で見る。違うときだけ会話に1行出す
+    */
+    detailWork: (workId) => {
+      const works = registry.list();
+      const found = works.find((work) => work.id === workId);
+      if (!found) return undefined;
+      const usual = pickHintedWork({
+        registeredIds: works.map((work) => work.id),
+        ...workTargetHints?.(),
+        spotlightWorkId: undefined,
+      });
+      return { title: found.title, differs: usual?.workId !== workId };
+    },
   });
   workChatPanel.setTourSpotlight(actionSpotlight);
+  // 光らせた項目が押されたら結びつきを受け取る。**相談の作品がその後に
+  // 替わっていたら使わない**（光らせたときの作品は、もう相談が指していない）
+  spotlightWorkFor = (command) => {
+    const workId = actionSpotlight.takeWorkFor(command);
+    return workId !== undefined && workId === workChatPanel.currentWorkId()
+      ? workId
+      : undefined;
+  };
   onCommandFinished = (command) => workChatPanel.notifyCommandRun(command);
 
   /*
@@ -3126,6 +3182,13 @@ export async function activate(
     chatTargetId: workChatPanel.isVisible()
       ? workChatPanel.currentWorkId()
       : undefined,
+    // 相談から光らせた詳細メニューの項目を押した1回（作者の判断 2026-11-01）。
+    // 相談の作品と同じときだけ（相談で作品を替えたあとの古い値は使わない）
+    spotlightWorkId:
+      spotlightWorkHint !== undefined &&
+      spotlightWorkHint === workChatPanel.currentWorkId()
+        ? spotlightWorkHint
+        : undefined,
   });
 
   context.subscriptions.push(
@@ -8655,7 +8718,11 @@ function reportTypoCheckResult(
  * 預ける。預ける前（起動の途中）は `undefined` で、これまでどおり作者に訊く。
  */
 let workTargetHints:
-  | (() => { treeSelectedId?: string; chatTargetId?: string })
+  | (() => {
+      treeSelectedId?: string;
+      chatTargetId?: string;
+      spotlightWorkId?: string;
+    })
   | undefined;
 
 /** ツリーから呼ばれた場合はそのノード、コマンドパレットからは選択させる */
@@ -8996,7 +9063,8 @@ async function resolveWorkUnrouted(
     **いま相談している作品をもう一度選ばされる**。引数の無い呼び出しは
     「作品が分からない」と決めつけていたが、画面には作品名が出ている。
 
-    順（引数 → ツリーの選択 → 相談の対象 → 訊く）は `pickHintedWork` が持つ。
+    順（引数 → ツリーの選択 → 相談の対象 → 訊く）は `pickHintedWork` が持つ
+    （相談から光らせた詳細メニューの項目を押した1回だけは、相談の作品が先。6.104）。
     **見えているものだけを当てにする**——畳んだままのツリーや、閉じた相談の
     選択は、作者の目には入っていない。外すと別の作品の資料が書き換わる。
   */
