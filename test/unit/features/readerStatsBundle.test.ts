@@ -443,3 +443,93 @@ describe("「読者反応自動取込」", () => {
     expect(informed[0]).toContain("カクヨム の読者の反応を 1件 取り込みました");
   });
 });
+
+/**
+ * 「未登録の自分の作品」を覚える（作者の指示 2026-11-01。設計書6.99.8）。
+ *
+ * 作品IDで決まらなかった画面のうち、本人しか開けない画面（`ownedVia: "owner-page"`）で
+ * 読んだものだけを渡す。**取り込むかを訊く前に渡す**ので、取り込むものが無い束でも、
+ * 登録した作品が1つも無くても覚える。
+ */
+describe("未登録の自分の作品を覚える", () => {
+  function ownedItem(workId: string, title: string, ownedVia?: "owner-page" | "approved"): unknown {
+    return JSON.parse(
+      buildReaderStatsEnvelope({
+        site: "kakuyomu",
+        workId,
+        title,
+        ...(ownedVia ? { ownedVia } : {}),
+        readAt: "2026-11-01T10:00:00.000+09:00",
+        entries: [{ scope: "work", metrics: { pv: 5 } }],
+      })
+    );
+  }
+
+  function ownedBundle(): string {
+    return bundleText([
+      ownedItem("1111", "作品Aの題", "owner-page"), // 登録済み（作品A）
+      ownedItem("7777", "未登録の作品", "owner-page"),
+      ownedItem("8888", "認めただけの作品", "approved"),
+      ownedItem("6666", "理由の無い作品"),
+      narouFunItem("N9999ZZ"),
+    ]);
+  }
+
+  function noting(): { helper: ReaderStatsHelperLink; noted: string[] } {
+    const noted: string[] = [];
+    const helper = new ReaderStatsHelperLink({
+      listWorks: () => works,
+      memory,
+      afterImport: async () => undefined,
+      noteOwnWorks: async (envelopes) => {
+        noted.push(...envelopes.map((envelope) => envelope.workId ?? ""));
+      },
+    });
+    return { helper, noted };
+  }
+
+  test("URI で受けた束のうち、作品IDで決まらない本人の画面の作品だけを渡す", async () => {
+    env.clipboard.text = ownedBundle();
+    const { helper, noted } = noting();
+    await helper.handleUri({ path: "/import-reader-stats" });
+    expect(noted).toEqual(["7777"]);
+  });
+
+  test("窓に戻ったとき、取り込むものが無い束でも（訊かなくても）覚える", async () => {
+    env.clipboard.text = bundleText([ownedItem("7777", "未登録の作品", "owner-page")]);
+    const { helper, noted } = noting();
+    await helper.checkOnFocus();
+    expect(informed).toEqual([]);
+    expect(noted).toEqual(["7777"]);
+  });
+
+  test("登録した作品が1つも無くても覚える", async () => {
+    works = [];
+    env.clipboard.text = bundleText([ownedItem("7777", "未登録の作品", "owner-page")]);
+    const { helper, noted } = noting();
+    await helper.handleUri({ path: "/import-reader-stats" });
+    expect(noted).toEqual(["7777"]);
+  });
+
+  test("1件の封筒でも同じに覚える", async () => {
+    env.clipboard.text = JSON.stringify(ownedItem("7777", "未登録の作品", "owner-page"));
+    const { helper, noted } = noting();
+    await helper.handleUri({ path: "/import-reader-stats" });
+    expect(noted).toEqual(["7777"]);
+  });
+
+  test("作者が貼り付けて取り込んだ束でも、作品IDで決まらない画面を渡す（渡す口があるときだけ）", async () => {
+    env.clipboard.text = ownedBundle();
+    const noted: string[] = [];
+    await importReaderStats(workA, {
+      works,
+      noteOwnWorks: async (envelopes) => {
+        noted.push(...envelopes.map((envelope) => envelope.workId ?? ""));
+      },
+    });
+    // 束の取り込みは決まらない画面をすべて渡し、本人の画面だけを拾うのは覚える側（`ownWorkCandidates`）
+    expect(noted).toContain("7777");
+    expect(noted).not.toContain("1111");
+    expect(rows(workA)).toHaveLength(1);
+  });
+});

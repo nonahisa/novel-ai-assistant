@@ -116,6 +116,8 @@ export interface ImportReaderStatsOptions {
    * （作者の裁定 2026-10-11）。渡さなければ、これまでどおり断るだけ
    */
   register?: ReaderStatsRegisterOptions;
+  /** 束のうち作品の決まらなかった画面を渡す（`ImportReaderStatsBundleOptions.noteOwnWorks`） */
+  noteOwnWorks?: (envelopes: readonly ReaderStatsEnvelope[]) => Promise<void>;
 }
 
 /** 束の取り込みの呼び方の違い */
@@ -124,6 +126,12 @@ export interface ImportReaderStatsBundleOptions {
   register?: ReaderStatsRegisterOptions;
   /** 知らせの頭に置く1文（その場で登録したあとの取り込みで「登録しました」を添える） */
   lead?: string;
+  /**
+   * どの作品の台帳の作品IDにも当たらなかった画面を渡す（作者の指示 2026-11-01）。
+   * 本人しか開けない画面で読んだ作品を「未登録の自分の作品」として覚える。
+   * ヘルパーからの受け口は束を渡す前に自分で覚えるので、作者が貼り付けたときだけ渡す
+   */
+  noteOwnWorks?: (envelopes: readonly ReaderStatsEnvelope[]) => Promise<void>;
 }
 
 /**
@@ -227,7 +235,10 @@ export async function importReaderStats(
     return importReaderStatsBundle(
       parsed.bundle,
       works.some((entry) => entry.id === work.id) ? works : [work, ...works],
-      { register: options.register }
+      {
+        register: options.register,
+        ...(options.noteOwnWorks ? { noteOwnWorks: options.noteOwnWorks } : {}),
+      }
     );
   }
 
@@ -356,6 +367,8 @@ export async function importReaderStatsBundle(
   */
   const unregistered: ReaderStatsEnvelope[] = [];
   const declined: string[] = [];
+  // どの作品の作品IDにも当たらなかった画面（未登録の自分の作品を覚えるため。2026-11-01）
+  const unrouted: ReaderStatsEnvelope[] = [];
   // 作品ごとの画面。**束に最初に出てきた順**（Map は入れた順を保つ）で、中は溜めた順
   const groups = new Map<string, ReaderStatsEnvelope[]>();
   for (const item of bundle.items) {
@@ -370,6 +383,7 @@ export async function importReaderStatsBundle(
     const envelope = item.result.envelope;
     const route = routeReaderStatsBundleItem(envelope, candidates);
     if (route.kind === "none") {
+      if (route.registrable) unrouted.push(envelope);
       if (register && route.registrable && envelope.workId) {
         if (
           !register.manual &&
@@ -468,6 +482,11 @@ export async function importReaderStatsBundle(
   if (declined.length > 0) {
     useLogFile(undefined);
     logStep(`登録しないことにした作品IDの分は取り込みませんでした：${declined.join(" ／ ")}`);
+  }
+
+  if (unrouted.length > 0 && options.noteOwnWorks) {
+    // 覚えるのに失敗しても、取り込みの知らせは止めない（覚える側が記録に残す）
+    await options.noteOwnWorks(unrouted);
   }
 
   const pending = groupPendingRegistrations(unregistered);

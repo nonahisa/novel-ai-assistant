@@ -42,6 +42,7 @@ import { listWorkMemos, type WorkMemo } from "../core/workMemos";
 import { PostingStore } from "../core/postingStore";
 import {
   emptyPostingLedger,
+  postingSiteInfo,
   postingSiteLabels,
   unpostedSites,
   type PostingLedger,
@@ -63,6 +64,14 @@ import {
   pickCount,
   countModeLabel,
 } from "../core/countSettings";
+import {
+  ownWorkKey,
+  ownWorkLabel,
+  registeredSiteWorkKeys,
+  visibleUnregisteredOwnWorks,
+  type UnregisteredOwnWork,
+} from "../core/unregisteredOwnWorks";
+import { processCommandsUsableHere } from "../core/processAvailability";
 
 /**
  * 作品一覧の走査を同時に走らせる数（設計書6.1.2）。
@@ -107,7 +116,44 @@ export type TreeNode =
   | EpisodeNode
   | MemoFolderNode
   | MemoFileNode
-  | MessageNode;
+  | MessageNode
+  | OwnWorksHeaderNode
+  | OwnWorkFrameNode;
+
+/**
+ * 「未登録の自分の作品」の枠を出すための口（作者の指示 2026-11-01。設計書6.99.8）。
+ *
+ * 覚え（保管庫）を持つのは `features/unregisteredOwnWorks.ts`。一覧はここから受け取り、
+ * **登録した作品の台帳と同じサイト・作品IDのものを外して**並べる（台帳は一覧を出すときに
+ * 読んでいる）。`views` から `features` を読み込まないよう、関数で受け取る。
+ */
+export interface OwnWorksSource {
+  /** 覚えている作品（出さないを選んだもの・登録済みも含む） */
+  list(): readonly UnregisteredOwnWork[];
+  /** バックアップを待っているか */
+  isWaiting(entry: UnregisteredOwnWork): boolean;
+  /** 覚え・待ちが変わった */
+  readonly onDidChange: vscode.Event<void>;
+}
+
+/**
+ * 「未登録の自分の作品」の見出し。作品の行の後ろに1つだけ置く（作品の行ではない）。
+ * 枠が1つも無ければ作らない
+ */
+export class OwnWorksHeaderNode {
+  readonly type = "ownWorksHeader" as const;
+  /** 枠が増減しても見出しは同じ行のまま差し替える（`WorkNode` と同じ理由） */
+  constructor(public frames: OwnWorkFrameNode[]) {}
+}
+
+/** 枠1つ。題とサイト名だけで、中身（話）は無い */
+export class OwnWorkFrameNode {
+  readonly type = "ownWorkFrame" as const;
+  constructor(
+    public readonly entry: UnregisteredOwnWork,
+    public readonly waiting: boolean
+  ) {}
+}
 
 /**
  * 書庫の段（設計書6.97.7）。書庫が2つ以上あるときだけ、作品の行の上に入る。
@@ -558,6 +604,69 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this._onDidChangeTreeData.fire();
   }
 
+  /** 「未登録の自分の作品」の覚え（`setOwnWorksSource` で渡される。無ければ出さない） */
+  private ownWorks: OwnWorksSource | undefined;
+
+  /** いま画面に出している「未登録の自分の作品」の見出し（出していなければ undefined） */
+  private ownHeader: OwnWorksHeaderNode | undefined;
+
+  /**
+   * 「未登録の自分の作品」の覚えをつなぐ（作者の指示 2026-11-01）。
+   * 覚え・待ちが変わったら、**見出しの行だけ**を描き直す（作品の行は撃たない）。
+   * 見出しが出る・消えるときだけ、一覧を丸ごと描き直す
+   */
+  setOwnWorksSource(source: OwnWorksSource): vscode.Disposable {
+    this.ownWorks = source;
+    return source.onDidChange(() => {
+      void this.redrawOwnWorks().catch(() => {
+        // 枠を描き直せなくても作品の行は出ている。次の描き直しで揃う
+      });
+    });
+  }
+
+  private async redrawOwnWorks(): Promise<void> {
+    const works = this.registry.list();
+    const frames = await this.ownFrames(works);
+    const header = this.ownHeader;
+    if (header && frames.length > 0) {
+      header.frames = frames;
+      this._onDidChangeTreeData.fire(header);
+      return;
+    }
+    if (!header && frames.length === 0) return;
+    this.redrawWholeList();
+  }
+
+  /** 根の行の後ろに「未登録の自分の作品」を足す（枠が無ければそのまま） */
+  private async withOwnWorks(
+    nodes: TreeNode[],
+    works: readonly WorkEntry[]
+  ): Promise<TreeNode[]> {
+    const frames = this.ownWorks ? await this.ownFrames(works) : [];
+    this.ownHeader = frames.length > 0 ? new OwnWorksHeaderNode(frames) : undefined;
+    return this.ownHeader ? [...nodes, this.ownHeader] : nodes;
+  }
+
+  /**
+   * 枠に出す作品。**登録した作品の台帳と同じサイト・作品IDのものは出さない。**
+   * 台帳は一覧の走査で読んでいる（完結の印と同じ控え）。読めなかった台帳は空と見る
+   */
+  private async ownFrames(works: readonly WorkEntry[]): Promise<OwnWorkFrameNode[]> {
+    const source = this.ownWorks;
+    if (!source) return [];
+    const list = source.list();
+    if (list.length === 0) return [];
+    await Promise.all(works.map((work) => this.loadPosting(work)));
+    const registered = registeredSiteWorkKeys(
+      works
+        .map((work) => this.posting.get(work.id))
+        .filter((ledger): ledger is PostingLedger => ledger !== undefined)
+    );
+    return visibleUnregisteredOwnWorks(list, registered).map(
+      (entry) => new OwnWorkFrameNode(entry, source.isWaiting(entry))
+    );
+  }
+
   /** 画面に出した作品の行を控える（1作品だけ撃つ相手。`rootRows` の説明） */
   private rememberRoot(nodes: TreeNode[]): TreeNode[] {
     this.rootOrder = nodes;
@@ -740,6 +849,56 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (node.type === "message") {
       const item = new vscode.TreeItem(node.text);
       item.contextValue = "message";
+      return item;
+    }
+
+    /*
+      「未登録の自分の作品」（作者の指示 2026-11-01）。**作品の行より控えめに**：見出しは
+      本の印を使わず、枠は題とサイト名だけ。右クリックの印（contextValue）は作品の行と
+      重ならない名前にする（`viewItem =~ /^work-/` の操作が枠に出ないように）
+    */
+    if (node.type === "ownWorksHeader") {
+      const item = new vscode.TreeItem(
+        "未登録の自分の作品",
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.id = "ownWorks:header";
+      item.contextValue = "ownWorksHeader";
+      item.iconPath = new vscode.ThemeIcon("inbox");
+      item.description = `${node.frames.length}作品`;
+      item.tooltip = new vscode.MarkdownString(
+        [
+          "**未登録の自分の作品**",
+          "",
+          "統合小説執筆環境ヘルパーが作品の管理画面で読んだ作品のうち、まだ登録していないものです。",
+          "",
+          // ブラウザ版では［バックアップを取る］を隠している（ダウンロードのフォルダーを見られない）
+          processCommandsUsableHere()
+            ? "右クリックの［バックアップを取る］でサイトのバックアップの画面を開き、届いたファイルを取り込むと作品として登録します。"
+            : "サイトから落としたバックアップを、右クリックの［ファイルから取り込む］で選ぶと作品として登録します。",
+          "ファイルを枠へドラッグして落としても取り込めます。",
+        ].join("\n")
+      );
+      return item;
+    }
+    if (node.type === "ownWorkFrame") {
+      const { entry } = node;
+      const site = postingSiteInfo(entry.site).label;
+      const item = new vscode.TreeItem(ownWorkLabel(entry), vscode.TreeItemCollapsibleState.None);
+      item.id = `ownWork:${ownWorkKey(entry.site, entry.workId)}`;
+      item.contextValue = "ownWorkFrame";
+      item.iconPath = new vscode.ThemeIcon(node.waiting ? "loading~spin" : "cloud-download");
+      item.description = `${site}${node.waiting ? "・バックアップ待ち" : ""}`;
+      item.tooltip = new vscode.MarkdownString(
+        [
+          `**${ownWorkLabel(entry)}**`,
+          "",
+          `- サイト: ${site}`,
+          `- 作品ID: ${entry.workId}`,
+          `- 最後に届いた日時: ${entry.lastSeenAt}`,
+          ...(node.waiting ? ["- バックアップが届くのを待っています（30分まで）"] : []),
+        ].join("\n")
+      );
       return item;
     }
 
@@ -1170,15 +1329,21 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       const warmed = this.warmedRoot;
       if (warmed) {
         this.warmedRoot = undefined;
-        return this.rememberRoot(warmed);
+        return this.withOwnWorks(this.rememberRoot(warmed), works);
       }
       /*
         **控えがあれば、走査を待たずに出す**（設計書6.107）。ノートPCでは
         走査が終わるまで14〜105秒、1行も出なかった。走査は裏で回し、
         終わったら描き直しを求めて差し替える。
+
+        **控えの回は「未登録の自分の作品」を出さない。** 登録済みかを見るには全作品の台帳が
+        要り、読むと控えで急いで出す意味が無くなる。走査が終わった回（上の `warmed`）で出る
       */
       const quick = await this.renderFromSnapshot(works);
-      if (quick) return this.rememberRoot(quick);
+      if (quick) {
+        this.ownHeader = undefined;
+        return this.rememberRoot(quick);
+      }
       /*
         **走査のあいだ、案内を「読み込んでいます」に差し替える**（設計書6.1.2）。
 
@@ -1195,7 +1360,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       try {
         const nodes = await this.scanAll(works);
         this.finishScan(nodes);
-        return this.rememberRoot(await this.arrange(nodes));
+        return this.withOwnWorks(this.rememberRoot(await this.arrange(nodes)), works);
       } finally {
         // **途中で失敗しても印を落とす。** 落とし忘れると、
         // 作品が0件になったあとも「読み込んでいます」が出たままになる
@@ -1204,6 +1369,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     }
 
     if (node.type === "library") return node.works;
+    if (node.type === "ownWorksHeader") return node.frames;
+    if (node.type === "ownWorkFrame") return [];
 
     if (node.type === "work") {
       // 走査に失敗していれば、開いたときに理由を出す。

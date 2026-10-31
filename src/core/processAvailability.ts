@@ -166,6 +166,13 @@ export function describeProcessesBlocked(command: string): string {
       "手元のVS Codeで開いてからお使いください。"
     );
   }
+  if (command === "novelai.fetchOwnWorkBackup") {
+    return (
+      "ブラウザ版では、バックアップが届くのを待てません" +
+      "（このパソコンのダウンロードのフォルダーを見られないためです）。" +
+      "サイトから落としたバックアップを、枠の右クリックの［ファイルから取り込む］で選んでください。"
+    );
+  }
   if (command === "novelai.connectClaudeCode") {
     return (
       "ブラウザ版では、Claude Code とつなげません" +
@@ -203,6 +210,13 @@ export function processRequiredCommands(): string[] {
 const WEB_BLOCKED_PALETTE_ONLY: readonly string[] = [
   "novelai.gitPull",
   "novelai.gitPush",
+  /*
+    「未登録の自分の作品」の［バックアップを取る］（作者の指示 2026-11-01）。作品一覧の
+    右クリックにだけある。外部プロセスは起こさないが、**届くのを待つにはこの機械の
+    ダウンロードのフォルダーを見る**（Node の fs）——ブラウザ版には見る先が無い。
+    ブラウザ版では［ファイルから取り込む］だけを出す
+  */
+  "novelai.fetchOwnWorkBackup",
 ];
 
 /**

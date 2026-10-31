@@ -116,30 +116,44 @@ export interface PickedBackup {
   readonly inspection: WorkZipInspection;
 }
 
+/**
+ * 取り込む作品のサイトと作品ID が先に分かっているとき（作品一覧の「未登録の自分の作品」の枠。
+ * 作者の指示 2026-11-01）。**訊き直さない**——ヘルパーが本人しか開けない画面で読んだ番号である。
+ */
+export interface KnownSiteWork {
+  readonly site: PostingSiteId;
+  readonly workId: string;
+}
+
+/**
+ * @returns 登録した作品。取りやめ・失敗なら undefined（枠から呼んだときは枠を残す）
+ */
 export async function importWorkFromZip(
   works: readonly WorkLocation[],
   register: RegisterWork,
   /** 相談パネルから渡されたとき。無ければ、これまでどおりファイルを選ばせる */
-  picked?: PickedBackup
-): Promise<void> {
+  picked?: PickedBackup,
+  /** 枠から取り込むとき、台帳へ書くサイトと作品ID（`notePostingSite`） */
+  known?: KnownSiteWork
+): Promise<WorkEntry | undefined> {
   // **作品フォルダーが決まるまでは、保管庫の記録へ書く。** 切り替えないと、
   // 読み取りの失敗が直前に触った関係の無い作品の記録へ紛れる
   // （相談パネルの取り込みで実際に起きた。2026-09-23）
   useLogFile(undefined);
   const source = picked ?? (await pickAndInspect());
-  if (!source) return;
+  if (!source) return undefined;
   const { inspection } = source;
   const zipPath = source.fileName;
 
-  if (!(await confirmImport(zipPath, inspection))) return;
+  if (!(await confirmImport(zipPath, inspection))) return undefined;
 
   // **置き場を決めてから題を訊く。** 逆にすると、名前を考えたあとで
   // 「どこに作りますか」と訊かれる（書庫の決め方は 6.97.2 のまま）
   const home = await resolveNewWorkHome(works);
-  if (!home) return;
+  if (!home) return undefined;
 
   const title = await askWorkTitle(inspection, home.note);
-  if (!title) return;
+  if (!title) return undefined;
 
   const folderPath = path.join(home.folderPath, title);
   if (await pathExists(folderPath)) {
@@ -157,7 +171,7 @@ export async function importWorkFromZip(
         ].join("\n"),
       }
     );
-    return;
+    return undefined;
   }
 
   // **ここから先の失敗は、その作品の記録へ残す**（`logFileRouting.test.ts`）。
@@ -166,7 +180,7 @@ export async function importWorkFromZip(
   useLogFile(folderPath);
 
   const extracted = await extractInto(folderPath, title, inspection);
-  if (!extracted) return;
+  if (!extracted) return undefined;
 
   /*
     登録は「フォルダから追加」と同じ道を通る（写しを作らない）。
@@ -178,16 +192,18 @@ export async function importWorkFromZip(
     指す（2026-09-19、作者の実機確認）。知っていることを訊かない。
   */
   const entry = await register(folderPath, title, { knownSingleWork: true });
-  if (!entry) return;
+  if (!entry) return undefined;
 
   const placed = inspection.info
     ? await applyWorkInfo(entry, inspection.info)
     : [];
 
   // **訊かずに下ごしらえする。** 出どころが分かったときだけ、投稿状態の
-  // 台帳へ「このサイトに載っている」ことを書き留める（6.99の「打鍵ゼロ」）
-  const recorded = inspection.site
-    ? await notePostingSite(entry, inspection.site, inspection)
+  // 台帳へ「このサイトに載っている」ことを書き留める（6.99の「打鍵ゼロ」）。
+  // 枠から来たときは、バックアップでサイトを見分けられなくても枠のサイトを使う
+  const recordSite = inspection.site ?? known?.site ?? null;
+  const recorded = recordSite
+    ? await notePostingSite(entry, recordSite, inspection, known)
     : NOTHING_RECORDED;
 
   /*
@@ -198,6 +214,7 @@ export async function importWorkFromZip(
   const chapters = await placeImportedChapters(entry, inspection.outline);
 
   await reportResult(entry, zipPath, inspection, placed, recorded, chapters);
+  return entry;
 }
 
 /** ファイルを選ばせて、読んで確かめる（メニューから始めたときの道） */
@@ -534,13 +551,24 @@ async function writePlotFromInfo(
 async function notePostingSite(
   work: WorkEntry,
   site: PostingSiteId,
-  inspection: WorkZipInspection
+  inspection: WorkZipInspection,
+  known?: KnownSiteWork
 ): Promise<RecordedReaderStats> {
   try {
     const store = new PostingStore(work);
     const ledger = await store.load();
 
-    const profile = backupSiteProfile(inspection);
+    /*
+      **枠の作品ID は、同じサイトのときだけ書く**（作者の指示 2026-11-01）。カクヨム・
+      アルファポリスのバックアップには作品ID が入っていないので、書かないと取り込んだあとも
+      枠が消えず、読者の反応も入らない。バックアップから作品ID が読めたとき（なろうの
+      Nコード）は、そちらを使う（ファイルの中身のほうが確か）
+    */
+    const fromBackup = backupSiteProfile(inspection);
+    const profile: PostingSiteProfile | undefined =
+      known && known.site === site && !fromBackup?.workId
+        ? { ...(fromBackup ?? {}), workId: known.workId }
+        : fromBackup;
     let next = ledger;
     // **すでに作品情報があれば触らない。** 作者が書いたメモやジャンルを、
     // 取り込みの下ごしらえで押し流さない（実装ルール2）

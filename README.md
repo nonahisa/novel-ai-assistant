@@ -388,6 +388,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 | `novelai.schedule.overlapPenalty` | `0.1` | 自分で進める作業が同じ日に重なったときの、重なり1つごとに落ちる速さの割合 |
 | `novelai.celebrations.enabled` | `true` | 目標に届いたら、執筆統計に風船（大きな目標は花火も）、原稿エディターの下の欄に一言 |
 | `novelai.readerStats.importOnFocus` | `true` | VS Code に戻ったとき、統合小説執筆環境ヘルパーがコピーした読者の反応を取り込むか訊く |
+| `novelai.ownWorks.downloadFolder` | `""`（Windows の「ダウンロード」） | 「未登録の自分の作品」の［バックアップを取る］のあと、届いたバックアップを探すフォルダー |
 | `novelai.epub.ornamentFolder` | `""`（指していない） | EPUBの飾り（`*.svg`）を追加で読み込むフォルダーの絶対パス |
 | `novelai.mode` | `author` | この環境を作者（`author`）と編集者（`editor`）のどちらとして使うか |
 

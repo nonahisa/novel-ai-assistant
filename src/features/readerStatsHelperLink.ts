@@ -16,9 +16,11 @@ import {
   readerStatsClipboardFingerprint,
   readerStatsUriAction,
   rememberFingerprint,
+  routeReaderStatsBundleItem,
   uriPathForLog,
   type ReaderStatsWorkCandidate,
 } from "../core/readerStatsHelperLink";
+import { ownWorkCandidates } from "../core/unregisteredOwnWorks";
 import { isWebRuntime } from "../core/runtime";
 import { logLine, useLogFile } from "../core/logger";
 import { cancelItem, isCancelItem } from "../views/dialogs";
@@ -101,6 +103,12 @@ export interface ReaderStatsHelperLinkDeps {
   handleSetupRequest?(query: string): Promise<void>;
   /** 外部AIから頼まれた実行（設計書6.87.22）。同じ受け口でパスを見分ける */
   handleRunRequest?(query: string): Promise<void>;
+  /**
+   * どの作品にも決まらなかった画面を渡す（作者の指示 2026-11-01）。本人しか開けない画面で
+   * 読んだ作品を「未登録の自分の作品」として覚える。**取り込むかを訊く前に渡す**——
+   * 登録した作品が1つも無い作者や、取り込むものが無い束でも、枠は出したいため
+   */
+  noteOwnWorks?(envelopes: readonly ReaderStatsEnvelope[]): Promise<void>;
 }
 
 /**
@@ -215,6 +223,11 @@ export class ReaderStatsHelperLink {
       void vscode.window.showWarningMessage(parsed.reason);
       return;
     }
+    await this.noteOwnWorks(
+      parsed.kind === "bundle"
+        ? parsed.bundle.items.flatMap((item) => (item.result.ok ? [item.result.envelope] : []))
+        : [parsed.envelope]
+    );
     if (parsed.kind === "bundle") {
       await this.runBundle(trigger, parsed.bundle);
       return;
@@ -386,6 +399,24 @@ export class ReaderStatsHelperLink {
       this.registerOptions(),
       importReaderStatsBundle
     );
+  }
+
+  /**
+   * 本人しか開けない画面で読んだのに、どの作品にも決まらない画面を覚えてもらう
+   * （作者の指示 2026-11-01。枠に出すかは作品一覧が決める）。
+   * 作品の決め方は束の取り込みと同じ（`routeReaderStatsBundleItem`。台帳の作品IDで1つに決まるか）
+   */
+  private async noteOwnWorks(envelopes: readonly ReaderStatsEnvelope[]): Promise<void> {
+    const note = this.deps.noteOwnWorks;
+    if (!note) return;
+    const owned = ownWorkCandidates(envelopes);
+    if (owned.length === 0) return;
+    const candidates = await loadCandidates(this.deps.listWorks());
+    const unrouted = owned.filter((envelope) => {
+      const route = routeReaderStatsBundleItem(envelope, candidates);
+      return route.kind === "none" && route.registrable === true;
+    });
+    if (unrouted.length > 0) await note(unrouted);
   }
 
   private seen(fingerprint: string): boolean {

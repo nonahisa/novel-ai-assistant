@@ -422,6 +422,52 @@ describe("ZIPから作品を取り込む", () => {
     expect(ledger.sites).toEqual([]);
   });
 
+  /*
+    「未登録の自分の作品」の枠から取り込むとき（作者の指示 2026-11-01）。枠のサイトと
+    作品ID を引き継ぐ——カクヨムのバックアップには作品ID が入っていないので、書かないと
+    取り込んだあとも枠が消えず、読者の反応も入らない
+  */
+  it("枠から取り込むと、枠の作品ID を台帳へ書き、登録した作品を返す", async () => {
+    const fs = new MemoryFs({ [ZIP_PATH]: KAKUYOMU_ZIP_BYTES });
+    fs.install();
+    stubWindow();
+
+    const entry = await importWorkFromZip(
+      WORKS,
+      async () => workEntry(),
+      {
+        fileName: "星を継ぐ者たち_20260919.zip",
+        inspection: inspectWorkBackup(KAKUYOMU_ZIP_BYTES, "星を継ぐ者たち_20260919.zip"),
+      },
+      { site: "kakuyomu", workId: "16818093000000000001" }
+    );
+
+    expect(entry?.id).toBe("w1");
+    const ledger = JSON.parse(fs.text(POSTING));
+    expect(ledger.siteProfiles).toEqual([
+      { site: "kakuyomu", workId: "16818093000000000001", genre: "異世界ファンタジー" },
+    ]);
+  });
+
+  it("枠のサイトとバックアップのサイトが違えば、枠の作品ID は書かない", async () => {
+    const fs = new MemoryFs({ [ZIP_PATH]: KAKUYOMU_ZIP_BYTES });
+    fs.install();
+    stubWindow();
+
+    await importWorkFromZip(
+      WORKS,
+      async () => workEntry(),
+      {
+        fileName: "星を継ぐ者たち_20260919.zip",
+        inspection: inspectWorkBackup(KAKUYOMU_ZIP_BYTES, "星を継ぐ者たち_20260919.zip"),
+      },
+      { site: "alphapolis", workId: "123456789" }
+    );
+
+    const ledger = JSON.parse(fs.text(POSTING));
+    expect(ledger.siteProfiles).toEqual([{ site: "kakuyomu", genre: "異世界ファンタジー" }]);
+  });
+
   it("出どころが分からないZIPでは、台帳を作らない", async () => {
     const fs = new MemoryFs({ [ZIP_PATH]: ZIP_BYTES });
     fs.install();
