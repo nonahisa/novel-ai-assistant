@@ -8,6 +8,7 @@ import type { WorkFormatKey } from "../core/workFormat";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkKindKey } from "../core/workKind";
 import { readWorkKind } from "../core/workKindStore";
+import { processCommandsUsableHere } from "../core/processAvailability";
 import {
   isCommandVisibleForColumn,
   isCommandVisibleForKind,
@@ -20,7 +21,6 @@ import {
   explainDisabled,
   isActionEnabled,
   isItemVisibleInRuntime,
-  menuAllowsProcesses,
   stepActionResourceUri,
   REQUIRES_WORK_HINT,
   type ActionCounter,
@@ -537,7 +537,7 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
    * （読み込みは最上段の描画が待って行う）。
    */
   visibleSteps(): readonly Step[] {
-    const base = filterStepsForRuntime(STEP_MENU, menuAllowsProcesses());
+    const base = filterStepsForRuntime(STEP_MENU, processCommandsUsableHere());
     const work = this.selectedWork();
     if (!work) return base;
     if (!this.formats.has(work.id)) return base;
@@ -759,7 +759,7 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     const works = this.registry.list();
     const selected = this.selectedWork();
     const mode = currentMode();
-    const runtimeAllowsProcesses = menuAllowsProcesses();
+    const runtimeAllowsProcesses = processCommandsUsableHere();
     // **作品が「選ばれているか」で判定する。** 登録の有無ではない
     const enabled = isActionEnabled(
       action,

@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { logFailure } from "../core/logger";
 import type { WorkRegistry } from "../core/workRegistry";
 import { currentMode } from "../core/actorContext";
-import { canRunProcesses } from "../core/runtime";
+import { processCommandsUsableHere } from "../core/processAvailability";
 import type { WorkKindKey } from "../models/types";
 import { commandsHiddenForWorks } from "../core/workTypeVisibility";
 import {
@@ -28,19 +28,6 @@ import {
   変えずに済ませるためで、写しではない（中身は core の1か所だけ）。
 */
 export * from "../core/actionTree";
-
-/**
- * 自前で並べるメニュー（詳細メニュー・簡単ステップメニュー）で、外部プロセスの
- * 要る操作を出してよいか（設計書5.8.5）。
- *
- * **package.json の `!isWeb` と同じ所で分ける。** `isWeb` は画面がブラウザで
- * 動いているか（`uiKind`）なので、拡張機能の側が Node で動く形（画面だけ
- * ブラウザ）でも隠れる。自前のメニューだけ `canRunProcesses()` で分けると、
- * コマンドパレットからは消えたのにメニューには残る、という食い違いになる
- */
-export function menuAllowsProcesses(): boolean {
-  return canRunProcesses() && vscode.env.uiKind !== vscode.UIKind.Web;
-}
 
 /** ツリーの節点 */
 export type ActionNode =
@@ -222,7 +209,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     const { item: action } = node;
     const hasWork = this.registry.list().length > 0;
     const mode = currentMode();
-    const runtimeAllowsProcesses = menuAllowsProcesses();
+    const runtimeAllowsProcesses = processCommandsUsableHere();
     const enabled = isActionEnabled(action, hasWork, mode, runtimeAllowsProcesses);
     const hint = disabledHint(action, hasWork, mode, runtimeAllowsProcesses);
 
@@ -293,7 +280,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       return group ? { type: "group", group } : undefined;
     }
 
-    const runtimeAllowsProcesses = menuAllowsProcesses();
+    const runtimeAllowsProcesses = processCommandsUsableHere();
     const hidden = this.hiddenByKind();
     for (const group of groups) {
       for (const entry of shownEntries(group.entries, runtimeAllowsProcesses, hidden)) {
@@ -322,7 +309,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
    * なかったことを黙って成功にしないために、ここで分かる必要がある。
    */
   findActionNode(command: string): ActionNode | undefined {
-    const runtimeAllowsProcesses = menuAllowsProcesses();
+    const runtimeAllowsProcesses = processCommandsUsableHere();
     const hidden = this.hiddenByKind();
     for (const group of visibleGroups(this.registry.list().length > 0)) {
       for (const entry of shownEntries(group.entries, runtimeAllowsProcesses, hidden)) {
@@ -358,7 +345,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     const hidden = this.hiddenByKind();
 
     if (!node) {
-      const runtimeAllowsProcesses = menuAllowsProcesses();
+      const runtimeAllowsProcesses = processCommandsUsableHere();
       return groups.flatMap((group): ActionNode[] => {
         if (!group.standalone) {
           // 種類で中身が全部隠れた分類は、見出しごと出さない（設計書6.109.7）。
@@ -380,7 +367,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       });
     }
     if (node.type === "group") {
-      return shownEntries(node.group.entries, menuAllowsProcesses(), hidden).map((entry) =>
+      return shownEntries(node.group.entries, processCommandsUsableHere(), hidden).map((entry) =>
         entry.kind === "section"
           ? {
               type: "section" as const,
@@ -391,7 +378,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       );
     }
     if (node.type === "section") {
-      return shownEntries(node.section.items, menuAllowsProcesses(), hidden).map((item) => ({
+      return shownEntries(node.section.items, processCommandsUsableHere(), hidden).map((item) => ({
         type: "action" as const,
         item,
       }));

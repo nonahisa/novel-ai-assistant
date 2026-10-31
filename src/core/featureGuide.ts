@@ -7,7 +7,7 @@ import {
   type ActionItem,
   type ActionSection,
 } from "./actionTree";
-import { canRunProcesses } from "./runtime";
+import { processCommandsUsableHere } from "./processAvailability";
 import { CHAT_MODEL_NOTES, DETECTION_MODEL_NOTES } from "./chatModelNotes";
 import { entranceOf } from "./actionEntrance";
 import {
@@ -210,7 +210,7 @@ export function buildFeatureIndex(): string {
   // 一覧も同じ規則で絞る（`isItemVisibleInRuntime`）。絞り方は
   // `buildGuideBundles()` と揃える——片方だけ規則が違うと、目次に出るのに
   // 説明が無い（またはその逆の）操作ができる
-  const allowsProcesses = canRunProcesses();
+  const allowsProcesses = processCommandsUsableHere();
 
   /*
     **詳細メニューから外した操作は、分類の下に並べない**（0.86.10 の担当の報告）。
@@ -344,7 +344,7 @@ const GUIDE_BUNDLE_SPLITS: Record<string, readonly GuideBundleSplit[]> = {
  * 分類の直下にある操作は、その分類の名前だけの束にする。
  */
 export function buildGuideBundles(): GuideBundle[] {
-  const allowsProcesses = canRunProcesses();
+  const allowsProcesses = processCommandsUsableHere();
   const bundles: GuideBundle[] = [];
 
   for (const group of ACTION_TREE) {
@@ -588,7 +588,7 @@ export function procedureActionLookup(
 ): ProcedureActionInfo | undefined {
   const action = findAction(command);
   if (!action) return undefined;
-  if (!isItemVisibleInRuntime(action, canRunProcesses())) return undefined;
+  if (!isItemVisibleInRuntime(action, processCommandsUsableHere())) return undefined;
 
   const needs = prerequisiteNoteOf(action);
   return {

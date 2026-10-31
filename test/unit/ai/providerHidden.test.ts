@@ -1,8 +1,8 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import type * as vscode from "vscode";
 import { AIRegistry } from "../../../src/ai/registry";
 import { probeVsCodeLm } from "../../../src/ai/vscodeLmProvider";
-import { lm } from "../support/vscodeStub";
+import { extensions, lm, setStubChatModels } from "../support/vscodeStub";
 
 /**
  * 口が働かないエディターでは、AIの選択肢から「VS Code に繋いであるAI」を
@@ -42,8 +42,44 @@ describe("AIの選択肢から外す", () => {
   });
 });
 
-describe("口の確かめ（エディターの名前は見ない）", () => {
-  test("口があれば、モデルが0件でも「使える」（Copilot 未サインインの VS Code を隠さない）", async () => {
+describe("口の確かめ（エディターの名前も拡張機能の名前も見ない）", () => {
+  afterEach(() => {
+    extensions.all = [];
+    setStubChatModels([]);
+  });
+
+  test("モデルが0件で、モデルを出す拡張機能も無ければ「使えない」", async () => {
+    extensions.all = [
+      { id: "someone.other", packageJSON: { contributes: { commands: [] } } },
+    ];
+    expect(await probeVsCodeLm()).toBe("unavailable");
+  });
+
+  test("モデルが0件でも、モデルを出す拡張機能が入っていれば「使える」（起動が遅れているだけの人を守る）", async () => {
+    extensions.all = [
+      {
+        id: "vscode.copilot",
+        packageJSON: {
+          contributes: { languageModelChatProviders: [{ vendor: "copilot" }] },
+        },
+      },
+    ];
+    expect(await probeVsCodeLm()).toBe("available");
+  });
+
+  test("モデルが1件でもあれば「使える」", async () => {
+    setStubChatModels([
+      {
+        id: "m",
+        name: "m",
+        vendor: "v",
+        family: "f",
+        version: "1",
+        maxInputTokens: 1000,
+        sendRequest: async () => ({ text: (async function* () {})() }),
+        countTokens: async () => 1,
+      },
+    ]);
     expect(await probeVsCodeLm()).toBe("available");
   });
 

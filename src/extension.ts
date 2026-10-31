@@ -240,7 +240,11 @@ import {
 import { startLoopLagMeter, type LoopLagReport } from "./core/loopLag";
 import { startStartupProfile } from "./core/startupProfiler";
 import { readerKind, type ReaderKind } from "./core/fileRead";
-import { describeProcessesBlocked } from "./core/processAvailability";
+import {
+  describeProcessesBlocked,
+  PROCESSES_BLOCKED_CONTEXT,
+  processCommandsUsableHere,
+} from "./core/processAvailability";
 import {
   LM_AVAILABILITY_KEY,
   LM_AVAILABLE_CONTEXT,
@@ -764,6 +768,17 @@ export async function activate(
    * あいだを丸ごと覆う必要があるので、ここより後ろには置けない。
    */
   const loopLagMeter = startLoopLagMeter();
+
+  /*
+    **外部プロセスの要る命令を隠す印**（設計書5.8.16）。package.json の `when` は
+    `!novelai.processesBlocked` なので、立てる前は「出す」側。ブラウザ版でだけ
+    立つ。待たずに頼む（起動の道に待ちを足さない）
+  */
+  void vscode.commands.executeCommand(
+    "setContext",
+    PROCESSES_BLOCKED_CONTEXT,
+    !processCommandsUsableHere()
+  );
 
   /**
    * どちらの読み口を選んだか（設計書6.107。0.74.11）。
@@ -1321,6 +1336,13 @@ export async function activate(
     */
     if (workMaintenanceStarted) return;
     workMaintenanceStarted = true;
+    /*
+      **AIの口の確かめも、整備と同じ合図で裏で起こす**（設計書5.9.3）。合図は
+      作品一覧の初回描画で、来なければ上限（60秒）で起きる（`maintenanceTrigger`）。
+      サイドバーを開かない起動でも確かめ直しが抜け落ちない。`void` で投げっぱなしにし、
+      起動の道では待たない。同じ版なら中で何もせず戻る
+    */
+    void lmGate.recheckInBackground();
     startupTiming.mark("整備 開始", startNote);
     const maintainStartedAt = performance.now();
     void registry
@@ -1399,8 +1421,8 @@ export async function activate(
   /*
     **VS Code のAIの口（`vscode.lm`）が働くか**（設計書5.9）。起動では globalState を
     同期で読んで印を立てるだけで、**待たない**（作者の前提、2026-10-31「起動を遅く
-    しない」）。確かめは作品一覧の初回描画のあと（`noteFirstWorkListRender`）に
-    裏で起こし、同じ版のあいだは確かめない・一度隠したら戻さない。
+    しない」）。確かめは整備と同じ起こし役（`startWorkMaintenance`。作品一覧の
+    初回描画か60秒の上限）で裏で起こし、同じ版のあいだは確かめない・一度隠したら戻さない。
   */
   const lmGate = new LmAvailabilityGate({
     version: String(
@@ -1410,10 +1432,15 @@ export async function activate(
     // 書いたら読み返す口を通す（設計書5.7.8。別の鍵の送り返しで消えると、
     // 次の起動で隠したはずのものが一瞬出てしまう）
     write: (record) => {
-      void verifiedState(context.globalState).update(
-        LM_AVAILABILITY_KEY,
-        record
-      );
+      // 残せなくても表示は続ける（呼び手は待たないので、投げると誰も受けない）
+      void verifiedState(context.globalState)
+        .update(LM_AVAILABILITY_KEY, record)
+        .catch((error: unknown) =>
+          logLine(
+            "VS Code のAIの口の確かめの結果を覚えられませんでした：" +
+              (error instanceof Error ? error.message : String(error))
+          )
+        );
     },
     publish: (show) => {
       void vscode.commands.executeCommand(
@@ -1506,11 +1533,6 @@ export async function activate(
         上限の見張りが先に起こしていれば、ここは何もしない。
       */
       maintenanceTrigger.signal();
-      /*
-        **AIの口の確かめも、一覧が出てから裏で起こす**（設計書5.9）。`void` で
-        投げっぱなしにし、起動の道では待たない。同じ版なら中で何もせず戻る
-      */
-      void lmGate.recheckInBackground();
     }
   };
 

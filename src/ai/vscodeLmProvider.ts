@@ -11,6 +11,11 @@ import {
 import { withAiWork } from "../core/aiActivity";
 import { logLine } from "../core/logger";
 import { rejectImagesIfAny } from "./imageInput";
+import {
+  hasLanguageModelProvider,
+  judgeLmProbe,
+  type LmProbeResult,
+} from "../core/lmAvailability";
 
 /**
  * VS Code のエディタが持っているAI（設計書6.87.11）。
@@ -492,27 +497,37 @@ export class VsCodeLmProvider implements AIProvider {
 }
 
 /**
- * いまのエディターで `vscode.lm` の口が働くか（設計書5.9）。
+ * いまのエディターで `vscode.lm` の口が働くか（設計書5.9.2）。
  *
- * **「使えない」と言うのは、口が無いか、一覧を引くと投げるときだけ。**
- * 一覧が空なのは、Copilot にサインインしていない・鍵を入れていないだけの
- * VS Code でも起きる（その人には繋ぎ方の案内がある）。空で隠すと、
- * あとで繋いでも次の版まで選択肢が出ない（隠したら戻さない決まりのため）。
- * Copilot の起動が遅れて一時的に空のこともある。
+ * 決め方は `core/lmAvailability.ts` の `judgeLmProbe`。**モデルが0件でも、
+ * モデルを出す拡張機能が入っていれば隠さない**（作者の裁定、2026-10-31
+ * 「モデルを出す拡張が無ければ隠す」）。0件は Copilot にサインインしていない
+ * だけの人や、Copilot の起動が遅れているときにも起きる。
  *
- * エディターの名前（appName）は見ない（決め打ちしない。`core/lmAvailability.ts`）。
+ * エディターの名前（appName）も拡張機能の名前も見ない。拡張機能は package.json の
+ * 貢献点で見分ける（`hasLanguageModelProvider`）。
  */
-export async function probeVsCodeLm(): Promise<"available" | "unavailable"> {
+export async function probeVsCodeLm(): Promise<LmProbeResult> {
   const lm = (vscode as { lm?: { selectChatModels?: unknown } }).lm;
-  if (typeof lm?.selectChatModels !== "function") return "unavailable";
-  try {
-    await vscode.lm.selectChatModels();
-    return "available";
-  } catch (error) {
-    logLine(
-      "VS Code のAIの口を確かめたところ、一覧を引けませんでした: " +
-        (error instanceof Error ? error.message : String(error))
-    );
-    return "unavailable";
+  const apiPresent = typeof lm?.selectChatModels === "function";
+  let threw = false;
+  let modelCount = 0;
+  if (apiPresent) {
+    try {
+      modelCount = (await vscode.lm.selectChatModels()).length;
+    } catch (error) {
+      threw = true;
+      logLine(
+        "VS Code のAIの口を確かめたところ、一覧を引けませんでした: " +
+          (error instanceof Error ? error.message : String(error))
+      );
+    }
   }
+  const providerExtensionPresent =
+    apiPresent && !threw && modelCount === 0
+      ? hasLanguageModelProvider(
+          (vscode.extensions?.all ?? []).map((extension) => extension.packageJSON)
+        )
+      : false;
+  return judgeLmProbe({ apiPresent, threw, modelCount, providerExtensionPresent });
 }

@@ -1,5 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import {
+  hasLanguageModelProvider,
+  judgeLmProbe,
   LmAvailabilityGate,
   parseLmAvailabilityRecord,
   planLmAvailability,
@@ -48,6 +50,35 @@ function makeGate(options: {
   });
   return { gate, published, probe };
 }
+
+describe("使えるかの決め方（作者の裁定 2026-10-31「モデルを出す拡張が無ければ隠す」）", () => {
+  const base = { apiPresent: true, threw: false, modelCount: 0, providerExtensionPresent: false };
+
+  test("口が無い・投げる → 使えない", () => {
+    expect(judgeLmProbe({ ...base, apiPresent: false, providerExtensionPresent: true })).toBe("unavailable");
+    expect(judgeLmProbe({ ...base, threw: true, providerExtensionPresent: true })).toBe("unavailable");
+  });
+
+  test("0件でモデルを出す拡張機能も無い → 使えない／拡張機能があれば使える／1件以上は使える", () => {
+    expect(judgeLmProbe(base)).toBe("unavailable");
+    expect(judgeLmProbe({ ...base, providerExtensionPresent: true })).toBe("available");
+    expect(judgeLmProbe({ ...base, modelCount: 2 })).toBe("available");
+  });
+
+  test("モデルを出す拡張機能は、名前でなく貢献点で見分ける", () => {
+    expect(hasLanguageModelProvider([])).toBe(false);
+    expect(hasLanguageModelProvider([{ contributes: { commands: [{}] } }, null, "x"])).toBe(false);
+    expect(
+      hasLanguageModelProvider([{ name: "anything", contributes: { languageModelChatProviders: [{ vendor: "a" }] } }])
+    ).toBe(true);
+    // 正式になる前の名前（古い VS Code）
+    expect(hasLanguageModelProvider([{ contributes: { languageModels: { vendor: "copilot" } } }])).toBe(true);
+    // 空の名乗りは数えない
+    expect(hasLanguageModelProvider([{ contributes: { languageModelChatProviders: [] } }])).toBe(false);
+    // 道具（languageModelTools）だけの拡張機能はモデルを出さない
+    expect(hasLanguageModelProvider([{ contributes: { languageModelTools: [{ name: "t" }] } }])).toBe(false);
+  });
+});
 
 describe("残した判断の読み方", () => {
   test("形が違えば残っていない扱い", () => {

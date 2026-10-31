@@ -3,8 +3,9 @@
  *
  * **メニューからは隠す**（作者の裁定、2026-10-31「ブラウザー版も隠す」）。
  * コマンドパレット・右クリック・ビューの見出しは package.json の
- * `when` に `!isWeb` を、自前で並べる画面（詳細メニュー・簡単ステップ
- * メニュー・AIへ渡す機能の一覧）は `isItemVisibleInRuntime` で外す。
+ * `when` に `!novelai.processesBlocked` を、自前で並べる画面（詳細メニュー・
+ * 簡単ステップメニュー・AIへ渡す機能の一覧）は `isItemVisibleInRuntime` で外す。
+ * どちらも `processCommandsUsableHere()` の1か所で分ける。
  *
  * **理由を出す処理（`describeProcessesBlocked`）は残す。** キー割り当て・
  * 知らせのボタン・ほかの拡張機能から命令が直に呼ばれたときの受け皿で、
@@ -17,6 +18,8 @@
  *
  * VS Code APIに依存しない。
  */
+
+import { canRunProcesses } from "./runtime";
 
 /**
  * 外部プロセスが要る、**操作メニューに載っている**コマンド。
@@ -76,6 +79,26 @@ const REQUIRES_PROCESSES = new Set<string>([
  * `git clone` の代わりにGitHubの中身を直に読む仕組みを指せば、開き直さずに
  * 登録できる。**やることが同じなら、道具が違っても塞がない。**
  */
+
+/**
+ * いまの環境で、外部プロセスの要る操作を出してよいか（設計書5.8.16）。
+ *
+ * **出す・隠すの判定はここ1か所。** package.json の `when`（下の印）・
+ * 詳細メニュー・簡単ステップメニュー・AIへ渡す機能の一覧（`featureGuide`）が
+ * すべてこれを見る。`isWeb`（画面がブラウザか）では分けない——Codespaces
+ * など、画面はブラウザでも拡張機能が Node で動く所では動くので出す
+ * （作者の裁定、2026-10-31「動くものは出す」）。
+ */
+export function processCommandsUsableHere(): boolean {
+  return canRunProcesses();
+}
+
+/**
+ * package.json の `when` で使う印。**隠す側の印**にしてある（立っていなければ出す）。
+ * `activate` の最初のほうで `setContext` するが、立てる前の一瞬に手元の人の
+ * メニューが消えて見えないよう、立っていないときは「出す」に倒す。
+ */
+export const PROCESSES_BLOCKED_CONTEXT = "novelai.processesBlocked";
 
 /** そのコマンドは、いまの実行環境（Node／ブラウザ）で使えるか */
 export function isCommandAvailableInRuntime(
@@ -185,7 +208,7 @@ const WEB_BLOCKED_PALETTE_ONLY: readonly string[] = [
 /**
  * ブラウザ版のメニュー（package.json の `contributes.menus`）から隠す命令。
  *
- * **一覧はここだけに持つ。** package.json の `!isWeb` を見張るテスト
+ * **一覧はここだけに持つ。** package.json の `!novelai.processesBlocked` を見張るテスト
  * （`browserHiddenMenus.test.ts`）もここから取るので、命令を足して
  * package.json を直し忘れると落ちる。
  */

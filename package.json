@@ -290,7 +290,7 @@
               "onCommand:novelai.setupOllama",
               "onCommand:novelai.setupLmStudio"
             ],
-            "when": "!isWeb"
+            "when": "!novelai.processesBlocked"
           },
           {
             "id": "claudeCode",
@@ -302,7 +302,7 @@
             "completionEvents": [
               "onCommand:novelai.connectClaudeCode"
             ],
-            "when": "!isWeb"
+            "when": "!novelai.processesBlocked"
           },
           {
             "id": "prepareWork",
@@ -1498,7 +1498,7 @@
         },
         {
           "command": "novelai.syncAllWorks",
-          "when": "view == novelai.works && !isWeb",
+          "when": "view == novelai.works && !novelai.processesBlocked",
           "group": "navigation@5"
         },
         {
@@ -1951,15 +1951,15 @@
         },
         {
           "command": "novelai.gitPull",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.gitPush",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.resolveConflicts",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.createWorkWithPlot",
@@ -1975,15 +1975,15 @@
         },
         {
           "command": "novelai.gitRestore",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.setupGithub",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.setupOllama",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.openExtensionSettings",
@@ -2011,59 +2011,59 @@
         },
         {
           "command": "novelai.setupLmStudio",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.runFullSetup",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.setupVectorSearch",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.selectOllamaExecutable",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.shareWithEditor",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.collectEditorProposals",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.joinAsEditor",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.finishReviewAndReturn",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.revokeEditorAccess",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.syncAllWorks",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.saveAndSync",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.resolveDivergence",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.exportPdf",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         },
         {
           "command": "novelai.connectClaudeCode",
-          "when": "!isWeb"
+          "when": "!novelai.processesBlocked"
         }
       ]
     },

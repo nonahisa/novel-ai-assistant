@@ -8,13 +8,19 @@ name: Marketplace へ公開
 #   交換に失敗しても PAT へは落ちない（vsce の作り）
 # - **作者の承認を挟む。** Environment `marketplace` の承認者が［承認］を押すまで止まる。
 #   公開は取り消せない（非公開にはできるが、その間に入れた人には届く）
-# - **パッチの版は断る。** Marketplace へ出すのは1段目・2段目が動いた版だけ（2026-09-21 の決まり）
+# - **版の段では断らない。** どの版を出すかは動かす人が決める（作者の指示 2026-10-31
+#   「バグ対応はマーケットプレースにも出しましょう」。決まりはスキル `release` の冒頭の表）。
+#   代わりに理由（reason）を必須にして、ログの最初に出す
 # - **Open VSX へも同じ VSIX を上げる**（2026-10-31。最後の段）。トークン OVSX_PAT が無ければその段だけ飛ばす
 on:
   workflow_dispatch:
     inputs:
       version:
         description: "出す版（例: 0.116.0）。GitHub Release v<版> に VSIX が付いていること"
+        required: true
+        type: string
+      reason:
+        description: "出す理由（例: バグの直し／機能）"
         required: true
         type: string
 permissions:
@@ -32,16 +38,19 @@ jobs:
       id-token: write
     env:
       VERSION: ${{ inputs.version }}
+      REASON: ${{ inputs.reason }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: 版の形と段を確かめる（パッチだけの版は出さない）
+      - name: 版の形と出す理由を確かめる
+        # 入力は env 経由で読む（式を run の中へ直に埋めると、入力の文字がシェルに解釈される）
         run: |
-          if ! [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::版は 0.116.0 の形で入れてください（入れた値: $VERSION）"; exit 1
           fi
-          if [ "${BASH_REMATCH[3]}" != "0" ]; then
-            echo "::error::$VERSION は3段目（パッチ）の版です。Marketplace へは1段目・2段目が動いた版だけを出します"; exit 1
+          if [ -z "${REASON// /}" ]; then
+            echo "::error::出す理由（reason）を入れてください（例: バグの直し／機能）"; exit 1
           fi
+          echo "::notice::v$VERSION を出します。理由: $REASON"
       - name: GitHub Release から VSIX を取り寄せる
         run: |
           gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" \
@@ -76,7 +85,9 @@ jobs:
         # - **同じ VSIX を上げる。** 上で SHA-256 と版を照らしたファイルをそのまま使う
         # - **Marketplace の後に置く。** こちらが落ちても Marketplace の公開は済んでいる
         # - **トークン（OVSX_PAT）が無ければ、この段だけ飛ばす。** シークレットは `if` で
-        #   直に読めないので、env に移してから見る
+        #   直に読めないので、env に移してから見る。ovsx は環境変数 OVSX_PAT を自分で読むので
+        #   引数（-p）には渡さない
+        # - **落ちたら赤にする**（continue-on-error は付けない。気づけるように）
         # - ovsx の版は固定する（1.2.0 は Node 22 以上が要る。上の setup-node と同じ）
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
@@ -85,4 +96,4 @@ jobs:
             echo "::notice::シークレット OVSX_PAT が無いので、Open VSX へは上げません（Marketplace の公開は済んでいます）"
             exit 0
           fi
-          npx --yes ovsx@1.2.0 publish "release/novel-ai-assistant-$VERSION.vsix" -p "$OVSX_PAT"
+          npx --yes ovsx@1.2.0 publish "release/novel-ai-assistant-$VERSION.vsix"

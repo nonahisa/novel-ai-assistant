@@ -9,7 +9,7 @@
  *
  * **起動の道で待たない**（作者の前提、2026-10-31。0.115.2 で起動時の点検を
  * 4.2秒→2.0秒にしたばかり）。起動では globalState を同期で読むだけにし、
- * 確かめは作品一覧の初回描画のあとに裏で行う。
+ * 確かめは作品フォルダーの整備と同じ合図（作品一覧の初回描画か、60秒の上限）で裏で行う。
  *
  * **一度隠したら戻さない**（作者の指示、2026-10-31「一回消したものは、戻さない
  * ようにお願いします」）。同じ版のあいだは確かめ直さない。
@@ -52,6 +52,61 @@ export interface LmAvailabilityRecord {
 
 /** 確かめの答え。決められなかったときは `undefined` を返す */
 export type LmProbeResult = "available" | "unavailable";
+
+/**
+ * 拡張機能の package.json の `contributes` で、言語モデルを出す（提供する）ことを
+ * 名乗る貢献点。
+ *
+ * - `languageModelChatProviders`：VS Code 1.104 以降の正式な名前。1.144 の組み込みの
+ *   Copilot（`resources/app/extensions/copilot`）が `{ vendor: "copilot" }` などで名乗って
+ *   いることを手元で確かめた（2026-10-31）
+ * - `languageModels`：正式になる前（提案中の口だったころ）の名前。1.90 前後の
+ *   Copilot Chat が使っていた。手元に古い版が無く実物では確かめていない
+ *
+ * **拡張機能の名前（`github.copilot-chat` など）では見ない。** 名前を決め打ちすると、
+ * VS Code 側へ鍵を入れる別の拡張機能や、新しく出る拡張機能を見落とす
+ */
+export const LM_PROVIDER_CONTRIBUTION_KEYS = [
+  "languageModelChatProviders",
+  "languageModels",
+] as const;
+
+/** 入っている拡張機能の中に、言語モデルを出すものが1つでもあるか */
+export function hasLanguageModelProvider(
+  packageJsons: readonly unknown[]
+): boolean {
+  return packageJsons.some((pkg) => {
+    if (typeof pkg !== "object" || pkg === null) return false;
+    const contributes = (pkg as { contributes?: unknown }).contributes;
+    if (typeof contributes !== "object" || contributes === null) return false;
+    return LM_PROVIDER_CONTRIBUTION_KEYS.some((key) => {
+      const value = (contributes as Record<string, unknown>)[key];
+      // 配列でも1件の object でも名乗りとみなす（古い版は object 1つだった）
+      return Array.isArray(value) ? value.length > 0 : typeof value === "object" && value !== null;
+    });
+  });
+}
+
+/**
+ * 口を確かめた結果から「使えるか」を決める（作者の裁定、2026-10-31「モデルを出す
+ * 拡張が無ければ隠す」）。
+ *
+ * - 口が無い・一覧を引くと投げる → 使えない
+ * - モデルが1件以上 → 使える
+ * - **モデルが0件で、モデルを出す拡張機能も1つも無い** → 使えない
+ * - モデルが0件でも、モデルを出す拡張機能が入っている → 使える（Copilot の起動が
+ *   遅れているだけ・サインイン前の人を隠さない）
+ */
+export function judgeLmProbe(observed: {
+  apiPresent: boolean;
+  threw: boolean;
+  modelCount: number;
+  providerExtensionPresent: boolean;
+}): LmProbeResult {
+  if (!observed.apiPresent || observed.threw) return "unavailable";
+  if (observed.modelCount > 0) return "available";
+  return observed.providerExtensionPresent ? "available" : "unavailable";
+}
 
 /** globalState の値を読む。形が違えば「残っていない」扱い（作者が書く値ではない） */
 export function parseLmAvailabilityRecord(

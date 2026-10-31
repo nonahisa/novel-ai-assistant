@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import * as nodePath from "node:path";
 import { describe, expect, test } from "vitest";
-import { browserHiddenCommands } from "../../../src/core/processAvailability";
+import {
+  browserHiddenCommands,
+  PROCESSES_BLOCKED_CONTEXT,
+} from "../../../src/core/processAvailability";
 import {
   LM_AVAILABLE_CONTEXT,
   LM_REQUIRED_COMMANDS,
@@ -27,9 +30,17 @@ const manifest = JSON.parse(
 ) as { contributes: { menus: Record<string, MenuEntry[]> } };
 const menus = manifest.contributes.menus;
 
-/** `!isWeb` を（否定の形で）条件に含むか。`false` は誰にも出ないので隠れている */
+/**
+ * 隠す印（`!novelai.processesBlocked`）を条件に含むか。`false` は誰にも出ないので隠れている。
+ * `isWeb` では分けない（作者の裁定 2026-10-31「動くものは出す」。Codespaces では出す）
+ */
 const hidesOnWeb = (when: string | undefined): boolean =>
-  when === "false" || /(^|[^\w.])!isWeb\b/.test(when ?? "");
+  when === "false" ||
+  (when ?? "").split(/\s*(?:&&|\|\||\(|\))\s*/).includes(`!${PROCESSES_BLOCKED_CONTEXT}`);
+
+test("isWeb では分けない（画面だけブラウザの所でも、動くものは出す）", () => {
+  expect(JSON.stringify(manifest)).not.toMatch(/\bisWeb\b/);
+});
 
 const hidesWithoutLm = (when: string | undefined): boolean =>
   when === "false" || (when ?? "").includes(LM_AVAILABLE_CONTEXT);
@@ -55,7 +66,7 @@ describe("ブラウザ版で使えない命令は、どのメニューからも�
     });
   }
 
-  test("右クリック・ビューの見出しなど、ほかの出口にも !isWeb がある", () => {
+  test("右クリック・ビューの見出しなど、ほかの出口にも隠す印がある", () => {
     const set = new Set(commands);
     const leaks: string[] = [];
     for (const [where, entries] of Object.entries(menus)) {
@@ -74,7 +85,7 @@ describe("ブラウザ版で使えない命令は、どのメニューからも�
     for (const entries of Object.values(menus)) {
       for (const entry of entries) {
         if (entry.command === "novelai.gitSync") {
-          expect(entry.when ?? "").not.toMatch(/!isWeb/);
+          expect(entry.when ?? "").not.toContain(PROCESSES_BLOCKED_CONTEXT);
         }
       }
     }
@@ -123,17 +134,36 @@ describe("VS Code のAIの口を使う命令は、口が働かないエディタ
 describe("口の確かめは、起動の時間に入れない（作者の前提、2026-10-31）", () => {
   const extension = srcSource("extension.ts");
 
-  test("確かめは作品一覧の初回描画のあとに、待たずに起こす", () => {
-    const body = blockAfter(extension, "const noteFirstWorkListRender = (", {
+  /*
+    整備と同じ起こし役（`startWorkMaintenance`）に載せる。合図は作品一覧の初回描画で、
+    来なければ上限（60秒）で起きる——サイドバーを開かない起動でも抜け落ちない
+  */
+  test("確かめは整備と同じ合図（初回描画か60秒の上限）で、待たずに起こす", () => {
+    const body = blockAfter(extension, "const startWorkMaintenance = (", {
       where: "extension.ts",
     });
     expect(body).toContain("void lmGate.recheckInBackground()");
+    const render = blockAfter(extension, "const noteFirstWorkListRender = (", {
+      where: "extension.ts",
+    });
+    expect(render).toContain("maintenanceTrigger.signal()");
   });
 
   test("activate のどこでも、確かめを await していない", () => {
     expect(extension).not.toMatch(/await\s+lmGate\./);
     expect(extension).not.toMatch(/await\s+probeVsCodeLm\b/);
-    // 呼ぶのは初回描画の1か所だけ（起動の道にもう1か所足されていない）
+    // 起こすのは1か所だけ（起動の道にもう1か所足されていない）
     expect(extension.match(/lmGate\.recheckInBackground\(/g) ?? []).toHaveLength(1);
+  });
+
+  test("隠す印は activate の最初のほうで、待たずに立てる", () => {
+    const start = extension.indexOf("export async function activate(");
+    const at = extension.indexOf("PROCESSES_BLOCKED_CONTEXT,", start);
+    expect(start).toBeGreaterThan(0);
+    expect(at).toBeGreaterThan(start);
+    const before = extension.slice(start, at);
+    expect(before).toMatch(/void vscode\.commands\.executeCommand\(\s*"setContext",\s*$/);
+    // 最初の await より前（起動の待ちに入らない）
+    expect(before).not.toMatch(/\bawait\b/);
   });
 });

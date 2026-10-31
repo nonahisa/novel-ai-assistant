@@ -1,20 +1,20 @@
 ---
 name: release
-description: 「VSIX化して」と言われたとき、配布の区切りができたとき、GitHub Release を出すとき、Marketplace へ公開するとき、配布の記録を残すときに読む。PowerShell で通す手順、Marketplace へブラウザから上げる手順、どの段でどこまで上げるかの決まり（GitHubは全段、Marketplaceは1段目2段目）。
+description: 「VSIX化して」と言われたとき、配布の区切りができたとき、GitHub Release を出すとき、Marketplace へ公開するとき、配布の記録を残すときに読む。PowerShell で通す手順、Marketplace へブラウザから上げる手順、どの段でどこまで上げるかの決まり（GitHubは全段、Marketplace と Open VSX は1段目2段目とバグの直しを含むパッチ）。
 ---
 
 # 配布（VSIX化 → 検証 → GitHub Release → 記録）
 
-**どこまで上げるかは、版のどの段が動いたかで決まる**（作者の指示、2026-09-21）。
+**どこまで上げるかは、版のどの段が動いたかと、中身で決まる**（作者の指示、2026-09-21。2026-10-31 に「バグ対応はマーケットプレースにも出しましょう」で改めた）。
 
 | | いつ |
 |---|---|
 | **GitHub Release** | **全段**。パッチを上げるたびに出す |
-| **Marketplace** | **1段目（メジャー）・2段目（マイナー）が動いたときだけ** |
+| **Marketplace・Open VSX** | **1段目（メジャー）・2段目（マイナー）が動いたとき**と、**バグの直しを含むパッチの版** |
 
 **どちらも指示を待たずに自走してよい。** この機械に vsce の PAT は無い。Marketplace へは **GitHub Actions の Trusted Publishing（手順3の A）** で上げる。作者の Chrome から上げる道（手順3の B）は、A が使えないときの代わり。
 
-**3段目（パッチ）だけの版は Marketplace へ上げない。** 出るのは GitHub Release までで、**次にマイナーが動いたときに、溜まったパッチごと Marketplace へ届く。**
+**バグの直しを含まないパッチ（動作を変えない整理〈リファクタリング〉・文書・テストだけ）は、これまでどおり GitHub Release まで。** 次に Marketplace へ出す版で、溜まった分ごと届く。どの版を出すかは動かす人（リーダー）が決め、手順のファイルの `reason` に理由（「バグの直し」「機能」など）を書く。
 
 ## 手順
 
@@ -54,24 +54,30 @@ gh release create v<版> "release/novel-ai-assistant-<版>.vsix" --target <完�
 - **ノートを書いたら、スキル `yomiyasu:yomiyasu` を通してから出す**（当て方とスクリプトの呼び方はスキル `docs-sync`）（README・`package.json` の `description`・`CHANGELOG.md` の新しい版の項目を書いたときも同じ。外の読み手が読む説明文だけに当てる）
 - **全段で出すので、溜めない**（パッチごとに出す）。**配布のために版を上げ直さない**
 
-### 3. Marketplace へ公開する（**1段目・2段目が動いたときは指示を待たず自走**）
+### 3. Marketplace へ公開する（**1段目・2段目が動いたとき、バグの直しを含むパッチのときは指示を待たず自走**）
 
 #### A. GitHub Actions の Trusted Publishing（2026-10-30〜。こちらが先）
 
 手順2で GitHub Release に VSIX を付け、ノートの末尾に `SHA-256：<64桁>` を書いてあること。
 
 ```bash
-gh workflow run publish-marketplace.yml -f version=<版>
+gh workflow run publish-marketplace.yml -f version=<版> -f reason=<理由>
 ```
 
-- 手順のファイルは `.github/workflows/publish-marketplace.yml`。Release の VSIX を**作り直さずに**取り寄せ、ノートの SHA-256・VSIX の中の版と照らしてから `vsce publish --packagePath … --oidc` で上げる。**3段目（パッチ）だけの版は断る**
+- 手順のファイルは `.github/workflows/publish-marketplace.yml`。Release の VSIX を**作り直さずに**取り寄せ、ノートの SHA-256・VSIX の中の版と照らしてから `vsce publish --packagePath … --oidc` で上げる。**版の段では断らない**（2026-10-31 から。出すかどうかは動かす人が上の表で決める）。`reason`（「バグの直し」「機能」など）は必須で、ログの最初に出る
 - **作者の承認で止まる**（GitHub の Environment `marketplace`。承認者は nonahisa、動かせるのは main だけ）。動かしたら作者に「GitHub の Actions の画面で［Review deployments］→［Approve］を押してください」と頼む。**承認は作者が押す**（こちらから押さない。公開は取り消せない）。押す前に、上げるもの・バイト数・SHA-256・実機確認の済み具合を作者に示す
 - Marketplace 側の登録は、管理画面の「信頼できる出版」の `novel-ai-assistant-publish`（リポジトリ nonahisa/novel-ai-assistant・手順 publish-marketplace.yml・Environment marketplace）。**手順のファイルの名前か Environment を変えたら、この登録も直す**（食い違うと鍵の交換で断られる。PAT へは落ちない）
 - 終わったら手順8（`node scripts/checkMarketplace.mjs`）で反映を確かめる
 - vsce は 4.0.2 以降が要る（devDependencies と手順のファイルの `npx @vscode/vsce@<版>` をそろえる）
-- **Open VSX へも同じ手順の中で上げる**（作者の裁定 2026-10-31「進める」。設計書5.9）。Marketplace の段のあとに `npx ovsx@<版> publish <同じ VSIX> -p $OVSX_PAT` の段がある。承認は Marketplace と共通（同じ Environment の1回）
+- **Open VSX へも同じ手順の中で上げる**（作者の裁定 2026-10-31「進める」。設計書5.9）。Marketplace の段のあとに `npx ovsx@<版> publish <同じ VSIX>` の段がある（トークンは ovsx が環境変数 `OVSX_PAT` から自分で読む）。承認は Marketplace と共通（同じ Environment の1回）。落ちたら手順は赤になる（`continue-on-error` は付けない。気づけるように）
+  - **初回だけ、作者の手で準備が要る**（こちらは作らない。名前空間が無いと最初の公開が失敗するので省けない）：
+    1. Eclipse のアカウントを作る（https://accounts.eclipse.org/user/register 。プロフィールの GitHub ユーザー名に `nonahisa`）
+    2. https://open-vsx.org に GitHub でログイン → Settings で Eclipse アカウントを連携 → 発行者の同意書（Publisher Agreement）に署名
+    3. Settings → Access Tokens でトークンを発行（画面を閉じると二度と見られない）
+    4. 作者の PowerShell で1回だけ `npx ovsx@<版> create-namespace nonahisa -p <トークン>`
+    5. GitHub のリポジトリの Settings → Secrets and variables → Actions → New repository secret で `OVSX_PAT` にトークンを入れる
   - シークレット `OVSX_PAT`（GitHub のリポジトリの Settings → Secrets and variables → Actions）が無ければ、**その段だけ飛ばして**「上げません」の notice を出す。Marketplace の公開は止めない
-  - トークンは作者が Open VSX で作る（こちらは作らない）。Open VSX のトークンは期限を選べるので、切れたら同じ所へ入れ直す
+  - トークンが切れたら、作者に 3 と 5 をやり直してもらう
   - Open VSX の段が落ちても Marketplace は済んでいる。直したら、同じ版で手順を動かし直さず、作者の手元の PowerShell で `npx ovsx@<版> publish <VSIX> -p <トークン>` を打ってもらい Open VSX だけ上げる（トークンはこちらが持たない）（Marketplace は同じ版を二度上げられない）
   - 反映は https://open-vsx.org/extension/nonahisa/novel-ai-assistant で見る
 

@@ -111,7 +111,7 @@ description: コードを書く・直す前に読む（implementer は必ず、�
 - **`vscode.Uri.file()` を直接呼ばない。** `paths.toUri()` を使う（同じ理由）
 - **`node:` で始まるものを静的importしない。** どうしても要るなら、`canRunProcesses()` で確かめてから**動的import**する（`await import("./xxx.js")`。**`.js` 拡張子が要る**）
 - **静的importは、呼ばれなくても実行される。** 拡張機能が読み込まれた瞬間に走るので、Node専用のファイルを1つでも静的importしていると、ブラウザでは起動した瞬間に落ちる
-- **ブラウザで使えない操作は、消さずに押せなくして理由を出す**（`processAvailability.ts`）。`editorMode.ts`（編集者モード）と同じ考え方
+- **ブラウザで使えない操作は、メニューから隠し、ほかの道から呼ばれたら理由を出す**（`processAvailability.ts`。作者の裁定 2026-10-31。設計書5.8.16）
 - **確かめ方**：`platform: "browser"` でビルドが通っただけでは足りない（`external` 指定は「実行時まで解決を遅らせる」だけで、静的importは残る）。**`extension.ts` の静的importだけをたどって、Node専用のファイルへ届かないこと**を `test/unit/cross/browserReach.test.ts` が見張る（たどる部品は `test/unit/support/importGraph.ts`。`npm run check` に入っている）。落ちたら、名指しされたimportを動的importへ移す
 
 ## ボタンつきの知らせの答えを待つとき
