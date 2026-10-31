@@ -73,7 +73,7 @@ jobs:
           if [ "$inner" != "$VERSION" ]; then
             echo "::error::VSIX の中の版（$inner）が $VERSION と違います"; exit 1
           fi
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - name: Marketplace へ公開する（OIDC）
