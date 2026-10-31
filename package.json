@@ -1240,6 +1240,12 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.setWorkCompletion",
+        "title": "連載状態切替",
+        "icon": "$(pass)",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.showEditHistory",
         "title": "編集履歴",
         "category": "小説執筆",
@@ -1624,9 +1630,14 @@
           "group": "1_stats@11"
         },
         {
-          "command": "novelai.addWorkMemo",
+          "command": "novelai.setWorkCompletion",
           "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "1_stats@12"
+        },
+        {
+          "command": "novelai.addWorkMemo",
+          "when": "view == novelai.works && viewItem =~ /^work-/",
+          "group": "1_stats@13"
         },
         {
           "command": "novelai.gitSync",
@@ -1935,6 +1946,10 @@
         },
         {
           "command": "novelai.recordReaderStats",
+          "when": "true"
+        },
+        {
+          "command": "novelai.setWorkCompletion",
           "when": "true"
         },
         {

@@ -24,8 +24,10 @@ import { WritingStatsStore } from "../core/writingStatsStore";
 import { buildWritingStatsPanelHtml } from "../views/writingStatsPanelHtml";
 import {
   buildPostingSiteRecords,
+  buildWorkPostingFacts,
   isOpenableWorkUrl,
   type PostingSiteRecord,
+  type WorkPostingFacts,
 } from "../core/postingSiteRecords";
 import { PostingStore } from "../core/postingStore";
 import { POSTING_SITES } from "../models/posting";
@@ -155,6 +157,18 @@ export async function openWritingStatsPanel(
         outcome = { kind: "failed", message: detail };
       }
       panel.webview.postMessage({ type: "readerAdvice", site, outcome });
+      return;
+    }
+    if (parsed.type === "setWorkCompletion") {
+      /*
+        連載中／完結の切り替え（作者の指示 2026-11-01）。**画面の中で台帳を書かない**——
+        右クリックの「連載状態切替」と同じコマンドへ頼む。作品一覧の印と、この画面の
+        出し直しはコマンドの側が行う（道を1本にしておく）
+      */
+      await vscode.commands.executeCommand("novelai.setWorkCompletion", {
+        type: "work",
+        work,
+      });
       return;
     }
     if (parsed.type === "openExternal" && parsed.url) {
@@ -334,6 +348,8 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     // 読めなかったときは理由を添える（黙って消さない。0.33.9）
     siteRecords: siteRecords.records,
     siteRecordsError: siteRecords.error,
+    // 連載中／完結の印と食い違いの知らせ（「概要」に控えめに出す。2026-11-01）
+    workFacts: siteRecords.workFacts,
     // 達成の印（設計書6.3.8）。どの目標をいつ達成したかを残す
     achievements: await achievementRowsFor(work),
     // 1日・1か月の目標の最長の連続（2以上のときだけ。作者の裁定 2026-09-23）
@@ -412,6 +428,11 @@ async function episodeTextsFor(
 /** 「サイトの記録」の読み込み結果。読めなかったときは理由を持つ */
 export interface SiteRecordsResult {
   records: PostingSiteRecord[];
+  /**
+   * 作品としての連載の状態・食い違い・サイト間のタグの差（作者の指示 2026-11-01）。
+   * 台帳を読めなかったときは null（画面は「概要」の行を出さない）
+   */
+  workFacts: WorkPostingFacts | null;
   /** 読めなかった理由。読めていれば null（画面はこの行を出さない） */
   error: string | null;
 }
@@ -432,8 +453,10 @@ export async function readSiteRecords(
   work: WorkEntry
 ): Promise<SiteRecordsResult> {
   try {
+    const ledger = await new PostingStore(work).load();
     return {
-      records: buildPostingSiteRecords(await new PostingStore(work).load()),
+      records: buildPostingSiteRecords(ledger),
+      workFacts: buildWorkPostingFacts(ledger),
       error: null,
     };
   } catch (error) {
@@ -444,6 +467,6 @@ export async function readSiteRecords(
       作品: work.title,
       内容: detail,
     });
-    return { records: [], error: detail };
+    return { records: [], workFacts: null, error: detail };
   }
 }

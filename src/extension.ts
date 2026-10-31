@@ -566,6 +566,7 @@ import {
   configurePostingSites,
   postNewEpisode,
   recordRanking,
+  setWorkCompletion,
 } from "./features/postingKit";
 import {
   importReaderStats,
@@ -7742,6 +7743,20 @@ export async function activate(
       **執筆量パネルは作り直す。** 記録した順位が出るのはそこなので、
       開いたままだと「記録しました」と言われた順位が画面に無い。
     */
+    /*
+      作品の「連載中／完結」（作者の選択「両方」2026-11-01）。作者が決める印で、
+      ヘルパーから届くサイトの印では書き換えない。**作品一覧の行も撃つ**——完結の作品には
+      行に小さな印が付くので、順位の記録と違って一覧の見た目が変わる。
+      執筆統計の「概要」にも出るので、開いていれば作り直す
+    */
+    registerCommand("novelai.setWorkCompletion", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      const result = await setWorkCompletion(work);
+      if (!result.changed) return;
+      treeProvider.refresh(work.id);
+      await refreshWritingStatsPanel(work, deviceId);
+    }),
     registerCommand("novelai.recordRanking", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
       if (!work) return;

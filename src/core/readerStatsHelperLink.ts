@@ -14,6 +14,7 @@ import { SETUP_URI_PATH } from "./setupRequest";
 import { RUN_URI_PATH } from "./runRequest";
 import {
   matchReaderStatsEnvelope,
+  readerStatsFactsWouldChange,
   readerStatsRecordsFromEnvelope,
   readerStatsSourceLabel,
   type ReaderStatsBundle,
@@ -296,6 +297,8 @@ export interface ReaderStatsBundleWorkOutcome {
   readonly screens: number;
   readonly added: number;
   readonly repeated: number;
+  /** タグ・連載の状態を書き換えたか（2026-11-01。数が同じでも保存した印） */
+  readonly factsChanged?: boolean;
 }
 
 /** 束のうち、取り込めなかったもの */
@@ -340,6 +343,7 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
 } {
   const added = outcome.works.reduce((sum, work) => sum + work.added, 0);
   const repeated = outcome.works.reduce((sum, work) => sum + work.repeated, 0);
+  const factsChanged = outcome.works.some((work) => work.factsChanged === true);
   const perWork = outcome.works
     .map((work) => `「${work.title}」${work.screens}画面`)
     .join("・");
@@ -361,15 +365,22 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
   }
   if (outcome.works.length === 0) {
     parts.push("読者の反応を取り込めませんでした。");
-  } else if (added === 0) {
+  } else if (added === 0 && !factsChanged) {
     // 何も書いていない（保存もしていない）。押したのに何も起きない、にならないよう理由を言う
     parts.push(
       `読者の反応は、すでに取り込んだ数と同じでした：${perWork}（${repeated}件）。記録は変えていません。`
+    );
+  } else if (added === 0) {
+    // 数は同じで、タグか連載の状態だけが変わった（2026-11-01。黙って書き換えない）
+    parts.push(
+      `読者の反応は、すでに取り込んだ数と同じでした：${perWork}（${repeated}件）。` +
+        "タグ・連載の状態の変化を記録しました。"
     );
   } else {
     parts.push(
       `読者の反応を取り込みました：${perWork}` +
         (repeated > 0 ? `（同じ数で積まなかったもの ${repeated}件）` : "") +
+        (factsChanged ? "（タグ・連載の状態も記録しました）" : "") +
         "。"
     );
   }
@@ -418,8 +429,12 @@ export function readerStatsAlreadyImported(
   envelope: ReaderStatsEnvelope,
   ledger: PostingLedger
 ): boolean {
-  return readerStatsRecordsFromEnvelope(envelope).every((record) =>
-    repeatsReaderStats(ledger, record)
+  return (
+    readerStatsRecordsFromEnvelope(envelope).every((record) =>
+      repeatsReaderStats(ledger, record)
+    ) &&
+    // 数が同じでもタグや連載の状態が変わっていれば、取り込めば台帳が変わる（2026-11-01）
+    !readerStatsFactsWouldChange(ledger, envelope)
   );
 }
 

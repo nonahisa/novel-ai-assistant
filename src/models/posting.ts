@@ -279,6 +279,15 @@ export interface ReaderStatsMetricInfo {
    * 入れないため。
    */
   dailyChange?: true;
+  /**
+   * **小さいほど良い数**（順位。アルファポリスの累計・24時間の順位。作者の指示 2026-11-01）。
+   *
+   * ほかの欄は「増えたら良い」なので、グラフや増減の色をこの欄に当てると、
+   * 1位へ上がった（数が減った）のが悪くなったように見える。**この印のある欄は
+   * 増減のグラフ（`dailyChange`）に載せない**し、増減の色を付ける処理を足すときは
+   * ここを見て向きを逆にすること。いまは表の数として並ぶだけである。
+   */
+  lowerIsBetter?: true;
 }
 
 /**
@@ -367,7 +376,37 @@ export const SITE_READER_STATS_METRICS: Readonly<
     { key: "narou_weeklyReaders", label: "週間読者", unit: "人", example: "111" },
   ],
   kakuyomu: [],
-  alphapolis: [],
+  /*
+    アルファポリスの管理画面の数（ヘルパー 0.17.0。作者の指示 2026-11-01）。
+    共通の名前で来るもの（累計ポイント→points・お気に入り→bookmarks・いいね→likes）の
+    ほかに、意味の合わない数をここに置く。並びはヘルパーの取り決めの順のまま。
+
+    - **順位は小さいほど良い**（`lowerIsBetter`）。増減のグラフには載せない
+    - しおり（`alphapolis_bookmarks`）は共通の `bookmarks`（お気に入り＝人数）と別物。
+      話ごとに数える「しおりを挟んだ数」なので、同じ軸に乗せない
+    - ハートは何を数えるかが未確認（作者の画面の一覧の数）。名前は画面の呼び方のまま
+  */
+  alphapolis: [
+    { key: "alphapolis_points24h", label: "24時間ポイント", unit: "pt", example: "300" },
+    {
+      key: "alphapolis_rankTotal",
+      label: "累計ランキング",
+      unit: "位",
+      example: "1234",
+      lowerIsBetter: true,
+    },
+    {
+      key: "alphapolis_rank24h",
+      label: "24時間ランキング",
+      unit: "位",
+      example: "56",
+      lowerIsBetter: true,
+    },
+    { key: "alphapolis_hearts", label: "ハート", unit: "個", example: "7" },
+    { key: "alphapolis_bookmarks", label: "しおり", unit: "個", example: "12" },
+    { key: "alphapolis_yells", label: "エール", unit: "回", example: "3" },
+    { key: "alphapolis_typoReports", label: "誤字報告", unit: "回", example: "1" },
+  ],
   note: [],
 };
 
@@ -562,6 +601,246 @@ export interface PostingLedger {
    * この欄が無い台帳（この機能より前のもの）は空として読む。
    */
   readerStats: ReaderStatsRecord[];
+  /**
+   * サイトごとの今のタグ・連載の状態・覚えた理由（作者の指示 2026-11-01）。
+   * **サイトごとに1件**で、届いた封筒の `readAt` が新しいときだけ書き換える。
+   *
+   * 任意の欄にしてあるのは、この欄を知らない台帳（これより前のもの）を
+   * そのまま読めるようにするため。無ければ空として扱う。
+   */
+  siteFacts?: PostingSiteFacts[];
+  /**
+   * タグの付け替えの記録（作者の指示 2026-11-01「付け替えた日を残す」）。
+   * **追記だけ**で、古い記録は書き換えない（順位・読者の反応と同じ流儀）。
+   */
+  tagChanges?: PostingTagChange[];
+  /**
+   * 作品としての「連載中／完結」（作者の選択「両方」2026-11-01）。
+   *
+   * **作者が決めた値だけが入る。** サイトから届いた印は `siteFacts` にしか書かず、
+   * ここへ写す処理は無い（作者が決めた値が勝つ。実装ルール2）。まだ決めていない
+   * 作品では欄ごと無く、画面はサイトの印を「初めの値の提案」として出す。
+   */
+  completion?: PostingWorkCompletion;
+}
+
+/** 連載の状態（ヘルパーの封筒の `completion` と同じ値） */
+export const WORK_COMPLETIONS = ["ongoing", "completed"] as const;
+
+export type WorkCompletion = (typeof WORK_COMPLETIONS)[number];
+
+export function isWorkCompletion(value: unknown): value is WorkCompletion {
+  return (
+    typeof value === "string" &&
+    (WORK_COMPLETIONS as readonly string[]).includes(value)
+  );
+}
+
+/** 画面に出す呼び方 */
+export function workCompletionLabel(value: WorkCompletion): string {
+  return value === "completed" ? "完結" : "連載中";
+}
+
+/**
+ * その作品を覚えた理由（ヘルパー 0.16.0 の封筒の `ownedVia`）。
+ *
+ * - `owner-page`：本人しか開けない画面（カクヨムの作品管理など）で読んだ
+ * - `approved`：作者が［覚える］と答えた
+ *
+ * いまは**受け取って残すだけ**（使い道は別の担当の仕事。2026-11-01）。
+ */
+export const READER_STATS_OWNED_VIA = ["owner-page", "approved"] as const;
+
+export type ReaderStatsOwnedVia = (typeof READER_STATS_OWNED_VIA)[number];
+
+export function isReaderStatsOwnedVia(value: unknown): value is ReaderStatsOwnedVia {
+  return (
+    typeof value === "string" &&
+    (READER_STATS_OWNED_VIA as readonly string[]).includes(value)
+  );
+}
+
+/** 作品の連載の状態（作者が決めた値と、決めた日時） */
+export interface PostingWorkCompletion {
+  value: WorkCompletion;
+  /** 作者が切り替えた日時（ISO8601） */
+  setAt: string;
+}
+
+/**
+ * 1つのサイトの、いまの事柄（ヘルパーから届いたもの）。
+ *
+ * **欄ごとに日時を持つ**——タグはカクヨムの作品管理の画面にしか無く、アクセス数の
+ * 画面の封筒には入らない。欄ごとに「いつ読めた値か」を持たないと、タグの無い
+ * 新しい封筒がタグの日時だけを進めてしまう。
+ */
+export interface PostingSiteFacts {
+  site: PostingSiteId;
+  /** 画面の並びのまま。`[]` は「タグが0個と分かった」 */
+  tags?: string[];
+  tagsAt?: string;
+  completion?: WorkCompletion;
+  completionAt?: string;
+  ownedVia?: ReaderStatsOwnedVia;
+  ownedViaAt?: string;
+}
+
+/** タグの付け替え1回ぶん */
+export interface PostingTagChange {
+  site: PostingSiteId;
+  /** 付け替えに気づいた封筒の `readAt`（サイトで付け替えた正確な時刻ではない） */
+  changedAt: string;
+  before: string[];
+  after: string[];
+}
+
+/** タグ1つの長さの上限（ヘルパーとの取り決め。これを超えるものはタグとして読まない） */
+export const READER_STATS_TAG_MAX_LENGTH = 60;
+
+/** タグの数の上限（ヘルパーとの取り決め） */
+export const READER_STATS_TAGS_MAX = 50;
+
+/**
+ * タグの並びを読む。**読めなければ undefined**（欄ごと捨てる）。
+ *
+ * 前後の空白・空・重複はヘルパーでも落としてあるが、受ける側でも落とす（同じ整え方）。
+ * 文字列でない要素・長すぎるタグ・多すぎる数は、**直さずに欄ごと捨てる**
+ * ——一部だけ拾うと、作者には「タグを外した」ように見える。
+ */
+export function readReaderStatsTags(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const tags: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") return undefined;
+    const tag = entry.trim();
+    if (!tag || tags.includes(tag)) continue;
+    if (tag.length > READER_STATS_TAG_MAX_LENGTH) return undefined;
+    tags.push(tag);
+  }
+  return tags.length > READER_STATS_TAGS_MAX ? undefined : tags;
+}
+
+/** そのサイトの今の事柄。無ければ undefined */
+export function siteFactsFor(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): PostingSiteFacts | undefined {
+  return (ledger.siteFacts ?? []).find((entry) => entry.site === site);
+}
+
+/** 届いた事柄（封筒1件ぶん） */
+export interface SiteFactsInput {
+  site: PostingSiteId;
+  readAt: string;
+  tags?: readonly string[];
+  completion?: WorkCompletion;
+  ownedVia?: ReaderStatsOwnedVia;
+}
+
+/**
+ * 届いた事柄を台帳へ写す（作者の指示 2026-11-01）。
+ *
+ * - **`readAt` が手元の値より新しいか同じときだけ**書き換える。束は溜めた順に並ぶが、
+ *   作者が古い画面を後から溜め直すこともあるので、並び順ではなく日時で決める
+ *   （ヘルパーの `history.js` と同じ決め方）。同じ日時なら、あとから来た方を採る
+ * - タグが前の値と違えば、**付け替えの記録を1件足す**。前の値が無い初回は足さない
+ *   （「付け替えた」のではなく、初めて分かっただけ）。比べるのは**並びも含めて**
+ *   （サイトの画面の並びが変わったのも、作者が並べ直した跡なので残す）
+ * - **作品の印（`completion`）には触らない**（作者が決めた値が勝つ）
+ *
+ * @returns 写したあとの台帳と、何か変わったか
+ */
+export function withSiteFacts(
+  ledger: PostingLedger,
+  input: SiteFactsInput
+): { ledger: PostingLedger; changed: boolean } {
+  const current = siteFactsFor(ledger, input.site);
+  const next: PostingSiteFacts = { ...(current ?? { site: input.site }) };
+  let changed = false;
+  let tagChange: PostingTagChange | undefined;
+
+  if (input.tags !== undefined && isNotOlder(input.readAt, next.tagsAt)) {
+    const tags = [...input.tags];
+    const before = next.tags;
+    if (before === undefined || !sameTags(before, tags)) {
+      if (before !== undefined) {
+        tagChange = { site: input.site, changedAt: input.readAt, before: [...before], after: tags };
+      }
+      next.tags = tags;
+      next.tagsAt = input.readAt;
+      changed = true;
+    }
+  }
+  if (input.completion !== undefined && isNotOlder(input.readAt, next.completionAt)) {
+    if (next.completion !== input.completion) {
+      next.completion = input.completion;
+      next.completionAt = input.readAt;
+      changed = true;
+    }
+  }
+  if (input.ownedVia !== undefined && isNotOlder(input.readAt, next.ownedViaAt)) {
+    if (next.ownedVia !== input.ownedVia) {
+      next.ownedVia = input.ownedVia;
+      next.ownedViaAt = input.readAt;
+      changed = true;
+    }
+  }
+  if (!changed) return { ledger, changed: false };
+
+  const facts = ledger.siteFacts ?? [];
+  return {
+    changed: true,
+    ledger: {
+      ...ledger,
+      siteFacts: current
+        ? facts.map((entry) => (entry.site === input.site ? next : entry))
+        : [...facts, next],
+      ...(tagChange ? { tagChanges: [...(ledger.tagChanges ?? []), tagChange] } : {}),
+    },
+  };
+}
+
+/**
+ * 届いた事柄で、台帳が変わるか（自動取り込みの「もう取り込んだか」の見分けに使う）。
+ * 書き換えの判断を写さないよう、`withSiteFacts` を当てて確かめる
+ */
+export function siteFactsWouldChange(ledger: PostingLedger, input: SiteFactsInput): boolean {
+  return withSiteFacts(ledger, input).changed;
+}
+
+/**
+ * 作者が作品の連載の状態を決める（`null` は「決めない」に戻す）。
+ * **作者の操作からだけ呼ぶ**——サイトの印から呼ぶ経路を作らない
+ */
+export function withWorkCompletion(
+  ledger: PostingLedger,
+  value: WorkCompletion | null,
+  setAt: string
+): PostingLedger {
+  if (value === null) {
+    const next = { ...ledger };
+    delete next.completion;
+    return next;
+  }
+  return { ...ledger, completion: { value, setAt } };
+}
+
+/** タグの並びが同じか（並びも含めて比べる。`withSiteFacts` の注記） */
+function sameTags(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((tag, index) => tag === right[index]);
+}
+
+/**
+ * 届いた日時が、手元の値より古くないか。手元に無ければ新しい扱い。
+ * **日時として読めないものは比べずに新しい扱い**——台帳の日時は作者が手で直すこともあり、
+ * 読めないからといって以後ずっと書き換えられないのは困る
+ */
+function isNotOlder(incoming: string, held: string | undefined): boolean {
+  if (held === undefined) return true;
+  const a = Date.parse(incoming);
+  const b = Date.parse(held);
+  if (Number.isNaN(a) || Number.isNaN(b)) return true;
+  return a >= b;
 }
 
 export function emptyPostingLedger(): PostingLedger {
@@ -894,6 +1173,38 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
     (record): record is ReaderStatsRecord => record !== null
   );
 
+  /*
+    サイトごとの今の事柄・タグの付け替え・作品の連載の状態（作者の指示 2026-11-01）。
+    **欄が無ければ無いまま**（これより前の台帳を読めなくしない）。壊れていれば
+    **直さずに止める**——とくに `completion` は作者が決めた値で、推測で読み替えると
+    作者の決定を書き換えたことになる（実装ルール2）。
+  */
+  const siteFacts = optionalObjectArray(value.siteFacts, "siteFacts", (entry, entryPath) =>
+    readSiteFactsRow(entry, entryPath)
+  );
+  if (siteFacts) {
+    const seen = new Set<PostingSiteId>();
+    siteFacts.forEach((entry, index) => {
+      // 同じサイトが2件あると、どちらが今の値か決められない
+      if (seen.has(entry.site)) invalid(`siteFacts[${index}].site`);
+      seen.add(entry.site);
+    });
+  }
+  const tagChanges = optionalObjectArray(value.tagChanges, "tagChanges", (entry, entryPath) => {
+    const site = requireSiteId(entry.site, `${entryPath}.site`);
+    requireNonEmptyString(entry.changedAt, `${entryPath}.changedAt`);
+    const before = readReaderStatsTags(entry.before) ?? invalid(`${entryPath}.before`);
+    const after = readReaderStatsTags(entry.after) ?? invalid(`${entryPath}.after`);
+    return { site, changedAt: (entry.changedAt as string).trim(), before, after };
+  });
+  let completion: PostingWorkCompletion | undefined;
+  if (value.completion !== undefined) {
+    const raw = objectValue(value.completion, "completion");
+    if (!isWorkCompletion(raw.value)) invalid("completion.value");
+    requireNonEmptyString(raw.setAt, "completion.setAt");
+    completion = { value: raw.value as WorkCompletion, setAt: (raw.setAt as string).trim() };
+  }
+
   return {
     ledger: {
       schemaVersion:
@@ -903,6 +1214,10 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
       posts,
       rankings,
       readerStats,
+      // 空の入れ物は持ち歩かない（読んで書き戻すだけで中身が増えないように）
+      ...(siteFacts?.length ? { siteFacts } : {}),
+      ...(tagChanges?.length ? { tagChanges } : {}),
+      ...(completion ? { completion } : {}),
     },
     skippedReaderStats: skippedReaderStatsRows.length,
     skippedReaderStatsRows,
@@ -938,6 +1253,40 @@ function parseReaderStatsMetrics(
   );
   const sawUnknown = Object.keys(value).some((key) => !known.has(key));
   return { metrics, sawUnknown };
+}
+
+/**
+ * サイトごとの今の事柄を1件読む（作者の指示 2026-11-01）。**壊れていれば例外**。
+ *
+ * 値と日時は対で持つ（`PostingSiteFacts` の注記）。片方だけの欄は、いつの値か
+ * 分からないので直さずに止める。
+ */
+function readSiteFactsRow(entry: Record<string, unknown>, entryPath: string): PostingSiteFacts {
+  const site = requireSiteId(entry.site, `${entryPath}.site`);
+  const facts: PostingSiteFacts = { site };
+  const pairs = [
+    ["tags", "tagsAt"],
+    ["completion", "completionAt"],
+    ["ownedVia", "ownedViaAt"],
+  ] as const;
+  for (const [key, atKey] of pairs) {
+    if (entry[key] === undefined && entry[atKey] === undefined) continue;
+    requireNonEmptyString(entry[atKey], `${entryPath}.${atKey}`);
+    const at = (entry[atKey] as string).trim();
+    if (key === "tags") {
+      facts.tags = readReaderStatsTags(entry.tags) ?? invalid(`${entryPath}.tags`);
+      facts.tagsAt = at;
+    } else if (key === "completion") {
+      if (!isWorkCompletion(entry.completion)) invalid(`${entryPath}.completion`);
+      facts.completion = entry.completion;
+      facts.completionAt = at;
+    } else {
+      if (!isReaderStatsOwnedVia(entry.ownedVia)) invalid(`${entryPath}.ownedVia`);
+      facts.ownedVia = entry.ownedVia;
+      facts.ownedViaAt = at;
+    }
+  }
+  return facts;
 }
 
 /**

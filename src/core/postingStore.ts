@@ -249,6 +249,17 @@ export class PostingStore {
           書く**（読めないからといって落とさない）。
         */
         ...(readerStats.length ? { readerStats } : {}),
+        /*
+          サイトごとの今のタグ・連載の状態、タグの付け替え、作品の連載の状態
+          （作者の指示 2026-11-01）。**ここで名指しして書かないと、読めても保存で消える。**
+          使っていない作品の台帳を膨らませないよう、無ければ欄ごと書かない。
+
+          **この欄を知らない古い版が保存すると、3つとも消える**（古い版は名指しした欄しか
+          書かない。サイト固有の指標と同じ「消せない限界」。設計書6.79.7）。
+        */
+        ...(ledger.siteFacts?.length ? { siteFacts: ledger.siteFacts } : {}),
+        ...(ledger.tagChanges?.length ? { tagChanges: ledger.tagChanges } : {}),
+        ...(ledger.completion ? { completion: ledger.completion } : {}),
       },
       null,
       2

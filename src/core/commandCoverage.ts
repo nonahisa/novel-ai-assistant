@@ -252,6 +252,8 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.recordRanking": { class: "C4", label: "ランキング記録", reason: "作者の判断" },
   "novelai.importReaderStats": { class: "C3", label: "読者反応自動取込" },
   "novelai.recordReaderStats": { class: "C4", label: "読者反応手動入力", reason: "作者の判断" },
+  // 作品の連載中／完結は作者が決める印（2026-11-01）。外部AIに決めさせない
+  "novelai.setWorkCompletion": { class: "C4", label: "連載状態切替", reason: "作者の判断" },
   // ── 外部AI・画面の並び
   "novelai.toggleExternalAccess": { class: "B", label: "外部AI許可／取消" },
   "novelai.writeAiInstructions": { class: "C4", label: "外部AI指示書設置", reason: "設定" },

@@ -75,7 +75,9 @@ export interface ReaderChangeChart extends ReaderChart {
  * 負を受ける欄とグラフに描く欄が食い違わないようにする。
  */
 const CHANGE_METRICS = ALL_READER_STATS_METRICS.filter(
-  (info) => info.dailyChange === true
+  // **小さいほど良い欄（順位）は載せない**（2026-11-01）。増減の棒は「増えた＝良い」と
+  // 読まれるので、順位を載せると1位へ上がったのが悪くなったように見える
+  (info) => info.dailyChange === true && info.lowerIsBetter !== true
 );
 
 const CHART_PERIODS: readonly Exclude<ReaderStatsPeriod, "total">[] = [

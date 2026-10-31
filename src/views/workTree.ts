@@ -851,9 +851,18 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       // 控えの値は**頭に「前回の値」と付ける**（設計書6.107）。行は後ろから
       // 切れるので、後ろに添えると長い作品名の行で読めなくなる
       const stale = node.snapshot === "stale";
+      /*
+        **完結の作品だけ**、説明の後ろに小さく「完結」と添える（作者の指示 2026-11-01）。
+        連載中は何も付けない（ほとんどの作品が連載中で、全部の行に字が並ぶとうるさい）。
+        見るのは**作者が決めた印だけ**——サイトから届いた印は提案でしかないので、
+        作者が「連載状態切替」で決めるまで一覧には出さない。台帳を読めない作品は印なし
+      */
+      const completed = this.posting.get(work.id)?.completion?.value === "completed";
       item.description = `${stale ? "（前回の値）" : ""}${
         stats.fileCount
-      }ファイル / ${modeLabel}${formatCount(pickCount(stats.totals, mode))}字`;
+      }ファイル / ${modeLabel}${formatCount(pickCount(stats.totals, mode))}字${
+        completed ? "・完結" : ""
+      }`;
       item.tooltip = new vscode.MarkdownString(
         [
           `**${work.title}**`,
@@ -871,6 +880,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
             toManuscriptPages(stats.totals.manuscriptLines)
           )} 枚`,
           `- ファイル数: ${stats.fileCount}`,
+          ...(completed ? ["- 連載の状態: 完結（作者が決めた印）"] : []),
           // 種類ごとの目安（台本の分数・エッセイの読了時間。設計書6.109）
           ...(workMeasure ? [`- ${workMeasure}`] : []),
           ...(this.syncTooltip?.(work.id) ?? []),
@@ -1662,6 +1672,13 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         worker()
       )
     );
+    /*
+      作品の行の「完結」の印に要る投稿状態を読む（作者の指示 2026-11-01）。行は畳んだまま
+      描かれるので、話の行を開くまで待つと印が出ない。**走査の4件の枠の外で読む**——
+      枠の中で待つと、次の作品の走査の始まりが台帳の読み込みのぶん遅れる。
+      読めない台帳は印なし（`loadPosting` が受け止める。一覧は止めない）
+    */
+    await Promise.all(works.map((w) => this.loadPosting(w)));
     return nodes;
   }
 

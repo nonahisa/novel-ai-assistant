@@ -4,10 +4,14 @@ import {
   postingSiteInfo,
   rankingsForSite,
   readerStatsForSite,
+  siteFactsFor,
   siteProfile,
+  workCompletionLabel,
   type PostingLedger,
   type PostingRankingRecord,
   type PostingSiteId,
+  type PostingTagChange,
+  type WorkCompletion,
   type ReaderStatsMetrics,
   type ReaderStatsRecord,
   type ReaderStatsSource,
@@ -104,6 +108,54 @@ export interface PostingSiteRecord {
   } | null;
   /** PVのグラフ（各話・日・月・年・合計）。材料の無いグラフは null */
   readerCharts: ReaderCharts;
+  /**
+   * そのサイトの今のタグ（ヘルパーから届いたもの。作者の指示 2026-11-01）。
+   * **`[]` は「タグが0個と分かった」、null は「まだ届いていない」**
+   */
+  tags: string[] | null;
+  /** 今のタグを読んだ日時（封筒の readAt）。タグが無ければ null */
+  tagsAt: string | null;
+  /** タグの付け替えの記録（新しい順）。1件も無ければ空 */
+  tagHistory: PostingTagChange[];
+  /** そのサイトの連載の状態（届いた印）。無ければ null */
+  completion: WorkCompletion | null;
+}
+
+/** サイトの印が作品の印と食い違ったもの */
+export interface WorkCompletionMismatch {
+  site: PostingSiteId;
+  label: string;
+  completion: WorkCompletion;
+  completionLabel: string;
+}
+
+/** サイト間のタグの食い違い（そのサイトにしか無いタグ） */
+export interface SiteTagDifference {
+  site: PostingSiteId;
+  label: string;
+  only: string[];
+}
+
+/**
+ * 作品としての事柄（執筆統計の「概要」と「読者の反応」に出す。作者の指示 2026-11-01）。
+ *
+ * **作品の印は作者が決めた値だけ**（`PostingLedger.completion`）。サイトの印は
+ * 食い違いの知らせと、まだ決めていないときの提案にだけ使い、作品の印を書き換えない。
+ */
+export interface WorkPostingFacts {
+  /** 作者が決めた連載の状態。決めていなければ null */
+  completion: { value: WorkCompletion; label: string; setAt: string } | null;
+  /**
+   * 作者がまだ決めていないときの提案（届いた印が全サイトで揃っているときだけ）。
+   * 揃っていない・届いていない・作者が決めているときは null
+   */
+  suggestion: { value: WorkCompletion; label: string } | null;
+  /** 作者の値と食い違うサイト（作者が決めていなければ空） */
+  mismatches: WorkCompletionMismatch[];
+  /** 画面に出す1文（食い違いがなければ null） */
+  notice: string | null;
+  /** サイト間のタグの食い違い。タグの届いたサイトが2つ未満なら空 */
+  tagDifferences: SiteTagDifference[];
 }
 
 /**
@@ -251,9 +303,30 @@ export function buildPostingSiteRecords(
       (entry) => entry.site === info.id
     );
     const rates = computeReaderRates(inLedgerOrder);
-    // 出すのは「作品情報がある」か「順位がある」か「反応がある」ときだけ。
+    const facts = siteFactsFor(ledger, info.id);
+    const tagHistory = (ledger.tagChanges ?? [])
+      .filter((change) => change.site === info.id)
+      // 新しい順（台帳は追記なので逆に並べる。同じ日時なら、あとから足したほうを先に）
+      .map((change, index) => ({ change, index }))
+      .sort((left, right) =>
+        left.change.changedAt === right.change.changedAt
+          ? right.index - left.index
+          : left.change.changedAt < right.change.changedAt
+            ? 1
+            : -1
+      )
+      .map(({ change }) => change);
+    // 出すのは「作品情報がある」か「順位がある」か「反応がある」か
+    // 「タグ・連載の状態が届いている」ときだけ。
     // 登録しただけのサイトは、まだ見せるものが無い（空の行を増やさない）
-    if (!profile && history.length === 0 && grouped.length === 0) {
+    if (
+      !profile &&
+      history.length === 0 &&
+      grouped.length === 0 &&
+      facts?.tags === undefined &&
+      facts?.completion === undefined &&
+      tagHistory.length === 0
+    ) {
       continue;
     }
 
@@ -295,10 +368,94 @@ export function buildPostingSiteRecords(
         inLedgerOrder,
         rates.base?.episode ?? null
       ),
+      tags: facts?.tags ?? null,
+      tagsAt: facts?.tags !== undefined ? facts.tagsAt ?? null : null,
+      tagHistory,
+      completion: facts?.completion ?? null,
     });
   }
 
   return records;
+}
+
+/**
+ * 作品としての事柄を組む（作者の指示 2026-11-01）。台帳を読むだけで書き換えない。
+ *
+ * サイトの並びは `POSTING_SITES` の順（画面ごとに順番が変わらないように）。
+ */
+export function buildWorkPostingFacts(ledger: PostingLedger): WorkPostingFacts {
+  const siteCompletions = POSTING_SITES.flatMap((info) => {
+    const value = siteFactsFor(ledger, info.id)?.completion;
+    return value === undefined
+      ? []
+      : [
+          {
+            site: info.id,
+            label: info.label,
+            completion: value,
+            completionLabel: workCompletionLabel(value),
+          },
+        ];
+  });
+  const authored = ledger.completion;
+
+  let mismatches: WorkCompletionMismatch[] = [];
+  let suggestion: WorkPostingFacts["suggestion"] = null;
+  let notice: string | null = null;
+  if (authored) {
+    mismatches = siteCompletions.filter((entry) => entry.completion !== authored.value);
+    if (mismatches.length > 0) {
+      // 「作品は完結にしてありますが、カクヨムでは連載中です」。直すのはサイトの側か作品の印か、
+      // どちらが正しいかはこちらに分からないので、両方の道を言う
+      notice =
+        `作品は${workCompletionLabel(authored.value)}にしてありますが、` +
+        mismatches.map((entry) => `${entry.label}では${entry.completionLabel}`).join("、") +
+        "です（サイトの設定か、作品の印を見直してください）。";
+    }
+  } else if (siteCompletions.length > 0) {
+    const values = new Set(siteCompletions.map((entry) => entry.completion));
+    if (values.size === 1) {
+      const value = siteCompletions[0].completion;
+      suggestion = { value, label: workCompletionLabel(value) };
+    } else {
+      // 決めていない作品で、サイトどうしが食い違う。どちらを採るかは作者が決める
+      notice =
+        "連載の状態がサイトによって違います（" +
+        siteCompletions.map((entry) => `${entry.label}は${entry.completionLabel}`).join("、") +
+        "）。作品の印を決めると、食い違うサイトを知らせます。";
+    }
+  }
+
+  return {
+    completion: authored
+      ? { value: authored.value, label: workCompletionLabel(authored.value), setAt: authored.setAt }
+      : null,
+    suggestion,
+    mismatches,
+    notice,
+    tagDifferences: tagDifferences(ledger),
+  };
+}
+
+/**
+ * サイト間のタグの食い違い（作者の使い道「サイトごとの食い違いを見る」）。
+ *
+ * **並びは比べない**——サイトごとに画面の並べ方が違い、同じタグの組なら食い違いではない。
+ * 片方にしか無いタグがあるサイトだけを挙げる。タグの届いたサイトが2つ未満なら比べない。
+ */
+function tagDifferences(ledger: PostingLedger): SiteTagDifference[] {
+  const withTags = POSTING_SITES.flatMap((info) => {
+    const tags = siteFactsFor(ledger, info.id)?.tags;
+    return tags === undefined ? [] : [{ site: info.id, label: info.label, tags }];
+  });
+  if (withTags.length < 2) return [];
+  return withTags.flatMap((entry) => {
+    const others = new Set(
+      withTags.filter((other) => other.site !== entry.site).flatMap((other) => other.tags)
+    );
+    const only = entry.tags.filter((tag) => !others.has(tag));
+    return only.length === 0 ? [] : [{ site: entry.site, label: entry.label, only }];
+  });
 }
 
 function toRow(record: PostingRankingRecord): PostingRankingRow {
