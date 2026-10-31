@@ -88,6 +88,9 @@ export async function openAllWorksWritingStatsPanel(
   const nonce = createNonce();
   created.webview.html = buildWritingStatsPanelHtml(nonce, created.webview.cspSource, {
     hasEpisodesTab: false,
+    // 投稿サイトの台帳は作品ごとにしか無い。全作品の合計では並べるものが無いので、
+    // 「読者の反応」のタブも出さない（空の案内だけのタブを置かない。設計書6.3.9）
+    hasReadersTab: false,
   });
 
   created.webview.onDidReceiveMessage(async (message: unknown) => {

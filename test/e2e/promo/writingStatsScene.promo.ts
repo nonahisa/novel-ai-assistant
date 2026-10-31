@@ -34,12 +34,17 @@ test("執筆統計の広報素材を撮る", async () => {
       await runCommand(page, "執筆統計");
       await waitUntil(async () => (frame = await statsFrame(page)) !== undefined, "執筆統計の画面が開く", 30_000);
       await waitUntil(async () => ((await frame?.locator("#chart rect.bar").count()) ?? 0) >= 30, "日ごとの棒が描かれる", 20_000);
+      // 開いたときは「概要」の面（設計書6.3.9）。日ごとのグラフから見せる
+      await frame?.locator('.tab[data-page="trend"]').click({ timeout: 5_000 }).catch(() => undefined);
     },
     play: async ({ page }, caption) => {
       await caption("保存のたびに、書いた量が日ごとに記録される");
       await page.waitForTimeout(4_500);
       await caption("目標の線と、達成率・連続日数も見られる");
+      // 達成率・連続日数の札は「概要」にある
+      await frame?.locator('.tab[data-page="overview"]').click({ timeout: 5_000 }).catch(() => undefined);
       await page.waitForTimeout(4_500);
+      await frame?.locator('.tab[data-page="trend"]').click({ timeout: 5_000 }).catch(() => undefined);
       await caption("日次・週次・月次・年次のグラフに切り替えられる");
       await page.waitForTimeout(1_000);
       const week = frame?.getByText("週次", { exact: false }).first();

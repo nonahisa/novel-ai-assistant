@@ -123,6 +123,8 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
       await waitUntil(async () => (stats = await siteRecordsFrame(page)) !== undefined, "執筆統計に「サイトの記録」の節が出る", 30_000);
       if (!stats) throw new Error("執筆統計が見つかりません");
       const statsFrame = stats;
+      // サイトの記録は「読者の反応」のタブにある（設計書6.3.9）。作者と同じく、タブを押してから読む
+      await statsFrame.locator('.tab[data-page="readers"]').click();
       const siteText = () =>
         statsFrame.evaluate(() => {
           const heading = Array.from(document.querySelectorAll("h3")).find((h) => h.textContent === "サイトの記録");

@@ -3,7 +3,7 @@
  *
  * 実機確認リスト 0.76.5〜0.83.13 の節の項目を機械へ移したもの（2026-10-04）：
  * - 「目標 ○」の札が、縦軸の数字・棒と重ならず、収まらないときは棒の並びの外（右）へ出る
- * - 開いたとき、日ごとのグラフが**右端（今日の側）から**見えている。左へ送ったあとは、描き直しで
+ * - 「執筆の推移」を開いたとき、日ごとのグラフが**右端（今日の側）から**見えている。左へ送ったあとは、描き直しで
  *   引き戻されない。「話ごとの文字数」から戻ったとき・日次⇔週次を切り替えたときは右端から見える
  *
  * 描かれた SVG の矩形（`getBoundingClientRect`）で見る。**色や読みやすさの良し悪しは見ていない。**
@@ -38,6 +38,8 @@ async function openStats(session: E2ESession): Promise<Frame> {
   if (!frame) throw new Error("執筆統計の面が見つかりません");
   const found = frame;
   await waitUntil(async () => (await found.locator("#chart rect.bar").count()) >= 30, "日ごとの棒が描かれる", 20_000);
+  // 開いたときは「概要」の面（設計書6.3.9）。グラフは「執筆の推移」にあるので、見て測る前に切り替える
+  await found.locator('.tab[data-page="trend"]').click();
   return found;
 }
 
@@ -95,7 +97,7 @@ test("左へ送ったあと描き直されても引き戻されず、話ごと�
     await setWorkKind(session.page, "エッセイ・記事");
     await frame.locator('.tab[data-page="episodes"]').click();
     await waitUntil(async () => (await frame.locator("#episode-cards .card", { hasText: "種類の目安" }).count()) === 1, "描き直された（種類の目安の札が出る）", 30_000);
-    await frame.locator('.tab[data-page="writing"]').click();
+    await frame.locator('.tab[data-page="trend"]').click();
     // 戻ると右端へ合わせる道が働くので、その前の「描き直しのあいだ」の状態は、左へ送り直して見る
     await frame.evaluate(() => {
       ((document.getElementById("chart") as Element).parentElement as HTMLElement).scrollLeft = 0;
@@ -118,7 +120,7 @@ test("左へ送ったあと描き直されても引き戻されず、話ごと�
     await frame.locator('.tab[data-page="episodes"]').click();
     await setWorkKind(session.page, "エッセイ・記事");
     await waitUntil(async () => (await frame.locator("#episode-cards .card", { hasText: "種類の目安" }).count()) === 1, "隠れているあいだに描き直される", 30_000);
-    await frame.locator('.tab[data-page="writing"]').click();
+    await frame.locator('.tab[data-page="trend"]').click();
     await waitUntil(async () => (await chartScroll(frame)).atRight, "戻ると右端から見える", 10_000);
   }, LAUNCH);
 });

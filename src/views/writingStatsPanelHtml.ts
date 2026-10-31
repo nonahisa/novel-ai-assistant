@@ -12,18 +12,35 @@ import { READER_STATS_VISIBLE_ROWS } from "../core/postingSiteRecords";
  *
  * **全作品の執筆量パネルとこのHTMLを共有する。** グラフ・カード・
  * 内訳テーブルの組み方は1作品でも全作品でも同じで、違うのは
- * 「話ごとの文字数」タブの有無（全作品では話数の単位が作品ごとに
- * バラバラで意味を持たない）だけ。別ファイルに複製すると、
- * グラフの目盛り間引きのような細かい修正が2箇所に必要になる。
+ * 「話ごと」「読者の反応」タブの有無（全作品では話数の単位が作品ごとに
+ * バラバラで意味を持たず、投稿サイトの台帳も作品ごとにしか無い）だけ。
+ * 別ファイルに複製すると、グラフの目盛り間引きのような細かい修正が
+ * 2箇所に必要になる。
+ *
+ * **タブは4つ**（作者の指示、2026-11-01「タブを有効活用して分け」。設計書6.3.9）。
+ * 以前は「執筆量」の1面に公募・数の札・目標・達成・グラフ・端末・サイトの記録が
+ * 縦に詰め込まれ、開くたびに長く送らないと目当ての所へ着かなかった。
+ * - 概要：締切・数の札・目標への入口・達成（開いたときに最初に見える所）
+ * - 執筆の推移：粒度の切り替え・グラフ・グラフの注記・端末ごとの内訳
+ * - 話ごと：話ごとの文字数（話の無い作品・全作品では出さない）
+ * - 読者の反応：投稿サイトの記録・増減・AIの助言（全作品では出さない）
  */
 export function buildWritingStatsPanelHtml(
   nonce: string,
   cspSource: string,
-  options: { hasEpisodesTab?: boolean; unitNoun?: string } = {}
+  options: { hasEpisodesTab?: boolean; hasReadersTab?: boolean; unitNoun?: string } = {}
 ): string {
   const hasEpisodesTab = options.hasEpisodesTab ?? true;
+  const hasReadersTab = options.hasReadersTab ?? true;
   // SNS記事は「話」ではなく「投稿」。数えるものが違えば呼び方も違う
   const unitNoun = options.unitNoun ?? "話";
+  // data-page の鍵は画面の自動テストが探すので変えない（episodes は以前からの鍵）
+  const tabs: Array<{ key: string; label: string }> = [
+    { key: "overview", label: "概要" },
+    { key: "trend", label: "執筆の推移" },
+    ...(hasEpisodesTab ? [{ key: "episodes", label: `${unitNoun}ごと` }] : []),
+    ...(hasReadersTab ? [{ key: "readers", label: "読者の反応" }] : []),
+  ];
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -42,52 +59,93 @@ body {
   color: var(--vscode-foreground);
   background: var(--vscode-editor-background);
 }
+/*
+  見た目の整理（作者の指示、2026-11-01「シンプルかつおしゃれに」）。
+  **色はテーマの変数だけで作る**——明るい・暗い・ハイコントラストのどれでも
+  読めるように、固定の色は足さない（達成の緑のような意味の色は既存のまま）。
+  段の間隔は1つの値（--gap）にそろえ、見出しは小さく、数字は大きくする。
+*/
+:root { --gap: 20px; }
 header {
   position: sticky;
   top: 0;
   z-index: 1;
   background: var(--vscode-editor-background);
   border-bottom: 1px solid var(--vscode-panel-border);
-  padding: 10px 16px 0;
+  padding: 12px 16px 0;
 }
-h1 { font-size: 1.2em; margin: 0 0 8px; }
-.tabs { display: flex; gap: 4px; }
+h1 { font-size: 1.05em; font-weight: 600; margin: 0 0 4px; }
+/*
+  タブは下線だけで今のタブを示す、軽い形にする（ボタンのような枠にしない）。
+  狭い窓（エディターの横に並べた 360px ほど）では折り返し、横に送らせない
+*/
+.tabs { display: flex; flex-wrap: wrap; gap: 0 20px; }
 .tab {
-  padding: 6px 14px;
+  padding: 6px 0 7px;
+  margin-bottom: -1px;
   cursor: pointer;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 4px 4px 0 0;
+  user-select: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
   color: var(--vscode-descriptionForeground);
 }
+.tab:hover { color: var(--vscode-foreground); }
 .tab.active {
   color: var(--vscode-foreground);
-  border-color: var(--vscode-panel-border);
-  background: var(--vscode-editorWidget-background, transparent);
+  border-bottom-color: var(--vscode-panelTitle-activeBorder, var(--vscode-focusBorder));
 }
-main { padding: 16px; }
+.tab:focus { outline: none; }
+.tab:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+main { padding: var(--gap) 16px; }
 section.page { display: none; }
-section.page.active { display: block; }
-.cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+/*
+  面の中は縦に積み、段の間隔を gap の1つで決める。中身の無い段（締切の無い
+  作品の #contest など）は消して、空いた隙間が残らないようにする
+*/
+section.page.active { display: flex; flex-direction: column; gap: var(--gap); }
+section.page > * { margin: 0; min-width: 0; }
+section.page > :empty { display: none; }
+h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+  margin: 0 0 8px;
+}
+/*
+  数の札は同じ大きさのカードを並べ、狭い窓では折り返す（横に送らせない）。
+  grid にすると、同じ行の札は高さもそろう
+*/
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
 /* 締切の帯。応募作ではここが最初に目に入る場所になる */
 .contest {
   border-left: 3px solid var(--vscode-focusBorder);
-  padding: 8px 12px;
-  margin-bottom: 16px;
+  border-radius: 0 4px 4px 0;
+  padding: 10px 14px;
   background: var(--vscode-textBlockQuote-background, rgba(127,127,127,0.08));
 }
 .contest.warn { border-left-color: var(--vscode-errorForeground); }
-.contest-head { font-weight: 600; margin-bottom: 4px; }
-.contest-detail { font-size: 12px; opacity: 0.85; }
+.contest-head { font-size: 1.05em; font-weight: 600; margin-bottom: 4px; }
+.contest-detail { font-size: 12px; color: var(--vscode-descriptionForeground); line-height: 1.6; }
 .card {
   border: 1px solid var(--vscode-panel-border);
   border-radius: 6px;
-  padding: 10px 14px;
-  min-width: 150px;
+  padding: 12px 14px;
+  min-width: 0;
 }
 .card .label { font-size: 12px; color: var(--vscode-descriptionForeground); }
-.card .value { font-size: 1.5em; margin-top: 2px; }
-.card .sub { font-size: 12px; color: var(--vscode-descriptionForeground); }
+.card .value {
+  font-size: 1.7em;
+  font-weight: 600;
+  line-height: 1.25;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.card .sub { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 2px; line-height: 1.5; overflow-wrap: anywhere; }
 .card.achieved .value { color: var(--vscode-testing-iconPassed, #4caf50); }
 .bar-outer {
   height: 6px;
@@ -100,7 +158,21 @@ section.page.active { display: block; }
 .meter { display: block; }
 .meter-fill { fill: var(--vscode-charts-blue, #3794ff); }
 .meter-fill.achieved { fill: var(--vscode-testing-iconPassed, #4caf50); }
-.controls { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
+.controls { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+/* 粒度の切り替えは控えめに。選んでいるものだけ色を付ける */
+.controls button {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 12px;
+  padding: 2px 12px;
+}
+.controls button:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, transparent); }
+.controls button.active {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-color: var(--vscode-button-background);
+}
 button {
   background: var(--vscode-button-secondaryBackground);
   color: var(--vscode-button-secondaryForeground);
@@ -164,7 +236,9 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 .mini { height: 8px; background: var(--vscode-panel-border); border-radius: 4px; min-width: 60px; overflow: hidden; }
 .note { color: var(--vscode-descriptionForeground); font-size: 12px; margin: 12px 0; line-height: 1.6; }
 /* サイトの記録（設計書6.68.5）。作品情報の1行と、その下に順位の履歴 */
-.site { margin-bottom: 18px; }
+.site { margin-bottom: var(--gap); }
+/* サイトが並ぶときは、細い線1本で区切る */
+.site + .site { border-top: 1px solid var(--vscode-panel-border); padding-top: var(--gap); }
 .site-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
 .site-name { font-weight: 600; }
 .site-meta { font-size: 12px; color: var(--vscode-descriptionForeground); }
@@ -211,7 +285,7 @@ a:hover, .link:hover { text-decoration: underline; }
 .empty { padding: 24px 0; color: var(--vscode-descriptionForeground); line-height: 1.7; }
 .conflicted { color: var(--vscode-editorWarning-foreground, #cca700); }
 /* 達成の記録（設計書6.3.8）。どの目標をいつ達成したかを、控えめに並べる */
-.achievements { margin: 0 0 18px; }
+.achievements { margin: 0; }
 .achievements-head { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 0 0 4px; }
 .achievement-row { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; padding: 2px 0; }
 .achievement-row .mark {
@@ -257,26 +331,29 @@ a:hover, .link:hover { text-decoration: underline; }
 <body>
 <header>
   <h1 id="title">執筆量</h1>
-  <div class="tabs">
-    <div class="tab active" data-page="writing">執筆量</div>
-    ${hasEpisodesTab ? `<div class="tab" data-page="episodes">${unitNoun}ごとの文字数</div>` : ''}
+  <div class="tabs" role="tablist" aria-label="執筆統計の表示">
+    ${tabs.map((tab, index) => `<div class="tab${index === 0 ? ' active' : ''}" role="tab" id="tab-${tab.key}" data-page="${tab.key}" aria-controls="page-${tab.key}" aria-selected="${index === 0 ? 'true' : 'false'}" tabindex="${index === 0 ? '0' : '-1'}">${tab.label}</div>`).join('\n    ')}
   </div>
 </header>
 <main>
-  <section class="page active" id="page-writing">
+  <section class="page active" id="page-overview" role="tabpanel" aria-labelledby="tab-overview">
     <div id="contest"></div>
     <div class="cards" id="cards"></div>
     <div class="note" id="goal-link"></div>
     <div id="achievements"></div>
+  </section>
+  <section class="page" id="page-trend" role="tabpanel" aria-labelledby="tab-trend">
     <div class="controls" id="granularity"></div>
     <div class="chart-wrap"><svg id="chart" width="100%" height="240"></svg></div>
     <div class="note" id="chart-note"></div>
     <div id="devices"></div>
-    <div id="site-records"></div>
   </section>
-  ${hasEpisodesTab ? `<section class="page" id="page-episodes">
+  ${hasEpisodesTab ? `<section class="page" id="page-episodes" role="tabpanel" aria-labelledby="tab-episodes">
     <div class="cards" id="episode-cards"></div>
     <div id="episode-table" class="table-scroll"></div>
+  </section>` : ''}
+  ${hasReadersTab ? `<section class="page" id="page-readers" role="tabpanel" aria-labelledby="tab-readers">
+    <div id="site-records"></div>
   </section>` : ''}
 </main>
 <script nonce="${nonce}">
@@ -337,14 +414,69 @@ function amount(value) {
   return (value > 0 ? '+' : '') + formatCount(value) + '字';
 }
 
+/**
+ * タブを選ぶ（設計書6.3.9）。
+ *
+ * **最後に開いていたタブを覚える**（vscode.setState）。作品ごとには分けない
+ * （作者の指示、2026-11-01「作品ごとでなくてよい」）。無いタブの鍵が
+ * 覚えてあれば（全作品の画面・話の無い作品）、先頭の「概要」へ戻す。
+ *
+ * @param page 選ぶタブの data-page
+ * @param focus 真ならそのタブへ焦点を移す（矢印キーで移ったとき）
+ */
+function selectTab(page, focus) {
+  const tabs = Array.from(document.querySelectorAll('.tab'));
+  const target = tabs.find((el) => el.dataset.page === page) || tabs[0];
+  if (!target) return;
+  const chosen = target.dataset.page;
+  tabs.forEach((el) => {
+    const on = el === target;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-selected', on ? 'true' : 'false');
+    // 焦点で巡るのは選んでいるタブだけ（ほかは矢印キーで移る。タブの並びの作法）
+    el.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll('.page').forEach((el) => {
+    el.classList.toggle('active', el.id === 'page-' + chosen);
+  });
+  if (focus) target.focus();
+  try {
+    vscode.setState(Object.assign({}, vscode.getState() || {}, { tab: chosen }));
+  } catch (error) {
+    // 覚えられなくてもタブは切り替わっている。次に開いたときに概要から始まるだけ
+  }
+  // 隠れていたあいだは横の送りが効かない（幅が0）ので、見えたところで合わせ直す
+  if (chosen === 'trend') pinChartToLatest();
+}
+
+/**
+ * 矢印キーで移る先（何番目のタブか）。端から先は反対の端へ回る。
+ * 関係の無いキーには -1 を返す（そのキーは画面の既定の動きに任せる）
+ */
+function tabIndexAfterKey(key, current, count) {
+  if (count <= 0) return -1;
+  if (key === 'ArrowRight') return (current + 1) % count;
+  if (key === 'ArrowLeft') return (current - 1 + count) % count;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return -1;
+}
+
 document.querySelectorAll('.tab').forEach((tab) => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((el) => el.classList.remove('active'));
-    tab.classList.add('active');
-    document.querySelectorAll('.page').forEach((el) => el.classList.remove('active'));
-    document.getElementById('page-' + tab.dataset.page).classList.add('active');
-    // 隠れていたあいだは横の送りが効かない（幅が0）ので、見えたところで合わせ直す
-    if (tab.dataset.page === 'writing') pinChartToLatest();
+  tab.addEventListener('click', () => selectTab(tab.dataset.page, false));
+  tab.addEventListener('keydown', (event) => {
+    const tabs = Array.from(document.querySelectorAll('.tab'));
+    const next = tabIndexAfterKey(event.key, tabs.indexOf(tab), tabs.length);
+    if (next < 0) {
+      // Enter・空白でも選べるようにする（焦点はもうそのタブにある）
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectTab(tab.dataset.page, false);
+      }
+      return;
+    }
+    event.preventDefault();
+    selectTab(tabs[next].dataset.page, true);
   });
 });
 
@@ -359,6 +491,17 @@ document.querySelectorAll('.tab').forEach((tab) => {
     chartFollowLatest =
       chartWrap.scrollLeft + chartWrap.clientWidth >= chartWrap.scrollWidth - 4;
   });
+})();
+
+// 前に開いていたタブから始める（覚えていなければ概要）
+(() => {
+  let saved = null;
+  try {
+    saved = vscode.getState();
+  } catch (error) {
+    saved = null;
+  }
+  selectTab(saved && typeof saved.tab === 'string' ? saved.tab : 'overview', false);
 })();
 
 function renderGranularity() {
@@ -749,9 +892,16 @@ function renderSiteRecords() {
       escapeHtml(failure) + '</div>'
     : '';
   if (records.length === 0) {
+    /*
+      「読者の反応」のタブは、記録が無くても出しておく（設計書6.3.9）。
+      空の面だけを見せると、壊れているのか使い方が違うのか分からないので、
+      **何をすればここに並ぶか**を短く言う。名前はメニューの字面に揃える
+    */
     host.innerHTML = failureNote
       ? '<h3>サイトの記録</h3>' + failureNote
-      : '';
+      : '<div class="empty">投稿サイトの記録はまだありません。<br>' +
+        '「投稿サイト設定」で投稿先を登録し、「ランキング記録」で順位を書き足すか、' +
+        '「読者反応自動取込」で読者の反応を取り込むと、ここに並びます。</div>';
     return;
   }
 
