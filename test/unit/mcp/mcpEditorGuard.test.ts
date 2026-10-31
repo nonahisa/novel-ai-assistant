@@ -248,7 +248,41 @@ describe("作者の作品では、今までどおり", () => {
     }
   });
 
-  it("folder を取らない道具は、印を読まずに通す", () => {
-    expect(() => assertEditorModeAllows({}, "mcp.version")).not.toThrow();
+  it("作品を指さない道具（setup.request を除く）は、印を読まずに通す", () => {
+    for (const name of ["mcp.version", "windows.list", "notices.recent", "works.list", "ai.settings"]) {
+      expect(() => assertEditorModeAllows({}, name), name).not.toThrow();
+    }
+  });
+
+  it("setup.request は作者の作品の path なら、どの段も断らない", () => {
+    const folder = makeWork();
+    for (const step of ["external-access", "register", "create", "ollama"]) {
+      expect(() => assertEditorModeAllows({ step, path: folder }, "setup.request"), step).not.toThrow();
+    }
+  });
+});
+
+describe("setup.request は作品を path で受ける", () => {
+  it("編集用の写しの path へ、外部AIの許可・登録・作成を頼めない", () => {
+    const folder = makeWork();
+    markAsEditorCopy(folder);
+    for (const step of ["external-access", "register", "create"]) {
+      expect(
+        () => assertEditorModeAllows({ step, path: folder }, "setup.request"),
+        step
+      ).toThrow(EditorModeBlockedError);
+    }
+  });
+
+  it("作品に触らない段は、写しの path でも通す", () => {
+    const folder = makeWork();
+    markAsEditorCopy(folder);
+    expect(() => assertEditorModeAllows({ step: "ollama", path: folder }, "setup.request")).not.toThrow();
+  });
+
+  it("ほかの道具の path は作品として読まない", () => {
+    const folder = makeWork();
+    markAsEditorCopy(folder);
+    expect(() => assertEditorModeAllows({ path: folder }, "outbox.import")).not.toThrow();
   });
 });

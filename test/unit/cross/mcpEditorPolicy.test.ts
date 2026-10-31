@@ -49,7 +49,8 @@ describe("道具の一覧と、編集者モードの表", () => {
     );
   });
 
-  it("転送層は、許可を確かめたあと・道具を動かす前に、編集者モードを確かめる", () => {
+  // 守りが先：断る道具に許可のノックを出さない（守りは印の有無だけを読み、原稿を読まない）
+  it("転送層は、守り → 許可 → 道具 の順に確かめる", () => {
     // 引数の型に `{ signal?: AbortSignal }` があるので、返す関数の矢印のあとから切り出す
     const body = findBlockAfter(source.slice(source.indexOf("function tool<Args>(")), "}) => {", {
       openAt: "afterMarker",
@@ -59,9 +60,9 @@ describe("道具の一覧と、編集者モードの表", () => {
     const permission = text.indexOf("assertExternalAccessAllowed(args, name)");
     const guard = text.indexOf("assertEditorModeAllows(args, name)");
     const handler = text.indexOf("await handler(args)");
-    expect(permission).toBeGreaterThan(-1);
-    expect(guard).toBeGreaterThan(permission);
-    expect(handler).toBeGreaterThan(guard);
+    expect(guard).toBeGreaterThan(-1);
+    expect(permission).toBeGreaterThan(guard);
+    expect(handler).toBeGreaterThan(permission);
   });
 });
 
@@ -114,6 +115,15 @@ describe("編集者モードで断る道具・許す道具", () => {
       "exportEpub",
     ]) {
       expect(isMcpToolAllowedForEditor("run.request", { ...folder, feature }), feature).toBe(false);
+    }
+  });
+
+  it("setup.request は、作品の印や登録簿を変える段だけ断る", () => {
+    for (const step of ["external-access", "register", "create"]) {
+      expect(isMcpToolAllowedForEditor("setup.request", { step, path: "C:/作品" }), step).toBe(false);
+    }
+    for (const step of ["ollama", "lmstudio", "ai", "vector", "diagnosis"]) {
+      expect(isMcpToolAllowedForEditor("setup.request", { step, path: "C:/作品" }), step).toBe(true);
     }
   });
 

@@ -51,14 +51,32 @@ export class EditorModeBlockedError extends McpToolError {
 }
 
 /**
+ * 守りが印を読む作品フォルダー。
+ *
+ * **`setup.request` は作品を `path` で受ける**（`folder` は許可の鍵なので、まだ登録して
+ * いない場所で必ず断られるのを避けて名前を変えてある。`setupRequest.ts`）。許可とは
+ * 違い、ここは `path` も作品として読む——読まないと、編集用の写しへ外部AIの許可や
+ * 登録を頼めてしまう。ほかの道具の `path` は作品を指さないので見ない。
+ */
+function workFolderOf(args: unknown, tool: string): string | undefined {
+  const folder = folderOf(args);
+  if (folder || tool !== "setup.request") return folder;
+  const target =
+    typeof args === "object" && args !== null && !Array.isArray(args)
+      ? (args as Record<string, unknown>).path
+      : undefined;
+  return typeof target === "string" && target.trim() ? target : undefined;
+}
+
+/**
  * 編集用の写し（か、確かめられない作品）で、表が許さない呼び出しなら断る。
  *
  * **作者の作品では印を読むだけで何もしない**——今までの動きを変えない。
- * `folder` を取らない道具は、どの作品か分からないので印を読まずに通す
- * （そうした道具は表でも作品のファイルを書かないものだけにしてある）。
+ * 作品を指さない呼び出し（`folder` も、`setup.request` の `path` も無い）は、
+ * どの作品か分からないので印を読まずに通す。
  */
 export function assertEditorModeAllows(args: unknown, tool: string): void {
-  const folder = folderOf(args);
+  const folder = workFolderOf(args, tool);
   if (!folder) return;
   const mode = readWorkFolderMode(folder);
   if (mode === "author") return;

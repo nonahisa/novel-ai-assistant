@@ -114,6 +114,9 @@ function featureRule(args: Args): (typeof EDITOR_FEATURE_RULES)[FeatureName] | u
     : undefined;
 }
 
+/** setup.request のうち、編集用の写しでは断る段 */
+const SETUP_STEPS_DENIED_FOR_EDITOR: readonly string[] = ["external-access", "register", "create"];
+
 const READ_ONLY = "読むだけ";
 const NO_FOLDER = "folder を取らないので作品の印では判定できない（作品のファイルを書かない）";
 
@@ -131,8 +134,12 @@ export const MCP_EDITOR_POLICY: Readonly<Record<string, McpEditorRule>> = {
     why: "光らせる頼みを .aiwriter/history/spotlight.jsonl（外から触られた記録と同じ所）へ1行足すだけ。押すのは人で、原稿にも資料にも触らない",
   },
   "setup.request": {
-    allow: true,
-    why: `${NO_FOLDER}。画面に確認を出すだけで、作品の作成・登録は拡張機能の受け口が行う`,
+    // 作品は `path` で受ける（守りはそれを作品として読む。`editorGuard.ts`）
+    allow: (args) => !SETUP_STEPS_DENIED_FOR_EDITOR.includes(String(args.step)),
+    why:
+      "作品は path で受ける。外部AIの許可（external-access）・登録（register）・作成（create）は、" +
+      "押すのは人でも作品の印や登録簿を変える段なので断る。Ollama・AI設定などの段は作品に触らないので許す" +
+      "（path の無い create は作品を指さないので印では判定できない）",
   },
   "ollama.generate": { allow: true, why: "手元のAIへ投げて返すだけ" },
   "ollama.models": { allow: true, why: READ_ONLY },
