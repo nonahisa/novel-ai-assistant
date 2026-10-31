@@ -117,7 +117,10 @@ describe("本物の fs で2つのプロセスが取り合う", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(fs.existsSync(file)).toBe(false);
-  });
+    // **全体の上限を延ばす。** 中の2つの待ちはそれぞれ最長5秒まで許しているのに、
+    // 全体が既定の5秒のままだった。GitHub の CI（windows-latest）で6.8秒かかって
+    // 時間切れで落ちた（2026-10-31）
+  }, 30_000);
 });
 
 describe("「一括処理の中か」を運ぶ仕組み（6.76.1 の追記）", () => {
