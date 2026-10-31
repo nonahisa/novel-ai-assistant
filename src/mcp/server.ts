@@ -21,7 +21,7 @@ import {
   setExternalClientName,
 } from "./tools/accessLog";
 import { assertExternalAccessAllowed } from "./tools/permission";
-import { assertEditorModeAllows } from "./tools/editorGuard";
+import { EditorModeBlockedError, assertEditorModeAllows } from "./tools/editorGuard";
 import {
   localAiSessionKind,
   withLocalAiNotes,
@@ -288,6 +288,8 @@ function tool<Args>(
         tool: name,
         args,
         ok: false,
+        // 編集用の写しで動く前に断った回は、原稿が出ていない（設計書6.87.25）
+        refused: error instanceof EditorModeBlockedError,
         failure:
           error instanceof McpToolError ? error.message : describeError(error),
       });

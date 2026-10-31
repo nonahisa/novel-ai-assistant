@@ -272,6 +272,22 @@ describe("recordExternalAccess——実際に書く", () => {
     expect(entry.detail).toBe("プロットが見つかりません");
   });
 
+  it("編集者モードで動く前に断った回は、原稿が出ていない（none）と理由を残す", () => {
+    // 守り（`editorGuard.ts`）は道具が1バイトも読む前に断る。外へ出たように残すと記録が嘘になる
+    // novel.run は runner で出る量が決まる道具なので、断った回まで「出た」と数えかねない
+    recordExternalAccess({
+      tool: "novel.run",
+      args: { folder, feature: "settings", runner: "sampling" },
+      ok: false,
+      refused: true,
+      failure: "novel.run は編集者モードでは使えません。",
+    });
+    const entry = readLog()[0];
+    expect(entry.ok).toBe(false);
+    expect(entry.exposure).toBe("none");
+    expect(entry.detail).toBe("novel.run は編集者モードでは使えません。");
+  });
+
   it("作品の分からない呼び出しは残さない", () => {
     // どの作品の記録なのか決められないので、書く先がない
     expect(

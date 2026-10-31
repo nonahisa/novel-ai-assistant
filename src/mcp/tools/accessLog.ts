@@ -507,6 +507,14 @@ export interface RecordAccessInput {
    */
   denied?: boolean;
   /**
+   * 編集用の写しで、道具が動く前に断ったか（設計書6.87.25）。
+   *
+   * `denied` と分けるのは、断り文に許可の案内（`EXTERNAL_ACCESS_DENIED_DETAIL`）を
+   * 出さないため——許可しても通らない。原稿は1文字も出ていないので `none` で残し、
+   * 理由は `failure` に入れる。
+   */
+  refused?: boolean;
+  /**
    * 道具の返り値（成功したときだけ）。**件数を読むためだけに使う**
    * （指摘を置いた回の「置いた N件・落とした N件」）。中身は記録に写さない
    */
@@ -544,7 +552,7 @@ export function recordExternalAccess(input: RecordAccessInput): boolean {
     client: clientName,
     file: fileOf(args),
     // 断った回は原稿が1文字も出ていないので `none`
-    exposure: input.denied ? "none" : exposureOf(input.tool, args),
+    exposure: input.denied || input.refused ? "none" : exposureOf(input.tool, args),
     model: modelOf(args),
     ok: input.ok,
     detail: input.denied
