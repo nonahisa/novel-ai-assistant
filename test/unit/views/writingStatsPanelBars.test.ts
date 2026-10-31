@@ -275,8 +275,8 @@ describe("(c)(d) 日ごとのグラフを描く", () => {
     );
   });
 
-  test("執筆量の見開きへ戻ったときと、日次・週次を切り替えたときも右端から見せる", () => {
-    expect(script).toContain("if (tab.dataset.page === 'writing') pinChartToLatest();");
+  test("執筆の推移のタブへ戻ったときと、日次・週次を切り替えたときも右端から見せる", () => {
+    expect(functionSource("selectTab")).toContain("if (chosen === 'trend') pinChartToLatest();");
     expect(functionSource("renderGranularity")).toContain("chartFollowLatest = true;");
   });
 });

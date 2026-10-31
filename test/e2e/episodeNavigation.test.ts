@@ -159,7 +159,7 @@ test("移る先の話が別の列・別の向きで開いているとき、［�
         30_000
       );
       if (!stats) throw new Error("執筆統計の面が見つかりません");
-      // 開いたときは「執筆量」の面なので、「話ごとの文字数」へ切り替える
+      // 開いたときは「概要」の面なので、「話ごと」へ切り替える（設計書6.3.9）
       await stats.locator('.tab[data-page="episodes"]').click();
       const groupsWithStats = await editorGroupTabs(page);
       await stats.locator("tr.clickable[data-path]", { hasText: "つづき" }).first().click();
