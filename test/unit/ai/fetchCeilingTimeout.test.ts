@@ -26,13 +26,21 @@ function headersTimeout(): Error {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   setLocalFetchForTests(undefined);
 });
 
 describe("クラウドのAIが Node の上限で切れたら、延ばす案内を出さない", () => {
   test("クラウドの口で切れたら、待った秒数で言い、延ばす案内を言わない", async () => {
-    vi.stubGlobal("fetch", () => Promise.reject(headersTimeout()));
+    // **本物の時計に頼らない。** 「すぐ失敗するので0秒」としていたら、遅い CI で
+    // 0.6秒かかって1秒に丸められ落ちた（2026-10-31）。時計を止め、偽の fetch の中で
+    // 実測と同じ302秒だけ進めてから切る
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.stubGlobal("fetch", () => {
+      vi.setSystemTime(Date.now() + 302_000);
+      return Promise.reject(headersTimeout());
+    });
     const error = await fetchJson({
       url: "https://example.invalid/v1",
       body: {},
@@ -45,10 +53,10 @@ describe("クラウドのAIが Node の上限で切れたら、延ばす案内�
     expect(isFetchCeilingTimeout(error)).toBe(true);
     if (!isFetchCeilingTimeout(error)) return;
     expect(error.configuredSeconds).toBe(900);
-    // 偽の fetch はすぐ失敗するので、待った秒数は0秒
-    expect(error.waitedSeconds).toBe(0);
+    // 偽の fetch が進めた302秒を、待った秒数として言う
+    expect(error.waitedSeconds).toBe(302);
     expect(error.message).toBe(
-      "Geminiの応答がタイムアウトしました（Node側の上限。0秒で切れました）。" +
+      "Geminiの応答がタイムアウトしました（Node側の上限。302秒で切れました）。" +
         "この上限は待ち時間の設定では変わりません。一度に送る量を減らしてください。"
     );
     expect(error.message).not.toContain("延ば");
