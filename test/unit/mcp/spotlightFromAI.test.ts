@@ -85,11 +85,12 @@ describe("内部（相談パネル）の繋ぎ目", () => {
   test("答えの中の名指しから、同じ ActionSpotlight を通している", () => {
     // **写しを作らない。** 案内と答えで瞬き方が変わると、直し漏れが出る
     expect(panel).toContain("findMenuMentions(reply, menuEntries())");
-    expect(panel).toContain("this.spotlight.show(mentions[0].command)");
+    // 相談の作品を添えて呼ぶ（作者の報告、2026-10-31）ので、引数は改行をまたぐ
+    expect(panel).toMatch(/this\.spotlight\.show\(\s*mentions\[0\]\.command/);
     // **案内中は自動で光らせない**（段の印と奪い合いになる）
-    expect(panel).toContain("if (this.tour.isActive()) return mentions;");
+    expect(panel).toContain("if (this.tour.isActive()) return { entries: mentions };");
     // 答えを送る前に光らせる（読んでいる間にサイドバーが動かないように）
-    expect(panel.indexOf("const spotlight = await this.spotlightMentions(")).
+    expect(panel.indexOf("await this.spotlightMentions(")).
       toBeGreaterThan(-1);
   });
 

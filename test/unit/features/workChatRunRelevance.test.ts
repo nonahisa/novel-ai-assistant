@@ -26,7 +26,10 @@ describe("相談パネルの実行ボタン", () => {
   });
 
   test("話題で照らした結果をボタンにする", () => {
-    expect(stagedBlock()).toContain("stageRun(relatedRun?.kind");
+    // AIが名指ししたボタンは `aiRun` に分けて持つ（今すぐ動かしてよいのはこちらだけ。
+    // 作者の判断、2026-10-31）。照らした結果から作ることは変わらない
+    expect(source).toContain("const aiRun = this.stageRun(relatedRun?.kind, context);");
+    expect(stagedBlock()).toContain("aiRun ??");
     expect(source).toMatch(/relatedChatRun\(answer\.run, \[\s*question,\s*\.\.\.earlierAuthorTurns/);
   });
 

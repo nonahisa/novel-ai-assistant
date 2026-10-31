@@ -354,6 +354,27 @@ export function chatRunDoneMessage(
     : `${head}結果は校正・メモパネルに出ます。`;
 }
 
+/**
+ * 作者がはっきり頼んだので、押すのを待たずに動かすときの1行（作者の判断、2026-10-31）。
+ *
+ * **動かす前に出す。** 確認の窓（料金・処理量）でやめられることがあるので、
+ * 「実行しました」とは言わない。答えの下のボタンは残るので、もう一度動かせる
+ * ことも添える。出し先は `chatRunDoneMessage` と同じく検知だけ言う。
+ */
+export function chatRunNowMessage(
+  kind: ChatRunKind,
+  editorMode: boolean,
+  label: string
+): string {
+  const head = `頼まれたので「${label}」を動かします（確認が出たら答えてください）。`;
+  const where = DETECTION_KINDS.has(kind)
+    ? editorMode
+      ? "結果は提案パネルに出ます。"
+      : "結果は校正・メモパネルに出ます。"
+    : "";
+  return `${head}${where}もう一度動かすときは、答えの下のボタンを押してください。`;
+}
+
 /** 起動したい機能の指定を、許可した一覧と突き合わせる */
 export function parseChatRun(raw: unknown): ChatRun | undefined {
   const key = typeof raw === "string" ? raw.trim().toLowerCase() : "";

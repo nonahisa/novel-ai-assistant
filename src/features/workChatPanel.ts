@@ -181,6 +181,7 @@ import {
 import { isEditorMode } from "../core/actorContext";
 import {
   chatRunDoneMessage,
+  chatRunNowMessage,
   describeChatEditButton,
   describeChatEditDestination,
   describeChatEditRejection,
@@ -224,7 +225,11 @@ import {
   createOrganizationStore,
 } from "../core/abilityStore";
 import type { Chatter } from "../core/chatter";
-import { detectRunIntent, relatedChatRun } from "../core/chatIntent";
+import {
+  detectRunIntent,
+  isExplicitRunRequest,
+  relatedChatRun,
+} from "../core/chatIntent";
 import {
   describeExecutionClaim,
   findExecutionClaim,
@@ -264,7 +269,12 @@ import { renderMarkdownLite } from "../core/markdownLite";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
 import { cancelItem } from "../views/dialogs";
 import { GuidedTourHost } from "./guidedTour";
-import { describeSpotlight, type ActionSpotlight } from "./actionSpotlight";
+import {
+  describeAlignedWork,
+  describeSpotlight,
+  type ActionSpotlight,
+  type SpotlightOptions,
+} from "./actionSpotlight";
 import { findMenuMentions, type MenuEntry } from "../core/menuMentions";
 import { menuEntries } from "../views/actionList";
 import { openInDefaultEditor } from "../views/openDocument";
@@ -844,7 +854,28 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   /** 光らせる先（3つのツリー）を渡す。拡張機能の起動時に一度だけ呼ぶ */
   setTourSpotlight(spotlight: ActionSpotlight): void {
     this.spotlight = spotlight;
-    this.tour.setSpotlight(spotlight);
+    /*
+      **案内の段も、相談の作品を添えて光らせる**（作者の報告、2026-10-31）。
+      案内の札はこのパネルに出て、パネルの上には相談の作品が出ている。
+      添えないと、札が「これを押して」と指した項目が、簡単ステップメニューの
+      覚えている別の作品で走る（答えの「▶ 光らせる」と同じ食い違い）。
+      合わせたことは、案内の札の「どこで光らせたか」の1行に入る（`describeSpotlight`）
+    */
+    this.tour.setSpotlight({
+      show: (command) => spotlight.show(command, this.spotlightOptions()),
+      clear: () => spotlight.clear(),
+    });
+  }
+
+  /**
+   * 光らせるときに添える作品（相談の作品）。
+   *
+   * 「▶ 光らせる」の札・答えからの自動の光らせ・案内の段の3つが、
+   * **同じここを通る**——1つだけ添え忘れると、そこから押したときだけ別の作品で走る。
+   */
+  private spotlightOptions(): SpotlightOptions {
+    const workId = this.currentWorkId();
+    return workId ? { workId } : {};
   }
 
   /**
@@ -964,21 +995,36 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * すでに「いま押すべき1つ」を指しているので、答えのほうから別の項目を
    * 指すと、印が奪い合いになって作者はどちらを押せばよいか分からなくなる。
    *
-   * @returns 答えに添える札の一覧（空なら札を出さない）
+   * **相談の作品を添えて光らせる**（作者の報告、2026-10-31）。添えないと、
+   * 光った簡単ステップメニューの項目が、メニューの覚えている別の作品で走る。
+   *
+   * @returns 答えに添える札の一覧（空なら札を出さない）と、簡単ステップ
+   *   メニューの作品を合わせたときの1行（**答えのあとに出す**——先に出すと
+   *   答えより上に並び、何の話か分からない）
    */
-  private async spotlightMentions(reply: string): Promise<MenuEntry[]> {
+  private async spotlightMentions(
+    reply: string,
+    workId: string | undefined
+  ): Promise<{ entries: MenuEntry[]; alignedNote?: string }> {
     const mentions = findMenuMentions(reply, menuEntries());
-    if (mentions.length === 0 || !this.spotlight) return mentions;
-    if (this.tour.isActive()) return mentions;
+    if (mentions.length === 0 || !this.spotlight) return { entries: mentions };
+    if (this.tour.isActive()) return { entries: mentions };
 
-    const result = await this.spotlight.show(mentions[0].command);
+    const result = await this.spotlight.show(
+      mentions[0].command,
+      workId ? { workId } : {}
+    );
+    const alignedNote = describeAlignedWork(result);
     /*
       **どちらのメニューにも無かった項目は、札にもしない**
       （`describeSpotlight` が「見当たりません」と言う状態）。押しても
       光らない札を出すと、作者は壊れていると思う。**確かめられたのは
       いま光らせた1件だけ**なので、落とすのもその1件に限る。
     */
-    return result.shown ? mentions : mentions.slice(1);
+    return {
+      entries: result.shown ? mentions : mentions.slice(1),
+      ...(alignedNote ? { alignedNote } : {}),
+    };
   }
 
   /**
@@ -994,10 +1040,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       logStep(`相談から知らない操作を光らせようとしました（${command}）`);
       return;
     }
-    const result = await this.spotlight.show(command);
-    if (!result.shown) {
+    // 札を押したときも相談の作品を添える（作者の報告、2026-10-31）
+    const result = await this.spotlight.show(command, this.spotlightOptions());
+    const aligned = describeAlignedWork(result);
+    if (!result.shown || aligned) {
       this.postAll({
         type: "note",
+        // 合わせたときは、作品が替わったことを黙らない（光った場所の1行に入る）
         message: describeSpotlight(result),
       });
     }
@@ -2339,10 +2388,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (answer.run && !relatedRun && parseChatRun(answer.run)) {
         logStep(`相談: 質問と話題の合わない実行ボタンを落とした（${String(answer.run)}）`);
       }
+      // **AIが名指ししたボタンを分けて持つ。** 今すぐ動かしてよいのはこちらだけ
+      // （規則で補ったボタンは、AIが「今すぐ」と言ったものではない）
+      const aiRun = this.stageRun(relatedRun?.kind, context);
       const staged = {
         edit: this.stageEdit(answer.edit, context?.work),
         run:
-          this.stageRun(relatedRun?.kind, context) ??
+          aiRun ??
           (intended ? this.stageRun(intended, context) : undefined),
         locate: this.stageLocate(answer.locate, context),
         // 実在の照合に資料の読み込みが要るので、ここだけ待つ
@@ -2398,7 +2450,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         札を出すと、読んでいる間にサイドバーが動いて、どの行が光ったのか
         目で追えない（案内の段（`showCurrent`）と同じ理由）。
       */
-      const spotlight = await this.spotlightMentions(answer.reply);
+      const { entries: spotlight, alignedNote } = await this.spotlightMentions(
+        answer.reply,
+        context?.work.id
+      );
 
       const { edit, ...others } = staged;
       /*
@@ -2427,6 +2482,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         html: renderMarkdownLite(answer.reply),
         ...others,
       });
+      // 光らせるときに簡単ステップメニューの作品を合わせた（作者の報告、2026-10-31）。
+      // 作者が最上段で選んでいた作品が替わったので、黙らない
+      if (alignedNote) this.postAll({ type: "note", message: alignedNote });
       /*
         **救った回は、救ったと言う**（2026-09-23）。閉じ括弧を足して
         読めたということは、**返事はそこで切れている**——続きがあったのに
@@ -2473,6 +2531,31 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       await this.updateAdvicePolicy(context?.work, answer.profileSignals);
       await this.updateWriterStyle(answer.writerStyleSignals);
       await this.updateAuthorReaderType(answer.authorReaderSignals);
+
+      /*
+        **作者がはっきり頼んだ回は、押すのを待たずに動かす**（作者の判断、
+        2026-10-31「明確な意思表示があるなら、AIが機能を実行しても良いのでは？」）。
+
+        **AIの出力は信用しない**（実装ルール3）。3つがそろったときだけ動かす：
+        - AIが今すぐ動かす印（`runNow`）を立てた（真偽の true だけ。`parseWorkChatAnswer`）
+        - AIが名指しした操作が一覧にあり、作者の言葉と話題が合う（`aiRun`）
+        - 作者の最後の発言が頼みの形をしている（`isExplicitRunRequest`）
+        動かすのは**この1つだけ**（ボタンは1回の答えに1つしか作らない）。
+
+        **省くのは「押す」の1手だけ。** 料金の確認（`confirmPaidUsage`）や各機能の
+        確認の窓は、走る先のコマンドがこれまでどおり出す（相談の作品には
+        「推し量った」印が付くので、「以降は訊かない」を覚えていても確認が出る。
+        `extension.ts` の `run`）。**答えを見せ、資料への反映も終えてから**動かす——
+        抽出は1時間を超えることがあり、その間に答えが出ないままになる。
+      */
+      if (answer.runNow && aiRun && isExplicitRunRequest(question)) {
+        await this.runStagedNow(aiRun.id, aiRun.label);
+      } else if (answer.runNow) {
+        logStep(
+          `相談: 今すぐ動かす印を受けたが動かさなかった（run=${String(answer.run)}、` +
+            `${aiRun ? "頼みの形でない" : "一覧に無いか話題が合わない"}）`
+        );
+      }
     } catch (error) {
       /*
         **タイムアウトだけは、その場で直せる札を添える**（2026-09-23）。
@@ -3145,6 +3228,36 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       editor.setDecorations(this.highlight, []);
       this.highlightTimer = undefined;
     }, HIGHLIGHT_MS);
+  }
+
+  /**
+   * 作者がはっきり頼んだ機能を、押すのを待たずに動かす（作者の判断、2026-10-31）。
+   *
+   * **ボタンの控え（`pendingRuns`）は消さない。** 答えの下のボタンを残し、
+   * もう一度押せるようにする（`runFeature` は押されたら控えを消し、ボタンを
+   * 「実行しました」の行に替える。こちらはそれをしない）。
+   *
+   * 動かすことは会話に1行で出す。**動かす前に出す**——確認の窓でやめられることが
+   * あるので、「実行しました」とは言わない（`chatRunNowMessage`）。
+   */
+  private async runStagedNow(id: string, label: string): Promise<void> {
+    const staged = this.pendingRuns.get(id);
+    if (!staged) return;
+    logStep(`相談: 頼まれたので押すのを待たずに動かした（${staged.kind}）`);
+    this.postAll({
+      type: "note",
+      message: chatRunNowMessage(staged.kind, isEditorMode(), label),
+    });
+    try {
+      await this.runner.run(staged.work, staged.kind, staged.filePath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談からの機能起動（頼まれて今すぐ）", {
+        内容: message,
+        詳細: failureDetail(error),
+      });
+      this.postError(`実行できませんでした: ${message}`);
+    }
   }
 
   /** 作者がボタンを押したときだけ、標準機能を起動する */

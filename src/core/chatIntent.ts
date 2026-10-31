@@ -16,11 +16,16 @@ import { parseChatRun, type ChatRun, type ChatRunKind } from "./chatEdit";
  * （マージ処理、文字数の再検証、逐語照合）。ここも同じにする。
  * 「抽出して」と書いてあるかどうかは、規則で十分に見分けられる。
  *
- * ## 押すのは作者
+ * ## 規則で見分けただけでは動かさない
  *
- * 見分けたからといって実行はしない。**ボタンを出すところまで**である。
- * 作者から許可されたのは「承諾性で起動すること」であり、
- * 会話の一言で処理が始まってよいわけではない。
+ * `detectRunIntent` が見分けても、**ボタンを出すところまで**である。
+ *
+ * 作者の判断（2026-10-31「明確な意思表示があるなら、AIが機能を実行しても
+ * 良いのでは？」）で、**作者がはっきり頼んだ回だけは、押すのを待たずに動かす**
+ * ようになった。動かすのは、AIが答えで機能を名指しし（`run`）、
+ * 「今すぐ動かす」の印（`runNow`）を立て、**しかも作者の最後の発言が
+ * 頼みの形をしている**（`isExplicitRunRequest`）ときだけである。
+ * 規則で補ったボタン（AIが名指ししていない）は、これまでどおり押すのを待つ。
  *
  * VS Code APIに依存しない。
  */
@@ -119,6 +124,31 @@ export function detectRunIntent(question: string): ChatRunKind | undefined {
     if (!best || rule.priority > best.priority) best = rule;
   }
   return best?.kind;
+}
+
+/**
+ * 作者の発言が、**何かを今してほしいという頼みの形か**（作者の判断、2026-10-31）。
+ *
+ * AIが「今すぐ動かす」の印（`runNow`）を立てても、**AIの出力は信用しない**
+ * （実装ルール3）。作者の言葉の側でも頼みの形をしているかを確かめ、
+ * 両方がそろったときだけ、押すのを待たずに動かす。
+ *
+ * - 「資料抽出を実行して」「誤字脱字を走らせてください」「お願いします」→ 頼み
+ * - 「どうすればいい？」「抽出ってできる？」「抽出の使い方を教えて」→ 頼みではない
+ *   （使い方を訊いただけで処理が始まると、作者は止め方も分からないまま待たされる）
+ *
+ * 見る形は `detectRunIntent` と同じ（質問の形なら外し、依頼の語か「〜て」で
+ * 言い切っていれば頼み）。**何を頼んだかは見ない**——それは AI の `run` と、
+ * 話題の照合（`relatedChatRun`）が受け持つ。
+ */
+export function isExplicitRunRequest(question: string): boolean {
+  const text = question.trim();
+  if (!text) return false;
+  if (QUESTION_PATTERN.test(text)) return false;
+  // 「？」で終わる文は、頼みの語が入っていても訊いている（「抽出してくれる？」は
+  // 頼みとも読めるが、迷ったら動かさない。ボタンは出ているので1手で動かせる）
+  if (/[?？]\s*$/.test(text)) return false;
+  return REQUEST_WORDS.test(text) || REQUEST_TE_ENDING.test(text);
 }
 
 /**

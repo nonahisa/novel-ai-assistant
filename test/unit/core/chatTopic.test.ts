@@ -243,9 +243,15 @@ describe("使い方の節も、目次と一緒に外す", () => {
     `, "authorReaderSignals": null`（29字）を足し、断り書きを
     「profileSignals と writerStyleSignals と authorReaderSignals は」（22字増）に
     したぶん（設計書6.101。頼む一段そのものは、9問に答えていない作者の回だけ別に足す）。
+
+    **7,971字へ更新した（2026-10-31・v3.35）。** 作者がはっきり頼んだら押すのを
+    待たずに動かす（作者の判断、2026-10-31）。【作業を頼まれたとき】の
+    「あなたは操作を実行できません」を、runNow を立ててよい条件の説明へ書き換え、
+    【出力形式】の例に `, "runNow": false` を足し、一覧に無い操作の案内で
+    操作名を「」で囲ませる1文を足したぶん（455字）。
   */
   test("目次を渡す回のシステム指示は、割る前と同じ長さ", () => {
-    expect(WORK_CHAT_SYSTEM_PROMPT.length).toBe(7516);
+    expect(WORK_CHAT_SYSTEM_PROMPT.length).toBe(7971);
   });
 
   test("外れるのは、使い方の節だけ", () => {

@@ -3082,6 +3082,9 @@ export async function activate(
     // 選ぶだけでは薄くて気づけなかった（作者の報告、2026-09-22）。
     // 指している項目に「▶」の印を残す先を渡す
     marker: actionDecorations,
+    // 相談から光らせて作品を合わせたとき（作者の報告、2026-10-31）。
+    // 最上段で選び直したとき（`novelai.chooseStepWork`）と同じく全作品を数え直す
+    onStepWorkAligned: () => refreshActionBadges(),
   });
   workChatPanel.setTourSpotlight(actionSpotlight);
   onCommandFinished = (command) => workChatPanel.notifyCommandRun(command);

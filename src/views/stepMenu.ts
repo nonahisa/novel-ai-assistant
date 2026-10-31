@@ -575,6 +575,54 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
   }
 
   /**
+   * 相談から項目を光らせる前に、選んでいる作品を相談の作品へ合わせる
+   * （作者の報告、2026-10-31。設計書6.104）。
+   *
+   * 相談の対象は「教科書チート」なのに、光らせた項目を押すと、
+   * このメニューが覚えていた別の作品で走った。光らせるのは「これを押して」
+   * という案内なので、**押したら相談の作品で走る**ように揃える。
+   *
+   * 合わせないとき（undefined を返す）：
+   * - もとから同じ作品（黙って光らせるだけでよい）
+   * - 登録に無い作品（合わせると「未選択」になり、押せる項目が消える）
+   * - **この操作がこのメニューに無い**（詳細メニューで光る。押しても
+   *   このメニューの作品は使わないので、替えると作者の選択を無駄に動かす）
+   *
+   * 載っているかは**作品のタイプで絞る前の並び**で見る。絞ったあとの並びは
+   * 今の作品のタイプで決まっており、合わせる先の作品のものではない。
+   *
+   * **タイプを読み終えてから返す。** 読み終える前に探すと、絞る前の並びで
+   * 節点を探してしまい、描き直した木に無い行を光らせにいく。
+   *
+   * 逆向き（このメニューで選び直したら相談の作品も替える）はしない——
+   * 相談の作品が黙って替わると、会話と資料の反映先が食い違う（`extension.ts`
+   * の `CHAT_WORK_KEY`）。
+   */
+  async alignWorkForSpotlight(
+    workId: string,
+    command: string
+  ): Promise<WorkEntry | undefined> {
+    if (this.selectedWork()?.id === workId) return undefined;
+    const target = this.registry.list().find((work) => work.id === workId);
+    if (!target) return undefined;
+    const offered = filterStepsForRuntime(
+      STEP_MENU,
+      processCommandsUsableHere()
+    ).some((step) =>
+      step.entries.some((entry) =>
+        entry.kind === "action"
+          ? entry.command === command
+          : entry.kind === "section" &&
+            entry.items.some((item) => item.command === command)
+      )
+    );
+    if (!offered) return undefined;
+    this.selectWork(workId);
+    await this.loadSelectedFormat();
+    return target;
+  }
+
+  /**
    * 覚えたタイプを捨てる。**プロットの `## 形式` が書き換わったときに呼ぶ。**
    *
    * 呼ばないと、タイプを変えたのにステップの並びが前のままになる

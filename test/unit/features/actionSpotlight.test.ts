@@ -270,3 +270,151 @@ describe("瞬かせる（createActionSpotlight）", () => {
     expect(marker.last).toBeUndefined();
   });
 });
+
+/**
+ * 相談から光らせるとき、簡単ステップメニューの作品を相談の作品へ合わせる
+ * （作者の報告、2026-10-31）。
+ *
+ * 相談の対象は「教科書チート」だったのに、答えの「▶ 光らせる」で示された
+ * 簡単ステップメニューの項目を押すと、別の作品「たゆたう鉛実験用」で走った。
+ * 簡単ステップメニューは自分の作品（`novelai.stepMenu.selectedWorkId`）を、
+ * 相談は自分の作品（`novelai.workChat.selectedWorkId`）を覚えていて、
+ * 光らせてもメニューの作品は変わらなかったためである。
+ */
+describe("相談の作品に合わせて光らせる（作者の報告、2026-10-31）", () => {
+  const chatWork: WorkEntry = {
+    id: "textbook",
+    title: "教科書チート",
+    folderPath: "C:/works/textbook",
+    registeredAt: "2026-10-31T00:00:00.000Z",
+  };
+  const menuWork: WorkEntry = {
+    id: "tayutau",
+    title: "たゆたう鉛実験用",
+    folderPath: "C:/works/tayutau",
+    registeredAt: "2026-10-31T00:00:00.000Z",
+  };
+
+  function twoWorks(selected: string): {
+    steps: StepMenuProvider;
+    actions: ActionListProvider;
+    store: { saved: string | undefined };
+  } {
+    const registry = {
+      list: () => [chatWork, menuWork],
+      onDidChange: () => ({ dispose() {} }),
+    } as unknown as WorkRegistry;
+    const store: { saved: string | undefined } = { saved: selected };
+    const steps = new StepMenuProvider(
+      registry,
+      {
+        get: () => store.saved,
+        set: (id) => {
+          store.saved = id;
+        },
+      },
+      noStore,
+      undefined,
+      // 作品のタイプは読まない（絞らずに全部並べる）
+      async () => undefined,
+      async () => undefined
+    );
+    return { steps, actions: new ActionListProvider(registry, noStore), store };
+  }
+
+  function spotlightOf(
+    steps: StepMenuProvider,
+    actions: ActionListProvider,
+    seen: StepNode[] = [],
+    onStepWorkAligned?: (id: string) => void
+  ): ReturnType<typeof createActionSpotlight> {
+    return createActionSpotlight(
+      {
+        stepView: fakeView(seen),
+        stepProvider: steps,
+        actionView: fakeView<ActionNode>([]),
+        actionProvider: actions,
+        ...(onStepWorkAligned ? { onStepWorkAligned } : {}),
+      },
+      noWait
+    );
+  }
+
+  /** 光らせた行を押したときに、どの作品で走るか */
+  function workOfRevealed(
+    steps: StepMenuProvider,
+    seen: StepNode[]
+  ): string | undefined {
+    const node = [...seen]
+      .reverse()
+      .find((entry) => entry.type === "action" && entry.item.command === GUIDED);
+    if (!node) return undefined;
+    const args = steps.getTreeItem(node).command?.arguments as
+      | Array<{ work?: WorkEntry }>
+      | undefined;
+    return args?.[0]?.work?.id;
+  }
+
+  test("光らせた項目を押すと、相談の作品で走る（再現）", async () => {
+    const { steps, actions, store } = twoWorks(menuWork.id);
+    const seen: StepNode[] = [];
+    const spotlight = spotlightOf(steps, actions, seen);
+
+    const result = await spotlight.show(GUIDED, { workId: chatWork.id });
+
+    expect(result.shown).toBe(true);
+    expect(
+      workOfRevealed(steps, seen),
+      "光らせた項目が、相談と別の作品で走る"
+    ).toBe(chatWork.id);
+    // **覚えている作品も替わる。** 最上段の「選択作品：」の行もこれを読む
+    expect(store.saved).toBe(chatWork.id);
+    // 合わせたことを作者に伝えるために、合わせた作品を返す
+    expect(result).toMatchObject({ alignedWork: { id: chatWork.id } });
+  });
+
+  test("もとから同じ作品なら、合わせたことにしない（黙って光らせるだけ）", async () => {
+    const { steps, actions } = twoWorks(chatWork.id);
+    const result = await spotlightOf(steps, actions).show(GUIDED, {
+      workId: chatWork.id,
+    });
+    expect(result).toEqual({ shown: true, view: "steps" });
+  });
+
+  test("作品を渡さなければ、メニューの作品は替えない（外部AIの光らせ）", async () => {
+    const { steps, actions, store } = twoWorks(menuWork.id);
+    await spotlightOf(steps, actions).show(GUIDED);
+    expect(store.saved).toBe(menuWork.id);
+  });
+
+  test("登録に無い作品を渡されても替えない", async () => {
+    const { steps, actions, store } = twoWorks(menuWork.id);
+    const result = await spotlightOf(steps, actions).show(GUIDED, {
+      workId: "gone",
+    });
+    expect(store.saved).toBe(menuWork.id);
+    expect(result).toEqual({ shown: true, view: "steps" });
+  });
+
+  test("簡単ステップメニューに無い操作なら、メニューの作品は替えない", async () => {
+    // 「メモ追加」（novelai.addWorkMemo）は
+    // 簡単ステップメニューに置いていない（詳細メニューで光る）
+    const { steps, actions, store } = twoWorks(menuWork.id);
+    const result = await spotlightOf(steps, actions).show(
+      "novelai.addWorkMemo",
+      { workId: chatWork.id }
+    );
+    expect(result).toEqual({ shown: true, view: "actions" });
+    expect(store.saved).toBe(menuWork.id);
+  });
+
+  test("合わせたら、呼ぶ側の後始末（件数の数え直し）を呼ぶ", async () => {
+    const { steps, actions } = twoWorks(menuWork.id);
+    const aligned: string[] = [];
+    await spotlightOf(steps, actions, [], (id) => aligned.push(id)).show(
+      GUIDED,
+      { workId: chatWork.id }
+    );
+    expect(aligned).toEqual([chatWork.id]);
+  });
+});
