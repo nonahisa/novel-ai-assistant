@@ -387,7 +387,15 @@ export const commands = {
  * HTTPを発する道は本物にも無い**。テストからは「何をコピーしたか」
  * 「どこを開いたか」を覗く。
  */
+/** 画面がどこで動いているか（本物と同じ値。1 が手元、2 がブラウザ） */
+export enum UIKind {
+  Desktop = 1,
+  Web = 2,
+}
+
 export const env = {
+  /** 既定は手元。ブラウザ版を試すテストは書き換えて戻す */
+  uiKind: UIKind.Desktop as UIKind,
   clipboard: {
     /** 直近にコピーした文字列。テストはここを読む */
     text: "",

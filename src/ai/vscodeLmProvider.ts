@@ -490,3 +490,29 @@ export class VsCodeLmProvider implements AIProvider {
     };
   }
 }
+
+/**
+ * いまのエディターで `vscode.lm` の口が働くか（設計書5.9）。
+ *
+ * **「使えない」と言うのは、口が無いか、一覧を引くと投げるときだけ。**
+ * 一覧が空なのは、Copilot にサインインしていない・鍵を入れていないだけの
+ * VS Code でも起きる（その人には繋ぎ方の案内がある）。空で隠すと、
+ * あとで繋いでも次の版まで選択肢が出ない（隠したら戻さない決まりのため）。
+ * Copilot の起動が遅れて一時的に空のこともある。
+ *
+ * エディターの名前（appName）は見ない（決め打ちしない。`core/lmAvailability.ts`）。
+ */
+export async function probeVsCodeLm(): Promise<"available" | "unavailable"> {
+  const lm = (vscode as { lm?: { selectChatModels?: unknown } }).lm;
+  if (typeof lm?.selectChatModels !== "function") return "unavailable";
+  try {
+    await vscode.lm.selectChatModels();
+    return "available";
+  } catch (error) {
+    logLine(
+      "VS Code のAIの口を確かめたところ、一覧を引けませんでした: " +
+        (error instanceof Error ? error.message : String(error))
+    );
+    return "unavailable";
+  }
+}

@@ -1498,7 +1498,7 @@
         },
         {
           "command": "novelai.syncAllWorks",
-          "when": "view == novelai.works",
+          "when": "view == novelai.works && !isWeb",
           "group": "navigation@5"
         },
         {
@@ -1951,15 +1951,15 @@
         },
         {
           "command": "novelai.gitPull",
-          "when": "true"
+          "when": "!isWeb"
         },
         {
           "command": "novelai.gitPush",
-          "when": "true"
+          "when": "!isWeb"
         },
         {
           "command": "novelai.resolveConflicts",
-          "when": "true"
+          "when": "!isWeb"
         },
         {
           "command": "novelai.createWorkWithPlot",
@@ -1975,15 +1975,15 @@
         },
         {
           "command": "novelai.gitRestore",
-          "when": "true"
+          "when": "!isWeb"
         },
         {
           "command": "novelai.setupGithub",
-          "when": "true"
+          "when": "!isWeb"
         },
         {
           "command": "novelai.setupOllama",
-          "when": "true"
+          "when": "!isWeb"
         },
         {
           "command": "novelai.openExtensionSettings",
@@ -2008,6 +2008,62 @@
         {
           "command": "novelai.generateWorldDocs",
           "when": "true"
+        },
+        {
+          "command": "novelai.setupLmStudio",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.runFullSetup",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.setupVectorSearch",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.selectOllamaExecutable",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.shareWithEditor",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.collectEditorProposals",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.joinAsEditor",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.finishReviewAndReturn",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.revokeEditorAccess",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.syncAllWorks",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.saveAndSync",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.resolveDivergence",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.exportPdf",
+          "when": "!isWeb"
+        },
+        {
+          "command": "novelai.connectClaudeCode",
+          "when": "!isWeb"
         }
       ]
     },

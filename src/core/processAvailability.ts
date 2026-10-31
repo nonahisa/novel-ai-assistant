@@ -1,8 +1,14 @@
 /**
  * ブラウザ版（vscode.dev / github.dev）では使えない操作（設計書5.8.5）。
  *
- * **消すのではなく、押せなくして理由を出す**（`editorMode.ts` と同じ考え方）。
- * 何ができないのかが見えないと、なぜその項目が消えたのか分からない。
+ * **メニューからは隠す**（作者の裁定、2026-10-31「ブラウザー版も隠す」）。
+ * コマンドパレット・右クリック・ビューの見出しは package.json の
+ * `when` に `!isWeb` を、自前で並べる画面（詳細メニュー・簡単ステップ
+ * メニュー・AIへ渡す機能の一覧）は `isItemVisibleInRuntime` で外す。
+ *
+ * **理由を出す処理（`describeProcessesBlocked`）は残す。** キー割り当て・
+ * 知らせのボタン・ほかの拡張機能から命令が直に呼ばれたときの受け皿で、
+ * 隠しても呼ばれる道は消えないため。
  *
  * ここに挙げるのは、外部プロセス（git・Ollama・パッケージ導入）を
  * 起動する操作。ブラウザには「外部プロセスを起動する」という概念自体が
@@ -162,4 +168,27 @@ export function describeProcessesBlocked(command: string): string {
 /** 一覧を外から見たいとき（テストと画面の説明で使う） */
 export function processRequiredCommands(): string[] {
   return [...REQUIRES_PROCESSES].sort();
+}
+
+/**
+ * 操作メニューに項目は無いが、ブラウザ版では理由を出して止めている命令。
+ *
+ * `REQUIRES_PROCESSES` に入れないのは、あちらが「操作メニューに実在する
+ * ID だけ」を持つ決まりだから（上の説明）。コマンドパレットには出るので、
+ * package.json で隠す対象には入れる。
+ */
+const WEB_BLOCKED_PALETTE_ONLY: readonly string[] = [
+  "novelai.gitPull",
+  "novelai.gitPush",
+];
+
+/**
+ * ブラウザ版のメニュー（package.json の `contributes.menus`）から隠す命令。
+ *
+ * **一覧はここだけに持つ。** package.json の `!isWeb` を見張るテスト
+ * （`browserHiddenMenus.test.ts`）もここから取るので、命令を足して
+ * package.json を直し忘れると落ちる。
+ */
+export function browserHiddenCommands(): string[] {
+  return [...new Set([...REQUIRES_PROCESSES, ...WEB_BLOCKED_PALETTE_ONLY])].sort();
 }

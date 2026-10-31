@@ -3,7 +3,6 @@ import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { currentMode } from "../core/actorContext";
 import type { WorkMode } from "../core/editorMode";
-import { canRunProcesses } from "../core/runtime";
 import { abbreviateTitle, isAbbreviated } from "../core/abbreviateTitle";
 import type { WorkFormatKey } from "../core/workFormat";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -20,6 +19,8 @@ import {
   disabledHint,
   explainDisabled,
   isActionEnabled,
+  isItemVisibleInRuntime,
+  menuAllowsProcesses,
   stepActionResourceUri,
   REQUIRES_WORK_HINT,
   type ActionCounter,
@@ -163,10 +164,36 @@ export function filterSteps(
 ): Step[] {
   if (!column && !kind) return [...steps];
 
-  const visible = (command: string): boolean =>
-    (!column || isCommandVisibleForColumn(command, column)) &&
-    isCommandVisibleForKind(command, kind);
+  return filterStepCommands(
+    steps,
+    (command) =>
+      (!column || isCommandVisibleForColumn(command, column)) &&
+      isCommandVisibleForKind(command, kind)
+  );
+}
 
+/**
+ * ブラウザ版で使えない操作を外す（作者の裁定、2026-10-31「ブラウザー版も隠す」。
+ * 設計書5.8.5）。判定は詳細メニューと同じ `isItemVisibleInRuntime` に任せる
+ * （2か所で決めると、片方だけ直したときに食い違う）。
+ */
+export function filterStepsForRuntime(
+  steps: readonly Step[],
+  runtimeAllowsProcesses: boolean
+): Step[] {
+  if (runtimeAllowsProcesses) return [...steps];
+  const index = actionIndex();
+  return filterStepCommands(steps, (command) => {
+    const item = index.get(command);
+    return !item || isItemVisibleInRuntime(item, runtimeAllowsProcesses);
+  });
+}
+
+/** 中身を絞り、空になった小分類と段を畳む（`filterSteps` と `filterStepsForRuntime` の共通の芯） */
+function filterStepCommands(
+  steps: readonly Step[],
+  visible: (command: string) => boolean
+): Step[] {
   const filtered: Step[] = [];
   for (const step of steps) {
     const entries: Step["entries"] = [];
@@ -510,11 +537,12 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
    * （読み込みは最上段の描画が待って行う）。
    */
   visibleSteps(): readonly Step[] {
+    const base = filterStepsForRuntime(STEP_MENU, menuAllowsProcesses());
     const work = this.selectedWork();
-    if (!work) return STEP_MENU;
-    if (!this.formats.has(work.id)) return STEP_MENU;
+    if (!work) return base;
+    if (!this.formats.has(work.id)) return base;
     return filterSteps(
-      STEP_MENU,
+      base,
       workTypeColumn(this.formats.get(work.id)),
       this.kinds.get(work.id)
     );
@@ -731,7 +759,7 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     const works = this.registry.list();
     const selected = this.selectedWork();
     const mode = currentMode();
-    const runtimeAllowsProcesses = canRunProcesses();
+    const runtimeAllowsProcesses = menuAllowsProcesses();
     // **作品が「選ばれているか」で判定する。** 登録の有無ではない
     const enabled = isActionEnabled(
       action,

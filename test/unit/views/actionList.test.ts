@@ -171,10 +171,29 @@ describe("操作メニューの構成", () => {
 
   /**
    * ブラウザ版（vscode.dev）では、外部プロセス（git・Ollama）を
-   * 起動できない（設計書5.8.5）。**消すのではなく、押せなくして
-   * 理由を出す**——編集者モードと同じ考え方を、実行環境にも広げた。
+   * 起動できない（設計書5.8.5）。**メニューからは隠す**（作者の裁定、
+   * 2026-10-31「ブラウザー版も隠す」）。押せなくして理由を出す判定
+   * （`isActionEnabled`・`explainDisabled`）は、キー割り当てなどから直に
+   * 呼ばれたときの受け皿として残してあり、下の試験はその受け皿を見る。
    */
   describe("外部プロセスを起動できない環境（ブラウザ版）", () => {
+    test("使えない操作はメニューに並べない（隠す）", () => {
+      const needs = new Set(processRequiredCommands());
+      for (const group of ACTION_TREE) {
+        const listed = shownEntries(group.entries, false).flatMap((entry) =>
+          entry.kind === "section" ? shownEntries(entry.items, false) : [entry]
+        );
+        for (const item of listed) {
+          expect(needs.has(item.command), item.command).toBe(false);
+        }
+      }
+      // 手元では隠さない
+      const local = allActions().filter((item) =>
+        isItemShownInActionList(item, true)
+      );
+      expect(local.some((item) => needs.has(item.command))).toBe(true);
+    });
+
     test("該当する操作だけが押せなくなる", () => {
       for (const action of allActions()) {
         const needsProcesses = processRequiredCommands().includes(

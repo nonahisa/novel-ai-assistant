@@ -69,6 +69,11 @@ gh workflow run publish-marketplace.yml -f version=<版>
 - Marketplace 側の登録は、管理画面の「信頼できる出版」の `novel-ai-assistant-publish`（リポジトリ nonahisa/novel-ai-assistant・手順 publish-marketplace.yml・Environment marketplace）。**手順のファイルの名前か Environment を変えたら、この登録も直す**（食い違うと鍵の交換で断られる。PAT へは落ちない）
 - 終わったら手順8（`node scripts/checkMarketplace.mjs`）で反映を確かめる
 - vsce は 4.0.2 以降が要る（devDependencies と手順のファイルの `npx @vscode/vsce@<版>` をそろえる）
+- **Open VSX へも同じ手順の中で上げる**（作者の裁定 2026-10-31「進める」。設計書5.9）。Marketplace の段のあとに `npx ovsx@<版> publish <同じ VSIX> -p $OVSX_PAT` の段がある。承認は Marketplace と共通（同じ Environment の1回）
+  - シークレット `OVSX_PAT`（GitHub のリポジトリの Settings → Secrets and variables → Actions）が無ければ、**その段だけ飛ばして**「上げません」の notice を出す。Marketplace の公開は止めない
+  - トークンは作者が Open VSX で作る（こちらは作らない）。Open VSX のトークンは期限を選べるので、切れたら同じ所へ入れ直す
+  - Open VSX の段が落ちても Marketplace は済んでいる。直したら、同じ版で手順を動かし直さず、作者の手元の PowerShell で `npx ovsx@<版> publish <VSIX> -p <トークン>` を打ってもらい Open VSX だけ上げる（トークンはこちらが持たない）（Marketplace は同じ版を二度上げられない）
+  - 反映は https://open-vsx.org/extension/nonahisa/novel-ai-assistant で見る
 
 #### B. 作者の Chrome から管理画面へ上げる（A が使えないときの代わり）
 

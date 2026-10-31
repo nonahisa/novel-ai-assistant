@@ -29,6 +29,19 @@ import {
 */
 export * from "../core/actionTree";
 
+/**
+ * 自前で並べるメニュー（詳細メニュー・簡単ステップメニュー）で、外部プロセスの
+ * 要る操作を出してよいか（設計書5.8.5）。
+ *
+ * **package.json の `!isWeb` と同じ所で分ける。** `isWeb` は画面がブラウザで
+ * 動いているか（`uiKind`）なので、拡張機能の側が Node で動く形（画面だけ
+ * ブラウザ）でも隠れる。自前のメニューだけ `canRunProcesses()` で分けると、
+ * コマンドパレットからは消えたのにメニューには残る、という食い違いになる
+ */
+export function menuAllowsProcesses(): boolean {
+  return canRunProcesses() && vscode.env.uiKind !== vscode.UIKind.Web;
+}
+
 /** ツリーの節点 */
 export type ActionNode =
   | { type: "group"; group: ActionGroup }
@@ -209,7 +222,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     const { item: action } = node;
     const hasWork = this.registry.list().length > 0;
     const mode = currentMode();
-    const runtimeAllowsProcesses = canRunProcesses();
+    const runtimeAllowsProcesses = menuAllowsProcesses();
     const enabled = isActionEnabled(action, hasWork, mode, runtimeAllowsProcesses);
     const hint = disabledHint(action, hasWork, mode, runtimeAllowsProcesses);
 
@@ -280,7 +293,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       return group ? { type: "group", group } : undefined;
     }
 
-    const runtimeAllowsProcesses = canRunProcesses();
+    const runtimeAllowsProcesses = menuAllowsProcesses();
     const hidden = this.hiddenByKind();
     for (const group of groups) {
       for (const entry of shownEntries(group.entries, runtimeAllowsProcesses, hidden)) {
@@ -309,7 +322,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
    * なかったことを黙って成功にしないために、ここで分かる必要がある。
    */
   findActionNode(command: string): ActionNode | undefined {
-    const runtimeAllowsProcesses = canRunProcesses();
+    const runtimeAllowsProcesses = menuAllowsProcesses();
     const hidden = this.hiddenByKind();
     for (const group of visibleGroups(this.registry.list().length > 0)) {
       for (const entry of shownEntries(group.entries, runtimeAllowsProcesses, hidden)) {
@@ -345,13 +358,14 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     const hidden = this.hiddenByKind();
 
     if (!node) {
-      const runtimeAllowsProcesses = canRunProcesses();
+      const runtimeAllowsProcesses = menuAllowsProcesses();
       return groups.flatMap((group): ActionNode[] => {
         if (!group.standalone) {
           // 種類で中身が全部隠れた分類は、見出しごと出さない（設計書6.109.7）。
           // **種類で隠すものが無いときは、いままでどおり必ず出す**
+          // ブラウザ版で中身が全部隠れた分類も同じく畳む（設計書5.8.5）
           if (
-            hidden.size > 0 &&
+            (hidden.size > 0 || !runtimeAllowsProcesses) &&
             shownEntries(group.entries, runtimeAllowsProcesses, hidden).length === 0
           ) {
             return [];
@@ -366,7 +380,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       });
     }
     if (node.type === "group") {
-      return shownEntries(node.group.entries, canRunProcesses(), hidden).map((entry) =>
+      return shownEntries(node.group.entries, menuAllowsProcesses(), hidden).map((entry) =>
         entry.kind === "section"
           ? {
               type: "section" as const,
@@ -377,7 +391,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       );
     }
     if (node.type === "section") {
-      return shownEntries(node.section.items, canRunProcesses(), hidden).map((item) => ({
+      return shownEntries(node.section.items, menuAllowsProcesses(), hidden).map((item) => ({
         type: "action" as const,
         item,
       }));

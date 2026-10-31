@@ -241,6 +241,12 @@ import { startLoopLagMeter, type LoopLagReport } from "./core/loopLag";
 import { startStartupProfile } from "./core/startupProfiler";
 import { readerKind, type ReaderKind } from "./core/fileRead";
 import { describeProcessesBlocked } from "./core/processAvailability";
+import {
+  LM_AVAILABILITY_KEY,
+  LM_AVAILABLE_CONTEXT,
+  LmAvailabilityGate,
+} from "./core/lmAvailability";
+import { probeVsCodeLm } from "./ai/vscodeLmProvider";
 import { installEditorLockGuard } from "./features/editorLockGuard";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
@@ -1390,6 +1396,36 @@ export async function activate(
 
     **知らせは出さない。** 作者を止めずに、あとから読めればよい。
   */
+  /*
+    **VS Code のAIの口（`vscode.lm`）が働くか**（設計書5.9）。起動では globalState を
+    同期で読んで印を立てるだけで、**待たない**（作者の前提、2026-10-31「起動を遅く
+    しない」）。確かめは作品一覧の初回描画のあと（`noteFirstWorkListRender`）に
+    裏で起こし、同じ版のあいだは確かめない・一度隠したら戻さない。
+  */
+  const lmGate = new LmAvailabilityGate({
+    version: String(
+      (context.extension.packageJSON as { version?: unknown }).version ?? ""
+    ),
+    read: () => context.globalState.get(LM_AVAILABILITY_KEY),
+    // 書いたら読み返す口を通す（設計書5.7.8。別の鍵の送り返しで消えると、
+    // 次の起動で隠したはずのものが一瞬出てしまう）
+    write: (record) => {
+      void verifiedState(context.globalState).update(
+        LM_AVAILABILITY_KEY,
+        record
+      );
+    },
+    publish: (show) => {
+      void vscode.commands.executeCommand(
+        "setContext",
+        LM_AVAILABLE_CONTEXT,
+        show
+      );
+    },
+    probe: probeVsCodeLm,
+  });
+  lmGate.start();
+
   let startupTimingWritten = false;
   let firstRenderDone = false;
   // ブラウザ版では点検を走らせない（gitの子プロセスが起こせない）ので、
@@ -1470,6 +1506,11 @@ export async function activate(
         上限の見張りが先に起こしていれば、ここは何もしない。
       */
       maintenanceTrigger.signal();
+      /*
+        **AIの口の確かめも、一覧が出てから裏で起こす**（設計書5.9）。`void` で
+        投げっぱなしにし、起動の道では待たない。同じ版なら中で何もせず戻る
+      */
+      void lmGate.recheckInBackground();
     }
   };
 
@@ -1511,6 +1552,13 @@ export async function activate(
   // そのあいだ右クリックの命令に行が渡らなくなる（`redrawIfChanged` の説明）
   gitSync.onDidChange(() => treeProvider.redrawIfChanged());
   const aiRegistry = new AIRegistry(context);
+  // 口が働かないと分かったら、AIの選択肢から外す（設計書5.9。戻すのは門番が決める）
+  aiRegistry.setProviderHidden("vscode-lm", !lmGate.visible);
+  context.subscriptions.push(
+    lmGate.onDidChange((show) =>
+      aiRegistry.setProviderHidden("vscode-lm", !show)
+    )
+  );
   // 測っていないモデルに切り替えたら、AIチューニングを一言勧める（設計書6.49.8）。
   // 選ぶ道（AI設定・機能別割当・大きいモデルの案内）はどれも選択の変更の
   // 合図を鳴らすので、見張るのはその1か所

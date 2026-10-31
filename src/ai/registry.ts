@@ -222,7 +222,21 @@ export class AIRegistry {
     return filterProvidersForRuntime(
       [...this.providers.values()],
       canRunProcesses()
-    );
+    ).filter((provider) => !this.hiddenProviders.has(provider.id));
+  }
+
+  /**
+   * このエディターで口が働かないと分かったプロバイダ（設計書5.9）。
+   *
+   * **選択肢から外すだけ**で、選んであるものは切り替えない（`resolve()` は
+   * 見ない）。誤って隠したときに、作者の選んだAIが黙って変わらないように
+   */
+  private readonly hiddenProviders = new Set<ProviderId>();
+
+  /** 選択肢から外す・戻す（`core/lmAvailability.ts` の門番が呼ぶ） */
+  setProviderHidden(id: ProviderId, hidden: boolean): void {
+    if (hidden) this.hiddenProviders.add(id);
+    else this.hiddenProviders.delete(id);
   }
 
   getProvider(id: ProviderId): AIProvider | undefined {
