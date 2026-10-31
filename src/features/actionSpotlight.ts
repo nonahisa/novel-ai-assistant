@@ -127,48 +127,59 @@ export function createActionSpotlight(
             command
           )
         : undefined;
-      if (aligned) targets.onStepWorkAligned?.(aligned.id);
       const alignedWork = aligned
         ? { alignedWork: { id: aligned.id, title: aligned.title } }
         : {};
 
-      const stepNode = targets.stepProvider.findActionNode(command);
-      if (
-        stepNode &&
-        (await blink(
-          targets.stepView,
-          stepNode,
-          targets.stepProvider.getParent(stepNode),
-          sleep,
-          blinkMs
-        ))
-      ) {
-        return { shown: true, view: "steps", ...alignedWork };
-      }
-      const actionNode = targets.actionProvider.findActionNode(command);
-      if (
-        actionNode &&
-        (await blink(
-          targets.actionView,
-          actionNode,
-          targets.actionProvider.getParent(actionNode),
-          sleep,
-          blinkMs
-        ))
-      ) {
-        // 合わせたのに詳細メニューへ回った（合わせた作品のタイプで消える段）
-        // ときも、合わせたことは伝える。メニューの作品は替わっている
-        return { shown: true, view: "actions", ...alignedWork };
-      }
-      // **どちらにも無ければ印も外す。** 押す場所が無いのに印だけ
-      // 残ると、前の段を指したままになる
-      targets.marker?.setSpotlight(undefined);
-      return { shown: false };
+      const result = await revealIn(command, alignedWork);
+      // **後始末は瞬かせたあと。** 件数の数え直しは木をもう一度描き直すので、
+      // 瞬きの途中に重なると選択が外れて光が見えにくくなる
+      if (aligned) targets.onStepWorkAligned?.(aligned.id);
+      return result;
     },
     clear(): void {
       targets.marker?.setSpotlight(undefined);
     },
   };
+
+  /** 先に簡単ステップメニュー、無ければ詳細メニューで光らせる */
+  async function revealIn(
+    command: string,
+    alignedWork: { alignedWork?: { id: string; title: string } }
+  ): Promise<SpotlightResult> {
+    const stepNode = targets.stepProvider.findActionNode(command);
+    if (
+      stepNode &&
+      (await blink(
+        targets.stepView,
+        stepNode,
+        targets.stepProvider.getParent(stepNode),
+        sleep,
+        blinkMs
+      ))
+    ) {
+      return { shown: true, view: "steps", ...alignedWork };
+    }
+    const actionNode = targets.actionProvider.findActionNode(command);
+    if (
+      actionNode &&
+      (await blink(
+        targets.actionView,
+        actionNode,
+        targets.actionProvider.getParent(actionNode),
+        sleep,
+        blinkMs
+      ))
+    ) {
+      // 合わせたのに詳細メニューへ回った（合わせた作品のタイプで消える段）
+      // ときも、合わせたことは伝える。メニューの作品は替わっている
+      return { shown: true, view: "actions", ...alignedWork };
+    }
+    // **どちらにも無ければ印も外す。** 押す場所が無いのに印だけ
+    // 残ると、前の段を指したままになる
+    targets.marker?.setSpotlight(undefined);
+    return { shown: false };
+  }
 }
 
 /**
