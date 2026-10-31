@@ -33,13 +33,37 @@ import type { StepMenuProvider, StepNode } from "../views/stepMenu";
  * 1. **印を残す**（`ActionDecorationProvider`。消えずに残るので、目を離しても戻れる）
  * 2. **瞬かせる**（`reveal` を2回。間に選択をいったん外すので、色が動いて目に入る）
  * 3. **もう一度光らせる**（相談パネルの札から呼び直せる。`GuidedTourHost.showAgain`）
+ *
+ * ## 相談から光らせるときは、作品を揃える（作者の報告、2026-10-31）
+ *
+ * 相談の作品は「教科書チート」だったのに、光らせた簡単ステップメニューの
+ * 項目を押すと別の作品で走った。簡単ステップメニューは自分で作品を覚えて
+ * いて（`novelai.stepMenu.selectedWorkId`）、光らせても替わらなかった。
+ * 相談は `show` に作品を添え、**簡単ステップメニューで光らせる操作なら、
+ * メニューの作品をそちらへ合わせる**（`StepMenuProvider.alignWorkForSpotlight`）。
+ * 合わせたことは `alignedWork` で返し、相談が会話に1行出す
+ * （最上段の「選択作品：」の行も描き直しで替わる）。
  */
 export type SpotlightResult =
-  | { readonly shown: true; readonly view: "steps" | "actions" }
+  | {
+      readonly shown: true;
+      readonly view: "steps" | "actions";
+      /** 簡単ステップメニューの作品を、渡された作品へ合わせたときだけ入る */
+      readonly alignedWork?: { readonly id: string; readonly title: string };
+    }
   | { readonly shown: false };
 
+export interface SpotlightOptions {
+  /**
+   * 押したときに走ってほしい作品（相談の作品）。
+   *
+   * **外部AI（MCP）からの光らせには渡さない。** 相談の作品とは関係が無い。
+   */
+  readonly workId?: string;
+}
+
 export interface ActionSpotlight {
-  show(command: string): Promise<SpotlightResult>;
+  show(command: string, options?: SpotlightOptions): Promise<SpotlightResult>;
   /** 印を外す。**案内が終わった／やめたときに呼ぶ** */
   clear(): void;
 }
@@ -62,6 +86,11 @@ export interface SpotlightTargets {
   readonly actionProvider: ActionListProvider;
   /** 印を付ける先。渡さなければ光らせるだけ（印は出ない） */
   readonly marker?: SpotlightMarker;
+  /**
+   * 簡単ステップメニューの作品を合わせたあとの後始末（未反映の件数の数え直し）。
+   * 最上段で選び直したとき（`novelai.chooseStepWork`）と同じことをする
+   */
+  readonly onStepWorkAligned?: (workId: string) => void;
 }
 
 /** 瞬きの間合い。**目が動くだけの長さ**が要る（短すぎると1回に見える） */
@@ -83,45 +112,74 @@ export function createActionSpotlight(
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   return {
-    async show(command: string): Promise<SpotlightResult> {
+    async show(
+      command: string,
+      options: SpotlightOptions = {}
+    ): Promise<SpotlightResult> {
       // **先に印を付ける。** 瞬いている間も「どれか」が見えている
       targets.marker?.setSpotlight(command);
 
-      const stepNode = targets.stepProvider.findActionNode(command);
-      if (
-        stepNode &&
-        (await blink(
-          targets.stepView,
-          stepNode,
-          targets.stepProvider.getParent(stepNode),
-          sleep,
-          blinkMs
-        ))
-      ) {
-        return { shown: true, view: "steps" };
-      }
-      const actionNode = targets.actionProvider.findActionNode(command);
-      if (
-        actionNode &&
-        (await blink(
-          targets.actionView,
-          actionNode,
-          targets.actionProvider.getParent(actionNode),
-          sleep,
-          blinkMs
-        ))
-      ) {
-        return { shown: true, view: "actions" };
-      }
-      // **どちらにも無ければ印も外す。** 押す場所が無いのに印だけ
-      // 残ると、前の段を指したままになる
-      targets.marker?.setSpotlight(undefined);
-      return { shown: false };
+      // **探す前に作品を合わせる。** 合わせると作品のタイプで並びが替わるので、
+      // 先に探した節点は描き直した木に無いことがある
+      const aligned = options.workId
+        ? await targets.stepProvider.alignWorkForSpotlight(
+            options.workId,
+            command
+          )
+        : undefined;
+      const alignedWork = aligned
+        ? { alignedWork: { id: aligned.id, title: aligned.title } }
+        : {};
+
+      const result = await revealIn(command, alignedWork);
+      // **後始末は瞬かせたあと。** 件数の数え直しは木をもう一度描き直すので、
+      // 瞬きの途中に重なると選択が外れて光が見えにくくなる
+      if (aligned) targets.onStepWorkAligned?.(aligned.id);
+      return result;
     },
     clear(): void {
       targets.marker?.setSpotlight(undefined);
     },
   };
+
+  /** 先に簡単ステップメニュー、無ければ詳細メニューで光らせる */
+  async function revealIn(
+    command: string,
+    alignedWork: { alignedWork?: { id: string; title: string } }
+  ): Promise<SpotlightResult> {
+    const stepNode = targets.stepProvider.findActionNode(command);
+    if (
+      stepNode &&
+      (await blink(
+        targets.stepView,
+        stepNode,
+        targets.stepProvider.getParent(stepNode),
+        sleep,
+        blinkMs
+      ))
+    ) {
+      return { shown: true, view: "steps", ...alignedWork };
+    }
+    const actionNode = targets.actionProvider.findActionNode(command);
+    if (
+      actionNode &&
+      (await blink(
+        targets.actionView,
+        actionNode,
+        targets.actionProvider.getParent(actionNode),
+        sleep,
+        blinkMs
+      ))
+    ) {
+      // 合わせたのに詳細メニューへ回った（合わせた作品のタイプで消える段）
+      // ときも、合わせたことは伝える。メニューの作品は替わっている
+      return { shown: true, view: "actions", ...alignedWork };
+    }
+    // **どちらにも無ければ印も外す。** 押す場所が無いのに印だけ
+    // 残ると、前の段を指したままになる
+    targets.marker?.setSpotlight(undefined);
+    return { shown: false };
+  }
 }
 
 /**
@@ -172,7 +230,21 @@ export function describeSpotlight(result: SpotlightResult): string {
   if (!result.shown) {
     return "この操作はメニューに見当たりませんでした。コマンドパレット（Ctrl+Shift+P）から探してください。";
   }
-  return result.view === "steps"
-    ? "簡単ステップメニューで光らせました。"
-    : "詳細メニューで光らせました。";
+  const where =
+    result.view === "steps"
+      ? "簡単ステップメニューで光らせました。"
+      : "詳細メニューで光らせました。";
+  const aligned = describeAlignedWork(result);
+  return aligned ? `${aligned}${where}` : where;
+}
+
+/**
+ * 簡単ステップメニューの作品を合わせたことの言い方（作者の報告、2026-10-31）。
+ *
+ * **黙って替えない。** 作者が最上段で選んでいた作品が替わるので、
+ * どの作品になったかを会話に残す。合わせていなければ undefined。
+ */
+export function describeAlignedWork(result: SpotlightResult): string | undefined {
+  if (!result.shown || !result.alignedWork) return undefined;
+  return `簡単ステップメニューの作品を、相談の作品「${result.alignedWork.title}」に合わせました。`;
 }

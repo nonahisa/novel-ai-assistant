@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { detectRunIntent } from "../../../src/core/chatIntent";
+import { detectRunIntent, isExplicitRunRequest } from "../../../src/core/chatIntent";
 
 /**
  * 実機のログで見つかった不具合の再現（2026-08-15）。
@@ -98,9 +98,42 @@ describe("応募先の提案", () => {
 
 describe("押すのは作者", () => {
   test("見分けても、返すのは機能の種別だけ", () => {
-    // 実行はしない。ボタンを出すところまでが、作者から許可された範囲
+    // 規則で見分けただけでは実行しない。ボタンを出すところまで（今すぐ動かすのは
+    // AIの印と作者の頼みの形がそろったときだけ。作者の判断、2026-10-31）
     const kind = detectRunIntent("設定を抽出してください");
 
     expect(typeof kind).toBe("string");
+  });
+});
+
+/**
+ * 今すぐ動かしてよい頼みの形か（作者の判断、2026-10-31）。
+ *
+ * AIが「今すぐ動かす」の印を立てても、作者の言葉が頼みの形でなければ動かさない。
+ * **迷ったら動かさない**——ボタンは出ているので、作者は1手で動かせる。
+ */
+describe("isExplicitRunRequest", () => {
+  test.each([
+    "資料抽出を実行して",
+    "誤字脱字を走らせて",
+    "誤字脱字を走らせてください",
+    "設定資料をまとめて抽出してほしい",
+    "お願いします",
+    "はい、お願い",
+  ])("頼み：%s", (question) => {
+    expect(isExplicitRunRequest(question)).toBe(true);
+  });
+
+  test.each([
+    "どうすればいい？",
+    "抽出ってできる？",
+    "抽出の使い方を教えて",
+    "誤字脱字の検知はありますか",
+    "抽出してくれる？",
+    "設定資料を抽出したほうがいいですか？",
+    "誤字が多い気がする",
+    "",
+  ])("頼みではない：%s", (question) => {
+    expect(isExplicitRunRequest(question)).toBe(false);
   });
 });

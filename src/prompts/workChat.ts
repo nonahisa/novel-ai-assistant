@@ -152,7 +152,13 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 //       2026-10-25 昼「微調整した上で、微調整している旨を表示してください」）。答えた
 //       作者は答えを土台に相談から微調整する。頼む文の字は1字も変えていない——変わったのは
 //       送る相手だけだが、答えた作者の回の送る本文が変わるので版を上げる
-export const WORK_CHAT_VERSION = "3.34";
+// 3.35: 作者がはっきり頼んだら、押すのを待たずに動かす（作者の判断、2026-10-31
+//       「明確な意思表示があるなら、AIが機能を実行しても良いのでは？」）。答えに
+//       runNow（真偽）の欄を足し、【作業を頼まれたとき】の「あなたは操作を実行
+//       できません。押すのは作者です」を、runNow を立ててよい条件の説明へ書き換えた。
+//       「実行したふりをしない」は runNow を立てなかった回のために残した。一覧に無い
+//       操作の案内では、操作名を「」で囲ませる（光らせる札が出る）
+export const WORK_CHAT_VERSION = "3.35";
 
 /**
  * 作者自身の読者タイプを推し量るための頼み（設計書6.101。作者の裁定
@@ -357,15 +363,24 @@ needFiles にそのパスを入れてください（作品フォルダからの�
 - 書き込みの提案が無いときは edit を省いてください。
 
 【作業を頼まれたとき】
-**あなたは、この拡張機能の操作を実行できません。押すのは作者です。**
-あなたが返せるのは文章と、作者が押すボタン（run）だけです。
-- **実行したふりをしないこと。** いま処理している・終わったら知らせる、の
-  ように、自分が操作を動かしたことにして答えないでください。作者は待つだけに
-  なり、そのあと結果を求められても出せません
+あなたが返せるのは文章と、作者が押すボタン（run）と、今すぐ動かす印（runNow）です。
+操作を動かすのは拡張機能で、**動かすのは下の一覧にある操作だけ、1回に1つだけ**です。
+- **runNow を true にしてよいのは、作者の最後の発言が、run に入れた操作を
+  今すぐ動かすようはっきり頼んでいるときだけです**（「資料抽出を実行して」
+  「誤字脱字を走らせて」など）。そのときは押すのを待たずに動き始めます
+  （料金の確認などの窓は、いつもどおり作者に出ます）
+- 相談・質問・迷い（「どうすればいい？」「抽出ってできる？」「やったほうがいい？」）
+  では runNow を false にしてください。run のボタンを出して、作者に押してもらいます
+- **実行したふりをしないこと。** runNow を true にしなかった回に、いま処理している・
+  終わったら知らせる、のように、自分が操作を動かしたことにして答えないでください。
+  作者は待つだけになり、そのあと結果を求められても出せません
+- runNow を true にした回も、結果を知っているように書かないこと。結果は、
+  動いた操作の画面に出ます
 - 頼まれた操作が下の一覧にあるなら、run に入れてください。ボタンが出ます
 - 一覧に無い操作を頼まれたら、**操作の名前と、画面のどこにあるか**
   （詳細メニューの分類 → 小分類 → 操作名）を伝えて、作者に押してもらって
-  ください。**末尾の目次にある操作を「ありません」と答えないこと。**
+  ください。操作名は「」で囲んで書くこと（画面にその項目を光らせる札が出ます）。
+  **末尾の目次にある操作を「ありません」と答えないこと。**
 - 結果を聞かれたら、作者が押して出た画面を見せてもらってください
 
 「抽出して」「あらすじを作って」のように**作業を頼まれたら、必ず run に機能名を
@@ -373,7 +388,7 @@ needFiles にそのパスを入れてください（作品フォルダからの�
 文章で「まず資料抽出をしましょう」と書くだけでは何も起きず、
 作者は「やると言ったのに動かない」と感じます。
 
-起動できるのは次のものだけです（作者がボタンを押したときだけ動きます）。
+起動できるのは次のものだけです（作者がボタンを押したとき、または runNow が true のときだけ動きます）。
 
 ${RUNNABLE_LIST}
 
@@ -384,7 +399,7 @@ ${RUNNABLE_LIST}
 資料として保存もされません。** 専用の機能は対象を漏れなく処理し、
 結果を確認して保存できる画面に出します。
 
-- 一覧に無い操作は run に入れないこと。入れても無視されます
+- 一覧に無い操作は run に入れないこと。入れても無視され、runNow を true にしても動きません
 - 手順が複数あるとき（例：抽出してから資料集を出力）は、**最初の1つだけ**を run に入れ、
   続きは終わってから改めて勧めること
 - とくに誤字脱字は、会話で「ここが誤字では」と言っても網羅性も適用の導線もありません
@@ -509,7 +524,7 @@ const SYSTEM_PROMPT_TAIL = `【本文の場所を指すとき】
   提案として並び、作者が選んだものだけが反映されます
 
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "${EXAMPLE_PERSON.fullName}", "notes": "他の登場人物『${EXAMPLE_OTHER.fullName}』の情報が混入しています。"}, "profileSignals": null, "writerStyleSignals": null, "authorReaderSignals": null}
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "runNow": false, "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "${EXAMPLE_PERSON.fullName}", "notes": "他の登場人物『${EXAMPLE_OTHER.fullName}』の情報が混入しています。"}, "profileSignals": null, "writerStyleSignals": null, "authorReaderSignals": null}
 
 **profileSignals と writerStyleSignals と authorReaderSignals は、末尾に説明があるときだけ使ってください。** 説明が無ければ必ず null にしてください。`;
 
@@ -737,6 +752,16 @@ export const WORK_CHAT_SCHEMA = {
       required: ["target", "content"],
     },
     run: { type: ["string", "null"] },
+    /*
+      今すぐ動かす印（作者の判断、2026-10-31）。**真偽だけを受ける。**
+      読むときも `=== true` しか通さない（`"true"` や指示の語が返っても立たない）。
+
+      **null を許さない**（ほかの欄と違う）。null を許すと型の組（union）が1つ増え、
+      Claude の上限（16）をさらに超える（`claudeSchemaLimits.test.ts`。この
+      スキーマはもとから超えていて、送り直しで通している）。立てない回は false と
+      言わせればよく、null と false を分ける意味も無い
+    */
+    runNow: { type: "boolean" },
     locate: {
       type: ["object", "null"],
       properties: {
@@ -810,6 +835,7 @@ export const WORK_CHAT_SCHEMA = {
     "needFiles",
     "edit",
     "run",
+    "runNow",
     "locate",
     "reloadRecord",
     "profileSignals",
@@ -843,6 +869,14 @@ export interface WorkChatAnswer {
   edit: unknown;
   /** 標準機能の起動の提案。許可した一覧と突き合わせてから使う */
   run: unknown;
+  /**
+   * 押すのを待たずに今すぐ動かす印（作者の判断、2026-10-31）。
+   *
+   * **真偽の true のときだけ立つ。** `"true"`・`1`・指示の語（「今すぐ動かす」）が
+   * 返っても立てない（CLAUDE.md の失敗3）。立っても、動かすかは呼ぶ側が
+   * `run` の照合と作者の言葉（`isExplicitRunRequest`）で決める
+   */
+  runNow: boolean;
   /** 本文の該当箇所を指す提案。呼び出し側で実在を照合する */
   locate: unknown;
   /**
@@ -923,6 +957,7 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     needFiles: undefined,
     edit: undefined,
     run: undefined,
+    runNow: false,
     locate: undefined,
     reloadRecord: undefined,
     profileSignals: undefined,
@@ -951,6 +986,7 @@ function readAnswer(
     needFiles?: unknown;
     edit?: unknown;
     run?: unknown;
+    runNow?: unknown;
     locate?: unknown;
     reloadRecord?: unknown;
     profileSignals?: unknown;
@@ -970,6 +1006,7 @@ function readAnswer(
     needFiles: record.needFiles,
     edit: record.edit,
     run: record.run,
+    runNow: record.runNow === true,
     locate: record.locate,
     reloadRecord: record.reloadRecord,
     profileSignals: parseProfileSignals(record.profileSignals),

@@ -165,9 +165,23 @@ describe("抽出は厳しいままにする", () => {
  * **禁じる文が prompt に入っていること**だけである。
  */
 describe("相談は、操作を実行したふりをしない", () => {
-  test("押すのは作者だと書いてある", () => {
-    expect(WORK_CHAT_SYSTEM_PROMPT).toContain("実行できません");
-    expect(WORK_CHAT_SYSTEM_PROMPT).toContain("押すのは作者");
+  /*
+    **3.35 で書き換えた**（作者の判断、2026-10-31「明確な意思表示があるなら、
+    AIが機能を実行しても良いのでは？」）。「あなたは操作を実行できません。
+    押すのは作者です」は、はっきり頼まれた回には当てはまらなくなった。
+    代わりに、今すぐ動かす印（runNow）を立ててよい条件と、立てない回
+    （相談・質問）を書いてあることを見る。
+  */
+  test("今すぐ動かしてよいのは、はっきり頼まれた回だけだと書いてある", () => {
+    expect(WORK_CHAT_SYSTEM_PROMPT).not.toContain(
+      "あなたは、この拡張機能の操作を実行できません"
+    );
+    expect(WORK_CHAT_SYSTEM_PROMPT).toContain(
+      "runNow を true にしてよいのは、作者の最後の発言が"
+    );
+    expect(WORK_CHAT_SYSTEM_PROMPT).toContain("では runNow を false にしてください");
+    // 動かすのは一覧にあるものを1回に1つだけ（コードの側でも締めている）
+    expect(WORK_CHAT_SYSTEM_PROMPT).toContain("1回に1つだけ");
   });
 
   test("実行したふりを禁じている", () => {
@@ -260,7 +274,8 @@ describe("版", () => {
     // 3.33（2026-10-25）：作者自身の読者タイプの推定の欄 authorReaderSignals を足した
     // （頼む文は9問に答えていない作者にだけ送る。設計書6.101）
     // 3.34（2026-10-25 昼）：その頼む文を、9問に答えた作者にも送る（答えを土台に微調整）
-    expect(WORK_CHAT_VERSION).toBe("3.34");
+    // 3.35（2026-10-31）：はっきり頼まれたら押すのを待たずに動かす印 runNow を足した（作者の判断）
+    expect(WORK_CHAT_VERSION).toBe("3.35");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });
