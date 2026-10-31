@@ -20,6 +20,7 @@ import {
   ChapterNode,
   MemoFolderNode,
   MemoFileNode,
+  OwnWorkFrameNode,
   type TreeNode,
 } from "./views/workTree";
 import { requireTreeNode } from "./views/treeCommandNode";
@@ -576,6 +577,10 @@ import {
   ReaderStatsHelperLink,
   registerReaderStatsHelperLink,
 } from "./features/readerStatsHelperLink";
+import {
+  ownWorkDropController,
+  UnregisteredOwnWorks,
+} from "./features/unregisteredOwnWorks";
 import { initSiteLinkGuide } from "./features/openSiteLink";
 import {
   proposeChapters,
@@ -2289,9 +2294,29 @@ export async function activate(
     )
   );
 
+  /*
+    「未登録の自分の作品」の枠（作者の指示 2026-11-01。設計書6.99.8）。覚えはこの端末の
+    保管庫に置き、作品一覧の最後に枠を出す。取り込みは「バックアップ取込」と同じ道
+    （`importWorkFromZip`）で、枠のサイトと作品ID を引き継ぐ
+  */
+  const ownWorks = new UnregisteredOwnWorks(verifiedState(context.globalState), {
+    importAsNew: async (picked, known) => {
+      const { importWorkFromZip } = await import("./features/importWorkFromZip.js");
+      return importWorkFromZip(
+        registry.list(),
+        (folderPath, title, options) => registerFolderAsWork(folderPath, title, options),
+        picked,
+        known
+      );
+    },
+  });
+  context.subscriptions.push(ownWorks, treeProvider.setOwnWorksSource(ownWorks));
+
   const treeView = vscode.window.createTreeView("novelai.works", {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
+    // 枠へバックアップのファイルを落として取り込む（作品の行・話の行への落としは受けない）
+    dragAndDropController: ownWorkDropController(ownWorks),
   });
   // 走査中の件数を見出しへ出すために控える（設計書6.1.2）
   worksView = treeView;
@@ -3829,6 +3854,36 @@ export async function activate(
       await importWorkFromZip(registry.list(), (folderPath, title, options) =>
         registerFolderAsWork(folderPath, title, options)
       );
+    })
+  );
+
+  /*
+    「未登録の自分の作品」の枠の右クリック（作者の指示 2026-11-01。設計書6.99.8）。
+    枠から呼ばれたときだけ動く（コマンドパレットには出していない）
+  */
+  const frameOf = (node: unknown): OwnWorkFrameNode | undefined => {
+    if (node instanceof OwnWorkFrameNode) return node;
+    void vscode.window.showInformationMessage(
+      "作品一覧の「未登録の自分の作品」の枠を右クリックしてお使いください。"
+    );
+    return undefined;
+  };
+  context.subscriptions.push(
+    registerCommand("novelai.fetchOwnWorkBackup", async (node?: unknown) => {
+      const frame = frameOf(node);
+      if (frame) await ownWorks.fetchBackup(frame.entry);
+    }),
+    registerCommand("novelai.importOwnWorkBackupFile", async (node?: unknown) => {
+      const frame = frameOf(node);
+      if (frame) await ownWorks.importFromPicker(frame.entry);
+    }),
+    registerCommand("novelai.hideOwnWork", async (node?: unknown) => {
+      const frame = frameOf(node);
+      if (frame) await ownWorks.hide(frame.entry);
+    }),
+    // 見出しの右クリック。登録済みの作品は戻しても枠に出ないので並べない
+    registerCommand("novelai.restoreHiddenOwnWorks", async () => {
+      await ownWorks.restoreHidden(await treeProvider.registeredOwnWorkKeys());
     })
   );
 
@@ -7785,6 +7840,8 @@ export async function activate(
           manual: true,
           afterImport: (changed) => refreshWritingStatsPanel(changed, deviceId),
         },
+        // 貼り付けた束のうち、本人しか開けない画面で読んだ未登録の作品を枠に出す（2026-11-01）
+        noteOwnWorks: (envelopes) => ownWorks.note(envelopes),
       });
       if (!result.changed) return;
       for (const changed of result.changedWorks ?? [work]) {
@@ -7814,6 +7871,8 @@ export async function activate(
         listWorks: () => registry.list(),
         memory: verifiedState(context.globalState),
         afterImport: (work) => refreshWritingStatsPanel(work, deviceId),
+        // 本人しか開けない画面で読んだ未登録の作品を、作品一覧の枠に出す（2026-11-01）
+        noteOwnWorks: (envelopes) => ownWorks.note(envelopes),
         // 公募の一覧（ヘルパー 0.12.0）。URI の受け口は1つしか持てないので、ここで渡す
         importContests: () => importContestsFromClipboard(contestDeps, "uri"),
         // カクヨムの章立て（ヘルパー 0.13.0。残課題 B7）。同じ受け口でパスを見分ける

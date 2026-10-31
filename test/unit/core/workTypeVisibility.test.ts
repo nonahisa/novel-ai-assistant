@@ -280,6 +280,21 @@ describe("タイプに合わない操作は出さない", () => {
 
 describe("右クリック（package.json の when）が表と噛み合う", () => {
   const contextMenu = manifest.contributes.menus["view/item/context"];
+  /** タイプを持たない行（未登録の自分の作品の枠と、その見出し）だけを狙う when */
+  const UNTYPED_ROW = /viewItem\s*=~\s*\/\^(?:ownWorkFrame|ownWorksHeader-hasHidden)\$\//;
+
+  test("タイプを持たない枠の項目は、枠と見出しの印だけを狙う（作品・章・話の行に出ない）", () => {
+    const frames = contextMenu.filter((entry) => UNTYPED_ROW.test(entry.when ?? ""));
+    expect(frames.map((entry) => entry.command).sort()).toEqual([
+      "novelai.fetchOwnWorkBackup",
+      "novelai.hideOwnWork",
+      "novelai.importOwnWorkBackupFile",
+      "novelai.restoreHiddenOwnWorks",
+    ]);
+    for (const entry of frames) {
+      expect(matchedContextValues(entry.when ?? ""), entry.command).toEqual([]);
+    }
+  });
 
   test("作品一覧の項目は、すべてタイプ付きの contextValue で絞っている", () => {
     // `viewItem == work` のような素の値が残っていると、タイプで
@@ -296,6 +311,9 @@ describe("右クリック（package.json の when）が表と噛み合う", () =
     const UNSET_EXCLUDED = new Set(["novelai.transferMemoToWork"]);
 
     for (const entry of contextMenu) {
+      // 「未登録の自分の作品」の枠（2026-11-01）は登録する前の作品で、タイプがまだ無い。
+      // タイプの軸に乗らない行なので、ここでは数えない（印は `ownWorkFrame` の1つだけ）
+      if (UNTYPED_ROW.test(entry.when ?? "")) continue;
       const matched = matchedContextValues(entry.when ?? "");
       const kinds = new Set(matched.map((value) => value.split("-")[0]));
 

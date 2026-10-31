@@ -180,6 +180,11 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // 未登録作品検索（設計書6.97・5.7.3）。こちらも中身を見るまで
   // タイプは分からないうえ、登録する前の操作である
   "novelai.collectUnregisteredWorks": "allTypes",
+  // 「未登録の自分の作品」の枠（2026-11-01）。登録する前の作品なので、タイプはまだ無い
+  "novelai.fetchOwnWorkBackup": "allTypes",
+  "novelai.importOwnWorkBackupFile": "allTypes",
+  "novelai.hideOwnWork": "allTypes",
+  "novelai.restoreHiddenOwnWorks": "allTypes",
   // 呼び名を変えるだけの操作。中身が何であっても要る（設計書6.1.1）
   "novelai.renameWork": "allTypes",
   // シリーズのつながり（設計書6.95）。長編でも短編集でも、同じ世界を

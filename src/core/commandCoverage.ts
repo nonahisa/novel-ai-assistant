@@ -53,6 +53,12 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.addWork": { class: "B", label: "フォルダー登録" },
   "novelai.collectUnregisteredWorks": { class: "C2", label: "未登録作品検索" },
   "novelai.importWorkFromZip": { class: "C4", label: "バックアップ取込", reason: "作者の判断" },
+  // 「未登録の自分の作品」の枠の操作（2026-11-01）。サイトの画面を開いて作者が落とすもの・
+  // 取り込むかを作者が決めるもの・一覧に出すかを作者が決めるもの
+  "novelai.fetchOwnWorkBackup": { class: "C3", label: "バックアップを取る" },
+  "novelai.importOwnWorkBackupFile": { class: "C4", label: "ファイルから取り込む", reason: "作者の判断" },
+  "novelai.hideOwnWork": { class: "C4", label: "この作品を一覧に出さない", reason: "作者の判断" },
+  "novelai.restoreHiddenOwnWorks": { class: "C4", label: "出さないにした作品を戻す", reason: "作者の判断" },
   "novelai.createWork": { class: "B", label: "新規作品を作成" },
   "novelai.renameWork": { class: "C4", label: "作品名変更", reason: "設定" },
   "novelai.setSeries": { class: "C4", label: "シリーズ連結", reason: "設定" },

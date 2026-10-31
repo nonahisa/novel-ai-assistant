@@ -383,6 +383,28 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.fetchOwnWorkBackup",
+        "title": "バックアップを取る",
+        "icon": "$(cloud-download)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.importOwnWorkBackupFile",
+        "title": "ファイルから取り込む",
+        "icon": "$(file-zip)",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.hideOwnWork",
+        "title": "この作品を一覧に出さない",
+        "category": "小説執筆"
+      },
+      {
+        "command": "novelai.restoreHiddenOwnWorks",
+        "title": "出さないにした作品を戻す",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.createPlot",
         "title": "プロット自力作成",
         "category": "小説執筆",
@@ -1660,6 +1682,26 @@
           "group": "9_danger"
         },
         {
+          "command": "novelai.fetchOwnWorkBackup",
+          "when": "view == novelai.works && viewItem =~ /^ownWorkFrame$/ && !novelai.processesBlocked",
+          "group": "1_ownWork@1"
+        },
+        {
+          "command": "novelai.importOwnWorkBackupFile",
+          "when": "view == novelai.works && viewItem =~ /^ownWorkFrame$/",
+          "group": "1_ownWork@2"
+        },
+        {
+          "command": "novelai.hideOwnWork",
+          "when": "view == novelai.works && viewItem =~ /^ownWorkFrame$/",
+          "group": "9_ownWork@1"
+        },
+        {
+          "command": "novelai.restoreHiddenOwnWorks",
+          "when": "view == novelai.works && viewItem =~ /^ownWorksHeader-hasHidden$/",
+          "group": "1_ownWork@1"
+        },
+        {
           "command": "novelai.checkTyposForFile",
           "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "1_actions@1"
@@ -1838,6 +1880,22 @@
         },
         {
           "command": "novelai.removeWork",
+          "when": "false"
+        },
+        {
+          "command": "novelai.fetchOwnWorkBackup",
+          "when": "false"
+        },
+        {
+          "command": "novelai.importOwnWorkBackupFile",
+          "when": "false"
+        },
+        {
+          "command": "novelai.hideOwnWork",
+          "when": "false"
+        },
+        {
+          "command": "novelai.restoreHiddenOwnWorks",
           "when": "false"
         },
         {
@@ -2282,6 +2340,12 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "VS Code に戻ったとき、統合小説執筆環境ヘルパーがコピーした読者の反応がクリップボードにあれば、取り込むかを訊く。\n\n・同じデータでは1度しか訊かない（取り込み済みのものは訊かない）\n・読者の反応でないものは読み流す（記録にも残さない）\n・ブラウザ版では働かない"
+        },
+        "novelai.ownWorks.downloadFolder": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "［バックアップを取る］のあと、届いたバックアップを探すフォルダー。\n\n・空なら Windows の「ダウンロード」（ユーザーのフォルダーの下の Downloads）\n・作品一覧の「未登録の自分の作品」の枠で使う\n・見るのは押したあとに来たファイルの名前だけ（ほかのファイルは開かない）\n・30分たつか、取り込むと見るのをやめる\n・ブラウザ版では働かない"
         },
         "novelai.episodeFileExtension": {
           "type": "string",

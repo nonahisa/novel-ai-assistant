@@ -172,6 +172,7 @@ const KEYS: KeyRow[] = [
   { key: "novelai.contests.inbox", literalIn: "features/contestImport.ts", writtenIn: "features/contestImport.ts", write: /\.update\(CONTEST_INBOX_KEY\b/g, guarded: true },
   { key: "novelai.readerStats.seenClipboard", literalIn: "features/readerStatsHelperLink.ts", writtenIn: "features/readerStatsHelperLink.ts", write: /\.update\(\s*SEEN_FINGERPRINTS_KEY\b/g, guarded: true },
   { key: "novelai.readerStats.declinedWorkIds", literalIn: "features/readerStatsRegister.ts", writtenIn: "features/readerStatsRegister.ts", write: /\.update\(DECLINED_READER_STATS_IDS_KEY\b/g, guarded: true },
+  { key: "novelai.ownWorks.unregistered", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(UNREGISTERED_OWN_WORKS_KEY\b/g, guarded: true },
   { key: "novelai.siteLink.browserGuideShown", literalIn: "features/openSiteLink.ts", writtenIn: "features/openSiteLink.ts", write: /\.update\(SITE_LINK_GUIDE_SHOWN_KEY\b/g, guarded: true },
   { key: "novelai.proofreadingSuite.selection", literalIn: "core/proofreadingSuite.ts", writtenIn: "features/proofreadingSuite.ts", write: /\.update\(\s*PROOFREADING_SUITE_SELECTION_KEY\b/g, guarded: true },
   { key: "novelai.imeDictionary.excluded.", literalIn: "core/imeDictionary.ts", writtenIn: "features/exportImeDictionary.ts", write: /\.update\(imeExcludedKey\(work\.id\)/g, guarded: true },
