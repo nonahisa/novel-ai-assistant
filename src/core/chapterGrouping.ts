@@ -99,6 +99,37 @@ export function groupEpisodesByChapter(
 }
 
 /**
+ * その話が属する章の題（作者の頼み 2026-11-01。投稿サイトのヘルパーへ渡す封筒の
+ * `chapter`、`postingEnvelope.ts`）。章に入っていなければ undefined。
+ *
+ * **作品一覧と同じ束ね（`groupEpisodesByChapter`）から引く。** 別の決め方を
+ * すると、一覧では第二章に見える話が投稿画面では第一章へ入る。
+ *
+ * `episodeGroupLabels` を使わないのは、章立てが空の作品でファイル名由来の
+ * 束ね名（「本編」など）へ倒れるため——それを章の題として渡すと、作者が
+ * 立てていない章を投稿画面で探しにいく。最初の章より前の話も章なしである。
+ *
+ * @param episodes 作品の話。**走査の並び**（作品一覧に出る順）で渡す
+ * @param episodePath 探す話のファイル（絶対パス。`EpisodeFile.filePath`）
+ */
+export function chapterNameOfEpisode(
+  episodes: readonly EpisodeFile[],
+  chapters: readonly Chapter[],
+  workFolder: string,
+  episodePath: string
+): string | undefined {
+  if (chapters.length === 0) return undefined;
+  const wanted = episodePathFor(workFolder, episodePath);
+  const group = groupEpisodesByChapter(episodes, chapters, workFolder).groups.find(
+    (candidate) =>
+      candidate.episodes.some(
+        (episode) => episodePathFor(workFolder, episode.filePath) === wanted
+      )
+  );
+  return group?.chapter.name;
+}
+
+/**
  * 目次を束ねる名前を、話ごとに決める（設計書6.66.4の3）。
  *
  * **台帳があれば台帳が正。** EPUBの「章ごとに区切る」目次は長らく

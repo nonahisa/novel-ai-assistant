@@ -47,6 +47,18 @@ export interface PostingEnvelope {
   workId?: string;
   /** 題名の欄へ入れる文字列（話の見出し） */
   title: string;
+  /**
+   * その話が属する章の題（作者の頼み 2026-11-01「章も入るようにしてください」）。
+   * アルファポリスの投稿画面の章を選ぶ欄を、ヘルパーがこの字で選ぶ。
+   *
+   * **作品の章立て（`設定/章立て.json`）にある字をそのまま入れる。** ヘルパーが
+   * 空白・全角半角をならして選択肢と照らすので、こちらで整えると二重になる。
+   *
+   * 章の無い作品・章の前に置かれた話では**欄ごと省く**（空文字も null も入れない。
+   * `workId` と同じ流儀）。省いてよい欄を足しただけで、古いヘルパーは知らない欄を
+   * 無視するので、形式版数は上げない（ヘルパーの設計書4章との取り決め）。
+   */
+  chapter?: string;
   /** 変換済みの本文（サイトごとのルビ・傍点の記法は既存の6.68.4が正） */
   body: string;
 }
@@ -55,6 +67,8 @@ export interface PostingEnvelope {
   **前書き・後書きの欄は作らない。** 母艦に相当するデータが無いためで、
   空欄を先回りして作ると「入れる場所があるのに常に空」になる。
   作るときは形式版数を上げ、ブラウザ拡張と一緒に足す（6.79.3）。
+  ——章の題（`chapter`）で版を上げなかったのは、あちらが「常に空の欄」の話で、
+  こちらは `workId` と同じ「あるときだけ載せる任意の欄」だからである。
 */
 
 /**
@@ -100,19 +114,23 @@ export function supportsPasteHelper(site: PostingSiteId): boolean {
  * 封筒を組み立てる。返すのは**クリップボードへ入れる文字列**である。
  *
  * @param input.workId 空・空白だけなら欄ごと書かない
+ * @param input.chapter 話が属する章の題。空・空白だけなら欄ごと書かない
  */
 export function buildPostingEnvelope(input: {
   site: PostingSiteId;
   workId?: string | null;
   title: string;
+  chapter?: string | null;
   body: string;
 }): string {
   const workId = (input.workId ?? "").trim();
+  const chapter = (input.chapter ?? "").trim();
   return JSON.stringify({
     [MARKER]: POSTING_ENVELOPE_VERSION,
     site: input.site,
     ...(workId ? { workId } : {}),
     title: input.title,
+    ...(chapter ? { chapter } : {}),
     body: input.body,
   });
 }
@@ -153,16 +171,19 @@ export function parsePostingEnvelope(raw: string): PostingEnvelope | null {
   const known = POSTING_SITES.find((info) => info.id === site);
   if (!known) return null;
 
-  const { title, body, workId } = value;
+  const { title, body, workId, chapter } = value;
   if (typeof title !== "string" || typeof body !== "string") return null;
   if (workId !== undefined && typeof workId !== "string") return null;
+  if (chapter !== undefined && typeof chapter !== "string") return null;
 
   const trimmedWorkId = (workId ?? "").trim();
+  const trimmedChapter = (chapter ?? "").trim();
   return {
     [MARKER]: POSTING_ENVELOPE_VERSION,
     site: known.id,
     ...(trimmedWorkId ? { workId: trimmedWorkId } : {}),
     title,
+    ...(trimmedChapter ? { chapter: trimmedChapter } : {}),
     body,
   };
 }

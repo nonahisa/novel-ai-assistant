@@ -73,6 +73,62 @@ describe("封筒を組み立てる", () => {
   });
 });
 
+/**
+ * 章の題（作者の頼み 2026-11-01「章も入るようにしてください」）。
+ * アルファポリスの投稿画面には章を選ぶ欄があり、ヘルパーが `chapter` の字で選ぶ。
+ * **章が無いときは欄ごと省く**——空文字を入れると「題が空の章」を探しにいく。
+ */
+describe("封筒の章の題", () => {
+  test("章の題が、作品の章立ての字のまま入る", () => {
+    const json = buildPostingEnvelope({
+      site: "alphapolis",
+      title: "邂逅",
+      chapter: "第一章『死の谷』",
+      body,
+    });
+    expect((JSON.parse(json) as Record<string, unknown>).chapter).toBe(
+      "第一章『死の谷』"
+    );
+  });
+
+  test("章が無ければ、欄ごと書かない", () => {
+    for (const chapter of [undefined, null, "", "　 "]) {
+      const json = buildPostingEnvelope({
+        site: "alphapolis",
+        title: "邂逅",
+        chapter,
+        body,
+      });
+      expect("chapter" in (JSON.parse(json) as Record<string, unknown>)).toBe(
+        false
+      );
+    }
+  });
+
+  test("組み立てた章の題を、そのまま読み戻せる", () => {
+    const envelope = parsePostingEnvelope(
+      buildPostingEnvelope({
+        site: "alphapolis",
+        title: "邂逅",
+        chapter: "第一章　出立",
+        body,
+      })
+    );
+    expect(envelope?.chapter).toBe("第一章　出立");
+  });
+
+  test("章の題が文字でなければ拒む", () => {
+    const json = JSON.stringify({
+      "novelai-post": POSTING_ENVELOPE_VERSION,
+      site: "alphapolis",
+      title: "邂逅",
+      chapter: 1,
+      body,
+    });
+    expect(parsePostingEnvelope(json)).toBeNull();
+  });
+});
+
 describe("封筒を読む", () => {
   test("組み立てたものを、そのまま読み戻せる", () => {
     const json = buildPostingEnvelope({
