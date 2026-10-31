@@ -243,6 +243,18 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 .site-name { font-weight: 600; }
 .site-meta { font-size: 12px; color: var(--vscode-descriptionForeground); }
 .site-latest { font-size: 12px; }
+/*
+  サイトのタグ（作者の指示 2026-11-01）。サイトの画面と見比べられるよう並びのまま、
+  1つずつ細い枠で囲む。食い違いや付け替えは文字の色だけで目立たせすぎない
+*/
+.site-tags { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 2px 0 0; }
+.site-tag {
+  font-size: 12px;
+  padding: 0 6px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 3px;
+}
+.facts-warn { color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); }
 /* 順位の表と読者の反応の表を見分けるための小見出し（設計書6.79.7） */
 .site-sub { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 10px 0 2px; }
 /*
@@ -340,6 +352,7 @@ a:hover, .link:hover { text-decoration: underline; }
     <div id="contest"></div>
     <div class="cards" id="cards"></div>
     <div class="note" id="goal-link"></div>
+    <div class="note" id="work-facts"></div>
     <div id="achievements"></div>
   </section>
   <section class="page" id="page-trend" role="tabpanel" aria-labelledby="tab-trend">
@@ -910,6 +923,10 @@ function renderSiteRecords() {
     if (record.workId) meta.push('作品ID ' + escapeHtml(record.workId));
     if (record.genre) meta.push('ジャンル ' + escapeHtml(record.genre));
     if (!record.registered) meta.push('いまは投稿先から外しています');
+    // そのサイトの画面に出ていた連載の状態（届いた印。作品の印は概要に出す）
+    if (record.completion) {
+      meta.push(record.completion === 'completed' ? 'サイトでは完結' : 'サイトでは連載中');
+    }
     if (record.note) meta.push(escapeHtml(record.note));
 
     const head = ['<div class="site-name">' + escapeHtml(record.label) + '</div>'];
@@ -960,7 +977,8 @@ function renderSiteRecords() {
       読者の反応（設計書6.79.7）。**あるものだけが並んだ値**が届く
       （どの欄が読めたか・どの列が要るかの判断は core 側が持つ）。
     */
-    const reader = renderReaderLatest(record.readerLatest) +
+    const reader = renderSiteTags(record) +
+      renderReaderLatest(record.readerLatest) +
       renderReaderRates(record.readerRates) +
       renderReaderAdvice(record.site, record.readerAdvice,
         readerAdviceOutcomes[record.site], readerAdviceBusy[record.site] === true) +
@@ -974,7 +992,7 @@ function renderSiteRecords() {
 
   const note = siteRecordsNote(records);
   host.innerHTML =
-    '<h3>サイトの記録</h3>' + failureNote + blocks.join('') +
+    '<h3>サイトの記録</h3>' + failureNote + renderTagDifferences() + blocks.join('') +
     // 言うことが無ければ、空の但し書きを置かない（作品情報だけの作品）
     (note ? '<div class="note">' + note + '</div>' : '');
 
@@ -1585,6 +1603,104 @@ function renderEpisodes() {
 /* ── 目標の達成を祝う（設計書6.3.8） ── */
 
 /**
+ * 作品の連載中／完結の印と、サイトの印との食い違い（作者の指示 2026-11-01）。
+ * **概要に控えめに1行だけ**出す。印も届いた印も無い作品では何も出さない（静かにする）。
+ *
+ * 作品の印は作者が決めた値で、ここからは書き換えない。［切り替える］は拡張機能側の
+ * 「連載状態切替」へ頼むだけ（画面の中で台帳を書かない）。
+ * 全作品の画面には届かない（state.workFacts が無い）ので、そのときは何も描かない。
+ */
+function renderWorkFacts() {
+  const host = document.getElementById('work-facts');
+  if (!host) return;
+  const facts = state && state.workFacts;
+  if (!facts) {
+    host.innerHTML = '';
+    return;
+  }
+  const parts = [];
+  if (facts.completion) {
+    parts.push('連載の状態：' + escapeHtml(facts.completion.label));
+  } else if (facts.suggestion) {
+    // 決めていない作品。届いた印は提案として言うだけ
+    parts.push('連載の状態：まだ決めていません（サイトでは' +
+      escapeHtml(facts.suggestion.label) + '）');
+  }
+  if (facts.notice) {
+    parts.push('<span class="facts-warn">' + escapeHtml(facts.notice) + '</span>');
+  }
+  if (parts.length === 0) {
+    host.innerHTML = '';
+    return;
+  }
+  parts.push('<span class="link" data-work-completion="1">切り替える</span>');
+  host.innerHTML = parts.join('　');
+  host.querySelectorAll('[data-work-completion]').forEach((el) => {
+    el.addEventListener('click', () => {
+      vscode.postMessage({ type: 'setWorkCompletion' });
+    });
+  });
+}
+
+/**
+ * サイトのタグと付け替えの記録（作者の指示 2026-11-01）。「読者の反応」のサイトごとの枠に出す。
+ *
+ * タグは**画面の並びのまま**（サイトの画面と見比べられるように）。0個と分かったときは
+ * 「なし」、まだ届いていないときは出さない（分からないのと0個は別のこと）。
+ * 付け替えは古い記録ほど要らないので畳む。
+ */
+function renderSiteTags(record) {
+  let html = '';
+  if (record.tags) {
+    html += '<div class="site-sub">タグ' +
+      (record.tagsAt ? '（' + escapeHtml(formatWhen(record.tagsAt)) + ' に読んだもの）' : '') +
+      '</div>';
+    html += record.tags.length > 0
+      ? '<div class="site-tags">' + record.tags.map((tag) =>
+          '<span class="site-tag">' + escapeHtml(tag) + '</span>').join('') + '</div>'
+      : '<div class="site-meta">なし</div>';
+  }
+  const history = record.tagHistory || [];
+  if (history.length > 0) {
+    const rows = history.map((change) => {
+      const removed = change.before.filter((tag) => change.after.indexOf(tag) < 0);
+      const added = change.after.filter((tag) => change.before.indexOf(tag) < 0);
+      // 足しも外しもしていなければ、並べ替えただけ
+      const what = removed.length === 0 && added.length === 0
+        ? '並べ替え'
+        : [
+            added.length > 0 ? '足した：' + added.map(escapeHtml).join('・') : '',
+            removed.length > 0 ? '外した：' + removed.map(escapeHtml).join('・') : '',
+          ].filter((text) => text).join(' ／ ');
+      return '<tr><td>' + escapeHtml(formatWhen(change.changedAt)) + '</td>' +
+        '<td>' + what + '</td>' +
+        '<td>' + (change.before.length > 0 ? change.before.map(escapeHtml).join('・') : 'なし') + '</td></tr>';
+    });
+    html += '<details class="fold"><summary>タグの付け替え（' +
+      formatCount(history.length) + '回）</summary>' +
+      '<table><thead><tr><th>気づいた日時</th><th>変えたところ</th><th>前のタグ</th></tr></thead>' +
+      '<tbody>' + rows.join('') + '</tbody></table>' +
+      '<div class="site-foot">日時は、付け替えたあとの画面を読んだときのものです（サイトで付け替えた時刻ではありません）。</div>' +
+      '</details>';
+  }
+  return html;
+}
+
+/**
+ * サイトどうしのタグの食い違い（作者の使い道「サイトごとの食い違いを見る」）。
+ * 片方にしか無いタグを、サイトごとに1行で言う。並びの違いは食い違いにしない（core が決める）
+ */
+function renderTagDifferences() {
+  const facts = state && state.workFacts;
+  const differences = (facts && facts.tagDifferences) || [];
+  if (differences.length === 0) return '';
+  return '<div class="note">サイトによってタグが違います：' +
+    differences.map((entry) =>
+      escapeHtml(entry.label) + 'だけ ' + entry.only.map(escapeHtml).join('・')).join(' ／ ') +
+    '</div>';
+}
+
+/**
  * 達成の記録。**どの目標をいつ達成したか**を残す。
  * 風船は数秒で消えるが、この印は残る（動きを減らす設定では、印だけになる）。
  */
@@ -1843,6 +1959,7 @@ window.addEventListener('message', (event) => {
   renderGranularity();
   renderContest();
   renderCards();
+  renderWorkFacts();
   renderAchievements();
   renderChart();
   renderDevices();

@@ -8,10 +8,18 @@ import {
   postingSiteInfo,
   POSTING_SITES,
   READER_STATS_PERIODS,
+  isReaderStatsOwnedVia,
+  isWorkCompletion,
+  readReaderStatsTags,
   repeatsReaderStats,
+  siteFactsWouldChange,
   siteProfile,
   withReaderStats,
+  withSiteFacts,
   type PostingLedger,
+  type ReaderStatsOwnedVia,
+  type SiteFactsInput,
+  type WorkCompletion,
   type PostingSiteId,
   type ReaderStatsMetrics,
   type ReaderStatsPeriod,
@@ -168,6 +176,20 @@ export interface ReaderStatsEnvelope {
    * 空文字は入れない。長さは `READER_STATS_TITLE_MAX_LENGTH` まで
    */
   title?: string;
+  /**
+   * 画面のタグの並び（ヘルパー 0.16.0。省いてよい欄なので版数は上げない）。
+   * **`[]` は「タグが0個と分かった」、欄なしは「その画面にタグが無い・読めなかった」**
+   * ——アクセス数の画面の封筒にタグが無いのを「全部外した」と読まないため、2つを分ける。
+   * 形が違えば欄ごと捨てる（`readReaderStatsTags`。数の正しい封筒は落とさない）
+   */
+  tags?: string[];
+  /** 連載中／完結（ヘルパー 0.16.0）。なろうの短編などは欄ごと無い */
+  completion?: WorkCompletion;
+  /**
+   * その作品を覚えた理由（ヘルパー 0.16.0。束にするときに付く）。
+   * いまは台帳へ残すだけで、使い道は別の仕事（2026-11-01）
+   */
+  ownedVia?: ReaderStatsOwnedVia;
   /** 1回の読み取りで拾えた行。**1件も無い封筒は受け取らない** */
   entries: ReaderStatsEnvelopeEntry[];
 }
@@ -241,6 +263,9 @@ export function buildReaderStatsEnvelope(input: {
   readAt: string;
   readAtBasis?: ReaderStatsReadAtBasis;
   title?: string | null;
+  tags?: readonly string[];
+  completion?: WorkCompletion;
+  ownedVia?: ReaderStatsOwnedVia;
   entries: readonly ReaderStatsEnvelopeEntry[];
 }): string {
   const workId = (input.workId ?? "").trim();
@@ -253,6 +278,10 @@ export function buildReaderStatsEnvelope(input: {
     readAt: input.readAt,
     ...(input.readAtBasis ? { readAtBasis: input.readAtBasis } : {}),
     ...(title ? { title } : {}),
+    // `[]` も書く（「タグが0個」と「欄なし」は別のこと）
+    ...(input.tags !== undefined ? { tags: input.tags } : {}),
+    ...(input.completion ? { completion: input.completion } : {}),
+    ...(input.ownedVia ? { ownedVia: input.ownedVia } : {}),
     entries: input.entries,
   });
 }
@@ -387,6 +416,15 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
     trimmedTitle && trimmedTitle.length <= READER_STATS_TITLE_MAX_LENGTH
       ? trimmedTitle
       : undefined;
+  /*
+    タグ・連載の状態・覚えた理由（ヘルパー 0.16.0。作者の指示 2026-11-01）。
+    **形が違えば、その欄だけ捨てて封筒は受ける**（作品名の長すぎと同じ扱い）。
+    どれも数の記録の添え物で、ここで封筒ごと断ると、正しい数まで取り込めなくなる。
+    `null` は「欄なし」（ほかの欄と同じ）。
+  */
+  const tags = absent(value.tags) ? undefined : readReaderStatsTags(value.tags);
+  const completion = isWorkCompletion(value.completion) ? value.completion : undefined;
+  const ownedVia = isReaderStatsOwnedVia(value.ownedVia) ? value.ownedVia : undefined;
   if (!Array.isArray(entries) || entries.length === 0) {
     return reject("コピーしたデータに読者の反応が1件も入っていませんでした。");
   }
@@ -428,6 +466,9 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
       readAt: readAt.trim(),
       ...(readAtBasis !== undefined ? { readAtBasis } : {}),
       ...(title !== undefined ? { title } : {}),
+      ...(tags !== undefined ? { tags } : {}),
+      ...(completion !== undefined ? { completion } : {}),
+      ...(ownedVia !== undefined ? { ownedVia } : {}),
       entries: parsedEntries,
     },
   };
@@ -725,6 +766,33 @@ export interface ReaderStatsApplied {
   readonly added: number;
   /** 取り込み済みの数と同じだったので積まなかった行の数 */
   readonly repeated: number;
+  /**
+   * タグ・連載の状態・覚えた理由のどれかを書き換えたか（作者の指示 2026-11-01）。
+   * **数が全部同じでも、これが true なら保存する**（タグだけ付け替えた日がある）
+   */
+  readonly factsChanged: boolean;
+}
+
+/**
+ * 封筒から、台帳へ写す事柄を組む。**1件の取り込み・束・「もう取り込んだか」の
+ * 見分けが同じ組み方を見る**（記録の組み方を1か所に置くのと同じ理由）
+ */
+export function siteFactsFromEnvelope(envelope: ReaderStatsEnvelope): SiteFactsInput {
+  return {
+    site: envelope.site,
+    readAt: envelope.readAt,
+    ...(envelope.tags !== undefined ? { tags: envelope.tags } : {}),
+    ...(envelope.completion !== undefined ? { completion: envelope.completion } : {}),
+    ...(envelope.ownedVia !== undefined ? { ownedVia: envelope.ownedVia } : {}),
+  };
+}
+
+/** 封筒の事柄で台帳が変わるか（`readerStatsAlreadyImported` が使う） */
+export function readerStatsFactsWouldChange(
+  ledger: PostingLedger,
+  envelope: ReaderStatsEnvelope
+): boolean {
+  return siteFactsWouldChange(ledger, siteFactsFromEnvelope(envelope));
 }
 
 /**
@@ -753,7 +821,12 @@ export function applyReaderStatsEnvelope(
     next = withReaderStats(next, record);
     added++;
   }
-  return { ledger: next, added, repeated };
+  /*
+    タグ・連載の状態・覚えた理由を写す（作者の指示 2026-11-01）。どれを今の値にするかは
+    `readAt` の新しい方で決める（`withSiteFacts`）。**作品の印には触らない**
+  */
+  const facts = withSiteFacts(next, siteFactsFromEnvelope(envelope));
+  return { ledger: facts.ledger, added, repeated, factsChanged: facts.changed };
 }
 
 /**

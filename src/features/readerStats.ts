@@ -260,9 +260,11 @@ export async function importReaderStats(
     await report("読者の反応の取り込み", work, error);
     return UNCHANGED;
   }
-  const { ledger: next, added, repeated } = applied;
+  const { ledger: next, added, repeated, factsChanged } = applied;
+  // タグ・連載の状態を書き換えたときは、そう言う（黙って書き換えない。2026-11-01）
+  const factsNote = factsChanged ? "（タグ・連載の状態も記録しました）" : "";
 
-  if (added === 0) {
+  if (added === 0 && !factsChanged) {
     // 何も書かない（保存もしない）。押したのに何も起きない、にならないよう理由を言う
     announceResult(
       work,
@@ -276,10 +278,22 @@ export async function importReaderStats(
 
   if (!(await save(store, work, next, "読者の反応の取り込み"))) return UNCHANGED;
 
+  if (added === 0) {
+    // 数は同じで、タグか連載の状態だけが変わった
+    announceResult(
+      work,
+      say(
+        `${info.label} の読者の反応は、すでに取り込んだ数と同じでした（${repeated}件）。` +
+          "タグ・連載の状態の変化を記録しました。執筆統計の「読者の反応」で見られます。"
+      )
+    );
+    return { changed: true };
+  }
+
   announceResult(
     work,
     say(
-      `${info.label} の読者の反応を ${added}件 取り込みました` +
+      `${info.label} の読者の反応を ${added}件 取り込みました${factsNote}` +
         (sourceLabel ? `（${sourceLabel}から）` : "") +
         (repeated > 0
           ? `（${repeated}件は、取り込み済みの数と同じだったので積んでいません）`
@@ -399,12 +413,15 @@ export async function importReaderStatsBundle(
     let added = 0;
     let repeated = 0;
     let screens = 0;
+    // タグ・連載の状態だけが変わった画面も保存する（数が同じでも。2026-11-01）
+    let factsChanged = false;
     for (const envelope of envelopes) {
       try {
         const applied = applyReaderStatsEnvelope(ledger, envelope);
         ledger = applied.ledger;
         added += applied.added;
         repeated += applied.repeated;
+        factsChanged = factsChanged || applied.factsChanged;
         screens++;
       } catch (error) {
         // 封筒の検証を通っていれば来ないが、1画面の失敗で残りを止めない
@@ -417,7 +434,7 @@ export async function importReaderStatsBundle(
       }
     }
     if (screens === 0) continue;
-    if (added > 0) {
+    if (added > 0 || factsChanged) {
       try {
         await entry.store.save(ledger);
       } catch (error) {
@@ -431,7 +448,13 @@ export async function importReaderStatsBundle(
       }
       changedWorks.push(entry.work);
     }
-    outcomes.push({ title: entry.work.title, screens, added, repeated });
+    outcomes.push({
+      title: entry.work.title,
+      screens,
+      added,
+      repeated,
+      ...(factsChanged ? { factsChanged } : {}),
+    });
   }
 
   // 取り込めなかったものは**全部を記録に残す**（知らせには先頭の数件しか並べない）

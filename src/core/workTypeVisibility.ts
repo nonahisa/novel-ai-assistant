@@ -397,6 +397,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // 読者の反応も同じ（設計書6.79.7）。PVやいいねは作品のタイプを選ばない
   "novelai.importReaderStats": "allTypes",
   "novelai.recordReaderStats": "allTypes",
+  // 連載中／完結は投稿する作品ならどの種類でも持てる（読者の反応と同じ扱い。2026-11-01）
+  "novelai.setWorkCompletion": "allTypes",
 
   // ── 書き出し ──
   // PDFは「いま手元にある文字をそのまま紙にする」道具なので全タイプ。

@@ -9,21 +9,27 @@ import {
   postingSiteInfo,
   postingSiteLabels,
   rankingBoards,
+  siteFactsFor,
   siteProfile,
   unpostedSites,
   validateNewEpisodeUrl,
   validateRankInput,
   validateWorkPageUrl,
   withBaselinePosts,
+  WORK_COMPLETIONS,
   withPost,
   withRanking,
   withSiteProfile,
   withSites,
+  withWorkCompletion,
+  workCompletionLabel,
   type PostingEpisodeTarget,
   type PostingLedger,
   type PostingSiteEntry,
   type PostingSiteId,
+  type WorkCompletion,
 } from "../models/posting";
+import { buildWorkPostingFacts } from "../core/postingSiteRecords";
 import { PostingStore, PostingStoreError } from "../core/postingStore";
 import { episodePathFor } from "../core/bookStore";
 // 章の題は作品一覧と同じ源（章立ての台帳を話の並びで束ねたもの）から引く
@@ -904,6 +910,74 @@ export async function recordRanking(
   void vscode.window.showInformationMessage(
     `${info.label} ${board} ${rank}位 を記録しました。` +
       "執筆統計の「サイトの記録」で履歴を見られます。"
+  );
+  return { changed: true };
+}
+
+/**
+ * 作品の「連載中／完結」を作者が決める（作者の選択「両方」2026-11-01）。
+ *
+ * **作品の印を書き換えるのは、ここだけ**。ヘルパーから届くサイトごとの印は台帳の
+ * `siteFacts` にしか入らず、作品の印へは写さない（作者が決めた値が勝つ。実装ルール2）。
+ * まだ決めていない作品では、届いた印が揃っていれば**提案として先頭に置く**——選ぶのは作者。
+ *
+ * サイトの登録が無い作品でも決められる（投稿していない作品の完結も、作者が記録したい）。
+ */
+export async function setWorkCompletion(work: WorkEntry): Promise<PostingKitResult> {
+  const store = new PostingStore(work);
+  const ledger = await load(store, work);
+  if (!ledger) return { changed: false };
+
+  const facts = buildWorkPostingFacts(ledger);
+  const current = ledger.completion?.value;
+  const suggested = facts.suggestion?.value;
+  // サイトの印を説明に添える（「カクヨム：連載中」）。食い違いに気づけるように
+  const siteNotes = POSTING_SITES.flatMap((info) => {
+    const value = siteFactsFor(ledger, info.id)?.completion;
+    return value === undefined ? [] : [`${info.label}は${workCompletionLabel(value)}`];
+  });
+  type Choice = vscode.QuickPickItem & { value: WorkCompletion | null };
+  const describe = (value: WorkCompletion): string =>
+    value === current
+      ? "いまの印"
+      : value === suggested
+        ? "サイトから届いた印と同じ"
+        : "";
+  const choices: Choice[] = WORK_COMPLETIONS.map((value) => ({
+    label: workCompletionLabel(value),
+    description: describe(value),
+    value,
+  }));
+  // 提案があれば先頭へ（決めていない作品だけ。決めてある作品は並びを変えない）
+  if (current === undefined && suggested !== undefined) {
+    choices.sort((left, right) => (left.value === suggested ? -1 : right.value === suggested ? 1 : 0));
+  }
+  if (current !== undefined) {
+    choices.push({ label: "決めない（印を外す）", description: "", value: null });
+  }
+
+  const picked = await vscode.window.showQuickPick([...choices, cancelItem()], {
+    title: `${work.title} の連載の状態`,
+    placeHolder:
+      (current !== undefined
+        ? `いまは「${workCompletionLabel(current)}」です。`
+        : "まだ決めていません。") +
+      (siteNotes.length > 0 ? `（${siteNotes.join("、")}）` : ""),
+    ignoreFocusOut: true,
+  });
+  if (!picked || isCancelItem(picked) || !("value" in picked)) return { changed: false };
+  if ((picked.value ?? undefined) === current) return { changed: false };
+
+  const next = withWorkCompletion(ledger, picked.value, new Date().toISOString());
+  if (!(await save(store, work, next, "連載の状態"))) return { changed: false };
+
+  // 決めたあとに食い違うサイトがあれば、その場で言う（あとで執筆統計の概要にも出る）
+  const notice = buildWorkPostingFacts(next).notice;
+  void vscode.window.showInformationMessage(
+    (picked.value === null
+      ? `${work.title} の連載の状態の印を外しました。`
+      : `${work.title} を「${workCompletionLabel(picked.value)}」にしました。`) +
+      (notice ? ` ${notice}` : "")
   );
   return { changed: true };
 }
