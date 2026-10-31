@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { logFailure } from "../core/logger";
 import type { WorkRegistry } from "../core/workRegistry";
 import { currentMode } from "../core/actorContext";
-import { canRunProcesses } from "../core/runtime";
+import { processCommandsUsableHere } from "../core/processAvailability";
 import type { WorkKindKey } from "../models/types";
 import { commandsHiddenForWorks } from "../core/workTypeVisibility";
 import {
@@ -209,7 +209,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     const { item: action } = node;
     const hasWork = this.registry.list().length > 0;
     const mode = currentMode();
-    const runtimeAllowsProcesses = canRunProcesses();
+    const runtimeAllowsProcesses = processCommandsUsableHere();
     const enabled = isActionEnabled(action, hasWork, mode, runtimeAllowsProcesses);
     const hint = disabledHint(action, hasWork, mode, runtimeAllowsProcesses);
 
@@ -280,7 +280,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       return group ? { type: "group", group } : undefined;
     }
 
-    const runtimeAllowsProcesses = canRunProcesses();
+    const runtimeAllowsProcesses = processCommandsUsableHere();
     const hidden = this.hiddenByKind();
     for (const group of groups) {
       for (const entry of shownEntries(group.entries, runtimeAllowsProcesses, hidden)) {
@@ -309,7 +309,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
    * なかったことを黙って成功にしないために、ここで分かる必要がある。
    */
   findActionNode(command: string): ActionNode | undefined {
-    const runtimeAllowsProcesses = canRunProcesses();
+    const runtimeAllowsProcesses = processCommandsUsableHere();
     const hidden = this.hiddenByKind();
     for (const group of visibleGroups(this.registry.list().length > 0)) {
       for (const entry of shownEntries(group.entries, runtimeAllowsProcesses, hidden)) {
@@ -345,13 +345,14 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     const hidden = this.hiddenByKind();
 
     if (!node) {
-      const runtimeAllowsProcesses = canRunProcesses();
+      const runtimeAllowsProcesses = processCommandsUsableHere();
       return groups.flatMap((group): ActionNode[] => {
         if (!group.standalone) {
           // 種類で中身が全部隠れた分類は、見出しごと出さない（設計書6.109.7）。
           // **種類で隠すものが無いときは、いままでどおり必ず出す**
+          // ブラウザ版で中身が全部隠れた分類も同じく畳む（設計書5.8.5）
           if (
-            hidden.size > 0 &&
+            (hidden.size > 0 || !runtimeAllowsProcesses) &&
             shownEntries(group.entries, runtimeAllowsProcesses, hidden).length === 0
           ) {
             return [];
@@ -366,7 +367,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       });
     }
     if (node.type === "group") {
-      return shownEntries(node.group.entries, canRunProcesses(), hidden).map((entry) =>
+      return shownEntries(node.group.entries, processCommandsUsableHere(), hidden).map((entry) =>
         entry.kind === "section"
           ? {
               type: "section" as const,
@@ -377,7 +378,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       );
     }
     if (node.type === "section") {
-      return shownEntries(node.section.items, canRunProcesses(), hidden).map((item) => ({
+      return shownEntries(node.section.items, processCommandsUsableHere(), hidden).map((item) => ({
         type: "action" as const,
         item,
       }));

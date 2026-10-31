@@ -245,7 +245,7 @@ describe("ブラウザ版（規則7）", () => {
         )
       ),
     ];
-    const hiddenOnWeb = (step.when ?? "").includes("!isWeb");
+    const hiddenOnWeb = (step.when ?? "").includes("!novelai.processesBlocked");
 
     if (blocked.length > 0) {
       test(`「${step.title}」はブラウザで動かない操作（${blocked.join("・")}）なので出さない`, () => {
@@ -260,7 +260,7 @@ describe("ブラウザ版（規則7）", () => {
   }
 
   test("道案内そのものはブラウザでも出る", () => {
-    expect(walkthrough().when ?? "").not.toContain("!isWeb");
+    expect(walkthrough().when ?? "").not.toContain("novelai.processesBlocked");
   });
 });
 

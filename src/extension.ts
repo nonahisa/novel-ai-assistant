@@ -240,7 +240,17 @@ import {
 import { startLoopLagMeter, type LoopLagReport } from "./core/loopLag";
 import { startStartupProfile } from "./core/startupProfiler";
 import { readerKind, type ReaderKind } from "./core/fileRead";
-import { describeProcessesBlocked } from "./core/processAvailability";
+import {
+  describeProcessesBlocked,
+  PROCESSES_BLOCKED_CONTEXT,
+  processCommandsUsableHere,
+} from "./core/processAvailability";
+import {
+  LM_AVAILABILITY_KEY,
+  LM_AVAILABLE_CONTEXT,
+  LmAvailabilityGate,
+} from "./core/lmAvailability";
+import { probeVsCodeLm } from "./ai/vscodeLmProvider";
 import { installEditorLockGuard } from "./features/editorLockGuard";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
@@ -758,6 +768,17 @@ export async function activate(
    * あいだを丸ごと覆う必要があるので、ここより後ろには置けない。
    */
   const loopLagMeter = startLoopLagMeter();
+
+  /*
+    **外部プロセスの要る命令を隠す印**（設計書5.8.16）。package.json の `when` は
+    `!novelai.processesBlocked` なので、立てる前は「出す」側。ブラウザ版でだけ
+    立つ。待たずに頼む（起動の道に待ちを足さない）
+  */
+  void vscode.commands.executeCommand(
+    "setContext",
+    PROCESSES_BLOCKED_CONTEXT,
+    !processCommandsUsableHere()
+  );
 
   /**
    * どちらの読み口を選んだか（設計書6.107。0.74.11）。
@@ -1315,6 +1336,13 @@ export async function activate(
     */
     if (workMaintenanceStarted) return;
     workMaintenanceStarted = true;
+    /*
+      **AIの口の確かめも、整備と同じ合図で裏で起こす**（設計書5.9.3）。合図は
+      作品一覧の初回描画で、来なければ上限（60秒）で起きる（`maintenanceTrigger`）。
+      サイドバーを開かない起動でも確かめ直しが抜け落ちない。`void` で投げっぱなしにし、
+      起動の道では待たない。同じ版なら中で何もせず戻る
+    */
+    void lmGate.recheckInBackground();
     startupTiming.mark("整備 開始", startNote);
     const maintainStartedAt = performance.now();
     void registry
@@ -1390,6 +1418,41 @@ export async function activate(
 
     **知らせは出さない。** 作者を止めずに、あとから読めればよい。
   */
+  /*
+    **VS Code のAIの口（`vscode.lm`）が働くか**（設計書5.9）。起動では globalState を
+    同期で読んで印を立てるだけで、**待たない**（作者の前提、2026-10-31「起動を遅く
+    しない」）。確かめは整備と同じ起こし役（`startWorkMaintenance`。作品一覧の
+    初回描画か60秒の上限）で裏で起こし、同じ版のあいだは確かめない・一度隠したら戻さない。
+  */
+  const lmGate = new LmAvailabilityGate({
+    version: String(
+      (context.extension.packageJSON as { version?: unknown }).version ?? ""
+    ),
+    read: () => context.globalState.get(LM_AVAILABILITY_KEY),
+    // 書いたら読み返す口を通す（設計書5.7.8。別の鍵の送り返しで消えると、
+    // 次の起動で隠したはずのものが一瞬出てしまう）
+    write: (record) => {
+      // 残せなくても表示は続ける（呼び手は待たないので、投げると誰も受けない）
+      void verifiedState(context.globalState)
+        .update(LM_AVAILABILITY_KEY, record)
+        .catch((error: unknown) =>
+          logLine(
+            "VS Code のAIの口の確かめの結果を覚えられませんでした：" +
+              (error instanceof Error ? error.message : String(error))
+          )
+        );
+    },
+    publish: (show) => {
+      void vscode.commands.executeCommand(
+        "setContext",
+        LM_AVAILABLE_CONTEXT,
+        show
+      );
+    },
+    probe: probeVsCodeLm,
+  });
+  lmGate.start();
+
   let startupTimingWritten = false;
   let firstRenderDone = false;
   // ブラウザ版では点検を走らせない（gitの子プロセスが起こせない）ので、
@@ -1511,6 +1574,13 @@ export async function activate(
   // そのあいだ右クリックの命令に行が渡らなくなる（`redrawIfChanged` の説明）
   gitSync.onDidChange(() => treeProvider.redrawIfChanged());
   const aiRegistry = new AIRegistry(context);
+  // 口が働かないと分かったら、AIの選択肢から外す（設計書5.9。戻すのは門番が決める）
+  aiRegistry.setProviderHidden("vscode-lm", !lmGate.visible);
+  context.subscriptions.push(
+    lmGate.onDidChange((show) =>
+      aiRegistry.setProviderHidden("vscode-lm", !show)
+    )
+  );
   // 測っていないモデルに切り替えたら、AIチューニングを一言勧める（設計書6.49.8）。
   // 選ぶ道（AI設定・機能別割当・大きいモデルの案内）はどれも選択の変更の
   // 合図を鳴らすので、見張るのはその1か所

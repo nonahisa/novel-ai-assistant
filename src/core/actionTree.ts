@@ -2913,7 +2913,11 @@ export function isItemVisibleInRuntime(
   runtimeAllowsProcesses: boolean
 ): boolean {
   // 外部プロセスを起動できる＝手元のVS Code
-  return !item.browserOnly || !runtimeAllowsProcesses;
+  if (item.browserOnly && runtimeAllowsProcesses) return false;
+  // **ブラウザ版で使えない操作は隠す**（作者の裁定、2026-10-31「ブラウザー版も
+  // 隠す」。設計書5.8.5）。押せなくして理由を出す受け皿（`isActionEnabled`・
+  // `explainDisabled`）は、キー割り当てなどから直に呼ばれたときのために残す
+  return isCommandAvailableInRuntime(item.command, runtimeAllowsProcesses);
 }
 
 /**

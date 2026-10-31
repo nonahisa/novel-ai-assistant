@@ -11,6 +11,11 @@ import {
 import { withAiWork } from "../core/aiActivity";
 import { logLine } from "../core/logger";
 import { rejectImagesIfAny } from "./imageInput";
+import {
+  hasLanguageModelProvider,
+  judgeLmProbe,
+  type LmProbeResult,
+} from "../core/lmAvailability";
 
 /**
  * VS Code のエディタが持っているAI（設計書6.87.11）。
@@ -489,4 +494,40 @@ export class VsCodeLmProvider implements AIProvider {
       tier: tierForContextWindow(contextWindow),
     };
   }
+}
+
+/**
+ * いまのエディターで `vscode.lm` の口が働くか（設計書5.9.2）。
+ *
+ * 決め方は `core/lmAvailability.ts` の `judgeLmProbe`。**モデルが0件でも、
+ * モデルを出す拡張機能が入っていれば隠さない**（作者の裁定、2026-10-31
+ * 「モデルを出す拡張が無ければ隠す」）。0件は Copilot にサインインしていない
+ * だけの人や、Copilot の起動が遅れているときにも起きる。
+ *
+ * エディターの名前（appName）も拡張機能の名前も見ない。拡張機能は package.json の
+ * 貢献点で見分ける（`hasLanguageModelProvider`）。
+ */
+export async function probeVsCodeLm(): Promise<LmProbeResult> {
+  const lm = (vscode as { lm?: { selectChatModels?: unknown } }).lm;
+  const apiPresent = typeof lm?.selectChatModels === "function";
+  let threw = false;
+  let modelCount = 0;
+  if (apiPresent) {
+    try {
+      modelCount = (await vscode.lm.selectChatModels()).length;
+    } catch (error) {
+      threw = true;
+      logLine(
+        "VS Code のAIの口を確かめたところ、一覧を引けませんでした: " +
+          (error instanceof Error ? error.message : String(error))
+      );
+    }
+  }
+  const providerExtensionPresent =
+    apiPresent && !threw && modelCount === 0
+      ? hasLanguageModelProvider(
+          (vscode.extensions?.all ?? []).map((extension) => extension.packageJSON)
+        )
+      : false;
+  return judgeLmProbe({ apiPresent, threw, modelCount, providerExtensionPresent });
 }

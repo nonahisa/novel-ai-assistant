@@ -673,6 +673,16 @@ export function setStubChatModels(models: StubChatModel[]): void {
   stubChatModels = models;
 }
 
+/**
+ * 入っている拡張機能（`vscode.extensions`）。既定は空。テストは `all` を差し替えて戻す。
+ * `getExtension` は既定で何も見つからない（本物の「入っていない」と同じ）
+ */
+export const extensions = {
+  all: [] as Array<{ id: string; packageJSON: unknown }>,
+  getExtension: (id: string): { id: string; packageJSON: unknown } | undefined =>
+    extensions.all.find((extension) => extension.id === id),
+};
+
 export const lm = {
   selectChatModels: async (): Promise<StubChatModel[]> => stubChatModels,
   onDidChangeChatModels: (_listener: () => void): { dispose(): void } => ({
