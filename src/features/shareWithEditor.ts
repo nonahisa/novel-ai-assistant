@@ -44,6 +44,8 @@ import {
   planShareSource,
   replacedDirectories,
   SHARED_FILES,
+  EDITING_SITE_FILE,
+  EDITOR_SHARE_MANIFEST_FILE,
 } from "../core/editingRepo";
 import {
   cloneUrlOf,
@@ -155,7 +157,7 @@ export interface EditingSite {
   editorLogin?: string;
 }
 
-const SITE_RELATIVE = path.join(".aiwriter", "editing.json");
+const SITE_RELATIVE = path.join(".aiwriter", EDITING_SITE_FILE);
 
 function sitePath(work: WorkEntry): string {
   return path.join(workPaths(work).root, SITE_RELATIVE);
@@ -1197,7 +1199,8 @@ async function walkFiles(root: string, prefix = ""): Promise<string[]> {
  */
 const SHARE_MANIFEST_RELATIVE = path.join(
   ".aiwriter",
-  "editor-share-manifest.json"
+  // MCP サーバーが「編集用の写し」の印として読む（名前は1か所で持つ）
+  EDITOR_SHARE_MANIFEST_FILE
 );
 
 /** 控えの中の道は `/` 区切りで持つ（Windows と他の機械で同じ形にする） */

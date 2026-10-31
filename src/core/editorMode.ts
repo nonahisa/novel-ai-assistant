@@ -95,6 +95,61 @@ export function describeBlocked(command: string): string {
   );
 }
 
+/**
+ * 作品フォルダーの印1つの様子。`unreadable` は「在るか無いかも確かめられない」
+ * （ファイルでないものが置かれている・読む権限が無い など）。
+ */
+export type FolderMarkState = "present" | "absent" | "unreadable";
+
+/** 作品フォルダーの印から読んだモード。`unknown` は確かめられなかった */
+export type WorkFolderMode = WorkMode | "unknown";
+
+/**
+ * 作品フォルダーだけから、その作品が編集用の写し（編集部の側）かを決める
+ * （設計書5.6.5・6.87.25。作者の指示 2026-10-31「MCPサーバの穴ふさぎは実行してください」）。
+ *
+ * **設定 `novelai.mode` は使えない。** 機械ごとの VS Code の設定で、VS Code の外で動く
+ * MCP サーバーからは確実には読めない。そこで、編集部へ渡すときにだけ置かれる印を読む。
+ *
+ * - `editorCopy`：`.aiwriter/editor-share-manifest.json`（編集用フォルダーにだけ置く）
+ * - `authorSite`：`.aiwriter/editing.json`（作者の作品にだけ置く）
+ *
+ * **印が無い作品は作者**。一度も渡していない普通の作品はすべてここに落ちるので、
+ * ここを編集者に倒すと作者の MCP が全部止まる。両方ある（ありえない組）か、
+ * 写しの印が確かめられないときは `unknown`——呼ぶ側は書く道具だけを断る。
+ */
+export function workModeFromMarks(marks: {
+  editorCopy: FolderMarkState;
+  authorSite: FolderMarkState;
+}): WorkFolderMode {
+  if (marks.editorCopy === "unreadable") return "unknown";
+  if (marks.editorCopy === "absent") return "author";
+  // 写しの印がある。作者の印も確かに在るなら、どちらとも言えない
+  return marks.authorSite === "present" ? "unknown" : "editor";
+}
+
+/** MCP の道具が断ったときに、代わりに使える道として添える文 */
+export const MCP_EDITOR_ALLOWED_MESSAGE_HINT =
+  "指摘は novel.propose の kind: \"finding\" で提案パネルへ置けます（当てるかは作者が決めます）";
+
+/**
+ * MCP の道具を編集者モードで断るときの文（画面の `describeBlocked` と同じ考え）。
+ * **何のためにそうしているかと、代わりの道まで言う。** 呼んだ外部AIが作者や
+ * 編集部へそのまま伝えられるようにする。
+ */
+export function describeMcpBlocked(tool: string, mode: WorkFolderMode): string {
+  const head =
+    mode === "unknown"
+      ? `この作品が編集用の写しかどうかを、作品フォルダーの印（.aiwriter/editor-share-manifest.json・` +
+        `.aiwriter/editing.json）から確かめられませんでした。念のため、編集者モードとして扱います。`
+      : "この作品は編集部へ渡した写し（編集者モード）です。";
+  return (
+    `${head}${tool} は編集者モードでは使えません。` +
+    "作者の原稿と資料を、編集部の側から書き換えないためです。" +
+    `${MCP_EDITOR_ALLOWED_MESSAGE_HINT}。`
+  );
+}
+
 /** 一覧を外から見たいとき（テストと画面の説明で使う） */
 export function editorAllowedCommands(): string[] {
   return [...EDITOR_ALLOWED].sort();

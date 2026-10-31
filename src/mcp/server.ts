@@ -21,6 +21,7 @@ import {
   setExternalClientName,
 } from "./tools/accessLog";
 import { assertExternalAccessAllowed } from "./tools/permission";
+import { assertEditorModeAllows } from "./tools/editorGuard";
 import {
   localAiSessionKind,
   withLocalAiNotes,
@@ -247,6 +248,14 @@ function tool<Args>(
     }
 
     try {
+      /*
+        **編集用の写しでは、書く道具を動く前に断る**（設計書6.87.25・5.6.5。作者の指示
+        2026-10-31「MCPサーバの穴ふさぎは実行してください」）。画面の編集者モードと同じく
+        許すものを並べる（`core/mcpEditorPolicy.ts`）。作者の作品では何もしない。
+        許可の断り（上）とは記録を分ける——`denied` で残すと、ノックの画面が
+        「許可すれば通る」と案内してしまう。ここは失敗として理由ごと残す（下の catch）
+      */
+      assertEditorModeAllows(args, name);
       /*
         **手元の Ollama へ送るなら、ほかの窓と順番を取る**（設計書6.76.1）。
         チャンクを回す `novel.run` は一括処理として、最初に送るときに
