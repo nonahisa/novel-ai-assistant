@@ -10,7 +10,9 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**0.116.1**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.115.3**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.116.1**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.116.1**）。Marketplace に出ている版はこれより遅れることがあります。
+
+Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます（公開の準備中です）。
 
 - 原稿を書き換えるAIはいません。提案を適用するのは、いつもあなたです。
 - 手元AI（Ollama / LM Studio）なら無料で使えます。クラウドAIも、鍵を入れれば機能ごとに選べます。
