@@ -61,12 +61,28 @@ export async function openEpisode(page: Page, fileName: string, expected: string
   let opened: Frame | undefined;
   await waitUntil(
     async () => {
+      /*
+        **同じ文を持つ面が2枚あるときは、前に出ている方を選ぶ。** 中身の同じ話
+        （CRLF と LF の原稿など）を続けて開くと、後ろへ回った面も本文を持ったまま
+        残る。先に見つかった方を返すと、隠れた面を押そうとして時間切れになった
+        （manuscriptTermsEol、全件の中でだけ 2026-10-31・11-01 に2回）
+      */
+      const matches: Frame[] = [];
       for (const frame of await manuscriptFrames(page)) {
-        if ((await composeText(frame)).includes(expected)) {
+        if ((await composeText(frame)).includes(expected)) matches.push(frame);
+      }
+      if (matches.length === 0) return false;
+      if (matches.length === 1) {
+        opened = matches[0];
+        return true;
+      }
+      for (const frame of matches) {
+        if ((await frameLayer(page, frame)).inFront) {
           opened = frame;
           return true;
         }
       }
+      // どれも前に出ていなければ、まだ描き替えの途中。待ち直す
       return false;
     },
     `原稿エディターで「${fileName}」の本文が描かれる`,
