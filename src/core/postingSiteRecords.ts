@@ -634,18 +634,15 @@ export function narouAnalysisUrl(
 ): string | undefined {
   const ncode = narouNcode(workId, workUrl);
   /*
-    **Nコードは大文字で渡す**（作者の指摘、2026-09-20。ブラウザで確かめた）。
+    **作品のページは `/novels/{小文字のNコード}`**（2026-11-01 のリニューアル。
+    作者の Chrome で確かめた。ヘルパー 0.14.2 の `matches` と同じ形）。
+    古い `/works/{大文字}` は 404 になる。
 
-    小文字（`.../works/n2600go`）を開くと、**なろう本体
-    （`ncode.syosetu.com`）へ飛ばされる**——分析ページが出ない。
-    作者の言葉では「両方なろうのページに飛びます」。
-
-    **なろう本体のURLは小文字のままでよい**ので、`narouNcode` の正規化
-    （小文字に揃える）は変えない。**大文字が要るのはこのリンクだけ**である。
+    2026-09-20〜10-31 は `/works/` の下で、小文字だとなろう本体へ飛ばされたため
+    大文字にしていた。リニューアルで逆になったので、`narouNcode` の正規化
+    （小文字に揃える）をそのまま使う。サイト名も「なろうファンDB」になった。
   */
-  return ncode
-    ? `https://db.narou.fun/works/${ncode.toUpperCase()}`
-    : undefined;
+  return ncode ? `https://db.narou.fun/novels/${ncode}` : undefined;
 }
 
 /**

@@ -60,13 +60,47 @@ describe("投稿ページのURLから導く", () => {
     ).toBe("n9999zz");
   });
 
-  test("アルファポリスとnoteは導かない（形が確かめられていない／作品の単位が無い）", () => {
+  /*
+    アルファポリスの作者用ページは /mypage/ の下にあり、作品IDは数字9桁が1つだけ出る
+    （2026-11-01 作者の Chrome で確かめた。ヘルパー 0.14.2 の照合と同じ形）。
+    読者向けの作品ページは /novel/{作者ID}/{作品ID} で作者IDが要るので、pageUrl は作らない
+  */
+  test("アルファポリス：投稿画面・作品の管理画面から9桁の作品IDを導く（作品ページは作らない）", () => {
     expect(
       deriveSiteProfile(
         "alphapolis",
-        "https://www.alphapolis.co.jp/novel/manage/123456/7890123"
+        "https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366"
       )
-    ).toEqual({});
+    ).toEqual({ workId: "637622366" });
+    expect(
+      deriveSiteProfile(
+        "alphapolis",
+        "https://www.alphapolis.co.jp/mypage/content/detail/637622366"
+      )
+    ).toEqual({ workId: "637622366" });
+    // 話の編集画面（作品IDのあとに話IDが続く）からも、作品IDは読める（ヘルパーの照合と同じ形）
+    expect(
+      deriveSiteProfile(
+        "alphapolis",
+        "https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366/123456"
+      )
+    ).toEqual({ workId: "637622366" });
+  });
+
+  test("アルファポリス：9桁でない・形の違うURLからは導かない", () => {
+    for (const url of [
+      // 0.116.1 まで例に出していた、実在しない形
+      "https://www.alphapolis.co.jp/novel/manage/123456/7890123",
+      "https://www.alphapolis.co.jp/mypage/novel/save_episode/63762236",
+      "https://www.alphapolis.co.jp/mypage/novel/save_episode/6376223660",
+      // 読者向けの作品ページ（作者IDと作品ID）。どちらが作品IDかを推し量らない
+      "https://www.alphapolis.co.jp/novel/123456789/637622366",
+    ]) {
+      expect(deriveSiteProfile("alphapolis", url), url).toEqual({});
+    }
+  });
+
+  test("noteは導かない（作品の単位が無い）", () => {
     expect(deriveSiteProfile("note", "https://note.com/notes/new")).toEqual({});
   });
 });
@@ -183,13 +217,16 @@ describe("コピーのあとに開く投稿ページ", () => {
     ).toBeUndefined();
   });
 
-  test("アルファポリス：作品IDがあっても組み立てない（IDの形が確かでない）", () => {
+  test("アルファポリス：9桁の作品IDから新しい話の投稿画面を組み立てる（2026-11-01 に形を確かめた）", () => {
     expect(
-      postingPageUrl("alphapolis", undefined, { workId: "123456789" })
-    ).toBeUndefined();
-    expect(
-      postingPageUrl("alphapolis", undefined, { workId: "000000/0000" })
-    ).toBeUndefined();
+      postingPageUrl("alphapolis", undefined, { workId: "637622366" })
+    ).toBe("https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366");
+  });
+
+  test("アルファポリス：9桁でない作品IDからは組み立てない（作品を指せないIDで別の画面を開かせない）", () => {
+    for (const workId of ["000000/0000", "123456/7890123", "12345678", "1234567890", "作品名"]) {
+      expect(postingPageUrl("alphapolis", undefined, { workId }), workId).toBeUndefined();
+    }
   });
 
   test("note：組み立てない（作品の単位が無い）", () => {
@@ -199,7 +236,7 @@ describe("コピーのあとに開く投稿ページ", () => {
   test("組み立てないサイトでも、台帳にあればそれを開く", () => {
     const narou = "https://syosetu.com/usernovelmanage/top/";
     expect(postingPageUrl("narou", narou, undefined)).toBe(narou);
-    const alphapolis = "https://www.alphapolis.co.jp/novel/manage/000000/0000";
+    const alphapolis = "https://www.alphapolis.co.jp/mypage/novel/save_episode/000000000";
     expect(postingPageUrl("alphapolis", alphapolis, undefined)).toBe(alphapolis);
   });
 
@@ -341,12 +378,13 @@ describe("作者だけが開けるページ", () => {
     });
   });
 
-  test("アルファポリスの管理画面・note の編集画面も作者用", () => {
+  test("アルファポリスの /mypage/ の下（投稿画面・作品の管理画面）・note の編集画面も作者用", () => {
+    // 2026-11-01 作者の Chrome で確かめた形（作者用ページはすべて /mypage/ の下）
     expect(
-      authorOnlyPage("https://www.alphapolis.co.jp/novel/manage/000000/0000")
+      authorOnlyPage("https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366")
     ).toEqual({ site: "alphapolis" });
     expect(
-      authorOnlyPage("https://www.alphapolis.co.jp/manage/novel/123/episode/new")
+      authorOnlyPage("https://www.alphapolis.co.jp/mypage/content/detail/637622366")
     ).toEqual({ site: "alphapolis" });
     expect(authorOnlyPage("https://editor.note.com/notes/abc/edit/")).toEqual({
       site: "note",
@@ -360,6 +398,8 @@ describe("作者だけが開けるページ", () => {
       "https://ncode.syosetu.com/n1234ab/",
       "https://ncode.syosetu.com/n1234ab/13/",
       "https://www.alphapolis.co.jp/novel/123456789/987654321",
+      // パスのどこかに manage があるだけでは作者用と言わない（0.116.1 までの見分けは実在しない形だった）
+      "https://www.alphapolis.co.jp/novel/123456789/987654321/manage",
       "https://note.com/someone/m/abc",
       "https://example.com/my/works/1",
       "",
@@ -375,7 +415,7 @@ describe("作者だけが開けるページ", () => {
     expect(notice).toContain(実機.workUrl);
     // 直す先が分からないサイトは、読者向けのページを貼ってもらう
     expect(
-      authorOnlyPageNotice("https://www.alphapolis.co.jp/novel/manage/000000/0000")
+      authorOnlyPageNotice("https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366")
     ).toContain("読者が開ける作品ページ");
     expect(authorOnlyPageNotice(実機.workUrl)).toBeUndefined();
   });

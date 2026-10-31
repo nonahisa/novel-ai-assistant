@@ -60,7 +60,7 @@ describe("作品URLの欄の初期値", () => {
     expect(announceWorkUrlDraft("", [author])).toBe(reader);
     expect(announceWorkUrlDraft("", [author, reader])).toBe(reader);
     expect(
-      announceWorkUrlDraft("", ["https://www.alphapolis.co.jp/novel/manage/000000/0000"])
+      announceWorkUrlDraft("", ["https://www.alphapolis.co.jp/mypage/novel/save_episode/123456789"])
     ).toBe("");
   });
 });

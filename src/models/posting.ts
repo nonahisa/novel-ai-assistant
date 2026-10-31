@@ -114,9 +114,14 @@ export const POSTING_SITES: readonly PostingSiteInfo[] = [
     id: "alphapolis",
     label: "アルファポリス",
     domain: "alphapolis.co.jp",
-    urlExample: "https://www.alphapolis.co.jp/novel/manage/000000/0000",
-    // **2つの番号を「/」で繋げて入れてもらう。** 片方だけでは作品を指せない
-    workIdExample: "123456/7890123（作者番号／作品番号）",
+    /*
+      **作者用のページは /mypage/ の下**（2026-11-01 作者の Chrome で確かめた）。
+      新しい話は /mypage/novel/save_episode/{作品ID}、作品IDは数字9桁。
+      0.116.1 までは /novel/manage/… の例と「作者番号／作品番号」の作品IDを出していたが、
+      どちらも実在しない形で、ヘルパー 0.14.2 の照合（9桁の作品ID）では取り違えとして止まる
+    */
+    urlExample: "https://www.alphapolis.co.jp/mypage/novel/save_episode/000000000",
+    workIdExample: "000000000（作品IDの数字9桁。投稿画面のURLの末尾の数字）",
     notation: "site",
     // アルファポリスもなろうと同じくルビで代用する
     emphasis: "narou",
@@ -1701,7 +1706,8 @@ export function withReaderStats(
  * 「いつ何件だったか」の履歴に何も足さないので積まない：
  *
  * 1. **まったく同じ記録**（読み取り日時・範囲・粒度・期間・数・出どころが同じ）。
- *    Narou.fun の封筒は記録の日時が「最終取得日時」なので、同じページを2度
+ *    Narou.fun の封筒は記録の日時がサイトの「データ取得」の日（2026-11-01 から。それまでは
+ *    「最終取得日時」）なので、同じページを2度
  *    押すと、作品全体の数まで同じ日時・同じ数で届く
  * 2. **作品全体の日別の行で、その日の数がいま見えている数と同じ**もの。
  *    Narou.fun の日ごとの増減（ブックマーク・評価ポイント）も、カクヨムの日ごとの

@@ -11,9 +11,9 @@ import { memoryFs } from "../support/memoryDisk";
  *
  * **確かめるのは、作品IDの例がサイトごとに変わること。** 4サイトとも
  * `n1234ab`（なろうのNコード）を出していたころは、ほかのサイトで何を
- * 入れればよいのか分からなかった——とりわけ**アルファポリスの作品IDは
- * 「作者番号＋作品番号」の2部構成**で、片方だけでは作品を指せない
- * （URLを合成しない理由は `core/snsShare.ts` にある）。
+ * 入れればよいのか分からなかった。**アルファポリスの作品IDは、投稿画面の URL の
+ * 末尾にある数字9桁**（2026-11-01 作者の Chrome で確かめた。ヘルパー 0.14.2 はこの9桁で
+ * 貼り込み先を照合する。0.116.1 までの例「作者番号／作品番号」は実在しない形だった）。
  *
  * **サイトへは何も送らない**（6.68.1）。ここで動くのは入力欄だけである。
  */
@@ -34,7 +34,7 @@ const newEpisodeUrl: Record<string, string> = {
   小説家になろう:
     "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/",
   カクヨム: "https://kakuyomu.jp/my/works/16816927859/episodes/new",
-  アルファポリス: "https://www.alphapolis.co.jp/novel/manage/123456/7890123",
+  アルファポリス: "https://www.alphapolis.co.jp/mypage/novel/save_episode/123456789",
   note: "https://note.com/notes/new",
 };
 
@@ -118,9 +118,9 @@ describe("サイトごとの作品IDの入力案内", () => {
     // **4サイトとも、その場で意味の通る例が出る**
     expect(workIdPlaceholder("小説家になろう")).toContain("Nコード");
     expect(workIdPlaceholder("カクヨム")).toContain("作品ページURL");
-    // アルファポリスは2部構成であることが読めること
-    expect(workIdPlaceholder("アルファポリス")).toContain("作者番号");
-    expect(workIdPlaceholder("アルファポリス")).toContain("作品番号");
+    // アルファポリスは9桁の作品IDであることが読めること（作者番号との組を勧めない）
+    expect(workIdPlaceholder("アルファポリス")).toContain("9桁");
+    expect(workIdPlaceholder("アルファポリス")).not.toContain("作者番号");
     // noteには「作品」の単位が無い（空のままでよいと言い切る）
     expect(workIdPlaceholder("note")).toContain("空のまま");
 
@@ -387,12 +387,21 @@ describe("投稿ページのURLから初期値を埋める", () => {
     );
   });
 
-  test("アルファポリスは埋めない（投稿画面のURLの形が実機で未確認）", async () => {
+  test("アルファポリスは9桁の作品IDだけ埋める（作品ページは作者IDが要るので埋めない）", async () => {
+    // 投稿画面の形は 2026-11-01 作者の Chrome で確かめた（/mypage/novel/save_episode/{9桁}）
     stub(newEpisodeUrl["アルファポリス"], "アルファポリス");
 
     await configurePostingSites(work);
 
-    // 片方だけの番号を入れると、作品を指せないIDが台帳に残る
+    expect(initial.get("アルファポリス での作品ID") || "").toBe("123456789");
+    expect(initial.get("アルファポリス の作品ページのURL") || "").toBe("");
+  });
+
+  test("アルファポリスでも、形の違う URL からは埋めない（作品を指せないIDを台帳に残さない）", async () => {
+    stub("https://www.alphapolis.co.jp/novel/manage/123456/7890123", "アルファポリス");
+
+    await configurePostingSites(work);
+
     expect(initial.get("アルファポリス での作品ID") || "").toBe("");
     expect(initial.get("アルファポリス の作品ページのURL") || "").toBe("");
   });

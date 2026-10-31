@@ -31,6 +31,20 @@ describe("作品IDから投稿ページのURLを組み立てる", () => {
     expect(postingPageUrl("kakuyomu", undefined, { workId: ID })).toBe(NEW_EPISODE);
   });
 
+  test("アルファポリスは9桁の作品IDから新しい話の投稿画面を組み立てる（2026-11-01 に形を確かめた）", () => {
+    const url = "https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366";
+    expect(newEpisodeUrlFromWorkId("alphapolis", "637622366")).toBe(url);
+    expect(newEpisodeUrlFromWorkId("alphapolis", " 637622366 ")).toBe(url);
+    // 0.116.1 まで欄の例に出していた「作者番号／作品番号」の形からは組まない
+    expect(newEpisodeUrlFromWorkId("alphapolis", "123456/637622366")).toBeUndefined();
+    const ledger = emptyPostingLedger();
+    const idPlan = planReaderStatsSiteId(ledger, "alphapolis", "637622366");
+    expect(planReaderStatsPostingSite(ledger, "alphapolis", "637622366", idPlan)).toEqual({
+      kind: "add",
+      entry: { site: "alphapolis", newEpisodeUrl: url },
+    });
+  });
+
   test("数字でない作品ID・組み立てられないサイトは undefined", () => {
     expect(newEpisodeUrlFromWorkId("kakuyomu", "作品名")).toBeUndefined();
     expect(newEpisodeUrlFromWorkId("kakuyomu", "")).toBeUndefined();
