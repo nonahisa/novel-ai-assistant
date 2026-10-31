@@ -756,7 +756,14 @@ export function withSiteFacts(
 ): { ledger: PostingLedger; changed: boolean } {
   const current = siteFactsFor(ledger, input.site);
   const next: PostingSiteFacts = { ...(current ?? { site: input.site }) };
+  /*
+    `changed` は**値が変わったときだけ**真にする。値が同じで日時だけ新しいときは、
+    日時を進めた台帳を返すが `changed` は偽のまま——数の保存に相乗りさせる
+    （日時だけのために保存したり、自動取り込みで「まだ取り込んでいない」と訊き直したり
+    しない）。日時を進めないと、あとから届いた**その間の古い画面**が勝ってしまう
+  */
   let changed = false;
+  let touched = false;
   let tagChange: PostingTagChange | undefined;
 
   if (input.tags !== undefined && isNotOlder(input.readAt, next.tagsAt)) {
@@ -767,29 +774,32 @@ export function withSiteFacts(
         tagChange = { site: input.site, changedAt: input.readAt, before: [...before], after: tags };
       }
       next.tags = tags;
-      next.tagsAt = input.readAt;
       changed = true;
     }
+    if (next.tagsAt !== input.readAt) touched = true;
+    next.tagsAt = input.readAt;
   }
   if (input.completion !== undefined && isNotOlder(input.readAt, next.completionAt)) {
     if (next.completion !== input.completion) {
       next.completion = input.completion;
-      next.completionAt = input.readAt;
       changed = true;
     }
+    if (next.completionAt !== input.readAt) touched = true;
+    next.completionAt = input.readAt;
   }
   if (input.ownedVia !== undefined && isNotOlder(input.readAt, next.ownedViaAt)) {
     if (next.ownedVia !== input.ownedVia) {
       next.ownedVia = input.ownedVia;
-      next.ownedViaAt = input.readAt;
       changed = true;
     }
+    if (next.ownedViaAt !== input.readAt) touched = true;
+    next.ownedViaAt = input.readAt;
   }
-  if (!changed) return { ledger, changed: false };
+  if (!changed && !touched) return { ledger, changed: false };
 
   const facts = ledger.siteFacts ?? [];
   return {
-    changed: true,
+    changed,
     ledger: {
       ...ledger,
       siteFacts: current

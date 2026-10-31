@@ -338,6 +338,29 @@ describe("台帳へ写す（今のタグ・付け替えの記録・連載の状�
     expect(ledger.tagChanges ?? []).toEqual([]);
   });
 
+  test("同じ値をあとで読み直したら日時だけ進み、その間の古い画面があとから来ても勝たない", () => {
+    let ledger = applyReaderStatsEnvelope(
+      registered(),
+      envelopeOf(kakuyomuRaw({ tags: ["A"], completion: "ongoing" }, "2026-10-01T00:00:00.000Z"))
+    ).ledger;
+    const reread = applyReaderStatsEnvelope(
+      ledger,
+      envelopeOf(kakuyomuRaw({ tags: ["A"], completion: "ongoing" }, "2026-11-01T00:00:00.000Z"))
+    );
+    // 値は変わっていないので「書き換えた」とは言わない（日時の前進は数の保存に相乗りする）
+    expect(reread.factsChanged).toBe(false);
+    ledger = reread.ledger;
+    expect(siteFactsFor(ledger, "kakuyomu")?.tagsAt).toBe("2026-11-01T00:00:00.000Z");
+    const between = applyReaderStatsEnvelope(
+      ledger,
+      envelopeOf(kakuyomuRaw({ tags: ["B"], completion: "completed" }, "2026-10-15T00:00:00.000Z"))
+    );
+    expect(between.factsChanged).toBe(false);
+    expect(siteFactsFor(between.ledger, "kakuyomu")?.tags).toEqual(["A"]);
+    expect(siteFactsFor(between.ledger, "kakuyomu")?.completion).toBe("ongoing");
+    expect(between.ledger.tagChanges ?? []).toEqual([]);
+  });
+
   test("サイトの印は、作品の印（作者が決める値）を書き換えない", () => {
     const ledger: PostingLedger = {
       ...registered(),
