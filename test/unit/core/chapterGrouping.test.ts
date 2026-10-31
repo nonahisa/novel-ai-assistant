@@ -1,6 +1,7 @@
 import * as path from "path";
 import { describe, expect, test } from "vitest";
 import {
+  chapterNameOfEpisode,
   chapterNodeId,
   episodeGroupLabels,
   formatChapterRange,
@@ -251,5 +252,42 @@ describe("目次の束ね名（台帳が正）", () => {
     // 第3話以降は第一章のまま。指し先の無い章は誰も束ねない
     expect(labels.get("本文/008.txt")).toBe("第一章");
     expect([...labels.values()]).not.toContain("幻の章");
+  });
+});
+
+/**
+ * 話が属する章の題（作者の頼み 2026-11-01。投稿サイトのヘルパーへ渡す封筒の `chapter`）。
+ * **作品一覧と同じ束ね方**から引く——別の決め方をすると、一覧では第二章に見える話が
+ * 投稿画面では第一章へ入る。
+ */
+describe("話が属する章の題", () => {
+  const chapters = [
+    chapter("第一章『死の谷』", "003.txt"),
+    chapter("第二章　出立", "006.txt"),
+  ];
+  const nameOf = (fileName: string, list: readonly Chapter[] = chapters) =>
+    chapterNameOfEpisode(
+      episodes,
+      list,
+      WORK_FOLDER,
+      path.join(WORK_FOLDER, "本文", fileName)
+    );
+
+  test("章の中の話は、その章の題を台帳の字のまま返す", () => {
+    expect(nameOf("003.txt")).toBe("第一章『死の谷』");
+    expect(nameOf("005.txt")).toBe("第一章『死の谷』");
+    expect(nameOf("008.txt")).toBe("第二章　出立");
+  });
+
+  test("最初の章より前の話は、章なし", () => {
+    expect(nameOf("001.txt")).toBeUndefined();
+  });
+
+  test("章立てが空なら、章なし（ファイル名由来の束ね名を章と偽らない）", () => {
+    expect(nameOf("004.txt", [])).toBeUndefined();
+  });
+
+  test("並びに無い話は、章なし", () => {
+    expect(nameOf("999.txt")).toBeUndefined();
   });
 });

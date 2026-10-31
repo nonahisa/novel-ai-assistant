@@ -246,3 +246,109 @@ describe("貼り込み係へ渡す形でコピー", () => {
     );
   });
 });
+
+/**
+ * 封筒の章の題（作者の頼み 2026-11-01「章も入るようにしてください」）。
+ *
+ * アルファポリスの投稿画面には章を選ぶ欄があり、ヘルパーが封筒の `chapter` の字で
+ * 選ぶ。章の題は**作品一覧が章として見せているもの**——`設定/章立て.json` を
+ * 話の並びで束ねたもの——から引く。章の切れ目は話の並びで決まるので、
+ * 章立てがある作品では走査を通す（ファイルの一覧を返す作り物が要る）。
+ */
+describe("封筒の章の題", () => {
+  const alphapolisUrl =
+    "https://www.alphapolis.co.jp/novel/episode/create/123456789";
+  const chapterLedgerPath = Uri.file(
+    path.join(work.folderPath, "設定", "章立て.json")
+  ).fsPath;
+
+  function put(fileName: string): void {
+    disk.set(
+      Uri.file(path.join(work.folderPath, "本文", fileName)).fsPath,
+      utf8(body)
+    );
+  }
+
+  function writeChapters(
+    chapters: Array<{ name: string; startEpisodePath: string }>
+  ): void {
+    disk.set(
+      chapterLedgerPath,
+      utf8(JSON.stringify({ schemaVersion: "1", chapters }))
+    );
+  }
+
+  /** アルファポリスで封筒を選び、クリップボードに入った封筒を返す */
+  async function copiedEnvelope(): Promise<Record<string, unknown>> {
+    let copied = "";
+    stubQuickPick([
+      (items) => byAnswer(items, "envelope"),
+      () => {
+        copied = env.clipboard.text;
+        return undefined;
+      },
+    ]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+    return JSON.parse(copied) as Record<string, unknown>;
+  }
+
+  beforeEach(() => {
+    disk.clear();
+    env.clipboard.text = "";
+    workspace.textDocuments = [];
+    // 走査が本文フォルダーの中を一覧できるようにする（`epubChapterToc.test.ts` と同じ形）
+    workspace.fs = memoryFs(disk, {
+      fileStat: { mtime: Date.UTC(2026, 10, 1, 0, 0, 0), size: 1 },
+      folderStat: { mtime: 0, size: 0 },
+      readDirectory: "nested",
+    });
+    Object.assign(window, {
+      showInformationMessage: async () => undefined,
+      showWarningMessage: async () => undefined,
+      showErrorMessage: async () => undefined,
+    });
+    disk.set(
+      ledgerPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          sites: [{ site: "alphapolis", newEpisodeUrl: alphapolisUrl }],
+          posts: [],
+          rankings: [],
+        })
+      )
+    );
+    // 第12話〜第14話。貼り込むのは第13話（`episode`）
+    put("012_出立.txt");
+    put("013_邂逅.txt");
+    put("014_別離.txt");
+  });
+
+  test("章のある作品の話では、その話が属する章の題が字のまま入る", async () => {
+    writeChapters([
+      { name: "第一章『死の谷』", startEpisodePath: "本文/012_出立.txt" },
+      { name: "第二章『氷の街』", startEpisodePath: "本文/014_別離.txt" },
+    ]);
+
+    const envelope = await copiedEnvelope();
+
+    // 第13話は第一章に入る（第二章は第14話から）。字は台帳のまま——ヘルパーが
+    // 投稿画面の選択肢と照らすので、こちらで整えない
+    expect(envelope.chapter).toBe("第一章『死の谷』");
+    expect(envelope.title).toBe("邂逅");
+  });
+
+  test("章の無い作品では、章の欄を作らない", async () => {
+    const envelope = await copiedEnvelope();
+    expect("chapter" in envelope).toBe(false);
+  });
+
+  test("章の前に置かれた話（どの章にも入らない話）では、章の欄を作らない", async () => {
+    writeChapters([
+      { name: "第一章『死の谷』", startEpisodePath: "本文/014_別離.txt" },
+    ]);
+
+    const envelope = await copiedEnvelope();
+    expect("chapter" in envelope).toBe(false);
+  });
+});

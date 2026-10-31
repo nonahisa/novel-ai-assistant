@@ -26,6 +26,10 @@ import {
 } from "../models/posting";
 import { PostingStore, PostingStoreError } from "../core/postingStore";
 import { episodePathFor } from "../core/bookStore";
+// 章の題は作品一覧と同じ源（章立ての台帳を話の並びで束ねたもの）から引く
+import { ChapterStore, ChapterStoreError } from "../core/chapterStore";
+import { chapterNameOfEpisode } from "../core/chapterGrouping";
+import type { Chapter } from "../models/chapter";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { extractEpisodeParts } from "../core/episodeCopy";
@@ -188,6 +192,15 @@ export async function postNewEpisode(
     sites = ledger.sites.map((entry) => entry.site);
   }
 
+  /*
+    **章の題は、封筒を選んだときに1度だけ引く**（作者の頼み 2026-11-01）。
+    章の切れ目は話の並びで決まるので、章立てのある作品では走査が要る——
+    封筒を使わない回や章の無い作品まで、200話を読ませない。
+  */
+  let chapterName: Promise<string | undefined> | undefined;
+  const chapterOf = () =>
+    (chapterName ??= chapterNameOf(work, target, episodesOf));
+
   const posted: PostingSiteId[] = [];
   const skipped: PostingSiteId[] = [];
   let aborted = false;
@@ -199,6 +212,7 @@ export async function postNewEpisode(
       label,
       subtitle: parts.subtitle,
       body: parts.body,
+      chapterOf,
     });
     if (answer === "abort") {
       aborted = true;
@@ -230,6 +244,47 @@ export async function postNewEpisode(
   }
 
   return { changed };
+}
+
+/**
+ * 貼り込む話が属する章の題（封筒の `chapter`。作者の頼み 2026-11-01）。
+ * 章に入っていなければ undefined。
+ *
+ * **作品一覧が章として見せているものと同じ源**——`設定/章立て.json`
+ * （`ChapterStore`）を話の並びで束ねたもの——から引く。本文の見出し行や
+ * バックアップは章立てを立てるときの材料で、立てたあとの正は台帳である。
+ *
+ * 台帳が読めなくても**投稿は止めない**。章の欄が埋まらないだけで、作者は
+ * 投稿画面で章を選べる。ただし黙って落とさず、ログと知らせに残す。
+ */
+async function chapterNameOf(
+  work: WorkEntry,
+  target: EpisodeFile,
+  episodesOf: () => Promise<EpisodeFile[]>
+): Promise<string | undefined> {
+  let chapters: Chapter[];
+  try {
+    chapters = (await new ChapterStore(work).load()).chapters;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logFailure("投稿キットの章立ての読み込み", {
+      作品: work.title,
+      種類: error instanceof ChapterStoreError ? error.kind : "unknown",
+      内容: detail,
+    });
+    void vscode.window.showWarningMessage(
+      `章立てを読めなかったため、章の題は入れずにコピーします: ${detail}`
+    );
+    return undefined;
+  }
+  // 章の無い作品では走査しない（話が決まっている回は走査しない約束を守る）
+  if (chapters.length === 0) return undefined;
+  return chapterNameOfEpisode(
+    await episodesOf(),
+    chapters,
+    work.folderPath,
+    target.filePath
+  );
 }
 
 /**
@@ -270,6 +325,8 @@ async function walkSite(input: {
   label: string;
   subtitle: string | null;
   body: string;
+  /** 封筒へ入れる章の題（章に入っていなければ undefined） */
+  chapterOf: () => Promise<string | undefined>;
 }): Promise<SiteAnswer> {
   const info = postingSiteInfo(input.site);
   const entry = input.ledger.sites.find((site) => site.site === input.site);
@@ -378,12 +435,17 @@ async function walkSite(input: {
 
         作品IDは**入っていれば**添える（6.68.5）。貼り込み係が投稿画面の
         URLと突き合わせて、別の作品の画面への貼り込みを止める（6.79.6 の貼り込み先の照合）。
+
+        章の題も**入っていれば**添える（作者の頼み 2026-11-01）。アルファポリスの
+        章を選ぶ欄をヘルパーが埋める。ほかのサイトのヘルパーは読まずに済ます。
       */
+      const chapter = await input.chapterOf();
       await vscode.env.clipboard.writeText(
         buildPostingEnvelope({
           site: input.site,
           workId: siteProfile(input.ledger, input.site)?.workId,
           title: input.subtitle?.trim() || input.label,
+          chapter,
           body,
         })
       );
