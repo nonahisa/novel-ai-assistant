@@ -131,6 +131,23 @@ export function editingFolderName(workTitle: string): string {
 export const SHARED_FILES = [".aiwriter/config.json", ".gitignore"] as const;
 
 /**
+ * 直下へ写した原稿の控え（`.aiwriter/` の下の名前）。**編集用フォルダーにだけ置く。**
+ *
+ * `copyForEditor` が送るたびに必ず書き、`.gitignore` の外なので編集部の取り寄せた
+ * 写しにも届く。作者の作品には書かない。そのため MCP サーバーは、これを
+ * 「この作品は編集用の写し（編集部の側）である」印として読む（設計書5.6.5・6.87.25）。
+ * 2026-10-01 より前に渡した編集用リポジトリには無く、次に送り直したときに置かれる。
+ */
+export const EDITOR_SHARE_MANIFEST_FILE = "editor-share-manifest.json";
+
+/**
+ * 編集部の送り先と相手（`.aiwriter/` の下の名前）。**作者の作品にだけ置く**
+ * （`SHARED_FILES` に入れていないので編集用へは写らない）。
+ * 上の印と両方あるのはありえない組なので、MCP は「確かめられない」扱いにする。
+ */
+export const EDITING_SITE_FILE = "editing.json";
+
+/**
  * 送り出すたびに、まるごと置き換えるフォルダー。
  *
  * **編集部はここへ書かない**ので、消して作り直しても失うものが無い。

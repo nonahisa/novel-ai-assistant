@@ -21,6 +21,7 @@ import {
   setExternalClientName,
 } from "./tools/accessLog";
 import { assertExternalAccessAllowed } from "./tools/permission";
+import { EditorModeBlockedError, assertEditorModeAllows } from "./tools/editorGuard";
 import {
   localAiSessionKind,
   withLocalAiNotes,
@@ -232,7 +233,32 @@ function tool<Args>(
 ): (args: Args, extra?: { signal?: AbortSignal }) => Promise<CallToolResult> {
   return async (args: Args, extra?: { signal?: AbortSignal }) => {
     /*
-      **まず許可を確かめる**（設計書6.87.10・6.87.14。作者の指示、2026-09-15／16）。
+      **最初に、編集用の写しでは書く道具を断る**（設計書6.87.25・5.6.5。作者の指示
+      2026-10-31「MCPサーバの穴ふさぎは実行してください」）。画面の編集者モードと同じく
+      許すものを並べる（`core/mcpEditorPolicy.ts`）。作者の作品では何もしない。
+
+      **許可より先に確かめる。** 後にすると、どのみち断る道具なのに許可のノック（6.87.14）が
+      出て、編集部に意味の無い許可をさせてしまう。ここが読むのは作品フォルダーの
+      印のファイルが在るかどうかだけで、原稿も資料も読まないので、読む前に許可は要らない。
+
+      許可の断りとは記録を分ける——`denied` で残すと、ノックの画面が「許可すれば通る」と
+      案内してしまう。失敗として理由ごと、原稿は出ていない（`refused`）として残す
+    */
+    try {
+      assertEditorModeAllows(args, name);
+    } catch (error) {
+      recordExternalAccess({
+        tool: name,
+        args,
+        ok: false,
+        refused: error instanceof EditorModeBlockedError,
+        failure: error instanceof McpToolError ? error.message : describeError(error),
+      });
+      return fail(error, checkBundleStaleness());
+    }
+
+    /*
+      **次に許可を確かめる**（設計書6.87.10・6.87.14。作者の指示、2026-09-15／16）。
       既定は拒否で、作者が意思確認をしていない作品は1文字も読ませない。
       **許可は接続元ごと・機能ごと**なので、道具の名前と `feature` を渡す
       ——ほかの機能を許していても、この機能は別に許可が要る（0.66.7）。
