@@ -280,15 +280,16 @@ describe("タイプに合わない操作は出さない", () => {
 
 describe("右クリック（package.json の when）が表と噛み合う", () => {
   const contextMenu = manifest.contributes.menus["view/item/context"];
-  /** タイプを持たない行（未登録の自分の作品の枠）だけを狙う when */
-  const UNTYPED_ROW = /viewItem\s*=~\s*\/\^ownWorkFrame\$\//;
+  /** タイプを持たない行（未登録の自分の作品の枠と、その見出し）だけを狙う when */
+  const UNTYPED_ROW = /viewItem\s*=~\s*\/\^(?:ownWorkFrame|ownWorksHeader-hasHidden)\$\//;
 
-  test("タイプを持たない枠の項目は、枠の印だけを狙う（作品・章・話の行に出ない）", () => {
+  test("タイプを持たない枠の項目は、枠と見出しの印だけを狙う（作品・章・話の行に出ない）", () => {
     const frames = contextMenu.filter((entry) => UNTYPED_ROW.test(entry.when ?? ""));
     expect(frames.map((entry) => entry.command).sort()).toEqual([
       "novelai.fetchOwnWorkBackup",
       "novelai.hideOwnWork",
       "novelai.importOwnWorkBackupFile",
+      "novelai.restoreHiddenOwnWorks",
     ]);
     for (const entry of frames) {
       expect(matchedContextValues(entry.when ?? ""), entry.command).toEqual([]);

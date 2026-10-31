@@ -3,7 +3,9 @@ import {
   backupEntryFor,
   checkBackupAgainstOwnWork,
   hideUnregisteredOwnWork,
+  hiddenUnregisteredOwnWorks,
   looksLikeBackupOf,
+  unhideUnregisteredOwnWork,
   narouBackupIdFrom,
   noteUnregisteredOwnWorks,
   readUnregisteredOwnWorks,
@@ -79,6 +81,18 @@ describe("覚える作品", () => {
     });
   });
 
+  test("出さないにした作品を戻せる（印だけを外し、ほかの覚えは残す）", () => {
+    let list = noteUnregisteredOwnWorks([], [envelope()]);
+    list = hideUnregisteredOwnWork(list, "kakuyomu", "16818093000000000001");
+    const back = unhideUnregisteredOwnWork(list, "kakuyomu", "16818093000000000001");
+    expect(back[0].hidden).toBeUndefined();
+    expect(back[0].title).toBe("氷の街の約束");
+    expect(hiddenUnregisteredOwnWorks(list, new Set()).map((entry) => entry.workId)).toEqual([
+      "16818093000000000001",
+    ]);
+    expect(hiddenUnregisteredOwnWorks(back, new Set())).toEqual([]);
+  });
+
   test("変わらなければ同じ配列を返す（保管庫へ書かずに済む）", () => {
     const list = noteUnregisteredOwnWorks([], [envelope()]);
     expect(noteUnregisteredOwnWorks(list, [envelope()])).toBe(list);
@@ -115,6 +129,16 @@ describe("枠に出す作品", () => {
     ]);
     expect(visibleUnregisteredOwnWorks(list, registered).map((entry) => entry.title)).toEqual([
       "未登録の作品",
+    ]);
+  });
+
+  test("出さないにした作品のうち、登録済みのものは戻す一覧にも出さない", () => {
+    const registered = registeredSiteWorkKeys([
+      withSiteProfile(emptyPostingLedger(), "narou", { workId: "N5555AA" }),
+    ]);
+    expect(hiddenUnregisteredOwnWorks(list, registered)).toEqual([]);
+    expect(hiddenUnregisteredOwnWorks(list, new Set()).map((entry) => entry.title)).toEqual([
+      "出さない作品",
     ]);
   });
 

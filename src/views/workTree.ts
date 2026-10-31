@@ -67,6 +67,7 @@ import {
 import {
   ownWorkKey,
   ownWorkLabel,
+  hiddenUnregisteredOwnWorks,
   registeredSiteWorkKeys,
   visibleUnregisteredOwnWorks,
   type UnregisteredOwnWork,
@@ -118,7 +119,8 @@ export type TreeNode =
   | MemoFileNode
   | MessageNode
   | OwnWorksHeaderNode
-  | OwnWorkFrameNode;
+  | OwnWorkFrameNode
+  | GuideActionNode;
 
 /**
  * 「未登録の自分の作品」の枠を出すための口（作者の指示 2026-11-01。設計書6.99.8）。
@@ -143,7 +145,35 @@ export interface OwnWorksSource {
 export class OwnWorksHeaderNode {
   readonly type = "ownWorksHeader" as const;
   /** 枠が増減しても見出しは同じ行のまま差し替える（`WorkNode` と同じ理由） */
-  constructor(public frames: OwnWorkFrameNode[]) {}
+  constructor(
+    public frames: OwnWorkFrameNode[],
+    /** 出さないにした作品の数。1つ以上なら右クリックに［出さないにした作品を戻す］ */
+    public hiddenCount = 0
+  ) {}
+}
+
+/**
+ * 登録した作品が0件のときに枠の上へ置く、登録の入口の行（リーダーの指示 2026-11-01）。
+ * 押すとそのコマンドが動く。並びと文言は package.json の viewsWelcome（空のときの案内）と同じ
+ */
+export class GuideActionNode {
+  readonly type = "guideAction" as const;
+  constructor(
+    public readonly label: string,
+    public readonly command: string,
+    public readonly icon: string
+  ) {}
+}
+
+/** 0件のときの案内（viewsWelcome の文と4つのボタンを行にしたもの） */
+function noWorksGuideNodes(): TreeNode[] {
+  return [
+    new MessageNode("まだ作品が登録されていません。"),
+    new GuideActionNode("バックアップ取込", "novelai.importWorkFromZip", "file-zip"),
+    new GuideActionNode("フォルダー登録", "novelai.addWork", "folder-opened"),
+    new GuideActionNode("新規作品を作成", "novelai.createWork", "new-file"),
+    new GuideActionNode("GitHubから追加", "novelai.addWorkFromGithub", "github"),
+  ];
 }
 
 /** 枠1つ。題とサイト名だけで、中身（話）は無い */
@@ -626,45 +656,73 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
   private async redrawOwnWorks(): Promise<void> {
     const works = this.registry.list();
-    const frames = await this.ownFrames(works);
+    const { frames, hidden } = await this.ownFrames(works);
     const header = this.ownHeader;
-    if (header && frames.length > 0) {
+    const shown = frames.length > 0 || hidden > 0;
+    if (header && shown) {
       header.frames = frames;
+      header.hiddenCount = hidden;
       this._onDidChangeTreeData.fire(header);
       return;
     }
-    if (!header && frames.length === 0) return;
+    if (!header && !shown) return;
     this.redrawWholeList();
   }
 
-  /** 根の行の後ろに「未登録の自分の作品」を足す（枠が無ければそのまま） */
+  /**
+   * 根の行の後ろに「未登録の自分の作品」を足す（枠も出さないにした作品も無ければそのまま）。
+   *
+   * **出さないにした作品だけが残っていても見出しは出す**——見出しの右クリックの
+   * ［出さないにした作品を戻す］が、戻す唯一の道だから。
+   *
+   * **登録した作品が0件のときは、枠の上に登録の案内と入口を置く**（リーダーの指示 2026-11-01）。
+   * VS Code の「まだ作品が登録されていません」の案内（viewsWelcome）は一覧が空のときだけ
+   * 出るので、枠の行があると消えてしまい、初めての人が登録の入口を見失う
+   */
   private async withOwnWorks(
     nodes: TreeNode[],
     works: readonly WorkEntry[]
   ): Promise<TreeNode[]> {
-    const frames = this.ownWorks ? await this.ownFrames(works) : [];
-    this.ownHeader = frames.length > 0 ? new OwnWorksHeaderNode(frames) : undefined;
-    return this.ownHeader ? [...nodes, this.ownHeader] : nodes;
+    const { frames, hidden } = this.ownWorks
+      ? await this.ownFrames(works)
+      : { frames: [], hidden: 0 };
+    this.ownHeader =
+      frames.length > 0 || hidden > 0 ? new OwnWorksHeaderNode(frames, hidden) : undefined;
+    if (!this.ownHeader) return nodes;
+    const guide = works.length === 0 ? noWorksGuideNodes() : [];
+    return [...guide, ...nodes, this.ownHeader];
   }
 
-  /**
-   * 枠に出す作品。**登録した作品の台帳と同じサイト・作品IDのものは出さない。**
-   * 台帳は一覧の走査で読んでいる（完結の印と同じ控え）。読めなかった台帳は空と見る
-   */
-  private async ownFrames(works: readonly WorkEntry[]): Promise<OwnWorkFrameNode[]> {
-    const source = this.ownWorks;
-    if (!source) return [];
-    const list = source.list();
-    if (list.length === 0) return [];
+  /** 登録済みのサイトと作品IDの組（［出さないにした作品を戻す］で登録済みを並べないため） */
+  async registeredOwnWorkKeys(): Promise<Set<string>> {
+    const works = this.registry.list();
     await Promise.all(works.map((work) => this.loadPosting(work)));
-    const registered = registeredSiteWorkKeys(
+    return registeredSiteWorkKeys(
       works
         .map((work) => this.posting.get(work.id))
         .filter((ledger): ledger is PostingLedger => ledger !== undefined)
     );
-    return visibleUnregisteredOwnWorks(list, registered).map(
-      (entry) => new OwnWorkFrameNode(entry, source.isWaiting(entry))
-    );
+  }
+
+  /**
+   * 枠に出す作品と、出さないにした作品の数。**登録した作品の台帳と同じサイト・作品IDの
+   * ものはどちらにも数えない。** 台帳は一覧の走査で読んでいる（完結の印と同じ控え）。
+   * 読めなかった台帳は空と見る
+   */
+  private async ownFrames(
+    works: readonly WorkEntry[]
+  ): Promise<{ frames: OwnWorkFrameNode[]; hidden: number }> {
+    const source = this.ownWorks;
+    if (!source) return { frames: [], hidden: 0 };
+    const list = source.list();
+    if (list.length === 0) return { frames: [], hidden: 0 };
+    const registered = await this.registeredOwnWorkKeys();
+    return {
+      frames: visibleUnregisteredOwnWorks(list, registered).map(
+        (entry) => new OwnWorkFrameNode(entry, source.isWaiting(entry))
+      ),
+      hidden: hiddenUnregisteredOwnWorks(list, registered).length,
+    };
   }
 
   /** 画面に出した作品の行を控える（1作品だけ撃つ相手。`rootRows` の説明） */
@@ -857,15 +915,29 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       本の印を使わず、枠は題とサイト名だけ。右クリックの印（contextValue）は作品の行と
       重ならない名前にする（`viewItem =~ /^work-/` の操作が枠に出ないように）
     */
+    if (node.type === "guideAction") {
+      const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
+      item.id = `guide:${node.command}`;
+      item.contextValue = "guideAction";
+      item.iconPath = new vscode.ThemeIcon(node.icon);
+      item.command = { command: node.command, title: node.label };
+      return item;
+    }
     if (node.type === "ownWorksHeader") {
       const item = new vscode.TreeItem(
         "未登録の自分の作品",
-        vscode.TreeItemCollapsibleState.Expanded
+        // 出さないにした作品だけのときは開く中身が無い
+        node.frames.length > 0
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.None
       );
       item.id = "ownWorks:header";
-      item.contextValue = "ownWorksHeader";
+      // 出さないにした作品があるときだけ、右クリックに［出さないにした作品を戻す］を出す
+      item.contextValue = node.hiddenCount > 0 ? "ownWorksHeader-hasHidden" : "ownWorksHeader";
       item.iconPath = new vscode.ThemeIcon("inbox");
-      item.description = `${node.frames.length}作品`;
+      item.description =
+        `${node.frames.length}作品` +
+        (node.hiddenCount > 0 ? `（出さない ${node.hiddenCount}）` : "");
       item.tooltip = new vscode.MarkdownString(
         [
           "**未登録の自分の作品**",
@@ -1370,7 +1442,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     if (node.type === "library") return node.works;
     if (node.type === "ownWorksHeader") return node.frames;
-    if (node.type === "ownWorkFrame") return [];
+    if (node.type === "ownWorkFrame" || node.type === "guideAction") return [];
 
     if (node.type === "work") {
       // 走査に失敗していれば、開いたときに理由を出す。

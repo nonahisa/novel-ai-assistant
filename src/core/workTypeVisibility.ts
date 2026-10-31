@@ -184,6 +184,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.fetchOwnWorkBackup": "allTypes",
   "novelai.importOwnWorkBackupFile": "allTypes",
   "novelai.hideOwnWork": "allTypes",
+  "novelai.restoreHiddenOwnWorks": "allTypes",
   // 呼び名を変えるだけの操作。中身が何であっても要る（設計書6.1.1）
   "novelai.renameWork": "allTypes",
   // シリーズのつながり（設計書6.95）。長編でも短編集でも、同じ世界を

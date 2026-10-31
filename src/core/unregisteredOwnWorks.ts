@@ -191,6 +191,28 @@ export function hideUnregisteredOwnWork(
   return updateOne(list, site, workId, (entry) => ({ ...entry, hidden: true }));
 }
 
+/** ［出さないにした作品を戻す］（出さないの印だけを外す） */
+export function unhideUnregisteredOwnWork(
+  list: readonly UnregisteredOwnWork[],
+  site: PostingSiteId,
+  workId: string
+): readonly UnregisteredOwnWork[] {
+  return updateOne(list, site, workId, ({ hidden: _hidden, ...rest }) => rest);
+}
+
+/**
+ * 出さないにした作品のうち、まだ登録していないもの（戻す画面に並べる）。
+ * 登録済みは戻しても枠に出ないので並べない
+ */
+export function hiddenUnregisteredOwnWorks(
+  list: readonly UnregisteredOwnWork[],
+  registered: ReadonlySet<string>
+): UnregisteredOwnWork[] {
+  return list.filter(
+    (entry) => entry.hidden === true && !registered.has(ownWorkKey(entry.site, entry.workId))
+  );
+}
+
 /** なろうのバックアップの画面の番号を覚える */
 export function setNarouBackupId(
   list: readonly UnregisteredOwnWork[],

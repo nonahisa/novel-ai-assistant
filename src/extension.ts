@@ -3880,6 +3880,10 @@ export async function activate(
     registerCommand("novelai.hideOwnWork", async (node?: unknown) => {
       const frame = frameOf(node);
       if (frame) await ownWorks.hide(frame.entry);
+    }),
+    // 見出しの右クリック。登録済みの作品は戻しても枠に出ないので並べない
+    registerCommand("novelai.restoreHiddenOwnWorks", async () => {
+      await ownWorks.restoreHidden(await treeProvider.registeredOwnWorkKeys());
     })
   );
 

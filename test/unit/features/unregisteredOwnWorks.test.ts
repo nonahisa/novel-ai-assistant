@@ -29,6 +29,7 @@ const original = {
   showInformationMessage: win.showInformationMessage,
   showWarningMessage: win.showWarningMessage,
   showInputBox: win.showInputBox,
+  showQuickPick: win.showQuickPick,
 };
 const fsStub = vscode.workspace.fs as unknown as Record<string, unknown>;
 
@@ -132,6 +133,7 @@ afterEach(() => {
   win.showInformationMessage = original.showInformationMessage;
   win.showWarningMessage = original.showWarningMessage;
   win.showInputBox = original.showInputBox;
+  win.showQuickPick = original.showQuickPick;
   delete fsStub.readFile;
 });
 
@@ -309,5 +311,46 @@ describe("覚えと出さない", () => {
     await own.hide(own.list()[0]);
     expect(own.list()[0].hidden).toBe(true);
     expect(fired).toBe(2);
+  });
+
+  test("［出さないにした作品を戻す］は出さないにした作品だけを並べ、選んだものを戻す", async () => {
+    remember(
+      { ...KAKUYOMU, hidden: true },
+      { ...ALPHAPOLIS, title: "別の作品", hidden: true },
+      { ...NAROU, title: "出している作品" }
+    );
+    const shown: string[] = [];
+    win.showQuickPick = (async (items: readonly { label: string }[]) => {
+      shown.push(...items.map((item) => item.label));
+      return [items[0]];
+    }) as unknown as Stub["showQuickPick"];
+    const own = service();
+    await own.restoreHidden();
+    expect(shown).toEqual(["氷の街の約束", "別の作品"]);
+    const byTitle = new Map(own.list().map((entry) => [entry.title, entry.hidden]));
+    expect(byTitle.get("氷の街の約束")).toBeUndefined();
+    expect(byTitle.get("別の作品")).toBe(true);
+  });
+
+  test("［出さないにした作品を戻す］で何も選ばなければ変えない", async () => {
+    remember({ ...KAKUYOMU, hidden: true });
+    win.showQuickPick = (async () => undefined) as Stub["showQuickPick"];
+    const own = service();
+    await own.restoreHidden();
+    expect(own.list()[0].hidden).toBe(true);
+  });
+});
+
+describe("なろうの数字ID の入れ方の説明", () => {
+  test("確かめてあるバックアップの画面のアドレスを例に出す（管理の画面のアドレスは出さない）", async () => {
+    remember(NAROU);
+    let prompt = "";
+    win.showInputBox = (async (options: { prompt?: string }) => {
+      prompt = options.prompt ?? "";
+      return undefined;
+    }) as Stub["showInputBox"];
+    await service().fetchBackup(NAROU);
+    expect(prompt).toContain("https://syosetu.com/backup/top/ncode/");
+    expect(prompt).not.toContain("管理");
   });
 });

@@ -14,7 +14,9 @@ import { canRunProcesses } from "../core/runtime";
 import {
   backupEntryFor,
   hideUnregisteredOwnWork,
+  hiddenUnregisteredOwnWorks,
   narouBackupIdFrom,
+  unhideUnregisteredOwnWork,
   noteUnregisteredOwnWorks,
   ownWorkKey,
   ownWorkLabel,
@@ -141,6 +143,42 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
     useLogFile(undefined);
     logStep(
       `未登録の自分の作品「${ownWorkLabel(entry)}」（${postingSiteInfo(entry.site).label} ${entry.workId}）を一覧に出さないことにしました`
+    );
+  }
+
+  /**
+   * ［出さないにした作品を戻す］（見出しの右クリック）。出さないにした作品を並べ、
+   * 選んだものの印を外す。何も選ばなければ変えない。
+   * @param registered 登録済みの組（戻しても枠に出ないので並べない）
+   */
+  async restoreHidden(registered: ReadonlySet<string> = new Set()): Promise<void> {
+    const hidden = hiddenUnregisteredOwnWorks(this.list(), registered);
+    if (hidden.length === 0) {
+      void vscode.window.showInformationMessage("出さないにした作品はありません。");
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      hidden.map((entry) => ({
+        label: ownWorkLabel(entry),
+        description: `${postingSiteInfo(entry.site).label} 作品ID ${entry.workId}`,
+        entry,
+      })),
+      {
+        title: "一覧に戻す作品を選ぶ（未登録の自分の作品）",
+        placeHolder: "戻す作品に印を付けて Enter",
+        canPickMany: true,
+        ignoreFocusOut: true,
+      }
+    );
+    if (!picked || picked.length === 0) return;
+    let next: readonly UnregisteredOwnWork[] = this.list();
+    for (const { entry } of picked) {
+      next = unhideUnregisteredOwnWork(next, entry.site, entry.workId);
+    }
+    await this.save(next);
+    useLogFile(undefined);
+    logStep(
+      `未登録の自分の作品を一覧に戻しました：${picked.map(({ entry }) => ownWorkLabel(entry)).join(" ／ ")}`
     );
   }
 
@@ -410,16 +448,18 @@ export const FETCH_OWN_WORK_BACKUP_COMMAND = "novelai.fetchOwnWorkBackup";
 async function askNarouBackupId(label: string): Promise<string | undefined> {
   const input = await askText({
     title: `「${label}」の小説家になろうのバックアップの画面の番号`,
+    // 例に出すのは確かめてあるバックアップの画面のアドレスだけ（2026-11-01 作者の Chrome で確認）
     prompt:
-      "なろうにログインして、この作品の管理の画面（作品の編集など）を開いたときの" +
-      "アドレスにある「/ncode/」の後ろの数字を入れてください（例：1702430）。" +
+      "なろうのこの作品のバックアップの画面のアドレス" +
+      "（https://syosetu.com/backup/top/ncode/〈数字〉/）にある数字を入れてください" +
+      "（例：https://syosetu.com/backup/top/ncode/1702430/ なら 1702430）。" +
       "Nコード（n1234ab）とは別の番号です。アドレスをそのまま貼っても読み取ります。" +
       "一度入れると覚えておきます。",
     placeHolder: "1702430",
     validateInput: (value) =>
       value.trim() === "" || narouBackupIdFrom(value)
         ? undefined
-        : "数字だけか、なろうのアドレス（…/ncode/〈数字〉/）を入れてください。Nコードは使えません。",
+        : "数字だけか、バックアップの画面のアドレス（https://syosetu.com/backup/top/ncode/〈数字〉/）を入れてください。Nコードは使えません。",
   });
   return narouBackupIdFrom(input);
 }

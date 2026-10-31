@@ -400,6 +400,11 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.restoreHiddenOwnWorks",
+        "title": "出さないにした作品を戻す",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.createPlot",
         "title": "プロット自力作成",
         "category": "小説執筆",
@@ -1692,6 +1697,11 @@
           "group": "9_ownWork@1"
         },
         {
+          "command": "novelai.restoreHiddenOwnWorks",
+          "when": "view == novelai.works && viewItem =~ /^ownWorksHeader-hasHidden$/",
+          "group": "1_ownWork@1"
+        },
+        {
           "command": "novelai.checkTyposForFile",
           "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "1_actions@1"
@@ -1882,6 +1892,10 @@
         },
         {
           "command": "novelai.hideOwnWork",
+          "when": "false"
+        },
+        {
+          "command": "novelai.restoreHiddenOwnWorks",
           "when": "false"
         },
         {

@@ -106,7 +106,8 @@ describe("未登録の自分の作品の枠", () => {
     const header = nodes[1];
     const headerItem = provider.getTreeItem(header);
     expect(headerItem.label).toBe("未登録の自分の作品");
-    expect(headerItem.contextValue).toBe("ownWorksHeader");
+    // 出さないにした作品が1つあるので、戻す道の印が付く
+    expect(headerItem.contextValue).toBe("ownWorksHeader-hasHidden");
 
     const children = await provider.getChildren(header);
     const items = children.map((node) => provider.getTreeItem(node));
@@ -126,10 +127,51 @@ describe("未登録の自分の作品の枠", () => {
   });
 
   test("枠が1つも無ければ見出しも出さない", async () => {
-    const onlyRegistered = [frames[0], frames[2]];
+    const onlyRegistered = [frames[0]];
     expect((await root([work], source(onlyRegistered))).nodes.map((node) => node.type)).toEqual(["work"]);
     expect((await root([work], source([]))).nodes.map((node) => node.type)).toEqual(["work"]);
     expect((await root([work], undefined)).nodes.map((node) => node.type)).toEqual(["work"]);
+  });
+
+  test("出さないにした作品があれば、見出しの印で［出さないにした作品を戻す］を出す。無ければ出さない", async () => {
+    const withHidden = await root([work], source(frames));
+    expect(withHidden.provider.getTreeItem(withHidden.nodes[1]).contextValue).toBe(
+      "ownWorksHeader-hasHidden"
+    );
+    const none = await root([work], source([frames[1]]));
+    expect(none.provider.getTreeItem(none.nodes[1]).contextValue).toBe("ownWorksHeader");
+  });
+
+  test("出さないにした作品だけが残っていても、戻す道のために見出しは出す（枠は0）", async () => {
+    const { provider, nodes } = await root([work], source([frames[0], frames[2]]));
+    expect(nodes.map((node) => node.type)).toEqual(["work", "ownWorksHeader"]);
+    expect(await provider.getChildren(nodes[1])).toEqual([]);
+    expect(provider.getTreeItem(nodes[1]).contextValue).toBe("ownWorksHeader-hasHidden");
+  });
+
+  /*
+    登録した作品が0件のとき、VS Code の「まだ作品が登録されていません」の案内（viewsWelcome）は
+    一覧が空のときだけ出る。枠の行があると出なくなるので、同じ文と登録の入口を枠の上に置く
+  */
+  test("登録した作品が0件で枠があるときは、枠の上に登録の案内と入口の行を置く", async () => {
+    const { provider, nodes } = await root([], source(frames));
+    const items = nodes.map((node) => provider.getTreeItem(node));
+    expect(items[0].label).toBe("まだ作品が登録されていません。");
+    const commands = items
+      .map((item) => item.command?.command)
+      .filter((command): command is string => command !== undefined);
+    expect(commands).toEqual([
+      "novelai.importWorkFromZip",
+      "novelai.addWork",
+      "novelai.createWork",
+      "novelai.addWorkFromGithub",
+    ]);
+    expect(nodes.at(-1)?.type).toBe("ownWorksHeader");
+  });
+
+  test("登録した作品が0件で枠も無ければ、何も返さない（いつもの案内が出る）", async () => {
+    expect((await root([], source([]))).nodes).toEqual([]);
+    expect((await root([], undefined)).nodes).toEqual([]);
   });
 
   test("作品の右クリックの印（work-）と重ならない", async () => {
