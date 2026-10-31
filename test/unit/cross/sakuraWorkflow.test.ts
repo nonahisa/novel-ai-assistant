@@ -27,7 +27,7 @@ describe("Sakura AI smoke workflow", () => {
     expect(topLevelBlock(workflow, "on")).not.toContain("  schedule:");
   });
 
-  test("checkout v4とsetup-node v4のNode 22だけで実行環境を準備する", () => {
+  test("checkout v5とsetup-node v5のNode 22だけで実行環境を準備する", () => {
     expect(topLevelBlock(workflow, "jobs")).toContain(
       "    timeout-minutes: 5"
     );
@@ -38,10 +38,10 @@ describe("Sakura AI smoke workflow", () => {
         return match ? [match[1]] : [];
       })
     );
-    expect(uses).toEqual(["actions/checkout@v4", "actions/setup-node@v4"]);
+    expect(uses).toEqual(["actions/checkout@v5", "actions/setup-node@v5"]);
 
     const setupNode = steps.find((step) =>
-      step.some((line) => line.trim() === "- uses: actions/setup-node@v4")
+      step.some((line) => line.trim() === "- uses: actions/setup-node@v5")
     );
     expect(setupNode).toContain("        with:");
     expect(setupNode).toContain("          node-version: 22");
