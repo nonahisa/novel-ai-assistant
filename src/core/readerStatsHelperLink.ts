@@ -525,7 +525,7 @@ export const POSTING_SITE_URL_HINT =
  *
  * - `add`：投稿先に無いので足す（投稿ページのURLは作品IDから組み立てた）
  * - `unbuildable`：投稿先に無いが、投稿ページのURLを作品IDから組み立てられない
- *   サイト（なろう・アルファポリス・note）。足さずに `POSTING_SITE_URL_HINT` を添える
+ *   サイト（なろう・note。アルファポリスは9桁の作品IDでなければ）。足さずに `POSTING_SITE_URL_HINT` を添える
  * - `none`：何もしない
  *
  * ## 足さないとき

@@ -80,8 +80,9 @@ export function workListUrl(
     case "alphapolis":
     case "note":
       /*
-        **合成しない。** アルファポリスの作品は「作者番号＋作品番号」の
-        2部構成で、作品IDの欄だけではURLを組めない。noteには「作品」の
+        **合成しない。** アルファポリスの読者向けの作品ページは
+        `/novel/{作者ID}/{作品ID}` で、作品IDの欄（9桁の作品IDだけ）からは
+        URLを組めない（2026-11-01 に確かめた）。noteには「作品」の
         単位が無い（記事とマガジン）。どちらも台帳の作品ページURLに頼る。
       */
       return undefined;

@@ -38,7 +38,7 @@ import {
 const url = {
   narou: "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/",
   kakuyomu: "https://kakuyomu.jp/my/works/1177354054892/episodes/new",
-  alphapolis: "https://www.alphapolis.co.jp/novel/manage/123456/789",
+  alphapolis: "https://www.alphapolis.co.jp/mypage/novel/save_episode/123456789",
   note: "https://note.com/notes/new",
 };
 

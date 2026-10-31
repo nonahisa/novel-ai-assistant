@@ -184,54 +184,54 @@ describe("作品ページのリンク", () => {
  */
 describe("なろうの分析リンク", () => {
   /*
-    **Nコードは大文字で渡す**（作者の指摘、2026-09-20。ブラウザで実測）。
-    小文字だと**なろう本体へ飛ばされ**、分析ページが出ない。
-    「両方なろうのページに飛びます」という報告から見つかった。
+    **2026-11-01 のリニューアルで、作品のページは `/novels/{小文字のNコード}` になった**
+    （作者の Chrome で確かめた。ヘルパー 0.14.2 と同じ）。古い `/works/{大文字}` は 404 になる。
 
-    **なろう本体のURLは小文字のままでよい**ので、narouNcode の正規化は
-    変えていない。大文字が要るのはこのリンクだけである。
+    2026-09-20〜10-31 は `/works/{大文字}` で、小文字だとなろう本体へ飛ばされていた
+    （そのころの指摘で大文字にしていた）。いまは逆に小文字の形で開く。
   */
-  test("Nコードは大文字で渡す（小文字だとなろう本体へ飛ばされる）", () => {
-    const url = narouAnalysisUrl("n2600go");
-    expect(url).toBe("https://db.narou.fun/works/N2600GO");
-    // 道の部分に小文字が混じらないこと
-    expect(url?.split("/works/")[1]).toBe("N2600GO");
+  test("作品のページは /novels/ の下で、Nコードは小文字（2026-11-01 のリニューアル後）", () => {
+    const url = narouAnalysisUrl("N2600GO");
+    expect(url).toBe("https://db.narou.fun/novels/n2600go");
+    // 古い形（/works/・大文字）を作らない
+    expect(url).not.toContain("/works/");
+    expect(url?.split("/novels/")[1]).toBe("n2600go");
   });
 
   test("作品IDがNコードなら、分析ページのURLを作る", () => {
     expect(narouAnalysisUrl("n1234ab")).toBe(
-      "https://db.narou.fun/works/N1234AB"
+      "https://db.narou.fun/novels/n1234ab"
     );
     // 英字1字のNコードもある
-    expect(narouAnalysisUrl("n9999a")).toBe("https://db.narou.fun/works/N9999A");
+    expect(narouAnalysisUrl("n9999a")).toBe("https://db.narou.fun/novels/n9999a");
   });
 
   test("大文字・前後の空白は整えてから使う", () => {
     expect(narouAnalysisUrl(" N1234AB ")).toBe(
-      "https://db.narou.fun/works/N1234AB"
+      "https://db.narou.fun/novels/n1234ab"
     );
   });
 
   test("作品IDが空なら、作品ページのURLから拾う", () => {
     expect(narouAnalysisUrl(null, "https://ncode.syosetu.com/n1234ab/")).toBe(
-      "https://db.narou.fun/works/N1234AB"
+      "https://db.narou.fun/novels/n1234ab"
     );
     // 話のページを貼っていても、先頭のNコードを拾う
     expect(narouAnalysisUrl("", "https://ncode.syosetu.com/n1234ab/13/")).toBe(
-      "https://db.narou.fun/works/N1234AB"
+      "https://db.narou.fun/novels/n1234ab"
     );
   });
 
   test("作品IDのほうを先に使う", () => {
     expect(
       narouAnalysisUrl("n1234ab", "https://ncode.syosetu.com/n9999zz/")
-    ).toBe("https://db.narou.fun/works/N1234AB");
+    ).toBe("https://db.narou.fun/novels/n1234ab");
   });
 
   test("作品IDがNコードでなければ、作品ページのURLへ落ちる", () => {
     expect(
       narouAnalysisUrl("わからない", "https://ncode.syosetu.com/n1234ab/")
-    ).toBe("https://db.narou.fun/works/N1234AB");
+    ).toBe("https://db.narou.fun/novels/n1234ab");
   });
 
   test("Nコードが見つからなければ、リンクを作らない", () => {
@@ -257,7 +257,7 @@ describe("なろうの分析リンク", () => {
 
     const records = buildPostingSiteRecords(ledger);
     expect(records.map((entry) => entry.analysisUrl)).toEqual([
-      "https://db.narou.fun/works/N1234AB",
+      "https://db.narou.fun/novels/n1234ab",
       // カクヨムには分析サイトのリンクを作らない（6.79.7はなろうの代替）
       null,
     ]);

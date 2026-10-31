@@ -115,7 +115,7 @@ describe("ヘルパーが働くサイトのリンクか", () => {
     expect(isHelperSiteUrl("https://ncode.syosetu.com/n1234ab/")).toBe(true);
     expect(isHelperSiteUrl("https://www.alphapolis.co.jp/novel/1/2")).toBe(true);
     expect(isHelperSiteUrl("https://note.com/someone")).toBe(true);
-    expect(isHelperSiteUrl("https://db.narou.fun/works/N1234AB")).toBe(true);
+    expect(isHelperSiteUrl("https://db.narou.fun/novels/n1234ab")).toBe(true);
   });
 
   test("ほかのサイト・似せたドメイン・http(s) でないものは違う", () => {

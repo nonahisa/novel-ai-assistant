@@ -436,7 +436,7 @@ beforeEach(() => {
 });
 
 describe("取り込み：Narou.fun の日ごとの増減", () => {
-  test("負の日を含めて台帳へ入り、記録の日時は最終取得日時、メモにそう残る", async () => {
+  test("負の日を含めて台帳へ入り、記録の日時はサイトのデータ取得の日、メモにそう残る", async () => {
     env.clipboard.text = dailyEnvelope();
     const result = await importReaderStats(work);
 
@@ -447,10 +447,29 @@ describe("取り込み：Narou.fun の日ごとの増減", () => {
     expect(stats.every((row) => row.readAt === fetchedAt)).toBe(true);
     expect(stats.find((row) => row.periodKey === "2026-09-19")?.metrics.bookmarks).toBe(-1);
     expect(stats[0].note).toContain("Narou.fun");
-    expect(stats[0].note).toContain("最終取得日時");
+    // 2026-11-01 のリニューアルで、サイトの表示は「最終取得日時」から「データ取得」の日付に変わった
+    expect(stats[0].note).toContain("データ取得の日");
+    expect(stats[0].note).not.toContain("最終取得日時");
   });
 
-  test("最終取得日時を読めなかった封筒は、押した時刻だとメモに残る", async () => {
+  test("リニューアル後の封筒（データ取得の日の 0:00、日本時間）も、その日時のまま台帳へ入る", async () => {
+    // ヘルパー 0.14.2 は「データ取得 2026/11/01」を、その日の 0:00（日本時間）として封筒へ入れる。
+    // 作品IDは小文字の Nコードで届く（大文字・小文字の組み合わせは test/unit/core/readerStatsNcodeCase.test.ts）
+    const dayStart = "2026-10-31T15:00:00.000Z";
+    env.clipboard.text = dailyEnvelope({
+      workId: "n1234ab",
+      readAt: dayStart,
+      readAtBasis: "fetched",
+    });
+    await importReaderStats(work);
+    expect(warned).toEqual([]);
+    const stats = storedLedger().readerStats;
+    expect(stats).toHaveLength(5);
+    expect(stats.every((row) => row.readAt === dayStart)).toBe(true);
+    expect(stats[0].note).toBe("Narou.funから読み取り（日時はNarou.funのデータ取得の日）");
+  });
+
+  test("データ取得の日を読めなかった封筒は、押した時刻だとメモに残る", async () => {
     env.clipboard.text = dailyEnvelope({
       readAt: "2026-09-23T01:00:00.000Z",
       readAtBasis: "clicked",
@@ -458,7 +477,8 @@ describe("取り込み：Narou.fun の日ごとの増減", () => {
     await importReaderStats(work);
     const note = storedLedger().readerStats[0].note ?? "";
     expect(note).toContain("押した時刻");
-    expect(note).not.toContain("日時は最終取得日時");
+    expect(note).toContain("データ取得の日は読めず");
+    expect(note).not.toContain("最終取得日時");
   });
 
   test("同じ表を2度取り込んでも、二重に積まない", async () => {

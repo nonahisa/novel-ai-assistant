@@ -97,8 +97,10 @@ export type ReaderStatsEnvelopeSource = keyof typeof READER_STATS_ENVELOPE_SOURC
 /**
  * 封筒の記録の日時（`readAt`）が何の日時か（残課題 B11 の続き、作者の裁定 2026-09-23）。
  *
- * - `fetched`：**出どころのサイトが数を取ってきた日時**（Narou.fun の「最終取得日時」）
- * - `clicked`：作者が貼り込み係のボタンを押した時刻（最終取得日時を読めなかったとき）
+ * - `fetched`：**出どころのサイトが数を取ってきた日時**。なろうファンDB（Narou.fun）は
+ *   2026-11-01 のリニューアルから「データ取得」の**日付だけ**を出すので、ヘルパー 0.14.2 は
+ *   その日の 0:00（日本時間）を入れる（0.14.1 までは「最終取得日時」の時刻まで入っていた）
+ * - `clicked`：作者が貼り込み係のボタンを押した時刻（サイトの日付を読めなかったとき）
  *
  * **欄が無ければ「押した時刻」**（これまでの封筒はすべてこれ）。省いてよい欄なので
  * 封筒の版数は上げない——知らない母艦は読み飛ばし、`readAt` を押した時刻として扱う
@@ -707,7 +709,7 @@ export function readerStatsRecordsFromEnvelope(
   return envelope.entries.map((entry) => ({
     site: envelope.site,
     // **封筒の読み取り時刻を使う。** いま取り込んだ時刻ではない。
-    // Narou.fun の封筒は「最終取得日時」（readAtBasis が fetched のとき）
+    // Narou.fun の封筒は「データ取得」の日の 0:00（readAtBasis が fetched のとき。2026-11-01 から）
     readAt: envelope.readAt,
     ...entry,
     source: "helper" as const,
@@ -758,17 +760,21 @@ export function applyReaderStatsEnvelope(
  * メモに添える「記録の日時は何の日時か」（残課題 B11 の続き、作者の裁定 2026-09-23）。
  *
  * 出どころのある封筒（Narou.fun）の記録の日時は、ふつう**そのサイトが数を取って
- * きた日時**（最終取得日時）である。読めなかった封筒は押した時刻へ落ちている
- * ——履歴の表では同じ日時の列に並ぶので、**どちらなのかをメモで見分けられる**
- * ようにする（印が無い封筒は、ヘルパー 0.6.0 までの「押した時刻」）。
+ * きた日**（ページの「データ取得」の日付。その日の 0:00）である。読めなかった封筒は
+ * 押した時刻へ落ちている——履歴の表では同じ日時の列に並ぶので、**どちらなのかを
+ * メモで見分けられる**ようにする（印が無い封筒は、ヘルパー 0.6.0 までの「押した時刻」）。
+ *
+ * 言い方は 2026-11-01 のサイトの変更に合わせた（それまでは「最終取得日時」）。
+ * **台帳に入っている古いメモは書き換えない**（作者の台帳の記録で、メモは重複の判定にも
+ * 使っていない。`repeatsReaderStats`）。
  */
 function readAtNote(
   sourceLabel: string,
   basis: ReaderStatsReadAtBasis | undefined
 ): string {
   return basis === "fetched"
-    ? `（日時は${sourceLabel}の最終取得日時）`
-    : `（日時は押した時刻。${sourceLabel}の最終取得日時は読めず）`;
+    ? `（日時は${sourceLabel}のデータ取得の日）`
+    : `（日時は押した時刻。${sourceLabel}のデータ取得の日は読めず）`;
 }
 
 /**

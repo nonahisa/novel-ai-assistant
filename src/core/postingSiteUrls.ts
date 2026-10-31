@@ -20,15 +20,16 @@ import { narouNcode } from "./postingSiteRecords";
  *
  * **形が確かめられたサイトだけ導く。** `core/snsShare.ts` の `workListUrl`
  * と同じ線で、埋めた先が存在しないページになるくらいなら、空のまま訊く
- * ほうがよい。いまのところ導けるのは**なろうとカクヨム**だけである。
+ * ほうがよい。導けるのは**なろう・カクヨム・アルファポリス**である。
  *
- * - **アルファポリス**は導かない。投稿画面のパスの形が実機で確かめられて
- *   おらず（貼り込み係 `content/sites.js` も「投稿画面のパスは実機未確認」
- *   として3つの候補を並べている）、`models/posting.ts` の例
- *   （`/novel/manage/000000/0000`）と貼り込み係が当てている形
- *   （`/manage/novel/{数字}/episode/new`）で作品IDの部数まで食い違う。
- *   **片方だけの番号を作品IDの欄へ入れると、作品を指せないIDが台帳に残る**
- *   （`models/posting.ts` の `workIdExample` に、その失敗の記録がある）
+ * - **アルファポリス**は**作品IDだけ**導く（2026-11-01 作者の Chrome で確かめた）。
+ *   作者用のページは `/mypage/` の下にあり、新しい話は
+ *   `/mypage/novel/save_episode/{作品ID}`、作品の管理画面は
+ *   `/mypage/content/detail/{作品ID}` で、**作品IDは数字9桁が1つだけ**出る。
+ *   ヘルパー 0.14.2 はこの9桁で取り違えを照合するので、台帳にもこの9桁を入れる。
+ *   読者向けの作品ページは `/novel/{作者ID}/{作品ID}` で作者IDが要るので、組み立てない。
+ *   0.116.1 までは形が分からず導いていなかった（`/novel/manage/…`・`/manage/novel/…`
+ *   の見当はどちらも実在しなかった）
  * - **note**には「作品」の単位が無い（記事とマガジン）ので導きようがない
  *
  * ## サイトへは触りにいかない
@@ -82,11 +83,35 @@ export function deriveSiteProfile(
       if (!workId) return {};
       return { workId, pageUrl: `https://kakuyomu.jp/works/${workId}` };
     }
-    case "alphapolis":
+    case "alphapolis": {
+      // 話の編集画面（`save_episode/{作品ID}/{話ID}`）も作品IDは同じ位置にある（ヘルパーの照合と同じ）
+      const parts = pathParts(url);
+      const candidate =
+        parts[0] === "mypage" &&
+        ((parts[1] === "novel" && parts[2] === "save_episode") ||
+          (parts[1] === "content" && parts[2] === "detail"))
+          ? parts[3]
+          : undefined;
+      const workId = alphapolisWorkId(candidate);
+      return workId ? { workId } : {};
+    }
     case "note":
-      // 上の説明のとおり、この2つは導かない
+      // 上の説明のとおり、導かない
       return {};
   }
+}
+
+/**
+ * アルファポリスの作品IDとして使える形（数字9桁ちょうど）なら、それを返す。
+ *
+ * **9桁より短くても長くても使わない。** ヘルパー 0.14.2 は投稿画面の URL の9桁と
+ * 封筒の作品IDを突き合わせ、違えば取り違えとして止める。作者番号との組
+ * （0.116.1 まで欄の例に出していた「作者番号／作品番号」）や桁の欠けた番号から
+ * URL を組むと、存在しない画面か、別の作品の画面を開かせることになる。
+ */
+export function alphapolisWorkId(value: string | null | undefined): string | undefined {
+  const trimmed = (value ?? "").trim();
+  return /^\d{9}$/.test(trimmed) ? trimmed : undefined;
 }
 
 /**
@@ -132,8 +157,9 @@ export function readerStatsPageUrl(
  * 1. **台帳の投稿ページのURL（`sites[].newEpisodeUrl`）があれば、それ。**
  *    作者が「投稿サイトの設定」で自分の画面から貼った値で、いちばん確か
  * 2. 無ければ、**形が実機で確かめられたサイトだけ**作品IDから組み立てる。
- *    いまはカクヨムだけ（`/my/works/{作品ID}/episodes/new`。作者の台帳に
- *    実際に入った値と同じ形。`deriveSiteProfile` が読んでいるのもこの形）
+ *    カクヨム（`/my/works/{作品ID}/episodes/new`。作者の台帳に
+ *    実際に入った値と同じ形。`deriveSiteProfile` が読んでいるのもこの形）と、
+ *    アルファポリス（`/mypage/novel/save_episode/{9桁の作品ID}`。2026-11-01）
  * 3. どちらも無ければ `undefined`（呼ぶ側はボタンを出さない）
  *
  * ## 組み立てないサイト
@@ -143,9 +169,10 @@ export function readerStatsPageUrl(
  *
  * - **なろう**：新しい話を書く画面は、Nコードではなく**サイト内部の番号**で
  *   作品を指すはずで、Nコードからは組み立てられない
- * - **アルファポリス**：作品IDが2部構成か1つの数字かで、資料と貼り込み係の
- *   当てている形が食い違っている（`deriveSiteProfile` の説明を参照）
  * - **note**：作品の単位が無い（記事とマガジン）
+ *
+ * アルファポリスは 2026-11-01 に投稿画面の形を確かめたので、9桁の作品IDから組み立てる側へ移した
+ * （`newEpisodeUrlFromWorkId`）。
  *
  * **開くだけ**で、書き込みも読み取りもしない（6.68.1）。
  *
@@ -170,7 +197,7 @@ export function postingPageUrl(
 /**
  * 作品IDから、そのサイトの新しい話を投稿するページのURLを組み立てる。
  *
- * **組み立てるのは形が実機で確かめられたサイトだけ**（いまはカクヨムだけ。
+ * **組み立てるのは形が実機で確かめられたサイトだけ**（カクヨムと、2026-11-01 からアルファポリス。
  * 組み立てないサイトの理由は `postingPageUrl` の説明）。開く口（`postingPageUrl`）と、
  * 読者の反応から作品IDを登録したときに投稿先へ足す口（`planReaderStatsPostingSite`）が
  * 同じ形を使うよう、ここ1か所で組み立てる。
@@ -181,6 +208,11 @@ export function newEpisodeUrlFromWorkId(
   site: PostingSiteId,
   workId: string | null | undefined
 ): string | undefined {
+  if (site === "alphapolis") {
+    // 新しい話の投稿画面（2026-11-01 作者の Chrome で確かめた形。ヘルパー 0.14.2 が貼り込む画面）
+    const id = alphapolisWorkId(workId);
+    return id ? `https://www.alphapolis.co.jp/mypage/novel/save_episode/${id}` : undefined;
+  }
   if (site !== "kakuyomu") return undefined;
   const trimmed = (workId ?? "").trim();
   // 作品IDの欄は自由入力なので、数字だけのときに限る（`readerStatsPageUrl` と同じ用心）
@@ -195,7 +227,7 @@ export function newEpisodeUrlFromWorkId(
  * **URL が空のときだけ**、台帳の作品IDから組み立てた URL を下書きとして入れる
  * （作品IDは読者の反応から登録されていることがあり、同じ番号を2度打たせない）。
  * 入っていればそのまま——作者が自分の画面から貼った値がいちばん確かである。
- * 組み立てるのは `newEpisodeUrlFromWorkId` が組み立てるサイト（いまはカクヨム）だけ。
+ * 組み立てるのは `newEpisodeUrlFromWorkId` が組み立てるサイト（カクヨム・アルファポリス）だけ。
  *
  * **下書きは欄の初期値に置くだけ**で、作者が Enter を押すまで台帳には入らない。
  */
@@ -282,8 +314,9 @@ export interface AuthorOnlyPage {
  * - カクヨム：`/my/` の下（作者の管理画面はすべてここ。読者向けは `/works/…`）
  * - なろう：`ncode.` の付かない `syosetu.com` の、`usernovelmanage`・`draftepisode`
  *   などで始まる管理画面（読者向けは `ncode.syosetu.com`。`deriveSiteProfile` と同じ形）
- * - アルファポリス：パスに `manage` を含む管理画面（投稿画面のパスは実機未確認で
- *   2つの形が並んでいるので、区画の並びには頼らない）
+ * - アルファポリス：`/mypage/` の下（新しい話は `/mypage/novel/save_episode/{作品ID}`、
+ *   作品の管理画面は `/mypage/content/detail/{作品ID}`。2026-11-01 作者の Chrome で確かめた。
+ *   0.116.1 まではパスに `manage` を含むかで見ていたが、その形は実在しなかった）
  * - note：編集画面の `editor.note.com`
  *
  * 読者向けの作品ページを組み立てるのは、作品の番号の形が確かめられた
@@ -317,7 +350,7 @@ export function authorOnlyPage(value: string | null | undefined): AuthorOnlyPage
   }
   if (
     (host === "alphapolis.co.jp" || host.endsWith(".alphapolis.co.jp")) &&
-    parts.includes("manage")
+    parts[0] === "mypage"
   ) {
     return { site: "alphapolis" };
   }
