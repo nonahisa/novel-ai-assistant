@@ -64,7 +64,7 @@ test("パレット・キーの画面・パネルのタブに「校正・メモ�
     }
     // 古い名前はパレットに出ない
     const legacy = await commandPaletteLabels(page, "シーンメモ").catch(() => [] as string[]);
-    expect(legacy.filter((label) => label.startsWith("小説執筆:")), "パレットに古い名前「シーンメモ」が残っています").toEqual([]);
+    expect(legacy.filter((label) => label.startsWith("統合小説執筆環境:")), "パレットに古い名前「シーンメモ」が残っています").toEqual([]);
 
     // ── パネルのタブと見出し ──
     await placeCaretAfter(frame, "一行目");

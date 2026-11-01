@@ -346,1177 +346,1177 @@
       {
         "command": "novelai.addWork",
         "title": "フォルダー登録",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(add)"
       },
       {
         "command": "novelai.collectUnregisteredWorks",
         "title": "未登録作品検索",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(library)"
       },
       {
         "command": "novelai.importWorkFromZip",
         "title": "バックアップ取込",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(file-zip)"
       },
       {
         "command": "novelai.createWork",
         "title": "新規作品を作成",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(new-folder)"
       },
       {
         "command": "novelai.renameWork",
         "title": "作品名変更",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.setSeries",
         "title": "シリーズ連結",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.removeWork",
         "title": "作品の登録を解除",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.fetchOwnWorkBackup",
         "title": "バックアップを取る",
         "icon": "$(cloud-download)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.importOwnWorkBackupFile",
         "title": "ファイルから取り込む",
         "icon": "$(file-zip)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.hideOwnWork",
         "title": "この作品を一覧に出さない",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.restoreHiddenOwnWorks",
         "title": "出さないにした作品を戻す",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.createPlot",
         "title": "プロット自力作成",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(list-tree)"
       },
       {
         "command": "novelai.openPlotMode",
         "title": "プロットモード",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.setPlotBasics",
         "title": "形式・ジャンル",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(tag)"
       },
       {
         "command": "novelai.setWorkKind",
         "title": "作品の種類（小説・台本など）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(symbol-class)"
       },
       {
         "command": "novelai.generatePlot",
         "title": "プロット逆算",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(sparkle)"
       },
       {
         "command": "novelai.openChat",
         "title": "AIに相談する",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "novelai.openChatPanel",
         "title": "AI相談（大きく開く）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "novelai.setAdvicePolicy",
         "title": "助言方針（診断）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(person)"
       },
       {
         "command": "novelai.setAuthorReaderType",
         "title": "あなた自身の読者タイプ（診断）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.openTargetReader",
         "title": "ターゲット読者",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(target)"
       },
       {
         "command": "novelai.runReaderTargetDiagnosis",
         "title": "ターゲット読者診断",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(person)"
       },
       {
         "command": "novelai.openTargetSheet",
         "title": "ターゲットシート（ターゲット読者へ）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(target)"
       },
       {
         "command": "novelai.showThreeCircles",
         "title": "3つの輪（ターゲット読者へ）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(circle-outline)"
       },
       {
         "command": "novelai.runWriterDiagnosis",
         "title": "作家タイプ診断（はじめの案内）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(compass)"
       },
       {
         "command": "novelai.openManual",
         "title": "使い方（マニュアル）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.openSceneGuide",
         "title": "場面別案内",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(map)"
       },
       {
         "command": "novelai.refresh",
         "title": "再読み込み",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(refresh)"
       },
       {
         "command": "novelai.addEpisode",
         "title": "新規話数ファイルを追加",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(new-file)"
       },
       {
         "command": "novelai.openWorkFolder",
         "title": "作品フォルダを開く",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.showWritingStats",
         "title": "執筆統計",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(graph-line)"
       },
       {
         "command": "novelai.showAllWorksWritingStats",
         "title": "全作品執筆統計",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(graph-line)"
       },
       {
         "command": "novelai.setWorkGoals",
         "title": "作品目標設定",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(target)"
       },
       {
         "command": "novelai.openSchedule",
         "title": "スケジュール",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(calendar)"
       },
       {
         "command": "novelai.importHolidays",
         "title": "祝日を取り込む",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(cloud-download)"
       },
       {
         "command": "novelai.exportScheduleIcs",
         "title": "スケジュールをカレンダーへ書き出す（.ics）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(export)"
       },
       {
         "command": "novelai.suggestContests",
         "title": "応募先をAIに提案してもらう",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(sparkle)"
       },
       {
         "command": "novelai.setupAI",
         "title": "AI設定",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(settings-gear)"
       },
       {
         "command": "novelai.assignFeatureAI",
         "title": "機能別AI割当",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(list-selection)"
       },
       {
         "command": "novelai.exitChatFocus",
         "title": "作品一覧とメニューを出す",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(layout-sidebar-left)"
       },
       {
         "command": "novelai.soloWorks",
         "title": "他のメニューを閉じる",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(screen-full)"
       },
       {
         "command": "novelai.soloSteps",
         "title": "他のメニューを閉じる",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(screen-full)"
       },
       {
         "command": "novelai.soloActions",
         "title": "他のメニューを閉じる",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(screen-full)"
       },
       {
         "command": "novelai.soloChat",
         "title": "他のメニューを閉じる",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(screen-full)"
       },
       {
         "command": "novelai.showAllViews",
         "title": "すべてのメニューを出す",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(layout-sidebar-left)"
       },
       {
         "command": "novelai.testAI",
         "title": "AI接続確認",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.measureContext",
         "title": "AIチューニング（測って設定を合わせる）",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.showTuningStats",
         "title": "AIチューニング一覧",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.forgetTuning",
         "title": "AIチューニング削除",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.exportPdf",
         "title": "PDF出力（印刷用）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(file-pdf)"
       },
       {
         "command": "novelai.exportEpub",
         "title": "EPUB出力（試作）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.openEpubEditor",
         "title": "EPUBエディター（試作）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.exportImeDictionary",
         "title": "IME辞書出力",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(symbol-keyword)"
       },
       {
         "command": "novelai.manageCustomFields",
         "title": "設定資料項目追加",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(list-selection)"
       },
       {
         "command": "novelai.showSettingsForTerm",
         "title": "設定情報を表示",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.applyPendingUpdates",
         "title": "設定資料更新分反映",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(check-all)"
       },
       {
         "command": "novelai.unifyCharacters",
         "title": "人物重複統合",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(merge)"
       },
       {
         "command": "novelai.showLog",
         "title": "ログ表示",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(output)"
       },
       {
         "command": "novelai.exportIssueReport",
         "title": "障害報告用の記録を書き出す",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(report)"
       },
       {
         "command": "novelai.openProposals",
         "title": "提案パネルを開く",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(checklist)"
       },
       {
         "command": "novelai.diagnoseWeb",
         "title": "動作診断（ブラウザ版の確認用）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(pulse)"
       },
       {
         "command": "novelai.selectOllamaExecutable",
         "title": "Ollama実行ファイル位置",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(folder-opened)"
       },
       {
         "command": "novelai.openSettingsPanel",
         "title": "設定資料集閲覧",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.openRelationGraph",
         "title": "人物相関図",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(type-hierarchy)"
       },
       {
         "command": "novelai.openLocationSketch",
         "title": "場所の略図",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(map)"
       },
       {
         "command": "novelai.extractSettings",
         "title": "一括抽出",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(sparkle)"
       },
       {
         "command": "novelai.extractCharactersOnly",
         "title": "人物抽出",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(person)"
       },
       {
         "command": "novelai.extractLocationsOnly",
         "title": "場所抽出",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(location)"
       },
       {
         "command": "novelai.extractAbilitiesOnly",
         "title": "スキル抽出",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(zap)"
       },
       {
         "command": "novelai.extractOrganizationsOnly",
         "title": "組織抽出",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(organization)"
       },
       {
         "command": "novelai.extractWorldOnly",
         "title": "世界観抽出",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(globe)"
       },
       {
         "command": "novelai.finishNewWork",
         "title": "支援機能全工程実行",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(rocket)"
       },
       {
         "command": "novelai.runProofreadingSuite",
         "title": "校正一括実行",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(checklist)"
       },
       {
         "command": "novelai.checkTypos",
         "title": "誤字脱字検知",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(search-fuzzy)"
       },
       {
         "command": "novelai.manageKeepWords",
         "title": "指摘対象外管理",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(circle-slash)"
       },
       {
         "command": "novelai.checkProofread",
         "title": "推敲",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(edit)"
       },
       {
         "command": "novelai.checkOpening",
         "title": "冒頭診断",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(telescope)"
       },
       {
         "command": "novelai.checkContradictions",
         "title": "矛盾検知",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(warning)"
       },
       {
         "command": "novelai.checkFactContradictions",
         "title": "矛盾検知（事実の照合）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(warning)"
       },
       {
         "command": "novelai.checkLocationConsistency",
         "title": "位置関係の照合（場所・AIなし）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(location)"
       },
       {
         "command": "novelai.restoreDismissedTravelDistances",
         "title": "見送った距離の提案を戻す",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.checkDeviations",
         "title": "プロット逸脱検知",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(compass)"
       },
       {
         "command": "novelai.checkForeshadows",
         "title": "伏線検知",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(eye)"
       },
       {
         "command": "novelai.checkForeshadowResolution",
         "title": "伏線回収確認",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(check-all)"
       },
       {
         "command": "novelai.openForeshadows",
         "title": "伏線一覧",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(list-unordered)"
       },
       {
         "command": "novelai.addForeshadow",
         "title": "伏線手動追加",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(add)"
       },
       {
         "command": "novelai.setForeshadowStatus",
         "title": "伏線状態変更",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(checklist)"
       },
       {
         "command": "novelai.resumeWriting",
         "title": "再開用資料",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(debug-continue)"
       },
       {
         "command": "novelai.createEpisodePlot",
         "title": "単話プロット作成",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(checklist)"
       },
       {
         "command": "novelai.episodePlotToPlotMode",
         "title": "プロットモードへ",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(list-tree)"
       },
       {
         "command": "novelai.previousEpisodePlot",
         "title": "前の話の単話プロット",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(arrow-left)"
       },
       {
         "command": "novelai.nextEpisodePlot",
         "title": "次の話の単話プロット",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(arrow-right)"
       },
       {
         "command": "novelai.checkEpisodePlot",
         "title": "単話プロット検査",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(check-all)"
       },
       {
         "command": "novelai.checkNotation",
         "title": "表記ゆれ検知",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(symbol-text)"
       },
       {
         "command": "novelai.checkNames",
         "title": "名前点検",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(symbol-key)"
       },
       {
         "command": "novelai.renameCharacter",
         "title": "人物名変更",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(replace-all)"
       },
       {
         "command": "novelai.applyRenameToRecords",
         "title": "人物名変更の資料反映",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(references)"
       },
       {
         "command": "novelai.checkTyposForFile",
         "title": "この話の誤字脱字を検知",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(search-fuzzy)"
       },
       {
         "command": "novelai.deleteEpisodeFile",
         "title": "この話を削除",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(trash)"
       },
       {
         "command": "novelai.generateSynopses",
         "title": "各話あらすじ",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(list-ordered)"
       },
       {
         "command": "novelai.openSynopsisDocs",
         "title": "紹介文・あらすじ閲覧",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.generateWorkBlurb",
         "title": "作品紹介文",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.generateCatchphrases",
         "title": "キャッチコピー案",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(megaphone)"
       },
       {
         "command": "novelai.generateAnnouncement",
         "title": "更新SNS告知文作成",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(megaphone)"
       },
       {
         "command": "novelai.configureAnnouncement",
         "title": "SNS告知設定（ハッシュタグ・URL）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(gear)"
       },
       {
         "command": "novelai.generateSettingsDocs",
         "title": "設定資料集出力",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(sync)"
       },
       {
         "command": "novelai.exportSettingsForAudience",
         "title": "提供先別出力",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(mail)"
       },
       {
         "command": "novelai.gitSync",
         "title": "GitHubと同期",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(git-branch)"
       },
       {
         "command": "novelai.saveAndSync",
         "title": "保存・同期",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(save-all)"
       },
       {
         "command": "novelai.gitPull",
         "title": "別の環境の変更を取り込む",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(cloud-download)"
       },
       {
         "command": "novelai.gitPush",
         "title": "この環境の変更を送信する",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "novelai.resolveConflicts",
         "title": "競合解決",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(git-merge)"
       },
       {
         "command": "novelai.createWorkWithPlot",
         "title": "プロット起点",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(list-tree)"
       },
       {
         "command": "novelai.createWorkFromManuscript",
         "title": "本文起点",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(edit)"
       },
       {
         "command": "novelai.addWorkFromGithub",
         "title": "GitHubから作品を追加",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(cloud-download)"
       },
       {
         "command": "novelai.syncAllWorks",
         "title": "全作品同期",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(sync)"
       },
       {
         "command": "novelai.resolveDivergence",
         "title": "分岐合流",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(git-merge)"
       },
       {
         "command": "novelai.mergeIntoLibrary",
         "title": "書庫集約",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(library)"
       },
       {
         "command": "novelai.gitRestore",
         "title": "過去の版に戻す（復元）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(history)"
       },
       {
         "command": "novelai.setupGithub",
         "title": "GitHub初期設定",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(github)"
       },
       {
         "command": "novelai.setupOllama",
         "title": "Ollama導入",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(cloud-download)"
       },
       {
         "command": "novelai.setupLmStudio",
         "title": "LM Studio導入",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(cloud-download)"
       },
       {
         "command": "novelai.openExtensionSettings",
         "title": "設定管理",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(settings)"
       },
       {
         "command": "novelai.manageConfirmSkips",
         "title": "確認省略解除",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(question)"
       },
       {
         "command": "novelai.generateCharacterDocs",
         "title": "人物一覧を生成（AIを使わない）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(person)"
       },
       {
         "command": "novelai.generateLocationDocs",
         "title": "場所一覧を生成（AIを使わない）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(location)"
       },
       {
         "command": "novelai.generateAbilityDocs",
         "title": "能力一覧を生成（AIを使わない）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(zap)"
       },
       {
         "command": "novelai.generateWorldDocs",
         "title": "世界観一覧を生成（AIを使わない）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(globe)"
       },
       {
         "command": "novelai.setupVectorSearch",
         "title": "ベクトル検索準備",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(search-fuzzy)"
       },
       {
         "command": "novelai.buildVectorIndex",
         "title": "検索索引作成／更新",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(database)"
       },
       {
         "command": "novelai.buildVectorIndexAll",
         "title": "検索索引作成／更新（全作品）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(database)"
       },
       {
         "command": "novelai.clearVectorIndex",
         "title": "検索索引削除",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(trash)"
       },
       {
         "command": "novelai.runFullSetup",
         "title": "セットアップ（必要なものを入れる）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(checklist)"
       },
       {
         "command": "novelai.openChatLog",
         "title": "相談ログ",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "novelai.showVersion",
         "title": "バージョン確認",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(info)"
       },
       {
         "command": "novelai.chooseChatWork",
         "title": "相談作品選択",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.chooseStepWork",
         "title": "ステップメニューの作品を選ぶ",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.convertToMarkdown",
         "title": "本文 .md 化",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(markdown)"
       },
       {
         "command": "novelai.unifyEol",
         "title": "改行コード統一",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(list-selection)"
       },
       {
         "command": "novelai.convertDocxToMarkdown",
         "title": "Word 原稿変換（docx をまとめて変換）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(file-code)"
       },
       {
         "command": "novelai.openVertical",
         "title": "縦書き表示",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.openEpisode",
         "title": "話を開く",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.readManuscriptAloud",
         "title": "原稿読み上げ（音読推敲）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(unmute)"
       },
       {
         "command": "novelai.addEmphasis",
         "title": "傍点付与",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(three-bars)"
       },
       {
         "command": "novelai.addRuby",
         "title": "ルビ付与",
         "icon": "$(text-size)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.copyForPosting",
         "title": "コピー（投稿サイト用）",
         "icon": "$(clippy)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.importRuby",
         "title": "投稿サイトルビ取込",
         "icon": "$(arrow-down)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.dictationClean",
         "title": "口述文整形",
         "icon": "$(mic)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.transcribePhotos",
         "title": "写真から書き起こし（手書き）",
         "icon": "$(device-camera)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.postNewEpisode",
         "title": "新話投稿",
         "icon": "$(rocket)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.postThisEpisode",
         "title": "この話を投稿する",
         "icon": "$(rocket)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.configurePostingSites",
         "title": "投稿サイト設定",
         "icon": "$(settings-gear)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.recordRanking",
         "title": "ランキング記録",
         "icon": "$(graph)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.importReaderStats",
         "title": "読者反応自動取込",
         "icon": "$(clippy)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.recordReaderStats",
         "title": "読者反応手動入力",
         "icon": "$(heart)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.setWorkCompletion",
         "title": "連載状態切替",
         "icon": "$(pass)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.postingAndReaders",
         "title": "投稿と読者の反応…",
         "icon": "$(rocket)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.showEditHistory",
         "title": "編集履歴",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(history)"
       },
       {
         "command": "novelai.toggleExternalAccess",
         "title": "外部AI許可／取消（MCPサーバー経由）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(shield)"
       },
       {
         "command": "novelai.writeAiInstructions",
         "title": "外部AI指示書設置（Claude Code・Codex・Gemini CLI ほか）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(book)"
       },
       {
         "command": "novelai.connectClaudeCode",
         "title": "Claude Code接続（会話でセットアップ）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(plug)"
       },
       {
         "command": "novelai.openChronicle",
         "title": "年表",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(list-ordered)"
       },
       {
         "command": "novelai.searchScenes",
         "title": "場面検索（言葉で本文を探す）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(search)"
       },
       {
         "command": "novelai.findSimilarScenes",
         "title": "類似場面検出（別の話どうしの似た場面）",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(copy)"
       },
       {
         "command": "novelai.openSceneMemos",
         "title": "校正・メモパネルを開く",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(note)"
       },
       {
         "command": "novelai.pruneFindings",
         "title": "期限切れ指摘消去",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(trash)"
       },
       {
         "command": "novelai.importOutboxInbox",
         "title": "原稿箱を取り込む",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(inbox)"
       },
       {
         "command": "novelai.nextSceneMemo",
         "title": "次のメモへ",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(arrow-right)"
       },
       {
         "command": "novelai.prevSceneMemo",
         "title": "前のメモへ",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(arrow-left)"
       },
       {
         "command": "novelai.addSceneMemo",
         "title": "ここにメモを足す",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(add)"
       },
       {
         "command": "novelai.proposeEditByHand",
         "title": "修正を提案する",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(edit)"
       },
       {
         "command": "novelai.editTimeline",
         "title": "作中時期・別筋登録",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(calendar)"
       },
       {
         "command": "novelai.reviewProposals",
         "title": "編集者提案確認",
         "icon": "$(inbox)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.toggleReviewLock",
         "title": "校閲開始／終了",
         "icon": "$(lock)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.splitCollectedFile",
         "title": "話ごとのファイルに分ける",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(split-horizontal)"
       },
       {
         "command": "novelai.copySubtitle",
         "title": "サブタイトルをコピー",
         "icon": "$(clippy)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.copyBodyForPosting",
         "title": "コピー（投稿サイト用）",
         "icon": "$(clippy)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.renameWithSubtitle",
         "title": "ファイル名にサブタイトルを付ける",
         "icon": "$(edit)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.addWorkMemo",
         "title": "メモ追加",
         "icon": "$(note)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.removeWorkMemo",
         "title": "メモを削除（ごみ箱へ）",
         "icon": "$(trash)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.transferMemoToWork",
         "title": "このメモを作品へ移管",
         "icon": "$(arrow-right)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.startChapter",
         "title": "ここから章を始める",
         "icon": "$(folder)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.renameChapter",
         "title": "章の名前を変える",
         "icon": "$(edit)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.removeChapter",
         "title": "章を外す",
         "icon": "$(close)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.proposeChapters",
         "title": "章立て提案",
         "icon": "$(list-tree)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.chaptersFromHeadings",
         "title": "章見出し反映",
         "icon": "$(list-tree)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.importChaptersFromBackup",
         "title": "章立て取込（バックアップから）",
         "icon": "$(list-tree)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.suggestChapterName",
         "title": "この章の名前の案を出す",
         "icon": "$(sparkle)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.insertEpisodeBefore",
         "title": "この話の前に挿入",
         "icon": "$(add)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.removeEpisodeAndRenumber",
         "title": "この話を削除（話数を詰める）",
         "icon": "$(trash)",
-        "category": "小説執筆"
+        "category": "統合小説執筆環境"
       },
       {
         "command": "novelai.switchMode",
         "title": "作者／編集者切替",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(person)"
       },
       {
         "command": "novelai.shareWithEditor",
         "title": "編集者へ渡す",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(repo-push)"
       },
       {
         "command": "novelai.joinAsEditor",
         "title": "編集者として参加",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(organization)"
       },
       {
         "command": "novelai.revokeEditorAccess",
         "title": "編集者連携を解除",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(debug-disconnect)"
       },
       {
         "command": "novelai.finishReviewAndReturn",
         "title": "校閲を終えて返す",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(check-all)"
       },
       {
         "command": "novelai.collectEditorProposals",
         "title": "編集者提案取込",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(repo-pull)"
       },
       {
         "command": "novelai.viewEditorProposals",
         "title": "編集者の提案を見る",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(inbox)"
       },
       {
         "command": "novelai.plotInterview",
         "title": "対話式プロット作成",
-        "category": "小説執筆",
+        "category": "統合小説執筆環境",
         "icon": "$(comment-discussion)"
       }
     ],
@@ -2147,7 +2147,7 @@
       ]
     },
     "configuration": {
-      "title": "小説AI執筆補助",
+      "title": "統合小説執筆環境",
       "properties": {
         "novelai.confirm.remembered": {
           "type": "object",
