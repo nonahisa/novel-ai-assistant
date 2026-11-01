@@ -10,6 +10,8 @@
  *    （もう一度押せる。`pendingRuns` を消さない）
  * 2. 同じ答えでも、作者の発言が「表記ゆれってどうやるの？」（使い方を訊いただけ）なら動かない。
  *    数秒見続けても組を選ぶ画面は出ず、ボタンだけが出る
+ * 3. 「表記ゆれを検知してくれる？」（「？」で結ぶ頼みの定型。0.117.0）でも押さずに動き、選ぶ画面を
+ *    閉じたあと答えの下に残ったボタンを押すと、もう一度走る（実機確認リスト 301・314 行。2026-11-02）
  *
  * **本物の AI は呼ばない。** 偽の Ollama が相談の答えの形（WORK_CHAT_SCHEMA）で答える。
  * 見えるのは「印がそろったら動く・そろわなければ動かない」の配線だけで、実機の AI が
@@ -37,6 +39,11 @@ const BODY = ["　空には沢山の星があった。", "　たくさんの星�
 const REQUEST_QUESTION = "表記ゆれを検知して";
 /** 使い方を訊いただけ（`isExplicitRunRequest` が外す）。こちらも「表記」を含み、ボタンは残る */
 const HOWTO_QUESTION = "表記ゆれってどうやるの？";
+/**
+ * 「？」で結ぶ頼みの定型（0.117.0。作者の判断 2026-11-01「『〜てくれる？』は動かす」）。
+ * 訊く形を借りたふつうの頼み方なので、動かす側に入る
+ */
+const PLEASE_QUESTION = "表記ゆれを検知してくれる？";
 
 const REPLY = "偽のAIの答えです：表記ゆれの検知で、揺れている書き方の組を確かめられます。";
 /** 表記ゆれの検知を名指しし、今すぐ動かす印を立てた答え。**どちらの件でも同じ答えを返す** */
@@ -56,7 +63,9 @@ let fake: FakeOllama;
 beforeAll(async () => {
   fake = await startFakeOllama((request) => {
     if (isSearchTermsRequest(request)) return SEARCH_TERMS_ANSWER;
-    if (request.user.includes(REQUEST_QUESTION) || request.user.includes(HOWTO_QUESTION)) return RUN_NOW_ANSWER;
+    if (request.user.includes(REQUEST_QUESTION) || request.user.includes(HOWTO_QUESTION) || request.user.includes(PLEASE_QUESTION)) {
+      return RUN_NOW_ANSWER;
+    }
     return "{}";
   });
 });
@@ -159,6 +168,47 @@ test("「表記ゆれを検知して」と頼み、AI が今すぐ動かす印�
 
       /* ── 答えの下のボタンは残る（もう一度押せる） ── */
       expect(await runButtonCount(large), `答えの下の「${RUN_BUTTON_TEXT}」が消えました${await describeState(page, large, sentBefore)}`).toBe(1);
+    },
+    fakeOllamaLaunch(fake, { keybindings: [{ key: OPEN_LARGE_KEY, command: "novelai.openChatPanel" }] })
+  );
+});
+
+test("「表記ゆれを検知してくれる？」と「？」で結んで頼んでも押さずに動き、閉じたあと答えの下に残ったボタンを押すと、もう一度走る", async () => {
+  await withVsCode(
+    "相談で「〜してくれる？」と頼まれたら動かし、ボタンでもう一度",
+    [{ name: EPISODE, text: BODY }],
+    async (session) => {
+      const { page } = session;
+      const sentBefore = fake.requests.length;
+      const large = await openLargeChat(page, sentBefore);
+
+      await ask(page, large, PLEASE_QUESTION, sentBefore);
+
+      /* ── 「〜してくれる？」でも、押さずに表記ゆれの組を選ぶ画面が出る ── */
+      await waitUntil(async () => (await quickPickTitle(page))?.startsWith(NOTATION_PICK_TITLE) === true, "「〜してくれる？」でも押さずに組を選ぶ画面が出る", 30_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}${await describeState(page, large, sentBefore)}`);
+        }
+      );
+      expect(await logText(large), "会話に動かすことの1行がありません").toContain(RUN_NOW_NOTE);
+
+      /* ── 選ぶ画面を閉じ、答えの下に残ったボタンを押す → もう一度走る ── */
+      await page.keyboard.press("Escape");
+      await waitUntil(async () => (await quickPickTitle(page)) === undefined, "組を選ぶ画面が閉じる", 10_000);
+      const toggle = large.locator(".more-toggle").last();
+      await waitUntil(async () => (await toggle.count()) > 0, "答えの下に「ほかにできること」の札が出ている", 10_000).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}${await describeState(page, large, sentBefore)}`);
+      });
+      await toggle.click();
+      const run = large.locator(".more-body button.option", { hasText: RUN_BUTTON_TEXT }).last();
+      await waitUntil(async () => await run.isVisible().catch(() => false), `答えの下の「${RUN_BUTTON_TEXT}」が見える`, 10_000);
+      await run.click();
+      await waitUntil(async () => (await quickPickTitle(page))?.startsWith(NOTATION_PICK_TITLE) === true, "残ったボタンを押すと、もう一度組を選ぶ画面が出る", 30_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}${await describeState(page, large, sentBefore)}`);
+        }
+      );
+      await page.keyboard.press("Escape");
     },
     fakeOllamaLaunch(fake, { keybindings: [{ key: OPEN_LARGE_KEY, command: "novelai.openChatPanel" }] })
   );
