@@ -133,6 +133,12 @@ export interface ImportReaderStatsBundleOptions {
    * ヘルパーからの受け口は束を渡す前に自分で覚えるので、作者が貼り付けたときだけ渡す
    */
   noteOwnWorks?: (envelopes: readonly ReaderStatsEnvelope[]) => Promise<void>;
+  /**
+   * 知らせを出さない（同じ文は操作の記録に残す）。バックアップからの登録の途中で、
+   * 控えておいた読者の反応を取り込むときだけ立てる——登録の知らせが取り込んだ画面の数を
+   * 言うので、知らせを2つ重ねない（2026-11-01。設計書6.99.8）
+   */
+  silent?: boolean;
 }
 
 /**
@@ -517,7 +523,9 @@ export async function importReaderStatsBundle(
   // （`announceResult` と同じ理由。束は作品をまたぐので、書き先は保管庫）
   useLogFile(undefined);
   logStep(notice.message);
-  if (register && pending.length > 0) {
+  if (options.silent) {
+    // 呼んだ側が自分の知らせで結果を言う（記録には上で残した）
+  } else if (register && pending.length > 0) {
     // ボタンの答えは待たない（押されたら後から登録して取り込む）
     showNoticeWithRegister(
       notice.level,

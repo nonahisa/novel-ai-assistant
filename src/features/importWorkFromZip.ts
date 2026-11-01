@@ -3,6 +3,7 @@ import * as path from "../core/paths";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { pathExists } from "../core/fileSystem";
 import { logFailure, logStep, useLogFile } from "../core/logger";
+import { messageOf } from "../core/errorMessage";
 import { parsePlotMarkdown } from "../core/plotDoc";
 import { readPlotText, writePlotSections } from "../core/plotFile";
 import {
@@ -128,6 +129,12 @@ export interface PickedBackup {
 export interface KnownSiteWork {
   readonly site: PostingSiteId;
   readonly workId: string;
+  /**
+   * 登録の前に控えておいた読者の反応を、登録した作品へ移す（2026-11-01。設計書6.99.8）。
+   * **台帳に作品ID を書いたあと・登録の知らせの前**に呼ぶ（知らせが取り込んだ画面の数を言う）。
+   * 控えの数と、台帳に入った数を返す
+   */
+  takeHeldStats?(): Promise<{ readonly held: number; readonly imported: number }>;
 }
 
 /**
@@ -138,6 +145,15 @@ export interface KnownSiteWork {
 export interface UnattendedImport {
   /** 届いたファイルの名前（終わったときの知らせに出す） */
   readonly fileName: string;
+  /**
+   * 書庫が分かれているとき、前回この流れで選んだ書庫を使う（作者の指示 2026-11-01）。
+   * 初回と、覚えた書庫が無くなっていたときだけ「どこに作りますか」と訊き、選んだ書庫を覚える。
+   * 覚えは拡張機能の保管庫（作者の作品フォルダーには書かない）
+   */
+  readonly library?: {
+    readonly remembered: string | undefined;
+    remember(folderPath: string): Promise<void>;
+  };
 }
 
 /**
@@ -174,12 +190,8 @@ export async function importWorkFromZip(
 
   // **置き場を決めてから題を訊く。** 逆にすると、名前を考えたあとで
   // 「どこに作りますか」と訊かれる（書庫の決め方は 6.97.2 のまま）。
-  // 訊かずに進むときも、書庫が1つに決まらなければ今までどおり選んでもらう
-  const decided = quiet ? decideNewWorkHome(works) : undefined;
-  const home =
-    decided?.kind === "library"
-      ? { folderPath: decided.folderPath, note: describeNewWorkHome(decided.folderPath) }
-      : await resolveNewWorkHome(works);
+  // 訊かずに進むときも、書庫が1つに決まらなければ選んでもらう（前回選んだ書庫が残っていれば使う）
+  const home = quiet ? await unattendedHome(works, quiet) : await resolveNewWorkHome(works);
   if (!home) return undefined;
 
   // 訊かずに進むときは、バックアップの題をそのまま作品名にする。
@@ -248,8 +260,54 @@ export async function importWorkFromZip(
   */
   const chapters = await placeImportedChapters(entry, inspection.outline);
 
-  await reportResult(entry, zipPath, inspection, placed, recorded, chapters, quiet);
+  // 控えておいた読者の反応は、台帳に作品ID を書いたここで移す（知らせが結果を言う）
+  const held = await takeHeldStats(entry, known);
+
+  await reportResult(entry, zipPath, inspection, placed, recorded, chapters, quiet, held);
   return entry;
+}
+
+/**
+ * 訊かずに取り込むときの置き場。書庫が1つなら訊かずにそこ。**分かれていれば、前回この流れで
+ * 選んだ書庫を使う**（作者の指示 2026-11-01「どこに作りますか」が毎回出た）。覚えた書庫が
+ * 無くなっていたら（作品をすべて外した・動かした）、今までどおり訊いて、選んだ書庫を覚え直す
+ */
+async function unattendedHome(
+  works: readonly WorkLocation[],
+  unattended: UnattendedImport
+): Promise<{ readonly folderPath: string; readonly note: string } | undefined> {
+  const decided = decideNewWorkHome(works);
+  if (decided.kind === "library") {
+    return { folderPath: decided.folderPath, note: describeNewWorkHome(decided.folderPath) };
+  }
+  const remembered = unattended.library?.remembered;
+  if (decided.kind === "choose" && remembered) {
+    const still = decided.candidates.find((candidate) =>
+      path.isSameFolder(candidate.folderPath, remembered)
+    );
+    if (still) {
+      logStep(`前回選んだ書庫へ作ります：${still.folderPath}`);
+      return { folderPath: still.folderPath, note: describeNewWorkHome(still.folderPath) };
+    }
+  }
+  const home = await resolveNewWorkHome(works);
+  // 覚えるのは書庫を選んでもらったときだけ（書庫が無く作ったときは、次は1つに決まる）
+  if (home && decided.kind === "choose") await unattended.library?.remember(home.folderPath);
+  return home;
+}
+
+/** 控えを移す。**失敗しても取り込みは成り立っている**ので、記録に残して先へ進む */
+async function takeHeldStats(
+  work: WorkEntry,
+  known: KnownSiteWork | undefined
+): Promise<{ readonly held: number; readonly imported: number } | undefined> {
+  if (!known?.takeHeldStats) return undefined;
+  try {
+    return await known.takeHeldStats();
+  } catch (error) {
+    logFailure("控えた読者の反応の取り込み", { 作品: work.title, 詳細: messageOf(error) });
+    return undefined;
+  }
 }
 
 /** 同じ題の作品がすでに登録されているか（題のそろえ方は相談パネルの照合と同じ） */
@@ -777,9 +835,11 @@ async function reportResult(
   /** 章立てをどうしたか（章の見出しが無ければ undefined） */
   chapters?: { readonly created: number; readonly note: string },
   /** 訊かずに取り込んだとき（知らせの頭と、次の一手を変える） */
-  unattended?: UnattendedImport
+  unattended?: UnattendedImport,
+  /** 控えておいた読者の反応を移した結果（枠から取り込んだときだけ） */
+  held?: { readonly held: number; readonly imported: number }
 ): Promise<void> {
-  const invite = readerStatsInvite(inspection.site, recorded);
+  const invite = readerStatsInvite(inspection.site, recorded, held);
   // **確認の画面で言ったことを、済んだあとでもう一度言う**（作者の指示）。
   // 確認は読み飛ばされることがあり、重複と欠番はあとから直すものなので、
   // 終わったところにも残しておかないと気づかれないまま埋もれる。
@@ -992,9 +1052,19 @@ interface ReaderStatsInvite {
  */
 function readerStatsInvite(
   site: PostingSiteId | null,
-  recorded: RecordedReaderStats
+  recorded: RecordedReaderStats,
+  /** 控えておいた読者の反応を移した結果（`takeHeldStats`） */
+  held?: { readonly held: number; readonly imported: number }
 ): ReaderStatsInvite | undefined {
-  if (!site) return undefined;
+  /*
+    **控えがあったときは、手で足す誘いを出さない**（2026-11-01 作者の実機）。控えを移したのに
+    「貼り付けか手入力で足せます」と言うと、作者は数が入っていないと受け取る。移せなかった
+    画面があれば、そう言って記録を指す（控えは残してあり、あとでもう一度試す）
+  */
+  const heldLine = describeHeldStats(held);
+  if (!site) {
+    return heldLine ? { short: "", noted: heldLine, line: heldLine, buttons: [], commands: {} } : undefined;
+  }
   const label = postingSiteInfo(site).label;
   /*
     **書き留めたことを黙っていない。** 訊かずに書いたものこそ、何を書いたかを
@@ -1014,6 +1084,8 @@ function readerStatsInvite(
   const noted = scope
     ? `${label}の作品として下ごしらえし、バックアップにあった${scope}の読者の反応を記録しました。`
     : short;
+
+  if (heldLine) return { short, noted: noted + heldLine, line: heldLine, buttons: [], commands: {} };
 
   if (supportsReaderStatsHelper(site)) {
     return {
@@ -1035,4 +1107,17 @@ function readerStatsInvite(
     buttons: ["手入力する"],
     commands: { 手入力する: "novelai.recordReaderStats" },
   };
+}
+
+/** 控えを移した結果の1文。控えが無ければ undefined（いつもの誘いを出す） */
+function describeHeldStats(
+  held: { readonly held: number; readonly imported: number } | undefined
+): string | undefined {
+  if (!held || held.held === 0) return undefined;
+  const left = held.held - held.imported;
+  if (left === 0) return `読者の反応（${held.imported}画面）も取り込みました。`;
+  const leftNote = `${left}画面は取り込めなかったので控えに残しました（理由は操作の記録にあります）。`;
+  return held.imported > 0
+    ? `読者の反応（${held.imported}画面）も取り込みました。${leftNote}`
+    : `控えておいた読者の反応（${held.held}画面）は取り込めなかったので控えに残しました（理由は操作の記録にあります）。`;
 }
