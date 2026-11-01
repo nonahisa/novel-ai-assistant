@@ -553,7 +553,7 @@ import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
 import { startAiAssignmentsSnapshot } from "./features/aiAssignmentsSnapshot";
 import { isEditorMode } from "./core/actorContext";
-import { setActiveModeForGuide } from "./core/editorMode";
+import { describeBlocked, setActiveModeForGuide } from "./core/editorMode";
 import { conflictFixHint } from "./core/syncEntryNames";
 import { rememberDecisionMemory } from "./features/decisionMemory";
 import {
@@ -2279,6 +2279,17 @@ export async function activate(
     registerCommand(
       "novelai.resolveDivergence",
       async (node?: WorkNode) => {
+        /*
+          **編集者モードでは使わせない**（作者の判断 2026-11-02）。詳細メニューは
+          押せなくしてあるが、知らせのボタンや相談からも呼ばれうるので、入口でも
+          止めて「校閲を終えて返す」へ案内する（`describeBlocked`）
+        */
+        if (isEditorMode()) {
+          void vscode.window.showInformationMessage(
+            describeBlocked("novelai.resolveDivergence")
+          );
+          return;
+        }
         // 合わせる相手は置き場（リポジトリ）だが、選んでもらうのは作品にする。
         // 作者が見ているのは作品であり、どの作品がどの置き場かは意識しなくてよい
         const work = await resolveWork(node, registry, {

@@ -46,6 +46,8 @@ import { withCancellableProgress } from "../views/progress";
 import { whenNoticePicked } from "../views/notify";
 import { CHOOSE_TEXT_TO_KEEP } from "../core/gitSyncMenuText";
 import {
+  FINISH_REVIEW_COMMAND,
+  finishReviewLabel,
   IDENTITY_MISSING_HINT,
   SETUP_GITHUB_COMMAND,
   setupGithubLabel,
@@ -754,13 +756,24 @@ function nextSteps(
     });
   }
 
-  const diverged = outcomes.find((one) => one.diverged)?.plan.target;
+  const divergedOutcome = outcomes.find((one) => one.diverged);
+  const diverged = divergedOutcome?.plan.target;
   if (diverged) {
-    steps.push({
-      label: CHOOSE_SIDE_TO_KEEP,
-      command: "novelai.resolveDivergence",
-      work: workOf(diverged),
-    });
+    // **編集者モード（受け取るだけ）では合わせる画面へ渡さない**（作者の判断
+    // 2026-11-02）。合わせるのは作者で、編集者は「校閲を終えて返す」で返す
+    steps.push(
+      divergedOutcome.plan.receiveOnly
+        ? {
+            label: finishReviewLabel(),
+            command: FINISH_REVIEW_COMMAND,
+            work: workOf(diverged),
+          }
+        : {
+            label: CHOOSE_SIDE_TO_KEEP,
+            command: "novelai.resolveDivergence",
+            work: workOf(diverged),
+          }
+    );
   }
 
   // 編集者モードでは出さない（送り先を作るのは作者の仕事。`planReceiveOnly`）

@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import {
+  describeBlocked,
   editorAllowedCommands,
   isCommandAllowed,
 } from "../../../src/core/editorMode";
+import { findAction } from "../../../src/core/actionTree";
 
 /**
  * 編集者モードの許可一覧（設計書5.6）。
@@ -35,11 +37,22 @@ describe("編集者モードの許可一覧", () => {
     for (const command of [
       "novelai.gitSync",
       "novelai.resolveConflicts",
-      "novelai.resolveDivergence",
       "novelai.showLog",
     ]) {
       expect(isCommandAllowed(command, "editor")).toBe(true);
     }
+  });
+
+  test("分岐合流は開かない。分かれたときは「校閲を終えて返す」へ案内する", () => {
+    // 作者の判断 2026-11-02。編集者の「保存・同期」は受け取るだけで、2台の原稿を
+    // 合わせるのは作者の仕事。編集者の側で合わせると作者の原稿が書き換わる
+    expect(isCommandAllowed("novelai.resolveDivergence", "editor")).toBe(false);
+    expect(isCommandAllowed("novelai.resolveDivergence", "author")).toBe(true);
+    const hint = describeBlocked("novelai.resolveDivergence");
+    expect(hint).toContain(
+      `「${findAction("novelai.finishReviewAndReturn")?.label}」`
+    );
+    expect(hint).not.toContain("作者の環境で実行してください");
   });
 
   test("手で書く直しと、編集者モードのメモは開く（本文には書かず提案として置く）", () => {
