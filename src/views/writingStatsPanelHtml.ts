@@ -1,4 +1,5 @@
 import { READER_STATS_VISIBLE_ROWS } from "../core/postingSiteRecords";
+import { POSTING_SITES } from "../models/posting";
 
 /**
  * 執筆量パネルの中身（設計書6.3）。
@@ -22,13 +23,26 @@ import { READER_STATS_VISIBLE_ROWS } from "../core/postingSiteRecords";
  * 縦に詰め込まれ、開くたびに長く送らないと目当ての所へ着かなかった。
  * - 概要：締切・数の札・目標への入口・達成（開いたときに最初に見える所）
  * - 執筆の推移：粒度の切り替え・グラフ・グラフの注記・端末ごとの内訳
- * - 話ごと：話ごとの文字数（話の無い作品・全作品では出さない）
- * - 読者の反応：投稿サイトの記録・増減・AIの助言（全作品では出さない）
+ * - 話ごと：話ごとの文字数（全作品では出さない。**0話の作品でも出し**、中身に
+ *   「まだ話がありません」と言う。作者の判断 2026-11-01）
+ * - 読者の反応：投稿サイトごとのタブに分け、その中に記録・増減・AIの助言（全作品では出さない。
+ *   サイトのタブは配信されているサイトだけ、なろうは最後尾。作者の指示 2026-11-01）
+ *
+ * **開くタブは、その作品で前に見ていたタブ**（作者の判断 2026-11-01）。覚えるのは拡張機能の
+ * 側（`core/writingStatsTabMemory.ts`）で、ここへは `initialTab`・`initialReaderSite` で届く。
  */
 export function buildWritingStatsPanelHtml(
   nonce: string,
   cspSource: string,
-  options: { hasEpisodesTab?: boolean; hasReadersTab?: boolean; unitNoun?: string } = {}
+  options: {
+    hasEpisodesTab?: boolean;
+    hasReadersTab?: boolean;
+    unitNoun?: string;
+    /** 開いたときに選ぶタブ（前に見ていたタブ）。その画面に無い・知らない鍵なら概要 */
+    initialTab?: string;
+    /** 読者の反応の中で、開いたときに選ぶサイト（前に見ていたサイト）。無ければ先頭のサイト */
+    initialReaderSite?: string | null;
+  } = {}
 ): string {
   const hasEpisodesTab = options.hasEpisodesTab ?? true;
   const hasReadersTab = options.hasReadersTab ?? true;
@@ -41,6 +55,17 @@ export function buildWritingStatsPanelHtml(
     ...(hasEpisodesTab ? [{ key: "episodes", label: `${unitNoun}ごと` }] : []),
     ...(hasReadersTab ? [{ key: "readers", label: "読者の反応" }] : []),
   ];
+  /*
+    **HTMLの属性へ埋めるので、知っている鍵だけを通す**（値はふつう postMessage で渡すが、
+    タブは開いた瞬間に選んでおきたい——概要が一瞬見えてから切り替わると、ちらつく）
+  */
+  const initialTab = tabs.some((tab) => tab.key === options.initialTab)
+    ? (options.initialTab as string)
+    : "overview";
+  const initialReaderSite = POSTING_SITES.some((info) => info.id === options.initialReaderSite)
+    ? (options.initialReaderSite as string)
+    : "";
+  const pageClass = (key: string): string => (key === initialTab ? "page active" : "page");
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -96,6 +121,36 @@ h1 { font-size: 1.05em; font-weight: 600; margin: 0 0 4px; }
 }
 .tab:focus { outline: none; }
 .tab:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+/*
+  読者の反応の中のサイトのタブ（作者の指示 2026-11-01）。外側のタブと同じ作り（下線で今を示す・
+  狭い幅では折り返して横に送らせない・色はテーマの変数だけ）で、一回り小さくする
+*/
+.site-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  margin-bottom: 12px;
+}
+.site-tab {
+  padding: 4px 0 5px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  font-size: 12px;
+  border-bottom: 2px solid transparent;
+  color: var(--vscode-descriptionForeground);
+}
+.site-tab:hover { color: var(--vscode-foreground); }
+.site-tab.active {
+  color: var(--vscode-foreground);
+  border-bottom-color: var(--vscode-panelTitle-activeBorder, var(--vscode-focusBorder));
+}
+.site-tab:focus { outline: none; }
+.site-tab:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.site-page { display: none; }
+.site-page.active { display: block; }
 main { padding: var(--gap) 16px; }
 section.page { display: none; }
 /*
@@ -340,32 +395,32 @@ a:hover, .link:hover { text-decoration: underline; }
 }
 </style>
 </head>
-<body>
+<body data-initial-tab="${initialTab}" data-initial-site="${initialReaderSite}">
 <header>
   <h1 id="title">執筆量</h1>
   <div class="tabs" role="tablist" aria-label="執筆統計の表示">
-    ${tabs.map((tab, index) => `<div class="tab${index === 0 ? ' active' : ''}" role="tab" id="tab-${tab.key}" data-page="${tab.key}" aria-controls="page-${tab.key}" aria-selected="${index === 0 ? 'true' : 'false'}" tabindex="${index === 0 ? '0' : '-1'}">${tab.label}</div>`).join('\n    ')}
+    ${tabs.map((tab) => `<div class="tab${tab.key === initialTab ? ' active' : ''}" role="tab" id="tab-${tab.key}" data-page="${tab.key}" aria-controls="page-${tab.key}" aria-selected="${tab.key === initialTab ? 'true' : 'false'}" tabindex="${tab.key === initialTab ? '0' : '-1'}">${tab.label}</div>`).join('\n    ')}
   </div>
 </header>
 <main>
-  <section class="page active" id="page-overview" role="tabpanel" aria-labelledby="tab-overview">
+  <section class="${pageClass("overview")}" id="page-overview" role="tabpanel" aria-labelledby="tab-overview">
     <div id="contest"></div>
     <div class="cards" id="cards"></div>
     <div class="note" id="goal-link"></div>
     <div class="note" id="work-facts"></div>
     <div id="achievements"></div>
   </section>
-  <section class="page" id="page-trend" role="tabpanel" aria-labelledby="tab-trend">
+  <section class="${pageClass("trend")}" id="page-trend" role="tabpanel" aria-labelledby="tab-trend">
     <div class="controls" id="granularity"></div>
     <div class="chart-wrap"><svg id="chart" width="100%" height="240"></svg></div>
     <div class="note" id="chart-note"></div>
     <div id="devices"></div>
   </section>
-  ${hasEpisodesTab ? `<section class="page" id="page-episodes" role="tabpanel" aria-labelledby="tab-episodes">
+  ${hasEpisodesTab ? `<section class="${pageClass("episodes")}" id="page-episodes" role="tabpanel" aria-labelledby="tab-episodes">
     <div class="cards" id="episode-cards"></div>
     <div id="episode-table" class="table-scroll"></div>
   </section>` : ''}
-  ${hasReadersTab ? `<section class="page" id="page-readers" role="tabpanel" aria-labelledby="tab-readers">
+  ${hasReadersTab ? `<section class="${pageClass("readers")}" id="page-readers" role="tabpanel" aria-labelledby="tab-readers">
     <div id="site-records"></div>
   </section>` : ''}
 </main>
@@ -430,14 +485,17 @@ function amount(value) {
 /**
  * タブを選ぶ（設計書6.3.9）。
  *
- * **最後に開いていたタブを覚える**（vscode.setState）。作品ごとには分けない
- * （作者の指示、2026-11-01「作品ごとでなくてよい」）。無いタブの鍵が
- * 覚えてあれば（全作品の画面・話の無い作品）、先頭の「概要」へ戻す。
+ * **作品ごとに、前に見ていたタブを覚える**（作者の判断 2026-11-01。同じ日の朝の
+ * 「作品ごとでなくてよい」を改めた）。覚えるのは拡張機能の側で、ここは押されたことを
+ * 知らせるだけ——WebView の中の記憶（setState）は画面を閉じると消えるので、
+ * 開き直すと概要へ戻っていた。無いタブの鍵が届いたら、先頭の「概要」へ戻す。
  *
  * @param page 選ぶタブの data-page
  * @param focus 真ならそのタブへ焦点を移す（矢印キーで移ったとき）
+ * @param remember 真なら拡張機能へ知らせて覚えてもらう（作者が押したとき）。開いたときの
+ *   選び直しでは知らせない（覚えている値で開いたところなので、送り返しても同じ）
  */
-function selectTab(page, focus) {
+function selectTab(page, focus, remember) {
   const tabs = Array.from(document.querySelectorAll('.tab'));
   const target = tabs.find((el) => el.dataset.page === page) || tabs[0];
   if (!target) return;
@@ -453,11 +511,7 @@ function selectTab(page, focus) {
     el.classList.toggle('active', el.id === 'page-' + chosen);
   });
   if (focus) target.focus();
-  try {
-    vscode.setState(Object.assign({}, vscode.getState() || {}, { tab: chosen }));
-  } catch (error) {
-    // 覚えられなくてもタブは切り替わっている。次に開いたときに概要から始まるだけ
-  }
+  if (remember) vscode.postMessage({ type: 'tabSelected', tab: chosen });
   // 隠れていたあいだは横の送りが効かない（幅が0）ので、見えたところで合わせ直す
   if (chosen === 'trend') pinChartToLatest();
 }
@@ -476,7 +530,7 @@ function tabIndexAfterKey(key, current, count) {
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {
-  tab.addEventListener('click', () => selectTab(tab.dataset.page, false));
+  tab.addEventListener('click', () => selectTab(tab.dataset.page, false, true));
   tab.addEventListener('keydown', (event) => {
     const tabs = Array.from(document.querySelectorAll('.tab'));
     const next = tabIndexAfterKey(event.key, tabs.indexOf(tab), tabs.length);
@@ -484,12 +538,12 @@ document.querySelectorAll('.tab').forEach((tab) => {
       // Enter・空白でも選べるようにする（焦点はもうそのタブにある）
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        selectTab(tab.dataset.page, false);
+        selectTab(tab.dataset.page, false, true);
       }
       return;
     }
     event.preventDefault();
-    selectTab(tabs[next].dataset.page, true);
+    selectTab(tabs[next].dataset.page, true, true);
   });
 });
 
@@ -506,16 +560,8 @@ document.querySelectorAll('.tab').forEach((tab) => {
   });
 })();
 
-// 前に開いていたタブから始める（覚えていなければ概要）
-(() => {
-  let saved = null;
-  try {
-    saved = vscode.getState();
-  } catch (error) {
-    saved = null;
-  }
-  selectTab(saved && typeof saved.tab === 'string' ? saved.tab : 'overview', false);
-})();
+// 前に見ていたタブから始める（拡張機能が覚えている値。覚えていなければ概要）
+selectTab(document.body.dataset.initialTab || 'overview', false, false);
 
 function renderGranularity() {
   const host = document.getElementById('granularity');
@@ -882,10 +928,22 @@ function renderDevices() {
 }
 
 /**
- * サイトの記録（設計書6.68.5）。
+ * 「読者の反応」の中で、いま見ているサイトのタブ（作者の指示 2026-11-01）。
+ * 拡張機能が覚えている値で始め、作者が押すたびに替える。**統計が送り直されても保つ**
+ * （本文を保存するたびに描き直すので、そのたびに先頭のサイトへ戻ると読めない）
+ */
+let readerSite = document.body.dataset.initialSite || '';
+
+/**
+ * 読者の反応（設計書6.68.5・6.79.7。旧「サイトの記録」）。
  *
- * **1件も無ければ、節ごと出さない。** 空の見出しと空の表が増えるだけで、
- * 執筆量を見にきた人の邪魔になる。
+ * **投稿サイトごとのタブに分ける**（作者の指示 2026-11-01「サイトごとにタブをわけて。
+ * 配信されているサイトのみタブを表示し、なろうを最後尾に」）。どのサイトを出すか・並びは
+ * core が決めて \`state.readerSites\` で渡す（\`readerSiteTabs\`）。**サイトが1つでもタブを出す**
+ * ——どのサイトの数かが一目で分かるように。
+ *
+ * サイトをまたぐ事柄（タグの食い違い・連載の状態の食い違い）は、**そのサイトのタブへ振り分ける**。
+ * 台帳を読めなかった知らせだけは、どのサイトにも属さないのでタブの上に置く。
  *
  * 作品ページは**拡張機能側へ頼んで開く**（openExternal）。画面の中から
  * 直接どこかへ繋ぐことはしない。
@@ -894,38 +952,40 @@ function renderSiteRecords() {
   const host = document.getElementById('site-records');
   if (!host) return;
   const records = (state && state.siteRecords) || [];
+  const sites = (state && state.readerSites) || [];
   /*
     **台帳を読めなかったことは、画面で言う**（設計書6.79.7、0.33.9）。
-    以前はログへ残すだけだったので、作者からは「サイトの記録」が理由も
+    以前はログへ残すだけだったので、作者からは読者の反応が理由も
     分からず消えたようにしか見えなかった。ほかの統計は従来どおり出す。
   */
   const failure = (state && state.siteRecordsError) || '';
   const failureNote = failure
-    ? '<div class="note">サイトの記録を読めませんでした：' +
+    ? '<div class="note">読者の反応の記録を読めませんでした：' +
       escapeHtml(failure) + '</div>'
     : '';
-  if (records.length === 0) {
+  if (sites.length === 0) {
     /*
       「読者の反応」のタブは、記録が無くても出しておく（設計書6.3.9）。
       空の面だけを見せると、壊れているのか使い方が違うのか分からないので、
       **何をすればここに並ぶか**を短く言う。名前はメニューの字面に揃える
     */
     host.innerHTML = failureNote
-      ? '<h3>サイトの記録</h3>' + failureNote
+      ? failureNote
       : '<div class="empty">投稿サイトの記録はまだありません。<br>' +
         '「投稿サイト設定」で投稿先を登録し、「ランキング記録」で順位を書き足すか、' +
         '「読者反応自動取込」で読者の反応を取り込むと、ここに並びます。</div>';
     return;
   }
 
-  const blocks = records.map((record) => {
+  const blockOf = (record) => {
     const meta = [];
     if (record.workId) meta.push('作品ID ' + escapeHtml(record.workId));
     if (record.genre) meta.push('ジャンル ' + escapeHtml(record.genre));
     if (!record.registered) meta.push('いまは投稿先から外しています');
     // そのサイトの画面に出ていた連載の状態（届いた印。作品の印は概要に出す）
-    if (record.completion) {
-      meta.push(record.completion === 'completed' ? 'サイトでは完結' : 'サイトでは連載中');
+    if (record.completionLabel) {
+      // 呼び方は core が渡す（休載を足したとき、ここに二択の分岐が残っていた。2026-11-01）
+      meta.push('サイトでは' + escapeHtml(record.completionLabel));
     }
     if (record.note) meta.push(escapeHtml(record.note));
 
@@ -986,15 +1046,60 @@ function renderSiteRecords() {
       renderReaderStatsTable(record.readerWork, '読者の反応', true) +
       renderReaderEpisodes(record.readerEpisodes);
 
+    // 但し書きもサイトごと（そのサイトに順位・反応・分析リンクがあるときだけ言う）
+    const note = siteRecordsNote([record]);
     return '<div class="site"><div class="site-head">' + head.join('') + '</div>' +
-      table + reader + '</div>';
-  });
+      renderSiteCrossNotes(record.site) +
+      table + reader +
+      // 言うことが無ければ、空の但し書きを置かない（作品情報だけの作品）
+      (note ? '<div class="note">' + note + '</div>' : '') +
+      '</div>';
+  };
 
-  const note = siteRecordsNote(records);
-  host.innerHTML =
-    '<h3>サイトの記録</h3>' + failureNote + renderTagDifferences() + blocks.join('') +
-    // 言うことが無ければ、空の但し書きを置かない（作品情報だけの作品）
-    (note ? '<div class="note">' + note + '</div>' : '');
+  // 覚えていたサイトが無ければ（外した・初めて）、先頭のサイト
+  if (!sites.some((tab) => tab.site === readerSite)) readerSite = sites[0].site;
+  const tabsHtml = '<div class="site-tabs" role="tablist" aria-label="読者の反応のサイト">' +
+    sites.map((tab) => {
+      const on = tab.site === readerSite;
+      const key = escapeHtml(tab.site);
+      return '<div class="site-tab' + (on ? ' active' : '') + '" role="tab" id="site-tab-' + key +
+        '" data-site-tab="' + key + '" aria-controls="site-page-' + key +
+        '" aria-selected="' + (on ? 'true' : 'false') + '" tabindex="' + (on ? '0' : '-1') + '">' +
+        escapeHtml(tab.label) + '</div>';
+    }).join('') + '</div>';
+  const pages = sites.map((tab) => {
+    const record = records.find((entry) => entry.site === tab.site);
+    const key = escapeHtml(tab.site);
+    /*
+      登録しただけで、まだ何も記録の無いサイト。空の面にせず、何をすれば並ぶかを言う
+      （配信しているのに数が無い、と分かるのも作者の材料）
+    */
+    const body = record
+      ? blockOf(record)
+      : '<div class="empty">' + escapeHtml(tab.label) + 'の記録はまだありません。<br>' +
+        '「ランキング記録」で順位を書き足すか、「読者反応自動取込」で読者の反応を取り込むと、ここに並びます。</div>';
+    return '<section class="site-page' + (tab.site === readerSite ? ' active' : '') +
+      '" id="site-page-' + key + '" data-site-page="' + key + '" role="tabpanel" aria-labelledby="site-tab-' +
+      key + '">' + body + '</section>';
+  });
+  host.innerHTML = failureNote + tabsHtml + pages.join('');
+
+  host.querySelectorAll('.site-tab').forEach((tab) => {
+    tab.addEventListener('click', () => selectReaderSite(tab.dataset.siteTab, false, true));
+    tab.addEventListener('keydown', (event) => {
+      const tabs = Array.from(host.querySelectorAll('.site-tab'));
+      const next = tabIndexAfterKey(event.key, tabs.indexOf(tab), tabs.length);
+      if (next < 0) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectReaderSite(tab.dataset.siteTab, false, true);
+        }
+        return;
+      }
+      event.preventDefault();
+      selectReaderSite(tabs[next].dataset.siteTab, true, true);
+    });
+  });
 
   host.querySelectorAll('[data-url]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -1551,7 +1656,8 @@ function renderEpisodes() {
   const countHead = summary.countMode === 'gross' ? '総文字数' : '純文字数';
   const table = document.getElementById('episode-table');
   if (rows.length === 0) {
-    table.innerHTML = '<div class="empty">本文ファイルがありません。</div>';
+    // 0話の作品でもタブは隠さず、ここで言う（作者の判断 2026-11-01）
+    table.innerHTML = '<div class="empty">まだ${unitNoun}がありません。</div>';
     return;
   }
   // **数字の出どころを黙って変えない。** 合本（1ファイルに複数話）は
@@ -1690,14 +1796,47 @@ function renderSiteTags(record) {
  * サイトどうしのタグの食い違い（作者の使い道「サイトごとの食い違いを見る」）。
  * 片方にしか無いタグを、サイトごとに1行で言う。並びの違いは食い違いにしない（core が決める）
  */
-function renderTagDifferences() {
+function renderSiteCrossNotes(site) {
+  /*
+    サイトのタブに分けたので（2026-11-01）、**そのサイトに関わる分だけ**をそのタブで言う。
+    以前は「読者の反応」の頭に全サイトぶんを1行で並べていた
+  */
   const facts = state && state.workFacts;
-  const differences = (facts && facts.tagDifferences) || [];
-  if (differences.length === 0) return '';
-  return '<div class="note">サイトによってタグが違います：' +
-    differences.map((entry) =>
-      escapeHtml(entry.label) + 'だけ ' + entry.only.map(escapeHtml).join('・')).join(' ／ ') +
-    '</div>';
+  const notes = [];
+  const difference = ((facts && facts.tagDifferences) || []).find((entry) => entry.site === site);
+  if (difference) {
+    notes.push('ほかのサイトに無いタグ：' + difference.only.map(escapeHtml).join('・'));
+  }
+  const mismatch = ((facts && facts.mismatches) || []).find((entry) => entry.site === site);
+  if (mismatch && facts.completion) {
+    notes.push('<span class="facts-warn">作品は' + escapeHtml(facts.completion.label) +
+      'にしてありますが、このサイトでは' + escapeHtml(mismatch.completionLabel) + 'です。</span>');
+  }
+  return notes.length > 0 ? '<div class="note">' + notes.join('<br>') + '</div>' : '';
+}
+
+/**
+ * 読者の反応の中のサイトのタブを選ぶ（作者の指示 2026-11-01）。外側のタブ（selectTab）と
+ * 同じ作りで、**押したときだけ拡張機能へ知らせて覚えてもらう**（作品ごとに前のサイトで開く）。
+ */
+function selectReaderSite(site, focus, remember) {
+  const host = document.getElementById('site-records');
+  if (!host) return;
+  const tabs = Array.from(host.querySelectorAll('.site-tab'));
+  const target = tabs.find((el) => el.dataset.siteTab === site) || tabs[0];
+  if (!target) return;
+  readerSite = target.dataset.siteTab;
+  tabs.forEach((el) => {
+    const on = el === target;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-selected', on ? 'true' : 'false');
+    el.tabIndex = on ? 0 : -1;
+  });
+  host.querySelectorAll('.site-page').forEach((el) => {
+    el.classList.toggle('active', el.dataset.sitePage === readerSite);
+  });
+  if (focus) target.focus();
+  if (remember) vscode.postMessage({ type: 'readerSiteSelected', site: readerSite });
 }
 
 /**

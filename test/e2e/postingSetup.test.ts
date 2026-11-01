@@ -38,11 +38,14 @@ const WORK_ID = "1177354054880000000";
 const NEW_EPISODE_URL = `https://kakuyomu.jp/my/works/${WORK_ID}/episodes/new`;
 const WORK_URL = `https://kakuyomu.jp/works/${WORK_ID}`;
 
-/** 執筆統計のパネルのうち「サイトの記録」の節（出ていなければ undefined） */
+/**
+ * 執筆統計のパネルのうち「読者の反応」のサイトのタブがある枠（出ていなければ undefined）。
+ * 2026-11-01 にサイトごとのタブへ分け、「サイトの記録」の見出しは無くなった
+ */
 async function siteRecordsFrame(page: Page): Promise<Frame | undefined> {
   for (const frame of page.frames()) {
     const has = await frame
-      .evaluate(() => Array.from(document.querySelectorAll("h3")).some((h) => h.textContent === "サイトの記録"))
+      .evaluate(() => document.querySelector("#site-records .site-tab") !== null)
       .catch(() => false);
     if (has) return frame;
   }
@@ -123,13 +126,14 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
       await waitUntil(async () => (stats = await siteRecordsFrame(page)) !== undefined, "執筆統計に「サイトの記録」の節が出る", 30_000);
       if (!stats) throw new Error("執筆統計が見つかりません");
       const statsFrame = stats;
-      // サイトの記録は「読者の反応」のタブにある（設計書6.3.9）。作者と同じく、タブを押してから読む
+      // サイトの記録は「読者の反応」のタブにある（設計書6.3.9）。作者と同じく、タブを押してから読む。
+      // 中はサイトごとのタブ（2026-11-01）。カクヨムのタブを押してから読む
       await statsFrame.locator('.tab[data-page="readers"]').click();
+      await statsFrame.locator('#site-records .site-tab[data-site-tab="kakuyomu"]').click();
       const siteText = () =>
-        statsFrame.evaluate(() => {
-          const heading = Array.from(document.querySelectorAll("h3")).find((h) => h.textContent === "サイトの記録");
-          return heading?.parentElement?.innerText ?? "";
-        });
+        statsFrame.evaluate(
+          () => (document.querySelector("#site-page-kakuyomu") as HTMLElement | null)?.innerText ?? ""
+        );
       expect(await siteText()).toContain("カクヨム");
       expect(await siteText()).toContain(`作品ID ${WORK_ID}`);
       expect(await siteText()).toContain("ジャンル ハイファンタジー");

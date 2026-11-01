@@ -12,6 +12,8 @@ import {
   POSTING_FILE,
   POSTING_SCHEMA_VERSION,
   type PostingLedger,
+  type PostingSiteFacts,
+  type SkippedSiteCompletion,
 } from "../models/posting";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { hashBytes } from "./textFile";
@@ -67,6 +69,34 @@ export class PostingStoreError extends Error {
   }
 }
 
+/** 知らない値を読まなかった台帳の知らせ（作者の判断 2026-11-01） */
+export interface PostingUnknownValues {
+  /** 台帳の場所 */
+  readonly filePath: string;
+  /** 読まなかった値の説明（「作品の連載の状態「…」」） */
+  readonly notes: readonly string[];
+}
+
+let unknownValuesListener: ((info: PostingUnknownValues) => void) | undefined;
+
+/**
+ * 知らない値を読まなかったときの知らせの口（1つだけ。あとから付けた方に替わる）。
+ *
+ * **core からは通知を出さない**ので、知らせ方（作者に一度だけ言う）は拡張機能の
+ * 起動時に付ける（`features/postingKit.ts` の `notifyPostingUnknownValuesOnce`）。
+ * 台帳を開く道は投稿キット・執筆統計・作品一覧と多く、そのどこから読んでも同じ所で知らせる。
+ */
+export function onPostingUnknownValues(
+  listener: (info: PostingUnknownValues) => void
+): { dispose(): void } {
+  unknownValuesListener = listener;
+  return {
+    dispose: () => {
+      if (unknownValuesListener === listener) unknownValuesListener = undefined;
+    },
+  };
+}
+
 export class PostingStore {
   private target: string | null = null;
   /**
@@ -88,6 +118,13 @@ export class PostingStore {
    * 検証はしない——読めないものを整えれば、整えた形がこちらの作り物になる。
    */
   private skippedReaderStatsRows: unknown[] = [];
+  /**
+   * 読み込みで読まなかった、この版が知らない連載の状態（作者の判断 2026-11-01）。
+   * **保存で書き戻す**（読み飛ばした行と同じ理由）。ただし作者が選び直した・新しい封筒が
+   * 知っている値を入れたときは、そちらが勝つ（そのときは書き戻さない）
+   */
+  private skippedCompletion: Record<string, unknown> | undefined;
+  private skippedSiteCompletions: SkippedSiteCompletion[] = [];
 
   constructor(private readonly work: WorkEntry) {}
 
@@ -117,6 +154,8 @@ export class PostingStore {
     this.loadedAt = new Date().toISOString();
     // 前に読んだ台帳の行を、別の台帳へ持ち込まない
     this.skippedReaderStatsRows = [];
+    this.skippedCompletion = undefined;
+    this.skippedSiteCompletions = [];
 
     let bytes: Uint8Array | null = null;
     try {
@@ -131,6 +170,7 @@ export class PostingStore {
     }
 
     let ledger: PostingLedger;
+    let unknownNotes: string[] = [];
     try {
       const read = readPostingLedger(
         JSON.parse(new TextDecoder().decode(bytes))
@@ -149,6 +189,9 @@ export class PostingStore {
             `${read.skippedReaderStats}件 読み飛ばしました（保存時もそのまま持ち回します）`
         );
       }
+      this.skippedCompletion = read.skippedCompletion;
+      this.skippedSiteCompletions = read.skippedSiteCompletions;
+      unknownNotes = read.unknownValues;
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new PostingStoreError(
@@ -161,6 +204,16 @@ export class PostingStore {
 
     this.snapshot = hashBytes(bytes);
     this.loaded = true;
+    /*
+      **知らない値を読まなかったことを、知らせの口へ渡す**（2026-11-01）。知らせるのは
+      画面の側（core から通知を出さない）。何度も同じ知らせが出ないようにするのも、あちら
+    */
+    if (unknownNotes.length > 0) {
+      logStep(
+        `設定/${POSTING_FILE}: この版が知らない値を読まずに持ち回します（${unknownNotes.join("、")}）`
+      );
+      unknownValuesListener?.({ filePath: target, notes: unknownNotes });
+    }
     return ledger;
   }
 
@@ -223,6 +276,24 @@ export class PostingStore {
       ...this.skippedReaderStatsRows,
     ];
 
+    /*
+      サイトごとの事柄へ、読まなかった知らない連載の状態を戻す（2026-11-01）。
+      **その間に封筒が知っている値を入れたサイトは戻さない**（新しい方が勝つ）。
+      欄の並びは元の台帳と違うことがあるが、中身は同じ（読む側は欄の名前で読む）
+    */
+    const siteFacts: Array<PostingSiteFacts | Record<string, unknown>> = [
+      ...(ledger.siteFacts ?? []),
+    ];
+    for (const skipped of this.skippedSiteCompletions) {
+      const index = siteFacts.findIndex((entry) => entry.site === skipped.site);
+      const restored = { completion: skipped.completion, completionAt: skipped.completionAt };
+      if (index < 0) {
+        siteFacts.push({ site: skipped.site, ...restored });
+      } else if ((siteFacts[index] as PostingSiteFacts).completion === undefined) {
+        siteFacts[index] = { ...siteFacts[index], ...restored };
+      }
+    }
+
     const body = JSON.stringify(
       {
         schemaVersion: ledger.schemaVersion || POSTING_SCHEMA_VERSION,
@@ -257,9 +328,17 @@ export class PostingStore {
           **この欄を知らない古い版が保存すると、3つとも消える**（古い版は名指しした欄しか
           書かない。サイト固有の指標と同じ「消せない限界」。設計書6.79.7）。
         */
-        ...(ledger.siteFacts?.length ? { siteFacts: ledger.siteFacts } : {}),
+        ...(siteFacts.length ? { siteFacts } : {}),
         ...(ledger.tagChanges?.length ? { tagChanges: ledger.tagChanges } : {}),
-        ...(ledger.completion ? { completion: ledger.completion } : {}),
+        /*
+          作者の印。**作者が選んでいれば、そちらが勝つ**。選んでいなければ、読まなかった
+          知らない値をそのまま戻す（新しい版が書いた値を消さない。2026-11-01）
+        */
+        ...(ledger.completion
+          ? { completion: ledger.completion }
+          : this.skippedCompletion
+            ? { completion: this.skippedCompletion }
+            : {}),
       },
       null,
       2

@@ -567,9 +567,11 @@ import {
 import {
   configurePostingSites,
   postNewEpisode,
+  notifyPostingUnknownValuesOnce,
   recordRanking,
   setWorkCompletion,
 } from "./features/postingKit";
+import { onPostingUnknownValues } from "./core/postingStore";
 import {
   importReaderStats,
   recordReaderStats,
@@ -1262,6 +1264,10 @@ export async function activate(
   // 編集部が校閲中の話を、作者が書けないようにする関所と、素のエディターへの警告
   // （作者の裁定、2026-10-28。ブラウザ版でも動く＝git を使わない）
   context.subscriptions.push(installEditorLockGuard(registry));
+
+  // 投稿状態の台帳に、この版が知らない値（連載の状態など）があったら一度だけ知らせる
+  // （作者の判断 2026-11-01。台帳ごと止めず、その欄だけ読まずに持ち回る）
+  context.subscriptions.push(onPostingUnknownValues(notifyPostingUnknownValuesOnce));
 
   /**
    * 作品一覧のビュー。**走査中の件数を見出しの右へ出す**ために持つ。

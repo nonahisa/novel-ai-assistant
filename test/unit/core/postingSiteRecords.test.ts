@@ -783,7 +783,7 @@ describe("執筆量パネルの側", () => {
    */
   test("台帳を読めなかった理由を出す配線がある", () => {
     expect(panelHtml).toContain("siteRecordsError");
-    expect(panelHtml).toContain("サイトの記録を読めませんでした");
+    expect(panelHtml).toContain("読者の反応の記録を読めませんでした");
   });
 
   test("節の置き場と、開く道の配線がある", () => {

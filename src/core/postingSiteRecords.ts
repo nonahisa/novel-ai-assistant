@@ -4,6 +4,7 @@ import {
   postingSiteInfo,
   rankingsForSite,
   readerStatsForSite,
+  readerStatsInLedgerOrder,
   siteFactsFor,
   siteProfile,
   workCompletionLabel,
@@ -119,6 +120,11 @@ export interface PostingSiteRecord {
   tagHistory: PostingTagChange[];
   /** そのサイトの連載の状態（届いた印）。無ければ null */
   completion: WorkCompletion | null;
+  /**
+   * その呼び方（「休載」）。**画面で二択の分岐を書かせない**ために core が渡す
+   * （休載を足したとき、画面の側に「完結でなければ連載中」の分岐が残っていた。2026-11-01）
+   */
+  completionLabel: string | null;
 }
 
 /** サイトの印が作品の印と食い違ったもの */
@@ -299,9 +305,8 @@ export function buildPostingSiteRecords(
       並べ替える）。同じ日時に同じ話が2件あるとき、あとから足したほうを
       採るには、足した順が要る。
     */
-    const inLedgerOrder = (ledger.readerStats ?? []).filter(
-      (entry) => entry.site === info.id
-    );
+    // 同じ日の Narou.fun の読み取りは、ここで畳んである（作者の判断 2026-11-01）
+    const inLedgerOrder = readerStatsInLedgerOrder(ledger, info.id);
     const rates = computeReaderRates(inLedgerOrder);
     const facts = siteFactsFor(ledger, info.id);
     const tagHistory = (ledger.tagChanges ?? [])
@@ -372,10 +377,51 @@ export function buildPostingSiteRecords(
       tagsAt: facts?.tags !== undefined ? facts.tagsAt ?? null : null,
       tagHistory,
       completion: facts?.completion ?? null,
+      completionLabel:
+        facts?.completion !== undefined ? workCompletionLabel(facts.completion) : null,
     });
   }
 
   return records;
+}
+
+/** 「読者の反応」の中のサイトのタブ1つ */
+export interface ReaderSiteTab {
+  site: PostingSiteId;
+  label: string;
+}
+
+/**
+ * 「読者の反応」の中に出すサイトのタブ（作者の指示 2026-11-01「サイトごとにタブをわけて。
+ * 配信されているサイトのみタブを表示し、なろうを最後尾に」）。
+ *
+ * **配信されているサイト**は、次のどれかがあるサイトとする：
+ *   - 投稿先として登録してある（`sites`。投稿サイト設定で登録したもの）
+ *   - サイトの記録の行がある（`buildPostingSiteRecords` が出す行。作品ID・作品ページの
+ *     URL・順位・読者の反応・届いたタグや連載の状態のどれかがある）
+ *
+ * 投稿先から外したサイトでも、記録が残っていればタブを出す——外した間も、そこで読まれた
+ * 数は作者の記録である（行を出す理由と同じ。6.68.4の8）。
+ *
+ * **並びは今の表示の順（`POSTING_SITES`）を保ち、なろうだけを最後尾へ回す。**
+ * なろうの数はなろうファンDB（Narou.fun）から来るもので、ほかのサイトの管理画面の数より
+ * 遅れて集まる。ほかのサイトを先に見られるようにする。
+ */
+export function readerSiteTabs(
+  ledger: PostingLedger,
+  records: readonly PostingSiteRecord[]
+): ReaderSiteTab[] {
+  const shown = new Set<PostingSiteId>([
+    ...ledger.sites.map((entry) => entry.site),
+    ...records.map((record) => record.site),
+  ]);
+  const ordered = [
+    ...POSTING_SITES.filter((info) => info.id !== "narou"),
+    ...POSTING_SITES.filter((info) => info.id === "narou"),
+  ];
+  return ordered
+    .filter((info) => shown.has(info.id))
+    .map((info) => ({ site: info.id, label: postingSiteInfo(info.id).label }));
 }
 
 /**

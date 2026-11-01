@@ -624,8 +624,17 @@ export interface PostingLedger {
   completion?: PostingWorkCompletion;
 }
 
-/** 連載の状態（ヘルパーの封筒の `completion` と同じ値） */
-export const WORK_COMPLETIONS = ["ongoing", "completed"] as const;
+/**
+ * 連載の状態（ヘルパーの封筒の `completion` と同じ値）。
+ *
+ * **休載（`hiatus`）は作者の判断で足した**（2026-11-01）。ヘルパーはいま連載中と完結しか
+ * 送らない（0.16.0）。休載に当たる値を送るようになったら、この名前で受ける約束にする。
+ *
+ * 並びは選ぶ画面の並びそのまま。**知らない値を台帳で読んだら、その欄だけ読まずに
+ * 生のまま持ち回る**（`readPostingLedger`）——ここへ値を足した新しい版の台帳を、
+ * 古い版が開いても投稿の記録ごと止まらないように。
+ */
+export const WORK_COMPLETIONS = ["ongoing", "completed", "hiatus"] as const;
 
 export type WorkCompletion = (typeof WORK_COMPLETIONS)[number];
 
@@ -638,8 +647,15 @@ export function isWorkCompletion(value: unknown): value is WorkCompletion {
 
 /** 画面に出す呼び方 */
 export function workCompletionLabel(value: WorkCompletion): string {
-  return value === "completed" ? "完結" : "連載中";
+  return WORK_COMPLETION_LABELS[value];
 }
+
+/** 呼び方の表。値を足したら、ここで型が足りないと言われる（二択の分岐を書かない） */
+const WORK_COMPLETION_LABELS: Readonly<Record<WorkCompletion, string>> = {
+  ongoing: "連載中",
+  completed: "完結",
+  hiatus: "休載",
+};
 
 /**
  * その作品を覚えた理由（ヘルパー 0.16.0 の封筒の `ownedVia`）。
@@ -899,6 +915,31 @@ export function validateWorkPageUrl(
   return validateSiteUrl(site, trimmed);
 }
 
+/**
+ * 作者が入れた作品IDの形を確かめる（作者の判断 2026-11-01）。空は通す（任意の欄）。
+ *
+ * **確かめるのはアルファポリスだけ。** 作品IDは数字9桁（投稿画面の URL
+ * `/mypage/novel/save_episode/{作品ID}` の末尾）で、ヘルパーはこの9桁で貼り込み先を
+ * 照合する。0.116.1 までの例に従って「作者番号／作品番号」を入れた作品は、あとで
+ * 取り違えとして止まるので、入れたその場で**どこを写すか**まで言う。
+ * ほかのサイトは形を確かめていない（なろうのNコードは照合の側で読む）ので、今までどおり問わない。
+ *
+ * 全角の数字は通さない（ヘルパーの照合は半角の9桁。直して受けると、作者の打った字と
+ * 台帳の字が食い違う）。
+ *
+ * @returns 断る理由。通すなら null
+ */
+export function validateSiteWorkIdInput(site: PostingSiteId, value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || site !== "alphapolis") return null;
+  if (/^[0-9]{9}$/.test(trimmed)) return null;
+  return (
+    "アルファポリスの作品IDは数字9桁です。" +
+    "投稿画面の URL の末尾の9桁の数字を入れてください" +
+    "（例：https://www.alphapolis.co.jp/mypage/novel/save_episode/123456789 なら 123456789）。"
+  );
+}
+
 function validateSiteUrl(site: PostingSiteId, trimmed: string): string | null {
   const info = postingSiteInfo(site);
   let url: URL;
@@ -946,6 +987,25 @@ export interface PostingLedgerReadResult {
    * なる。持ち回すのは書き戻す口（`core/postingStore.ts`）の仕事である。
    */
   skippedReaderStatsRows: unknown[];
+  /**
+   * 作品の連載の状態のうち、**この版が知らない値**だったもの（JSONそのままの形。2026-11-01）。
+   *
+   * 読み飛ばした行と同じく**保存で消さないために返す**。新しい版が足した状態
+   * （休載を足したのと同じように）を、古い版が保存で消してはいけない。
+   * 知っている値なら undefined。
+   */
+  skippedCompletion?: Record<string, unknown>;
+  /** サイトごとの連載の状態のうち、この版が知らない値だったもの（生のまま） */
+  skippedSiteCompletions: SkippedSiteCompletion[];
+  /** 読まなかった値の説明（作者へ一度知らせる文の材料）。無ければ空 */
+  unknownValues: string[];
+}
+
+/** サイトの事柄から外した、知らない連載の状態（`completion` と `completionAt` の対） */
+export interface SkippedSiteCompletion {
+  site: PostingSiteId;
+  completion: string;
+  completionAt: string;
 }
 
 /**
@@ -1188,9 +1248,22 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
     **欄が無ければ無いまま**（これより前の台帳を読めなくしない）。壊れていれば
     **直さずに止める**——とくに `completion` は作者が決めた値で、推測で読み替えると
     作者の決定を書き換えたことになる（実装ルール2）。
+
+    **ただし「知らない連載の状態」だけは止めない**（作者の判断 2026-11-01「休載を足す」）。
+    文字列ではあるがこの版の一覧に無い値は、新しい版が足した状態である見込みが高い。
+    そこで台帳ごと止めると、投稿キットも執筆統計も、その作品だけ使えなくなる。
+    その欄だけを読まずに生のまま返し（保存で書き戻すのは `PostingStore`）、作者へは
+    一度知らせる。**型の違い・日時の欠けは壊れたJSONとして今までどおり止める。**
   */
+  const unknownValues: string[] = [];
+  const skippedSiteCompletions: SkippedSiteCompletion[] = [];
   const siteFacts = optionalObjectArray(value.siteFacts, "siteFacts", (entry, entryPath) =>
-    readSiteFactsRow(entry, entryPath)
+    readSiteFactsRow(entry, entryPath, (skipped) => {
+      skippedSiteCompletions.push(skipped);
+      unknownValues.push(
+        `${postingSiteInfo(skipped.site).label}の連載の状態「${skipped.completion}」`
+      );
+    })
   );
   if (siteFacts) {
     const seen = new Set<PostingSiteId>();
@@ -1208,11 +1281,18 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
     return { site, changedAt: (entry.changedAt as string).trim(), before, after };
   });
   let completion: PostingWorkCompletion | undefined;
+  let skippedCompletion: Record<string, unknown> | undefined;
   if (value.completion !== undefined) {
     const raw = objectValue(value.completion, "completion");
-    if (!isWorkCompletion(raw.value)) invalid("completion.value");
+    requireNonEmptyString(raw.value, "completion.value");
     requireNonEmptyString(raw.setAt, "completion.setAt");
-    completion = { value: raw.value as WorkCompletion, setAt: (raw.setAt as string).trim() };
+    if (isWorkCompletion(raw.value)) {
+      completion = { value: raw.value, setAt: (raw.setAt as string).trim() };
+    } else {
+      // 知らない状態。**写しを整えずにそのまま持つ**（整えると、整えた形がこちらの作り物になる）
+      skippedCompletion = raw;
+      unknownValues.push(`作品の連載の状態「${String(raw.value)}」`);
+    }
   }
 
   return {
@@ -1231,6 +1311,9 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
     },
     skippedReaderStats: skippedReaderStatsRows.length,
     skippedReaderStatsRows,
+    ...(skippedCompletion ? { skippedCompletion } : {}),
+    skippedSiteCompletions,
+    unknownValues,
   };
 }
 
@@ -1271,7 +1354,11 @@ function parseReaderStatsMetrics(
  * 値と日時は対で持つ（`PostingSiteFacts` の注記）。片方だけの欄は、いつの値か
  * 分からないので直さずに止める。
  */
-function readSiteFactsRow(entry: Record<string, unknown>, entryPath: string): PostingSiteFacts {
+function readSiteFactsRow(
+  entry: Record<string, unknown>,
+  entryPath: string,
+  onUnknownCompletion: (skipped: SkippedSiteCompletion) => void
+): PostingSiteFacts {
   const site = requireSiteId(entry.site, `${entryPath}.site`);
   const facts: PostingSiteFacts = { site };
   const pairs = [
@@ -1287,9 +1374,17 @@ function readSiteFactsRow(entry: Record<string, unknown>, entryPath: string): Po
       facts.tags = readReaderStatsTags(entry.tags) ?? invalid(`${entryPath}.tags`);
       facts.tagsAt = at;
     } else if (key === "completion") {
-      if (!isWorkCompletion(entry.completion)) invalid(`${entryPath}.completion`);
-      facts.completion = entry.completion;
-      facts.completionAt = at;
+      /*
+        知らない状態の文字列は、この欄の対だけを外す（`readPostingLedger` の注記）。
+        タグ・覚えた理由は読めるので残す。文字列でなければ壊れた形として止める
+      */
+      requireNonEmptyString(entry.completion, `${entryPath}.completion`);
+      if (isWorkCompletion(entry.completion)) {
+        facts.completion = entry.completion;
+        facts.completionAt = at;
+      } else {
+        onUnknownCompletion({ site, completion: entry.completion as string, completionAt: at });
+      }
     } else {
       if (!isReaderStatsOwnedVia(entry.ownedVia)) invalid(`${entryPath}.ownedVia`);
       facts.ownedVia = entry.ownedVia;
@@ -2061,7 +2156,8 @@ export function withReaderStats(
  * 取り込もうとしている記録が、**台帳に積んである数の繰り返し**か
  * （残課題 B11 の続き、作者の裁定 2026-09-23「同じ表を2度取り込んでも二重に積まない」）。
  *
- * 台帳は追記だけで畳まない（`withReaderStats`）。ただし、次の2つは
+ * 台帳は追記だけで畳まない（`withReaderStats`）。ただし、次の2つ（と、関数の中の3。
+ * Narou.fun の同じ日の同じ数。2026-11-01）は
  * 「いつ何件だったか」の履歴に何も足さないので積まない：
  *
  * 1. **まったく同じ記録**（読み取り日時・範囲・粒度・期間・数・出どころが同じ）。
@@ -2111,6 +2207,21 @@ export function repeatsReaderStats(
     return true;
   }
 
+  /*
+    3. **Narou.fun の同じ日の読み取りで、その日にいま見えている数と同じ**もの
+       （作者の判断 2026-11-01）。読むときに同じ日はあとの方だけを見る
+       （`collapseNarouFunSameDay`）ので、同じ数をもう1件積んでも見え方は変わらない。
+       **数が違えば積む**——読むときにあとの方が勝つので、新しい数は消えない
+  */
+  const dayKey = narouFunDayKey(record);
+  if (dayKey !== undefined) {
+    const sameDay = collapseNarouFunSameDay(
+      rows.filter((row) => row.source === record.source && narouFunDayKey(row) === dayKey)
+    );
+    const shownToday = sameDay[sameDay.length - 1];
+    if (shownToday && sameReaderStatsMetrics(shownToday.metrics, record.metrics)) return true;
+  }
+
   // 話ごとの日別は、いまどのサイトも送らず、グラフも描かない（比べる相手が無い）
   if (record.scope !== "work" || record.period !== "day") return false;
   let shown: { row: ReaderStatsRecord; time: number } | undefined;
@@ -2143,9 +2254,79 @@ export function readerStatsForSite(
   ledger: PostingLedger,
   site: PostingSiteId
 ): ReaderStatsRecord[] {
-  return (ledger.readerStats ?? [])
-    .filter((entry) => entry.site === site)
-    .sort((left, right) => compareReadAtDesc(left, right));
+  // 同じ日の Narou.fun の読み取りは、あとの方だけを見る（`collapseNarouFunSameDay`）
+  return collapseNarouFunSameDay(readerStatsInLedgerOrder(ledger, site)).sort(
+    (left, right) => compareReadAtDesc(left, right)
+  );
+}
+
+/**
+ * そのサイトの反応を、**台帳に書かれた順のまま**返す（率とグラフ用。同じ日時に2件あれば
+ * あとから足したほうを採るには、足した順が要る）。同じ日の Narou.fun の読み取りは畳む
+ */
+export function readerStatsInLedgerOrder(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): ReaderStatsRecord[] {
+  return collapseNarouFunSameDay(
+    (ledger.readerStats ?? []).filter((entry) => entry.site === site)
+  );
+}
+
+/**
+ * なろうファンDB（Narou.fun）の、**同じ日の読み取りを1つに畳む**（作者の判断 2026-11-01）。
+ * 同じ日に2回以上読んだら、**あとの方だけ**を残す。日ごとのグラフ・履歴の表が1日1つになる。
+ *
+ * - **台帳は書き換えない。** 読むときに畳むだけで、作者のファイルからは1件も消さない
+ *   （直す前の版で重なって積まれた記録も、ここを通れば同じ扱いになる）
+ * - **日の区切りは手元の暦日（0:00）。** Narou.fun の記録の日時は「データ取得の日の 0:00」
+ *   （readAtBasis が fetched。2026-11-01 から）なので、執筆量の区切り（既定は朝4時。
+ *   `stats.dayBoundaryHour`）で切ると前の日へ落ちる。履歴の表の「今日」の欄も手元の暦日で
+ *   見ている（`postingSiteRecords.ts` の `localDateKey`）ので、そちらに揃えた
+ * - **畳むのは「なろう × ヘルパー」の記録だけ。** なろうの数をヘルパーが読むのは
+ *   Narou.fun だけ（なろう本体は機械で読まない）なので、この2つで Narou.fun の封筒と言える。
+ *   カクヨムの同じ日の2回は、今までどおり「その時に見た数」として2回並べる
+ * - 1回の読み取りは範囲・話・粒度・期間ごとに何件にも分かれて入るので、**その組ごと**に
+ *   畳む（作品全体の数と、日別の30日ぶんを互いに消さない）
+ * - 日時の読めない記録は畳まない（どちらが後か決められない。捨てもしない）
+ *
+ * @param records **台帳に書かれた順**。返すのも同じ順（落とした記録を抜いただけ）
+ */
+export function collapseNarouFunSameDay(
+  records: readonly ReaderStatsRecord[]
+): ReaderStatsRecord[] {
+  const latest = new Map<string, { index: number; time: number }>();
+  records.forEach((record, index) => {
+    const key = narouFunDayKey(record);
+    if (key === undefined) return;
+    const time = Date.parse(record.readAt);
+    const found = latest.get(key);
+    // 同じ日時なら、台帳であとにある方（`>=`）
+    if (!found || time >= found.time) latest.set(key, { index, time });
+  });
+  if (latest.size === 0) return [...records];
+  return records.filter((record, index) => {
+    const key = narouFunDayKey(record);
+    return key === undefined || latest.get(key)?.index === index;
+  });
+}
+
+/**
+ * 畳む組の鍵。Narou.fun の記録でなければ undefined（畳まない）。
+ * 区切りにNULを使うのは、どの欄にも現れない字だからである（生のままは置かない）
+ */
+function narouFunDayKey(record: ReaderStatsRecord): string | undefined {
+  if (record.site !== "narou" || record.source !== "helper") return undefined;
+  const when = new Date(record.readAt);
+  if (Number.isNaN(when.getTime())) return undefined;
+  const day = `${when.getFullYear()}-${when.getMonth() + 1}-${when.getDate()}`;
+  return [
+    day,
+    record.scope,
+    record.episode ?? "",
+    record.period ?? "",
+    record.periodKey ?? "",
+  ].join("\u0000");
 }
 
 /** そのサイトの最新の反応。1件も無ければ undefined */

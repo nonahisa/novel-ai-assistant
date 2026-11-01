@@ -14,6 +14,7 @@ import {
   unpostedSites,
   validateNewEpisodeUrl,
   validateRankInput,
+  validateSiteWorkIdInput,
   validateWorkPageUrl,
   withBaselinePosts,
   WORK_COMPLETIONS,
@@ -30,7 +31,11 @@ import {
   type WorkCompletion,
 } from "../models/posting";
 import { buildWorkPostingFacts } from "../core/postingSiteRecords";
-import { PostingStore, PostingStoreError } from "../core/postingStore";
+import {
+  PostingStore,
+  PostingStoreError,
+  type PostingUnknownValues,
+} from "../core/postingStore";
 import { episodePathFor } from "../core/bookStore";
 // 章の題は作品一覧と同じ源（章立ての台帳を話の並びで束ねたもの）から引く
 import { ChapterStore, ChapterStoreError } from "../core/chapterStore";
@@ -710,7 +715,7 @@ async function askSiteProfiles(
         label: "$(edit) 作品ID・作品ページ・ジャンルも入れる",
         detail:
           "サイトごとに3つ訊きます（どれも空のままで構いません）。" +
-          "執筆統計の「サイトの記録」に出ます",
+          "執筆統計の「読者の反応」に出ます",
         detailed: true,
       },
     ],
@@ -757,6 +762,12 @@ async function askSiteProfiles(
       value: current?.workId || derived.workId,
       placeHolder: info.workIdExample,
       ignoreFocusOut: true,
+      /*
+        アルファポリスは数字9桁でなければ、どこを写すかを言って止める（作者の判断 2026-11-01）。
+        違う形のまま入ると、ヘルパーの照合で取り違えとして止まり、原因にたどり着きにくい。
+        空は通す（作品IDは任意）
+      */
+      validateInput: (value) => validateSiteWorkIdInput(entry.site, value) ?? undefined,
     });
     // **Escは「ここまでで終える」。** 入れたぶんはそのまま残し、
     // まだ訊いていないサイトの作品情報にも触らない
@@ -909,7 +920,7 @@ export async function recordRanking(
 
   void vscode.window.showInformationMessage(
     `${info.label} ${board} ${rank}位 を記録しました。` +
-      "執筆統計の「サイトの記録」で履歴を見られます。"
+      "執筆統計の「読者の反応」で履歴を見られます。"
   );
   return { changed: true };
 }
@@ -923,6 +934,29 @@ export async function recordRanking(
  *
  * サイトの登録が無い作品でも決められる（投稿していない作品の完結も、作者が記録したい）。
  */
+/** 知らせた台帳と中身（同じ知らせは、VS Code を起こしている間に一度だけ出す） */
+const toldUnknownValues = new Set<string>();
+
+/**
+ * 投稿状態の台帳で、この版が知らない値を読まなかったことを**一度だけ**知らせる
+ * （作者の判断 2026-11-01。`onPostingUnknownValues` に付ける）。
+ *
+ * 台帳は執筆統計・作品一覧・投稿キットが開くたびに読み直すので、毎回出すと直すまで
+ * 邪魔になる。**台帳の場所と中身の組で一度**——中身が変わったら（別の値が増えたら）また言う。
+ * 黙ってもいない：読まなかった値は保存でも消さずに持ち回るが、それをこちらが黙って
+ * 抱えていると、作者は「選んだはずの状態が出ない」理由にたどり着けない。
+ */
+export function notifyPostingUnknownValuesOnce(info: PostingUnknownValues): void {
+  const key = [info.filePath.toLowerCase(), ...info.notes].join("\u0000");
+  if (toldUnknownValues.has(key)) return;
+  toldUnknownValues.add(key);
+  void vscode.window.showWarningMessage(
+    `投稿状態（${info.filePath}）に、この版が知らない値がありました：${info.notes.join("、")}。` +
+      "その欄だけを読まずに、ほかの記録はそのまま使います（台帳からは消しません）。" +
+      "拡張機能を新しい版にすると読めるようになります。"
+  );
+}
+
 export async function setWorkCompletion(work: WorkEntry): Promise<PostingKitResult> {
   const store = new PostingStore(work);
   const ledger = await load(store, work);

@@ -324,7 +324,7 @@ describe("知らせ（1つにまとめる）", () => {
     expect(notice.level).toBe("info");
     expect(notice.message).toBe(
       "読者の反応を取り込みました：「作品A」3画面・「作品B」1画面（同じ数で積まなかったもの 2件）。" +
-        "執筆統計の「サイトの記録」で履歴を見られます。"
+        "執筆統計の「読者の反応」で履歴を見られます。"
     );
   });
 
@@ -355,7 +355,7 @@ describe("知らせ（1つにまとめる）", () => {
     });
     expect(notice.message.startsWith("読者の反応を取り込めませんでした。")).toBe(true);
     expect(notice.message).not.toContain("投稿サイト設定");
-    expect(notice.message).not.toContain("サイトの記録");
+    expect(notice.message).not.toContain("で履歴を見られます");
   });
 
   test("取り込めなかったものが多ければ、先頭だけ並べて残りは件数で言う", () => {

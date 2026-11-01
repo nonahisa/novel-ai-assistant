@@ -105,7 +105,8 @@ describe("キーボードで動かせる作り", () => {
     // 選んでいるのは1つだけで、焦点で巡るのもそれだけ
     expect(tabTags.filter((tag) => tag.includes('aria-selected="true"'))).toHaveLength(1);
     expect(tabTags.filter((tag) => tag.includes('tabindex="0"'))).toHaveLength(1);
-    expect((perWork.match(/role="tabpanel"/g) ?? []).length).toBe(4);
+    // 数えるのは外側の面だけ（スクリプトの中には、読者の反応のサイトの面を組む字がある）
+    expect((perWork.split("<script")[0].match(/role="tabpanel"/g) ?? []).length).toBe(4);
   });
 
   const after = new Function(`${functionSource("tabIndexAfterKey")}\nreturn tabIndexAfterKey;`)() as (
@@ -129,10 +130,10 @@ describe("キーボードで動かせる作り", () => {
   });
 });
 
-describe("最後に開いていたタブを覚える", () => {
-  /** selectTab を作り物の DOM で動かす */
-  function run(saved: unknown, click?: string): { active: string | null; stored: unknown } {
-    let stored: unknown = saved;
+describe("前に見ていたタブで開く（作品ごと。作者の判断 2026-11-01）", () => {
+  /** selectTab を作り物の DOM で動かす。画面から拡張機能へ送った知らせも集める */
+  function run(initial: string, click?: string): { active: string | null; posted: unknown[] } {
+    const posted: unknown[] = [];
     const makeTab = (page: string) => {
       const classes = new Set<string>();
       const attributes: Record<string, string> = {};
@@ -158,44 +159,122 @@ describe("最後に開いていたタブを覚える", () => {
     const fakeDocument = {
       querySelectorAll: (selector: string) => (selector === ".tab" ? tabs : selector === ".page" ? pages : []),
     };
-    const fakeVscode = {
-      getState: () => stored,
-      setState: (value: unknown) => {
-        stored = value;
-      },
-    };
+    const fakeVscode = { postMessage: (message: unknown) => posted.push(message) };
     const select = new Function(
       "document",
       "vscode",
       `${functionSource("selectTab")}\nfunction pinChartToLatest() {}\nreturn selectTab;`
-    )(fakeDocument, fakeVscode) as (page: string, focus: boolean) => void;
-    const initial =
-      saved && typeof (saved as { tab?: unknown }).tab === "string" ? (saved as { tab: string }).tab : "overview";
-    select(initial, false);
-    if (click) select(click, false);
+    )(fakeDocument, fakeVscode) as (page: string, focus: boolean, remember?: boolean) => void;
+    // 開いたときの選び直しは覚え直さない（拡張機能が覚えている値で開いたところ）
+    select(initial, false, false);
+    if (click) select(click, false, true);
     const activePage = pages.find((page) => page.classList.has("active"));
     const selected = tabs.filter((tab) => tab.attributes["aria-selected"] === "true");
     expect(selected).toHaveLength(1);
     expect(activePage?.id).toBe(`page-${selected[0].dataset.page}`);
-    return { active: selected[0].dataset.page, stored };
+    return { active: selected[0].dataset.page, posted };
   }
 
-  test("押したタブを覚え、次に開いたときはそのタブから始まる", () => {
-    const first = run(undefined, "readers");
-    expect(first.stored).toEqual({ tab: "readers" });
-    expect(run(first.stored).active).toBe("readers");
+  test("押したタブを拡張機能へ知らせる（覚えるのは拡張機能の側）", () => {
+    const result = run("overview", "readers");
+    expect(result.active).toBe("readers");
+    expect(result.posted).toEqual([{ type: "tabSelected", tab: "readers" }]);
   });
 
-  test("覚えていなければ概要から始まる", () => {
-    expect(run(undefined).active).toBe("overview");
+  test("開いたときの選び直しでは知らせない", () => {
+    expect(run("trend").posted).toEqual([]);
   });
 
-  test("無いタブを覚えていたら、先頭の概要へ戻す", () => {
-    expect(run({ tab: "writing" }).active).toBe("overview");
+  test("無いタブを渡されたら、先頭の概要へ戻す", () => {
+    expect(run("writing").active).toBe("overview");
   });
 
-  test("開いたときに覚えた値を読む配線がある", () => {
-    expect(scriptOf(perWork)).toContain("vscode.getState()");
+  test("覚えていたタブを選んだ状態で画面を組む（開いた瞬間に概要が見えない）", () => {
+    const html = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", { initialTab: "readers" });
+    expect(html).toContain('<section class="page active" id="page-readers"');
+    expect(html).toContain('<section class="page" id="page-overview"');
+    const tabTags = [...html.matchAll(/<div class="tab(?: [^"]*)?"[^>]*>/g)].map((m) => m[0]);
+    expect(tabTags.filter((tag) => tag.includes('aria-selected="true"'))).toEqual([
+      expect.stringContaining('data-page="readers"'),
+    ]);
+    expect(html).toContain('data-initial-tab="readers"');
+  });
+
+  test("その画面に無いタブ・知らない鍵を渡されたら概要で組む", () => {
+    const all = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", {
+      hasEpisodesTab: false,
+      hasReadersTab: false,
+      initialTab: "readers",
+    });
+    expect(all).toContain('<section class="page active" id="page-overview"');
+    expect(all).toContain('data-initial-tab="overview"');
+    const odd = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", {
+      initialTab: '"><script>',
+    });
+    expect(odd).toContain('data-initial-tab="overview"');
+    expect(odd).not.toContain('"><script>');
+  });
+
+  test("WebView の中の記憶（閉じると消える）には頼らない", () => {
+    expect(scriptOf(perWork)).not.toContain("vscode.setState");
+    expect(scriptOf(perWork)).toContain("dataset.initialTab");
+  });
+});
+
+describe("0話の作品の「話ごと」", () => {
+  test("タブは隠さない", () => {
+    // 作品ごとの画面は、話の有無にかかわらず4つ（話の数を見て組み替えない）
+    expect(tabsOf(perWork).map((tab) => tab.key)).toContain("episodes");
+  });
+
+  function renderEmpty(html: string): { cards: string; table: string } {
+    const cards = { innerHTML: "" };
+    const table = { innerHTML: "" };
+    const script = scriptOf(html);
+    const start = script.indexOf("\nfunction renderEpisodes(");
+    const end = script.indexOf("\n}\n", start);
+    const helpers = ["formatCount", "card", "escapeHtml"]
+      .map((name) => {
+        const s = script.indexOf(`\nfunction ${name}(`);
+        return script.slice(s, script.indexOf("\n}\n", s) + 3);
+      })
+      .join("\n");
+    const render = new Function(
+      "document",
+      "state",
+      `${helpers}\n${script.slice(start, end + 3)}\nreturn renderEpisodes;`
+    )(
+      { getElementById: (id: string) => (id === "episode-cards" ? cards : id === "episode-table" ? table : null) },
+      {
+        episodes: {
+          summary: {
+            countedFiles: 0,
+            conflictedFiles: 0,
+            totalChars: 0,
+            averageChars: 0,
+            medianChars: 0,
+            longest: null,
+            shortest: null,
+            collectedFiles: 0,
+            countMode: "net",
+          },
+          rows: [],
+        },
+      }
+    ) as () => void;
+    render();
+    return { cards: cards.innerHTML, table: table.innerHTML };
+  }
+
+  test("中身に「まだ話がありません」と出す（札に NaN を出さない）", () => {
+    const shown = renderEmpty(perWork);
+    expect(shown.table).toContain("まだ話がありません");
+    expect(shown.cards).not.toContain("NaN");
+  });
+
+  test("SNS記事の作品では「まだ投稿がありません」", () => {
+    const sns = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", { unitNoun: "投稿" });
+    expect(renderEmpty(sns).table).toContain("まだ投稿がありません");
   });
 });
 

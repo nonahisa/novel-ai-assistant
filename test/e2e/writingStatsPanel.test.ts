@@ -189,6 +189,43 @@ test("作品の種類を変えると、開いている統計の「目安」の�
   );
 });
 
+/*
+  前に見ていたタブで開く（作者の判断 2026-11-01）。WebView の中の記憶は閉じると消えるので、
+  **閉じて開き直したとき**に前のタブで開くことを見る（作品ごとに拡張機能の保管庫で覚える）。
+  0話の作品でも「話ごと」のタブは出て、中身に「まだ話がありません」と言う
+*/
+const CLOSE_STATS_KEY = { key: "ctrl+alt+shift+w", command: "workbench.action.closeActiveEditor" };
+
+test("執筆統計は閉じて開き直しても前に見ていたタブで開き、0話の作品でも「話ごと」のタブがあって「まだ話がありません」と出る", async () => {
+  await withVsCode(
+    "統計のタブの記憶",
+    [],
+    async (session) => {
+      const first = await openStatsWithoutBars(session);
+      // 0話の作品でも「話ごと」のタブは隠れていない
+      await first.locator('.tab[data-page="episodes"]').click();
+      await waitUntil(
+        async () => (await first.locator("#episode-table", { hasText: "まだ話がありません" }).count()) === 1,
+        "0話の作品で「まだ話がありません」が出る",
+        20_000
+      );
+      // 読者の反応のタブへ移って閉じる
+      await first.locator('.tab[data-page="readers"]').click();
+      await session.page.keyboard.press("Control+Alt+Shift+KeyW");
+      await waitUntil(async () => (await statsFrame(session.page)) === undefined, "執筆統計が閉じる", 15_000);
+
+      const reopened = await openStatsWithoutBars(session);
+      await waitUntil(
+        async () => (await reopened.locator('.tab.active[data-page="readers"]').count()) === 1,
+        "開き直すと前に見ていた「読者の反応」で開く",
+        15_000
+      );
+      expect(await reopened.locator("#page-readers.active").count()).toBe(1);
+    },
+    { keybindings: [CLOSE_STATS_KEY] }
+  );
+});
+
 /** 執筆統計の画面を開く（日ごとの棒が描かれるのは待たない。記録が無い作品でも使える） */
 async function openStatsWithoutBars(session: E2ESession): Promise<Frame> {
   await runCommand(session.page, "執筆統計");

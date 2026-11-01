@@ -202,22 +202,32 @@ describe("執筆統計の画面", () => {
     expect(render({ tags: null, tagsAt: null, tagHistory: [] })).toBe("");
   });
 
-  test("サイト間の食い違いは、片方にしか無いタグをサイトごとに言う", () => {
+  /*
+    読者の反応をサイトごとのタブに分けた（作者の指示 2026-11-01）ので、サイトをまたぐ
+    食い違いは**そのサイトのタブで、そのサイトの分だけ**言う
+  */
+  test("サイト間の食い違いは、そのサイトのタブで、そのサイトにしか無いタグを言う", () => {
     const render = new Function(
       [
         "var state = { workFacts: { tagDifferences: [",
         "{ site: 'kakuyomu', label: 'カクヨム', only: ['群像劇'] },",
-        "{ site: 'alphapolis', label: 'アルファポリス', only: ['<恋愛>'] } ] } };",
+        "{ site: 'alphapolis', label: 'アルファポリス', only: ['<恋愛>'] } ],",
+        "completion: { value: 'completed', label: '完結', setAt: 'x' },",
+        "mismatches: [{ site: 'kakuyomu', label: 'カクヨム', completion: 'hiatus', completionLabel: '休載' }] } };",
         extractFunction(panelScript, "escapeHtml"),
-        extractFunction(panelScript, "renderTagDifferences"),
-        "return renderTagDifferences;",
+        extractFunction(panelScript, "renderSiteCrossNotes"),
+        "return renderSiteCrossNotes;",
       ].join("\n")
-    )() as () => string;
-    const html = render();
-    expect(html).toContain("サイトによってタグが違います");
-    expect(html).toContain("カクヨムだけ 群像劇");
+    )() as (site: string) => string;
+    const kakuyomu = render("kakuyomu");
+    expect(kakuyomu).toContain("ほかのサイトに無いタグ：群像劇");
+    expect(kakuyomu).toContain("作品は完結にしてありますが、このサイトでは休載です");
+    expect(kakuyomu).not.toContain("恋愛");
     // タグは作者の入力なので必ず逃がす
-    expect(html).toContain("アルファポリスだけ &lt;恋愛&gt;");
+    expect(render("alphapolis")).toContain("ほかのサイトに無いタグ：&lt;恋愛&gt;");
+    expect(render("alphapolis")).not.toContain("休載");
+    // 何も無いサイトでは空
+    expect(render("narou")).toBe("");
   });
 
   test("全作品の画面（読者の反応のタブが無い）でも、連載の状態の描画で落ちない作り", () => {

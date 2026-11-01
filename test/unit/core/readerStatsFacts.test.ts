@@ -82,7 +82,8 @@ describe("封筒の3つの欄を受け取る", () => {
     const envelope = envelopeOf(
       kakuyomuRaw({
         tags: ["異世界", 3],
-        completion: "hiatus",
+        // 休載（hiatus）は 2026-11-01 に知っている値になった。知らない値の例を別に使う
+        completion: "paused-forever",
         ownedVia: "stolen",
       })
     );
@@ -443,13 +444,26 @@ describe("台帳へ写す（今のタグ・付け替えの記録・連載の状�
     expect(withNumbers.message).toContain("（タグ・連載の状態も記録しました）");
   });
 
-  test("壊れた作品の印は直さずに止める（作者の書いた値を推測で書き換えない）", () => {
+  /*
+    2026-11-01 の作者の判断（休載を足す）で、**知らない値は台帳ごと止めず、その欄だけ読まない**
+    形に変えた（読み替えもしない。生のまま持ち回って保存でも消さない。workCompletionHiatus.test.ts）。
+    形の壊れ（文字列でない値）は今までどおり止める
+  */
+  test("知らない作品の印は推測で読み替えず、その欄だけ読まない。形の壊れは止める", () => {
+    const read = readPostingLedger({
+      schemaVersion: "1",
+      sites: [],
+      posts: [],
+      completion: { value: "finished", setAt: "2026-11-01T00:00:00.000Z" },
+    });
+    expect(read.ledger.completion).toBeUndefined();
+    expect(read.skippedCompletion).toEqual({ value: "finished", setAt: "2026-11-01T00:00:00.000Z" });
     expect(() =>
       readPostingLedger({
         schemaVersion: "1",
         sites: [],
         posts: [],
-        completion: { value: "finished", setAt: "2026-11-01T00:00:00.000Z" },
+        completion: { value: ["finished"], setAt: "2026-11-01T00:00:00.000Z" },
       })
     ).toThrow();
   });
