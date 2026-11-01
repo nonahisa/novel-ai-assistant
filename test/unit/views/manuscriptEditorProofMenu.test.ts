@@ -40,6 +40,7 @@ function runOpenProofMenu(): { items: MenuItem[]; posted: unknown[]; closed: num
     let menuTerm = null;
     let menuOwner = "";
     function closeMenu() { env.closed += 1; }
+    function keyHandOver() { env.posted.push("handOver"); }
     const menu = {
       set innerHTML(value) { env.items.length = 0; },
       classList: { add() {} },
@@ -102,15 +103,24 @@ describe("上の列の［校正］", () => {
     const labels = env.items.filter((item) => item.kind === "item");
     for (const item of labels) item.click?.();
     expect(env.closed).toBe(labels.length);
+    // 校正の前には、キーの道と同じく打ちかけの字を送る（handOver）
     expect(env.posted).toEqual([
+      "handOver",
       { type: "runProofCheck", check: "typos" },
+      "handOver",
       { type: "runProofCheck", check: "proofread" },
+      "handOver",
       { type: "runProofCheck", check: "notation" },
+      "handOver",
       { type: "runProofCheck", check: "suite" },
       { type: "openMemos" },
     ]);
     // 画面が送る名前は、拡張機能側の表にすべてある（受け取られずに黙らない）
-    for (const message of env.posted.slice(0, 4) as Array<{ check: string }>) {
+    const runs = env.posted.filter(
+      (message): message is { type: string; check: string } =>
+        typeof message === "object" && (message as { type?: string }).type === "runProofCheck"
+    );
+    for (const message of runs) {
       expect(proofCheckCommand(message.check), message.check).toBeDefined();
     }
   });

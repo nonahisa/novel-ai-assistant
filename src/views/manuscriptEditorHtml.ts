@@ -4844,6 +4844,9 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     }
     function run(check) {
       return function () {
+        // **先に打ちかけの字とカーソルの行を送る**（キーの道の keyHandOver と同じ）。
+        // 送り損ねたまま保存・検知へ進むと、最後に打った字が検知に入らない
+        keyHandOver();
         vscode.postMessage({ type: "runProofCheck", check: check });
       };
     }

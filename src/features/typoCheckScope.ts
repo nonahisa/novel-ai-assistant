@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
+import { fromUri } from "../core/paths";
+import { dirtyDocumentsInside } from "./presave";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import { scanWork } from "../core/scanner";
@@ -183,6 +185,22 @@ export async function chooseScope(
   } catch {
     // 走査できないなら絞らない
     return { kind: "all" };
+  }
+  /*
+    **未保存の話は「いま書いた」ものとして数える**（作者の判断 2026-11-02）。
+    未保存は実行の確認の窓で保存する（`features/presave.ts`）ので、範囲を選ぶ
+    時点ではまだファイルに入っていない。更新時刻だけで数えると、いま打っている
+    話が「前回から書いた分だけ」から黙って落ちる（前は保存が先だった）
+  */
+  const dirty = dirtyDocumentsInside(work.folderPath).map((document) =>
+    fromUri(document.uri)
+  );
+  if (dirty.length > 0) {
+    candidates = candidates.map((candidate) =>
+      dirty.some((dirtyPath) => path.isSamePath(dirtyPath, candidate.filePath))
+        ? { ...candidate, modifiedAt: Number.MAX_SAFE_INTEGER }
+        : candidate
+    );
   }
 
   // **作品の話として見つかったときだけ**「この話だけ」を並べる。作品の外の
