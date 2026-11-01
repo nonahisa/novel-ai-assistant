@@ -500,3 +500,42 @@ describe("同期の確認の窓", () => {
     expect(syncChoiceOf(undefined)).toBeUndefined();
   });
 });
+
+/**
+ * 状態を調べる前の取りに行き（fetch）が失敗した置き場（2026-11-02）。
+ *
+ * 遅れの数は手元が知っている古いままなので、0件でも「同期は取れています」とは言えない。
+ * 以前は理由が `nothing` になり、「次は同期しません」の行からも消えて、つながらなかったことが
+ * 作者に伝わらなかった（原稿箱の受け取りと同じ形。編集者の「保存・同期」の受け取るだけの道でも同じ）。
+ */
+describe("取りに行けなかった置き場", () => {
+  test("作者の手順：ほかにやることが無ければ「受け取れませんでした」を理由にし、次は同期しないものへ並べる", () => {
+    const plans = planSyncAll([state({ fetchFailed: true })]);
+    expect(plans[0]?.skip).toBe("fetch_failed");
+    expect(actionablePlans(plans)).toHaveLength(0);
+    const skips = describeSyncSkips(plans);
+    expect(skips).toContain("GitHub から受け取れませんでした");
+    // エラー文から原因を当てない（実装ルール5）
+    expect(skips).not.toMatch(/ネット|回線|権限/);
+  });
+
+  test("編集者の受け取るだけの手順でも同じ", () => {
+    const plans = planSyncAll([state({ fetchFailed: true })], { editor: true });
+    expect(plans[0]?.receiveOnly).toBe(true);
+    expect(plans[0]?.skip).toBe("fetch_failed");
+    expect(describeSyncSkips(plans)).toContain("GitHub から受け取れませんでした");
+  });
+
+  test("手元にやることがあれば、取りに行けなくても今までどおり進める（送信の失敗は別に報告される）", () => {
+    const plan = planSyncTarget(state({ fetchFailed: true, trackable: 2 }));
+    expect(plan.commit).toBe(true);
+    expect(plan.push).toBe(true);
+    expect(plan.skip).toBeUndefined();
+  });
+
+  test("取りに行けたなら、これまでどおり「同期は取れています」（理由の行には出さない）", () => {
+    const plans = planSyncAll([state()], { editor: true });
+    expect(plans[0]?.skip).toBe("nothing");
+    expect(describeSyncSkips(plans)).toBe("");
+  });
+});

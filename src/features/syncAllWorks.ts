@@ -306,17 +306,20 @@ async function collectStates(
   // 取りに行けなくても止めない。手元が知っている範囲で進めるだけで、
   // いまより悪くはならない
   if (token.isCancellationRequested) return states;
+  // 取りに行けなかった置き場は印を残す（2026-11-02）。止めはしないが、ほかにやることが
+  // 無いときに「同期は取れています」と言わないため（`SyncTargetState.fetchFailed`）
   const fetchedRoots = await Promise.all(
-    firsts.map(async ({ root, status }) => {
-      if (!canFetch(status)) return false;
+    firsts.map(async ({ root, status }): Promise<"fetched" | "failed" | "skipped"> => {
+      if (!canFetch(status)) return "skipped";
       const fetched = await fetchRemote(root, deps.run);
       if (!fetched.ok) {
         logFailure("すべて同期：状態を調べる前のfetchに失敗", {
           置き場: root,
           詳細: fetched.detail ?? "（詳細なし）",
         });
+        return "failed";
       }
-      return true;
+      return "fetched";
     })
   );
 
@@ -326,7 +329,8 @@ async function collectStates(
     let status = first.status;
     progress.report({ message: work.title });
 
-    if (fetchedRoots[index]) {
+    const fetchFailed = fetchedRoots[index] === "failed";
+    if (fetchedRoots[index] !== "skipped") {
       status = await readSyncStatus(root, deps.run);
     }
 
@@ -377,6 +381,7 @@ async function collectStates(
       status,
       trackable,
       ...(unsaved > 0 ? { unsaved } : {}),
+      ...(fetchFailed ? { fetchFailed: true } : {}),
       ...(await involvedWorks(deps, root, target.works, status)),
     });
   }

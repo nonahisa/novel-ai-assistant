@@ -497,6 +497,41 @@ describe("編集者モードの保存・同期", () => {
     expect(confirm).not.toContain("送信します");
     expect(confirm).toContain("「校閲を終えて返す」");
   });
+
+  /**
+   * 取りに行けないとき（2026-11-02）。以前は fetch の失敗をログに残すだけで、読み直した
+   * 遅れが0件なので「同期するものはありませんでした。」だけで終わり、受け取れなかったことが
+   * 作者に伝わらなかった（原稿箱の受け取りと同じ形）
+   */
+  test("取りに行けなければ、受け取れなかったことを理由の行に出す（「同期は取れています」で済ませない）", async () => {
+    const offline: GitCommandRunner = async (args) => {
+      calls.push(args);
+      const joined = args.join(" ");
+      const ok = (stdout: string) => ({ code: 0, stdout, stderr: "" });
+      if (args[0] === "fetch") return { code: 128, stdout: "", stderr: "fatal: unable to access" };
+      if (args[0] === "--version") return ok("git version 2.55");
+      if (joined === "rev-parse --is-inside-work-tree --show-toplevel") return ok("true\nC:/写し");
+      if (joined === "rev-parse --show-toplevel") return ok("C:/写し");
+      if (args[0] === "status") return ok("");
+      if (joined === "remote") return ok("origin");
+      if (args[0] === "symbolic-ref") return ok("main");
+      if (joined.startsWith("rev-parse --abbrev-ref")) return ok("origin/main");
+      // 手元が知っている範囲では遅れていない（取りに行けなかったので古いまま）
+      if (args[0] === "rev-list") return ok("0\t0");
+      if (args[0] === "config") return ok("編集者");
+      if (args[0] === "diff") return { code: 1, stdout: "", stderr: "" };
+      return ok("");
+    };
+
+    await syncAllWorks({ registry: copyRegistry, monitor, run: offline, editor: true });
+
+    expect(calls.map((args) => args[0])).toContain("fetch");
+    const said = shown.join("\n");
+    expect(said).toContain("同期するものはありませんでした。");
+    expect(said).toContain("GitHub から受け取れませんでした");
+    // エラー文は画面に出さない（ログだけ。実装ルール5）
+    expect(said).not.toContain("fatal");
+  });
 });
 
 /**
