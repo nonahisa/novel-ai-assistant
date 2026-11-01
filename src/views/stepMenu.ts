@@ -230,7 +230,7 @@ export const STEP_MENU_MISSING_COMMANDS: readonly string[] = resolved.missing;
 
 const editorResolved = resolveSteps(EDITOR_STEP_DEFS, actionIndex());
 
-/** 編集者モードの簡単ステップメニュー（設計書6.70.5。作者の指示 2026-11-01） */
+/** 編集者モードの簡単ステップメニュー（設計書6.29.6。作者の指示 2026-11-01） */
 export const EDITOR_STEP_MENU: readonly Step[] = editorResolved.steps;
 
 /** 編集者モードの並びで、実体が見つからなかった参照。**空でなければならない** */
