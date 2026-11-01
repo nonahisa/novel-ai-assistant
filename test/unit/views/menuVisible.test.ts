@@ -108,9 +108,8 @@ describe("画面に出る詳細メニュー（道順を書く人はここを読�
       "    作者／編集者切替",
       "    編集者へ渡す",
       "    編集者として参加",
-      "    校閲開始／終了",
-      "    修正を提案する",
-      "    校閲を終えて返す",
+      // 校閲開始／終了・修正を提案する・校閲を終えて返すは編集者の画面にだけ出る
+      // （作者の判断 2026-11-01。下の「編集者連携」のテスト）。
       // 取込と確認を1つにした（作者の判断 2026-11-01）。編集者の環境では
       // 「編集部提案確認」が出る（下の「編集者モードの編集部連携」）
       "    編集者の提案を見る",
@@ -315,6 +314,35 @@ describe("画面に出る詳細メニュー（道順を書く人はここを読�
     expect(editor).toContain("編集者提案確認");
     expect(editor).not.toContain("編集者の提案を見る");
     expect(editor).not.toContain("編集者提案取込");
+  });
+
+  /*
+    **編集者だけの操作は、作者の画面に出さない**（作者の判断 2026-11-01）。
+    作者が押しても「編集者モードで使う」と断られるだけの項目が並んでいた。
+    作者が編集者の付けた校閲中の印を外したいときは「編集者連携を解除」から（設計書5.6.1.2）
+  */
+  test("編集者連携：校閲開始／終了・修正を提案する・校閲を終えて返すは編集者の画面にだけ出る", () => {
+    const section = (mode: WorkMode): string[] => {
+      const menu = visibleMenu(mode);
+      const start = menu.indexOf("  編集者連携");
+      const rest = menu.slice(start + 1);
+      const end = rest.findIndex((line) => !line.startsWith("    "));
+      return rest.slice(0, end).map((line) => line.trim());
+    };
+    const editorOnly = ["校閲開始／終了", "修正を提案する", "校閲を終えて返す"];
+    const author = section("author");
+    const editor = section("editor");
+    for (const label of editorOnly) {
+      expect(author, label).not.toContain(label);
+      expect(editor, label).toContain(label);
+    }
+    expect(author).toEqual([
+      "作者／編集者切替",
+      "編集者へ渡す",
+      "編集者として参加",
+      "編集者の提案を見る",
+      "編集者連携を解除",
+    ]);
   });
 });
 

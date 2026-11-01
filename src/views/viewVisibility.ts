@@ -43,6 +43,19 @@ export function initialViewContext(): Record<string, unknown> {
 }
 
 /**
+ * 「他のメニューを閉じる」の印で、相談のビュー（AIに相談）が隠れているか
+ * （作者の判断 2026-11-01）。
+ *
+ * 隠れているあいだはビューの `focus` が効かず、相談パネルを開けない。相談を開く
+ * 操作（`novelai.openChat`）は、隠れていれば印を外してから開く。判断は
+ * `package.json` の `when` 式と同じでなければならない（`viewVisibility.test.ts` が
+ * 式を読んで突き合わせる）。
+ */
+export function chatHiddenBySolo(soloView: string | undefined): boolean {
+  return soloView !== undefined && soloView !== "chat";
+}
+
+/**
  * 印を素の状態へ戻す。
  *
  * `setContext` を引数で受け取るのは、**VS Code を持ち込まずに試験するため**。

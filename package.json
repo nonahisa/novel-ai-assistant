@@ -294,7 +294,7 @@
           },
           {
             "id": "claudeCode",
-            "title": "Claude Code とつなぐ（任意）",
+            "title": "Claude Code接続（任意）",
             "description": "VS Code 版の Claude Code を使っているなら、つなぐと Claude Code のチャットで会話しながら最初の作品まで準備できます。\n[Claude Code接続](command:novelai.connectClaudeCode)",
             "media": {
               "markdown": "media/walkthrough/claudeCode.md"

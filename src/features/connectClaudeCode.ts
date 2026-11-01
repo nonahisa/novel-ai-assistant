@@ -10,6 +10,7 @@ import {
   type ClaudeMcpEntry,
 } from "../core/claudeCodeRegistration";
 import { canRunProcesses } from "../core/runtime";
+import { findAction } from "../core/actionTree";
 import { logLine, useLogFile } from "../core/logger";
 import { SERVER_NAME } from "../mcp/version";
 import { SETUP_PROMPT_NAME } from "../mcp/prompts/setupGuide";
@@ -77,7 +78,10 @@ function nextStep(): string {
     "Claude Code のチャットで新しい会話を始め、「/」を打って" +
     `「${SERVER_NAME}:${SETUP_PROMPT_NAME}」を選ぶと、執筆環境のセットアップを会話で進められます。` +
     "（開いたままの会話には、つないだ道具が出ないことがあります）\n\n" +
-    "VS Code を入れ直して場所が変わったときは、もう一度「Claude Code とつなぐ」を押してください。"
+    // 名前は詳細メニューの項目から引く（作者の判断 2026-11-01。写すと名前を変えた日に古くなる）
+    `VS Code を入れ直して場所が変わったときは、もう一度「${
+      findAction("novelai.connectClaudeCode")?.label ?? "Claude Code接続"
+    }」を押してください。`
   );
 }
 

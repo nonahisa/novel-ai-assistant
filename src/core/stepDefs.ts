@@ -212,7 +212,7 @@ export const STEP_DEFS: readonly StepDef[] = [
       "novelai.generateCatchphrases",
       "novelai.openSynopsisDocs",
       "novelai.copyForPosting",
-      "novelai.shareWithEditor",
+      // 「編集者へ渡す」は6段へ移した（作者の判断 2026-11-01）。編集者と組む操作を1段に集める
       /*
         **「WEB投稿支援（準備中）」の枠を、実物に置き換えた**（作者の裁定、
         2026-09-23 問14 A）。予定していた「ブラウザで投稿を助ける」は、
@@ -229,16 +229,24 @@ export const STEP_DEFS: readonly StepDef[] = [
     icon: "organization",
     detail:
       "編集者と一緒に仕上げる段階\n\n" +
+      "・編集者へ渡し、届いた提案を1件ずつ決める\n\n" +
       "編集者は本文を書き換えず、提案として置く。",
+    /*
+      **作者が押す操作だけを並べる**（作者の判断 2026-11-01）。以前は「校閲開始／終了」
+      「校閲を終えて返す」も並び、作者が押しても編集者モードの操作だと断られた。
+      編集者の流れは編集者モードの並び（下の `EDITOR_STEP_DEFS`）にある。
+
+      並びは作者の作業の順（渡す → 提案を見る → 解除 → 履歴）。切替と参加は、
+      自分が編集者として人の作品を見る日のための入口なので、流れの後ろに置く
+    */
     entries: [
-      "novelai.switchMode",
-      "novelai.joinAsEditor",
-      "novelai.toggleReviewLock",
-      "novelai.finishReviewAndReturn",
+      "novelai.shareWithEditor",
       // 取込と確認を1つにした（作者の判断 2026-11-01）。受け取って未決を並べる
       "novelai.viewEditorProposals",
       "novelai.revokeEditorAccess",
       "novelai.showEditHistory",
+      "novelai.switchMode",
+      "novelai.joinAsEditor",
     ],
   },
   {

@@ -2,6 +2,7 @@ import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import {
   announceRenameProposals,
+  announceRenameSettled,
   confirmScope,
 } from "../../../src/features/nameRename";
 import { findAction } from "../../../src/views/actionList";
@@ -89,6 +90,38 @@ describe("付け替えの知らせから資料への反映へ", () => {
     // 返事を返さないまま（release を呼ばない）でも、関数は同期で戻る
     const returned: unknown = announceRenameProposals(work, 2);
     expect(returned).toBeUndefined();
+    expect(ran).toEqual([]);
+  });
+});
+
+/**
+ * 提案パネルで本文の置き換えを最後の1件まで決め終えたとき、資料への反映を訊く
+ * （作者の判断 2026-11-01）。
+ *
+ * 「適用が済んだら『人物名変更の資料反映』を」と言っても、その入口は最初の知らせの
+ * ボタンだけで、知らせが沈むと探せなかった（詳細メニューには戻さない。2026-09-24 B10①）。
+ */
+describe("置き換えを決め終えたときの、資料への反映の問い", () => {
+  test("どの付け替えかを言い、［資料に反映する］を出す", () => {
+    announceRenameSettled(work, { oldName: "太郎", newName: "次郎" });
+    expect(shown).toHaveLength(1);
+    expect(shown[0].message).toContain("「太郎」→「次郎」");
+    expect(shown[0].items).toEqual(["資料に反映する"]);
+  });
+
+  test("押せば、この作品を指して資料への反映を呼ぶ", async () => {
+    answer = (items) => items[0];
+    announceRenameSettled(work, { oldName: "太郎", newName: "次郎" });
+    release();
+    await settle();
+    expect(ran).toEqual([{ command: APPLY, args: [{ type: "work", work }] }]);
+  });
+
+  test("押さなければ何もしない・返事を待たずに戻る", async () => {
+    const returned: unknown = announceRenameSettled(work, { oldName: "太郎", newName: "次郎" });
+    expect(returned).toBeUndefined();
+    release();
+    await settle();
     expect(ran).toEqual([]);
   });
 });

@@ -607,14 +607,17 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           // 集約に置き換えた——相手のいる作業だけの並びなので、分ける目的は
           // こちらのほうがよく果たせる。
           //
-          // 主に使うのは編集部の側で、作者が押すのは編集部が外し忘れた札を
-          // 外すとき（設計書5.6.1.2）。引き渡しと並べると、その道が見つかる
+          // **作者の画面には出さない**（作者の判断 2026-11-01）。作者の環境に
+          // 編集者だけの操作が並ぶと、押しても使えないものが混じる。編集者が
+          // 外し忘れた印を作者が外すのは「編集者連携を解除」から（設計書5.6.1.2）。
+          // コマンドパレットからは今までどおり呼べる
           {
             kind: "action",
             command: "novelai.toggleReviewLock",
             label: "校閲開始／終了",
             icon: "lock",
             requiresWork: true,
+            shownInModes: ["editor"],
             detail:
               "開いているファイルを「校閲中」として押さえる\n\n" +
               "・作者が直そうとすると、誰がいつから見ているかが出る\n\n" +
@@ -631,6 +634,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             label: "修正を提案する",
             icon: "edit",
             requiresWork: true,
+            shownInModes: ["editor"],
             detail:
               "本文で選んだ所に、修正案と理由を提案として置く\n\n" +
               "・先に本文で修正したい所を選んでから押す\n\n" +
@@ -644,6 +648,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             label: "校閲を終えて返す",
             icon: "check-all",
             requiresWork: true,
+            shownInModes: ["editor"],
             detail:
               "押さえている校閲のロックを外し、提案を作者へ返す\n\n" +
               "・送るのは提案・ロック・編集履歴だけ\n\n" +

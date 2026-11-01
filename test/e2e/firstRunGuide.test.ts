@@ -11,7 +11,7 @@
  *
  * 見張ること：
  * - 拡張機能が起きると、右下に「小説執筆へようこそ。使うAIを選ぶと…」の案内が出て、
- *   押し口［AIを選ぶ］［道案内を見る］が並ぶ（Claude Code は入っていないので［Claude Code とつなぐ］は出ない）
+ *   押し口［AIを選ぶ］［道案内を見る］が並ぶ（Claude Code は入っていないので［Claude Code接続］は出ない）
  * - ［AIを選ぶ］を押すと「使用するAIを選んでください（1つで構いません）」の選ぶ画面が出て、
  *   Ollama などと［取りやめる］が並ぶ（Esc で閉じ、AI は選ばない）
  *
@@ -79,7 +79,7 @@ test("まっさらな環境で起こすと、使うAIを選ぶ案内が出て、
       expect(seen.text).toContain("AIなしでも使えます");
       expect(seen.buttons, `案内の押し口：${JSON.stringify(seen.buttons)}`).toContain("AIを選ぶ");
       expect(seen.buttons).toContain("道案内を見る");
-      expect(seen.buttons, "Claude Code が入っていないのに［Claude Code とつなぐ］が出ています").not.toContain("Claude Code とつなぐ");
+      expect(seen.buttons, "Claude Code が入っていないのに［Claude Code接続］が出ています").not.toContain("Claude Code接続");
       expect(seen.pickerTitle).toBe(PICKER_TITLE);
       expect(seen.rows.some((row) => row.includes("Ollama")), `選ぶ画面の行：${JSON.stringify(seen.rows)}`).toBe(true);
       expect(seen.rows.some((row) => row.includes("取りやめる")), `選ぶ画面の行：${JSON.stringify(seen.rows)}`).toBe(true);
