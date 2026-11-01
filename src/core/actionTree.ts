@@ -1089,9 +1089,12 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             // **見出しと中身を合わせる**（作者の報告、2026-08-31）。
             // 「AIに相談する」とだけ書いてあったので、押すと本文の領域に
             // 大きく開くことが読めなかった——`package.json` のコマンド名は
-            // はじめから「AIに相談する（大きく開く）」で、こちらだけがずれていた
-            label: "AI相談",
+            // はじめから「AIに相談する（大きく開く）」で、こちらだけがずれていた。
+            // **名前は「AIに相談」にそろえ、開き方は説明欄で言う**（作者の判断
+            // 2026-11-02。横に開く入口・原稿の右クリックと同じ名前にする）
+            label: "AIに相談",
             note: "大きく開く",
+            description: "大きく開く",
             icon: "comment-discussion",
             // **詳細メニューには出さない**（作者の指定、2026-09-03。
             // 横のパネルの「メインに表示」ボタンが入口。簡単ステップメニューには残る）。
@@ -1167,11 +1170,13 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.openChat",
-            label: "相談パネルを開く",
+            // 名前は「AIに相談」にそろえ、開き方は説明欄で（作者の判断 2026-11-02）
+            label: "AIに相談",
+            description: "横に開く",
             icon: "comment-discussion",
             // 開くだけで作品は要らない（作品を選ぶのは相談の中）
             requiresWork: false,
-            // 「AI相談（大きく開く）」と同じ扱い。開いた先の相談でAIを呼び、
+            // 「AIに相談（大きく開く）」と同じ扱い。開いた先の相談でAIを呼び、
             // クラウドのAIなら料金が出るので、押す前に見分けられるようにする
             usesAI: true,
             detail:

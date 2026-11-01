@@ -90,8 +90,8 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.chaptersFromHeadings": { class: "C4", label: "章見出し反映", reason: "作者の判断" },
   "novelai.importChaptersFromBackup": { class: "C4", label: "章立て取込（バックアップから）", reason: "作者の判断" },
   // ── 相談・診断・案内
-  "novelai.openChat": { class: "A", label: "AIに相談する" },
-  "novelai.openChatPanel": { class: "A", label: "AI相談（大きく開く）" },
+  "novelai.openChat": { class: "A", label: "AIに相談" },
+  "novelai.openChatPanel": { class: "A", label: "AIに相談（大きく開く）" },
   "novelai.openChatLog": { class: "A", label: "相談ログ", via: "novel.read kind: chatLog（名指しの鍵。\"*\" では読めない）" },
   "novelai.chooseChatWork": { class: "C3", label: "相談作品選択" },
   "novelai.setAdvicePolicy": { class: "C4", label: "助言方針（診断）", reason: "作者の判断" },

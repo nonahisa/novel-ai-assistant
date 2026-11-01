@@ -495,7 +495,7 @@ describe("本文の右クリックから開く相談", () => {
       manifest.contributes.commands.map((one) => [one.command, one.title])
     );
 
-    expect(titles.get("novelai.openChat")).toBe("AIに相談する");
+    expect(titles.get("novelai.openChat")).toBe("AIに相談");
     expect(titles.get("novelai.openChatPanel")).toContain("大きく開く");
   });
 

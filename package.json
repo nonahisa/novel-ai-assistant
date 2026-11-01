@@ -329,7 +329,7 @@
           {
             "id": "help",
             "title": "困ったら",
-            "description": "場面を選ぶと、押す場所を順に光らせて案内します。やりたいことを言葉で訊くなら相談パネルへ。\n[場面別案内](command:novelai.openSceneGuide)\n[相談パネルを開く](command:novelai.openChat)\n[使い方](command:novelai.openManual)",
+            "description": "場面を選ぶと、押す場所を順に光らせて案内します。やりたいことを言葉で訊くなら相談パネルへ。\n[場面別案内](command:novelai.openSceneGuide)\n[AIに相談](command:novelai.openChat)\n[使い方](command:novelai.openManual)",
             "media": {
               "markdown": "media/walkthrough/help.md"
             },
@@ -436,13 +436,13 @@
       },
       {
         "command": "novelai.openChat",
-        "title": "AIに相談する",
+        "title": "AIに相談",
         "category": "統合小説執筆環境",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "novelai.openChatPanel",
-        "title": "AI相談（大きく開く）",
+        "title": "AIに相談（大きく開く）",
         "category": "統合小説執筆環境",
         "icon": "$(comment-discussion)"
       },
