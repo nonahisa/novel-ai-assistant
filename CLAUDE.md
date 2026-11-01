@@ -110,6 +110,6 @@ npm run check            # 型検査＋単体テスト＋本番ビルド
 
 ## ユーザーの環境
 
-- Windows / PowerShell、Node.js 24.x、Git 2.55
+- Windows / PowerShell、Node.js 24.x、Git 2.51
 - Ollama（`gemma4:e4b` 8B / コンテキスト131072 / tools・thinking対応）
 - テストに使える実データ：19話・約41,000字のカクヨム形式作品

@@ -30,7 +30,7 @@ model: sonnet
 1. **担当の作業場（`.claude/worktrees/agent-*`）**
    - 本体が「取り込み済み」と言った担当の分だけ。まだ動いている担当の作業場は消さない（追加の指示で再び動くことがある）
    - **消す前に `node_modules`・`.vscode-test`・`.vscode-test-web` がジャンクション（連結）でないかを必ず見る**：`(Get-Item <path> -Force).LinkType`。`Junction` なら先に `cmd /c rmdir "<path>"` で連結だけを外す。外さずに消すと本体の依存が消える（2026-09-24 に一度起きた）
-   - `git worktree remove -f -f <path>`、枝は `git branch -D worktree-agent-…`。最後に本体の `node_modules/.bin` の数（75前後）が減っていないか確かめる
+   - `git worktree remove -f -f <path>`、枝は `git branch -D worktree-agent-…`。消す前に本体の `node_modules/.bin` の数を数えて控え、消したあと減っていないか確かめる
    - 「使用中」で消せないフォルダーは無理をせず報告する（裏で測定がファイルを掴んでいることがある）。`git worktree prune` はしてよい
 2. **右の枠の起動設定（`.claude/launch.json`）**
    - テストのために足した一時の設定（スクラッチパッドの写しを指すもの、「まっさら」「試しの置き場」「〜の写し」）を消す

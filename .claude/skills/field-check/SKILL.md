@@ -125,7 +125,7 @@ screenshot({ scale: 0.6 })
 
 ## MCP を別プロセスから撃つ
 
-**このセッションに繋がっている MCP サーバーは、セッション開始時の古い束のまま**である（`mcp.version` で分かる）。新しい束を使うには別プロセスを起動する。
+**このセッションに繋がっている MCP サーバーは、セッション開始時の束のまま**である。`mcp.version` の `bundle.stale` が `true`（古い）なら、新しい束を使うために別プロセスを起動する。
 
 ```powershell
 $env:ELECTRON_RUN_AS_NODE = $null
@@ -134,7 +134,7 @@ $text | claude -p --mcp-config .mcp.json --allowedTools "mcp__novel-ai-assistant
 ```
 
 - **指示ファイルは UTF-8 で Write する**（日本語パスを引数に直接書かない）。指示は英語で短く、「結果だけ報告・userPrompt は出さない・ほかの道具は呼ばない・再試行しない」を書く
-- 道具名は `.` を `_` にした形（`opening.prompt` → `mcp__novel-ai-assistant__opening_prompt`）
+- 道具名は `.` を `_` にした形（`novel.prompt` → `mcp__novel-ai-assistant__novel_prompt`）
 - `ToolSearch` を allowedTools に入れないと、Haiku が道具を呼べないことがある
 - **束を作り直してから撃つ**（`npm run check` か `npm run build`。`dist/mcp-server.mjs`）
 
@@ -150,7 +150,5 @@ $text | claude -p --mcp-config .mcp.json --allowedTools "mcp__novel-ai-assistant
 
 **モデルを比べる・頼み方の工夫を比べる・手元の Ollama を複数の担当で使うときは、スキル `ai-bench` を読む**（正解の作り方・製品と同じ道・採点・手元のAIの札・MCP を起こすときの保管庫）。
 
-- **見逃しと誤検出の両方を数える。** 片方だけでは、何も指摘しない実装が満点になる
-- **製品と同じ経路を通す**（`runner: "ollama"`、`*.run`）。`prompt` だけ呼んで `validate` を通さない測り方は、製品に無い不具合を見つけたことになる
-- 仕込み（わざと入れた矛盾・誤字）は**一時フォルダーの写し**に入れる。確認用コピーも作者の作品の写しなので、書き換えない
+- 見逃しと誤検出の両方を数える・製品と同じ経路（`runner: "ollama"`、`novel.run`）で検算まで通す・仕込みは一時フォルダーの写しにだけ入れる、の3つの決まりと理由はスキル `ai-bench` が正
 - 測った結果は引継ぎ書8章に「何を・どのモデルで・何件中何件」で残す。実機確認リストの該当項目には `→ **MCP で測れる**：道具名` の道しるべが付いている
