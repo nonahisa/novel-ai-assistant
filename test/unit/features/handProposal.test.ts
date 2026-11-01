@@ -23,7 +23,7 @@ vi.mock("../../../src/core/actorContext", () => ({
 }));
 
 vi.mock("../../../src/core/gitAttribution", () => ({
-  tryGitUserName: vi.fn(async () => "編集部"),
+  tryGitUserName: vi.fn(async () => "編集者"),
 }));
 
 vi.mock("../../../src/views/notify", () => ({
@@ -107,8 +107,8 @@ beforeEach(() => {
   } as unknown as typeof workspace.fs;
 });
 
-describe("編集部の手書きの直しは、本文を書き換えず提案として置く", () => {
-  test("選んだ所の直した案と理由が台帳へ積まれ、本文は変わらない", async () => {
+describe("編集者の手書きの直しは、本文を書き換えず提案として置く", () => {
+  test("選んだ所の修正案と理由が台帳へ積まれ、本文は変わらない", async () => {
     answer("走った", "促音の誤り");
     const at = body.indexOf("走つた");
 
@@ -130,12 +130,12 @@ describe("編集部の手書きの直しは、本文を書き換えず提案と�
       suggestion: "走った",
       reason: "促音の誤り",
       category: "編集部の直し",
-      proposer: "編集部",
+      proposer: "編集者",
       status: "pending",
     });
   });
 
-  test("直した案を空にすると、意見だけの提案になる", async () => {
+  test("修正案を空にすると、意見だけの提案になる", async () => {
     answer("", "ここは言い切らないほうが余韻が出ます");
     const at = body.indexOf("走つた");
 
@@ -212,7 +212,7 @@ describe("編集部の手書きの直しは、本文を書き換えず提案と�
     const placed = await proposeByHand(work, fakeDocument(body), range(0, 0, 0, 0), "edit");
     expect(placed).toBe(false);
     expect(said).toEqual([
-      "直したい所を本文で選んでから押してください（右クリックからも出せます）。",
+      "修正したい所を本文で選んでから押してください（右クリックからも出せます）。",
     ]);
   });
 });
@@ -222,7 +222,7 @@ describe("編集部の手書きの直しは、本文を書き換えず提案と�
  * （作者の決定 2026-11-01）。メニューを押した時点では選んでいる所が本文の側にしか無いので、
  * 前面の原稿エディターへ頼み返すか、素のエディターの選択を使う。
  */
-describe("コマンド（詳細メニュー・コマンドパレット）からの「直しを提案する」", () => {
+describe("コマンド（詳細メニュー・コマンドパレット）からの「修正を提案する」", () => {
   function commandDeps(over: Partial<Parameters<typeof proposeEditFromCommand>[0]> = {}) {
     const proposed: unknown[] = [];
     return {
@@ -289,7 +289,7 @@ describe("コマンド（詳細メニュー・コマンドパレット）から�
     expect(await proposeEditFromCommand(deps)).toBe("noSelection");
     expect(proposed).toEqual([]);
     expect(said).toEqual([
-      "直したい所を本文で選んでから押してください（右クリックからも出せます）。",
+      "修正したい所を本文で選んでから押してください（右クリックからも出せます）。",
     ]);
   });
 
@@ -298,7 +298,7 @@ describe("コマンド（詳細メニュー・コマンドパレット）から�
     const { deps } = commandDeps();
     expect(await proposeEditFromCommand(deps)).toBe("noSelection");
     expect(said).toEqual([
-      "直したい所を本文で選んでから押してください（右クリックからも出せます）。",
+      "修正したい所を本文で選んでから押してください（右クリックからも出せます）。",
     ]);
   });
 });

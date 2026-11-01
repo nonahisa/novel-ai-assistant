@@ -243,7 +243,7 @@ describe("表示を切り替えると、前の中身が消える", () => {
     expect(latest().items[0]).toMatchObject({ settingSays: "主人公の成長" });
   });
 
-  test("設定資料の更新のあとに編集部からの提案を出すと、提案が見える", () => {
+  test("設定資料の更新のあとに編集者からの提案を出すと、提案が見える", () => {
     // showProposals も replaceContents を通る（設計書5.6）
     const panel = panelWithView();
     panel.showRecordUpdates(work, [recordUpdate], async () => ({ ok: true }), async () => ({ ok: true }));
@@ -264,7 +264,7 @@ describe("表示を切り替えると、前の中身が消える", () => {
       },
     ]);
 
-    expect(latest().category).toBe("編集部からの提案");
+    expect(latest().category).toBe("編集者からの提案");
     expect(latest().items).toHaveLength(1);
     expect(latest().items[0]).toMatchObject({ suggestion: "走った" });
   });
@@ -699,7 +699,7 @@ describe("再チェックの出し分け", () => {
    * あちらは承認・却下という別の片付け方を持っており、結果を提案の側へ
    * 書き戻す必要もある。
    */
-  test("編集部からの提案には出さない", () => {
+  test("編集者からの提案には出さない", () => {
     const panel = panelWithView();
     panel.showProposals(work, [
       {

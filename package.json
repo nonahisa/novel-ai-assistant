@@ -1347,7 +1347,7 @@
       },
       {
         "command": "novelai.proposeEditByHand",
-        "title": "直しを提案する",
+        "title": "修正を提案する",
         "category": "小説執筆",
         "icon": "$(edit)"
       },
@@ -1359,7 +1359,7 @@
       },
       {
         "command": "novelai.reviewProposals",
-        "title": "編集部提案確認",
+        "title": "編集者提案確認",
         "icon": "$(inbox)",
         "category": "小説執筆"
       },
@@ -1473,19 +1473,19 @@
       },
       {
         "command": "novelai.shareWithEditor",
-        "title": "編集部へ渡す",
+        "title": "編集者へ渡す",
         "category": "小説執筆",
         "icon": "$(repo-push)"
       },
       {
         "command": "novelai.joinAsEditor",
-        "title": "編集部として参加",
+        "title": "編集者として参加",
         "category": "小説執筆",
         "icon": "$(organization)"
       },
       {
         "command": "novelai.revokeEditorAccess",
-        "title": "編集部連携を解除",
+        "title": "編集者連携を解除",
         "category": "小説執筆",
         "icon": "$(debug-disconnect)"
       },
@@ -1497,9 +1497,15 @@
       },
       {
         "command": "novelai.collectEditorProposals",
-        "title": "編集部提案取込",
+        "title": "編集者提案取込",
         "category": "小説執筆",
         "icon": "$(repo-pull)"
+      },
+      {
+        "command": "novelai.viewEditorProposals",
+        "title": "編集者の提案を見る",
+        "category": "小説執筆",
+        "icon": "$(inbox)"
       },
       {
         "command": "novelai.plotInterview",
@@ -1858,6 +1864,18 @@
           "when": "config.novelai.mode == 'editor'"
         },
         {
+          "command": "novelai.collectEditorProposals",
+          "when": "false"
+        },
+        {
+          "command": "novelai.reviewProposals",
+          "when": "config.novelai.mode == 'editor'"
+        },
+        {
+          "command": "novelai.viewEditorProposals",
+          "when": "config.novelai.mode != 'editor'"
+        },
+        {
           "command": "novelai.episodePlotToPlotMode",
           "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md"
         },
@@ -2117,10 +2135,7 @@
           "command": "novelai.shareWithEditor",
           "when": "!novelai.processesBlocked"
         },
-        {
-          "command": "novelai.collectEditorProposals",
-          "when": "!novelai.processesBlocked"
-        },
+
         {
           "command": "novelai.joinAsEditor",
           "when": "!novelai.processesBlocked"
@@ -2616,7 +2631,7 @@
             "編集者：本文の校正・校閲だけ。設定資料や執筆の機能は使えない"
           ],
           "default": "author",
-          "markdownDescription": "この環境を作者と編集者のどちらとして使うか。\n\n・編集部の方は「editor」\n・操作の記録に残る種別も変わる\n\n[作者／編集者切替…](command:novelai.switchMode)"
+          "markdownDescription": "この環境を作者と編集者のどちらとして使うか。\n\n・編集者の方は「editor」\n・操作の記録に残る種別も変わる\n\n[作者／編集者切替…](command:novelai.switchMode)"
         }
       }
     },

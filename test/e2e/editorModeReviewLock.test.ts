@@ -66,7 +66,7 @@ const EPISODE_2 = "002_街.txt";
 const EPISODE_3 = "003_宿.txt";
 const EPISODE_4 = "004_朝.txt";
 const OTHER_TEXT = ["　街は静かだった。", ""].join("\n");
-const STEP = "6. 編集部校正・校閲";
+const STEP = "6. 編集者校正・校閲";
 
 function labelOf(command: string): string {
   const label = findAction(command)?.label;
@@ -112,7 +112,7 @@ async function waitDialog(session: E2ESession, includes: string, label: string):
 
 /* ── 1. 編集者の側：切り替えと、押さえる ── */
 
-test("簡単ステップメニュー「6. 編集部校正・校閲」の「作者／編集者切替」で編集者モードになり、「校閲開始／終了」で選んだ範囲の話が編集者の名で押さえられる", async () => {
+test("簡単ステップメニュー「6. 編集者校正・校閲」の「作者／編集者切替」で編集者モードになり、「校閲開始／終了」で選んだ範囲の話が編集者の名で押さえられる", async () => {
   await withVsCode(
     "編集者モードと校閲のロック",
     [
@@ -197,9 +197,9 @@ test("簡単ステップメニュー「6. 編集部校正・校閲」の「作�
 /* ── 2. 作者の側：押さえられたファイルを直そうとする・外す ── */
 
 /** 編集部が2時間前から押さえている台帳（作者の側に同期で届いた形） */
-const HOLDER = "山田（編集部）";
+const HOLDER = "山田（編集者）";
 
-test("編集部が押さえているファイルを作者が［適用］で直そうとすると誰が・何を・いつからが出て断られ、閉じれば本文は変わらず、連携を解除すれば［適用］が通る", async () => {
+test("編集者が押さえているファイルを作者が［適用］で直そうとすると誰が・何を・いつからが出て断られ、閉じれば本文は変わらず、連携を解除すれば［適用］が通る", async () => {
   await withVsCode(
     "作者の側のロック",
     [{ name: EPISODE, text: TEXT }],
@@ -223,7 +223,7 @@ test("編集部が押さえているファイルを作者が［適用］で直�
       await panel.locator('button[data-action="apply"]').first().click();
 
       // 編集部が押さえた話は、作者の［適用］が断られる（作者の裁定 2026-10-28。以前の「それでも直す」は無い）
-      const warning = await waitDialog(session, "は編集部が校閲中のため、適用できません。", "［適用］で「〜は編集部が校閲中のため、適用できません」の窓が出る");
+      const warning = await waitDialog(session, "は編集者が校閲中のため、適用できません。", "［適用］で「〜は編集者が校閲中のため、適用できません」の窓が出る");
       const oneLine = warning.replace(/\s+/g, " ");
       expect(oneLine, `窓にファイルの名前がありません：${oneLine}`).toContain(EPISODE);
       expect(oneLine, `窓に誰が見ているかがありません：${oneLine}`).toContain(`${HOLDER} が校閲中です`);
@@ -241,10 +241,10 @@ test("編集部が押さえているファイルを作者が［適用］で直�
          （送り先が無い）ので権利は外せず、手で外す案内が出て、鍵だけが外れる */
       await clearNotifications(page);
       await panel.locator('button[data-action="apply"]').first().click();
-      await waitDialog(session, "は編集部が校閲中のため、適用できません。", "もう一度、断りの窓が出る");
+      await waitDialog(session, "は編集者が校閲中のため、適用できません。", "もう一度、断りの窓が出る");
       // 次の確認の窓がすぐ出るので、窓が消えるのを待たずに押す（pressDialogButton は消えるのを待つ）
       await page.locator(".monaco-dialog-box .monaco-button", { hasText: "連携を解除…" }).first().click();
-      const revoke = await waitDialog(session, "編集部との連携を解除しますか。", "連携の解除の確認の窓が出る");
+      const revoke = await waitDialog(session, "編集者との連携を解除しますか。", "連携の解除の確認の窓が出る");
       expect(revoke.replace(/\s+/g, " "), "解除の確認に、外す校閲中の印の範囲がありません").toContain("校閲中の印を外します");
       await pressDialogButton(page, "解除する");
       await waitUntil(async () => (await lockEvents(workFolder)).length === 2, "ロックの台帳に外した1行が増える", 15_000).catch(async (error: unknown) => {

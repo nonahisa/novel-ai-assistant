@@ -4851,8 +4851,8 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     // **編集者モードの柱**（設計書5.6.1.1。作者の指示 2026-11-01）。選んだ所への
     // 直しを、本文に書かず提案として置く。校閲する人がいちばん使うので上に置く
     if (reviewMode) {
-      add("直しを提案する", sendProposeEdit, hasSelection).title =
-        "選んだ所の直した案と理由を書いて、作者への提案として置きます（本文は変わりません）";
+      add("修正を提案する", sendProposeEdit, hasSelection).title =
+        "選んだ所の修正案と理由を書いて、作者への提案として置きます（本文は変わりません）";
       rule();
     }
 

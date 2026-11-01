@@ -37,7 +37,7 @@ export interface McpEditorRule {
 export const EDITOR_FEATURE_RULES: Readonly<
   Record<FeatureName, { readonly run: boolean; readonly validate: boolean; readonly why: string }>
 > = {
-  typo: { run: true, validate: true, why: "校正。編集部の仕事そのもの" },
+  typo: { run: true, validate: true, why: "校正。編集者の仕事そのもの" },
   proofread: { run: true, validate: true, why: "推敲の指摘。答えを返すだけ" },
   notation: { run: true, validate: true, why: "表記ゆれ。答えを返すだけ" },
   contradiction: { run: true, validate: true, why: "矛盾の指摘。答えを返すだけ" },
@@ -64,7 +64,7 @@ export const EDITOR_FEATURE_RULES: Readonly<
   announce: {
     run: false,
     validate: false,
-    why: "検算を通った告知文を .aiwriter/cache/announcements.json の履歴へ足す。告知は作者の広報で、編集部の仕事ではない",
+    why: "検算を通った告知文を .aiwriter/cache/announcements.json の履歴へ足す。告知は作者の広報で、編集者の仕事ではない",
   },
   opening: { run: true, validate: true, why: "冒頭診断。答えを返すだけ" },
   name: { run: true, validate: true, why: "名前の紛らわしさ。答えを返すだけ" },
@@ -168,7 +168,7 @@ export const MCP_EDITOR_POLICY: Readonly<Record<string, McpEditorRule>> = {
   },
   "novel.propose": {
     allow: (args) => args.kind === "finding",
-    why: "kind: finding（提案パネルへ指摘を置く）は編集部の仕事そのもの。設定資料の案・章立て・伏線・予定の案は断る",
+    why: "kind: finding（提案パネルへ指摘を置く）は編集者の仕事そのもの。設定資料の案・章立て・伏線・予定の案は断る",
   },
   "run.request": {
     allow: (args) => {

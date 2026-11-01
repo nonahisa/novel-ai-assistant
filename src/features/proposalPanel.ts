@@ -1161,7 +1161,16 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
      * （設計書6.96.4）。**残し直さない**——残し直すと `time` が今日に
      * なって期限が数え直され、**三日で消えるはずの指摘が永久に残る。**
      */
-    options: { quiet?: boolean; restored?: boolean } = {}
+    options: {
+      quiet?: boolean;
+      restored?: boolean;
+      /**
+       * 表示中の作品と違っても、届いた作品へ移る（作者が押した命令から呼ぶとき）。
+       * 検知の結果は画面を奪わない決まりだが、作者が「この作品の提案を見る」と
+       * 押したときは、移らないと押した意味が無い
+       */
+      takeOver?: boolean;
+    } = {}
   ): IncomingCount {
     /*
       **指摘を残すのは、ここ1か所だけ**（設計書6.96）。
@@ -1297,7 +1306,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     entry.categories.set(category, bucket);
 
     // まだ何も出していないとき、または同じ作品なら、これまでどおり前面へ
-    if (!this.work || this.keyOf(this.work) === this.keyOf(work)) {
+    // 上で表示中の作品を控えへ戻してあるので、`takeOver` で移っても作業は消えない
+    if (
+      !this.work ||
+      this.keyOf(this.work) === this.keyOf(work) ||
+      options.takeOver
+    ) {
       this.work = work;
       /*
         **静かに届いたものは、作者が見ている分類を奪わない**（0.45.2）。
@@ -2504,14 +2518,35 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 本文を書き換える処理を新しく作らない。
    */
   showProposals(work: WorkEntry, items: ProposalViewItem[]): void {
-    const resolved: ProposalViewItem[] = items.map((item) => ({
-      ...item,
-      // 提案のファイルは作品フォルダーからの相対パス。開くには繋ぐ
-      filePath: path.isAbsolute(item.filePath)
-        ? item.filePath
-        : path.join(work.folderPath, item.filePath),
-    }));
-    this.replaceContents(work, "編集部からの提案", { items: resolved });
+    /*
+      **作者が押した命令なので、ほかの作品を見ていてもこの作品へ移る**
+      （作者の判断 2026-11-01「編集部の提案を見る」）。移らないと「表示する」の
+      知らせがもう1枚出るだけで、押したのに並ばないように見える
+    */
+    this.replaceContents(
+      work,
+      EDITOR_PROPOSALS_CATEGORY,
+      { items: resolveProposalFiles(work, items) },
+      { takeOver: true }
+    );
+  }
+
+  /**
+   * 台帳（`proposals.jsonl`）に残っている未決の編集部の提案を、静かに戻す
+   * （作者の実機 2026-11-01。設計書5.6.11）。
+   *
+   * **選び欄はパネルが手元に持つ段だけを並べる。** 開いたときに台帳から戻さないと、
+   * 同期で届いた提案の作品が、窓を読み込み直したあと選び欄から消えていた。
+   * 戻し方は残した指摘と同じ（`showRestoredFindings`）：前面化も知らせも出さず、
+   * 置き場へ残し直さない。
+   */
+  showRestoredProposals(work: WorkEntry, items: ProposalViewItem[]): void {
+    this.replaceContents(
+      work,
+      EDITOR_PROPOSALS_CATEGORY,
+      { items: resolveProposalFiles(work, items) },
+      { quiet: true, restored: true }
+    );
   }
 
   /**
@@ -4334,7 +4369,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.markStatus(id2(item), "applied", "提案として作者へ送りました。");
     await recordEdit(work, {
       actor: "editor",
-      action: `${this.category}の直しを提案した`,
+      action: `${this.category}の修正を提案した`,
       file: path.basename(item.filePath),
       detail: `${item.line}行 「${item.target}」→「${item.suggestion}」`,
     });
@@ -4358,7 +4393,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     // 「それでも直す」を選べたが、校閲中の話は本文への書き込みの入口で断られる。
     // 解く手段は「編集部連携を解除」（編集部と決裂したとき）
     const action = await vscode.window.showWarningMessage(
-      `${path.basename(filePath)} は編集部が校閲中のため、適用できません。`,
+      `${path.basename(filePath)} は編集者が校閲中のため、適用できません。`,
       { modal: true, detail: describeLock(lock) },
       "連携を解除…"
     );
@@ -4638,6 +4673,22 @@ function describeContradiction(item: ContradictionViewItem): string {
  * 同じものと分かるように、両方を出す。残さない種類（設定資料の更新など）は
  * 空になる。
  */
+/** 編集部の提案を入れる分類（命令で並べるときも、台帳から戻すときも同じ段へ） */
+const EDITOR_PROPOSALS_CATEGORY = "編集者からの提案";
+
+/** 提案のファイルは作品フォルダーからの相対パス。開くには作品の場所と繋ぐ */
+function resolveProposalFiles(
+  work: WorkEntry,
+  items: readonly ProposalViewItem[]
+): ProposalViewItem[] {
+  return items.map((item) => ({
+    ...item,
+    filePath: path.isAbsolute(item.filePath)
+      ? item.filePath
+      : path.join(work.folderPath, item.filePath),
+  }));
+}
+
 function identitiesOfRow(
   workFolder: string,
   category: string,

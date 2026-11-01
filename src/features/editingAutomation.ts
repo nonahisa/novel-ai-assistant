@@ -9,7 +9,14 @@ import {
   type DecisionCounts,
 } from "../models/proposal";
 import { logFailure, logStep, useLogFile } from "../core/logger";
-import { notifyDone } from "../views/notify";
+import { notifyDone, whenNoticePicked } from "../views/notify";
+import { primeEditorProposalsInPanel } from "./reviewProposals";
+import type { ProposalView } from "../models/proposal";
+import {
+  decisionKey,
+  globalDecisionMemory,
+  type DecisionMemory,
+} from "./decisionMemory";
 import {
   describeLockChanges,
   importEditorProposalsQuietly,
@@ -24,7 +31,8 @@ import {
  * 編集部連携の自動化（作者の裁定、2026-10-28）。
  *
  * - 採否を決め終えたら、編集部へ自動で送り返す（確認窓なし）
- * - 同期のあと、編集部から提案が届いていれば知らせて提案パネルを開く
+ * - 同期のあと、編集部から提案が届いていれば、提案パネルの選び欄へ静かに足し、
+ *   ［提案を見る］の付いた知らせを出す（作者の判断 2026-11-01）
  *
  * **Node（git）を使うので、呼ぶ側は `canRunProcesses()` を確かめて動的 import する**
  * （ブラウザ版の束に静的に入れない）。
@@ -59,8 +67,8 @@ const defaultReturnDeps: ReturnDeps = {
     useLogFile(work.folderPath);
     logFailure("採否の送り返し", { 作品: work.title, 詳細: detail });
     void vscode.window.showWarningMessage(
-      "採否を編集部へ送り返せませんでした。採否そのものは記録してあります。" +
-        `（${detail}）あとで「編集部へ渡す」を押すと送り直せます。`
+      "採否を編集者へ送り返せませんでした。採否そのものは記録してあります。" +
+        `（${detail}）あとで「編集者へ渡す」を押すと送り直せます。`
     );
   },
 };
@@ -144,8 +152,8 @@ async function runReturn(work: WorkEntry, deps: ReturnDeps): Promise<ReturnOutco
     } catch {
       breakdown = "";
     }
-    logStep(`採否を編集部へ送り返した（${work.title}）${breakdown}`);
-    deps.notifyDone(`採否を編集部へ送り返しました${breakdown}。`);
+    logStep(`採否を編集者へ送り返した（${work.title}）${breakdown}`);
+    deps.notifyDone(`採否を編集者へ送り返しました${breakdown}。`);
     return "sent";
   } catch (error) {
     deps.notifyFailure(
@@ -156,24 +164,54 @@ async function runReturn(work: WorkEntry, deps: ReturnDeps): Promise<ReturnOutco
   }
 }
 
+/** 知らせのボタン（押すと「編集部の提案を見る」と同じく並べる） */
+export const VIEW_PROPOSALS_BUTTON = "提案を見る";
+
 /** 試験で差し替えられる口 */
 export interface InboxDeps {
   isEditorMode: () => boolean;
   importProposals: (work: WorkEntry) => Promise<ImportResult>;
   notify: (text: string) => void;
-  openPanel: (work: WorkEntry) => Promise<void>;
+  /**
+   * 提案が届いた知らせ。［提案を見る］を押したら `onView` を呼ぶ。
+   * **答えを待たない**（同期の後始末を作者の返事まで止めない）
+   */
+  offer: (work: WorkEntry, text: string, onView: () => Promise<void>) => void;
+  /** 届いた作品の未決を、提案パネルの選び欄へ静かに足す（開いていなければ何もしない） */
+  primePanel: (work: WorkEntry) => Promise<void>;
+  /** 「編集部の提案を見る」をその作品で走らせる */
+  viewProposals: (work: WorkEntry) => Promise<void>;
+  /** 編集者モード：作品の提案と採否の今の状態（同期で届いた作者の採否を数える） */
+  loadProposals: (work: WorkEntry) => Promise<ProposalView[]>;
+  /** 編集者モード：もう知らせた採否の覚え */
+  decisionMemory: DecisionMemory;
 }
 
 const defaultInboxDeps: InboxDeps = {
   isEditorMode,
   importProposals: (work) => importEditorProposalsQuietly(work),
   notify: (text) => void vscode.window.showInformationMessage(text),
-  openPanel: async (work) => {
-    await vscode.commands.executeCommand("novelai.reviewProposals", {
+  offer: (work, text, onView) => {
+    whenNoticePicked(
+      vscode.window.showInformationMessage(text, VIEW_PROPOSALS_BUTTON),
+      async (picked) => {
+        if (picked === VIEW_PROPOSALS_BUTTON) await onView();
+      },
+      { label: "編集者の提案を見る", workFolder: work.folderPath }
+    );
+  },
+  primePanel: async (work) => {
+    await primeEditorProposalsInPanel(work);
+  },
+  viewProposals: async (work) => {
+    // 作品を渡す。引数無しだと作品選択からやり直させる
+    await vscode.commands.executeCommand("novelai.viewEditorProposals", {
       type: "work",
       work,
     });
   },
+  loadProposals: (work) => new ProposalStore(work).load(),
+  decisionMemory: globalDecisionMemory,
 };
 
 /** 走っている最中にもう一度呼ばれたら、同じ走りを待つ（二重に取り込まない） */
@@ -204,39 +242,91 @@ async function runInbox(
   works: readonly WorkEntry[],
   deps: InboxDeps
 ): Promise<number> {
-  // 編集者モードの環境は、提案を受け取る側ではなく出す側
-  if (deps.isEditorMode()) return 0;
+  // 編集者モードの環境は、提案を受け取る側ではなく出す側。同期で届いた作者の採否を知らせる
+  if (deps.isEditorMode()) {
+    await noticeArrivedDecisions(works, deps);
+    return 0;
+  }
 
   let total = 0;
-  let opened = false;
   for (const work of works) {
     try {
       const result = await deps.importProposals(work);
       if (result.status !== "done") continue;
       if (result.pullFailed) {
         useLogFile(work.folderPath);
-        logStep(`編集部の提案の取り寄せに失敗（手元の分だけ取り込み）: ${work.title}`);
+        logStep(`編集者の提案の取り寄せに失敗（手元の分だけ取り込み）: ${work.title}`);
       }
       // 鍵が動いたら知らせる（校閲が始まった／終わった）
       for (const text of describeLockChanges(result)) deps.notify(text);
       if (result.added <= 0) continue;
       total += result.added;
-      deps.notify(
-        `編集部から提案が ${result.added} 件届きました` +
-          (works.length > 1 ? `（「${work.title}」）。` : "。")
+      /*
+        **パネルを勝手に開かない**（作者の判断 2026-11-01「知らせに［提案を見る］を付ける」を
+        受けた実装の判断。0.120.2）。窓の読み込み直しの最中に
+        開いても作者は見ておらず、知らせが2枚（届いた・N件あります）重なるだけだった。
+        選び欄へ静かに足し（知らせが流れても選び欄から辿れる）、知らせのボタンで並べる
+      */
+      await deps.primePanel(work);
+      deps.offer(
+        work,
+        `編集者から提案が ${result.added} 件届きました` +
+          (works.length > 1 ? `（「${work.title}」）。` : "。"),
+        () => deps.viewProposals(work)
       );
-      // 提案パネルは1作品ぶんしか開けない。最初に届いた作品を開く
-      if (!opened) {
-        opened = true;
-        await deps.openPanel(work);
-      }
     } catch (error) {
       useLogFile(work.folderPath);
-      logFailure("編集部の提案の取り込み（同期のあと）", {
+      logFailure("編集者の提案の取り込み（同期のあと）", {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),
       });
     }
   }
   return total;
+}
+
+/**
+ * 編集者モード：同期で届いた作者の採否を知らせる（作者の判断 2026-11-01「届いたら知らせる」）。
+ *
+ * 編集者の写しは作品そのものが編集用リポジトリなので、採否（decision の行）は開いたときの
+ * 点検・同期の取り込みでそのまま台帳へ入る。**新しく届いた分だけ**を数え、同じものを
+ * 二度知らせない（`decisionMemory`）。
+ *
+ * **覚えが空のとき（初めて動いたとき）は、今ある採否を全部「届いた」として1回知らせる。**
+ * 黙って全部を既読にすると、この版へ上げた直後に入った作者の採否が、知らされないまま消える
+ * （実装の判断。0.120.2）。**例外は外へ出さない。**
+ */
+async function noticeArrivedDecisions(
+  works: readonly WorkEntry[],
+  deps: InboxDeps
+): Promise<void> {
+  for (const work of works) {
+    try {
+      const views = await deps.loadProposals(work);
+      const seen = deps.decisionMemory.seen(work.id);
+      const arrived: ProposalView[] = [];
+      const keys: string[] = [];
+      for (const view of views) {
+        const key = decisionKey(view);
+        if (!key || seen.has(key)) continue;
+        arrived.push(view);
+        keys.push(key);
+      }
+      if (arrived.length === 0) continue;
+      deps.notify(
+        "作者が提案を決めました" +
+          (works.length > 1 ? `（「${work.title}」）` : "") +
+          `（${describeDecisionCounts(summarizeDecisions(arrived))}）。`
+      );
+      await deps.decisionMemory.add(work.id, keys);
+      useLogFile(work.folderPath);
+      logStep(`作者の採否が届いた（${work.title}・${arrived.length}件）`);
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logFailure("届いた採否の知らせ", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }

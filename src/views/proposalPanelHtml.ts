@@ -1112,7 +1112,7 @@ function renderItem(item) {
   // 文体の書き換えになるので、直し方は作者が決める。
   // 押しても何も起きないボタンを出さない
   const hasFix = Boolean(item.suggestion);
-  // **編集部の「意見だけ」の提案**（直した案が空。作者の指示 2026-11-01）。
+  // **編集者の「意見だけ」の提案**（直した案が空。作者の指示 2026-11-01）。
   // 直し方は作者が決めるので［適用］は出さず、［読んだ］で片づけられるようにする
   const opinion = Boolean(item.proposalId) && !hasFix;
   const canAct = item.status === 'pending' || item.status === 'failed';
@@ -1155,7 +1155,7 @@ function renderItem(item) {
       '</div>'
     : '<div class="quote">' + escapeHtml(item.original) + '</div>' +
       '<div class="reason">' + escapeHtml(explain) +
-      (opinion ? '（編集部の意見です。本文は変わりません）' : '（直し方は作者が決めてください）') +
+      (opinion ? '（編集者の意見です。本文は変わりません）' : '（直し方は作者が決めてください）') +
       '</div>';
 
   return (

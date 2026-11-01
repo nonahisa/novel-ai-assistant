@@ -1,7 +1,7 @@
 /**
  * Discord「機能紹介」用の広報素材：編集部の方と一緒に使う（作者の依頼 2026-10-22）。
  * features.md の文：編集部は本文を書き換えず、提案として置く。作者が1件ずつ採るか見送るかを決める。
- * 作者は「作品管理 → 編集部連携 → 編集部提案確認」で提案を見られる。
+ * 作者は「作品管理 → 編集部連携 → 編集部の提案を見る」で提案を見られる。
  *
  * 編集部からの提案は、製品が読む形（`.aiwriter/proposals/proposals.jsonl`）で前もって置く（広報用の作り物。
  * 提案者の名前は「編集部A」＝実在しない名前）。**AIは呼ばない。**
@@ -26,16 +26,16 @@ const TEXT = [
   "",
 ].join("\n");
 
-const PROPOSER = "編集部A";
+const PROPOSER = "編集者A";
 const PROPOSALS = [
   { id: "p1", line: 2, original: "男は以外にも若かった。", target: "以外", suggestion: "意外", reason: "「思いのほか」の意味なら「意外」です" },
   { id: "p2", line: 3, original: "零時をさしていた。", target: "さして", suggestion: "指して", reason: "針などが示す意味なら「指す」です" },
 ];
 
-test("編集部の方と一緒に使うの広報素材を撮る", async () => {
+test("編集者の方と一緒に使うの広報素材を撮る", async () => {
   await recordFeature({
     name: "editorial",
-    subtitle: "編集部の方と一緒に使う — 提案を、作者が1件ずつ決める",
+    subtitle: "編集者の方と一緒に使う — 提案を、作者が1件ずつ決める",
     workTitle: E2E_WORK_TITLE,
     episodes: [{ name: EPISODE, text: TEXT }],
     fakeModels: ["gemma4:e4b", "gemma4:26b"],
@@ -59,10 +59,11 @@ test("編集部の方と一緒に使うの広報素材を撮る", async () => {
       await openEpisode(page, EPISODE, "零時を");
     },
     play: async ({ page }, caption) => {
-      await caption("編集部は本文を書き換えず、提案として置く");
+      await caption("編集者は本文を書き換えず、提案として置く");
       await page.waitForTimeout(2_000);
-      await caption("作者は「編集部提案確認」で、届いた提案を見る");
-      await runCommand(page, "編集部提案確認");
+      // 取込と確認を1つにした（作者の判断 2026-11-01）。渡していない作品でも、手元の未決を並べる
+      await caption("作者は「編集者の提案を見る」で、届いた提案を見る");
+      await runCommand(page, "編集者の提案を見る");
       await waitUntil(
         async () => {
           const title = (await quickPickTitle(page)) ?? "";
@@ -73,7 +74,7 @@ test("編集部の方と一緒に使うの広報素材を撮る", async () => {
           const panel = await proposalPanelFrame(page);
           return panel !== undefined && (await panel.locator('[data-action="apply"]').count()) > 0;
         },
-        "提案パネルに編集部の提案が並ぶ",
+        "提案パネルに編集者の提案が並ぶ",
         30_000
       );
       await clearNotifications(page);

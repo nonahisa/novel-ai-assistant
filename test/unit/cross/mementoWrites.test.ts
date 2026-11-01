@@ -175,6 +175,8 @@ const KEYS: KeyRow[] = [
   { key: "novelai.ownWorks.unregistered", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(UNREGISTERED_OWN_WORKS_KEY\b/g, guarded: true },
   { key: "novelai.ownWorks.pendingReaderStats", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(PENDING_OWN_WORK_STATS_KEY\b/g, guarded: true },
   { key: "novelai.ownWorks.unattendedLibrary", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(UNATTENDED_LIBRARY_KEY\b/g, guarded: true },
+  // 編集者の側で、もう知らせた作者の採否（作者の判断 2026-11-01「届いたら知らせる」）
+  { key: "novelai.editorSeenDecisions", literalIn: "features/decisionMemory.ts", writtenIn: "features/decisionMemory.ts", write: /\.update\(STORAGE_KEY\b/g, guarded: true },
   { key: "novelai.siteLink.browserGuideShown", literalIn: "features/openSiteLink.ts", writtenIn: "features/openSiteLink.ts", write: /\.update\(SITE_LINK_GUIDE_SHOWN_KEY\b/g, guarded: true },
   { key: "novelai.proofreadingSuite.selection", literalIn: "core/proofreadingSuite.ts", writtenIn: "features/proofreadingSuite.ts", write: /\.update\(\s*PROOFREADING_SUITE_SELECTION_KEY\b/g, guarded: true },
   { key: "novelai.imeDictionary.excluded.", literalIn: "core/imeDictionary.ts", writtenIn: "features/exportImeDictionary.ts", write: /\.update\(imeExcludedKey\(work\.id\)/g, guarded: true },

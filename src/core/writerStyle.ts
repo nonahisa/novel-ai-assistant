@@ -633,7 +633,7 @@ export function diagnosisNarrative(style: WriterStyle): string[] {
     case "editing":
       lines.push(
         "人の作品を見る側で使うとのことでした。" +
-          "編集者モードでは本文を書き換えません——直した案は提案として置き、" +
+          "編集者モードでは本文を書き換えません——修正案は提案として置き、" +
           "採るかどうかは作者が決めます。"
       );
       break;
@@ -1113,14 +1113,14 @@ function unstickAdvice(style: WriterStyle): TutorialAdvice {
 function reviewAdvice(): TutorialAdvice {
   return {
     advice:
-      "作者から届いたリンクを貼って、編集部として参加してください。" +
+      "作者から届いたリンクを貼って、編集者として参加してください。" +
       "招待の受諾と作品の取り寄せのあと、編集者モードに切り替わります。" +
-      "このモードでは本文を書き換えられません——直した案は提案として置き、" +
+      "このモードでは本文を書き換えられません——修正案は提案として置き、" +
       "採るかどうかは作者が決めます。取り違えて原稿を直してしまう事故が起きません。",
     steps: [
       {
         command: "novelai.joinAsEditor",
-        label: "編集部として参加",
+        label: "編集者として参加",
         why: "見る側で使うと答えていただいたためです。リンクを貼ると取り寄せまで進みます",
       },
       {

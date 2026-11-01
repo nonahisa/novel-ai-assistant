@@ -4,6 +4,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ProposalStore } from "../core/proposalStore";
 import {
+  categoryLabel,
   describeDecisionCounts,
   isHandCategory,
   isOpinionOnly,
@@ -48,8 +49,8 @@ export async function reviewProposals(
 
   if (all.length === 0) {
     void vscode.window.showInformationMessage(
-      "編集部からの提案はまだありません。" +
-        "編集部が校正・校閲を行い、同期すると届きます。"
+      "編集者からの提案はまだありません。" +
+        "編集者が校正・校閲を行い、同期すると届きます。"
     );
     return;
   }
@@ -81,9 +82,184 @@ export async function reviewProposals(
 
   panel.showProposals(work, pending.map(toViewItem));
   void vscode.window.showInformationMessage(
-    `編集部からの提案が ${pending.length} 件あります。` +
+    `編集者からの提案が ${pending.length} 件あります。` +
       "「提案」パネルで1件ずつご確認ください。"
   );
+}
+
+/**
+ * GitHub から編集部の提案を受け取った結果（「編集部の提案を見る」の前半）。
+ *
+ * **受け取りは Node（git）を使う**ので、中身は `shareWithEditor.ts` の
+ * `receiveEditorProposals` が持ち、ここからは動的 import で呼ぶ（実装ルール7）。
+ */
+export type EditorReceiveOutcome =
+  | {
+      kind: "received";
+      /** 作品の台帳へ新しく足した件数 */
+      added: number;
+      /** 取り寄せ（早送り）が断られ、手元にある分だけ取り込んだ */
+      pullFailed: boolean;
+      /** 校閲の範囲が動いた知らせ（`describeLockChanges`） */
+      lockMessages: string[];
+    }
+  /** まだ編集部へ渡していない作品（編集用フォルダーの記録が無い） */
+  | { kind: "notShared" }
+  /** この環境では受け取れない（ブラウザ版） */
+  | { kind: "unavailable" }
+  /** 受け取りの途中で失敗した。`detail` はログへだけ残す */
+  | { kind: "failed"; detail: string };
+
+/** 試験で差し替えられる口。製品は何も渡さない */
+export interface ShowEditorProposalsDeps {
+  receive: (work: WorkEntry) => Promise<EditorReceiveOutcome>;
+}
+
+const defaultShowDeps: ShowEditorProposalsDeps = {
+  receive: async (work) => {
+    if (!canRunProcesses()) return { kind: "unavailable" };
+    const { receiveEditorProposals } = await import("./shareWithEditor.js");
+    return receiveEditorProposals(work);
+  },
+};
+
+/**
+ * 編集部の提案を見る（作者モード。作者の判断 2026-11-01「1つにまとめる」）。
+ *
+ * 以前は「編集部提案取込」（受け取るだけ）と「編集部提案確認」（並べるだけ）に
+ * 分かれていた。自動の同期で先に受け取られていると、取込は「すべて取り込み済み」で
+ * 終わり、作者は提案がどこにあるのか分からなかった（実機 2026-11-01）。
+ *
+ * 1. GitHub から受け取る（手動の取込と同じ道）
+ * 2. 受け取った分も含めて、**未決の提案をすべて**提案パネルに並べる。
+ *    新しく届いた分が0件でも、未決があれば並べる
+ * 3. 受け取りに失敗しても、手元にある未決は並べ、理由を1文添える
+ *
+ * **本文には触らない。** 書くのは受け取りの中の提案と鍵の台帳だけ。
+ */
+export async function showEditorProposals(
+  work: WorkEntry,
+  panel: ProposalPanel,
+  deps: ShowEditorProposalsDeps = defaultShowDeps
+): Promise<{ pending: number }> {
+  // **編集者モードでは受け取らない。** 提案を出す側なので、置いた数を見る道へ
+  if (isEditorMode()) {
+    await reviewProposals(work, panel);
+    return { pending: 0 };
+  }
+
+  let outcome: EditorReceiveOutcome;
+  try {
+    outcome = await deps.receive(work);
+  } catch (error) {
+    outcome = {
+      kind: "failed",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (outcome.kind === "failed") {
+    // **エラーの本文は捨てずにログへ**（実装ルール5）。画面には原因を当てずに言う
+    useLogFile(work.folderPath);
+    logFailure("編集者の提案の受け取り", { 作品: work.title, 詳細: outcome.detail });
+  }
+  if (outcome.kind === "received") {
+    for (const text of outcome.lockMessages) {
+      void vscode.window.showInformationMessage(text);
+    }
+  }
+
+  const all = await new ProposalStore(work).load();
+  const pending = all.filter((entry) => entry.status === "pending");
+  const trouble = describeReceiveTrouble(outcome);
+
+  if (pending.length === 0) {
+    const counts = summarizeDecisions(all);
+    const decided = counts.accepted + counts.rejected + counts.read;
+    const history =
+      all.length > 0
+        ? `これまでに ${all.length} 件の提案がありました` +
+          (decided > 0 ? `（${describeDecisionCounts(counts)}）` : "") +
+          "。"
+        : "";
+    const notShared =
+      outcome.kind === "notShared"
+        ? `「${work.title}」はまだ編集者へ渡していません。`
+        : "";
+    const text = `未決の提案はありません。${history}${notShared}${trouble}`;
+    if (trouble) void vscode.window.showWarningMessage(text);
+    else void vscode.window.showInformationMessage(text);
+    return { pending: 0 };
+  }
+
+  panel.showProposals(work, pending.map(toViewItem));
+  const added = outcome.kind === "received" && outcome.added > 0
+    ? `（いま ${outcome.added} 件届きました）`
+    : "";
+  const head =
+    `編集者からの提案が ${pending.length} 件あります${added}。` +
+    "「提案」パネルで1件ずつご確認ください。";
+  if (trouble) {
+    void vscode.window.showWarningMessage(`${head}${trouble}手元にある分を並べています。`);
+  } else {
+    void vscode.window.showInformationMessage(head);
+  }
+  return { pending: pending.length };
+}
+
+/**
+ * 受け取れなかった理由の1文（受け取れたときは空）。
+ *
+ * **エラー文から原因を当てない**（実装ルール5）。git の文は英語で、言い当てると
+ * 外れたときに作者を違う方向へ動かす。「受け取れなかった」ことだけを言い、詳細はログ。
+ */
+function describeReceiveTrouble(outcome: EditorReceiveOutcome): string {
+  if (outcome.kind === "unavailable") {
+    return "ブラウザ版ではGitHubから受け取れません。";
+  }
+  if (outcome.kind === "failed") {
+    return "GitHubから受け取れませんでした（詳しくは「ログ」に残しました）。";
+  }
+  if (outcome.kind === "received" && outcome.pullFailed) {
+    return "GitHubから受け取れませんでした。";
+  }
+  return "";
+}
+
+/**
+ * 台帳に残っている未決の編集部の提案を、提案パネルへ静かに戻す。**戻した件数を返す。**
+ *
+ * 提案パネルを開いたとき（作品ごと）と、自動の同期で提案が届いたときに呼ぶ。
+ * これが無いと、作品の選び欄に未決の編集部の提案がある作品が出なかった
+ * （作者の実機 2026-11-01）。**編集者モードでは戻さない**（採るのは作者の判断）。
+ */
+export async function primeEditorProposals(
+  work: WorkEntry,
+  panel: ProposalPanel
+): Promise<number> {
+  if (isEditorMode()) return 0;
+  const pending = (await new ProposalStore(work).load()).filter(
+    (entry) => entry.status === "pending"
+  );
+  if (pending.length === 0) return 0;
+  panel.showRestoredProposals(work, pending.map(toViewItem));
+  return pending.length;
+}
+
+/**
+ * 自動の同期のあとに戻す先のパネル（`extension.ts` が起動時に1回だけ覚えさせる）。
+ *
+ * 同期の後始末（`editingAutomation.ts`）は Node 側の束で動的に読まれ、パネルを
+ * 引数で受け取れない。パネルは拡張機能に1つだけなので、ここで持つ。
+ */
+let rememberedPanel: ProposalPanel | undefined;
+
+export function rememberProposalPanel(panel: ProposalPanel): void {
+  rememberedPanel = panel;
+}
+
+/** 覚えたパネルへ戻す。パネルがまだ無ければ何もしない（開いたときに読まれる） */
+export async function primeEditorProposalsInPanel(work: WorkEntry): Promise<number> {
+  return rememberedPanel ? primeEditorProposals(work, rememberedPanel) : 0;
 }
 
 function toViewItem(proposal: ProposalView): ProposalViewItem & {
@@ -93,7 +269,7 @@ function toViewItem(proposal: ProposalView): ProposalViewItem & {
   // 検知の指摘は理由が種類の一語（「促音の誤り」等）で分かるが、手書きの理由は
   // 自由な文なので、検知から来たものか人が書いたものかが読み分けられない
   const said = isHandCategory(proposal.category)
-    ? `${proposal.category}：${proposal.reason}`
+    ? `${categoryLabel(proposal.category)}：${proposal.reason}`
     : proposal.reason;
   return {
     id: `proposal:${proposal.id}`,
@@ -401,7 +577,7 @@ export async function acceptProposal(
   ]);
   await recordEdit(work, {
     actor: "author",
-    action: "編集部の提案を採り入れた",
+    action: "編集者の提案を採り入れた",
     file: path.basename(proposal.file),
     detail: `${proposal.line}行 「${proposal.target}」→「${proposal.suggestion}」`,
   });
@@ -432,7 +608,7 @@ async function acknowledgeProposal(
   ]);
   await recordEdit(work, {
     actor: "author",
-    action: "編集部の意見を読んだ",
+    action: "編集者の意見を読んだ",
     file: path.basename(proposal.file),
     detail: `${proposal.line}行 「${proposal.target}」`,
   });
@@ -478,7 +654,7 @@ export async function rejectProposal(
   ]);
   await recordEdit(work, {
     actor: "author",
-    action: "編集部の提案を見送った",
+    action: "編集者の提案を見送った",
     file: fileName,
     detail: "",
   });

@@ -170,7 +170,8 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   // ためた「N件のファイルが更新されました」を、ここで1回だけ出す
   await flushNotices?.();
 
-  // 編集部から提案が届いていれば知らせて提案パネルを開く（作者の裁定、2026-10-28）。
+  // 編集部から提案が届いていれば［提案を見る］付きで知らせる（作者の裁定、2026-10-28。
+  // 2026-11-01 からパネルは勝手に開かない。編集者モードでは届いた作者の採否を知らせる）。
   // 編集用リポジトリは書庫の同期の対象外なので別口で取り寄せる。
   // **失敗しても同期の報告を止めない**
   await collectEditorInboxAfterSync(works);
@@ -191,7 +192,7 @@ async function collectEditorInboxAfterSync(
     const automation = await import("./editingAutomation.js");
     await automation.collectEditorInboxQuietly(works);
   } catch (error) {
-    logFailure("同期のあとの編集部の提案の取り込み", {
+    logFailure("同期のあとの編集者の提案の取り込み", {
       詳細: error instanceof Error ? error.message : String(error),
     });
   }

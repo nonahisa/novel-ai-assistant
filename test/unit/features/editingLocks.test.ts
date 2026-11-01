@@ -43,7 +43,7 @@ function lockLine(
   holderKind: "editor" | "author",
   time: string
 ): string {
-  return JSON.stringify({ kind, file, holder: "編集部", holderKind, time, note: "" });
+  return JSON.stringify({ kind, file, holder: "編集者", holderKind, time, note: "" });
 }
 
 describe("校閲の範囲", () => {
@@ -264,7 +264,7 @@ describe("校閲の範囲", () => {
       await put(root, POINTER, JSON.stringify({ folderPath: editing }));
     });
 
-    test("編集部の acquire が届き、解除（release）も届く", async () => {
+    test("編集者の acquire が届き、解除（release）も届く", async () => {
       await put(
         editing,
         LOCKS,
@@ -315,7 +315,7 @@ describe("校閲の範囲", () => {
   });
 
   describe("本文への書き込みの共通の入口", () => {
-    test("編集部が校閲中の話への書き込みは断る。ほかの話は断らない", async () => {
+    test("編集者が校閲中の話への書き込みは断る。ほかの話は断らない", async () => {
       await put(root, nodePath.join("本文", "001.txt"), "ゆき");
       await put(root, nodePath.join("本文", "002.txt"), "あめ");
       await put(
@@ -336,7 +336,7 @@ describe("校閲の範囲", () => {
       expect(refused.ok).toBe(false);
       if (!refused.ok) {
         expect(refused.reason).toBe("editor_locked");
-        expect(refused.detail).toContain("編集部が校閲中");
+        expect(refused.detail).toContain("編集者が校閲中");
       }
       // ファイルは1バイトも変わらない
       expect(await read(root, nodePath.join("本文", "002.txt"))).toBe("あめ");
@@ -377,7 +377,7 @@ describe("校閲の範囲", () => {
           kind: "proposal",
           id: `in-${index}`,
           time: "2026-10-28T09:00:00.000Z",
-          proposer: "編集部",
+          proposer: "編集者",
           file: "本文/001.txt",
           line: 1,
           original: "あ",

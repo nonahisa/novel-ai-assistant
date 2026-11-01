@@ -247,7 +247,7 @@ export function stepMenuFor(mode: WorkMode): readonly Step[] {
 }
 
 /** 編集者モードで作品が無いときの、最上段の薄字（作品は参加で受け取る） */
-export const EDITOR_STEP_NO_WORK_HINT = "編集部として参加（ステップ1）から";
+export const EDITOR_STEP_NO_WORK_HINT = "編集者として参加（ステップ1）から";
 
 
 /** 最上段の作品選択窓を押したときに走るコマンド */
@@ -947,7 +947,7 @@ function editorSelectorItem(
   item.tooltip = new vscode.MarkdownString(
     workCount === 0
       ? "まだ作品を受け取っていません。\n\n" +
-          "・「1. 編集部として参加」で、作者から届いたリンクを貼る"
+          "・「1. 編集者として参加」で、作者から届いたリンクを貼る"
       : (view.fullTitle ? `**${view.fullTitle}**\n\n` : "") +
           "下に並ぶ操作は、校閲で預かっているこの作品に効く"
   );

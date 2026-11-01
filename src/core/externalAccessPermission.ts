@@ -216,7 +216,7 @@ export const EDIT_HISTORY_READ_KEY = "novel.read.editHistory";
 export const SEPARATE_READ_KEYS: Readonly<Record<string, string>> = {
   [CHAT_LOG_READ_KEY]: "相談ログを読む（相談の質問・返事・渡した場面）",
   [ACTION_LOG_READ_KEY]: "動作のログを読む（本文の断片が入ることがあります）",
-  [EDIT_HISTORY_READ_KEY]: "編集履歴を読む（作者と編集部の操作の記録）",
+  [EDIT_HISTORY_READ_KEY]: "編集履歴を読む（作者と編集者の操作の記録）",
 };
 
 /** `novel.read` の kind → 名指しの鍵 */

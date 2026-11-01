@@ -34,6 +34,7 @@ import {
   formatJsonForFile,
   type JsonFileFormat,
 } from "./jsonFileFormat";
+import { EDITING_SITE_FILE, EDITOR_SHARE_MANIFEST_FILE } from "./editingRepo";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -980,6 +981,7 @@ async function ensureRecoveryIgnoreRule(
   folderPath: string,
   options: { syncCache?: boolean } = {}
 ): Promise<void> {
+  if (await isEditorCopyFolder(folderPath)) return;
   await appendMissingIgnoreRules(folderPath, (bytes) =>
     missingIgnoreRules(bytes, options)
   );
@@ -1002,8 +1004,39 @@ export async function ensureOnUseIgnoreRule(
   if (!ON_USE_IGNORED_PATHS.includes(rule)) {
     throw new Error(`使った作品にだけ足す除外の行ではありません: ${rule}`);
   }
+  // 編集用の写しの `.gitignore` は作者のもの（`isEditorCopyFolder` の説明）
+  if (await isEditorCopyFolder(folderPath)) return;
   await appendMissingIgnoreRules(folderPath, (bytes) =>
     lineSet(bytes).has(rule) ? [] : [rule]
+  );
+}
+
+/**
+ * 編集者へ渡した写し（編集用リポジトリ）の作品フォルダーか。**`.gitignore` を書かない**ために見る。
+ *
+ * 写しの `.gitignore` は作者が送ったもので、編集者の側の「校閲を終えて返す」は `.aiwriter/` しか
+ * 記録しない。ここで行を足すと、**記録されない未記録の変更が永久に残り**、開いたときの点検が
+ * 取り込みを止め続ける（編集者役の実機 2026-11-01「未取得 1 / 未記録 1」のまま、作者の採否が
+ * 入らなかった）。作者の `novelai.git.syncCache: true` で送られた `!.aiwriter/cache/` を、
+ * 編集者の既定（同期しない）が打ち消そうとして `.aiwriter/cache/` を足していた。
+ *
+ * **モード（`novelai.mode`）では足りない。** 「編集者として参加」は登録を済ませてから
+ * 編集者モードへ切り替えるので、登録の時点ではまだ作者モードである。印で見る
+ * （`.aiwriter/editor-share-manifest.json` があり `.aiwriter/editing.json` が無い。
+ * `workModeFromMarks` と同じ見方。どちらも読めなければ写しではないとして今までどおり）。
+ */
+export async function isEditorCopyFolder(folderPath: string): Promise<boolean> {
+  const root = path.join(folderPath, AIWRITER_DIR);
+  const isFile = async (name: string): Promise<boolean> => {
+    try {
+      const stat = await vscode.workspace.fs.stat(path.toUri(path.join(root, name)));
+      return stat.type === vscode.FileType.File;
+    } catch {
+      return false;
+    }
+  };
+  return (
+    (await isFile(EDITOR_SHARE_MANIFEST_FILE)) && !(await isFile(EDITING_SITE_FILE))
   );
 }
 

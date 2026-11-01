@@ -148,7 +148,7 @@ describe("誤字脱字・推敲に出るボタン", () => {
     expect(buttons).not.toContain("適用");
   });
 
-  test("編集部の意見だけの提案には［読んだ］が出て、読んだあとは［戻す］を出さない（作者の指示 2026-11-01）", () => {
+  test("編集者の意見だけの提案には［読んだ］が出て、読んだあとは［戻す］を出さない（作者の指示 2026-11-01）", () => {
     // 直した案が空の提案。［適用］は出さず、本文に触れずに片づける［読んだ］を出す
     const opinion = typoIssue({
       proposalId: "p1",
@@ -161,7 +161,7 @@ describe("誤字脱字・推敲に出るボタン", () => {
     expect(buttons).toContain("本文を見る");
     expect(buttons).toContain("無視");
     expect(buttons).not.toContain("適用");
-    expect(renderItem(opinion)).toContain("編集部の意見です");
+    expect(renderItem(opinion)).toContain("編集者の意見です");
 
     const read = buttonsOf({ ...opinion, status: "applied" });
     expect(read).not.toContain("戻す");

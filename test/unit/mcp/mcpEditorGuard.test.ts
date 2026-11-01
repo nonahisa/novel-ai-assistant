@@ -181,7 +181,7 @@ describe("編集用の写しでは、書く道具が1バイトも書かずに断
       message = (error as Error).message;
     }
     expect(message).toContain("編集者モードでは使えません");
-    expect(message).toContain("作者の原稿と資料を、編集部の側から書き換えないためです");
+    expect(message).toContain("作者の原稿と資料を、編集者の側から書き換えないためです");
     expect(message).toContain(MCP_EDITOR_ALLOWED_MESSAGE_HINT);
   });
 

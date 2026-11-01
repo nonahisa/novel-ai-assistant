@@ -225,19 +225,19 @@ export const STEP_DEFS: readonly StepDef[] = [
     ],
   },
   {
-    label: "6. 編集部校正・校閲",
+    label: "6. 編集者校正・校閲",
     icon: "organization",
     detail:
-      "編集部と一緒に仕上げる段階\n\n" +
-      "編集部は本文を書き換えず、提案として置く。",
+      "編集者と一緒に仕上げる段階\n\n" +
+      "編集者は本文を書き換えず、提案として置く。",
     entries: [
       "novelai.switchMode",
       "novelai.joinAsEditor",
       "novelai.toggleReviewLock",
       "novelai.finishReviewAndReturn",
-      "novelai.collectEditorProposals",
+      // 取込と確認を1つにした（作者の判断 2026-11-01）。受け取って未決を並べる
+      "novelai.viewEditorProposals",
       "novelai.revokeEditorAccess",
-      "novelai.reviewProposals",
       "novelai.showEditHistory",
     ],
   },
@@ -295,7 +295,7 @@ export const STEP_DEFS: readonly StepDef[] = [
  */
 export const EDITOR_STEP_DEFS: readonly StepDef[] = [
   {
-    label: "1. 編集部として参加",
+    label: "1. 編集者として参加",
     icon: "organization",
     detail:
       "作者から届いたリンクで、作品を受け取る段階\n\n" +
@@ -328,11 +328,11 @@ export const EDITOR_STEP_DEFS: readonly StepDef[] = [
     ],
   },
   {
-    label: "4. 直しを提案する",
+    label: "4. 修正を提案する",
     icon: "edit",
     detail:
       "読んで気づいたことを、自分の言葉で作者へ伝える段階\n\n" +
-      "・本文で直したい所を選んでから押す\n\n" +
+      "・本文で修正したい所を選んでから押す\n\n" +
       "・本文を選んで右クリックしても出せる\n\n" +
       "・行への意見だけなら、右クリックの「メモ追加」（素のエディターでは「ここにメモを足す」）\n\n" +
       "本文は書き換わらない。作者が採るかどうかを決める。",
