@@ -192,12 +192,18 @@ export interface PostingSiteEntry {
 /**
  * 作者が画面で見た順位の記録（設計書6.68.5）。
  *
- * **サイトから取りに行かない。** ランキングのページを機械で読むのは
- * 6.68.1で断った線の内側にある。ここに入るのは、作者が見て打った値だけ。
+ * **ランキングのページを機械で読まない。** ページを読むのは6.68.1で断った線の内側にある。
+ * ここに入るのは、作者が見て打った値と、**作者が同意して押したときだけ**なろう殿堂入りAPI
+ * から取った、その作品自身の順位（`source: "narou-api"`。作者の指示 2026-11-02）だけである。
  */
 export interface PostingRankingRecord {
   site: PostingSiteId;
-  /** 記録した日時（ISO8601）。順位が出た日時ではなく、書き留めた日時 */
+  /**
+   * 記録した日時（ISO8601）。手入力は順位が出た日時ではなく、書き留めた日時。
+   * **API から取った順位（`source: "narou-api"`）だけは、順位が出た日**（殿堂入りの
+   * `rtype` の日付の 0:00、日本時間）——取った時刻にすると、何年ぶんの履歴が
+   * 1つの日時に潰れてグラフにならない
+   */
   recordedAt: string;
   /** 種別。日間・週間・月間・ジャンル名など、**サイトの呼び方のまま** */
   board: string;
@@ -205,7 +211,16 @@ export interface PostingRankingRecord {
   rank: number;
   /** 作者のメモ（任意） */
   note?: string;
+  /**
+   * 出どころ。**手入力には付けない**（欄が無い＝作者が打った）。
+   * `"narou-api"` はなろう殿堂入りAPIから取った順位で、**AI へ渡す材料に入れない**
+   * （作者が運営へ約束した使い方。2026-11-02）
+   */
+  source?: PostingRankingSource;
 }
+
+/** 順位の出どころ（手入力は欄そのものを持たない） */
+export type PostingRankingSource = "narou-api";
 
 /**
  * **サイトをまたいで比べられる軸**（設計書6.79.7）。
@@ -285,7 +300,8 @@ export interface ReaderStatsMetricInfo {
    * ほかの欄は「増えたら良い」なので、グラフや増減の色をこの欄に当てると、
    * 1位へ上がった（数が減った）のが悪くなったように見える。**この印のある欄は
    * 増減のグラフ（`dailyChange`）に載せない**し、増減の色を付ける処理を足すときは
-   * ここを見て向きを逆にすること。いまは表の数として並ぶだけである。
+   * ここを見て向きを逆にすること。表の数のほか、**順位の推移のグラフ**（`core/rankSeries.ts`。
+   * 縦の軸を上下逆にした折れ線。2026-11-02）に、この印のある欄がすべて載る。
    */
   lowerIsBetter?: true;
 }
@@ -467,8 +483,12 @@ export const READER_STATS_PERIODS: readonly ReaderStatsPeriod[] = [
  * 「いつの数字か」の意味も違う（バックアップの数字は、作者がダウンロード
  * した時点のもので、取り込んだ日のものではない）。あとから見た人が
  * 区別できなくなる畳み方はしない。
+ *
+ * - `narou-api`：**作者が同意して押したときだけ、なろう小説APIから取った**その作品自身の数
+ *   （作者の指示 2026-11-02）。**AI へ渡す材料に入れない**（`isApiDerivedReaderStats`。
+ *   作者がなろうの運営へ約束した使い方）。ヘルパーの数と混ぜないのも同じ理由
  */
-export type ReaderStatsSource = "helper" | "manual" | "backup";
+export type ReaderStatsSource = "helper" | "manual" | "backup" | "narou-api";
 
 /**
  * 受け付ける出どころの一覧。**一覧はここ1つだけが持つ**（指標と同じ流儀）。
@@ -476,12 +496,35 @@ export type ReaderStatsSource = "helper" | "manual" | "backup";
  * **古い版はこの一覧を知らない。** `設定/` はGitで同期するので、`backup` を
  * 知らない版が読むと、**台帳ごと読めなくなる**（行を飛ばす仕組みは指標に
  * しか無い）。増やすときは、その影響を承知のうえで増やすこと。
+ *
+ * `narou-api`（2026-11-02）を足したときの影響：0.69.9 以降の版は知らない出どころの行を
+ * **生のまま控えて書き戻す**（`skippedReaderStatsRows`）ので、数も印も消えない。
+ * 0.67.1 以前の版は、API で取った行のある台帳を読めなくなる（直せない。承知のうえで足した）。
  */
 export const READER_STATS_SOURCES: readonly ReaderStatsSource[] = [
   "helper",
   "manual",
   "backup",
+  "narou-api",
 ];
+
+/**
+ * API から取った記録か（作者の指示 2026-11-02）。**AI へ渡す材料を作る所は、必ずこれで除く。**
+ *
+ * なろう小説API・なろう殿堂入りAPIの数は、作者が運営へ「AI に渡さない」と約束して
+ * 使っている。読者の反応の助言・相談・MCP の道具が同じ材料（`buildReaderAdviceMaterials`）
+ * を通るので、そこで除けば3つの道が一度に閉じる。
+ */
+export function isApiDerivedReaderStats(record: { source?: string }): boolean {
+  return record.source === "narou-api";
+}
+
+/** AI へ渡してよい記録だけを残す（`isApiDerivedReaderStats` の逆。並びは保つ） */
+export function readerStatsForAi<T extends { source?: string }>(
+  records: readonly T[]
+): T[] {
+  return records.filter((record) => !isApiDerivedReaderStats(record));
+}
 
 /**
  * 読者の反応の記録（設計書6.79.7）。
@@ -489,9 +532,9 @@ export const READER_STATS_SOURCES: readonly ReaderStatsSource[] = [
  * **追記だけで、畳まない**（順位と同じ流儀）。同じ日に2回読めば2件になる
  * ——これは「いま何件か」の台帳ではなく、「いつ何件だったか」の履歴である。
  *
- * **こちらからサイトを読みにいく処理は無い**（6.68.1の線はそのまま）。
- * 入るのは作者が打った値か、作者が自分で開いた管理画面から貼り込み係が
- * 作った封筒だけである。
+ * **ページを読みにいく処理は無い**（6.68.1の線はそのまま）。入るのは作者が打った値か、
+ * 作者が自分で開いた管理画面から貼り込み係が作った封筒、それと**作者が同意して押した
+ * ときだけ**なろう小説APIから取ったその作品自身の数（`source: "narou-api"`。設計書6.79.7.4）だけである。
  */
 export interface ReaderStatsRecord {
   site: PostingSiteId;
@@ -1123,6 +1166,12 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
         board: (entry.board as string).trim(),
         rank: entry.rank as number,
         ...(note ? { note } : {}),
+        /*
+          **出どころの印を読み落とさない**（2026-11-02）。ここで落とすと、読んで書き戻す
+          だけで API の順位が手入力の顔になり、AI へ渡さない約束の目印が消える。
+          知らない値は印ごと読まない（いまある値は1つだけ）
+        */
+        ...(entry.source === "narou-api" ? { source: "narou-api" as const } : {}),
       };
     }) ?? [];
 
@@ -1798,9 +1847,32 @@ export function withRanking(
         rank: record.rank,
         // **空のメモは持たせない**（台帳が中身の無い欄で膨らまないように）
         ...(note ? { note } : {}),
+        // 出どころは API のときだけ持つ（手入力は欄そのものが無い）
+        ...(record.source === "narou-api" ? { source: record.source } : {}),
       },
     ],
   };
+}
+
+/**
+ * 積もうとしている順位が、**台帳にもうある順位の繰り返し**か（2026-11-02）。
+ *
+ * なろう殿堂入りAPIは、押すたびにその作品の**過去の順位をすべて**返す。そのまま積むと
+ * 押した回数だけ同じ履歴が重なるので、**同じサイト・種別・日時・出どころで同じ順位**なら
+ * 積まない。順位が違えば積む（サイトが数え直した。台帳は追記だけで、前の値は消さない）
+ */
+export function repeatsRanking(
+  ledger: PostingLedger,
+  record: PostingRankingRecord
+): boolean {
+  return ledger.rankings.some(
+    (entry) =>
+      entry.site === record.site &&
+      entry.board === record.board.trim() &&
+      entry.recordedAt === record.recordedAt &&
+      entry.rank === record.rank &&
+      entry.source === record.source
+  );
 }
 
 /** そのサイトの記録を、新しい順で返す（画面はこの順に並べる） */
@@ -2316,11 +2388,18 @@ export function collapseNarouFunSameDay(
  * 区切りにNULを使うのは、どの欄にも現れない字だからである（生のままは置かない）
  */
 function narouFunDayKey(record: ReaderStatsRecord): string | undefined {
-  if (record.site !== "narou" || record.source !== "helper") return undefined;
+  /*
+    なろう小説APIから取った数（`narou-api`。2026-11-02）も**同じ日はあとの方だけ**を見る
+    （作者の指示「同じ日に何度取っても積み重ねない」）。**出どころは鍵に入れる**——
+    Narou.fun の数と API の数を、互いに畳んで消さない（集計の時機が違う別の数である）
+  */
+  if (record.site !== "narou") return undefined;
+  if (record.source !== "helper" && record.source !== "narou-api") return undefined;
   const when = new Date(record.readAt);
   if (Number.isNaN(when.getTime())) return undefined;
   const day = `${when.getFullYear()}-${when.getMonth() + 1}-${when.getDate()}`;
   return [
+    record.source,
     day,
     record.scope,
     record.episode ?? "",

@@ -1,5 +1,6 @@
 import {
   POSTING_SITES,
+  readerStatsForAi,
   readerStatsForSite,
   type PostingLedger,
 } from "../models/posting";
@@ -98,7 +99,12 @@ export function collectReactions(
 ): TargetSheetReaction[] {
   const reactions: TargetSheetReaction[] = [];
   for (const info of POSTING_SITES) {
-    const latest = readerStatsForSite(ledger, info.id).find(
+    /*
+      **なろう小説APIの数は使わない**（2026-11-02）。この紙は作品フォルダーに書くファイルで、
+      ほかの機能（AI の相談など）の材料に回りうる。API の数は AI へ渡さない・出典を添えて
+      出すと約束しているので、出典を書けない所へは写さない
+    */
+    const latest = readerStatsForAi(readerStatsForSite(ledger, info.id)).find(
       (record) => record.scope === "work"
     );
     if (!latest) continue;

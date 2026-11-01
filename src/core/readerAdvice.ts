@@ -1,6 +1,7 @@
 import {
   POSTING_SITES,
   postingSiteInfo,
+  readerStatsForAi,
   readerStatsInLedgerOrder,
   type PostingLedger,
   type PostingSiteId,
@@ -391,7 +392,11 @@ export function buildReaderAdviceMaterials(
     if (site !== undefined && info.id !== site) continue;
     // **台帳に書かれた順**で渡す（同じ日時に同じ話が2件あれば、あとのほう）
     // 同じ日の Narou.fun の読み取りは畳む（画面のグラフ・率と同じ材料を渡す。2026-11-01）
-    const records = readerStatsInLedgerOrder(ledger, info.id);
+    /*
+      **なろう小説APIの数は AI へ渡さない**（作者がなろうの運営へ約束した使い方。2026-11-02）。
+      助言のボタン・相談・MCP の道具の3つが、この材料を通る
+    */
+    const records = readerStatsForAi(readerStatsInLedgerOrder(ledger, info.id));
     const rates = computeReaderRates(records);
     if (rates.episodeReadAt === null) continue;
     materials.push(

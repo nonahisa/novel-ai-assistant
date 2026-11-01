@@ -74,6 +74,22 @@ import {
   streakSummaryFor,
 } from "./celebrations";
 import { createNonce } from "../core/webviewNonce";
+import type { PostingLedger } from "../models/posting";
+import { isWebRuntime } from "../core/runtime";
+import {
+  fetchNarouApi,
+  narouApiPanelState,
+  openNarouGuideline,
+  setNarouApiAgreement,
+  type NarouApiMemento,
+  type NarouApiOutcome,
+} from "./narouApiFetch";
+import {
+  isRankCelebrationId,
+  logRankCelebrationFailure,
+  markRankCelebrationsShown,
+  pendingRankCelebration,
+} from "./rankCelebrations";
 
 /**
  * 執筆量パネル（設計書6.3）。
@@ -83,6 +99,13 @@ import { createNonce } from "../core/webviewNonce";
  */
 
 const openPanels = new Map<string, vscode.WebviewPanel>();
+
+/**
+ * 拡張機能の保管庫（守りつき）。なろうAPIの同意・回数と、順位のお祝いの印を置く
+ * （2026-11-02）。統計を組み直す口（`refreshWritingStatsPanel`）は呼び元が多く、そこまで
+ * 保管庫を引き回さないよう、パネルを開いたときに1度つなぐ
+ */
+let panelMemento: NarouApiMemento | undefined;
 
 export async function openWritingStatsPanel(
   context: vscode.ExtensionContext,
@@ -95,6 +118,7 @@ export async function openWritingStatsPanel(
    */
   readerAdviceDeps?: ReaderAdviceDeps
 ): Promise<void> {
+  panelMemento = verifiedState(context.globalState);
   const existing = openPanels.get(work.id);
   if (existing) {
     existing.reveal();
@@ -103,6 +127,7 @@ export async function openWritingStatsPanel(
       data: await buildStatsPanelData(work, deviceId),
     });
     await offerCelebration(existing, work);
+    await offerRankCelebration(existing, work);
     return;
   }
 
@@ -117,7 +142,10 @@ export async function openWritingStatsPanel(
   panel.onDidDispose(() => openPanels.delete(work.id));
   // 裏に回っていたタブが見えるようになったら、その間に届いた祝いを上げる（設計書6.3.8）
   panel.onDidChangeViewState((event) => {
-    if (event.webviewPanel.visible) void offerCelebration(panel, work);
+    if (event.webviewPanel.visible) {
+      void offerCelebration(panel, work);
+      void offerRankCelebration(panel, work);
+    }
   });
 
   // 見出しの語（「話」か「投稿」か）と、本文を開く画面の向きの両方に使う
@@ -154,9 +182,85 @@ export async function openWritingStatsPanel(
       site?: string;
       force?: boolean;
       tab?: string;
+      checked?: boolean;
+      ids?: unknown;
     };
-    // 風船を見せ終えた（設計書6.3.8）。印を付けて、二度は上げない
+    /*
+      風船を見せ終えた（設計書6.3.8）。印を付けて、二度は上げない。順位のお祝いの鍵
+      （2026-11-02）は順位の係が覚え、執筆の目標の印の帳面には入れない
+    */
+    if (parsed.type === "celebrated" && Array.isArray(parsed.ids)) {
+      const ids = parsed.ids.filter((id): id is string => typeof id === "string");
+      const rankIds = ids.filter(isRankCelebrationId);
+      if (rankIds.length > 0) {
+        try {
+          await markRankCelebrationsShown(verifiedState(context.globalState), rankIds);
+        } catch (error) {
+          logRankCelebrationFailure(work, error);
+        }
+      }
+      await acceptCelebrated({
+        type: "celebrated",
+        ids: ids.filter((id) => !isRankCelebrationId(id)),
+      });
+      return;
+    }
     if (await acceptCelebrated(message)) return;
+    /*
+      なろうAPIによる作品情報取得（作者の指示 2026-11-02）。ガイドラインを開く・同意の
+      チェック・取得の3つ。**どれも押したときだけ**動き、終わったら統計を組み直す
+    */
+    if (parsed.type === "narouOpenGuideline") {
+      const memento = verifiedState(context.globalState);
+      const opened = await openNarouGuideline(memento, (url) =>
+        vscode.env.openExternal(vscode.Uri.parse(url))
+      ).catch((error: unknown) => {
+        useLogFile(work.folderPath);
+        logFailure("なろうデベロッパー利用ガイドラインを開く", {
+          内容: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      });
+      if (!opened) {
+        void vscode.window.showWarningMessage(
+          "ガイドラインを開けませんでした。もう一度リンクを押してください。"
+        );
+      }
+      await postStats(panel, work, deviceId);
+      return;
+    }
+    if (parsed.type === "narouAgree") {
+      try {
+        await setNarouApiAgreement(verifiedState(context.globalState), parsed.checked === true);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        useLogFile(work.folderPath);
+        logFailure("なろうAPIの同意を覚える", { 内容: detail });
+        void vscode.window.showErrorMessage(detail);
+      }
+      await postStats(panel, work, deviceId);
+      return;
+    }
+    if (parsed.type === "narouFetch") {
+      let outcome: NarouApiOutcome;
+      try {
+        outcome = await fetchNarouApi(work, {
+          memento: verifiedState(context.globalState),
+          store: new PostingStore(work),
+          fetch: (url) => fetch(url),
+          isWeb: isWebRuntime(),
+        });
+      } catch (error) {
+        // **必ず返事をする**（画面のボタンが「取得しています…」のまま戻らなくならないように）
+        const detail = error instanceof Error ? error.message : String(error);
+        useLogFile(work.folderPath);
+        logFailure("なろうAPIによる作品情報取得", { 作品: work.title, 内容: detail });
+        outcome = { kind: "failed", message: detail };
+      }
+      panel.webview.postMessage({ type: "narouApi", outcome });
+      await postStats(panel, work, deviceId);
+      return;
+    }
     // 作者が押したタブを覚える（2026-11-01）。知らない鍵は覚えない（覚える側が確かめる）
     if (parsed.type === "tabSelected") {
       await rememberWritingStatsTab(verifiedState(context.globalState), work.id, parsed.tab);
@@ -233,6 +337,7 @@ export async function openWritingStatsPanel(
       });
       // 閉じている間に届いた目標は、開いたこのときに一度だけ祝う
       await offerCelebration(panel, work);
+      await offerRankCelebration(panel, work);
       return;
     }
     if (parsed.type === "open" && parsed.filePath) {
@@ -275,6 +380,37 @@ export async function refreshWritingStatsPanel(
   });
   // 保存で目標に届いた瞬間、開いていればその場で祝う（設計書6.3.8）
   await offerCelebration(panel, work);
+  await offerRankCelebration(panel, work);
+}
+
+/** 統計を組み直して送る（なろうAPIの欄を押したあと） */
+async function postStats(panel: vscode.WebviewPanel, work: WorkEntry, deviceId: string): Promise<void> {
+  panel.webview.postMessage({ type: "stats", data: await buildStatsPanelData(work, deviceId) });
+}
+
+/**
+ * まだ見せていない順位のお祝いを送る（作者の指示 2026-11-02）。**見えているときだけ**
+ * （執筆の目標の祝いと同じ）。見せ終えたかは画面から `celebrated` で返してもらう
+ */
+async function offerRankCelebration(panel: vscode.WebviewPanel, work: WorkEntry): Promise<void> {
+  if (!panel.visible || !panelMemento) return;
+  try {
+    const ledger = await new PostingStore(work).load();
+    const payload = pendingRankCelebration(panelMemento, work, ledger);
+    if (payload) await panel.webview.postMessage({ type: "celebrate", payload });
+  } catch (error) {
+    // 台帳が読めなければ祝わないだけ（読めないことは統計の画面が言う）
+    logRankCelebrationFailure(work, error);
+  }
+}
+
+/**
+ * 台帳を保存し終えたとき（`onPostingSaved`）、その作品の統計が開いていれば順位のお祝いを
+ * その場で上げる。閉じていれば、次に開いたとき1回だけ上がる
+ */
+export async function offerRankCelebrationIfOpen(work: WorkEntry): Promise<void> {
+  const panel = openPanels.get(work.id);
+  if (panel) await offerRankCelebration(panel, work);
 }
 
 /**
@@ -379,6 +515,13 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     siteRecordsError: siteRecords.error,
     // サイトのタブ（「カクヨムの反応」など。配信されているサイトだけ。なろうは最後尾。2026-11-01）
     readerSites: siteRecords.sites,
+    /*
+      なろうAPIによる作品情報取得の欄（作者の指示 2026-11-02）。なろうに載っている作品だけ。
+      保管庫がつながっていない（パネルを開く前の組み直し）ときは出さない
+    */
+    narouApi: panelMemento
+      ? narouApiPanelState(panelMemento, siteRecords.ledger, isWebRuntime())
+      : null,
     // 連載中／完結の印と食い違いの知らせ（「概要」に控えめに出す。2026-11-01）
     workFacts: siteRecords.workFacts,
     // 達成の印（設計書6.3.8）。どの目標をいつ達成したかを残す
@@ -468,6 +611,8 @@ export interface SiteRecordsResult {
   sites: ReaderSiteTab[];
   /** 読めなかった理由。読めていれば null（画面はこの行を出さない） */
   error: string | null;
+  /** 読めた台帳（なろうAPIの欄が Nコードを見る）。読めなかったときは null */
+  ledger: PostingLedger | null;
 }
 
 /**
@@ -493,6 +638,7 @@ export async function readSiteRecords(
       workFacts: buildWorkPostingFacts(ledger),
       sites: readerSiteTabs(ledger, records),
       error: null,
+      ledger,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -502,6 +648,6 @@ export async function readSiteRecords(
       作品: work.title,
       内容: detail,
     });
-    return { records: [], workFacts: null, sites: [], error: detail };
+    return { records: [], workFacts: null, sites: [], error: detail, ledger: null };
   }
 }

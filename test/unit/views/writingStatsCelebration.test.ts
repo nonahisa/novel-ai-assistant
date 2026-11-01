@@ -63,7 +63,19 @@ describe("風船と花火", () => {
 
   test("1日は少なめの風船、作品・締切では花火も", () => {
     expect(script).toContain("size === 'small' ? 5 : 12");
-    expect(script).toContain("if (size === 'fireworks')");
+    // 順位で1位に入ったときの大きな花火（grand。2026-11-02）も同じ花火の道を通る
+    expect(script).toContain("if (size === 'fireworks' || grand)");
+  });
+
+  test("順位で1位に入ったときは大きな花火（数も火花も増やす）", () => {
+    expect(script).toContain("const grand = size === 'grand'");
+    expect(script).toContain("(grand ? 12 : 5)");
+    expect(script).toContain("grand ? 64 : 36");
+  });
+
+  test("動きを減らす設定では、順位のお祝いも動かさず札だけ（同じ celebrate を通る）", () => {
+    expect(script).toContain("if (!reducedMotion()) runCelebration(payload.size, payload.balloons)");
+    expect(script).toContain("showCelebrationBanner(");
   });
 
   test("拡張機能から届いた祝いを受け取る", () => {
