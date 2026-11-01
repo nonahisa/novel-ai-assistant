@@ -38,6 +38,67 @@ import { useLogFile } from "../core/logger";
 /** 何を置くか。`edit` は「直しを提案する」、`memo` は編集者モードの「ここにメモを足す」 */
 export type HandProposalKind = "edit" | "memo";
 
+/**
+ * 選ばずに押したときの案内。**詳細メニューから押した人に、右クリックの道も教える**
+ * （作者の決定 2026-11-01）。メニューは本文の外にあるので、押す前に本文で選んでおく必要がある
+ */
+export const PICK_FIRST_MESSAGE =
+  "直したい所を本文で選んでから押してください（右クリックからも出せます）。";
+
+/** コマンドから押されたときに要るもの。試験で差し替えるため外から渡す */
+export interface ProposeEditCommandDeps {
+  /** 前面の原稿エディターへ「いまの選択で頼んで」と送る。前面に無ければ false */
+  askManuscript: () => boolean;
+  /** 素のエディター（いちばん最近前に出ていたもの） */
+  activeEditor: () =>
+    | { document: vscode.TextDocument; selection: vscode.Range }
+    | undefined;
+  /** 選んだ所で手書きの提案へ進む（作品を引くのは呼ぶ側） */
+  propose: (document: vscode.TextDocument, range: vscode.Range) => Promise<void>;
+}
+
+export type ProposeEditCommandOutcome =
+  | "notEditor"
+  | "manuscript"
+  | "noSelection"
+  | "proposed";
+
+/**
+ * コマンド「直しを提案する」の受け口（詳細メニュー・コマンドパレット。設計書5.6.1.1）。
+ *
+ * - **作者モードでは押せない理由を出す**（編集部連携のほかの項目と同じく、メニューには
+ *   出したまま押したときに言う。`finishReviewAndReturn` と同じ形）。本文が開いていない
+ *   ときに選び方の案内が先に出ると、モードの違いが伝わらない
+ * - **前面の原稿エディターを先に見る。** 選んでいる所は画面の中にしか無いので、画面へ
+ *   頼み返す（傍点のキーと同じ形）。選んでいなければ画面が空の範囲を返し、
+ *   `proposeByHand` が同じ案内を出す
+ * - 無ければ素のエディターの選択を使う。選んでいなければ案内だけ出す
+ */
+export async function proposeEditFromCommand(
+  deps: ProposeEditCommandDeps
+): Promise<ProposeEditCommandOutcome> {
+  if (!isEditorMode()) {
+    void vscode.window.showInformationMessage(
+      "「直しを提案する」は、編集者モードで使う操作です。作者の環境では本文をそのまま直せます。"
+    );
+    return "notEditor";
+  }
+  if (deps.askManuscript()) return "manuscript";
+  const editor = deps.activeEditor();
+  const { start, end } = editor?.selection ?? {};
+  if (
+    !editor ||
+    !start ||
+    !end ||
+    (start.line === end.line && start.character === end.character)
+  ) {
+    void vscode.window.showInformationMessage(PICK_FIRST_MESSAGE);
+    return "noSelection";
+  }
+  await deps.propose(editor.document, editor.selection);
+  return "proposed";
+}
+
 /** 選んだ所の、画面に出す短い引用（長い文は頭だけ） */
 function quote(text: string): string {
   return text.length > 20 ? `${text.slice(0, 20)}…` : text;
@@ -84,9 +145,8 @@ export async function proposeByHand(
   }
   const empty = range.start.character === range.end.character;
   if (kind === "edit" && empty) {
-    void vscode.window.showWarningMessage(
-      "直したい所を選んでから実行してください。"
-    );
+    // 詳細メニューから押して原稿エディターが選んでいない所を返したときも、ここへ来る
+    void vscode.window.showWarningMessage(PICK_FIRST_MESSAGE);
     return false;
   }
 

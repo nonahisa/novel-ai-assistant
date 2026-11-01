@@ -17,7 +17,17 @@
  * 1行1件の追記だけなら、複数人が同時に触っても競合しにくい。
  */
 
-export type ProposalStatus = "pending" | "accepted" | "rejected";
+/**
+ * 提案のいまの状態。
+ *
+ * **`read` は、意見だけの提案（直した案が空）を作者が読んだ印**（作者の決定 2026-11-01）。
+ * 採用（`accepted`）として残すと、編集部の側で意見が「採られた」と数えられる。
+ * 意見は本文に当てるものではないので、採ったとも見送ったとも別に数える。
+ */
+export type ProposalStatus = "pending" | "accepted" | "rejected" | "read";
+
+/** 作者が決めたときに足す状態（未決は記録しない） */
+export type ProposalDecisionStatus = Exclude<ProposalStatus, "pending">;
 
 export interface Proposal {
   /** 提案を指すための番号。承認・却下の記録がこれを指す */
@@ -53,7 +63,7 @@ export interface ProposalDecision {
   time: string;
   /** 決めた人（作者） */
   decidedBy: string;
-  status: "accepted" | "rejected";
+  status: ProposalDecisionStatus;
   /** 却下の理由。作者が編集部へ伝えたいことがあれば */
   note: string;
 }
@@ -129,6 +139,41 @@ export function resolveProposals(lines: ProposalLine[]): ProposalView[] {
     }
     return compareTimeDesc(a.time, b.time);
   });
+}
+
+/** 採否の内訳。編集部へ返す知らせと、編集者モードの案内で使う */
+export interface DecisionCounts {
+  accepted: number;
+  rejected: number;
+  read: number;
+  pending: number;
+}
+
+/**
+ * 採用・見送り・読まれたを数える。
+ *
+ * **意見だけの提案は、採用に数えない**（作者の決定 2026-11-01）。0.118.0 では
+ * ［読んだ］を「採った」（`accepted`）で残していたので、**意見だけの提案に付いた
+ * 「採った」も読まれたとして数える**（古い記録の読み方を変えずに、数えだけ直す。
+ * 意見には当てる直しが無いので、それを「採った」と読む道は元から無い）。
+ */
+export function summarizeDecisions(
+  views: readonly ProposalView[]
+): DecisionCounts {
+  const counts: DecisionCounts = { accepted: 0, rejected: 0, read: 0, pending: 0 };
+  for (const view of views) {
+    if (view.status === "accepted" && isOpinionOnly(view)) {
+      counts.read += 1;
+    } else {
+      counts[view.status] += 1;
+    }
+  }
+  return counts;
+}
+
+/** 内訳を「採用 N・見送り N・読まれた N」の形で書く（未決は呼ぶ側が別に言う） */
+export function describeDecisionCounts(counts: DecisionCounts): string {
+  return `採用 ${counts.accepted}・見送り ${counts.rejected}・読まれた ${counts.read}`;
 }
 
 function isNewer(candidate: string, current: string): boolean {

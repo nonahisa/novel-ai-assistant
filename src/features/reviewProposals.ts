@@ -4,9 +4,11 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ProposalStore } from "../core/proposalStore";
 import {
+  describeDecisionCounts,
   isHandCategory,
   isOpinionOnly,
   locateProposal,
+  summarizeDecisions,
   type ProposalView,
 } from "../models/proposal";
 import { FileLockStore } from "../core/fileLockStore";
@@ -51,9 +53,18 @@ export async function reviewProposals(
     );
     return;
   }
+  /*
+    **採否の内訳を「採用 N・見送り N・読まれた N」で添える**（作者の決定 2026-11-01）。
+    編集部が作者から送り返された採否を見る場所はここなので、意見を読んだものを
+    採用に混ぜずに言う（`summarizeDecisions`）
+  */
+  const counts = summarizeDecisions(all);
+  const decided = counts.accepted + counts.rejected + counts.read;
+  const breakdown = decided > 0 ? `これまでの採否：${describeDecisionCounts(counts)}。` : "";
   if (pending.length === 0) {
     void vscode.window.showInformationMessage(
-      `未決の提案はありません（これまでに ${all.length} 件の提案がありました）。`
+      `未決の提案はありません（これまでに ${all.length} 件の提案がありました）。` +
+        breakdown
     );
     return;
   }
@@ -62,7 +73,8 @@ export async function reviewProposals(
   if (isEditorMode()) {
     void vscode.window.showInformationMessage(
       `未決の提案が ${pending.length} 件あります。` +
-        "採るかどうかは作者が決めます（編集者モードでは決められません）。"
+        "採るかどうかは作者が決めます（編集者モードでは決められません）。" +
+        breakdown
     );
     return;
   }
@@ -331,8 +343,8 @@ export async function acceptProposal(
 ): Promise<{ ok: boolean; reason?: string }> {
   /*
     **意見だけの提案（直した案が空）は、本文を書き換えない**（作者の指示 2026-11-01）。
-    空の案で置き換えると、選んだ所が消える。「読んだ」として採った記録だけを足し、
-    採否の数え方・送り返しは直しの提案と同じ道を通す
+    空の案で置き換えると、選んだ所が消える。「読んだ」の記録だけを足し（採用には
+    数えない。作者の決定 2026-11-01）、送り返しは直しの提案と同じ道を通す
   */
   if (isOpinionOnly(proposal)) {
     await acknowledgeProposal(work, proposal);
@@ -400,8 +412,9 @@ export async function acceptProposal(
 /**
  * 意見だけの提案を「読んだ」として片づける。**本文には触らない。**
  *
- * 採った記録（`accepted`）で残す。見送り（`rejected`）にすると、編集部の側では
- * 「意見が退けられた」と読めてしまう。読んだうえで直すかどうかは作者が本文で決める。
+ * **「読んだ」（`read`）で残す**（作者の決定 2026-11-01）。採った（`accepted`）にすると
+ * 編集部の側で意見が「採用」に数えられ、見送り（`rejected`）にすると「意見が退けられた」と
+ * 読めてしまう。読んだうえで直すかどうかは作者が本文で決める。
  */
 async function acknowledgeProposal(
   work: WorkEntry,
@@ -413,7 +426,7 @@ async function acknowledgeProposal(
       proposalId: proposal.id,
       time: new Date().toISOString(),
       decidedBy: who,
-      status: "accepted",
+      status: "read",
       note: "意見を読んだ",
     },
   ]);

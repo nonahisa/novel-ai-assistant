@@ -279,6 +279,101 @@ export const STEP_DEFS: readonly StepDef[] = [
   },
 ];
 
+/**
+ * 編集者モードの簡単ステップメニュー（作者の指示 2026-11-01「簡単ステップメニュー、
+ * 編集モードに切り替えた場合は特化したものに切り替えてください」。設計書6.29.6・5.6）。
+ *
+ * 編集部の人は作品づくりの7段（作品登録・新作構想…）を通らない。作者の並びのまま
+ * だと、押しても「編集者モードでは使えません」になる段が大半を占め、拡張機能を
+ * 初めて触る人には何から押せばよいか分からない。そこで**校閲の流れの順に並べ直す。**
+ *
+ * - **編集者モードで押せる操作だけを並べる**（`editorMode.ts` の許可の一覧。
+ *   食い違いは `stepMenuEditorMode.test.ts` が見張る）
+ * - 操作の名前と説明は、作者の並びと同じく詳細メニュー（`ACTION_TREE`）から引く
+ * - 「ここにメモを足す」と提案パネルは詳細メニューに無い（本文の右クリックと
+ *   結果が届いたときに開く口だけ）ので、段の説明で道を教える
+ */
+export const EDITOR_STEP_DEFS: readonly StepDef[] = [
+  {
+    label: "1. 編集部として参加",
+    icon: "organization",
+    detail:
+      "作者から届いたリンクで、作品を受け取る段階\n\n" +
+      "・参加が済んでいれば、ここは飛ばしてよい\n\n" +
+      "・作者が原稿を直したあとは「同期」で最新にする",
+    entries: ["novelai.joinAsEditor", "novelai.gitSync"],
+  },
+  {
+    label: "2. 校閲する範囲を押さえる",
+    icon: "lock",
+    detail:
+      "これから見る話を「校閲中」にして、作者に知らせる段階\n\n" +
+      "・見る話を開いてから押す\n\n" +
+      "・押さえている間、作者がその話を直そうとすると知らせが出る",
+    entries: ["novelai.toggleReviewLock"],
+  },
+  {
+    label: "3. 検知で探す",
+    icon: "search-fuzzy",
+    detail:
+      "直したほうがよさそうな所を、機械に探させる段階\n\n" +
+      "・表記ゆれ検知は AI を使わないので、AI の設定が無くても使える\n\n" +
+      "・誤字脱字検知と推敲は AI を使う\n\n" +
+      "・見つかったものは［適用］で提案として置く。本文は書き換わらない",
+    entries: [
+      "novelai.checkNotation",
+      "novelai.checkTypos",
+      "novelai.checkProofread",
+      "novelai.manageKeepWords",
+    ],
+  },
+  {
+    label: "4. 直しを提案する",
+    icon: "edit",
+    detail:
+      "読んで気づいたことを、自分の言葉で作者へ伝える段階\n\n" +
+      "・本文で直したい所を選んでから押す\n\n" +
+      "・本文を選んで右クリックしても出せる\n\n" +
+      "・行への意見だけなら、右クリックの「ここにメモを足す」\n\n" +
+      "本文は書き換わらない。作者が採るかどうかを決める。",
+    entries: ["novelai.proposeEditByHand"],
+  },
+  {
+    label: "5. 置いた提案を見る",
+    icon: "inbox",
+    detail:
+      "置いた提案の数と、作者が採ったかどうかを確かめる段階\n\n" +
+      "・まだ決まっていない数と、採用・見送り・読まれたの数が出る\n\n" +
+      "・誰がいつ何をしたかは編集履歴で見られる",
+    entries: ["novelai.reviewProposals", "novelai.showEditHistory"],
+  },
+  {
+    label: "6. 校閲を終えて返す",
+    icon: "check-all",
+    detail:
+      "押さえた範囲を外し、置いた提案を作者へ届ける段階\n\n" +
+      "・送るのは提案・押さえの記録・編集履歴だけ\n\n" +
+      "・本文に保存していない変更があれば、送らずに止まる",
+    entries: ["novelai.finishReviewAndReturn"],
+  },
+  {
+    label: "7. 作者モードへ戻る",
+    icon: "arrow-swap",
+    detail:
+      "この環境を、自分の作品を書く使い方へ戻す段階\n\n" +
+      "・いつでも編集者モードへ切り替え直せる",
+    entries: ["novelai.switchMode"],
+  },
+  {
+    label: "ヘルプ",
+    icon: "question",
+    detail:
+      "うまく動かないときに開く場所\n\n" +
+      "・困ったときは記録を作者へ渡すと、原因を探しやすい",
+    entries: ["novelai.showLog", "novelai.exportIssueReport", "novelai.showVersion"],
+  },
+];
+
 /** 定義が参照しているコマンドIDをすべて挙げる（テストで実在を確かめる） */
 function referencedCommands(defs: readonly StepDef[]): string[] {
   const commands: string[] = [];
@@ -297,3 +392,11 @@ function referencedCommands(defs: readonly StepDef[]): string[] {
 /** 簡単ステップメニューが参照しているコマンドID */
 export const STEP_REFERENCED_COMMANDS: readonly string[] =
   referencedCommands(STEP_DEFS);
+
+/**
+ * 編集者モードの簡単ステップメニューが参照しているコマンドID。
+ * **`STEP_REFERENCED_COMMANDS` には混ぜない**——相談の目次（`actionEntrance.ts`）は
+ * 作者の並びに載っているかで入口を言うので、編集部の段を混ぜると作者に違う道を教える
+ */
+export const EDITOR_STEP_REFERENCED_COMMANDS: readonly string[] =
+  referencedCommands(EDITOR_STEP_DEFS);

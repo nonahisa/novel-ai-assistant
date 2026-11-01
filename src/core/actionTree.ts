@@ -654,6 +654,22 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・終わったらもう一度押して外す\n\n" +
               "直しは、検知の［適用］か、本文を選んで右クリックの「直しを提案する」で提案として置く。",
           },
+          // 校閲中に、編集部が自分の言葉で直しと意見を置く（作者の決定 2026-11-01）。
+          // 右クリックにしか無いと見つからないので、札を掛ける操作の隣にも出す。
+          // 作者モードでは押したときに理由を出す（`proposeEditFromCommand`）
+          {
+            kind: "action",
+            command: "novelai.proposeEditByHand",
+            label: "直しを提案する",
+            icon: "edit",
+            requiresWork: true,
+            detail:
+              "本文で選んだ所に、直した案と理由を提案として置く\n\n" +
+              "・先に本文で直したい所を選んでから押す\n\n" +
+              "・直した案を空にすると、意見だけを送れる\n\n" +
+              "・右クリックからも出せる\n\n" +
+              "編集者モードで使う。本文は書き換わらない。",
+          },
           {
             kind: "action",
             command: "novelai.finishReviewAndReturn",
