@@ -350,8 +350,10 @@ describe("拡張機能ホストの再起動（残ったタブを開き直す）"
     vi.useRealTimers();
     // 決まった回数だけ後回しにする settle では、全件を同時に走らせて重いときに
     // 閉じる処理より先に確かめてしまい揺れた（2026-10-15）。閉じ終わるまで待つ
-    await vi.waitFor(() => expect(closedTabs).toEqual([tab]), { timeout: 5_000 });
+    // CI の windows-latest は遅く、待ちとテストの既定の上限がどちらも5秒で、
+    // 5007ミリ秒で落ちた（2026-11-01）。待ちを20秒・テストの上限を30秒にする
+    await vi.waitFor(() => expect(closedTabs).toEqual([tab]), { timeout: 20_000 });
     expect(created).toHaveLength(1);
     expect(created[0]!.panel.webview.html).toContain("Ctrl+Alt+M");
-  });
+  }, 30_000);
 });
