@@ -101,6 +101,21 @@
 - 2024年の IPA 未踏の資料には「実用的なオープンソースのニューラルかな漢字変換は未だ存在しない」とあった（https://www.ipa.go.jp/jinzai/mitou/it/2024/nl10bi0000006qh1-att/seikashosai-ok-3.pdf ）。その後に上の各案が出てきたので、試せる段階に入っている
 - 次に試すなら：shion と zenz を、作者の作品（19話）の本文の読みから変換させ、誤変換の数と1回の時間を CPU だけで比べる
 
+### 12-1. 使う条件（ライセンス）を追って調べた（2026-11-01。各モデルのページと Hugging Face の API で読んだ。法律の判断ではない）
+
+- **shion v4.2 small は非公開になっていた**（ページが 401）。同じ作者の後継が公開されている：**Aster-v1.2-small**（約29MB の int8 ONNX）と **Bletilla-v0.1-small**（Mixture-of-Experts。setsuna-ime の今の既定）。どちらも **Apache-2.0**。これを使う IME **setsuna-ime** は Windows（TSF）と Linux（fcitx5）向けで、**MIT**（https://github.com/esehehelp/setsuna-ime 。2026-10-30 更新）
+- **zenz は版で許諾が違う**：v1〜v3.1 は **CC-BY-SA 4.0**（基の ku-nlp/gpt2-*-japanese-char も CC-BY-SA 4.0。Wikipedia・CC-100・OSCAR で学習）。**v3.2（small・xsmall、2026-05〜07）は Apache-2.0** に変わった。ただし v3.2 のページは許諾の1行だけで、基のモデルと学習データが書いていない
+- **rakukan の既定のモデルは jinen**（togatogah/jinen-v1・v2。GPT-2 系と Qwen3 系、26M〜90M、GGUF の Q5 量子化）。**CC-BY-SA 4.0**、学習データは zenz-v2.5-dataset。rakukan 本体は MIT、karukan 本体は MIT／Apache-2.0
+- **辞書**：Mozc の公開辞書は「混合」。中身は IPAdic（奈良先端大の表記と保証しない旨の文を必ず添える）と沖縄辞書など。コードは BSD 3-Clause。azooKey の辞書は Apache-2.0。karukan が使う SudachiDict は Apache-2.0
+- **それぞれの意味**
+  - MIT・BSD・Apache-2.0：配ってよく、売ってもよい。著作権の表記と許諾の文を同梱すれば足りる。Apache-2.0 は特許の扱いも明記されていて、いちばん扱いやすい
+  - CC-BY-SA 4.0：配ってよく、売ってもよい。ただし表記が要り、**モデルを追加で学習させて配るなら、その結果も CC-BY-SA で公開する**。IME のプログラム本体まで同じ条件になるとは一般に読まれていない（モデルは別の物として同梱する）。変換の結果（作者が書いた文）には及ばない
+  - **作者の作品で鍛える場合**：手元で鍛えて手元で使うだけなら、配っていないので何も起きない。鍛えたモデルを配るときだけ、上の条件が効く。作品そのものを学習データとして配ることにはならない
+- **気をつけること**
+  - Aster・Bletilla はモデルとしては Apache-2.0 だが、学習データの中に、使う条件の厳しいものが混ざって見える（livedoor ニュースコーパス・Amazon Reviews Multi・JESC など。それぞれ改変の禁止・研究用途のみ・継承の条件がある見込みで、未確認）。zenz-v3.2 は学習データが書いていない。**製品として配る前に、出所をもう一度確かめる**（作者へ問い合わせる道もある）
+  - 一番すっきりしているのは「Apache-2.0 のモデル＋ Apache-2.0 の辞書（azooKey・SudachiDict）＋ MIT のエンジン」の組み合わせ。Mozc の辞書を使うなら IPAdic の文を添える
+- 見立てを直す：前の段の「shion の形が筋がよい」は、**Aster／Bletilla（Apache-2.0、ONNX int8）と setsuna-ime（MIT、Windows TSF）**に読み替える。Windows で動く実物があり、許諾も扱いやすいので、試すならまずここから
+
 ## 作者の要望
 
 - 2026-08-15「執筆に特化したIMEを作りたい」「ATOKにも対応してほしい」（設計書6.13.1、引継ぎ書8章「IME辞書の強化」）。拡張機能の中には作れないので、辞書の書き出しを強くする形で応えた
