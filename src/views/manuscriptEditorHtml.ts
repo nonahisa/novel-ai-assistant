@@ -979,6 +979,7 @@ body.clipped #cheer { white-space: normal; }
   <button id="copy" title="投稿サイトの記法に直してコピーします">コピー（投稿サイト用）</button>
   <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
   <button id="episodePlot" title="この話の単話プロットを右の列に開きます。無ければ作るかを訊きます。前後の話へ移ると、右の単話プロットもその話のものに切り替わります">単話プロット</button>
+  <button id="proof" aria-haspopup="menu" title="この話の校正（誤字脱字・推敲・表記ゆれ・まとめて校正）を選んで走らせます。校正・メモパネルもここから開けます">校正</button>
   <div class="sep note-only"></div>
   <button id="noteStyle" class="note-only" title="noteの読み味に近い組版（幅・行間・書体）で表示します。もう一度押すと、いつもの表示に戻ります">note風</button>
   <button id="notePv" class="note-only" title="noteに貼ったときの見た目を出します。noteに無い記法には印が付きます">貼り付け後</button>
@@ -1720,6 +1721,19 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   */
   document.getElementById("episodePlot").addEventListener("click", function () {
     vscode.postMessage({ type: "openEpisodePlot", line: caretLine() });
+  });
+  /*
+    上の列の［校正］（作者の判断 2026-11-02「校正ボタンで校正パネルがひらけるように」）。
+    押すと右クリックと同じ品書きの箱（#menu）に、校正の4つと校正・メモパネルを出す。
+    **押した瞬間の click は document まで上がって品書きを閉じる**ので、ここで止める
+  */
+  document.getElementById("proof").addEventListener("click", function (event) {
+    event.stopPropagation();
+    if (menu.classList.contains("open") && menuOwner === "proof") {
+      closeMenu();
+      return;
+    }
+    openProofMenu(event.currentTarget.getBoundingClientRect());
   });
   document.getElementById("copy").addEventListener("click", function () {
     /*
@@ -4795,10 +4809,64 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
 
   /* ── 右クリック ────────────────────── */
   let menuTerm = null;
+  /** いま開いている品書きの出どころ（右クリック／上の列の［校正］）。［校正］を押し直したら閉じるため */
+  let menuOwner = "";
 
   function closeMenu() {
     menu.classList.remove("open");
+    menuOwner = "";
     menuTerm = null;
+  }
+
+  /**
+   * 上の列の［校正］の品書き（作者の判断 2026-11-02）。
+   *
+   * **命令はキー（Ctrl+Alt+T／P／H／A）と同じもの**を、拡張機能側が押した原稿の
+   * 作品・話で呼ぶ（訊き直さない）。誤字脱字はこの話だけ、推敲は範囲を選ぶ窓の
+   * 先頭（Enter）が「この話だけ」。表記ゆれとまとめて校正は作品の中で揃える
+   * ものなので、キーと同じく作品全体を見る（名前でそう言う）。
+   * 右クリックの品書きと同じ箱を使う——見た目も閉じ方（外を押す・Esc）も揃う
+   */
+  function openProofMenu(anchor) {
+    menu.innerHTML = "";
+    menuTerm = null;
+    menuOwner = "proof";
+    function add(label, title, onClick) {
+      const item = document.createElement("div");
+      item.className = "item";
+      item.textContent = label;
+      item.title = title;
+      item.addEventListener("click", function () {
+        closeMenu();
+        onClick();
+      });
+      menu.appendChild(item);
+    }
+    function run(check) {
+      return function () {
+        // **先に打ちかけの字とカーソルの行を送る**（キーの道の keyHandOver と同じ）。
+        // 送り損ねたまま保存・検知へ進むと、最後に打った字が検知に入らない
+        keyHandOver();
+        vscode.postMessage({ type: "runProofCheck", check: check });
+      };
+    }
+    add("誤字脱字（この話）", "この話の誤字脱字をAIが探します", run("typos"));
+    add("推敲", "範囲を選ぶ窓が出ます。先頭（Enter）が「この話だけ」です", run("proofread"));
+    add("表記ゆれ（作品全体）", "作品の中で表記が揺れている語を探します（揃えるのは作品全体なので、この話だけには絞りません）", run("notation"));
+    add("まとめて校正（作品全体）", "選んだ校正を順に作品全体で走らせます", run("suite"));
+    const r = document.createElement("div");
+    r.className = "rule";
+    menu.appendChild(r);
+    add("校正・メモパネルを開く", "この話の校正・メモパネルを横に開きます", function () {
+      vscode.postMessage({ type: "openMemos" });
+    });
+    menu.classList.add("open");
+    // ボタンの下に出す。狭い窓では画面の中へ収める（右クリックと同じ収め方）
+    const box = menu.getBoundingClientRect();
+    const left = Math.min(anchor.left, window.innerWidth - box.width - 4);
+    const top = Math.min(anchor.bottom + 2, window.innerHeight - box.height - 4);
+    menu.style.left = Math.max(0, left) + "px";
+    menu.style.top = Math.max(0, top) + "px";
   }
 
   /**
@@ -4807,6 +4875,7 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
    */
   function openMenu(x, y, term, hasSelection, emphasisOn) {
     menu.innerHTML = "";
+    menuOwner = "context";
     menuTerm = term;
 
     function add(label, onClick, enabled) {
@@ -4897,7 +4966,8 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
       if (!text) return;
       vscode.postMessage({ type: "copyNotation", text: text });
     }, hasSelection);
-    add("AI相談（選択範囲）", function () {
+    // 名前は命令の名前（「AIに相談」）にそろえる（作者の判断 2026-11-02）
+    add("AIに相談（選んだ所）", function () {
       // 組んで書く面では、品書きを開いた時点の選択を使う。
       // **押した瞬間には選択が消えている**（画面の他所を押すと外れる）ので、
       // textarea のように押されてから読むことができない
@@ -4911,7 +4981,9 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
 
     /* ── シーンメモ（設計書6.40.3・6.40.4） ── */
     rule();
-    add("メモ追加", function () {
+    // 名前は命令の題（Ctrl+/ の「ここにメモを足す」）と同じ（作者の判断 2026-11-02）。
+    // 「メモ追加」は作品メモ（作品一覧）の名前なので、同じ名前だと取り違える
+    add("ここにメモを足す", function () {
       // **カーソル行の「上」に挿す**（設計書6.40.3）。いま書いている行の
       // 下に入ると、続きを打つたびに付箋が押し下げられる。
       // 編集者モードでは、拡張機能側が行を挿さずに提案として置く（設計書5.6.1.1）

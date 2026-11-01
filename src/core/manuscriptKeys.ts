@@ -113,6 +113,33 @@ export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
 ];
 
 /**
+ * 原稿エディターの上の列の［校正］の品書き（作者の判断 2026-11-02）。
+ *
+ * **キー（Ctrl+Alt+T／P／H／A）と同じ命令を、同じ形で呼ぶ。** 品書きから来た
+ * ことは、キーから来たのと同じ控え（`extension.ts` の `manuscriptKeyFiles`）で
+ * 伝えるので、関門・保存の確認（Enter で進む選択窓）・範囲の先頭（「この話だけ」）
+ * が入口で変わらない。作品と話は押した原稿のものを渡す（前面のタブから推し量らない）。
+ *
+ * 画面から届く値なので、ここに無い名前は受け取らない（`proofCheckCommand`）。
+ */
+export const MANUSCRIPT_PROOF_CHECKS = {
+  typos: "novelai.checkTyposForFile",
+  proofread: "novelai.checkProofread",
+  notation: "novelai.checkNotation",
+  suite: "novelai.runProofreadingSuite",
+} as const;
+
+export type ManuscriptProofCheck = keyof typeof MANUSCRIPT_PROOF_CHECKS;
+
+/** 画面から届いた名前を命令へ。知らない名前なら undefined（推し量らない） */
+export function proofCheckCommand(check: unknown): string | undefined {
+  return typeof check === "string" &&
+    Object.prototype.hasOwnProperty.call(MANUSCRIPT_PROOF_CHECKS, check)
+    ? MANUSCRIPT_PROOF_CHECKS[check as ManuscriptProofCheck]
+    : undefined;
+}
+
+/**
  * その原稿がどの作品のものか。**入れ子の作品では、いちばん深い作品を選ぶ。**
  *
  * 書庫（1つのフォルダーに複数作品）では、書庫そのものと中の作品の両方が

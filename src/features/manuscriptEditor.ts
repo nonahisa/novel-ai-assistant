@@ -1777,6 +1777,11 @@ type Incoming =
   | { type: "proposeEdit"; start: number; end: number }
   /** シーンメモのパネルを横に開く（設計書6.40.4） */
   | { type: "openMemos" }
+  /**
+   * 上の列の［校正］の品書きから、この話の校正を走らせる（作者の判断 2026-11-02）。
+   * `check` は画面から届く値なので、繋ぎの側が表（`MANUSCRIPT_PROOF_CHECKS`）で確かめる
+   */
+  | { type: "runProofCheck"; check?: unknown }
   /** 執筆再開の資料を開く（設計書6.36。右クリックから。0.76.7） */
   | { type: "resumeWriting" }
   /**
@@ -1971,6 +1976,14 @@ export interface ManuscriptEditorDeps {
    * **繋ぐのは `extension.ts` だけ**（シーンメモと同じ理由）。
    */
   resumeWriting?: (filePath: string) => Promise<void>;
+  /**
+   * 上の列の［校正］の品書き（作者の判断 2026-11-02）。誤字脱字・推敲・表記ゆれ・
+   * まとめて校正を、**原稿エディターのキー（Ctrl+Alt+T／P／H／A）と同じ道**で走らせる。
+   *
+   * **渡すのは原稿のパス。** 作品と話は繋ぎの側がこの原稿から引く（訊き直さない）。
+   * **繋ぐのは `extension.ts` だけ**——校正の命令はあちらにしか無い。
+   */
+  runProofCheck?: (filePath: string, check: unknown) => Promise<void>;
   /**
    * この話の単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23
    * 「エディターから単話プロット参照したいです」）。
@@ -3246,6 +3259,10 @@ export class ManuscriptEditorProvider
 
         case "resumeWriting":
           await this.deps.resumeWriting?.(fromUri(document.uri));
+          break;
+
+        case "runProofCheck":
+          await this.deps.runProofCheck?.(fromUri(document.uri), message.check);
           break;
 
         case "openEpisodePlot":

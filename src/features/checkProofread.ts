@@ -77,7 +77,7 @@ import {
 // 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
 import { summarizeReasons } from "../core/checkRunCounts";
 import { KeepWordStore } from "../core/keepWordStore";
-import { confirmRun } from "../views/notify";
+import { confirmRun, type ConfirmPresave } from "../views/notify";
 import {
   buildStyleNote,
   collectWorkStyle,
@@ -148,6 +148,16 @@ export interface CheckProofreadOptions extends SuiteAwareOptions {
    * 提案パネルへ出すために使う。渡されなければ何もしない
    */
   onProgress?: CheckProgress;
+  /**
+   * 作品の中の未保存（作者の判断 2026-11-02。`features/presave.ts`）。
+   * 確認の窓に「未保存の N 件を保存してから実行します」と書き、［実行］で保存する
+   */
+  presave?: ConfirmPresave;
+  /**
+   * 保存つきの確認で、作者がもう［実行］を選んだ（保存した本文で読み直す2回目）。
+   * 確認は出さない。**外から渡さない**——このファイルの中の読み直しだけが立てる
+   */
+  presaved?: boolean;
 }
 
 export async function checkProofread(
@@ -218,7 +228,11 @@ export async function checkProofread(
   };
 
   const pending = chunks.filter((chunk) => !cache.get(chunk.hash, cacheKeyBase));
-  if (pending.length > 0) {
+  // **未保存があるときは、処理済みばかりでも確認を出す**（作者の判断 2026-11-02）。
+  // ここで読んだのは保存前のファイルなので「処理済み」は当てにならない。
+  // 確認で保存してから読み直す
+  const presaveCount = options.presave?.count ?? 0;
+  if (pending.length > 0 || presaveCount > 0) {
     // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
     // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
     if (
@@ -268,6 +282,8 @@ export async function checkProofread(
       // **飛ばした中身はログへ残す**——絞り込みの上限や課金の断りは、
       // この確認の中にしか書かれていない
       log.step(`推敲：まとめ実行のため確認を省略\n${detail}`);
+    } else if (options.presaved) {
+      log.step("推敲：保存つきの確認で実行が選ばれたので、保存した本文で読み直しました");
     } else {
       // 大きいモデルの案内はここでは出さない（作者の裁定 2026-10-25
       // 「誤字脱字だけ残す」。モデルを自分から勧めないため）
@@ -279,9 +295,19 @@ export async function checkProofread(
           remember: { id: "ai.run.checkProofread" },
           // 推し量った作品なら「訊かない」を覚えていても訊く
           work,
+          presave: options.presave,
         }
       );
       if (!confirmed) return undefined;
+      // 保存した。**読んだ本文は保存前のもの**なので、初めから読み直す
+      // （見積もりの数も、保存した本文で数え直したものになる）
+      if (presaveCount > 0) {
+        return checkProofread(work, registry, {
+          ...options,
+          presave: undefined,
+          presaved: true,
+        });
+      }
     }
   }
 

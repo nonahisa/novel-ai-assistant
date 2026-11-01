@@ -304,7 +304,7 @@ test("編集者向けの手順書の画面ショットを撮る", async () => {
         });
         if (((await proposeItem.getAttribute("class")) ?? "").includes("disabled")) throw new Error("品書きの「修正を提案する」が押せない形です（選択が届いていない）");
         const menuText = await frame.locator("#menu").innerText();
-        if (!menuText.includes("メモ追加")) throw new Error(`品書きに「メモ追加」がありません：${menuText}`);
+        if (!menuText.includes("ここにメモを足す")) throw new Error(`品書きに「ここにメモを足す」がありません：${menuText}`);
         // 品書きの上に本物のマウスを載せると行が光るので、画面の端へ逃がしてから撮る（品書きは閉じない）
         await page.mouse.move(SIZE.width - 10, SIZE.height - 40);
         await page.waitForTimeout(300);

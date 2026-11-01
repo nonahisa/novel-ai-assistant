@@ -128,10 +128,10 @@ function recordUpdate(extra: Record<string, unknown> = {}) {
 }
 
 describe("誤字脱字・推敲に出るボタン", () => {
-  test("修正案があるときは、適用／無視／今後直さない／再チェック", () => {
+  test("修正案があるときは、適用／見送る／今後直さない／再チェック", () => {
     expect(buttonsOf(typoIssue({ canRecheck: true }))).toEqual([
       "適用",
-      "無視",
+      "見送る",
       "今後直さない",
       "再チェック",
     ]);
@@ -159,7 +159,7 @@ describe("誤字脱字・推敲に出るボタン", () => {
     const buttons = buttonsOf(opinion);
     expect(buttons[0]).toBe("読んだ");
     expect(buttons).toContain("本文を見る");
-    expect(buttons).toContain("無視");
+    expect(buttons).toContain("見送る");
     expect(buttons).not.toContain("適用");
     expect(renderItem(opinion)).toContain("編集者の意見です");
 
@@ -236,16 +236,16 @@ describe("バックアップとの違い（複数行の置き換え。設計書6
     };
   }
 
-  test("バックアップを採る／手元のまま（再チェックも「今後直さない」も出さない）", () => {
+  test("バックアップを採る／見送る（再チェックも「今後直さない」も出さない）", () => {
     // 修正案（suggestion）が空でも「本文を見る」にしない——行を消すのも1つの案である
     expect(buttonsOf(block({ canRecheck: false }))).toEqual([
       "バックアップを採る",
-      "手元のまま",
+      "見送る",
     ]);
   });
 
   test("採ったあとは「戻す」だけ", () => {
-    expect(buttonsOf(block({ status: "applied" }))).toEqual(["戻す"]);
+    expect(buttonsOf(block({ status: "applied" }))).toEqual(["手元の文に戻す"]);
   });
 
   test("手元とバックアップの行を、行ごと並べる（行の無い側は「行なし」）", () => {
@@ -268,7 +268,7 @@ describe("バックアップとの違い（複数行の置き換え。設計書6
 });
 
 describe("矛盾に出るボタン", () => {
-  test("本文を見る／設定資料を見る／無視／伏線として登録／再チェック", () => {
+  test("本文を見る／設定資料を見る／見送る／伏線として登録／再チェック", () => {
     expect(
       buttonsOf(
         contradictionIssue({ canRegisterForeshadow: true, canRecheck: true })
@@ -276,7 +276,7 @@ describe("矛盾に出るボタン", () => {
     ).toEqual([
       "本文を見る",
       "設定資料を見る",
-      "無視",
+      "見送る",
       "伏線として登録",
       "再チェック",
     ]);
@@ -306,7 +306,7 @@ describe("矛盾に出るボタン", () => {
       })
     );
 
-    expect(buttons).toEqual(["単話プロットを見る", "無視"]);
+    expect(buttons).toEqual(["単話プロットを見る", "見送る"]);
   });
 
   test("再チェック中は、この行の操作を全部止める", () => {

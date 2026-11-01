@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import type { FeatureRunResult } from "../core/proofreadingSuite";
-import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import { Character } from "../models/character";
@@ -71,6 +70,7 @@ import {
 import { withAiTurnProgress } from "./aiTurn";
 import {
   logFailure,
+  logStep,
   showLog,
   useLogFile,
   workLog,
@@ -120,7 +120,9 @@ import {
   notifyDone,
   suggestAction,
   whenNoticePicked,
+  type ConfirmPresave,
 } from "../views/notify";
+import { dirtyDocumentsInside, saveDirtyDocumentsOf } from "./presave";
 import { estimateCallsTimeFor } from "../ai/runTimeEstimate";
 import { describeCallTimeEstimate } from "../core/etaEstimate";
 import {
@@ -289,23 +291,8 @@ export async function saveDirtyDocumentsBeforeExtraction(
         "中止"
       )) === "保存して実行";
   if (!accepted) return false;
-
-  for (const document of dirtyDocuments) {
-    if (!document.save || !(await document.save())) {
-      await vscode.window.showWarningMessage(
-        `保存できない文書があるため、${actionLabel}を中止しました。`
-      );
-      return false;
-    }
-  }
-
-  if (dirtyDocumentsInside(work.folderPath).length > 0) {
-    await vscode.window.showWarningMessage(
-      `保存後も未保存の文書が残っているため、${actionLabel}を中止しました。`
-    );
-    return false;
-  }
-  return true;
+  // 保存の手順は確認の窓で保存する道（`features/presave.ts`）と同じものを通す
+  return saveDirtyDocumentsOf(work, actionLabel);
 }
 
 /** 抽出して保存できる設定の種別 */
@@ -349,6 +336,17 @@ export interface ExtractCharactersOptions {
    * 押す「更新分を反映」だけが、パネルを通らずダイアログを開いていた。
    */
   proposalPanel?: ProposalPanel;
+  /**
+   * 作品の中の未保存（作者の判断 2026-11-02。`features/presave.ts`）。
+   * 確認の窓に「未保存の N 件を保存してから実行します」と書き、［実行］で保存する。
+   * 人物設定の未保存もこの数に入る（作品のフォルダーの中なので）
+   */
+  presave?: ConfirmPresave;
+  /**
+   * 保存つきの確認で、作者がもう［実行］を選んだ（保存した本文で読み直す2回目）。
+   * 確認も競合の問いも出さない。**外から渡さない**——このファイルの中の読み直しだけが立てる
+   */
+  presaved?: boolean;
 }
 
 /**
@@ -487,7 +485,10 @@ export async function extractCharacters(
       ? mergeAdjacentChunks(rawChunks, { maxChars: mergeChars })
       : rawChunks;
 
-  if (conflicted.length > 0) {
+  if (conflicted.length > 0 && options.presaved) {
+    // 1回目（保存の前）に作者が「除外して続行」を選んである。同じことを2回訊かない
+    logStep(`設定資料の抽出：未解決の競合 ${conflicted.length} 件を除外（保存のあとの読み直し）`);
+  } else if (conflicted.length > 0) {
     const proceed = await suggestAction({
       message:
         `未解決の競合が ${conflicted.length} 件あります（${conflicted
@@ -508,7 +509,15 @@ export async function extractCharacters(
   }
 
   const store = new CharacterStore(work);
-  if ((await store.dirtyDocumentPaths()).length > 0) {
+  /*
+    **人物設定の未保存も、確認の窓で保存する**（作者の判断 2026-11-02）。
+    作品のフォルダーの中にあるので、確認に書く未保存の数（`presave`）に入っている。
+    ［実行］で保存してから読み直すので、ここでは止めない。数えたあとに増えた分は
+    保存のあとの見直し（`saveDirtyDocumentsOf`）が拾って止める。
+    確認を通らない道（`presave` を渡さない呼び出し）は、これまでどおり止める
+  */
+  const presaveCount = options.presave?.count ?? 0;
+  if ((await store.dirtyDocumentPaths()).length > 0 && presaveCount === 0) {
     await vscode.window.showWarningMessage(
       "未保存の人物設定があります。人物設定を保存してから、もう一度実行してください。"
     );
@@ -556,7 +565,9 @@ export async function extractCharacters(
     (c) => !cache.get(c.hash, cacheKeyBase)
   );
 
-  if (pending.length === 0) {
+  // **未保存があるときは、処理済みばかりでも確認を出す**（作者の判断 2026-11-02）。
+  // ここで読んだのは保存前のファイルなので「処理済み」は当てにならない
+  if (pending.length === 0 && presaveCount === 0) {
     // キャッシュだけで完結するのでAIには接続しない。
     // Ollamaが落ちていても再反映はできるため、ここで疎通を求めない。
     //
@@ -622,25 +633,39 @@ export async function extractCharacters(
       buildKnownCharacterNamesForPrompt(loaded.characters, []),
       configuredMaxOutputTokens
     );
-    const confirmed = await confirmRun(
+    const message =
       `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
-        `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
-        `モデル: ${resolved.model} / ` +
-        (timeEstimate
-          ? describeCallTimeEstimate(timeEstimate)
-          : "目安は出せません") +
-        "\n" +
-        costNotice,
-      "実行",
-      {
+      `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
+      `モデル: ${resolved.model} / ` +
+      (timeEstimate
+        ? describeCallTimeEstimate(timeEstimate)
+        : "目安は出せません") +
+      "\n" +
+      costNotice;
+    if (options.presaved) {
+      // 保存つきの確認でもう［実行］が選ばれた読み直し（2回目）。同じことを訊かない
+      logStep(
+        `設定資料の抽出：保存つきの確認で実行が選ばれたので、保存した本文で読み直しました\n${message}`
+      );
+    } else {
+      const confirmed = await confirmRun(message, "実行", {
         remember: { id: "ai.run.extractCharacters" },
         // **どの作品かを確認画面に出す**（ノートPCの実機、2026-09-23）。
         // 詳細メニューの抽出は作品一覧の選択へ訊かずに進むので、一覧の
         // 行を誤ってクリックしていると、別の作品で確認まで進む
         work,
-      }
-    );
-    if (!confirmed) return "cancelled";
+        presave: options.presave,
+      });
+      if (!confirmed) return "cancelled";
+    }
+    // 保存した。**読んだ本文と人物設定は保存前のもの**なので、初めから読み直す
+    if (presaveCount > 0) {
+      return extractCharacters(work, registry, {
+        ...options,
+        presave: undefined,
+        presaved: true,
+      });
+    }
   }
 
   /*
@@ -2151,12 +2176,6 @@ function shouldOfferSettings(kind: AIError["kind"]): boolean {
     kind === "model_not_found" ||
     kind === "authentication_failed" ||
     kind === "permission_denied";
-}
-
-function dirtyDocumentsInside(folderPath: string): vscode.TextDocument[] {
-  return vscode.workspace.textDocuments.filter(
-    (document) => document.isDirty && path.isPathInside(folderPath, fromUri(document.uri))
-  );
 }
 
 /** 課金の説明に出すサービス名 */

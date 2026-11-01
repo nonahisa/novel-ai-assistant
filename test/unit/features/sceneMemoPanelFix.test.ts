@@ -458,6 +458,9 @@ describe("［本文へ］・［AIに相談］・［提案パネル］", () => {
     await settle();
 
     expect(given.openProposals).toHaveBeenCalledTimes(1);
+    // **見ていた作品を渡す**（作者の実機 2026-11-02。渡さないと、提案パネルが
+    // 前に見ていた別の作品のまま開いた）
+    expect(given.openProposals).toHaveBeenCalledWith(work);
   });
 });
 

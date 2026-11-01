@@ -137,6 +137,28 @@ export interface ConfirmOptions {
    *    題名の文字列では、どう決めたかが運べないので、作品の入れ物ごと受け取る
    */
   work?: ConfirmWork;
+  /**
+   * 実行の前に保存する未保存の文書（作者の判断 2026-11-02。`features/presave.ts`）。
+   *
+   * 件数が1以上なら、確認の文に「未保存の N 件を保存してから実行します」を1行足し、
+   * ［実行］を押したときに `save()` を呼ぶ。保存できなければ取りやめと同じに返す。
+   * **未保存があるときは「以降は訊かない」を覚えていても訊く**——保存は作者の
+   * 文書に触る操作なので、黙って保存しない。
+   */
+  presave?: ConfirmPresave;
+}
+
+/** 確認で保存する未保存の文書（形だけ。作り方は `features/presave.ts`） */
+export interface ConfirmPresave {
+  /** 作ったときの未保存の文書の数 */
+  readonly count: number;
+  /** 全部保存できて、残りが無ければ true（できなければ理由を出して false） */
+  save(): Promise<boolean>;
+}
+
+/** 確認の文に足す1行。**文言はここだけ**に置く（機能ごとに言い方がずれないように） */
+export function presaveLine(count: number): string {
+  return `未保存の ${count} 件を保存してから実行します。`;
 }
 
 /** 確認へ渡す作品。題名さえあればよい（`WorkEntry` はそのまま渡せる） */
@@ -201,6 +223,15 @@ export async function confirmRun(
   return answer?.kind === "run";
 }
 
+/**
+ * ［実行］のあとで、確認に書いた未保存を保存する。**別の道（`choices`）では保存しない**
+ * ——実行しないのに作者の文書を書き出すことになる。
+ */
+async function savedBeforeRun(presave: ConfirmPresave | undefined): Promise<boolean> {
+  if (!presave || presave.count === 0) return true;
+  return presave.save();
+}
+
 /** `confirmRunOrChoose` の答え。**閉じられたら undefined** */
 export type ConfirmOrChoice =
   | { readonly kind: "run" }
@@ -225,6 +256,7 @@ export async function confirmRunOrChoose(
   const rememberId = options.remember?.id;
   const workTitle = options.work?.title;
   const inferred = inferredWorkSource(options.work);
+  const presaveCount = options.presave?.count ?? 0;
   /** 覚えていたが、作品を推し量ったので訊き直す回 */
   let overridingMemory = false;
 
@@ -241,7 +273,7 @@ export async function confirmRunOrChoose(
         **判断はここ1か所に置く。** 機能の側は作品を渡すだけで、
         どう決めたかを知らなくてよい
       */
-      if (!inferred) {
+      if (!inferred && presaveCount === 0) {
         // 画面を出さないぶん、**どの作品で走らせたかは記録に残す**
         logStep(
           `確認を省略（以降は訊かない）: ${rememberId} / ${runLabel}` +
@@ -251,8 +283,10 @@ export async function confirmRunOrChoose(
       }
       overridingMemory = true;
       logStep(
-        `作品を推し量ったので確認を出す（以降は訊かないを覚えていても）: ` +
-          `${rememberId} / ${workTitle ?? "（題名なし）"} / ${inferred}`
+        (inferred
+          ? `作品を推し量ったので確認を出す（以降は訊かないを覚えていても）: `
+          : `未保存の文書を保存するので確認を出す（以降は訊かないを覚えていても）: `) +
+          `${rememberId} / ${workTitle ?? "（題名なし）"} / ${inferred ?? `未保存 ${presaveCount}件`}`
       );
     }
   }
@@ -270,7 +304,8 @@ export async function confirmRunOrChoose(
     ...choices,
   ];
   const shownMessage = withWorkTitle(
-    message,
+    // 保存の断りは本文のすぐ下に置く（［実行］で何が起きるかを、押す前に読ませる）
+    presaveCount > 0 ? `${message}\n${presaveLine(presaveCount)}` : message,
     workTitle,
     overridingMemory && inferred ? inferredWorkNote(inferred) : undefined
   );
@@ -284,10 +319,10 @@ export async function confirmRunOrChoose(
     warning: options.kind === "warning",
   });
 
-  if (answer === runLabel) return { kind: "run" };
+  if (answer === runLabel) return (await savedBeforeRun(options.presave)) ? { kind: "run" } : undefined;
   if (rememberId && answer === rememberLabel(runLabel)) {
     await rememberConfirmAnswer(rememberId, runLabel);
-    return { kind: "run" };
+    return (await savedBeforeRun(options.presave)) ? { kind: "run" } : undefined;
   }
   if (answer !== undefined && choices.includes(answer)) {
     return { kind: "choice", label: answer };

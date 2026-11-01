@@ -1125,6 +1125,43 @@ describe("人物抽出フロー", () => {
     );
   });
 
+  test("確認の窓で保存する道（presave）なら、人物JSONの未保存で止めず、［実行］で保存してから読み直す（作者の判断 2026-11-02）", async () => {
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
+    const showInformationMessage = vi.fn(
+      async (_message: string, ..._actions: unknown[]) => "実行"
+    );
+    Object.assign(window, {
+      showWarningMessage,
+      showInformationMessage,
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    // 保存する前だけ未保存。保存したあとの読み直しでは残っていない
+    state.dirtyDocumentPaths
+      .mockResolvedValueOnce(["C:\\NOVELS\\WORK\\設定\\characters\\char_001_灯.json"])
+      .mockResolvedValue([]);
+    state.generate.mockResolvedValue(successfulResult("灯"));
+    const presave = { count: 1, save: vi.fn(async () => true) };
+
+    await extractCharacters(work, testRegistry(), { presave });
+
+    expect(showWarningMessage.mock.calls.map((call) => String(call[0]))).not.toContainEqual(
+      expect.stringContaining("未保存の人物設定があります")
+    );
+    // 確認は1回だけ。保存の1行が入っている
+    const confirms = showInformationMessage.mock.calls.filter((call) =>
+      String(call[0]).includes("チャンク中")
+    );
+    expect(confirms).toHaveLength(1);
+    expect(String(confirms[0][0])).toContain("未保存の 1 件を保存してから実行します。");
+    expect(presave.save).toHaveBeenCalledOnce();
+    expect(state.generate).toHaveBeenCalled();
+  });
+
   test("AI処理中に人物JSONがdirtyになった場合は保存直前に再検査して拒否する", async () => {
     const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { withAiTurn } from "./aiTurn";
 import type { WorkEntry } from "../models/types";
 import { withProgress } from "../views/progress";
+import { confirmRun, presaveLine, type ConfirmPresave } from "../views/notify";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import {
   describeRunCancelledStep,
@@ -88,6 +89,14 @@ export interface ProofreadingSuiteDeps {
   estimate?(
     checks: readonly ProofreadingCheck[]
   ): Promise<SuiteEstimate | undefined>;
+  /**
+   * 作品の中の未保存（作者の判断 2026-11-02。`features/presave.ts`）。
+   *
+   * まとめ実行の確認の窓に「未保存の N 件を保存してから実行します」と書き、
+   * ［実行］で保存してから中の検知を走らせる。中の検知は確認を飛ばすので、
+   * 保存はここでしか訊けない
+   */
+  presave?: ConfirmPresave;
 }
 
 interface CheckPick extends vscode.QuickPickItem {
@@ -162,16 +171,28 @@ export async function runProofreadingSuite(
     checks,
     estimate: aiChecks.length > 0 ? await deps.estimate?.(aiChecks) : undefined,
   });
+  const presaveCount = deps.presave?.count ?? 0;
   if (confirm) {
     const answer = await vscode.window.showInformationMessage(
-      confirm.message,
+      // 保存の断りは本文のすぐ下に置く（［実行］で何が起きるかを、押す前に読ませる）
+      presaveCount > 0 ? `${confirm.message}\n${presaveLine(presaveCount)}` : confirm.message,
       { modal: true, detail: confirm.detail },
       "実行"
     );
     // **控えは残したまま戻る。** 選び直したこと自体は作者の意思なので、
     // 次に開いたときも同じ組み合わせが選ばれている
     if (answer !== "実行") return;
+  } else if (presaveCount > 0) {
+    // 量の確認が要らない組み合わせでも、黙って保存しない
+    const run = await confirmRun(
+      `${work.title} の校正をまとめて実行します。`,
+      "実行",
+      { work }
+    );
+    if (!run) return;
   }
+  // 保存できなければ走らせない（理由は保存の口が出す）
+  if (presaveCount > 0 && deps.presave && !(await deps.presave.save())) return;
 
   const ref: SuiteWorkRef = { type: "work", work };
   /**

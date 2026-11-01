@@ -357,3 +357,53 @@ describe("原稿エディターから呼んだときの範囲", () => {
     expect(describeChosenScope("current")).toContain("この話");
   });
 });
+
+/**
+ * **未保存の話は「前回から書いた分」に入れる**（作者の判断 2026-11-02 で順番が変わった）。
+ *
+ * 未保存は実行の確認の窓で保存するようになり、範囲を選ぶ時点ではまだ保存されて
+ * いない。ファイルの更新時刻は古いので、時刻だけで数えると、いま打っている話が
+ * 「前回から書いた分だけ」から黙って落ちる（前は保存が先だったので入っていた）。
+ */
+describe("未保存の話は、前回から書いた分に入る", () => {
+  const episodes = Array.from({ length: 3 }, (_, i) => ({
+    filePath: `C:/works/試しの作品/原稿/${String(i + 1).padStart(3, "0")}.txt`,
+  }));
+
+  beforeEach(() => {
+    notifyMocks.pickWithMemory.mockReset();
+    notifyMocks.pickWithMemory.mockResolvedValue("changed");
+    notifyMocks.confirmRun.mockClear();
+    scannerMocks.scanWork.mockResolvedValue({ episodes });
+  });
+
+  afterEach(() => {
+    workspace.textDocuments = [];
+  });
+
+  test("更新時刻が前回より前でも、未保存なら書いた分として選べる", async () => {
+    // 前回の検知は 1000。1話目だけ 2000 に書いて保存済み、2話目は打ちかけ（未保存）
+    workspace.textDocuments = [
+      { uri: { fsPath: episodes[1].filePath }, isDirty: true },
+    ] as unknown as typeof workspace.textDocuments;
+    const originalFs = workspace.fs;
+    workspace.fs = {
+      readFile: async () =>
+        new TextEncoder().encode(JSON.stringify({ checkedAt: 1000 })),
+      stat: async (uri: { fsPath: string }) => ({
+        mtime: uri.fsPath.endsWith("001.txt") ? 2000 : 500,
+      }),
+    };
+    let chosen;
+    try {
+      chosen = await chooseScope(work, "typo");
+    } finally {
+      workspace.fs = originalFs;
+    }
+
+    expect(chosen).toEqual({
+      kind: "changed",
+      filePaths: [episodes[0].filePath, episodes[1].filePath],
+    });
+  });
+});
