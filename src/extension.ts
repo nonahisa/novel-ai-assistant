@@ -8142,7 +8142,9 @@ export async function activate(
       もう一度選ばされる
     */
     registerCommand("novelai.postingAndReaders", async (node?: WorkNode) => {
-      const work = await resolveWork(node, registry);
+      // 中に新話投稿（作品に手を加える操作。`preferLast: false`）があるので、入口でも
+      // 直前の作品を先頭にしない（Enter だけで別の作品の投稿へ進まないため）
+      const work = await resolveWork(node, registry, { preferLast: false });
       if (!work) return;
       const picked = await vscode.window.showQuickPick(
         [
