@@ -25,10 +25,13 @@ import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput
 import { proposalPanelFrame } from "./support/sampleFinding";
 import { defaultCharactersFolder, writeCharactersTo } from "./support/settingsFixture";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
-import { waitUntil } from "./support/wait";
+import { holdsFor, waitUntil } from "./support/wait";
 import {
   acceptQuickPick,
+  clearNotifications,
+  closeDialog,
   dialogText,
+  notificationTexts,
   pickQuickPickRow,
   pressDialogButton,
   waitForQuickPick,
@@ -86,6 +89,86 @@ async function countIn(session: E2ESession, word: string): Promise<number> {
 
 const oldNameCount = (session: E2ESession) => countIn(session, OLD);
 const newNameCount = (session: E2ESession) => countIn(session, NEW);
+
+/**
+ * 付け替えの置き換えを最後の1件まで決め終えたときの問い（0.121.0。作者の判断 2026-11-01。
+ * 実機確認リスト 335 行）。途中の1件では出ず、［適用］と［見送る］を混ぜて決め終えると
+ * 「「〈旧〉」→「〈新〉」の本文の置き換えを決め終えました。…反映しますか。」と［資料に反映する］が出て、
+ * 押すと資料への反映の確認の窓が出る。
+ *
+ * 入口は「人物名変更」（名前点検の［付け替える］と同じ待ちの対応表を通る。問いを出すのは提案パネルの
+ * 「名前の付け替え」の分類を決め終えたとき＝ `extension.ts` の `setOnCategorySettled`）。
+ */
+test("付け替えの置き換えを1件ずつ［適用］か［見送る］で最後まで決めると、途中では出なかった「決め終えました」と［資料に反映する］が出て、押すと資料への反映の確認が出る", async () => {
+  await withVsCode(
+    "付け替えを決め終えたときの問い",
+    EPISODES,
+    async (session) => {
+      const { page } = session;
+      await runCommand(page, "人物名変更");
+      await waitForQuickPick(page, "名前を付け替える人物");
+      await pickQuickPickRow(page, OLD);
+      await waitForQuickInput(page, `「${OLD}」を何という名前にしますか`);
+      await answerInput(page, NEW);
+      await waitForQuickInput(page, `「${NEW}」の読み`);
+      await answerInput(page, "みかどゆういち");
+      await waitForQuickPick(page, "この対応で付け替えます");
+      await acceptQuickPick(page);
+      await waitUntil(async () => (await dialogText(page)) !== undefined, "範囲の確認の窓が出る", 20_000);
+      await pressDialogButton(page, "提案パネルに出す");
+
+      let panel: Frame | undefined;
+      await waitUntil(
+        async () => {
+          panel = await proposalPanelFrame(page);
+          return panel !== undefined && (await panel.locator('button[data-action="apply"]').count()) >= 3;
+        },
+        "提案パネルに［適用］が3件並ぶ",
+        30_000
+      );
+      const proposals = panel as Frame;
+      await clearNotifications(page);
+      const settled = async () => (await notificationTexts(page)).find((text) => text.includes("の本文の置き換えを決め終えました"));
+
+      // 1件目を［適用］→ まだ2件残っているので問いは出ない
+      await proposals.locator('button[data-action="apply"]').first().click();
+      await waitUntil(async () => (await oldNameCount(session)) === 2, "1件の［適用］で旧名が1か所減る", 20_000);
+      await holdsFor(async () => (await settled()) === undefined, "途中の1件では「決め終えました」が出ない", 3_000);
+
+      // 2件目を［見送る］→ まだ1件残っている
+      const dismissible = proposals.locator('button[data-action="dismiss"]');
+      await waitUntil(async () => (await dismissible.count()) >= 2, "残りの2件に［見送る］がある", 10_000);
+      await dismissible.first().click();
+      await waitUntil(async () => (await proposals.locator('button[data-action="apply"]').count()) === 1, "見送った行が並びから外れる", 15_000).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（パネル：${JSON.stringify((await proposals.evaluate(() => document.body.innerText)).slice(0, 400))}）`);
+      });
+      await holdsFor(async () => (await settled()) === undefined, "まだ1件残っているあいだは「決め終えました」が出ない", 3_000);
+
+      // 最後の1件を［適用］→ 問いが出る
+      await proposals.locator('button[data-action="apply"]').first().click();
+      let notice: string | undefined;
+      await waitUntil(async () => (notice = await settled()) !== undefined, "最後の1件を決めると「決め終えました」が出る", 20_000).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（知らせ：${JSON.stringify(await notificationTexts(page))}）`);
+      });
+      expect(notice).toContain(`「${OLD}」→「${NEW}」の本文の置き換えを決め終えました。`);
+      expect(notice).toContain("反映しますか。");
+      // 見送った1か所は旧名のまま、ほかは新しい名前
+      expect(await oldNameCount(session)).toBe(1);
+      expect(await newNameCount(session)).toBe(2);
+
+      const toast = page.locator(".notification-toast", { hasText: "の本文の置き換えを決め終えました" }).first();
+      await toast.locator(".monaco-button", { hasText: "資料に反映する" }).first().click();
+      await waitUntil(async () => (await dialogText(page))?.includes(`「${OLD}」→「${NEW}」を資料にも反映します`) === true, "［資料に反映する］で資料への反映の確認の窓が出る", 20_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（窓：${JSON.stringify(await dialogText(page))}／知らせ：${JSON.stringify(await notificationTexts(page))}）`);
+        }
+      );
+      // 資料は書き換えない（確認の窓まで）
+      await closeDialog(page);
+    },
+    LAUNCH
+  );
+});
 
 test("人物名変更で提案パネルに並び、1件ずつ適用・本文を見る・まとめて適用ができ、資料にも反映され、作者メモは無傷", async () => {
   await withVsCode(
