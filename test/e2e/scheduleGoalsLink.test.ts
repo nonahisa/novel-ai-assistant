@@ -3,7 +3,7 @@
  * 374 行を機械へ移した。作者の判断 2026-11-02「案内だけでは開く道が無い」）。
  *
  * 作品目標設定に応募先（公募）がある作品では、スケジュールの画面にその応募先から出した公募のスケジュールが並ぶ。
- * その段を押すと、詳細に「直すときは作品目標設定で。」の案内と［作品目標設定を開く］が出て、押すと
+ * その見出しを押すと、詳細に「直すときは作品目標設定で。」の案内と［作品目標設定を開く］が出て、押すと
  * **その作品の**作品目標設定が、作品を訊かずに開く（作品を2つ登録しておき、作品を選ぶ画面が出ないことを見る）。
  *
  * **AI は呼ばない。** 作品目標（`.aiwriter/goals.json`）は起こす前に製品の形で置く。
@@ -24,7 +24,7 @@ const REGISTER_OTHER_KEY = "ctrl+alt+shift+b";
 const REGISTER_OTHER_PRESS = "Control+Alt+Shift+KeyB";
 const CONTEST = "画面テスト新人賞";
 
-test("作品目標設定の応募先から出したスケジュールの段を押すと、案内の下に［作品目標設定を開く］が出て、押すとその作品の作品目標設定が作品を訊かずに開く", async () => {
+test("作品目標設定の応募先から出したスケジュールの見出しを押すと、案内の下に［作品目標設定を開く］が出て、押すとその作品の作品目標設定が作品を訊かずに開く", async () => {
   const registerOther: Record<string, unknown> = { key: REGISTER_OTHER_KEY, command: "novelai.addWork", args: { folderPath: "", title: OTHER_TITLE } };
   await withVsCode(
     "スケジュールから作品目標設定",
