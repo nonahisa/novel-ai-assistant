@@ -2054,6 +2054,34 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     void this.loadPending?.(this);
   }
 
+  /**
+   * その作品の提案パネルを前に出す（校正・メモパネルの［提案パネル］から。
+   * 作者の実機 2026-11-02）。
+   *
+   * `reveal()` だけでは、前に見ていた作品のまま開く——「たゆたう鉛 - 実験用」の
+   * 校正・メモパネルから押して「たゆたう鉛_確認用」が出た。**作品を切り替えてから
+   * 前に出す。** 切り替えは `switchWork`・`inCategory` と同じく、いま出している分を
+   * 控えへ戻してから移るので、もう一方の作品の作業は消えない。
+   *
+   * まだ結果の無い作品でも切り替える（控えの置き場は作らない）。前の作品の
+   * 指摘を、押した作品のものとして見せないため。
+   */
+  revealFor(work: WorkEntry, options: { preserveFocus?: boolean } = {}): void {
+    if (!this.work || this.keyOf(this.work) !== this.keyOf(work)) {
+      this.stashCurrent();
+      const entry = this.buckets.get(this.keyOf(work));
+      if (entry) {
+        entry.work = work;
+        this.work = entry.work;
+        this.activate(this.categoryToShow(entry));
+      } else {
+        this.work = work;
+        this.activate(this.category);
+      }
+    }
+    this.reveal(options);
+  }
+
   /** 右の列の提案パネルが前面でフォーカスを持っているか（適用後に戻すため） */
   private editorPanelFocused(): boolean {
     return this.editorPanel?.active === true;

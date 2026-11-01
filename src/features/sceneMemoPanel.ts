@@ -141,8 +141,11 @@ export interface SceneMemoDeps {
    * 並ぶので、渡し直さなくてよい。
    *
    * **渡されなければ出さない**（押しても何も起きない口を作らない）。
+   *
+   * **見ていた作品を渡す**（作者の実機 2026-11-02）。渡さないと、提案パネルは
+   * 前に見ていた別の作品のまま開く。
    */
-  openProposals?: () => void | Promise<void>;
+  openProposals?: (work: WorkEntry) => void | Promise<void>;
   /**
    * 修正案の無い推敲の指摘について、短い助言を作る口（画面のボタンは
    * ［AIに相談］。P-47、`findingAdvice.ts`）。
@@ -1070,7 +1073,7 @@ class SceneMemoPanel {
           await this.consultInChat(message.findingId);
           return;
         case "openProposals":
-          await this.deps.openProposals?.();
+          await this.deps.openProposals?.(this.work);
           return;
         case "openMergeCandidates":
           await this.deps.openMergeCandidates?.(this.work);

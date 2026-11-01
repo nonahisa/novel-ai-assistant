@@ -2829,7 +2829,8 @@ export async function activate(
       へ移る口として、ここだけ残す。指摘は置き場から提案パネルにも並ぶので、
       行を渡し直さない。作者が押したので、フォーカスごと移す
     */
-    openProposals: () => proposalPanel.reveal(),
+    // 押したパネルの作品へ切り替えてから前に出す（作者の実機 2026-11-02）
+    openProposals: (work) => proposalPanel.revealFor(work),
     /*
       ［AIに相談］——修正案の無い推敲の指摘について、短い助言を行のすぐ下に出す
       （P-47。作者の報告 2026-10-05「くどすぎます」「表示される位置が離れすぎて
