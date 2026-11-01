@@ -58,38 +58,27 @@ export async function footText(frame: Frame, id: "counts" | "note"): Promise<str
  */
 export async function openEpisode(page: Page, fileName: string, expected: string): Promise<Frame> {
   await quickOpen(page, fileName);
-  let opened: Frame | undefined;
-  await waitUntil(
-    async () => {
-      /*
-        **同じ文を持つ面が2枚あるときは、前に出ている方を選ぶ。** 中身の同じ話
-        （CRLF と LF の原稿など）を続けて開くと、後ろへ回った面も本文を持ったまま
-        残る。先に見つかった方を返すと、隠れた面を押そうとして時間切れになった
-        （manuscriptTermsEol、全件の中でだけ 2026-10-31・11-01 に2回）
-      */
-      const matches: Frame[] = [];
-      for (const frame of await manuscriptFrames(page)) {
-        if ((await composeText(frame)).includes(expected)) matches.push(frame);
-      }
-      if (matches.length === 0) return false;
-      if (matches.length === 1) {
-        opened = matches[0];
-        return true;
-      }
-      for (const frame of matches) {
-        if ((await frameLayer(page, frame)).inFront) {
-          opened = frame;
-          return true;
-        }
-      }
-      // どれも前に出ていなければ、まだ描き替えの途中。待ち直す
-      return false;
-    },
-    `原稿エディターで「${fileName}」の本文が描かれる`,
-    30_000
-  );
-  if (!opened) throw new Error("原稿エディターの面が見つかりません");
-  return opened;
+  /*
+    **本文の合う面が1枚だけでも、前に出ていなければ選ばない**（`frontFrameShowing`）。
+    中身の同じ話（CRLF と LF の原稿など）を続けて開くと、後ろへ回った面も本文を持ったまま
+    残る。前は「2枚あるときだけ前に出ている方を選ぶ」形で、1枚のときは裏の面でも返していた。
+    新しい面がまだ本文を描く前に、裏へ回った前の話の面が一瞬 `expected` と同じ字になると
+    （打った直後に古い本文が届いて描き直される揺れ。2026-11-02 の調べ）、それを掴み、
+    隠れた面を押そうとして30秒で時間切れになった（manuscriptTermsEol、単独で3〜5回に1回）
+  */
+  return frontFrameShowing(page, expected, `原稿エディターで「${fileName}」の本文が前に出ている面に描かれる`, 30_000);
+}
+
+/**
+ * 掴んでおいた面が裏へ回っていたら、前に出ている面を探し直して返す（押す・選ぶ直前に使う）。
+ *
+ * 原稿エディターの面は裏に回っても残る（`retainContextWhenHidden`）ので、掴んだ面の部品も
+ * locator は見つかるが、押すと前の iframe が受け止めて30秒押し直す。前に出ていれば同じ面を
+ * そのまま返し、出ていなければ本文に `marker` を描いた前の面を `frontFrameShowing` で待つ
+ */
+export async function frontFrameAgain(page: Page, frame: Frame, marker: string, label: string): Promise<Frame> {
+  if ((await frameLayer(page, frame).catch(() => undefined))?.inFront) return frame;
+  return frontFrameShowing(page, marker, label);
 }
 
 /**

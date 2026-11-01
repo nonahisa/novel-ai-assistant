@@ -21,7 +21,7 @@ import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { emptyCharacter } from "../../src/models/character";
-import { composeText, footText, openEpisode, placeCaretAfter, selectText } from "./support/manuscriptFrame";
+import { composeText, footText, frontFrameAgain, openEpisode, placeCaretAfter, selectText } from "./support/manuscriptFrame";
 import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput";
 import { charactersFolder, settingsPanelFrame, writeCharactersTo } from "./support/settingsFixture";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -160,8 +160,11 @@ async function rawFile(session: E2ESession, name: string): Promise<string> {
 }
 
 /** ルビと傍点を振り、保存してファイルに入るまで待つ */
-async function rubyAndEmphasis(session: E2ESession, frame: Frame, episode: string): Promise<void> {
+async function rubyAndEmphasis(session: E2ESession, given: Frame, episode: string): Promise<void> {
   const { page } = session;
+  // 押す直前に、掴んだ面が前に出ているかを確かめ直す（裏へ回った前の話の面を押して
+  // 30秒時間切れになった。2026-11-01・02）
+  const frame = await frontFrameAgain(page, given, "一行目", `${episode}：ルビを振る面が前に出ている`);
   await selectText(frame, "一行目");
   // 狭い窓では、本体の吹き出しが上の帯のボタンに重なって押せない（dismissWorkbenchHover）
   await dismissWorkbenchHover(page);
