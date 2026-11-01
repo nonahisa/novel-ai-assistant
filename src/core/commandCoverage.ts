@@ -196,7 +196,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.buildVectorIndexAll": { class: "B", label: "検索索引作成／更新（全作品）" },
   "novelai.clearVectorIndex": { class: "C4", label: "検索索引削除", reason: "消す" },
   // ── 本文の操作・ファイル
-  "novelai.deleteEpisodeFile": { class: "C4", label: "ファイルを削除", reason: "消す" },
+  "novelai.deleteEpisodeFile": { class: "C4", label: "この話を削除", reason: "消す" },
   "novelai.insertEpisodeBefore": { class: "C4", label: "この話の前に挿入", reason: "原稿" },
   "novelai.removeEpisodeAndRenumber": { class: "C4", label: "この話を削除（話数を詰める）", reason: "原稿" },
   "novelai.splitCollectedFile": { class: "C4", label: "話ごとのファイルに分ける", reason: "原稿" },

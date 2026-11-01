@@ -314,7 +314,13 @@ import {
   isCommandVisibleForKind,
   kindFeatureOfCommand,
   kindMismatchMessage,
+  workTypeContextValue,
 } from "./core/workTypeVisibility";
+import {
+  canRenumberOnDelete,
+  EPISODE_DELETE_CHOICES,
+  routeOfDeleteAnswer,
+} from "./core/episodeDeleteChoice";
 import {
   selectableWorkFormats,
   type WorkFormatDef,
@@ -7413,7 +7419,7 @@ export async function activate(
     registerCommand(
       "novelai.deleteEpisodeFile",
       async (picked?: EpisodeNode) => {
-        const node = requireTreeNode(picked, "ファイルを削除");
+        const node = requireTreeNode(picked, "この話を削除");
         if (!node) return;
 
         // 削除は取り消せない操作の入口なので、ごみ箱経由にしたうえで
@@ -7421,15 +7427,50 @@ export async function activate(
         const dirtyNote = hasUnsavedChanges(node.episode.filePath)
           ? "未保存の変更も破棄されます。"
           : "";
-        const answer = await vscode.window.showWarningMessage(
-          `${node.episode.fileName} を削除しますか？`,
-          {
-            modal: true,
-            detail: `ごみ箱に移動します。元に戻すことができます。${dirtyNote}`,
-          },
-          "削除する"
-        );
-        if (answer !== "削除する") return;
+        /*
+          **「この話を削除」1つから、話数を詰めるかを訊く**（作者の判断
+          2026-11-02。`core/episodeDeleteChoice.ts`）。詰められる話（番号で数える
+          形式）だけ問いを出し、詰めるほうは今までの「話数を詰める削除」へ渡す
+          ——付け替える話の一覧と最後の確認はそちらが出す。詰められない話は、
+          今までどおり消すかだけを訊く
+        */
+        if (
+          canRenumberOnDelete(
+            workTypeContextValue("episode", node.format, node.kind)
+          )
+        ) {
+          const choice = await vscode.window.showWarningMessage(
+            `「${node.episode.fileName}」を削除します。あとの話の話数を詰めますか？`,
+            {
+              modal: true,
+              detail:
+                "どちらもごみ箱に移動します。元に戻すことができます。\n" +
+                "・話数を詰める：あとの話の番号を1つずつ繰り上げる（次に付け替える話の一覧が出る）\n" +
+                `・詰めない：この話のファイルだけを消し、番号は空いたままにする${dirtyNote ? `\n${dirtyNote}` : ""}`,
+            },
+            EPISODE_DELETE_CHOICES.renumber,
+            EPISODE_DELETE_CHOICES.fileOnly
+          );
+          const route = routeOfDeleteAnswer(choice);
+          if (!route) return;
+          if (route === "renumber") {
+            await vscode.commands.executeCommand(
+              "novelai.removeEpisodeAndRenumber",
+              node
+            );
+            return;
+          }
+        } else {
+          const answer = await vscode.window.showWarningMessage(
+            `${node.episode.fileName} を削除しますか？`,
+            {
+              modal: true,
+              detail: `ごみ箱に移動します。元に戻すことができます。${dirtyNote}`,
+            },
+            "削除する"
+          );
+          if (answer !== "削除する") return;
+        }
 
         try {
           await vscode.workspace.fs.delete(

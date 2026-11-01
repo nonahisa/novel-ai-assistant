@@ -922,7 +922,7 @@
       },
       {
         "command": "novelai.deleteEpisodeFile",
-        "title": "ファイルを削除",
+        "title": "この話を削除",
         "category": "小説執筆",
         "icon": "$(trash)"
       },
@@ -1757,11 +1757,6 @@
           "command": "novelai.insertEpisodeBefore",
           "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)(-(essay|lyrics))?$/",
           "group": "4_renumber@1"
-        },
-        {
-          "command": "novelai.removeEpisodeAndRenumber",
-          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)(-(essay|lyrics))?$/",
-          "group": "4_renumber@2"
         },
         {
           "command": "novelai.deleteEpisodeFile",
