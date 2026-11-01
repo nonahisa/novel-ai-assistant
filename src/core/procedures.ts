@@ -185,7 +185,7 @@ export const PROCEDURES: readonly Procedure[] = [
       {
         command: "novelai.runProofreadingSuite",
         why: "誤字脱字・表記ゆれ・推敲を一度に掛けられる",
-        check: "提案パネルに指摘が並ぶ。1件ずつ適用か無視を決める",
+        check: "提案パネルに指摘が並ぶ。1件ずつ適用か見送るかを決める",
       },
       {
         command: "novelai.manageKeepWords",

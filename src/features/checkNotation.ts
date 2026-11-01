@@ -752,7 +752,7 @@ export function describeNotationResult(
       `${counted.join(" / ")}。`,
     ];
     if (result.dismissedCount > 0) {
-      parts.push(`（無視した分 ${result.dismissedCount}件は除いています）`);
+      parts.push(`（見送った分 ${result.dismissedCount}件は除いています）`);
     }
     // **2つの置き場を混ぜない。** 外し方が違うので、別の文にして名指しする
     if (result.keptGroupCount > 0) {
@@ -780,12 +780,12 @@ export function describeNotationResult(
     );
   }
   if (result.dismissedCount > 0) {
-    // **`dismissedCount` は「無視」ボタンの記録**（`TypoDismissedHistory`）で
+    // **`dismissedCount` は［見送る］（もとの「無視」）ボタンの記録**（`TypoDismissedHistory`）で
     // あって、「今後直さない」（`設定/keep_words.json`）ではない。外す場所も
     // 違うので、「指摘対象外を管理」へ案内すると作者はそこで何も見つけられない
     const parts = [
       `${result.unifiedCount}組を揃えることにしましたが、` +
-        `${result.dismissedCount}件はすべて以前「無視」にしたものでした。`,
+        `${result.dismissedCount}件はすべて以前「見送る」にしたものでした。`,
     ];
     if (result.keptGroupCount > 0) {
       parts.push(

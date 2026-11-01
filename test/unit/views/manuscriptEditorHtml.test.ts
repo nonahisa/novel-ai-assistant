@@ -864,7 +864,7 @@ describe("シーンメモの見え方", () => {
   });
 
   it("右クリックの品書きに、メモを足す・横に開くがある", () => {
-    expect(code).toContain('add("メモ追加"');
+    expect(code).toContain('add("ここにメモを足す"');
     expect(code).toContain('add("校正・メモパネルを開く"');
     expect(code).toContain('type: "addMemo", line: menuCaretLine()');
     expect(code).toContain('type: "openMemos"');

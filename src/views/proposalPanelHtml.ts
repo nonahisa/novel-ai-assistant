@@ -111,7 +111,7 @@ body {
 /*
   ボタンは押しやすい大きさにする（作者の指摘、2026-09-06）。
 
-  「適用／無視／今後直さない／再チェック／戻す」が小さく詰まっていて、
+  「適用／見送る／今後直さない／再チェック／戻す」が小さく詰まっていて、
   押し間違えやすかった。**押し間違いが原稿を書き換える**場所なので、
   見た目より当てやすさを取る。
 */
@@ -274,7 +274,7 @@ body.show-low .issue.low { display: flex; }
   「今後直さない」だけ隣から離す（作者の指摘、2026-09-06）。
 
   **取り消しにくい判断だから**である。押すとその語を今後どの話でも
-  指摘しなくなるので、「無視」の隣に同じ間隔で並んでいると、
+  指摘しなくなるので、「見送る」の隣に同じ間隔で並んでいると、
   1つ押し間違えただけで指摘が二度と出なくなる。
 */
 .actions .keep-word { margin-inline-start: 16px; }
@@ -325,7 +325,7 @@ body.show-low .issue.low { display: flex; }
 
   矛盾は「設定では／本文では」の対比に加えて4行の説明が付くので、
   既定の高さの提案パネルでは1件だけでも
-  「本文を見る／設定資料を見る／無視／伏線として登録／再チェック」が
+  「本文を見る／設定資料を見る／見送る／伏線として登録／再チェック」が
   下へはみ出し、**初見では「ボタンが無い」に見えた。**
 
   説明のほうを畳むのではなく（読まずに押されると困る）、説明の塊だけを
@@ -671,7 +671,8 @@ function renderWorks(works) {
 const CONFIDENCE_LABEL = { high: '確信度: 高', medium: '確信度: 中', low: '確信度: 低' };
 const STATUS_LABEL = {
   applied: '適用済み',
-  dismissed: '無視しました',
+  // 押すボタンの名前（［見送る］）にそろえる（作者の判断 2026-11-02）
+  dismissed: '見送りました',
   failed: '失敗',
   resolved: '解消を確認しました',
 };
@@ -1003,9 +1004,9 @@ function renderContradiction(item) {
     '<span class="badge ' + item.confidence + '">' + CONFIDENCE_LABEL[item.confidence] + '</span>' +
     renderOriginBadge(item) +
     // **片付いた理由は1つではない**（設計書6.35.4）。伏線として登録した
-    // ものは「無視しました」ではない。理由が添えてあればそちらを出す
+    // ものは「見送りました」ではない。理由が添えてあればそちらを出す
     (item.status === 'dismissed'
-      ? '<span class="reason">' + escapeHtml(item.dismissReason || '無視しました') + '</span>'
+      ? '<span class="reason">' + escapeHtml(item.dismissReason || STATUS_LABEL.dismissed) + '</span>'
       : '') +
     '</div>' +
     // **説明はひと塊にして、そこだけスクロールさせる。** 4行の説明で
@@ -1037,7 +1038,7 @@ function renderContradiction(item) {
         (item.openTarget === 'none'
           ? ''
           : '<button class="secondary" data-action="openSettings" data-id="' + item.id + '"' + disabled + '>' + escapeHtml(item.openLabel || (item.openTarget === 'plot' ? 'プロットを見る' : '設定資料を見る')) + '</button>') +
-        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
+        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>見送る</button>' +
         // **矛盾ではなく伏線だった、という道**（設計書6.35.4）。
         // 矛盾検知は「意図した違和感」も食い違いとして拾うので、
         // そこから伏線の台帳へ移せるようにする。プロット逸脱には出ない
@@ -1180,10 +1181,10 @@ function renderItem(item) {
               ? '<button data-action="apply" data-id="' + item.id + '" title="意見を読んだ印を付けて片づけます（本文は変わりません）"' + disabled + '>読んだ</button>'
               : '') +
             '<button' + (opinion ? ' class="secondary"' : '') + ' data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>') +
-        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
+        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>見送る</button>' +
         (canKeep(item)
           // **隣から離して置く**（.keep-word）。取り消しにくい判断なので、
-          // 「無視」と同じ間隔で並べない
+          // 「見送る」と同じ間隔で並べない
           ? '<button class="secondary keep-word" data-action="keepWord" data-id="' + item.id + '" title="この語を今後どの話でも指摘しません"' + disabled + '>今後直さない</button>'
           : '') +
         // **どちらに揃えるかは、機械には決められない**（設計書6.73）。
@@ -1218,8 +1219,8 @@ function renderItem(item) {
  * バックアップとの違い1か所（設計書6.99.7）。
  *
  * **確信度は出さない。** 機械の見立てではなく、2つの原稿の違いそのもので
- * ある。押せるのは「バックアップを採る」「手元のまま」と、採ったあとの
- * 「戻す」だけ（再チェックも「今後直さない」も、この形には意味が無い）。
+ * ある。押せるのは「バックアップを採る」「見送る」と、採ったあとの
+ * 「手元の文に戻す」だけ（再チェックも「今後直さない」も、この形には意味が無い）。
  */
 function renderBlock(item) {
   const block = item.lineBlock;
@@ -1258,12 +1259,12 @@ function renderBlock(item) {
     (canAct
       ? '<div class="actions">' +
         '<button data-action="apply" data-id="' + item.id + '" title="この1か所だけ、原稿をバックアップの文にします">バックアップを採る</button>' +
-        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '" title="原稿はこのままにします">手元のまま</button>' +
+        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '" title="原稿はこのままにします（バックアップの文は採りません）">見送る</button>' +
         '</div>'
       : '') +
     (item.status === 'applied'
       ? '<div class="actions">' +
-        '<button class="secondary" data-action="undo" data-id="' + item.id + '" title="原稿をこの1か所だけ手元の文へ戻します">戻す</button>' +
+        '<button class="secondary" data-action="undo" data-id="' + item.id + '" title="バックアップを採ったのを取り消し、原稿をこの1か所だけ手元の文へ戻します">手元の文に戻す</button>' +
         '</div>'
       : '') +
     '</div>'

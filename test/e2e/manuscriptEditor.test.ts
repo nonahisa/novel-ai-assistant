@@ -55,8 +55,8 @@ async function contextMenuNames(): Promise<string[]> {
     titleOf("novelai.copyForPosting"),
     "コピー（記法のまま）",
     // 実機確認リスト 0.96.9 の並びの残り（短く、名詞止めにそろえた名前）
-    "AI相談（選択範囲）",
-    "メモ追加",
+    "AIに相談（選んだ所）",
+    "ここにメモを足す",
     "校正・メモパネルを開く",
     "単話プロットを開く",
     resume,

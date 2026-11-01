@@ -110,8 +110,8 @@ test("右クリック「メモ追加」で行の上に // が入り、［済み�
       });
       if (!caretBox) throw new Error("カーソルの位置が測れません");
       await frame.locator("#compose").click({ button: "right", position: caretBox });
-      const addItem = frame.locator("#menu .item", { hasText: "メモ追加" }).first();
-      await waitUntil(async () => (await addItem.count()) > 0 && (await addItem.isVisible()), "右クリックの品書きに「メモ追加」が出る");
+      const addItem = frame.locator("#menu .item", { hasText: "ここにメモを足す" }).first();
+      await waitUntil(async () => (await addItem.count()) > 0 && (await addItem.isVisible()), "右クリックの品書きに「ここにメモを足す」が出る");
       await addItem.click();
       await waitUntil(async () => /\/\/ ?\n+一の三行目。/.test(await composeText(frame)), "「メモ追加」で行の上に // が入る").catch(
         async (error: unknown) => {
@@ -362,8 +362,8 @@ test("打つ面でも、右クリック「メモ追加」でカーソル行の�
       // 打つ面の上で右クリックする（右クリックした点にカーソルが動く。どの行に動いたかは、
       // 品書きが開いたあとに読み直して、製品が使う値と同じものを見る）
       await surface.locator("#write").click({ button: "right", position: { x: 60, y: 70 } });
-      const addItem = surface.locator("#menu .item", { hasText: "メモ追加" }).first();
-      await waitUntil(async () => (await addItem.count()) > 0 && (await addItem.isVisible()), "右クリックの品書きに「メモ追加」が出る");
+      const addItem = surface.locator("#menu .item", { hasText: "ここにメモを足す" }).first();
+      await waitUntil(async () => (await addItem.count()) > 0 && (await addItem.isVisible()), "右クリックの品書きに「ここにメモを足す」が出る");
       const caretLine = await surface.evaluate(() => {
         const write = document.getElementById("write") as HTMLTextAreaElement;
         return write.value.slice(0, write.selectionStart).split("\n").length;

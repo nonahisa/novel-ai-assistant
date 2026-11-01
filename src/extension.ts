@@ -1921,7 +1921,7 @@ export async function activate(
       if (from) panel.setChapterContext(chapterOfPath(from.filePath));
       await panel.showRecord(kind, id);
     },
-    // 「AI相談（選択範囲）」。校正・メモパネルの［AIに相談］も同じ関数を通る
+    // 「AIに相談（選んだ所）」。校正・メモパネルの［AIに相談］も同じ関数を通る
     openChat: (document, range) => openChatWithRange(document, range),
     // 編集者モードの「直しを提案する」「メモ追加」（設計書5.6.1.1）。本文には書かない
     proposeByHand: async (document, range, kind) => {
@@ -2777,7 +2777,7 @@ export async function activate(
    */
   /**
    * 原稿エディターの本文と範囲を相談パネルへ渡して開く（右クリックの
-   * 「AI相談（選択範囲）」）。
+   * 「AIに相談（選んだ所）」）。
    *
    * **本文を素のエディターで開かない**（作者の報告 2026-10-04。設計書6.25.10）。
    * 以前は相談パネルが素のエディターからしか本文を受け取れなかったので、

@@ -97,7 +97,7 @@ describe("指摘が出たとき", () => {
       shown({ remaining: 1 })
     );
     expect(text).toContain("5件");
-    expect(text).toContain("無視");
+    expect(text).toContain("見送");
   });
 
   it("途中で閉じたなら、そこから先を見ていないと言う", () => {
@@ -185,7 +185,7 @@ describe("0件のとき、理由を言い分ける", () => {
       shown()
     );
     expect(text).toContain("30件");
-    expect(text).toContain("無視");
+    expect(text).toContain("見送");
     expect(text).not.toContain("指摘対象外管理");
   });
 
