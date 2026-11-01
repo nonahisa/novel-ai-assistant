@@ -4,7 +4,7 @@ import { embeddingModelName, isVectorSearchEnabled } from "./vectorSearch";
 import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
 import { withCancellableProgress } from "../views/progress";
 import { cancelItem } from "../views/dialogs";
-import { notifyDone } from "../views/notify";
+import { notifyDone, whenNoticePicked } from "../views/notify";
 
 /**
  * 意味検索（ベクトルDB）のセットアップ案内。
@@ -22,6 +22,31 @@ import { notifyDone } from "../views/notify";
  * 案内文にも「既定は bge-m3」と書くだけにして、
  * 作者が変えたらそちらを案内する。
  */
+
+/** 索引づくりへ進むボタン（作者の判断 2026-11-01） */
+const BUILD_INDEX = "索引を作る";
+
+/**
+ * 意味検索を使えるようにしたあとの知らせ。**押せる道を付ける**（作者の判断 2026-11-01）。
+ *
+ * 以前は「作品を選んで『検索用の索引を作る』を実行してください」と言うだけで、
+ * その名前の操作はどこにも無かった（命令の題は別の名前で、詳細メニューからも
+ * 外してある。設計書6.56.3）。ボタンの名前は動作の言葉にし、命令の名前は言わない。
+ * 作品は索引づくりの側が訊く。**返事を待たない**（押さずに置いてもよい次の一手）
+ */
+export function announceVectorSearchReady(head: string): void {
+  whenNoticePicked(
+    vscode.window.showInformationMessage(
+      `${head}相談で使うには、作品ごとに索引が要ります。`,
+      BUILD_INDEX
+    ),
+    async (picked) => {
+      if (picked !== BUILD_INDEX) return;
+      await vscode.commands.executeCommand("novelai.buildVectorIndex");
+    },
+    { label: "意味検索の準備のあとの索引づくり" }
+  );
+}
 
 interface Step {
   label: string;
@@ -69,9 +94,7 @@ export async function setupVectorSearch(): Promise<void> {
         await vscode.workspace
           .getConfiguration("novelai")
           .update("vectorSearch.enabled", true, vscode.ConfigurationTarget.Global);
-        notifyDone(
-          "意味検索を使えるようにしました。作品を選んで「検索用の索引を作る」を実行してください。"
-        );
+        announceVectorSearchReady("意味検索を使えるようにしました。");
       },
     });
   }
@@ -89,11 +112,11 @@ export async function setupVectorSearch(): Promise<void> {
           !enabled,
           vscode.ConfigurationTarget.Global
         );
-      notifyDone(
-        enabled
-          ? "意味検索を切りました。相談では語句一致で場面を探します。"
-          : "意味検索を入にしました。作品を選んで「検索用の索引を作る」を実行してください。"
-      );
+      if (enabled) {
+        notifyDone("意味検索を切りました。相談では語句一致で場面を探します。");
+      } else {
+        announceVectorSearchReady("意味検索を入にしました。");
+      }
     },
   });
 

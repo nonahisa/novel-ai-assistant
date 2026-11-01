@@ -291,13 +291,74 @@ function dirtyBodyDocuments(work: WorkEntry): vscode.TextDocument[] {
   );
 }
 
+/**
+ * 取り込む前に GitHub から受け取った結果（作者の判断 2026-11-01）。
+ *
+ * - `received`：受け取った（受け取るものが無かったときも含む）
+ * - `skipped`：受け取りを試さなかった（GitHub と同期していない作品・ブラウザ版）。理由を1文で持つ
+ * - `failed`：受け取れなかった。**何が悪かったかは、受け取りの側が知らせとログに出し済み**
+ *   （取り込みの係〈`gitSync.ts` の `pull`〉が「取り込みに失敗しました」などを出す）
+ */
+export type InboxReceiveOutcome =
+  | { kind: "received" }
+  | { kind: "skipped"; reason: string }
+  | { kind: "failed" };
+
+export interface ImportOutboxInboxDeps {
+  /**
+   * 取り込む前に GitHub から受け取る。**拡張機能の入口が渡す**（`extension.ts`）。
+   *
+   * ここで同期の係を直に読み込まないのは、同期が Node（git）を使うので
+   * ブラウザ版の束へ持ち込めないため（実装ルール7）と、受け取りの手順を
+   * 同期の係の1か所に置いたままにするため。渡さなければ受け取らない（以前の動き）
+   */
+  receive?: (work: WorkEntry) => Promise<InboxReceiveOutcome>;
+}
+
+/** 受け取りの結果を、知らせに添える1文にする（受け取れたときは何も足さない） */
+function describeReceiveNote(outcome: InboxReceiveOutcome | undefined, imported: boolean): string {
+  if (!outcome || outcome.kind === "received") return "";
+  if (outcome.kind === "skipped") return outcome.reason;
+  return imported
+    ? "GitHub からは受け取れなかったため、手元に届いていた分だけを取り込みました。"
+    : "GitHub からは受け取れなかったため、手元に届いている分だけを見ました。";
+}
+
 /** ［原稿箱を取り込む］の本体（詳細メニュー・コマンドパレット・同期のあとの知らせから） */
-export async function importOutboxInbox(work: WorkEntry): Promise<void> {
+export async function importOutboxInbox(
+  work: WorkEntry,
+  deps: ImportOutboxInboxDeps = {}
+): Promise<void> {
+  /*
+    **先に GitHub から受け取る**（作者の判断 2026-11-01）。以前は届いた箱を読むだけで、
+    同期していないと「GitHub と同期すると届きます」で終わり、作者は同期を探しに
+    行ってからもう一度押していた。**受け取れなくても止めない**——手元に届いている
+    箱は、受け取りの成否と関係なく取り込める
+  */
+  let received: InboxReceiveOutcome | undefined;
+  if (deps.receive) {
+    try {
+      received = await deps.receive(work);
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logFailure("原稿箱の前の GitHub からの受け取りに失敗", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+      received = { kind: "failed" };
+    }
+  }
+
   const names = await listPendingInbox(work);
   if (names.length === 0) {
+    const note = describeReceiveNote(received, false);
     vscode.window.showInformationMessage(
       `「${work.title}」の原稿箱に、取り込み待ちのものはありません。` +
-        "出先のページで［パソコンへ送る］を押したあと、GitHub と同期すると届きます。"
+        (received?.kind === "received"
+          ? // 受け取ったあとなので「同期すると届きます」は言わない（もう同期した）
+            "GitHub の最新も受け取りました。出先のページで［パソコンへ送る］を押してから、もう一度押してください。"
+          : note ||
+            "出先のページで［パソコンへ送る］を押したあと、GitHub と同期すると届きます。")
     );
     return;
   }
@@ -344,7 +405,9 @@ export async function importOutboxInbox(work: WorkEntry): Promise<void> {
   const summary = describeInboxImport(report.outcome, report.broken.length);
   const trouble =
     report.outcome.refusedCount > 0 || report.broken.length > 0 || report.unmoved.length > 0;
-  const tail = report.outcome.importedCount > 0 ? "提案パネル・校正メモパネルは、開き直すと反映されます。" : "";
+  const tail =
+    (report.outcome.importedCount > 0 ? "提案パネル・校正メモパネルは、開き直すと反映されます。" : "") +
+    describeReceiveNote(received, true);
   const shown = trouble
     ? vscode.window.showWarningMessage(`「${work.title}」：${summary}${tail}`, "理由を見る")
     : vscode.window.showInformationMessage(`「${work.title}」：${summary}${tail}`);

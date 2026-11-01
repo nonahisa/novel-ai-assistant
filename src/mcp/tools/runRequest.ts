@@ -367,7 +367,8 @@ function requestDirectory(deps: Pick<RunRequestDeps, "storageRoot">): string {
   const root = deps.storageRoot();
   if (!root) {
     throw new McpToolError(
-      "拡張機能の保管庫の場所が分かりません。拡張機能の「Claude Code とつなぐ」で登録し直してください。"
+      // 名前は詳細メニューの項目に揃える（作者の判断 2026-11-01。`claudeCodeConnectName.test.ts`）
+      "拡張機能の保管庫の場所が分かりません。拡張機能の「Claude Code接続」で登録し直してください。"
     );
   }
   return nodePath.join(root, RUN_REQUEST_DIRECTORY);

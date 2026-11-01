@@ -97,7 +97,7 @@ describe("Claude Code が入っていれば「つなぐ」も出す（設計書6
     await offerFirstRunSetup(
       deps({ notify, claudeCodeInstalled: () => true, connectClaudeCode: async () => undefined })
     );
-    expect(notify.mock.calls[0]).toContain("Claude Code とつなぐ");
+    expect(notify.mock.calls[0]).toContain("Claude Code接続");
     expect(notify.mock.calls[0]).toContain("AIを選ぶ");
   });
 
@@ -106,7 +106,7 @@ describe("Claude Code が入っていれば「つなぐ」も出す（設計書6
     const runWizard = vi.fn(async () => true);
     await offerFirstRunSetup(
       deps({
-        notify: async () => "Claude Code とつなぐ",
+        notify: async () => "Claude Code接続",
         claudeCodeInstalled: () => true,
         connectClaudeCode,
         runWizard,
@@ -119,7 +119,7 @@ describe("Claude Code が入っていれば「つなぐ」も出す（設計書6
   test("入っていなければ出さない（これまでと同じ）", async () => {
     const notify = vi.fn<FirstRunDeps["notify"]>(async () => undefined);
     await offerFirstRunSetup(deps({ notify, claudeCodeInstalled: () => false }));
-    expect(notify.mock.calls[0]).not.toContain("Claude Code とつなぐ");
+    expect(notify.mock.calls[0]).not.toContain("Claude Code接続");
   });
 });
 
@@ -143,7 +143,7 @@ describe("声かけから道案内を開ける（設計書6.104 入口2）", () 
     );
     expect(notify.mock.calls[0].slice(1)).toEqual([
       "AIを選ぶ",
-      "Claude Code とつなぐ",
+      "Claude Code接続",
       OPEN_WALKTHROUGH,
     ]);
   });

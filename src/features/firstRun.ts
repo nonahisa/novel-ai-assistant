@@ -4,6 +4,7 @@ import { AIRegistry, runSetupWizard } from "../ai/registry";
 import { CLAUDE_CODE_EXTENSION_ID } from "../core/claudeCodeRegistration";
 import { logLine } from "../core/logger";
 import { verifiedState } from "../core/verifiedMemento";
+import { findAction } from "../core/actionTree";
 
 /**
  * はじめて開いたときに、使うAIを選んでもらう（作者の指示、2026-08-19）。
@@ -51,7 +52,12 @@ export interface FirstRunDeps {
 
 /** 案内の押し口の名前 */
 const PICK_AI = "AIを選ぶ";
-export const CONNECT_CLAUDE_CODE = "Claude Code とつなぐ";
+/**
+ * つなぐ押し口。**名前は詳細メニューの項目から引く**（作者の判断 2026-11-01）。
+ * 「Claude Code とつなぐ」と書いていた頃は、メニュー（「Claude Code接続」）と名前が違った
+ */
+export const CONNECT_CLAUDE_CODE =
+  findAction("novelai.connectClaudeCode")?.label ?? "Claude Code接続";
 export const OPEN_WALKTHROUGH = "道案内を見る";
 
 /**
