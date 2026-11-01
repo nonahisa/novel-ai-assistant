@@ -12,6 +12,8 @@
  *    **簡単ステップメニューに無い**項目（「人物相関図」）を名指しすると、詳細メニューのその項目が光り、
  *    会話に「詳細メニューの項目は、相談の作品「作品B」で走ります。」が出る。光った行を押すと、作品を訊かずに
  *    作品Bの人物相関図が開く。**対照**：同じ行をもう一度押すと（光らせた1回は使い切った）、作品を選ぶ画面が出る
+ * 3. 368（0.122.0）：簡単ステップメニューの最上段で作品Bを選び、相談の作品は作品Aのまま、簡単ステップメニューの
+ *    「AIに相談」（薄字「大きく開く」）を押すと、大きい相談の画面が作品Bで開く
  *
  * **本物の AI は呼ばない。** 偽の Ollama が「人物相関図」を名指しした答えを返す。実機の AI が項目を
  * 名指しするかは作者の手に残す。
@@ -286,6 +288,101 @@ test("作品一覧で作品Aを選んだまま、相談の作品（作品B）で
       await waitForQuickPick(page, PICK_TITLE, 20_000);
       await page.keyboard.press("Escape");
       await holdsFor(async () => !tabNamesInclude((await editorGroupTabs(page)).flat(), `人物相関図: ${E2E_WORK_TITLE}`), "取りやめたあとに作品Aの人物相関図が開かない", 2_000);
+    },
+    launchOptions()
+  );
+}, 300_000);
+
+/* ── 3. 368：簡単ステップメニューの「AIに相談」（大きく開く）は、最上段の作品で開く ── */
+
+/** 簡単ステップメニューの区画 */
+function stepPane(page: Page): Locator {
+  return page.locator(".pane", { has: page.locator(".pane-header", { hasText: "簡単ステップメニュー" }) }).first();
+}
+
+/** 簡単ステップメニューの最上段（作品を選ぶ行。木の0番目）の名前（chatSpotlightWork と同じ読み方） */
+async function stepTopLabel(page: Page): Promise<string> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const label = await page.evaluate(() => {
+      const pane = Array.from(document.querySelectorAll(".pane")).find((node) =>
+        (node.querySelector(".pane-header")?.textContent ?? "").includes("簡単ステップメニュー")
+      );
+      const top = Array.from(pane?.querySelectorAll(".monaco-list-row") ?? []).find((row) => (row as HTMLElement).dataset.index === "0");
+      return top ? (top.querySelector(".label-name")?.textContent ?? top.getAttribute("aria-label") ?? "").trim() : undefined;
+    });
+    if (label !== undefined) return label;
+    const box = await stepPane(page).locator(".pane-body").first().boundingBox();
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, -600);
+    }
+    await page.waitForTimeout(150);
+  }
+  return "（最上段が描かれていません）";
+}
+
+test("簡単ステップメニューの最上段で作品Bを選び、相談の作品は作品Aのまま、簡単ステップメニューの「AIに相談」（大きく開く）を押すと、大きい相談の画面が作品Bで開く", async () => {
+  await withVsCode(
+    "簡単ステップメニューの相談の作品",
+    [{ name: "001_港.txt", text: "　港の娘は朝早く起きた。\n" }],
+    async (session) => {
+      const { page } = session;
+      await registerOtherWork(page);
+      await collapseSidebarPane(page, "AIに相談");
+
+      // 相談の作品は作品A
+      await runCommand(page, "相談作品選択");
+      await waitForQuickPick(page, "どの作品について相談しますか");
+      await pickQuickPickRow(page, E2E_WORK_TITLE);
+
+      // 簡単ステップメニューの最上段で作品Bを選ぶ
+      await treeRow(page, await stepTopLabel(page)).click();
+      await waitForQuickPick(page, "簡単ステップメニューで使う作品", 15_000);
+      await pickQuickPickRow(page, OTHER_TITLE);
+      await waitUntil(async () => (await stepTopLabel(page)) === `選択作品：${OTHER_TITLE}`, "簡単ステップメニューの最上段が「選択作品：作品B」になる", 15_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（いまの最上段：${JSON.stringify(await stepTopLabel(page))}）`);
+        }
+      );
+
+      // 簡単ステップメニューの「AIに相談」（薄字「大きく開く」）を、段を開きながら探す
+      const pane = stepPane(page);
+      const chatRow = pane.locator('.monaco-list-row[aria-label^="AIに相談"]').first();
+      const closed = pane.locator('.monaco-list-row[aria-expanded="false"]');
+      for (let attempt = 0; attempt < 30 && (await chatRow.count()) === 0; attempt++) {
+        if ((await closed.count()) > 0) {
+          await closed.first().click();
+          await page.waitForTimeout(300);
+          continue;
+        }
+        const box = await pane.locator(".pane-body").first().boundingBox();
+        if (box) {
+          await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.75);
+          await page.mouse.wheel(0, 120);
+        }
+        await page.waitForTimeout(150);
+      }
+      expect(await chatRow.count(), "簡単ステップメニューに「AIに相談」が見つかりません").toBe(1);
+      expect((await chatRow.getAttribute("aria-label")) ?? "", "押す行が「大きく開く」の相談ではありません").toContain("大きく開く");
+      await chatRow.scrollIntoViewIfNeeded();
+      await chatRow.click();
+
+      let large: Frame | undefined;
+      await waitUntil(
+        async () => {
+          large = await largeChatFrame(page);
+          return large !== undefined && (await chatTarget(large)).trim() !== "";
+        },
+        "大きい相談の画面が開く",
+        30_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}${await quickInputWaitContext(page)}`);
+      });
+      const chat = large as Frame;
+      await waitUntil(async () => (await chatTarget(chat)).includes(OTHER_TITLE), "大きい相談の画面の相談の対象が作品Bになる", 10_000).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（相談の対象：${JSON.stringify(await chatTarget(chat))}）`);
+      });
+      expect(await quickPickTitle(page), "大きく開くのに作品を訊かれました").toBeUndefined();
     },
     launchOptions()
   );
