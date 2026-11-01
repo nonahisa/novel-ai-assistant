@@ -256,6 +256,27 @@ svg { display: block; }
 .bar.mark { fill: var(--vscode-charts-orange, #d18616); }
 .line { fill: none; stroke: var(--vscode-charts-blue, #3794ff); stroke-width: 1.5; }
 .dot { fill: var(--vscode-charts-blue, #3794ff); }
+/*
+  順位の推移（作者の指示 2026-11-02）。**幅に合わせて縮む**（viewBox＋width:100%）ので、
+  狭い幅でも横に送らない。線の色は種別ごとに VS Code のグラフの色（暗いテーマでも読める）
+*/
+.rank-chart svg { width: 100%; height: auto; max-width: 760px; }
+.rank-line { fill: none; stroke: var(--rank-color); stroke-width: 1.8; }
+.rank-dot { fill: var(--rank-color); }
+.rank-s0 { --rank-color: var(--vscode-charts-blue, #3794ff); }
+.rank-s1 { --rank-color: var(--vscode-charts-orange, #d18616); }
+.rank-s2 { --rank-color: var(--vscode-charts-green, #89d185); }
+.rank-s3 { --rank-color: var(--vscode-charts-purple, #b180d7); }
+.rank-s4 { --rank-color: var(--vscode-charts-red, #f14c4c); }
+.rank-s5 { --rank-color: var(--vscode-charts-yellow, #cca700); }
+.rank-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin: 4px 0 0; }
+.rank-key { display: inline-flex; align-items: center; gap: 6px; }
+.rank-swatch { display: inline-block; width: 14px; height: 3px; background: var(--rank-color); }
+/* なろうAPIの欄。同意のチェックが入るまでボタンは押せない */
+.narou-api { margin: 8px 0 12px; padding: 8px 10px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
+.narou-api label { display: inline-flex; align-items: center; gap: 6px; }
+.narou-api .row { margin: 4px 0; }
+.narou-api label.disabled { color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); }
 /* 率の表は3行しかない。画面幅いっぱいに広げると、率と式が左右に離れて読みにくい */
 table.reader-rates { width: auto; }
 .tick { fill: var(--vscode-descriptionForeground); font-size: 10px; }
@@ -440,6 +461,9 @@ let chartFollowLatest = true;
 */
 const readerAdviceOutcomes = {};
 const readerAdviceBusy = {};
+/* なろうAPIの取得（2026-11-02）。助言と同じく、描き直しても消えないよう別に持つ */
+let narouApiOutcome = null;
+let narouApiBusy = false;
 
 const GRANULARITY_LABELS = { daily: '日次', weekly: '週次', monthly: '月次', yearly: '年次' };
 
@@ -1038,10 +1062,14 @@ function renderSiteRecords() {
       '<td class="num">' + formatCount(row.rank) + '</td>' +
       '<td>' + escapeHtml(row.note || '') + '</td></tr>'
     );
-    const table = rows.length > 0
+    /*
+      順位の推移のグラフ（作者の指示 2026-11-02）。**表はそのまま、グラフの下に残す**。
+      順位が1つも無いサイトでは、グラフの代わりに1行の案内
+    */
+    const table = renderRankChart(record.rankChart) + (rows.length > 0
       ? '<table><thead><tr><th>日時</th><th>種別</th><th class="num">順位</th>' +
         '<th>メモ</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>'
-      : '';
+      : '');
 
     /*
       読者の反応（設計書6.79.7）。**あるものだけが並んだ値**が届く
@@ -1057,7 +1085,9 @@ function renderSiteRecords() {
       renderReaderEpisodes(record.readerEpisodes);
 
     // 但し書きもサイトごと（そのサイトに順位・反応・分析リンクがあるときだけ言う）
-    const note = siteRecordsNote([record]);
+    const note = siteRecordsNote([record]) +
+      // 取った数を出す所に出典（作者が運営へ約束した書き方。2026-11-02）
+      (record.apiAttribution ? escapeHtml(record.apiAttribution) : '');
     return '<div class="site"><div class="site-head">' + head.join('') + '</div>' +
       renderSiteCrossNotes(record.site) +
       table + reader +
@@ -1075,10 +1105,10 @@ function renderSiteRecords() {
       登録しただけで、まだ何も記録の無いサイト。空の面にせず、何をすれば並ぶかを言う
       （配信しているのに数が無い、と分かるのも作者の材料）
     */
-    const body = record
+    const body = (tab.site === 'narou' ? renderNarouApi(state && state.narouApi) : '') + (record
       ? blockOf(record)
       : '<div class="empty">' + escapeHtml(tab.label) + 'の記録はまだありません。<br>' +
-        '「ランキング記録」で順位を書き足すか、「読者反応自動取込」で読者の反応を取り込むと、ここに並びます。</div>';
+        '「ランキング記録」で順位を書き足すか、「読者反応自動取込」で読者の反応を取り込むと、ここに並びます。</div>');
     return '<section class="page' + ('site-' + tab.site === current ? ' active' : '') +
       '" id="page-site-' + key + '" data-site-page="' + key + '" role="tabpanel" aria-labelledby="tab-site-' +
       key + '">' + body + '</section>';
@@ -1088,6 +1118,28 @@ function renderSiteRecords() {
   host.querySelectorAll('[data-url]').forEach((el) => {
     el.addEventListener('click', () => {
       vscode.postMessage({ type: 'openExternal', url: el.dataset.url });
+    });
+  });
+  /*
+    なろうAPIの欄（作者の指示 2026-11-02）。ガイドラインは**拡張機能の側で開く**
+    （開けたときだけ、チェックを押せるようになる）。チェックと取得も拡張機能へ頼む
+  */
+  host.querySelectorAll('[data-narou-guideline]').forEach((el) => {
+    el.addEventListener('click', () => {
+      vscode.postMessage({ type: 'narouOpenGuideline' });
+    });
+  });
+  host.querySelectorAll('[data-narou-agree]').forEach((el) => {
+    el.addEventListener('change', () => {
+      vscode.postMessage({ type: 'narouAgree', checked: el.checked === true });
+    });
+  });
+  host.querySelectorAll('[data-narou-fetch]').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (narouApiBusy || el.disabled) return;
+      narouApiBusy = true;
+      renderSiteRecords();
+      vscode.postMessage({ type: 'narouFetch' });
     });
   });
   // 「AIに助言をもらう」（設計書6.79.7.3）。**押したときだけ**頼む
@@ -1104,6 +1156,143 @@ function renderSiteRecords() {
       });
     });
   });
+}
+
+/**
+ * なろうAPIによる作品情報取得の欄（作者の指示 2026-11-02）。
+ *
+ * - ブラウザ版：ボタンを出さず「パソコンの VS Code で使えます」の1行
+ * - Nコードが無い：「投稿サイト設定で Nコードを登録すると使えます」
+ * - それ以外：ガイドラインへのリンク・同意のチェック・ボタン。**ガイドラインを開くまで
+ *   チェックは押せず、チェックが入るまでボタンは押せない**（既定はチェックなし）
+ */
+function renderNarouApi(api) {
+  if (!api) return '';
+  const head = '<div class="site-sub">なろうAPIによる作品情報取得</div>';
+  if (api.status === 'web') {
+    return '<div class="narou-api">' + head +
+      '<div class="site-meta">なろうAPIによる作品情報取得は、パソコンの VS Code で使えます。</div></div>';
+  }
+  if (api.status === 'no-ncode') {
+    return '<div class="narou-api">' + head +
+      '<div class="site-meta">投稿サイト設定で Nコードを登録すると使えます。</div></div>';
+  }
+  const parts = [head];
+  parts.push('<div class="row"><span class="link" data-narou-guideline="1">なろうデベロッパー利用ガイドライン</span>' +
+    '<span class="site-meta">（押すとブラウザで開きます）</span></div>');
+  const agree = '<input type="checkbox" data-narou-agree="1"' +
+    (api.agreed ? ' checked' : '') + (api.opened ? '' : ' disabled') + '>';
+  parts.push('<div class="row"><label' + (api.opened ? '' : ' class="disabled"') + '>' + agree +
+    'ガイドラインを読み、これに従って使うことに同意します</label>' +
+    (api.opened
+      ? (api.agreed && api.agreedAt
+        ? '<span class="site-meta">（' + escapeHtml(formatWhen(api.agreedAt)) + ' に同意。外すといつでも取り消せます）</span>'
+        : '')
+      : '<span class="site-meta">先にガイドラインを開いてください</span>') +
+    '</div>');
+  const label = narouApiBusy ? '取得しています…' : 'なろうAPIによる作品情報取得';
+  parts.push('<div class="row"><button data-narou-fetch="1"' +
+    (api.agreed && !narouApiBusy ? '' : ' disabled') + '>' + escapeHtml(label) + '</button></div>');
+  parts.push('<div class="site-meta">Nコード ' + escapeHtml(api.ncode || '') +
+    ' の作品の数と順位を1回取ります（同じ作品は' + escapeHtml(String(api.intervalMinutes)) +
+    '分に1回・1日' + escapeHtml(String(api.dailyLimit)) +
+    '回まで）。取った数は作品フォルダーの投稿の記録にだけ書き、AIには渡しません。</div>');
+  if (narouApiOutcome && narouApiOutcome.message) {
+    parts.push('<div class="note">' + escapeHtml(narouApiOutcome.message).split(String.fromCharCode(10)).join('<br>') + '</div>');
+  }
+  parts.push('<div class="site-foot">' + escapeHtml(api.attribution || '') + '</div>');
+  return '<div class="narou-api">' + parts.join('') + '</div>';
+}
+
+/** 圏外（null）で線を切った、続いている点のまとまり */
+function rankSegments(points) {
+  const segments = [];
+  let current = [];
+  (points || []).forEach((point) => {
+    if (point.rank === null || point.rank === undefined) {
+      if (current.length > 0) segments.push(current);
+      current = [];
+      return;
+    }
+    current.push(point);
+  });
+  if (current.length > 0) segments.push(current);
+  return segments;
+}
+
+/** 日付（YYYY-MM-DD）を数に。横軸は日付の間隔どおりに置く */
+function rankDayTime(day) {
+  return Date.parse(day + 'T00:00:00Z');
+}
+
+/**
+ * 順位の縦の位置。**上下を逆にする**——順位は小さいほど上なので、いちばん良い順位
+ * （best）をいちばん上（top）に置く
+ */
+function rankY(rank, best, worst, top, height) {
+  const span = worst - best;
+  if (span === 0) return top + height / 2;
+  return top + ((rank - best) / span) * height;
+}
+
+/**
+ * 順位の推移（作者の指示 2026-11-02「順位もグラフにしてください」）。
+ *
+ * 種別ごとに線を分け、色と凡例を付ける。圏外（null）で線を切り、0や大きな数で埋めない。
+ * 増減のグラフ（renderReaderCharts）には今までどおり混ぜない——向きが逆で読み違えるため。
+ */
+function renderRankChart(chart) {
+  const title = '<div class="site-sub">順位の推移（上ほど上位）</div>';
+  if (!chart || !chart.series || chart.series.length === 0) {
+    return title + '<div class="site-meta">「ランキング記録」で順位を残すと、ここに推移が出ます。</div>';
+  }
+  const width = 640;
+  const padLeft = 52;
+  const padRight = 16;
+  const padTop = 14;
+  const padBottom = 30;
+  const plotHeight = 150;
+  const plotWidth = width - padLeft - padRight;
+  const height = padTop + plotHeight + padBottom;
+  const first = rankDayTime(chart.firstDay);
+  const last = rankDayTime(chart.lastDay);
+  const xOf = (day) => last === first
+    ? padLeft + plotWidth / 2
+    : padLeft + ((rankDayTime(day) - first) / (last - first)) * plotWidth;
+  const yOf = (rank) => rankY(rank, chart.best, chart.worst, padTop, plotHeight);
+
+  const parts = [];
+  parts.push('<line class="axis" x1="' + padLeft + '" y1="' + (padTop + plotHeight) + '" x2="' + (width - padRight) +
+    '" y2="' + (padTop + plotHeight) + '" />');
+  parts.push('<text class="tick" x="4" y="' + (padTop + 4) + '">' + formatCount(chart.best) + '位</text>');
+  if (chart.worst !== chart.best) {
+    parts.push('<text class="tick" x="4" y="' + (padTop + plotHeight + 4) + '">' + formatCount(chart.worst) + '位</text>');
+  }
+  parts.push('<text class="tick" x="' + padLeft + '" y="' + (height - 8) + '">' + escapeHtml(chart.firstDay) + '</text>');
+  if (chart.lastDay !== chart.firstDay) {
+    parts.push('<text class="tick" x="' + (width - padRight) + '" y="' + (height - 8) +
+      '" text-anchor="end">' + escapeHtml(chart.lastDay) + '</text>');
+  }
+  const legend = [];
+  chart.series.forEach((line, index) => {
+    const cls = 'rank-s' + (index % 6);
+    rankSegments(line.points).forEach((segment) => {
+      if (segment.length < 2) return;
+      parts.push('<polyline class="rank-line ' + cls + '" points="' +
+        segment.map((point) => xOf(point.day) + ',' + yOf(point.rank)).join(' ') + '" />');
+    });
+    line.points.forEach((point) => {
+      if (point.rank === null || point.rank === undefined) return;
+      parts.push('<circle class="rank-dot ' + cls + '" cx="' + xOf(point.day) + '" cy="' + yOf(point.rank) +
+        '" r="3"><title>' + escapeHtml(line.label + '  ' + point.day + '  ' + formatCount(point.rank) + '位') +
+        '</title></circle>');
+    });
+    legend.push('<span class="rank-key ' + cls + '"><span class="rank-swatch"></span>' + escapeHtml(line.label) + '</span>');
+  });
+  return title + '<div class="rank-chart"><svg viewBox="0 0 ' + width + ' ' + height +
+    '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="順位の推移">' + parts.join('') + '</svg></div>' +
+    '<div class="rank-legend">' + legend.join('') + '</div>' +
+    '<div class="site-foot">線が切れている所は、その種別で順位が無かった（圏外）。</div>';
 }
 
 /**
@@ -1591,8 +1780,12 @@ function siteRecordsNote(records) {
   if (records.some((record) => (record.history || []).length > 0)) {
     // 名前はメニューの字面に揃える（0.75.8）。メニューで探すときに
     // 見つからない名前を案内に書くと、押す場所が分からなくなる
-    notes.push('順位は「ランキング記録」で書き足した値。' +
-      'サイトから自動で取ってこない。');
+    notes.push(records.some((record) => record.apiAttribution)
+      // なろうAPIで取った順位がある（2026-11-02）。自動では取らないことは変わらない
+      ? '順位は「ランキング記録」で書き足した値と、ボタンを押したときだけなろう殿堂入りAPIから取った値。' +
+        '自動では取ってこない。'
+      : '順位は「ランキング記録」で書き足した値。' +
+        'サイトから自動で取ってこない。');
   }
   if (records.some((record) => record.readerLatest)) {
     notes.push('読者の反応は、手入力か、ご自身で開いた管理画面から' +
@@ -1975,8 +2168,13 @@ function runCelebration(size, balloons) {
   }
 
   const bursts = [];
-  if (size === 'fireworks') {
-    for (let index = 0; index < 5; index++) {
+  /*
+    grand（順位で1位に入った。2026-11-02）は大きな花火：数を増やし、火花も多くする。
+    区切りは拡張機能の側（core/rankCelebrations.ts）が決めて送る
+  */
+  const grand = size === 'grand';
+  if (size === 'fireworks' || grand) {
+    for (let index = 0; index < (grand ? 12 : 5); index++) {
       bursts.push({
         at: 250 + index * 550,
         x: width * (0.2 + Math.random() * 0.6),
@@ -2030,7 +2228,7 @@ function runCelebration(size, balloons) {
     bursts.forEach((burst) => {
       if (burst.done || elapsed < burst.at) return;
       burst.done = true;
-      const count = 36;
+      const count = grand ? 64 : 36;
       for (let index = 0; index < count; index++) {
         const angle = (Math.PI * 2 * index) / count;
         const power = 0.12 + Math.random() * 0.08;
@@ -2084,6 +2282,12 @@ window.addEventListener('message', (event) => {
     if (message.outcome && message.outcome.kind !== 'cancelled') {
       readerAdviceOutcomes[message.site] = message.outcome;
     }
+    renderSiteRecords();
+    return;
+  }
+  if (message.type === 'narouApi') {
+    narouApiBusy = false;
+    narouApiOutcome = message.outcome || null;
     renderSiteRecords();
     return;
   }

@@ -4,6 +4,8 @@ import {
   postingSiteInfo,
   rankingsForSite,
   readerStatsForSite,
+  isApiDerivedReaderStats,
+  readerStatsForAi,
   readerStatsInLedgerOrder,
   siteFactsFor,
   siteProfile,
@@ -26,6 +28,8 @@ import { formatReaderAdviceMaterial } from "../prompts/readerAdvice";
 import { computeReaderRates, type ReaderRates } from "./readerRates";
 import { buildReaderCharts, type ReaderCharts } from "./readerStatsCharts";
 import { readerSiteTabLabel } from "./readerSiteTabNames";
+import { buildRankChart, type RankChartData } from "./rankSeries";
+import { NAROU_API_ATTRIBUTION } from "./narouApi";
 
 /**
  * 執筆量パネルに出す「サイトの記録」（設計書6.68.5）。
@@ -110,6 +114,17 @@ export interface PostingSiteRecord {
   } | null;
   /** PVのグラフ（各話・日・月・年・合計）。材料の無いグラフは null */
   readerCharts: ReaderCharts;
+  /**
+   * 順位の推移のグラフ（作者の指示 2026-11-02「順位もグラフにしてください」）。
+   * 手の記録・ヘルパー・なろう殿堂入りAPIの順位をすべて、種別ごとの線で。
+   * 順位が1つも無ければ null（画面は「『ランキング記録』で順位を残すと…」の1行）
+   */
+  rankChart: RankChartData | null;
+  /**
+   * なろう小説API・なろう殿堂入りAPIから取った数か順位が1つでもあれば、その出典の1行
+   * （作者が運営へ約束した「取った数を出す画面に出典を書く」。2026-11-02）。無ければ null
+   */
+  apiAttribution: string | null;
   /**
    * そのサイトの今のタグ（ヘルパーから届いたもの。作者の指示 2026-11-01）。
    * **`[]` は「タグが0個と分かった」、null は「まだ届いていない」**
@@ -361,11 +376,15 @@ export function buildPostingSiteRecords(
         rates.episodeReadAt === null
           ? null
           : {
+              /*
+                **AIへ渡す材料と同じものを見せる**（`buildReaderAdviceMaterials`）。
+                なろう小説APIの数は AI へ渡さない約束なので、ここでも除く（2026-11-02）
+              */
               materialText: formatReaderAdviceMaterial(
                 buildReaderAdviceMaterial(
                   postingSiteInfo(info.id).label,
-                  rates,
-                  inLedgerOrder
+                  computeReaderRates(readerStatsForAi(inLedgerOrder)),
+                  readerStatsForAi(inLedgerOrder)
                 )
               ),
               sources: Object.values(READER_ADVICE_SOURCES),
@@ -374,6 +393,14 @@ export function buildPostingSiteRecords(
         inLedgerOrder,
         rates.base?.episode ?? null
       ),
+      rankChart: buildRankChart(ledger, info.id),
+      apiAttribution:
+        (ledger.readerStats ?? []).some(
+          (row) => row.site === info.id && isApiDerivedReaderStats(row)
+        ) ||
+        ledger.rankings.some((row) => row.site === info.id && isApiDerivedReaderStats(row))
+          ? NAROU_API_ATTRIBUTION
+          : null,
       tags: facts?.tags ?? null,
       tagsAt: facts?.tags !== undefined ? facts.tagsAt ?? null : null,
       tagHistory,
@@ -536,6 +563,8 @@ const READER_SOURCE_LABELS: Record<ReaderStatsSource, string> = {
   helper: "貼り付け",
   manual: "手入力",
   backup: "バックアップ",
+  // 出典の書き方は画面の但し書き（`NAROU_API_ATTRIBUTION`）に任せ、列では短く
+  "narou-api": "なろう小説API",
 };
 
 /**

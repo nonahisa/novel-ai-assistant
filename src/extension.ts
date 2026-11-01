@@ -402,10 +402,12 @@ import {
   createCelebrationService,
 } from "./features/celebrations";
 import {
+  offerRankCelebrationIfOpen,
   openWritingStatsPanel,
   refreshOpenWritingStatsPanels,
   refreshWritingStatsPanel,
 } from "./features/writingStatsPanel";
+import { logRankCelebrationFailure, notifyRankEvents } from "./features/rankCelebrations";
 import {
   openAllWorksWritingStatsPanel,
   refreshAllWorksWritingStatsPanel,
@@ -581,7 +583,7 @@ import {
   recordRanking,
   setWorkCompletion,
 } from "./features/postingKit";
-import { onPostingUnknownValues } from "./core/postingStore";
+import { onPostingSaved, onPostingUnknownValues } from "./core/postingStore";
 import {
   importReaderStats,
   recordReaderStats,
@@ -1278,6 +1280,19 @@ export async function activate(
   // 投稿状態の台帳に、この版が知らない値（連載の状態など）があったら一度だけ知らせる
   // （作者の判断 2026-11-01。台帳ごと止めず、その欄だけ読まずに持ち回る）
   context.subscriptions.push(onPostingUnknownValues(notifyPostingUnknownValuesOnce));
+
+  /*
+    順位のお祝い（作者の指示 2026-11-02）。順位は手の記録・ヘルパーの取り込み・なろう殿堂入り
+    APIのどの道からでも台帳の保存を通るので、ここ1か所で「入った・上がった」を見て知らせる。
+    保存の流れは待たせない（知らせとお祝いは後から）
+  */
+  context.subscriptions.push(
+    onPostingSaved((work, ledger) => {
+      void notifyRankEvents(verifiedState(context.globalState), work, ledger)
+        .then(() => offerRankCelebrationIfOpen(work))
+        .catch((error: unknown) => logRankCelebrationFailure(work, error));
+    })
+  );
 
   /**
    * 作品一覧のビュー。**走査中の件数を見出しの右へ出す**ために持つ。

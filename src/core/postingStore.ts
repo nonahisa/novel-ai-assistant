@@ -69,6 +69,26 @@ export class PostingStoreError extends Error {
   }
 }
 
+/**
+ * 台帳を保存し終えたときの知らせの口（作者の指示 2026-11-02「ランキングに入ったり順位が
+ * 上がった場合、風船とか花火を」）。**順位はいくつもの道から入る**（手の記録・ヘルパーの
+ * 取り込み・なろう殿堂入りAPI）ので、道ごとにお祝いを呼ぶのでなく、台帳を書いた所1か所で
+ * 知らせる。**core からは通知を出さない**ので、知らせ方は拡張機能の起動時に付ける
+ * （`features/rankCelebrations.ts`）。聞き手の失敗で保存を失敗にしない。
+ */
+let savedListener: ((work: WorkEntry, ledger: PostingLedger) => void) | undefined;
+
+export function onPostingSaved(
+  listener: (work: WorkEntry, ledger: PostingLedger) => void
+): { dispose(): void } {
+  savedListener = listener;
+  return {
+    dispose: () => {
+      if (savedListener === listener) savedListener = undefined;
+    },
+  };
+}
+
 /** 知らない値を読まなかった台帳の知らせ（作者の判断 2026-11-01） */
 export interface PostingUnknownValues {
   /** 台帳の場所 */
@@ -347,6 +367,11 @@ export class PostingStore {
     await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
     await atomicWriteFile(target, bytes);
     this.snapshot = hashBytes(bytes);
+    try {
+      savedListener?.(this.work, ledger);
+    } catch {
+      // 知らせの側の失敗で、書けた保存を失敗にしない（聞き手が自分でログに残す）
+    }
   }
 
   /**
