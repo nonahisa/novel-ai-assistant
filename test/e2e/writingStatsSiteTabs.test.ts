@@ -403,9 +403,15 @@ function kakuyomuWeeklyLedger(): Record<string, unknown> {
   });
 }
 
-/** 作品の右クリック「ランキング記録」で、カクヨムの週間に順位を入れる */
+/**
+ * 作品の右クリック「投稿と読者の反応…」→「ランキング記録」で、カクヨムの週間に順位を入れる。
+ * 投稿まわりの6つは 0.122.0 で右クリックの入口1つにまとめた（作者の判断 2026-11-02。
+ * `core/postingMenu.ts`）。右クリックで指した作品のまま、作品を選び直させずに進むことも見る
+ */
 async function recordWeekly(page: Page, rank: string): Promise<void> {
-  await treeContextMenu(page, E2E_WORK_TITLE, "ランキング記録");
+  await treeContextMenu(page, E2E_WORK_TITLE, "投稿と読者の反応…");
+  await waitForQuickInput(page, `投稿と読者の反応（${E2E_WORK_TITLE}）`);
+  await pickQuickPickRow(page, "ランキング記録");
   await waitForQuickInput(page, "のランキングを記録");
   await pickQuickPickRow(page, "カクヨム");
   await waitForQuickInput(page, "カクヨム のランキングの種別");

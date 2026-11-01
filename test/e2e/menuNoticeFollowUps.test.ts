@@ -6,10 +6,12 @@
  * 1. 設定資料が1件も無い作品で「矛盾検知」を押すと、AI を呼ぶ前に止まり、メニューの名前「一括抽出」で
  *    次の一手を案内する（メニューに無い名前「設定資料をまとめて抽出」は出ない）。作者がメニューから押して
  *    見るのは前提の関所の選ぶ画面（件の中の断り書き）
- * 2. 「ベクトル検索準備」で設定を入にすると、知らせに［索引を作る］が付き、押すと索引づくりが始まる
- *    （作品が1つなので選ぶ画面は出ずに索引ができる）。知らせに「検索用の索引を作る」の名前は出ない
+ * 2. 「ベクトル検索準備」で設定を入にすると、知らせに［検索索引作成／更新］が付き、押すと索引づくりが始まる
+ *    （作品が1つなので選ぶ画面は出ずに索引ができる）。知らせに「検索用の索引を作る」の名前は出ない。
+ *    ボタンの名前は 0.122.0 で動作の言葉「索引を作る」から命令の題へそろえた（作者の判断 2026-11-02）
  * 3. 詳細メニューの見出しの「他のメニューを閉じる」で「AIに相談」などを隠したあと、詳細メニュー
- *    →「作品執筆」→「相談・助言」→「相談パネルを開く」を押すと、隠れていたメニューが全部戻って
+ *    →「作品執筆」→「相談・助言」→「AIに相談」（説明欄「横に開く」。0.122.0 で「相談パネルを開く」から
+ *    名前をそろえた。作者の判断 2026-11-02）を押すと、隠れていたメニューが全部戻って
  *    相談パネルが開き、「相談パネルを開けませんでした」は出ない（「他のメニューを閉じる」は右クリックでなく
  *    見出しの「…」にある。件の中の断り書き）
  *
@@ -92,11 +94,13 @@ test("設定資料が1件も無い作品で矛盾検知を押すと、AI を呼�
   );
 });
 
-/* ── 2. ベクトル検索準備のあとの［索引を作る］ ── */
+/* ── 2. ベクトル検索準備のあとの［検索索引作成／更新］ ── */
 
-const READY_HEAD = "意味検索を入にしました。相談で使うには、作品ごとに索引が要ります。";
+const READY_HEAD = "意味検索を入にしました。相談で使うには、作品ごとに検索索引が要ります。";
+/** 知らせのボタン。詳細メニューの木の命令の題と同じ名前（`setupVectorSearch.ts` の `buildIndexLabel`） */
+const BUILD_INDEX = "検索索引作成／更新";
 
-test("ベクトル検索準備で設定を入にすると、知らせに［索引を作る］が付き、押すと作品の索引づくりへ進む", async () => {
+test("ベクトル検索準備で設定を入にすると、知らせに［検索索引作成／更新］が付き、押すと作品の索引づくりへ進む", async () => {
   await withVsCode(
     "ベクトル検索準備のあとの索引づくり",
     [EPISODE],
@@ -117,10 +121,10 @@ test("ベクトル検索準備で設定を入にすると、知らせに［索�
       const buttons = await toast
         .first()
         .evaluate((node) => Array.from(node.querySelectorAll(".monaco-button")).map((button) => (button.textContent ?? "").trim()));
-      expect(buttons, `知らせのボタン：${JSON.stringify(buttons)}`).toContain("索引を作る");
+      expect(buttons, `知らせのボタン：${JSON.stringify(buttons)}`).toContain(BUILD_INDEX);
 
       const embedBefore = fake.embedRequests.length;
-      await toast.first().locator(".monaco-button", { hasText: "索引を作る" }).first().click();
+      await toast.first().locator(".monaco-button", { hasText: BUILD_INDEX }).first().click();
       /*
         索引づくりへ進む。作品が1つだけなので作品を選ぶ画面は出ず、そのまま索引ができる
         （作品が2つ以上なら選ぶ画面が出る——それは作者の手に残す）。埋め込みは偽の Ollama が答える
@@ -131,7 +135,7 @@ test("ベクトル検索準備で設定を入にすると、知らせに［索�
           built = (await notificationTexts(page)).find((text) => text.startsWith("索引ができました")) ?? "";
           return built !== "";
         },
-        "［索引を作る］を押すと、作品の索引ができる",
+        "［検索索引作成／更新］を押すと、作品の索引ができる",
         30_000
       ).catch(async (error: unknown) => {
         throw new Error(
@@ -171,7 +175,7 @@ async function chatFrame(page: Page): Promise<Frame | undefined> {
   return undefined;
 }
 
-test("詳細メニューの見出しの「…」の「他のメニューを閉じる」で相談を隠したあと、詳細メニューの「相談パネルを開く」を押すと、隠れたメニューが全部戻って相談パネルが開く", async () => {
+test("詳細メニューの見出しの「…」の「他のメニューを閉じる」で相談を隠したあと、詳細メニューの「AIに相談」（横に開く）を押すと、隠れたメニューが全部戻って相談パネルが開く", async () => {
   await withVsCode(
     "他のメニューを閉じたあとの相談",
     [EPISODE],
@@ -223,15 +227,21 @@ test("詳細メニューの見出しの「…」の「他のメニューを閉�
         throw new Error(`${String(error)}（出ている見出し：${JSON.stringify(await paneHeaders(page))}）`);
       });
 
-      /* ── 詳細メニュー →「作品執筆」→「相談・助言」→「相談パネルを開く」 ── */
+      /* ── 詳細メニュー →「作品執筆」→「相談・助言」→「AIに相談」（横に開く） ── */
       for (const head of ["作品執筆", "相談・助言"]) {
         const row = await scrollTreeUntilRow(page, "作品管理", head);
         await row.scrollIntoViewIfNeeded();
         if ((await row.getAttribute("aria-expanded")) !== "true") await row.click();
         await waitUntil(async () => (await row.getAttribute("aria-expanded")) === "true", `「${head}」が開く`, 10_000);
       }
-      const open = await scrollTreeUntilRow(page, "相談・助言", "相談パネルを開く");
+      const open = await scrollTreeUntilRow(page, "相談・助言", "AIに相談");
       await open.scrollIntoViewIfNeeded();
+      /*
+        「AIに相談」は2つある（横に開く・大きく開く）。詳細メニューに出るのは横に開くほうだけで
+        （大きく開くほうは `hiddenFromActionList`）、取り違えると別のパネルが開く。説明欄で確かめる
+      */
+      const openLabel = (await open.getAttribute("aria-label")) ?? "";
+      expect(openLabel, `押す行の名前：${openLabel}`).toContain("横に開く");
       await open.click();
 
       await waitUntil(
