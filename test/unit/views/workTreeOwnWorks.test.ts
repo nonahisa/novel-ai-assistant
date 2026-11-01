@@ -121,6 +121,28 @@ describe("未登録の自分の作品の枠", () => {
     expect(await provider.getChildren(children[0])).toEqual([]);
   });
 
+  /*
+    2026-11-01 作者の実機（0.120.0）：「苦手の流転」は題で覚えから外れたのに、読者の反応の控えだけが
+    残った。覚えが空だと描き直しで登録済みの組を渡さなかったので、控えがいつまでも取り込まれない
+  */
+  test("覚えが空でも読者の反応の控えがあれば、描き直しで登録済みの組を渡す（見出しは出さない）", async () => {
+    const noticed: ReadonlySet<string>[] = [];
+    const own: OwnWorksSource = {
+      ...source([]),
+      hasPendingStats: () => true,
+      noticeRegistered: (registered) => noticed.push(registered),
+    };
+    const { nodes } = await root([work], own);
+    expect(nodes.map((node) => node.type)).toEqual(["work"]);
+    expect(noticed).toHaveLength(1);
+    expect(noticed[0].has("kakuyomu:111")).toBe(true);
+
+    // 覚えも控えも無ければ、台帳を読まずに帰る（いつもの軽さ）
+    const quiet: ReadonlySet<string>[] = [];
+    await root([work], { ...source([]), hasPendingStats: () => false, noticeRegistered: (r) => quiet.push(r) });
+    expect(quiet).toEqual([]);
+  });
+
   test("待っている作品には「バックアップ待ち」と添える", async () => {
     const { provider, nodes } = await root([work], source(frames, ["222"]));
     const children = await provider.getChildren(nodes[1]);

@@ -207,6 +207,11 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
     }
   }
 
+  /** 控えが残っているか（`OwnWorksSource.hasPendingStats`。覚えが空でも描き直しで取り込むため） */
+  hasPendingStats(): boolean {
+    return this.pending().length > 0;
+  }
+
   /** 控えている読者の反応（読み戻しの関所を通ったものだけ） */
   pendingStats(): readonly ReaderStatsEnvelope[] {
     return this.pending().map((entry) => entry.parsed);
