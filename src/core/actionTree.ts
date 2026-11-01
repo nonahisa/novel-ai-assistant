@@ -290,7 +290,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         detail:
           "誰が何を直したかの一覧\n\n" +
           "・作者・編集者・AIの3つに色分け\n\n" +
-          "・編集部と一緒に書くときに使う\n\n" +
+          "・編集者と一緒に書くときに使う\n\n" +
           "この画面から履歴は変えられない。",
       },
     ],
@@ -600,7 +600,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
       */
       {
         kind: "section",
-        label: "編集部連携",
+        label: "編集者連携",
         icon: "organization",
         items: [
           {
@@ -616,31 +616,31 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "この環境を「編集者」として使う状態への切り替え\n\n" +
               "・編集者は本文の校正・校閲だけを行える\n\n" +
-              "・編集部の方と一緒に書くときに使う\n\n" +
+              "・編集者の方と一緒に書くときに使う\n\n" +
               "・いつでも作者へ戻せる\n\n" +
               "編集者モードでは、本文を書き換えず提案として置く。",
           },
           {
             kind: "action",
             command: "novelai.shareWithEditor",
-            label: "編集部へ渡す",
+            label: "編集者へ渡す",
             icon: "repo-push",
             requiresWork: true,
             detail:
-              "この作品だけの非公開リポジトリを作って送り、編集部を招く\n\n" +
-              "・置き場と名前は自動。初回だけ編集部の GitHub 名を訊く\n\n" +
+              "この作品だけの非公開リポジトリを作って送り、編集者を招く\n\n" +
+              "・置き場と名前は自動。初回だけ編集者の GitHub 名を訊く\n\n" +
               "・送るのは本文と設定資料\n\n" +
               "・ほかの作品は渡らない\n\n" +
-              "編集部が書けるのは提案だけ。本文は書き換わらない。",
+              "編集者が書けるのは提案だけ。本文は書き換わらない。",
           },
           {
             kind: "action",
             command: "novelai.joinAsEditor",
-            label: "編集部として参加",
+            label: "編集者として参加",
             icon: "organization",
             requiresWork: false,
             detail:
-              "作者から届いたリンクを貼って、編集部として参加する\n\n" +
+              "作者から届いたリンクを貼って、編集者として参加する\n\n" +
               "・招待の受諾・取り寄せ・登録まで1回で済む\n\n" +
               "・続けて、この環境を編集者モードにする\n\n" +
               "編集者モードでは本文を書き換えず、提案として置く。",
@@ -664,7 +664,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・作者が直そうとすると、誰がいつから見ているかが出る\n\n" +
               "・ファイル単位。他の話は今までどおり書ける\n\n" +
               "・終わったらもう一度押して外す\n\n" +
-              "直しは、検知の［適用］か、本文を選んで右クリックの「直しを提案する」で提案として置く。",
+              "修正は、検知の［適用］か、本文を選んで右クリックの「修正を提案する」で提案として置く。",
           },
           // 校閲中に、編集部が自分の言葉で直しと意見を置く（作者の決定 2026-11-01）。
           // 右クリックにしか無いと見つからないので、札を掛ける操作の隣にも出す。
@@ -672,13 +672,13 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.proposeEditByHand",
-            label: "直しを提案する",
+            label: "修正を提案する",
             icon: "edit",
             requiresWork: true,
             detail:
-              "本文で選んだ所に、直した案と理由を提案として置く\n\n" +
-              "・先に本文で直したい所を選んでから押す\n\n" +
-              "・直した案を空にすると、意見だけを送れる\n\n" +
+              "本文で選んだ所に、修正案と理由を提案として置く\n\n" +
+              "・先に本文で修正したい所を選んでから押す\n\n" +
+              "・修正案を空にすると、意見だけを送れる\n\n" +
               "・右クリックからも出せる\n\n" +
               "編集者モードで使う。本文は書き換わらない。",
           },
@@ -703,12 +703,12 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.viewEditorProposals",
-            label: "編集部の提案を見る",
+            label: "編集者の提案を見る",
             icon: "inbox",
             requiresWork: true,
             shownInModes: ["author"],
             detail:
-              "編集部の提案を GitHub から受け取って、未決の分を提案パネルへ並べる\n\n" +
+              "編集者の提案を GitHub から受け取って、未決の分を提案パネルへ並べる\n\n" +
               "・新しく届いた分が無くても、まだ決めていない提案があれば並べる\n\n" +
               "・受け取れなかったときも、手元にある分を並べる\n\n" +
               "・採るか見送るかは1件ずつ作者が決める\n\n" +
@@ -717,29 +717,29 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.revokeEditorAccess",
-            label: "編集部連携を解除",
+            label: "編集者連携を解除",
             icon: "debug-disconnect",
             requiresWork: true,
             detail:
-              "編集部と決裂したときに、作者の側から連携を解く\n\n" +
+              "編集者と決裂したときに、作者の側から連携を解く\n\n" +
               "・校閲中の印を外す\n\n" +
-              "・GitHub で編集部の書き込みの権利を外す\n\n" +
+              "・GitHub で編集者の書き込みの権利を外す\n\n" +
               "作者モードで使う。",
           },
           {
             kind: "action",
             command: "novelai.reviewProposals",
-            label: "編集部提案確認",
+            label: "編集者提案確認",
             icon: "inbox",
             requiresWork: true,
             // 作者は上の「編集部の提案を見る」から入る（作者の判断 2026-11-01）。
             // 編集者の環境では、置いた提案の数を見る入口として今までどおり出す
             shownInModes: ["editor"],
             detail:
-              "編集部が出した直しの提案を1件ずつ確認\n\n" +
+              "編集者が出した直しの提案を1件ずつ確認\n\n" +
               "・採るか見送るかを決める\n\n" +
               "・本文に入るのは採ると決めたものだけ\n\n" +
-              "編集部は本文を書き換えない。",
+              "編集者は本文を書き換えない。",
           },
         ],
       },

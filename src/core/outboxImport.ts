@@ -709,7 +709,7 @@ async function importVerdict(record: OutboxRecord, context: Context): Promise<De
   */
   // 書き手は**パスから**読んだもの（`by` の欄は誰でも書けるので見ない）
   if (!context.isOwner(record.writer)) {
-    return { ok: false, reason: "持ち主でない人の採否は入れません（編集部の意見はメモで書いてください）。" };
+    return { ok: false, reason: "持ち主でない人の採否は入れません（編集者の意見はメモで書いてください）。" };
   }
   if (!record.verdict) return { ok: false, reason: "採否（fix・done・reject）がありません。" };
   if (!record.findingId) return { ok: false, reason: "どの指摘への採否か分かりません（findingId がありません）。" };
@@ -796,7 +796,7 @@ async function importVerdict(record: OutboxRecord, context: Context): Promise<De
 async function importEdit(record: OutboxRecord, context: Context): Promise<DecisionOutcome> {
   // 採否と同じく、持ち主の記録だけ（書き手はパスから読んだもの）
   if (!context.isOwner(record.writer)) {
-    return { ok: false, reason: "持ち主でない人の直しは入れません（編集部の意見はメモで書いてください）。" };
+    return { ok: false, reason: "持ち主でない人の直しは入れません（編集者の意見はメモで書いてください）。" };
   }
   if (!record.findingId) return { ok: false, reason: "どの指摘への直しか分かりません（findingId がありません）。" };
   /*

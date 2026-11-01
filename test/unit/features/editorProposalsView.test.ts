@@ -212,7 +212,7 @@ beforeEach(() => {
   editorMode = false;
 });
 
-describe("提案パネルの作品の選び欄に、未決の編集部の提案がある作品を出す", () => {
+describe("提案パネルの作品の選び欄に、未決の編集者の提案がある作品を出す", () => {
   test("開いたときの読み込みで、実験用が7件で選び欄に出る（ほかの作品の検知の結果があっても）", async () => {
     putSevenProposals();
     const panel = panelWithOtherWorks();
@@ -277,7 +277,7 @@ describe("提案パネルの作品の選び欄に、未決の編集部の提案�
   });
 });
 
-describe("編集部の提案を見る（受け取ってから並べる）", () => {
+describe("編集者の提案を見る（受け取ってから並べる）", () => {
   test("新しく届いた分が0件でも、未決の7件を並べる（実機で「すべて取り込み済み」で止まっていた）", async () => {
     putSevenProposals();
     const panel = panelWithOtherWorks();
@@ -291,9 +291,9 @@ describe("編集部の提案を見る（受け取ってから並べる）", () =
     expect(result.pending).toBe(7);
     // 作者が押した命令なので、ほかの作品を見ていても実験用へ移る
     expect(latest().workTitle).toBe(experiment.title);
-    expect(latest().category).toBe("編集部からの提案");
+    expect(latest().category).toBe("編集者からの提案");
     expect(latest().items as unknown[]).toHaveLength(7);
-    expect(informed.join("\n")).toContain("編集部からの提案が 7 件あります");
+    expect(informed.join("\n")).toContain("編集者からの提案が 7 件あります");
     expect(informed.join("\n")).not.toContain("すべて取り込み済み");
   });
 
@@ -375,7 +375,7 @@ describe("編集部の提案を見る（受け取ってから並べる）", () =
 
     const said = informed.join("\n");
     expect(said).toContain("未決の提案はありません");
-    expect(said).toContain("まだ編集部へ渡していません");
+    expect(said).toContain("まだ編集者へ渡していません");
   });
 
   test("受け取りに失敗して未決も0件なら、0件と失敗の理由の両方を言う", async () => {
@@ -418,5 +418,42 @@ describe("編集部の提案を見る（受け取ってから並べる）", () =
     );
 
     expect([...files.keys()]).toEqual([...before.keys()]);
+  });
+});
+
+describe("分類の表示名（作者の判断 2026-11-01「編集者」「修正を提案する」）", () => {
+  test("台帳の値「編集部の直し」「編集部のメモ」は、画面では「編集者の修正」「編集者のメモ」と出す", async () => {
+    const lines = [
+      { id: "h1", category: "編集部の直し", reason: "語順" },
+      { id: "h2", category: "編集部のメモ", reason: "ここは言い切らない" },
+    ].map((row, index) =>
+      JSON.stringify({
+        kind: "proposal",
+        id: row.id,
+        time: "2026-11-01T12:00:00.000Z",
+        proposer: "kmizu",
+        file: "本文/001.txt",
+        line: index + 2,
+        original: "　彼は振り返った。",
+        target: "振り返った",
+        suggestion: index === 0 ? "振りかえった" : "",
+        reason: row.reason,
+        category: row.category,
+      })
+    );
+    files.set(ledgerPath(experiment), new TextEncoder().encode(`${lines.join("\n")}\n`));
+    const panel = panelWithOtherWorks();
+
+    await showEditorProposals(
+      experiment,
+      panel,
+      deps({ kind: "received", added: 0, pullFailed: false, lockMessages: [] })
+    );
+
+    const reasons = (latest().items as Array<{ reason: string }>).map((item) => item.reason);
+    expect(reasons[0]).toMatch(/^編集者の修正：語順/);
+    expect(reasons[1]).toMatch(/^編集者のメモ：ここは言い切らない/);
+    // 台帳の値は書き換えない（古い版の相手も読めるように）
+    expect(new TextDecoder().decode(files.get(ledgerPath(experiment)))).toContain("編集部の直し");
   });
 });

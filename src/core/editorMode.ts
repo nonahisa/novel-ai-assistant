@@ -146,10 +146,10 @@ export function describeMcpBlocked(tool: string, mode: WorkFolderMode): string {
     mode === "unknown"
       ? `この作品が編集用の写しかどうかを、作品フォルダーの印（.aiwriter/editor-share-manifest.json・` +
         `.aiwriter/editing.json）から確かめられませんでした。念のため、編集者モードとして扱います。`
-      : "この作品は編集部へ渡した写し（編集者モード）です。";
+      : "この作品は編集者へ渡した写し（編集者モード）です。";
   return (
     `${head}${tool} は編集者モードでは使えません。` +
-    "作者の原稿と資料を、編集部の側から書き換えないためです。" +
+    "作者の原稿と資料を、編集者の側から書き換えないためです。" +
     `${MCP_EDITOR_ALLOWED_MESSAGE_HINT}。`
   );
 }

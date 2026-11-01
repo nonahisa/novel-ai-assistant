@@ -188,7 +188,7 @@ export function describeProcessesBlocked(command: string): string {
     command === "novelai.revokeEditorAccess"
   ) {
     return (
-      "編集部とのやり取りはgitコマンドを使うため、ブラウザ版では使えません。" +
+      "編集者とのやり取りはgitコマンドを使うため、ブラウザ版では使えません。" +
       "手元のVS Codeをお使いください。"
     );
   }

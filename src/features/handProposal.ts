@@ -43,7 +43,7 @@ export type HandProposalKind = "edit" | "memo";
  * （作者の決定 2026-11-01）。メニューは本文の外にあるので、押す前に本文で選んでおく必要がある
  */
 export const PICK_FIRST_MESSAGE =
-  "直したい所を本文で選んでから押してください（右クリックからも出せます）。";
+  "修正したい所を本文で選んでから押してください（右クリックからも出せます）。";
 
 /** コマンドから押されたときに要るもの。試験で差し替えるため外から渡す */
 export interface ProposeEditCommandDeps {
@@ -79,7 +79,7 @@ export async function proposeEditFromCommand(
 ): Promise<ProposeEditCommandOutcome> {
   if (!isEditorMode()) {
     void vscode.window.showInformationMessage(
-      "「直しを提案する」は、編集者モードで使う操作です。作者の環境では本文をそのまま直せます。"
+      "「修正を提案する」は、編集者モードで使う操作です。作者の環境では本文をそのまま直せます。"
     );
     return "notEditor";
   }
@@ -118,7 +118,7 @@ export async function proposeByHand(
   // **作者は本文をそのまま直せる。** 作者の提案は誰も受け取らないので置かない
   if (!isEditorMode()) {
     void vscode.window.showInformationMessage(
-      "直しを提案として置くのは、編集者モードの操作です。作者の環境では本文をそのまま直せます。"
+      "修正を提案として置くのは、編集者モードの操作です。作者の環境では本文をそのまま直せます。"
     );
     return false;
   }
@@ -217,7 +217,7 @@ export async function proposeByHand(
 
   await recordEdit(work, {
     actor: "editor",
-    action: kind === "memo" ? "メモを提案として置いた" : "直しを提案した",
+    action: kind === "memo" ? "メモを提案として置いた" : "修正を提案した",
     file: path.basename(filePath),
     detail: proposal.suggestion
       ? `${line}行 「${proposal.target}」→「${proposal.suggestion}」`
@@ -254,20 +254,20 @@ async function askHandProposal(
   }
 
   const suggestion = await askText({
-    title: "直しを提案する（1/2）：直した案",
+    title: "修正を提案する（1/2）：修正案",
     prompt: `「${quote(target)}」をどう直すか。空にすると、意見だけを送ります`,
     value: target,
   });
   if (suggestion === undefined) return undefined;
   const opinionOnly = suggestion === "" || suggestion === target;
   const reason = await askText({
-    title: "直しを提案する（2/2）：理由・意見",
+    title: "修正を提案する（2/2）：理由・意見",
     prompt: opinionOnly
-      ? "作者へ伝える意見をひと言（直した案が無いので、こちらは必ず書いてください）"
+      ? "作者へ伝える意見をひと言（修正案が無いので、こちらは必ず書いてください）"
       : "直す理由をひと言（空でも送れます）",
     validateInput: (value) =>
       opinionOnly && value.trim() === ""
-        ? "直した案が無いときは、意見を書いてください。"
+        ? "修正案が無いときは、意見を書いてください。"
         : undefined,
   });
   if (reason === undefined) return undefined;

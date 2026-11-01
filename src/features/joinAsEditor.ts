@@ -53,7 +53,7 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
         ? `編集者モードの環境で登録できる作品は ${EDITOR_WORK_LIMIT} つまでです` +
             `（いまは「${registered[0]?.title ?? "登録済みの作品"}」）。` +
             "別の作品に参加するには、先にその作品の登録を外してください。"
-        : `編集部として参加すると、この環境は編集者モード（作品は ${EDITOR_WORK_LIMIT} つまで）になります。` +
+        : `編集者として参加すると、この環境は編集者モード（作品は ${EDITOR_WORK_LIMIT} つまで）になります。` +
             `いま ${registered.length} 件の作品が登録されているため、このままでは参加できません。` +
             "登録を外すか、別の VS Code の環境（プロファイル）で参加してください。"
     );
@@ -75,13 +75,13 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
           );
         }
       },
-      { label: "編集部として参加" }
+      { label: "編集者として参加" }
     );
     return;
   }
 
   const link = await askText({
-    title: "編集部として参加",
+    title: "編集者として参加",
     prompt: "作者から届いたリンクを貼り付けてください",
     placeHolder: "https://github.com/ユーザー名/リポジトリ名",
     ignoreFocusOut: true,
@@ -96,7 +96,7 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   let home = await defaultParentForNewFolder(registered);
   if (!home) {
     home = await pickNewFolderParent({
-      purpose: "編集部の作品を置く場所を選択",
+      purpose: "編集者の作品を置く場所を選択",
       openLabel: "ここに置く",
       works: registered,
     });
@@ -117,7 +117,7 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   // 使えなくなる操作も先に見せる（切り替えの確認と同じ文）
   const switching = mode === "author";
   const confirmed = await vscode.window.showWarningMessage(
-    `編集部として「${ref.owner}/${ref.repo}」に参加します。`,
+    `編集者として「${ref.owner}/${ref.repo}」に参加します。`,
     {
       modal: true,
       detail: [
@@ -151,7 +151,7 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
     acceptEditorInvitation(token, ref)
   );
   if (!accepted.ok) {
-    logFailure("編集部として参加（招待の受諾）", {
+    logFailure("編集者として参加（招待の受諾）", {
       リポジトリ: `${ref.owner}/${ref.repo}`,
       理由: accepted.reason,
       詳細: accepted.detail,
@@ -164,13 +164,13 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
     return;
   }
   logStep(
-    `編集部の招待を${accepted.outcome === "accepted" ? "受けた" : "受け済みと確認"}: ` +
+    `編集者の招待を${accepted.outcome === "accepted" ? "受けた" : "受け済みと確認"}: ` +
       `${ref.owner}/${ref.repo}`
   );
 
   const cloned = await cloneIntoPlace(token, ref, destination);
   if (!cloned.ok) {
-    logFailure("編集部として参加（取り寄せ）", {
+    logFailure("編集者として参加（取り寄せ）", {
       リポジトリ: `${ref.owner}/${ref.repo}`,
       詳細: cloned.detail,
     });
@@ -185,7 +185,7 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
           await vscode.commands.executeCommand("novelai.showLog");
         }
       },
-      { label: "編集部として参加" }
+      { label: "編集者として参加" }
     );
     return;
   }
@@ -208,7 +208,7 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   if (switching) await applyMode("editor");
 
   notifyDone(
-    `「${entry.title}」に編集部として参加しました。` +
+    `「${entry.title}」に編集者として参加しました。` +
       "開いたときに、作者からの更新が自動で取り込まれます。"
   );
 }

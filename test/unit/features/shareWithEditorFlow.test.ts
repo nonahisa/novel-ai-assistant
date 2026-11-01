@@ -22,7 +22,7 @@ const work: WorkEntry = {
   folderPath: "C:\\Novels\\氷の街",
   registeredAt: "2026-09-21T00:00:00.000Z",
 };
-const destination = "C:\\Novels\\編集部\\氷の街-編集用";
+const destination = "C:\\Novels\\編集者\\氷の街-編集用";
 
 /** 送り先の登録だけを覚えている、作り物の git */
 function fakeGit() {
@@ -210,7 +210,7 @@ describe("渡し終わったときの知らせ", () => {
       login: "octocat",
       link: "https://github.com/me/repo/invitations",
     });
-    expect(notice.message).toContain("「氷の街」を編集部へ渡し、octocatさんを招待しました");
+    expect(notice.message).toContain("「氷の街」を編集者へ渡し、octocatさんを招待しました");
     expect(notice.message).toContain("https://github.com/me/repo/invitations");
     expect(notice.actions).toContain("リンクを写す");
     expect(notice.link).toBe("https://github.com/me/repo/invitations");
@@ -231,7 +231,7 @@ describe("渡し終わったときの知らせ", () => {
       login: "octocat",
       detail: "GitHubに「octocat」という名前の人が見つかりませんでした。",
     });
-    expect(notice.message).toContain("編集部へ渡しました");
+    expect(notice.message).toContain("編集者へ渡しました");
     expect(notice.message).toContain("Collaborators");
     expect(notice.actions).toContain("GitHubで開く");
   });
@@ -243,7 +243,7 @@ describe("渡し終わったときの知らせ", () => {
   });
 });
 
-describe("編集部の招待に使う鍵（gh だけの作者にも招待まで自動）", () => {
+describe("編集者の招待に使う鍵（gh だけの作者にも招待まで自動）", () => {
   const ref = { owner: "hisa", repo: "novel-20261028-editing" };
   const invited = vi.fn(async () => ({ ok: true as const, outcome: "invited" as const }));
 

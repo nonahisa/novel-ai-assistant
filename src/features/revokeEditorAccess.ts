@@ -69,7 +69,7 @@ export async function revokeEditorAccessFlow(
 ): Promise<RevokeFlowResult> {
   if (isEditorMode()) {
     void vscode.window.showWarningMessage(
-      "編集部との連携を解除できるのは作者です（編集者モードでは使えません）。"
+      "編集者との連携を解除できるのは作者です（編集者モードでは使えません）。"
     );
     return { kind: "notAuthorMode" };
   }
@@ -78,7 +78,7 @@ export async function revokeEditorAccessFlow(
   const site = await readSite(work);
   if (!pointer && !site.remoteUrl && !site.editorLogin) {
     void vscode.window.showInformationMessage(
-      `「${work.title}」はまだ編集部へ渡していません。解除するものがありません。`
+      `「${work.title}」はまだ編集者へ渡していません。解除するものがありません。`
     );
     return { kind: "notShared" };
   }
@@ -106,11 +106,11 @@ export async function revokeEditorAccessFlow(
         mine.map((lock) => lock.file),
         who,
         "author",
-        "編集部との連携を解除"
+        "編集者との連携を解除"
       );
       await recordEdit(work, {
         actor: "author",
-        action: "編集部との連携を解除（校閲の鍵を外した）",
+        action: "編集者との連携を解除（校閲の鍵を外した）",
         file: range ?? "",
         detail: login ? `${login} さんの権利を外します` : "",
       });
@@ -130,7 +130,7 @@ export async function revokeEditorAccessFlow(
         const result = await (deps.revoke ?? revokeEditorAccess)(token, ref, login);
         if (result.ok) {
           github = result.outcome;
-          logStep(`編集部の権利を外した: ${login}（${ref.owner}/${ref.repo}／${result.outcome}）`);
+          logStep(`編集者の権利を外した: ${login}（${ref.owner}/${ref.repo}／${result.outcome}）`);
         } else {
           github = "failed";
           reportRevokeFailure(work, ref, login, result.detail);
@@ -159,7 +159,7 @@ export async function revokeEditorAccessFlow(
         useLogFile(work.folderPath);
         logFailure("連携の解除を編集用リポジトリへ送る", { 作品: work.title, 詳細: sent.detail });
         void vscode.window.showWarningMessage(
-          "解除の記録を編集用リポジトリへ送れませんでした。あとで「編集部へ渡す」を押すと送れます。" +
+          "解除の記録を編集用リポジトリへ送れませんでした。あとで「編集者へ渡す」を押すと送れます。" +
             `（${sent.detail}）`
         );
       }
@@ -168,14 +168,14 @@ export async function revokeEditorAccessFlow(
   };
 
   // 同じ編集用フォルダーの作業は1本ずつ（自動の送り返し・取り込みと重ならない）
-  const result = await withProgress("編集部との連携を解除しています…", () =>
+  const result = await withProgress("編集者との連携を解除しています…", () =>
     pointer ? runSerialized(editingQueueKey(pointer.folderPath), work1) : work1()
   );
 
   useLogFile(work.folderPath);
   if (result.kind === "done" && result.github !== "failed") {
     notifyDone(
-      "編集部との連携を解除しました。" +
+      "編集者との連携を解除しました。" +
         (range ? `${range}の校閲中の印を外しました。` : "")
     );
   }
@@ -207,7 +207,7 @@ function reportRevokeFailure(
   detail: string
 ): void {
   useLogFile(work.folderPath);
-  logFailure("編集部の権利を外す", { 作品: work.title, 相手: login, 詳細: detail });
+  logFailure("編集者の権利を外す", { 作品: work.title, 相手: login, 詳細: detail });
   const open = ref ? "GitHubで開く" : undefined;
   void vscode.window
     .showWarningMessage(
@@ -233,17 +233,17 @@ async function confirmWithModal(
     range ? `・${range}の校閲中の印を外します` : "・校閲中の印はありません",
     login
       ? `・${login} さんの書き込みの権利を GitHub から外します`
-      : "・編集部の名前が分からないため、GitHub の権利は外せません（GitHub の Settings で手で外してください）",
-    "・編集部はこの作品に提案を返せなくなります",
+      : "・編集者の名前が分からないため、GitHub の権利は外せません（GitHub の Settings で手で外してください）",
+    "・編集者はこの作品に提案を返せなくなります",
     "・解除の記録は編集用リポジトリへも送ります",
   ];
   const answer = await vscode.window.showWarningMessage(
-    `「${work.title}」の編集部との連携を解除しますか。`,
+    `「${work.title}」の編集者との連携を解除しますか。`,
     {
       modal: true,
       detail:
         (range && login
-          ? `${range}の校閲中の印を外し、${login} さんの書き込みの権利を外します。編集部はこの作品に提案を返せなくなります。\n\n`
+          ? `${range}の校閲中の印を外し、${login} さんの書き込みの権利を外します。編集者はこの作品に提案を返せなくなります。\n\n`
           : "") + lines.join("\n"),
     },
     "解除する"

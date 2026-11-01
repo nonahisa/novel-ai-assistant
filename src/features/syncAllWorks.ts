@@ -192,7 +192,7 @@ async function collectEditorInboxAfterSync(
     const automation = await import("./editingAutomation.js");
     await automation.collectEditorInboxQuietly(works);
   } catch (error) {
-    logFailure("同期のあとの編集部の提案の取り込み", {
+    logFailure("同期のあとの編集者の提案の取り込み", {
       詳細: error instanceof Error ? error.message : String(error),
     });
   }

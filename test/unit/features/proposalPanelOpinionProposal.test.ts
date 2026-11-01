@@ -139,7 +139,7 @@ function proposal(overrides: Partial<Proposal>): Proposal {
   return {
     id: "p-test",
     time: "2026-11-01T00:00:00.000Z",
-    proposer: "編集部",
+    proposer: "編集者",
     file: "本文/003.txt",
     line: 2,
     original: "　夜が明けた。",
@@ -195,7 +195,7 @@ beforeEach(() => {
   vi.mocked(writeTextFilePreservingFormat).mockClear();
 });
 
-describe("編集部の意見だけの提案を、作者が受け取る", () => {
+describe("編集者の意見だけの提案を、作者が受け取る", () => {
   test("［読んだ］を押しても本文は変わらず、読んだ記録だけが足される", async () => {
     const panel = await panelWith(proposal({}));
 
@@ -209,10 +209,10 @@ describe("編集部の意見だけの提案を、作者が受け取る", () => {
     // 台帳では「読んだ」になり、未決から外れる（採用には数えない。作者の決定 2026-11-01）
     const [view] = await new ProposalStore(work).load();
     expect(view.status).toBe("read");
-    expect(edits.some((entry) => entry.action === "編集部の意見を読んだ")).toBe(true);
+    expect(edits.some((entry) => entry.action === "編集者の意見を読んだ")).toBe(true);
   });
 
-  test("直した案のある手書きの提案は、これまでどおり本文に当たる", async () => {
+  test("修正案のある手書きの提案は、これまでどおり本文に当たる", async () => {
     const panel = await panelWith(
       proposal({
         id: "p-edit",

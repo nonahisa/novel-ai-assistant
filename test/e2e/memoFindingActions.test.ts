@@ -161,7 +161,7 @@ test("修正案の無い指摘（矛盾）の［本文へ］で、原稿のそ�
   );
 });
 
-test("編集部の校閲ロックの掛かった話で［直す］を押すと「校閲中のため、適用できません」と断られ、本文は変わらない", async () => {
+test("編集者の校閲ロックの掛かった話で［直す］を押すと「校閲中のため、適用できません」と断られ、本文は変わらない", async () => {
   const sample: SampleFinding = {
     episode: EPISODE,
     text: TEXT,
@@ -201,7 +201,7 @@ test("編集部の校閲ロックの掛かった話で［直す］を押すと�
       await memo.locator('button[data-act="fix"]').first().click();
       let shown: string | undefined;
       await waitUntil(async () => (shown = await dialogText(page)) !== undefined, "校閲中の断りの窓が出る", 10_000);
-      expect(shown).toContain(`${EPISODE} は編集部が校閲中のため、適用できません。`);
+      expect(shown).toContain(`${EPISODE} は編集者が校閲中のため、適用できません。`);
       expect(shown, "断りの窓に、解く手段［連携を解除…］がありません").toContain("連携を解除…");
       expect(shown, "断られるはずなのに、まだ「それでも直す」が残っています").not.toContain("それでも直す");
 

@@ -40,7 +40,7 @@ describe("describeMcpBlocked", () => {
   it("理由と代わりの道を言う", () => {
     const text = describeMcpBlocked("novel.extract.commit", "editor");
     expect(text).toContain("novel.extract.commit は編集者モードでは使えません");
-    expect(text).toContain("作者の原稿と資料を、編集部の側から書き換えないためです");
+    expect(text).toContain("作者の原稿と資料を、編集者の側から書き換えないためです");
     expect(text).toContain(MCP_EDITOR_ALLOWED_MESSAGE_HINT);
   });
 

@@ -214,6 +214,6 @@ export function describePreferOpenDocumentFailure(
     case "encoding_error":
       return `${label}の文字コードで書けない文字があるため、書くのを止めました。`;
     case "editor_locked":
-      return `${label}は編集部が校閲中のため、書くのを止めました。`;
+      return `${label}は編集者が校閲中のため、書くのを止めました。`;
   }
 }

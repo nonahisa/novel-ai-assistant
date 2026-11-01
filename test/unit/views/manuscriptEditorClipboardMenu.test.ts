@@ -66,7 +66,7 @@ function runOpenMenu(options: { term: boolean; hasSelection: boolean; reviewMode
     function menuSelection() { return null; }
     function menuCaretLine() { return 0; }
     function menuSelectedNotation() { return ""; }
-    // 編集者モードの「直しを提案する」（設計書5.6.1.1）。既定は作者モード
+    // 編集者モードの「修正を提案する」（設計書5.6.1.1）。既定は作者モード
     const reviewMode = env.reviewMode;
     function sendProposeEdit() { env.called.push("proposeEdit"); }
     const menu = {
@@ -166,19 +166,19 @@ describe("右クリックの品書きの並び", () => {
     expect(called).toEqual(["cut", "copy", "paste"]);
   });
 
-  it("編集者モードでは、貼り付けの次に「直しを提案する」が出る（作者の指示 2026-11-01）", () => {
+  it("編集者モードでは、貼り付けの次に「修正を提案する」が出る（作者の指示 2026-11-01）", () => {
     const { items, called } = runOpenMenu({ term: false, hasSelection: true, reviewMode: true });
     const shown = items.map((item) => (item.kind === "rule" ? "―" : item.label));
-    expect(shown.slice(0, 6)).toEqual(["切り取り", "コピー", "貼り付け", "―", "直しを提案する", "―"]);
+    expect(shown.slice(0, 6)).toEqual(["切り取り", "コピー", "貼り付け", "―", "修正を提案する", "―"]);
     items[4].click?.();
     expect(called).toEqual(["proposeEdit"]);
   });
 
-  it("「直しを提案する」は、選んでいなければ押せない。作者モードでは出ない", () => {
+  it("「修正を提案する」は、選んでいなければ押せない。作者モードでは出ない", () => {
     const unselected = runOpenMenu({ term: false, hasSelection: false, reviewMode: true });
-    expect(unselected.items[4]).toMatchObject({ label: "直しを提案する", disabled: true });
+    expect(unselected.items[4]).toMatchObject({ label: "修正を提案する", disabled: true });
     const author = runOpenMenu({ term: false, hasSelection: true });
-    expect(author.items.map((item) => item.label)).not.toContain("直しを提案する");
+    expect(author.items.map((item) => item.label)).not.toContain("修正を提案する");
   });
 });
 

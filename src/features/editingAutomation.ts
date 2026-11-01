@@ -67,8 +67,8 @@ const defaultReturnDeps: ReturnDeps = {
     useLogFile(work.folderPath);
     logFailure("採否の送り返し", { 作品: work.title, 詳細: detail });
     void vscode.window.showWarningMessage(
-      "採否を編集部へ送り返せませんでした。採否そのものは記録してあります。" +
-        `（${detail}）あとで「編集部へ渡す」を押すと送り直せます。`
+      "採否を編集者へ送り返せませんでした。採否そのものは記録してあります。" +
+        `（${detail}）あとで「編集者へ渡す」を押すと送り直せます。`
     );
   },
 };
@@ -152,8 +152,8 @@ async function runReturn(work: WorkEntry, deps: ReturnDeps): Promise<ReturnOutco
     } catch {
       breakdown = "";
     }
-    logStep(`採否を編集部へ送り返した（${work.title}）${breakdown}`);
-    deps.notifyDone(`採否を編集部へ送り返しました${breakdown}。`);
+    logStep(`採否を編集者へ送り返した（${work.title}）${breakdown}`);
+    deps.notifyDone(`採否を編集者へ送り返しました${breakdown}。`);
     return "sent";
   } catch (error) {
     deps.notifyFailure(
@@ -197,7 +197,7 @@ const defaultInboxDeps: InboxDeps = {
       async (picked) => {
         if (picked === VIEW_PROPOSALS_BUTTON) await onView();
       },
-      { label: "編集部の提案を見る", workFolder: work.folderPath }
+      { label: "編集者の提案を見る", workFolder: work.folderPath }
     );
   },
   primePanel: async (work) => {
@@ -255,7 +255,7 @@ async function runInbox(
       if (result.status !== "done") continue;
       if (result.pullFailed) {
         useLogFile(work.folderPath);
-        logStep(`編集部の提案の取り寄せに失敗（手元の分だけ取り込み）: ${work.title}`);
+        logStep(`編集者の提案の取り寄せに失敗（手元の分だけ取り込み）: ${work.title}`);
       }
       // 鍵が動いたら知らせる（校閲が始まった／終わった）
       for (const text of describeLockChanges(result)) deps.notify(text);
@@ -270,13 +270,13 @@ async function runInbox(
       await deps.primePanel(work);
       deps.offer(
         work,
-        `編集部から提案が ${result.added} 件届きました` +
+        `編集者から提案が ${result.added} 件届きました` +
           (works.length > 1 ? `（「${work.title}」）。` : "。"),
         () => deps.viewProposals(work)
       );
     } catch (error) {
       useLogFile(work.folderPath);
-      logFailure("編集部の提案の取り込み（同期のあと）", {
+      logFailure("編集者の提案の取り込み（同期のあと）", {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),
       });

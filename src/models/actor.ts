@@ -43,7 +43,7 @@ export const ACTOR_STYLES: Record<ActorKind, ActorStyle> = {
     kind: "editor",
     label: "編集者",
     color: "#c2543a",
-    description: "編集部の操作（編集者モードの環境から）",
+    description: "編集者の操作（編集者モードの環境から）",
   },
   ai: {
     kind: "ai",

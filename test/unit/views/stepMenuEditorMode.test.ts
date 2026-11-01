@@ -69,7 +69,7 @@ describe("モードで、簡単ステップメニューの並びが替わる", (
       "3. 作品執筆",
       "4. 自己校正",
       "5. 投稿脱稿",
-      "6. 編集部校正・校閲",
+      "6. 編集者校正・校閲",
       "7. 電子出版等",
       "ヘルプ",
     ]);
@@ -78,7 +78,7 @@ describe("モードで、簡単ステップメニューの並びが替わる", (
     );
   });
 
-  test("編集者モードは、編集部の流れの段だけになる（作品づくりの段は出さない）", async () => {
+  test("編集者モードは、編集者の流れの段だけになる（作品づくりの段は出さない）", async () => {
     mode = "editor";
     const menu = provider([work("a", "氷の街")]);
     const labels = menu.visibleSteps().map((step) => step.label);
@@ -87,10 +87,10 @@ describe("モードで、簡単ステップメニューの並びが替わる", (
     expect(labels).not.toContain("2. 新作構想");
     // 流れの順：参加 → 範囲を押さえる → 検知 → 提案を置く → 見る → 返す → 戻る
     expect(labels).toEqual([
-      "1. 編集部として参加",
+      "1. 編集者として参加",
       "2. 校閲する範囲を押さえる",
       "3. 検知で探す",
-      "4. 直しを提案する",
+      "4. 修正を提案する",
       "5. 置いた提案を見る",
       "6. 校閲を終えて返す",
       "7. 作者モードへ戻る",
@@ -101,7 +101,7 @@ describe("モードで、簡単ステップメニューの並びが替わる", (
   test("作者モードへ戻すと、作者の並びへ戻る（作り直さずに、次の描画から）", async () => {
     const menu = provider([work("a", "氷の街")]);
     mode = "editor";
-    expect(menu.visibleSteps()[0].label).toBe("1. 編集部として参加");
+    expect(menu.visibleSteps()[0].label).toBe("1. 編集者として参加");
     mode = "author";
     expect(menu.visibleSteps()[0].label).toBe("1. 作品登録");
   });
@@ -132,7 +132,7 @@ describe("モードで、簡単ステップメニューの並びが替わる", (
   });
 
   test("提案の段は、右クリックからも出せることを説明に添える", () => {
-    const step = EDITOR_STEP_MENU.find((entry) => entry.label === "4. 直しを提案する");
+    const step = EDITOR_STEP_MENU.find((entry) => entry.label === "4. 修正を提案する");
     expect(step?.detail).toContain("右クリック");
     expect(step?.detail).toContain("ここにメモを足す");
   });

@@ -2766,7 +2766,7 @@ export class ManuscriptEditorProvider
       if (await this.lockedByEditor(document)) {
         void this.logForDocument(
           document,
-          `原稿エディタ：編集部が校閲中の話なので、打った字（${item.text.length}字）を原稿へ入れずに画面の控えへ回しました`
+          `原稿エディタ：編集者が校閲中の話なので、打った字（${item.text.length}字）を原稿へ入れずに画面の控えへ回しました`
         );
         /*
           **拡張機能の側にも控える**（読み取り専用の道と同じ。作者の裁定、2026-10-15 23時）。
@@ -3822,7 +3822,7 @@ export class ManuscriptEditorProvider
       this.editRejectedNotified.set(key, now);
       void vscode.window
         .showWarningMessage(
-          `「${paths.basename(filePath)}」は編集部が校閲中のため、書けません（${describeLock(lock)}）。`,
+          `「${paths.basename(filePath)}」は編集者が校閲中のため、書けません（${describeLock(lock)}）。`,
           "連携を解除…"
         )
         .then((action) => {

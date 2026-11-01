@@ -4369,7 +4369,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.markStatus(id2(item), "applied", "提案として作者へ送りました。");
     await recordEdit(work, {
       actor: "editor",
-      action: `${this.category}の直しを提案した`,
+      action: `${this.category}の修正を提案した`,
       file: path.basename(item.filePath),
       detail: `${item.line}行 「${item.target}」→「${item.suggestion}」`,
     });
@@ -4393,7 +4393,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     // 「それでも直す」を選べたが、校閲中の話は本文への書き込みの入口で断られる。
     // 解く手段は「編集部連携を解除」（編集部と決裂したとき）
     const action = await vscode.window.showWarningMessage(
-      `${path.basename(filePath)} は編集部が校閲中のため、適用できません。`,
+      `${path.basename(filePath)} は編集者が校閲中のため、適用できません。`,
       { modal: true, detail: describeLock(lock) },
       "連携を解除…"
     );
@@ -4674,7 +4674,7 @@ function describeContradiction(item: ContradictionViewItem): string {
  * 空になる。
  */
 /** 編集部の提案を入れる分類（命令で並べるときも、台帳から戻すときも同じ段へ） */
-const EDITOR_PROPOSALS_CATEGORY = "編集部からの提案";
+const EDITOR_PROPOSALS_CATEGORY = "編集者からの提案";
 
 /** 提案のファイルは作品フォルダーからの相対パス。開くには作品の場所と繋ぐ */
 function resolveProposalFiles(

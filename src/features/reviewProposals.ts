@@ -4,6 +4,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ProposalStore } from "../core/proposalStore";
 import {
+  categoryLabel,
   describeDecisionCounts,
   isHandCategory,
   isOpinionOnly,
@@ -48,8 +49,8 @@ export async function reviewProposals(
 
   if (all.length === 0) {
     void vscode.window.showInformationMessage(
-      "編集部からの提案はまだありません。" +
-        "編集部が校正・校閲を行い、同期すると届きます。"
+      "編集者からの提案はまだありません。" +
+        "編集者が校正・校閲を行い、同期すると届きます。"
     );
     return;
   }
@@ -81,7 +82,7 @@ export async function reviewProposals(
 
   panel.showProposals(work, pending.map(toViewItem));
   void vscode.window.showInformationMessage(
-    `編集部からの提案が ${pending.length} 件あります。` +
+    `編集者からの提案が ${pending.length} 件あります。` +
       "「提案」パネルで1件ずつご確認ください。"
   );
 }
@@ -159,7 +160,7 @@ export async function showEditorProposals(
   if (outcome.kind === "failed") {
     // **エラーの本文は捨てずにログへ**（実装ルール5）。画面には原因を当てずに言う
     useLogFile(work.folderPath);
-    logFailure("編集部の提案の受け取り", { 作品: work.title, 詳細: outcome.detail });
+    logFailure("編集者の提案の受け取り", { 作品: work.title, 詳細: outcome.detail });
   }
   if (outcome.kind === "received") {
     for (const text of outcome.lockMessages) {
@@ -182,7 +183,7 @@ export async function showEditorProposals(
         : "";
     const notShared =
       outcome.kind === "notShared"
-        ? `「${work.title}」はまだ編集部へ渡していません。`
+        ? `「${work.title}」はまだ編集者へ渡していません。`
         : "";
     const text = `未決の提案はありません。${history}${notShared}${trouble}`;
     if (trouble) void vscode.window.showWarningMessage(text);
@@ -195,7 +196,7 @@ export async function showEditorProposals(
     ? `（いま ${outcome.added} 件届きました）`
     : "";
   const head =
-    `編集部からの提案が ${pending.length} 件あります${added}。` +
+    `編集者からの提案が ${pending.length} 件あります${added}。` +
     "「提案」パネルで1件ずつご確認ください。";
   if (trouble) {
     void vscode.window.showWarningMessage(`${head}${trouble}手元にある分を並べています。`);
@@ -268,7 +269,7 @@ function toViewItem(proposal: ProposalView): ProposalViewItem & {
   // 検知の指摘は理由が種類の一語（「促音の誤り」等）で分かるが、手書きの理由は
   // 自由な文なので、検知から来たものか人が書いたものかが読み分けられない
   const said = isHandCategory(proposal.category)
-    ? `${proposal.category}：${proposal.reason}`
+    ? `${categoryLabel(proposal.category)}：${proposal.reason}`
     : proposal.reason;
   return {
     id: `proposal:${proposal.id}`,
@@ -576,7 +577,7 @@ export async function acceptProposal(
   ]);
   await recordEdit(work, {
     actor: "author",
-    action: "編集部の提案を採り入れた",
+    action: "編集者の提案を採り入れた",
     file: path.basename(proposal.file),
     detail: `${proposal.line}行 「${proposal.target}」→「${proposal.suggestion}」`,
   });
@@ -607,7 +608,7 @@ async function acknowledgeProposal(
   ]);
   await recordEdit(work, {
     actor: "author",
-    action: "編集部の意見を読んだ",
+    action: "編集者の意見を読んだ",
     file: path.basename(proposal.file),
     detail: `${proposal.line}行 「${proposal.target}」`,
   });
@@ -653,7 +654,7 @@ export async function rejectProposal(
   ]);
   await recordEdit(work, {
     actor: "author",
-    action: "編集部の提案を見送った",
+    action: "編集者の提案を見送った",
     file: fileName,
     detail: "",
   });

@@ -206,6 +206,18 @@ export const HAND_EDIT_CATEGORY = "編集部の直し";
 /** 編集部が「ここにメモを足す」で置いた意見の分類 */
 export const HAND_MEMO_CATEGORY = "編集部のメモ";
 
+/**
+ * 分類を画面に出す名前（作者の判断 2026-11-01「画面はすべて『編集者』にそろえる」「修正を提案する」）。
+ *
+ * **台帳に書く値は変えない**（`HAND_EDIT_CATEGORY`・`HAND_MEMO_CATEGORY`）。古い版の相手も
+ * 読めるように、書くのも読むのも同じ値のまま、出すときだけ新しい名前にする。
+ */
+export function categoryLabel(category: string): string {
+  if (category === HAND_EDIT_CATEGORY) return "編集者の修正";
+  if (category === HAND_MEMO_CATEGORY) return "編集者のメモ";
+  return category;
+}
+
 /** 手で書いた提案の分類か（作者の画面で分類を添えるかを決める） */
 export function isHandCategory(category: string): boolean {
   return category === HAND_EDIT_CATEGORY || category === HAND_MEMO_CATEGORY;
@@ -345,7 +357,7 @@ export function buildHandProposal(input: {
   if (suggestion === "" && reason === "") {
     return {
       ok: false,
-      reason: "直した案か意見の、どちらかを書いてください。",
+      reason: "修正案か意見の、どちらかを書いてください。",
     };
   }
   return {

@@ -106,17 +106,17 @@ describe("画面に出る詳細メニュー（道順を書く人はここを読�
       "    同期",
       "    競合解決",
       "    復元",
-      "  編集部連携",
+      "  編集者連携",
       "    作者／編集者切替",
-      "    編集部へ渡す",
-      "    編集部として参加",
+      "    編集者へ渡す",
+      "    編集者として参加",
       "    校閲開始／終了",
-      "    直しを提案する",
+      "    修正を提案する",
       "    校閲を終えて返す",
       // 取込と確認を1つにした（作者の判断 2026-11-01）。編集者の環境では
       // 「編集部提案確認」が出る（下の「編集者モードの編集部連携」）
-      "    編集部の提案を見る",
-      "    編集部連携を解除",
+      "    編集者の提案を見る",
+      "    編集者連携を解除",
       "  作品別設定",
       "    形式・ジャンル",
       "    作品の種類",
@@ -300,23 +300,23 @@ describe("画面に出る詳細メニュー（道順を書く人はここを読�
     作者は「編集部の提案を見る」（受け取って並べる）、編集者は「編集部提案確認」
     （置いた提案の数を見る。編集部向けの手順書どおり）。両方が並ぶと同じものが2つに見える
   */
-  test("編集部連携：作者には「編集部の提案を見る」だけ、編集者には「編集部提案確認」が出る", () => {
+  test("編集者連携：作者には「編集者の提案を見る」だけ、編集者には「編集者提案確認」が出る", () => {
     const section = (mode: WorkMode): string[] => {
       const menu = visibleMenu(mode);
-      const start = menu.indexOf("  編集部連携");
+      const start = menu.indexOf("  編集者連携");
       const rest = menu.slice(start + 1);
       const end = rest.findIndex((line) => !line.startsWith("    "));
       return rest.slice(0, end).map((line) => line.trim());
     };
     const author = section("author");
-    expect(author).toContain("編集部の提案を見る");
-    expect(author).not.toContain("編集部提案確認");
-    expect(author).not.toContain("編集部提案取込");
+    expect(author).toContain("編集者の提案を見る");
+    expect(author).not.toContain("編集者提案確認");
+    expect(author).not.toContain("編集者提案取込");
 
     const editor = section("editor");
-    expect(editor).toContain("編集部提案確認");
-    expect(editor).not.toContain("編集部の提案を見る");
-    expect(editor).not.toContain("編集部提案取込");
+    expect(editor).toContain("編集者提案確認");
+    expect(editor).not.toContain("編集者の提案を見る");
+    expect(editor).not.toContain("編集者提案取込");
   });
 });
 

@@ -47,8 +47,8 @@ function callerHint(): string {
 /** 断りの文（理由と、解く手段） */
 export function describeRefusal(fileName: string, lockText: string): string {
   return (
-    `「${fileName}」は編集部が校閲中のため、書き込めません（${lockText}）。` +
-    "編集部と連絡がつかないときは、「編集部連携を解除」で解けます。"
+    `「${fileName}」は編集者が校閲中のため、書き込めません（${lockText}）。` +
+    "編集者と連絡がつかないときは、「編集者連携を解除」で解けます。"
   );
 }
 
@@ -76,12 +76,12 @@ async function warnAboutLockedFile(
 
   const name = path.basename(filePath);
   useLogFile(work.folderPath);
-  logStep(`編集部が校閲中の話を素のエディターで${kind === "opened" ? "開いた" : "保存した"}: ${name}`);
+  logStep(`編集者が校閲中の話を素のエディターで${kind === "opened" ? "開いた" : "保存した"}: ${name}`);
   const message =
     kind === "opened"
-      ? `「${name}」は編集部が校閲中です（${describeLock(lock)}）。` +
-        "ここで書いても、校閲が終わるまで編集部へは送られません。"
-      : `「${name}」を保存しました。この話は編集部が校閲中のため、編集部へは送り直されません` +
+      ? `「${name}」は編集者が校閲中です（${describeLock(lock)}）。` +
+        "ここで書いても、校閲が終わるまで編集者へは送られません。"
+      : `「${name}」を保存しました。この話は編集者が校閲中のため、編集者へは送り直されません` +
         "（校閲が終わったあとの送り直しで、作者の版が反映されます）。";
   const action = await vscode.window.showWarningMessage(message, "連携を解除…");
   if (action === "連携を解除…") {
@@ -110,7 +110,7 @@ export function installEditorLockGuard(registry: {
     if (!lock) return undefined;
     const name = path.basename(filePath);
     useLogFile(work.folderPath);
-    logFailure("編集部が校閲中のため本文への書き込みを断った", {
+    logFailure("編集者が校閲中のため本文への書き込みを断った", {
       話: name,
       呼び出し: callerHint(),
     });

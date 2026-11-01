@@ -66,7 +66,7 @@ const SIZE = { width: 1280, height: 800 };
 /** 作り話の作品の題（見本と分かる名前） */
 const WORK_TITLE = "春を待つ灯（見本）";
 /** 編集部の名前（鍵の持ち主・編集履歴に出る）。実在の人の名前は使わない */
-const EDITOR_NAME = "編集部（見本）";
+const EDITOR_NAME = "編集者（見本）";
 /** 参加の入力欄に貼るリンクの見本（取り寄せは走らせない） */
 const SAMPLE_LINK = "https://github.com/sakka-mihon/haru-wo-matsu-akari";
 
@@ -122,7 +122,7 @@ const SETTINGS: Record<string, unknown> = {
 /** 撮った画像の一覧（終わりに標準出力へ出す） */
 const taken: string[] = [];
 
-test("編集部向けの手順書の画面ショットを撮る", async () => {
+test("編集者向けの手順書の画面ショットを撮る", async () => {
   await mkdir(IMG_DIR, { recursive: true });
   const fake = await startFakeOllama(() => "OK");
   let remoteFolder = "";
@@ -148,10 +148,10 @@ test("編集部向けの手順書の画面ショットを撮る", async () => {
         await setPaneExpanded(page, ACTION_PANE, false);
         await setPaneExpanded(page, STEP_PANE, true);
         const steps = [
-          "1. 編集部として参加",
+          "1. 編集者として参加",
           "2. 校閲する範囲を押さえる",
           "3. 検知で探す",
-          "4. 直しを提案する",
+          "4. 修正を提案する",
           "5. 置いた提案を見る",
           "6. 校閲を終えて返す",
           "7. 作者モードへ戻る",
@@ -169,28 +169,28 @@ test("編集部向けの手順書の画面ショットを撮る", async () => {
         await calm(page);
         await shoot(page, "01_アイコンと簡単ステップメニュー", [
           { locator: activityIcon(page), label: "左の「統合小説執筆環境」のアイコン" },
-          { locator: rowLabel(paneRow(page, STEP_PANE, steps[0] as string)), label: "「1. 編集部として参加」" },
+          { locator: rowLabel(paneRow(page, STEP_PANE, steps[0] as string)), label: "「1. 編集者として参加」" },
         ], [page.locator(".part.sidebar").first(), activityIcon(page)]);
 
         /* ── 02 詳細メニュー →「作品管理」→「編集部連携」 ── */
         await setPaneExpanded(page, STEP_PANE, false);
         await setPaneExpanded(page, ACTION_PANE, true);
-        await expandPath(page, ACTION_PANE, ["作品管理", "編集部連携"]);
-        for (const head of ["編集部として参加", "校閲開始／終了", "直しを提案する", "校閲を終えて返す"]) {
+        await expandPath(page, ACTION_PANE, ["作品管理", "編集者連携"]);
+        for (const head of ["編集者として参加", "校閲開始／終了", "修正を提案する", "校閲を終えて返す"]) {
           await revealRow(page, ACTION_PANE, head);
         }
         // 4つが同時に見えていること（手順書の文がこの1枚を指す）
         const visible: string[] = [];
-        for (const head of ["編集部として参加", "校閲開始／終了", "直しを提案する", "校閲を終えて返す"]) {
+        for (const head of ["編集者として参加", "校閲開始／終了", "修正を提案する", "校閲を終えて返す"]) {
           if (await rowFits(page, ACTION_PANE, head)) visible.push(head);
         }
         if (visible.length !== 4) {
-          throw new Error(`「編集部連携」の4つが同時に見えていません（見えたもの：${visible.join("・")}／いまの行：${(await treeRowLabels(page)).join(" / ")}）`);
+          throw new Error(`「編集者連携」の4つが同時に見えていません（見えたもの：${visible.join("・")}／いまの行：${(await treeRowLabels(page)).join(" / ")}）`);
         }
         await calm(page);
         await shoot(page, "02_詳細メニューの編集部連携", [
-          { locator: rowLabel(paneRow(page, ACTION_PANE, "編集部連携")), label: "「編集部連携」" },
-          { locator: rowLabel(paneRow(page, ACTION_PANE, "編集部として参加")), label: "「編集部として参加」" },
+          { locator: rowLabel(paneRow(page, ACTION_PANE, "編集者連携")), label: "「編集者連携」" },
+          { locator: rowLabel(paneRow(page, ACTION_PANE, "編集者として参加")), label: "「編集者として参加」" },
         ], [page.locator(".part.sidebar").first()]);
         await collapsePath(page, ACTION_PANE, ["作品管理"]);
         await setPaneExpanded(page, ACTION_PANE, false);
@@ -294,47 +294,47 @@ test("編集部向けの手順書の画面ショットを撮る", async () => {
         const frame = await openEpisode(page, EP3, "春は、");
         await selectText(frame, PROPOSE_TARGET);
         await frame.locator("#compose").click({ button: "right", position: await selectionPoint(frame) });
-        const proposeItem = frame.locator("#menu .item", { hasText: "直しを提案する" }).first();
+        const proposeItem = frame.locator("#menu .item", { hasText: "修正を提案する" }).first();
         await waitUntil(
           async () => (await frame.locator("#menu").evaluate((menu) => menu.classList.contains("open"))) && (await proposeItem.count()) > 0,
-          "右クリックの品書きに「直しを提案する」が出る",
+          "右クリックの品書きに「修正を提案する」が出る",
           10_000
         ).catch(async (error: unknown) => {
           throw new Error(`${String(error)}（品書き：${JSON.stringify(await frame.locator("#menu").innerText().catch(() => ""))}）`);
         });
-        if (((await proposeItem.getAttribute("class")) ?? "").includes("disabled")) throw new Error("品書きの「直しを提案する」が押せない形です（選択が届いていない）");
+        if (((await proposeItem.getAttribute("class")) ?? "").includes("disabled")) throw new Error("品書きの「修正を提案する」が押せない形です（選択が届いていない）");
         const menuText = await frame.locator("#menu").innerText();
         if (!menuText.includes("メモ追加")) throw new Error(`品書きに「メモ追加」がありません：${menuText}`);
         // 品書きの上に本物のマウスを載せると行が光るので、画面の端へ逃がしてから撮る（品書きは閉じない）
         await page.mouse.move(SIZE.width - 10, SIZE.height - 40);
         await page.waitForTimeout(300);
         const menuBox = frame.locator("#menu");
-        await shoot(page, "06_右クリックの品書き", [{ locator: proposeItem, label: "品書きの「直しを提案する」" }], [menuBox], 60);
+        await shoot(page, "06_右クリックの品書き", [{ locator: proposeItem, label: "品書きの「修正を提案する」" }], [menuBox], 60);
         await proposeItem.click();
 
         /* ── 07 直した案と、ひと言 ── */
-        await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("直しを提案する（1/2）"), "「直した案」の入力欄が出る", 15_000).catch(async (error: unknown) => {
+        await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("修正を提案する（1/2）"), "「修正案」の入力欄が出る", 15_000).catch(async (error: unknown) => {
           throw new Error(`${String(error)}（右下の知らせ：${JSON.stringify(await notificationTexts(page))}）`);
         });
         await fillInput(page, PROPOSE_FIX);
         await calm(page);
-        await shoot(page, "07a_直した案", [{ locator: quickInput(page), label: "直した案の入力欄" }], [quickWidget(page)]);
+        await shoot(page, "07a_直した案", [{ locator: quickInput(page), label: "修正案の入力欄" }], [quickWidget(page)]);
         await page.keyboard.press("Enter");
-        await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("直しを提案する（2/2）"), "「理由・意見」の入力欄が出る", 15_000);
+        await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("修正を提案する（2/2）"), "「理由・意見」の入力欄が出る", 15_000);
         await page.keyboard.insertText(PROPOSE_REASON);
         await calm(page);
         await shoot(page, "07b_ひと言", [{ locator: quickInput(page), label: "理由・意見の入力欄" }], [quickWidget(page)]);
         const beforeHand = await proposalCount();
         const bodyBeforeHand = await readEpisodes(manuscriptFolder);
         await page.keyboard.press("Enter");
-        await waitUntil(async () => (await proposalCount()) > beforeHand, "「直しを提案する」で提案の台帳に1件増える", 15_000).catch(async (error: unknown) => {
+        await waitUntil(async () => (await proposalCount()) > beforeHand, "「修正を提案する」で提案の台帳に1件増える", 15_000).catch(async (error: unknown) => {
           throw new Error(`${String(error)}（右下の知らせ：${JSON.stringify(await notificationTexts(page))}）`);
         });
-        await holdsFor(async () => (await readEpisodes(manuscriptFolder)) === bodyBeforeHand, "「直しを提案する」のあとも本文が変わらない", 2_000);
+        await holdsFor(async () => (await readEpisodes(manuscriptFolder)) === bodyBeforeHand, "「修正を提案する」のあとも本文が変わらない", 2_000);
         await clearNotifications(page);
 
         /* ── 08 置いた提案を見る（編集部提案確認） ── */
-        await clickStepEntry(page, steps[4] as string, "編集部提案確認");
+        await clickStepEntry(page, steps[4] as string, "編集者提案確認");
         await waitUntil(
           async () => (await notificationTexts(page)).some((text) => text.includes("未決の提案") || text.includes("提案はまだありません")),
           "提案の行方の知らせが出る",
@@ -345,7 +345,7 @@ test("編集部向けの手順書の画面ショットを撮る", async () => {
         // 知らせは右下で途中までしか写らないので、全文を手順書の下書き用に出しておく
         process.stdout.write(`[手順書] 08 の知らせ：${JSON.stringify(await notificationTexts(page))}\n`);
         await calm(page);
-        await shoot(page, "08_編集部提案確認", [{ locator: rowLabel(paneRow(page, STEP_PANE, "編集部提案確認")), label: "「編集部提案確認」" }], [
+        await shoot(page, "08_編集部提案確認", [{ locator: rowLabel(paneRow(page, STEP_PANE, "編集者提案確認")), label: "「編集者提案確認」" }], [
           page.locator(".notification-toast").first(),
         ]);
         await clearNotifications(page);
@@ -415,10 +415,10 @@ test("編集部向けの手順書の画面ショットを撮る", async () => {
           await clearNotifications(page);
           await setPaneExpanded(page, ACTION_PANE, true);
           await waitUntil(async () => (await paneRow(page, ACTION_PANE, "作品管理").count()) > 0, "詳細メニューに「作品管理」が出る", 30_000);
-          await expandPath(page, ACTION_PANE, ["作品管理", "編集部連携"]);
-          const join = await revealRow(page, ACTION_PANE, "編集部として参加");
+          await expandPath(page, ACTION_PANE, ["作品管理", "編集者連携"]);
+          const join = await revealRow(page, ACTION_PANE, "編集者として参加");
           await rowLabel(join).click();
-          await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("編集部として参加"), "「編集部として参加」の入力欄が出る", 20_000).catch(async (error: unknown) => {
+          await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("編集者として参加"), "「編集者として参加」の入力欄が出る", 20_000).catch(async (error: unknown) => {
             throw new Error(`${String(error)}（右下の知らせ：${JSON.stringify(await notificationTexts(page))}）`);
           });
           await page.keyboard.insertText(SAMPLE_LINK);

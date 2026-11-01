@@ -49,7 +49,7 @@ const EDITING_FOLDER = "画面テストの作品-編集用";
 const EDITING_REMOTE = "編集用の送り先.git";
 
 const BUSY = "いま動いています";
-const FAILED = "編集部へ渡せませんでした";
+const FAILED = "編集者へ渡せませんでした";
 
 /** 一時フォルダーの根（書庫の1つ上）。作品は `<根>/書庫/<作品>` */
 function rootOf(workFolder: string): string {
@@ -111,7 +111,7 @@ async function shareOnce(session: E2ESession, round: string): Promise<number> {
   let shown: string | undefined;
   await waitUntil(
     async () => ((shown = await dialogText(page)) ?? "") !== "" || (await busyShown(session, since)),
-    `${round}：「編集部へ渡す」の確認の窓が出る`,
+    `${round}：「編集者へ渡す」の確認の窓が出る`,
     30_000
   ).catch(async (error: unknown) => {
     throw new Error(`${String(error)}（${await describeNotices(session, since - 1_000)}）`);
@@ -159,9 +159,9 @@ async function hideUnanswered(session: E2ESession, seq: number, round: string): 
   expect(entry?.answer ?? null, `${round}：畳んだ知らせには、まだ答えが来ていない（押されても閉じられてもいない）`).toBeNull();
 }
 
-test("「編集部へ渡す」の失敗の知らせを押さずに畳んでも、もう一度押すと「いま動いています」と断られず、同じ知らせまで進む", async () => {
+test("「編集者へ渡す」の失敗の知らせを押さずに畳んでも、もう一度押すと「いま動いています」と断られず、同じ知らせまで進む", async () => {
   await withVsCode(
-    "編集部へ渡すの知らせを待たない",
+    "編集者へ渡すの知らせを待たない",
     [{ name: EPISODE, text: "　一話の本文。\n" }],
     async (session) => {
       const root = rootOf(session.workFolder);

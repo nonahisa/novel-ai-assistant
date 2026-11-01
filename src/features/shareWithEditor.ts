@@ -255,7 +255,7 @@ export async function shareWithEditor(
 ): Promise<void> {
   if (isEditorMode()) {
     void vscode.window.showWarningMessage(
-      "編集者モードでは、作品を編集部へ渡せません（作者の操作です）。"
+      "編集者モードでは、作品を編集者へ渡せません（作者の操作です）。"
     );
     return;
   }
@@ -289,9 +289,9 @@ export async function shareWithEditor(
   let editorLogin = site.editorLogin ?? pointer?.editorLogin;
   if (!editorLogin) {
     const asked = await askText({
-      title: "編集部の GitHub ユーザー名",
+      title: "編集者の GitHub ユーザー名",
       prompt:
-        "編集部の方の GitHub ユーザー名（招待を送ります。あとで招くなら空のまま Enter）",
+        "編集者の方の GitHub ユーザー名（招待を送ります。あとで招くなら空のまま Enter）",
       placeHolder: "例: octocat",
       ignoreFocusOut: true,
       validateInput: (value) => {
@@ -310,8 +310,8 @@ export async function shareWithEditor(
   const needsSignIn = !repositoryExists && !(await hasGithubSession());
   const confirmed = await vscode.window.showWarningMessage(
     repositoryExists
-      ? `「${work.title}」の本文と設定資料を、編集部へ送り直しますか。`
-      : `「${work.title}」を編集部へ渡します。` +
+      ? `「${work.title}」の本文と設定資料を、編集者へ送り直しますか。`
+      : `「${work.title}」を編集者へ渡します。` +
           "GitHubに非公開のリポジトリを作って送ります。",
     {
       modal: true,
@@ -321,8 +321,8 @@ export async function shareWithEditor(
         "【送るもの】本文・設定資料・提案のやり取り",
         "【送らないもの】キャッシュ・ログ・回復用の退避・これまでの履歴",
         "",
-        "編集部はこのリポジトリだけを見ます。ほかの作品は渡りません。",
-        "編集部が書けるのは提案だけで、本文は書き換わりません。",
+        "編集者はこのリポジトリだけを見ます。ほかの作品は渡りません。",
+        "編集者が書けるのは提案だけで、本文は書き換わりません。",
         ...(repositoryExists
           ? []
           : [
@@ -351,7 +351,7 @@ export async function shareWithEditor(
 
   // **同じ編集用フォルダーの作業は1本ずつ**（自動の送り返し・取り込みと重ならない）
   const result = await runSerialized(editingQueueKey(target), async () =>
-    withProgress("編集部へ渡す形にしています…", async (): Promise<PushOutcome> => {
+    withProgress("編集者へ渡す形にしています…", async (): Promise<PushOutcome> => {
       if (cloneFrom) {
         const cloned = await cloneEditingRepository(cloneFrom, target);
         if (!cloned.ok) return { ok: false, detail: cloned.detail };
@@ -363,10 +363,10 @@ export async function shareWithEditor(
   if (!result.ok) {
     // **記録の直前に書き先を向ける**（0.43.3 と同じ）
     useLogFile(work.folderPath);
-    logFailure("編集部へ渡す", { 作品: work.title, 詳細: result.detail });
+    logFailure("編集者へ渡す", { 作品: work.title, 詳細: result.detail });
     whenNoticePicked(
       vscode.window.showErrorMessage(
-        `編集部へ渡せませんでした: ${result.detail}`,
+        `編集者へ渡せませんでした: ${result.detail}`,
         "ログを表示",
         "閉じる"
       ),
@@ -375,7 +375,7 @@ export async function shareWithEditor(
           await vscode.commands.executeCommand("novelai.showLog");
         }
       },
-      { label: "編集部へ渡す", workFolder: work.folderPath }
+      { label: "編集者へ渡す", workFolder: work.folderPath }
     );
     return;
   }
@@ -427,7 +427,7 @@ export async function shareWithEditor(
         await vscode.env.openExternal(vscode.Uri.parse(repositoryUrl));
       }
     },
-    { label: "編集部へ渡す", workFolder: work.folderPath }
+    { label: "編集者へ渡す", workFolder: work.folderPath }
   );
 }
 
@@ -487,11 +487,11 @@ export async function inviteEditor(
 
   const invited = await (deps.invite ?? inviteCollaborator)(token, ref, login);
   if (!invited.ok) {
-    logFailure("編集部の招待", { 相手: login, 理由: invited.reason, 詳細: invited.detail });
+    logFailure("編集者の招待", { 相手: login, 理由: invited.reason, 詳細: invited.detail });
     return { kind: "failed", login, detail: invited.detail };
   }
   logStep(
-    `編集部を招いた: ${login}（${ref.owner}/${ref.repo}／` +
+    `編集者を招いた: ${login}（${ref.owner}/${ref.repo}／` +
       `${invited.outcome === "invited" ? "招待" : "すでに共同編集者"}）`
   );
   return invited.outcome === "invited"
@@ -883,7 +883,7 @@ async function cloneEditingRepository(
 
 /** 送り返しで範囲を飛ばしたときの知らせ */
 export function skippedLockedMessage(skipped: readonly string[]): string {
-  return `${describeLockRange([...skipped])}は編集部が校閲中のため送っていません。`;
+  return `${describeLockRange([...skipped])}は編集者が校閲中のため送っていません。`;
 }
 
 /** 置き場所を聞く。**作品フォルダーの中には置かせない**（入れ子のリポジトリになる） */
@@ -906,7 +906,7 @@ export async function chooseDestination(
 
   const name = await askText({
     title: "編集用フォルダーの名前",
-    prompt: "編集部へ渡すフォルダーの名前",
+    prompt: "編集者へ渡すフォルダーの名前",
     value: editingFolderName(work.title),
     ignoreFocusOut: true,
     validateInput: (value) => {
@@ -1514,11 +1514,11 @@ export async function setUpAndPush(
       return {
         ok: false,
         detail:
-          "送り先のリポジトリがまだありません（先に「編集部へ渡す」を実行してください）",
+          "送り先のリポジトリがまだありません（先に「編集者へ渡す」を実行してください）",
       };
     }
     const baseName = editingRepositoryBaseName(work.title);
-    const description = repositoryDescription(`${work.title}（編集部へ渡す用）`);
+    const description = repositoryDescription(`${work.title}（編集者へ渡す用）`);
 
     const token = await getToken();
     if (token) {
@@ -1616,7 +1616,7 @@ export function shareNoticeFor(
       message:
         `「${workTitle}」の編集用フォルダーは用意しました。` +
         "GitHubへ送るには、VS Code の GitHub アカウントへのサインインか " +
-        "`gh`（GitHub CLI）が要ります。整えてから「編集部へ渡す」をもう一度押してください。",
+        "`gh`（GitHub CLI）が要ります。整えてから「編集者へ渡す」をもう一度押してください。",
       actions: ["閉じる"],
     };
   }
@@ -1624,7 +1624,7 @@ export function shareNoticeFor(
     case "invited":
       return {
         message:
-          `「${workTitle}」を編集部へ渡し、${invite.login}さんを招待しました。` +
+          `「${workTitle}」を編集者へ渡し、${invite.login}さんを招待しました。` +
           `招待のリンク：${invite.link}`,
         actions: ["リンクを写す", "GitHubで開く", "閉じる"],
         link: invite.link,
@@ -1632,27 +1632,27 @@ export function shareNoticeFor(
     case "already":
       return {
         message:
-          `「${workTitle}」を編集部へ渡しました。` +
+          `「${workTitle}」を編集者へ渡しました。` +
           `${invite.login}さんはすでに共同編集者です。`,
         actions: ["GitHubで開く", "閉じる"],
       };
     case "failed":
       return {
         message:
-          `「${workTitle}」を編集部へ渡しました。ただし招待はできませんでした` +
-          `（${invite.detail}）。GitHubの「Settings」→「Collaborators」から編集部を招いてください。`,
+          `「${workTitle}」を編集者へ渡しました。ただし招待はできませんでした` +
+          `（${invite.detail}）。GitHubの「Settings」→「Collaborators」から編集者を招いてください。`,
         actions: ["GitHubで開く", "閉じる"],
       };
     case "skipped":
       return {
         message:
-          `「${workTitle}」を編集部へ渡しました。編集部はまだ招いていません。` +
+          `「${workTitle}」を編集者へ渡しました。編集者はまだ招いていません。` +
           "GitHubの「Settings」→「Collaborators」から招いてください。",
         actions: ["GitHubで開く", "閉じる"],
       };
     case "none":
       return {
-        message: `「${workTitle}」を編集部へ送り直しました。`,
+        message: `「${workTitle}」を編集者へ送り直しました。`,
         actions: ["GitHubで開く", "閉じる"],
       };
   }
@@ -1789,7 +1789,7 @@ export function describeLockChanges(result: {
   const messages: string[] = [];
   if (result.locksAcquired.length > 0) {
     messages.push(
-      `編集部が${describeLockRange([...result.locksAcquired])}を校閲中です。` +
+      `編集者が${describeLockRange([...result.locksAcquired])}を校閲中です。` +
         "終わるまで、この範囲は書けません。"
     );
   }
@@ -1814,7 +1814,7 @@ export async function receiveEditorProposals(
   run?: GitCommandRunner
 ): Promise<EditorReceiveOutcome> {
   try {
-    const result = await withProgress("編集部の提案を受け取っています…", () =>
+    const result = await withProgress("編集者の提案を受け取っています…", () =>
       importEditorProposalsQuietly(work, run)
     );
     if (result.status === "noPointer") return { kind: "notShared" };

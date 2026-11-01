@@ -2950,7 +2950,7 @@ export async function activate(
           await primeEditorProposals(work, panel);
         } catch (error) {
           useLogFile(work.folderPath);
-          logFailure("編集部の提案の読み込みに失敗", {
+          logFailure("編集者の提案の読み込みに失敗", {
             作品: work.title,
             詳細: error instanceof Error ? error.message : String(error),
           });
@@ -7711,7 +7711,7 @@ export async function activate(
         if (!work) return;
         if (!canRunProcesses()) {
           vscode.window.showWarningMessage(
-            "編集部へ渡す操作はブラウザ版では使えません。"
+            "編集者へ渡す操作はブラウザ版では使えません。"
           );
           return;
         }
@@ -8319,7 +8319,7 @@ export async function activate(
         const automation = await import("./features/editingAutomation.js");
         await automation.collectEditorInboxQuietly(registry.list());
       } catch (error) {
-        logFailure("開いたときの編集部の提案の取り込み", {
+        logFailure("開いたときの編集者の提案の取り込み", {
           詳細: error instanceof Error ? error.message : String(error),
         });
       }

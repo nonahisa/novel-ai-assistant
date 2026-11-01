@@ -56,12 +56,12 @@ const runFile = promisify(execFile);
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const RELEASE_DIR = path.join(repositoryRoot, "release", "promo");
-const OUTPUT = path.join(repositoryRoot, "docs", "下書き", "編集部の操作.mp4");
+const OUTPUT = path.join(repositoryRoot, "docs", "下書き", "編集者の操作.mp4");
 
 /** 作り話の作品（「たゆたう鉛-実験用」に似せた題） */
 const WORK_TITLE = "ゆらめく錫-見本用";
 /** 編集部の名前（鍵の持ち主・編集履歴に出る）。実在の人の名前は使わない */
-const EDITOR_NAME = "編集部（見本）";
+const EDITOR_NAME = "編集者（見本）";
 /** 参加の入力欄に貼るリンクの見本（取り寄せは走らせない） */
 const SAMPLE_LINK = "https://github.com/sakka-mihon/yurameku-suzu";
 
@@ -103,7 +103,7 @@ const SETTINGS: Record<string, unknown> = {
 /** 場面の時刻（録り始めからの秒を、あとで静止画を取り出す目安に出す） */
 const marks: Array<{ at: number; text: string }> = [];
 
-test("編集部の操作動画を撮る", async () => {
+test("編集者の操作動画を撮る", async () => {
   await mkdir(RELEASE_DIR, { recursive: true });
   const videoDir = path.join(RELEASE_DIR, "raw-editor-guide");
   await rm(videoDir, { recursive: true, force: true });
@@ -122,7 +122,7 @@ test("編集部の操作動画を撮る", async () => {
 
   try {
     const { videoPath } = await withVsCode(
-      "広報・編集部の操作",
+      "広報・編集者の操作",
       EPISODES,
       async (session) => {
         const { page, workFolder, manuscriptFolder } = session;
@@ -147,7 +147,7 @@ test("編集部の操作動画を撮る", async () => {
 
         /* ── 2. 校閲開始／終了 ── */
         await caption(page, "「校閲開始／終了」で、校閲する話の範囲を選ぶ");
-        await clickMenu(page, ["作品管理", "編集部連携", "校閲開始／終了"]);
+        await clickMenu(page, ["作品管理", "編集者連携", "校閲開始／終了"]);
         await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("始めの話を選びます"), "始めの話を選ぶ画面が出る", 20_000);
         await page.waitForTimeout(1_200);
         await clickPickRow(page, "第2話", "始めの話（第2話）");
@@ -245,7 +245,7 @@ test("編集部の操作動画を撮る", async () => {
 
         /* ── 4. 校閲を終えて返す ── */
         await caption(page, "校閲が済んだら「校閲を終えて返す」");
-        await clickMenu(page, ["作品管理", "編集部連携", "校閲を終えて返す"]);
+        await clickMenu(page, ["作品管理", "編集者連携", "校閲を終えて返す"]);
         let ask = "";
         await waitUntil(async () => (ask = (await dialogText(page)) ?? "").includes("の校閲を終えて、作者へ返します。"), "返すかの確認の窓が出る", 20_000).catch(async (error: unknown) => {
           throw new Error(`${String(error)}（右下の知らせ：${JSON.stringify(await notificationTexts(page))}）`);
@@ -274,8 +274,8 @@ test("編集部の操作動画を撮る", async () => {
         await clearNotifications(page);
 
         /* ── 5. 編集部提案確認・編集履歴 ── */
-        await caption(page, "「編集部提案確認」で、返した提案の行方を見る");
-        await clickMenu(page, ["作品管理", "編集部連携", "編集部提案確認"]);
+        await caption(page, "「編集者提案確認」で、返した提案の行方を見る");
+        await clickMenu(page, ["作品管理", "編集者連携", "編集者提案確認"]);
         await waitUntil(async () => (await notificationTexts(page)).some((text) => text.includes("未決の提案") || text.includes("提案はまだありません")), "提案の行方の知らせが出る", 15_000);
         await parkCursor(page, PARK.x, PARK.y);
         await page.waitForTimeout(3_000);
@@ -292,7 +292,7 @@ test("編集部の操作動画を撮る", async () => {
 
         /* ── 6. 作者に戻す ── */
         await caption(page, "終わったら「作者／編集者切替」で作者に戻す");
-        await clickMenu(page, ["作品管理", "編集部連携", "作者／編集者切替"]);
+        await clickMenu(page, ["作品管理", "編集者連携", "作者／編集者切替"]);
         await waitUntil(async () => ((await dialogText(page)) ?? "").includes("この環境を「作者」に戻しますか。"), "作者に戻すかの確認の窓が出る", 20_000);
         await page.waitForTimeout(1_800);
         await clickWithCursor(page, page.locator(".monaco-dialog-box .monaco-button", { hasText: "作者に戻す" }).first(), "［作者に戻す］");
@@ -304,7 +304,7 @@ test("編集部の操作動画を撮る", async () => {
 
         await hideCaption(page);
         await hideCursor(page);
-        await showTitleCard(page, "統合小説執筆環境", "編集部の操作は、ここまでです");
+        await showTitleCard(page, "統合小説執筆環境", "編集者の操作は、ここまでです");
         await page.waitForTimeout(2_700);
         sceneEndedAt = Date.now();
       },
@@ -323,7 +323,7 @@ test("編集部の操作動画を撮る", async () => {
         },
         /* ── 1. 編集部として参加（作品の登録より前） ── */
         beforeRegister: async (page) => {
-          await showTitleCard(page, "統合小説執筆環境", "編集部の操作 — 参加から、校閲を終えて返すまで");
+          await showTitleCard(page, "統合小説執筆環境", "編集者の操作 — 参加から、校閲を終えて返すまで");
           sceneStartedAt = Date.now();
           await clearNotifications(page);
           await pressWorkbenchKey(page, "Control+Alt+Shift+KeyJ");
@@ -342,9 +342,9 @@ test("編集部の操作動画を撮る", async () => {
           const stray = await quickPickTitle(page);
           if (stray !== undefined) throw new Error(`表題の裏で、意図しない入力欄が開いています：${stray}`);
           await hideTitleCard(page);
-          await caption(page, "詳細メニュー →「作品管理」→「編集部連携」→「編集部として参加」");
-          await clickMenu(page, ["作品管理", "編集部連携", "編集部として参加"]);
-          await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("編集部として参加"), "「編集部として参加」の入力欄が出る", 20_000).catch(async (error: unknown) => {
+          await caption(page, "詳細メニュー →「作品管理」→「編集者連携」→「編集者として参加」");
+          await clickMenu(page, ["作品管理", "編集者連携", "編集者として参加"]);
+          await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("編集者として参加"), "「編集者として参加」の入力欄が出る", 20_000).catch(async (error: unknown) => {
             throw new Error(`${String(error)}（右下の知らせ：${JSON.stringify(await notificationTexts(page))}）`);
           });
           await parkCursor(page, PARK.x, PARK.y);

@@ -59,6 +59,6 @@ describe("本文を書く経路", () => {
   test("**提案の適用は、履歴も退避も通る**", () => {
     const source = sourceOf("src/features/reviewProposals.ts");
     expect(source).toContain("writeTextFilePreservingFormat");
-    expect(source).toContain("編集部の提案を採り入れた");
+    expect(source).toContain("編集者の提案を採り入れた");
   });
 });

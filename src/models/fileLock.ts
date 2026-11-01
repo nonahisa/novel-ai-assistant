@@ -81,7 +81,7 @@ export function lockOf(
  * だけでは、待てばよいのか連絡すべきなのか判断できない。
  */
 export function describeLock(lock: FileLock): string {
-  const who = lock.holder || "編集部";
+  const who = lock.holder || "編集者";
   const since = formatSince(lock.since);
   const what = lock.note ? `（${lock.note}）` : "";
   return `${who} が校閲中です${what}。${since}`;

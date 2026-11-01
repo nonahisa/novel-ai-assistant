@@ -40,7 +40,7 @@ describe("採否を決め終えたときの自動の送り返し", () => {
     const deps = returnDeps();
     expect(await returnDecisionsIfFinished(work("a"), deps)).toBe("sent");
     expect(deps.resend).toHaveBeenCalledOnce();
-    expect(deps.notifyDone).toHaveBeenCalledWith("採否を編集部へ送り返しました。");
+    expect(deps.notifyDone).toHaveBeenCalledWith("採否を編集者へ送り返しました。");
   });
 
   test("送り返した知らせに、採用・見送り・読まれたの内訳を添える（意見は採用に数えない）", async () => {
@@ -49,7 +49,7 @@ describe("採否を決め終えたときの自動の送り返し", () => {
     });
     expect(await returnDecisionsIfFinished(work("counts"), deps)).toBe("sent");
     expect(deps.notifyDone).toHaveBeenCalledWith(
-      "採否を編集部へ送り返しました（採用 2・見送り 1・読まれた 3）。"
+      "採否を編集者へ送り返しました（採用 2・見送り 1・読まれた 3）。"
     );
   });
 
@@ -175,7 +175,7 @@ function inboxDeps(over: Partial<InboxDeps> = {}): InboxDeps {
   };
 }
 
-describe("同期のあとの、編集部の提案の取り込み", () => {
+describe("同期のあとの、編集者の提案の取り込み", () => {
   test("0件なら黙る（知らせも、パネルも出さない）", async () => {
     const deps = inboxDeps();
     expect(await collectEditorInboxQuietly([work("a")], deps)).toBe(0);
@@ -199,7 +199,7 @@ describe("同期のあとの、編集部の提案の取り込み", () => {
     expect(deps.offer).toHaveBeenCalledOnce();
     const [offeredWork, text, onView] = vi.mocked(deps.offer).mock.calls[0];
     expect(offeredWork.id).toBe("a");
-    expect(text).toBe("編集部から提案が 3 件届きました。");
+    expect(text).toBe("編集者から提案が 3 件届きました。");
     // 勝手に開かず、選び欄へ静かに足す（作者の判断 2026-11-01 のボタンを受けた実装の判断）
     expect(deps.primePanel).toHaveBeenCalledOnce();
     expect(deps.viewProposals).not.toHaveBeenCalled();
