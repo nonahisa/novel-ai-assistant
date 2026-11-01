@@ -273,6 +273,56 @@ export async function rescueBarText(frame: Frame): Promise<string> {
   return frame.evaluate(() => document.getElementById("rescueText")?.textContent ?? "").catch(() => "");
 }
 
+export async function delayEditsToHost(frame: Frame, delayMs: number): Promise<void> {
+  /*
+    `dropEditsToHost` と同じ枠で、落とさずに `delayMs` だけ遅らせて渡す（2026-11-02）。
+    打った字の便が本体へ着く前に、本体が別の理由（面が前に出た・後ろへ回った）で
+    本文を送り直す順を、揺れに頼らず毎回作るため。便どうしの順は変えない
+    （同じ長さだけ遅らせるので、先に送った便が先に着く）
+  */
+  const outer = frame.parentFrame();
+  if (!outer) throw new Error("WebView の外側の枠が見つかりません");
+  await outer.evaluate((ms) => {
+    const proto = MessagePort.prototype as MessagePort & { __e2eDelay?: boolean };
+    if (proto.__e2eDelay) return;
+    proto.__e2eDelay = true;
+    const original = proto.postMessage;
+    proto.postMessage = function (this: MessagePort, ...args: unknown[]) {
+      const message = args[0] as { channel?: string; data?: { message?: { type?: string } } } | undefined;
+      if (message?.channel === "onmessage" && message.data?.message?.type === "edit") {
+        setTimeout(() => (original as (...rest: unknown[]) => void).apply(this, args), ms);
+        return;
+      }
+      return (original as (...rest: unknown[]) => void).apply(this, args);
+    } as typeof proto.postMessage;
+  }, delayMs);
+}
+
+/**
+ * 組んで書く面の字の移り変わりを、面の中で時刻つきで記録し始める（`composeTrace` で読む）。
+ * 一度出た字が後で消えていないか（古い本文での描き直し）を、0.1秒の揺れでも取りこぼさずに見る
+ */
+export async function startComposeTrace(frame: Frame): Promise<void> {
+  await frame.evaluate(() => {
+    const holder = window as unknown as { __e2eTrace?: Array<{ t: number; text: string }> };
+    if (holder.__e2eTrace) return;
+    const trace: Array<{ t: number; text: string }> = [];
+    holder.__e2eTrace = trace;
+    const compose = document.getElementById("compose");
+    if (!compose) return;
+    const record = () => trace.push({ t: Math.round(performance.now()), text: compose.innerText });
+    record();
+    new MutationObserver(record).observe(compose, { subtree: true, childList: true, characterData: true });
+  });
+}
+
+/** `startComposeTrace` から今までの記録 */
+export async function composeTrace(frame: Frame): Promise<Array<{ t: number; text: string }>> {
+  return frame.evaluate(
+    () => (window as unknown as { __e2eTrace?: Array<{ t: number; text: string }> }).__e2eTrace ?? []
+  );
+}
+
 /**
  * 画面から拡張機能へ向かう「打った字の便」（edit）だけを、WebView の外側の枠で落とす。
  *

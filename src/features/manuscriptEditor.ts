@@ -2234,6 +2234,20 @@ export class ManuscriptEditorProvider
      * 届く前に打たれた便を、その変更を戻さずに当て直すために使う
      */
     const ledger: ScreenEditLedger = createScreenEditLedger();
+    /*
+      **この画面の便を何番まで裁き終えたか**（設計書6.25.9。2026-11-02）。当てた・
+      重なって控えへ回した・入らなかったのどれでも進める。画面へ本文を送るとき、
+      本文と一緒に読んで添える（handledSeq）。画面はこれより新しい便を送っていれば、
+      その本文は打った字を知らないと分かり、描き直しに使わない。
+      **当てた便では、当て終えてから進める**——先に進めると「番号は新しいのに
+      本文は打つ前」の便ができ、画面が打つ前の本文で描き直す（直したかった形そのもの）
+    */
+    let handledSeq = 0;
+    /** 最後に画面へ送った本文に添えた handledSeq（裁く前の本文を送ったかを見る） */
+    let handledSeqSent = 0;
+    const markHandled = (item: SentEdit): void => {
+      if (typeof item.seq === "number" && item.seq > handledSeq) handledSeq = item.seq;
+    };
 
     const send = async (): Promise<void> => {
       const found = await this.deps.highlighter.indexFor(
@@ -2261,11 +2275,16 @@ export class ManuscriptEditorProvider
         安全弁がすべて1行ごとに1文字ずつずれる（実際にずれていた）
       */
       const text = toLf(document.getText());
+      // 本文と同じ瞬間に読む（間に待ちを挟むと、番号と本文が食い違う）
+      const textHandledSeq = handledSeq;
+      handledSeqSent = textHandledSeq;
       // 画面はこの本文を取り込めば、次の便の元にする（指紋で送ってくる）
       ledger.rememberSent(text);
       await panel.webview.postMessage({
         type: "update",
         text,
+        // この本文が、画面の便を何番まで含んでいるか（上の handledSeq）
+        handledSeq: textHandledSeq,
         // note風の組版と、切り替えボタンの出し入れ（設計書6.69）
         noteLike,
         // 編集者モードか（右クリックに「直しを提案する」を出す。設計書5.6.1.1）。
@@ -2786,6 +2805,8 @@ export class ManuscriptEditorProvider
         if (lockedDecision.kind !== "conflict") {
           ledger.rememberRejected(item.text, lockedDecision.baseKey);
         }
+        // 裁いた（入れない）。送る本文を画面が受け取れるよう、送る前に進める
+        markHandled(item);
         sendNow();
         return "conflict";
       }
@@ -2806,12 +2827,24 @@ export class ManuscriptEditorProvider
           **断った直後だけは待たずに送る**（作者の裁定、2026-10-04。設計書6.25.9）。
           120ミリ秒まとめる送り（scheduleSend）は続く変更で延びるので、届く前に
           作者が［それでも戻す］を押すと、画面は古い本文を元にした便を送り、
-          もう一度断られていた
+          もう一度断られていた。
+          **送る前に裁いた番号を進める**——進めないと、画面はこの本文を「打った字を
+          知らない本文」として捨て、古い本文の上に打ち続ける
         */
+        markHandled(item);
         sendNow();
         return "conflict";
       }
       let result = await this.applyEdit(document, decision.text);
+      // 当て終えた（文書はもうこの便を含む）。ここで初めて進める
+      markHandled(item);
+      /*
+        **差が無くても、裁く前の本文を送っていたら送り直す**（2026-11-02）。画面は
+        その本文を捨てている。当てた便なら文書が変わって送り直しが走るが、差の無い便
+        では何も起きず、捨てた本文に混ざっていた本体の変更（当て直しで文書には
+        入っている）や用語の色が、次に文書が変わるまで画面へ届かない
+      */
+      if (result === "noop" && handledSeqSent < handledSeq) sendNow();
       /*
         読み取り専用の原稿では、断った便の字も文書（メモリ上）には入っている。
         画面が送り直すと差が無いので「入った」になり、赤字が下りて控えが消える
@@ -2881,6 +2914,9 @@ export class ManuscriptEditorProvider
           );
         } finally {
           selfEditing = false;
+          // 当てる途中で投げた便も裁いたことにする（画面は見回りで送り直す。
+          // 進めないままだと、この画面は本体の本文をいつまでも受け取らない）
+          markHandled(item);
         }
         if (outcome === false || outcome === "readonly") {
           this.warnEditRejected(document, outcome === "readonly" ? "ignored" : "failed");

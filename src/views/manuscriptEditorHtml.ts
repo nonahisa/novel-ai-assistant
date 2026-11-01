@@ -5223,12 +5223,61 @@ ${RESUME_WRITING_LABEL ? `
     tip.style.top = Math.max(4, top) + "px";
   }
 
+  /* staleUpdate:start */
+  /*
+    ── 打った字より古い本文は、描き直しに使わない（設計書6.25.9。2026-11-02） ──
+    画面の自動テストの揺れを調べて見つかった。字を打った直後に面を押して前へ
+    出すと、本体は「表示に戻った」として本文を送り直す（onDidChangeViewState）。
+    その本文を読んだのが**打った字の便を当てる前**だと、画面には打つ前の本文が
+    届く。画面はそれを外からの変更と見て描き直し、打った字が0.1〜0.2秒消えて
+    から戻った（戻る前に打った字は、帯へ回るおそれがあった）。
+
+    本体は update に「その本文を読んだとき、この画面の便を何番まで裁き終えて
+    いたか」（handledSeq）を添える。**画面が送った便のうち返事の来ていないものが
+    あり、その番号が裁き終えた番号より新しければ、その本文は打った字を知らない。**
+    描き直しにも、次の便の元にも使わない。本体の変更が混ざっていても失われない
+    ——本体は便を当てるとき、その変更のあとの本文へ打った所だけを当て直し
+    （core/screenEditRebase.ts）、当てたあとの本文を改めて送ってくる。
+
+    - 番号が添えられていない update（古い本体）は今までどおり取り込む
+    - 返事が全部来ていれば取り込む（拡張機能ホストが起動し直して番号が0へ
+      戻っても、そこで固まらない）
+    - 最初の1便は必ず取り込む（開いた直後の見た目・控えが添えてある）
+  */
+  function updateBehindTyping(handledSeq, sentSeq, waiting, firstTaken) {
+    if (!firstTaken || !waiting) return false;
+    if (typeof handledSeq !== "number") return false;
+    return handledSeq < sentSeq;
+  }
+  /* staleUpdate:end */
+  /** 本体の本文を一度でも取り込んだか（最初の1便は門を通さない） */
+  let updateTaken = false;
+
   /* ── 拡張機能からの知らせ ──────────── */
   window.addEventListener("message", function (event) {
     const message = event.data;
     // 何か届けば、拡張機能はつながっている（2段目の案内の出し分け。hostSilent）
     hearFromHost();
+    if (
+      message.type === "update" &&
+      updateBehindTyping(message.handledSeq, editSeq, unconfirmed !== null, updateTaken)
+    ) {
+      /*
+        打った字の便より古い本文。**current も元も動かさずに捨てる**（current を
+        古い本文にすると、焦点が外れたときの送りが「原稿と違う」と誤って記録する）。
+        本文は書かない（字数と番号だけ）
+      */
+      vscode.postMessage({
+        type: "log",
+        text:
+          "原稿エディタ：打った字の便（" + editSeq + "）を当てる前の本文（" +
+          (typeof message.text === "string" ? message.text.length : 0) +
+          "字、便" + message.handledSeq + "まで）が届いたので、描き直しに使いませんでした",
+      });
+      return;
+    }
     if (message.type === "update") {
+      updateTaken = true;
       /*
         **開くときの見た目を当てる**（設計書6.25.5）。
         向き・大きさ・面の決め方は拡張機能側（core/manuscriptAppearance.ts）
