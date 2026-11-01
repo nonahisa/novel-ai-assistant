@@ -3,7 +3,12 @@ import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ProposalStore } from "../core/proposalStore";
-import type { ProposalView } from "../models/proposal";
+import {
+  isHandCategory,
+  isOpinionOnly,
+  locateProposal,
+  type ProposalView,
+} from "../models/proposal";
 import { FileLockStore } from "../core/fileLockStore";
 import { describeLock, normalizeFile } from "../models/fileLock";
 import { isEditorMode, recordEdit } from "../core/actorContext";
@@ -72,6 +77,12 @@ export async function reviewProposals(
 function toViewItem(proposal: ProposalView): ProposalViewItem & {
   proposalId: string;
 } {
+  // **編集部が手で書いたものは、分類を頭に添える**（「編集部の直し：…」）。
+  // 検知の指摘は理由が種類の一語（「促音の誤り」等）で分かるが、手書きの理由は
+  // 自由な文なので、検知から来たものか人が書いたものかが読み分けられない
+  const said = isHandCategory(proposal.category)
+    ? `${proposal.category}：${proposal.reason}`
+    : proposal.reason;
   return {
     id: `proposal:${proposal.id}`,
     proposalId: proposal.id,
@@ -83,8 +94,8 @@ function toViewItem(proposal: ProposalView): ProposalViewItem & {
     target: proposal.target,
     suggestion: proposal.suggestion,
     reason: proposal.proposer
-      ? `${proposal.reason}（${proposal.proposer} さんの提案）`
-      : proposal.reason,
+      ? `${said}（${proposal.proposer} さんの提案）`
+      : said,
     confidence: "high",
     status: "pending",
   };
@@ -318,6 +329,15 @@ export async function acceptProposal(
   work: WorkEntry,
   proposal: { id: string; file: string; line: number; original: string; target: string; suggestion: string }
 ): Promise<{ ok: boolean; reason?: string }> {
+  /*
+    **意見だけの提案（直した案が空）は、本文を書き換えない**（作者の指示 2026-11-01）。
+    空の案で置き換えると、選んだ所が消える。「読んだ」として採った記録だけを足し、
+    採否の数え方・送り返しは直しの提案と同じ道を通す
+  */
+  if (isOpinionOnly(proposal)) {
+    await acknowledgeProposal(work, proposal);
+    return { ok: true };
+  }
   const absolute = path.join(work.folderPath, proposal.file);
   let file;
   try {
@@ -326,22 +346,22 @@ export async function acceptProposal(
     return { ok: false, reason: "本文を読み込めませんでした。" };
   }
 
-  const lines = file.text.split("\n");
-  const lineText = lines[proposal.line - 1];
-  if (lineText === undefined || !lineText.includes(proposal.original)) {
+  // **照らし方は置く側（編集部の手書きの提案）と同じ関数**（`locateProposal`）。
+  // 置くときに「選んだ所を指す」と確かめた位置が、採るときにもそのまま当たる
+  const located = locateProposal(file.text, proposal);
+  if (located.kind === "originalMissing") {
     return {
       ok: false,
       reason:
         "提案が届いてから本文が変わっているため、この提案の位置を特定できませんでした。",
     };
   }
-
-  const originalIndex = lineText.indexOf(proposal.original);
-  const targetIndex = proposal.original.indexOf(proposal.target);
-  if (targetIndex === -1) {
+  if (located.kind === "targetMissing") {
     return { ok: false, reason: "提案の位置を特定できませんでした。" };
   }
-  const at = originalIndex + targetIndex;
+  const lines = file.text.split("\n");
+  const lineText = lines[proposal.line - 1];
+  const at = located.at;
   lines[proposal.line - 1] =
     lineText.slice(0, at) +
     proposal.suggestion +
@@ -375,6 +395,35 @@ export async function acceptProposal(
   });
   startReturnIfFinished(work);
   return { ok: true };
+}
+
+/**
+ * 意見だけの提案を「読んだ」として片づける。**本文には触らない。**
+ *
+ * 採った記録（`accepted`）で残す。見送り（`rejected`）にすると、編集部の側では
+ * 「意見が退けられた」と読めてしまう。読んだうえで直すかどうかは作者が本文で決める。
+ */
+async function acknowledgeProposal(
+  work: WorkEntry,
+  proposal: { id: string; file: string; line: number; target: string }
+): Promise<void> {
+  const who = (await tryGitUserName(work.folderPath)) ?? "";
+  await new ProposalStore(work).decide([
+    {
+      proposalId: proposal.id,
+      time: new Date().toISOString(),
+      decidedBy: who,
+      status: "accepted",
+      note: "意見を読んだ",
+    },
+  ]);
+  await recordEdit(work, {
+    actor: "author",
+    action: "編集部の意見を読んだ",
+    file: path.basename(proposal.file),
+    detail: `${proposal.line}行 「${proposal.target}」`,
+  });
+  startReturnIfFinished(work);
 }
 
 /**

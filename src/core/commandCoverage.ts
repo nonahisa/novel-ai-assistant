@@ -228,6 +228,8 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.showEditHistory": { class: "A", label: "編集履歴", via: "novel.read kind: editHistory（名指しの鍵。\"*\" では読めない）" },
   "novelai.reviewProposals": { class: "C4", label: "編集部提案確認", reason: "作者の判断" },
   "novelai.toggleReviewLock": { class: "C4", label: "校閲開始／終了", reason: "作者の判断" },
+  // 編集部が自分の言葉で書く直し。外のAIの指摘は novel.propose の finding で置ける
+  "novelai.proposeEditByHand": { class: "C4", label: "直しを提案する", reason: "作者の判断" },
   "novelai.switchMode": { class: "C4", label: "作者／編集者切替", reason: "設定" },
   "novelai.shareWithEditor": { class: "C4", label: "編集部へ渡す", reason: "送信" },
   "novelai.revokeEditorAccess": { class: "C4", label: "編集部連携を解除", reason: "作者の判断" },

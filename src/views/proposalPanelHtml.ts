@@ -1112,9 +1112,14 @@ function renderItem(item) {
   // 文体の書き換えになるので、直し方は作者が決める。
   // 押しても何も起きないボタンを出さない
   const hasFix = Boolean(item.suggestion);
+  // **編集部の「意見だけ」の提案**（直した案が空。作者の指示 2026-11-01）。
+  // 直し方は作者が決めるので［適用］は出さず、［読んだ］で片づけられるようにする
+  const opinion = Boolean(item.proposalId) && !hasFix;
   const canAct = item.status === 'pending' || item.status === 'failed';
-  const statusText = STATUS_LABEL[item.status]
-    ? '<span class="reason">' + STATUS_LABEL[item.status] + '</span>'
+  // 意見を読んだものは「適用済み」と書かない（本文には何も当てていない）
+  const statusLabel = opinion && item.status === 'applied' ? '読みました' : STATUS_LABEL[item.status];
+  const statusText = statusLabel
+    ? '<span class="reason">' + statusLabel + '</span>'
     : '';
   const statusDetail = item.statusDetail
     ? '<div class="status-detail">' + escapeHtml(item.statusDetail) + '</div>'
@@ -1150,7 +1155,8 @@ function renderItem(item) {
       '</div>'
     : '<div class="quote">' + escapeHtml(item.original) + '</div>' +
       '<div class="reason">' + escapeHtml(explain) +
-      '（直し方は作者が決めてください）</div>';
+      (opinion ? '（編集部の意見です。本文は変わりません）' : '（直し方は作者が決めてください）') +
+      '</div>';
 
   return (
     '<div class="' + classes.join(' ') + '">' +
@@ -1170,7 +1176,10 @@ function renderItem(item) {
       ? '<div class="actions">' +
         (hasFix
           ? '<button data-action="apply" data-id="' + item.id + '"' + disabled + '>適用</button>'
-          : '<button data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>') +
+          : (opinion
+              ? '<button data-action="apply" data-id="' + item.id + '" title="意見を読んだ印を付けて片づけます（本文は変わりません）"' + disabled + '>読んだ</button>'
+              : '') +
+            '<button' + (opinion ? ' class="secondary"' : '') + ' data-action="jump" data-id="' + item.id + '"' + disabled + '>本文を見る</button>') +
         '<button class="secondary" data-action="dismiss" data-id="' + item.id + '"' + disabled + '>無視</button>' +
         (canKeep(item)
           // **隣から離して置く**（.keep-word）。取り消しにくい判断なので、
@@ -1195,7 +1204,8 @@ function renderItem(item) {
       : '') +
     // **適用したあとに気が変わることがある**（作者の指摘）。
     // 直した箇所を、元の語へ戻せるようにする
-    (item.status === 'applied'
+    // 意見だけの提案は本文を変えていないので、戻すものが無い
+    (item.status === 'applied' && !opinion
       ? '<div class="actions">' +
         '<button class="secondary" data-action="undo" data-id="' + item.id + '" title="本文をこの指摘の前へ戻します">戻す</button>' +
         '</div>'

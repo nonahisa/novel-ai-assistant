@@ -496,9 +496,8 @@ import {
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   ManuscriptEditorProvider,
   activeManuscriptTabUri,
-  addMemoToOpenManuscript,
   askNotationInActiveManuscript,
-  insertMemoLineAbove,
+  askProposeEditInActiveManuscript,
   isInsideWork,
   lastManuscriptCaret,
   openManuscriptForReading,
@@ -546,6 +545,8 @@ import {
   reviewProposals,
   toggleReviewLock,
 } from "./features/reviewProposals";
+import { proposeByHand, type HandProposalKind } from "./features/handProposal";
+import { addSceneMemoHere } from "./features/sceneMemoCommand";
 import { offerFirstRunSetupInVsCode } from "./features/firstRun";
 import { splitCollectedFile } from "./features/splitCollectedFile";
 import {
@@ -1891,6 +1892,10 @@ export async function activate(
     },
     // 「AI相談（選択範囲）」。校正・メモパネルの［AIに相談］も同じ関数を通る
     openChat: (document, range) => openChatWithRange(document, range),
+    // 編集者モードの「直しを提案する」「メモ追加」（設計書5.6.1.1）。本文には書かない
+    proposeByHand: async (document, range, kind) => {
+      await proposeByHandInWork(registry, document, range, kind);
+    },
     // 下段の字数（作者の指示、2026-08-29）。**走査は一覧のキャッシュを借りる**
     workStats: (work) => treeProvider.getStats(work),
     // 改行コードの案内（設計書5.4.2）も、走査は一覧の結果を借りる
@@ -5574,18 +5579,28 @@ export async function activate(
       素のエディタで開いた別のファイルが「作業中」として返る）。
     */
     registerCommand("novelai.addSceneMemo", async () => {
-      if (await addMemoToOpenManuscript()) return;
+      // 本体と、編集者モードでの分かれ道は features/sceneMemoCommand.ts（設計書5.6.1.1）
+      await addSceneMemoHere((document, range, kind) =>
+        proposeByHandInWork(registry, document, range, kind)
+      );
+    }),
+    /*
+      「直しを提案する」（編集者モード。設計書5.6.1.1。作者の指示 2026-11-01）。
+      選んだ所への直した案と理由を、本文に書かず提案として置く。
+
+      **前面の原稿エディタを先に見る。** 選んでいる所は画面の中にしか無いので、
+      画面へ頼み返す（傍点のキーと同じ形）。無ければ素のエディタの選択を使う
+    */
+    registerCommand("novelai.proposeEditByHand", async () => {
+      if (askProposeEditInActiveManuscript()) return;
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
         void vscode.window.showInformationMessage(
-          "メモを足す本文を開いてから実行してください。"
+          "直したい所を本文で選んでから実行してください。"
         );
         return;
       }
-      await insertMemoLineAbove(
-        editor.document,
-        editor.selection.active.line + 1
-      );
+      await proposeByHandInWork(registry, editor.document, editor.selection, "edit");
     })
   );
 
@@ -8916,6 +8931,26 @@ function workOfPath(
   return registry
     .list()
     .find((entry) => isInsideWork(entry.folderPath, filePath));
+}
+
+/**
+ * 開いている本文の作品を引いて、手書きの提案を置く（設計書5.6.1.1）。
+ * 作品の外のファイルでは置き先の台帳が無いので、理由を出して止める
+ */
+async function proposeByHandInWork(
+  registry: WorkRegistry,
+  document: vscode.TextDocument,
+  range: vscode.Range,
+  kind: HandProposalKind
+): Promise<void> {
+  const work = workOfPath(registry, fromUri(document.uri));
+  if (!work) {
+    void vscode.window.showWarningMessage(
+      "登録した作品の本文で実行してください（提案は作品ごとに置きます）。"
+    );
+    return;
+  }
+  await proposeByHand(work, document, range, kind);
 }
 
 /**

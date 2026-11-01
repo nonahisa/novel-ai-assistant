@@ -421,6 +421,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.collectEditorProposals": "allTypes",
   "novelai.reviewProposals": "allTypes",
   "novelai.toggleReviewLock": "allTypes",
+  "novelai.proposeEditByHand": "allTypes",
 
   // ── 拡張機能そのものの設定・道具立て ──
   "novelai.setupAI": "allTypes",

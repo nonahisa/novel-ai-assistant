@@ -1054,6 +1054,69 @@ export async function addMemoToOpenManuscript(): Promise<boolean> {
 }
 
 /**
+ * 右クリックの「メモ追加」の受け口（画面の `addMemo`）。
+ *
+ * **編集者モードでは本文に行を挿さない**（設計書5.6.1.1。作者の指示 2026-11-01）。
+ * その行への意見を、提案として置く。繋ぎが無ければ何もしない
+ * （挿す道へ落とすと、編集部が本文を書き換えてしまう）
+ *
+ * @param line 1始まり
+ */
+export async function addMemoFromManuscript(
+  document: vscode.TextDocument,
+  line: number,
+  proposeByHand: ManuscriptEditorDeps["proposeByHand"]
+): Promise<void> {
+  if (isEditorMode()) {
+    const index = Math.max(0, Math.min(line - 1, document.lineCount - 1));
+    const at = new vscode.Position(index, 0);
+    await proposeByHand?.(document, new vscode.Range(at, at), "memo");
+    return;
+  }
+  await insertMemoLineAbove(document, line);
+}
+
+/**
+ * 原稿エディタが最後に居た場所（文書と1始まりの行）。開いていなければ undefined。
+ *
+ * 編集者モードの「ここにメモを足す」が使う。本文に行を挿さず、その行への
+ * 意見を提案として置く（`features/handProposal.ts`）ので、挿す処理は通さない。
+ */
+export function openManuscriptCaret():
+  | { document: vscode.TextDocument; line: number }
+  | undefined {
+  const caret = lastCaret;
+  if (!caret) return undefined;
+  const open = openManuscripts.get(manuscriptLedgerKey(caret.filePath));
+  if (!open) return undefined;
+  return { document: open.document, line: caret.line };
+}
+
+/**
+ * 前面の原稿エディターに、選んでいる所で「直しを提案する」を頼ませる
+ * （コマンドの受け口。編集者モード）。
+ *
+ * 選んでいる所は画面の中にしか無いので、傍点のキー（`askNotationInActiveManuscript`）と
+ * 同じく画面へ送り返し、画面が右クリックと同じ頼み（`proposeEdit`）を送ってくる。
+ *
+ * @returns 前面に原稿エディターがあって送れたら true
+ */
+export function askProposeEditInActiveManuscript(): boolean {
+  for (const open of openManuscripts.values()) {
+    let active = false;
+    try {
+      active = open.panel.active;
+    } catch {
+      continue;
+    }
+    if (!active) continue;
+    void open.panel.webview.postMessage({ type: "askProposeEdit" });
+    return true;
+  }
+  return false;
+}
+
+/**
  * 前面の原稿エディターに、選んでいる語へルビ・傍点を付ける頼みを出させる
  * （傍点のキー Ctrl+Alt+K。設計書6.25.10）。
  *
@@ -1707,6 +1770,11 @@ type Incoming =
   | { type: "unsentStatus"; status?: unknown }
   /** カーソル行の**上**に `// ` の行を挿す（設計書6.40.3） */
   | { type: "addMemo"; line: number }
+  /**
+   * 選んだ所への直しを、提案として置く（編集者モードの右クリック。設計書5.6.1.1）。
+   * 位置はLF空間。選んでいなければ -1
+   */
+  | { type: "proposeEdit"; start: number; end: number }
   /** シーンメモのパネルを横に開く（設計書6.40.4） */
   | { type: "openMemos" }
   /** 執筆再開の資料を開く（設計書6.36。右クリックから。0.76.7） */
@@ -1813,6 +1881,15 @@ export interface ManuscriptEditorDeps {
   openChat(
     document: vscode.TextDocument,
     range: vscode.Range | undefined
+  ): Promise<void>;
+  /**
+   * 編集者モードで、選んだ所（メモなら行）への手書きの提案を置く（設計書5.6.1.1）。
+   * **本文には書かない。** 作品の引き当てと提案の組み立ては extension.ts の繋ぎ側
+   */
+  proposeByHand?(
+    document: vscode.TextDocument,
+    range: vscode.Range,
+    kind: "edit" | "memo"
   ): Promise<void>;
   /**
    * 作品ぜんたいの字数（下段に出す。作者の指示、2026-08-29）。
@@ -2191,6 +2268,9 @@ export class ManuscriptEditorProvider
         text,
         // note風の組版と、切り替えボタンの出し入れ（設計書6.69）
         noteLike,
+        // 編集者モードか（右クリックに「直しを提案する」を出す。設計書5.6.1.1）。
+        // モードは途中で切り替わるので、便のたびに添える
+        editorMode: isEditorMode(),
         /*
           「noteに貼ったときの見た目」。**開いているあいだだけ組む**
           （閉じている面のために本文ぜんたいを組む理由が無い）。
@@ -2522,7 +2602,14 @@ export class ManuscriptEditorProvider
     // 設定を直したのに何も起きなければ、作者は壊れていると受け取る
     subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (!event.affectsConfiguration("novelai.manuscriptEditor")) return;
+        // 作者／編集者の切り替え（novelai.mode）も送り直す。右クリックの
+        // 「直しを提案する」の出し入れは本文の便に乗っている（設計書5.6.1.1）
+        if (
+          !event.affectsConfiguration("novelai.manuscriptEditor") &&
+          !event.affectsConfiguration("novelai.mode")
+        ) {
+          return;
+        }
         void send();
       })
     );
@@ -3098,8 +3185,24 @@ export class ManuscriptEditorProvider
         }
 
         case "addMemo":
-          await insertMemoLineAbove(document, message.line);
+          await addMemoFromManuscript(document, message.line, this.deps.proposeByHand);
           break;
+
+        case "proposeEdit": {
+          // 画面の位置はLF空間。文書の位置へ直してから範囲にする（相談と同じ）
+          const source = document.getText();
+          const start = message.start >= 0 ? message.start : 0;
+          const end = message.end > start ? message.end : start;
+          await this.deps.proposeByHand?.(
+            document,
+            new vscode.Range(
+              document.positionAt(fromLfOffset(source, start)),
+              document.positionAt(fromLfOffset(source, end))
+            ),
+            "edit"
+          );
+          break;
+        }
 
         case "openMemos":
           await this.deps.openSceneMemos?.(fromUri(document.uri));

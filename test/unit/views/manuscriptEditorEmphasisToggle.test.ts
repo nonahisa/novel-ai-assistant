@@ -57,6 +57,9 @@ function runOpenMenu(emphasisOn: { start: number; end: number } | null): {
     function menuSelection() { return null; }
     function menuCaretLine() { return 0; }
     function menuSelectedNotation() { return ""; }
+    // 編集者モードの「直しを提案する」（設計書5.6.1.1）。ここでは作者モード
+    const reviewMode = false;
+    function sendProposeEdit() {}
     const menu = {
       set innerHTML(value) { env.items.length = 0; },
       classList: { add() {} },

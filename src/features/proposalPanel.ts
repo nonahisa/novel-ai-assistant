@@ -3518,6 +3518,28 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       return;
     }
 
+    /*
+      **編集部の「意見だけ」の提案は、［読んだ］で片づける**（作者の指示 2026-11-01）。
+      本文には触らないので、校閲中かどうかも確かめない。下の「修正案が無い」の
+      案内へ落とすと、採る道が無いまま未決に残り続ける
+    */
+    if (item.proposalId && !item.suggestion && !isEditorMode()) {
+      const outcome = await acceptProposal(work, {
+        id: item.proposalId,
+        file: path.relative(work.folderPath, item.filePath),
+        line: item.line,
+        original: item.original,
+        target: item.target,
+        suggestion: "",
+      });
+      this.markStatus(
+        id,
+        outcome.ok ? "applied" : "failed",
+        outcome.ok ? "意見を読みました（本文は変えていません）。" : outcome.reason
+      );
+      return;
+    }
+
     // **修正案の無い指摘は、本文を書き換えない**（作者の裁定 2026-10-17。A23）。
     // 画面は［適用］を出さないが、押す口が届けば空の修正案で文を消していた
     // （推敲の冗長で、26b の10件中6件が修正案なしで通る）。まとめて適用と

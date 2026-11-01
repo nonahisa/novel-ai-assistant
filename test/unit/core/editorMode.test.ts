@@ -42,6 +42,13 @@ describe("編集者モードの許可一覧", () => {
     }
   });
 
+  test("手で書く直しと、編集者モードのメモは開く（本文には書かず提案として置く）", () => {
+    // 作者の指示 2026-11-01。検知の［適用］しか道が無く、編集部役が校閲の仕方で止まった
+    for (const command of ["novelai.proposeEditByHand", "novelai.addSceneMemo"]) {
+      expect(isCommandAllowed(command, "editor")).toBe(true);
+    }
+  });
+
   test("作品全体に及ぶ操作と執筆の機能は開かない", () => {
     // 編集部が見るのは1作品だけ（EDITOR_WORK_LIMIT）。全作品の同期は要らない
     for (const command of [
