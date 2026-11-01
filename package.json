@@ -1346,6 +1346,12 @@
         "icon": "$(add)"
       },
       {
+        "command": "novelai.proposeEditByHand",
+        "title": "直しを提案する",
+        "category": "小説執筆",
+        "icon": "$(edit)"
+      },
+      {
         "command": "novelai.editTimeline",
         "title": "作中時期・別筋登録",
         "category": "小説執筆",
@@ -1806,6 +1812,11 @@
       ],
       "editor/context": [
         {
+          "command": "novelai.proposeEditByHand",
+          "when": "config.novelai.mode == 'editor' && (resourceExtname == .txt || resourceExtname == .md)",
+          "group": "navigation@0"
+        },
+        {
           "command": "novelai.showSettingsForTerm",
           "when": "resourceExtname == .txt || resourceExtname == .md",
           "group": "navigation@1"
@@ -1842,6 +1853,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "novelai.proposeEditByHand",
+          "when": "config.novelai.mode == 'editor'"
+        },
         {
           "command": "novelai.episodePlotToPlotMode",
           "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md"

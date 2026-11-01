@@ -95,6 +95,8 @@ export function describeModeChange(next: WorkMode): string {
     "",
     "本文は書き換わりません。「適用」を押しても、作者への提案として",
     "置かれます。採るかどうかは作者が決めます。",
+    "自分で気づいた直しは、本文を選んで右クリックの「直しを提案する」で",
+    "書けます（意見だけでも置けます）。",
     "",
     `（${editorAllowedCommands().length}個の操作が使えます）`,
   ].join("\n");

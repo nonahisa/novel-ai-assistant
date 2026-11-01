@@ -1346,6 +1346,11 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
    */
   let noteLike = false;
   /**
+   * 編集者モードか（設計書5.6.1.1）。右クリックに「直しを提案する」を出す。
+   * **決めるのは拡張機能側**で、本文の便（update）に添えて届く
+   */
+  let reviewMode = false;
+  /**
    * note風の組版で見せるか。
    *
    * **SNS記事では既定で入れる**（作者の依頼、2026-09-04）。押せばいつもの
@@ -4843,6 +4848,14 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     add("貼り付け", menuPaste);
     rule();
 
+    // **編集者モードの柱**（設計書5.6.1.1。作者の指示 2026-11-01）。選んだ所への
+    // 直しを、本文に書かず提案として置く。校閲する人がいちばん使うので上に置く
+    if (reviewMode) {
+      add("直しを提案する", sendProposeEdit, hasSelection).title =
+        "選んだ所の直した案と理由を書いて、作者への提案として置きます（本文は変わりません）";
+      rule();
+    }
+
     // **ルビは選んでいなくても押せる。** 選択が無ければ拡張機能側が
     // 直前の漢字のまとまりを拾う（傍点は選んだ範囲そのものに付けるので、
     // 選択が要る）
@@ -4900,9 +4913,12 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     rule();
     add("メモ追加", function () {
       // **カーソル行の「上」に挿す**（設計書6.40.3）。いま書いている行の
-      // 下に入ると、続きを打つたびに付箋が押し下げられる
+      // 下に入ると、続きを打つたびに付箋が押し下げられる。
+      // 編集者モードでは、拡張機能側が行を挿さずに提案として置く（設計書5.6.1.1）
       vscode.postMessage({ type: "addMemo", line: menuCaretLine() });
-    });
+    }).title = reviewMode
+      ? "この行への意見を、作者への提案として置きます（本文は変わりません）"
+      : "";
     add("校正・メモパネルを開く", function () {
       vscode.postMessage({ type: "openMemos" });
     });
@@ -5095,6 +5111,29 @@ ${RESUME_WRITING_LABEL ? `
     // 打つ面の値はもともと記法そのもの。組んで書く面は数え直して取る
     const text = composeOn ? composeTextNow() : write.value;
     return text.slice(at.start, at.end);
+  }
+
+  /**
+   * 選んだ所への「直しを提案する」を送る（編集者モード。設計書5.6.1.1）。
+   *
+   * 品書きからは開いた時点の選択を、コマンドからの頼み（fromCommand）では
+   * いまの選択を使う。選んでいなければ -1 を送り、拡張機能側が一言出す
+   */
+  function sendProposeEdit(fromCommand) {
+    let at = null;
+    if (fromCommand === true) {
+      const now = composeOn
+        ? composeSelectionNow()
+        : { start: write.selectionStart, end: write.selectionEnd };
+      at = now && now.end > now.start ? now : null;
+    } else {
+      at = menuSelection();
+    }
+    vscode.postMessage({
+      type: "proposeEdit",
+      start: at ? at.start : -1,
+      end: at ? at.end : -1
+    });
   }
 
   /*
@@ -5309,6 +5348,8 @@ ${RESUME_WRITING_LABEL ? `
         }
       }
       document.body.classList.toggle("plain", message.hasTerms === false);
+      // 編集者モードか（右クリックの出し分けだけに使う。設計書5.6.1.1）
+      if (typeof message.editorMode === "boolean") reviewMode = message.editorMode;
       /* ── SNS記事のnote風（設計書6.69） ── */
       if (typeof message.noteLike === "boolean" && message.noteLike !== noteLike) {
         noteLike = message.noteLike;
@@ -5418,6 +5459,9 @@ ${RESUME_WRITING_LABEL ? `
       */
       if (composing) return;
       keyNotation(message.kind === "ruby" ? "ruby" : "emphasis");
+    } else if (message.type === "askProposeEdit") {
+      // コマンド「直しを提案する」から届く頼み（選んでいる所はこの画面にしか無い）
+      sendProposeEdit(true);
     } else if (message.type === "revealLine") {
       revealLine(message.line, message.caret);
     } else if (message.type === "select" && composeOn) {

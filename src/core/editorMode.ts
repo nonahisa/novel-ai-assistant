@@ -38,6 +38,10 @@ const EDITOR_ALLOWED = new Set<string>([
   "novelai.checkNotation",
   "novelai.checkProofread",
   "novelai.manageKeepWords",
+  // 編集部が自分の言葉で書く直し・意見（作者の指示 2026-11-01）。**本文には書かず
+  // 提案として置く**。「ここにメモを足す」も編集者モードでは行を挿さず、意見の提案になる
+  "novelai.proposeEditByHand",
+  "novelai.addSceneMemo",
 
   // 原稿を受け取り、直したものを返すために要る
   // 1作品だけ見る編集部は作品ごとの同期で足りる（`syncAllWorks` は開かない）
