@@ -541,6 +541,8 @@ import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
 import { startAiAssignmentsSnapshot } from "./features/aiAssignmentsSnapshot";
 import { isEditorMode } from "./core/actorContext";
+import { setActiveModeForGuide } from "./core/editorMode";
+import { conflictFixHint } from "./core/syncEntryNames";
 import { rememberDecisionMemory } from "./features/decisionMemory";
 import {
   primeEditorProposals,
@@ -2535,9 +2537,13 @@ export async function activate(
     「作者／編集者切替」を押した道だけでなく、設定画面で novelai.mode を直した道も
     同じに効くよう、設定の変化を見る。押せる操作も変わるので詳細メニューも描き直す
   */
+  // 相談の目次・マニュアルが入口を言うときも、いまのモードで画面に出るかを見る
+  // （`actionEntrance.ts` の `entranceOf`。2026-11-01）
+  setActiveModeForGuide(isEditorMode() ? "editor" : "author");
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration("novelai.mode")) return;
+      setActiveModeForGuide(isEditorMode() ? "editor" : "author");
       stepProvider.refresh();
       actionProvider.refresh();
     })
@@ -5645,34 +5651,37 @@ export async function activate(
           node && node.type === "work" ? node.work : await resolveWork(undefined, registry);
         if (!work) return;
         /*
-          **先に GitHub から受け取る**（作者の判断 2026-11-01）。手順は「同期」の取り込み
-          （`novelai.gitPull`）と同じ：取り寄せて数え直し、遅れていれば取り込む。
-          取り込みの係（`gitSync.pull`）は自分で結果の知らせを出すので、ここでは成否だけ渡す
+          **先に GitHub から受け取る**（作者の判断 2026-11-01）。受け取りは同期の係の
+          受け取るだけの口（`gitSync.receive`）1つに任せる：取り寄せて、遅れていれば早送りで
+          取り込む。**問いも知らせも出さない**口なので、何と言うかは原稿箱の知らせの1つに
+          まとまる（`gitSync.pull` は未記録の変更で問いを出してすぐ戻り、問いと「受け取れ
+          なかった」が並んでいた）。受け取りの最中は「原稿箱に N件届いています」も出さない
         */
         await importOutboxInbox(work, {
           receive: async (target) => {
-            if (!canRunProcesses()) {
+            if (!canRunProcesses() || !gitSync.receive) {
               return {
                 kind: "skipped",
                 reason: "ブラウザ版では GitHub から受け取れないため、手元に届いている分だけを見ました。",
               };
             }
-            const status = await gitSync.refresh(target, { fetch: true, notify: false });
-            if (status.kind === "not_a_repo" || status.kind === "no_remote") {
-              return {
-                kind: "skipped",
-                reason: "この作品は GitHub と同期していないため、GitHub からは受け取りませんでした。",
-              };
+            const outcome = await gitSync.receive(target);
+            switch (outcome.kind) {
+              case "received":
+              case "nothing":
+                return { kind: "received" };
+              case "skipped":
+                return { kind: "skipped", reason: outcome.reason };
+              case "conflicted":
+                return {
+                  kind: "skipped",
+                  reason:
+                    "GitHub の分は受け取りましたが、書きかけと同じ箇所が食い違いました。" +
+                    conflictFixHint(true),
+                };
+              case "failed":
+                return { kind: "skipped", reason: outcome.reason };
             }
-            if (status.kind !== "tracked") {
-              const { describeStatus } = await import("./features/gitSync.js");
-              return {
-                kind: "skipped",
-                reason: `GitHub からは受け取りませんでした（${describeStatus(status).replace(/。$/, "")}）。`,
-              };
-            }
-            if (status.behind === 0) return { kind: "received" };
-            return (await gitSync.pull(target)) ? { kind: "received" } : { kind: "failed" };
           },
         });
       }

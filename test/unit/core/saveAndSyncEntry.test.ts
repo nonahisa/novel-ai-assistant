@@ -182,6 +182,32 @@ describe("編集者モードの「保存・同期」は受け取るだけ", () =
   });
 });
 
+describe("相談の目次の入口は、モードで画面に出るかを見る（2026-11-01）", () => {
+  test("作者モードでは、編集者モードだけに出る「校閲を終えて返す」を詳細メニューにあると言わない", async () => {
+    const { entranceOf } = await import("../../../src/core/actionEntrance");
+    const action = findAction("novelai.finishReviewAndReturn");
+    if (!action) throw new Error("「校閲を終えて返す」が木に無い");
+    expect(action.shownInModes).toEqual(["editor"]);
+    const inAuthor = entranceOf(action, "author");
+    expect(inAuthor?.text).toContain("編集者モードの詳細メニュー");
+    expect(entranceOf(action, "editor")).toBeUndefined();
+  });
+
+  test("モードを省くと、extension が入れたモード（既定は作者）で見る", async () => {
+    const { entranceOf } = await import("../../../src/core/actionEntrance");
+    const { setActiveModeForGuide } = await import("../../../src/core/editorMode");
+    const action = findAction("novelai.finishReviewAndReturn");
+    if (!action) throw new Error("「校閲を終えて返す」が木に無い");
+    try {
+      expect(entranceOf(action)).toBeDefined();
+      setActiveModeForGuide("editor");
+      expect(entranceOf(action)).toBeUndefined();
+    } finally {
+      setActiveModeForGuide("author");
+    }
+  });
+});
+
 describe("同期まわりの行き止まりを直す", () => {
   test("早送りで取り込んだあと書きかけが食い違ったら、残す文を選ばせる（メニューに無い項目を指さない）", async () => {
     const { describePulledButConflicted, CHOOSE_TEXT_TO_KEEP } = await import(

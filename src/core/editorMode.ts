@@ -80,6 +80,24 @@ const EDITOR_ALLOWED = new Set<string>([
   "novelai.exportIssueReport",
 ]);
 
+/**
+ * 相談の目次・マニュアルが「どこにあるか」を言うときに見るモード（2026-11-01）。
+ *
+ * core は VS Code の設定を読めない（`actorContext.ts` は vscode に依る）ので、
+ * `extension.ts` が起動時とモードを切り替えたときに入れる。入れない所（MCP サーバー・
+ * 単体テスト）では作者モードとして扱う。**押せるかの判定には使わない**（それは
+ * `isCommandAllowed` に呼び出し側がモードを渡す）。
+ */
+let modeForGuide: WorkMode = DEFAULT_MODE;
+
+export function setActiveModeForGuide(mode: WorkMode): void {
+  modeForGuide = mode;
+}
+
+export function activeModeForGuide(): WorkMode {
+  return modeForGuide;
+}
+
 /** そのコマンドは、いまのモードで使えるか */
 export function isCommandAllowed(command: string, mode: WorkMode): boolean {
   return mode === "author" || EDITOR_ALLOWED.has(command);
