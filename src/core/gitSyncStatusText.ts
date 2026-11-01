@@ -315,8 +315,16 @@ export function listSyncTargets<W extends { title: string }>(
  * **競合の残る置き場は外す**——すべて同期（`planSyncTarget`）は競合マーカーを
  * 履歴へ入れないために飛ばすので、出しても押して何も起きない項目になる。
  * 取り込み待ちだけの置き場も外す（記録も送信も無い。取り込みは作品ごとの一覧から）。
+ *
+ * **編集者モードでは出さない**（作者の判断 2026-11-01）。ここで言う「保存・同期」は
+ * 記録して送る段のことで、編集者が送るのは「校閲を終えて返す」だけである。
+ * 編集者の「保存・同期」は受け取るだけになる（`syncAllPlan.ts` の `planSyncTarget`）。
  */
-export function canSaveAndSync(status: GitSyncStatus): boolean {
+export function canSaveAndSync(
+  status: GitSyncStatus,
+  mode: { editor?: boolean } = {}
+): boolean {
+  if (mode.editor) return false;
   if (status.kind !== "tracked") return false;
   if (status.unmerged > 0) return false;
   return status.dirty > 0 || status.ahead > 0;

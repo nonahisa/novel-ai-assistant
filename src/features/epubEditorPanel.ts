@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { canRunProcesses } from "../core/runtime";
+import { conflictFixHint } from "../core/syncEntryNames";
 import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
@@ -3474,7 +3476,7 @@ async function readFirstChapter(
     chapter: null,
     episodePath: null,
     notice:
-      "本文はすべて未解決の競合を含んでいます。「競合解決」で直してください。",
+      "本文はすべて未解決の競合を含んでいます。" + conflictFixHint(canRunProcesses()),
   };
 }
 

@@ -125,7 +125,7 @@ describe("「GitHubと同期」の一覧の文（案A）", () => {
     );
     const labels = pick.items.map((item) => (item.label ?? "").replace(/^\$\([^)]+\)\s*/, ""));
     expect(labels).toEqual([
-      "保存してそろえる（ほかの作品もまとめて）",
+      "保存・同期（ほかの作品もまとめて）",
       "いまの原稿を履歴に残す（送らない）",
       "両方の書き換えを合わせる",
       "このPCの書き換えだけ送る",

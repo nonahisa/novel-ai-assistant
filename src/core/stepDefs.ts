@@ -300,8 +300,9 @@ export const EDITOR_STEP_DEFS: readonly StepDef[] = [
     detail:
       "作者から届いたリンクで、作品を受け取る段階\n\n" +
       "・参加が済んでいれば、ここは飛ばしてよい\n\n" +
-      "・作者が原稿を直したあとは「同期」で最新にする",
-    entries: ["novelai.joinAsEditor", "novelai.gitSync"],
+      "・作者が原稿を直したあとは「保存・同期」で最新を受け取る\n\n" +
+      "・提案は「校閲を終えて返す」で作者へ届く",
+    entries: ["novelai.joinAsEditor", "novelai.saveAndSync"],
   },
   {
     label: "2. 校閲する範囲を押さえる",

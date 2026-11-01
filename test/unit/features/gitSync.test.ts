@@ -545,7 +545,12 @@ describe("分かれている作品の印", () => {
  * 階層をたどって実際に押せることは実機に残る。
  */
 describe("「分岐合流」（旧「分かれた分を合わせる」）の入口", () => {
-  test("詳細メニューの「GitHubで作品管理」に並ぶ（実機確認リスト A-17 の代わり）", () => {
+  /*
+    **詳細メニューからは外し、「保存・同期」の中から開く**（作者の判断 2026-11-01。同期の
+    入口を1つにまとめた）。分かれていれば「保存・同期」がその場で合わせにいき、止まったら
+    報告のボタン（「どちらを残すか選ぶ」）で直に開く（`syncAllWorksRun.test.ts`）
+  */
+  test("詳細メニューの「GitHubで作品管理」には並ばず、入口は「保存・同期」（実機確認リスト A-17 の代わり）", () => {
     const group = ACTION_TREE.find((one) => one.label === "作品管理");
     const section = group?.entries.find(
       (entry) => entry.kind === "section" && entry.label.includes("GitHub")
@@ -554,12 +559,13 @@ describe("「分岐合流」（旧「分かれた分を合わせる」）の入�
       throw new Error("「GitHubで作品管理」の小分類がありません");
     }
 
-    const item = section.items.find(
-      (one) => one.command === "novelai.resolveDivergence"
-    );
-    expect(item?.label).toBe("分岐合流");
+    expect(
+      section.items.find((one) => one.command === "novelai.resolveDivergence")
+    ).toBeUndefined();
+    const entry = section.items.find((one) => one.command === "novelai.saveAndSync");
     // 作品を選ばなくても押せる（分岐したかどうかを、こちらで調べる）
-    expect(item?.requiresWork).toBe(false);
+    expect(entry?.requiresWork).toBe(false);
+    expect(entry?.detail).toContain("残す文を選ぶ画面");
   });
 });
 

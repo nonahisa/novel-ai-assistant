@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { canRunProcesses } from "../core/runtime";
+import { conflictFixHint } from "../core/syncEntryNames";
 import * as paths from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
@@ -1818,7 +1820,7 @@ function describeWriteFailure(
   if (reason === "conflict_markers") {
     return (
       `本文に未解決の競合が含まれているため、メモを${didNot}。` +
-      "「競合解決」で直してからお試しください。"
+      conflictFixHint(canRunProcesses())
     );
   }
   return `メモを${could}。ログに理由が残っています。`;

@@ -242,4 +242,33 @@ describe("GitHub初期設定を1回押したときの問い（2026-10-26 の裁�
     expect(questions).toEqual(["製品の確認（モーダル）: GitHub試験_確認用 をGitHubへ送ります。"]);
     expect(push).toHaveBeenCalledTimes(1);
   });
+
+  /*
+    行き止まりの直し（作者の判断 2026-11-01、洗い出しの2）。履歴の箱（.git）はあるのに
+    記録が1つも無い置き場で、「先に『Gitで管理を始める』を実行してください」と止めていた。
+    その項目は「Gitで管理していない」ときにしか出ないので、押す所が無かった。
+    **その場で最初の記録を作る段へ戻して、続けて送る。**
+  */
+  test("記録が1つも無いリポジトリでも、最初の記録を作ってから送る（行き止まりにしない）", async () => {
+    state.repo = true;
+    state.committed = false;
+    state.remote = false;
+    await runSetupFlow(target(), await readStatus(), { readStatus, run: noRun as never });
+    expect(infoMessages.join("\n")).not.toContain("Gitで管理を始める");
+    expect(state.committed).toBe(true);
+    // 送る前に、最初の記録を作るかを訊く（残した記録は消さないので、確かめてから作る）
+    expect(questions.some((line) => line.includes("最初の記録"))).toBe(true);
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
+  test("送り先だけ決まっていて記録が0のときも、最初の記録を作ってから送る", async () => {
+    state.repo = true;
+    state.committed = false;
+    state.remote = true;
+    modalAnswer = "送信する";
+    await runSetupFlow(target(), await readStatus(), { readStatus, run: noRun as never });
+    expect(infoMessages.join("\n")).not.toContain("Gitで管理を始める");
+    expect(state.committed).toBe(true);
+    expect(push).toHaveBeenCalledTimes(1);
+  });
 });

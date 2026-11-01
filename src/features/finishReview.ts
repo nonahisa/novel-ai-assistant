@@ -22,7 +22,9 @@ import { runSerialized } from "../core/ledgerQueue";
 import { pushWasRejected, reconcileDiverged } from "./shareWithEditor";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
-import { notifyDone } from "../views/notify";
+import { notifyDone, whenNoticePicked } from "../views/notify";
+import { findAction } from "../core/actionTree";
+import { CHOOSE_TEXT_TO_KEEP } from "../core/gitSyncMenuText";
 
 /**
  * 校閲を終えて、作者へ返す（編集者モード専用。作者の裁定、2026-10-28）。
@@ -54,6 +56,17 @@ export type FinishReviewResult =
   | { kind: "cancelled" }
   | { kind: "failed"; detail: string };
 
+/** 本文の書き換えを見つけたときの知らせのボタン（VS Code のソース管理を開く） */
+export const OPEN_SOURCE_CONTROL = "ソース管理を開く";
+
+/**
+ * 本文の書き換えの戻し方（1文）。ソース管理の「変更を破棄」は VS Code の標準の操作で、
+ * 押す前に VS Code が確かめる
+ */
+export const BODY_CHANGE_UNDO_HINT =
+  "［ソース管理を開く］で開く一覧で、戻す話を右クリックして「変更を破棄」を選ぶと元に戻せます。" +
+  "戻してから、もう一度押してください。";
+
 export async function finishReviewAndReturn(
   work: WorkEntry,
   deps: FinishReviewDeps = {}
@@ -69,14 +82,30 @@ export async function finishReviewAndReturn(
 
   const status = await readSyncStatus(work.folderPath, run);
   if (status.kind !== "tracked") {
+    // 「GitHubと同期」は詳細メニューから外した（作者の判断 2026-11-01）。編集者が
+    // 作品を受け取る入口は「編集者として参加」
     void vscode.window.showWarningMessage(
-      "この作品はまだ GitHub とつながっていません。先に「GitHubと同期」で取り寄せてください。"
+      "この作品はまだ GitHub とつながっていません。" +
+        `先に「${findAction("novelai.joinAsEditor")?.label ?? "編集者として参加"}」で受け取ってください。`
     );
     return { kind: "notTracked" };
   }
   if (status.unmerged > 0) {
-    void vscode.window.showWarningMessage(
-      "競合が残っています。先に「競合解決」で片づけてください。"
+    // 「競合解決」は詳細メニューから外したので、残す文を選ぶ画面をボタンで開く。
+    // **答えは待たない**（押さずに置かれても、この操作は終わっている）
+    whenNoticePicked(
+      vscode.window.showWarningMessage(
+        "どちらの文を残すか決まっていない原稿があります。残す文を選んでから、もう一度押してください。",
+        CHOOSE_TEXT_TO_KEEP
+      ),
+      async (picked) => {
+        if (picked !== CHOOSE_TEXT_TO_KEEP) return;
+        await vscode.commands.executeCommand("novelai.resolveConflicts", {
+          type: "work",
+          work,
+        });
+      },
+      { label: "校閲を終えて返す", workFolder: work.folderPath }
     );
     return { kind: "unmerged" };
   }
@@ -93,10 +122,29 @@ export async function finishReviewAndReturn(
   const outside = changesOutsideLedger(parseStatusPorcelainPaths(working.stdout));
   if (outside.length > 0) {
     const shown = outside.slice(0, 5).join("、");
-    void vscode.window.showWarningMessage(
-      "本文に未記録の変更があるため、送らずに止めました" +
-        `（${shown}${outside.length > 5 ? " ほか" : ""}）。` +
-        "編集者モードは本文を書き換えない作りです。変更を元に戻してからもう一度押してください。"
+    /*
+      **戻し方まで言う**（作者の判断 2026-11-01、洗い出しの3）。以前は「変更を元に
+      戻してから」とだけ言い、戻す道が無かった。
+
+      **ここでは戻さない**——戻すのは作者の原稿の本文の書き換えを捨てることで、
+      取り消せない。未追跡のファイルなら消すことになる。どの話を戻すかは編集者が
+      見て決められるよう、VS Code のソース管理（変更の一覧と「変更を破棄」がある）を
+      ボタンで開き、戻し方を1文で言う
+    */
+    whenNoticePicked(
+      vscode.window.showWarningMessage(
+        "本文に未記録の変更があるため、送らずに止めました" +
+          `（${shown}${outside.length > 5 ? " ほか" : ""}）。` +
+          "編集者モードは本文を書き換えない作りです。" +
+          BODY_CHANGE_UNDO_HINT,
+        OPEN_SOURCE_CONTROL
+      ),
+      async (picked) => {
+        if (picked === OPEN_SOURCE_CONTROL) {
+          await vscode.commands.executeCommand("workbench.view.scm");
+        }
+      },
+      { label: "校閲を終えて返す", workFolder: work.folderPath }
     );
     return { kind: "bodyChanged", files: outside };
   }

@@ -26,8 +26,9 @@ import { canRunProcesses } from "./runtime";
  *
  * `extension.ts` では `novelai.gitPull` / `novelai.gitPush` も
  * `canRunProcesses()` を確かめているが、この2つは操作メニューに項目が無い
- * （「同期」〈`novelai.gitSync`〉の中のQuickPickからしか選べない。
- * `gitSync` 自体をここで塞いでいるので、その先へは進めない）。
+ * （作品一覧の右クリックの「GitHubと同期」〈`novelai.gitSync`〉の中の
+ * QuickPickからしか選べない。ブラウザ版の `gitSync` はソース管理へ案内するので、
+ * その先へは進めない）。
  * **ここに挙げるのは、操作メニューで実在するIDだけ**にする。挙げても
  * 対応する項目が無ければ、下のテスト（`processAvailability.test.ts`）が
  * 「実在しないIDを禁じている」と気づけずに黙って素通りしてしまう。
@@ -40,7 +41,6 @@ const REQUIRES_PROCESSES = new Set<string>([
   "novelai.setupLmStudio",
   "novelai.runFullSetup",
   "novelai.setupVectorSearch",
-  "novelai.resolveConflicts",
   "novelai.selectOllamaExecutable",
   "novelai.shareWithEditor",
   // 「編集部の提案を見る」（旧「編集部提案取込」）はここに入れない。受け取りは git を
@@ -48,16 +48,13 @@ const REQUIRES_PROCESSES = new Set<string>([
   "novelai.joinAsEditor",
   "novelai.finishReviewAndReturn",
   "novelai.revokeEditorAccess",
-  // **すべて同期はgitコマンドを直に打つ**ので、ブラウザでは動かせない。
-  // 1作品ずつの `novelai.gitSync` と違い、ソース管理へ案内して代わりに
-  // させる形にできない（置き場ごとに記録・取り込み・送信を順に行うため）
-  "novelai.syncAllWorks",
-  // **保存して同期も、中で「作品をすべて同期」を回す**（設計書6.15.1）ので、
-  // 同じ理由でブラウザでは動かせない。保存だけできても、送るところで詰まる
-  "novelai.saveAndSync",
-  // **分岐を合わせるのもgitコマンドを直に打つ**（設計書5.5.16）。
-  // ソース管理へ案内して代わりにさせる形にはできない
-  "novelai.resolveDivergence",
+  /*
+    **「保存・同期」はここに入れない**（作者の判断 2026-11-01）。同期の入口を1つに
+    まとめたので、ブラウザ版でソース管理へ案内していた「同期」（`novelai.gitSync`）の
+    役目もここが持つ。gitコマンドは打てないが、保存して確定する道は在る（設計書5.8.9）。
+    「全作品同期」「分岐合流」「競合解決」は詳細メニューから外したので、下の
+    `WEB_BLOCKED_PALETTE_ONLY` へ移した
+  */
   // **PDF出力は、組んだHTMLを手元のブラウザへ渡して印刷させる。**
   // 外部プロセスこそ起動しないが、`openExternal` に渡せるのは手元の
   // ファイル（`file:`）だけで、ブラウザ版の作品は `vscode-vfs://github/…`
@@ -70,7 +67,7 @@ const REQUIRES_PROCESSES = new Set<string>([
 ]);
 
 /**
- * **`novelai.gitSync`（同期）はここに入れない。** ブラウザでは押せて、
+ * **`novelai.gitSync`（同期）・`novelai.saveAndSync`（保存・同期）はここに入れない。** ブラウザでは押せて、
  * VS Code のソース管理へ案内する（設計書5.8.9）。gitコマンドは打てないが、
  * **保存する道そのものは在る**ので、行き止まりにしない。
  *
@@ -123,7 +120,7 @@ export function describeProcessesBlocked(command: string): string {
     return (
       "ブラウザ版では、この設定は要りません。" +
       "GitHubのリポジトリを開いている時点で、つながっています。" +
-      "保存は「作品管理」→「GitHub作品管理」→「同期」からご覧ください。"
+      "保存は「作品管理」→「GitHub作品管理」→「保存・同期」からご覧ください。"
     );
   }
   // **案内文にサービス名を決め打ちしない。** 下の `startsWith("novelai.setup")`
@@ -142,12 +139,8 @@ export function describeProcessesBlocked(command: string): string {
       "クラウドのAI（Gemini・OpenAI・さくらのAI Engine・Claude）をお使いください。"
     );
   }
-  if (command === "novelai.saveAndSync") {
-    return (
-      "ブラウザ版では、保存と同期をまとめて行えません（gitコマンドを起動できないためです）。" +
-      "保存は Ctrl+S で、送信は「作品管理」→「GitHub作品管理」→「同期」の案内からお願いします。"
-    );
-  }
+  // 「保存・同期」はブラウザ版でも塞がない（ソース管理へ案内する。`extension.ts`）ので、
+  // ここには説明を持たない（2026-11-01）
   if (command === "novelai.gitRestore") {
     return (
       "ブラウザ版では、過去の版に戻せません（gitコマンドを起動できないためです）。" +
@@ -210,6 +203,15 @@ export function processRequiredCommands(): string[] {
 const WEB_BLOCKED_PALETTE_ONLY: readonly string[] = [
   "novelai.gitPull",
   "novelai.gitPush",
+  /*
+    詳細メニューから外した同期の命令（作者の判断 2026-11-01。入口は「保存・同期」1つ）。
+    命令は知らせのボタン・作品一覧の見出しから呼ばれるので残してある。どれも
+    gitコマンドを直に打つ（記録・取り込み・送信を順に行う／分岐を合わせる／残す文を
+    選ぶ）ので、ソース管理へ案内して代わりにさせる形にはできない
+  */
+  "novelai.syncAllWorks",
+  "novelai.resolveDivergence",
+  "novelai.resolveConflicts",
   /*
     「未登録の自分の作品」の［バックアップを取る］（作者の指示 2026-11-01）。作品一覧の
     右クリックにだけある。外部プロセスは起こさないが、**届くのを待つにはこの機械の

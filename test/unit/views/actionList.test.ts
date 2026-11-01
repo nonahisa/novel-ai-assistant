@@ -151,7 +151,7 @@ describe("操作メニューの構成", () => {
 
     expect(commands).toContain("novelai.extractSettings");
     expect(commands).toContain("novelai.showWritingStats");
-    expect(commands).toContain("novelai.gitSync");
+    expect(commands).toContain("novelai.saveAndSync");
   });
 
   test("作品が無ければ、作品を要する操作は押せない", () => {
@@ -245,9 +245,10 @@ describe("操作メニューの構成", () => {
     });
 
     test("同期は塞がない。押せばソース管理へ案内する（設計書5.8.9）", () => {
-      // **行き止まりにしない。** gitコマンドは打てないが、保存する道は在る
+      // **行き止まりにしない。** gitコマンドは打てないが、保存する道は在る。
+      // 同期の入口は「保存・同期」1つ（作者の判断 2026-11-01）
       const action = allActions().find(
-        (entry) => entry.command === "novelai.gitSync"
+        (entry) => entry.command === "novelai.saveAndSync"
       );
       expect(action).toBeDefined();
       if (!action) return;
@@ -257,10 +258,11 @@ describe("操作メニューの構成", () => {
     });
 
     test("編集者モードの制限と、実行環境の制限は両方効く", () => {
-      // novelai.resolveConflicts は編集者モードでは許されているが、
+      // novelai.finishReviewAndReturn は編集者モードでは許されているが、
       // ブラウザでは使えない。両方の理由を正しく見分けられること
+      // （競合解決は詳細メニューから外した。2026-11-01）
       const action = allActions().find(
-        (entry) => entry.command === "novelai.resolveConflicts"
+        (entry) => entry.command === "novelai.finishReviewAndReturn"
       );
       expect(action).toBeDefined();
       if (!action) return;
@@ -873,7 +875,6 @@ describe("メニュー名とコマンドパレットの名前", () => {
     残るのは、名前を変えなかった項目と、右クリックにも出る1件だけである。
   */
   const EXCEPTIONS: Record<string, string> = {
-    "novelai.gitSync": "小分類「GitHub作品管理」の下。「GitHubと」は文脈で分かる",
     "novelai.gitRestore": "小分類「GitHub作品管理」の下。並びの短さを揃えている",
     "novelai.openSynopsisDocs":
       "小分類「資料閲覧」の下なので「閲覧」を落とした（狭いサイドバー。2026-10-03）。パレットでは作る操作（作品紹介文・各話あらすじ）と見分けるため「閲覧」を残す",

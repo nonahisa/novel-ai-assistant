@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { conflictFixHint } from "../core/syncEntryNames";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import {
@@ -60,7 +61,7 @@ import {
   type CoverSide,
   type CoverSource,
 } from "../core/coverBake";
-import { randomUuid } from "../core/runtime";
+import { canRunProcesses, randomUuid } from "../core/runtime";
 import {
   collectOrnamentCatalogue,
   type OrnamentCatalogue,
@@ -362,7 +363,7 @@ async function composeEpubExport(work: WorkEntry): Promise<EpubExportOutcome> {
       message:
         conflicted.length > 0
           ? "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
-            "「競合解決」で直してからもう一度お試しください。"
+            conflictFixHint(canRunProcesses())
           : "本に入れられる本文がありませんでした。" + noticeLines(notices),
     };
   }

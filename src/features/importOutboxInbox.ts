@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
+import { saveAndSyncLabel } from "../core/syncEntryNames";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { atomicWriteFile } from "../core/atomicWrite";
@@ -297,7 +298,7 @@ export async function importOutboxInbox(work: WorkEntry): Promise<void> {
   if (names.length === 0) {
     vscode.window.showInformationMessage(
       `「${work.title}」の原稿箱に、取り込み待ちのものはありません。` +
-        "出先のページで［パソコンへ送る］を押したあと、GitHub と同期すると届きます。"
+        `出先のページで［パソコンへ送る］を押したあと、「${saveAndSyncLabel()}」を押すと届きます。`
     );
     return;
   }

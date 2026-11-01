@@ -63,9 +63,16 @@ import {
 export { isWarning } from "../core/gitSyncStatusText";
 import {
   buildGitSyncMenuEntries,
+  CHOOSE_TEXT_TO_KEEP,
+  describePulledButConflicted,
   describeSyncMenuStatus,
   gitSyncMenuTitle,
 } from "../core/gitSyncMenuText";
+import {
+  IDENTITY_MISSING_HINT,
+  SAVE_AND_SYNC_COMMAND,
+  saveAndSyncLabel,
+} from "../core/syncEntryNames";
 import { cancelItem } from "../views/dialogs";
 import {
   canRecordChanges,
@@ -419,12 +426,13 @@ export class GitSyncMonitor implements vscode.Disposable {
       vscode.StatusBarAlignment.Right,
       101
     );
-    // 引数つきで呼ぶ。ステータスバーからのときだけ、手当ての要る置き場へ
-    // 絞って選ばせるため（作者の指摘、2026-10-01）
+    // **押したら「保存・同期」と同じ流れにする**（作者の判断 2026-11-01）。
+    // 以前は手当ての要る置き場の一覧（作品ごとの「同期」の入口）を出していたが、
+    // 同期の入口を1つにまとめたので、ここも同じ1つへ渡す。状態を見て要る段だけを
+    // 進めるので、選ばせる一覧は要らない
     this.statusBar.command = {
-      title: "GitHubと同期",
-      command: "novelai.gitSync",
-      arguments: [{ fromStatusBar: true }],
+      title: saveAndSyncLabel(),
+      command: SAVE_AND_SYNC_COMMAND,
     };
     this.disposables.push(this.statusBar);
 
@@ -1325,10 +1333,7 @@ ${reason}` : ""}`,
     // **名前が無いと git commit は必ず失敗する。** 初めてGitを使う作者が
     // 必ずここで詰まるので、先に確かめて次の一手を示す
     if (!(await hasCommitIdentity(root, run))) {
-      vscode.window.showWarningMessage(
-        "記録する人の名前が未設定です。" +
-          "「GitHubと同期」の案内から一度設定してください。"
-      );
+      vscode.window.showWarningMessage(IDENTITY_MISSING_HINT);
       return false;
     }
 
@@ -1409,20 +1414,24 @@ ${reason}` : ""}`,
         logFailure("記録の前の早送りで、書きかけと食い違った", {
           作品: work.title,
         });
-        if (
-          (await vscode.window.showWarningMessage(
-            `「${work.title}」にGitHubの分を取り込みましたが、書きかけと同じ箇所が食い違いました。`,
-            {
-              modal: true,
-              detail:
-                "書きかけはgitの退避（stash）に残してあります。" +
-                // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
-                "食い違いを直してから、もう一度「GitHubと同期」の「GitHub の書き換えを受け取る」を押してください。",
-            },
+        {
+          // **押す所をその場に出す**（作者の判断 2026-11-01、洗い出しの3）。以前の文は
+          // 一覧に出ない項目（「GitHub の書き換えを受け取る」）を指していた
+          const text = describePulledButConflicted(work.title);
+          const answer = await vscode.window.showWarningMessage(
+            text.message,
+            { modal: true, detail: text.detail },
+            CHOOSE_TEXT_TO_KEEP,
             "ログを表示"
-          )) === "ログを表示"
-        ) {
-          showLog();
+          );
+          if (answer === CHOOSE_TEXT_TO_KEEP) {
+            await vscode.commands.executeCommand("novelai.resolveConflicts", {
+              type: "work",
+              work,
+            });
+          } else if (answer === "ログを表示") {
+            showLog();
+          }
         }
         return false;
 

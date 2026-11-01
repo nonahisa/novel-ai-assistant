@@ -49,6 +49,24 @@ import {
 import { withCancellableProgress } from "../views/progress";
 import type { WalkConflictsResult } from "./resolveConflicts";
 import { readAutoResendSettings } from "./autoResend";
+import { isEditorMode } from "../core/actorContext";
+import {
+  finishReviewLabel,
+  IDENTITY_MISSING_HINT,
+  saveAndSyncLabel,
+} from "../core/syncEntryNames";
+
+/**
+ * 送るときに押す所の1文（作者の判断 2026-11-01）。
+ *
+ * **編集者モードでは「保存・同期」は受け取るだけ**なので、「送るときは『保存・同期』を」
+ * と言うと押しても送れない。編集者が作者へ送るのは「校閲を終えて返す」だけ。
+ */
+export function describeHowToSend(editor: boolean): string {
+  return editor
+    ? `作者へ届けるときは「${finishReviewLabel()}」を押してください。`
+    : `送るときは「${saveAndSyncLabel()}」を押してください。`;
+}
 
 /**
  * 分岐したときに、畳めるものは畳む（設計書5.5.16／5.5.18）。
@@ -277,7 +295,10 @@ export async function resolveDivergence(
   if (outcome.kind === "not_diverged") {
     void vscode.window.showInformationMessage(
       `「${label}」は、2台の原稿がそろっています（作業は要りません）。` +
-        "送るのと取り込むのは「保存・同期」でできます。"
+        // 編集者モードの「保存・同期」は受け取るだけ（作者の判断 2026-11-01）
+        (isEditorMode()
+          ? `受け取るのは「${saveAndSyncLabel()}」、作者へ届けるのは「${finishReviewLabel()}」でできます。`
+          : `送るのと取り込むのは「${saveAndSyncLabel()}」でできます。`)
     );
     return;
   }
@@ -317,7 +338,7 @@ export async function resolveDivergence(
   );
   if (!result) return;
 
-  await reportFold(deps, label, result, { sending: false, autoResend });
+  await reportFold(deps, label, result, { sending: false, autoResend, editor: isEditorMode() });
 }
 
 /** どの置き場を畳むか。作品が指定されなければ、登録の先頭から根をたどる */
@@ -376,6 +397,8 @@ export function describeDivergenceConfirm(input: {
    * 「どうやって統合するかわからない」）
    */
   sideExample?: string;
+  /** 編集者モードか。送る所の案内を「校閲を終えて返す」へ分ける（`describeHowToSend`） */
+  editor?: boolean;
 }): { message: string; detail: string; buttons: string[] } {
   const label = `「${input.label}」`;
   const toChoose = input.settingsToChoose ?? 0;
@@ -401,7 +424,7 @@ export function describeDivergenceConfirm(input: {
   lines.push(
     input.autoResend
       ? "そろえ終わったら、数分のうちに自動でGitHubへ送ります。"
-      : "GitHubへは送りません。送るときは「保存・同期」を押してください。"
+      : `GitHubへは送りません。${describeHowToSend(input.editor ?? false)}`
   );
 
   return {
@@ -482,6 +505,7 @@ async function confirm(
     ...counts,
     autoResend,
     sideExample: keepBothExample(classified.manuscripts, new Date()),
+    editor: isEditorMode(),
   });
   const answer = await vscode.window.showInformationMessage(
     text.message,
@@ -532,8 +556,7 @@ export async function foldDivergence(
     if (!(await hasCommitIdentity(root, run))) {
       return {
         ok: false,
-        reason:
-          "記録する人の名前が未設定です。「GitHubと同期」から一度設定してください。",
+        reason: IDENTITY_MISSING_HINT,
       };
     }
     const committed = await commitAll(
@@ -1035,13 +1058,16 @@ export function describeAuthoredStop(files: readonly string[]): string {
 /**
  * 続けるときに押す所（作者、2026-10-13 夜「窓が消えてから再度窓を開けない」）。
  *
- * **次の一手は1つだけ示す。** 「GitHubと同期」の一覧の「両方の書き換えを合わせる」
- * （`core/gitSyncMenuText.ts`）は、2台で分かれている間はいつも出ている。
- * やめると全部戻るので、押せば最初から選び直しになる
+ * **次の一手は1つだけ示す。** 同期の入口は「保存・同期」1つにまとめた（作者の判断
+ * 2026-11-01）。2台で分かれている間は、押せばその中で合わせる画面へ進む
+ * （`syncAllWorks.ts` の `foldHere`）。やめると全部戻るので、押せば最初から選び直しになる
  */
-export const RESUME_FOLD_STEP =
-  "続けるには、作品一覧で作品を右クリックし、「GitHubと同期」→「両方の書き換えを合わせる」をもう一度押してください。" +
-  "最初から選び直しになります。";
+export function resumeFoldStep(): string {
+  return (
+    `続けるには、もう一度「${saveAndSyncLabel()}」を押してください（2台の書き換えを合わせる画面へ進みます）。` +
+    "最初から選び直しになります。"
+  );
+}
 
 /** 作者が選ぶ画面を閉じて（取りやめて）やめたときの理由（知らせの詳しい文） */
 export function describeFoldStopped(files: readonly string[]): string {
@@ -1050,7 +1076,7 @@ export function describeFoldStopped(files: readonly string[]): string {
   return (
     `同じところを両方で書き換えた原稿・設定資料が ${files.length}件あります` +
     `（${listed.join("、")}${more}）。\n\n` +
-    RESUME_FOLD_STEP
+    resumeFoldStep()
   );
 }
 
@@ -1100,6 +1126,8 @@ export function describeFoldSuccess(
      * （2026-10-11、「送りません」と書いた1分後に送られていた）
      */
     autoResend?: boolean;
+    /** 編集者モードか。送る所の案内を「校閲を終えて返す」へ分ける */
+    editor?: boolean;
   } = { sending: false }
 ): string {
   const parts = [`もう1台から入れたファイル ${result.incoming}件`];
@@ -1139,7 +1167,9 @@ export function describeFoldSuccess(
     ? `続けてGitHubへ送ります${withSide}。`
     : options.autoResend
       ? `数分のうちに自動でGitHubへ送ります${withSide}。`
-      : `GitHubへは「保存・同期」で送ります${withSide}。`;
+      : options.editor
+        ? `作者へは「${finishReviewLabel()}」で届けます${withSide}。`
+        : `GitHubへは「${saveAndSyncLabel()}」で送ります${withSide}。`;
   return (
     `「${label}」の2台の原稿をそろえました（${parts.join("／")}）。` +
     sideNote +
@@ -1153,7 +1183,7 @@ async function reportFold(
   deps: ResolveDivergenceDeps,
   label: string,
   result: FoldOutcome,
-  options: { sending: boolean; autoResend: boolean }
+  options: { sending: boolean; autoResend: boolean; editor?: boolean }
 ): Promise<void> {
   if (!result.ok) {
     const notice = describeFoldFailureNotice(label, result);

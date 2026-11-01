@@ -3,6 +3,7 @@ import type { WorkEntry } from "../models/types";
 import { divergenceLine } from "./gitSyncStatusText";
 import { isPathInside, isSameFolder, join } from "./pathText";
 import { settingsToChooseCount, type ConflictWalkStart } from "./divergenceScan";
+import { finishReviewLabel, setupGithubLabel } from "./syncEntryNames";
 
 /**
  * 「作品をすべて同期する」で、置き場ごとに何をするかを決める（設計書5.5.14）。
@@ -78,6 +79,23 @@ export interface SyncTargetPlan {
    * できないなら理由を出す
    */
   skip?: SkipReason;
+  /**
+   * 受け取るだけの手順か（編集者モード。作者の判断 2026-11-01）。
+   *
+   * 確認の窓で「GitHubへ送信します」と言わず、送るのは「校閲を終えて返す」だと
+   * 言うために持つ。**`commit`・`push` は必ず偽**（`planSyncTarget`）
+   */
+  receiveOnly?: boolean;
+}
+
+/** `planSyncTarget` に渡す、いまの環境の立場 */
+export interface SyncPlanMode {
+  /**
+   * 編集者モードか。**編集者の「保存・同期」は受け取るだけ**（作者の判断 2026-11-01）。
+   * core は VS Code の設定を読まないので、呼び出し側（`features/handoffSync.ts`）が
+   * `isEditorMode()` を読んで渡す
+   */
+  editor?: boolean;
 }
 
 export type SkipReason =
@@ -95,19 +113,45 @@ export type SkipReason =
   | "unmerged"
   /** 状態を読めなかった */
   | "failed"
+  /**
+   * 編集者モードで、作者の側と分かれている（手元に送っていない提案の記録がある）。
+   * 合わせて送るのは「校閲を終えて返す」の役目（`finishReview.ts` の台帳だけの合わせ直し）
+   */
+  | "editor_diverged"
   /** やることが無い（同期は取れている） */
   | "nothing";
 
-export const SKIP_REASON_TEXT: Record<SkipReason, string> = {
-  git_missing: "gitが見つかりません",
-  not_a_repo: "Gitで管理していません",
-  no_remote: "送り先が未設定です",
-  no_upstream: "まだ一度も送信していません",
-  detached: "ブランチを見ていません",
-  unmerged: "競合が解決していません",
-  failed: "状態を読めませんでした",
-  nothing: "同期は取れています",
-};
+/**
+ * 飛ばした理由の文。
+ *
+ * **関数にしてあるのは、メニューの名前を木から引くため**（`syncEntryNames.ts`）。
+ * 定数の表にすると、読み込みの順で木がまだ無いうちに名前を引くことになる。
+ */
+export function skipReasonText(reason: SkipReason): string {
+  switch (reason) {
+    case "git_missing":
+      return "gitが見つかりません";
+    case "not_a_repo":
+      return "Gitで管理していません";
+    case "no_remote":
+      return `送り先が未設定です（「${setupGithubLabel()}」で決められます）`;
+    case "no_upstream":
+      return `まだ一度も送信していません（「${setupGithubLabel()}」で送れます）`;
+    case "detached":
+      return "ブランチを見ていません";
+    case "unmerged":
+      return "どちらの文を残すか決まっていない原稿があります（「残す文を選ぶ」で選べます）";
+    case "failed":
+      return "状態を読めませんでした";
+    case "editor_diverged":
+      return (
+        "作者の側と、手元の提案の記録が分かれています" +
+        `（「${finishReviewLabel()}」で、そろえて作者へ届けます）`
+      );
+    case "nothing":
+      return "同期は取れています";
+  }
+}
 
 /**
  * 置き場ごとの手順を決める。
@@ -115,7 +159,11 @@ export const SKIP_REASON_TEXT: Record<SkipReason, string> = {
  * **競合が残っているものには触らない。** 記録すると競合マーカーごと
  * 履歴に入る（5.5.3）。
  */
-export function planSyncTarget(target: SyncTargetState): SyncTargetPlan {
+export function planSyncTarget(
+  target: SyncTargetState,
+  mode: SyncPlanMode = {}
+): SyncTargetPlan {
+  if (mode.editor) return planReceiveOnly(target);
   const base = { target, commit: false, pull: false, push: false };
   const status = target.status;
   // 未保存の文書は、記録の前に保存してから入れる（設計書5.5.19）
@@ -155,11 +203,53 @@ export function planSyncTarget(target: SyncTargetState): SyncTargetPlan {
   return { ...base, commit, pull, push };
 }
 
+/**
+ * 編集者モードの手順：**受け取るだけ**（作者の判断 2026-11-01）。
+ *
+ * 編集者が作者へ送るのは「校閲を終えて返す」だけにする。ここで記録すると
+ * `git add -A` が本文の書きかけまで履歴に入れ、送れば作者の原稿の履歴へ流れる。
+ *
+ * - 作者が先へ進んでいれば受け取る（書きかけの提案は git が退避して戻す。
+ *   `syncAllWorks.ts` の記録の前の早送り）
+ * - 手元に送っていない提案の記録があって分かれているなら、合わせにいかない。
+ *   合わせて送るのは「校閲を終えて返す」（台帳だけを混ぜ、本文は作者の側を使う）
+ * - 送り先が無い・競合が残るなどは、作者モードと同じ理由で飛ばす
+ */
+function planReceiveOnly(target: SyncTargetState): SyncTargetPlan {
+  const base = {
+    target,
+    commit: false,
+    pull: false,
+    push: false,
+    receiveOnly: true,
+  };
+  const status = target.status;
+  switch (status.kind) {
+    case "git_missing":
+    case "not_a_repo":
+    case "detached":
+    case "failed":
+    case "no_remote":
+    case "no_upstream":
+      return { ...base, skip: status.kind };
+    case "tracked":
+      break;
+  }
+  if (status.unmerged > 0) return { ...base, skip: "unmerged" };
+  if (status.behind > 0 && status.ahead > 0) {
+    return { ...base, skip: "editor_diverged" };
+  }
+  if (status.behind > 0) return { ...base, pull: true };
+  return { ...base, skip: "nothing" };
+}
+
 /** 置き場をまとめて、やることを決める */
 export function planSyncAll(
-  targets: readonly SyncTargetState[]
+  targets: readonly SyncTargetState[],
+  mode: SyncPlanMode = {}
 ): SyncTargetPlan[] {
-  return targets.map(planSyncTarget);
+  // `map(planSyncTarget)` と書かない。2つ目の引数に並びの番号が渡ってしまう
+  return targets.map((target) => planSyncTarget(target, mode));
 }
 
 /** 実際に動かすものだけ */
@@ -205,7 +295,7 @@ export function describePlan(plan: SyncTargetPlan): string {
     );
   }
   if (parts.length === 0) {
-    return SKIP_REASON_TEXT[plan.skip ?? "nothing"];
+    return skipReasonText(plan.skip ?? "nothing");
   }
   return parts.join(" / ");
 }
@@ -331,7 +421,7 @@ export function describeSyncSkips(plans: readonly SyncTargetPlan[]): string {
     .map(
       (plan) =>
         `・${describeTargetWorks(plan.target)}：${
-          SKIP_REASON_TEXT[plan.skip ?? "nothing"]
+          skipReasonText(plan.skip ?? "nothing")
         }`
     )
     .join("\n");
@@ -342,6 +432,8 @@ export function describeSyncSkips(plans: readonly SyncTargetPlan[]): string {
 const SYNC = "同期する";
 const SYNC_NEWEST = "同期する（設定資料は新しいほうへ）";
 const SYNC_ONE_BY_ONE = "同期する（1件ずつ選ぶ）";
+/** 編集者モードの確認のボタン（受け取るだけ） */
+const RECEIVE = "受け取る";
 
 /**
  * 同期の確認の窓に出す中身（作者の裁定、2026-10-01 案2）。
@@ -361,6 +453,24 @@ export function describeSyncConfirm(
   const lines = doing.map(
     (plan) => `・${describeTargetWorks(plan.target)}：${describePlan(plan)}`
   );
+
+  /*
+    **編集者モードは受け取るだけ**（作者の判断 2026-11-01）。「GitHubへ送信します」
+    「送り先が未設定です」とは言わず、送る道（校閲を終えて返す）を名指す。
+    分かれた置き場は合わせにいかない（`planReceiveOnly`）ので、選ぶものの説明も要らない
+  */
+  if (doing.length > 0 && doing.every((plan) => plan.receiveOnly)) {
+    return {
+      message: `${doing.length}か所で、作者の最新の原稿を受け取ります。`,
+      detail:
+        `${lines.join("\n")}\n\n` +
+        "受け取るだけで、GitHubへは何も送りません。" +
+        `提案は「${finishReviewLabel()}」で作者へ届きます。` +
+        describeSyncSkips(all),
+      buttons: [RECEIVE],
+    };
+  }
+
   const sending = doing.filter((plan) => plan.push).length;
 
   let settings = 0;
@@ -414,7 +524,7 @@ export function syncChoiceOf(
 ): ConflictWalkStart | undefined {
   if (answer === SYNC_NEWEST) return "newest";
   if (answer === SYNC_ONE_BY_ONE) return "oneByOne";
-  if (answer === SYNC) return "manuscriptsOnly";
+  if (answer === SYNC || answer === RECEIVE) return "manuscriptsOnly";
   return undefined;
 }
 
@@ -451,6 +561,12 @@ export interface SyncTargetOutcome {
    * という壊れ方をさせない（設計書5.5.16）
    */
   diverged?: boolean;
+  /**
+   * 早送りで取り込んだあと、退避した書きかけを戻すときに食い違って止めたか
+   * （作者の判断 2026-11-01、洗い出しの3）。報告から残す文を選ぶ画面へ直に
+   * 行けるようにするための印。`diverged` と同じく、**理由の文言で見分けない**
+   */
+  conflicted?: boolean;
   /**
    * 分かれた分を、その場で合わせた結果（設計書5.5.18）。
    *

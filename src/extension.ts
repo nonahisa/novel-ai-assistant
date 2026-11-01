@@ -228,9 +228,6 @@ import {
   describeSyncBadge,
   describeSyncTooltip,
   hasPendingSync,
-  listSyncTargets,
-  buildStatusBarSyncMenu,
-  type StatusBarSyncChoice,
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
@@ -2187,9 +2184,18 @@ export async function activate(
     // （あちらは未保存があると保存を促して止まる。設計書6.15の手順1）
     registerCommand("novelai.saveAndSync", async () => {
       if (!canRunProcesses()) {
-        vscode.window.showWarningMessage(
-          describeProcessesBlocked("novelai.saveAndSync")
-        );
+        /*
+          **ブラウザ版でも行き止まりにしない**（設計書5.8.9。作者の判断 2026-11-01）。
+          同期の入口を「保存・同期」1つにまとめたので、ブラウザ版でソース管理へ
+          案内していた「同期」の役目もここが持つ。gitコマンドは打てないが、
+          保存してGitHubへ確定する道（ソース管理）は在る
+        */
+        const work = await resolveWork(undefined, registry, {
+          title: "保存する作品を選択",
+        });
+        if (!work) return;
+        const { showWebSyncGuide } = await import("./features/webSync.js");
+        await showWebSyncGuide(work);
         return;
       }
       const { saveAndSyncAll } = await import("./features/handoffSync.js");
@@ -4676,22 +4682,21 @@ export async function activate(
     registerCommand(
       "novelai.gitSync",
       async (arg?: WorkNode | { fromStatusBar: true }) => {
-        // **ステータスバーから押したときだけ**、手当ての要る置き場へ絞る
-        // （作者の指摘、2026-10-01：「未記録 2」を押すと全作品が並んだ）。
-        // コマンドパレットや詳細メニューからは、これまでどおり全作品から選ぶ
+        /*
+          **ステータスバーから押したときと、編集者モードでは「保存・同期」と同じ流れへ渡す**
+          （作者の判断 2026-11-01）。同期の入口は1つにまとめた。ステータスバーはもう
+          `novelai.saveAndSync` を直に呼ぶが、古い引数で呼ばれたときのために残す。
+          編集者モードの作品ごとの一覧は記録・送信の項目を持つので、編集者には出さない
+          （編集者が送るのは「校閲を終えて返す」だけ。受け取りは「保存・同期」）
+        */
         const fromStatusBar =
           arg !== undefined && "fromStatusBar" in arg && arg.fromStatusBar;
-        const node = fromStatusBar ? undefined : (arg as WorkNode | undefined);
-        // **ステータスバーからは、同期を先頭にした1つの一覧を出す**
-        // （作者の報告、2026-10-10。設計書6.15.1）。ブラウザ版はgitが無く
-        // 状態が読めないので、今までどおり作品を選ばせて案内へ回す
-        if (fromStatusBar && canRunProcesses()) {
-          await showStatusBarSyncMenu(registry, gitSync);
+        if (fromStatusBar || isEditorMode()) {
+          await vscode.commands.executeCommand("novelai.saveAndSync");
           return;
         }
-        const work = fromStatusBar
-          ? await pickWorkNeedingSync(registry, gitSync)
-          : await resolveWork(node, registry, {
+        const node = arg as WorkNode | undefined;
+        const work = await resolveWork(node, registry, {
           title: "同期する作品を選択",
           // **一覧の印をそのまま使う。** この先の同期メニューは記録・送信・
           // 受け取りのどれにも進めるので、状態を丸ごと見せるのが合っている。
@@ -9080,152 +9085,6 @@ async function resolveWork(
     lastWorkMemory?.set(work.id);
   }
   return work;
-}
-
-/**
- * ステータスバーから押された同期の対象を選ばせる。**手当ての要る置き場だけ**
- * を並べ、1つだけなら選ばせずに進む（作者の指摘、2026-10-01）。
- * 数え方・まとめ方は `listSyncTargets`（ステータスバーの数と同じ畳み方）。
- */
-async function pickWorkNeedingSync(
-  registry: WorkRegistry,
-  gitSync: GitSyncMonitorLike
-): Promise<WorkEntry | undefined> {
-  const targets = listSyncTargets(
-    registry.list().flatMap((work) => {
-      const status = gitSync.statusFor(work.id);
-      return status ? [{ work, status }] : [];
-    })
-  );
-  if (targets.length === 0) {
-    vscode.window.showInformationMessage(
-      "手当ての要る作品はありません（記録・送信・取り込みはどれも済んでいます）。"
-    );
-    return undefined;
-  }
-  const chosen =
-    targets.length === 1
-      ? targets[0]
-      : await (async () => {
-          const picked = await vscode.window.showQuickPick(
-            [
-              ...targets.map((target) => ({
-                label: target.label,
-                description: target.description,
-                target,
-              })),
-              cancelItem(),
-            ],
-            {
-              title: "同期する作品を選択（手当ての要るものだけ）",
-              placeHolder: "記録・送信・取り込みの要る置き場です",
-            }
-          );
-          return picked && "target" in picked ? picked.target : undefined;
-        })();
-  if (!chosen) return undefined;
-  useLogFile(chosen.work.folderPath);
-  return chosen.work;
-}
-
-/**
- * ステータスバーから押されたときの一覧（作者の報告、2026-10-10。設計書6.15.1）。
- *
- * **2段にしない。** 分岐合流 → 保存・同期（すべて）→ 作品ごと → ログ を
- * 1つの一覧に並べる。並びの決まりは `buildStatusBarSyncMenu`（core。単体テストあり）。
- * 保存・同期は確認の窓を `syncAllWorks` が1回出すので、ここでは重ねて訊かない。
- */
-async function showStatusBarSyncMenu(
-  registry: WorkRegistry,
-  gitSync: GitSyncMonitorLike
-): Promise<void> {
-  const menu = buildStatusBarSyncMenu(
-    registry.list().flatMap((work) => {
-      const status = gitSync.statusFor(work.id);
-      return status ? [{ work, status }] : [];
-    })
-  );
-  if (menu.kind === "nothing") {
-    vscode.window.showInformationMessage(
-      "手当ての要る作品はありません（記録・送信・取り込みはどれも済んでいます）。"
-    );
-    return;
-  }
-
-  const { showGitSyncActions } = await import("./features/gitSync.js");
-  const openWork = async (work: WorkEntry): Promise<void> => {
-    useLogFile(work.folderPath);
-    await showGitSyncActions(gitSync as GitSyncMonitor, work);
-  };
-  if (menu.kind === "direct") {
-    await openWork(menu.work);
-    return;
-  }
-
-  const icons: Record<StatusBarSyncChoice<WorkEntry>["kind"], string> = {
-    divergence: "$(git-merge) ",
-    syncAll: "$(cloud-upload) ",
-    work: "",
-    log: "$(output) ",
-  };
-  // 「そろえたあと送るか」を事実に合わせる（2026-10-11、「GitHubへは送りません」と
-  // 書いてあったのに、自動の送り直しが1分後に送っていた）
-  const { readAutoResendSettings } = await import("./features/autoResend.js");
-  const autoResend = readAutoResendSettings().enabled !== false;
-  const details: Record<StatusBarSyncChoice<WorkEntry>["kind"], string> = {
-    divergence: autoResend
-      ? "このパソコンともう1台で別々に書いた分を、1つの原稿にそろえます。そろえたあと、自動でGitHubへ送ります。"
-      : "このパソコンともう1台で別々に書いた分を、1つの原稿にそろえます。GitHubへは「保存・同期」で送ります。",
-    syncAll:
-      "開いている原稿を保存し、すべての作品を記録してGitHubへ送ります。送る前に1回だけ確認します。",
-    work: "この作品の操作（記録・取り込み・送信・状態の確認）を選びます。",
-    log: "同期に失敗した理由はここに記録しています。",
-  };
-  type Row = vscode.QuickPickItem & { choice?: StatusBarSyncChoice<WorkEntry> };
-  const rows: Row[] = [];
-  for (const choice of menu.choices) {
-    // 作品ごとの行の前に区切りを置く。上の2つ（まとめて行う操作）と見分けるため
-    if (choice.kind === "work" && !rows.some((row) => row.choice?.kind === "work")) {
-      rows.push({ label: "作品ごと", kind: vscode.QuickPickItemKind.Separator });
-    }
-    if (choice.kind === "log") {
-      rows.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
-    }
-    rows.push({
-      label: `${icons[choice.kind]}${choice.label}`,
-      description: choice.description,
-      detail: details[choice.kind],
-      choice,
-    });
-  }
-  const picked = await vscode.window.showQuickPick([...rows, cancelItem()], {
-    title: "GitHubとの同期",
-    placeHolder: "同期するか、作品を選んで操作を選んでください",
-    // そろえる流れの入口。ほかの窓へ移っても閉じない（2026-10-13 夜の見直し）
-    ignoreFocusOut: true,
-  });
-  if (!picked || !("choice" in picked) || !picked.choice) return;
-
-  const choice = picked.choice;
-  switch (choice.kind) {
-    case "divergence":
-      // 作品はもう分かっているので、分岐合流の作品選びを飛ばす
-      // （`syncAllWorks.ts` の報告から渡すのと同じ形）
-      await vscode.commands.executeCommand("novelai.resolveDivergence", {
-        type: "work",
-        work: choice.work,
-      });
-      return;
-    case "syncAll":
-      await vscode.commands.executeCommand("novelai.saveAndSync");
-      return;
-    case "work":
-      await openWork(choice.work);
-      return;
-    case "log":
-      showLog();
-      return;
-  }
 }
 
 async function resolveWorkUnrouted(

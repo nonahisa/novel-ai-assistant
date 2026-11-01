@@ -43,8 +43,11 @@ const EDITOR_ALLOWED = new Set<string>([
   "novelai.proposeEditByHand",
   "novelai.addSceneMemo",
 
-  // 原稿を受け取り、直したものを返すために要る
-  // 1作品だけ見る編集部は作品ごとの同期で足りる（`syncAllWorks` は開かない）
+  // 原稿を受け取るために要る。**編集者モードの「保存・同期」は受け取るだけ**
+  // （作者の判断 2026-11-01。記録も送信もしない。送るのは「校閲を終えて返す」だけ）。
+  // `gitSync` は作品一覧の右クリックから呼ばれるので残すが、編集者モードでは
+  // 「保存・同期」と同じ受け取りへ回す（`extension.ts`）。`syncAllWorks` は開かない
+  "novelai.saveAndSync",
   "novelai.gitSync",
   "novelai.resolveConflicts",
   // 編集部と作者の両方が触ったあとは、ここを通らないと合流できない
