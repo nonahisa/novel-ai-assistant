@@ -336,7 +336,8 @@ describe("編集用リポジトリの立ち直り", { timeout: REAL_GIT_TIMEOUT_
       const result = await reconcileDiverged(editor, runGit, { ledgerOnly: true });
 
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.detail).toContain("GitHubと同期");
+      // 戻し方を言う（「GitHubと同期」は詳細メニューから外した。2026-11-01）
+      if (!result.ok) expect(result.detail).toContain("変更を破棄");
       expect(await read(editor, "本文/メモ.txt")).toBe("消えてはいけない書きかけ");
     });
 

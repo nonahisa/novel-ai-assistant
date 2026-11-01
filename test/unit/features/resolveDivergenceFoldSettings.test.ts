@@ -223,7 +223,8 @@ describe("設定資料と本文の自動合流：設定資料と、途中でや�
     expect(notice.kind).toBe("stopped");
     expect(notice.message).toBe("そろえるのを途中でやめました。原稿は元のままです。");
     expect(notice.detail).toContain(
-      "続けるには、作品一覧で作品を右クリックし、「GitHubと同期」→「両方の書き換えを合わせる」をもう一度押してください。"
+      // 同期の入口は「保存・同期」1つ（作者の判断 2026-11-01）。分かれている間は、その中で合わせる画面へ進む
+      "続けるには、もう一度「保存・同期」を押してください（2台の書き換えを合わせる画面へ進みます）。"
     );
     expect(notice.detail).toContain("第5話.txt");
     expect(`${notice.message}${notice.detail}`).not.toContain("そろえられませんでした");

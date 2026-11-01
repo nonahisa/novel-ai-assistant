@@ -28,13 +28,9 @@ describe("実行環境で使えるか", () => {
   });
 
   it("一覧にあるコマンドは、外部プロセスを起動できるときだけ使える", () => {
-    // 競合の解決は、ブラウザに代わりの道が無い（手元でやるしかない）
-    expect(isCommandAvailableInRuntime("novelai.resolveConflicts", true)).toBe(
-      true
-    );
-    expect(isCommandAvailableInRuntime("novelai.resolveConflicts", false)).toBe(
-      false
-    );
+    // 過去の版に戻すのは、ブラウザに代わりの道が無い（GitHubのサイトで見て写すだけ）
+    expect(isCommandAvailableInRuntime("novelai.gitRestore", true)).toBe(true);
+    expect(isCommandAvailableInRuntime("novelai.gitRestore", false)).toBe(false);
   });
 });
 

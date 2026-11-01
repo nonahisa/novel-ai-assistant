@@ -405,6 +405,98 @@ describe("早送りで書きかけと食い違ったとき", () => {
     expect(text).toContain("書きかけと同じ箇所が食い違ったので止めました");
     expect(text).toContain("退避（stash）に残っています");
   });
+
+  /*
+    行き止まりの直し（作者の判断 2026-11-01、洗い出しの3）。「食い違いを直してから、
+    もう一度同期してください」と言うだけで、直す画面へ行く道が無かった。
+    **残す文を選ぶ画面を、知らせのボタンで直に開く。**
+  */
+  test("報告に「残す文を選ぶ」ボタンが出て、押すと食い違った作品で競合解決を開く", async () => {
+    const executed: Array<{ command: string; args: unknown[] }> = [];
+    const { commands } = await import("../support/vscodeStub");
+    const original = commands.executeCommand;
+    commands.executeCommand = async (command: string, ...args: unknown[]) => {
+      executed.push({ command, args });
+      return undefined;
+    };
+    const buttons: string[] = [];
+    Object.assign(window, {
+      showWarningMessage: async (message: string, ...rest: unknown[]) => {
+        const detail = rest.find(
+          (item): item is { detail?: string } =>
+            typeof item === "object" && item !== null && "detail" in item
+        )?.detail;
+        shown.push(detail ? `${message}\n${detail}` : message);
+        const labels = rest.filter((item): item is string => typeof item === "string");
+        buttons.push(...labels);
+        return labels.find((label) => label === "残す文を選ぶ");
+      },
+    });
+    try {
+      await syncAllWorks({ registry: twoRegistry, monitor, run: twoLibraries });
+    } finally {
+      commands.executeCommand = original;
+    }
+
+    expect(buttons).toContain("残す文を選ぶ");
+    expect(shown.join("\n")).toContain("残す文を選んでください");
+    const opened = executed.find((one) => one.command === "novelai.resolveConflicts");
+    expect(opened?.args[0]).toEqual({ type: "work", work: libraries[0] });
+  });
+});
+
+/**
+ * 編集者モードの「保存・同期」（作者の判断 2026-11-01）。
+ *
+ * **編集者が送るのは「校閲を終えて返す」だけ。** 保存・同期は作者の最新の原稿と
+ * 採否を受け取るだけにし、記録も送信もしない（編集部の書きかけを作者の原稿の
+ * 履歴へ流さない）。
+ */
+describe("編集者モードの保存・同期", () => {
+  const copies: WorkEntry[] = [
+    { id: "e1", title: "預かった作品", folderPath: "C:/写し" },
+  ] as WorkEntry[];
+  const copyRegistry = { list: () => copies } as unknown as WorkRegistry;
+
+  /** 作者が2件先へ進んでいて、手元には提案（台帳）の書きかけがある写し */
+  const editorCopy: GitCommandRunner = async (args) => {
+    calls.push(args);
+    const joined = args.join(" ");
+    const ok = (stdout: string) => ({ code: 0, stdout, stderr: "" });
+    if (args[0] === "--version") return ok("git version 2.55");
+    if (joined === "rev-parse --is-inside-work-tree --show-toplevel") return ok("true\nC:/写し");
+    if (joined === "rev-parse --show-toplevel") return ok("C:/写し");
+    if (joined === "status --porcelain --untracked-files=all") {
+      return ok(" M .aiwriter/proposals.json\n");
+    }
+    if (args[0] === "status") return ok(" M .aiwriter/proposals.json\n");
+    if (joined === "remote") return ok("origin");
+    if (args[0] === "symbolic-ref") return ok("main");
+    if (joined.startsWith("rev-parse --abbrev-ref")) return ok("origin/main");
+    if (args[0] === "rev-list") return ok("2\t0");
+    if (args[0] === "config") return ok("編集者");
+    if (args[0] === "diff") return { code: 1, stdout: "", stderr: "" };
+    return ok("");
+  };
+
+  test("受け取るだけで、記録も送信もしない", async () => {
+    await syncAllWorks({ registry: copyRegistry, monitor, run: editorCopy, editor: true });
+
+    const names = calls.map((args) => args[0]);
+    expect(names).toContain("pull");
+    expect(names).not.toContain("commit");
+    expect(names).not.toContain("push");
+    expect(names).not.toContain("add");
+  });
+
+  test("確認の窓は、送るのは「校閲を終えて返す」だと言う", async () => {
+    await syncAllWorks({ registry: copyRegistry, monitor, run: editorCopy, editor: true });
+
+    const confirm = shown.find((text) => text.includes("受け取ります")) ?? "";
+    expect(confirm).not.toBe("");
+    expect(confirm).not.toContain("送信します");
+    expect(confirm).toContain("「校閲を終えて返す」");
+  });
 });
 
 /**

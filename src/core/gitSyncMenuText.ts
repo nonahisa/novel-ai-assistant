@@ -1,4 +1,36 @@
 import type { DivergenceConflicts, GitSyncStatus } from "./git";
+import { saveAndSyncLabel } from "./syncEntryNames";
+
+/**
+ * 残す文を選ぶ画面（`novelai.resolveConflicts`）を開く知らせのボタン（作者の判断 2026-11-01）。
+ *
+ * 「競合解決」は詳細メニューから外したので、ボタンの字はメニューの名前でなく
+ * **文と同じ言葉**にする（`handoffSync.ts` の「どちらを残すか選ぶ」と同じ流儀）。
+ * 押された文字で分けるので、ここ1か所に置く。
+ */
+export const CHOOSE_TEXT_TO_KEEP = "残す文を選ぶ";
+
+/**
+ * 記録の前に早送りで取り込んだあと、退避した書きかけを戻すときに食い違ったときの文。
+ *
+ * 以前は「もう一度『GitHubと同期』の『GitHub の書き換えを受け取る』を押して」と
+ * 言っていたが、食い違いが残っている間その項目は一覧に出ない（受け取るものが無い）。
+ * **その場のボタンで、残す文を選ぶ画面を開く**（洗い出しの3）。
+ */
+export function describePulledButConflicted(title: string): {
+  message: string;
+  detail: string;
+} {
+  return {
+    message: `「${title}」にGitHubの分を取り込みましたが、書きかけと同じ箇所が食い違いました。`,
+    detail:
+      "書きかけはgitの退避（stash）に残してあります。" +
+      `「${CHOOSE_TEXT_TO_KEEP}」を押して、残す文を選んでください。` +
+      "選び終わったら、もう一度「" +
+      saveAndSyncLabel() +
+      "」を押すと、記録して送ります。",
+  };
+}
 
 /**
  * 「GitHubと同期」を押したときの一覧の文（設計書5.5.18。作者の裁定 2026-10-13 夜「案A」）。
@@ -117,7 +149,9 @@ export function buildGitSyncMenuEntries(
 
   if (allowed.canSaveAndSync && status.kind === "tracked") {
     entries.push({
-      label: "$(cloud-upload) 保存してそろえる（ほかの作品もまとめて）",
+      // **名前は詳細メニューの「保存・同期」にそろえる**（作者の判断 2026-11-01）。
+      // 中身は同じ処理（`novelai.saveAndSync`）なのに名前が違い、別の操作に見えていた
+      label: `$(cloud-upload) ${saveAndSyncLabel()}（ほかの作品もまとめて）`,
       description: [
         status.dirty > 0 ? `履歴に残す分 ${status.dirty}件` : undefined,
         status.ahead > 0 ? `送る分 ${status.ahead}件` : undefined,

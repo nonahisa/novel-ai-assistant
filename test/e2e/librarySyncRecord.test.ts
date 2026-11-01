@@ -5,7 +5,8 @@
  *
  * 何を見張るか：
  * - 80：書庫（1つの置き場に作品が2つ）で書き換えて右下（ステータスバー）に「未記録 N」を出し、
- *   ステータスバーを押して「いまの原稿を履歴に残す」、または「全作品同期」を押したあと、`git status` が0件なら
+ *   「GitHubと同期」の「いまの原稿を履歴に残す」、または「全作品同期」を押したあと、`git status` が0件なら
+ *   （2026-11-01 からステータスバーを押すと「保存・同期」になったので、一覧はパレットから開く）
  *   「未記録」が消え、数秒待っても戻らない。「GitHub の様子を読み直す」の知らせの数とステータスバーの数が
  *   食い違わない（一覧の文は 0.105.6 で作者の裁定「案A」に改めた。2026-10-13 夜）
  * - 4989：記録だけ（送らない）を押すと、作品一覧の「記録待ち」の数が減る（0になる）
@@ -66,6 +67,13 @@ const SHOW_SIDEBAR_PRESS = "Control+Alt+Shift+KeyJ";
  */
 const REDRAW_LIST_KEY = "ctrl+alt+shift+p";
 const REDRAW_LIST_PRESS = "Control+Alt+Shift+KeyP";
+/**
+ * 「全作品同期」を押すキー。**コマンドパレットからは外した**（作者の判断 2026-11-01。同期の入口を
+ * 「保存・同期」1つにまとめた）ので、使い捨ての keybindings.json に書いたキーで命令を直に呼ぶ。
+ * ここで見たいのは記録の前の保存（`presave`）で、「保存・同期」は押した時点で全部を保存してしまう
+ */
+const SYNC_ALL_KEY = "ctrl+alt+shift+f";
+const SYNC_ALL_PRESS = "Control+Alt+Shift+KeyF";
 
 /** 起こし方：左の列（作品一覧）を出すキーと、もう1つの作品を登録するキー。`prepare` は作品と git の準備 */
 function launchFor(prepare: (folders: { workFolder: string; otherFolder: string; root: string }) => Promise<void>): LaunchOptions {
@@ -76,7 +84,12 @@ function launchFor(prepare: (folders: { workFolder: string; otherFolder: string;
   };
   return {
     settings: { ...SIDEBAR_LAUNCH.settings },
-    keybindings: [...SIDEBAR_LAUNCH.keybindings, registerOther, { key: REDRAW_LIST_KEY, command: "novelai.refresh" }],
+    keybindings: [
+      ...SIDEBAR_LAUNCH.keybindings,
+      registerOther,
+      { key: REDRAW_LIST_KEY, command: "novelai.refresh" },
+      { key: SYNC_ALL_KEY, command: "novelai.syncAllWorks" },
+    ],
     prepareWork: async ({ workFolder }) => {
       const library = path.dirname(workFolder);
       const otherFolder = path.join(library, OTHER_TITLE);
@@ -202,27 +215,32 @@ async function diagnoseRowMarks(
   );
 }
 
-/** ステータスバーの同期の項目（`hasText` の字を含むもの）を押し、置き場の同期の選ぶ画面まで進む */
+/**
+ * ステータスバーに同期の項目（`hasText` の字を含むもの）が出ているのを確かめてから、作品の同期の
+ * 一覧（「<作品> を GitHub とそろえる」）まで進む。
+ *
+ * **ステータスバーを押すと「保存・同期」と同じ流れになった**（作者の判断 2026-11-01。同期の入口を
+ * 1つにまとめた）ので、記録だけ（送らない）・様子の読み直しの一覧は、パレットの「GitHubと同期」から開く
+ * （作品一覧の右クリックと同じ一覧）
+ */
 async function openSyncMenuFromStatusBar(page: Page, hasText: string): Promise<void> {
   const item = page.locator(".part.statusbar .statusbar-item", { hasText }).first();
   await item.waitFor({ state: "visible", timeout: 10_000 }).catch(async (error: unknown) => {
     throw new Error(`ステータスバーに「${hasText}」の項目が出ません（${String(error)}／${JSON.stringify(await statusBarTexts(page))}）`);
   });
-  await item.click();
-  // 手当ての要る置き場が1つなら、その置き場の「<作品> を GitHub とそろえる」が直に出る（`buildStatusBarSyncMenu`）。
-  // 2つ以上なら「GitHubとの同期」から置き場（書庫）の行を選ぶ
+  await runCommand(page, "GitHubと同期");
   await waitUntil(
     async () => {
       const title = (await quickPickTitle(page)) ?? "";
-      return title.includes("を GitHub とそろえる") || title === "GitHubとの同期";
+      return title.includes("を GitHub とそろえる") || title.includes("同期する作品を選択");
     },
-    "ステータスバーを押すと同期の選ぶ画面が出る",
+    "「GitHubと同期」で同期の選ぶ画面が出る",
     20_000
   ).catch(async (error: unknown) => {
     throw new Error(`${String(error)}${await quickInputWaitContext(page)}`);
   });
-  if ((await quickPickTitle(page)) === "GitHubとの同期") {
-    await pickQuickPickRow(page, "書庫");
+  if (((await quickPickTitle(page)) ?? "").includes("同期する作品を選択")) {
+    await pickQuickPickRow(page, E2E_WORK_TITLE);
     await waitForQuickInput(page, "を GitHub とそろえる");
   }
 }
@@ -329,7 +347,7 @@ test("書庫で書き換えると「未記録」が置き場の数で出て、�
         }
       );
       const syncSince = Date.now();
-      await runCommand(page, "全作品同期");
+      await pressWorkbenchKey(page, SYNC_ALL_PRESS);
       let confirm: string | undefined;
       await waitUntil(async () => ((confirm = await dialogText(page)) ?? "").includes("か所を同期します"), "全作品同期の確認の窓が出る", 30_000).catch(
         async (error: unknown) => {
@@ -402,7 +420,7 @@ test("原稿エディターで打って保存しないうちに全作品同期�
       expect(await porcelainLines(repo), "保存していないので、ディスクはまだ変わっていない").toEqual([]);
 
       const since = Date.now();
-      await runCommand(page, "全作品同期");
+      await pressWorkbenchKey(page, SYNC_ALL_PRESS);
       let confirm: string | undefined;
       await waitUntil(async () => ((confirm = await dialogText(page)) ?? "").includes("か所を同期します"), "全作品同期の確認の窓が出る", 30_000).catch(
         async (error: unknown) => {

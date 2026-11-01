@@ -3,6 +3,22 @@ import type { WorkEntry } from "../models/types";
 import type { GitSyncStatus } from "../core/git";
 
 /**
+ * 受け取るだけの結果（`GitSyncMonitorLike.receive`）。
+ *
+ * - `received`：早送りで取り込んだ
+ * - `nothing`：受け取るものが無かった（取り寄せたうえで遅れていない）
+ * - `skipped`：受け取らなかった。理由は作者に見せる1文
+ * - `conflicted`：取り込んだが、退避した書きかけを戻すときに食い違った（残す文を選ぶ要がある）
+ * - `failed`：受け取れなかった。理由は作者に見せる1文（詳しくはログ）
+ */
+export type ReceiveOutcome =
+  | { kind: "received"; behind: number }
+  | { kind: "nothing" }
+  | { kind: "skipped"; reason: string }
+  | { kind: "conflicted" }
+  | { kind: "failed"; reason: string };
+
+/**
  * `GitSyncMonitor` の形。実物とブラウザ版の代役の両方が持つ。
  *
  * **`import type` で持つ。** 型だけなら消えるので、`core/git.ts`
@@ -21,6 +37,12 @@ export interface GitSyncMonitorLike extends vscode.Disposable {
     options: { fetch: boolean; notify: boolean }
   ): Promise<GitSyncStatus>;
   pull(work: WorkEntry): Promise<boolean>;
+  /**
+   * 受け取るだけ（取り寄せて、遅れていれば早送りで取り込む）。**問いも知らせも出さない**
+   * ——結果を返し、何と言うかは呼び出し側が1つにまとめて決める（2026-11-01）。
+   * 記録も送信もしない。**代役は持たない**（ブラウザ版には git が無い）
+   */
+  receive?(work: WorkEntry): Promise<ReceiveOutcome>;
   push(work: WorkEntry): Promise<boolean>;
   /**
    * 取り込みのあいだ、設定資料の見張りを止める仕掛けを渡す（設計書5.5.18）。

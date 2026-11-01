@@ -43,6 +43,13 @@ import {
 } from "../core/logger";
 import { useSyncLog } from "./syncLog";
 import { withCancellableProgress } from "../views/progress";
+import { whenNoticePicked } from "../views/notify";
+import { CHOOSE_TEXT_TO_KEEP } from "../core/gitSyncMenuText";
+import {
+  IDENTITY_MISSING_HINT,
+  SETUP_GITHUB_COMMAND,
+  setupGithubLabel,
+} from "../core/syncEntryNames";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 import type { SyncPresave } from "./presaveBeforeSync";
 import { describePresaveFailures } from "../core/syncPresave";
@@ -103,6 +110,13 @@ export interface SyncAllDeps {
    * 原稿エディターの大きな部品まで読み込むことになるため
    */
   presave?: SyncPresave;
+  /**
+   * 編集者モードか（作者の判断 2026-11-01）。**編集者の「保存・同期」は受け取るだけ**
+   * で、記録も送信もしない（`planSyncTarget`）。呼び出し側（`handoffSync.ts`）が
+   * `isEditorMode()` を読んで渡す——ここで設定を読むと、手順の試験が設定の
+   * 差し替えに縛られる
+   */
+  editor?: boolean;
 }
 
 export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
@@ -120,13 +134,22 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   );
   if (!states) return;
 
-  const plans = planSyncAll(states);
+  const plans = planSyncAll(states, { editor: deps.editor });
   const doing = actionablePlans(plans);
   if (doing.length === 0) {
     // 書庫に同期するものが無くても、編集部の提案は届いているかもしれない
     await collectEditorInboxAfterSync(works);
-    void vscode.window.showInformationMessage(
-      `同期するものはありませんでした。${describeSyncSkips(plans)}`
+    // **止まっている所があれば、次の手をボタンで出す**（作者の判断 2026-11-01）。
+    // 「競合が残っています」「送り先が未設定です」と言うだけでは、押す所が
+    // メニューから消えた今は行き止まりになる。ボタンの答えは待たない
+    const next = nextSteps(plans, []);
+    whenNoticePicked(
+      vscode.window.showInformationMessage(
+        `同期するものはありませんでした。${describeSyncSkips(plans)}`,
+        ...next.map((step) => step.label)
+      ),
+      (picked) => runNextStep(next, picked),
+      { label: "保存・同期の次の手" }
     );
     return;
   }
@@ -486,10 +509,12 @@ async function runPlan(
     // **この置き場は、記録も取り込みも進めない**——`git add -A` が
     // 競合マーカーごと記録してしまう。他の置き場はそのまま続ける
     outcome.pulled = true;
+    outcome.conflicted = true;
+    // 直す画面へは報告のボタン（「残す文を選ぶ」）で進む（作者の判断 2026-11-01）
     outcome.error =
       "GitHubの分を取り込みましたが、書きかけと同じ箇所が食い違ったので止めました。" +
       "書きかけはgitの退避（stash）に残っています。" +
-      "食い違いを直してから、もう一度同期してください。";
+      `「${CHOOSE_TEXT_TO_KEEP}」を押して、残す文を選んでください。`;
     logFailure("すべて同期：記録の前の早送りで、書きかけと食い違った", {
       置き場: name,
     });
@@ -513,8 +538,7 @@ async function runPlan(
     // **名前とメールアドレスが無いと、gitはコミットを作れない。**
     // ここで訊くと一括処理が止まるので、案内だけ出して飛ばす
     if (!(await hasCommitIdentity(cwd, run))) {
-      outcome.error =
-        "記録する人の名前が未設定です。「GitHubと同期」から一度設定してください。";
+      outcome.error = IDENTITY_MISSING_HINT;
       return outcome;
     }
     const message = syncCommitMessage(trackable, new Date());
@@ -658,9 +682,19 @@ async function report(
 ): Promise<void> {
   const failed = outcomes.filter((one) => one.error);
   const summary = describeOutcomes(outcomes) + describeSyncSkips(plans);
+  const next = nextSteps(plans, outcomes);
 
   if (failed.length === 0) {
-    void vscode.window.showInformationMessage(summary);
+    // 通ったうえで、飛ばした所（送り先が無い・競合が残る）があれば次の手を添える。
+    // **ボタンの答えは待たない**（`whenNoticePicked`。押さずに置かれても止まらない）
+    whenNoticePicked(
+      vscode.window.showInformationMessage(
+        summary,
+        ...next.map((step) => step.label)
+      ),
+      (picked) => runNextStep(next, picked),
+      { label: "保存・同期の次の手" }
+    );
     return;
   }
 
@@ -669,23 +703,89 @@ async function report(
   const detail = failed
     .map((one) => `・${describeTargetWorks(one.plan.target)}：${one.error}`)
     .join("\n");
-  // 分岐で止まったものがあるなら、**その場から次の手へ行けるようにする**
-  const diverged = failed.filter((one) => one.diverged);
-  const buttons =
-    diverged.length > 0 ? ["分岐合流", "ログを表示"] : ["ログを表示"];
+  // 分岐・食い違いで止まったものがあるなら、**その場から次の手へ行けるようにする**
   const action = await vscode.window.showWarningMessage(
     summary,
     { modal: true, detail },
-    ...buttons
+    ...next.map((step) => step.label),
+    "ログを表示"
   );
-  if (action === "ログを表示") showLog();
-  if (action === "分岐合流") {
-    // 関わる作品が分かっていれば、それを入口にする（書庫の先頭の作品より近い）
-    const target = diverged[0]?.plan.target;
-    const work = target?.involved?.[0] ?? target?.works[0];
-    await vscode.commands.executeCommand(
-      "novelai.resolveDivergence",
-      work ? { type: "work", work } : undefined
-    );
+  if (action === "ログを表示") {
+    showLog();
+    return;
   }
+  await runNextStep(next, action);
+}
+
+/** 報告に添える「次の一手」のボタン1つ */
+interface NextStep {
+  label: string;
+  command: string;
+  work?: WorkEntry;
+}
+
+/** 分かれたときのボタン。文の言葉と同じにする（`handoffSync.ts` の同じ名前のボタン） */
+const CHOOSE_SIDE_TO_KEEP = "どちらを残すか選ぶ";
+
+/**
+ * 止まった所ごとに、次に押す所を1つずつ決める（作者の判断 2026-11-01）。
+ *
+ * 「分岐合流」「競合解決」は詳細メニューから外したので、**その場のボタンで直に開く。**
+ * ボタンの字は消えたメニューの名前を使わず、文と同じ言葉にする。
+ * 送り先が無い・まだ送っていない置き場は「GitHub初期設定」へ（メニューに残る項目なので
+ * 名前は木から引く）。関わる作品が分かっていれば、それを入口にする（書庫の先頭の作品より近い）。
+ */
+function nextSteps(
+  plans: readonly SyncTargetPlan[],
+  outcomes: readonly SyncTargetOutcome[]
+): NextStep[] {
+  const workOf = (target: SyncTargetPlan["target"]) =>
+    target.involved?.[0] ?? target.works[0];
+  const steps: NextStep[] = [];
+
+  const conflicted =
+    outcomes.find((one) => one.conflicted)?.plan.target ??
+    plans.find((plan) => plan.skip === "unmerged")?.target;
+  if (conflicted) {
+    steps.push({
+      label: CHOOSE_TEXT_TO_KEEP,
+      command: "novelai.resolveConflicts",
+      work: workOf(conflicted),
+    });
+  }
+
+  const diverged = outcomes.find((one) => one.diverged)?.plan.target;
+  if (diverged) {
+    steps.push({
+      label: CHOOSE_SIDE_TO_KEEP,
+      command: "novelai.resolveDivergence",
+      work: workOf(diverged),
+    });
+  }
+
+  // 編集者モードでは出さない（送り先を作るのは作者の仕事。`planReceiveOnly`）
+  const unsent = plans.find(
+    (plan) =>
+      !plan.receiveOnly && (plan.skip === "no_remote" || plan.skip === "no_upstream")
+  )?.target;
+  if (unsent) {
+    steps.push({
+      label: setupGithubLabel(),
+      command: SETUP_GITHUB_COMMAND,
+      work: workOf(unsent),
+    });
+  }
+  return steps;
+}
+
+async function runNextStep(
+  steps: readonly NextStep[],
+  picked: string | undefined
+): Promise<void> {
+  const step = steps.find((one) => one.label === picked);
+  if (!step) return;
+  await vscode.commands.executeCommand(
+    step.command,
+    step.work ? { type: "work", work: step.work } : undefined
+  );
 }

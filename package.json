@@ -1537,8 +1537,8 @@
           "group": "navigation@4"
         },
         {
-          "command": "novelai.syncAllWorks",
-          "when": "view == novelai.works && !novelai.processesBlocked",
+          "command": "novelai.saveAndSync",
+          "when": "view == novelai.works",
           "group": "navigation@5"
         },
         {
@@ -2057,11 +2057,11 @@
         },
         {
           "command": "novelai.gitPull",
-          "when": "!novelai.processesBlocked"
+          "when": "false"
         },
         {
           "command": "novelai.gitPush",
-          "when": "!novelai.processesBlocked"
+          "when": "false"
         },
         {
           "command": "novelai.resolveConflicts",
@@ -2150,11 +2150,11 @@
         },
         {
           "command": "novelai.syncAllWorks",
-          "when": "!novelai.processesBlocked"
+          "when": "false"
         },
         {
           "command": "novelai.saveAndSync",
-          "when": "!novelai.processesBlocked"
+          "when": "true"
         },
         {
           "command": "novelai.resolveDivergence",

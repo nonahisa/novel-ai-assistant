@@ -63,9 +63,18 @@ import {
 export { isWarning } from "../core/gitSyncStatusText";
 import {
   buildGitSyncMenuEntries,
+  CHOOSE_TEXT_TO_KEEP,
+  describePulledButConflicted,
   describeSyncMenuStatus,
   gitSyncMenuTitle,
 } from "../core/gitSyncMenuText";
+import {
+  conflictFixHint,
+  IDENTITY_MISSING_HINT,
+  SAVE_AND_SYNC_COMMAND,
+  saveAndSyncLabel,
+} from "../core/syncEntryNames";
+import type { ReceiveOutcome } from "./gitSyncStub";
 import { cancelItem } from "../views/dialogs";
 import {
   canRecordChanges,
@@ -419,12 +428,13 @@ export class GitSyncMonitor implements vscode.Disposable {
       vscode.StatusBarAlignment.Right,
       101
     );
-    // 引数つきで呼ぶ。ステータスバーからのときだけ、手当ての要る置き場へ
-    // 絞って選ばせるため（作者の指摘、2026-10-01）
+    // **押したら「保存・同期」と同じ流れにする**（作者の判断 2026-11-01）。
+    // 以前は手当ての要る置き場の一覧（作品ごとの「同期」の入口）を出していたが、
+    // 同期の入口を1つにまとめたので、ここも同じ1つへ渡す。状態を見て要る段だけを
+    // 進めるので、選ばせる一覧は要らない
     this.statusBar.command = {
-      title: "GitHubと同期",
-      command: "novelai.gitSync",
-      arguments: [{ fromStatusBar: true }],
+      title: saveAndSyncLabel(),
+      command: SAVE_AND_SYNC_COMMAND,
     };
     this.disposables.push(this.statusBar);
 
@@ -921,7 +931,9 @@ export class GitSyncMonitor implements vscode.Disposable {
       別に見る——箱は本文ではないが、作者が待っているものである。自動では取り込まない
       （本文を書き換えるので、押すのは作者）
     */
-    if (changed.some(isPendingInboxPath)) this.notifyInbox(work);
+    // 受け取るだけの最中（原稿箱の取り込みの前）は出さない。このあと箱を読むので、
+    // 出すと押しても「取り込み待ちはありません」になる（`receive`）
+    if (changed.some(isPendingInboxPath)) this.inboxArrived(work);
 
     const files = bodyChangePaths(changed);
     if (files.length === 0) return;
@@ -1125,6 +1137,104 @@ export class GitSyncMonitor implements vscode.Disposable {
   }
 
   /**
+   * 受け取るだけ（`GitSyncMonitorLike.receive` の説明）。原稿箱の取り込みの前などで使う
+   * （作者の判断 2026-11-01。同期の入口を「保存・同期」1つにまとめたので、受け取りの
+   * 手順も1つにする）。
+   *
+   * - **問いを出さない。** `pull` は未記録の変更があると［記録してから取り込む］を訊いて
+   *   すぐ戻るので、呼び出し側の「受け取れなかった」と問いが並んでいた。ここは記録の前の
+   *   早送り（`pullBeforeRecording`。書きかけは git が退避して戻す）で受け取り、記録はしない
+   * - **分かれている・残す文が決まっていない置き場には触らない。** 合わせるのは「保存・同期」
+   * - **受け取りの最中は「原稿箱に N件届いています」を出さない**（`quietInbox`）。原稿箱の
+   *   取り込みがこのあと箱を読むので、出すと押しても「取り込み待ちはありません」になる
+   */
+  async receive(work: WorkEntry): Promise<ReceiveOutcome> {
+    const run = this.options.run ?? runGit;
+    this.quietInbox += 1;
+    try {
+      const status = await this.refresh(work, { fetch: true, notify: false });
+      if (status.kind === "not_a_repo" || status.kind === "no_remote") {
+        return {
+          kind: "skipped",
+          reason: "この作品は GitHub と同期していないため、GitHub からは受け取りませんでした。",
+        };
+      }
+      if (status.kind !== "tracked") {
+        return {
+          kind: "skipped",
+          reason: `GitHub からは受け取りませんでした（${describeSyncMenuStatus(status)}）。`,
+        };
+      }
+      if (status.unmerged > 0) {
+        return {
+          kind: "skipped",
+          reason:
+            "どちらの文を残すか決まっていない原稿があるため、GitHub からは受け取りませんでした。" +
+            conflictFixHint(true),
+        };
+      }
+      if (status.behind === 0) return { kind: "nothing" };
+      if (status.ahead > 0) {
+        return {
+          kind: "skipped",
+          reason:
+            "このパソコンと GitHub の両方で書き換えがあるため、ここでは受け取りませんでした。" +
+            `「${saveAndSyncLabel()}」を押すと、合わせて送ります。`,
+        };
+      }
+
+      let result: PreRecordPull | undefined;
+      await this.countedPull(work, async () => {
+        const resume = this.settingsPause?.(work);
+        try {
+          result = await withProgress("GitHub の分を受け取っています…", () =>
+            pullBeforeRecording(work.folderPath, status, run)
+          );
+        } finally {
+          resume?.();
+        }
+        return result.kind === "pulled";
+      });
+      if (!result) return { kind: "failed", reason: "GitHub から受け取れませんでした。" };
+      switch (result.kind) {
+        case "pulled":
+          this.lastFetchAt.set(work.id, Date.now());
+          this.notified.delete(work.id);
+          useLogFile(work.folderPath);
+          logStep(`受け取った（${work.title}／${result.behind}件）`);
+          return { kind: "received", behind: result.behind };
+        case "conflicted":
+          useLogFile(work.folderPath);
+          logFailure("受け取りの早送りで、書きかけと食い違った", { 作品: work.title });
+          return { kind: "conflicted" };
+        case "fast_forward_failed":
+          useLogFile(work.folderPath);
+          logFailure("受け取りの早送りに失敗", { 作品: work.title, 詳細: result.detail });
+          return {
+            kind: "failed",
+            reason:
+              "GitHub から受け取れませんでした" +
+              `（${describeNetworkFailure(result.detail) ?? "詳しくはログにあります"}）。`,
+          };
+        case "diverged":
+        case "skipped":
+          return { kind: "nothing" };
+      }
+    } finally {
+      this.quietInbox -= 1;
+    }
+  }
+
+  /** 受け取るだけの最中か（「原稿箱に N件届いています」を出さない） */
+  private quietInbox = 0;
+
+  /** 原稿箱が届いたとき。受け取るだけの最中は黙る（`receive`） */
+  private inboxArrived(work: WorkEntry): void {
+    if (this.quietInbox > 0) return;
+    this.notifyInbox(work);
+  }
+
+  /**
    * 未記録の変更を記録してから、もう一度だけ取り込む（問いの答えから呼ぶ）。
    *
    * **記録 → 取り込みの往復は1回まで**にする（`runPull` に `afterRecording` を
@@ -1325,10 +1435,7 @@ ${reason}` : ""}`,
     // **名前が無いと git commit は必ず失敗する。** 初めてGitを使う作者が
     // 必ずここで詰まるので、先に確かめて次の一手を示す
     if (!(await hasCommitIdentity(root, run))) {
-      vscode.window.showWarningMessage(
-        "記録する人の名前が未設定です。" +
-          "「GitHubと同期」の案内から一度設定してください。"
-      );
+      vscode.window.showWarningMessage(IDENTITY_MISSING_HINT);
       return false;
     }
 
@@ -1409,20 +1516,24 @@ ${reason}` : ""}`,
         logFailure("記録の前の早送りで、書きかけと食い違った", {
           作品: work.title,
         });
-        if (
-          (await vscode.window.showWarningMessage(
-            `「${work.title}」にGitHubの分を取り込みましたが、書きかけと同じ箇所が食い違いました。`,
-            {
-              modal: true,
-              detail:
-                "書きかけはgitの退避（stash）に残してあります。" +
-                // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
-                "食い違いを直してから、もう一度「GitHubと同期」の「GitHub の書き換えを受け取る」を押してください。",
-            },
+        {
+          // **押す所をその場に出す**（作者の判断 2026-11-01、洗い出しの3）。以前の文は
+          // 一覧に出ない項目（「GitHub の書き換えを受け取る」）を指していた
+          const text = describePulledButConflicted(work.title);
+          const answer = await vscode.window.showWarningMessage(
+            text.message,
+            { modal: true, detail: text.detail },
+            CHOOSE_TEXT_TO_KEEP,
             "ログを表示"
-          )) === "ログを表示"
-        ) {
-          showLog();
+          );
+          if (answer === CHOOSE_TEXT_TO_KEEP) {
+            await vscode.commands.executeCommand("novelai.resolveConflicts", {
+              type: "work",
+              work,
+            });
+          } else if (answer === "ログを表示") {
+            showLog();
+          }
         }
         return false;
 

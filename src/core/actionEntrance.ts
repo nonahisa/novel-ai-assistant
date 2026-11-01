@@ -1,5 +1,6 @@
 import type { ActionItem } from "./actionTree";
 import { STEP_REFERENCED_COMMANDS } from "./stepDefs";
+import { activeModeForGuide, type WorkMode } from "./editorMode";
 
 /**
  * 詳細メニューに**出さない**操作（`hiddenFromActionList`）の、実際の入口
@@ -139,9 +140,34 @@ const FROM_SETTINGS: ActionEntrance = {
 };
 
 /**
- * 実際の入口。**詳細メニューに出る操作なら undefined**（入口は詳細メニューそのもの）。
+ * モードを切り替えると詳細メニューに出る操作（`shownInModes`）の入口。
+ *
+ * 作者モードで「校閲を終えて返す」（編集者モードだけに出る）を「詳細メニューの
+ * 『編集者連携』に」と案内すると、作者が開いても見つからない（2026-11-01）。
+ * どのモードで出るかを言い、切り替える所も添える。
  */
-export function entranceOf(action: ActionItem): ActionEntrance | undefined {
+function entranceInOtherMode(shownIn: WorkMode): ActionEntrance {
+  const name = shownIn === "editor" ? "編集者モード" : "作者モード";
+  return {
+    place: `${name}の詳細メニュー`,
+    text: `${name}の詳細メニューから（「作者／編集者切替」で切り替えます）`,
+  };
+}
+
+/**
+ * 実際の入口。**詳細メニューに出る操作なら undefined**（入口は詳細メニューそのもの）。
+ *
+ * `mode` はいまの環境のモード。省けば `activeModeForGuide()`（`extension.ts` が起動時と
+ * 切り替えのときに入れる。MCP など入れない所では作者モード）。**画面に並べるかの規則は
+ * 詳細メニューと同じ**（`commandsHiddenForMode` の `shownInModes`）。
+ */
+export function entranceOf(
+  action: ActionItem,
+  mode: WorkMode = activeModeForGuide()
+): ActionEntrance | undefined {
+  if (action.shownInModes && !action.shownInModes.includes(mode)) {
+    return entranceInOtherMode(action.shownInModes[0] ?? "author");
+  }
   if (!action.hiddenFromActionList) return undefined;
   return (
     SPECIAL_ENTRANCES[action.command] ??

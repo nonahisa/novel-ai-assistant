@@ -34,6 +34,8 @@ import { logFailure, logStep, showLog } from "../core/logger";
 import { useSyncLog } from "./syncLog";
 import { readMachineName } from "./windowCard";
 import { whenNoticePicked } from "../views/notify";
+import { isEditorMode } from "../core/actorContext";
+import { finishReviewLabel, saveAndSyncLabel } from "../core/syncEntryNames";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 import type { SyncPresave } from "./presaveBeforeSync";
 
@@ -538,13 +540,16 @@ function describeStopped(
       case "unsaved":
         return (
           `「${outcome.label}」に保存していない原稿があるので、同期していません。` +
-          "保存してから「保存・同期」をお使いください。"
+          `保存してから「${saveAndSyncLabel()}」をお使いください。`
         );
       case "dirty":
         return (
           `「${outcome.label}」に記録していない変更が ${action.dirty}件あります` +
           (action.behind > 0 ? `（もう1台で書いた分 ${action.behind}件も未反映です）` : "") +
-          "。「保存・同期」で記録して送れます。"
+          // 編集者モードの「保存・同期」は受け取るだけ（作者の判断 2026-11-01）
+          (isEditorMode()
+            ? `。作者へは「${finishReviewLabel()}」で届けます。`
+            : `。「${saveAndSyncLabel()}」で記録して送れます。`)
         );
     }
   }
@@ -588,6 +593,11 @@ export async function saveAndSyncAll(
     run: deps.run,
     pauseSettingsWatch: deps.pauseSettingsWatch,
     batchFileNotices: deps.batchFileNotices,
+    /*
+      **編集者モードは受け取るだけ**（作者の判断 2026-11-01）。編集者が作者へ送るのは
+      「校閲を終えて返す」だけにする（記録も送信もしない。`planSyncTarget`）
+    */
+    editor: isEditorMode(),
     /*
       上の saveAll は全部を保存するが、原稿エディターの画面から届いた便が
       当たり終わるのは待たない。同期の側で、記録の前にもう一度確かめる

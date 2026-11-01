@@ -15,6 +15,7 @@ import {
 import { FileLockStore } from "../core/fileLockStore";
 import { describeLock, normalizeFile } from "../models/fileLock";
 import { isEditorMode, recordEdit } from "../core/actorContext";
+import { finishReviewLabel, saveAndSyncLabel } from "../core/syncEntryNames";
 import { tryGitUserName } from "../core/gitAttribution";
 import {
   readTextFile,
@@ -375,7 +376,12 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
   });
   void vscode.window.showInformationMessage(
     `${path.basename(relative)} を押さえました。` +
-      "同期すると、作者側にも伝わります。終わったらもう一度押して外してください。"
+      // **編集者が送るのは「校閲を終えて返す」だけ**（作者の判断 2026-11-01）。
+      // 編集者モードの「保存・同期」は受け取るだけなので、「同期すると」とは言わない
+      (holderKind === "editor"
+        ? `「${finishReviewLabel()}」で作者へ届きます。`
+        : `「${saveAndSyncLabel()}」で送ると、編集者にも伝わります。`) +
+      "終わったらもう一度押して外してください。"
   );
 }
 

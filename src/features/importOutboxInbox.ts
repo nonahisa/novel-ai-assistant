@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
+import { saveAndSyncLabel } from "../core/syncEntryNames";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { atomicWriteFile } from "../core/atomicWrite";
@@ -295,7 +296,9 @@ function dirtyBodyDocuments(work: WorkEntry): vscode.TextDocument[] {
  * 取り込む前に GitHub から受け取った結果（作者の判断 2026-11-01）。
  *
  * - `received`：受け取った（受け取るものが無かったときも含む）
- * - `skipped`：受け取りを試さなかった（GitHub と同期していない作品・ブラウザ版）。理由を1文で持つ
+ * - `skipped`：受け取らなかった・受け取れなかった（GitHub と同期していない作品・ブラウザ版・
+ *   分かれている・つながらない）。理由を1文で持つ（受け取りの口〈`gitSync.receive`〉は知らせを
+ *   出さないので、ここで1つに言う。2026-11-01）
  * - `failed`：受け取れなかった。**何が悪かったかは、受け取りの側が知らせとログに出し済み**
  *   （取り込みの係〈`gitSync.ts` の `pull`〉が「取り込みに失敗しました」などを出す）
  */
@@ -358,7 +361,8 @@ export async function importOutboxInbox(
           ? // 受け取ったあとなので「同期すると届きます」は言わない（もう同期した）
             "GitHub の最新も受け取りました。出先のページで［パソコンへ送る］を押してから、もう一度押してください。"
           : note ||
-            "出先のページで［パソコンへ送る］を押したあと、GitHub と同期すると届きます。")
+            // 同期の入口は「保存・同期」1つ（作者の判断 2026-11-01）
+            `出先のページで［パソコンへ送る］を押したあと、「${saveAndSyncLabel()}」を押すと届きます。`)
     );
     return;
   }

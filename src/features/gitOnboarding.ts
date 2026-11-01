@@ -36,6 +36,7 @@ import { redactUrlCredentials } from "../core/redactUrl";
 import { withProgress } from "../views/progress";
 import { askText , cancelItem } from "../views/dialogs";
 import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
+import { saveAndSyncLabel } from "../core/syncEntryNames";
 
 /**
  * GitHub同期を始めるまでの案内。
@@ -308,9 +309,31 @@ async function startTracking(
     return false;
   }
 
+  const count = await commitFirstRecord(target, run);
+  if (count === undefined) return false;
+
+  logStep(`Gitで管理を開始: ${target.label}（${count}件）`);
+  // 次の段（送り先）は `runSetupFlow` が続けて出すので、ここでは止めない
+  notifyDone(
+    `${target.label} をGitで管理し始めました（${count} 件を記録）。続けてGitHubのリポジトリとつなげます。`
+  );
+  return true;
+}
+
+/**
+ * 1つ目の記録（初回コミット）を作る。作れたら記録した件数、作れなければ undefined。
+ *
+ * 「Gitで管理を始める」（`startTracking`）の init のあとと、**履歴の箱はあるのに
+ * 記録が1つも無い置き場**（`ensureFirstRecord`）の両方から呼ぶ。手順を2つ持つと
+ * 片方だけ直して食い違うので、1つにしてある。
+ */
+async function commitFirstRecord(
+  target: SyncTarget,
+  run: GitCommandRunner
+): Promise<number | undefined> {
   // 名前とメールが無いとコミットが失敗する。初めての人はここで必ず詰まる
   if (!(await hasCommitIdentity(target.folderPath, run))) {
-    if (!(await askCommitIdentity(target, run))) return false;
+    if (!(await askCommitIdentity(target, run))) return undefined;
   }
 
   const count = await countTrackableFiles(target.folderPath, run);
@@ -322,7 +345,7 @@ async function startTracking(
   );
   if (!committed.ok) {
     reportFailure("初回コミット", committed.detail);
-    return false;
+    return undefined;
   }
   // 1つ目の記録が作れないと、このあとの送信も履歴も成り立たない。
   // **空のフォルダーだったということなので、失敗ではなく理由を出す**
@@ -331,14 +354,38 @@ async function startTracking(
       `${target.label} に記録できるものがありませんでした。` +
         "本文を1話でも置いてから、もう一度お試しください。"
     );
-    return false;
+    return undefined;
   }
+  return count;
+}
 
-  logStep(`Gitで管理を開始: ${target.label}（${count}件）`);
-  // 次の段（送り先）は `runSetupFlow` が続けて出すので、ここでは止めない
-  notifyDone(
-    `${target.label} をGitで管理し始めました（${count} 件を記録）。続けてGitHubのリポジトリとつなげます。`
+/**
+ * 記録が1つも無ければ、その場で1つ目の記録を作る（作者の判断 2026-11-01、洗い出しの2）。
+ * 記録があれば何もしないで true。
+ *
+ * 以前は「まだ記録が1つもありません。先に『Gitで管理を始める』を実行してください」と
+ * 止めていたが、**その項目は「Gitで管理していない」ときにしか出ない**（`nextSetupStep`）。
+ * 履歴の箱（.git）だけが先にある置き場——別の道具で `git init` だけした・初回の記録が
+ * 途中で止まった——では、押す所が無かった。**最初の記録を作る段へ戻して、続ける。**
+ *
+ * 確認は「Gitで管理を始める」と同じ文の形・同じ警告の顔にする（残した記録は消さない）。
+ */
+async function ensureFirstRecord(
+  target: SyncTarget,
+  run: GitCommandRunner
+): Promise<boolean> {
+  if (await hasCommits(target.folderPath, run)) return true;
+  const confirmed = await confirmRun(
+    `${describeSyncTarget(target)} には、まだ最初の記録がありません。いまの原稿を最初の記録として残しますか？\n` +
+      "キャッシュなど、同期しない設定のものは除きます。残した記録は、あとから消しません。\n" +
+      "この時点ではまだ外部へ何も送りません。",
+    "記録する",
+    { kind: "warning" }
   );
+  if (!confirmed) return false;
+  const count = await commitFirstRecord(target, run);
+  if (count === undefined) return false;
+  logStep(`最初の記録を作った: ${target.label}（${count}件）`);
   return true;
 }
 
@@ -450,8 +497,9 @@ async function connectRemote(
     // 履歴だけでも「消してしまった原稿を戻す」という価値がある
     vscode.window.showInformationMessage(
       `${target.label} は、この端末だけで履歴を残します。\n` +
-        // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
-        "書き換えを残したいときは「GitHubと同期」の「いまの原稿を履歴に残す」を押してください。"
+        // 同期の入口は「保存・同期」1つ（作者の判断 2026-11-01）。送り先が無い置き場では、
+        // 押すと履歴に残すだけで送らない（`planSyncTarget` の no_remote）
+        `書き換えを残したいときは「${saveAndSyncLabel()}」を押してください（送り先が無いので、履歴に残すだけです）。`
     );
     return false;
   }
@@ -497,12 +545,8 @@ async function createAndSend(
   via: "vscodeAuth" | "gh",
   run: GitCommandRunner
 ): Promise<boolean> {
-  if (!(await hasCommits(target.folderPath, run))) {
-    vscode.window.showWarningMessage(
-      "まだ記録が1つもありません。先に「Gitで管理を始める」を実行してください。"
-    );
-    return false;
-  }
+  // 記録が0なら、その場で最初の記録を作る段へ戻す（行き止まりにしない）
+  if (!(await ensureFirstRecord(target, run))) return false;
 
   const name = suggestRepositoryName(target.label);
   const description = repositoryDescription(target.label);
@@ -545,8 +589,8 @@ async function createAndSend(
 
   vscode.window.showInformationMessage(
     `非公開のリポジトリ ${created.name} を作り、${target.label} を GitHub へ送りました。` +
-      // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
-      "以後は「GitHubと同期」で GitHub とそろえられます。" +
+      // 同期の入口は「保存・同期」1つ（作者の判断 2026-11-01）
+      `以後は「${saveAndSyncLabel()}」で GitHub とそろえられます。` +
       (created.remembered === false
         // 送り終えたあとの知らせなので、「次の送信」と言う（今回の送信は済んでいる）
         ? "（この端末では認証情報を覚えられませんでした。次の送信で Git から一度聞かれることがあります）"
@@ -655,12 +699,8 @@ async function firstPush(
   branch: string,
   run: GitCommandRunner
 ): Promise<boolean> {
-  if (!(await hasCommits(target.folderPath, run))) {
-    vscode.window.showWarningMessage(
-      "まだ記録が1つもありません。先に「Gitで管理を始める」を実行してください。"
-    );
-    return false;
-  }
+  // 記録が0なら、その場で最初の記録を作る段へ戻す（行き止まりにしない）
+  if (!(await ensureFirstRecord(target, run))) return false;
 
   const remote = await run(
     ["remote", "get-url", "origin"],
@@ -692,8 +732,8 @@ async function firstPush(
 
   if (!(await sendFirst(target, branch, remoteUrl, run))) return false;
   vscode.window.showInformationMessage(
-    // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
-    `${target.label} を GitHub へ送りました。以後は「GitHubと同期」で GitHub とそろえられます。`
+    // 同期の入口は「保存・同期」1つ（作者の判断 2026-11-01）
+    `${target.label} を GitHub へ送りました。以後は「${saveAndSyncLabel()}」で GitHub とそろえられます。`
   );
   return true;
 }

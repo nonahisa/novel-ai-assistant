@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { canRunProcesses } from "../core/runtime";
+import { conflictFixHint } from "../core/syncEntryNames";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry, WorkPdfExportConfig } from "../models/types";
 import { scanWork } from "../core/scanner";
@@ -268,7 +270,7 @@ async function composePdfExport(
       message:
         conflicted.length > 0
           ? "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
-            "「競合解決」で直してからもう一度お試しください。"
+            conflictFixHint(canRunProcesses())
           : "紙に出せる本文がありませんでした。" + emptyNote(empty),
     };
   }
