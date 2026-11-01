@@ -93,7 +93,12 @@ import {
   readNarrativePerson,
 } from "../core/workStyle";
 import type { KeepWord } from "../models/keepWord";
-import { confirmRunOrChoose, notifyDone, suggestAction } from "../views/notify";
+import {
+  confirmRunOrChoose,
+  notifyDone,
+  suggestAction,
+  type ConfirmPresave,
+} from "../views/notify";
 import { findLargerModelOffer } from "./largerModelOffer";
 
 /**
@@ -186,6 +191,16 @@ export interface CheckTyposOptions extends SuiteAwareOptions {
    * 作者はそこを見て待っている。渡されなければ何もしない
    */
   onProgress?: CheckProgress;
+  /**
+   * 作品の中の未保存（作者の判断 2026-11-02。`features/presave.ts`）。
+   * 確認の窓に「未保存の N 件を保存してから実行します」と書き、［実行］で保存する
+   */
+  presave?: ConfirmPresave;
+  /**
+   * 保存つきの確認で、作者がもう［実行］を選んだ（保存した本文で読み直す2回目）。
+   * 確認も競合の問いも出さない。**外から渡さない**——このファイルの中の読み直しだけが立てる
+   */
+  presaved?: boolean;
 }
 
 /**
@@ -298,7 +313,10 @@ export async function checkTypos(
     sources.push(...episodeBodySources(ep.filePath, file.text, ep));
   }
 
-  if (conflicted.length > 0) {
+  if (conflicted.length > 0 && options.presaved) {
+    // 1回目（保存の前）に作者が「除外して続行」を選んである。同じことを2回訊かない
+    workLog(work.folderPath).step(`誤字脱字検知：未解決の競合 ${conflicted.length} 件を除外（保存のあとの読み直し）`);
+  } else if (conflicted.length > 0) {
     const proceed = await suggestAction({
       message:
         `未解決の競合が ${conflicted.length} 件あります（${conflicted
@@ -444,8 +462,11 @@ export async function checkTypos(
   const pending = chunks.filter((c) => !cache.get(c.hash, cacheKeyBase));
   /** 確認に添えた「大きいモデルの案内」。「開始」と一緒に記録へ残す（A3④） */
   let pendingOfferLog = "";
+  // **未保存があるときは、処理済みばかりでも確認を出す**（作者の判断 2026-11-02）。
+  // ここで読んだのは保存前のファイルなので「処理済み」は当てにならない
+  const presaveCount = options.presave?.count ?? 0;
 
-  if (pending.length > 0) {
+  if (pending.length > 0 || presaveCount > 0) {
     if (
       !(await confirmProviderReachable(
         resolved.provider,
@@ -492,6 +513,8 @@ export async function checkTypos(
       // **飛ばした中身は捨てずにログへ残す**——あとから件数と見積もりを
       // 突き合わせられないと、料金の問い合わせに答えられない
       log.step(`誤字脱字検知：まとめ実行のため確認を省略\n${notice}`);
+    } else if (options.presaved) {
+      log.step("誤字脱字検知：保存つきの確認で実行が選ばれたので、保存した本文で読み直しました");
     } else {
       /*
         **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
@@ -518,6 +541,7 @@ export async function checkTypos(
           // 作品そのものを渡す——推し量った作品なら「訊かない」を覚えていても訊く
           work,
           choices: offer?.choices,
+          presave: options.presave,
         }
       );
       if (!answer) return undefined;
@@ -527,6 +551,15 @@ export async function checkTypos(
         return next === "rerun" ? checkTypos(work, registry, options) : undefined;
       }
       if (offer) pendingOfferLog = offer.logText;
+      // 保存した。**読んだ本文は保存前のもの**なので、初めから読み直す
+      if (presaveCount > 0) {
+        if (pendingOfferLog) log.step(pendingOfferLog);
+        return checkTypos(work, registry, {
+          ...options,
+          presave: undefined,
+          presaved: true,
+        });
+      }
     }
   } else if (chunks.length > 0) {
     vscode.window.showInformationMessage(

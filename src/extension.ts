@@ -62,6 +62,7 @@ import {
   extractCharacters,
   saveDirtyDocumentsBeforeExtraction,
 } from "./features/extractCharacters";
+import { preparePresave, type Presave } from "./features/presave";
 // Node専用（node:child_process / node:path）。選ぶ操作の中で動的importする（設計書5.8.5）
 import {
   chooseWorkStartMode,
@@ -742,6 +743,34 @@ async function saveBeforeCheck(
     askInPicker: manuscriptKeyFileOf(node) !== undefined,
   });
   return saved ? undefined : CHECK_CANCELLED;
+}
+
+/**
+ * 校正の検知の前の未保存を、**実行の確認の窓で保存する**形にして渡す
+ * （作者の判断 2026-11-02。`features/presave.ts`）。
+ *
+ * それまでは範囲を選ぶ前に「未保存の変更が N 件あります。保存してから
+ * 実行しますか？」と訊いていた（範囲・保存・実行の確認で3回）。いまは機能の
+ * 確認の窓に1行書き、［実行］で保存する。
+ *
+ * **まとめ実行の中だけは、これまでどおり先に訊く**——機能の確認は飛ばされる
+ * （まとめ側が1回だけ確認している）ので、確認の窓で保存する道が無い。まとめ側が
+ * 始める前に保存しているので、ふつうはここで未保存は見つからない（走っている
+ * 間に打った分だけ）。
+ *
+ * @returns 機能へ渡す保存の口（`presave`）。まとめ実行の中で取りやめたら undefined
+ */
+async function presaveForCheck(
+  work: WorkEntry,
+  actionLabel: string,
+  node: unknown,
+  options: CheckRunOptions | undefined
+): Promise<{ presave?: Presave } | undefined> {
+  if (isSuiteConfirmed(options)) {
+    const unsaved = await saveBeforeCheck(work, actionLabel, node);
+    return unsaved ? undefined : {};
+  }
+  return { presave: preparePresave(work, actionLabel) };
 }
 
 /**
@@ -3195,10 +3224,9 @@ export async function activate(
       }
 
       // 以下は、コマンドの側が受け取れない道だけが残る。
-      // 未保存のまま読むと、画面と違う本文を検知してしまう
-      if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知"))) {
-        return;
-      }
+      // 未保存のまま読むと、画面と違う本文を検知してしまう。
+      // **保存は実行の確認の窓で訊く**（作者の判断 2026-11-02。`features/presave.ts`）
+      const presave = preparePresave(work, "誤字脱字の検知");
 
       // **「いま開いている話だけ」の誤字脱字は、ここに残る。**
       // コマンド（`novelai.checkTyposForFile`）は一覧の節点（`EpisodeNode`）
@@ -3211,6 +3239,7 @@ export async function activate(
         (onProgress) =>
           checkTypos(work, aiRegistry, {
             onProgress,
+            presave,
             ...(kind === "checkTyposForFile" && filePath
               ? { filePaths: [filePath] }
               : {}),
@@ -5860,13 +5889,12 @@ export async function activate(
       registerCommand(command, async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, `${label}の抽出`)))
-          return;
-
+        // 未保存は実行の確認の窓で保存する（作者の判断 2026-11-02。`features/presave.ts`）
         const saved = await extractCharacters(work, aiRegistry, {
           kinds: [kind],
           // 抽出後の「提案を見る」を提案パネルへ通す（設計書6.57.1）
           proposalPanel,
+          presave: preparePresave(work, `${label}の抽出`),
         });
         if (saved !== "done") return;
 
@@ -5940,14 +5968,12 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
 
-        // 保存の確認で「やめる」を選んだ回も取りやめである
-        if (!(await saveDirtyDocumentsBeforeExtraction(work))) {
-          return CHECK_CANCELLED;
-        }
-
+        // 未保存は実行の確認の窓で保存する（作者の判断 2026-11-02。`features/presave.ts`）。
+        // 確認で取りやめた回は "cancelled" が返る
         const extracted = await extractCharacters(work, aiRegistry, {
           // 抽出後の「提案を見る」を提案パネルへ通す（設計書6.57.1）
           proposalPanel,
+          presave: preparePresave(work, "設定資料の抽出"),
         });
         treeProvider.refresh(work.id);
         // 抽出で承認待ちが増えることがある。押さなくても気づけるよう数え直す
@@ -6278,13 +6304,13 @@ export async function activate(
           右下の知らせで訊くが、そこには Enter が届かない。ここで保存して
           おけば、中の検知は未保存を見つけずに進む
         */
-        if (
-          manuscriptKeyFileOf(node) !== undefined &&
-          (await saveBeforeCheck(work, "校正の一括実行", node))
-        ) {
-          return CHECK_CANCELLED;
-        }
+        /*
+          **未保存は、まとめ実行の確認の窓で保存する**（作者の判断 2026-11-02）。
+          中の検知はそのあとに走るので、未保存を見つけずに進む（キーから来ても
+          メニューから来ても同じ）
+        */
         await runProofreadingSuite(work, {
+          presave: preparePresave(work, "校正の一括実行"),
           memento: verifiedState(context.globalState),
           // 内訳は提案パネルの残り件数から数える（設計書6.37.3）。
           // 各機能の戻り値を覗くと、機能ごとに違う数え方を写すことになる
@@ -6332,9 +6358,11 @@ export async function activate(
         const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return CHECK_CANCELLED;
 
-        // 未保存のまま読むと、画面と違う本文を検知してしまう
-        const unsaved = await saveBeforeCheck(work, "誤字脱字の検知");
-        if (unsaved) return unsaved;
+        // 未保存のまま読むと、画面と違う本文を検知してしまう。
+        // **保存は実行の確認の窓で訊く**（作者の判断 2026-11-02。`presaveForCheck`）
+        const prepared = await presaveForCheck(work, "誤字脱字の検知", node, options);
+        if (!prepared) return CHECK_CANCELLED;
+        const { presave } = prepared;
 
         // **前回から書いた分だけに絞れる**（設計書6.8.7）。
         // 聞く意味があるときだけ聞く（一度も検知していない・全部が対象・
@@ -6354,6 +6382,7 @@ export async function activate(
               onProgress,
               suiteConfirmed,
               suiteHoldsRun,
+              presave,
             })
         );
         /*
@@ -6829,9 +6858,11 @@ export async function activate(
         const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return CHECK_CANCELLED;
 
-        // 未保存のまま読むと、画面と違う本文を推敲してしまう
-        const unsaved = await saveBeforeCheck(work, "推敲", node);
-        if (unsaved) return unsaved;
+        // 未保存のまま読むと、画面と違う本文を推敲してしまう。
+        // **保存は実行の確認の窓で訊く**（作者の判断 2026-11-02。`presaveForCheck`）
+        const prepared = await presaveForCheck(work, "推敲", node, options);
+        if (!prepared) return CHECK_CANCELLED;
+        const { presave } = prepared;
 
         const suiteConfirmed = isSuiteConfirmed(options);
         // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
@@ -6849,6 +6880,7 @@ export async function activate(
             onProgress,
             suiteConfirmed,
             suiteHoldsRun,
+            presave,
           })
         );
         if (!result || result.cancelled) return CHECK_CANCELLED;
@@ -7360,13 +7392,9 @@ export async function activate(
         const work = node.work;
 
         // 未保存のまま読むと、画面と違う本文を検知してしまう。
-        // 原稿エディターのキーから来たときは、Enter で進む選択窓で訊く
-        if (
-          !(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知", {
-            askInPicker: manuscriptKeyFileOf(node) !== undefined,
-          }))
-        )
-          return;
+        // **保存は実行の確認の窓で訊く**（作者の判断 2026-11-02。`presaveForCheck`）。
+        // 確認の窓は画面上部の選択窓なので、原稿エディターのキーからでも Enter で進む
+        const presave = preparePresave(work, "誤字脱字の検知");
 
         const result = await withPanelProgress(
           work,
@@ -7375,6 +7403,7 @@ export async function activate(
             checkTypos(work, aiRegistry, {
               filePaths: [node.episode.filePath],
               onProgress,
+              presave,
             })
         );
         // 中止した回に「完了しました」を重ねない（`novelai.checkTypos` と同じ）
