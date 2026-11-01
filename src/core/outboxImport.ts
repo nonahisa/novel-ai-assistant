@@ -176,8 +176,8 @@ export const OUTBOX_IMPORTED_FILE = "outbox-imported.jsonl";
 export const BODY_CHANGED_REASON =
   "パソコンの本文が変わっています（送ったあとに書き換えられたため、入れませんでした。最新を送り直してから書いてください）";
 
-/** 出先の編集部のメモの頭書き（6.115） */
-export const EDITORIAL_PREFIX = "編集部：";
+/** 出先の編集者のメモの頭書き（6.115。画面の言い方を「編集者」にそろえた 2026-11-01 作者の判断。使っている人がいないので古い頭書きは読み替えない） */
+export const EDITORIAL_PREFIX = "編集者：";
 
 /**
  * ［自分で直す］で足す行の覚え書き。**置き換えた文が作者の文であることの印**——

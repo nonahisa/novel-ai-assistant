@@ -318,10 +318,10 @@ describe("outbox.import——メモ", () => {
     );
   });
 
-  it("持ち主でない人のメモには「編集部：」を付ける", async () => {
+  it("持ち主でない人のメモには「編集者：」を付ける", async () => {
     writeBody("一行目\n");
     await outboxImport({ folder: root, ownerId: OWNER, records: [memo({ writer: EDITOR, text: "ここは早い" })] });
-    expect(readBytes().toString("utf8")).toBe("一行目\n// 編集部：ここは早い\n");
+    expect(readBytes().toString("utf8")).toBe("一行目\n// 編集者：ここは早い\n");
   });
 
   it("送ったあとに本文が変わっていれば入れずに断る（原稿は1バイトも変えない）", async () => {
@@ -466,7 +466,7 @@ describe("outbox.import——採否", () => {
       [OWNER, "imported"],
       [EDITOR, "imported"],
     ]);
-    expect(readBytes().toString("utf8")).toBe("一行目\n// 作者\n// 編集部：編集\n");
+    expect(readBytes().toString("utf8")).toBe("一行目\n// 作者\n// 編集者：編集\n");
   });
 
   it("［採らない］は退けた、［済み］は採ったとして記録し、本文には触れない", async () => {
