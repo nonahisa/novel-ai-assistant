@@ -1,6 +1,7 @@
 import {
   POSTING_SITES,
   postingSiteInfo,
+  readerStatsInLedgerOrder,
   type PostingLedger,
   type PostingSiteId,
   type ReaderStatsRecord,
@@ -389,9 +390,8 @@ export function buildReaderAdviceMaterials(
   for (const info of POSTING_SITES) {
     if (site !== undefined && info.id !== site) continue;
     // **台帳に書かれた順**で渡す（同じ日時に同じ話が2件あれば、あとのほう）
-    const records = (ledger.readerStats ?? []).filter(
-      (entry) => entry.site === info.id
-    );
+    // 同じ日の Narou.fun の読み取りは畳む（画面のグラフ・率と同じ材料を渡す。2026-11-01）
+    const records = readerStatsInLedgerOrder(ledger, info.id);
     const rates = computeReaderRates(records);
     if (rates.episodeReadAt === null) continue;
     materials.push(

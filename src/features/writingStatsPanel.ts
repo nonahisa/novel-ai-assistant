@@ -26,9 +26,19 @@ import {
   buildPostingSiteRecords,
   buildWorkPostingFacts,
   isOpenableWorkUrl,
+  readerSiteTabs,
   type PostingSiteRecord,
+  type ReaderSiteTab,
   type WorkPostingFacts,
 } from "../core/postingSiteRecords";
+import {
+  rememberReaderSiteTab,
+  rememberWritingStatsTab,
+  rememberedReaderSiteTab,
+  rememberedWritingStatsTab,
+} from "../core/writingStatsTabMemory";
+// 保管庫へは守りつきで書く（素の update を呼ばない決まり。mementoWrites.test.ts）
+import { verifiedState } from "../core/verifiedMemento";
 import { PostingStore } from "../core/postingStore";
 import { POSTING_SITES } from "../models/posting";
 import {
@@ -119,8 +129,16 @@ export async function openWritingStatsPanel(
   panel.webview.html = buildWritingStatsPanelHtml(
     nonce,
     panel.webview.cspSource,
-    // SNS記事では「投稿ごとの文字数」。話数ではなく投稿の並びである
-    { unitNoun: episodeUnit(format).noun }
+    {
+      // SNS記事では「投稿ごとの文字数」。話数ではなく投稿の並びである
+      unitNoun: episodeUnit(format).noun,
+      /*
+        **その作品で前に見ていたタブで開く**（作者の判断 2026-11-01）。外側のタブと、
+        読者の反応の中のサイトのタブの両方。覚えるのは拡張機能の保管庫（作品のファイルではない）
+      */
+      initialTab: rememberedWritingStatsTab(verifiedState(context.globalState), work.id),
+      initialReaderSite: rememberedReaderSiteTab(verifiedState(context.globalState), work.id),
+    }
   );
 
   panel.webview.onDidReceiveMessage(async (message: unknown) => {
@@ -130,9 +148,19 @@ export async function openWritingStatsPanel(
       url?: string;
       site?: string;
       force?: boolean;
+      tab?: string;
     };
     // 風船を見せ終えた（設計書6.3.8）。印を付けて、二度は上げない
     if (await acceptCelebrated(message)) return;
+    // 作者が押したタブを覚える（2026-11-01）。知らない鍵は覚えない（覚える側が確かめる）
+    if (parsed.type === "tabSelected") {
+      await rememberWritingStatsTab(verifiedState(context.globalState), work.id, parsed.tab);
+      return;
+    }
+    if (parsed.type === "readerSiteSelected") {
+      await rememberReaderSiteTab(verifiedState(context.globalState), work.id, parsed.site);
+      return;
+    }
     if (parsed.type === "askReaderAdvice" && parsed.site) {
       /*
         **押したときだけAIを呼ぶ**（設計書6.79.7.3）。画面から届いたサイト名は
@@ -348,6 +376,8 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     // 読めなかったときは理由を添える（黙って消さない。0.33.9）
     siteRecords: siteRecords.records,
     siteRecordsError: siteRecords.error,
+    // 読者の反応の中のサイトのタブ（配信されているサイトだけ。なろうは最後尾。2026-11-01）
+    readerSites: siteRecords.sites,
     // 連載中／完結の印と食い違いの知らせ（「概要」に控えめに出す。2026-11-01）
     workFacts: siteRecords.workFacts,
     // 達成の印（設計書6.3.8）。どの目標をいつ達成したかを残す
@@ -425,7 +455,7 @@ async function episodeTextsFor(
   return texts;
 }
 
-/** 「サイトの記録」の読み込み結果。読めなかったときは理由を持つ */
+/** 「読者の反応」（旧「サイトの記録」）の読み込み結果。読めなかったときは理由を持つ */
 export interface SiteRecordsResult {
   records: PostingSiteRecord[];
   /**
@@ -433,6 +463,8 @@ export interface SiteRecordsResult {
    * 台帳を読めなかったときは null（画面は「概要」の行を出さない）
    */
   workFacts: WorkPostingFacts | null;
+  /** 読者の反応の中に出すサイトのタブ（`readerSiteTabs`）。読めなかったときは空 */
+  sites: ReaderSiteTab[];
   /** 読めなかった理由。読めていれば null（画面はこの行を出さない） */
   error: string | null;
 }
@@ -454,9 +486,11 @@ export async function readSiteRecords(
 ): Promise<SiteRecordsResult> {
   try {
     const ledger = await new PostingStore(work).load();
+    const records = buildPostingSiteRecords(ledger);
     return {
-      records: buildPostingSiteRecords(ledger),
+      records,
       workFacts: buildWorkPostingFacts(ledger),
+      sites: readerSiteTabs(ledger, records),
       error: null,
     };
   } catch (error) {
@@ -467,6 +501,6 @@ export async function readSiteRecords(
       作品: work.title,
       内容: detail,
     });
-    return { records: [], workFacts: null, error: detail };
+    return { records: [], workFacts: null, sites: [], error: detail };
   }
 }

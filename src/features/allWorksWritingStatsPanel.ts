@@ -31,6 +31,13 @@ import {
 } from "./celebrations";
 import { COMMON_GOALS_MESSAGE, editCommonWritingGoals } from "./commonWritingGoals";
 import { createNonce } from "../core/webviewNonce";
+import {
+  ALL_WORKS_TAB_KEY,
+  rememberWritingStatsTab,
+  rememberedWritingStatsTab,
+} from "../core/writingStatsTabMemory";
+// 保管庫へは守りつきで書く（素の update を呼ばない決まり。mementoWrites.test.ts）
+import { verifiedState } from "../core/verifiedMemento";
 
 /**
  * 全作品の執筆量パネル（作者の要望、2026-08-13）。
@@ -91,11 +98,17 @@ export async function openAllWorksWritingStatsPanel(
     // 投稿サイトの台帳は作品ごとにしか無い。全作品の合計では並べるものが無いので、
     // 「読者の反応」のタブも出さない（空の案内だけのタブを置かない。設計書6.3.9）
     hasReadersTab: false,
+    // 前に見ていたタブで開く（作品ごとの画面と同じ。全作品の画面は作品とは別の鍵。2026-11-01）
+    initialTab: rememberedWritingStatsTab(verifiedState(context.globalState), ALL_WORKS_TAB_KEY),
   });
 
   created.webview.onDidReceiveMessage(async (message: unknown) => {
     if (await acceptCelebrated(message)) return;
-    const parsed = message as { type?: string };
+    const parsed = message as { type?: string; tab?: string };
+    if (parsed.type === "tabSelected") {
+      await rememberWritingStatsTab(verifiedState(context.globalState), ALL_WORKS_TAB_KEY, parsed.tab);
+      return;
+    }
     if (parsed.type === COMMON_GOALS_MESSAGE) {
       // 1日・1か月の目標（全作品共通）を決める（作者の指摘、2026-09-23）。
       // 全作品の合計で判定する目標なので、この画面からこそ押せてほしい

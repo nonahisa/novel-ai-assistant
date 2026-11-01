@@ -107,6 +107,15 @@ describe("作品の行の完結の印", () => {
     expect(row.tooltip).toContain("連載の状態: 完結");
   });
 
+  test("作者が休載にした作品は、説明の後ろに「休載」が付く（2026-11-01 足した）", async () => {
+    loadPosting.mockResolvedValue(
+      ledgerWith((ledger) => withWorkCompletion(ledger, "hiatus", "2026-11-01T00:00:00.000Z"))
+    );
+    const row = await workRow();
+    expect(row.description).toMatch(/・休載$/);
+    expect(row.tooltip).toContain("連載の状態: 休載");
+  });
+
   test("連載中の作品・決めていない作品には何も付けない", async () => {
     loadPosting.mockResolvedValue(
       ledgerWith((ledger) => withWorkCompletion(ledger, "ongoing", "2026-11-01T00:00:00.000Z"))
