@@ -148,6 +148,30 @@ describe("誤字脱字・推敲に出るボタン", () => {
     expect(buttons).not.toContain("適用");
   });
 
+  test("編集部の意見だけの提案には［読んだ］が出て、読んだあとは［戻す］を出さない（作者の指示 2026-11-01）", () => {
+    // 直した案が空の提案。［適用］は出さず、本文に触れずに片づける［読んだ］を出す
+    const opinion = typoIssue({
+      proposalId: "p1",
+      suggestion: "",
+      target: "そう返されるかもしれあい。",
+      reason: "編集部のメモ：ここは言い切らないほうがよい",
+    });
+    const buttons = buttonsOf(opinion);
+    expect(buttons[0]).toBe("読んだ");
+    expect(buttons).toContain("本文を見る");
+    expect(buttons).toContain("無視");
+    expect(buttons).not.toContain("適用");
+    expect(renderItem(opinion)).toContain("編集部の意見です");
+
+    const read = buttonsOf({ ...opinion, status: "applied" });
+    expect(read).not.toContain("戻す");
+    expect(renderItem({ ...opinion, status: "applied" })).toContain("読みました");
+  });
+
+  test("提案でない修正案なしの指摘には［読んだ］を出さない", () => {
+    expect(buttonsOf(typoIssue({ suggestion: "", target: "長い一文" }))).not.toContain("読んだ");
+  });
+
   test("語として登録できない長さなら、「今後直さない」を出さない", () => {
     // 推敲は一文まるごとを指すので、語としては登録できない
     const long = "あ".repeat(30);

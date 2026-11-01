@@ -2602,7 +2602,14 @@ export class ManuscriptEditorProvider
     // 設定を直したのに何も起きなければ、作者は壊れていると受け取る
     subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (!event.affectsConfiguration("novelai.manuscriptEditor")) return;
+        // 作者／編集者の切り替え（novelai.mode）も送り直す。右クリックの
+        // 「直しを提案する」の出し入れは本文の便に乗っている（設計書5.6.1.1）
+        if (
+          !event.affectsConfiguration("novelai.manuscriptEditor") &&
+          !event.affectsConfiguration("novelai.mode")
+        ) {
+          return;
+        }
         void send();
       })
     );
