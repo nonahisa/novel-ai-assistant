@@ -25,7 +25,7 @@ import { ownWorkCandidates, ownWorkLabel } from "../core/unregisteredOwnWorks";
 import { isWebRuntime } from "../core/runtime";
 import { logLine, useLogFile } from "../core/logger";
 import { cancelItem, isCancelItem } from "../views/dialogs";
-import { importReaderStats, importReaderStatsBundle } from "./readerStats";
+import { importReaderStats, importReaderStatsBundle, type NoteOwnRankings } from "./readerStats";
 import {
   groupPendingRegistrations,
   isDeclinedReaderStatsId,
@@ -110,6 +110,11 @@ export interface ReaderStatsHelperLinkDeps {
    * 登録した作品が1つも無い作者や、取り込むものが無い束でも、枠は出したいため
    */
   noteOwnWorks?(envelopes: readonly ReaderStatsEnvelope[]): Promise<void>;
+  /**
+   * どの作品にも決まらなかった順位を渡す（2026-11-02）。未登録の自分の作品の順位なら控える。
+   * 束の取り込み（`importReaderStatsBundle`）が、画面の覚え（`noteOwnWorks`）のあとに呼ぶ
+   */
+  noteOwnRankings?: NoteOwnRankings;
 }
 
 /**
@@ -309,8 +314,11 @@ export class ReaderStatsHelperLink {
    */
   private async runBundle(trigger: Trigger, bundle: ReaderStatsBundle): Promise<void> {
     useLogFile(undefined);
+    const rankingCount = (bundle.rankings ?? []).length;
     logLine(
-      `ヘルパーがまとめて渡した読者の反応（${bundle.items.length}画面）を` +
+      `ヘルパーがまとめて渡した読者の反応（${bundle.items.length}画面` +
+        (rankingCount > 0 ? `・順位${rankingCount}件` : "") +
+        "）を" +
         (trigger === "uri" ? "呼び出しで受けました。" : "クリップボードに見つけました。")
     );
 
@@ -330,11 +338,21 @@ export class ReaderStatsHelperLink {
       const summary = pending
         .map((entry) => {
           const title = works.find((work) => work.id === entry.id)?.title ?? entry.id;
-          return `「${title}」${entry.screens}画面`;
+          const bits = [
+            entry.screens > 0 ? `${entry.screens}画面` : "",
+            entry.ranks > 0 ? `順位${entry.ranks}件` : "",
+          ].filter(Boolean);
+          return `「${title}」${bits.join("・")}`;
         })
         .join("・");
+      // 順位だけの束（2026-11-02）なら「読者の反応」と言わない
+      const what = pending.some((entry) => entry.screens > 0)
+        ? pending.some((entry) => entry.ranks > 0)
+          ? "読者の反応と順位"
+          : "読者の反応"
+        : "順位";
       const answer = await vscode.window.showInformationMessage(
-        "クリップボードに、統合小説執筆環境ヘルパーがまとめて渡した読者の反応" +
+        `クリップボードに、統合小説執筆環境ヘルパーがまとめて渡した${what}` +
           `（まだ取り込んでいないもの：${summary}）があります。取り込みますか？`,
         "取り込む",
         "取り込まない"
@@ -345,6 +363,8 @@ export class ReaderStatsHelperLink {
     const result = await importReaderStatsBundle(bundle, works, {
       // 登録の無い作品IDは、その場で作品に登録できるようにする（作者の裁定 2026-10-11）
       register: this.registerOptions(),
+      // 画面の覚えは訊く前に済ませてある（`noteOwnWorks`）。順位はそのあとで控える
+      ...(this.deps.noteOwnRankings ? { noteOwnRankings: this.deps.noteOwnRankings } : {}),
     });
     for (const work of result.changedWorks ?? []) {
       await this.deps.afterImport(work);

@@ -103,7 +103,9 @@ export function detectRankEvents(
       const base = { site: info.id, board: line.label, day: last.day, rank: last.rank };
       events.push({
         ...base,
-        id: rankEventId(workId, base),
+        // 鍵は線の見分け（`key`）で作る。見出しが変わっても同じ順位を二度祝わない
+        // （手の記録・API の線は名前と同じなので、これまでの鍵は変わらない）
+        id: rankEventId(workId, { ...base, board: line.key }),
         siteLabel: info.label,
         previous,
         size: rankCelebrationSize(last.rank, previous),

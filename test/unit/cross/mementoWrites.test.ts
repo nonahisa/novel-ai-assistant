@@ -174,6 +174,8 @@ const KEYS: KeyRow[] = [
   { key: "novelai.readerStats.declinedWorkIds", literalIn: "features/readerStatsRegister.ts", writtenIn: "features/readerStatsRegister.ts", write: /\.update\(DECLINED_READER_STATS_IDS_KEY\b/g, guarded: true },
   { key: "novelai.ownWorks.unregistered", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(UNREGISTERED_OWN_WORKS_KEY\b/g, guarded: true },
   { key: "novelai.ownWorks.pendingReaderStats", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(PENDING_OWN_WORK_STATS_KEY\b/g, guarded: true },
+  // 未登録の自分の作品の順位の控え（2026-11-02。ヘルパーの束の rankings）
+  { key: "novelai.ownWorks.pendingRankings", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(PENDING_OWN_WORK_RANKINGS_KEY\b/g, guarded: true },
   { key: "novelai.ownWorks.unattendedLibrary", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(UNATTENDED_LIBRARY_KEY\b/g, guarded: true },
   // 編集者の側で、もう知らせた作者の採否（作者の判断 2026-11-01「届いたら知らせる」）
   { key: "novelai.editorSeenDecisions", literalIn: "features/decisionMemory.ts", writtenIn: "features/decisionMemory.ts", write: /\.update\(STORAGE_KEY\b/g, guarded: true },

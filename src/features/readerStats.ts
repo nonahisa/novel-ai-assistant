@@ -21,17 +21,21 @@ import {
 import { PostingStore, PostingStoreError } from "../core/postingStore";
 import {
   applyReaderStatsEnvelope,
+  applyReaderStatsRankings,
   matchReaderStatsEnvelope,
   parseReaderStatsPaste,
   readerStatsSourceLabel,
   type ReaderStatsApplied,
   type ReaderStatsBundle,
   type ReaderStatsEnvelope,
+  type ReaderStatsRanking,
 } from "../core/readerStatsEnvelope";
 import {
   readerStatsBundleItemLabel,
   readerStatsBundleNotice,
+  readerStatsRankingLabel,
   routeReaderStatsBundleItem,
+  routeReaderStatsRanking,
   type ReaderStatsBundleFailure,
   type ReaderStatsBundleWorkOutcome,
 } from "../core/readerStatsHelperLink";
@@ -120,7 +124,19 @@ export interface ImportReaderStatsOptions {
   register?: ReaderStatsRegisterOptions;
   /** 束のうち作品の決まらなかった画面を渡す（`ImportReaderStatsBundleOptions.noteOwnWorks`） */
   noteOwnWorks?: (envelopes: readonly ReaderStatsEnvelope[]) => Promise<void>;
+  /** 束のうち作品の決まらなかった順位を渡す（`ImportReaderStatsBundleOptions.noteOwnRankings`） */
+  noteOwnRankings?: NoteOwnRankings;
 }
+
+/**
+ * 作品の決まらなかった順位を「未登録の自分の作品」の控えへ渡す口（2026-11-02）。
+ * 順位には覚えた理由（`ownedVia`）が無いので、同じ束の画面と、枠の覚えを見て決める。
+ * @returns 控えた順位（控えなかったものは呼ぶ側が記録に残して捨てる）
+ */
+export type NoteOwnRankings = (
+  rankings: readonly ReaderStatsRanking[],
+  envelopes: readonly ReaderStatsEnvelope[]
+) => Promise<readonly ReaderStatsRanking[]>;
 
 /** 束の取り込みの呼び方の違い */
 export interface ImportReaderStatsBundleOptions {
@@ -134,6 +150,12 @@ export interface ImportReaderStatsBundleOptions {
    * ヘルパーからの受け口は束を渡す前に自分で覚えるので、作者が貼り付けたときだけ渡す
    */
   noteOwnWorks?: (envelopes: readonly ReaderStatsEnvelope[]) => Promise<void>;
+  /**
+   * どの作品の台帳の作品IDにも当たらなかった順位を渡す（2026-11-02）。
+   * 本人しか開けない画面で読んだ作品の順位なら控え、登録したら取り込む。
+   * **画面の覚え（`noteOwnWorks`）のあとに呼ぶ**——同じ束で覚えた作品の順位も控えに入るように
+   */
+  noteOwnRankings?: NoteOwnRankings;
   /**
    * 知らせを出さない（同じ文は操作の記録に残す）。バックアップからの登録の途中で、
    * 控えておいた読者の反応を取り込むときだけ立てる——登録の知らせが取り込んだ画面の数を
@@ -246,6 +268,7 @@ export async function importReaderStats(
       {
         register: options.register,
         ...(options.noteOwnWorks ? { noteOwnWorks: options.noteOwnWorks } : {}),
+        ...(options.noteOwnRankings ? { noteOwnRankings: options.noteOwnRankings } : {}),
       }
     );
   }
@@ -426,6 +449,34 @@ export async function importReaderStatsBundle(
     groups.set(route.id, [...(groups.get(route.id) ?? []), envelope]);
   }
   /*
+    順位（2026-11-02。ヘルパー 0.19.0）。**画面と同じ関所で作品を決める**
+    （`routeReaderStatsRanking`。台帳の作品IDで1つに決まるものだけ）。読めなかった1件・
+    決まらなかった1件は記録に残して捨てる（決まらない順位は、未登録の自分の作品なら控える）
+  */
+  const rankingGroups = new Map<string, ReaderStatsRanking[]>();
+  const unroutedRankings: ReaderStatsRanking[] = [];
+  const droppedRankings: string[] = [];
+  for (const item of bundle.rankings ?? []) {
+    if (!item.result.ok) {
+      droppedRankings.push(`順位の${item.position}件目：${item.result.reason}`);
+      continue;
+    }
+    const ranking = item.result.ranking;
+    const route = routeReaderStatsRanking(ranking, candidates);
+    if (route.kind === "none") {
+      if (route.registrable) {
+        unroutedRankings.push(ranking);
+      } else {
+        droppedRankings.push(`${readerStatsRankingLabel(ranking)}：${route.reason}`);
+      }
+      continue;
+    }
+    rankingGroups.set(route.id, [...(rankingGroups.get(route.id) ?? []), ranking]);
+    // 順位だけの作品も、保存の回に入れる（画面の無い作品は groups に居ない）
+    if (!groups.has(route.id)) groups.set(route.id, []);
+  }
+
+  /*
     投稿状態を読めなかった作品は、振り分けの先に入っていない。その作品の画面は
     「作品が見つかりません」で落ちているかもしれないので、**そちらの失敗があるとき
     だけ**読めなかった作品の名前も並べる（関係の無いときは知らせを長くしない）。
@@ -469,14 +520,23 @@ export async function importReaderStatsBundle(
         });
       }
     }
-    if (screens === 0) continue;
-    if (added > 0 || factsChanged) {
+    // 順位は画面のあとに積む（同じ作品の台帳へ。同じ鍵は積まない）
+    const rankingsHere = rankingGroups.get(id) ?? [];
+    const rankApplied = applyReaderStatsRankings(ledger, rankingsHere);
+    ledger = rankApplied.ledger;
+    const ranks = rankApplied.added;
+    const ranksRepeated = rankApplied.repeated;
+    if (screens === 0 && rankingsHere.length === 0) continue;
+    if (added > 0 || factsChanged || ranks > 0) {
       try {
         await entry.store.save(ledger);
       } catch (error) {
         logBundleFailure(`${entry.work.title} の投稿状態の保存`, error, entry.work);
         failures.push({
-          label: `「${entry.work.title}」の${screens}画面`,
+          label:
+            screens > 0
+              ? `「${entry.work.title}」の${screens}画面${ranks > 0 ? `と順位${ranks}件` : ""}`
+              : `「${entry.work.title}」の順位${ranks}件`,
           reason: `保存できませんでした（${messageOf(error)}）。`,
           fixByWorkId: false,
         });
@@ -490,6 +550,7 @@ export async function importReaderStatsBundle(
       added,
       repeated,
       ...(factsChanged ? { factsChanged } : {}),
+      ...(rankingsHere.length > 0 ? { ranks, ranksRepeated } : {}),
     });
   }
 
@@ -511,6 +572,36 @@ export async function importReaderStatsBundle(
     await options.noteOwnWorks(unrouted);
   }
 
+  // 作品の決まらなかった順位：未登録の自分の作品のものは控え、残りは記録に残して捨てる
+  let ranksHeld = 0;
+  if (unroutedRankings.length > 0) {
+    const okEnvelopes = bundle.items.flatMap((item) => (item.result.ok ? [item.result.envelope] : []));
+    let held: readonly ReaderStatsRanking[] = [];
+    if (options.noteOwnRankings) {
+      try {
+        held = await options.noteOwnRankings(unroutedRankings, okEnvelopes);
+      } catch (error) {
+        // 控えられなくても、取り込みの知らせは止めない
+        useLogFile(undefined);
+        logFailure("未登録の自分の作品の順位を控える", { 詳細: messageOf(error) });
+      }
+    }
+    ranksHeld = held.length;
+    for (const ranking of unroutedRankings) {
+      if (held.includes(ranking)) continue;
+      droppedRankings.push(
+        `${readerStatsRankingLabel(ranking)}：この作品IDを登録した作品が見つかりませんでした。`
+      );
+    }
+  }
+  if (droppedRankings.length > 0) {
+    useLogFile(undefined);
+    logFailure("まとめて渡された順位のうち、取り込めなかったもの", {
+      件数: droppedRankings.length,
+      内訳: droppedRankings.join("\n"),
+    });
+  }
+
   const pending = groupPendingRegistrations(unregistered);
   const notice = readerStatsBundleNotice({
     works: outcomes,
@@ -520,6 +611,9 @@ export async function importReaderStatsBundle(
     framed: declinedElsewhere === 0 ? framed : [],
     registerOffered: pending.length > 0,
     lead: options.lead,
+    ...(bundle.items.length === 0 ? { rankingsOnly: true } : {}),
+    ...(droppedRankings.length > 0 ? { ranksUnrouted: droppedRankings.length } : {}),
+    ...(ranksHeld > 0 ? { ranksHeld } : {}),
   });
   // 知らせが画面から外れても読み返せるよう、同じ文を操作ログにも残す
   // （`announceResult` と同じ理由。束は作品をまたぐので、書き先は保管庫）

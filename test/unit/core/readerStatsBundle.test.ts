@@ -308,7 +308,7 @@ describe("窓に戻ったとき訊くか（まだ取り込んでいない画面�
         { id: "a", ledger: imported },
         { id: "b", ledger: kakuyomuWork(KAKUYOMU_POST_B, "2222") },
       ])
-    ).toEqual([{ id: "b", screens: 2 }]);
+    ).toEqual([{ id: "b", screens: 2, ranks: 0 }]);
   });
 });
 

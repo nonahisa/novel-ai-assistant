@@ -214,13 +214,47 @@ export interface PostingRankingRecord {
   /**
    * 出どころ。**手入力には付けない**（欄が無い＝作者が打った）。
    * `"narou-api"` はなろう殿堂入りAPIから取った順位で、**AI へ渡す材料に入れない**
-   * （作者が運営へ約束した使い方。2026-11-02）
+   * （作者が運営へ約束した使い方。2026-11-02）。
+   * `"helper"` はヘルパーが作者の開いたランキングの画面で読んだ順位（2026-11-02。
+   * 束の `rankings`）。このときの `board` は**区分の鍵**（ヘルパーが付ける機械向けの名前）で、
+   * 画面に出すのは `boardLabel`
    */
   source?: PostingRankingSource;
+  /**
+   * 画面の見出しのまま（ヘルパーの順位だけ）。グラフの線・表の種別に出す。
+   * 無ければ `board` を出す（手入力は `board` がそのまま作者の言葉）
+   */
+  boardLabel?: string;
+  /** 期間（ヘルパーの順位だけ。`POSTING_RANKING_SPANS`） */
+  span?: PostingRankingSpan;
+  /** ジャンル（ヘルパーの順位だけ。画面の書き方のまま） */
+  genre?: string;
 }
 
 /** 順位の出どころ（手入力は欄そのものを持たない） */
-export type PostingRankingSource = "narou-api";
+export type PostingRankingSource = "narou-api" | "helper";
+
+/** ヘルパーの順位の期間（ヘルパーとの取り決め 2026-11-02） */
+export const POSTING_RANKING_SPANS = [
+  "daily",
+  "weekly",
+  "monthly",
+  "yearly",
+  "total",
+  "24h",
+  "other",
+] as const;
+
+export type PostingRankingSpan = (typeof POSTING_RANKING_SPANS)[number];
+
+export function isPostingRankingSpan(value: unknown): value is PostingRankingSpan {
+  return typeof value === "string" && (POSTING_RANKING_SPANS as readonly string[]).includes(value);
+}
+
+/** 画面に出す種別の名前（ヘルパーの順位は見出し、手入力・API は `board` のまま） */
+export function rankingBoardLabel(record: Pick<PostingRankingRecord, "board" | "boardLabel">): string {
+  return record.boardLabel ?? record.board;
+}
 
 /**
  * **サイトをまたいで比べられる軸**（設計書6.79.7）。
@@ -1171,7 +1205,14 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
           だけで API の順位が手入力の顔になり、AI へ渡さない約束の目印が消える。
           知らない値は印ごと読まない（いまある値は1つだけ）
         */
-        ...(entry.source === "narou-api" ? { source: "narou-api" as const } : {}),
+        ...(entry.source === "narou-api" || entry.source === "helper"
+          ? { source: entry.source as PostingRankingSource }
+          : {}),
+        /*
+          ヘルパーの順位の添え物（2026-11-02）。**形が違えば欄ごと読まない**（台帳は止めない
+          ——順位そのものは読めている。作者が手で直した台帳で、ここが崩れることはありうる）
+        */
+        ...readRankingExtras(entry),
       };
     }) ?? [];
 
@@ -1582,6 +1623,21 @@ export function withSiteProfile(
   };
 }
 
+/** 順位の省いてよい欄（見出し・期間・ジャンル）を読む。形の違う欄は持たない */
+function readRankingExtras(
+  entry: Record<string, unknown>
+): Pick<PostingRankingRecord, "boardLabel" | "span" | "genre"> {
+  const text = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+  const boardLabel = text(entry.boardLabel);
+  const genre = text(entry.genre);
+  return {
+    ...(boardLabel !== undefined ? { boardLabel } : {}),
+    ...(isPostingRankingSpan(entry.span) ? { span: entry.span } : {}),
+    ...(genre !== undefined ? { genre } : {}),
+  };
+}
+
 /** 順位として受けられる値か。**1以上の整数だけ**（0位も-1位も無い） */
 function isRank(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 1;
@@ -1847,11 +1903,36 @@ export function withRanking(
         rank: record.rank,
         // **空のメモは持たせない**（台帳が中身の無い欄で膨らまないように）
         ...(note ? { note } : {}),
-        // 出どころは API のときだけ持つ（手入力は欄そのものが無い）
-        ...(record.source === "narou-api" ? { source: record.source } : {}),
+        // 出どころは API・ヘルパーのときだけ持つ（手入力は欄そのものが無い）
+        ...(record.source === "narou-api" || record.source === "helper"
+          ? { source: record.source }
+          : {}),
+        ...readRankingExtras({ ...record }),
       },
     ],
   };
+}
+
+/**
+ * ヘルパーの順位が、**同じ鍵でもう台帳にある**か（2026-11-02。ヘルパーとの取り決め）。
+ *
+ * 鍵はサイト＋区分（`board`）＋日付（作品はこの台帳そのもの）。**順位が違っても積まない**
+ * ——取り決めの「同じ鍵は積まない」のまま。同じ束が呼び出しと貼り付けで2度届く・ヘルパーの
+ * 「もう一度渡す」で古い束が届くので、あとから届いた方が新しいとは限らない（積んだ方を残す）。
+ * 見るのはヘルパーの順位どうしだけ（手入力・API の順位とは鍵の作りが違う）
+ */
+export function hasHelperRankingOn(
+  ledger: PostingLedger,
+  record: Pick<PostingRankingRecord, "site" | "board" | "recordedAt">
+): boolean {
+  const board = record.board.trim();
+  return ledger.rankings.some(
+    (entry) =>
+      entry.source === "helper" &&
+      entry.site === record.site &&
+      entry.board === board &&
+      entry.recordedAt === record.recordedAt
+  );
 }
 
 /**
@@ -1904,7 +1985,10 @@ export function rankingBoards(
   ledger: PostingLedger,
   site: PostingSiteId
 ): string[] {
-  const newestFirst = [...ledger.rankings].sort(compareRecordedAtDesc);
+  // ヘルパーの順位の `board` は機械向けの区分の鍵なので、作者の打つ候補に混ぜない（2026-11-02）
+  const newestFirst = ledger.rankings
+    .filter((entry) => entry.source !== "helper")
+    .sort(compareRecordedAtDesc);
   const boards: string[] = [];
   for (const entry of newestFirst) {
     if (entry.site === site && !boards.includes(entry.board)) {

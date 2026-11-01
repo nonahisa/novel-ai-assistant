@@ -2,6 +2,7 @@ import {
   ALL_READER_STATS_METRICS,
   POSTING_SITES,
   postingSiteInfo,
+  rankingBoardLabel,
   rankingsForSite,
   readerStatsForSite,
   isApiDerivedReaderStats,
@@ -547,7 +548,8 @@ function tagDifferences(ledger: PostingLedger): SiteTagDifference[] {
 function toRow(record: PostingRankingRecord): PostingRankingRow {
   return {
     recordedAt: record.recordedAt,
-    board: record.board,
+    // ヘルパーの順位は見出しを出す（`board` は区分の鍵。2026-11-02）
+    board: rankingBoardLabel(record),
     rank: record.rank,
     note: record.note ?? null,
   };

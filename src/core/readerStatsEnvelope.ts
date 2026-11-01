@@ -1,7 +1,12 @@
 import {
   ALL_READER_STATS_METRICS,
+  hasHelperRankingOn,
   hasReaderStatsMetrics,
+  isPostingRankingSpan,
   isReaderStatsValue,
+  withRanking,
+  type PostingRankingRecord,
+  type PostingRankingSpan,
   isKnownPostingSite,
   isReaderStatsPeriodKey,
   isReaderStatsUpdatedAt,
@@ -507,8 +512,53 @@ export interface ReaderStatsBundleItem {
 export interface ReaderStatsBundle {
   /** まとめて渡した時刻（ヘルパーが書く。記録には使わない——記録の日時は各封筒の readAt） */
   readonly handedAt?: string;
-  /** 溜めた順（古いものが先）。**空の束は受け取らない** */
+  /**
+   * 溜めた順（古いものが先）。**順位（`rankings`）も無い空の束は受け取らない**
+   * ——順位だけを読んだ日は、items が空で rankings だけの束が届く（2026-11-02）
+   */
   readonly items: readonly ReaderStatsBundleItem[];
+  /**
+   * ランキングの順位（ヘルパー 0.19.0。束の一番上の段の省いてよい欄。2026-11-02）。
+   * 読めなかった1件も理由を持ったまま残す（items と同じ。記録に残すため）
+   */
+  readonly rankings?: readonly ReaderStatsBundleRanking[];
+}
+
+/**
+ * ヘルパーが作者の開いたランキングの画面で読んだ、自分の作品の順位の1件
+ * （ヘルパーとの取り決め 2026-11-02）。圏外は送られない。
+ *
+ * 見分けの鍵は site＋workId＋board＋date。作品は site＋workId で決める
+ * （読者の反応の束と同じ。台帳の作品IDで1つに決まるものだけ）。
+ */
+export interface ReaderStatsRanking {
+  readonly site: PostingSiteId;
+  /** どこで読んだか（なろうのときだけ "narou.fun"。いまなろうは送られない） */
+  readonly source?: ReaderStatsEnvelopeSource;
+  readonly workId: string;
+  /** サイトでの作品名（知らせと記録にだけ使う。作品の照合には使わない） */
+  readonly title?: string;
+  /** 一覧の区分の鍵（機械向けの名前。台帳の `board` に入る） */
+  readonly board: string;
+  /** 画面の見出しのまま（グラフの線・表に出す） */
+  readonly boardLabel: string;
+  readonly span: PostingRankingSpan;
+  readonly genre?: string;
+  /** 順位。1以上の整数 */
+  readonly rank: number;
+  /** 日本時間の日付（YYYY-MM-DD） */
+  readonly date: string;
+  /** 読んだ日時（ISO8601） */
+  readonly readAt: string;
+}
+
+/** 束の中の順位の1件。読めなかったものも理由を持って残る */
+export interface ReaderStatsBundleRanking {
+  /** 束の rankings の何件目か（1から） */
+  readonly position: number;
+  readonly result:
+    | { readonly ok: true; readonly ranking: ReaderStatsRanking }
+    | { readonly ok: false; readonly reason: string };
 }
 
 /**
@@ -557,9 +607,20 @@ export function parseReaderStatsPaste(raw: string): ReaderStatsPasteResult {
       reason: `まとめて渡された読者の反応を読めませんでした。${READER_STATS_BUNDLE_VERSION_MISMATCH}`,
     };
   }
-  if (value.items.length === 0) {
+  /*
+    順位（2026-11-02）。**1件ずつ確かめ、読めない1件だけを捨てる**——束はまるごと断らない
+    （順位は数の記録の添え物で、形の崩れた1件のために読者の反応まで落とさない）
+  */
+  const rankings = parseBundleRankings(value.rankings);
+  if (value.items.length === 0 && !rankings.some((ranking) => ranking.result.ok)) {
     // ヘルパーは空の束を作らない取り決め。来たら何も書かずに言う
-    return { ok: false, reason: "まとめて渡された読者の反応が、1件も入っていませんでした。" };
+    return {
+      ok: false,
+      reason:
+        rankings.length > 0
+          ? "まとめて渡された順位を、1件も読めませんでした。"
+          : "まとめて渡された読者の反応が、1件も入っていませんでした。",
+    };
   }
 
   const items = value.items.map((item, index): ReaderStatsBundleItem => {
@@ -581,11 +642,155 @@ export function parseReaderStatsPaste(raw: string): ReaderStatsPasteResult {
   return {
     ok: true,
     kind: "bundle",
-    bundle: { ...(handedAt ? { handedAt } : {}), items },
+    bundle: {
+      ...(handedAt ? { handedAt } : {}),
+      items,
+      ...(rankings.length > 0 ? { rankings } : {}),
+    },
   };
 }
 
 const BUNDLE_ITEM_NOT_ENVELOPE = "読者の反応のデータとして読めませんでした。";
+
+/** 区分の鍵・見出しの長さの上限（ヘルパーの書く上限と同じ。越えたら作り手の不具合） */
+const RANKING_BOARD_MAX_LENGTH = 200;
+const RANKING_LABEL_MAX_LENGTH = 100;
+
+/**
+ * 束の rankings を読む。**欄が無ければ空**（これまでの束・順位の無い束）。
+ * 並びでなければ1件の失敗として残す（記録に残す。束は断らない）
+ */
+function parseBundleRankings(raw: unknown): ReaderStatsBundleRanking[] {
+  if (absent(raw)) return [];
+  if (!Array.isArray(raw)) {
+    return [{ position: 1, result: { ok: false, reason: "順位の並びとして読めませんでした。" } }];
+  }
+  return raw.map((item, index): ReaderStatsBundleRanking => {
+    const position = index + 1;
+    const read = parseRanking(item);
+    return typeof read === "string"
+      ? { position, result: { ok: false, reason: read } }
+      : { position, result: { ok: true, ranking: read } };
+  });
+}
+
+/**
+ * 順位の1件を確かめる。**直さずに、受けるか捨てるかだけを決める**（封筒と同じ流儀）。
+ * @returns 読めた順位、読めなければ捨てる理由
+ */
+export function parseRanking(raw: unknown): ReaderStatsRanking | string {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return "順位のデータとして読めませんでした。";
+  }
+  const value = raw as Record<string, unknown>;
+  const site = POSTING_SITES.find((info) => info.id === value.site);
+  if (!site) return "順位に書かれたサイトが分かりませんでした。";
+  const rawSource = absent(value.source) ? undefined : value.source;
+  if (rawSource !== undefined && !isReaderStatsEnvelopeSource(rawSource)) {
+    return "順位に書かれた読み取り元が分かりませんでした。";
+  }
+  /*
+    **読者の反応の封筒と同じサイトの線**（`supportsReaderStatsHelper`）。なろう本体の画面を
+    読んだ順位は受けない（作者の判断 2026-11-02。ヘルパーも送らない取り決め）
+  */
+  if (!supportsReaderStatsHelper(site.id, rawSource)) {
+    return `${site.label}の順位は、ヘルパーからは取り込みません。`;
+  }
+  const text = (field: unknown, max: number): string | undefined =>
+    typeof field === "string" && field.trim() !== "" && field.trim().length <= max
+      ? field.trim()
+      : undefined;
+  const workId = text(value.workId, 100);
+  if (!workId) return "順位に作品IDが入っていませんでした。";
+  const board = text(value.board, RANKING_BOARD_MAX_LENGTH);
+  const boardLabel = text(value.boardLabel, RANKING_LABEL_MAX_LENGTH);
+  if (!board || !boardLabel) return "順位の一覧の区分を読めませんでした。";
+  if (!isPostingRankingSpan(value.span)) return "順位の期間を読めませんでした。";
+  // **順位は直さずに捨てる**（0位・1.5位・"3"。台帳の関所 `isRank` と同じ線）
+  if (!Number.isSafeInteger(value.rank) || (value.rank as number) < 1) {
+    return "順位の数を読めませんでした。";
+  }
+  if (!isCalendarDay(value.date)) return "順位の日付を読めませんでした。";
+  if (typeof value.readAt !== "string" || Number.isNaN(Date.parse(value.readAt))) {
+    return "順位を読んだ日時を読めませんでした。";
+  }
+  // 作品名・ジャンルは添え物。形が違えば欄ごと捨てる（順位そのものは落とさない）
+  const title = text(value.title, READER_STATS_TITLE_MAX_LENGTH);
+  const genre = text(value.genre, RANKING_LABEL_MAX_LENGTH);
+  return {
+    site: site.id,
+    ...(rawSource !== undefined ? { source: rawSource } : {}),
+    workId,
+    ...(title !== undefined ? { title } : {}),
+    board,
+    boardLabel,
+    span: value.span,
+    ...(genre !== undefined ? { genre } : {}),
+    rank: value.rank as number,
+    date: value.date,
+    readAt: value.readAt.trim(),
+  };
+}
+
+/** 暦にある日付か（YYYY-MM-DD。`2026-13-45` は落とす） */
+function isCalendarDay(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === value;
+}
+
+/**
+ * ヘルパーの順位を、台帳の順位の記録にする。
+ *
+ * 記録の日時は**その日の 0:00（日本時間）**——なろう殿堂入りAPIの順位と同じ流儀で、
+ * グラフは時差の書いてある日時をその暦日として読む（`rankDayOf`）。読んだ時刻にすると、
+ * 手元の時差で前の日へずれる
+ */
+export function rankingRecordFromHelper(ranking: ReaderStatsRanking): PostingRankingRecord {
+  return {
+    site: ranking.site,
+    recordedAt: `${ranking.date}T00:00:00+09:00`,
+    board: ranking.board,
+    rank: ranking.rank,
+    note: "ヘルパーがランキングの画面から読み取り",
+    source: "helper",
+    boardLabel: ranking.boardLabel,
+    span: ranking.span,
+    ...(ranking.genre !== undefined ? { genre: ranking.genre } : {}),
+  };
+}
+
+/** 順位を台帳へ積んだ結果 */
+export interface ReaderStatsRankingsApplied {
+  readonly ledger: PostingLedger;
+  readonly added: number;
+  /** 同じ鍵がもうあって積まなかった数 */
+  readonly repeated: number;
+}
+
+/**
+ * 順位を台帳へ積む（元の台帳は書き換えない）。**同じ鍵（サイト＋区分＋日付）は積まない**
+ * （`hasHelperRankingOn`。束の中で同じ鍵が重なっても、先の1件だけ）。
+ * 作品の照合は呼ぶ側が済ませている（`routeReaderStatsRanking`）
+ */
+export function applyReaderStatsRankings(
+  ledger: PostingLedger,
+  rankings: readonly ReaderStatsRanking[]
+): ReaderStatsRankingsApplied {
+  let next = ledger;
+  let added = 0;
+  let repeated = 0;
+  for (const ranking of rankings) {
+    const record = rankingRecordFromHelper(ranking);
+    if (hasHelperRankingOn(next, record)) {
+      repeated++;
+      continue;
+    }
+    next = withRanking(next, record);
+    added++;
+  }
+  return { ledger: next, added, repeated };
+}
 
 function notEnvelopeResult(): Extract<ReaderStatsEnvelopeResult, { ok: false }> {
   return { ok: false, reason: NOT_ENVELOPE_REASON, kind: "notEnvelope" };

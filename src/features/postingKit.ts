@@ -8,6 +8,7 @@ import {
   POSTING_SITES,
   postingSiteInfo,
   postingSiteLabels,
+  rankingBoardLabel,
   rankingBoards,
   siteFactsFor,
   siteProfile,
@@ -1031,7 +1032,7 @@ async function askRankingSite(
           label: info.label,
           // 前回の記録を添える。「前より上がったか」がこの操作の関心である
           description: latest
-            ? `前回 ${latest.board} ${latest.rank}位`
+            ? `前回 ${rankingBoardLabel(latest)} ${latest.rank}位`
             : "記録はまだありません",
           site: entry.site,
         };

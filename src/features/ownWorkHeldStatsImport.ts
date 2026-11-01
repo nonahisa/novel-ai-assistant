@@ -2,9 +2,16 @@ import { PostingStore } from "../core/postingStore";
 import {
   readerStatsAlreadyImported,
   routeReaderStatsBundleItem,
+  routeReaderStatsRanking,
   type ReaderStatsWorkCandidate,
 } from "../core/readerStatsHelperLink";
-import type { ReaderStatsBundle, ReaderStatsEnvelope } from "../core/readerStatsEnvelope";
+import {
+  rankingRecordFromHelper,
+  type ReaderStatsBundle,
+  type ReaderStatsEnvelope,
+  type ReaderStatsRanking,
+} from "../core/readerStatsEnvelope";
+import { hasHelperRankingOn } from "../models/posting";
 import { logFailure, useLogFile } from "../core/logger";
 import { messageOf } from "../core/errorMessage";
 import type { WorkEntry } from "../models/types";
@@ -88,6 +95,46 @@ export async function importHeldOwnWorkStats(
     if (id === undefined) return true;
     const ledger = after.find((candidate) => candidate.id === id)?.ledger;
     return !ledger || !readerStatsAlreadyImported(envelope, ledger);
+  });
+  return { remaining, changedWorks: result.changedWorks ?? [] };
+}
+
+/**
+ * 控えておいた「未登録の自分の作品」の順位を、登録した作品へ取り込む（2026-11-02）。
+ *
+ * 画面の控えと同じく**束の取り込みと同じ関数**を通す（振り分けの関所・同じ鍵は積まない）。
+ * **知らせは出さない**——読者の反応の控えを移した知らせと重ねない（記録には残る。積んだ順位の
+ * お祝いは台帳の保存から出る）。取り込んだあと台帳を読み直し、入った順位だけを控えから外す。
+ */
+export async function importHeldOwnWorkRankings(
+  rankings: readonly ReaderStatsRanking[],
+  works: readonly WorkEntry[]
+): Promise<{
+  /** まだ台帳に入っていない順位（控えに残す） */
+  readonly remaining: readonly ReaderStatsRanking[];
+  readonly changedWorks: readonly WorkEntry[];
+}> {
+  const before = await loadCandidates(works);
+  const routedTo = new Map<ReaderStatsRanking, string>();
+  for (const ranking of rankings) {
+    const route = routeReaderStatsRanking(ranking, before);
+    if (route.kind === "work") routedTo.set(ranking, route.id);
+  }
+  if (routedTo.size === 0) return { remaining: rankings, changedWorks: [] };
+  const bundle: ReaderStatsBundle = {
+    items: [],
+    rankings: [...routedTo.keys()].map((ranking, index) => ({
+      position: index + 1,
+      result: { ok: true, ranking },
+    })),
+  };
+  const result = await importReaderStatsBundle(bundle, works, { silent: true });
+  const after = await loadCandidates(works.filter((work) => [...routedTo.values()].includes(work.id)));
+  const remaining = rankings.filter((ranking) => {
+    const id = routedTo.get(ranking);
+    if (id === undefined) return true;
+    const ledger = after.find((candidate) => candidate.id === id)?.ledger;
+    return !ledger || !hasHelperRankingOn(ledger, rankingRecordFromHelper(ranking));
   });
   return { remaining, changedWorks: result.changedWorks ?? [] };
 }

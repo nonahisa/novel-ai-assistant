@@ -1293,6 +1293,12 @@ function renderRankChart(chart) {
   return title + '<div class="rank-chart"><svg viewBox="0 0 ' + width + ' ' + height +
     '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="順位の推移">' + parts.join('') + '</svg></div>' +
     '<div class="rank-legend">' + legend.join('') + '</div>' +
+    // 線が多すぎるときは直近に順位のある線だけを描く（core/rankSeries.ts の RANK_CHART_MAX_SERIES）
+    (chart.hiddenLabels && chart.hiddenLabels.length > 0
+      ? '<div class="site-meta">ほかに' + chart.hiddenLabels.length + '本の線（' +
+        escapeHtml(chart.hiddenLabels.slice(0, 3).join('・')) + (chart.hiddenLabels.length > 3 ? 'など' : '') +
+        '）は、下の順位の表で見られます。</div>'
+      : '') +
     '<div class="site-foot">線が切れている所は、その種別で順位が無かった（圏外）。</div>';
 }
 
