@@ -293,6 +293,22 @@ export function buildSetupDocument(plan: SetupPlan): string {
  * **1件ごとに確認は取らない。** 押す前に何を入れるか見せているので、
  * 途中で何度も聞くと作業が進まない。ただし**中止はいつでもできる**。
  */
+const SHOW_LOG = "ログを見る";
+/** 手で入れ終えたあとに押すボタン（作者の判断 2026-11-01） */
+export const RECHECK_AFTER_MANUAL = "入れ終えたので確かめる";
+/**
+ * 手で入れてもらう案内のあとの失敗の理由。**ボタンを出すかの目印にも使う**
+ * （導入の結果の型は `core/packageInstall.ts` の共有物なので、印を足さずに文で見分ける）
+ */
+export const MANUAL_INSTALL_DETAIL =`入れ終わったら、この知らせの［${RECHECK_AFTER_MANUAL}］を押してください。`;
+
+/** 導入に失敗したときの知らせのボタン。手で入れるものがあれば、確かめ直す道を先に出す */
+export function installFailureButtons(details: readonly string[]): string[] {
+  return details.includes(MANUAL_INSTALL_DETAIL)
+    ? [RECHECK_AFTER_MANUAL, SHOW_LOG]
+    : [SHOW_LOG];
+}
+
 async function installEntries(
   registry: AIRegistry,
   entries: readonly SetupPlanEntry[],
@@ -308,11 +324,13 @@ async function installEntries(
   if (confirmed !== proceed) return;
 
   const failures: string[] = [];
+  const failureDetails: string[] = [];
 
   for (const entry of entries) {
     const outcome = await installOne(entry.requirement.id, manager);
     if (outcome.kind === "failed") {
       failures.push(`${entry.requirement.label}: ${outcome.detail}`);
+      failureDetails.push(outcome.detail);
       logFailure("セットアップの導入に失敗", {
         対象: entry.requirement.label,
         理由: outcome.detail,
@@ -327,12 +345,21 @@ async function installEntries(
   }
 
   if (failures.length > 0) {
-    const showLog = "ログを見る";
+    /*
+      **手で入れてもらうものがあれば、入れ終えたあとに押す道を付ける**（作者の判断
+      2026-11-01）。以前は「もう一度『セットアップ（必要なものを入れる）』を実行して
+      ください」と言うだけで、その名前の操作は詳細メニューに無かった（設定管理へ
+      移した。設計書6.56.3）。
+
+      この知らせは**待つ**。押されたら下の確かめ直しへ進む——コマンドを呼び直さないのは、
+      いま走っているセットアップの続きがそのまま確かめ直しになっているため
+      （呼び直すと同じ案内が2つ重なる）
+    */
     const picked = await vscode.window.showErrorMessage(
       `一部を入れられませんでした。\n${failures.join("\n")}`,
-      showLog
+      ...installFailureButtons(failureDetails)
     );
-    if (picked === showLog) {
+    if (picked === SHOW_LOG) {
       await vscode.commands.executeCommand("novelai.showLog");
     }
   }
@@ -401,11 +428,7 @@ async function guideManualInstall(
   }
 
   // 入れ終わったかは分からない。**入ったことにしない**
-  return {
-    kind: "failed",
-    detail:
-      "入れ終わったら、もう一度「セットアップ（必要なものを入れる）」を実行してください。",
-  };
+  return { kind: "failed", detail: MANUAL_INSTALL_DETAIL };
 }
 
 async function installOne(

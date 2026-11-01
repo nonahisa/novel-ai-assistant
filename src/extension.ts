@@ -146,6 +146,7 @@ import {
 import {
   FOCUS_CHAT_KEY,
   SOLO_VIEW_KEY,
+  chatHiddenBySolo,
   resetViewVisibility,
 } from "./views/viewVisibility";
 import { ActionDecorationProvider } from "./views/actionDecorations";
@@ -374,6 +375,7 @@ import {
 } from "./features/nameCheck";
 import {
   announceRenameProposals,
+  announceRenameSettled,
   applyRenameToRecords,
   clearPendingRename,
   describeRenameRecordsResult,
@@ -3317,6 +3319,14 @@ export async function activate(
         // パネルを開いた時点で activeTextEditor は取れなくなる
         workChatPanel.trackEditor(vscode.window.activeTextEditor);
       }
+      /*
+        **「他のメニューを閉じる」で相談のビューが隠れていれば、先に出し直す**
+        （作者の判断 2026-11-01）。隠れたままでは focus が効かず、相談パネルを
+        開けない。案内は「左の『AIに相談』を開いて」と言うだけで、隠れたビューは
+        作者には開きようがなかった。印を外して全部のメニューを戻す（相談だけを
+        残すと、作者が残したメニューまで消える）
+      */
+      if (chatHiddenBySolo(soloViewNow)) await setSoloView(undefined);
       await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
     }),
     // 本文の領域に大きく開く（作者の要望、2026-08-28）。
@@ -3385,7 +3395,14 @@ export async function activate(
    */
   async function setSoloView(view: string | undefined): Promise<void> {
     await vscode.commands.executeCommand("setContext", SOLO_VIEW_KEY, view);
+    soloViewNow = view;
   }
+  /**
+   * いま立てている「1つだけ残す」の印。**`setContext` は書くだけで読み返せない**ので、
+   * 相談を開くとき（`novelai.openChat`）に隠れているかを知るため、ここで控える。
+   * 起動時は `resetViewVisibility` で印を外しているので、初めは undefined
+   */
+  let soloViewNow: string | undefined;
 
   // ─── AIの独り言（設計書6.21） ───
   const chatter = new ChatterService({
@@ -5622,7 +5639,37 @@ export async function activate(
         const work =
           node && node.type === "work" ? node.work : await resolveWork(undefined, registry);
         if (!work) return;
-        await importOutboxInbox(work);
+        /*
+          **先に GitHub から受け取る**（作者の判断 2026-11-01）。手順は「同期」の取り込み
+          （`novelai.gitPull`）と同じ：取り寄せて数え直し、遅れていれば取り込む。
+          取り込みの係（`gitSync.pull`）は自分で結果の知らせを出すので、ここでは成否だけ渡す
+        */
+        await importOutboxInbox(work, {
+          receive: async (target) => {
+            if (!canRunProcesses()) {
+              return {
+                kind: "skipped",
+                reason: "ブラウザ版では GitHub から受け取れないため、手元に届いている分だけを見ました。",
+              };
+            }
+            const status = await gitSync.refresh(target, { fetch: true, notify: false });
+            if (status.kind === "not_a_repo" || status.kind === "no_remote") {
+              return {
+                kind: "skipped",
+                reason: "この作品は GitHub と同期していないため、GitHub からは受け取りませんでした。",
+              };
+            }
+            if (status.kind !== "tracked") {
+              const { describeStatus } = await import("./features/gitSync.js");
+              return {
+                kind: "skipped",
+                reason: `GitHub からは受け取りませんでした（${describeStatus(status).replace(/。$/, "")}）。`,
+              };
+            }
+            if (status.behind === 0) return { kind: "received" };
+            return (await gitSync.pull(target)) ? { kind: "received" } : { kind: "failed" };
+          },
+        });
       }
     ),
     registerCommand("novelai.nextSceneMemo", async (node?: WorkNode) => {
@@ -6366,6 +6413,19 @@ export async function activate(
     // 資料への反映へそのまま進めるボタンを付ける（押さなければ何もしない。待たない）
     announceRenameProposals(work, result.issues.length, result.pending.oldName);
   };
+
+  /*
+    **本文の置き換えを決め終えたら、資料への反映を訊く**（作者の判断 2026-11-01）。
+    最初の知らせは「適用が済んだら」と言うだけで、1件ずつ決めているうちに沈む。
+    待ち（対応表）が残っている作品だけ訊く——資料へ反映し終えた作品や、
+    待ちを破棄した作品では、決め終えても何も出さない
+  */
+  proposalPanel.setOnCategorySettled((work, category) => {
+    if (category !== "名前の付け替え") return;
+    const pending = loadPendingRename(verifiedState(context.workspaceState), work.id);
+    if (!pending) return;
+    announceRenameSettled(work, pending);
+  });
 
   context.subscriptions.push(
     registerCommand("novelai.checkNames", async (node?: WorkNode) => {

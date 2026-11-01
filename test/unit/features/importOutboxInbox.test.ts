@@ -3,8 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 import { execFileSync } from "node:child_process";
-import { FileSystemError, FileType, workspace } from "../support/vscodeStub";
-import { runInboxImport, countPendingInboxRecords } from "../../../src/features/importOutboxInbox";
+import { FileSystemError, FileType, window, workspace } from "../support/vscodeStub";
+import {
+  runInboxImport,
+  countPendingInboxRecords,
+  importOutboxInbox,
+} from "../../../src/features/importOutboxInbox";
 import { outboxImport } from "../../../src/mcp/tools/outbox";
 import { OUTBOX_INBOX_FORMAT, parseInboxResult } from "../../../src/core/outboxInbox";
 import { BODY_CHANGED_REASON, gitBlobSha, type OutboxRecord } from "../../../src/core/outboxImport";
@@ -325,4 +329,108 @@ describe("done へ移したものは、次の同期で送られる", () => {
     // 本物の git を何度も起こすので、CI の windows-latest では5秒を越えることがある
     // （2026-10-23 に 5014ms で落ちた）。ほかの git のテストと同じ30秒にする
   }, 30_000);
+});
+
+/**
+ * ［原稿箱を取り込む］は、**先に GitHub から受け取ってから**取り込む（作者の判断 2026-11-01）。
+ *
+ * 以前は届いた箱を読むだけで、同期していなければ「GitHub と同期すると届きます」で
+ * 終わった。押した作者は、同期を探しに行ってからもう一度押すことになった。
+ * 受け取れなくても、手元に届いている箱は取り込む。理由は1文で添える。
+ */
+describe("原稿箱を取り込む前に、GitHub から受け取る", () => {
+  let messages: string[] = [];
+
+  /**
+   * 本体（`importOutboxInbox`）は時刻を渡せないので、指摘をいまの時刻にして
+   * 期限切れ（既定3日）で断られないようにする
+   */
+  function freshWork(name: string): WorkEntry {
+    const work = makeWork(name);
+    fs.writeFileSync(
+      nodePath.join(work.folderPath, ".aiwriter", "findings.jsonl"),
+      `${JSON.stringify({ ...FINDING, time: new Date().toISOString() })}\n`,
+      "utf8"
+    );
+    return work;
+  }
+
+  beforeEach(() => {
+    messages = [];
+    const capture = async (message: string) => {
+      messages.push(message);
+      return undefined;
+    };
+    Object.assign(window, {
+      showInformationMessage: capture,
+      showWarningMessage: capture,
+      showErrorMessage: capture,
+    });
+  });
+
+  it("受け取りを先に呼び、受け取って届いた箱を取り込む", async () => {
+    const work = freshWork("receive");
+    const bytes = fs.readFileSync(nodePath.join(work.folderPath, FILE));
+    const order: string[] = [];
+    await importOutboxInbox(work, {
+      receive: async () => {
+        order.push("receive");
+        // 同期で箱が届いたことにする（受け取りの前には箱が無い）
+        putBox(work, "20261101T050000Z-tablet.json", [recordsFor(bytes)[2]]);
+        return { kind: "received" };
+      },
+    });
+
+    expect(order).toEqual(["receive"]);
+    expect(read(work, FILE)).toContain("ゆっくり");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).not.toContain("受け取れません");
+  });
+
+  it("受け取れなくても、手元に届いている箱は取り込み、理由を1文で添える", async () => {
+    const work = freshWork("receive-failed");
+    const bytes = fs.readFileSync(nodePath.join(work.folderPath, FILE));
+    putBox(work, "20261101T050000Z-tablet.json", [recordsFor(bytes)[2]]);
+
+    await importOutboxInbox(work, {
+      receive: async () => ({ kind: "failed" }),
+    });
+
+    expect(read(work, FILE)).toContain("ゆっくり");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("GitHub からは受け取れなかったため、手元に届いていた分だけを取り込みました。");
+  });
+
+  it("受け取りが投げても止めない（手元の箱は取り込む）", async () => {
+    const work = freshWork("receive-throw");
+    const bytes = fs.readFileSync(nodePath.join(work.folderPath, FILE));
+    putBox(work, "20261101T050000Z-tablet.json", [recordsFor(bytes)[2]]);
+
+    await importOutboxInbox(work, {
+      receive: async () => {
+        throw new Error("回線が切れた");
+      },
+    });
+
+    expect(read(work, FILE)).toContain("ゆっくり");
+    expect(messages[0]).toContain("GitHub からは受け取れなかった");
+  });
+
+  it("受け取ったあとで空なら、「同期すると届きます」とは言わない", async () => {
+    const work = makeWork("receive-empty");
+    await importOutboxInbox(work, { receive: async () => ({ kind: "received" }) });
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("取り込み待ちのものはありません");
+    expect(messages[0]).not.toContain("同期すると届きます");
+  });
+
+  it("GitHub と同期していない作品では、受け取りを飛ばした理由を言う", async () => {
+    const work = makeWork("receive-skip");
+    await importOutboxInbox(work, {
+      receive: async () => ({ kind: "skipped", reason: "この作品は GitHub と同期していません。" }),
+    });
+
+    expect(messages[0]).toContain("この作品は GitHub と同期していません。");
+  });
 });

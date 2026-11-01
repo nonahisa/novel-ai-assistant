@@ -1096,7 +1096,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       webviewView.webview.cspSource
     );
     webviewView.webview.onDidReceiveMessage((message: unknown) => {
-      void this.handleMessage(message as IncomingMessage);
+      void this.receive(message as IncomingMessage);
     });
     webviewView.onDidDispose(() => {
       if (this.view === webviewView) this.view = undefined;
@@ -2044,7 +2044,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.editorPanel = panel;
     panel.webview.html = buildProposalPanelHtml(createNonce(), panel.webview.cspSource);
     panel.webview.onDidReceiveMessage((message: unknown) => {
-      void this.handleMessage(message as IncomingMessage);
+      void this.receive(message as IncomingMessage);
     });
     panel.onDidDispose(() => {
       if (this.editorPanel === panel) this.editorPanel = undefined;
@@ -3002,6 +3002,49 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         : "novelai.openSettingsPanel",
       ref
     );
+  }
+
+  /**
+   * 分類の提案を最後の1件まで決め終えたときに呼ぶ口（作者の判断 2026-11-01）。
+   *
+   * 人物名の付け替えは、本文の置き換えを決め終えたその場で資料への反映を訊く
+   * （`extension.ts`）。**パネルは付け替えの待ちを知らない**ので、どの分類が
+   * 終わったかだけを渡し、訊くかどうかは受け手が決める。
+   */
+  setOnCategorySettled(
+    listener: ((work: WorkEntry, category: string) => void) | undefined
+  ): void {
+    this.onCategorySettled = listener;
+  }
+
+  private onCategorySettled: ((work: WorkEntry, category: string) => void) | undefined;
+
+  /**
+   * 面からの知らせを受ける。**決める操作（適用・見送り・まとめて適用）だけ**、
+   * その前後で分類の残りを数え、残りが0になったら合図する。
+   *
+   * 決める操作に絞るのは、開き直し・分類の選び直しで鳴らさないため（同じ問いを
+   * 何度も出さない）。適用に失敗した提案は残りに数える（`isRemaining`）ので、
+   * 当たらなかった置き換えを残したまま「決め終えた」とは言わない。
+   */
+  private async receive(message: IncomingMessage): Promise<void> {
+    const decides =
+      message.type === "apply" || message.type === "dismiss" || message.type === "applyAll";
+    const work = this.work;
+    const category = this.category;
+    const before = decides && work ? this.remainingIn(work, category) : 0;
+    await this.handleMessage(message);
+    if (!decides || !work || before === 0) return;
+    if (this.remainingIn(work, category) !== 0) return;
+    try {
+      this.onCategorySettled?.(work, category);
+    } catch (error) {
+      // 受け手の失敗で、済んだ適用を失敗に見せない。記録だけ残す
+      logFailure("提案パネル：決め終えたときの合図", {
+        分類: category,
+        理由: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async handleMessage(message: IncomingMessage): Promise<void> {

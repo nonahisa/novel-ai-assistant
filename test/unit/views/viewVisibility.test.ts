@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   FOCUS_CHAT_KEY,
   SOLO_VIEW_KEY,
+  chatHiddenBySolo,
   initialViewContext,
   resetViewVisibility,
 } from "../../../src/views/viewVisibility";
@@ -123,5 +124,31 @@ describe("起動のたびに素の状態へ戻す", () => {
     });
 
     expect(visibleViews(context)).toEqual(VIEWS.map((view) => view.id));
+  });
+});
+
+/**
+ * 「他のメニューを閉じる」で相談のビューが隠れていても、相談を開く操作で出し直す
+ * （作者の判断 2026-11-01）。
+ *
+ * 以前は相談パネルを開けず「左の『AIに相談』を開いてから、もう一度」と言うだけで、
+ * 隠れているビューは作者には開きようがなかった（`novelai.openChat` は印に触れなかった）。
+ */
+describe("相談を開くときに、隠れた相談のビューを出し直す", () => {
+  const SOLO_VALUES = [undefined, "works", "steps", "actions", "chat"] as const;
+
+  test("出し直しが要るかの判断は、package.json の when 式と食い違わない", () => {
+    for (const solo of SOLO_VALUES) {
+      const shown = visibleViews({ [FOCUS_CHAT_KEY]: false, [SOLO_VIEW_KEY]: solo });
+      expect(chatHiddenBySolo(solo), String(solo)).toBe(!shown.includes("novelai.chatView"));
+    }
+  });
+
+  test("出し直す印（すべて出す）で、相談のビューが出る", () => {
+    for (const solo of SOLO_VALUES) {
+      if (!chatHiddenBySolo(solo)) continue;
+      const shown = visibleViews({ [FOCUS_CHAT_KEY]: false, [SOLO_VIEW_KEY]: undefined });
+      expect(shown).toContain("novelai.chatView");
+    }
   });
 });

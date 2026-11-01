@@ -981,3 +981,42 @@ describe("段の説明の長さ", () => {
     expect(withEmphasis, "強調ではなく、行を分けて示す").toEqual([]);
   });
 });
+
+/**
+ * 作者の「6. 編集者校正・校閲」は作者の操作だけにする（作者の判断 2026-11-01）。
+ *
+ * 以前は作者の段に「校閲開始／終了」「校閲を終えて返す」が並び、作者には使えない
+ * 編集者の操作が混じっていた。「編集者へ渡す」は5段にあり、編集者と組む操作が
+ * 2つの段に散っていた。
+ */
+describe("作者の6段は、作者が押す操作だけ", () => {
+  const step6 = () => STEP_MENU.find((step) => step.label === "6. 編集者校正・校閲");
+
+  test("渡す → 提案を見る → 解除 → 編集履歴、続いて切替と参加", () => {
+    expect(commandsOf(step6())).toEqual([
+      "novelai.shareWithEditor",
+      "novelai.viewEditorProposals",
+      "novelai.revokeEditorAccess",
+      "novelai.showEditHistory",
+      "novelai.switchMode",
+      "novelai.joinAsEditor",
+    ]);
+  });
+
+  test("編集者だけの操作（校閲開始／終了・修正を提案する・校閲を終えて返す）は載せない", () => {
+    const ids = commandsOf(step6());
+    for (const command of [
+      "novelai.toggleReviewLock",
+      "novelai.proposeEditByHand",
+      "novelai.finishReviewAndReturn",
+      "novelai.reviewProposals",
+    ]) {
+      expect(ids).not.toContain(command);
+    }
+  });
+
+  test("「編集者へ渡す」は5段から6段へ移した（2か所に置かない）", () => {
+    const step5 = STEP_MENU.find((step) => step.label === "5. 投稿脱稿");
+    expect(commandsOf(step5)).not.toContain("novelai.shareWithEditor");
+  });
+});

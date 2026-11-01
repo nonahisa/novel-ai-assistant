@@ -175,6 +175,7 @@ import {
 import { summarizeReasons } from "../core/checkRunCounts";
 import { hashText } from "../core/textFile";
 import { confirmRun } from "../views/notify";
+import { findAction } from "../core/actionTree";
 import { cancelItem } from "../views/dialogs";
 
 /**
@@ -191,6 +192,16 @@ import { cancelItem } from "../views/dialogs";
  * **設定が無い作品では実行しない。** 照らし合わせる相手が無いのに
  * AIへ投げると、本文だけを見て「矛盾していそうなこと」を作り出す。
  */
+
+/**
+ * 設定資料が無いときに言う次の一手。**名前はメニューの項目から引く**（作者の判断
+ * 2026-11-01）。「設定資料をまとめて抽出」と書いていたが、メニューの名前は
+ * 「一括抽出」で、その名前では見つからない。写すと名前を変えた日に片方だけ古くなる
+ */
+export function extractSettingsHint(): string {
+  const label = findAction("novelai.extractSettings")?.label ?? "一括抽出";
+  return `先に「${label}」を実行してください。`;
+}
 
 /**
  * 「まとめたせいで入り切らなかった。分けて試し直す」の印。
@@ -1985,10 +1996,7 @@ async function collectSettings(
     if (suite.suiteConfirmed) {
       // **「失敗」と言わせない**（作者の指摘、2026-09-06）。短い理由は
       // 内訳の括弧へ、次の一手はまとめの末尾へ、と行き先を分けて渡す
-      suite.noteMissing?.(
-        "矛盾は、先に「設定資料をまとめて抽出」を実行してください。",
-        "設定資料がまだ無いため"
-      );
+      suite.noteMissing?.(`矛盾は、${extractSettingsHint()}`, "設定資料がまだ無いため");
       return undefined;
     }
     const answer = await vscode.window.showWarningMessage(
@@ -1999,7 +2007,7 @@ async function collectSettings(
           "矛盾検知は、作った設定資料と本文を照らし合わせる機能です。" +
           "設定が無いまま実行すると、AIは本文だけを見て" +
           "「矛盾していそうなこと」を作り出します。\n\n" +
-          "先に「設定資料をまとめて抽出」を実行してください。",
+          extractSettingsHint(),
       },
       "設定資料を抽出する"
     );

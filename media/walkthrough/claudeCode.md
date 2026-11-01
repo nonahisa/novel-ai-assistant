@@ -1,4 +1,4 @@
-# Claude Code とつなぐ（任意）
+# Claude Code接続（任意）
 
 VS Code 版の Claude Code を使っている人向けです。
 

@@ -28,7 +28,7 @@ import {
 } from "../core/nameRename";
 import type { TypoCheckIssue } from "./checkTypos";
 import { askText, cancelItem } from "../views/dialogs";
-import { suggestAction } from "../views/notify";
+import { suggestAction, whenNoticePicked } from "../views/notify";
 import { logFailure, useLogFile } from "../core/logger";
 import { findAction } from "../views/actionList";
 import { verifiedState } from "../core/verifiedMemento";
@@ -410,6 +410,39 @@ export function announceRenameProposals(
     if (answer !== label) return;
     void vscode.commands.executeCommand(APPLY_RENAME_COMMAND, { type: "work", work });
   });
+}
+
+/** 置き換えを決め終えたときの問いのボタン（作者の判断 2026-11-01） */
+const APPLY_TO_RECORDS = "資料に反映する";
+
+/**
+ * 提案パネルで、付け替えの本文の置き換えを最後の1件まで決め終えたときの問い
+ * （作者の判断 2026-11-01）。
+ *
+ * 最初の知らせ（`announceRenameProposals`）は「適用が済んだら」と言うが、置き換えを
+ * 1件ずつ決めているうちに通知センターへ沈み、資料への反映の入口が見つからなくなる。
+ * **詳細メニューには戻さない**（2026-09-24 B10①）。決め終えたその時に訊く。
+ *
+ * 押したあとは資料への反映のコマンドへ渡す——何をどこまで直すかの確認は
+ * そちらが出す（資料を書き換える前の確認を1か所に置く）。**返事を待たない**
+ * （提案パネルの操作の途中から呼ばれるので、押されるまでパネルを止めない）。
+ */
+export function announceRenameSettled(
+  work: WorkEntry,
+  pending: { oldName: string; newName: string }
+): void {
+  whenNoticePicked(
+    vscode.window.showInformationMessage(
+      `「${pending.oldName}」→「${pending.newName}」の本文の置き換えを決め終えました。` +
+        "設定資料・プロット・あらすじ・伏線の記録にも反映しますか。",
+      APPLY_TO_RECORDS
+    ),
+    async (answer) => {
+      if (answer !== APPLY_TO_RECORDS) return;
+      await vscode.commands.executeCommand(APPLY_RENAME_COMMAND, { type: "work", work });
+    },
+    { label: "人物名変更の資料反映の問い", workFolder: work.folderPath }
+  );
 }
 
 /**
