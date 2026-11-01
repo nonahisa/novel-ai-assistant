@@ -75,10 +75,10 @@ export interface PostingEnvelope {
  * 統合小説執筆環境ヘルパー（ブラウザ拡張）の入手先（0.76.7。作者の依頼、
  * 2026-09-23「ヘルパーにつなぐ案内を仕込んでください。今はGithubで」）。
  *
- * **ここ1か所だけが持つ。** Chrome ウェブストアへ載ったら、ここを
- * 差し替えれば案内がすべて向きを変える（写しを置くと片方だけ古くなる）。
+ * **ここ1か所だけが持つ。** 写しを置くと片方だけ古くなる。
+ * 2026-11-02 に Chrome ウェブストアへ載ったので、ストアのページへ差し替えた。
  */
-export const HELPER_DOWNLOAD_URL = "https://github.com/nonahisa/novel-ai-helper";
+export const HELPER_DOWNLOAD_URL = "https://chromewebstore.google.com/detail/mbchfkieflpplhgaaefbdgjcbhkocbmc";
 
 /**
  * 貼り込み係へ渡せるサイト（設計書6.79.1・6.79.8）。

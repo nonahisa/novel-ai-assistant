@@ -516,8 +516,8 @@ describe("読者反応自動取込（貼り付けて取り込む）", () => {
    * ときに、入手先を開く道を添える。開くだけで、何も書かない。
    */
   describe("ヘルパーの入手先を開く", () => {
-    test("入手先は GitHub の1か所", () => {
-      expect(HELPER_DOWNLOAD_URL).toBe("https://github.com/nonahisa/novel-ai-helper");
+    test("入手先は Chrome ウェブストアの1か所（2026-11-02 に載った）", () => {
+      expect(HELPER_DOWNLOAD_URL).toBe("https://chromewebstore.google.com/detail/mbchfkieflpplhgaaefbdgjcbhkocbmc");
     });
 
     test("2択の画面に「ヘルパーを入れる」があり、選べば入手先を開く", async () => {
