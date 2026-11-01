@@ -123,6 +123,112 @@ export function orderByLastWork<T extends { id: string }>(
 }
 
 /**
+ * 詳細メニューから押したときにコマンドへ渡る印（作者の判断 2026-11-02）。
+ *
+ * ## なぜ印が要るか
+ *
+ * 作者の判断は「**詳細メニューから押した、作品が要る命令は、毎回作品を選ばせる**」。
+ * 詳細メニューの項目は作品を持たないので、印が無ければコマンドの側は
+ * コマンドパレットや知らせのボタン（引数なしで呼ぶ所がある）と見分けられない。
+ * 引数なしの呼び出しを一律に「訊く」へ変えると、知らせのボタンのように
+ * 作品が画面で決まっている所まで訊き直すことになる（作者が「今までどおり
+ * 訊かない」とした所）。**呼ばれ方そのものに印を付ける**——原稿エディターの
+ * キーの印（`manuscriptKeys.ts`）と同じ形である。
+ *
+ * 印はコマンド登録の包み（`extension.ts` の `registerCommand`）が外し、
+ * コマンドの本体には「引数なし」として届く。
+ */
+export const DETAIL_MENU_SOURCE = "detailMenu";
+
+export interface DetailMenuArgs {
+  readonly source: typeof DETAIL_MENU_SOURCE;
+}
+
+export const DETAIL_MENU_ARGS: DetailMenuArgs = { source: DETAIL_MENU_SOURCE };
+
+/** コマンドの第1引数が、詳細メニューから押した印か */
+export function isDetailMenuArgs(value: unknown): value is DetailMenuArgs {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { source?: unknown }).source === DETAIL_MENU_SOURCE
+  );
+}
+
+/** 選ぶ画面で上に置いた理由（作者の判断 2026-11-02） */
+export type LikelyWorkReason = "manuscript" | "tree" | "step" | "chat";
+
+export interface LikelyWorkHints {
+  /** いま書いている原稿（前面の原稿エディター・素のエディター）の作品 */
+  manuscriptWorkId?: string;
+  /** 作品一覧で選んでいる作品 */
+  treeSelectedId?: string;
+  /** 簡単ステップメニューの最上段で選んでいる作品 */
+  stepSelectedId?: string;
+  /** 相談パネルがいま対象にしている作品 */
+  chatTargetId?: string;
+}
+
+/**
+ * 作品を選ぶ画面で、**いまいちばんありそうな作品を上へ**置く
+ * （作者の判断 2026-11-02）。
+ *
+ * ## なぜ選ばせたうえで並べるのか
+ *
+ * 推し量って黙って走らせると、外したときに別の作品の資料が書き換わる
+ * （2026-09-23 の実機で、作品一覧の誤った選択から約1時間30分の抽出が走りかけた）。
+ * 選ぶ画面を出せば外れは作者が見て直せる。いちばん上は選ばれた状態で開くので、
+ * 当たっていれば Enter だけで進める。
+ *
+ * ## 順
+ *
+ * 書いている原稿 → 作品一覧の選択 → 簡単ステップメニューの選択 → 相談の作品
+ * （作者の指定）。原稿がいちばん「いまの作品」に近く、相談は前の作品のまま
+ * 残りやすい。**重なった作品は上の理由で1度だけ**出す。残りの並びは変えない
+ * （登録順は作者が見慣れた並びである）。
+ *
+ * 登録から外れた手がかりは当てにしない（`pickHintedWork` と同じ理由）。
+ */
+export function orderByLikelyWork<T extends { id: string }>(
+  works: readonly T[],
+  hints: LikelyWorkHints
+): { work: T; reason?: LikelyWorkReason }[] {
+  const candidates: [string | undefined, LikelyWorkReason][] = [
+    [hints.manuscriptWorkId, "manuscript"],
+    [hints.treeSelectedId, "tree"],
+    [hints.stepSelectedId, "step"],
+    [hints.chatTargetId, "chat"],
+  ];
+  const top: { work: T; reason?: LikelyWorkReason }[] = [];
+  const used = new Set<string>();
+  for (const [id, reason] of candidates) {
+    if (id === undefined || used.has(id)) continue;
+    const work = works.find((entry) => entry.id === id);
+    if (!work) continue;
+    used.add(id);
+    top.push({ work, reason });
+  }
+  return [
+    ...top,
+    ...works.filter((work) => !used.has(work.id)).map((work) => ({ work })),
+  ];
+}
+
+/** 上に置いた理由を、選ぶ画面の説明欄の言葉で */
+export function describeLikelyWorkReason(reason: LikelyWorkReason): string {
+  switch (reason) {
+    case "manuscript":
+      return "いま書いている原稿";
+    case "tree":
+      return "作品一覧で選んでいる作品";
+    case "step":
+      return "簡単ステップメニューで選んでいる作品";
+    case "chat":
+      return "相談している作品";
+  }
+}
+
+/**
  * 作品を**推し量って**決めたときの、決め方（作者の裁定、2026-09-23）。
  *
  * - `"tree"`：作品一覧（ツリー）で選ばれていた

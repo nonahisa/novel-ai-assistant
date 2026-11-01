@@ -273,9 +273,13 @@ import {
 // 完了通知の件数は、提案パネルの見出しと同じ数え方をする（設計書6.8）
 import { describeCheckRunCounts } from "./core/checkRunCounts";
 import {
+  describeLikelyWorkReason,
+  isDetailMenuArgs,
   markInferredWork,
   orderByLastWork,
+  orderByLikelyWork,
   pickHintedWork,
+  type LikelyWorkHints,
 } from "./core/workTarget";
 import type { IncomingCount } from "./core/proposalBuckets";
 import {
@@ -987,9 +991,12 @@ export async function activate(
       いきなり「作品を選択」を出すと、これまで出ていなかった問いが
       増える（しかも関門と機能で別の作品を見かねない）。
     */
-    const openedPath = vscode.window.activeTextEditor
-      ? fromUri(vscode.window.activeTextEditor.document.uri)
-      : undefined;
+    // 詳細メニューから押したときは推し量らず選ばせる（作者の判断 2026-11-02）。
+    // 開いているファイルで決めると、選ぶ画面が出ないまま関門を通ってしまう
+    const openedPath =
+      vscode.window.activeTextEditor && detailMenuAsk === undefined
+        ? fromUri(vscode.window.activeTextEditor.document.uri)
+        : undefined;
     const work =
       given?.work ??
       (openedPath ? inferredWorkOfPath(registry, openedPath) : undefined) ??
@@ -1126,6 +1133,14 @@ export async function activate(
     thisArg
   ) =>
     vscode.commands.registerCommand(command, async (...args: unknown[]) => {
+      /*
+        **詳細メニューから押した印は、最初に外す**（作者の判断 2026-11-02）。
+        本体には「引数なし」として届け、作品を決める所で毎回選ばせる
+        （`detailMenuAsk`）。印のまま渡すと、引数を作品の節点と読む命令が
+        取り違える
+      */
+      const fromDetailMenu = isDetailMenuArgs(args[0]);
+      if (fromDetailMenu) args = [undefined, ...args.slice(1)];
       // 関門より先に残す（関門で止まった回も「届いた」ことは分かるように）
       if (treeMenuCommands.has(command)) {
         logStep(describeTreeMenuCall(command, args[0]));
@@ -1141,16 +1156,32 @@ export async function activate(
       // 光らせた詳細メニューの項目なら相談の作品で（`spotlightWorkHint`）
       const litWork = spotlightWorkFor?.(command);
       spotlightWorkHint = args[0] === undefined ? litWork : undefined;
+      /*
+        詳細メニューから押したら、作品を毎回選ばせる。**相談から光らせた項目を
+        押した1回だけは除く**——相談で「この作品の、この項目」と示されて押して
+        いるので、相談の作品で走らせる（作者の判断 2026-11-01。相談から呼んだ
+        ときは訊かない）。押されるたびに置き直し、古い印を残さない
+      */
+      const askToken =
+        fromDetailMenu && litWork === undefined ? {} : undefined;
+      detailMenuAsk = askToken;
       // 種類の関門（設計書6.109.7）は前提の関門より先に通す。歌詞の作品で
       // 「先に人物を抽出しますか」と訊いても意味が無い
+      // 関門で止まった回も、詳細メニューの印を残さない（下の finally を通らない）
+      const dropAsk = (): undefined => {
+        if (askToken !== undefined && detailMenuAsk === askToken) {
+          detailMenuAsk = undefined;
+        }
+        return undefined;
+      };
       const kindGate = await guardWorkKind(command, args);
-      if (kindGate === "stop") return undefined;
+      if (kindGate === "stop") return dropAsk();
       const gate = await guardPrerequisites(command, args);
-      if (!gate.run) return undefined;
+      if (!gate.run) return dropAsk();
       args = gate.args;
       // 前提の関門が作品を決めた（作品選択で選ばれた）なら、その作品で見直す
       if (kindGate === "unknown" && (await guardWorkKind(command, args)) === "stop") {
-        return undefined;
+        return dropAsk();
       }
 
       if (!beginCommand(runningCommands, command)) {
@@ -1158,7 +1189,7 @@ export async function activate(
         vscode.window.showInformationMessage(
           `「${label}」はいま動いています。終わるまでお待ちください。`
         );
-        return undefined;
+        return dropAsk();
       }
       const syncBusy = isSyncBusyCommand(command);
       if (syncBusy) syncCommandsRunning += 1;
@@ -1213,6 +1244,8 @@ export async function activate(
         if (litWork !== undefined && spotlightWorkHint === litWork) {
           spotlightWorkHint = undefined;
         }
+        // 作品を決めずに終わった操作の印も残さない（ほかの操作の印には触らない）
+        dropAsk();
       }
     });
 
@@ -3323,6 +3356,21 @@ export async function activate(
         ? spotlightWorkHint
         : undefined,
   });
+  // 詳細メニューから押したときの、選ぶ画面の並び（作者の判断 2026-11-02）。
+  // 並べるだけなので、見えていないツリーの選択や相談の作品も渡す
+  likelyWorkHints = () => {
+    const opened = activeManuscriptUri();
+    return {
+      manuscriptWorkId: opened
+        ? findWorkForPath(registry, fromUri(opened))?.id
+        : undefined,
+      treeSelectedId: worksView?.selection.find(
+        (item): item is WorkNode => item.type === "work"
+      )?.work.id,
+      stepSelectedId: stepProvider.selectedWork()?.id,
+      chatTargetId: workChatPanel.currentWorkId(),
+    };
+  };
 
   context.subscriptions.push(
     workChatPanel,
@@ -8771,7 +8819,9 @@ function workOfCommandArgs(
   }
   // 原稿エディタ（WebView）で書いているときも、その作品を見る
   // （`activeTextEditor` だけだと原稿エディタでは空になる）
-  const opened = activeManuscriptUri();
+  // 詳細メニューから押したときは、作品は選ぶ画面で決まる（作者の判断
+  // 2026-11-02）。ここで原稿の作品を当てると、選ぶ前の作品で種類の関門が止める
+  const opened = detailMenuAsk === undefined ? activeManuscriptUri() : undefined;
   if (opened) {
     const found = findWorkForPath(registry, fromUri(opened));
     if (found) return found;
@@ -8993,6 +9043,26 @@ let workTargetHints:
     })
   | undefined;
 
+/**
+ * 作品を選ぶ画面で上に置く手がかりを訊く口（作者の判断 2026-11-02）。
+ *
+ * `workTargetHints` と違い、**見えていないものも渡す**。こちらは推し量って
+ * 走らせるためではなく、選ぶ画面の並びを決めるだけなので、外れても作者が
+ * 見て選び直せる。預ける前（起動の途中）は並びを変えない。
+ */
+let likelyWorkHints: (() => LikelyWorkHints) | undefined;
+
+/**
+ * いま押された操作が、詳細メニューから作品を渡さずに押されたものか
+ * （作者の判断 2026-11-02。`core/workTarget.ts` の `DETAIL_MENU_ARGS`）。
+ *
+ * 入っているあいだに作品を決める所（`resolveWork`）が呼ばれたら、推し量らずに
+ * 選ぶ画面を出す。**最初の1回で使い切る**——コマンドが作品を決めたあとに
+ * 呼ぶ別の処理まで訊き直さないため。入れ物は押されるたびに作り、
+ * 包みが終わるときに自分の入れ物だけを片づける（`spotlightWorkHint` と同じ形）。
+ */
+let detailMenuAsk: object | undefined;
+
 /** ツリーから呼ばれた場合はそのノード、コマンドパレットからは選択させる */
 interface ResolveWorkOptions {
   /**
@@ -9210,10 +9280,22 @@ async function resolveWorkUnrouted(
     **見えているものだけを当てにする**——畳んだままのツリーや、閉じた相談の
     選択は、作者の目には入っていない。外すと別の作品の資料が書き換わる。
   */
-  const hinted = pickHintedWork({
-    registeredIds: works.map((work) => work.id),
-    ...workTargetHints?.(),
-  });
+  /*
+    **詳細メニューから押したときは推し量らず、毎回選ばせる**（作者の判断
+    2026-11-02。`detailMenuAsk`）。使うのは最初の1回だけ——コマンドが作品を
+    決めたあとに呼ぶ別の処理まで訊き直さない。1作品しか無いときは選ぶ相手が
+    いないので、これまでどおり訊かない
+  */
+  const askFromMenu = detailMenuAsk !== undefined;
+  detailMenuAsk = undefined;
+  const hinted = askFromMenu
+    ? works.length === 1
+      ? { workId: works[0].id, source: "single" as const }
+      : undefined
+    : pickHintedWork({
+        registeredIds: works.map((work) => work.id),
+        ...workTargetHints?.(),
+      });
   if (hinted) {
     const found = works.find((work) => work.id === hinted.workId);
     /*
@@ -9240,24 +9322,41 @@ async function resolveWorkUnrouted(
       （補足付きの一覧〈annotate〉は「溜まっている作品を上」の並びを
       持っているので、ここでは触らない。いま preferLast と併せて使う所は無い）
     */
-    const { ordered, lastFirst } = (options.preferLast ?? true)
-      ? orderByLastWork(works, lastWorkMemory?.get())
-      : { ordered: works, lastFirst: false };
+    /*
+      **詳細メニューから押したときは、いまいちばんありそうな作品を上へ**
+      （作者の判断 2026-11-02）。書いている原稿 → 作品一覧の選択 → 簡単ステップ
+      メニューの選択 → 相談の作品の順。上に置いた理由は説明欄に出す。
+      作品に手を加える操作（`preferLast: false`）は並べ替えない——Enter だけで
+      別の作品に手が入るのを避ける理由は、直前の作品のときと同じである
+    */
+    const likely =
+      askFromMenu && (options.preferLast ?? true)
+        ? orderByLikelyWork(works, likelyWorkHints?.() ?? {})
+        : undefined;
+    const { ordered, lastFirst } = likely
+      ? { ordered: likely.map((entry) => entry.work), lastFirst: false }
+      : (options.preferLast ?? true)
+        ? orderByLastWork(works, lastWorkMemory?.get())
+        : { ordered: works, lastFirst: false };
     const picked = await vscode.window.showQuickPick(
       [
-        ...ordered.map((w, index) => ({
-          label: abbreviateTitle(w.title),
-          // 先頭に置いた理由を見せる。黙って並びが変わると、作者には
-          // 登録順が崩れたように見える
-          description:
-            lastFirst && index === 0
-              ? `前回の作品　${w.folderPath}`
-              : w.folderPath,
-          // 省略したときだけ全文を添える。短い題にまで2行目を足すと、
-          // 選ぶだけの窓が縦に伸びて読みにくくなる
-          detail: isAbbreviated(w.title) ? w.title : undefined,
-          work: w,
-        })),
+        ...ordered.map((w, index) => {
+          const reason = likely?.[index]?.reason;
+          return {
+            label: abbreviateTitle(w.title),
+            // 先頭に置いた理由を見せる。黙って並びが変わると、作者には
+            // 登録順が崩れたように見える
+            description: reason
+              ? `${describeLikelyWorkReason(reason)}　${w.folderPath}`
+              : lastFirst && index === 0
+                ? `前回の作品　${w.folderPath}`
+                : w.folderPath,
+            // 省略したときだけ全文を添える。短い題にまで2行目を足すと、
+            // 選ぶだけの窓が縦に伸びて読みにくくなる
+            detail: isAbbreviated(w.title) ? w.title : undefined,
+            work: w,
+          };
+        }),
         // Escでも閉じられるが、それを知らない人には出口が無いように見える
         cancelItem(),
       ],
