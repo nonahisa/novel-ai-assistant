@@ -3416,9 +3416,19 @@ export async function activate(
     // 本文の領域に大きく開く（作者の要望、2026-08-28）。
     // **横の小さいパネル（novelai.openChat）は残す。** 範囲を選んで聞くときは
     // 本文が見えている必要があり、大きい画面では隠れてしまう
-    registerCommand("novelai.openChatPanel", () => {
+    registerCommand("novelai.openChatPanel", async (node?: unknown) => {
       // 開く前に、今の本文を覚えさせる（`openChat` と同じ理由）
       workChatPanel.trackEditor(vscode.window.activeTextEditor);
+      /*
+        **簡単ステップメニューから来たら、選んだ作品で相談する**（作者の判断
+        2026-11-02）。ステップは作品が要る項目へ選んだ作品を渡すのに、ここが
+        引数を見ずに開いていたので、相談は前の作品のまま開いていた。
+        違うときだけ合わせる（同じなら、覚えた本文を手放さない）。開く前に
+        合わせるのは、前の作品で一瞬描かれないようにするため
+      */
+      if (isWorkRefArg(node) && workChatPanel.currentWorkId() !== node.work.id) {
+        await workChatPanel.focusWork(node.work);
+      }
       workChatPanel.openLargePanel();
     }),
     registerCommand("novelai.exitChatFocus", async () => {
@@ -9112,6 +9122,21 @@ let lastWorkMemory:
  * この形だけを要求する（`WorkNode` はそのまま渡せる）。
  */
 export type WorkRef = Pick<WorkNode, "type" | "work">;
+
+/**
+ * 引数が作品の入れ物（`WorkRef`）か。引数を任意に受けるコマンド
+ * （ほかの所からは引数なしで呼ばれる）で、作品を渡されたときだけ使うため
+ */
+function isWorkRefArg(value: unknown): value is WorkRef {
+  if (typeof value !== "object" || value === null) return false;
+  const ref = value as { type?: unknown; work?: unknown };
+  return (
+    ref.type === "work" &&
+    typeof ref.work === "object" &&
+    ref.work !== null &&
+    typeof (ref.work as { id?: unknown }).id === "string"
+  );
+}
 
 /**
  * 相談パネルから起動できる機能と、対応するコマンド。
