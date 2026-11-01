@@ -1147,12 +1147,43 @@ export class GitSyncMonitor implements vscode.Disposable {
    * - **分かれている・残す文が決まっていない置き場には触らない。** 合わせるのは「保存・同期」
    * - **受け取りの最中は「原稿箱に N件届いています」を出さない**（`quietInbox`）。原稿箱の
    *   取り込みがこのあと箱を読むので、出すと押しても「取り込み待ちはありません」になる
+   * - **取りに行くのは自前で、必ず1回**（2026-11-02）。数え直し（`refresh` の `fetch`）に
+   *   任せていたときは、(1) 取りに行きの失敗がログに残るだけで捨てられ、読み直した遅れが
+   *   0件なので「受け取るものは無い」になり、(2) 数え直しの間引き（直前に取りに行ったか・
+   *   自動の取りに行きの設定）を通るので、裏で取りに行った直後（素のエディターで話を開いた・
+   *   起動した）に押すと、取りに行かずに「無い」と答えた。どちらも原稿箱の知らせで
+   *   「GitHub の最新も受け取りました」になった（画面テスト outboxInboxReceiveFirst）。
+   *   作者が「受け取る」を押した場面なので、間引きも設定も見ない（`statusBeforeRecording` と
+   *   同じ考え。あちらは記録の前の判断なので、新しい控えがあれば使う）
    */
   async receive(work: WorkEntry): Promise<ReceiveOutcome> {
     const run = this.options.run ?? runGit;
     this.quietInbox += 1;
     try {
-      const status = await this.refresh(work, { fetch: true, notify: false });
+      // 先に手元だけで読み、取りに行ける作品かを確かめる（同期していない作品で
+      // 取りに行くと、直しようのない失敗がログに並ぶ。`runRefresh` の冒頭と同じ理由）
+      const local = await this.refresh(work, { fetch: false, notify: false });
+      if (local.kind === "tracked") {
+        const fetched = await fetchRemote(work.folderPath, run);
+        this.lastFetchAt.set(work.id, Date.now());
+        if (!fetched.ok) {
+          // **エラー文から原因を当てない**（実装ルール5）。git の文はログへだけ残す
+          useLogFile(work.folderPath);
+          logFailure("受け取りの前のGitのfetchに失敗", {
+            作品: work.title,
+            詳細: fetched.detail ?? "（詳細なし）",
+          });
+          return {
+            kind: "failed",
+            reason: "GitHub から受け取れませんでした（詳しくはログにあります）。",
+          };
+        }
+      }
+      // 取り寄せたぶんを反映して読み直す（取りに行かなかった作品は手元の読みのまま）
+      const status =
+        local.kind === "tracked"
+          ? await this.refresh(work, { fetch: false, notify: false })
+          : local;
       if (status.kind === "not_a_repo" || status.kind === "no_remote") {
         return {
           kind: "skipped",

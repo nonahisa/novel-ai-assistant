@@ -63,6 +63,14 @@ export interface SyncTargetState {
    * 調べられなかったときは undefined（名前は書庫の名前だけにする）。
    */
   involved?: WorkEntry[];
+  /**
+   * 状態を調べる前の取りに行き（fetch）が失敗したか（2026-11-02）。
+   *
+   * 失敗すると遅れの数は手元が知っている古いままで、0件なら「同期は取れています」で
+   * 飛ばされ、作者には受け取れなかったことが伝わらなかった（原稿箱の受け取りと同じ形）。
+   * ほかにやることが無い置き場だけ、理由を `fetch_failed` に替える
+   */
+  fetchFailed?: boolean;
 }
 
 /** その置き場でやること */
@@ -118,6 +126,11 @@ export type SkipReason =
    * 合わせて送るのは「校閲を終えて返す」の役目（`finishReview.ts` の台帳だけの合わせ直し）
    */
   | "editor_diverged"
+  /**
+   * 手元ではやることが無いが、GitHub を取りに行けなかった（`SyncTargetState.fetchFailed`）。
+   * 「同期は取れています」とは言えない
+   */
+  | "fetch_failed"
   /** やることが無い（同期は取れている） */
   | "nothing";
 
@@ -148,6 +161,9 @@ export function skipReasonText(reason: SkipReason): string {
         "作者の側と、手元の提案の記録が分かれています" +
         `（「${finishReviewLabel()}」で、そろえて作者へ届けます）`
       );
+    case "fetch_failed":
+      // 理由は当てない（実装ルール5）。git の文はログに残してある
+      return "GitHub から受け取れませんでした（詳しくはログにあります）";
     case "nothing":
       return "同期は取れています";
   }
@@ -199,7 +215,7 @@ export function planSyncTarget(
   // 記録するぶんも送る。記録すれば ahead が増える
   const push = status.ahead > 0 || commit;
 
-  if (!commit && !pull && !push) return { ...base, skip: "nothing" };
+  if (!commit && !pull && !push) return { ...base, skip: nothingOrFetchFailed(target) };
   return { ...base, commit, pull, push };
 }
 
@@ -240,7 +256,15 @@ function planReceiveOnly(target: SyncTargetState): SyncTargetPlan {
     return { ...base, skip: "editor_diverged" };
   }
   if (status.behind > 0) return { ...base, pull: true };
-  return { ...base, skip: "nothing" };
+  return { ...base, skip: nothingOrFetchFailed(target) };
+}
+
+/**
+ * やることが無い置き場の理由。取りに行けなかったなら「同期は取れています」と言わない
+ * （2026-11-02。遅れの数が古いままなので、取れているかは分からない）
+ */
+function nothingOrFetchFailed(target: SyncTargetState): SkipReason {
+  return target.fetchFailed ? "fetch_failed" : "nothing";
 }
 
 /** 置き場をまとめて、やることを決める */

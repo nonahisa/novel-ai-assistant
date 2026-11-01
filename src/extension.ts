@@ -5849,7 +5849,10 @@ export async function activate(
                     conflictFixHint(true),
                 };
               case "failed":
-                return { kind: "skipped", reason: outcome.reason };
+                // **`skipped` に畳まない**（2026-11-02）。畳むと原稿箱の知らせが「受け取らなかった」
+                // 理由の文になり、取り込んだ箱が手元に届いていた分だけだと言えなかった。
+                // 何が悪かったかは受け取りの口がログへ残し済み（理由は当てない。実装ルール5）
+                return { kind: "failed" };
             }
           },
         });
