@@ -32,9 +32,7 @@ import {
   type WorkPostingFacts,
 } from "../core/postingSiteRecords";
 import {
-  rememberReaderSiteTab,
   rememberWritingStatsTab,
-  rememberedReaderSiteTab,
   rememberedWritingStatsTab,
 } from "../core/writingStatsTabMemory";
 // 保管庫へは守りつきで書く（素の update を呼ばない決まり。mementoWrites.test.ts）
@@ -125,6 +123,12 @@ export async function openWritingStatsPanel(
   // 見出しの語（「話」か「投稿」か）と、本文を開く画面の向きの両方に使う
   const format = await readWorkFormat(work);
 
+  /*
+    サイトのタブは**組み立てるときから出しておく**（2026-11-01「二段のタブとせず」）。前に見ていた
+    サイトのタブで開くとき、概要が一瞬見えてから切り替わらないように。統計が届けば画面が揃え直す。
+    台帳は統計を組むときにもう一度読む（読むのは1つの小さなファイルなので、渡し回さない）
+  */
+  const initialSites = (await readSiteRecords(work)).sites;
   const nonce = createNonce();
   panel.webview.html = buildWritingStatsPanelHtml(
     nonce,
@@ -133,11 +137,12 @@ export async function openWritingStatsPanel(
       // SNS記事では「投稿ごとの文字数」。話数ではなく投稿の並びである
       unitNoun: episodeUnit(format).noun,
       /*
-        **その作品で前に見ていたタブで開く**（作者の判断 2026-11-01）。外側のタブと、
-        読者の反応の中のサイトのタブの両方。覚えるのは拡張機能の保管庫（作品のファイルではない）
+        **その作品で前に見ていたタブで開く**（作者の判断 2026-11-01）。サイトのタブ（「カクヨムの反応」
+        など）も同じ1段のタブ。覚えるのは拡張機能の保管庫（作品のファイルではない）。
+        そのサイトのタブがもう無ければ、画面が概要で組む
       */
       initialTab: rememberedWritingStatsTab(verifiedState(context.globalState), work.id),
-      initialReaderSite: rememberedReaderSiteTab(verifiedState(context.globalState), work.id),
+      readerSites: initialSites,
     }
   );
 
@@ -155,10 +160,6 @@ export async function openWritingStatsPanel(
     // 作者が押したタブを覚える（2026-11-01）。知らない鍵は覚えない（覚える側が確かめる）
     if (parsed.type === "tabSelected") {
       await rememberWritingStatsTab(verifiedState(context.globalState), work.id, parsed.tab);
-      return;
-    }
-    if (parsed.type === "readerSiteSelected") {
-      await rememberReaderSiteTab(verifiedState(context.globalState), work.id, parsed.site);
       return;
     }
     if (parsed.type === "askReaderAdvice" && parsed.site) {
@@ -376,7 +377,7 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     // 読めなかったときは理由を添える（黙って消さない。0.33.9）
     siteRecords: siteRecords.records,
     siteRecordsError: siteRecords.error,
-    // 読者の反応の中のサイトのタブ（配信されているサイトだけ。なろうは最後尾。2026-11-01）
+    // サイトのタブ（「カクヨムの反応」など。配信されているサイトだけ。なろうは最後尾。2026-11-01）
     readerSites: siteRecords.sites,
     // 連載中／完結の印と食い違いの知らせ（「概要」に控えめに出す。2026-11-01）
     workFacts: siteRecords.workFacts,
@@ -463,7 +464,7 @@ export interface SiteRecordsResult {
    * 台帳を読めなかったときは null（画面は「概要」の行を出さない）
    */
   workFacts: WorkPostingFacts | null;
-  /** 読者の反応の中に出すサイトのタブ（`readerSiteTabs`）。読めなかったときは空 */
+  /** 執筆統計に出すサイトのタブ（`readerSiteTabs`）。読めなかったときは空 */
   sites: ReaderSiteTab[];
   /** 読めなかった理由。読めていれば null（画面はこの行を出さない） */
   error: string | null;

@@ -96,7 +96,7 @@ export async function openAllWorksWritingStatsPanel(
   created.webview.html = buildWritingStatsPanelHtml(nonce, created.webview.cspSource, {
     hasEpisodesTab: false,
     // 投稿サイトの台帳は作品ごとにしか無い。全作品の合計では並べるものが無いので、
-    // 「読者の反応」のタブも出さない（空の案内だけのタブを置かない。設計書6.3.9）
+    // サイトのタブ（「カクヨムの反応」など）も、概要の取り込み方の案内も出さない（設計書6.3.9）
     hasReadersTab: false,
     // 前に見ていたタブで開く（作品ごとの画面と同じ。全作品の画面は作品とは別の鍵。2026-11-01）
     initialTab: rememberedWritingStatsTab(verifiedState(context.globalState), ALL_WORKS_TAB_KEY),
