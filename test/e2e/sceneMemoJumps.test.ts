@@ -21,6 +21,7 @@ import { expect, test } from "vitest";
 import {
   caretPosition,
   composeText,
+  frameLayer,
   manuscriptFrames,
   memoPanelFrame,
   openEpisode,
@@ -29,7 +30,17 @@ import {
 import { readFileWhenPresent } from "./support/fileSettle";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { activeTabNames, quickOpen, tabIsDirty, tabNamesInclude } from "./support/workbenchDom";
+import {
+  activateTab,
+  activeGroupIndex,
+  activeTabNames,
+  countTabsNamed,
+  editorGroupTabs,
+  quickOpen,
+  readTabState,
+  tabIsDirty,
+  tabNamesInclude,
+} from "./support/workbenchDom";
 
 const EP1 = "001_いち.txt";
 const EP2 = "002_に.txt";
@@ -180,8 +191,32 @@ test("右クリック「メモ追加」で行の上に // が入り、［済み�
       await waitUntil(async () => tabNamesInclude(await activeTabNames(page), EP3), "先頭の［戻る］で第3話へ回る");
       await waitUntil(async () => (await caretLineAnywhere(page)).includes("三のメモA"), "先頭の［戻る］で末尾のメモへ回る");
 
-      // 第1話を前に戻してから（クイックオープンで、開いているタブへ移る）
+      /*
+        第1話を前に戻してから（クイックオープンで、開いているタブへ移る）。
+
+        **Ctrl+P の前に、焦点を原稿の列（左）へ移しておく。** Ctrl+P は「焦点のある列」に開く。
+        ［← 戻る］はパネルの中のボタンなので、押した瞬間は焦点がパネルの列（右）にある。
+        製品は第3話を左の列へ焦点ごと前に出す（`revealManuscriptPanelInPlace`）が、上の2つの待ちは
+        「左の列に第3話が前に出た」「第3話のカーソルが三のメモAの行」で、どちらも焦点が左へ移るのを
+        待っていない（第3話のカーソルは1回目の［次へ］から同じ行にあり、すぐ満たされる）。
+        全件の走り（0.121.0、2026-11-02）で、焦点が移る前に Ctrl+P が右の列で解決され、第1話の
+        2枚目がパネルの列に開いてパネルを裏へ押しやり、下の［済み］が見えないまま30秒で落ちた
+        （写真：右の列にパネル（裏）と第1話（前））。同じ原稿の2枚目は製品が止めない作り（設計書6.25.11）
+        なので、テストの側で焦点の列を決めてから開く
+      */
+      await activateTab(page, EP3);
+      await waitUntil(async () => (await activeGroupIndex(page)) === 0, "第3話のタブを押すと、焦点が原稿の列（左）へ移る").catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（列ごとのタブ：${JSON.stringify(await readTabState(page))}）`);
+        }
+      );
       const ep1Frame = await openEpisode(page, EP1, "一の三行目");
+      const ep1Tabs = countTabsNamed((await editorGroupTabs(page)).flat(), EP1);
+      expect(ep1Tabs, `第1話のタブが ${ep1Tabs} 枚あります（Ctrl+P がパネルの列に2枚目を開いた。列ごとのタブ：${JSON.stringify(await editorGroupTabs(page))}）`).toBe(1);
+      // **押す前に、パネルの面が前に出ているかを確かめる。** 裏に回った面の［済み］も locator は見つけるので、
+      // 隠れたまま押しに行くと30秒待って「visible でない」としか言わない
+      const panelLayer = await frameLayer(page, panel);
+      expect(panelLayer.inFront, `校正・メモパネルが前に出ていません（${panelLayer.detail}／列ごとのタブ：${JSON.stringify(await editorGroupTabs(page))}）`).toBe(true);
       /* ── ［済み］：開いている話（画面から消え、ファイルは書き換えない）（F-45） ──
          帯の［戻す］で戻るかは、下の別の件で見る */
       await doneButtonOf("一のメモ").click();
