@@ -542,6 +542,7 @@ import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
 import { startAiAssignmentsSnapshot } from "./features/aiAssignmentsSnapshot";
 import { isEditorMode } from "./core/actorContext";
+import { rememberDecisionMemory } from "./features/decisionMemory";
 import {
   primeEditorProposals,
   rememberProposalPanel,
@@ -2972,6 +2973,8 @@ export async function activate(
   );
   // 自動の同期で編集部の提案が届いたとき、開いているパネルの選び欄へも足すため
   rememberProposalPanel(proposalPanel);
+  // 編集者モードで、同期で届いた作者の採否を二度知らせないための覚え（作者の判断 2026-11-01）
+  rememberDecisionMemory(verifiedState(context.globalState));
   context.subscriptions.push(
     // 下段の面。**既定では出さない**（package.json の `when` が設定
     // `novelai.proposals.showInBottomPanel` を見る）。出したときのために登録は残す
@@ -8308,7 +8311,8 @@ export async function activate(
       }
       noteStartupHandoffDone("点検 終了");
 
-      // 編集部から提案が届いていれば知らせて提案パネルを開く（作者の裁定、2026-10-28）。
+      // 編集部から提案が届いていれば［提案を見る］付きで知らせる（作者の裁定、2026-10-28。
+      // 2026-11-01 からパネルは勝手に開かない）。編集者モードでは、届いた作者の採否を知らせる。
       // 編集用リポジトリは書庫の同期の対象外なので、別口で取り寄せる。
       // **失敗しても点検（本来の同期）は止めない**——中で例外を外へ出さない
       try {

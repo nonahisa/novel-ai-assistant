@@ -29,6 +29,7 @@ import {
   type UnsentMarkStorage,
 } from "../core/unsentMark";
 import { buildSyncTarget } from "../core/syncTarget";
+import { rescueEditorGitignore } from "./editorGitignoreRescue";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { useSyncLog } from "./syncLog";
 import { readMachineName } from "./windowCard";
@@ -220,6 +221,17 @@ async function handleTarget(
       });
     }
   }
+
+  /*
+    **編集者へ渡した写しで、拡張機能が足した `.gitignore` の行を先に戻す**（編集者役の実機
+    2026-11-01。0.120.0 までの版が足した行が、記録されない未記録の変更として取り込みを
+    止め続けていた）。足しただけと言い切れないときは触らず、下の「記録していない変更」で止まる
+  */
+  await rescueEditorGitignore(
+    target.root,
+    target.works.map((work) => work.folderPath),
+    run
+  );
 
   const status = await readSyncStatus(target.root, deps.run);
   const overlap = await readOverlap(target.root, status, run);

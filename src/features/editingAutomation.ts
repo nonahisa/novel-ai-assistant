@@ -11,6 +11,12 @@ import {
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { notifyDone, whenNoticePicked } from "../views/notify";
 import { primeEditorProposalsInPanel } from "./reviewProposals";
+import type { ProposalView } from "../models/proposal";
+import {
+  decisionKey,
+  globalDecisionMemory,
+  type DecisionMemory,
+} from "./decisionMemory";
 import {
   describeLockChanges,
   importEditorProposalsQuietly,
@@ -175,6 +181,10 @@ export interface InboxDeps {
   primePanel: (work: WorkEntry) => Promise<void>;
   /** 「編集部の提案を見る」をその作品で走らせる */
   viewProposals: (work: WorkEntry) => Promise<void>;
+  /** 編集者モード：作品の提案と採否の今の状態（同期で届いた作者の採否を数える） */
+  loadProposals: (work: WorkEntry) => Promise<ProposalView[]>;
+  /** 編集者モード：もう知らせた採否の覚え */
+  decisionMemory: DecisionMemory;
 }
 
 const defaultInboxDeps: InboxDeps = {
@@ -200,6 +210,8 @@ const defaultInboxDeps: InboxDeps = {
       work,
     });
   },
+  loadProposals: (work) => new ProposalStore(work).load(),
+  decisionMemory: globalDecisionMemory,
 };
 
 /** 走っている最中にもう一度呼ばれたら、同じ走りを待つ（二重に取り込まない） */
@@ -230,8 +242,11 @@ async function runInbox(
   works: readonly WorkEntry[],
   deps: InboxDeps
 ): Promise<number> {
-  // 編集者モードの環境は、提案を受け取る側ではなく出す側
-  if (deps.isEditorMode()) return 0;
+  // 編集者モードの環境は、提案を受け取る側ではなく出す側。同期で届いた作者の採否を知らせる
+  if (deps.isEditorMode()) {
+    await noticeArrivedDecisions(works, deps);
+    return 0;
+  }
 
   let total = 0;
   for (const work of works) {
@@ -247,7 +262,8 @@ async function runInbox(
       if (result.added <= 0) continue;
       total += result.added;
       /*
-        **パネルを勝手に開かない**（作者の判断 2026-11-01）。窓の読み込み直しの最中に
+        **パネルを勝手に開かない**（作者の判断 2026-11-01「知らせに［提案を見る］を付ける」を
+        受けた実装の判断。0.120.2）。窓の読み込み直しの最中に
         開いても作者は見ておらず、知らせが2枚（届いた・N件あります）重なるだけだった。
         選び欄へ静かに足し（知らせが流れても選び欄から辿れる）、知らせのボタンで並べる
       */
@@ -267,4 +283,50 @@ async function runInbox(
     }
   }
   return total;
+}
+
+/**
+ * 編集者モード：同期で届いた作者の採否を知らせる（作者の判断 2026-11-01「届いたら知らせる」）。
+ *
+ * 編集者の写しは作品そのものが編集用リポジトリなので、採否（decision の行）は開いたときの
+ * 点検・同期の取り込みでそのまま台帳へ入る。**新しく届いた分だけ**を数え、同じものを
+ * 二度知らせない（`decisionMemory`）。
+ *
+ * **覚えが空のとき（初めて動いたとき）は、今ある採否を全部「届いた」として1回知らせる。**
+ * 黙って全部を既読にすると、この版へ上げた直後に入った作者の採否が、知らされないまま消える
+ * （実装の判断。0.120.2）。**例外は外へ出さない。**
+ */
+async function noticeArrivedDecisions(
+  works: readonly WorkEntry[],
+  deps: InboxDeps
+): Promise<void> {
+  for (const work of works) {
+    try {
+      const views = await deps.loadProposals(work);
+      const seen = deps.decisionMemory.seen(work.id);
+      const arrived: ProposalView[] = [];
+      const keys: string[] = [];
+      for (const view of views) {
+        const key = decisionKey(view);
+        if (!key || seen.has(key)) continue;
+        arrived.push(view);
+        keys.push(key);
+      }
+      if (arrived.length === 0) continue;
+      deps.notify(
+        "作者が提案を決めました" +
+          (works.length > 1 ? `（「${work.title}」）` : "") +
+          `（${describeDecisionCounts(summarizeDecisions(arrived))}）。`
+      );
+      await deps.decisionMemory.add(work.id, keys);
+      useLogFile(work.folderPath);
+      logStep(`作者の採否が届いた（${work.title}・${arrived.length}件）`);
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logFailure("届いた採否の知らせ", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }

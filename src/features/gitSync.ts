@@ -40,6 +40,7 @@ import {
   useLogFile,
 } from "../core/logger";
 import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
+import { rescueEditorGitignore } from "./editorGitignoreRescue";
 import { withProgress } from "../views/progress";
 
 // ツリーのバッジ用は core/gitSyncStatusText.ts へ切り出した。
@@ -1310,6 +1311,11 @@ ${reason}` : ""}`,
   private async recordBeforePull(work: WorkEntry): Promise<boolean> {
     const run = this.options.run ?? runGit;
     const root = work.folderPath;
+
+    // **編集者へ渡した写しでは、拡張機能が足した `.gitignore` の行を先に戻す**
+    // （`editorGitignoreRescue.ts`）。戻さずに記録すると作者へ送られ、作者の側が
+    // `!.aiwriter/cache/` を足し直して往復する
+    await rescueEditorGitignore(root, [root], run);
 
     // **記録より先に、早送りできるうちに取り込む**（設計書5.5.18）。
     // 名前の確認より前に置くのは、ここで引き返す場面でも遅れは解消して

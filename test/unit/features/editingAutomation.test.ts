@@ -6,6 +6,8 @@ import {
   type ReturnDeps,
 } from "../../../src/features/editingAutomation";
 import type { WorkEntry } from "../../../src/models/types";
+import type { ProposalView } from "../../../src/models/proposal";
+import type { DecisionMemory } from "../../../src/features/decisionMemory";
 
 /**
  * 編集部連携の自動化（作者の裁定、2026-10-28）。
@@ -167,6 +169,8 @@ function inboxDeps(over: Partial<InboxDeps> = {}): InboxDeps {
     offer: vi.fn(),
     primePanel: vi.fn(async () => undefined),
     viewProposals: vi.fn(async () => undefined),
+    loadProposals: vi.fn(async () => []),
+    decisionMemory: memoryOf(),
     ...over,
   };
 }
@@ -196,7 +200,7 @@ describe("同期のあとの、編集部の提案の取り込み", () => {
     const [offeredWork, text, onView] = vi.mocked(deps.offer).mock.calls[0];
     expect(offeredWork.id).toBe("a");
     expect(text).toBe("編集部から提案が 3 件届きました。");
-    // 作者の判断 2026-11-01：勝手に開かず、選び欄へ静かに足す
+    // 勝手に開かず、選び欄へ静かに足す（作者の判断 2026-11-01 のボタンを受けた実装の判断）
     expect(deps.primePanel).toHaveBeenCalledOnce();
     expect(deps.viewProposals).not.toHaveBeenCalled();
     // ［提案を見る］を押すと、「編集部の提案を見る」をその作品で走らせる
@@ -234,5 +238,119 @@ describe("同期のあとの、編集部の提案の取り込み", () => {
     const deps = inboxDeps({ isEditorMode: () => true });
     expect(await collectEditorInboxQuietly([work("a")], deps)).toBe(0);
     expect(deps.importProposals).not.toHaveBeenCalled();
+  });
+});
+
+/** 覚えの代役（Map 1つ） */
+function memoryOf(): DecisionMemory {
+  const store = new Map<string, Set<string>>();
+  return {
+    seen: (id) => store.get(id) ?? new Set(),
+    add: async (id, keys) => {
+      const set = store.get(id) ?? new Set<string>();
+      for (const key of keys) set.add(key);
+      store.set(id, set);
+    },
+  };
+}
+
+/** 提案1件の今の状態。`status` を渡すと、作者の採否の行が付く */
+function view(
+  id: string,
+  status: "pending" | "accepted" | "rejected" | "read",
+  time = "2026-11-01T12:30:00.000Z",
+  suggestion = "直し"
+): ProposalView {
+  return {
+    id,
+    time: "2026-11-01T12:00:00.000Z",
+    proposer: "kmizu",
+    file: "本文/001.txt",
+    line: 1,
+    original: "原文",
+    target: "原",
+    suggestion,
+    reason: "表記ゆれ",
+    category: "表記ゆれ",
+    status,
+    decision:
+      status === "pending"
+        ? undefined
+        : { proposalId: id, time, decidedBy: "nonahisa", status, note: "" },
+  };
+}
+
+describe("編集者モード：同期で届いた作者の採否を知らせる（作者の判断 2026-11-01）", () => {
+  test("届いた採否を「作者が提案を決めました（採用 N・見送り N・読まれた N）。」で知らせる", async () => {
+    const deps = inboxDeps({
+      isEditorMode: () => true,
+      loadProposals: vi.fn(async () => [
+        view("p1", "accepted"),
+        view("p2", "rejected"),
+        view("p3", "read"),
+        // 意見だけ（直した案が空）を採ったものは、読まれたに数える（0.119.0 の数え方）
+        view("p4", "accepted", undefined, ""),
+        view("p5", "pending"),
+      ]),
+    });
+
+    await collectEditorInboxQuietly([work("a")], deps);
+
+    expect(deps.notify).toHaveBeenCalledWith(
+      "作者が提案を決めました（採用 1・見送り 1・読まれた 2）。"
+    );
+  });
+
+  test("同じ採否を二度知らせない。新しく届いた分だけを数える", async () => {
+    let views = [view("p1", "accepted"), view("p2", "pending")];
+    const deps = inboxDeps({
+      isEditorMode: () => true,
+      loadProposals: vi.fn(async () => views),
+    });
+
+    await collectEditorInboxQuietly([work("a")], deps);
+    await collectEditorInboxQuietly([work("a")], deps);
+    expect(deps.notify).toHaveBeenCalledTimes(1);
+
+    // 2件目が届いた
+    views = [view("p1", "accepted"), view("p2", "rejected", "2026-11-01T13:00:00.000Z")];
+    await collectEditorInboxQuietly([work("a")], deps);
+    expect(deps.notify).toHaveBeenCalledTimes(2);
+    expect(deps.notify).toHaveBeenLastCalledWith(
+      "作者が提案を決めました（採用 0・見送り 1・読まれた 0）。"
+    );
+  });
+
+  test("決め直し（見送り → 採用）は新しく届いたものとして知らせる", async () => {
+    let views = [view("p1", "rejected")];
+    const deps = inboxDeps({
+      isEditorMode: () => true,
+      loadProposals: vi.fn(async () => views),
+    });
+    await collectEditorInboxQuietly([work("a")], deps);
+
+    views = [view("p1", "accepted", "2026-11-01T14:00:00.000Z")];
+    await collectEditorInboxQuietly([work("a")], deps);
+
+    expect(deps.notify).toHaveBeenLastCalledWith(
+      "作者が提案を決めました（採用 1・見送り 0・読まれた 0）。"
+    );
+  });
+
+  test("採否が無ければ黙る。読めなくても例外を外へ出さない", async () => {
+    const quiet = inboxDeps({
+      isEditorMode: () => true,
+      loadProposals: vi.fn(async () => [view("p1", "pending")]),
+    });
+    await collectEditorInboxQuietly([work("a")], quiet);
+    expect(quiet.notify).not.toHaveBeenCalled();
+
+    const broken = inboxDeps({
+      isEditorMode: () => true,
+      loadProposals: vi.fn(async () => {
+        throw new Error("読めない");
+      }),
+    });
+    await expect(collectEditorInboxQuietly([work("a")], broken)).resolves.toBe(0);
   });
 });
