@@ -43,7 +43,8 @@ const REQUIRES_PROCESSES = new Set<string>([
   "novelai.resolveConflicts",
   "novelai.selectOllamaExecutable",
   "novelai.shareWithEditor",
-  "novelai.collectEditorProposals",
+  // 「編集部の提案を見る」（旧「編集部提案取込」）はここに入れない。受け取りは git を
+  // 使うが、手元にある未決を並べるところはブラウザ版でも動く（作者の判断 2026-11-01）
   "novelai.joinAsEditor",
   "novelai.finishReviewAndReturn",
   "novelai.revokeEditorAccess",
@@ -182,7 +183,6 @@ export function describeProcessesBlocked(command: string): string {
   }
   if (
     command === "novelai.shareWithEditor" ||
-    command === "novelai.collectEditorProposals" ||
     command === "novelai.joinAsEditor" ||
     command === "novelai.finishReviewAndReturn" ||
     command === "novelai.revokeEditorAccess"

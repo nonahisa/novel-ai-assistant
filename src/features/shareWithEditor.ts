@@ -69,6 +69,8 @@ import { withProgress } from "../views/progress";
 import { whenNoticePicked } from "../views/notify";
 import { askText } from "../views/dialogs";
 import { isEditorMode } from "../core/actorContext";
+// 型だけ。`reviewProposals.ts` は静的に読まない（あちらがこのファイルを動的に読む）
+import type { EditorReceiveOutcome } from "./reviewProposals";
 
 /**
  * 編集部へ作品を渡し、提案を受け取る（設計書5.7.5）。
@@ -1798,61 +1800,36 @@ export function describeLockChanges(result: {
 }
 
 /**
- * 編集部の提案を取り込む（手動の道。「編集部提案取込」）。
+ * 編集部の提案を GitHub から受け取る（「編集部の提案を見る」の前半。作者の判断 2026-11-01）。
  *
- * **本文には触らない。** 取り込むのは提案と鍵の台帳だけで、採るかどうかは
- * 作者が提案パネルで決める。
+ * **知らせを出さない。** 何件あるか・受け取れたかは、続けて並べる側
+ * （`reviewProposals.ts` の `showEditorProposals`）が1つの知らせにまとめて言う。
+ * 以前の「編集部提案取込」は、ここで「すべて取り込み済み」と言って終わっていたため、
+ * 自動の同期で先に受け取られていると、作者には提案がどこにあるか分からなかった。
+ *
+ * **本文には触らない。** 取り込むのは提案と鍵の台帳だけ。例外は外へ出さず、失敗として返す。
  */
-export async function collectEditorProposals(work: WorkEntry): Promise<void> {
-  const result = await withProgress("編集部の提案を取り寄せています…", () =>
-    importEditorProposalsQuietly(work)
-  );
-  if (result.status === "noPointer") {
-    void vscode.window.showInformationMessage(
-      `「${work.title}」はまだ編集部へ渡していません。` +
-        "先に「編集部へ渡す」を実行してください。"
+export async function receiveEditorProposals(
+  work: WorkEntry,
+  run?: GitCommandRunner
+): Promise<EditorReceiveOutcome> {
+  try {
+    const result = await withProgress("編集部の提案を受け取っています…", () =>
+      importEditorProposalsQuietly(work, run)
     );
-    return;
+    if (result.status === "noPointer") return { kind: "notShared" };
+    return {
+      kind: "received",
+      added: result.added,
+      pullFailed: result.pullFailed,
+      lockMessages: describeLockChanges(result),
+    };
+  } catch (error) {
+    return {
+      kind: "failed",
+      detail: error instanceof Error ? error.message : String(error),
+    };
   }
-  if (result.pullFailed) {
-    // 取り寄せに失敗しても、手元にある分は取り込める。止めずに知らせる
-    void vscode.window.showWarningMessage(
-      "GitHubから取り寄せられませんでした。手元にある分だけを取り込みます。"
-    );
-  }
-  for (const text of describeLockChanges(result)) {
-    void vscode.window.showInformationMessage(text);
-  }
-  if (!result.hadIncoming) {
-    void vscode.window.showInformationMessage(
-      "編集部からの提案はまだありません。"
-    );
-    return;
-  }
-  if (result.added === 0) {
-    void vscode.window.showInformationMessage(
-      "新しい提案はありませんでした（すべて取り込み済みです）。"
-    );
-    return;
-  }
-
-  whenNoticePicked(
-    vscode.window.showInformationMessage(
-      `編集部からの提案を${result.added}件取り込みました。`,
-      "提案を見る",
-      "閉じる"
-    ),
-    async (next) => {
-      if (next === "提案を見る") {
-        // いま取り込んだ作品の提案を見る。引数無しだと作品選択からやり直させる
-        await vscode.commands.executeCommand("novelai.reviewProposals", {
-          type: "work",
-          work,
-        });
-      }
-    },
-    { label: "編集部提案取込", workFolder: work.folderPath }
-  );
 }
 
 /**

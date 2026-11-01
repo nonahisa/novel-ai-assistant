@@ -236,6 +236,8 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.joinAsEditor": { class: "C4", label: "編集部として参加", reason: "設定" },
   "novelai.finishReviewAndReturn": { class: "C4", label: "校閲を終えて返す", reason: "送信" },
   "novelai.collectEditorProposals": { class: "C1", label: "編集部提案取込" },
+  // 取込と確認を1つにした命令（作者の判断 2026-11-01）。受け取って提案パネルへ並べるだけで、採否は作者
+  "novelai.viewEditorProposals": { class: "C1", label: "編集部の提案を見る" },
   // ── 同期・GitHub
   "novelai.gitSync": { class: "C4", label: "GitHubと同期", reason: "送信" },
   "novelai.saveAndSync": { class: "C4", label: "保存・同期", reason: "送信" },

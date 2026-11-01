@@ -541,8 +541,12 @@ import { startLocalAiGate } from "./features/localAiGate";
 import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
 import { startAiAssignmentsSnapshot } from "./features/aiAssignmentsSnapshot";
+import { isEditorMode } from "./core/actorContext";
 import {
+  primeEditorProposals,
+  rememberProposalPanel,
   reviewProposals,
+  showEditorProposals,
   toggleReviewLock,
 } from "./features/reviewProposals";
 import {
@@ -2940,6 +2944,17 @@ export async function activate(
           });
         }
         try {
+          // **編集部の未決の提案も戻す**（作者の実機 2026-11-01）。戻さないと、
+          // 作品の選び欄に、編集部の提案だけが未決の作品が出なかった
+          await primeEditorProposals(work, panel);
+        } catch (error) {
+          useLogFile(work.folderPath);
+          logFailure("編集部の提案の読み込みに失敗", {
+            作品: work.title,
+            詳細: error instanceof Error ? error.message : String(error),
+          });
+        }
+        try {
           // **外部AIの台帳の案**（章立て・伏線・予定の段。設計書6.87.24）。
           // 採ったら台帳へ書き、章が変われば作品一覧の折りたたみを作り直す
           await primeLedgerProposals(work, panel, {
@@ -2955,6 +2970,8 @@ export async function activate(
       }
     }
   );
+  // 自動の同期で編集部の提案が届いたとき、開いているパネルの選び欄へも足すため
+  rememberProposalPanel(proposalPanel);
   context.subscriptions.push(
     // 下段の面。**既定では出さない**（package.json の `when` が設定
     // `novelai.proposals.showInBottomPanel` を見る）。出したときのために登録は残す
@@ -7628,28 +7645,50 @@ export async function activate(
     })
   );
 
+  /** 提案を見る作品を選ぶ（未決の数を添える。編集部の提案の3つの命令で共通） */
+  const resolveProposalWork = (node?: WorkNode): Promise<WorkEntry | undefined> =>
+    resolveWork(node, registry, {
+      title: "提案を確認する作品を選択",
+      // 提案は作品ごとに溜まる。**この操作には印が無い**ので、
+      // 選ぶ場面が「どこに未処理が残っているか」を知る唯一の手がかりになる。
+      // `pendingCount()` は提案の1ファイル（JSONL）を読むだけで済むので、
+      // 選択肢を出すたびに呼んでも重くならない
+      annotate: async (candidate) => {
+        let count = 0;
+        try {
+          count = await new ProposalStore(candidate).pendingCount();
+        } catch {
+          // 読めない作品は0件として扱う。補足が出ないだけで実害はない
+        }
+        return pendingProposalNote(count);
+      },
+    });
+
   context.subscriptions.push(
+    /*
+      **編集部の提案を見る**（作者モード。作者の判断 2026-11-01「1つにまとめる」）。
+      受け取り（以前の「編集部提案取込」）と並べる（以前の「編集部提案確認」）を1つにした。
+      旧2つの ID はキー割り当てや外からの呼び出しを壊さないよう残し、ここへ回す
+      （編集者モードの「編集部提案確認」は、置いた提案の数を見る道のまま）
+    */
+    registerCommand(
+      "novelai.viewEditorProposals",
+      async (node?: WorkNode) => {
+        const work = await resolveProposalWork(node);
+        if (!work) return;
+        await showEditorProposals(work, proposalPanel);
+      }
+    ),
     registerCommand(
       "novelai.reviewProposals",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry, {
-          title: "提案を確認する作品を選択",
-          // 提案は作品ごとに溜まる。**この操作には印が無い**ので、
-          // 選ぶ場面が「どこに未処理が残っているか」を知る唯一の手がかりになる。
-          // `pendingCount()` は提案の1ファイル（JSONL）を読むだけで済むので、
-          // 選択肢を出すたびに呼んでも重くならない
-          annotate: async (candidate) => {
-            let count = 0;
-            try {
-              count = await new ProposalStore(candidate).pendingCount();
-            } catch {
-              // 読めない作品は0件として扱う。補足が出ないだけで実害はない
-            }
-            return pendingProposalNote(count);
-          },
-        });
+        const work = await resolveProposalWork(node);
         if (!work) return;
-        await reviewProposals(work, proposalPanel);
+        if (isEditorMode()) {
+          await reviewProposals(work, proposalPanel);
+          return;
+        }
+        await showEditorProposals(work, proposalPanel);
       }
     ),
     registerCommand(
@@ -7727,21 +7766,13 @@ export async function activate(
         await finishReviewAndReturn(work);
       }
     ),
+    // 旧「編集部提案取込」。受け取ったあと並べるところまで、新しい命令と同じにする
     registerCommand(
       "novelai.collectEditorProposals",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveProposalWork(node);
         if (!work) return;
-        if (!canRunProcesses()) {
-          vscode.window.showWarningMessage(
-            "編集部の提案の取り込みはブラウザ版では使えません。"
-          );
-          return;
-        }
-        const { collectEditorProposals } = await import(
-          "./features/shareWithEditor.js"
-        );
-        await collectEditorProposals(work);
+        await showEditorProposals(work, proposalPanel);
       }
     )
   );

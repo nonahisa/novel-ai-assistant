@@ -9,7 +9,8 @@ import {
   type DecisionCounts,
 } from "../models/proposal";
 import { logFailure, logStep, useLogFile } from "../core/logger";
-import { notifyDone } from "../views/notify";
+import { notifyDone, whenNoticePicked } from "../views/notify";
+import { primeEditorProposalsInPanel } from "./reviewProposals";
 import {
   describeLockChanges,
   importEditorProposalsQuietly,
@@ -24,7 +25,8 @@ import {
  * 編集部連携の自動化（作者の裁定、2026-10-28）。
  *
  * - 採否を決め終えたら、編集部へ自動で送り返す（確認窓なし）
- * - 同期のあと、編集部から提案が届いていれば知らせて提案パネルを開く
+ * - 同期のあと、編集部から提案が届いていれば、提案パネルの選び欄へ静かに足し、
+ *   ［提案を見る］の付いた知らせを出す（作者の判断 2026-11-01）
  *
  * **Node（git）を使うので、呼ぶ側は `canRunProcesses()` を確かめて動的 import する**
  * （ブラウザ版の束に静的に入れない）。
@@ -156,20 +158,44 @@ async function runReturn(work: WorkEntry, deps: ReturnDeps): Promise<ReturnOutco
   }
 }
 
+/** 知らせのボタン（押すと「編集部の提案を見る」と同じく並べる） */
+export const VIEW_PROPOSALS_BUTTON = "提案を見る";
+
 /** 試験で差し替えられる口 */
 export interface InboxDeps {
   isEditorMode: () => boolean;
   importProposals: (work: WorkEntry) => Promise<ImportResult>;
   notify: (text: string) => void;
-  openPanel: (work: WorkEntry) => Promise<void>;
+  /**
+   * 提案が届いた知らせ。［提案を見る］を押したら `onView` を呼ぶ。
+   * **答えを待たない**（同期の後始末を作者の返事まで止めない）
+   */
+  offer: (work: WorkEntry, text: string, onView: () => Promise<void>) => void;
+  /** 届いた作品の未決を、提案パネルの選び欄へ静かに足す（開いていなければ何もしない） */
+  primePanel: (work: WorkEntry) => Promise<void>;
+  /** 「編集部の提案を見る」をその作品で走らせる */
+  viewProposals: (work: WorkEntry) => Promise<void>;
 }
 
 const defaultInboxDeps: InboxDeps = {
   isEditorMode,
   importProposals: (work) => importEditorProposalsQuietly(work),
   notify: (text) => void vscode.window.showInformationMessage(text),
-  openPanel: async (work) => {
-    await vscode.commands.executeCommand("novelai.reviewProposals", {
+  offer: (work, text, onView) => {
+    whenNoticePicked(
+      vscode.window.showInformationMessage(text, VIEW_PROPOSALS_BUTTON),
+      async (picked) => {
+        if (picked === VIEW_PROPOSALS_BUTTON) await onView();
+      },
+      { label: "編集部の提案を見る", workFolder: work.folderPath }
+    );
+  },
+  primePanel: async (work) => {
+    await primeEditorProposalsInPanel(work);
+  },
+  viewProposals: async (work) => {
+    // 作品を渡す。引数無しだと作品選択からやり直させる
+    await vscode.commands.executeCommand("novelai.viewEditorProposals", {
       type: "work",
       work,
     });
@@ -208,7 +234,6 @@ async function runInbox(
   if (deps.isEditorMode()) return 0;
 
   let total = 0;
-  let opened = false;
   for (const work of works) {
     try {
       const result = await deps.importProposals(work);
@@ -221,15 +246,18 @@ async function runInbox(
       for (const text of describeLockChanges(result)) deps.notify(text);
       if (result.added <= 0) continue;
       total += result.added;
-      deps.notify(
+      /*
+        **パネルを勝手に開かない**（作者の判断 2026-11-01）。窓の読み込み直しの最中に
+        開いても作者は見ておらず、知らせが2枚（届いた・N件あります）重なるだけだった。
+        選び欄へ静かに足し（知らせが流れても選び欄から辿れる）、知らせのボタンで並べる
+      */
+      await deps.primePanel(work);
+      deps.offer(
+        work,
         `編集部から提案が ${result.added} 件届きました` +
-          (works.length > 1 ? `（「${work.title}」）。` : "。")
+          (works.length > 1 ? `（「${work.title}」）。` : "。"),
+        () => deps.viewProposals(work)
       );
-      // 提案パネルは1作品ぶんしか開けない。最初に届いた作品を開く
-      if (!opened) {
-        opened = true;
-        await deps.openPanel(work);
-      }
     } catch (error) {
       useLogFile(work.folderPath);
       logFailure("編集部の提案の取り込み（同期のあと）", {

@@ -164,7 +164,9 @@ function inboxDeps(over: Partial<InboxDeps> = {}): InboxDeps {
       added: 0,
     })),
     notify: vi.fn(),
-    openPanel: vi.fn(async () => undefined),
+    offer: vi.fn(),
+    primePanel: vi.fn(async () => undefined),
+    viewProposals: vi.fn(async () => undefined),
     ...over,
   };
 }
@@ -174,10 +176,11 @@ describe("同期のあとの、編集部の提案の取り込み", () => {
     const deps = inboxDeps();
     expect(await collectEditorInboxQuietly([work("a")], deps)).toBe(0);
     expect(deps.notify).not.toHaveBeenCalled();
-    expect(deps.openPanel).not.toHaveBeenCalled();
+    expect(deps.offer).not.toHaveBeenCalled();
+    expect(deps.primePanel).not.toHaveBeenCalled();
   });
 
-  test("届いていれば件数を知らせ、提案パネルを開く", async () => {
+  test("届いていれば［提案を見る］付きで件数を知らせ、パネルは開かずに選び欄へ足す", async () => {
     const deps = inboxDeps({
       importProposals: vi.fn(async () => ({
         status: "done" as const,
@@ -189,8 +192,16 @@ describe("同期のあとの、編集部の提案の取り込み", () => {
       })),
     });
     expect(await collectEditorInboxQuietly([work("a")], deps)).toBe(3);
-    expect(deps.notify).toHaveBeenCalledWith("編集部から提案が 3 件届きました。");
-    expect(deps.openPanel).toHaveBeenCalledOnce();
+    expect(deps.offer).toHaveBeenCalledOnce();
+    const [offeredWork, text, onView] = vi.mocked(deps.offer).mock.calls[0];
+    expect(offeredWork.id).toBe("a");
+    expect(text).toBe("編集部から提案が 3 件届きました。");
+    // 作者の判断 2026-11-01：勝手に開かず、選び欄へ静かに足す
+    expect(deps.primePanel).toHaveBeenCalledOnce();
+    expect(deps.viewProposals).not.toHaveBeenCalled();
+    // ［提案を見る］を押すと、「編集部の提案を見る」をその作品で走らせる
+    await onView();
+    expect(deps.viewProposals).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
   });
 
   test("pointer の無い作品は飛ばす", async () => {
@@ -216,7 +227,7 @@ describe("同期のあとの、編集部の提案の取り込み", () => {
       }),
     });
     expect(await collectEditorInboxQuietly([work("bad"), work("good")], deps)).toBe(1);
-    expect(deps.openPanel).toHaveBeenCalledOnce();
+    expect(deps.offer).toHaveBeenCalledOnce();
   });
 
   test("編集者モードでは取り込みに行かない", async () => {

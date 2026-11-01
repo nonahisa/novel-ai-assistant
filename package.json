@@ -1502,6 +1502,12 @@
         "icon": "$(repo-pull)"
       },
       {
+        "command": "novelai.viewEditorProposals",
+        "title": "編集部の提案を見る",
+        "category": "小説執筆",
+        "icon": "$(inbox)"
+      },
+      {
         "command": "novelai.plotInterview",
         "title": "対話式プロット作成",
         "category": "小説執筆",
@@ -1858,6 +1864,18 @@
           "when": "config.novelai.mode == 'editor'"
         },
         {
+          "command": "novelai.collectEditorProposals",
+          "when": "false"
+        },
+        {
+          "command": "novelai.reviewProposals",
+          "when": "config.novelai.mode == 'editor'"
+        },
+        {
+          "command": "novelai.viewEditorProposals",
+          "when": "config.novelai.mode != 'editor'"
+        },
+        {
           "command": "novelai.episodePlotToPlotMode",
           "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md"
         },
@@ -2117,10 +2135,7 @@
           "command": "novelai.shareWithEditor",
           "when": "!novelai.processesBlocked"
         },
-        {
-          "command": "novelai.collectEditorProposals",
-          "when": "!novelai.processesBlocked"
-        },
+
         {
           "command": "novelai.joinAsEditor",
           "when": "!novelai.processesBlocked"

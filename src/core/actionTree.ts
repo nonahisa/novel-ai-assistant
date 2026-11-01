@@ -111,6 +111,16 @@ export interface ActionItem {
    */
   hiddenFromActionList?: boolean;
   /**
+   * 詳細メニューの画面に並べるモード（無ければ両方）。
+   *
+   * **作者と編集者で、同じ用事の入口が違う**ときに使う（作者の判断 2026-11-01）。
+   * 作者は「編集部の提案を見る」（受け取って並べる）、編集者は「編集部提案確認」
+   * （置いた提案の数を見る）。両方を並べると、作者には同じものが2つに見える。
+   * 押せなくして理由を出す（`isCommandAllowed`）のは「その人にはできない操作」で、
+   * こちらは「その人には別の入口がある操作」なので出さない。
+   */
+  shownInModes?: readonly WorkMode[];
+  /**
    * いまはほかの入口にまとめた**旧入口**か。値はいまの入口のコマンドID
    * （2026-09-25 深夜の実接続の測定）。
    *
@@ -684,15 +694,24 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・本文に未記録の変更があれば、送らずに止める\n\n" +
               "編集者モードで使う。",
           },
+          /*
+            **取込と確認を1つにした**（作者の判断 2026-11-01「1つにまとめる」）。
+            自動の同期で先に受け取られていると、取込は「すべて取り込み済み」で終わり、
+            提案がどこにあるのか分からなかった。旧「編集部提案取込」
+            （`novelai.collectEditorProposals`）はここへ回すだけにして、木から外した
+          */
           {
             kind: "action",
-            command: "novelai.collectEditorProposals",
-            label: "編集部提案取込",
-            icon: "repo-pull",
+            command: "novelai.viewEditorProposals",
+            label: "編集部の提案を見る",
+            icon: "inbox",
             requiresWork: true,
+            shownInModes: ["author"],
             detail:
-              "編集部が書いた提案を取り寄せて提案パネルへ並べる\n\n" +
-              "・採るかどうかは1件ずつ作者が決める\n\n" +
+              "編集部の提案を GitHub から受け取って、未決の分を提案パネルへ並べる\n\n" +
+              "・新しく届いた分が無くても、まだ決めていない提案があれば並べる\n\n" +
+              "・受け取れなかったときも、手元にある分を並べる\n\n" +
+              "・採るか見送るかは1件ずつ作者が決める\n\n" +
               "本文には触らない。",
           },
           {
@@ -713,6 +732,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             label: "編集部提案確認",
             icon: "inbox",
             requiresWork: true,
+            // 作者は上の「編集部の提案を見る」から入る（作者の判断 2026-11-01）。
+            // 編集者の環境では、置いた提案の数を見る入口として今までどおり出す
+            shownInModes: ["editor"],
             detail:
               "編集部が出した直しの提案を1件ずつ確認\n\n" +
               "・採るか見送るかを決める\n\n" +
@@ -2955,6 +2977,28 @@ export function isItemShownInActionList(
 ): boolean {
   if (item.hiddenFromActionList) return false;
   return isItemVisibleInRuntime(item, runtimeAllowsProcesses);
+}
+
+/**
+ * そのモードで詳細メニューの画面に並べない操作（`shownInModes`）。
+ *
+ * `shownEntries` の「隠す操作」の組へ足して使う（作品の種類で隠すものと同じ口）。
+ * **画面に出すかどうかだけ**の話なので、`isItemVisibleInRuntime` には混ぜない。
+ */
+export function commandsHiddenForMode(mode: WorkMode): Set<string> {
+  const hidden = new Set<string>();
+  const visit = (item: ActionItem): void => {
+    if (item.shownInModes && !item.shownInModes.includes(mode)) {
+      hidden.add(item.command);
+    }
+  };
+  for (const group of ACTION_TREE) {
+    for (const entry of group.entries) {
+      if (entry.kind === "action") visit(entry);
+      else entry.items.forEach(visit);
+    }
+  }
+  return hidden;
 }
 
 /** 分類・小分類の中身を、いまの環境に合わせて絞る */

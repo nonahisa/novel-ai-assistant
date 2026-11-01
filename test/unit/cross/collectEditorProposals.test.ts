@@ -32,7 +32,7 @@ vi.mock("../../../src/views/progress", () => ({
   withProgress: async <T>(_title: string, run: () => Promise<T>) => run(),
 }));
 
-const { collectEditorProposals } = await import(
+const { receiveEditorProposals } = await import(
   "../../../src/features/shareWithEditor"
 );
 
@@ -130,7 +130,7 @@ describe("編集部の提案を取り込む", () => {
     await put(root, POINTER_RELATIVE, JSON.stringify({ folderPath: editing }));
     await put(editing, PROPOSAL_RELATIVE, `${proposal("a")}\n`);
 
-    await collectEditorProposals(work());
+    await receiveEditorProposals(work());
 
     // 提案は入っている（取り込み自体は動いている）
     expect(await read(root, PROPOSAL_RELATIVE)).toContain(proposal("a"));
@@ -146,7 +146,7 @@ describe("編集部の提案を取り込む", () => {
     // 編集用フォルダーにだけ在るもの。取り込みで持ってこない
     await put(editing, nodePath.join("本文", "999.txt"), "編集部が足した話");
 
-    await collectEditorProposals(work());
+    await receiveEditorProposals(work());
 
     const names = await fsp.readdir(nodePath.join(root, "本文"));
     expect(names).toEqual(["001.txt"]);
@@ -155,14 +155,13 @@ describe("編集部の提案を取り込む", () => {
     );
   });
 
-  test("まだ渡していない作品では、その旨を伝えて何もしない", async () => {
+  test("まだ渡していない作品では、その旨を返して何もしない", async () => {
     await put(root, BODY_RELATIVE, "ゆき");
     // 行き先の記録が無い
 
-    await collectEditorProposals(work());
-
-    expect(messages.join("\n")).toContain("まだ編集部へ渡していません");
-    expect(messages.join("\n")).toContain("「編集部へ渡す」");
+    // 知らせは並べる側（`showEditorProposals`）がまとめて出す。ここは結果を返すだけ
+    expect(await receiveEditorProposals(work())).toEqual({ kind: "notShared" });
+    expect(messages).toEqual([]);
     // 台帳を作らない（空のファイルを置き去りにしない）
     await expect(read(root, PROPOSAL_RELATIVE)).rejects.toThrow();
   });
@@ -172,9 +171,10 @@ describe("編集部の提案を取り込む", () => {
     await put(root, POINTER_RELATIVE, JSON.stringify({ folderPath: editing }));
     await put(editing, PROPOSAL_RELATIVE, "");
 
-    await collectEditorProposals(work());
-
-    expect(messages.join("\n")).toContain("提案はまだありません");
+    expect(await receiveEditorProposals(work())).toMatchObject({
+      kind: "received",
+      added: 0,
+    });
     await expect(read(root, PROPOSAL_RELATIVE)).rejects.toThrow();
   });
 
@@ -182,14 +182,14 @@ describe("編集部の提案を取り込む", () => {
     await put(root, POINTER_RELATIVE, JSON.stringify({ folderPath: editing }));
     await put(editing, PROPOSAL_RELATIVE, `${proposal("a")}\n${proposal("b")}\n`);
 
-    await collectEditorProposals(work());
-    await collectEditorProposals(work());
+    expect(await receiveEditorProposals(work())).toMatchObject({ added: 2 });
+    // 2回目は足すものが無い（並べる側は、それでも未決を並べる。作者の実機 2026-11-01）
+    expect(await receiveEditorProposals(work())).toMatchObject({ added: 0 });
 
     const lines = (await read(root, PROPOSAL_RELATIVE))
       .trim()
       .split("\n")
       .filter((line) => line.length > 0);
     expect(lines).toHaveLength(2);
-    expect(messages.join("\n")).toContain("すべて取り込み済み");
   });
 });

@@ -7,6 +7,7 @@ import type { WorkKindKey } from "../models/types";
 import { commandsHiddenForWorks } from "../core/workTypeVisibility";
 import {
   ACTION_TREE,
+  commandsHiddenForMode,
   disabledHint,
   isActionEnabled,
   REQUIRES_WORK_HINT,
@@ -141,8 +142,10 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
 
   /** いま種類で隠す操作。作品の種類を知る口が無ければ何も隠さない */
   private hiddenByKind(): ReadonlySet<string> {
-    if (!this.workKinds) return new Set();
-    return commandsHiddenForWorks(this.workKinds());
+    // **モードで入口が違う操作も、ここで隠す**（`shownInModes`。作者の判断 2026-11-01）
+    const byMode = commandsHiddenForMode(currentMode());
+    if (!this.workKinds) return byMode;
+    return new Set([...commandsHiddenForWorks(this.workKinds()), ...byMode]);
   }
 
   /**

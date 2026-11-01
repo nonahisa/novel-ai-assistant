@@ -235,9 +235,9 @@ export const STEP_DEFS: readonly StepDef[] = [
       "novelai.joinAsEditor",
       "novelai.toggleReviewLock",
       "novelai.finishReviewAndReturn",
-      "novelai.collectEditorProposals",
+      // 取込と確認を1つにした（作者の判断 2026-11-01）。受け取って未決を並べる
+      "novelai.viewEditorProposals",
       "novelai.revokeEditorAccess",
-      "novelai.reviewProposals",
       "novelai.showEditHistory",
     ],
   },
