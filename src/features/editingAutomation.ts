@@ -3,6 +3,11 @@ import type { WorkEntry } from "../models/types";
 import { isEditorMode } from "../core/actorContext";
 import { shouldReturnDecisions } from "../core/editingRepo";
 import { ProposalStore } from "../core/proposalStore";
+import {
+  describeDecisionCounts,
+  summarizeDecisions,
+  type DecisionCounts,
+} from "../models/proposal";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { notifyDone } from "../views/notify";
 import {
@@ -34,11 +39,18 @@ export interface ReturnDeps {
   resend: (work: WorkEntry) => Promise<PushOutcome & { skipped?: boolean }>;
   notifyDone: (text: string) => void;
   notifyFailure: (work: WorkEntry, detail: string) => void;
+  /**
+   * 送り返した採否の内訳（採用・見送り・読まれた。作者の決定 2026-11-01）。
+   * 渡さなければ内訳を添えない（試験で差し替えないときの形）
+   */
+  decisionCounts?: (work: WorkEntry) => Promise<DecisionCounts>;
 }
 
 const defaultReturnDeps: ReturnDeps = {
   hasPointer: async (work) => (await readPointer(work)) !== undefined,
   pendingCount: (work) => new ProposalStore(work).pendingCount(),
+  decisionCounts: async (work) =>
+    summarizeDecisions(await new ProposalStore(work).load()),
   isEditorMode,
   resend: (work) => resendDecisionsQuietly(work),
   notifyDone: (text) => notifyDone(text),
@@ -123,8 +135,17 @@ async function runReturn(work: WorkEntry, deps: ReturnDeps): Promise<ReturnOutco
       return "failed";
     }
     useLogFile(work.folderPath);
-    logStep(`採否を編集部へ送り返した（${work.title}）`);
-    deps.notifyDone("採否を編集部へ送り返しました。");
+    // **意見を読んだものは採用に数えない**（作者の決定 2026-11-01）。内訳が読めなくても
+    // 送り返しは済んでいるので、知らせは内訳なしで出す
+    let breakdown = "";
+    try {
+      const counts = deps.decisionCounts ? await deps.decisionCounts(work) : undefined;
+      if (counts) breakdown = `（${describeDecisionCounts(counts)}）`;
+    } catch {
+      breakdown = "";
+    }
+    logStep(`採否を編集部へ送り返した（${work.title}）${breakdown}`);
+    deps.notifyDone(`採否を編集部へ送り返しました${breakdown}。`);
     return "sent";
   } catch (error) {
     deps.notifyFailure(

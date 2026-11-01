@@ -41,6 +41,16 @@ describe("採否を決め終えたときの自動の送り返し", () => {
     expect(deps.notifyDone).toHaveBeenCalledWith("採否を編集部へ送り返しました。");
   });
 
+  test("送り返した知らせに、採用・見送り・読まれたの内訳を添える（意見は採用に数えない）", async () => {
+    const deps = returnDeps({
+      decisionCounts: async () => ({ accepted: 2, rejected: 1, read: 3, pending: 0 }),
+    });
+    expect(await returnDecisionsIfFinished(work("counts"), deps)).toBe("sent");
+    expect(deps.notifyDone).toHaveBeenCalledWith(
+      "採否を編集部へ送り返しました（採用 2・見送り 1・読まれた 3）。"
+    );
+  });
+
   test("未決が残っていれば送り返さない", async () => {
     const deps = returnDeps({ pendingCount: async () => 2 });
     expect(await returnDecisionsIfFinished(work("a"), deps)).toBe("skipped");

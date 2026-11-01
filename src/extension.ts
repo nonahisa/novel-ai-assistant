@@ -545,7 +545,11 @@ import {
   reviewProposals,
   toggleReviewLock,
 } from "./features/reviewProposals";
-import { proposeByHand, type HandProposalKind } from "./features/handProposal";
+import {
+  proposeByHand,
+  proposeEditFromCommand,
+  type HandProposalKind,
+} from "./features/handProposal";
 import { addSceneMemoHere } from "./features/sceneMemoCommand";
 import { offerFirstRunSetupInVsCode } from "./features/firstRun";
 import { splitCollectedFile } from "./features/splitCollectedFile";
@@ -5588,19 +5592,17 @@ export async function activate(
       「直しを提案する」（編集者モード。設計書5.6.1.1。作者の指示 2026-11-01）。
       選んだ所への直した案と理由を、本文に書かず提案として置く。
 
-      **前面の原稿エディタを先に見る。** 選んでいる所は画面の中にしか無いので、
-      画面へ頼み返す（傍点のキーと同じ形）。無ければ素のエディタの選択を使う
+      右クリックのほか、詳細メニュー（作品管理 → 編集部連携）からも押せる
+      （作者の決定 2026-11-01）。モードの確かめ・原稿エディタへの頼み返し・
+      選んでいないときの案内は features/handProposal.ts の `proposeEditFromCommand`
     */
     registerCommand("novelai.proposeEditByHand", async () => {
-      if (askProposeEditInActiveManuscript()) return;
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        void vscode.window.showInformationMessage(
-          "直したい所を本文で選んでから実行してください。"
-        );
-        return;
-      }
-      await proposeByHandInWork(registry, editor.document, editor.selection, "edit");
+      await proposeEditFromCommand({
+        askManuscript: () => askProposeEditInActiveManuscript(),
+        activeEditor: () => vscode.window.activeTextEditor,
+        propose: (document, range) =>
+          proposeByHandInWork(registry, document, range, "edit"),
+      });
     })
   );
 

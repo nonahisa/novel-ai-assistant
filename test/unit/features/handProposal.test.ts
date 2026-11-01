@@ -43,7 +43,9 @@ vi.mock("../../../src/core/textFile", () => ({
   writeTextFilePreservingFormat: vi.fn(async () => ({ ok: true })),
 }));
 
-const { proposeByHand } = await import("../../../src/features/handProposal");
+const { proposeByHand, proposeEditFromCommand } = await import(
+  "../../../src/features/handProposal"
+);
 const { writeTextFilePreservingFormat } = await import("../../../src/core/textFile");
 const { ProposalStore } = await import("../../../src/core/proposalStore");
 
@@ -198,5 +200,105 @@ describe("編集部の手書きの直しは、本文を書き換えず提案と�
 
     expect(placed).toBe(false);
     expect(ledger()).toBe("");
+  });
+
+  test("原稿エディターから選ばずに頼まれたら、選び方を案内する", async () => {
+    const said: string[] = [];
+    window.showWarningMessage = async (text: string) => {
+      said.push(text);
+      return undefined;
+    };
+    // 画面は選んでいないとき -1 を送り、受け口で 0〜0 の空の範囲になる
+    const placed = await proposeByHand(work, fakeDocument(body), range(0, 0, 0, 0), "edit");
+    expect(placed).toBe(false);
+    expect(said).toEqual([
+      "直したい所を本文で選んでから押してください（右クリックからも出せます）。",
+    ]);
+  });
+});
+
+/**
+ * 詳細メニュー（作品管理 → 編集部連携）からも「直しを提案する」を押せる
+ * （作者の決定 2026-11-01）。メニューを押した時点では選んでいる所が本文の側にしか無いので、
+ * 前面の原稿エディターへ頼み返すか、素のエディターの選択を使う。
+ */
+describe("コマンド（詳細メニュー・コマンドパレット）からの「直しを提案する」", () => {
+  function commandDeps(over: Partial<Parameters<typeof proposeEditFromCommand>[0]> = {}) {
+    const proposed: unknown[] = [];
+    return {
+      proposed,
+      deps: {
+        askManuscript: () => false,
+        activeEditor: () => undefined,
+        propose: async (document: unknown, picked: unknown) => {
+          proposed.push({ document, picked });
+        },
+        ...over,
+      },
+    };
+  }
+
+  function listenInfo(): string[] {
+    const said: string[] = [];
+    window.showInformationMessage = async (text: string) => {
+      said.push(text);
+      return undefined;
+    };
+    return said;
+  }
+
+  test("作者モードでは置かずに、編集者モードの操作だと理由を出す", async () => {
+    editorMode = false;
+    const said = listenInfo();
+    let asked = false;
+    const { deps, proposed } = commandDeps({
+      askManuscript: () => {
+        asked = true;
+        return true;
+      },
+    });
+    expect(await proposeEditFromCommand(deps)).toBe("notEditor");
+    expect(asked).toBe(false);
+    expect(proposed).toEqual([]);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain("編集者モード");
+  });
+
+  test("前面に原稿エディターがあれば、その画面の選択で進む", async () => {
+    const { deps, proposed } = commandDeps({ askManuscript: () => true });
+    expect(await proposeEditFromCommand(deps)).toBe("manuscript");
+    expect(proposed).toEqual([]);
+  });
+
+  test("素のエディターで選んでいれば、そのまま入力へ進む", async () => {
+    const document = fakeDocument(body);
+    const selection = range(0, 2, 0, 5);
+    const { deps, proposed } = commandDeps({
+      activeEditor: () => ({ document, selection }),
+    });
+    expect(await proposeEditFromCommand(deps)).toBe("proposed");
+    expect(proposed).toEqual([{ document, picked: selection }]);
+  });
+
+  test("選んでいなければ、本文で選んでから押すよう案内する", async () => {
+    const said = listenInfo();
+    const document = fakeDocument(body);
+    const { deps, proposed } = commandDeps({
+      activeEditor: () => ({ document, selection: range(0, 2, 0, 2) }),
+    });
+    expect(await proposeEditFromCommand(deps)).toBe("noSelection");
+    expect(proposed).toEqual([]);
+    expect(said).toEqual([
+      "直したい所を本文で選んでから押してください（右クリックからも出せます）。",
+    ]);
+  });
+
+  test("本文が開いていなくても、同じ案内を出す", async () => {
+    const said = listenInfo();
+    const { deps } = commandDeps();
+    expect(await proposeEditFromCommand(deps)).toBe("noSelection");
+    expect(said).toEqual([
+      "直したい所を本文で選んでから押してください（右クリックからも出せます）。",
+    ]);
   });
 });

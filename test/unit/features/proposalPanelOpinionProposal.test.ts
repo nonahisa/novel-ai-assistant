@@ -196,7 +196,7 @@ beforeEach(() => {
 });
 
 describe("編集部の意見だけの提案を、作者が受け取る", () => {
-  test("［読んだ］を押しても本文は変わらず、採った記録だけが足される", async () => {
+  test("［読んだ］を押しても本文は変わらず、読んだ記録だけが足される", async () => {
     const panel = await panelWith(proposal({}));
 
     await press(panel);
@@ -206,9 +206,9 @@ describe("編集部の意見だけの提案を、作者が受け取る", () => {
     expect(firstItem(panel).status).toBe("applied");
     expect(firstItem(panel).statusDetail).toContain("本文は変えていません");
 
-    // 台帳では「採った」になり、未決から外れる（編集部へ返る数え方も直しと同じ）
+    // 台帳では「読んだ」になり、未決から外れる（採用には数えない。作者の決定 2026-11-01）
     const [view] = await new ProposalStore(work).load();
-    expect(view.status).toBe("accepted");
+    expect(view.status).toBe("read");
     expect(edits.some((entry) => entry.action === "編集部の意見を読んだ")).toBe(true);
   });
 

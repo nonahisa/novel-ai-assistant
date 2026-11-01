@@ -176,7 +176,11 @@ function toLine(value: unknown): ProposalLine | undefined {
   if (record.kind === "decision") {
     const proposalId = stringOrEmpty(record.proposalId);
     const status = record.status;
-    if (!proposalId || (status !== "accepted" && status !== "rejected")) {
+    // `read` は意見を読んだ印（作者の決定 2026-11-01）。知らない状態の行は今までどおり捨てる
+    if (
+      !proposalId ||
+      (status !== "accepted" && status !== "rejected" && status !== "read")
+    ) {
       return undefined;
     }
     return {
