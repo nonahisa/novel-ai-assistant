@@ -5,15 +5,20 @@
  * 見張るのは、**作品一覧で別の作品（作品B）を選んだままでも、開いている原稿の作品（作品A）で進む**こと、
  * **どこでも Esc で止まる**こと、**量の確認で Enter を押すと推敲が走る**こと。縦書き・横書きの両方で押す。
  *
- * 1. 打ちかけの字があれば、上部に「未保存の変更が 1 件あります」の窓が出て、先頭が［保存して実行］
- *    （作品を選ぶ窓は出ない）。Esc で止めると、ファイルは書き換わらず、次の窓も出ない
- * 2. Enter で保存すると、本文のファイルに打った字が入り、範囲の窓「どこまで見ますか」の先頭が
- *    「この話だけ（ファイル名）」。Esc で止めると、次の窓が出ない
- * 3. 保存済みなら、1 を飛ばして範囲の窓から出る。Enter で進むと、料金・量の確認
- *    （「作品A の推敲を行います。」「1チャンク中 1件を処理します」、先頭が［実行］）が出る。
+ * 保存の問いは、0.122.0 で実行の確認の窓の1行にまとめた（作者の判断 2026-11-02。`features/presave.ts`）。
+ * それまでの「保存の窓→範囲の窓→量の確認」は、いまは「範囲の窓→量の確認（未保存があれば保存の1行つき）」。
+ * **保存の窓が先に出ないこと**と、**確認で取りやめたら保存しないこと**もここで見張る。
+ *
+ * 0. 保存済みなら、範囲の窓「どこまで見ますか」の先頭が「この話だけ」。Enter で進むと料金・量の確認
+ *    （「作品A の推敲を行います。」「1チャンク中 1件を処理します」、先頭が［実行］）が出て、保存の1行は無い。
  *    Esc で止めると、推敲は始まらない（操作ログに「推敲を開始」が無く、AI へも何も送らない）
- * 4. もう一度 3 まで進み、確認で Enter を押すと推敲が走る。作品A の操作ログに
- *    「推敲を開始: 作品A …」と「推敲を終了: 1/1 …」が書かれ、偽の AI に頼みが届く
+ * 1. 打ちかけの字があっても、最初に出るのは範囲の窓（先頭は「この話だけ（ファイル名）」。
+ *    「未保存の変更が N 件あります」の窓は出ない）。Esc で止めると、ファイルは書き換わらず、次の窓も出ない
+ * 2. もう一度範囲の窓を Enter で進むと、確認に「未保存の 1 件を保存してから実行します。」の1行が出る。
+ *    Esc で止めると、ファイルは書き換わらず（取りやめたら保存しない）、推敲も始まらない
+ * 3. もう一度確認まで進め、Enter を押すと、保存してから推敲が走る。本文のファイルに打った字が入り、
+ *    作品A の操作ログに「推敲を開始: 作品A …」と「推敲を終了: 1/1 …」が書かれ、偽の AI に頼みが届く。
+ *    保存したあとに2回目の確認は出ない（保存した本文で読み直して、そのまま走る）
  *
  * ## AI は偽の Ollama（2026-10-13 に替えた）
  *
@@ -162,13 +167,29 @@ async function typeOne(frame: Frame, page: Page, mark: string): Promise<void> {
   await waitUntil(async () => (await composeText(frame)).includes(mark), `打った字「${mark}」が面に出る`);
 }
 
-/** 保存済みの原稿で Ctrl+Alt+P → 範囲の窓の先頭（この話だけ）で Enter まで進める */
-async function pressAndPassScope(frame: Frame, page: Page, label: string): Promise<void> {
+/**
+ * Ctrl+Alt+P → 範囲の窓の先頭（この話だけ）で Enter まで進める。
+ * 打ちかけがあっても、**最初に出るのは範囲の窓**（保存は確認の窓で訊く。作者の判断 2026-11-02）
+ */
+async function pressAndPassScope(frame: Frame, page: Page, label: string, dirty = false): Promise<void> {
   await placeCaretAfter(frame, "静かだった。");
   await page.keyboard.press("Control+Alt+KeyP");
   const direct = await waitTopPicker(page, "どこまで見ますか");
-  expect(direct.first, `${label}：保存済みなら、保存の窓を飛ばして範囲の窓から出る`).toContain("この話だけ");
+  expect(direct.first, `${label}：${dirty ? "打ちかけがあっても" : "保存済みなら"}、範囲の窓から出て先頭は「この話だけ」`).toContain("この話だけ");
   await page.keyboard.press("Enter");
+}
+
+/** 確認の窓に出る、保存の1行（`views/notify.ts` の `presaveLine`） */
+const PRESAVE_LINE = "未保存の 1 件を保存してから実行します。";
+
+/** 窓が閉じ、推敲が始まっておらず、AI へも何も送っていない（`mark` を渡せば、本文にその字が無いことも） */
+async function stoppedQuietly(session: E2ESession, from: number, mark?: string): Promise<boolean> {
+  return (
+    (await pickerGone(session.page)) &&
+    (mark === undefined || !(await readEpisode(session)).includes(mark)) &&
+    !(await actionLogLines(session)).some((line) => line.includes("推敲を開始:")) &&
+    fake.requests.length === from
+  );
 }
 
 async function runFlow(session: E2ESession, frame: Frame, label: string): Promise<void> {
@@ -184,52 +205,67 @@ async function runFlow(session: E2ESession, frame: Frame, label: string): Promis
   await waitUntil(async () => (await rowB.count()) > 0, "作品一覧に作品Bの行が出る", 20_000);
   await rowB.click();
 
-  /* ── 1：打ちかけ → 保存の窓。Esc で止めると何も変わらない ── */
-  await typeOne(frame, page, `【${label}1】`);
-  await page.keyboard.press("Control+Alt+KeyP");
-  const save = await waitTopPicker(page, "作品：" + E2E_WORK_TITLE, "未保存の変更が 1 件あります");
-  expect(save.first, `${label}：保存の窓の先頭`).toContain("保存して実行");
+  /* ── 0：保存済み → 範囲の窓 → 確認（保存の1行なし）。Esc で止めると推敲は始まらない ── */
+  await pressAndPassScope(frame, page, label);
+  const saved = await waitRunConfirm(session, label, from);
+  expect(saved.first, `${label}：確認の先頭は［実行］（Enter でそのまま走る）`).toContain("実行");
+  expect(saved.text, `${label}：確認は開いている原稿の作品（作品A）で出る`).toContain(E2E_WORK_TITLE);
+  expect(saved.text, `${label}：確認に作品一覧で選んだ作品Bが出ている`).not.toContain(OTHER_TITLE);
+  expect(saved.text, `${label}：確認に送る量（1チャンク中 1件）が出ていない`).toContain("1チャンク中 1件を処理します");
+  expect(saved.text, `${label}：保存済みなのに、確認に保存の1行が出ている`).not.toContain("未保存の");
   await page.keyboard.press("Escape");
-  await holdsFor(async () => (await pickerGone(page)) && !(await readEpisode(session)).includes(`【${label}1】`), `${label}：Esc で止めたのに窓が続くか本文が書き換わった`, 2_500);
+  await holdsFor(async () => await stoppedQuietly(session, from), `${label}：確認を Esc で止めたのに、窓が続くか推敲が始まった`, 3_000).catch(
+    async (error: unknown) => {
+      throw new Error(`${String(error)}\n${await describeState(session, from)}`);
+    }
+  );
 
-  /* ── 2：もう一度 → Enter で保存 → 範囲の窓の先頭は「この話だけ」。Esc で止める ── */
-  await placeCaretAfter(frame, "静かだった。");
+  /* ── 1：打ちかけ → 最初に出るのは範囲の窓（保存の窓は出ない）。Esc で止めると何も変わらない ── */
+  const mark = `【${label}1】`;
+  await typeOne(frame, page, mark);
   await page.keyboard.press("Control+Alt+KeyP");
-  await waitTopPicker(page, "作品：" + E2E_WORK_TITLE, "未保存の変更が 1 件あります");
-  await page.keyboard.press("Enter");
   const scope = await waitTopPicker(page, "どこまで見ますか");
   expect(scope.first, `${label}：範囲の窓の先頭`).toContain("この話だけ");
   expect(scope.first, `${label}：範囲の窓の先頭に話のファイル名`).toContain(EPISODE);
-  await waitUntil(async () => (await readEpisode(session)).includes(`【${label}1】`), `${label}：保存して実行で本文のファイルに打った字が入る`);
   await page.keyboard.press("Escape");
-  await holdsFor(async () => await pickerGone(page), `${label}：Esc で止めたのに次の窓が出た`, 2_500);
+  await holdsFor(async () => await stoppedQuietly(session, from, mark), `${label}：範囲の窓を Esc で止めたのに、窓が続くか本文が書き換わった`, 2_500).catch(
+    async (error: unknown) => {
+      throw new Error(`${String(error)}\n${await describeState(session, from)}`);
+    }
+  );
 
-  /* ── 3：保存済みなら範囲の窓から。Enter で料金・量の確認。Esc で止めると推敲は始まらない ── */
-  await pressAndPassScope(frame, page, label);
-  const confirm = await waitRunConfirm(session, label, from);
-  expect(confirm.first, `${label}：確認の先頭は［実行］（Enter でそのまま走る）`).toContain("実行");
-  expect(confirm.text, `${label}：確認は開いている原稿の作品（作品A）で出る`).toContain(E2E_WORK_TITLE);
-  expect(confirm.text, `${label}：確認に作品一覧で選んだ作品Bが出ている`).not.toContain(OTHER_TITLE);
-  expect(confirm.text, `${label}：確認に送る量（1チャンク中 1件）が出ていない`).toContain("1チャンク中 1件を処理します");
+  /* ── 2：範囲の窓を Enter → 確認に保存の1行。Esc で止めると保存も推敲もしない ── */
+  await pressAndPassScope(frame, page, label, true);
+  const unsaved = await waitRunConfirm(session, label, from);
+  expect(unsaved.first, `${label}：保存つきの確認の先頭は［実行］`).toContain("実行");
+  expect(unsaved.text, `${label}：確認に保存の1行が出ていない`).toContain(PRESAVE_LINE);
+  expect(unsaved.text, `${label}：保存つきの確認が作品Aで出ていない`).toContain(E2E_WORK_TITLE);
+  expect(unsaved.text, `${label}：保存つきの確認に作品Bが出ている`).not.toContain(OTHER_TITLE);
   await page.keyboard.press("Escape");
   await holdsFor(
-    async () =>
-      (await pickerGone(page)) &&
-      !(await actionLogLines(session)).some((line) => line.includes("推敲を開始:")) &&
-      fake.requests.length === from,
-    `${label}：確認を Esc で止めたのに、窓が続くか推敲が始まった`,
+    async () => await stoppedQuietly(session, from, mark),
+    `${label}：保存つきの確認を Esc で止めたのに、窓が続くか、保存されたか、推敲が始まった`,
     3_000
   ).catch(async (error: unknown) => {
     throw new Error(`${String(error)}\n${await describeState(session, from)}`);
   });
 
-  /* ── 4：もう一度確認まで進め、Enter で推敲が走る（作品Aの操作ログに開始と終了） ── */
-  await pressAndPassScope(frame, page, label);
-  await waitRunConfirm(session, label, from);
+  /* ── 3：もう一度確認まで進め、Enter で保存してから推敲が走る（作品Aの操作ログに開始と終了） ── */
+  await pressAndPassScope(frame, page, label, true);
+  const again = await waitRunConfirm(session, label, from);
+  expect(again.text, `${label}：2回目の保存つきの確認に保存の1行が出ていない`).toContain(PRESAVE_LINE);
   await page.keyboard.press("Enter");
+  await waitUntil(async () => (await readEpisode(session)).includes(mark), `${label}：確認の［実行］で本文のファイルに打った字が入る`).catch(
+    async (error: unknown) => {
+      throw new Error(`${String(error)}\n${await describeState(session, from)}`);
+    }
+  );
+  // 保存したあとは、保存した本文で読み直してそのまま走る。2回目の確認が出たら覚えておく
+  let secondConfirm = false;
   await waitUntil(
     async () => {
       await passLocalAiGate(page);
+      if (((await quickPickTitle(page)) ?? "").includes("推敲を行います")) secondConfirm = true;
       const lines = await actionLogLines(session);
       return lines.some((line) => line.includes("推敲を開始:")) && lines.some((line) => line.includes("推敲を終了:"));
     },
@@ -238,6 +274,7 @@ async function runFlow(session: E2ESession, frame: Frame, label: string): Promis
   ).catch(async (error: unknown) => {
     throw new Error(`${String(error)}\n${await describeState(session, from)}`);
   });
+  expect(secondConfirm, `${label}：保存したあとに、もう一度確認の窓が出た`).toBe(false);
   const lines = await actionLogLines(session);
   const started = lines.filter((line) => line.includes("推敲を開始:"));
   const ended = lines.filter((line) => line.includes("推敲を終了:"));
@@ -248,7 +285,7 @@ async function runFlow(session: E2ESession, frame: Frame, label: string): Promis
   await clearNotifications(page);
 }
 
-test("作品一覧で別の作品を選んだままでも、横書きの原稿の Ctrl+Alt+P は保存の窓→範囲の窓→量の確認の順で、どこでも Esc で止まり、確認で Enter を押すと推敲が走る", async () => {
+test("作品一覧で別の作品を選んだままでも、横書きの原稿の Ctrl+Alt+P は範囲の窓→量の確認（未保存は保存の1行つき）の順で、どこでも Esc で止まり、確認で Enter を押すと推敲が走る", async () => {
   await withVsCode(
     "推敲のキー（横書き）",
     [{ name: EPISODE, text: TEXT }],
@@ -260,7 +297,7 @@ test("作品一覧で別の作品を選んだままでも、横書きの原稿�
   );
 }, 300_000);
 
-test("作品一覧で別の作品を選んだままでも、縦書きの原稿の Ctrl+Alt+P は保存の窓→範囲の窓→量の確認の順で、どこでも Esc で止まり、確認で Enter を押すと推敲が走る", async () => {
+test("作品一覧で別の作品を選んだままでも、縦書きの原稿の Ctrl+Alt+P は範囲の窓→量の確認（未保存は保存の1行つき）の順で、どこでも Esc で止まり、確認で Enter を押すと推敲が走る", async () => {
   await withVsCode(
     "推敲のキー（縦書き）",
     [{ name: EPISODE, text: TEXT }],
