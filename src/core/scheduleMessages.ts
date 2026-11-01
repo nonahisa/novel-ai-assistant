@@ -16,6 +16,8 @@ export type ScheduleMessage =
   | { type: "addSchedule"; workId: string | null }
   | { type: "openWork"; workId: string }
   | { type: "openFile"; workId: string }
+  /** 応募先に従うスケジュールの「作品目標設定で直す」から開く（作者の判断 2026-11-02） */
+  | { type: "openWorkGoals"; workId: string }
   | { type: "updateStep"; workId: string; scheduleId: string; stepId: string; patch: StepPatch }
   | { type: "addStep"; workId: string; scheduleId: string; afterStepId: string | null; label: string; days: number }
   | { type: "removeStep"; workId: string; scheduleId: string; stepId: string }
@@ -50,6 +52,7 @@ export function parseScheduleMessage(raw: unknown): ScheduleMessage | null {
       return { type: "addSchedule", workId };
     case "openWork":
     case "openFile":
+    case "openWorkGoals":
       return workId ? { type: value.type, workId } : null;
     case "updateStep": {
       const patch = stepPatch(value.patch);

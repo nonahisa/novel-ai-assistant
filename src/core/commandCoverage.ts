@@ -90,8 +90,8 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.chaptersFromHeadings": { class: "C4", label: "章見出し反映", reason: "作者の判断" },
   "novelai.importChaptersFromBackup": { class: "C4", label: "章立て取込（バックアップから）", reason: "作者の判断" },
   // ── 相談・診断・案内
-  "novelai.openChat": { class: "A", label: "AIに相談する" },
-  "novelai.openChatPanel": { class: "A", label: "AI相談（大きく開く）" },
+  "novelai.openChat": { class: "A", label: "AIに相談" },
+  "novelai.openChatPanel": { class: "A", label: "AIに相談（大きく開く）" },
   "novelai.openChatLog": { class: "A", label: "相談ログ", via: "novel.read kind: chatLog（名指しの鍵。\"*\" では読めない）" },
   "novelai.chooseChatWork": { class: "C3", label: "相談作品選択" },
   "novelai.setAdvicePolicy": { class: "C4", label: "助言方針（診断）", reason: "作者の判断" },
@@ -148,7 +148,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.extractSettings": { class: "A", label: "一括抽出", via: "run.request feature: settings" },
   "novelai.extractCharactersOnly": { class: "A", label: "人物抽出" },
   "novelai.extractLocationsOnly": { class: "A", label: "場所抽出" },
-  "novelai.extractAbilitiesOnly": { class: "A", label: "スキル抽出" },
+  "novelai.extractAbilitiesOnly": { class: "A", label: "能力抽出" },
   "novelai.extractOrganizationsOnly": { class: "A", label: "組織抽出" },
   "novelai.extractWorldOnly": { class: "A", label: "世界観抽出" },
   "novelai.openSettingsPanel": { class: "A", label: "設定資料集閲覧", via: "novel.read kind: settings" },
@@ -196,7 +196,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.buildVectorIndexAll": { class: "B", label: "検索索引作成／更新（全作品）" },
   "novelai.clearVectorIndex": { class: "C4", label: "検索索引削除", reason: "消す" },
   // ── 本文の操作・ファイル
-  "novelai.deleteEpisodeFile": { class: "C4", label: "ファイルを削除", reason: "消す" },
+  "novelai.deleteEpisodeFile": { class: "C4", label: "この話を削除", reason: "消す" },
   "novelai.insertEpisodeBefore": { class: "C4", label: "この話の前に挿入", reason: "原稿" },
   "novelai.removeEpisodeAndRenumber": { class: "C4", label: "この話を削除（話数を詰める）", reason: "原稿" },
   "novelai.splitCollectedFile": { class: "C4", label: "話ごとのファイルに分ける", reason: "原稿" },
@@ -204,7 +204,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.convertToMarkdown": { class: "C4", label: "本文 .md 化", reason: "原稿" },
   "novelai.unifyEol": { class: "C4", label: "改行コード統一", reason: "原稿" },
   "novelai.convertDocxToMarkdown": { class: "C1", label: "Word 原稿変換" },
-  "novelai.openVertical": { class: "C3", label: "縦書き表示" },
+  "novelai.openVertical": { class: "C3", label: "原稿エディターで開く" },
   "novelai.openEpisode": { class: "C3", label: "話を開く" },
   "novelai.readManuscriptAloud": { class: "C3", label: "原稿読み上げ" },
   "novelai.addEmphasis": { class: "C4", label: "傍点付与", reason: "原稿" },
@@ -264,6 +264,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.recordReaderStats": { class: "C4", label: "読者反応手動入力", reason: "作者の判断" },
   // 作品の連載中／完結は作者が決める印（2026-11-01）。外部AIに決めさせない
   "novelai.setWorkCompletion": { class: "C4", label: "連載状態切替", reason: "作者の判断" },
+  "novelai.postingAndReaders": { class: "C3", label: "投稿と読者の反応…" },
   // ── 外部AI・画面の並び
   "novelai.toggleExternalAccess": { class: "B", label: "外部AI許可／取消" },
   "novelai.writeAiInstructions": { class: "C4", label: "外部AI指示書設置", reason: "設定" },

@@ -108,8 +108,10 @@ function resolveActionPath(parts: string[]): boolean {
   if (!entry) return false;
   if (entry.kind === "action") return rest.length === 1 && !entry.hiddenFromActionList;
   if (rest.length === 1) return true;
-  const item = entry.items.find((i) => i.label === third);
-  return rest.length === 2 && item !== undefined && !item.hiddenFromActionList;
+  // 隠した項目と見えている項目が同じ名前のことがある（「AIに相談」。作者の判断
+  // 2026-11-02 で名前をそろえ、開き方は説明欄で言う）。見えているほうを探す
+  const item = entry.items.find((i) => i.label === third && !i.hiddenFromActionList);
+  return rest.length === 2 && item !== undefined;
 }
 
 /** 文の中の「詳細メニュー › …」「簡単ステップメニュー › …」を拾う */

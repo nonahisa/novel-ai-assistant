@@ -89,7 +89,7 @@ export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
     command: "novelai.addSceneMemo",
     label: "ここにメモを足す",
   },
-  { key: "ctrl+alt+c", command: "novelai.openChat", label: "AIに相談する" },
+  { key: "ctrl+alt+c", command: "novelai.openChat", label: "AIに相談" },
   /*
     傍点（K は圏点）。前は画面の中で Ctrl+Shift+K を受けていたが、Notion の
     デスクトップアプリが Windows 全体で取っていて届かなかった（作者の実機、

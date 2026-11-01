@@ -25,6 +25,14 @@ describe("画面から届く知らせ", () => {
     }
   });
 
+  test("作品目標設定を開く知らせは、作品を名指ししたものだけ通す（作者の判断 2026-11-02）", () => {
+    expect(parseScheduleMessage({ type: "openWorkGoals", workId: "w" })).toEqual({
+      type: "openWorkGoals",
+      workId: "w",
+    });
+    expect(parseScheduleMessage({ type: "openWorkGoals" })).toBeNull();
+  });
+
   test("形の合わないものは捨てる", () => {
     expect(parseScheduleMessage(null)).toBeNull();
     expect(parseScheduleMessage({ type: "unknown" })).toBeNull();

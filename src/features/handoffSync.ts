@@ -35,7 +35,11 @@ import { useSyncLog } from "./syncLog";
 import { readMachineName } from "./windowCard";
 import { whenNoticePicked } from "../views/notify";
 import { isEditorMode } from "../core/actorContext";
-import { finishReviewLabel, saveAndSyncLabel } from "../core/syncEntryNames";
+import {
+  FINISH_REVIEW_COMMAND,
+  finishReviewLabel,
+  saveAndSyncLabel,
+} from "../core/syncEntryNames";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 import type { SyncPresave } from "./presaveBeforeSync";
 
@@ -441,8 +445,11 @@ async function reportStartup(
   // **ボタンは文の言葉と同じにする**（作者の裁定、2026-10-11）。それまでの
   // ［分岐合流］は、文の「どちらを残すかお選びください」と結びつかなかった。
   // ログはここで開いても作者の判断の助けにならないので、［あとで］に替えた
+  // **編集者モードでは、合わせる画面へ渡さない**（作者の判断 2026-11-02）。
+  // 合わせるのは作者の仕事で、編集者は「校閲を終えて返す」で提案を返す
+  const editor = isEditorMode();
   const buttons = needsFold
-    ? [CHOOSE_WHICH_TO_KEEP, "あとで"]
+    ? [editor ? finishReviewLabel() : CHOOSE_WHICH_TO_KEEP, "あとで"]
     : ["同期する", "ログを表示"];
   // **ボタンが押されるのを待たない**（2026-10-11、作者のノートPC）。
   // 待つと、作者が押さずにベルへ畳んだ間じゅう点検が終わらず、
@@ -451,7 +458,9 @@ async function reportStartup(
   whenNoticePicked(
     vscode.window.showWarningMessage(lines.join("\n"), ...buttons),
     async (answer) => {
-      if (answer === CHOOSE_WHICH_TO_KEEP) {
+      if (editor && needsFold && answer === finishReviewLabel()) {
+        await vscode.commands.executeCommand(FINISH_REVIEW_COMMAND);
+      } else if (answer === CHOOSE_WHICH_TO_KEEP) {
         await vscode.commands.executeCommand("novelai.resolveDivergence");
       } else if (answer === "同期する") {
         await vscode.commands.executeCommand("novelai.saveAndSync");
@@ -531,7 +540,11 @@ function describeStopped(
 ): string {
   const action = outcome.action;
   if (action.kind === "ask") {
-    return describeAskStop(outcome.label, machineName, action.overlap);
+    // 編集者モードは合わせない。押す所を言う（作者の判断 2026-11-02）
+    return isEditorMode()
+      ? describeAskStop(outcome.label, machineName, action.overlap) +
+          `編集者の側では合わせません。「${finishReviewLabel()}」で提案を作者へ返してください。`
+      : describeAskStop(outcome.label, machineName, action.overlap);
   }
   if (action.kind === "blocked") {
     switch (action.reason) {

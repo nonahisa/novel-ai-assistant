@@ -684,6 +684,10 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
     var name = null; var milestone = null; var target = null;
     if (schedule.followsGoals) {
       detail.appendChild(el("div", "note", "名前・締切・予定の字数は作品目標設定の応募先に従います（ここへは写しません）。直すときは作品目標設定で。"));
+      // 案内だけでは開く道が無かった（作者の判断 2026-11-02）。この作品を名指しして開く
+      var goalsRow = el("div", "buttons");
+      goalsRow.appendChild(button("作品目標設定を開く", "", function () { post({ type: "openWorkGoals", workId: column.workId }); }));
+      detail.appendChild(goalsRow);
     } else {
       name = field(detail, "名前", input("text", schedule.name));
       milestone = field(detail, plan.milestoneLabel + "（空なら未定。今日から詰めて最短の日を出します）", input("date", schedule.milestone));

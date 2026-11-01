@@ -50,8 +50,9 @@ const EDITOR_ALLOWED = new Set<string>([
   "novelai.saveAndSync",
   "novelai.gitSync",
   "novelai.resolveConflicts",
-  // 編集部と作者の両方が触ったあとは、ここを通らないと合流できない
-  "novelai.resolveDivergence",
+  // **「分岐合流」（`novelai.resolveDivergence`）は開かない**（作者の判断 2026-11-02）。
+  // 編集者の「保存・同期」は受け取るだけで、2台の原稿を合わせるのは作者の仕事。
+  // 分かれたときは「校閲を終えて返す」へ案内する（`describeBlocked`）
   "novelai.addWorkFromGithub",
 
   // 読むために要る
@@ -107,7 +108,25 @@ export function isCommandAllowed(command: string, mode: WorkMode): boolean {
 export const EDITOR_BLOCKED_HINT =
   "編集者モードでは使えません（本文の校正・校閲のみ）";
 
+/**
+ * 編集者が作者へ返す入口の名前（詳細メニューの「校閲を終えて返す」）。
+ *
+ * **`syncEntryNames.ts` の `finishReviewLabel()` を読まない**——あちらは
+ * `actionTree.ts` を読み、`actionTree.ts` はこのファイルを読むので、輪になる。
+ * 名前がずれたら `editorMode.test.ts` が木の名前と突き合わせて止める。
+ */
+const FINISH_REVIEW_LABEL = "校閲を終えて返す";
+
 export function describeBlocked(command: string): string {
+  // 分かれたときに押せる所を言う（作者の判断 2026-11-02）。「作者の環境で」だけでは、
+  // 編集者は分かれたままの原稿をどうすればよいか分からない
+  if (command === "novelai.resolveDivergence") {
+    return (
+      "編集者モードでは、2台の原稿を合わせる操作は使えません。" +
+      "編集者の「保存・同期」は受け取るだけで、合わせるのは作者が行います。" +
+      `原稿が作者の側と分かれたときは、「${FINISH_REVIEW_LABEL}」で提案を作者へ返してください。`
+    );
+  }
   if (command.startsWith("novelai.extract") || command.includes("Settings")) {
     return (
       "編集者モードでは設定資料を変更できません。" +

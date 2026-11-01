@@ -274,9 +274,13 @@ import {
 // 完了通知の件数は、提案パネルの見出しと同じ数え方をする（設計書6.8）
 import { describeCheckRunCounts } from "./core/checkRunCounts";
 import {
+  describeLikelyWorkReason,
+  isDetailMenuArgs,
   markInferredWork,
   orderByLastWork,
+  orderByLikelyWork,
   pickHintedWork,
+  type LikelyWorkHints,
 } from "./core/workTarget";
 import type { IncomingCount } from "./core/proposalBuckets";
 import {
@@ -311,7 +315,15 @@ import {
   isCommandVisibleForKind,
   kindFeatureOfCommand,
   kindMismatchMessage,
+  workTypeContextValue,
 } from "./core/workTypeVisibility";
+import {
+  canRenumberOnDelete,
+  EPISODE_DELETE_CHOICES,
+  routeOfDeleteAnswer,
+} from "./core/episodeDeleteChoice";
+import { POSTING_MENU_ENTRIES } from "./core/postingMenu";
+import { SETTINGS_DOC_CHOICES } from "./core/settingsDocChoices";
 import {
   selectableWorkFormats,
   type WorkFormatDef,
@@ -548,7 +560,7 @@ import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
 import { startAiAssignmentsSnapshot } from "./features/aiAssignmentsSnapshot";
 import { isEditorMode } from "./core/actorContext";
-import { setActiveModeForGuide } from "./core/editorMode";
+import { describeBlocked, setActiveModeForGuide } from "./core/editorMode";
 import { conflictFixHint } from "./core/syncEntryNames";
 import { rememberDecisionMemory } from "./features/decisionMemory";
 import {
@@ -1023,9 +1035,12 @@ export async function activate(
       いきなり「作品を選択」を出すと、これまで出ていなかった問いが
       増える（しかも関門と機能で別の作品を見かねない）。
     */
-    const openedPath = vscode.window.activeTextEditor
-      ? fromUri(vscode.window.activeTextEditor.document.uri)
-      : undefined;
+    // 詳細メニューから押したときは推し量らず選ばせる（作者の判断 2026-11-02）。
+    // 開いているファイルで決めると、選ぶ画面が出ないまま関門を通ってしまう
+    const openedPath =
+      vscode.window.activeTextEditor && detailMenuAsk === undefined
+        ? fromUri(vscode.window.activeTextEditor.document.uri)
+        : undefined;
     const work =
       given?.work ??
       (openedPath ? inferredWorkOfPath(registry, openedPath) : undefined) ??
@@ -1180,6 +1195,14 @@ export async function activate(
     thisArg
   ) =>
     vscode.commands.registerCommand(command, async (...args: unknown[]) => {
+      /*
+        **詳細メニューから押した印は、最初に外す**（作者の判断 2026-11-02）。
+        本体には「引数なし」として届け、作品を決める所で毎回選ばせる
+        （`detailMenuAsk`）。印のまま渡すと、引数を作品の節点と読む命令が
+        取り違える
+      */
+      const fromDetailMenu = isDetailMenuArgs(args[0]);
+      if (fromDetailMenu) args = [undefined, ...args.slice(1)];
       // 関門より先に残す（関門で止まった回も「届いた」ことは分かるように）
       if (treeMenuCommands.has(command)) {
         logStep(describeTreeMenuCall(command, args[0]));
@@ -1195,16 +1218,32 @@ export async function activate(
       // 光らせた詳細メニューの項目なら相談の作品で（`spotlightWorkHint`）
       const litWork = spotlightWorkFor?.(command);
       spotlightWorkHint = args[0] === undefined ? litWork : undefined;
+      /*
+        詳細メニューから押したら、作品を毎回選ばせる。**相談から光らせた項目を
+        押した1回だけは除く**——相談で「この作品の、この項目」と示されて押して
+        いるので、相談の作品で走らせる（作者の判断 2026-11-01。相談から呼んだ
+        ときは訊かない）。押されるたびに置き直し、古い印を残さない
+      */
+      const askToken =
+        fromDetailMenu && litWork === undefined ? {} : undefined;
+      detailMenuAsk = askToken;
       // 種類の関門（設計書6.109.7）は前提の関門より先に通す。歌詞の作品で
       // 「先に人物を抽出しますか」と訊いても意味が無い
+      // 関門で止まった回も、詳細メニューの印を残さない（下の finally を通らない）
+      const dropAsk = (): undefined => {
+        if (askToken !== undefined && detailMenuAsk === askToken) {
+          detailMenuAsk = undefined;
+        }
+        return undefined;
+      };
       const kindGate = await guardWorkKind(command, args);
-      if (kindGate === "stop") return undefined;
+      if (kindGate === "stop") return dropAsk();
       const gate = await guardPrerequisites(command, args);
-      if (!gate.run) return undefined;
+      if (!gate.run) return dropAsk();
       args = gate.args;
       // 前提の関門が作品を決めた（作品選択で選ばれた）なら、その作品で見直す
       if (kindGate === "unknown" && (await guardWorkKind(command, args)) === "stop") {
-        return undefined;
+        return dropAsk();
       }
 
       if (!beginCommand(runningCommands, command)) {
@@ -1212,7 +1251,7 @@ export async function activate(
         vscode.window.showInformationMessage(
           `「${label}」はいま動いています。終わるまでお待ちください。`
         );
-        return undefined;
+        return dropAsk();
       }
       const syncBusy = isSyncBusyCommand(command);
       if (syncBusy) syncCommandsRunning += 1;
@@ -1267,6 +1306,8 @@ export async function activate(
         if (litWork !== undefined && spotlightWorkHint === litWork) {
           spotlightWorkHint = undefined;
         }
+        // 作品を決めずに終わった操作の印も残さない（ほかの操作の印には触らない）
+        dropAsk();
       }
     });
 
@@ -2307,6 +2348,17 @@ export async function activate(
     registerCommand(
       "novelai.resolveDivergence",
       async (node?: WorkNode) => {
+        /*
+          **編集者モードでは使わせない**（作者の判断 2026-11-02）。詳細メニューは
+          押せなくしてあるが、知らせのボタンや相談からも呼ばれうるので、入口でも
+          止めて「校閲を終えて返す」へ案内する（`describeBlocked`）
+        */
+        if (isEditorMode()) {
+          void vscode.window.showInformationMessage(
+            describeBlocked("novelai.resolveDivergence")
+          );
+          return;
+        }
         // 合わせる相手は置き場（リポジトリ）だが、選んでもらうのは作品にする。
         // 作者が見ているのは作品であり、どの作品がどの置き場かは意識しなくてよい
         const work = await resolveWork(node, registry, {
@@ -3391,6 +3443,21 @@ export async function activate(
         ? spotlightWorkHint
         : undefined,
   });
+  // 詳細メニューから押したときの、選ぶ画面の並び（作者の判断 2026-11-02）。
+  // 並べるだけなので、見えていないツリーの選択や相談の作品も渡す
+  likelyWorkHints = () => {
+    const opened = activeManuscriptUri();
+    return {
+      manuscriptWorkId: opened
+        ? findWorkForPath(registry, fromUri(opened))?.id
+        : undefined,
+      treeSelectedId: worksView?.selection.find(
+        (item): item is WorkNode => item.type === "work"
+      )?.work.id,
+      stepSelectedId: stepProvider.selectedWork()?.id,
+      chatTargetId: workChatPanel.currentWorkId(),
+    };
+  };
 
   context.subscriptions.push(
     workChatPanel,
@@ -3436,9 +3503,19 @@ export async function activate(
     // 本文の領域に大きく開く（作者の要望、2026-08-28）。
     // **横の小さいパネル（novelai.openChat）は残す。** 範囲を選んで聞くときは
     // 本文が見えている必要があり、大きい画面では隠れてしまう
-    registerCommand("novelai.openChatPanel", () => {
+    registerCommand("novelai.openChatPanel", async (node?: unknown) => {
       // 開く前に、今の本文を覚えさせる（`openChat` と同じ理由）
       workChatPanel.trackEditor(vscode.window.activeTextEditor);
+      /*
+        **簡単ステップメニューから来たら、選んだ作品で相談する**（作者の判断
+        2026-11-02）。ステップは作品が要る項目へ選んだ作品を渡すのに、ここが
+        引数を見ずに開いていたので、相談は前の作品のまま開いていた。
+        違うときだけ合わせる（同じなら、覚えた本文を手放さない）。開く前に
+        合わせるのは、前の作品で一瞬描かれないようにするため
+      */
+      if (isWorkRefArg(node) && workChatPanel.currentWorkId() !== node.work.id) {
+        await workChatPanel.focusWork(node.work);
+      }
       workChatPanel.openLargePanel();
     }),
     registerCommand("novelai.exitChatFocus", async () => {
@@ -5836,7 +5913,27 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await generateSettingsDocs(work);
+        /*
+          **種類を選ぶ**（作者の判断 2026-11-02。`core/settingsDocChoices.ts`）。
+          種類ごとの「一覧を生成」4つをここへまとめ、組織も選べるようにした。
+          先頭の「すべて」は Enter だけで今までどおり全部を書き出す
+        */
+        const picked = await vscode.window.showQuickPick(
+          [
+            ...SETTINGS_DOC_CHOICES.map((choice) => ({
+              label: choice.label,
+              description: choice.description,
+              choice,
+            })),
+            cancelItem(),
+          ],
+          { title: `どの資料を書き出しますか（${abbreviateTitle(work.title)}）` }
+        );
+        if (!picked || !("choice" in picked)) return;
+        await generateSettingsDocs(
+          work,
+          picked.choice.kinds ? { kinds: picked.choice.kinds } : {}
+        );
       }
     )
   );
@@ -5854,7 +5951,9 @@ export async function activate(
   );
 
   // 種別ごとの書き出し。JSONを1種類だけ直したときに、
-  // その一覧だけを作り直せるようにする
+  // その一覧だけを作り直せるようにする。
+  // **パレットからは外した**（作者の判断 2026-11-02）。入口は「設定資料集出力」で
+  // 種類を選ぶ形。ID を呼ぶ所が残っていても壊れないよう、命令は残す
   for (const [command, kind] of [
     ["novelai.generateCharacterDocs", "characters"],
     ["novelai.generateLocationDocs", "locations"],
@@ -5881,7 +5980,7 @@ export async function activate(
   for (const [command, kind, label] of [
     ["novelai.extractCharactersOnly", "characters", "人物"],
     ["novelai.extractLocationsOnly", "locations", "場所"],
-    ["novelai.extractAbilitiesOnly", "abilities", "スキル"],
+    ["novelai.extractAbilitiesOnly", "abilities", "能力"],
     ["novelai.extractOrganizationsOnly", "organizations", "組織"],
     ["novelai.extractWorldOnly", "world", "世界観"],
   ] as const) {
@@ -7423,7 +7522,7 @@ export async function activate(
     registerCommand(
       "novelai.deleteEpisodeFile",
       async (picked?: EpisodeNode) => {
-        const node = requireTreeNode(picked, "ファイルを削除");
+        const node = requireTreeNode(picked, "この話を削除");
         if (!node) return;
 
         // 削除は取り消せない操作の入口なので、ごみ箱経由にしたうえで
@@ -7431,15 +7530,50 @@ export async function activate(
         const dirtyNote = hasUnsavedChanges(node.episode.filePath)
           ? "未保存の変更も破棄されます。"
           : "";
-        const answer = await vscode.window.showWarningMessage(
-          `${node.episode.fileName} を削除しますか？`,
-          {
-            modal: true,
-            detail: `ごみ箱に移動します。元に戻すことができます。${dirtyNote}`,
-          },
-          "削除する"
-        );
-        if (answer !== "削除する") return;
+        /*
+          **「この話を削除」1つから、話数を詰めるかを訊く**（作者の判断
+          2026-11-02。`core/episodeDeleteChoice.ts`）。詰められる話（番号で数える
+          形式）だけ問いを出し、詰めるほうは今までの「話数を詰める削除」へ渡す
+          ——付け替える話の一覧と最後の確認はそちらが出す。詰められない話は、
+          今までどおり消すかだけを訊く
+        */
+        if (
+          canRenumberOnDelete(
+            workTypeContextValue("episode", node.format, node.kind)
+          )
+        ) {
+          const choice = await vscode.window.showWarningMessage(
+            `「${node.episode.fileName}」を削除します。あとの話の話数を詰めますか？`,
+            {
+              modal: true,
+              detail:
+                "どちらもごみ箱に移動します。元に戻すことができます。\n" +
+                "・話数を詰める：あとの話の番号を1つずつ繰り上げる（次に付け替える話の一覧が出る）\n" +
+                `・詰めない：この話のファイルだけを消し、番号は空いたままにする${dirtyNote ? `\n${dirtyNote}` : ""}`,
+            },
+            EPISODE_DELETE_CHOICES.renumber,
+            EPISODE_DELETE_CHOICES.fileOnly
+          );
+          const route = routeOfDeleteAnswer(choice);
+          if (!route) return;
+          if (route === "renumber") {
+            await vscode.commands.executeCommand(
+              "novelai.removeEpisodeAndRenumber",
+              node
+            );
+            return;
+          }
+        } else {
+          const answer = await vscode.window.showWarningMessage(
+            `${node.episode.fileName} を削除しますか？`,
+            {
+              modal: true,
+              detail: `ごみ箱に移動します。元に戻すことができます。${dirtyNote}`,
+            },
+            "削除する"
+          );
+          if (answer !== "削除する") return;
+        }
 
         try {
           await vscode.workspace.fs.delete(
@@ -8068,6 +8202,32 @@ export async function activate(
       if (!result.changed) return;
       treeProvider.refresh(work.id);
       await refreshWritingStatsPanel(work, deviceId);
+    }),
+    /*
+      作品の右クリックの「投稿と読者の反応…」（作者の判断 2026-11-02。
+      `core/postingMenu.ts`）。投稿まわりの6つを1つの入口にまとめ、押すと選ぶ。
+      **選んだ命令へ同じ作品を渡す**——渡さないと、右クリックで指した作品を
+      もう一度選ばされる
+    */
+    registerCommand("novelai.postingAndReaders", async (node?: WorkNode) => {
+      // 中に新話投稿（作品に手を加える操作。`preferLast: false`）があるので、入口でも
+      // 直前の作品を先頭にしない（Enter だけで別の作品の投稿へ進まないため）
+      const work = await resolveWork(node, registry, { preferLast: false });
+      if (!work) return;
+      const picked = await vscode.window.showQuickPick(
+        [
+          ...POSTING_MENU_ENTRIES.map((entry) => ({
+            label: entry.label,
+            description: entry.description,
+            command: entry.command,
+          })),
+          cancelItem(),
+        ],
+        { title: `投稿と読者の反応（${abbreviateTitle(work.title)}）` }
+      );
+      if (!picked || !("command" in picked)) return;
+      const ref: WorkRef = { type: "work", work };
+      await vscode.commands.executeCommand(picked.command, ref);
     }),
     registerCommand("novelai.recordRanking", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
@@ -8839,7 +8999,9 @@ function workOfCommandArgs(
   }
   // 原稿エディタ（WebView）で書いているときも、その作品を見る
   // （`activeTextEditor` だけだと原稿エディタでは空になる）
-  const opened = activeManuscriptUri();
+  // 詳細メニューから押したときは、作品は選ぶ画面で決まる（作者の判断
+  // 2026-11-02）。ここで原稿の作品を当てると、選ぶ前の作品で種類の関門が止める
+  const opened = detailMenuAsk === undefined ? activeManuscriptUri() : undefined;
   if (opened) {
     const found = findWorkForPath(registry, fromUri(opened));
     if (found) return found;
@@ -9061,6 +9223,26 @@ let workTargetHints:
     })
   | undefined;
 
+/**
+ * 作品を選ぶ画面で上に置く手がかりを訊く口（作者の判断 2026-11-02）。
+ *
+ * `workTargetHints` と違い、**見えていないものも渡す**。こちらは推し量って
+ * 走らせるためではなく、選ぶ画面の並びを決めるだけなので、外れても作者が
+ * 見て選び直せる。預ける前（起動の途中）は並びを変えない。
+ */
+let likelyWorkHints: (() => LikelyWorkHints) | undefined;
+
+/**
+ * いま押された操作が、詳細メニューから作品を渡さずに押されたものか
+ * （作者の判断 2026-11-02。`core/workTarget.ts` の `DETAIL_MENU_ARGS`）。
+ *
+ * 入っているあいだに作品を決める所（`resolveWork`）が呼ばれたら、推し量らずに
+ * 選ぶ画面を出す。**最初の1回で使い切る**——コマンドが作品を決めたあとに
+ * 呼ぶ別の処理まで訊き直さないため。入れ物は押されるたびに作り、
+ * 包みが終わるときに自分の入れ物だけを片づける（`spotlightWorkHint` と同じ形）。
+ */
+let detailMenuAsk: object | undefined;
+
 /** ツリーから呼ばれた場合はそのノード、コマンドパレットからは選択させる */
 interface ResolveWorkOptions {
   /**
@@ -9110,6 +9292,21 @@ let lastWorkMemory:
  * この形だけを要求する（`WorkNode` はそのまま渡せる）。
  */
 export type WorkRef = Pick<WorkNode, "type" | "work">;
+
+/**
+ * 引数が作品の入れ物（`WorkRef`）か。引数を任意に受けるコマンド
+ * （ほかの所からは引数なしで呼ばれる）で、作品を渡されたときだけ使うため
+ */
+function isWorkRefArg(value: unknown): value is WorkRef {
+  if (typeof value !== "object" || value === null) return false;
+  const ref = value as { type?: unknown; work?: unknown };
+  return (
+    ref.type === "work" &&
+    typeof ref.work === "object" &&
+    ref.work !== null &&
+    typeof (ref.work as { id?: unknown }).id === "string"
+  );
+}
 
 /**
  * 相談パネルから起動できる機能と、対応するコマンド。
@@ -9278,10 +9475,22 @@ async function resolveWorkUnrouted(
     **見えているものだけを当てにする**——畳んだままのツリーや、閉じた相談の
     選択は、作者の目には入っていない。外すと別の作品の資料が書き換わる。
   */
-  const hinted = pickHintedWork({
-    registeredIds: works.map((work) => work.id),
-    ...workTargetHints?.(),
-  });
+  /*
+    **詳細メニューから押したときは推し量らず、毎回選ばせる**（作者の判断
+    2026-11-02。`detailMenuAsk`）。使うのは最初の1回だけ——コマンドが作品を
+    決めたあとに呼ぶ別の処理まで訊き直さない。1作品しか無いときは選ぶ相手が
+    いないので、これまでどおり訊かない
+  */
+  const askFromMenu = detailMenuAsk !== undefined;
+  detailMenuAsk = undefined;
+  const hinted = askFromMenu
+    ? works.length === 1
+      ? { workId: works[0].id, source: "single" as const }
+      : undefined
+    : pickHintedWork({
+        registeredIds: works.map((work) => work.id),
+        ...workTargetHints?.(),
+      });
   if (hinted) {
     const found = works.find((work) => work.id === hinted.workId);
     /*
@@ -9308,24 +9517,41 @@ async function resolveWorkUnrouted(
       （補足付きの一覧〈annotate〉は「溜まっている作品を上」の並びを
       持っているので、ここでは触らない。いま preferLast と併せて使う所は無い）
     */
-    const { ordered, lastFirst } = (options.preferLast ?? true)
-      ? orderByLastWork(works, lastWorkMemory?.get())
-      : { ordered: works, lastFirst: false };
+    /*
+      **詳細メニューから押したときは、いまいちばんありそうな作品を上へ**
+      （作者の判断 2026-11-02）。書いている原稿 → 作品一覧の選択 → 簡単ステップ
+      メニューの選択 → 相談の作品の順。上に置いた理由は説明欄に出す。
+      作品に手を加える操作（`preferLast: false`）は並べ替えない——Enter だけで
+      別の作品に手が入るのを避ける理由は、直前の作品のときと同じである
+    */
+    const likely =
+      askFromMenu && (options.preferLast ?? true)
+        ? orderByLikelyWork(works, likelyWorkHints?.() ?? {})
+        : undefined;
+    const { ordered, lastFirst } = likely
+      ? { ordered: likely.map((entry) => entry.work), lastFirst: false }
+      : (options.preferLast ?? true)
+        ? orderByLastWork(works, lastWorkMemory?.get())
+        : { ordered: works, lastFirst: false };
     const picked = await vscode.window.showQuickPick(
       [
-        ...ordered.map((w, index) => ({
-          label: abbreviateTitle(w.title),
-          // 先頭に置いた理由を見せる。黙って並びが変わると、作者には
-          // 登録順が崩れたように見える
-          description:
-            lastFirst && index === 0
-              ? `前回の作品　${w.folderPath}`
-              : w.folderPath,
-          // 省略したときだけ全文を添える。短い題にまで2行目を足すと、
-          // 選ぶだけの窓が縦に伸びて読みにくくなる
-          detail: isAbbreviated(w.title) ? w.title : undefined,
-          work: w,
-        })),
+        ...ordered.map((w, index) => {
+          const reason = likely?.[index]?.reason;
+          return {
+            label: abbreviateTitle(w.title),
+            // 先頭に置いた理由を見せる。黙って並びが変わると、作者には
+            // 登録順が崩れたように見える
+            description: reason
+              ? `${describeLikelyWorkReason(reason)}　${w.folderPath}`
+              : lastFirst && index === 0
+                ? `前回の作品　${w.folderPath}`
+                : w.folderPath,
+            // 省略したときだけ全文を添える。短い題にまで2行目を足すと、
+            // 選ぶだけの窓が縦に伸びて読みにくくなる
+            detail: isAbbreviated(w.title) ? w.title : undefined,
+            work: w,
+          };
+        }),
         // Escでも閉じられるが、それを知らない人には出口が無いように見える
         cancelItem(),
       ],

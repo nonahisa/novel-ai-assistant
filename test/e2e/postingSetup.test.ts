@@ -66,7 +66,10 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
       await expandTreeRow(page, E2E_WORK_TITLE);
 
       /* ── 新話投稿の初回（F-67） ── */
-      await treeContextMenu(page, E2E_WORK_TITLE, "新話投稿");
+      // 作品の右クリックの投稿まわりは「投稿と読者の反応…」1つにまとめた（2026-11-02）
+      await treeContextMenu(page, E2E_WORK_TITLE, "投稿と読者の反応…");
+      await waitForQuickInput(page, "投稿と読者の反応");
+      await pickQuickPickRow(page, "新話投稿");
       await waitForQuickInput(page, "を出すサイト");
       await toggleQuickPickRow(page, "カクヨム");
       await acceptQuickPick(page);
@@ -101,7 +104,10 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
       }
 
       /* ── 投稿サイト設定で作品情報を入れる（F-74） ── */
-      await treeContextMenu(page, E2E_WORK_TITLE, "投稿サイト設定");
+      // 作品の右クリックの投稿まわりは「投稿と読者の反応…」1つにまとめた（2026-11-02）
+      await treeContextMenu(page, E2E_WORK_TITLE, "投稿と読者の反応…");
+      await waitForQuickInput(page, "投稿と読者の反応");
+      await pickQuickPickRow(page, "投稿サイト設定");
       await waitForQuickInput(page, "を出すサイト");
       // 登録済みのカクヨムは選ばれた状態で出る。そのまま進める
       await acceptQuickPick(page);
@@ -146,7 +152,10 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
 
       /* ── 開いたままランキングを記録すると、その場で表に出る（F-74） ── */
       expect(await siteText()).not.toContain("最新 日間");
-      await treeContextMenu(page, E2E_WORK_TITLE, "ランキング記録");
+      // 作品の右クリックの投稿まわりは「投稿と読者の反応…」1つにまとめた（2026-11-02）
+      await treeContextMenu(page, E2E_WORK_TITLE, "投稿と読者の反応…");
+      await waitForQuickInput(page, "投稿と読者の反応");
+      await pickQuickPickRow(page, "ランキング記録");
       await waitForQuickInput(page, "のランキングを記録");
       await pickQuickPickRow(page, "カクヨム");
       await waitForQuickInput(page, "カクヨム のランキングの種別");

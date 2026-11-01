@@ -1031,7 +1031,7 @@ function publishAdvice(style: WriterStyle): TutorialAdvice {
 function unstickAdvice(style: WriterStyle): TutorialAdvice {
   const talk: TutorialStep = {
     command: "novelai.openChatPanel",
-    label: "AI相談",
+    label: "AIに相談",
     why:
       "「何を書けばいいか分からない」を、そのまま書いて構いません。" +
       "診断で決めた言い方で応じます（9問に答えていれば、その言い分けも効きます）",

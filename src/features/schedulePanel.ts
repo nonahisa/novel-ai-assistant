@@ -128,6 +128,13 @@ async function handleMessage(message: ScheduleMessage, deps: SchedulePanelDeps):
     case "openWork":
       await openWork(workOf(deps, message.workId));
       return;
+    case "openWorkGoals":
+      // 作品を渡して開く。渡さないと、いま見ていた作品をもう一度選ばされる
+      await vscode.commands.executeCommand("novelai.setWorkGoals", {
+        type: "work",
+        work: workOf(deps, message.workId),
+      });
+      return;
     case "openFile": {
       const work = workOf(deps, message.workId);
       await openInDefaultEditor(await new ScheduleStore(work).filePath());

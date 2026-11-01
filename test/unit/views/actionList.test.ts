@@ -884,8 +884,6 @@ describe("メニュー名とコマンドパレットの名前", () => {
       "狭いサイドバー（全角9字）に収めるため「を書き出す」を落とした。パレットでは押して何が起きるかが分かるよう残す（設計書8.5）",
     "novelai.restoreDismissedTravelDistances":
       "狭いサイドバー（全角9字）に収めるため「の提案」を落とした。パレットでは何を戻すかが分かるよう残す",
-    "novelai.openChat":
-      "同じ title が本文の右クリックにも出る。そこでは動作を言う「AIに相談する」のほうが通じる（範囲を選んで訊く入口）",
   };
 
   test("label＋（note）が package.json の title と一致する", () => {
@@ -1388,9 +1386,11 @@ describe("相談の項目は、木に残して画面から隠す", () => {
 
     expect(action, "木から消すと簡単ステップメニューが壊れる").toBeTruthy();
     // 補足（「大きく開く」）は note へ移した（2026-09-06）。
-    // 名前は 2026-09-23 に「AIに相談」から「AI相談」へ
-    expect(action?.label).toBe("AI相談");
+    // 名前は 2026-09-23 に「AIに相談」から「AI相談」へ、2026-11-02 に「AIに相談」へ戻した
+    // （作者の判断。入口の名前をそろえ、開き方は説明欄で言う）
+    expect(action?.label).toBe("AIに相談");
     expect(action?.note).toBe("大きく開く");
+    expect(action?.description).toBe("大きく開く");
     // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
     expect(isItemVisibleInRuntime(action!, true)).toBe(true);
   });
@@ -1440,7 +1440,9 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     );
     const last = visible[visible.length - 1];
     expect(last?.kind === "action" ? last.command : undefined).toBe("novelai.openChat");
-    expect(last?.kind === "action" ? last.label : undefined).toBe("相談パネルを開く");
+    // 名前は「相談パネルを開く」から「AIに相談」へ（作者の判断 2026-11-02）。開き方は説明欄
+    expect(last?.kind === "action" ? last.label : undefined).toBe("AIに相談");
+    expect(last?.kind === "action" ? last.description : undefined).toBe("横に開く");
     // 最上位には、もう単独の行として出ない
     const provider = new ActionListProvider(fakeRegistry(), memoryStore());
     const top = provider.getChildren();

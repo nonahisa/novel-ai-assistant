@@ -177,7 +177,7 @@ describe("押されたことを拾う口", () => {
       "const registerCommand: typeof vscode.commands.registerCommand"
     );
     expect(start, "登録の包みが見つからない").toBeGreaterThan(-1);
-    const body = source.slice(start, start + 2_500);
+    const body = source.slice(start, start + 5_000);
 
     const awaited = body.indexOf("const returned = await callback.apply(");
     const notified = body.indexOf(

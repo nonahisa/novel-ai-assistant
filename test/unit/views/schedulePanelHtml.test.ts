@@ -72,6 +72,12 @@ describe("スケジュールの画面", () => {
     for (const type of ["exportIcs", "importHolidays", "openWorkloadSettings"]) expect(html).toContain(`"${type}"`);
   });
 
+  test("応募先に従うスケジュールの案内の横に［作品目標設定を開く］を置き、作品を名指しして頼む（作者の判断 2026-11-02）", () => {
+    // 「直すときは作品目標設定で」と言うだけで、開く道が無かった
+    expect(html).toContain("作品目標設定を開く");
+    expect(html).toContain('post({ type: "openWorkGoals", workId: column.workId })');
+  });
+
   test("連載の点は色だけでなく記号でも分ける", () => {
     for (const symbol of ["●", "◐", "○", "×"]) expect(html).toContain(symbol);
   });

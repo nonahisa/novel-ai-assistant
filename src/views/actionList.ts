@@ -5,6 +5,7 @@ import { currentMode } from "../core/actorContext";
 import { processCommandsUsableHere } from "../core/processAvailability";
 import type { WorkKindKey } from "../models/types";
 import { commandsHiddenForWorks } from "../core/workTypeVisibility";
+import { DETAIL_MENU_ARGS } from "../core/workTarget";
 import {
   ACTION_TREE,
   commandsHiddenForMode,
@@ -251,8 +252,21 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     // 「AI」と件数の印を出すための目印
     item.resourceUri = actionResourceUri(node);
     if (enabled) {
-      // 引数を渡さないので、作品が複数あれば実行時に選択を求められる
-      item.command = { command: action.command, title: action.label };
+      /*
+        **作品が要る操作には「詳細メニューから押した」印を渡す**（作者の判断
+        2026-11-02）。受けた側は毎回作品を選ばせ、いちばんありそうな作品を上に置く
+        （`core/workTarget.ts` の `orderByLikelyWork`）。印はコマンド登録の包みが
+        外すので、この拡張機能の命令（`novelai.`）にだけ付ける——VS Code 本体の
+        命令へ渡すと、知らない引数として届く
+      */
+      item.command =
+        action.requiresWork && action.command.startsWith("novelai.")
+          ? {
+              command: action.command,
+              title: action.label,
+              arguments: [DETAIL_MENU_ARGS],
+            }
+          : { command: action.command, title: action.label };
     }
     // **押せないものは command を持たせない。** 押しても何も起きない
     // ことより、押したら「作品を選んでください」と訊かれて何も選べない

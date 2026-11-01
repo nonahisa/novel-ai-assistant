@@ -404,6 +404,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.recordReaderStats": "allTypes",
   // 連載中／完結は投稿する作品ならどの種類でも持てる（読者の反応と同じ扱い。2026-11-01）
   "novelai.setWorkCompletion": "allTypes",
+  // 上の投稿まわり6つを選ぶ入口（作者の判断 2026-11-02）。中の6つと同じく全タイプ
+  "novelai.postingAndReaders": "allTypes",
 
   // ── 書き出し ──
   // PDFは「いま手元にある文字をそのまま紙にする」道具なので全タイプ。
