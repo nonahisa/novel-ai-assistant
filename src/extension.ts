@@ -321,6 +321,7 @@ import {
   EPISODE_DELETE_CHOICES,
   routeOfDeleteAnswer,
 } from "./core/episodeDeleteChoice";
+import { POSTING_MENU_ENTRIES } from "./core/postingMenu";
 import {
   selectableWorkFormats,
   type WorkFormatDef,
@@ -8110,6 +8111,30 @@ export async function activate(
       if (!result.changed) return;
       treeProvider.refresh(work.id);
       await refreshWritingStatsPanel(work, deviceId);
+    }),
+    /*
+      作品の右クリックの「投稿と読者の反応…」（作者の判断 2026-11-02。
+      `core/postingMenu.ts`）。投稿まわりの6つを1つの入口にまとめ、押すと選ぶ。
+      **選んだ命令へ同じ作品を渡す**——渡さないと、右クリックで指した作品を
+      もう一度選ばされる
+    */
+    registerCommand("novelai.postingAndReaders", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      const picked = await vscode.window.showQuickPick(
+        [
+          ...POSTING_MENU_ENTRIES.map((entry) => ({
+            label: entry.label,
+            description: entry.description,
+            command: entry.command,
+          })),
+          cancelItem(),
+        ],
+        { title: `投稿と読者の反応（${abbreviateTitle(work.title)}）` }
+      );
+      if (!picked || !("command" in picked)) return;
+      const ref: WorkRef = { type: "work", work };
+      await vscode.commands.executeCommand(picked.command, ref);
     }),
     registerCommand("novelai.recordRanking", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);

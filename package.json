@@ -1268,6 +1268,12 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.postingAndReaders",
+        "title": "投稿と読者の反応…",
+        "icon": "$(rocket)",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.showEditHistory",
         "title": "編集履歴",
         "category": "小説執筆",
@@ -1639,34 +1645,9 @@
           "group": "1_stats@6"
         },
         {
-          "command": "novelai.postNewEpisode",
+          "command": "novelai.postingAndReaders",
           "when": "view == novelai.works && viewItem =~ /^work-/",
           "group": "1_stats@7"
-        },
-        {
-          "command": "novelai.configurePostingSites",
-          "when": "view == novelai.works && viewItem =~ /^work-/",
-          "group": "1_stats@8"
-        },
-        {
-          "command": "novelai.recordRanking",
-          "when": "view == novelai.works && viewItem =~ /^work-/",
-          "group": "1_stats@9"
-        },
-        {
-          "command": "novelai.importReaderStats",
-          "when": "view == novelai.works && viewItem =~ /^work-/",
-          "group": "1_stats@10"
-        },
-        {
-          "command": "novelai.recordReaderStats",
-          "when": "view == novelai.works && viewItem =~ /^work-/",
-          "group": "1_stats@11"
-        },
-        {
-          "command": "novelai.setWorkCompletion",
-          "when": "view == novelai.works && viewItem =~ /^work-/",
-          "group": "1_stats@12"
         },
         {
           "command": "novelai.addWorkMemo",
