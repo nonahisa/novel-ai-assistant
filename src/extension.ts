@@ -2375,6 +2375,15 @@ export async function activate(
       }
       return result.remaining;
     },
+    // 控えておいた順位も、登録されたあとに取り込む（2026-11-02。知らせは出さない）
+    importHeldRankings: async (rankings) => {
+      const { importHeldOwnWorkRankings } = await import("./features/ownWorkHeldStatsImport.js");
+      const result = await importHeldOwnWorkRankings(rankings, registry.list());
+      for (const changed of result.changedWorks) {
+        await refreshWritingStatsPanel(changed, deviceId);
+      }
+      return result.remaining;
+    },
   });
   context.subscriptions.push(ownWorks, treeProvider.setOwnWorksSource(ownWorks));
 
@@ -8022,6 +8031,8 @@ export async function activate(
         },
         // 貼り付けた束のうち、本人しか開けない画面で読んだ未登録の作品を枠に出す（2026-11-01）
         noteOwnWorks: (envelopes) => ownWorks.note(envelopes),
+        // 作品の決まらなかった順位は、未登録の自分の作品のものなら控える（2026-11-02）
+        noteOwnRankings: (rankings, envelopes) => ownWorks.noteRankings(rankings, envelopes),
       });
       if (!result.changed) return;
       for (const changed of result.changedWorks ?? [work]) {
@@ -8053,6 +8064,8 @@ export async function activate(
         afterImport: (work) => refreshWritingStatsPanel(work, deviceId),
         // 本人しか開けない画面で読んだ未登録の作品を、作品一覧の枠に出す（2026-11-01）
         noteOwnWorks: (envelopes) => ownWorks.note(envelopes),
+        // 作品の決まらなかった順位は、未登録の自分の作品のものなら控える（2026-11-02）
+        noteOwnRankings: (rankings, envelopes) => ownWorks.noteRankings(rankings, envelopes),
         // 公募の一覧（ヘルパー 0.12.0）。URI の受け口は1つしか持てないので、ここで渡す
         importContests: () => importContestsFromClipboard(contestDeps, "uri"),
         // カクヨムの章立て（ヘルパー 0.13.0。残課題 B7）。同じ受け口でパスを見分ける

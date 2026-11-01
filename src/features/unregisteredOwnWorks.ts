@@ -9,13 +9,17 @@ import {
 import { BACKUP_FILE_EXTENSIONS } from "../core/backupFileKinds";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { describeProcessesBlocked } from "../core/processAvailability";
-import type { ReaderStatsEnvelope } from "../core/readerStatsEnvelope";
+import type { ReaderStatsEnvelope, ReaderStatsRanking } from "../core/readerStatsEnvelope";
 import { canRunProcesses } from "../core/runtime";
 import {
+  holdOwnWorkRankings,
   holdOwnWorkStats,
+  readPendingOwnWorkRankings,
   readPendingOwnWorkStats,
   storedPending,
+  storedPendingRankings,
   takeRegisteredPending,
+  type PendingOwnWorkRanking,
   type PendingOwnWorkStats,
 } from "../core/ownWorkPendingStats";
 import {
@@ -28,6 +32,7 @@ import {
   narouBackupIdFrom,
   unhideUnregisteredOwnWork,
   noteUnregisteredOwnWorks,
+  ownWorkCandidates,
   ownWorkKey,
   ownWorkLabel,
   readUnregisteredOwnWorks,
@@ -73,6 +78,12 @@ export const UNREGISTERED_OWN_WORKS_KEY = "novelai.ownWorks.unregistered";
  * （`mementoWrites.test.ts`）
  */
 export const PENDING_OWN_WORK_STATS_KEY = "novelai.ownWorks.pendingReaderStats";
+
+/**
+ * 順位の控えの置き場（`context.globalState` の鍵。2026-11-02）。書く口は `savePendingRankings` の
+ * 1か所だけ（`mementoWrites.test.ts`）
+ */
+export const PENDING_OWN_WORK_RANKINGS_KEY = "novelai.ownWorks.pendingRankings";
 
 /**
  * 届いたバックアップを訊かずに取り込むとき、前回「どこに作りますか」で選んだ書庫
@@ -140,6 +151,14 @@ export interface UnregisteredOwnWorksDeps {
     lead: string,
     options?: { readonly silent?: boolean }
   ): Promise<readonly ReaderStatsEnvelope[]>;
+  /**
+   * 控えておいた順位を、登録した作品へ取り込む（束の取り込みと同じ関数を通す。知らせは出さない
+   * ——読者の反応の控えの知らせと重ねない。積んだ順位はお祝いが言う）。
+   * @returns まだ台帳に入っていない順位（控えに残す）
+   */
+  importHeldRankings?(
+    rankings: readonly ReaderStatsRanking[]
+  ): Promise<readonly ReaderStatsRanking[]>;
   /** 時計（試験で差し替える） */
   now?(): number;
   /** 待つ長さ（既定は30分） */
@@ -207,9 +226,39 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
     }
   }
 
+  /**
+   * 作品の決まらなかった順位を渡す（2026-11-02）。**順位には覚えた理由が無い**ので、
+   * 同じ束の本人しか開けない画面で読んだ作品か、枠に覚えている作品（`note` が覚えたもの）
+   * の順位だけを控える。**失敗しても取り込みを止めない**（記録に残すだけ）。
+   * @returns 控えた順位（残りは呼ぶ側が記録に残して捨てる）
+   */
+  async noteRankings(
+    rankings: readonly ReaderStatsRanking[],
+    envelopes: readonly ReaderStatsEnvelope[]
+  ): Promise<readonly ReaderStatsRanking[]> {
+    try {
+      const own = new Set(this.list().map((entry) => ownWorkKey(entry.site, entry.workId)));
+      for (const envelope of ownWorkCandidates(envelopes)) {
+        own.add(ownWorkKey(envelope.site, (envelope.workId ?? "").trim()));
+      }
+      const held = holdOwnWorkRankings(
+        this.pendingRankings(),
+        rankings,
+        (site, workId) => own.has(ownWorkKey(site, workId)),
+        this.clock()
+      );
+      if (held.changed) await this.savePendingRankings(held.next);
+      return held.held;
+    } catch (error) {
+      useLogFile(undefined);
+      logFailure("未登録の自分の作品の順位を控える", { 詳細: messageOf(error) });
+      return [];
+    }
+  }
+
   /** 控えが残っているか（`OwnWorksSource.hasPendingStats`。覚えが空でも描き直しで取り込むため） */
   hasPendingStats(): boolean {
-    return this.pending().length > 0;
+    return this.pending().length > 0 || this.pendingRankings().length > 0;
   }
 
   /** 控えている読者の反応（読み戻しの関所を通ったものだけ） */
@@ -244,7 +293,7 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
           .join(" ／ ")}`
       );
     }
-    const waiting = this.pending().some((entry) =>
+    const waiting = [...this.pending(), ...this.pendingRankings()].some((entry) =>
       registered.has(ownWorkKey(entry.site, entry.workId))
     );
     if (waiting) await this.flushHeldStats();
@@ -293,14 +342,16 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
 
   private async flushNow(key: string | undefined, silent: boolean): Promise<HeldStatsOutcome> {
     const none: HeldStatsOutcome = { held: 0, imported: 0 };
-    const importHeld = this.deps.importHeldStats;
-    if (!importHeld) return none;
     const pending = this.pending();
-    if (pending.length === 0) return none;
+    if (pending.length === 0 && this.pendingRankings().length === 0) return none;
     const registered = new Set(
       await (this.deps.registeredKeys?.() ?? Promise.resolve(new Set<string>()))
     );
     if (key) registered.add(key);
+    // 順位の控えを先に移す（数の控えの取り込みの知らせとは別に、黙って移す。2026-11-02）
+    await this.flushHeldRankings(registered);
+    const importHeld = this.deps.importHeldStats;
+    if (!importHeld || pending.length === 0) return none;
     const { taken } = takeRegisteredPending(pending, (site, workId) =>
       registered.has(ownWorkKey(site, workId))
     );
@@ -342,6 +393,42 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
       await this.savePending(storedPending(keep));
     }
     return { held: taken.length, imported: done.size };
+  }
+
+  /** 控えた順位のうち、登録済みの作品の分を取り込む。台帳に入らなかったものは控えに残す */
+  private async flushHeldRankings(registered: ReadonlySet<string>): Promise<void> {
+    const importHeld = this.deps.importHeldRankings;
+    if (!importHeld) return;
+    const taken = this.pendingRankings().filter((entry) =>
+      registered.has(ownWorkKey(entry.site, entry.workId))
+    );
+    if (taken.length === 0) return;
+    let remaining: Set<ReaderStatsRanking>;
+    try {
+      remaining = new Set(await importHeld(taken.map((entry) => entry.parsed)));
+    } catch (error) {
+      // **控えは消さない**（次に一覧を描き直したときにもう一度試す）
+      useLogFile(undefined);
+      logFailure("控えた順位の取り込み", { 詳細: `${messageOf(error)}（控えは残しました）` });
+      return;
+    }
+    const done = new Set(
+      taken.filter((entry) => !remaining.has(entry.parsed)).map((entry) => entry.ranking)
+    );
+    if (done.size < taken.length) {
+      useLogFile(undefined);
+      logFailure("控えた順位の取り込み", {
+        詳細:
+          `${taken.length - done.size}件が台帳に入りませんでした（取り込み先の作品が1つに決まらない・保存できない）。` +
+          "控えは残し、次に作品一覧を描き直したときにもう一度試します。",
+      });
+    }
+    if (done.size > 0) {
+      const keep = this.pendingRankings().filter((entry) => !done.has(entry.ranking));
+      await this.savePendingRankings(storedPendingRankings(keep));
+      useLogFile(undefined);
+      logStep(`登録した作品へ、登録の前に控えておいた順位（${done.size}件）を移しました。`);
+    }
   }
 
   /** ［この作品を一覧に出さない］ */
@@ -724,6 +811,18 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
       this.memory.get<unknown>(PENDING_OWN_WORK_STATS_KEY, []),
       this.clock()
     );
+  }
+
+  private pendingRankings() {
+    return readPendingOwnWorkRankings(
+      this.memory.get<unknown>(PENDING_OWN_WORK_RANKINGS_KEY, []),
+      this.clock()
+    );
+  }
+
+  /** 順位の控えの書く口はここだけ（`mementoWrites.test.ts`）。枠の見た目は変わらないので描き直さない */
+  private async savePendingRankings(next: readonly PendingOwnWorkRanking[]): Promise<void> {
+    await this.memory.update(PENDING_OWN_WORK_RANKINGS_KEY, next);
   }
 
   /** 控えの書く口はここだけ（`mementoWrites.test.ts`）。枠の見た目は変わらないので描き直さない */

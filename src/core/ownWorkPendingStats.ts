@@ -1,5 +1,10 @@
 import type { PostingSiteId } from "../models/posting";
-import { parseReaderStatsEnvelope, type ReaderStatsEnvelope } from "./readerStatsEnvelope";
+import {
+  parseRanking,
+  parseReaderStatsEnvelope,
+  type ReaderStatsEnvelope,
+  type ReaderStatsRanking,
+} from "./readerStatsEnvelope";
 import { ownWorkCandidates, ownWorkKey } from "./unregisteredOwnWorks";
 
 /**
@@ -166,4 +171,144 @@ export function takeRegisteredPending(
 /** 保管庫へ置く形に直す */
 export function storedPending(list: readonly PendingOwnWorkStatsEntry[]): PendingOwnWorkStats[] {
   return list.map(stored);
+}
+
+// ---------------------------------------------------------------------------
+// 順位の控え（2026-11-02。ヘルパー 0.19.0 の束の rankings）
+// ---------------------------------------------------------------------------
+
+/**
+ * 控えた順位の1件。**順位には覚えた理由（`ownedVia`）が無い**ので、控えるかは呼ぶ側が
+ * 決める（同じ束の本人しか開けない画面・枠の覚え）。読み戻すときは束と同じ関所
+ * （`parseRanking`）を通し直す（版の違う拡張機能が書いた値が残りうる）。
+ */
+export interface PendingOwnWorkRanking {
+  readonly site: PostingSiteId;
+  readonly workId: string;
+  readonly heldAt: string;
+  /** 順位そのもの（JSON の文字列） */
+  readonly ranking: string;
+}
+
+export interface PendingOwnWorkRankingEntry extends PendingOwnWorkRanking {
+  readonly parsed: ReaderStatsRanking;
+}
+
+/**
+ * 作品ごとに控える順位の数。1件は「1つの区分の1日の順位」で、カクヨムはジャンル×期間で
+ * 1日に何件も届く。登録までの数日ぶんが入る数にした（1件は200字ほど）
+ */
+export const MAX_PENDING_RANKINGS_PER_WORK = 100;
+/** 全体で控える順位の数 */
+export const MAX_PENDING_RANKINGS_TOTAL = 300;
+
+/** 同じ順位の見分け（ヘルパーとの取り決め：サイト＋作品ID＋区分＋日付） */
+function rankingKey(ranking: ReaderStatsRanking): string {
+  return [ownWorkKey(ranking.site, ranking.workId), ranking.board, ranking.date].join("\u0000");
+}
+
+/** 保管庫の値を読む。形の違う項目・関所を通らない順位・古すぎるものは捨てる */
+export function readPendingOwnWorkRankings(
+  value: unknown,
+  now: number
+): PendingOwnWorkRankingEntry[] {
+  if (!Array.isArray(value)) return [];
+  const out: PendingOwnWorkRankingEntry[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const entry = raw as Record<string, unknown>;
+    if (typeof entry.ranking !== "string" || typeof entry.heldAt !== "string") continue;
+    const heldAt = Date.parse(entry.heldAt);
+    if (Number.isNaN(heldAt) || now - heldAt > PENDING_STATS_MAX_AGE_DAYS * DAY_MS) continue;
+    let json: unknown;
+    try {
+      json = JSON.parse(entry.ranking);
+    } catch {
+      continue;
+    }
+    const parsed = parseRanking(json);
+    if (typeof parsed === "string") continue;
+    out.push({
+      site: parsed.site,
+      workId: parsed.workId,
+      heldAt: entry.heldAt,
+      ranking: entry.ranking,
+      parsed,
+    });
+  }
+  return out;
+}
+
+/**
+ * 順位を控えに足す。`isOwn` が「未登録の自分の作品」と言ったものだけ。同じ鍵は足さない。
+ * @returns 書く値・変わったか・控えに入った順位（すでに控えてあったものも含む）
+ */
+export function holdOwnWorkRankings(
+  current: readonly PendingOwnWorkRankingEntry[],
+  rankings: readonly ReaderStatsRanking[],
+  isOwn: (site: PostingSiteId, workId: string) => boolean,
+  now: number
+): {
+  readonly next: PendingOwnWorkRanking[];
+  readonly changed: boolean;
+  readonly held: ReaderStatsRanking[];
+} {
+  const list: PendingOwnWorkRankingEntry[] = [...current];
+  const keys = new Set(list.map((entry) => rankingKey(entry.parsed)));
+  const held: ReaderStatsRanking[] = [];
+  let changed = false;
+  const heldAt = new Date(now).toISOString();
+  for (const ranking of rankings) {
+    // 出どころのある順位（Narou.fun）は他人の作品の頁も開けるので控えない（画面と同じ線）
+    if (ranking.source !== undefined || !isOwn(ranking.site, ranking.workId)) continue;
+    held.push(ranking);
+    const key = rankingKey(ranking);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    list.push({
+      site: ranking.site,
+      workId: ranking.workId,
+      heldAt,
+      ranking: JSON.stringify(ranking),
+      parsed: ranking,
+    });
+    changed = true;
+  }
+  const trimmed = trimPendingRankings(list);
+  return {
+    next: trimmed.map(storedRanking),
+    changed: changed || trimmed.length !== list.length,
+    held,
+  };
+}
+
+/** 上限を当てる。読んだ日時の古いものから捨てる（並びは古い順に戻す） */
+function trimPendingRankings(
+  list: readonly PendingOwnWorkRankingEntry[]
+): PendingOwnWorkRankingEntry[] {
+  const newestFirst = [...list].sort((a, b) =>
+    a.parsed.readAt < b.parsed.readAt ? 1 : a.parsed.readAt > b.parsed.readAt ? -1 : 0
+  );
+  const perWork = new Map<string, number>();
+  const kept: PendingOwnWorkRankingEntry[] = [];
+  for (const entry of newestFirst) {
+    const key = ownWorkKey(entry.site, entry.workId);
+    const count = perWork.get(key) ?? 0;
+    if (count >= MAX_PENDING_RANKINGS_PER_WORK) continue;
+    if (kept.length >= MAX_PENDING_RANKINGS_TOTAL) break;
+    perWork.set(key, count + 1);
+    kept.push(entry);
+  }
+  return kept.reverse();
+}
+
+function storedRanking(entry: PendingOwnWorkRankingEntry): PendingOwnWorkRanking {
+  return { site: entry.site, workId: entry.workId, heldAt: entry.heldAt, ranking: entry.ranking };
+}
+
+/** 保管庫へ置く形に直す */
+export function storedPendingRankings(
+  list: readonly PendingOwnWorkRankingEntry[]
+): PendingOwnWorkRanking[] {
+  return list.map(storedRanking);
 }

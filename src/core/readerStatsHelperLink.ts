@@ -1,4 +1,5 @@
 import {
+  hasHelperRankingOn,
   postingSiteInfo,
   repeatsReaderStats,
   siteProfile,
@@ -16,11 +17,14 @@ import { SETUP_URI_PATH } from "./setupRequest";
 import { RUN_URI_PATH } from "./runRequest";
 import {
   matchReaderStatsEnvelope,
+  READER_STATS_ENVELOPE_VERSION,
+  rankingRecordFromHelper,
   readerStatsFactsWouldChange,
   readerStatsRecordsFromEnvelope,
   readerStatsSourceLabel,
   type ReaderStatsBundle,
   type ReaderStatsEnvelope,
+  type ReaderStatsRanking,
 } from "./readerStatsEnvelope";
 
 /**
@@ -253,6 +257,43 @@ export function routeReaderStatsBundleItem(
 }
 
 /**
+ * 束の順位の1件の行き先を決める（2026-11-02。ヘルパー 0.19.0）。
+ *
+ * **読者の反応の画面と同じ関所を通す**——順位には封筒が無いので、サイト・出どころ・作品IDだけの
+ * 封筒の形に包んで `routeReaderStatsBundleItem` へ渡す。照合に使うのはその3つだけで
+ * （行の中身・日時は見ない）、写しの関所を置くと片方だけ緩む。
+ */
+export function routeReaderStatsRanking(
+  ranking: ReaderStatsRanking,
+  candidates: readonly ReaderStatsWorkCandidate[]
+): ReaderStatsBundleRoute {
+  return routeReaderStatsBundleItem(rankingAsEnvelope(ranking), candidates);
+}
+
+/** 照合のためだけの封筒の形（台帳へは書かない） */
+function rankingAsEnvelope(ranking: ReaderStatsRanking): ReaderStatsEnvelope {
+  return {
+    "novelai-stats": READER_STATS_ENVELOPE_VERSION,
+    site: ranking.site,
+    ...(ranking.source !== undefined ? { source: ranking.source } : {}),
+    workId: ranking.workId,
+    readAt: ranking.readAt,
+    ...(ranking.title !== undefined ? { title: ranking.title } : {}),
+    entries: [],
+  };
+}
+
+/** 取り込めなかった順位の1件を、作者が見分けられる名前で言う（記録に残す） */
+export function readerStatsRankingLabel(ranking: ReaderStatsRanking): string {
+  const site = postingSiteInfo(ranking.site).label;
+  return (
+    `${site} 作品ID ${ranking.workId}` +
+    (ranking.title ? `「${ranking.title}」` : "") +
+    `の${ranking.boardLabel}（${ranking.date}・${ranking.rank}位）`
+  );
+}
+
+/**
  * 取り込めなかった1件を、作者が見分けられる名前で言う（「カクヨム 作品ID 1177…」）。
  * **作品名は言えない**——決まらなかったから取り込めなかったのである。
  */
@@ -278,8 +319,13 @@ export function readerStatsBundleItemLabel(envelope: ReaderStatsEnvelope): strin
 export function readerStatsBundlePending(
   bundle: ReaderStatsBundle,
   candidates: readonly ReaderStatsWorkCandidate[]
-): { id: string; screens: number }[] {
-  const pending = new Map<string, number>();
+): { id: string; screens: number; ranks: number }[] {
+  const pending = new Map<string, { screens: number; ranks: number }>();
+  const entry = (id: string): { screens: number; ranks: number } => {
+    const held = pending.get(id) ?? { screens: 0, ranks: 0 };
+    pending.set(id, held);
+    return held;
+  };
   for (const item of bundle.items) {
     if (!item.result.ok) continue;
     const envelope = item.result.envelope;
@@ -287,9 +333,22 @@ export function readerStatsBundlePending(
     if (route.kind !== "work") continue;
     const ledger = candidates.find((candidate) => candidate.id === route.id)?.ledger;
     if (!ledger || readerStatsAlreadyImported(envelope, ledger)) continue;
-    pending.set(route.id, (pending.get(route.id) ?? 0) + 1);
+    entry(route.id).screens++;
   }
-  return [...pending].map(([id, screens]) => ({ id, screens }));
+  /*
+    順位（2026-11-02）。**順位だけの束も訊く**——画面の数だけ見ていると、items が空の束は
+    「まだ取り込んでいないもの無し」で黙って捨てられる。台帳に同じ鍵が無い順位だけを数える
+  */
+  for (const item of bundle.rankings ?? []) {
+    if (!item.result.ok) continue;
+    const ranking = item.result.ranking;
+    const route = routeReaderStatsRanking(ranking, candidates);
+    if (route.kind !== "work") continue;
+    const ledger = candidates.find((candidate) => candidate.id === route.id)?.ledger;
+    if (!ledger || hasHelperRankingOn(ledger, rankingRecordFromHelper(ranking))) continue;
+    entry(route.id).ranks++;
+  }
+  return [...pending].map(([id, counts]) => ({ id, ...counts }));
 }
 
 /** 束を取り込んだ結果のうち、1つの作品へ入った分 */
@@ -301,6 +360,10 @@ export interface ReaderStatsBundleWorkOutcome {
   readonly repeated: number;
   /** タグ・連載の状態を書き換えたか（2026-11-01。数が同じでも保存した印） */
   readonly factsChanged?: boolean;
+  /** 積んだ順位の数（2026-11-02。束の rankings） */
+  readonly ranks?: number;
+  /** 同じ鍵がもうあって積まなかった順位の数 */
+  readonly ranksRepeated?: number;
 }
 
 /** 束のうち、取り込めなかったもの */
@@ -333,6 +396,58 @@ export interface ReaderStatsBundleOutcome {
   readonly registerOffered?: boolean;
   /** 知らせの頭に置く1文（その場で登録したあとの取り込みで「登録しました」を添える） */
   readonly lead?: string;
+  /** 束に読者の反応の画面が無く、順位だけだったか（取り込めなかったときの言い方を変える） */
+  readonly rankingsOnly?: boolean;
+  /**
+   * 作品が決まらず、控えにも入れなかった順位の数（記録には全部を残す）。
+   * 控えに入れた順位は数えない（登録したら取り込む）
+   */
+  readonly ranksUnrouted?: number;
+  /** 未登録の自分の作品の順位として控えた数（登録したら取り込む） */
+  readonly ranksHeld?: number;
+}
+
+/**
+ * 順位が絡んだ取り込みの1文（2026-11-02）。「読者の反応 N画面と順位 M件を取り込みました」。
+ * 画面の無い作品は順位だけ、順位の無い作品は画面だけを言う
+ */
+function rankedSummary(
+  works: readonly ReaderStatsBundleWorkOutcome[],
+  factsChanged: boolean
+): string {
+  const sum = (pick: (work: ReaderStatsBundleWorkOutcome) => number): number =>
+    works.reduce((total, work) => total + pick(work), 0);
+  const screens = sum((work) => work.screens);
+  const added = sum((work) => work.added);
+  const repeated = sum((work) => work.repeated);
+  const ranks = sum((work) => work.ranks ?? 0);
+  const ranksRepeated = sum((work) => work.ranksRepeated ?? 0);
+  const perWork = works
+    .map((work) => {
+      const bits: string[] = [];
+      if (work.screens > 0) bits.push(`${work.screens}画面`);
+      if ((work.ranks ?? 0) + (work.ranksRepeated ?? 0) > 0) {
+        bits.push(`順位${(work.ranks ?? 0) + (work.ranksRepeated ?? 0)}件`);
+      }
+      return `「${work.title}」${bits.join("・")}`;
+    })
+    .join("・");
+  const subject = [screens > 0 ? "読者の反応" : "", "順位"].filter(Boolean).join("と");
+  if (added === 0 && ranks === 0) {
+    return (
+      `${subject}は、すでに取り込んだものと同じでした：${perWork}（${repeated + ranksRepeated}件）。` +
+      (factsChanged ? "タグ・連載の状態の変化を記録しました。" : "記録は変えていません。")
+    );
+  }
+  const counted =
+    (screens > 0 ? `読者の反応 ${screens}画面と` : "") + `順位 ${ranks}件を取り込みました`;
+  const skipped = repeated + ranksRepeated;
+  return (
+    `${counted}：${perWork}` +
+    (skipped > 0 ? `（すでに取り込んだもので積まなかったもの ${skipped}件）` : "") +
+    (factsChanged ? "（タグ・連載の状態も記録しました）" : "") +
+    "。"
+  );
 }
 
 /** 知らせに並べる「取り込めなかったもの」の数。**残りは件数で言い、全部は記録に残す** */
@@ -355,6 +470,11 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
   const perWork = outcome.works
     .map((work) => `「${work.title}」${work.screens}画面`)
     .join("・");
+  // 順位が絡むとき（2026-11-02）だけ言い方を変える。絡まなければこれまでの文のまま
+  const involvesRanks = outcome.works.some(
+    (work) => (work.ranks ?? 0) + (work.ranksRepeated ?? 0) > 0
+  );
+  const ranksAdded = outcome.works.reduce((sum, work) => sum + (work.ranks ?? 0), 0);
 
   const declined = outcome.declined ?? [];
   const framed = outcome.framed ?? [];
@@ -387,7 +507,15 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
     return { level: "info", message: parts.join("") };
   }
   if (outcome.works.length === 0) {
-    parts.push("読者の反応を取り込めませんでした。");
+    // 順位だけの束（2026-11-02）なら「読者の反応」と言わない
+    if (!outcome.rankingsOnly) {
+      parts.push("読者の反応を取り込めませんでした。");
+    } else if ((outcome.ranksHeld ?? 0) === 0 || outcome.failures.length > 0) {
+      // 控えただけなら断りの文にしない（下で「控えました」と言う）
+      parts.push("順位を取り込めませんでした。");
+    }
+  } else if (involvesRanks) {
+    parts.push(rankedSummary(outcome.works, factsChanged));
   } else if (added === 0 && !factsChanged) {
     // 何も書いていない（保存もしていない）。押したのに何も起きない、にならないよう理由を言う
     parts.push(
@@ -432,7 +560,17 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
   if (declined.length > 0) {
     parts.push(`登録しないことにした作品IDの分（${declined.length}画面）は取り込んでいません。`);
   }
-  if (added > 0) {
+  if ((outcome.ranksHeld ?? 0) > 0) {
+    parts.push(
+      `作品一覧の「未登録の自分の作品」の順位（${outcome.ranksHeld}件）は控えました（作品を登録したら取り込みます）。`
+    );
+  }
+  if ((outcome.ranksUnrouted ?? 0) > 0) {
+    parts.push(
+      `どの作品のものか決まらなかった順位（${outcome.ranksUnrouted}件）は取り込んでいません（出力パネルに記録しました）。`
+    );
+  }
+  if (added > 0 || ranksAdded > 0) {
     parts.push(`${READER_SITE_TABS_HINT}で履歴を見られます。`);
   }
   return {

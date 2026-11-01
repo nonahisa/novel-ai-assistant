@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as vscode from "vscode";
 import {
   IMPORT_ARRIVED_LABEL,
+  PENDING_OWN_WORK_RANKINGS_KEY,
   UNREGISTERED_OWN_WORKS_KEY,
   UnregisteredOwnWorks,
   type OwnWorksMemory,
@@ -14,6 +15,7 @@ import {
   buildReaderStatsEnvelope,
   parseReaderStatsEnvelope,
   type ReaderStatsEnvelope,
+  type ReaderStatsRanking,
 } from "../../../src/core/readerStatsEnvelope";
 import type { WorkEntry } from "../../../src/models/types";
 
@@ -554,5 +556,68 @@ describe("なろうの数字ID の入れ方の説明", () => {
     await service().fetchBackup(NAROU);
     expect(prompt).toContain("https://syosetu.com/backup/top/ncode/");
     expect(prompt).not.toContain("管理");
+  });
+});
+
+describe("順位の控え（2026-11-02。ヘルパーの束の rankings）", () => {
+  /** ヘルパー 0.19.0 と同じ形の1件（test/rankings.test.js の見本に合わせた） */
+  function ownRanking(over: Partial<ReaderStatsRanking> = {}): ReaderStatsRanking {
+    return {
+      site: "kakuyomu",
+      workId: KAKUYOMU.workId,
+      title: "氷の街の約束",
+      board: "rankings/all/daily/long",
+      boardLabel: "日間総合の長編ランキング",
+      span: "daily",
+      rank: 30,
+      date: "2026-11-01",
+      readAt: "2026-11-01T09:00:00.000Z",
+      ...over,
+    };
+  }
+
+  test("枠に覚えている作品の順位だけを控え、知らない作品の順位は控えない", async () => {
+    remember(KAKUYOMU);
+    const own = service();
+    const held = await own.noteRankings([ownRanking(), ownRanking({ workId: "999" })], []);
+    expect(held.map((entry) => entry.workId)).toEqual([KAKUYOMU.workId]);
+    expect(memory.values.get(PENDING_OWN_WORK_RANKINGS_KEY)).toHaveLength(1);
+    expect(own.hasPendingStats()).toBe(true);
+    // 同じ鍵は二度控えない
+    await own.noteRankings([ownRanking()], []);
+    expect(memory.values.get(PENDING_OWN_WORK_RANKINGS_KEY)).toHaveLength(1);
+  });
+
+  test("同じ束の本人しか開けない画面で読んだ作品の順位も控える", async () => {
+    const screen = parseReaderStatsEnvelope(
+      buildReaderStatsEnvelope({
+        site: "kakuyomu",
+        workId: "555",
+        readAt: "2026-11-01T09:00:00.000Z",
+        ownedVia: "owner-page",
+        entries: [{ scope: "work", metrics: { pv: 1 } }],
+      })
+    );
+    if (!screen.ok) throw new Error(screen.reason);
+    const held = await service().noteRankings([ownRanking({ workId: "555" })], [screen.envelope]);
+    expect(held).toHaveLength(1);
+  });
+
+  test("登録されたら控えから取り込みへ渡し、台帳に入った分だけ外す", async () => {
+    remember(KAKUYOMU);
+    const handed: ReaderStatsRanking[][] = [];
+    const own = service({
+      registeredKeys: async () => new Set([`kakuyomu:${KAKUYOMU.workId}`]),
+      importHeldRankings: async (rankings) => {
+        handed.push([...rankings]);
+        return rankings.filter((entry) => entry.rank === 99);
+      },
+    });
+    await own.noteRankings([ownRanking(), ownRanking({ board: "x", rank: 99 })], []);
+    await own.settleRegistered(new Set([`kakuyomu:${KAKUYOMU.workId}`]));
+    expect(handed).toHaveLength(1);
+    expect(handed[0]).toHaveLength(2);
+    // 「まだ台帳に入っていない」と返された1件だけ残る
+    expect(memory.values.get(PENDING_OWN_WORK_RANKINGS_KEY)).toHaveLength(1);
   });
 });
