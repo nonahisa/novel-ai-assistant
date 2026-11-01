@@ -61,7 +61,7 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
   // 種別ごとに分かれており（6.17.2）、その人物のぶんがこれである
   { id: "novelai.extractCharactersOnly", label: "人物抽出" },
   { id: "novelai.extractLocationsOnly", label: "場所抽出" },
-  { id: "novelai.extractAbilitiesOnly", label: "スキル抽出" },
+  { id: "novelai.extractAbilitiesOnly", label: "能力抽出" },
   { id: "novelai.extractOrganizationsOnly", label: "組織抽出" },
   { id: "novelai.extractWorldOnly", label: "世界観抽出" },
   { id: "novelai.extractSettings", label: "一括抽出" },

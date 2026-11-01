@@ -67,7 +67,7 @@ describe("機能の名前・機能を尋ねる言い回しで、目次が渡る"
   const cases: Array<{ question: string; expectName: string }> = [
     { question: "傍点を付けたい", expectName: "傍点付与" },
     { question: "音声読み上げはある？", expectName: "原稿読み上げ" },
-    { question: "縦書きで読みたい", expectName: "縦書き表示" },
+    { question: "縦書きで読みたい", expectName: "原稿エディターで開く" },
     // 名前は目次に無い（翻訳は無い機能）。**無いと答えるにも目次が要る**
     { question: "英語に翻訳する機能はある？", expectName: "詳細メニューの操作" },
     { question: "挿絵を描いてくれる機能ってありますか", expectName: "詳細メニューの操作" },

@@ -38,11 +38,13 @@ async function settle(): Promise<void> {
 }
 
 describe("意味検索の準備のあとの知らせ", () => {
-  test("メニューに無い名前を言わず、［索引を作る］を出す", () => {
+  test("メニューに無い名前を言わず、命令の題と同じ［検索索引作成／更新］を出す", () => {
     announceVectorSearchReady("意味検索を使えるようにしました。");
     expect(shown).toHaveLength(1);
     expect(shown[0].message).not.toContain("検索用の索引を作る");
-    expect(shown[0].items).toEqual(["索引を作る"]);
+    // ボタンの名前は命令の題にそろえる（作者の判断 2026-11-02）。動作の言葉
+    // （「索引を作る」）にしていたが、パレットで同じ操作を探すときに名前が違った
+    expect(shown[0].items).toEqual(["検索索引作成／更新"]);
   });
 
   test("押せば、索引づくりをそのまま始める", async () => {

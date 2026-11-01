@@ -162,7 +162,7 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 //       立てさせる（作者の判断、2026-11-01「『〜てくれる？』は動かす」）。コード側の
 //       `isExplicitRunRequest` も同じ形を頼みとみなすようにしたが、AI が runNow を
 //       立てなければ動かない。立てない側の例「表記ゆれってどうやるの？」と対で並べた
-export const WORK_CHAT_VERSION = "3.36";
+export const WORK_CHAT_VERSION = "3.37";
 
 /**
  * 作者自身の読者タイプを推し量るための頼み（設計書6.101。作者の裁定
@@ -482,7 +482,7 @@ export const FEATURE_SHORTLIST_NAMES = [
   "PDF出力（印刷用）",
   "EPUB出力（試作）",
   "Word 原稿変換（docx をまとめて変換）",
-  "縦書き表示",
+  "原稿エディターで開く",
   "誤字脱字検知",
   "推敲",
   "矛盾検知",

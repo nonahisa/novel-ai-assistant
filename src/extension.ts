@@ -5912,7 +5912,7 @@ export async function activate(
   for (const [command, kind, label] of [
     ["novelai.extractCharactersOnly", "characters", "人物"],
     ["novelai.extractLocationsOnly", "locations", "場所"],
-    ["novelai.extractAbilitiesOnly", "abilities", "スキル"],
+    ["novelai.extractAbilitiesOnly", "abilities", "能力"],
     ["novelai.extractOrganizationsOnly", "organizations", "組織"],
     ["novelai.extractWorldOnly", "world", "世界観"],
   ] as const) {
