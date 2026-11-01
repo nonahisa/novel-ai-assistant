@@ -521,7 +521,11 @@ import {
   openManuscriptFile,
   warnManuscriptNotOpen,
 } from "./features/manuscriptTab";
-import { isManuscriptKeyArgs, workForFile } from "./core/manuscriptKeys";
+import {
+  isManuscriptKeyArgs,
+  proofCheckCommand,
+  workForFile,
+} from "./core/manuscriptKeys";
 import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
 import { toggleExternalAccessPermission } from "./features/externalAccessPermission";
@@ -751,6 +755,9 @@ async function saveBeforeCheck(
  * 作品）だけが見る。WeakMap なので、節点を捨てれば控えも消える。
  */
 const manuscriptKeyFiles = new WeakMap<object, string>();
+
+/** 原稿から命令へ渡す節点を作れず、命令を走らせないときの印（`manuscriptNodeFor`） */
+const STOP_MANUSCRIPT_COMMAND = Symbol("stopManuscriptCommand");
 
 /** キーから来た節点なら、そのとき開いていた原稿の場所 */
 function manuscriptKeyFileOf(node: unknown): string | undefined {
@@ -1081,6 +1088,24 @@ export async function activate(
       ? undefined
       : activeManuscriptTabUri();
     const filePath = uri ? fromUri(uri) : undefined;
+    const node = await manuscriptNodeFor(command, filePath);
+    return node === STOP_MANUSCRIPT_COMMAND ? undefined : [node, ...rest];
+  };
+
+  /**
+   * 原稿の場所から、命令へ渡す節点を作る（キーと上の列の［校正］で共用）。
+   *
+   * 上の列の［校正］（作者の判断 2026-11-02）は、押した原稿が分かっているので
+   * 前面のタブから引き直さない。**節点の作り方と控え（`manuscriptKeyFiles`）は
+   * キーと同じ**にして、関門・保存の確認・範囲の先頭が入口で変わらないようにする。
+   *
+   * @returns 命令へ渡す第1引数（作品が分からなければ undefined＝作品を訊く道）。
+   *   止めるなら `STOP_MANUSCRIPT_COMMAND`
+   */
+  const manuscriptNodeFor = async (
+    command: string,
+    filePath: string | undefined
+  ): Promise<unknown> => {
     const work = filePath ? workForFile(registry.list(), filePath) : undefined;
 
     if (command === "novelai.checkTyposForFile") {
@@ -1095,17 +1120,17 @@ export async function activate(
           "開いている原稿が、登録した作品の話として見つかりませんでした。" +
             "作品一覧から話を開いてから押してください。"
         );
-        return undefined;
+        return STOP_MANUSCRIPT_COMMAND;
       }
       const node = new EpisodeNode(work, episode);
       manuscriptKeyFiles.set(node, filePath);
-      return [node, ...rest];
+      return node;
     }
 
-    if (!work || !filePath) return [undefined, ...rest];
+    if (!work || !filePath) return undefined;
     const ref: WorkRef = { type: "work", work };
     manuscriptKeyFiles.set(ref, filePath);
-    return [ref, ...rest];
+    return ref;
   };
 
   /*
@@ -2095,6 +2120,19 @@ export async function activate(
         "novelai.resumeWriting",
         work ? ({ type: "work", work } satisfies WorkRef) : undefined
       );
+    },
+    // 上の列の［校正］の品書き（作者の判断 2026-11-02）。**キーと同じ道**——
+    // 節点はキーと同じ作り方（`manuscriptNodeFor`）で、押した原稿から引く。
+    // 命令を通すので、関門・保存の確認・範囲の先頭（この話だけ）もキーと揃う
+    runProofCheck: async (filePath, check) => {
+      const command = proofCheckCommand(check);
+      if (!command) {
+        logStep(`原稿エディターの［校正］：知らない項目が届いたので無視しました（${String(check)}）`);
+        return;
+      }
+      const node = await manuscriptNodeFor(command, filePath);
+      if (node === STOP_MANUSCRIPT_COMMAND) return;
+      await vscode.commands.executeCommand(command, node);
     },
     // 単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23）。
     // **繋ぐのはここだけ**（シーンメモと同じ理由）。作品は開いている原稿のもの、

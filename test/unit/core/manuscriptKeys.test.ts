@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
+  MANUSCRIPT_KEY_BINDINGS,
   MANUSCRIPT_KEY_SOURCE,
+  MANUSCRIPT_PROOF_CHECKS,
   isManuscriptKeyArgs,
+  proofCheckCommand,
   workForFile,
 } from "../../../src/core/manuscriptKeys";
 
@@ -42,5 +45,25 @@ describe("開いている原稿がどの作品か", () => {
 
   test("どの作品にも入っていなければ undefined（推し量らない）", () => {
     expect(workForFile(works, "D:/無関係/メモ.txt")).toBeUndefined();
+  });
+});
+
+/*
+  上の列の［校正］の品書き（作者の判断 2026-11-02）。キーと同じ命令を呼ぶ
+*/
+describe("［校正］の品書きの命令", () => {
+  test("4つとも、原稿エディターのキーに割り当てた命令と同じ", () => {
+    const keyCommands = MANUSCRIPT_KEY_BINDINGS.map((binding) => binding.command);
+    for (const command of Object.values(MANUSCRIPT_PROOF_CHECKS)) {
+      expect(keyCommands).toContain(command);
+    }
+  });
+
+  test("画面から届いた名前を命令へ。知らない名前は受け取らない", () => {
+    expect(proofCheckCommand("typos")).toBe("novelai.checkTyposForFile");
+    expect(proofCheckCommand("suite")).toBe("novelai.runProofreadingSuite");
+    expect(proofCheckCommand("toString")).toBeUndefined();
+    expect(proofCheckCommand("novelai.checkProofread")).toBeUndefined();
+    expect(proofCheckCommand(undefined)).toBeUndefined();
   });
 });
