@@ -137,6 +137,11 @@ export interface OwnWorksSource {
   isWaiting(entry: UnregisteredOwnWork): boolean;
   /** 覚え・待ちが変わった */
   readonly onDidChange: vscode.Event<void>;
+  /**
+   * 一覧を描くたびに、いま登録済みのサイト・作品ID（と題）の組を渡す。**答えは待たない**
+   * ——覚えを書き換えるのは受けた側で、書き換えたら `onDidChange` で描き直しを求める
+   */
+  noticeRegistered?(registered: ReadonlySet<string>): void;
 }
 
 /**
@@ -701,7 +706,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return registeredSiteWorkKeys(
       works
         .map((work) => this.posting.get(work.id))
-        .filter((ledger): ledger is PostingLedger => ledger !== undefined)
+        .filter((ledger): ledger is PostingLedger => ledger !== undefined),
+      // 台帳に作品IDの無い作品も、題が同じなら登録済みと見る（2026-11-01）
+      works.map((work) => work.title)
     );
   }
 
@@ -718,6 +725,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     const list = source.list();
     if (list.length === 0) return { frames: [], hidden: 0 };
     const registered = await this.registeredOwnWorkKeys();
+    // 登録済みになった作品を覚えから外し、控えておいた読者の反応をその作品へ移す
+    // （枠の外の道で登録されたときに気づけるのは、ここで登録済みの組を取ったときだけ）
+    source.noticeRegistered?.(registered);
     return {
       frames: visibleUnregisteredOwnWorks(list, registered).map(
         (entry) => new OwnWorkFrameNode(entry, source.isWaiting(entry))
@@ -947,7 +957,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           "",
           // ブラウザ版では［バックアップを取る］を隠している（ダウンロードのフォルダーを見られない）
           processCommandsUsableHere()
-            ? "右クリックの［バックアップを取る］でサイトのバックアップの画面を開き、届いたファイルを取り込むと作品として登録します。"
+            ? "右クリックの［バックアップを取る］でサイトのバックアップの画面を開き、落としたファイルが届くと、そのまま取り込んで作品として登録します。"
             : "サイトから落としたバックアップを、右クリックの［ファイルから取り込む］で選ぶと作品として登録します。",
           "ファイルを枠へドラッグして落としても取り込めます。",
         ].join("\n")
@@ -1414,13 +1424,15 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         走査が終わるまで14〜105秒、1行も出なかった。走査は裏で回し、
         終わったら描き直しを求めて差し替える。
 
-        **控えの回は「未登録の自分の作品」を出さない。** 登録済みかを見るには全作品の台帳が
-        要り、読むと控えで急いで出す意味が無くなる。走査が終わった回（上の `warmed`）で出る
+        **控えの回にも「未登録の自分の作品」を出す**（2026-11-01、作者の実機で枠が出なかった）。
+        0.119.0 までは「台帳を読むと急いで出す意味が無くなる」として控えの回に出さず、
+        走査が終わった回（上の `warmed`）だけで出していた。裏の走査が長引く・終わらない作品が
+        1つでもあると、枠がいつまでも出ない。登録済みかを見るのに要るのは各作品の投稿状態
+        （小さな JSON）だけで、原稿の走査より桁違いに軽い
       */
       const quick = await this.renderFromSnapshot(works);
       if (quick) {
-        this.ownHeader = undefined;
-        return this.rememberRoot(quick);
+        return this.withOwnWorks(this.rememberRoot(quick), works);
       }
       /*
         **走査のあいだ、案内を「読み込んでいます」に差し替える**（設計書6.1.2）。

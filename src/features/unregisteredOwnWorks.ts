@@ -12,7 +12,17 @@ import { describeProcessesBlocked } from "../core/processAvailability";
 import type { ReaderStatsEnvelope } from "../core/readerStatsEnvelope";
 import { canRunProcesses } from "../core/runtime";
 import {
+  holdOwnWorkStats,
+  readPendingOwnWorkStats,
+  storedPending,
+  takeRegisteredPending,
+  type PendingOwnWorkStats,
+} from "../core/ownWorkPendingStats";
+import {
   backupEntryFor,
+  forgetRegisteredOwnWorks,
+  isRegisteredOwnWork,
+  looksLikeBackupOf,
   hideUnregisteredOwnWork,
   hiddenUnregisteredOwnWorks,
   narouBackupIdFrom,
@@ -44,6 +54,12 @@ import type { ImportOwnWorkAsNew } from "./ownWorkBackupImport";
  * - ダウンロードのフォルダーを見る部品（Node の `fs`）は**動的 import**。ブラウザ版では
  *   ［バックアップを取る］そのものを隠す（設計書5.8.16）
  * - ZIP を読む部品も、取り込みが押されてから動的 import する（起動を重くしない）
+ * - **届いたバックアップは訊かずに取り込む**（作者の判断 2026-11-01「全部自動で取り込めない
+ *   ものでしょうか？」）。どの作品のものか1つに決まらない・同じ作品が登録済み・読めない・
+ *   中身が食い違うときだけ、今までどおり訊くか理由を言う。サイトのバックアップのボタンを
+ *   押すのは作者の手に残す（ヘルパーもこちらも送信しない決まり）
+ * - 管理画面で読んだ未登録の作品の読者の反応は控え（`core/ownWorkPendingStats.ts`）、
+ *   登録されたらその作品へ取り込む
  */
 
 /**
@@ -51,6 +67,15 @@ import type { ImportOwnWorkAsNew } from "./ownWorkBackupImport";
  * （`mementoWrites.test.ts`）
  */
 export const UNREGISTERED_OWN_WORKS_KEY = "novelai.ownWorks.unregistered";
+
+/**
+ * 読者の反応の控えの置き場（`context.globalState` の鍵）。書く口は `savePending` の1か所だけ
+ * （`mementoWrites.test.ts`）
+ */
+export const PENDING_OWN_WORK_STATS_KEY = "novelai.ownWorks.pendingReaderStats";
+
+/** 控えた読者の反応を取り込んだときの知らせの頭 */
+export const HELD_STATS_LEAD = "登録した作品へ、登録の前に控えておいた読者の反応を移しました。";
 
 /** 設定の名前（`novelai.` の下）。空なら Windows の「ダウンロード」 */
 export const DOWNLOAD_FOLDER_SETTING = "ownWorks.downloadFolder";
@@ -85,6 +110,19 @@ export interface UnregisteredOwnWorksDeps {
   lister?(folder: string): Promise<DownloadFolderLister>;
   /** 刻み（既定は `setInterval`） */
   schedule?(tick: () => void, intervalMs: number): ScheduledTask;
+  /**
+   * いま登録済みのサイト・作品ID（と題）の組（既定は「何も登録されていない」）。
+   * 届いたバックアップを訊かずに取り込む前に、同じ作品がもう登録されていないか見る
+   */
+  registeredKeys?(): Promise<ReadonlySet<string>>;
+  /**
+   * 控えておいた読者の反応を、登録した作品へ取り込む（束の取り込みと同じ関数を通す）。
+   * @returns まだ台帳に入っていない画面（控えに残す）
+   */
+  importHeldStats?(
+    envelopes: readonly ReaderStatsEnvelope[],
+    lead: string
+  ): Promise<readonly ReaderStatsEnvelope[]>;
   /** 時計（試験で差し替える） */
   now?(): number;
   /** 待つ長さ（既定は30分） */
@@ -105,6 +143,10 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
   /** 覚え・待ちが変わった（作品一覧の枠を描き直す） */
   readonly onDidChange = this.changed.event;
   private readonly waits = new Map<string, ActiveWait>();
+  /** 訊かずに取り込んでいる最中の作品（同じ作品のファイルが続けて届いたら、2つ目は訊く） */
+  private readonly importing = new Set<string>();
+  /** 控えの取り込みが重ならないための印 */
+  private flushing = false;
 
   constructor(
     private readonly memory: OwnWorksMemory,
@@ -133,6 +175,85 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
     } catch (error) {
       useLogFile(undefined);
       logFailure("未登録の自分の作品を覚える", { 詳細: messageOf(error) });
+    }
+    // 数も控える（作品が登録されたら、その作品へ取り込む。2026-11-01）
+    try {
+      const held = holdOwnWorkStats(this.pending(), envelopes, this.clock());
+      if (held.changed) await this.savePending(held.next);
+    } catch (error) {
+      useLogFile(undefined);
+      logFailure("未登録の自分の作品の読者の反応を控える", { 詳細: messageOf(error) });
+    }
+  }
+
+  /** 控えている読者の反応（読み戻しの関所を通ったものだけ） */
+  pendingStats(): readonly ReaderStatsEnvelope[] {
+    return this.pending().map((entry) => entry.parsed);
+  }
+
+  /**
+   * 作品一覧が描かれるたびに、登録済みの組を受け取る（`OwnWorksSource.noticeRegistered`）。
+   * 枠の外の道（「投稿サイト設定」で作品IDを入れた・別の道で登録した）で登録された作品も、
+   * ここで覚えから外し、控えておいた読者の反応をその作品へ取り込む。**答えは待たない**
+   */
+  noticeRegistered(registered: ReadonlySet<string>): void {
+    void this.settleRegistered(registered).catch((error: unknown) => {
+      useLogFile(undefined);
+      logFailure("登録済みになった未登録の自分の作品を片づける", { 詳細: messageOf(error) });
+    });
+  }
+
+  /** `noticeRegistered` の本体（試験から終わりを待てるように分ける） */
+  async settleRegistered(registered: ReadonlySet<string>): Promise<void> {
+    const list = this.list();
+    const next = forgetRegisteredOwnWorks(list, registered);
+    if (next !== list) {
+      const gone = list.filter((entry) => !next.includes(entry));
+      for (const entry of gone) this.stopWait(entry, "imported");
+      await this.save(next);
+      useLogFile(undefined);
+      logStep(
+        `登録済みになった作品を「未登録の自分の作品」から外しました：${gone
+          .map((entry) => ownWorkLabel(entry))
+          .join(" ／ ")}`
+      );
+    }
+    const waiting = this.pending().some((entry) =>
+      registered.has(ownWorkKey(entry.site, entry.workId))
+    );
+    if (waiting) await this.flushHeldStats();
+  }
+
+  /**
+   * 控えた読者の反応のうち、登録済みの作品の分を取り込む。
+   * 作品が1つに決まらない画面・台帳に入らなかった画面は控えに残す
+   */
+  async flushHeldStats(): Promise<void> {
+    const importHeld = this.deps.importHeldStats;
+    if (!importHeld || this.flushing) return;
+    const pending = this.pending();
+    if (pending.length === 0) return;
+    this.flushing = true;
+    try {
+      const registered = await (this.deps.registeredKeys?.() ?? Promise.resolve(new Set<string>()));
+      const { taken } = takeRegisteredPending(pending, (site, workId) =>
+        registered.has(ownWorkKey(site, workId))
+      );
+      if (taken.length === 0) return;
+      const remaining = new Set(
+        await importHeld(
+          taken.map((entry) => entry.parsed),
+          HELD_STATS_LEAD
+        )
+      );
+      const done = new Set(
+        taken.filter((entry) => !remaining.has(entry.parsed)).map((entry) => entry.envelope)
+      );
+      // 取り込みのあいだに控えが増えていてもよいように、読み直してから外す
+      const keep = this.pending().filter((entry) => !done.has(entry.envelope));
+      await this.savePending(storedPending(keep));
+    } finally {
+      this.flushing = false;
     }
   }
 
@@ -222,7 +343,7 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
     void vscode.window.showInformationMessage(
       `「${label}」：${how}` +
         (waiting
-          ? "ダウンロードのフォルダーに届いたら、取り込むかお訊きします（30分まで待ちます）。"
+          ? "ダウンロードのフォルダーに届いたら、そのまま取り込んで登録します（30分まで待ちます）。"
           : "落とし終えたら、枠の［ファイルから取り込む］で選んでください。")
     );
   }
@@ -242,7 +363,11 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
   }
 
   /** 枠へ落とされたファイル・選んだファイル・届いたファイル */
-  async importFromUri(entry: UnregisteredOwnWork, uri: vscode.Uri): Promise<void> {
+  async importFromUri(
+    entry: UnregisteredOwnWork,
+    uri: vscode.Uri,
+    options: { readonly unattended?: boolean } = {}
+  ): Promise<void> {
     let bytes: Uint8Array;
     try {
       bytes = await vscode.workspace.fs.readFile(uri);
@@ -255,21 +380,35 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
       void vscode.window.showWarningMessage(`ファイルを読めませんでした：${messageOf(error)}`);
       return;
     }
-    await this.importBytes(entry, { fileName: path.basename(uri.path), bytes });
+    await this.importBytes(entry, { fileName: path.basename(uri.path), bytes }, options);
   }
 
   /** 取り込みの本体（ZIP を読む部品はここで初めて読み込む） */
   async importBytes(
     entry: UnregisteredOwnWork,
-    source: { readonly fileName: string; readonly bytes: Uint8Array }
+    source: { readonly fileName: string; readonly bytes: Uint8Array },
+    /** 届いたバックアップを訊かずに取り込むか（`handleArrived` だけが立てる） */
+    options: { readonly unattended?: boolean } = {}
   ): Promise<WorkEntry | undefined> {
     const { importOwnWorkBackup } = await import("./ownWorkBackupImport.js");
-    const work = await importOwnWorkBackup(entry, source, this.deps.importAsNew);
+    const work = await importOwnWorkBackup(
+      entry,
+      source,
+      this.deps.importAsNew,
+      options.unattended === true
+    );
     if (!work) return undefined;
     // 取り込めたら待ちを止め、覚えを忘れる（台帳に作品ID が入ったので、覚えていても枠は出ない）
     this.stopWait(entry, "imported");
     await this.save(forgetUnregisteredOwnWork(this.list(), entry.site, entry.workId));
     await this.deps.afterImport?.(work);
+    // 登録の前に控えておいた読者の反応を、登録した作品へ移す（失敗しても登録は済んでいる）
+    try {
+      await this.flushHeldStats();
+    } catch (error) {
+      useLogFile(undefined);
+      logFailure("控えた読者の反応の取り込み", { 作品: work.title, 詳細: messageOf(error) });
+    }
     return work;
   }
 
@@ -344,7 +483,17 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
         return;
       }
       if (step.kind === "arrived") {
-        for (const name of step.names) this.askArrived(wait, name);
+        // **ここでは取り込みを待たない**（見張りの印を立てたまま待つと、次の刻みが止まる）
+        void this.handleArrived(wait, step.names).catch((error: unknown) => {
+          useLogFile(undefined);
+          logFailure("届いたバックアップの取り込み", {
+            作品: ownWorkLabel(wait.entry),
+            詳細: messageOf(error),
+          });
+          void vscode.window.showWarningMessage(
+            `「${ownWorkLabel(wait.entry)}」のバックアップを取り込めませんでした：${messageOf(error)}`
+          );
+        });
       }
     } catch (error) {
       // フォルダーが一時的に読めないだけかもしれない。止めずに次の刻みで見直す（30分で止まる）
@@ -355,26 +504,98 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
     }
   }
 
-  /** 届いたことを知らせて訊く。**答えは待たない**（押されたら後から取り込む） */
-  private askArrived(wait: ActiveWait, name: string): void {
+  /**
+   * 届いたファイルを扱う（作者の判断 2026-11-01「届いたバックアップは訊かずに取り込む」）。
+   *
+   * 訊かずに取り込むのは、迷う所が無いときだけ：
+   * - **一度に2つ以上届いた** → どれがこの作品のものか決まらないので、1つずつ訊く
+   * - **名前がほかの枠の作品にも当たる**（本編と「〜別視点〜」など、題の頭が同じ） → 訊く
+   * - **同じ作品がもう登録されている** → 取り込まずに理由を言い、待ちを止める
+   * - **同じ作品をいま取り込んでいる**（続けて落とした） → 2つ目は訊く
+   * - 読めない・中身が枠の作品と食い違う → 取り込みの側が理由を言う・訊く（今までどおり）
+   *
+   * 落としたファイルは消さない・動かさない（読むだけ）。
+   */
+  private async handleArrived(wait: ActiveWait, names: readonly string[]): Promise<void> {
+    if (names.length !== 1) {
+      for (const name of names) this.askArrived(wait, name, "several");
+      return;
+    }
+    const name = names[0];
+    const key = ownWorkKey(wait.entry.site, wait.entry.workId);
+    const others = this.list().filter(
+      (entry) =>
+        !entry.hidden &&
+        ownWorkKey(entry.site, entry.workId) !== key &&
+        looksLikeBackupOf(name, entry)
+    );
+    if (others.length > 0) {
+      this.askArrived(wait, name, "ambiguous", others);
+      return;
+    }
+    const registered = await (this.deps.registeredKeys?.() ?? Promise.resolve(new Set<string>()));
+    if (isRegisteredOwnWork(wait.entry, registered)) {
+      const label = ownWorkLabel(wait.entry);
+      this.stopWait(wait.entry, "imported");
+      useLogFile(undefined);
+      logStep(`「${label}」はもう登録してあるため、届いたバックアップ（${name}）は取り込みませんでした`);
+      void vscode.window.showInformationMessage(
+        `「${label}」はもう登録してある作品なので、届いたバックアップ（${name}）は取り込みませんでした。` +
+          "ファイルはダウンロードのフォルダーにそのまま残っています。"
+      );
+      return;
+    }
+    if (this.importing.has(key)) {
+      this.askArrived(wait, name, "again");
+      return;
+    }
+    this.importing.add(key);
+    try {
+      useLogFile(undefined);
+      logStep(`「${ownWorkLabel(wait.entry)}」のバックアップが届いたので、訊かずに取り込みます：${name}`);
+      await this.importFromUri(this.current(wait.entry), path.toUri(path.join(wait.folder, name)), {
+        unattended: true,
+      });
+    } finally {
+      this.importing.delete(key);
+    }
+  }
+
+  /** 覚えのいまの形（押されるまでに覚えが変わっていても、その作品で取り込む） */
+  private current(entry: UnregisteredOwnWork): UnregisteredOwnWork {
+    const key = ownWorkKey(entry.site, entry.workId);
+    return this.list().find((known) => ownWorkKey(known.site, known.workId) === key) ?? entry;
+  }
+
+  /**
+   * 訊かずには取り込めないとき、届いたことを知らせて訊く。**答えは待たない**
+   * （押されたら後から取り込む）。なぜ訊くのかを1文で添える
+   */
+  private askArrived(
+    wait: ActiveWait,
+    name: string,
+    why: "several" | "ambiguous" | "again",
+    others: readonly UnregisteredOwnWork[] = []
+  ): void {
     const label = ownWorkLabel(wait.entry);
     useLogFile(undefined);
     logStep(`「${label}」のバックアップらしいファイルが届きました：${name}`);
+    const reason =
+      why === "several"
+        ? "一度に複数のファイルが届いたため、どれを取り込むかお訊きします。"
+        : why === "ambiguous"
+          ? `名前が「${others.map((entry) => ownWorkLabel(entry)).join("」「")}」にも当たるため、どの作品のものか決められませんでした。`
+          : "同じ作品のファイルを取り込んでいる最中に、もう1つ届きました。";
     whenNoticePicked(
       vscode.window.showInformationMessage(
-        `「${label}」のバックアップ（${name}）が届きました。取り込みますか？`,
+        `「${label}」のバックアップらしいファイル（${name}）が届きました。${reason}「${label}」として取り込みますか？`,
         IMPORT_ARRIVED_LABEL,
         SKIP_ARRIVED_LABEL
       ),
       async (answer) => {
         if (answer !== IMPORT_ARRIVED_LABEL) return;
         // 押されるまでに覚えが変わっていても（出さないにした等）、押した枠の作品で取り込む
-        const current =
-          this.list().find(
-            (entry) =>
-              ownWorkKey(entry.site, entry.workId) === ownWorkKey(wait.entry.site, wait.entry.workId)
-          ) ?? wait.entry;
-        await this.importFromUri(current, path.toUri(path.join(wait.folder, name)));
+        await this.importFromUri(this.current(wait.entry), path.toUri(path.join(wait.folder, name)));
       },
       { label: "未登録の自分の作品のバックアップの取り込み" }
     );
@@ -398,6 +619,22 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
   private async save(next: readonly UnregisteredOwnWork[]): Promise<void> {
     await this.memory.update(UNREGISTERED_OWN_WORKS_KEY, next);
     this.changed.fire();
+  }
+
+  private pending() {
+    return readPendingOwnWorkStats(
+      this.memory.get<unknown>(PENDING_OWN_WORK_STATS_KEY, []),
+      this.clock()
+    );
+  }
+
+  /** 控えの書く口はここだけ（`mementoWrites.test.ts`）。枠の見た目は変わらないので描き直さない */
+  private async savePending(next: readonly PendingOwnWorkStats[]): Promise<void> {
+    await this.memory.update(PENDING_OWN_WORK_STATS_KEY, next);
+  }
+
+  private clock(): number {
+    return (this.deps.now ?? Date.now)();
   }
 }
 

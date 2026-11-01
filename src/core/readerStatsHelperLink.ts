@@ -10,6 +10,7 @@ import {
 import { narouNcode } from "./postingSiteRecords";
 import { newEpisodeUrlFromWorkId } from "./postingSiteUrls";
 import { hashText } from "./hash";
+import { canRunProcesses } from "./runtime";
 import { SETUP_URI_PATH } from "./setupRequest";
 import { RUN_URI_PATH } from "./runRequest";
 import {
@@ -321,6 +322,12 @@ export interface ReaderStatsBundleOutcome {
    * 取り込めなかったものには数えず、ボタンも出さない（作者の裁定 2026-10-11）
    */
   readonly declined?: readonly string[];
+  /**
+   * `declined` の画面がどれも本人しか開けない画面で読んだもので、「未登録の自分の作品」の
+   * 枠に載せたとき、その作品（作品名。無ければ「作品ID …」。2026-11-01）。断りの文を
+   * 「次に何をすればよいか」の文に替える。1画面でも枠に載らないものが混じれば渡さない
+   */
+  readonly framed?: readonly string[];
   /** 知らせに［作品に登録する］を付けるか（直し方の文を変える） */
   readonly registerOffered?: boolean;
   /** 知らせの頭に置く1文（その場で登録したあとの取り込みで「登録しました」を添える） */
@@ -349,7 +356,22 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
     .join("・");
 
   const declined = outcome.declined ?? [];
+  const framed = outcome.framed ?? [];
   const parts: string[] = outcome.lead ? [outcome.lead] : [];
+  if (
+    outcome.works.length === 0 &&
+    outcome.failures.length === 0 &&
+    declined.length > 0 &&
+    framed.length > 0
+  ) {
+    /*
+      **登録しないと決めた作品IDの分だけで、どれも枠に載せた**（2026-11-01）。
+      管理画面で読んだ自分の作品なので、断りではなく次の一手を言う。数は控えてあり、
+      登録したら取り込む（`core/ownWorkPendingStats.ts`）
+    */
+    parts.push(ownWorkFramedNotice(framed));
+    return { level: "info", message: parts.join("") };
+  }
   if (outcome.works.length === 0 && outcome.failures.length === 0 && declined.length > 0) {
     /*
       **登録しないと決めた作品IDの分だけだった。** 押したのに何も起きない、に
@@ -416,6 +438,24 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
     level: outcome.failures.length > 0 ? "warning" : "info",
     message: parts.join(""),
   };
+}
+
+/**
+ * 「未登録の自分の作品」の枠に載せたことを言う1文（2026-11-01）。
+ * 作者が次にすること（［バックアップを取る］）と、そのあと起きること（自動で登録し、
+ * 控えた読者の反応も取り込む）を言う。束の知らせとヘルパーからの1件の知らせで同じ言い方にする
+ */
+export function ownWorkFramedNotice(labels: readonly string[]): string {
+  const shown = labels.slice(0, BUNDLE_FAILURES_SHOWN).map((label) => `「${label}」`).join("");
+  const rest = labels.length - Math.min(labels.length, BUNDLE_FAILURES_SHOWN);
+  return (
+    `${shown}${rest > 0 ? `ほか${rest}作品` : ""}を作品一覧の「未登録の自分の作品」に載せました。` +
+    // ブラウザ版では［バックアップを取る］を隠している（ダウンロードのフォルダーを見られない）
+    (canRunProcesses()
+      ? "右クリックの［バックアップを取る］でバックアップを落とすと、自動で登録します"
+      : "サイトから落としたバックアップを、右クリックの［ファイルから取り込む］で選ぶと登録します") +
+    "（読者の反応も控えてあり、登録したら取り込みます）。"
+  );
 }
 
 /**

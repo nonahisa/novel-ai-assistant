@@ -49,6 +49,7 @@ import { emptyPostingLedger, withSiteProfile } from "../../../src/models/posting
 import type { UnregisteredOwnWork } from "../../../src/core/unregisteredOwnWorks";
 import type { WorkEntry } from "../../../src/models/types";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
+import { WORK_LIST_SNAPSHOT_KEY, buildWorkListSnapshot } from "../../../src/core/workListSnapshot";
 
 const work: WorkEntry = {
   id: "work_1",
@@ -178,5 +179,119 @@ describe("未登録の自分の作品の枠", () => {
     const { provider, nodes } = await root([work], source(frames));
     const children = await provider.getChildren(nodes[1]);
     expect(String(provider.getTreeItem(children[0]).contextValue)).not.toMatch(/^work-/);
+  });
+});
+
+/*
+  作者の実機（0.119.0、2026-11-01）で枠が出なかった件の再現。覚えには2作品が入っているのに、
+  作品一覧のどこにも見出しが無かった。実機と同じ形——まとまり（書庫「novel」）に17作品、
+  ほかに単独の作品が4つ、前回の一覧の控えがある——で描く
+*/
+describe("実機と同じ形（書庫があり、前回の一覧の控えがある）でも枠が出る", () => {
+  const library = Array.from({ length: 17 }, (_, index): WorkEntry => ({
+    id: `novel_${index}`,
+    title: `書庫の作品${index}`,
+    folderPath: path.join("C:", "Users", "someone", "novel", `作品${index}`),
+    registeredAt: "2026-09-04T00:00:00.000Z",
+  }));
+  // 「確認用コピー」も2作品を抱えるまとまり（書庫が2つあると、一覧に書庫の段が付く）
+  const copies = ["教科書チート_確認用", "星の数_確認用"].map(
+    (name, index): WorkEntry => ({
+      id: `copy_${index}`,
+      title: name,
+      folderPath: path.join("C:", "Users", "someone", "Documents", "確認用コピー", name),
+      registeredAt: "2026-09-04T00:00:00.000Z",
+    })
+  );
+  const standalone = ["GitHub試験_確認用", "GitHub試験_確認用2", "テスト作品"].map(
+    (name, index): WorkEntry => ({
+      id: `solo_${index}`,
+      title: name,
+      folderPath: path.join("C:", "Users", "someone", "Documents", `置き場${index}`, name),
+      registeredAt: "2026-09-04T00:00:00.000Z",
+    })
+  );
+  const works = [...library, ...copies, ...standalone];
+  const author: UnregisteredOwnWork[] = [
+    {
+      site: "kakuyomu",
+      workId: "16816927861924296900",
+      title: "星の数ほどいるクズ",
+      ownedVia: "owner-page",
+      lastSeenAt: "2026-11-01T07:47:50.743Z",
+    },
+  ];
+
+  function snapshotStore() {
+    const data = new Map<string, unknown>([
+      [
+        WORK_LIST_SNAPSHOT_KEY,
+        buildWorkListSnapshot(
+          works.map((entry) => ({
+            id: entry.id,
+            folderPath: entry.folderPath,
+            fileCount: 3,
+            totals: { gross: 10, net: 9, lines: 1, paragraphs: 1, manuscriptLines: 1 },
+            conflictedCount: 0,
+          })),
+          "t"
+        ),
+      ],
+    ]);
+    return {
+      get: (key: string) => data.get(key),
+      update: async (key: string, value: unknown) => {
+        data.set(key, value);
+      },
+    };
+  }
+
+  test("走査を待って描いたとき、書庫と作品の後ろに見出しが付く", async () => {
+    loadPosting.mockResolvedValue(emptyPostingLedger());
+    const { nodes } = await root(works, source(author));
+    expect(nodes.at(-1)?.type).toBe("ownWorksHeader");
+    expect(nodes.filter((node) => node.type === "library")).toHaveLength(2);
+  });
+
+  test("控えで先に描いたあと、裏の走査が終わって描き直した回で見出しが付く", async () => {
+    loadPosting.mockResolvedValue(emptyPostingLedger());
+    const registry = {
+      list: () => works,
+      onDidChange: () => ({ dispose() {} }),
+    } as unknown as WorkRegistry;
+    const provider = new WorkTreeProvider(registry, undefined, undefined, undefined, undefined, {
+      snapshot: snapshotStore(),
+    });
+    let redraws = 0;
+    provider.onDidChangeTreeData(() => redraws++);
+    provider.setOwnWorksSource(source(author));
+    await provider.getChildren();
+    await vi.waitFor(() => expect(redraws).toBeGreaterThan(0));
+    const second = await provider.getChildren();
+    expect(second.at(-1)?.type).toBe("ownWorksHeader");
+  });
+
+  /*
+    これが実機で起きていたこと（0.119.0 までは、控えの回に枠を出さない作りだった）。
+    裏の走査が長引く・終わらない作品が1つでもあると、控えの行のまま枠が出ない。
+    枠に要るのは各作品の投稿状態（小さな JSON）だけで、原稿の走査は要らない
+  */
+  test("裏の走査が終わらなくても、控えで描いた回に見出しが付く", async () => {
+    loadPosting.mockResolvedValue(emptyPostingLedger());
+    scanWork.mockImplementation(() => new Promise(() => {}));
+    const registry = {
+      list: () => works,
+      onDidChange: () => ({ dispose() {} }),
+    } as unknown as WorkRegistry;
+    const provider = new WorkTreeProvider(registry, undefined, undefined, undefined, undefined, {
+      snapshot: snapshotStore(),
+    });
+    provider.setOwnWorksSource(source(author));
+    const first = await provider.getChildren();
+    expect(first.filter((node) => node.type === "library")).toHaveLength(2);
+    expect(first.at(-1)?.type).toBe("ownWorksHeader");
+    expect((await provider.getChildren(first.at(-1))).map((node) => node.type)).toEqual([
+      "ownWorkFrame",
+    ]);
   });
 });

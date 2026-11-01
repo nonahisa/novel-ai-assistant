@@ -2315,14 +2315,29 @@ export async function activate(
     （`importWorkFromZip`）で、枠のサイトと作品ID を引き継ぐ
   */
   const ownWorks = new UnregisteredOwnWorks(verifiedState(context.globalState), {
-    importAsNew: async (picked, known) => {
+    importAsNew: async (picked, known, unattended) => {
       const { importWorkFromZip } = await import("./features/importWorkFromZip.js");
       return importWorkFromZip(
         registry.list(),
         (folderPath, title, options) => registerFolderAsWork(folderPath, title, options),
         picked,
-        known
+        known,
+        unattended
       );
+    },
+    // 届いたバックアップを訊かずに取り込む前に、同じ作品がもう登録されていないか見る
+    registeredKeys: () => treeProvider.registeredOwnWorkKeys(),
+    /*
+      管理画面で読んだ未登録の作品の読者の反応を、登録されたあとに取り込む（2026-11-01）。
+      取り込みは束の取り込みと同じ関数（`importReaderStatsBundle`）を通る
+    */
+    importHeldStats: async (envelopes, lead) => {
+      const { importHeldOwnWorkStats } = await import("./features/ownWorkHeldStatsImport.js");
+      const result = await importHeldOwnWorkStats(envelopes, registry.list(), lead);
+      for (const changed of result.changedWorks) {
+        await refreshWritingStatsPanel(changed, deviceId);
+      }
+      return result.remaining;
     },
   });
   context.subscriptions.push(ownWorks, treeProvider.setOwnWorksSource(ownWorks));

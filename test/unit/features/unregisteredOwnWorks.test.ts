@@ -10,7 +10,11 @@ import {
 import { IMPORT_ANYWAY_LABEL } from "../../../src/features/ownWorkBackupImport";
 import { BACKUP_WAIT_LIMIT_MS, type DownloadFolderLister } from "../../../src/core/backupArrivalWatch";
 import type { UnregisteredOwnWork } from "../../../src/core/unregisteredOwnWorks";
-import type { ReaderStatsEnvelope } from "../../../src/core/readerStatsEnvelope";
+import {
+  buildReaderStatsEnvelope,
+  parseReaderStatsEnvelope,
+  type ReaderStatsEnvelope,
+} from "../../../src/core/readerStatsEnvelope";
 import type { WorkEntry } from "../../../src/models/types";
 
 /**
@@ -18,7 +22,9 @@ import type { WorkEntry } from "../../../src/models/types";
  *
  * - ［バックアップを取る］はサイトごとの画面を開き、**開く前に**待ちを始める
  * - なろうの数字ID が無ければ訊いて覚える。訊くのをやめたら何も開かない
- * - 届いたら訊く（勝手に取り込まない）。30分で止まる
+ * - 届いたら訊かずに取り込む（作者の判断 2026-11-01）。どの作品のものか決まらない・
+ *   登録済みのときだけ訊くか理由を言う。30分で止まる
+ * - 管理画面で読んだ未登録の作品の読者の反応は控え、登録されたら取り込みへ渡す
  * - 取り込む前に中身を照らし、食い違えば止めて訊く
  * - ブラウザ版（フォルダーを見られない）では待たない
  */
@@ -191,22 +197,96 @@ describe("［バックアップを取る］", () => {
 });
 
 describe("待ち", () => {
-  test("押したあとに来たバックアップらしい名前に気づいて訊く（押す前のファイルと別の名前は無視）", async () => {
-    remember(KAKUYOMU);
-    folder.files.set("氷の街の約束_20261001.zip", 10); // 押す前からあった
+  /*
+    作者の判断（2026-11-01）「届いたバックアップは訊かずに取り込む」。0.119.0 までは
+    「取り込みますか？」と訊いて、［取り込む］を押されるまで取り込まなかった
+  */
+  test("押したあとに来たバックアップらしいファイルを、訊かずに取り込んで登録する（押す前のファイルと別の名前は無視）", async () => {
+    remember(ALPHAPOLIS);
+    folder.files.set("氷の街の約束 (1).txt", 10); // 押す前からあった
+    const read: string[] = [];
+    fsStub.readFile = async (uri: { fsPath?: string; path?: string }) => {
+      read.push(String(uri.path ?? uri.fsPath));
+      return new TextEncoder().encode(ALPHAPOLIS_TEXT);
+    };
     const own = service();
-    await own.fetchBackup(KAKUYOMU);
+    await own.fetchBackup(ALPHAPOLIS);
+    expect(infos.at(-1)).toContain("そのまま取り込んで登録します");
     folder.files.set("請求書.pdf", 5);
-    folder.files.set("氷の街の約束_20261101.zip", 20);
-    await own.pollNow(KAKUYOMU);
-    await own.pollNow(KAKUYOMU);
-    const asked = infos.filter((message) => message.includes("届きました"));
-    expect(asked).toEqual([
-      "「氷の街の約束」のバックアップ（氷の街の約束_20261101.zip）が届きました。取り込みますか？",
-    ]);
-    // 訊いただけで取り込まない
+    folder.files.set("氷の街の約束.txt", 20);
+    await own.pollNow(ALPHAPOLIS);
+    await own.pollNow(ALPHAPOLIS);
+    await vi.waitFor(() => expect(importAsNew).toHaveBeenCalledTimes(1));
+    // 訊かない
+    expect(infos.some((message) => message.includes("取り込みますか"))).toBe(false);
+    expect(importAsNew.mock.calls[0][1]).toEqual({ site: "alphapolis", workId: "123456789" });
+    // 訊かずに進む印（届いたファイルの名前）が取り込みへ渡る
+    expect(importAsNew.mock.calls[0][2]).toEqual({ fileName: "氷の街の約束.txt" });
+    // 読んだのは届いたファイルだけ（押す前からあったもの・別の名前は開かない）
+    expect(read).toHaveLength(1);
+    expect(read[0]).toContain("氷の街の約束.txt");
+    expect(read[0]).not.toContain("(1)");
+    await vi.waitFor(() => expect(own.list()).toEqual([]));
+    expect(own.isWaiting(ALPHAPOLIS)).toBe(false);
+  });
+
+  test("一度に2つ届いたら、どれを取り込むか訊く（訊いただけでは取り込まない）", async () => {
+    remember(ALPHAPOLIS);
+    const own = service();
+    await own.fetchBackup(ALPHAPOLIS);
+    folder.files.set("氷の街の約束.txt", 20);
+    folder.files.set("氷の街の約束 (1).txt", 30);
+    await own.pollNow(ALPHAPOLIS);
+    await own.pollNow(ALPHAPOLIS);
+    await vi.waitFor(() =>
+      expect(infos.filter((message) => message.includes("取り込みますか"))).toHaveLength(2)
+    );
+    expect(infos.find((message) => message.includes("取り込みますか"))).toContain(
+      "一度に複数のファイルが届いたため"
+    );
     expect(importAsNew).not.toHaveBeenCalled();
-    expect(tick).toBeDefined();
+  });
+
+  test("名前がほかの枠の作品にも当たるときは、どの作品のものか決まらないので訊く", async () => {
+    const sequel: UnregisteredOwnWork = {
+      ...ALPHAPOLIS,
+      workId: "987654321",
+      title: "氷の街の約束　～別視点～",
+    };
+    remember(ALPHAPOLIS, sequel);
+    const own = service();
+    await own.fetchBackup(ALPHAPOLIS);
+    // 「氷の街の約束」は別視点の題の頭でもある
+    folder.files.set("氷の街の約束.txt", 20);
+    await own.pollNow(ALPHAPOLIS);
+    await own.pollNow(ALPHAPOLIS);
+    await vi.waitFor(() =>
+      expect(infos.some((message) => message.includes("取り込みますか"))).toBe(true)
+    );
+    expect(infos.find((message) => message.includes("取り込みますか"))).toContain(
+      "どの作品のものか決められませんでした"
+    );
+    expect(importAsNew).not.toHaveBeenCalled();
+  });
+
+  test("同じ作品がもう登録されていれば、取り込まずに理由を言い、待ちを止める（ファイルには触らない）", async () => {
+    remember(ALPHAPOLIS);
+    let read = 0;
+    fsStub.readFile = async () => {
+      read++;
+      return new TextEncoder().encode(ALPHAPOLIS_TEXT);
+    };
+    const own = service({ registeredKeys: async () => new Set(["alphapolis:123456789"]) });
+    await own.fetchBackup(ALPHAPOLIS);
+    folder.files.set("氷の街の約束.txt", 20);
+    await own.pollNow(ALPHAPOLIS);
+    await own.pollNow(ALPHAPOLIS);
+    await vi.waitFor(() =>
+      expect(infos.some((message) => message.includes("もう登録してある作品なので"))).toBe(true)
+    );
+    expect(importAsNew).not.toHaveBeenCalled();
+    expect(read).toBe(0);
+    expect(own.isWaiting(ALPHAPOLIS)).toBe(false);
   });
 
   test("30分で止まり、そう知らせる", async () => {
@@ -220,26 +300,24 @@ describe("待ち", () => {
     expect(infos.at(-1)).toContain("30分待ちましたが");
   });
 
-  test("［取り込む］を押すと届いたファイルを読んで取り込み、枠を忘れて待ちを止める", async () => {
+  test("訊いたときに［取り込む］を押すと、届いたファイルを読んで取り込む（訊いて取り込むときは確かめの窓を省かない）", async () => {
     remember(ALPHAPOLIS);
     fsStub.readFile = async () => new TextEncoder().encode(ALPHAPOLIS_TEXT);
-    let answered: Promise<unknown> | undefined;
     win.showInformationMessage = ((message: string) => {
       infos.push(message);
-      const answer = message.includes("届きました") ? IMPORT_ARRIVED_LABEL : undefined;
-      answered = Promise.resolve(answer);
-      return answered;
+      return Promise.resolve(message.includes("取り込みますか") ? IMPORT_ARRIVED_LABEL : undefined);
     }) as Stub["showInformationMessage"];
     const own = service();
     await own.fetchBackup(ALPHAPOLIS);
     folder.files.set("氷の街の約束.txt", 100);
+    folder.files.set("氷の街の約束 (1).txt", 100);
     await own.pollNow(ALPHAPOLIS);
     await own.pollNow(ALPHAPOLIS);
     // 押されたあとの処理（`whenNoticePicked`）が終わるのを待つ
-    await vi.waitFor(() => expect(importAsNew).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(importAsNew).toHaveBeenCalled());
     expect(importAsNew.mock.calls[0][1]).toEqual({ site: "alphapolis", workId: "123456789" });
+    expect(importAsNew.mock.calls[0][2]).toBeUndefined();
     await vi.waitFor(() => expect(own.list()).toEqual([]));
-    expect(own.isWaiting(ALPHAPOLIS)).toBe(false);
   });
 });
 
@@ -338,6 +416,96 @@ describe("覚えと出さない", () => {
     const own = service();
     await own.restoreHidden();
     expect(own.list()[0].hidden).toBe(true);
+  });
+});
+
+describe("読者の反応の控え", () => {
+  function ownEnvelope(over: Record<string, unknown> = {}): ReaderStatsEnvelope {
+    const parsed = parseReaderStatsEnvelope(
+      buildReaderStatsEnvelope({
+        site: "kakuyomu",
+        workId: "16816927861924296900",
+        readAt: "2026-11-01T07:47:50.743Z",
+        title: "星の数ほどいるクズ",
+        ownedVia: "owner-page",
+        entries: [{ scope: "work", metrics: { pv: 120 } }],
+        ...over,
+      })
+    );
+    if (!parsed.ok) throw new Error(parsed.reason);
+    return parsed.envelope;
+  }
+
+  test("管理画面で読んだ未登録の作品の数を控え、登録されたら控えから取り込みへ渡す", async () => {
+    let registered = new Set<string>();
+    const handed: ReaderStatsEnvelope[][] = [];
+    const own = service({
+      registeredKeys: async () => registered,
+      importHeldStats: async (envelopes, lead) => {
+        handed.push([...envelopes]);
+        expect(lead).toContain("控えておいた読者の反応");
+        return [];
+      },
+    });
+    await own.note([ownEnvelope(), ownEnvelope({ ownedVia: "approved", workId: "1" })]);
+    // 本人しか開けない画面の分だけ控える
+    expect(own.pendingStats().map((envelope) => envelope.workId)).toEqual(["16816927861924296900"]);
+
+    // まだ登録されていなければ渡さない
+    await own.settleRegistered(registered);
+    expect(handed).toEqual([]);
+
+    // ほかの道（投稿サイト設定など）で同じサイト・作品ID が登録された
+    registered = new Set(["kakuyomu:16816927861924296900"]);
+    await own.settleRegistered(registered);
+    expect(handed).toHaveLength(1);
+    expect(handed[0][0].entries).toEqual(ownEnvelope().entries);
+    // 渡して台帳に入った分は控えから外し、枠からも外す
+    expect(own.pendingStats()).toEqual([]);
+    expect(own.list()).toEqual([]);
+  });
+
+  test("取り込みの側が「まだ台帳に入っていない」と返した画面は控えに残す", async () => {
+    const registered = new Set(["kakuyomu:16816927861924296900"]);
+    const own = service({
+      registeredKeys: async () => registered,
+      importHeldStats: async (envelopes) => envelopes,
+    });
+    await own.note([ownEnvelope()]);
+    await own.settleRegistered(registered);
+    expect(own.pendingStats()).toHaveLength(1);
+  });
+
+  test("枠のバックアップを取り込んで登録したら、その作品の控えを取り込みへ渡す", async () => {
+    remember(ALPHAPOLIS);
+    const handed: ReaderStatsEnvelope[] = [];
+    const own = service({
+      // 取り込んだあとは台帳に作品ID が入っている
+      registeredKeys: async () => new Set(["alphapolis:123456789"]),
+      importHeldStats: async (envelopes) => {
+        handed.push(...envelopes);
+        return [];
+      },
+    });
+    await own.note([ownEnvelope({ site: "alphapolis", workId: "123456789", title: "氷の街の約束" })]);
+    await own.importBytes(ALPHAPOLIS, {
+      fileName: "氷の街の約束.txt",
+      bytes: new TextEncoder().encode(ALPHAPOLIS_TEXT),
+    });
+    expect(handed.map((envelope) => envelope.workId)).toEqual(["123456789"]);
+    expect(own.pendingStats()).toEqual([]);
+  });
+
+  /*
+    リーダーの指示 3（2026-11-01）。作者が「登録しない」と決めた作品ID でも、管理画面で読んだ
+    自分の作品は枠に出す（覚えの側は「登録しない」の覚えを見ない作り。それを確かめる）
+  */
+  test("「登録しない」と決めた作品ID でも、管理画面で読んだ自分の作品は覚えて控える", async () => {
+    memory.values.set("novelai.readerStats.declinedWorkIds", ["kakuyomu:16816927861924296900"]);
+    const own = service();
+    await own.note([ownEnvelope()]);
+    expect(own.list().map((entry) => entry.title)).toEqual(["星の数ほどいるクズ"]);
+    expect(own.pendingStats()).toHaveLength(1);
   });
 });
 

@@ -9,6 +9,7 @@ import {
 } from "../core/readerStatsEnvelope";
 import {
   DECLINED_UNDO_HINT,
+  ownWorkFramedNotice,
   planReaderStatsSiteId,
   pickReaderStatsWork,
   readerStatsAlreadyImported,
@@ -20,7 +21,7 @@ import {
   uriPathForLog,
   type ReaderStatsWorkCandidate,
 } from "../core/readerStatsHelperLink";
-import { ownWorkCandidates } from "../core/unregisteredOwnWorks";
+import { ownWorkCandidates, ownWorkLabel } from "../core/unregisteredOwnWorks";
 import { isWebRuntime } from "../core/runtime";
 import { logLine, useLogFile } from "../core/logger";
 import { cancelItem, isCancelItem } from "../views/dialogs";
@@ -384,6 +385,14 @@ export class ReaderStatsHelperLink {
     }
     const siteLabel = postingSiteInfo(envelope.site).label;
     if (isDeclinedReaderStatsId(this.deps.memory, envelope.site, workId)) {
+      // 本人しか開けない画面で読んだ自分の作品は、「登録しない」の覚えがあっても枠に載せて
+      // 数も控えている（2026-11-01）。断りでなく、次に何をすればよいかを言う
+      if (this.deps.noteOwnWorks && ownWorkCandidates([envelope]).length > 0) {
+        void vscode.window.showInformationMessage(
+          ownWorkFramedNotice([ownWorkLabel({ title: envelope.title, workId })])
+        );
+        return;
+      }
       void vscode.window.showInformationMessage(
         `${siteLabel}の作品ID ${workId} は、登録しないことにした作品IDなので取り込みませんでした。` +
           DECLINED_UNDO_HINT

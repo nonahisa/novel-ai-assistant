@@ -2,6 +2,9 @@ import { describe, expect, test } from "vitest";
 import {
   backupEntryFor,
   checkBackupAgainstOwnWork,
+  comparableLedgerWorkId,
+  forgetRegisteredOwnWorks,
+  isRegisteredOwnWork,
   hideUnregisteredOwnWork,
   hiddenUnregisteredOwnWorks,
   looksLikeBackupOf,
@@ -147,6 +150,58 @@ describe("枠に出す作品", () => {
       withSiteProfile(emptyPostingLedger(), "alphapolis", { workId: "222" }),
     ]);
     expect(visibleUnregisteredOwnWorks(list, registered).map((entry) => entry.workId)).toContain("222");
+  });
+
+  /*
+    作者の実機（2026-11-01）：登録済みの「教科書チート」のアルファポリスの作品ID 637622366 が
+    「未登録」として覚えられていた。0.116.1 までの欄の例「作者番号／作品番号」で入れた台帳でも、
+    後ろの9桁で登録済みと見る
+  */
+  test("アルファポリスの古い形（作者番号／作品番号）の台帳も、後ろの9桁で登録済みと見る", () => {
+    const frame: UnregisteredOwnWork = {
+      site: "alphapolis",
+      workId: "637622366",
+      title: "転生受験生の教科書チート生活　～その知識、学校で習いましたよ？～",
+      ownedVia: "owner-page",
+      lastSeenAt: "x",
+    };
+    for (const old of ["386123/637622366", "386123／637622366", " 386123 / 637622366 "]) {
+      const registered = registeredSiteWorkKeys([
+        withSiteProfile(emptyPostingLedger(), "alphapolis", { workId: old }),
+      ]);
+      expect(visibleUnregisteredOwnWorks([frame], registered)).toEqual([]);
+    }
+    // 作者番号だけ・桁の違うものは読み替えない（推し量って別の作品に当てない）
+    for (const other of ["386123", "386123/63762236", "637622366/386123"]) {
+      const registered = registeredSiteWorkKeys([
+        withSiteProfile(emptyPostingLedger(), "alphapolis", { workId: other }),
+      ]);
+      expect(visibleUnregisteredOwnWorks([frame], registered)).toHaveLength(1);
+    }
+    expect(comparableLedgerWorkId("alphapolis", "386123/637622366")).toBe("637622366");
+    expect(comparableLedgerWorkId("kakuyomu", "386123/637622366")).toBe("386123/637622366");
+  });
+
+  test("台帳に作品IDが無くても、登録した作品の題が同じなら枠に出さず、覚えからも外せる", () => {
+    const frame: UnregisteredOwnWork = {
+      site: "kakuyomu",
+      workId: "16816927861924296900",
+      title: "星の数ほどいるクズ",
+      ownedVia: "owner-page",
+      lastSeenAt: "x",
+    };
+    const registered = registeredSiteWorkKeys([emptyPostingLedger()], ["星の数ほどいるクズ"]);
+    expect(isRegisteredOwnWork(frame, registered)).toBe(true);
+    expect(visibleUnregisteredOwnWorks([frame], registered)).toEqual([]);
+    expect(forgetRegisteredOwnWorks([frame], registered)).toEqual([]);
+    // 題の違う作品は残る。変わらなければ同じ配列（書かずに済む）
+    const none = registeredSiteWorkKeys([], ["別の作品の題"]);
+    const list = [frame];
+    expect(forgetRegisteredOwnWorks(list, none)).toBe(list);
+    // 短い題（4字未満）は題では見ない（別の作品と重なりやすい）
+    expect(
+      isRegisteredOwnWork({ ...frame, title: "無題" }, registeredSiteWorkKeys([], ["無題"]))
+    ).toBe(false);
   });
 });
 
