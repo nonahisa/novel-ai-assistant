@@ -51,6 +51,7 @@ import {
   type ReaderStatsRegisterOptions,
 } from "./readerStatsRegister";
 import { messageOf } from "../core/errorMessage";
+import { ownWorkCandidates, ownWorkLabel } from "../core/unregisteredOwnWorks";
 
 /**
  * 読者の反応を台帳へ入れる2つの入口（設計書6.79.7）。
@@ -367,6 +368,13 @@ export async function importReaderStatsBundle(
   */
   const unregistered: ReaderStatsEnvelope[] = [];
   const declined: string[] = [];
+  /*
+    「登録しない」と決めた作品IDのうち、本人しか開けない画面で読んだもの（2026-11-01）。
+    こちらは「未登録の自分の作品」の枠に載る（覚えは「登録しない」を見ない）ので、
+    知らせは断りでなく次の一手を言う
+  */
+  const framed: string[] = [];
+  let declinedElsewhere = 0;
   // どの作品の作品IDにも当たらなかった画面（未登録の自分の作品を覚えるため。2026-11-01）
   const unrouted: ReaderStatsEnvelope[] = [];
   // 作品ごとの画面。**束に最初に出てきた順**（Map は入れた順を保つ）で、中は溜めた順
@@ -390,6 +398,12 @@ export async function importReaderStatsBundle(
           isDeclinedReaderStatsId(register.memory, envelope.site, envelope.workId)
         ) {
           declined.push(readerStatsBundleItemLabel(envelope));
+          if (ownWorkCandidates([envelope]).length > 0) {
+            const label = ownWorkLabel({ title: envelope.title, workId: envelope.workId });
+            if (!framed.includes(label)) framed.push(label);
+          } else {
+            declinedElsewhere++;
+          }
           continue;
         }
         unregistered.push(envelope);
@@ -494,6 +508,8 @@ export async function importReaderStatsBundle(
     works: outcomes,
     failures,
     declined,
+    // 枠に載らない画面が1つでも混じれば、これまでどおりの断りの文にする
+    framed: declinedElsewhere === 0 ? framed : [],
     registerOffered: pending.length > 0,
     lead: options.lead,
   });

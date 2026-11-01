@@ -208,9 +208,7 @@ export function hiddenUnregisteredOwnWorks(
   list: readonly UnregisteredOwnWork[],
   registered: ReadonlySet<string>
 ): UnregisteredOwnWork[] {
-  return list.filter(
-    (entry) => entry.hidden === true && !registered.has(ownWorkKey(entry.site, entry.workId))
-  );
+  return list.filter((entry) => entry.hidden === true && !isRegisteredOwnWork(entry, registered));
 }
 
 /** なろうのバックアップの画面の番号を覚える */
@@ -223,6 +221,20 @@ export function setNarouBackupId(
   return updateOne(list, site, workId, (entry) => ({ ...entry, narouBackupId }));
 }
 
+/**
+ * 登録済みになった作品を忘れる（2026-11-01）。枠の［バックアップを取る］以外の道
+ * （「投稿サイト設定」で作品IDを入れた・別の道で同じ作品を登録した）で登録されたものも、
+ * 覚えに残し続けない。
+ * @returns 変わったら新しい並び、変わらなければ同じ配列（書かずに済ませるため）
+ */
+export function forgetRegisteredOwnWorks(
+  list: readonly UnregisteredOwnWork[],
+  registered: ReadonlySet<string>
+): readonly UnregisteredOwnWork[] {
+  const next = list.filter((entry) => !isRegisteredOwnWork(entry, registered));
+  return next.length === list.length ? list : next;
+}
+
 /** 取り込んで登録したので忘れる（登録した作品の台帳に作品IDが入った） */
 export function forgetUnregisteredOwnWork(
   list: readonly UnregisteredOwnWork[],
@@ -233,18 +245,64 @@ export function forgetUnregisteredOwnWork(
 }
 
 /**
- * 登録した作品の台帳から、サイトと作品IDの組を集める（枠から外す相手）。
- * 読めなかった台帳は渡さないこと（その作品は「作品IDの無い作品」と同じに扱う）
+ * 台帳の作品IDを、枠の作品IDと比べられる形にする。
+ *
+ * **アルファポリスだけ読み替える。** 0.116.1 までは欄の例に「作者番号／作品番号」
+ * （`123456/7890123`）を出していたので、その形のまま入っている台帳がある。いまの作品ID
+ * は数字9桁（ヘルパーが管理画面で読む番号）なので、**区切りの後ろが9桁ちょうどのときだけ**
+ * その9桁と見る。作者番号だけ・桁の違うものは読み替えない（推し量って別の作品に当てない。
+ * `alphapolisWorkId` と同じ線）。ほかのサイトはそのまま
  */
-export function registeredSiteWorkKeys(ledgers: readonly PostingLedger[]): Set<string> {
+export function comparableLedgerWorkId(site: PostingSiteId, workId: string): string {
+  const trimmed = workId.trim();
+  if (site !== "alphapolis" || alphapolisWorkId(trimmed)) return trimmed;
+  const parts = trimmed.split(/[/／]/).map((part) => part.trim());
+  const last = parts.length >= 2 ? alphapolisWorkId(parts[parts.length - 1]) : undefined;
+  return last ?? trimmed;
+}
+
+/** 登録した作品の題を、登録済みの組に混ぜるときの鍵（サイト・作品IDの鍵と重ならない頭を付ける） */
+function registeredTitleKey(title: string): string {
+  return `title:${normalizeWorkTitle(title)}`;
+}
+
+/**
+ * 登録した作品の台帳から、サイトと作品IDの組を集める（枠から外す相手）。
+ * 読めなかった台帳は渡さないこと（その作品は「作品IDの無い作品」と同じに扱う）。
+ *
+ * `titles` を渡すと、登録した作品の題も同じ組に入れる（2026-11-01 リーダーの指示）。
+ * 台帳に作品IDを入れていない作品でも、題が同じなら同じ作品と見て枠から外す
+ * ——枠に出したままだと、［バックアップを取る］で同じ作品を2つ目として登録してしまう
+ */
+export function registeredSiteWorkKeys(
+  ledgers: readonly PostingLedger[],
+  titles: readonly string[] = []
+): Set<string> {
   const keys = new Set<string>();
   for (const ledger of ledgers) {
     for (const entry of ledger.siteProfiles) {
       const workId = siteProfile(ledger, entry.site)?.workId?.trim();
-      if (workId) keys.add(ownWorkKey(entry.site, workId));
+      if (workId) keys.add(ownWorkKey(entry.site, comparableLedgerWorkId(entry.site, workId)));
     }
   }
+  for (const title of titles) {
+    // 短すぎる題（「無題」など）は別の作品と重なりやすいので、題では見ない
+    if (normalizeWorkTitle(title).length >= 4) keys.add(registeredTitleKey(title));
+  }
   return keys;
+}
+
+/** その作品はもう登録済みか（サイトと作品ID、または題が同じ。`registeredSiteWorkKeys`） */
+export function isRegisteredOwnWork(
+  entry: Pick<UnregisteredOwnWork, "site" | "workId" | "title">,
+  registered: ReadonlySet<string>
+): boolean {
+  if (registered.has(ownWorkKey(entry.site, entry.workId))) return true;
+  return (
+    entry.title !== undefined &&
+    normalizeWorkTitle(entry.title).length >= 4 &&
+    registered.has(registeredTitleKey(entry.title))
+  );
 }
 
 /**
@@ -257,7 +315,7 @@ export function visibleUnregisteredOwnWorks(
 ): UnregisteredOwnWork[] {
   const order: PostingSiteId[] = ["narou", "kakuyomu", "alphapolis", "note"];
   return list
-    .filter((entry) => !entry.hidden && !registered.has(ownWorkKey(entry.site, entry.workId)))
+    .filter((entry) => !entry.hidden && !isRegisteredOwnWork(entry, registered))
     .sort(
       (a, b) =>
         order.indexOf(a.site) - order.indexOf(b.site) ||

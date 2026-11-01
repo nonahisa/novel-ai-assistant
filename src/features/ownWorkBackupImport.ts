@@ -18,7 +18,7 @@ import { messageOf } from "../core/errorMessage";
 import { postingSiteInfo } from "../models/posting";
 import type { WorkEntry } from "../models/types";
 import { withProgress } from "../views/progress";
-import type { KnownSiteWork, PickedBackup } from "./importWorkFromZip";
+import type { KnownSiteWork, PickedBackup, UnattendedImport } from "./importWorkFromZip";
 
 /**
  * 「未登録の自分の作品」の枠へ、バックアップを取り込む（作者の指示 2026-11-01）。
@@ -41,7 +41,9 @@ import type { KnownSiteWork, PickedBackup } from "./importWorkFromZip";
 /** 新しい作品として取り込む口（`extension.ts` の登録の道を持っている側が渡す） */
 export type ImportOwnWorkAsNew = (
   picked: PickedBackup,
-  known: KnownSiteWork
+  known: KnownSiteWork,
+  /** 届いたバックアップを訊かずに取り込むとき（`importWorkFromZip` の同じ名前の引数） */
+  unattended?: UnattendedImport
 ) => Promise<WorkEntry | undefined>;
 
 /** 照らして食い違ったときの、取り込みへ進むボタン */
@@ -53,7 +55,12 @@ export const IMPORT_ANYWAY_LABEL = "それでも取り込む";
 export async function importOwnWorkBackup(
   entry: UnregisteredOwnWork,
   source: { readonly fileName: string; readonly bytes: Uint8Array },
-  importAsNew: ImportOwnWorkAsNew
+  importAsNew: ImportOwnWorkAsNew,
+  /**
+   * 届いたバックアップを訊かずに取り込むか（作者の判断 2026-11-01）。立っていても、
+   * 読めない・中身が枠の作品と食い違うときは、今までどおり止めて理由を言う・訊く
+   */
+  unattended = false
 ): Promise<WorkEntry | undefined> {
   // 作品が決まるまでは保管庫の記録へ（相談パネルの受け口と同じ理由。設計書6.99.7）
   useLogFile(undefined);
@@ -127,6 +134,9 @@ export async function importOwnWorkBackup(
 
   return importAsNew(
     { fileName, inspection },
-    { site: entry.site, workId: entry.workId }
+    { site: entry.site, workId: entry.workId },
+    // 照らして食い違い、作者が［それでも取り込む］を選んだときは、訊かずには進めない
+    // （作者が迷った取り込みなので、題と中身を見せてから作る）
+    unattended && check.ok ? { fileName } : undefined
   );
 }

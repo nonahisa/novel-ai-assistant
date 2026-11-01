@@ -463,6 +463,26 @@ describe("登録の無い作品IDをその場で登録する（作者の裁定 2
     expect(notice.message).toContain("「読者反応自動取込」");
   });
 
+  /*
+    リーダーの指示 3（2026-11-01）。管理画面で読んだ自分の作品は「登録しない」の覚えがあっても
+    枠に載る。そのときは断りでなく、次に何をすればよいかを言う
+  */
+  test("登録しないと決めた作品IDの分が、どれも枠に載せた自分の作品なら、次の一手を言う", () => {
+    const notice = readerStatsBundleNotice({
+      works: [],
+      failures: [],
+      declined: ["カクヨム 作品ID 16816927861924296900"],
+      framed: ["星の数ほどいるクズ"],
+    });
+    expect(notice.level).toBe("info");
+    expect(notice.message).toBe(
+      "「星の数ほどいるクズ」を作品一覧の「未登録の自分の作品」に載せました。" +
+        "右クリックの［バックアップを取る］でバックアップを落とすと、自動で登録します" +
+        "（読者の反応も控えてあり、登録したら取り込みます）。"
+    );
+    expect(notice.message).not.toContain("登録しないことにした");
+  });
+
   test("［作品に登録する］を付けるときは、直し方の文でボタンを指す", () => {
     const notice = readerStatsBundleNotice({
       works: [],

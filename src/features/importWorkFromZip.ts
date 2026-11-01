@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { pathExists } from "../core/fileSystem";
-import { logFailure, useLogFile } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
 import { parsePlotMarkdown } from "../core/plotDoc";
 import { readPlotText, writePlotSections } from "../core/plotFile";
 import {
@@ -44,10 +44,15 @@ import { placeImportedChapters } from "./importChaptersFromBackup";
 import { describeEpisodeNumbers } from "../core/episodeNumberCheck";
 import type { WorkInfo } from "../core/workInfoParse";
 import { DEFAULT_MANUSCRIPT_DIR, type WorkEntry } from "../models/types";
-import type { WorkLocation } from "../core/libraryHome";
+import {
+  decideNewWorkHome,
+  describeNewWorkHome,
+  type WorkLocation,
+} from "../core/libraryHome";
+import { normalizeWorkTitle } from "../core/backupMatch";
 import type { CollectionOptions } from "./addCollection";
 import { askText } from "../views/dialogs";
-import { confirmRun } from "../views/notify";
+import { confirmRun, whenNoticePicked } from "../views/notify";
 import {
   openInDefaultEditor,
   revealFolder,
@@ -126,15 +131,28 @@ export interface KnownSiteWork {
 }
 
 /**
+ * 訊かずに取り込むとき（作者の判断 2026-11-01「届いたバックアップは訊かずに取り込む」）。
+ * 「未登録の自分の作品」の枠で［バックアップを取る］を押し、ダウンロードのフォルダーに
+ * 届いたファイルだけに付ける（枠へ落とす・選ぶは作者の手なので、今までどおり確かめる）。
+ */
+export interface UnattendedImport {
+  /** 届いたファイルの名前（終わったときの知らせに出す） */
+  readonly fileName: string;
+}
+
+/**
  * @returns 登録した作品。取りやめ・失敗なら undefined（枠から呼んだときは枠を残す）
  */
 export async function importWorkFromZip(
-  works: readonly WorkLocation[],
+  /** 登録した作品（置き場の見当と、訊かずに進むときの同じ題の見分けに使う） */
+  works: readonly (WorkLocation & { readonly title?: string })[],
   register: RegisterWork,
   /** 相談パネルから渡されたとき。無ければ、これまでどおりファイルを選ばせる */
   picked?: PickedBackup,
   /** 枠から取り込むとき、台帳へ書くサイトと作品ID（`notePostingSite`） */
-  known?: KnownSiteWork
+  known?: KnownSiteWork,
+  /** 届いたバックアップを訊かずに取り込むとき */
+  unattended?: UnattendedImport
 ): Promise<WorkEntry | undefined> {
   // **作品フォルダーが決まるまでは、保管庫の記録へ書く。** 切り替えないと、
   // 読み取りの失敗が直前に触った関係の無い作品の記録へ紛れる
@@ -145,14 +163,31 @@ export async function importWorkFromZip(
   const { inspection } = source;
   const zipPath = source.fileName;
 
-  if (!(await confirmImport(zipPath, inspection))) return undefined;
+  /*
+    **訊かずに進むのは、迷う所が1つも無いときだけ**（作者の判断 2026-11-01）。
+    同じ題の作品がすでに登録されていれば、今までどおり中身を見せて確かめる
+    ——同じ作品を2つ目として作ってしまうかもしれないので、勝手に決めない
+  */
+  const quiet = unattended && !hasWorkTitled(works, inspection.title) ? unattended : undefined;
+
+  if (!quiet && !(await confirmImport(zipPath, inspection))) return undefined;
 
   // **置き場を決めてから題を訊く。** 逆にすると、名前を考えたあとで
-  // 「どこに作りますか」と訊かれる（書庫の決め方は 6.97.2 のまま）
-  const home = await resolveNewWorkHome(works);
+  // 「どこに作りますか」と訊かれる（書庫の決め方は 6.97.2 のまま）。
+  // 訊かずに進むときも、書庫が1つに決まらなければ今までどおり選んでもらう
+  const decided = quiet ? decideNewWorkHome(works) : undefined;
+  const home =
+    decided?.kind === "library"
+      ? { folderPath: decided.folderPath, note: describeNewWorkHome(decided.folderPath) }
+      : await resolveNewWorkHome(works);
   if (!home) return undefined;
 
-  const title = await askWorkTitle(inspection, home.note);
+  // 訊かずに進むときは、バックアップの題をそのまま作品名にする。
+  // フォルダー名に使えない文字を含むなら、黙って直さずに今までどおり訊く
+  const title =
+    quiet && workTitleProblem(inspection.title) === null
+      ? inspection.title.trim()
+      : await askWorkTitle(inspection, home.note);
   if (!title) return undefined;
 
   const folderPath = path.join(home.folderPath, title);
@@ -213,8 +248,27 @@ export async function importWorkFromZip(
   */
   const chapters = await placeImportedChapters(entry, inspection.outline);
 
-  await reportResult(entry, zipPath, inspection, placed, recorded, chapters);
+  await reportResult(entry, zipPath, inspection, placed, recorded, chapters, quiet);
   return entry;
+}
+
+/** 同じ題の作品がすでに登録されているか（題のそろえ方は相談パネルの照合と同じ） */
+function hasWorkTitled(
+  works: readonly (WorkLocation & { readonly title?: string })[],
+  title: string
+): boolean {
+  const wanted = normalizeWorkTitle(title);
+  return (
+    wanted !== "" && works.some((work) => normalizeWorkTitle(work.title ?? "") === wanted)
+  );
+}
+
+/** 作品名（フォルダ名）として使えないなら理由を返す。題を訊く欄の確かめと同じ */
+function workTitleProblem(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "作品名を入力してください";
+  if (/[/\\:*?"<>|]/.test(trimmed)) return "フォルダ名に使えない文字が含まれています";
+  return null;
 }
 
 /** ファイルを選ばせて、読んで確かめる（メニューから始めたときの道） */
@@ -374,14 +428,7 @@ async function askWorkTitle(
     title: homeNote,
     value: inspection.title,
     prompt: "作品名を確かめてください（フォルダ名になります）",
-    validateInput: (value) => {
-      const trimmed = value.trim();
-      if (trimmed.length === 0) return "作品名を入力してください";
-      if (/[/\\:*?"<>|]/.test(trimmed)) {
-        return "フォルダ名に使えない文字が含まれています";
-      }
-      return null;
-    },
+    validateInput: workTitleProblem,
   });
   return title?.trim() || undefined;
 }
@@ -728,7 +775,9 @@ async function reportResult(
   /** 台帳へ積んだ読者の反応の内訳（バックアップに入っていたぶん） */
   recorded: RecordedReaderStats,
   /** 章立てをどうしたか（章の見出しが無ければ undefined） */
-  chapters?: { readonly created: number; readonly note: string }
+  chapters?: { readonly created: number; readonly note: string },
+  /** 訊かずに取り込んだとき（知らせの頭と、次の一手を変える） */
+  unattended?: UnattendedImport
 ): Promise<void> {
   const invite = readerStatsInvite(inspection.site, recorded);
   // **確認の画面で言ったことを、済んだあとでもう一度言う**（作者の指示）。
@@ -777,6 +826,11 @@ async function reportResult(
         .filter((note) => note !== "")
         .join(" ");
 
+  if (unattended) {
+    reportUnattended(work, unattended, inspection, message, concerns, chapters, recordPath);
+    return;
+  }
+
   const action = await vscode.window.showInformationMessage(
     message,
     // **記録を先頭に置く。** 気をつけたいことがあるときは、ここが次の一歩
@@ -799,6 +853,62 @@ async function reportResult(
   if (command) {
     await vscode.commands.executeCommand(command, { type: "work", work });
   }
+}
+
+/** 訊かずに取り込んだあとの［作品を開く］（最初の話を原稿の画面で開く） */
+export const OPEN_IMPORTED_WORK_LABEL = "作品を開く";
+
+/**
+ * 訊かずに取り込んだときの知らせ（作者の判断 2026-11-01）。
+ *
+ * **頭で「何を登録したか」を言い切る**——作者は確認の窓を1つも見ていないので、
+ * どの作品がどのファイルから入ったかを、ここで初めて知る。ボタンは次の一手の
+ * ［作品を開く］を1つだけ。気をつけたいこと（重複・欠番・文字コード）があるときだけ、
+ * 記録を開くボタンも添える（見出しだけでは中身が分からないため）。
+ *
+ * **答えは待たない**（`whenNoticePicked`）。届いたファイルの見張りの途中から呼ばれるので、
+ * 待つと次に届いたファイルに気づけなくなる。
+ */
+function reportUnattended(
+  work: WorkEntry,
+  unattended: UnattendedImport,
+  inspection: WorkZipInspection,
+  summary: string,
+  concerns: readonly string[],
+  chapters: { readonly created: number; readonly note: string } | undefined,
+  recordPath: string | undefined
+): void {
+  const lead = `「${work.title}」を登録しました（バックアップ：${path.basename(unattended.fileName)}）。`;
+  const recordLabel = `${IMPORT_RECORD_KIND}を開く`;
+  const needsRecord =
+    recordPath !== undefined && (concerns.length > 0 || (chapters !== undefined && chapters.created === 0));
+  useLogFile(work.folderPath);
+  logStep(`${lead}${summary}`);
+  const first = inspection.files[0];
+  whenNoticePicked(
+    vscode.window.showInformationMessage(
+      lead + summary,
+      OPEN_IMPORTED_WORK_LABEL,
+      ...(needsRecord ? [recordLabel] : [])
+    ),
+    async (answer) => {
+      if (answer === recordLabel && recordPath) {
+        await openInDefaultEditor(recordPath);
+        return;
+      }
+      if (answer !== OPEN_IMPORTED_WORK_LABEL) return;
+      if (!first) {
+        await revealFolder(work.folderPath);
+        return;
+      }
+      // 一覧から話を開くのと同じ道（原稿の画面）で開く
+      await vscode.commands.executeCommand(
+        "novelai.openEpisode",
+        path.toUri(path.join(work.folderPath, DEFAULT_MANUSCRIPT_DIR, first.name))
+      );
+    },
+    { label: "届いたバックアップの取り込み", workFolder: work.folderPath }
+  );
 }
 
 /**

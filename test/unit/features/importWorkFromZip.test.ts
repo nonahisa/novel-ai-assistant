@@ -340,6 +340,59 @@ describe("ZIPから作品を取り込む", () => {
     expect(fs.text(paths.join(MANUSCRIPT, "episode_0001.txt"))).toBe(EPISODE_TEXT);
   });
 
+  /*
+    作者の判断（2026-11-01）「届いたバックアップは訊かずに取り込む」。「未登録の自分の作品」の
+    枠で待っていたファイルだけが、この印を付けて来る
+  */
+  it("訊かずに取り込む印があれば、確かめの窓も作品名の欄も出さずに登録し、［作品を開く］を添えて知らせる", async () => {
+    const fs = new MemoryFs({ [ZIP_PATH]: ZIP_BYTES });
+    fs.install();
+    stubWindow();
+    let asked = 0;
+    const originalInput = window.showInputBox;
+    window.showInputBox = (async () => {
+      asked++;
+      return undefined;
+    }) as typeof window.showInputBox;
+    try {
+      const registered: string[] = [];
+      const entry = await importWorkFromZip(
+        WORKS,
+        async (folderPath) => {
+          registered.push(folderPath);
+          return workEntry();
+        },
+        { fileName: ZIP_PATH, inspection: inspectWorkBackup(ZIP_BYTES, "星を継ぐ者たち_20260919.zip") },
+        { site: "kakuyomu", workId: "1177354054934574437" },
+        { fileName: "星を継ぐ者たち_20260919.zip" }
+      );
+      expect(entry?.title).toBe("星を継ぐ者たち");
+      expect(registered).toEqual([WORK_FOLDER]);
+      expect(asked).toBe(0);
+      // 確かめの窓（「この内容で作品を作りますか？」）は出ていない
+      expect(notices.some((notice) => notice.message.includes("作りますか"))).toBe(false);
+      const last = notices.at(-1);
+      expect(last?.message.startsWith("「星を継ぐ者たち」を登録しました（バックアップ：星を継ぐ者たち_20260919.zip）。")).toBe(true);
+      expect(last?.buttons[0]).toBe("作品を開く");
+    } finally {
+      window.showInputBox = originalInput;
+    }
+  });
+
+  it("訊かずに取り込む印があっても、同じ題の作品がすでに登録されていれば確かめる", async () => {
+    const fs = new MemoryFs({ [ZIP_PATH]: ZIP_BYTES });
+    fs.install();
+    stubWindow();
+    await importWorkFromZip(
+      [{ folderPath: paths.join(LIBRARY, "既にある作品"), title: "星を継ぐ者たち" }],
+      async () => workEntry(paths.join(LIBRARY, "星を継ぐ者たち_2")),
+      { fileName: ZIP_PATH, inspection: inspectWorkBackup(ZIP_BYTES, "星を継ぐ者たち_20260919.zip") },
+      undefined,
+      { fileName: "星を継ぐ者たち_20260919.zip" }
+    );
+    expect(notices.some((notice) => notice.message.includes("作りますか"))).toBe(true);
+  });
+
   it("「1作品だと分かっている」と伝えて登録を頼む（書庫か訊かせない）", async () => {
     const fs = new MemoryFs({ [ZIP_PATH]: ZIP_BYTES });
     fs.install();

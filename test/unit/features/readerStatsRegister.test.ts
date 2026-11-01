@@ -406,6 +406,45 @@ describe("まとめて渡された分（URI）", () => {
     expect(picks).toHaveLength(0);
   });
 
+  /*
+    リーダーの指示 3（2026-11-01）。管理画面で読んだ自分の作品は「登録しない」の覚えがあっても
+    「未登録の自分の作品」の枠に載る。知らせは断りでなく、次に何をすればよいかを言う
+  */
+  test("「登録しない」にしたIDでも、管理画面で読んだ自分の作品なら枠に載せたと言う（束・1件とも）", async () => {
+    const owned = (readAt: string) => ({
+      ...(kakuyomuItem(KAKUYOMU_ID, readAt) as Record<string, unknown>),
+      title: "星の数ほどいるクズ",
+      ownedVia: "owner-page",
+    });
+    memory.values.set(DECLINED_READER_STATS_IDS_KEY, [`kakuyomu:${KAKUYOMU_ID}`]);
+    const noted: string[] = [];
+    const helper = new ReaderStatsHelperLink({
+      listWorks: () => works,
+      memory,
+      afterImport: async () => undefined,
+      noteOwnWorks: async (envelopes) => {
+        noted.push(...envelopes.map((envelope) => envelope.workId ?? ""));
+      },
+    });
+
+    env.clipboard.text = bundleText([owned("2026-10-11T10:00:00.000+09:00")]);
+    await helper.handleUri({ path: "/import-reader-stats" });
+    expect(noted).toEqual([KAKUYOMU_ID]);
+    expect([...warned, ...informed]).toEqual([
+      "「星の数ほどいるクズ」を作品一覧の「未登録の自分の作品」に載せました。" +
+        "右クリックの［バックアップを取る］でバックアップを落とすと、自動で登録します" +
+        "（読者の反応も控えてあり、登録したら取り込みます）。",
+    ]);
+
+    warned.length = 0;
+    informed.length = 0;
+    env.clipboard.text = JSON.stringify(owned("2026-10-12T10:00:00.000+09:00"));
+    await helper.handleUri({ path: "/import-reader-stats" });
+    expect([...warned, ...informed]).toHaveLength(1);
+    expect(informed[0]).toContain("「未登録の自分の作品」に載せました");
+    expect(warnButtons.flat()).not.toContain(REGISTER_WORK_ID_LABEL);
+  });
+
   test("「登録しない」にしたIDでも、手で貼り付けて取り込むときはボタンを出し、登録すれば覚えを外す", async () => {
     await memory.update(DECLINED_READER_STATS_IDS_KEY, [`kakuyomu:${KAKUYOMU_ID}`]);
     env.clipboard.text = bundleText([kakuyomuItem(KAKUYOMU_ID)]);
