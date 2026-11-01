@@ -209,18 +209,24 @@ test("執筆統計は閉じて開き直しても前に見ていたタブで開�
         "0話の作品で「まだ話がありません」が出る",
         20_000
       );
-      // 読者の反応のタブへ移って閉じる
-      await first.locator('.tab[data-page="readers"]').click();
+      /*
+        この台の作品は投稿先を登録していないので、サイトのタブ（「カクヨムの反応」など）は出ず、
+        概要に取り込み方の案内が1行出る（作者の指示 2026-11-01「二段のタブとせず」）
+      */
+      expect(await first.locator(".tab[data-site]").count()).toBe(0);
+      expect(await first.locator("#reader-guide", { hasText: "読者の反応はまだありません" }).count()).toBe(1);
+      // 執筆の推移のタブへ移って閉じる
+      await first.locator('.tab[data-page="trend"]').click();
       await session.page.keyboard.press("Control+Alt+Shift+KeyW");
       await waitUntil(async () => (await statsFrame(session.page)) === undefined, "執筆統計が閉じる", 15_000);
 
       const reopened = await openStatsWithoutBars(session);
       await waitUntil(
-        async () => (await reopened.locator('.tab.active[data-page="readers"]').count()) === 1,
-        "開き直すと前に見ていた「読者の反応」で開く",
+        async () => (await reopened.locator('.tab.active[data-page="trend"]').count()) === 1,
+        "開き直すと前に見ていた「執筆の推移」で開く",
         15_000
       );
-      expect(await reopened.locator("#page-readers.active").count()).toBe(1);
+      expect(await reopened.locator("#page-trend.active").count()).toBe(1);
     },
     { keybindings: [CLOSE_STATS_KEY] }
   );

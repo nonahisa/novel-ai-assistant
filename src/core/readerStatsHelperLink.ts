@@ -8,6 +8,7 @@ import {
   type PostingSiteId,
 } from "../models/posting";
 import { narouNcode } from "./postingSiteRecords";
+import { READER_SITE_TABS_HINT } from "./readerSiteTabNames";
 import { newEpisodeUrlFromWorkId } from "./postingSiteUrls";
 import { hashText } from "./hash";
 import { canRunProcesses } from "./runtime";
@@ -432,7 +433,7 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
     parts.push(`登録しないことにした作品IDの分（${declined.length}画面）は取り込んでいません。`);
   }
   if (added > 0) {
-    parts.push("執筆統計の「読者の反応」で履歴を見られます。");
+    parts.push(`${READER_SITE_TABS_HINT}で履歴を見られます。`);
   }
   return {
     level: outcome.failures.length > 0 ? "warning" : "info",

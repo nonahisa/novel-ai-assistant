@@ -1,5 +1,14 @@
-import { READER_STATS_VISIBLE_ROWS } from "../core/postingSiteRecords";
+import { READER_STATS_VISIBLE_ROWS, type ReaderSiteTab } from "../core/postingSiteRecords";
 import { POSTING_SITES } from "../models/posting";
+
+/** HTMLへ埋める字を逃がす（画面の中の escapeHtml と同じ4つ） */
+function escapeMarkup(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 /**
  * 執筆量パネルの中身（設計書6.3）。
@@ -13,47 +22,71 @@ import { POSTING_SITES } from "../models/posting";
  *
  * **全作品の執筆量パネルとこのHTMLを共有する。** グラフ・カード・
  * 内訳テーブルの組み方は1作品でも全作品でも同じで、違うのは
- * 「話ごと」「読者の反応」タブの有無（全作品では話数の単位が作品ごとに
+ * 「話ごと」とサイトのタブの有無（全作品では話数の単位が作品ごとに
  * バラバラで意味を持たず、投稿サイトの台帳も作品ごとにしか無い）だけ。
  * 別ファイルに複製すると、グラフの目盛り間引きのような細かい修正が
  * 2箇所に必要になる。
  *
- * **タブは4つ**（作者の指示、2026-11-01「タブを有効活用して分け」。設計書6.3.9）。
+ * **タブは1段**（作者の指示、2026-11-01「タブを有効活用して分け」。設計書6.3.9）。
  * 以前は「執筆量」の1面に公募・数の札・目標・達成・グラフ・端末・サイトの記録が
  * 縦に詰め込まれ、開くたびに長く送らないと目当ての所へ着かなかった。
  * - 概要：締切・数の札・目標への入口・達成（開いたときに最初に見える所）
  * - 執筆の推移：粒度の切り替え・グラフ・グラフの注記・端末ごとの内訳
  * - 話ごと：話ごとの文字数（全作品では出さない。**0話の作品でも出し**、中身に
  *   「まだ話がありません」と言う。作者の判断 2026-11-01）
- * - 読者の反応：投稿サイトごとのタブに分け、その中に記録・増減・AIの助言（全作品では出さない。
- *   サイトのタブは配信されているサイトだけ、なろうは最後尾。作者の指示 2026-11-01）
+ * - 〈サイト〉の反応（「カクヨムの反応」「アルファの反応」…「なろうの反応」）：そのサイトの記録・
+ *   増減・AIの助言。**配信しているサイトの分だけ**、なろうは最後尾（全作品では出さない。
+ *   作者の指示 2026-11-01「読者の反応は二段のタブとせず」。0.119.0 は「読者の反応」の中に
+ *   サイトのタブを持つ二段だった）。配信しているサイトが無ければ、概要に取り込み方の案内を1行
+ *
+ * サイトのタブは**組み立てるときと、統計が届くたびの両方で**揃える。組み立てるときに出して
+ * おくのは、前に見ていたサイトのタブで開いたとき概要がちらつかないように。届くたびに揃え直す
+ * のは、開いたまま「投稿サイト設定」で投稿先を足したとき、そのサイトのタブが現れるように。
  *
  * **開くタブは、その作品で前に見ていたタブ**（作者の判断 2026-11-01）。覚えるのは拡張機能の
- * 側（`core/writingStatsTabMemory.ts`）で、ここへは `initialTab`・`initialReaderSite` で届く。
+ * 側（`core/writingStatsTabMemory.ts`）で、ここへは `initialTab` で届く。
  */
 export function buildWritingStatsPanelHtml(
   nonce: string,
   cspSource: string,
   options: {
     hasEpisodesTab?: boolean;
+    /**
+     * サイトのタブ（と、配信しているサイトが無いときの概要の案内）を持つ画面か。
+     * 全作品の画面では持たない（投稿サイトの台帳は作品ごとにしか無い）
+     */
     hasReadersTab?: boolean;
     unitNoun?: string;
     /** 開いたときに選ぶタブ（前に見ていたタブ）。その画面に無い・知らない鍵なら概要 */
     initialTab?: string;
-    /** 読者の反応の中で、開いたときに選ぶサイト（前に見ていたサイト）。無ければ先頭のサイト */
-    initialReaderSite?: string | null;
+    /**
+     * 開いたときに出しておくサイトのタブ（`readerSiteTabs` の並び）。統計が届けば揃え直す
+     */
+    readerSites?: readonly ReaderSiteTab[];
   } = {}
 ): string {
   const hasEpisodesTab = options.hasEpisodesTab ?? true;
   const hasReadersTab = options.hasReadersTab ?? true;
   // SNS記事は「話」ではなく「投稿」。数えるものが違えば呼び方も違う
   const unitNoun = options.unitNoun ?? "話";
+  /*
+    サイトのタブは知っているサイトの鍵だけを通す（HTMLの属性へ埋めるので）。名前は core が
+    決めた字面を、念のため逃がしてから埋める
+  */
+  const readerSites = hasReadersTab
+    ? (options.readerSites ?? []).filter((tab) => POSTING_SITES.some((info) => info.id === tab.site))
+    : [];
   // data-page の鍵は画面の自動テストが探すので変えない（episodes は以前からの鍵）
-  const tabs: Array<{ key: string; label: string }> = [
+  const tabs: Array<{ key: string; label: string; site?: string }> = [
     { key: "overview", label: "概要" },
     { key: "trend", label: "執筆の推移" },
     ...(hasEpisodesTab ? [{ key: "episodes", label: `${unitNoun}ごと` }] : []),
-    ...(hasReadersTab ? [{ key: "readers", label: "読者の反応" }] : []),
+    // 鍵の形は core/writingStatsTabMemory.ts の siteTabKey と同じ（覚える側と揃える）
+    ...readerSites.map((tab) => ({
+      key: `site-${tab.site}`,
+      label: escapeMarkup(tab.tabLabel),
+      site: tab.site,
+    })),
   ];
   /*
     **HTMLの属性へ埋めるので、知っている鍵だけを通す**（値はふつう postMessage で渡すが、
@@ -62,9 +95,6 @@ export function buildWritingStatsPanelHtml(
   const initialTab = tabs.some((tab) => tab.key === options.initialTab)
     ? (options.initialTab as string)
     : "overview";
-  const initialReaderSite = POSTING_SITES.some((info) => info.id === options.initialReaderSite)
-    ? (options.initialReaderSite as string)
-    : "";
   const pageClass = (key: string): string => (key === initialTab ? "page active" : "page");
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -102,9 +132,11 @@ header {
 h1 { font-size: 1.05em; font-weight: 600; margin: 0 0 4px; }
 /*
   タブは下線だけで今のタブを示す、軽い形にする（ボタンのような枠にしない）。
-  狭い窓（エディターの横に並べた 360px ほど）では折り返し、横に送らせない
+  狭い窓（エディターの横に並べた 360px ほど）では折り返し、横に送らせない。
+  サイトのタブを1段に並べたので（2026-11-01）最大7つになる。間を少し詰め、折り返した段どうしが
+  くっつかないよう縦にも少し空ける
 */
-.tabs { display: flex; flex-wrap: wrap; gap: 0 20px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px 16px; }
 .tab {
   padding: 6px 0 7px;
   margin-bottom: -1px;
@@ -121,36 +153,6 @@ h1 { font-size: 1.05em; font-weight: 600; margin: 0 0 4px; }
 }
 .tab:focus { outline: none; }
 .tab:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-/*
-  読者の反応の中のサイトのタブ（作者の指示 2026-11-01）。外側のタブと同じ作り（下線で今を示す・
-  狭い幅では折り返して横に送らせない・色はテーマの変数だけ）で、一回り小さくする
-*/
-.site-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 16px;
-  border-bottom: 1px solid var(--vscode-panel-border);
-  margin-bottom: 12px;
-}
-.site-tab {
-  padding: 4px 0 5px;
-  margin-bottom: -1px;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-  font-size: 12px;
-  border-bottom: 2px solid transparent;
-  color: var(--vscode-descriptionForeground);
-}
-.site-tab:hover { color: var(--vscode-foreground); }
-.site-tab.active {
-  color: var(--vscode-foreground);
-  border-bottom-color: var(--vscode-panelTitle-activeBorder, var(--vscode-focusBorder));
-}
-.site-tab:focus { outline: none; }
-.site-tab:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.site-page { display: none; }
-.site-page.active { display: block; }
 main { padding: var(--gap) 16px; }
 section.page { display: none; }
 /*
@@ -395,11 +397,11 @@ a:hover, .link:hover { text-decoration: underline; }
 }
 </style>
 </head>
-<body data-initial-tab="${initialTab}" data-initial-site="${initialReaderSite}">
+<body data-initial-tab="${initialTab}">
 <header>
   <h1 id="title">執筆量</h1>
-  <div class="tabs" role="tablist" aria-label="執筆統計の表示">
-    ${tabs.map((tab) => `<div class="tab${tab.key === initialTab ? ' active' : ''}" role="tab" id="tab-${tab.key}" data-page="${tab.key}" aria-controls="page-${tab.key}" aria-selected="${tab.key === initialTab ? 'true' : 'false'}" tabindex="${tab.key === initialTab ? '0' : '-1'}">${tab.label}</div>`).join('\n    ')}
+  <div class="tabs" id="tabs" role="tablist" aria-label="執筆統計の表示">
+    ${tabs.map((tab) => `<div class="tab${tab.key === initialTab ? ' active' : ''}" role="tab" id="tab-${tab.key}" data-page="${tab.key}"${tab.site ? ` data-site="${tab.site}"` : ''} aria-controls="page-${tab.key}" aria-selected="${tab.key === initialTab ? 'true' : 'false'}" tabindex="${tab.key === initialTab ? '0' : '-1'}">${tab.label}</div>`).join('\n    ')}
   </div>
 </header>
 <main>
@@ -408,6 +410,7 @@ a:hover, .link:hover { text-decoration: underline; }
     <div class="cards" id="cards"></div>
     <div class="note" id="goal-link"></div>
     <div class="note" id="work-facts"></div>
+    ${hasReadersTab ? '<div class="note" id="reader-guide"></div>' : ''}
     <div id="achievements"></div>
   </section>
   <section class="${pageClass("trend")}" id="page-trend" role="tabpanel" aria-labelledby="tab-trend">
@@ -420,9 +423,7 @@ a:hover, .link:hover { text-decoration: underline; }
     <div class="cards" id="episode-cards"></div>
     <div id="episode-table" class="table-scroll"></div>
   </section>` : ''}
-  ${hasReadersTab ? `<section class="${pageClass("readers")}" id="page-readers" role="tabpanel" aria-labelledby="tab-readers">
-    <div id="site-records"></div>
-  </section>` : ''}
+  ${hasReadersTab ? `<div id="site-records">${readerSites.map((tab) => `<section class="${pageClass(`site-${tab.site}`)}" id="page-site-${tab.site}" data-site-page="${tab.site}" role="tabpanel" aria-labelledby="tab-site-${tab.site}"></section>`).join('')}</div>` : ''}
 </main>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
@@ -529,9 +530,21 @@ function tabIndexAfterKey(key, current, count) {
   return -1;
 }
 
-document.querySelectorAll('.tab').forEach((tab) => {
-  tab.addEventListener('click', () => selectTab(tab.dataset.page, false, true));
-  tab.addEventListener('keydown', (event) => {
+/*
+  **タブの並びで受ける**（タブ1つずつに付けない）。サイトのタブは統計が届くたびに
+  揃え直すので（renderSiteRecords）、タブに直接付けると作り直したタブで効かなくなる
+*/
+(() => {
+  const bar = document.getElementById('tabs');
+  if (!bar) return;
+  const tabOf = (event) => event.target && event.target.closest ? event.target.closest('.tab') : null;
+  bar.addEventListener('click', (event) => {
+    const tab = tabOf(event);
+    if (tab) selectTab(tab.dataset.page, false, true);
+  });
+  bar.addEventListener('keydown', (event) => {
+    const tab = tabOf(event);
+    if (!tab) return;
     const tabs = Array.from(document.querySelectorAll('.tab'));
     const next = tabIndexAfterKey(event.key, tabs.indexOf(tab), tabs.length);
     if (next < 0) {
@@ -545,7 +558,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     event.preventDefault();
     selectTab(tabs[next].dataset.page, true, true);
   });
-});
+})();
 
 // 作者が自分で横へ送ったかどうかを覚える（右端から離れたら、描き直しで引き戻さない）
 (() => {
@@ -928,29 +941,25 @@ function renderDevices() {
 }
 
 /**
- * 「読者の反応」の中で、いま見ているサイトのタブ（作者の指示 2026-11-01）。
- * 拡張機能が覚えている値で始め、作者が押すたびに替える。**統計が送り直されても保つ**
- * （本文を保存するたびに描き直すので、そのたびに先頭のサイトへ戻ると読めない）
- */
-let readerSite = document.body.dataset.initialSite || '';
-
-/**
  * 読者の反応（設計書6.68.5・6.79.7。旧「サイトの記録」）。
  *
- * **投稿サイトごとのタブに分ける**（作者の指示 2026-11-01「サイトごとにタブをわけて。
- * 配信されているサイトのみタブを表示し、なろうを最後尾に」）。どのサイトを出すか・並びは
- * core が決めて \`state.readerSites\` で渡す（\`readerSiteTabs\`）。**サイトが1つでもタブを出す**
- * ——どのサイトの数かが一目で分かるように。
+ * **サイトごとに外側のタブを1つ**（「カクヨムの反応」など。作者の指示 2026-11-01「読者の反応は
+ * 二段のタブとせず」）。どのサイトを出すか・並び・名前は core が決めて \`state.readerSites\` で
+ * 渡す（\`readerSiteTabs\`）。**サイトが1つでもタブを出す**——どのサイトの数かが一目で分かるように。
+ * 統計が届くたびに、タブの並びを届いたサイトに揃え直す（\`syncSiteTabs\`）。
  *
  * サイトをまたぐ事柄（タグの食い違い・連載の状態の食い違い）は、**そのサイトのタブへ振り分ける**。
- * 台帳を読めなかった知らせだけは、どのサイトにも属さないのでタブの上に置く。
+ * どのサイトにも属さない「台帳を読めなかった」知らせと、配信しているサイトが無いときの案内は
+ * 「概要」に1行で出す（\`#reader-guide\`）。
  *
  * 作品ページは**拡張機能側へ頼んで開く**（openExternal）。画面の中から
  * 直接どこかへ繋ぐことはしない。
  */
 function renderSiteRecords() {
   const host = document.getElementById('site-records');
-  if (!host) return;
+  const guide = document.getElementById('reader-guide');
+  // 全作品の画面にはどちらも無い（投稿サイトの台帳は作品ごとにしか無い）
+  if (!host && !guide) return;
   const records = (state && state.siteRecords) || [];
   const sites = (state && state.readerSites) || [];
   /*
@@ -959,21 +968,22 @@ function renderSiteRecords() {
     分からず消えたようにしか見えなかった。ほかの統計は従来どおり出す。
   */
   const failure = (state && state.siteRecordsError) || '';
-  const failureNote = failure
-    ? '<div class="note">読者の反応の記録を読めませんでした：' +
-      escapeHtml(failure) + '</div>'
-    : '';
-  if (sites.length === 0) {
+  if (guide) {
     /*
-      「読者の反応」のタブは、記録が無くても出しておく（設計書6.3.9）。
-      空の面だけを見せると、壊れているのか使い方が違うのか分からないので、
-      **何をすればここに並ぶか**を短く言う。名前はメニューの字面に揃える
+      配信しているサイトが無ければタブが1つも出ないので、**何をすればタブが出るか**を概要で
+      短く言う（空の面を見せない。名前はメニューの字面に揃える）
     */
-    host.innerHTML = failureNote
-      ? failureNote
-      : '<div class="empty">投稿サイトの記録はまだありません。<br>' +
-        '「投稿サイト設定」で投稿先を登録し、「ランキング記録」で順位を書き足すか、' +
-        '「読者反応自動取込」で読者の反応を取り込むと、ここに並びます。</div>';
+    guide.innerHTML = failure
+      ? '読者の反応の記録を読めませんでした：' + escapeHtml(failure)
+      : sites.length === 0
+        ? '読者の反応はまだありません。「投稿サイト設定」で投稿先を登録するか、' +
+          '「読者反応自動取込」で取り込むと、サイトごとのタブ（「カクヨムの反応」など）が出ます。'
+        : '';
+  }
+  syncSiteTabs(sites);
+  if (!host) return;
+  if (sites.length === 0) {
+    host.innerHTML = '';
     return;
   }
 
@@ -1056,17 +1066,8 @@ function renderSiteRecords() {
       '</div>';
   };
 
-  // 覚えていたサイトが無ければ（外した・初めて）、先頭のサイト
-  if (!sites.some((tab) => tab.site === readerSite)) readerSite = sites[0].site;
-  const tabsHtml = '<div class="site-tabs" role="tablist" aria-label="読者の反応のサイト">' +
-    sites.map((tab) => {
-      const on = tab.site === readerSite;
-      const key = escapeHtml(tab.site);
-      return '<div class="site-tab' + (on ? ' active' : '') + '" role="tab" id="site-tab-' + key +
-        '" data-site-tab="' + key + '" aria-controls="site-page-' + key +
-        '" aria-selected="' + (on ? 'true' : 'false') + '" tabindex="' + (on ? '0' : '-1') + '">' +
-        escapeHtml(tab.label) + '</div>';
-    }).join('') + '</div>';
+  // 前に見ていたタブ（統計を送り直しても、見ているサイトのタブから動かさない）
+  const current = activeTabKey();
   const pages = sites.map((tab) => {
     const record = records.find((entry) => entry.site === tab.site);
     const key = escapeHtml(tab.site);
@@ -1078,28 +1079,11 @@ function renderSiteRecords() {
       ? blockOf(record)
       : '<div class="empty">' + escapeHtml(tab.label) + 'の記録はまだありません。<br>' +
         '「ランキング記録」で順位を書き足すか、「読者反応自動取込」で読者の反応を取り込むと、ここに並びます。</div>';
-    return '<section class="site-page' + (tab.site === readerSite ? ' active' : '') +
-      '" id="site-page-' + key + '" data-site-page="' + key + '" role="tabpanel" aria-labelledby="site-tab-' +
+    return '<section class="page' + ('site-' + tab.site === current ? ' active' : '') +
+      '" id="page-site-' + key + '" data-site-page="' + key + '" role="tabpanel" aria-labelledby="tab-site-' +
       key + '">' + body + '</section>';
   });
-  host.innerHTML = failureNote + tabsHtml + pages.join('');
-
-  host.querySelectorAll('.site-tab').forEach((tab) => {
-    tab.addEventListener('click', () => selectReaderSite(tab.dataset.siteTab, false, true));
-    tab.addEventListener('keydown', (event) => {
-      const tabs = Array.from(host.querySelectorAll('.site-tab'));
-      const next = tabIndexAfterKey(event.key, tabs.indexOf(tab), tabs.length);
-      if (next < 0) {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          selectReaderSite(tab.dataset.siteTab, false, true);
-        }
-        return;
-      }
-      event.preventDefault();
-      selectReaderSite(tabs[next].dataset.siteTab, true, true);
-    });
-  });
+  host.innerHTML = pages.join('');
 
   host.querySelectorAll('[data-url]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -1749,7 +1733,7 @@ function renderWorkFacts() {
 }
 
 /**
- * サイトのタグと付け替えの記録（作者の指示 2026-11-01）。「読者の反応」のサイトごとの枠に出す。
+ * サイトのタグと付け替えの記録（作者の指示 2026-11-01）。そのサイトのタブ（「カクヨムの反応」など）に出す。
  *
  * タグは**画面の並びのまま**（サイトの画面と見比べられるように）。0個と分かったときは
  * 「なし」、まだ届いていないときは出さない（分からないのと0個は別のこと）。
@@ -1815,28 +1799,39 @@ function renderSiteCrossNotes(site) {
   return notes.length > 0 ? '<div class="note">' + notes.join('<br>') + '</div>' : '';
 }
 
+/** いま選んでいるタブの鍵（まだ選んでいなければ、開いたときのタブ） */
+function activeTabKey() {
+  const active = document.querySelector('.tab.active');
+  return active ? active.dataset.page : (document.body.dataset.initialTab || 'overview');
+}
+
 /**
- * 読者の反応の中のサイトのタブを選ぶ（作者の指示 2026-11-01）。外側のタブ（selectTab）と
- * 同じ作りで、**押したときだけ拡張機能へ知らせて覚えてもらう**（作品ごとに前のサイトで開く）。
+ * サイトのタブを、届いたサイトの並びに揃える（作者の指示 2026-11-01「二段のタブとせず」）。
+ *
+ * 外側のタブの並びの後ろに、サイトのタブ（data-site を持つもの）だけを足し引きする。
+ * 並びが同じなら触らない——統計は本文を保存するたびに届くので、そのたびに作り直すと
+ * 焦点が外れる。押したときの動き（クリック・矢印キー）はタブの並びで受けているので、
+ * 作り直したタブでもそのまま効く。
+ *
+ * **見ていたサイトのタブが無くなったら「概要」へ**（投稿先から外し、記録も無いサイト）。
+ * このときは覚え直さない（作者が押したのではない）。
  */
-function selectReaderSite(site, focus, remember) {
-  const host = document.getElementById('site-records');
-  if (!host) return;
-  const tabs = Array.from(host.querySelectorAll('.site-tab'));
-  const target = tabs.find((el) => el.dataset.siteTab === site) || tabs[0];
-  if (!target) return;
-  readerSite = target.dataset.siteTab;
-  tabs.forEach((el) => {
-    const on = el === target;
-    el.classList.toggle('active', on);
-    el.setAttribute('aria-selected', on ? 'true' : 'false');
-    el.tabIndex = on ? 0 : -1;
-  });
-  host.querySelectorAll('.site-page').forEach((el) => {
-    el.classList.toggle('active', el.dataset.sitePage === readerSite);
-  });
-  if (focus) target.focus();
-  if (remember) vscode.postMessage({ type: 'readerSiteSelected', site: readerSite });
+function syncSiteTabs(sites) {
+  const bar = document.getElementById('tabs');
+  if (!bar) return;
+  const want = sites.map((tab) => 'site-' + tab.site);
+  const shown = Array.from(bar.querySelectorAll('.tab[data-site]'));
+  if (shown.map((el) => el.dataset.page).join(',') === want.join(',')) return;
+  const current = activeTabKey();
+  shown.forEach((el) => el.remove());
+  bar.insertAdjacentHTML('beforeend', sites.map((tab) => {
+    const key = escapeHtml(tab.site);
+    return '<div class="tab" role="tab" id="tab-site-' + key + '" data-page="site-' + key +
+      '" data-site="' + key + '" aria-controls="page-site-' + key +
+      '" aria-selected="false" tabindex="-1">' + escapeHtml(tab.tabLabel || tab.label) + '</div>';
+  }).join(''));
+  const keep = current.indexOf('site-') !== 0 || want.indexOf(current) >= 0;
+  selectTab(keep ? current : 'overview', false, false);
 }
 
 /**

@@ -39,6 +39,7 @@ import {
 import { readerStatsPageUrl } from "../core/postingSiteUrls";
 import { HELPER_DOWNLOAD_URL } from "../core/postingEnvelope";
 import { formatReaderStatsMetrics } from "../core/postingSiteRecords";
+import { readerSiteTabLabel } from "../core/readerSiteTabNames";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { whenNoticePicked } from "../views/notify";
@@ -302,7 +303,8 @@ export async function importReaderStats(
       work,
       say(
         `${info.label} の読者の反応は、すでに取り込んだ数と同じでした（${repeated}件）。` +
-          "タグ・連載の状態の変化を記録しました。執筆統計の「読者の反応」で見られます。"
+          "タグ・連載の状態の変化を記録しました。" +
+          `執筆統計の「${readerSiteTabLabel(info.id)}」で見られます。`
       )
     );
     return { changed: true };
@@ -316,7 +318,7 @@ export async function importReaderStats(
         (repeated > 0
           ? `（${repeated}件は、取り込み済みの数と同じだったので積んでいません）`
           : "") +
-        "。執筆統計の「読者の反応」で履歴を見られます。"
+        `。執筆統計の「${readerSiteTabLabel(info.id)}」で履歴を見られます。`
     )
   );
   return { changed: true };
@@ -792,7 +794,7 @@ export async function recordReaderStats(
 
   void vscode.window.showInformationMessage(
     `${info.label} の読者の反応を記録しました（${formatReaderStatsMetrics(metrics)}）。` +
-      "執筆統計の「読者の反応」で履歴を見られます。"
+      `執筆統計の「${readerSiteTabLabel(info.id)}」で履歴を見られます。`
   );
   return { changed: true };
 }

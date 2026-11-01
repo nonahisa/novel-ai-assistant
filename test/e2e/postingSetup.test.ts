@@ -39,13 +39,13 @@ const NEW_EPISODE_URL = `https://kakuyomu.jp/my/works/${WORK_ID}/episodes/new`;
 const WORK_URL = `https://kakuyomu.jp/works/${WORK_ID}`;
 
 /**
- * 執筆統計のパネルのうち「読者の反応」のサイトのタブがある枠（出ていなければ undefined）。
- * 2026-11-01 にサイトごとのタブへ分け、「サイトの記録」の見出しは無くなった
+ * 執筆統計のパネルのうち、サイトのタブ（「カクヨムの反応」など）がある枠（出ていなければ undefined）。
+ * 2026-11-01 にサイトごとのタブを外側の1段に並べた（「読者の反応」の中の二段のタブは無くした）
  */
 async function siteRecordsFrame(page: Page): Promise<Frame | undefined> {
   for (const frame of page.frames()) {
     const has = await frame
-      .evaluate(() => document.querySelector("#site-records .site-tab") !== null)
+      .evaluate(() => document.querySelector('.tab[data-site="kakuyomu"]') !== null)
       .catch(() => false);
     if (has) return frame;
   }
@@ -120,19 +120,17 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
       await pickQuickPickRow(page, "引き直さずに終わる");
       await waitQuickInputClosed(page, "投稿サイト設定が閉じる");
 
-      // 執筆統計に「サイトの記録」の節が出て、作品ページへのリンクが入る
+      // 執筆統計に「カクヨムの反応」のタブが出て、作品ページへのリンクが入る
       await treeContextMenu(page, E2E_WORK_TITLE, "執筆統計");
       let stats: Frame | undefined;
-      await waitUntil(async () => (stats = await siteRecordsFrame(page)) !== undefined, "執筆統計に「サイトの記録」の節が出る", 30_000);
+      await waitUntil(async () => (stats = await siteRecordsFrame(page)) !== undefined, "執筆統計に「カクヨムの反応」のタブが出る", 30_000);
       if (!stats) throw new Error("執筆統計が見つかりません");
       const statsFrame = stats;
-      // サイトの記録は「読者の反応」のタブにある（設計書6.3.9）。作者と同じく、タブを押してから読む。
-      // 中はサイトごとのタブ（2026-11-01）。カクヨムのタブを押してから読む
-      await statsFrame.locator('.tab[data-page="readers"]').click();
-      await statsFrame.locator('#site-records .site-tab[data-site-tab="kakuyomu"]').click();
+      // サイトの記録は「カクヨムの反応」のタブにある（設計書6.3.9）。作者と同じく、タブを押してから読む
+      await statsFrame.locator('.tab[data-page="site-kakuyomu"]', { hasText: "カクヨムの反応" }).click();
       const siteText = () =>
         statsFrame.evaluate(
-          () => (document.querySelector("#site-page-kakuyomu") as HTMLElement | null)?.innerText ?? ""
+          () => (document.querySelector("#page-site-kakuyomu") as HTMLElement | null)?.innerText ?? ""
         );
       expect(await siteText()).toContain("カクヨム");
       expect(await siteText()).toContain(`作品ID ${WORK_ID}`);

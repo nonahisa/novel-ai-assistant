@@ -31,6 +31,7 @@ import {
   type WorkCompletion,
 } from "../models/posting";
 import { buildWorkPostingFacts } from "../core/postingSiteRecords";
+import { READER_SITE_TABS_HINT, readerSiteTabLabel } from "../core/readerSiteTabNames";
 import {
   PostingStore,
   PostingStoreError,
@@ -715,7 +716,7 @@ async function askSiteProfiles(
         label: "$(edit) 作品ID・作品ページ・ジャンルも入れる",
         detail:
           "サイトごとに3つ訊きます（どれも空のままで構いません）。" +
-          "執筆統計の「読者の反応」に出ます",
+          `${READER_SITE_TABS_HINT}に出ます`,
         detailed: true,
       },
     ],
@@ -920,7 +921,7 @@ export async function recordRanking(
 
   void vscode.window.showInformationMessage(
     `${info.label} ${board} ${rank}位 を記録しました。` +
-      "執筆統計の「読者の反応」で履歴を見られます。"
+      `執筆統計の「${readerSiteTabLabel(info.id)}」で履歴を見られます。`
   );
   return { changed: true };
 }

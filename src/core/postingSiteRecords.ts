@@ -25,6 +25,7 @@ import {
 import { formatReaderAdviceMaterial } from "../prompts/readerAdvice";
 import { computeReaderRates, type ReaderRates } from "./readerRates";
 import { buildReaderCharts, type ReaderCharts } from "./readerStatsCharts";
+import { readerSiteTabLabel } from "./readerSiteTabNames";
 
 /**
  * 執筆量パネルに出す「サイトの記録」（設計書6.68.5）。
@@ -385,15 +386,22 @@ export function buildPostingSiteRecords(
   return records;
 }
 
-/** 「読者の反応」の中のサイトのタブ1つ */
+/** 執筆統計のサイトのタブ1つ */
 export interface ReaderSiteTab {
   site: PostingSiteId;
+  /** サイトの名前（「小説家になろう」。タブの中の案内に使う） */
   label: string;
+  /** タブの名前（「なろうの反応」。`readerSiteTabLabel`） */
+  tabLabel: string;
 }
 
 /**
- * 「読者の反応」の中に出すサイトのタブ（作者の指示 2026-11-01「サイトごとにタブをわけて。
+ * 執筆統計に出すサイトのタブ（作者の指示 2026-11-01「サイトごとにタブをわけて。
  * 配信されているサイトのみタブを表示し、なろうを最後尾に」）。
+ *
+ * **タブは1段**（同じ日の後の指示「二段のタブとせず、『カクヨムの反応』『なろうの反応』
+ * 『アルファの反応』で並べてください」）。「概要」「執筆の推移」「話ごと」の後ろに、
+ * ここで決めた並びのまま足す。
  *
  * **配信されているサイト**は、次のどれかがあるサイトとする：
  *   - 投稿先として登録してある（`sites`。投稿サイト設定で登録したもの）
@@ -421,7 +429,11 @@ export function readerSiteTabs(
   ];
   return ordered
     .filter((info) => shown.has(info.id))
-    .map((info) => ({ site: info.id, label: postingSiteInfo(info.id).label }));
+    .map((info) => ({
+      site: info.id,
+      label: postingSiteInfo(info.id).label,
+      tabLabel: readerSiteTabLabel(info.id),
+    }));
 }
 
 /**

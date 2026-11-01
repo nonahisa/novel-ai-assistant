@@ -17,6 +17,8 @@ import {
 } from "./prerequisites";
 // 上限の値は**定数から引く**（説明文に書き写すと、変えたときに画面だけ古くなる）
 import { MAX_ISSUES_PER_1000_CHARS } from "../prompts/proofread";
+// 執筆統計のサイトのタブの言い方（タブの字面と揃える。2026-11-01）
+import { READER_SITE_TABS_HINT } from "./readerSiteTabNames";
 
 /**
  * 操作メニュー。
@@ -2071,7 +2073,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "投稿サイトで見た順位の書き留め\n\n" +
               "・訊くのはサイト→種別→順位の3つ\n\n" +
-              "・履歴は執筆統計の「読者の反応」\n\n" +
+              "・履歴は" + READER_SITE_TABS_HINT + "\n\n" +
               "サイトから自動で取ってくることはない。",
           },
           // **順位の隣に置く**（設計書6.79.7）。どちらも「投稿したあとに
@@ -2102,7 +2104,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "サイトで見たPV・評価・いいねの書き留め\n\n" +
               "・訊くのはサイト→範囲→粒度→数値の順\n\n" +
               "・読めた数字だけでよい\n\n" +
-              "・履歴は執筆統計の「読者の反応」\n\n" +
+              "・履歴は" + READER_SITE_TABS_HINT + "\n\n" +
               "サイトから自動で取ってくることはない。",
           },
           {

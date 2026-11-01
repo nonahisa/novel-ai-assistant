@@ -5,15 +5,27 @@ import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanel
  * 執筆統計のタブ（作者の指示、2026-11-01「タブを有効活用して分け、見た目を
  * シンプルかつおしゃれに」。設計書6.3.9）。
  *
+ * **タブは1段**（同じ日の後の指示「読者の反応は二段のタブとせず、『カクヨムの反応』
+ * 『なろうの反応』『アルファの反応』で並べてください」）。
+ *
  * 見るのは**置き場所**（どの id がどのタブの面にあるか）と、キーボードで
  * 動かせる作り、最後に開いたタブを覚える配線である。見た目の良し悪しは
  * 画面でしか分からない。
  */
 
 const perWork = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:");
+/** 4つのサイトに配信している作品（並びは core の readerSiteTabs が決めたとおりに届く） */
+const fourSites = [
+  { site: "kakuyomu", label: "カクヨム", tabLabel: "カクヨムの反応" },
+  { site: "alphapolis", label: "アルファポリス", tabLabel: "アルファの反応" },
+  { site: "note", label: "note", tabLabel: "noteの反応" },
+  { site: "narou", label: "小説家になろう", tabLabel: "なろうの反応" },
+] as const;
+const withSites = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", { readerSites: fourSites });
 const allWorks = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", {
   hasEpisodesTab: false,
   hasReadersTab: false,
+  readerSites: fourSites,
 });
 
 function scriptOf(html: string): string {
@@ -37,22 +49,40 @@ function pageOf(html: string, key: string): string {
   return found ? found[1] : "";
 }
 
-/** タブの並び（data-page と字面） */
+/** 組み立てたタブの並び（data-page と字面）。スクリプトの中のタブを組み直す字は数えない */
 function tabsOf(html: string): Array<{ key: string; label: string }> {
-  return [...html.matchAll(/<div class="tab[^"]*"[^>]*data-page="([^"]+)"[^>]*>([^<]*)<\/div>/g)].map((m) => ({
+  return [...html.split("<script")[0].matchAll(/<div class="tab[^"]*"[^>]*data-page="([^"]+)"[^>]*>([^<]*)<\/div>/g)].map((m) => ({
     key: m[1],
     label: m[2],
   }));
 }
 
 describe("タブの分け方", () => {
-  test("作品ごとの画面は、概要・執筆の推移・話ごと・読者の反応の4つ", () => {
-    expect(tabsOf(perWork)).toEqual([
+  test("概要・執筆の推移・話ごとの後ろに、配信しているサイトの「〜の反応」を1段で並べる", () => {
+    expect(tabsOf(withSites)).toEqual([
       { key: "overview", label: "概要" },
       { key: "trend", label: "執筆の推移" },
       { key: "episodes", label: "話ごと" },
-      { key: "readers", label: "読者の反応" },
+      { key: "site-kakuyomu", label: "カクヨムの反応" },
+      { key: "site-alphapolis", label: "アルファの反応" },
+      { key: "site-note", label: "noteの反応" },
+      { key: "site-narou", label: "なろうの反応" },
     ]);
+    // 二段のタブ（0.119.0 の「読者の反応」の中のサイトのタブ）は無い
+    expect(withSites).not.toContain('data-page="readers"');
+    expect(withSites).not.toContain("site-tab");
+  });
+
+  test("配信しているサイトが無い作品では、サイトのタブを出さない", () => {
+    expect(tabsOf(perWork).map((tab) => tab.key)).toEqual(["overview", "trend", "episodes"]);
+  });
+
+  test("知らないサイトの鍵は、タブにも面にも埋めない", () => {
+    const odd = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", {
+      readerSites: [{ site: '"><x>' as never, label: "x", tabLabel: "x" }],
+    });
+    expect(odd).not.toContain('"><x>');
+    expect(tabsOf(odd)).toHaveLength(3);
   });
 
   test("作品の単位の名前（投稿など）は、話ごとのタブの名前に使う", () => {
@@ -60,15 +90,19 @@ describe("タブの分け方", () => {
     expect(tabsOf(sns).map((tab) => tab.label)).toContain("投稿ごと");
   });
 
-  test("全作品の画面は、話ごと・読者の反応を出さない", () => {
+  test("全作品の画面は、話ごと・サイトのタブ・取り込み方の案内を出さない", () => {
     expect(tabsOf(allWorks).map((tab) => tab.key)).toEqual(["overview", "trend"]);
-    expect(allWorks).not.toContain('id="page-episodes"');
-    expect(allWorks).not.toContain('id="page-readers"');
+    // 見るのは組み立てた所（スクリプトの中には、サイトの面を組み直す字がある）
+    const built = allWorks.split("<script")[0];
+    expect(built).not.toContain('id="page-episodes"');
+    expect(built).not.toContain('id="page-site-');
+    expect(built).not.toContain('id="reader-guide"');
+    expect(built).not.toContain('id="site-records"');
   });
 
-  test("概要には締切・数の札・目標への入口・達成を置く", () => {
+  test("概要には締切・数の札・目標への入口・読者の反応の案内・達成を置く", () => {
     const page = pageOf(perWork, "overview");
-    for (const id of ["contest", "cards", "goal-link", "achievements"]) {
+    for (const id of ["contest", "cards", "goal-link", "reader-guide", "achievements"]) {
       expect(page, id).toContain(`id="${id}"`);
     }
     expect(page).not.toContain('id="chart"');
@@ -81,32 +115,39 @@ describe("タブの分け方", () => {
     }
   });
 
-  test("話ごとには札と表、読者の反応にはサイトの記録を置く", () => {
+  test("話ごとには札と表、サイトのタブの面はサイトの記録の置き場の中に置く", () => {
     expect(pageOf(perWork, "episodes")).toContain('id="episode-cards"');
     expect(pageOf(perWork, "episodes")).toContain('id="episode-table"');
-    expect(pageOf(perWork, "readers")).toContain('id="site-records"');
+    const records = withSites.slice(withSites.indexOf('<div id="site-records">'), withSites.indexOf("</main>"));
+    for (const site of ["kakuyomu", "alphapolis", "note", "narou"]) {
+      expect(records, site).toContain(`<section class="page" id="page-site-${site}"`);
+    }
   });
 
   test("開いた直後に見えるのは概要（ほかの面は隠れている）", () => {
     expect(perWork).toContain('<section class="page active" id="page-overview"');
     expect(perWork).toContain('<section class="page" id="page-trend"');
   });
+
+  test("タブが増えても、狭い幅では折り返す（横に送らせない）", () => {
+    expect(perWork).toMatch(/\.tabs \{ display: flex; flex-wrap: wrap;/);
+  });
 });
 
 describe("キーボードで動かせる作り", () => {
   test("tablist・tab・tabpanel の役と、選んでいるタブの印がある", () => {
-    expect(perWork).toContain('role="tablist"');
-    const tabTags = [...perWork.matchAll(/<div class="tab(?: [^"]*)?"[^>]*>/g)].map((m) => m[0]);
-    expect(tabTags).toHaveLength(4);
+    expect(withSites).toContain('role="tablist"');
+    const tabTags = [...withSites.split("<script")[0].matchAll(/<div class="tab(?: [^"]*)?"[^>]*>/g)].map((m) => m[0]);
+    expect(tabTags).toHaveLength(7);
     for (const tag of tabTags) {
       expect(tag).toContain('role="tab"');
-      expect(tag).toMatch(/aria-controls="page-[a-z]+"/);
+      expect(tag).toMatch(/aria-controls="page-[a-z-]+"/);
     }
     // 選んでいるのは1つだけで、焦点で巡るのもそれだけ
     expect(tabTags.filter((tag) => tag.includes('aria-selected="true"'))).toHaveLength(1);
     expect(tabTags.filter((tag) => tag.includes('tabindex="0"'))).toHaveLength(1);
-    // 数えるのは外側の面だけ（スクリプトの中には、読者の反応のサイトの面を組む字がある）
-    expect((perWork.split("<script")[0].match(/role="tabpanel"/g) ?? []).length).toBe(4);
+    // 数えるのは組み立てた面だけ（スクリプトの中には、サイトの面を組み直す字がある）
+    expect((withSites.split("<script")[0].match(/role="tabpanel"/g) ?? []).length).toBe(7);
   });
 
   const after = new Function(`${functionSource("tabIndexAfterKey")}\nreturn tabIndexAfterKey;`)() as (
@@ -122,11 +163,21 @@ describe("キーボードで動かせる作り", () => {
     expect(after("ArrowLeft", 2, 4)).toBe(1);
     expect(after("Home", 2, 4)).toBe(0);
     expect(after("End", 0, 4)).toBe(3);
+    // サイトのタブが並んで7つになっても、同じ1段の中で巡る
+    expect(after("ArrowRight", 6, 7)).toBe(0);
+    expect(after("ArrowLeft", 0, 7)).toBe(6);
   });
 
   test("関係の無いキーでは移らない", () => {
     expect(after("a", 1, 4)).toBe(-1);
     expect(after("ArrowDown", 1, 4)).toBe(-1);
+  });
+
+  test("押したときの動きはタブの並びで受ける（統計が届いて作り直したサイトのタブでも効く）", () => {
+    const script = scriptOf(perWork);
+    expect(script).toContain("document.getElementById('tabs')");
+    expect(script).toContain("closest('.tab')");
+    expect(script).not.toContain("document.querySelectorAll('.tab').forEach");
   });
 });
 
@@ -148,7 +199,7 @@ describe("前に見ていたタブで開く（作品ごと。作者の判断 202
         attributes,
       };
     };
-    const tabs = ["overview", "trend", "episodes", "readers"].map(makeTab);
+    const tabs = ["overview", "trend", "episodes", "site-kakuyomu", "site-narou"].map(makeTab);
     const pages = tabs.map((tab) => {
       const classes = new Set<string>();
       return {
@@ -175,36 +226,50 @@ describe("前に見ていたタブで開く（作品ごと。作者の判断 202
     return { active: selected[0].dataset.page, posted };
   }
 
-  test("押したタブを拡張機能へ知らせる（覚えるのは拡張機能の側）", () => {
-    const result = run("overview", "readers");
-    expect(result.active).toBe("readers");
-    expect(result.posted).toEqual([{ type: "tabSelected", tab: "readers" }]);
+  test("押したタブ（サイトのタブも）を拡張機能へ知らせる（覚えるのは拡張機能の側）", () => {
+    const result = run("overview", "site-narou");
+    expect(result.active).toBe("site-narou");
+    expect(result.posted).toEqual([{ type: "tabSelected", tab: "site-narou" }]);
   });
 
   test("開いたときの選び直しでは知らせない", () => {
     expect(run("trend").posted).toEqual([]);
   });
 
-  test("無いタブを渡されたら、先頭の概要へ戻す", () => {
+  test("無いタブを渡されたら、先頭の概要へ戻す（もう無い「読者の反応」も）", () => {
     expect(run("writing").active).toBe("overview");
+    expect(run("readers").active).toBe("overview");
   });
 
-  test("覚えていたタブを選んだ状態で画面を組む（開いた瞬間に概要が見えない）", () => {
-    const html = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", { initialTab: "readers" });
-    expect(html).toContain('<section class="page active" id="page-readers"');
+  test("覚えていたサイトのタブを選んだ状態で画面を組む（開いた瞬間に概要が見えない）", () => {
+    const html = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", {
+      initialTab: "site-alphapolis",
+      readerSites: fourSites,
+    });
+    expect(html).toContain('<section class="page active" id="page-site-alphapolis"');
     expect(html).toContain('<section class="page" id="page-overview"');
-    const tabTags = [...html.matchAll(/<div class="tab(?: [^"]*)?"[^>]*>/g)].map((m) => m[0]);
+    const tabTags = [...html.split("<script")[0].matchAll(/<div class="tab(?: [^"]*)?"[^>]*>/g)].map((m) => m[0]);
     expect(tabTags.filter((tag) => tag.includes('aria-selected="true"'))).toEqual([
-      expect.stringContaining('data-page="readers"'),
+      expect.stringContaining('data-page="site-alphapolis"'),
     ]);
-    expect(html).toContain('data-initial-tab="readers"');
+    expect(html).toContain('data-initial-tab="site-alphapolis"');
+  });
+
+  test("覚えていたサイトのタブがもう無ければ（配信をやめた）、概要で組む", () => {
+    const html = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", {
+      initialTab: "site-note",
+      readerSites: fourSites.filter((tab) => tab.site !== "note"),
+    });
+    expect(html).toContain('<section class="page active" id="page-overview"');
+    expect(html).toContain('data-initial-tab="overview"');
   });
 
   test("その画面に無いタブ・知らない鍵を渡されたら概要で組む", () => {
     const all = buildWritingStatsPanelHtml("NONCE123", "vscode-resource:", {
       hasEpisodesTab: false,
       hasReadersTab: false,
-      initialTab: "readers",
+      initialTab: "site-kakuyomu",
+      readerSites: fourSites,
     });
     expect(all).toContain('<section class="page active" id="page-overview"');
     expect(all).toContain('data-initial-tab="overview"');
@@ -223,7 +288,7 @@ describe("前に見ていたタブで開く（作品ごと。作者の判断 202
 
 describe("0話の作品の「話ごと」", () => {
   test("タブは隠さない", () => {
-    // 作品ごとの画面は、話の有無にかかわらず4つ（話の数を見て組み替えない）
+    // 作品ごとの画面は、話の有無にかかわらず「話ごと」を出す（話の数を見て組み替えない）
     expect(tabsOf(perWork).map((tab) => tab.key)).toContain("episodes");
   });
 
@@ -278,16 +343,49 @@ describe("0話の作品の「話ごと」", () => {
   });
 });
 
-describe("読者の反応の空の案内", () => {
-  test("記録の無い作品では、何をすればここに並ぶかを言う", () => {
+describe("配信しているサイトが無い作品の案内（概要に1行）", () => {
+  function guideOf(state: unknown): { guide: string; host: string } {
+    const guide = { innerHTML: "" };
     const host = { innerHTML: "", querySelectorAll: () => [] };
     const render = new Function(
       "document",
       "state",
-      `${functionSource("renderSiteRecords")}\nreturn renderSiteRecords;`
-    )({ getElementById: (id: string) => (id === "site-records" ? host : null) }, { siteRecords: [] }) as () => void;
+      [
+        functionSource("escapeHtml"),
+        // タブの並びの揃え直しと今のタブは、ここでは見ない（下の「サイトのタブを揃え直す」で見る）
+        "function syncSiteTabs() {}",
+        "function activeTabKey() { return 'overview'; }",
+        functionSource("renderSiteRecords"),
+        "return renderSiteRecords;",
+      ].join("\n")
+    )(
+      { getElementById: (id: string) => (id === "site-records" ? host : id === "reader-guide" ? guide : null) },
+      state
+    ) as () => void;
     render();
-    expect(host.innerHTML).toContain("投稿サイトの記録はまだありません");
-    expect(host.innerHTML).toContain("「投稿サイト設定」");
+    return { guide: guide.innerHTML, host: host.innerHTML };
+  }
+
+  test("サイトのタブを出さず、何をすればタブが出るかを概要で言う", () => {
+    const shown = guideOf({ siteRecords: [], readerSites: [] });
+    expect(shown.guide).toContain("読者の反応はまだありません");
+    expect(shown.guide).toContain("「投稿サイト設定」");
+    expect(shown.guide).toContain("「カクヨムの反応」");
+    expect(shown.host).toBe("");
+  });
+
+  test("台帳を読めなかった知らせも概要へ（どのサイトにも属さない）", () => {
+    const shown = guideOf({ siteRecords: [], readerSites: [], siteRecordsError: "<壊れた>" });
+    expect(shown.guide).toContain("読者の反応の記録を読めませんでした：&lt;壊れた&gt;");
+  });
+
+  test("配信しているサイトがあれば、概要の案内は空", () => {
+    const shown = guideOf({
+      siteRecords: [],
+      readerSites: [{ site: "kakuyomu", label: "カクヨム", tabLabel: "カクヨムの反応" }],
+      siteRecordsError: null,
+    });
+    expect(shown.guide).toBe("");
+    expect(shown.host).toContain('id="page-site-kakuyomu"');
   });
 });
