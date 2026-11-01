@@ -2489,6 +2489,19 @@ export async function activate(
       stepProvider.refresh();
     });
   };
+  /*
+    **モードを切り替えた瞬間に、簡単ステップメニューの並びを替える**（作者の指示
+    2026-11-01。設計書6.70.5）。編集者モードでは編集部の流れの段に替わる。
+    「作者／編集者切替」を押した道だけでなく、設定画面で novelai.mode を直した道も
+    同じに効くよう、設定の変化を見る。押せる操作も変わるので詳細メニューも描き直す
+  */
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration("novelai.mode")) return;
+      stepProvider.refresh();
+      actionProvider.refresh();
+    })
+  );
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
   refreshActionBadges();
   registry.onDidChange(() => refreshActionBadges());
