@@ -2111,7 +2111,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             requiresWork: true,
             detail:
               "抽出済みのJSONから、読むための設定資料集を書き出す\n\n" +
-              "・種別は人物・場所・能力・組織・世界観・各話あらすじ\n\n" +
+              "・押すと種類を選ぶ（すべて・人物・場所・能力・組織・世界観・各話あらすじ）\n\n" +
               "・JSONの手直しや、まとめ・更新の反映のあとに使う\n\n" +
               "AIは呼ばない。",
           },

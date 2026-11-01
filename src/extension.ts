@@ -322,6 +322,7 @@ import {
   routeOfDeleteAnswer,
 } from "./core/episodeDeleteChoice";
 import { POSTING_MENU_ENTRIES } from "./core/postingMenu";
+import { SETTINGS_DOC_CHOICES } from "./core/settingsDocChoices";
 import {
   selectableWorkFormats,
   type WorkFormatDef,
@@ -5844,7 +5845,27 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await generateSettingsDocs(work);
+        /*
+          **種類を選ぶ**（作者の判断 2026-11-02。`core/settingsDocChoices.ts`）。
+          種類ごとの「一覧を生成」4つをここへまとめ、組織も選べるようにした。
+          先頭の「すべて」は Enter だけで今までどおり全部を書き出す
+        */
+        const picked = await vscode.window.showQuickPick(
+          [
+            ...SETTINGS_DOC_CHOICES.map((choice) => ({
+              label: choice.label,
+              description: choice.description,
+              choice,
+            })),
+            cancelItem(),
+          ],
+          { title: `どの資料を書き出しますか（${abbreviateTitle(work.title)}）` }
+        );
+        if (!picked || !("choice" in picked)) return;
+        await generateSettingsDocs(
+          work,
+          picked.choice.kinds ? { kinds: picked.choice.kinds } : {}
+        );
       }
     )
   );
@@ -5862,7 +5883,9 @@ export async function activate(
   );
 
   // 種別ごとの書き出し。JSONを1種類だけ直したときに、
-  // その一覧だけを作り直せるようにする
+  // その一覧だけを作り直せるようにする。
+  // **パレットからは外した**（作者の判断 2026-11-02）。入口は「設定資料集出力」で
+  // 種類を選ぶ形。ID を呼ぶ所が残っていても壊れないよう、命令は残す
   for (const [command, kind] of [
     ["novelai.generateCharacterDocs", "characters"],
     ["novelai.generateLocationDocs", "locations"],

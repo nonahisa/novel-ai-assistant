@@ -2077,19 +2077,19 @@
         },
         {
           "command": "novelai.generateCharacterDocs",
-          "when": "true"
+          "when": "false"
         },
         {
           "command": "novelai.generateLocationDocs",
-          "when": "true"
+          "when": "false"
         },
         {
           "command": "novelai.generateAbilityDocs",
-          "when": "true"
+          "when": "false"
         },
         {
           "command": "novelai.generateWorldDocs",
-          "when": "true"
+          "when": "false"
         },
         {
           "command": "novelai.setupLmStudio",
