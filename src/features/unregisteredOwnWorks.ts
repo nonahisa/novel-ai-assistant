@@ -74,6 +74,21 @@ export const UNREGISTERED_OWN_WORKS_KEY = "novelai.ownWorks.unregistered";
  */
 export const PENDING_OWN_WORK_STATS_KEY = "novelai.ownWorks.pendingReaderStats";
 
+/**
+ * 届いたバックアップを訊かずに取り込むとき、前回「どこに作りますか」で選んだ書庫
+ * （`context.globalState` の鍵。作者の指示 2026-11-01）。**作者の作品フォルダーには書かない。**
+ * 書く口は `rememberUnattendedLibrary` の1か所だけ（`mementoWrites.test.ts`）
+ */
+export const UNATTENDED_LIBRARY_KEY = "novelai.ownWorks.unattendedLibrary";
+
+/** 控えた読者の反応を、いま登録した作品へ移した結果（登録の知らせが言う） */
+export interface HeldStatsOutcome {
+  /** その作品の控えにあった画面の数 */
+  readonly held: number;
+  /** そのうち台帳に入った画面の数 */
+  readonly imported: number;
+}
+
 /** 控えた読者の反応を取り込んだときの知らせの頭 */
 export const HELD_STATS_LEAD = "登録した作品へ、登録の前に控えておいた読者の反応を移しました。";
 
@@ -117,11 +132,13 @@ export interface UnregisteredOwnWorksDeps {
   registeredKeys?(): Promise<ReadonlySet<string>>;
   /**
    * 控えておいた読者の反応を、登録した作品へ取り込む（束の取り込みと同じ関数を通す）。
+   * `silent` が立っていたら知らせを出さない（登録の知らせが言う。記録には残す）。
    * @returns まだ台帳に入っていない画面（控えに残す）
    */
   importHeldStats?(
     envelopes: readonly ReaderStatsEnvelope[],
-    lead: string
+    lead: string,
+    options?: { readonly silent?: boolean }
   ): Promise<readonly ReaderStatsEnvelope[]>;
   /** 時計（試験で差し替える） */
   now?(): number;
@@ -145,8 +162,12 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
   private readonly waits = new Map<string, ActiveWait>();
   /** 訊かずに取り込んでいる最中の作品（同じ作品のファイルが続けて届いたら、2つ目は訊く） */
   private readonly importing = new Set<string>();
-  /** 控えの取り込みが重ならないための印 */
-  private flushing = false;
+  /**
+   * 控えの取り込みの列。**重なったら飛ばさず、前のが終わるのを待って順に走らせる。**
+   * 飛ばす作りだったころは、登録の直後の一覧の描き直しが先に走ると、登録の道の取り込みが
+   * 黙って何もせずに戻り、知らせが「取り込んだか」を言えなかった（2026-11-01 作者の実機）
+   */
+  private flushQueue: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly memory: OwnWorksMemory,
@@ -184,6 +205,11 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
       useLogFile(undefined);
       logFailure("未登録の自分の作品の読者の反応を控える", { 詳細: messageOf(error) });
     }
+  }
+
+  /** 控えが残っているか（`OwnWorksSource.hasPendingStats`。覚えが空でも描き直しで取り込むため） */
+  hasPendingStats(): boolean {
+    return this.pending().length > 0;
   }
 
   /** 控えている読者の反応（読み戻しの関所を通ったものだけ） */
@@ -226,35 +252,96 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
 
   /**
    * 控えた読者の反応のうち、登録済みの作品の分を取り込む。
-   * 作品が1つに決まらない画面・台帳に入らなかった画面は控えに残す
+   * 作品が1つに決まらない画面・台帳に入らなかった画面は控えに残し、理由を記録に残す。
+   *
+   * **いま登録した作品は、呼ぶ側が名指しする**（`justRegistered`）。「登録済みか」を
+   * 作品一覧の控え（`registeredKeys`）だけで見ると、登録の直後の描き直しが台帳に
+   * 作品ID が書かれる前の空の台帳を控えに持つので、その作品が登録済みに見えない
+   * （2026-11-01 作者の実機。控えが残ったまま、知らせは「手で足せます」と言った）。
+   * 名指しした作品も、取り込み先は台帳を読み直して決めるので、台帳に作品ID が無ければ
+   * 控えに残る（取り違えない）。
+   *
+   * @returns 名指しした作品の控えの数と、台帳に入った数（名指しが無ければ取り込み全体の数）
    */
-  async flushHeldStats(): Promise<void> {
+  flushHeldStats(
+    options: {
+      readonly justRegistered?: Pick<UnregisteredOwnWork, "site" | "workId">;
+      /** 知らせを出さない（登録の知らせが言う） */
+      readonly silent?: boolean;
+    } = {}
+  ): Promise<HeldStatsOutcome> {
+    const key = options.justRegistered
+      ? ownWorkKey(options.justRegistered.site, options.justRegistered.workId)
+      : undefined;
+    // 前の取り込みが同じ控えを先に移しても数え違えないよう、**並ぶ前に**控えを数える
+    const mine = key
+      ? this.pending().filter((entry) => ownWorkKey(entry.site, entry.workId) === key)
+      : [];
+    const run = this.flushQueue.then(async () => {
+      const outcome = await this.flushNow(key, options.silent === true);
+      if (!key) return outcome;
+      const still = new Set(this.pending().map((entry) => entry.envelope));
+      return {
+        held: mine.length,
+        imported: mine.filter((entry) => !still.has(entry.envelope)).length,
+      };
+    });
+    // 失敗しても列は止めない（失敗はこの呼び出しの答えとして返す）
+    this.flushQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async flushNow(key: string | undefined, silent: boolean): Promise<HeldStatsOutcome> {
+    const none: HeldStatsOutcome = { held: 0, imported: 0 };
     const importHeld = this.deps.importHeldStats;
-    if (!importHeld || this.flushing) return;
+    if (!importHeld) return none;
     const pending = this.pending();
-    if (pending.length === 0) return;
-    this.flushing = true;
+    if (pending.length === 0) return none;
+    const registered = new Set(
+      await (this.deps.registeredKeys?.() ?? Promise.resolve(new Set<string>()))
+    );
+    if (key) registered.add(key);
+    const { taken } = takeRegisteredPending(pending, (site, workId) =>
+      registered.has(ownWorkKey(site, workId))
+    );
+    if (taken.length === 0) return none;
+    let remaining: Set<ReaderStatsEnvelope>;
     try {
-      const registered = await (this.deps.registeredKeys?.() ?? Promise.resolve(new Set<string>()));
-      const { taken } = takeRegisteredPending(pending, (site, workId) =>
-        registered.has(ownWorkKey(site, workId))
-      );
-      if (taken.length === 0) return;
-      const remaining = new Set(
+      remaining = new Set(
         await importHeld(
           taken.map((entry) => entry.parsed),
-          HELD_STATS_LEAD
+          HELD_STATS_LEAD,
+          silent ? { silent: true } : {}
         )
       );
-      const done = new Set(
-        taken.filter((entry) => !remaining.has(entry.parsed)).map((entry) => entry.envelope)
-      );
+    } catch (error) {
+      // **控えは消さない**（次に一覧を描き直したときにもう一度試す）
+      useLogFile(undefined);
+      logFailure("控えた読者の反応の取り込み", {
+        作品: describeHeld(taken),
+        詳細: `${messageOf(error)}（控えは残しました）`,
+      });
+      return { held: taken.length, imported: 0 };
+    }
+    const done = new Set(
+      taken.filter((entry) => !remaining.has(entry.parsed)).map((entry) => entry.envelope)
+    );
+    const left = taken.filter((entry) => !done.has(entry.envelope));
+    if (left.length > 0) {
+      useLogFile(undefined);
+      logFailure("控えた読者の反応の取り込み", {
+        作品: describeHeld(left),
+        詳細:
+          `${left.length}画面が台帳に入りませんでした（取り込み先の作品が1つに決まらない・保存できない）。` +
+          "控えは残し、次に作品一覧を描き直したときにもう一度試します。",
+      });
+    }
+    if (done.size > 0) {
       // 取り込みのあいだに控えが増えていてもよいように、読み直してから外す
       const keep = this.pending().filter((entry) => !done.has(entry.envelope));
       await this.savePending(storedPending(keep));
-    } finally {
-      this.flushing = false;
     }
+    return { held: taken.length, imported: done.size };
   }
 
   /** ［この作品を一覧に出さない］ */
@@ -395,16 +482,27 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
       entry,
       source,
       this.deps.importAsNew,
-      options.unattended === true
+      options.unattended === true,
+      {
+        /*
+          登録の前に控えておいた読者の反応を、**台帳に作品ID を書いた直後・登録の知らせの前に**
+          移す（知らせが「取り込みました」と言えるように。2026-11-01 作者の実機）
+        */
+        takeHeldStats: () => this.flushHeldStats({ justRegistered: entry, silent: true }),
+        library: {
+          remembered: this.rememberedUnattendedLibrary(),
+          remember: (folderPath) => this.rememberUnattendedLibrary(folderPath),
+        },
+      }
     );
     if (!work) return undefined;
     // 取り込めたら待ちを止め、覚えを忘れる（台帳に作品ID が入ったので、覚えていても枠は出ない）
     this.stopWait(entry, "imported");
     await this.save(forgetUnregisteredOwnWork(this.list(), entry.site, entry.workId));
     await this.deps.afterImport?.(work);
-    // 登録の前に控えておいた読者の反応を、登録した作品へ移す（失敗しても登録は済んでいる）
+    // 取り込みの途中で移せなかった分の受け皿（移し終えていれば何もしない。失敗しても登録は済んでいる）
     try {
-      await this.flushHeldStats();
+      await this.flushHeldStats({ justRegistered: entry });
     } catch (error) {
       useLogFile(undefined);
       logFailure("控えた読者の反応の取り込み", { 作品: work.title, 詳細: messageOf(error) });
@@ -633,6 +731,22 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
     await this.memory.update(PENDING_OWN_WORK_STATS_KEY, next);
   }
 
+  /** 訊かずに取り込む流れで、前回選んだ書庫（無ければ undefined） */
+  private rememberedUnattendedLibrary(): string | undefined {
+    const value = this.memory.get<unknown>(UNATTENDED_LIBRARY_KEY, undefined);
+    return typeof value === "string" && value.trim() !== "" ? value : undefined;
+  }
+
+  /** 書庫の覚えの書く口はここだけ（`mementoWrites.test.ts`）。覚えられなくても取り込みは止めない */
+  private async rememberUnattendedLibrary(folderPath: string): Promise<void> {
+    try {
+      await this.memory.update(UNATTENDED_LIBRARY_KEY, folderPath);
+    } catch (error) {
+      useLogFile(undefined);
+      logFailure("訊かずに取り込むときの書庫を覚える", { 場所: folderPath, 詳細: messageOf(error) });
+    }
+  }
+
   private clock(): number {
     return (this.deps.now ?? Date.now)();
   }
@@ -699,6 +813,16 @@ async function askNarouBackupId(label: string): Promise<string | undefined> {
         : "数字だけか、バックアップの画面のアドレス（https://syosetu.com/backup/top/ncode/〈数字〉/）を入れてください。Nコードは使えません。",
   });
   return narouBackupIdFrom(input);
+}
+
+/** 記録に出す、控えの作品の名前（題・サイト・作品ID。同じ作品は1つにまとめる） */
+function describeHeld(
+  entries: readonly { readonly site: string; readonly workId: string; readonly parsed: ReaderStatsEnvelope }[]
+): string {
+  const labels = entries.map(
+    (entry) => `${ownWorkLabel({ title: entry.parsed.title, workId: entry.workId })}（${entry.site} ${entry.workId}）`
+  );
+  return [...new Set(labels)].join(" ／ ");
 }
 
 async function defaultOpenLink(url: string): Promise<void> {

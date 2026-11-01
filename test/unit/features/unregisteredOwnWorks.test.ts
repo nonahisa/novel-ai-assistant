@@ -219,9 +219,9 @@ describe("待ち", () => {
     await vi.waitFor(() => expect(importAsNew).toHaveBeenCalledTimes(1));
     // 訊かない
     expect(infos.some((message) => message.includes("取り込みますか"))).toBe(false);
-    expect(importAsNew.mock.calls[0][1]).toEqual({ site: "alphapolis", workId: "123456789" });
+    expect(importAsNew.mock.calls[0][1]).toMatchObject({ site: "alphapolis", workId: "123456789" });
     // 訊かずに進む印（届いたファイルの名前）が取り込みへ渡る
-    expect(importAsNew.mock.calls[0][2]).toEqual({ fileName: "氷の街の約束.txt" });
+    expect(importAsNew.mock.calls[0][2]).toMatchObject({ fileName: "氷の街の約束.txt" });
     // 読んだのは届いたファイルだけ（押す前からあったもの・別の名前は開かない）
     expect(read).toHaveLength(1);
     expect(read[0]).toContain("氷の街の約束.txt");
@@ -315,7 +315,7 @@ describe("待ち", () => {
     await own.pollNow(ALPHAPOLIS);
     // 押されたあとの処理（`whenNoticePicked`）が終わるのを待つ
     await vi.waitFor(() => expect(importAsNew).toHaveBeenCalled());
-    expect(importAsNew.mock.calls[0][1]).toEqual({ site: "alphapolis", workId: "123456789" });
+    expect(importAsNew.mock.calls[0][1]).toMatchObject({ site: "alphapolis", workId: "123456789" });
     expect(importAsNew.mock.calls[0][2]).toBeUndefined();
     await vi.waitFor(() => expect(own.list()).toEqual([]));
   });
@@ -330,7 +330,7 @@ describe("取り込む前に照らす", () => {
     });
     expect(work?.id).toBe("new");
     expect(importAsNew).toHaveBeenCalledTimes(1);
-    expect(importAsNew.mock.calls[0][1]).toEqual({ site: "alphapolis", workId: "123456789" });
+    expect(importAsNew.mock.calls[0][1]).toMatchObject({ site: "alphapolis", workId: "123456789" });
   });
 
   test("食い違えば止めて訊き、やめたら取り込まない（枠は残る）", async () => {
@@ -474,6 +474,40 @@ describe("読者の反応の控え", () => {
     await own.note([ownEnvelope()]);
     await own.settleRegistered(registered);
     expect(own.pendingStats()).toHaveLength(1);
+  });
+
+  test("取り込みの側が失敗しても止まらず、控えは残す", async () => {
+    const registered = new Set(["kakuyomu:16816927861924296900"]);
+    const own = service({
+      registeredKeys: async () => registered,
+      importHeldStats: async () => {
+        throw new Error("台帳を読めませんでした");
+      },
+    });
+    await own.note([ownEnvelope()]);
+    await expect(own.settleRegistered(registered)).resolves.toBeUndefined();
+    expect(own.pendingStats()).toHaveLength(1);
+  });
+
+  test("重なって呼ばれても飛ばさず順に走らせ、名指しした作品の控えの数と取り込めた数を返す", async () => {
+    let calls = 0;
+    const own = service({
+      // 一覧の控えはまだ古い（作品ID の鍵が無い）。名指しで取り込む
+      registeredKeys: async () => new Set<string>(),
+      importHeldStats: async () => {
+        calls++;
+        return [];
+      },
+    });
+    await own.note([ownEnvelope()]);
+    const [plain, named] = await Promise.all([
+      own.flushHeldStats(),
+      own.flushHeldStats({ justRegistered: { site: "kakuyomu", workId: "16816927861924296900" } }),
+    ]);
+    expect(plain).toEqual({ held: 0, imported: 0 });
+    expect(named).toEqual({ held: 1, imported: 1 });
+    expect(calls).toBe(1);
+    expect(own.pendingStats()).toEqual([]);
   });
 
   test("枠のバックアップを取り込んで登録したら、その作品の控えを取り込みへ渡す", async () => {

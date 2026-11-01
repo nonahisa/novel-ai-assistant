@@ -142,6 +142,11 @@ export interface OwnWorksSource {
    * ——覚えを書き換えるのは受けた側で、書き換えたら `onDidChange` で描き直しを求める
    */
   noticeRegistered?(registered: ReadonlySet<string>): void;
+  /**
+   * 読者の反応の控えが残っているか。覚えが空でも控えがあれば、描くたびに登録済みの組を渡す
+   * （題で覚えから外れたのに控えだけが残った作品の分を、ここで取り込むため。2026-11-01 作者の実機）
+   */
+  hasPendingStats?(): boolean;
 }
 
 /**
@@ -723,7 +728,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     const source = this.ownWorks;
     if (!source) return { frames: [], hidden: 0 };
     const list = source.list();
-    if (list.length === 0) return { frames: [], hidden: 0 };
+    // 覚えも控えも無いときだけ、台帳を読まずに帰る
+    if (list.length === 0 && !source.hasPendingStats?.()) return { frames: [], hidden: 0 };
     const registered = await this.registeredOwnWorkKeys();
     // 登録済みになった作品を覚えから外し、控えておいた読者の反応をその作品へ移す
     // （枠の外の道で登録されたときに気づけるのは、ここで登録済みの組を取ったときだけ）

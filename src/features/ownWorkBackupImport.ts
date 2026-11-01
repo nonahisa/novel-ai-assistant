@@ -60,7 +60,12 @@ export async function importOwnWorkBackup(
    * 届いたバックアップを訊かずに取り込むか（作者の判断 2026-11-01）。立っていても、
    * 読めない・中身が枠の作品と食い違うときは、今までどおり止めて理由を言う・訊く
    */
-  unattended = false
+  unattended = false,
+  /** 枠の側が持つもの（控えの移し方・訊かずに取り込むときの書庫の覚え） */
+  hooks: {
+    readonly takeHeldStats?: KnownSiteWork["takeHeldStats"];
+    readonly library?: UnattendedImport["library"];
+  } = {}
 ): Promise<WorkEntry | undefined> {
   // 作品が決まるまでは保管庫の記録へ（相談パネルの受け口と同じ理由。設計書6.99.7）
   useLogFile(undefined);
@@ -134,9 +139,16 @@ export async function importOwnWorkBackup(
 
   return importAsNew(
     { fileName, inspection },
-    { site: entry.site, workId: entry.workId },
+    {
+      site: entry.site,
+      workId: entry.workId,
+      // 訊いて取り込むときも、控えは移す（作者の指示 2026-11-01「訊かずに・訊いてのどちらも」）
+      ...(hooks.takeHeldStats ? { takeHeldStats: hooks.takeHeldStats } : {}),
+    },
     // 照らして食い違い、作者が［それでも取り込む］を選んだときは、訊かずには進めない
     // （作者が迷った取り込みなので、題と中身を見せてから作る）
-    unattended && check.ok ? { fileName } : undefined
+    unattended && check.ok
+      ? { fileName, ...(hooks.library ? { library: hooks.library } : {}) }
+      : undefined
   );
 }

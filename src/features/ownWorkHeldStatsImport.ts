@@ -21,20 +21,32 @@ import { importReaderStatsBundle } from "./readerStats";
  * ## 渡すのは、作品が1つに決まる画面だけ
  *
  * 決まらない画面まで渡すと「取り込めなかったもの」の注意と［作品に登録する］が出る。
- * 控えはまだ登録されていない作品のためのものなので、決まらない画面は**黙って控えに残す**
- * （次に登録されたときにまた見る。上限と日数で古いものから捨てる）。
+ * 控えはまだ登録されていない作品のためのものなので、決まらない画面は**知らせずに控えに残す**
+ * （理由は記録へ。次に登録されたときにまた見る。上限と日数で古いものから捨てる）。
  *
  * ## 控えから外すのは、台帳に入ったと確かめた画面だけ
  *
  * 束の取り込みは保存に失敗しても例外を投げない（記録に残して知らせる）。取り込んだあと
  * 台帳を読み直し、**同じ記録が入っている画面だけ**を控えから外す（入っていなければ残す）。
  *
+ * ## 決まらなかった画面は、理由を操作の記録に残す（2026-11-01 作者の実機）
+ *
+ * ここへ来るのは「登録済み」と見た作品の画面なので、決まらないのは台帳に作品ID が無い
+ * （取り込みが書けなかった・サイトが違った）か、同じ作品ID の作品が2つあるときである。
+ * 黙って残すと「控えは残っているのに何も起きていない」ことに誰も気づけない。
+ *
+ * ## 知らせを出さないとき（`silent`）
+ *
+ * バックアップからの登録の途中で取り込むときは、**登録の知らせが取り込んだ画面の数を言う**。
+ * 束の取り込みの知らせまで出すと、同じことを2つの知らせで言うことになる（記録には残る）。
+ *
  * 読み込むのは `extension.ts` の閉包から動的 import するときだけ（起動を重くしない）。
  */
 export async function importHeldOwnWorkStats(
   envelopes: readonly ReaderStatsEnvelope[],
   works: readonly WorkEntry[],
-  lead: string
+  lead: string,
+  options: { readonly silent?: boolean } = {}
 ): Promise<{
   /** まだ台帳に入っていない画面（控えに残す） */
   readonly remaining: readonly ReaderStatsEnvelope[];
@@ -46,7 +58,14 @@ export async function importHeldOwnWorkStats(
   const routedTo = new Map<ReaderStatsEnvelope, string>();
   for (const envelope of envelopes) {
     const route = routeReaderStatsBundleItem(envelope, before);
-    if (route.kind !== "work") continue;
+    if (route.kind !== "work") {
+      useLogFile(undefined);
+      logFailure("控えた読者の反応の取り込み先を決める", {
+        作品: `${envelope.title ?? "（題なし）"}（${envelope.site} ${envelope.workId ?? "作品IDなし"}）`,
+        詳細: `${route.reason}（控えに残し、次に作品一覧を描き直したときにもう一度試します）`,
+      });
+      continue;
+    }
     routed.push(envelope);
     routedTo.set(envelope, route.id);
   }
@@ -58,7 +77,10 @@ export async function importHeldOwnWorkStats(
       result: { ok: true, envelope },
     })),
   };
-  const result = await importReaderStatsBundle(bundle, works, { lead });
+  const result = await importReaderStatsBundle(bundle, works, {
+    lead,
+    ...(options.silent ? { silent: true } : {}),
+  });
 
   const after = await loadCandidates(works.filter((work) => [...routedTo.values()].includes(work.id)));
   const remaining = envelopes.filter((envelope) => {

@@ -2325,15 +2325,21 @@ export async function activate(
         unattended
       );
     },
+    /*
+      取り込んで登録したら、その作品の一覧の控えを捨てる。登録の直後の描き直しが、台帳に
+      作品ID が書かれる前の空の台帳を控えに持つので、そのままだと「登録済みか」の見分けが
+      古いまま残る（2026-11-01 作者の実機。控えの取り込みが黙って何もしなかった）
+    */
+    afterImport: async (work) => treeProvider.refresh(work.id),
     // 届いたバックアップを訊かずに取り込む前に、同じ作品がもう登録されていないか見る
     registeredKeys: () => treeProvider.registeredOwnWorkKeys(),
     /*
       管理画面で読んだ未登録の作品の読者の反応を、登録されたあとに取り込む（2026-11-01）。
       取り込みは束の取り込みと同じ関数（`importReaderStatsBundle`）を通る
     */
-    importHeldStats: async (envelopes, lead) => {
+    importHeldStats: async (envelopes, lead, options) => {
       const { importHeldOwnWorkStats } = await import("./features/ownWorkHeldStatsImport.js");
-      const result = await importHeldOwnWorkStats(envelopes, registry.list(), lead);
+      const result = await importHeldOwnWorkStats(envelopes, registry.list(), lead, options);
       for (const changed of result.changedWorks) {
         await refreshWritingStatsPanel(changed, deviceId);
       }
