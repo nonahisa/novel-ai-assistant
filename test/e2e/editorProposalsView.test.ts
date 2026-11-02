@@ -273,8 +273,8 @@ test("自動の同期で先に届いた提案があっても「編集者の提�
       await pressViewProposals(page);
       const offline = await waitNotice(page, "受け取れませんでした", "つながらないときの知らせが出る");
       expect(offline, `知らせ：${offline}`).toContain("編集者からの提案が 3 件あります");
-      expect(offline).toContain("GitHubから受け取れませんでした");
-      expect(offline).toContain("手元にある分を並べています。");
+      // 取りに行けなかった（pullFailed）ときの文。受け取りの途中の失敗（「（詳しくは「ログ」に残しました）」）とは分ける
+      expect(offline).toContain("GitHubから受け取れませんでした。手元にある分を並べています。");
       const kept = await waitPanel(page, 3, "つながらなくても手元の未決3件が並ぶ");
       await holdsFor(
         async () => {
