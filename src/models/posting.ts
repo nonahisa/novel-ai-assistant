@@ -634,6 +634,26 @@ export interface PostingRecord {
 }
 
 /**
+ * 修正版を出し直した記録（設計書6.68.7。作者の依頼 2026-11-03「修正後再投稿に対応してください」）。
+ *
+ * **投稿の記録（`posts`）とは別の配列に持つ。** 出し直しは新しい話を出したことにならないので、
+ * `posts` に混ぜると未投稿の数や「投稿した日時」が狂う。`posts` に欄を足す形にしなかったのは、
+ * 投稿した日時（読者が初めて読めた日）を出し直しの日時で塗り替えないため。
+ *
+ * 同じ話・同じサイトは**1件に保つ**（日時は新しいほう。`posts` と同じ流儀）。
+ * 話の指し方は `PostingRecord` と同じ（合本の1話は `chapter` か `order`）。
+ */
+export interface PostingRevisionRecord {
+  /** 作品フォルダからの相対パス（区切りは `/`） */
+  episodePath: string;
+  site: PostingSiteId;
+  /** 作者が「出し直しました」と答えた日時（ISO8601） */
+  revisedAt: string;
+  chapter?: number;
+  order?: number;
+}
+
+/**
  * 投稿の記録が指す先（設計書6.68.2）。**ファイルか、合本の中の1話か。**
  *
  * 合本でないファイルは、これまでどおり相対パスの文字列だけで指せる
@@ -666,6 +686,12 @@ export interface PostingLedger {
    */
   siteProfiles: PostingSiteProfileEntry[];
   posts: PostingRecord[];
+  /**
+   * 修正版を出し直した記録（6.68.7）。**未投稿の数には効かない**（`posts` だけを見る）。
+   *
+   * この欄が無い台帳（これより前のもの）は、出し直しが1件も無いとして読む。
+   */
+  revisions?: PostingRevisionRecord[];
   /**
    * 順位の記録（6.68.5）。**追記だけ**で、古い記録は書き換えない。
    *
@@ -1184,6 +1210,27 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
       };
     }) ?? [];
 
+  /*
+    修正版の出し直し（6.68.7）。**欄が無ければ無いまま**（これより前の台帳を読めなくしない）。
+    中身は `posts` と同じ厳しさで読み、壊れていれば直さずに止める——話数の欄が崩れると、
+    どの話を直したかが静かにずれる。
+  */
+  const revisions = optionalObjectArray(value.revisions, "revisions", (entry, entryPath) => {
+    requireNonEmptyString(entry.episodePath, `${entryPath}.episodePath`);
+    const site = requireSiteId(entry.site, `${entryPath}.site`);
+    requireNonEmptyString(entry.revisedAt, `${entryPath}.revisedAt`);
+    optionalNullableNumber(entry.chapter, `${entryPath}.chapter`);
+    optionalNullableNumber(entry.order, `${entryPath}.order`);
+    const chapter = typeof entry.chapter === "number" ? entry.chapter : null;
+    const order = typeof entry.order === "number" ? entry.order : null;
+    return {
+      episodePath: normalizeEpisodePath(entry.episodePath as string),
+      site,
+      revisedAt: (entry.revisedAt as string).trim(),
+      ...(chapter !== null ? { chapter } : order !== null ? { order } : {}),
+    };
+  });
+
   const rankings =
     optionalObjectArray(value.rankings, "rankings", (entry, entryPath) => {
       const site = requireSiteId(entry.site, `${entryPath}.site`);
@@ -1392,6 +1439,8 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
       sites,
       siteProfiles,
       posts,
+      // 空の入れ物は持ち歩かない（下の3つと同じ）
+      ...(revisions?.length ? { revisions } : {}),
       rankings,
       readerStats,
       // 空の入れ物は持ち歩かない（読んで書き戻すだけで中身が増えないように）
@@ -1860,6 +1909,90 @@ export function unpostedSites(
         POSTING_SITES.findIndex((site) => site.id === left) -
         POSTING_SITES.findIndex((site) => site.id === right)
     );
+}
+
+/**
+ * その話を、もう出したサイト（6.68.7。修正版を出し直す先の候補）。
+ *
+ * **登録したサイトの中だけを見る**（`unpostedSites` と対）。外したサイトへ出した記録は
+ * 残っているが、外している間はそのサイトを案内しない（未投稿の数と同じ線）。
+ * 基準線（導入前に出した話）も「出した」に入れる——出したことは事実で、直すなら貼り替える。
+ */
+export function postedSites(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike
+): PostingSiteId[] {
+  const unposted = new Set(unpostedSites(ledger, target));
+  return ledger.sites
+    .map((entry) => entry.site)
+    .filter((site) => !unposted.has(site))
+    .sort(
+      (left, right) =>
+        POSTING_SITES.findIndex((site) => site.id === left) -
+        POSTING_SITES.findIndex((site) => site.id === right)
+    );
+}
+
+/**
+ * その話・そのサイトの投稿の記録（出し直しの画面に投稿日を添えるため）。
+ *
+ * その話そのものの記録を先に見て、無ければファイルまるごとの記録（`isPosted` と同じ読み）。
+ */
+export function postRecordFor(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId
+): PostingRecord | undefined {
+  const key = postingEpisodeKey(target);
+  const filePath = normalizeEpisodePath(toTarget(target).episodePath);
+  const onSite = ledger.posts.filter((post) => post.site === site);
+  return (
+    onSite.find((post) => postingEpisodeKey(post) === key) ??
+    onSite.find((post) => postingEpisodeKey(post) === filePath)
+  );
+}
+
+/** その話・そのサイトで、いちばん最近に修正版を出し直した記録 */
+export function revisionFor(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId
+): PostingRevisionRecord | undefined {
+  const key = postingEpisodeKey(target);
+  return (ledger.revisions ?? []).find(
+    (record) => record.site === site && postingEpisodeKey(record) === key
+  );
+}
+
+/**
+ * 「修正版を出し直しました」を記録する（6.68.7）。**元の台帳は書き換えない。**
+ *
+ * **`posts` には触らない**——出し直しは新しい話を出したことにならない。未投稿の数も、
+ * 投稿した日時も変わらない。同じ話・同じサイトの記録は1件に保つ（日時は新しいほう）。
+ */
+export function withRevision(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId,
+  revisedAt: string
+): PostingLedger {
+  const wanted = toTarget(target);
+  const key = postingEpisodeKey(wanted);
+  const kept = (ledger.revisions ?? []).filter(
+    (record) => !(record.site === site && postingEpisodeKey(record) === key)
+  );
+  return {
+    ...ledger,
+    revisions: [
+      ...kept,
+      {
+        episodePath: normalizeEpisodePath(wanted.episodePath),
+        site,
+        revisedAt,
+        ...episodeRefFields(wanted),
+      },
+    ],
+  };
 }
 
 /**

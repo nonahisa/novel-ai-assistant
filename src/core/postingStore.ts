@@ -332,6 +332,12 @@ export class PostingStore {
           ? { siteProfiles: ledger.siteProfiles }
           : {}),
         posts: ledger.posts,
+        /*
+          修正版の出し直し（6.68.7）。**名指しして書かないと、記録しても保存で消える。**
+          1件も無ければ欄ごと書かない。この欄を知らない古い版が保存すると消える
+          （`siteFacts` と同じ「消せない限界」）——消えても投稿の記録と未投稿の数は変わらない
+        */
+        ...(ledger.revisions?.length ? { revisions: ledger.revisions } : {}),
         rankings: ledger.rankings ?? [],
         /*
           読者の反応（6.79.7）。**1件も無ければ欄ごと書かない**——作品情報

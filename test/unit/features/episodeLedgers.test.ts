@@ -594,4 +594,33 @@ describe("話数を指している台帳の追従", () => {
     expect(after.posts).toEqual([]);
     expect(describeLedgerFollowSummary(summary)).toContain("投稿の記録");
   });
+
+  /**
+   * 修正版の出し直しの記録（設計書6.68.7）も、投稿の記録と同じ規則で付いてくる。
+   * 消えた話の記録は落とし、繰り上がってきた別の話が「出し直し済み」に見えないようにする。
+   */
+  test("出し直しの記録も付いてくる。消えた話の出し直しの記録は落とす", async () => {
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+    await store.save({
+      ...ledger,
+      posts: [{ episodePath: "本文/004.txt", site: "kakuyomu", postedAt: "2026-09-04T00:00:00.000Z" }],
+      revisions: [
+        { episodePath: "本文/003.txt", site: "kakuyomu", revisedAt: "2026-11-01T00:00:00.000Z" },
+        { episodePath: "本文/004.txt", site: "kakuyomu", revisedAt: "2026-11-02T00:00:00.000Z" },
+      ],
+    });
+
+    await followEpisodeLedgers(work, [rename("004.txt", "003.txt")], {
+      filePath: episodePath("003.txt"),
+      number: 3,
+      next: { filePath: episodePath("003.txt"), number: 3 },
+    });
+
+    const after = await new PostingStore(work).load();
+    expect(after.posts.map((post) => post.episodePath)).toEqual(["本文/003.txt"]);
+    expect(after.revisions).toEqual([
+      { episodePath: "本文/003.txt", site: "kakuyomu", revisedAt: "2026-11-02T00:00:00.000Z" },
+    ]);
+  });
 });

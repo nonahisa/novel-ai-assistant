@@ -149,6 +149,44 @@ export function readerStatsPageUrl(
 }
 
 /**
+ * 修正版を出し直すときに開く、作品の管理画面（設計書6.68.7。作者の依頼 2026-11-03）。
+ *
+ * ## 話の編集画面は組み立てない
+ *
+ * 話の編集画面は、どのサイトも**サイトが振った話の番号**で話を指す（アルファポリスなら
+ * `save_episode/{作品ID}/{話ID}`）。台帳が知っているのは作品IDと手元のファイルだけで、
+ * 話の番号はどこにも残っていない（ページを読みにいけば分かるが、6.68.1 で読まないと決めている）。
+ * だから作品の管理画面を開き、そこから作者が話を選ぶ。
+ *
+ * ## 組み立てるのは形を確かめたサイトだけ
+ *
+ * - カクヨム：`/my/works/{作品ID}`（`readerStatsPageUrl` と同じ画面。話の一覧が並ぶ）
+ * - アルファポリス：`/mypage/content/detail/{9桁の作品ID}`（2026-11-01 作者の Chrome で確かめた）
+ * - なろう・note：組み立てない（なろうの管理画面はNコードでなくサイト内部の番号で作品を指すと
+ *   見ている。noteは作品の単位が無い）。**推測のURLを開かせない**——とくに新しい話の投稿ページを
+ *   代わりに開くと、修正版がもう1本の新しい話として公開される
+ *
+ * 作品IDは台帳の値を先に見て、無ければ投稿ページのURLから導く（`readerStatsPageUrl` と同じ順）。
+ *
+ * @returns 開けるURL。組み立てられなければ undefined（呼ぶ側は開かずに案内だけ出す）
+ */
+export function workManagePageUrl(
+  site: PostingSiteId,
+  profile: PostingSiteProfile | undefined,
+  postUrl?: string | null
+): string | undefined {
+  if (site === "kakuyomu") return readerStatsPageUrl(site, profile, postUrl);
+  if (site === "alphapolis") {
+    const workId =
+      alphapolisWorkId(profile?.workId) ?? deriveSiteProfile(site, postUrl).workId;
+    return workId
+      ? `https://www.alphapolis.co.jp/mypage/content/detail/${workId}`
+      : undefined;
+  }
+  return undefined;
+}
+
+/**
  * 「コピー（投稿サイト用）」のあとに開く、そのサイトの投稿ページ
  * （作者の依頼、2026-09-23）。
  *

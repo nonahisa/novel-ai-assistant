@@ -461,10 +461,22 @@ async function followPosting(
   try {
     const store = new PostingStore(work);
     const ledger = await store.load();
-    if (ledger.posts.length === 0) return;
+    const revisions = ledger.revisions ?? [];
+    if (ledger.posts.length === 0 && revisions.length === 0) return;
     const result = renumberPostingPosts(ledger.posts, moves, removedRelPath);
-    if (result.changed === 0 && result.dropped === 0) return;
-    await store.save({ ...ledger, posts: result.posts });
+    /*
+      **修正版の出し直しの記録（6.68.7）も同じ規則で付け替える。** 投稿の記録だけ動かすと、
+      詰めたあとに同じパスへ来た別の話が「出し直し済み」に見える。数は報告に足さない
+      （報告の件数は「投稿の記録」の数として作者に見せている）
+    */
+    const revised = renumberPostingPosts(revisions, moves, removedRelPath);
+    const revisionsMoved = revised.changed + revised.dropped > 0;
+    if (result.changed === 0 && result.dropped === 0 && !revisionsMoved) return;
+    await store.save({
+      ...ledger,
+      posts: result.posts,
+      ...(revisions.length > 0 ? { revisions: revised.posts } : {}),
+    });
     summary.posting = result.changed;
     summary.postingDropped = result.dropped;
   } catch (error) {

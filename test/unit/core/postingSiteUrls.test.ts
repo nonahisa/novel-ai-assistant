@@ -9,6 +9,7 @@ import {
   planNewEpisodeUrlOnWorkIdChange,
   postingPageUrl,
   readerStatsPageUrl,
+  workManagePageUrl,
 } from "../../../src/core/postingSiteUrls";
 
 /**
@@ -418,5 +419,43 @@ describe("作者だけが開けるページ", () => {
       authorOnlyPageNotice("https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366")
     ).toContain("読者が開ける作品ページ");
     expect(authorOnlyPageNotice(実機.workUrl)).toBeUndefined();
+  });
+});
+
+/**
+ * 修正版を出し直すときに開く、作品の管理画面（設計書6.68.7。作者の依頼 2026-11-03）。
+ * 話の編集画面は話の番号が台帳に無いので組み立てない。**新しい話の投稿ページは返さない**
+ * （修正版をそこへ貼ると、同じ話がもう1本公開される）。
+ */
+describe("出し直しで開く作品の管理画面", () => {
+  test("カクヨムは作品の管理画面（台帳の作品IDを先に、無ければ投稿ページのURLから）", () => {
+    expect(workManagePageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl)).toBe(
+      "https://kakuyomu.jp/my/works/16816927859"
+    );
+    expect(workManagePageUrl("kakuyomu", undefined, 実機.newEpisodeUrl)).toBe(
+      `https://kakuyomu.jp/my/works/${実機.workId}`
+    );
+  });
+
+  test("アルファポリスは /mypage/content/detail/9桁（形の違う作品IDは使わない）", () => {
+    const postUrl = "https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366";
+    expect(workManagePageUrl("alphapolis", { workId: "123456789" }, postUrl)).toBe(
+      "https://www.alphapolis.co.jp/mypage/content/detail/123456789"
+    );
+    expect(workManagePageUrl("alphapolis", { workId: "12345/678" }, postUrl)).toBe(
+      "https://www.alphapolis.co.jp/mypage/content/detail/637622366"
+    );
+    expect(workManagePageUrl("alphapolis", undefined, undefined)).toBeUndefined();
+  });
+
+  test("なろう・noteは組み立てない（投稿ページのURLがあっても、それを返さない）", () => {
+    expect(
+      workManagePageUrl(
+        "narou",
+        { workId: "n1234ab" },
+        "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/"
+      )
+    ).toBeUndefined();
+    expect(workManagePageUrl("note", undefined, "https://note.com/notes/new")).toBeUndefined();
   });
 });
