@@ -37,7 +37,7 @@ import { expect, test } from "vitest";
 import { rankEventNotice, type RankEvent } from "../../src/core/rankCelebrations";
 import { parseReaderStatsPaste, buildReaderStatsEnvelope, type ReaderStatsRanking } from "../../src/core/readerStatsEnvelope";
 import { routeReaderStatsRanking } from "../../src/core/readerStatsHelperLink";
-import type { PostingLedger } from "../../src/models/posting";
+import { parsePostingLedger, type PostingLedger } from "../../src/models/posting";
 import { readJsonWhenPresent } from "./support/fileSettle";
 import {
   HELPER_LINK_LAUNCH,
@@ -105,7 +105,8 @@ function expectBundleRoutes(bundle: string, ledger: Record<string, unknown>, wan
   for (const item of rankings) {
     expect(item.result.ok, `見本の順位の${item.position}件目が読めません：${JSON.stringify(item.result)}`).toBe(true);
     if (!item.result.ok) continue;
-    const route = routeReaderStatsRanking(item.result.ranking, [{ id: "見本", ledger: ledger as unknown as PostingLedger }]);
+    // 台帳の見本も製品の読み込み（壊れていれば例外）へ通す
+    const route = routeReaderStatsRanking(item.result.ranking, [{ id: "見本", ledger: parsePostingLedger(ledger) }]);
     expect(route, `見本の順位の${item.position}件目が作品に決まりません`).toEqual({ kind: "work", id: "見本" });
   }
   for (const item of parsed.bundle.items) {
