@@ -3,10 +3,13 @@ import {
   RANK_CELEBRATION_WINDOW_DAYS,
   RANK_FIREWORKS_RISE,
   RANK_FIREWORKS_TOP,
+  RANK_STREAK_SIZE,
   detectRankEvents,
   rankCelebrationScale,
   rankCelebrationSize,
+  rankEventLine,
   rankEventNotice,
+  rankStreakUnit,
 } from "../../../src/core/rankCelebrations";
 import { emptyPostingLedger, type PostingRankingRecord } from "../../../src/models/posting";
 
@@ -29,10 +32,10 @@ describe("何を祝うか", () => {
     expect(rankEventNotice("苦手の流転", events[0])).toBe("「苦手の流転」がカクヨムの日間で120位に入りました！");
   });
 
-  test("順位が上がった", () => {
+  test("自己最高を抜いた", () => {
     const events = detectRankEvents(ledgerOf([at("2026-10-31", 120), at("2026-11-01", 100)]), "w1", "2026-11-02");
-    expect(events[0]).toMatchObject({ rank: 100, previous: 120 });
-    expect(rankEventNotice("苦手の流転", events[0])).toBe("「苦手の流転」がカクヨムの日間で120位から100位に上がりました！");
+    expect(events[0]).toMatchObject({ kind: "best", rank: 100, previous: 120 });
+    expect(rankEventNotice("苦手の流転", events[0])).toBe("「苦手の流転」がカクヨムの日間で自己最高の120位を抜いて100位になりました！");
   });
 
   test("下がった・同じときは何も出さない", () => {
@@ -52,6 +55,89 @@ describe("何を祝うか", () => {
     expect(again.map((event) => event.id)).toEqual(first.map((event) => event.id));
     expect(new Set(first.map((event) => event.id)).size).toBe(2);
     expect(detectRankEvents(ledger, "w2", "2026-11-02")[0].id).not.toBe(first[0].id);
+  });
+});
+
+describe("自己最高を抜いたときだけ祝う（作者の裁定 2026-11-02 夜）", () => {
+  test("下がったあとに戻しただけ（自己最高に届かない上昇）は祝わない", () => {
+    const ledger = ledgerOf([at("2026-10-30", 5), at("2026-10-31", 40), at("2026-11-01", 20)]);
+    expect(detectRankEvents(ledger, "w1", "2026-11-02")).toEqual([]);
+  });
+
+  test("自己最高と同じ順位に戻しただけでも祝わない", () => {
+    const ledger = ledgerOf([at("2026-10-30", 5), at("2026-10-31", 40), at("2026-11-01", 5)]);
+    expect(detectRankEvents(ledger, "w1", "2026-11-02")).toEqual([]);
+  });
+
+  test("自己最高を抜いたら、抜いた自己最高の順位を添えて祝う（直前の点ではない）", () => {
+    const ledger = ledgerOf([at("2026-10-30", 30), at("2026-10-31", 80), at("2026-11-01", 12)]);
+    const events = detectRankEvents(ledger, "w1", "2026-11-02");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: "best", rank: 12, previous: 30 });
+    expect(rankEventNotice("苦手の流転", events[0])).toBe(
+      "「苦手の流転」がカクヨムの日間で自己最高の30位を抜いて12位になりました！"
+    );
+    expect(rankEventLine(events[0])).toBe("カクヨムの日間で自己最高の30位を抜いて12位になりました");
+  });
+
+  test("規模の上昇幅は自己最高から測る", () => {
+    const ledger = ledgerOf([at("2026-10-30", 100), at("2026-10-31", 300), at("2026-11-01", 60)]);
+    expect(detectRankEvents(ledger, "w1", "2026-11-02")[0]).toMatchObject({ previous: 100, size: "small" });
+  });
+
+  test("初めての1位は大きな花火", () => {
+    const ledger = ledgerOf([at("2026-10-31", 3), at("2026-11-01", 1)]);
+    expect(detectRankEvents(ledger, "w1", "2026-11-02")[0]).toMatchObject({ kind: "best", rank: 1, previous: 3, size: "grand" });
+  });
+});
+
+describe("1位が続いた長さで毎回祝う（作者の裁定 2026-11-02 夜）", () => {
+  test("日間の1位が続くと「1位がN日続きました！」", () => {
+    const ledger = ledgerOf([at("2026-10-30", 4), at("2026-10-31", 1), at("2026-11-01", 1), at("2026-11-02", 1)]);
+    const events = detectRankEvents(ledger, "w1", "2026-11-02");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: "streak", rank: 1, streak: { count: 3, unit: "日" }, size: RANK_STREAK_SIZE });
+    expect(rankEventNotice("苦手の流転", events[0])).toBe("「苦手の流転」がカクヨムの日間で1位が3日続きました！");
+    expect(rankEventLine(events[0])).toBe("カクヨムの日間で1位が3日続きました");
+  });
+
+  test("連続の日ごとに鍵が違う（毎回祝う）", () => {
+    const two = detectRankEvents(ledgerOf([at("2026-10-31", 1), at("2026-11-01", 1)]), "w1", "2026-11-02");
+    const three = detectRankEvents(
+      ledgerOf([at("2026-10-31", 1), at("2026-11-01", 1), at("2026-11-02", 1)]),
+      "w1",
+      "2026-11-02"
+    );
+    expect(two[0].streak?.count).toBe(2);
+    expect(three[0].streak?.count).toBe(3);
+    expect(three[0].id).not.toBe(two[0].id);
+  });
+
+  test("週間・累計などは「回」で数える", () => {
+    const events = detectRankEvents(
+      ledgerOf([at("2026-10-26", 1, "週間"), at("2026-11-02", 1, "週間")]),
+      "w1",
+      "2026-11-02"
+    );
+    expect(events[0]).toMatchObject({ kind: "streak", streak: { count: 2, unit: "回" } });
+    expect(rankEventNotice("苦手の流転", events[0])).toBe("「苦手の流転」がカクヨムの週間で1位が2回続きました！");
+  });
+
+  test("間に2位以下があれば連続は切れる（戻った1位は自己最高に届かないので祝わず、次の1位から数え直す）", () => {
+    const back = ledgerOf([at("2026-10-30", 1), at("2026-10-31", 2), at("2026-11-01", 1)]);
+    expect(detectRankEvents(back, "w1", "2026-11-02")).toEqual([]);
+    const again = ledgerOf([at("2026-10-29", 1), at("2026-10-30", 2), at("2026-10-31", 1), at("2026-11-01", 1)]);
+    expect(detectRankEvents(again, "w1", "2026-11-02")[0]).toMatchObject({ kind: "streak", streak: { count: 2, unit: "日" } });
+  });
+
+  test("種別から日ごとかを決める（決められなければ「回」）", () => {
+    expect(rankStreakUnit("日間")).toBe("日");
+    expect(rankStreakUnit("総合 日間")).toBe("日");
+    expect(rankStreakUnit("24時間ランキング")).toBe("日");
+    expect(rankStreakUnit("週間")).toBe("回");
+    expect(rankStreakUnit("月間")).toBe("回");
+    expect(rankStreakUnit("累計ランキング")).toBe("回");
+    expect(rankStreakUnit("作者が付けた名前")).toBe("回");
   });
 });
 
