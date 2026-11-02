@@ -174,26 +174,38 @@ async function measureBar(page: Page, frame: Frame): Promise<BarMeasure> {
 }
 
 /**
- * 品書きの箱と、項目の字の箱（いちばん右・いちばん下）。
+ * 品書きの箱（縁取りまで含む）と、項目の字の箱（いちばん右・いちばん下）、項目の中で切れた字の数。
  *
- * **はみ出しは項目の字で測る。** 面そのものが品書きより狭いとき（幅 400px の窓で面は約 188px、品書きは約 190px）、
- * 製品は品書きを左端へ寄せるので、右の縁取りの 1〜2px は面の外に出る（2026-11-02 この件を書いたときの値）。
- * 項目の字が読めて押せるかを見る——縁取りの数 px は見た目の話で、作者の目に残す
+ * **はみ出しは縁取りまで含めた箱で測る**（作者の裁定 2026-11-02「直す」）。幅 400px の窓では面が約 188px と
+ * 品書きの最小幅（約 190px）より狭く、以前は右の縁取りの 1〜2px が面の外に出ていた。品書きの幅を面に合わせて
+ * 狭め、項目の字は折り返して収める。字が読めて押せることは、項目の字の右端と「項目の中で切れた字」で見る
  */
-async function menuBox(frame: Frame): Promise<{ left: number; right: number; top: number; bottom: number; items: number; textRight: number; textBottom: number }> {
+async function menuBox(frame: Frame): Promise<{
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  items: number;
+  textRight: number;
+  textBottom: number;
+  clippedItems: string[];
+}> {
   return frame.evaluate(() => {
     const menu = document.getElementById("menu") as HTMLElement;
     const rect = menu.getBoundingClientRect();
     let textRight = 0;
     let textBottom = 0;
-    for (const item of Array.from(menu.querySelectorAll(".item"))) {
+    const clippedItems: string[] = [];
+    for (const item of Array.from(menu.querySelectorAll(".item")) as HTMLElement[]) {
       const range = document.createRange();
       range.selectNodeContents(item);
       const box = range.getBoundingClientRect();
       textRight = Math.max(textRight, box.right);
       textBottom = Math.max(textBottom, box.bottom);
+      // 字が項目の箱より広い（横へ切れている・隠れている）ものを拾う
+      if (item.scrollWidth > item.clientWidth + 1) clippedItems.push(`${(item.textContent ?? "").trim()}（${item.scrollWidth}/${item.clientWidth}）`);
     }
-    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, items: menu.querySelectorAll(".item").length, textRight, textBottom };
+    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, items: menu.querySelectorAll(".item").length, textRight, textBottom, clippedItems };
   });
 }
 
@@ -213,8 +225,9 @@ async function expectFitsNarrow(page: Page, frame: Frame, label: string): Promis
   expect(menu.items, `${label}：品書きの項目の数（${menuDetail}）`).toBe(5);
   expect(menu.left, `${label}：品書きが左へはみ出しています（${menuDetail}）`).toBeGreaterThanOrEqual(-1);
   expect(menu.textRight, `${label}：品書きの項目の字が見えている幅の右へはみ出しています（${menuDetail}）`).toBeLessThanOrEqual(bar.visibleRight + 1);
-  // 縁取りまで含めた箱も、面の幅を超える分（数 px）より大きくははみ出さない
-  expect(menu.right, `${label}：品書きの箱が見えている幅の右へ大きくはみ出しています（${menuDetail}）`).toBeLessThanOrEqual(bar.visibleRight + 4);
+  expect(menu.clippedItems, `${label}：品書きの項目の字が切れています（${menuDetail}）`).toEqual([]);
+  // 縁取りまで含めた箱が、見えている幅の中に収まる（測りの丸めの 1px だけ許す）
+  expect(menu.right, `${label}：品書きの縁取りが見えている幅の右へはみ出しています（${menuDetail}）`).toBeLessThanOrEqual(bar.visibleRight + 1);
   expect(menu.top, `${label}：品書きが上へはみ出しています（${menuDetail}）`).toBeGreaterThanOrEqual(-1);
   expect(menu.bottom, `${label}：品書きが面の下へはみ出しています（${menuDetail}）`).toBeLessThanOrEqual(bar.frameHeight + 1);
   console.info(`[E2E] ${label}：${menuDetail}`);

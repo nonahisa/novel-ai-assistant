@@ -77,6 +77,8 @@ function runOpenMenu(options: { term: boolean; hasSelection: boolean; reviewMode
       appendChild(node) { env.items.push(node.item); },
     };
     const document = {
+      // 品書きを面の中へ収める placeMenu が面の幅を読む
+      documentElement: { clientWidth: 1000 },
       createElement() {
         const item = { kind: "item", label: "", disabled: false };
         const node = {

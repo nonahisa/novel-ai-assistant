@@ -823,6 +823,9 @@ ruby > rt {
   position: fixed;
   z-index: 20;
   min-width: 190px;
+  /* 幅は縁取りまで含めて数える。置く側（placeMenu）が最大幅を面の幅に合わせるので、
+     縁取りの 1px ずつで面の外へ出ないようにする */
+  box-sizing: border-box;
   padding: 4px 0;
   border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
   border-radius: 4px;
@@ -836,7 +839,10 @@ ruby > rt {
   padding: 5px 14px;
   font-size: 12px;
   cursor: pointer;
-  white-space: nowrap;
+  /* 広い面では1行に収まる（箱は字の幅まで広がる）。面が品書きより狭いときだけ折り返し、
+     字を切らずに読めて押せるままにする */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 #menu .item:hover {
   background: var(--vscode-menu-selectionBackground);
@@ -4860,13 +4866,8 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     add("校正・メモパネルを開く", "この話の校正・メモパネルを横に開きます", function () {
       vscode.postMessage({ type: "openMemos" });
     });
-    menu.classList.add("open");
-    // ボタンの下に出す。狭い窓では画面の中へ収める（右クリックと同じ収め方）
-    const box = menu.getBoundingClientRect();
-    const left = Math.min(anchor.left, window.innerWidth - box.width - 4);
-    const top = Math.min(anchor.bottom + 2, window.innerHeight - box.height - 4);
-    menu.style.left = Math.max(0, left) + "px";
-    menu.style.top = Math.max(0, top) + "px";
+    // ボタンの下に出す。狭い窓では面の中へ収める（右クリックと同じ収め方）
+    placeMenu(anchor.left, anchor.bottom + 2);
   }
 
   /**
@@ -5006,10 +5007,26 @@ ${RESUME_WRITING_LABEL ? `
       vscode.postMessage({ type: "resumeWriting" });
     });
 ` : ""}
+    placeMenu(x, y);
+  }
+
+  /**
+   * 品書きの箱を開き、面の中へ収めて置く（右クリックと［校正］で共通）。
+   *
+   * **縁取りまで面の中に収める**（作者の裁定 2026-11-02「直す」）。幅 400px の窓では面が約 188px と
+   * 品書きの最小幅 190px より狭く、左端へ寄せても右の縁取りが外に出ていた。そこで最大幅（と最小幅）を
+   * 面の幅から余白を引いた値に合わせ、項目の字は折り返させる（CSS の #menu .item）。
+   * 測る前に左上へ戻すのは、前に開いた位置が残っていると、残りの幅で字が折り返したまま測ってしまうため
+   */
+  function placeMenu(x, y) {
+    const room = Math.max(0, document.documentElement.clientWidth - 8);
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    menu.style.maxWidth = room + "px";
+    menu.style.minWidth = Math.min(190, room) + "px";
     menu.classList.add("open");
-    // 画面の外へはみ出さないように収める
     const box = menu.getBoundingClientRect();
-    const left = Math.min(x, window.innerWidth - box.width - 4);
+    const left = Math.min(x, document.documentElement.clientWidth - box.width - 4);
     const top = Math.min(y, window.innerHeight - box.height - 4);
     menu.style.left = Math.max(0, left) + "px";
     menu.style.top = Math.max(0, top) + "px";

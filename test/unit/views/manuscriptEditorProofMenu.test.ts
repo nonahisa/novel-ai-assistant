@@ -29,14 +29,33 @@ interface MenuItem {
   click?: () => void;
 }
 
-function runOpenProofMenu(): { items: MenuItem[]; posted: unknown[]; closed: number } {
+interface ProofMenuRun {
+  items: MenuItem[];
+  posted: unknown[];
+  closed: number;
+  style: Record<string, string>;
+}
+
+/**
+ * @param faceWidth 面の幅（document.documentElement.clientWidth）
+ * @param naturalWidth 品書きが字の幅まで広がったときの幅。置く側が決めた最大幅で頭打ちになる
+ */
+function runOpenProofMenu(faceWidth = 300, naturalWidth = 200): ProofMenuRun {
   const source = functionSource("openProofMenu", "function openMenu(");
-  const env = { items: [] as MenuItem[], posted: [] as unknown[], closed: 0 };
+  const place = functionSource("placeMenu", "function termAtCaret(");
+  const env: ProofMenuRun & { faceWidth: number; naturalWidth: number } = {
+    items: [],
+    posted: [],
+    closed: 0,
+    style: {},
+    faceWidth,
+    naturalWidth,
+  };
   const open = new Function(
     "env",
     `
     const vscode = { postMessage(message) { env.posted.push(message); } };
-    const window = { innerWidth: 300, innerHeight: 400 };
+    const window = { innerWidth: env.faceWidth, innerHeight: 400 };
     let menuTerm = null;
     let menuOwner = "";
     function closeMenu() { env.closed += 1; }
@@ -44,11 +63,16 @@ function runOpenProofMenu(): { items: MenuItem[]; posted: unknown[]; closed: num
     const menu = {
       set innerHTML(value) { env.items.length = 0; },
       classList: { add() {} },
-      style: {},
-      getBoundingClientRect() { return { width: 200, height: 150 }; },
+      style: env.style,
+      // 本物の箱と同じく、最大幅（縁取り込み）を超えては広がらない
+      getBoundingClientRect() {
+        const max = parseFloat(env.style.maxWidth ?? "Infinity");
+        return { width: Math.min(env.naturalWidth, max), height: 150 };
+      },
       appendChild(node) { env.items.push(node.item); },
     };
     const document = {
+      documentElement: { clientWidth: env.faceWidth },
       createElement() {
         const item = { kind: "item", label: "", title: "" };
         return {
@@ -61,10 +85,11 @@ function runOpenProofMenu(): { items: MenuItem[]; posted: unknown[]; closed: num
       },
     };
     ${source}
+    ${place}
     return openProofMenu;
     `
   )(env) as (anchor: { left: number; bottom: number }) => void;
-  open({ left: 250, bottom: 30 });
+  open({ left: 28, bottom: 30 });
   return env;
 }
 
@@ -96,6 +121,22 @@ describe("上の列の［校正］", () => {
     for (const item of items.filter((entry) => entry.kind === "item")) {
       expect(item.title, item.label).not.toBe("");
     }
+  });
+
+  it("面が品書きの最小幅より狭くても、縁取りまで面の中に収める（作者の裁定 2026-11-02。幅 400px の窓で面は約 188px）", () => {
+    const { style } = runOpenProofMenu(188, 260);
+    const left = parseFloat(style.left);
+    const width = Math.min(260, parseFloat(style.maxWidth));
+    expect(parseFloat(style.minWidth), "最小幅が面より広いままです").toBeLessThanOrEqual(188);
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(left + width, `品書きの右端が面の外に出ます（${JSON.stringify(style)}）`).toBeLessThanOrEqual(188);
+  });
+
+  it("広い面では最小幅 190px のまま、ボタンの下に出す", () => {
+    const { style } = runOpenProofMenu(1000, 200);
+    expect(style.minWidth).toBe("190px");
+    expect(style.left).toBe("28px");
+    expect(style.top).toBe("32px");
   });
 
   it("押すと品書きを閉じ、キーと同じ命令の名前で拡張機能へ頼む", () => {
