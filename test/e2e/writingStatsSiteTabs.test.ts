@@ -22,9 +22,14 @@
  *    「「〈作品〉」がカクヨムの週間で30位から12位に上がりました！」が1回出て、開いている執筆統計に
  *    「おめでとうございます」の札が出る。同じ記録をもう一度入れても二度は出ない。閉じていた作品では
  *    次に開いたときに1回だけ札が出る（開き直すともう出ない）
+ * 6. 順位のお祝いの規模：初めての順位（12位）は「12位に入りました！」と風船だけ（4個）、10位以内（5位）は
+ *    風船8個に花火が足され、1位は風船20個と、10位以内より多い火花。10位より下でも50位以上上がれば
+ *    （80位→25位）風船8個と花火（区切りは `core/rankCelebrations.ts`）。
+ *    絵は面の中の描く呼び出しを数えて読む（良し悪しは見ない）。「アニメーションを減らす」
+ *    （prefers-reduced-motion: reduce。Playwright の emulateMedia で写す）のときは絵が出ず札だけ
  *
  * **作者の目に残すもの**：幅 360px での折り返し・暗いテーマで読めるか・線の色の見分け・風船と花火の
- * 動きと規模・OS の「アニメーションを減らす」。本物のなろうの API は呼ばない（取得のボタンは押さない）。
+ * 見た目（動きの良し悪し）・OS の設定そのもので「アニメーションを減らす」が画面に届くか。本物のなろうの API は呼ばない（取得のボタンは押さない）。
  * **AI は呼ばない。**
  */
 import { mkdir, writeFile } from "node:fs/promises";
@@ -33,6 +38,7 @@ import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { NAROU_GUIDELINE_URL } from "../../src/core/narouApi";
 import { NAROU_API_CONSENT_KEY } from "../../src/core/narouApiGate";
+import { RANK_BALLOONS } from "../../src/core/rankCelebrations";
 import { answerInput, waitForQuickInput, waitQuickInputClosed } from "./support/quickInput";
 import { SIDEBAR_LAUNCH, showSidebar, treeContextMenu } from "./support/sidebar";
 import { statsFrame } from "./support/statsFixture";
@@ -188,7 +194,14 @@ test("投稿先を3つ登録した作品では、タブが概要・執筆の推�
       await page.keyboard.press("ArrowLeft");
       await waitUntil(async () => (await activeTabKey(frame)) === "site-narou", "先頭で左の矢印キーを押すとなろうの反応へ回る", 10_000);
 
-      // なろうの反応を見たまま閉じて開き直すと、なろうの反応で開く
+      /*
+        なろうの反応を見たまま閉じて開き直すと、なろうの反応で開く。
+        **覚えの便が届く間を置いてから閉じる。** タブを移ると面が拡張機能へ「選んだ」を送り（`tabSelected`）、
+        拡張機能が保管庫へ書く。矢印キーの直後に閉じると、その便が届く前に面が消え、ひとつ前の「概要」を
+        覚えたまま開き直すことがあった（2026-11-02、まとめて走らせて1回）。便の到着は画面の外から見えないので、
+        お祝いの件（見せ終えた印）と同じく間を置く。作者の手はこの速さで閉じない
+      */
+      await page.waitForTimeout(1_500);
       await closeStats(page);
       const reopened = await openStats(page, 3);
       await waitUntil(async () => (await activeTabKey(reopened)) === "site-narou", "開き直すと前に見ていた「なろうの反応」で開く", 15_000).catch(
@@ -408,14 +421,16 @@ function kakuyomuWeeklyLedger(): Record<string, unknown> {
  * 投稿まわりの6つは 0.122.0 で右クリックの入口1つにまとめた（作者の判断 2026-11-02。
  * `core/postingMenu.ts`）。右クリックで指した作品のまま、作品を選び直させずに進むことも見る
  */
-async function recordWeekly(page: Page, rank: string): Promise<void> {
+async function recordWeekly(page: Page, rank: string, options: { typeBoard?: boolean } = {}): Promise<void> {
   await treeContextMenu(page, E2E_WORK_TITLE, "投稿と読者の反応…");
   await waitForQuickInput(page, `投稿と読者の反応（${E2E_WORK_TITLE}）`);
   await pickQuickPickRow(page, "ランキング記録");
   await waitForQuickInput(page, "のランキングを記録");
   await pickQuickPickRow(page, "カクヨム");
   await waitForQuickInput(page, "カクヨム のランキングの種別");
-  await pickQuickPickRow(page, "週間");
+  // そのサイトに順位がまだ1つも無いと、種別は選ぶ画面でなく打ち込む欄で訊かれる
+  if (options.typeBoard) await answerInput(page, "週間");
+  else await pickQuickPickRow(page, "週間");
   await waitForQuickInput(page, "カクヨム の週間の順位");
   await answerInput(page, rank);
   await waitForQuickInput(page, "メモ（任意）");
@@ -540,6 +555,219 @@ test("執筆統計を閉じたまま上がった順位を記録すると、次�
       ...SIDEBAR_LAUNCH,
       keybindings: [...SIDEBAR_LAUNCH.keybindings, OPEN_STATS_KEY, CLOSE_EDITOR_KEY],
       prepareWork: writeLedgerBeforeLaunch(kakuyomuWeeklyLedger),
+    }
+  );
+}, 240_000);
+
+/* ── 6. 順位のお祝いの規模（風船・花火が出たか）と「アニメーションを減らす」 ── */
+
+/** カクヨムだけを登録し、順位はまだ1つも無い台帳 */
+function kakuyomuNoRankLedger(): Record<string, unknown> {
+  return ledger({ sites: [KAKUYOMU_SITE], profiles: [{ site: "kakuyomu", workId: KAKUYOMU_ID }] });
+}
+
+interface CelebrationProbe {
+  /** お祝いの絵の層（`canvas.celebrate-layer`）が足された回数 */
+  layers: number;
+  /** 描いた1コマの数 */
+  frames: number;
+  /** 1コマで描いた風船の数の最大（風船は1つにつき楕円を2回描く：本体と光） */
+  maxBalloons: number;
+  /** 花火の火花を描いた回数（火花だけが円 `arc` で描かれる） */
+  sparks: number;
+}
+
+interface ProbeStore {
+  layers: number;
+  frames: Array<{ ellipses: number; arcs: number }>;
+}
+
+/**
+ * 執筆統計の面の中で、お祝いの絵の描き方を数える（試験の側で面に差し込む。製品は変えない）。
+ *
+ * 絵の良し悪しは見ない。「風船が上がったか」「花火が上がったか」「何個か」だけを、描く呼び出しの数で読む。
+ * お祝いの層（`.celebrate-layer`）の絵だけを数える——グラフなど、ほかの絵は数えない
+ */
+async function installCelebrationProbe(frame: Frame): Promise<void> {
+  await frame.evaluate(() => {
+    const host = window as unknown as { __celebrationProbe?: ProbeStore };
+    if (host.__celebrationProbe) return;
+    const probe: ProbeStore = { layers: 0, frames: [] };
+    host.__celebrationProbe = probe;
+    const isCelebration = (ctx: CanvasRenderingContext2D) => ctx.canvas.classList.contains("celebrate-layer");
+    const proto = CanvasRenderingContext2D.prototype;
+    const clearRect = proto.clearRect;
+    const ellipse = proto.ellipse;
+    const arc = proto.arc;
+    // 1コマの始まりは clearRect（製品の frame() は毎コマ最初に消す）
+    proto.clearRect = function (this: CanvasRenderingContext2D, ...args: Parameters<CanvasRenderingContext2D["clearRect"]>) {
+      if (isCelebration(this)) probe.frames.push({ ellipses: 0, arcs: 0 });
+      return clearRect.apply(this, args);
+    };
+    proto.ellipse = function (this: CanvasRenderingContext2D, ...args: Parameters<CanvasRenderingContext2D["ellipse"]>) {
+      const current = probe.frames[probe.frames.length - 1];
+      if (current && isCelebration(this)) current.ellipses += 1;
+      return ellipse.apply(this, args);
+    };
+    proto.arc = function (this: CanvasRenderingContext2D, ...args: Parameters<CanvasRenderingContext2D["arc"]>) {
+      const current = probe.frames[probe.frames.length - 1];
+      if (current && isCelebration(this)) current.arcs += 1;
+      return arc.apply(this, args);
+    };
+    new MutationObserver((records) => {
+      for (const record of records) {
+        record.addedNodes.forEach((node) => {
+          if (node instanceof HTMLCanvasElement && node.classList.contains("celebrate-layer")) probe.layers += 1;
+        });
+      }
+    }).observe(document.body, { childList: true });
+  });
+}
+
+async function readCelebrationProbe(frame: Frame): Promise<CelebrationProbe> {
+  return frame.evaluate(() => {
+    const probe = (window as unknown as { __celebrationProbe: ProbeStore }).__celebrationProbe;
+    return {
+      layers: probe.layers,
+      frames: probe.frames.length,
+      maxBalloons: probe.frames.reduce((max, one) => Math.max(max, Math.floor(one.ellipses / 2)), 0),
+      sparks: probe.frames.reduce((sum, one) => sum + one.arcs, 0),
+    };
+  });
+}
+
+async function resetCelebrationProbe(frame: Frame): Promise<void> {
+  await frame.evaluate(() => {
+    const probe = (window as unknown as { __celebrationProbe: ProbeStore }).__celebrationProbe;
+    probe.layers = 0;
+    probe.frames.length = 0;
+  });
+}
+
+/** 順位を記録し、`notice` の知らせと札が出て、お祝いの絵が描き終わる（層が消える）まで待って、描き方を返す */
+async function recordAndWatch(
+  page: Page,
+  frame: Frame,
+  rank: string,
+  notice: string,
+  options: { typeBoard?: boolean } = {}
+): Promise<{ banner: string; probe: CelebrationProbe }> {
+  await clearNotifications(page);
+  await resetCelebrationProbe(frame);
+  await recordWeekly(page, rank, options);
+  let banner = "";
+  await waitUntil(
+    async () => {
+      const now = await bannerText(frame);
+      if (now) banner = now;
+      return (await riseNotices(page)).includes(notice) && banner.includes("おめでとうございます");
+    },
+    `「${notice}」の知らせと、執筆統計の「おめでとうございます」の札が出る`,
+    15_000
+  ).catch(async (error: unknown) => {
+    throw new Error(`${String(error)}（知らせ：${JSON.stringify(await notificationTexts(page))}／札：${JSON.stringify(banner)}）`);
+  });
+  // 絵は4.5秒で消える。札（4.5秒＋0.8秒）が消えれば、絵も描き終わっている
+  await waitUntil(async () => (await bannerText(frame)) === "" && (await frame.locator("canvas.celebrate-layer").count()) === 0, "お祝いの札と絵が消える", 20_000).catch(
+    async (error: unknown) => {
+      throw new Error(`${String(error)}（描き方：${JSON.stringify(await readCelebrationProbe(frame))}）`);
+    }
+  );
+  return { banner, probe: await readCelebrationProbe(frame) };
+}
+
+test("初めての順位を記録すると「12位に入りました！」が出て執筆統計に風船だけが上がり、10位以内に入ると風船に花火が足され、1位では風船も火花も増える", async () => {
+  await withVsCode(
+    "順位のお祝いの規模",
+    [EPISODE],
+    async (session) => {
+      const { page } = session;
+      await showSidebar(page, E2E_WORK_TITLE);
+      const frame = await openStats(page, 1);
+      await installCelebrationProbe(frame);
+
+      // 初めての順位（12位。10位より下）：風船だけ
+      const first = await recordAndWatch(page, frame, "12", `「${E2E_WORK_TITLE}」がカクヨムの週間で12位に入りました！`, { typeBoard: true });
+      expect(first.probe.layers, `お祝いの絵：${JSON.stringify(first.probe)}`).toBe(1);
+      expect(first.probe.frames, `お祝いの絵が動いていません：${JSON.stringify(first.probe)}`).toBeGreaterThan(5);
+      expect(first.probe.maxBalloons, `風船の数：${JSON.stringify(first.probe)}`).toBe(RANK_BALLOONS.small);
+      expect(first.probe.sparks, `10位より下なのに花火が上がりました：${JSON.stringify(first.probe)}`).toBe(0);
+
+      // 同じ日の書き直しで5位（10位以内）：風船に花火が足される
+      const top10 = await recordAndWatch(page, frame, "5", `「${E2E_WORK_TITLE}」がカクヨムの週間で5位に入りました！`);
+      expect(top10.probe.layers, `お祝いの絵：${JSON.stringify(top10.probe)}`).toBe(1);
+      expect(top10.probe.maxBalloons, `風船の数：${JSON.stringify(top10.probe)}`).toBe(RANK_BALLOONS.fireworks);
+      expect(top10.probe.sparks, `10位以内なのに花火が上がりません：${JSON.stringify(top10.probe)}`).toBeGreaterThan(0);
+
+      // 1位：大きな花火（風船も火花も増える）
+      const grand = await recordAndWatch(page, frame, "1", `「${E2E_WORK_TITLE}」がカクヨムの週間で1位に入りました！`);
+      expect(grand.probe.layers, `お祝いの絵：${JSON.stringify(grand.probe)}`).toBe(1);
+      expect(grand.probe.maxBalloons, `風船の数：${JSON.stringify(grand.probe)}`).toBe(RANK_BALLOONS.grand);
+      expect(grand.probe.sparks, `1位の火花が10位以内より多くありません：${JSON.stringify({ top10: top10.probe, grand: grand.probe })}`).toBeGreaterThan(top10.probe.sparks);
+    },
+    {
+      ...SIDEBAR_LAUNCH,
+      keybindings: [...SIDEBAR_LAUNCH.keybindings, OPEN_STATS_KEY],
+      prepareWork: writeLedgerBeforeLaunch(kakuyomuNoRankLedger),
+    }
+  );
+}, 240_000);
+
+/** カクヨムだけを登録し、昨日の週間80位を記録した台帳（50位以上の上昇を作る） */
+function kakuyomuWeekly80Ledger(): Record<string, unknown> {
+  return ledger({
+    sites: [KAKUYOMU_SITE],
+    profiles: [{ site: "kakuyomu", workId: KAKUYOMU_ID }],
+    rankings: [{ site: "kakuyomu", recordedAt: yesterdayIso(), board: "週間", rank: 80 }],
+  });
+}
+
+test("10位より下でも50位以上上がると「80位から25位に上がりました！」が出て、執筆統計に風船と花火が上がる", async () => {
+  await withVsCode(
+    "順位のお祝い（50位以上の上昇）",
+    [EPISODE],
+    async (session) => {
+      const { page } = session;
+      await showSidebar(page, E2E_WORK_TITLE);
+      const frame = await openStats(page, 1);
+      // 見本の「昨日の80位」は、開いたときに1回だけ札が出る（まだ見せていない初めての順位）。消えてから記録する
+      await waitUntil(async () => (await bannerText(frame)).includes("80位に入りました"), "開いたときに、まだ見せていない80位の札が出る", 15_000);
+      await waitUntil(async () => (await bannerText(frame)) === "" && (await frame.locator("canvas.celebrate-layer").count()) === 0, "開いたときの札と絵が消える", 20_000);
+      await installCelebrationProbe(frame);
+      const rise = await recordAndWatch(page, frame, "25", `「${E2E_WORK_TITLE}」がカクヨムの週間で80位から25位に上がりました！`);
+      expect(rise.probe.layers, `お祝いの絵：${JSON.stringify(rise.probe)}`).toBe(1);
+      expect(rise.probe.maxBalloons, `風船の数：${JSON.stringify(rise.probe)}`).toBe(RANK_BALLOONS.fireworks);
+      expect(rise.probe.sparks, `50位以上上がったのに花火が上がりません：${JSON.stringify(rise.probe)}`).toBeGreaterThan(0);
+    },
+    {
+      ...SIDEBAR_LAUNCH,
+      keybindings: [...SIDEBAR_LAUNCH.keybindings, OPEN_STATS_KEY],
+      prepareWork: writeLedgerBeforeLaunch(kakuyomuWeekly80Ledger),
+    }
+  );
+}, 240_000);
+
+test("「アニメーションを減らす」（prefers-reduced-motion: reduce）のときは、1位に入っても風船・花火の絵は出ず「おめでとうございます」の札だけが出る", async () => {
+  await withVsCode(
+    "順位のお祝い（動きを減らす）",
+    [EPISODE],
+    async (session) => {
+      const { page } = session;
+      // OS の「アニメーションを減らす」は、画面の中では prefers-reduced-motion として届く。ここではそれを写す
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await showSidebar(page, E2E_WORK_TITLE);
+      const frame = await openStats(page, 1);
+      expect(await frame.evaluate(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches), "執筆統計の面に「動きを減らす」が届いていません").toBe(true);
+      await installCelebrationProbe(frame);
+      const seen = await recordAndWatch(page, frame, "1", `「${E2E_WORK_TITLE}」がカクヨムの週間で1位に入りました！`, { typeBoard: true });
+      expect(seen.banner).toContain("1位");
+      expect(seen.probe.layers, `動きを減らすのに絵が出ました：${JSON.stringify(seen.probe)}`).toBe(0);
+      expect(seen.probe.frames).toBe(0);
+    },
+    {
+      ...SIDEBAR_LAUNCH,
+      keybindings: [...SIDEBAR_LAUNCH.keybindings, OPEN_STATS_KEY],
+      prepareWork: writeLedgerBeforeLaunch(kakuyomuNoRankLedger),
     }
   );
 }, 240_000);
