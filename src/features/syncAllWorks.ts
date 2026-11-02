@@ -761,13 +761,19 @@ function nextSteps(
     });
   }
 
-  const divergedOutcome = outcomes.find((one) => one.diverged);
-  const diverged = divergedOutcome?.plan.target;
-  if (diverged) {
+  // 編集者モードで分かれた置き場は、計画の段で外す（`planReceiveOnly` の
+  // `editor_diverged`）ので結果を持たない。結果だけを見ていると、知らせにボタンが
+  // 1つも付かなかった（0.122.0 の実機確認の項目）。結果を先に見て、無ければ計画から拾う
+  // ——両方から足すと、同じ［校閲を終えて返す］が2つ並ぶ
+  const divergedPlan =
+    outcomes.find((one) => one.diverged)?.plan ??
+    plans.find((plan) => plan.skip === "editor_diverged");
+  const diverged = divergedPlan?.target;
+  if (divergedPlan && diverged) {
     // **編集者モード（受け取るだけ）では合わせる画面へ渡さない**（作者の判断
     // 2026-11-02）。合わせるのは作者で、編集者は「校閲を終えて返す」で返す
     steps.push(
-      divergedOutcome.plan.receiveOnly
+      divergedPlan.receiveOnly
         ? {
             label: finishReviewLabel(),
             command: FINISH_REVIEW_COMMAND,

@@ -18,15 +18,20 @@
  * **問い合わせの道は通らない**（一致すれば確かめを飛ばす。作成時に確かめてある、という作りのため）。
  * ただし一致の判定（`sameRepository`）は、両方を GitHub の「持ち主/リポジトリ名」として読めたときだけ真になる。
  * `file:///C:/Users/<名前>/…` は「Users」「<名前>」を拾って読める——**一時フォルダーの道の頭（ユーザー名）が
- * 英数字・`._-` の外の機械では読めず、GitHub の非公開の問い合わせへ落ちる**。そこで落ちたら、まずこの依存を疑う。
+ * 英数字・`._-` の外の機械では読めず、GitHub の非公開の問い合わせへ落ちる**（gh の札を拾って外へ通信しうる）。
+ * そこで、**一時フォルダーの道が読めない機械では、この件を理由を出して飛ばす**（`REMOTE_URL_READABLE`）。
+ * 起こしたあとの本当の道でも確かめ、読めなければ VS Code が送り返しへ進む前に止める（`prepareWork`）。
+ * 製品の判定（`sameRepository`）は変えない。
  *
  * **見ていないもの（作者の手）**：編集者の環境で同期してから「編集者提案確認」を押したときに同じ内訳が出る所
  * （2台目の環境が要る）。**AI は呼ばない。**
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
+import { parseGithubRepoRef } from "../../src/core/githubRepoRef";
 import { HAND_EDIT_CATEGORY, HAND_MEMO_CATEGORY, proposalId } from "../../src/models/proposal";
 import { git, initRepoWithFirstCommit } from "./support/gitFixture";
 import { OPEN_PROPOSALS_LAUNCH, OPEN_PROPOSALS_PRESS, proposalPanelFrame } from "./support/sampleFinding";
@@ -77,21 +82,44 @@ function proposalLine(entry: HandProposal): string {
 
 const LEDGER_RELATIVE = path.join(".aiwriter", "proposals", "proposals.jsonl");
 
+/** 送り先の裸の置き場の URL（手元の道を `file:///` にしたもの） */
+function remoteUrlOf(remote: string): string {
+  return `file:///${remote.replace(/\\/g, "/")}`;
+}
+
 /** 一時フォルダーの根の中の置き場（作品フォルダーは 根/書庫/作品）。送り先の名前は URL にするので英数字だけ */
 function places(root: string): { editing: string; remote: string; remoteUrl: string } {
   const remote = path.join(root, "editing-remote.git");
   return {
     editing: path.join(root, "編集部", `${E2E_WORK_TITLE}-編集用`),
     remote,
-    remoteUrl: `file:///${remote.replace(/\\/g, "/")}`,
+    remoteUrl: remoteUrlOf(remote),
   };
 }
+
+/**
+ * 送り先の URL が、製品の一致の判定（`sameRepository`）で「持ち主/リポジトリ名」として読めるか。
+ * 読めなければ一致が偽になり、GitHub の問い合わせの道へ落ちる。`withVsCode` と同じ一時フォルダーの
+ * 置き方（`tmpdir()` の下の `novelai-e2e-…`）で、起こす前に見積もる
+ */
+function remoteUrlReadable(remoteUrl: string): boolean {
+  return parseGithubRepoRef(remoteUrl) !== undefined;
+}
+const REMOTE_URL_READABLE = remoteUrlReadable(
+  remoteUrlOf(path.join(tmpdir(), "novelai-e2e-probe", "editing-remote.git"))
+);
 
 const LAUNCH: LaunchOptions = {
   ...OPEN_PROPOSALS_LAUNCH,
   prepareWork: async ({ workFolder }) => {
     const root = path.dirname(path.dirname(workFolder));
     const { editing, remote, remoteUrl } = places(root);
+    // 見積もりと本当の道が食い違ったときの止め。送り返しへ進むと GitHub へ問い合わせうるので、起こす前に落とす
+    if (!remoteUrlReadable(remoteUrl)) {
+      throw new Error(
+        `送り先の URL（${remoteUrl}）が製品の一致の判定で読めない形です。このまま進むと GitHub への問い合わせへ落ちるので止めました`
+      );
+    }
     const ledger = `${ALL.map(proposalLine).join("\n")}\n`;
 
     // 作者の側の編集用フォルダー：編集者が返した3件の入った台帳を記録して、送り先へ送ってある
@@ -170,7 +198,15 @@ async function shownWith(page: Page, text: string): Promise<string | undefined> 
   return [...(await statusBarTexts(page)), ...(await notificationTexts(page))].find((one) => one.includes(text));
 }
 
-test("編集者の提案を、意見は［読んだ］・直しは［適用］と［見送る］で決め終えると、下の帯に「採否を編集者へ送り返しました（採用 1・見送り 1・読まれた 1）。」が出て、送り先の台帳に3件の採否が届く", async () => {
+if (!REMOTE_URL_READABLE) {
+  // 飛ばした理由を走りの記録に残す（黙って飛ばすと、見張れていないことに気づけない）
+  console.warn(
+    `editorDecisionsReturn を飛ばします：一時フォルダーの道（${tmpdir()}）の頭が英数字・._- の外で、` +
+      "送り先の URL が製品の一致の判定で読めず、GitHub への問い合わせへ落ちて外へ通信しうるため"
+  );
+}
+
+test.skipIf(!REMOTE_URL_READABLE)("編集者の提案を、意見は［読んだ］・直しは［適用］と［見送る］で決め終えると、下の帯に「採否を編集者へ送り返しました（採用 1・見送り 1・読まれた 1）。」が出て、送り先の台帳に3件の採否が届く", async () => {
   await withVsCode(
     "採否を編集者へ送り返す",
     [{ name: EPISODE, text: TEXT }],

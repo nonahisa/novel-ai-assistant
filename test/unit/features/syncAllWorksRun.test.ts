@@ -532,6 +532,55 @@ describe("編集者モードの保存・同期", () => {
     // エラー文は画面に出さない（ログだけ。実装ルール5）
     expect(said).not.toContain("fatal");
   });
+
+  /**
+   * 作者の側と分かれているとき（0.122.0 の実機確認の項目。e2e/editorModeSaveSyncDiverged で
+   * 見つけた不具合）。計画の段で外した置き場は結果（`outcome.diverged`）を持たないので、
+   * 次の手を結果からしか拾わないと、知らせにボタンが1つも付かなかった
+   */
+  test("作者の側と分かれていれば、受け取らずに済んだ知らせへ［校閲を終えて返す］を付け、押すとその作品で開く", async () => {
+    const divergedCopy: GitCommandRunner = async (args, cwd, timeoutMs, options) => {
+      if (args[0] === "rev-list") {
+        calls.push(args);
+        return { code: 0, stdout: "1\t1", stderr: "" };
+      }
+      return editorCopy(args, cwd, timeoutMs, options);
+    };
+    const executed: Array<{ command: string; args: unknown[] }> = [];
+    const { commands } = await import("../support/vscodeStub");
+    const original = commands.executeCommand;
+    commands.executeCommand = async (command: string, ...args: unknown[]) => {
+      executed.push({ command, args });
+      return undefined;
+    };
+    const buttons: string[] = [];
+    Object.assign(window, {
+      showInformationMessage: async (message: string, ...rest: unknown[]) => {
+        shown.push(message);
+        const labels = rest.filter((item): item is string => typeof item === "string");
+        buttons.push(...labels);
+        return labels.find((label) => label === "校閲を終えて返す");
+      },
+    });
+    try {
+      await syncAllWorks({ registry: copyRegistry, monitor, run: divergedCopy, editor: true });
+      // ボタンの答えは待たずに後から動く（whenNoticePicked）ので、一巡り待ってから見る
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      commands.executeCommand = original;
+    }
+
+    const names = calls.map((args) => args[0]);
+    expect(names).not.toContain("pull");
+    expect(names).not.toContain("commit");
+    expect(names).not.toContain("push");
+    expect(shown.join("\n")).toContain("同期するものはありませんでした。");
+    expect(buttons).toContain("校閲を終えて返す");
+    expect(buttons).not.toContain("どちらを残すか選ぶ");
+    const opened = executed.find((one) => one.command === "novelai.finishReviewAndReturn");
+    expect(opened?.args[0]).toEqual({ type: "work", work: copies[0] });
+    expect(executed.map((one) => one.command)).not.toContain("novelai.resolveDivergence");
+  });
 });
 
 /**

@@ -27,8 +27,10 @@ describe("編集者モードでは分岐合流へ渡さない", () => {
   test("すべて同期：受け取るだけの置き場が分かれたら「校閲を終えて返す」へ", () => {
     const source = read("src/features/syncAllWorks.ts");
     expect(source).toMatch(
-      /divergedOutcome\.plan\.receiveOnly\s*\?\s*\{\s*label: finishReviewLabel\(\),\s*command: FINISH_REVIEW_COMMAND,/
+      /divergedPlan\.receiveOnly\s*\?\s*\{\s*label: finishReviewLabel\(\),\s*command: FINISH_REVIEW_COMMAND,/
     );
+    // 計画の段で外した分かれた置き場（結果を持たない）からも拾う（0.122.2）
+    expect(source).toMatch(/plans\.find\(\(plan\) => plan\.skip === "editor_diverged"\)/);
   });
 
   test("命令の入口でも止めて、案内を出す", () => {

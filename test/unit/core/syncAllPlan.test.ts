@@ -533,6 +533,15 @@ describe("取りに行けなかった置き場", () => {
     expect(plan.skip).toBeUndefined();
   });
 
+  test("編集者の手順で作者の側と分かれていれば、合わせにいかず「校閲を終えて返す」を理由の行に出す", () => {
+    const plans = planSyncAll([state({ status: tracked({ ahead: 1, behind: 1 }) })], { editor: true });
+    expect(plans[0]?.receiveOnly).toBe(true);
+    expect(plans[0]?.skip).toBe("editor_diverged");
+    expect(plans[0]?.pull).toBe(false);
+    expect(actionablePlans(plans)).toHaveLength(0);
+    expect(describeSyncSkips(plans)).toContain("「校閲を終えて返す」");
+  });
+
   test("取りに行けたなら、これまでどおり「同期は取れています」（理由の行には出さない）", () => {
     const plans = planSyncAll([state()], { editor: true });
     expect(plans[0]?.skip).toBe("nothing");
