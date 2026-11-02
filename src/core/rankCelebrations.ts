@@ -11,7 +11,9 @@ import { buildRankSeries, type RankPoint } from "./rankSeries";
  *   - その線で初めての順位 → 「ランキングに入りました」（`entered`）
  *   - それまでの**自己最高（いちばん小さい順位）を抜いた** → 「自己最高の N 位を抜いて M 位に
  *     なりました」（`best`）。下がったあとに戻しただけ（自己最高に届かない・並んだだけ）は祝わない
- *   - 1位が続いている（直前の順位のあった点も1位） → 「1位が N 日（回）続きました」（`streak`）
+ *   - 1位が続いている（直前の点も1位） → 「1位が N 日（回）続きました」（`streak`）
+ *   - 1位が一度切れて（2位以下・圏外）から1位に戻った → 「1位に戻りました」（`returned`。
+ *     作者の裁定 2026-11-02 夜）。次の点も1位なら「2」から数え直す
  *   - それ以外 → 何もしない
  *
  * 材料は順位のグラフと同じ線（`buildRankSeries`）。手の記録・ヘルパー・なろう殿堂入りAPIの
@@ -28,7 +30,7 @@ import { buildRankSeries, type RankPoint } from "./rankSeries";
  * | 場合 | 規模 |
  * |---|---|
  * | 初めて1位になった（初めてのランクインが1位のときも） | 大きな花火（`grand`） |
- * | 1位が続いた | `RANK_STREAK_SIZE`（風船が数個） |
+ * | 1位が続いた・1位に戻った | `RANK_STREAK_SIZE`（風船が数個） |
  * | `RANK_FIREWORKS_TOP` 位以内、または自己最高から `RANK_FIREWORKS_RISE` 位以上の上昇 | 花火（`fireworks`） |
  * | それ以外の初めてのランクイン・自己最高 | 風船が数個（`small`） |
  *
@@ -64,14 +66,14 @@ export type RankStreakUnit = "日" | "回";
 export interface RankEvent {
   /** 一度きりの鍵（`rank:` で始まる。執筆の目標の祝いの鍵と混ざらない） */
   id: string;
-  /** 初めてのランクイン・自己最高の更新・1位の連続 */
-  kind: "entered" | "best" | "streak";
+  /** 初めてのランクイン・自己最高の更新・1位の連続・切れたあとに1位へ戻った */
+  kind: "entered" | "best" | "streak" | "returned";
   site: PostingSiteId;
   siteLabel: string;
   board: string;
   day: string;
   rank: number;
-  /** 抜いた自己最高の順位。初めてのランクインと1位の連続では null */
+  /** 抜いた自己最高の順位。初めてのランクイン・1位の連続・1位に戻ったときは null */
   previous: number | null;
   /** 1位の連続（`kind: "streak"` のときだけ） */
   streak?: { count: number; unit: RankStreakUnit };
@@ -149,10 +151,14 @@ export function detectRankEvents(
         });
         continue;
       }
-      // 1位の連続：直前の点（圏外も含めて）も1位のときだけ。間に圏外や2位以下があれば切れ、
-      // 戻ってきた1位は自己最高に届かない戻りなので祝わず、次の1位から数え直す
+      // ここへ来た1位は、自己最高（1位）にすでに届いている。連続は直前の点（圏外も含めて）も
+      // 1位のときだけで、間に圏外や2位以下があれば切れる
       const count = last.rank === 1 ? trailingFirstPlaces(line.points) : 0;
-      if (count >= 2) {
+      if (count === 1) {
+        // 切れたあとに1位へ戻った日（作者の裁定 2026-11-02 夜「戻った日も祝う」）。自己最高を
+        // 抜いた祝いではないので規模は連続と同じ風船だけ。次の点も1位なら「2」から数え直す
+        events.push({ ...common, kind: "returned", previous: null, size: RANK_STREAK_SIZE });
+      } else if (count >= 2) {
         events.push({
           ...common,
           kind: "streak",
@@ -177,6 +183,7 @@ function rankEventBody(event: RankEvent): string {
   if (event.kind === "streak" && event.streak) {
     return `1位が${event.streak.count}${event.streak.unit}続きました`;
   }
+  if (event.kind === "returned") return `${event.rank}位に戻りました`;
   if (event.previous === null) return `${event.rank}位に入りました`;
   return `自己最高の${event.previous}位を抜いて${event.rank}位になりました`;
 }

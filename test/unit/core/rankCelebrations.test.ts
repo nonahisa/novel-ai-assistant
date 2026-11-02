@@ -123,11 +123,22 @@ describe("1位が続いた長さで毎回祝う（作者の裁定 2026-11-02 夜
     expect(rankEventNotice("苦手の流転", events[0])).toBe("「苦手の流転」がカクヨムの週間で1位が2回続きました！");
   });
 
-  test("間に2位以下があれば連続は切れる（戻った1位は自己最高に届かないので祝わず、次の1位から数え直す）", () => {
+  test("間に2位以下があれば連続は切れ、1位に戻った日は「1位に戻りました！」（風船だけ）、次の1位から数え直す", () => {
     const back = ledgerOf([at("2026-10-30", 1), at("2026-10-31", 2), at("2026-11-01", 1)]);
-    expect(detectRankEvents(back, "w1", "2026-11-02")).toEqual([]);
+    const events = detectRankEvents(back, "w1", "2026-11-02");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: "returned", rank: 1, previous: null, size: "small" });
+    expect(rankEventNotice("苦手の流転", events[0])).toBe("「苦手の流転」がカクヨムの日間で1位に戻りました！");
+    expect(rankEventLine(events[0])).toBe("カクヨムの日間で1位に戻りました");
     const again = ledgerOf([at("2026-10-29", 1), at("2026-10-30", 2), at("2026-10-31", 1), at("2026-11-01", 1)]);
     expect(detectRankEvents(again, "w1", "2026-11-02")[0]).toMatchObject({ kind: "streak", streak: { count: 2, unit: "日" } });
+  });
+
+  test("圏外を挟んで1位に戻っても「1位に戻りました！」（なろうAPIの日間は空いた日が圏外）", () => {
+    const api = (day: string, rank: number): PostingRankingRecord => ({ ...at(day, rank), site: "narou", source: "narou-api" });
+    const events = detectRankEvents(ledgerOf([api("2026-10-29", 1), api("2026-11-01", 1)]), "w1", "2026-11-02");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: "returned", rank: 1 });
   });
 
   test("種別から日ごとかを決める（決められなければ「回」）", () => {

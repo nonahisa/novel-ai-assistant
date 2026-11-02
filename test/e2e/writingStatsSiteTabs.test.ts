@@ -441,7 +441,7 @@ async function recordWeekly(page: Page, rank: string, options: { typeBoard?: boo
 const RISE_NOTICE = `「${E2E_WORK_TITLE}」がカクヨムの週間で自己最高の30位を抜いて12位になりました！`;
 
 async function riseNotices(page: Page): Promise<string[]> {
-  return (await notificationTexts(page)).filter((text) => ["位に入りました！", "位になりました！", "続きました！"].some((tail) => text.includes(tail)));
+  return (await notificationTexts(page)).filter((text) => ["位に入りました！", "位になりました！", "位に戻りました！", "続きました！"].some((tail) => text.includes(tail)));
 }
 
 async function bannerText(frame: Frame): Promise<string> {
