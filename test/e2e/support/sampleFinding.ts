@@ -49,12 +49,27 @@ export function sampleFindingId(sample: SampleFinding): string {
 
 /** 見本の指摘を、製品が読む形で置く */
 export async function writeSampleFinding(workFolder: string, sample: SampleFinding): Promise<void> {
+  await writeSampleFindings(workFolder, [sample]);
+}
+
+/**
+ * 見本の指摘を**いくつも**、製品が読む形で置く（置き場は1つのファイルなので、まとめて書く）。
+ * 種類（誤字脱字・推敲・表記ゆれ・矛盾）が違えば、提案パネルでは別のタブに並ぶ
+ */
+export async function writeSampleFindings(workFolder: string, samples: readonly SampleFinding[]): Promise<void> {
+  const folder = path.join(workFolder, ".aiwriter");
+  await mkdir(folder, { recursive: true });
+  await writeFile(path.join(folder, "findings.jsonl"), samples.map((sample) => sampleFindingLine(sample) + "\n").join(""), "utf8");
+}
+
+/** 見本の指摘1件の行（`findings.jsonl` の1行） */
+function sampleFindingLine(sample: SampleFinding): string {
   let at = sample.text.indexOf(sample.original);
   for (let skip = sample.occurrence ?? 0; skip > 0 && at >= 0; skip--) {
     at = sample.text.indexOf(sample.original, at + sample.original.length);
   }
   if (at < 0) throw new Error("見本の指摘の原文が本文にありません（指定の回数だけ出てきません）");
-  const line = JSON.stringify({
+  return JSON.stringify({
     kind: "finding",
     id: sampleFindingId(sample),
     // 期限（既定3日）の起点。置くたびに今の時刻にする
@@ -71,9 +86,6 @@ export async function writeSampleFinding(workFolder: string, sample: SampleFindi
     label: sample.label ?? "誤字脱字",
     ...(sample.producer ? { producer: sample.producer } : {}),
   });
-  const folder = path.join(workFolder, ".aiwriter");
-  await mkdir(folder, { recursive: true });
-  await writeFile(path.join(folder, "findings.jsonl"), line + "\n", "utf8");
 }
 
 /**
