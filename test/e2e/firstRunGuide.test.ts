@@ -26,13 +26,15 @@
  * globalState に「声かけは済んだ」（`novelai.writerWelcome: "done"`）を置いて起こす。
  * **AI は呼ばない。**
  */
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { WRITER_WELCOME_KEY } from "../../src/core/writerProfileStore";
 import { waitForQuickInput } from "./support/quickInput";
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { notificationTexts, quickInputWaitContext, quickPickRows, quickPickTitle } from "./support/workbenchDom";
+import { notificationTexts, pressWorkbenchKey, quickInputWaitContext, quickPickRows, quickPickTitle } from "./support/workbenchDom";
 
 /** 誰も応えない番地（discard のポート）。手元のAIが「決まっている」と数えられないようにする */
 const DEAD_ENDPOINT = "http://127.0.0.1:9";
@@ -92,6 +94,104 @@ test("まっさらな環境で起こすと、使うAIを選ぶ案内が出て、
       },
       globalState: { [WRITER_WELCOME_KEY]: "done" },
       beforeRegister: readWelcome,
+    }
+  );
+});
+
+/*
+  ── Claude Code が入っている環境（実機確認リスト 0.121.0「設定資料が1件も無い作品で矛盾検知を押すと…」の後半） ──
+
+  案内の［Claude Code接続］は `vscode.extensions.getExtension("anthropic.claude-code")` があるときだけ出る。
+  拡張機能の置き場は空の一時フォルダーなので、**package.json だけの見本**を同じ ID で開発中の形として読ませる
+  （`LaunchOptions.extraExtensions`。中身のコードは無く、本物の Claude Code は動かない）。
+  ［Claude Code接続］は**押さない**——押すと作者の機械の Claude Code の設定（MCP の登録）へ書きにいく。
+  道案内の段の題は、案内の［道案内を見る］と同じ道（`workbench.action.openWalkthrough`）で開いて読む。
+*/
+
+/** 道案内を開くキー（数字のキーは製品の package.json とも、ほかの件とも重ならない） */
+const OPEN_WALKTHROUGH_PRESS = "Control+Alt+Shift+Digit2";
+
+async function fakeClaudeCodeExtension(root: string): Promise<string[]> {
+  const folder = path.join(root, "見本の拡張機能", "claude-code");
+  await mkdir(folder, { recursive: true });
+  await writeFile(
+    path.join(folder, "package.json"),
+    JSON.stringify(
+      {
+        name: "claude-code",
+        publisher: "anthropic",
+        displayName: "Claude Code の見本（画面の自動テスト用。中身は無い）",
+        version: "0.0.1",
+        engines: { vscode: "^1.80.0" },
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+  return [folder];
+}
+
+test("Claude Code が入っている環境では、はじめての案内に［Claude Code接続］が並び、道案内の段の題も「Claude Code接続」になっている", async () => {
+  let seen: { text: string; buttons: string[] } | undefined;
+  const readWelcome = async (page: Page): Promise<void> => {
+    const toast = page.locator(".notification-toast", { hasText: WELCOME_HEAD });
+    await waitUntil(async () => (await toast.count()) > 0, "起動のあと「小説執筆へようこそ」の案内が出る", 90_000).catch(
+      async (error: unknown) => {
+        throw new Error(`${String(error)}（出ている知らせ：${JSON.stringify(await notificationTexts(page))}）`);
+      }
+    );
+    seen = {
+      text: (await toast.first().innerText()).replace(/\s+/g, " "),
+      buttons: (await toast.first().locator(".monaco-button").allInnerTexts()).map((label) => label.trim()).filter(Boolean),
+    };
+  };
+
+  await withVsCode(
+    "はじめての案内（Claude Code あり）",
+    [{ name: "001_はじまり.txt", text: "最初の話の一行目。\n" }],
+    async (session) => {
+      if (!seen) throw new Error("案内を読む前に本体へ来ました（beforeRegister が呼ばれていません）");
+      expect(seen.buttons, `案内の押し口：${JSON.stringify(seen.buttons)}`).toEqual(["AIを選ぶ", "Claude Code接続", "道案内を見る"]);
+      expect(seen.text, `案内の文：${seen.text}`).toContain("Claude Code とつなぐと、Claude Code のチャットで会話しながらセットアップを進められます。");
+
+      // 道案内を開いて、段の題を読む
+      const { page } = session;
+      await pressWorkbenchKey(page, OPEN_WALKTHROUGH_PRESS);
+      let titles: string[] = [];
+      await waitUntil(
+        async () => {
+          titles = await page.evaluate(() =>
+            Array.from(document.querySelectorAll(".gettingStartedContainer .getting-started-step .step-title")).map((node) => (node.textContent ?? "").trim())
+          );
+          return titles.length > 0;
+        },
+        "道案内の段が並ぶ",
+        30_000
+      ).catch(async (error: unknown) => {
+        const body = await page.evaluate(
+          () => (document.querySelector(".gettingStartedContainer") as HTMLElement | null)?.innerText.slice(0, 600) ?? "（道案内の面がありません）"
+        );
+        throw new Error(`${String(error)}（道案内の字：${body}）`);
+      });
+      expect(titles, `道案内の段：${JSON.stringify(titles)}`).toContain("Claude Code接続（任意）");
+      expect(titles.some((title) => title.includes("Claude Code とつなぐ")), `古い名前の段があります：${JSON.stringify(titles)}`).toBe(false);
+    },
+    {
+      settings: {
+        "novelai.ollama.endpoint": DEAD_ENDPOINT,
+        "novelai.lmstudio.endpoint": DEAD_ENDPOINT,
+      },
+      keybindings: [
+        {
+          key: "ctrl+alt+shift+2",
+          command: "workbench.action.openWalkthrough",
+          args: "nonahisa.novel-ai-assistant#novelai.gettingStarted",
+        },
+      ],
+      globalState: { [WRITER_WELCOME_KEY]: "done" },
+      beforeRegister: readWelcome,
+      extraExtensions: fakeClaudeCodeExtension,
     }
   );
 });

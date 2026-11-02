@@ -148,6 +148,16 @@ export interface LaunchOptions {
    * ここで投げると、写真を残して VS Code を閉じ、その例外で落ちる
    */
   beforeRegister?: (page: Page) => Promise<void>;
+  /**
+   * この拡張機能のほかに、**開発中の形で読み込ませる拡張機能**のフォルダーを返す
+   * （`--extensionDevelopmentPath` を足す）。起こす前に一時フォルダーの根を受け取るので、
+   * 見本の拡張機能はその下に作る（片づけで一緒に消える）。
+   *
+   * 拡張機能の置き場（`--extensions-dir`）は空の一時フォルダーで、Marketplace から入れる道は
+   * 通信を伴う。「ほかの拡張機能が入っている環境」（Claude Code など）を作るには、
+   * package.json だけの見本をこの道で読ませる。**製品に口を足さずに済む**
+   */
+  extraExtensions?: (root: string) => Promise<readonly string[]>;
 }
 
 /** package.json の `publisher.name`。globalState はこの名前の行に1つの JSON で入る */
@@ -170,6 +180,28 @@ async function seedGlobalState(userData: string, values: Record<string, unknown>
   const db = new DatabaseSync(path.join(folder, "state.vscdb"));
   try {
     db.exec("CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)");
+    db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(EXTENSION_ID, JSON.stringify(values));
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * 閉じている VS Code の globalState（この拡張機能の行）を読んで書き換える。
+ * **`restartVsCode` の `beforeRelaunch` の中でだけ呼ぶ**（起きている VS Code は手元の写しを持ち、
+ * 閉じるときに書き戻すので、起きている間に書いても消える）。
+ *
+ * 登録のときに決まる作品ID（`work_…`）を鍵にする値は、起こす前（`LaunchOptions.globalState`）には
+ * 置けない。登録のあとに閉じて、登録簿から ID を引いて書く道に使う
+ */
+export async function editGlobalState(root: string, mutate: (values: Record<string, unknown>) => void): Promise<void> {
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(path.join(root, "user-data", "User", "globalStorage", "state.vscdb"));
+  try {
+    const row = db.prepare("SELECT value FROM ItemTable WHERE key = ?").get(EXTENSION_ID) as { value?: unknown } | undefined;
+    const text = typeof row?.value === "string" ? row.value : row?.value instanceof Uint8Array ? new TextDecoder().decode(row.value) : "{}";
+    const values = JSON.parse(text) as Record<string, unknown>;
+    mutate(values);
     db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(EXTENSION_ID, JSON.stringify(values));
   } finally {
     db.close();
@@ -202,6 +234,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
     await writeFile(path.join(manuscriptFolder, episode.name), episode.text, "utf8");
   }
   if (options.prepareWork) await options.prepareWork({ workFolder, manuscriptFolder });
+  const extraExtensionPaths = options.extraExtensions ? await options.extraExtensions(root) : [];
   // 開くフォルダー。作品をワークスペースの外に置くときは、書庫と関係の無い空のフォルダーを開く
   const openFolder = options.outsideWorkspace ? path.join(root, "別の作業フォルダー") : library;
   if (options.outsideWorkspace) await mkdir(openFolder, { recursive: true });
@@ -276,6 +309,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
       // その旗の値として食われる（実際に書庫が開かれず、空の窓になった）
       openFolder,
       `--extensionDevelopmentPath=${repositoryRoot}`,
+      ...extraExtensionPaths.map((folder) => `--extensionDevelopmentPath=${folder}`),
       `--user-data-dir=${userData}`,
       `--extensions-dir=${path.join(root, "extensions")}`,
       // `--disable-extensions` は付けない。拡張機能の置き場は空の一時フォルダーなので
@@ -365,7 +399,16 @@ async function closeAndStop(app: ElectronApplication, entry: { root: string; pid
  * を見られる。**起こし直したあとは `session.app`・`session.page` が新しいものに替わる**
  * （前の `page` や面は使えない）。登録は済んでいるので、やり直さない。
  */
-export async function restartVsCode(session: E2ESession): Promise<void> {
+export async function restartVsCode(
+  session: E2ESession,
+  options: {
+    /**
+     * 閉じきったあと・起こす前に呼ぶ（`editGlobalState` で保管庫を書き換えるなど）。
+     * VS Code は閉じるときに手元の写しを state.vscdb へ書き戻すので、書き換えは必ずここで行う
+     */
+    beforeRelaunch?: () => Promise<void>;
+  } = {}
+): Promise<void> {
   const context = relaunchContexts.get(session.root);
   if (!context) throw new Error("開き直しの控えがありません（withVsCode の外では使えません）");
   const old = session.app;
@@ -374,6 +417,11 @@ export async function restartVsCode(session: E2ESession): Promise<void> {
   await Promise.race([old.close().catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 20_000))]);
   // 閉じきれなかった分は止める（一時フォルダーは消さない）
   if (oldProcess.exitCode === null) oldProcess.kill();
+  if (options.beforeRelaunch) {
+    // 止めた本体が state.vscdb を離すまで待つ（書き換えが閉じる側の書き戻しと重ならないように）
+    await waitUntil(() => oldProcess.exitCode !== null || oldProcess.signalCode !== null, "閉じた VS Code の本体が終わる", 20_000);
+    await options.beforeRelaunch();
+  }
   const app = await _electron.launch({ executablePath: context.executablePath, args: context.args, env: cleanEnv(), timeout: 60_000 });
   const pid = app.process().pid;
   if (pid !== undefined) await recordLaunch({ root: session.root, pid });
