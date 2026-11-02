@@ -18,13 +18,13 @@
  * 4. 順位の推移：なろうの日間（API の順位。2日空いた所が圏外）と週間（手の記録）で、線が種別ごとに
  *    色の組を分けて描かれ（日間は圏外で2本に切れる）、凡例が2つ、1位側が上。順位の無いカクヨムの
  *    タブには「『ランキング記録』で順位を残すと、ここに推移が出ます。」の1行
- * 5. 順位のお祝い：「ランキング記録」で下がった順位では何も出ず、前より良い順位を記録すると
- *    「「〈作品〉」がカクヨムの週間で30位から12位に上がりました！」が1回出て、開いている執筆統計に
+ * 5. 順位のお祝い：「ランキング記録」で下がった順位では何も出ず、自己最高より良い順位を記録すると
+ *    「「〈作品〉」がカクヨムの週間で自己最高の30位を抜いて12位になりました！」が1回出て、開いている執筆統計に
  *    「おめでとうございます」の札が出る。同じ記録をもう一度入れても二度は出ない。閉じていた作品では
  *    次に開いたときに1回だけ札が出る（開き直すともう出ない）
  * 6. 順位のお祝いの規模：初めての順位（12位）は「12位に入りました！」と風船だけ（4個）、10位以内（5位）は
  *    風船8個に花火が足され、1位は風船20個と、10位以内より多い火花。10位より下でも50位以上上がれば
- *    （80位→25位）風船8個と花火（区切りは `core/rankCelebrations.ts`）。
+ *    （自己最高の80位を抜いて25位）風船8個と花火（区切りは `core/rankCelebrations.ts`）。
  *    絵は面の中の描く呼び出しを数えて読む（良し悪しは見ない）。「アニメーションを減らす」
  *    （prefers-reduced-motion: reduce。Playwright の emulateMedia で写す）のときは絵が出ず札だけ
  *
@@ -438,10 +438,10 @@ async function recordWeekly(page: Page, rank: string, options: { typeBoard?: boo
   await waitQuickInputClosed(page, "ランキング記録が閉じる");
 }
 
-const RISE_NOTICE = `「${E2E_WORK_TITLE}」がカクヨムの週間で30位から12位に上がりました！`;
+const RISE_NOTICE = `「${E2E_WORK_TITLE}」がカクヨムの週間で自己最高の30位を抜いて12位になりました！`;
 
 async function riseNotices(page: Page): Promise<string[]> {
-  return (await notificationTexts(page)).filter((text) => text.includes("位に上がりました！") || text.includes("位に入りました！"));
+  return (await notificationTexts(page)).filter((text) => ["位に入りました！", "位になりました！", "続きました！"].some((tail) => text.includes(tail)));
 }
 
 async function bannerText(frame: Frame): Promise<string> {
@@ -452,7 +452,7 @@ async function bannerText(frame: Frame): Promise<string> {
   );
 }
 
-test("ランキング記録で下がった順位では何も出ず、上がった順位で「30位から12位に上がりました！」が1回出て開いている執筆統計に札が出て、同じ記録をもう一度入れても二度は出ない", async () => {
+test("ランキング記録で下がった順位では何も出ず、自己最高を抜いた順位で「自己最高の30位を抜いて12位になりました！」が1回出て開いている執筆統計に札が出て、同じ記録をもう一度入れても二度は出ない", async () => {
   await withVsCode(
     "順位のお祝い（開いているとき）",
     [EPISODE],
@@ -484,7 +484,7 @@ test("ランキング記録で下がった順位では何も出ず、上がっ�
       );
       await clearNotifications(page);
 
-      // 上がった順位（同じ日の書き直しで 12位。前の日の 30位と比べる）
+      // 自己最高を抜いた順位（同じ日の書き直しで 12位。それまでの自己最高の 30位と比べる）
       await recordWeekly(page, "12");
       let seenBanner = "";
       await waitUntil(
@@ -493,7 +493,7 @@ test("ランキング記録で下がった順位では何も出ず、上がっ�
           if (banner) seenBanner = banner;
           return (await riseNotices(page)).includes(RISE_NOTICE) && seenBanner.includes("おめでとうございます");
         },
-        "「30位から12位に上がりました！」の知らせと、執筆統計の「おめでとうございます」の札が出る",
+        "「自己最高の30位を抜いて12位になりました！」の知らせと、執筆統計の「おめでとうございます」の札が出る",
         15_000
       ).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（知らせ：${JSON.stringify(await notificationTexts(page))}／札：${JSON.stringify(seenBanner)}）`);
@@ -722,7 +722,7 @@ function kakuyomuWeekly80Ledger(): Record<string, unknown> {
   });
 }
 
-test("10位より下でも50位以上上がると「80位から25位に上がりました！」が出て、執筆統計に風船と花火が上がる", async () => {
+test("10位より下でも50位以上上がると「自己最高の80位を抜いて25位になりました！」が出て、執筆統計に風船と花火が上がる", async () => {
   await withVsCode(
     "順位のお祝い（50位以上の上昇）",
     [EPISODE],
@@ -734,7 +734,7 @@ test("10位より下でも50位以上上がると「80位から25位に上がり
       await waitUntil(async () => (await bannerText(frame)).includes("80位に入りました"), "開いたときに、まだ見せていない80位の札が出る", 15_000);
       await waitUntil(async () => (await bannerText(frame)) === "" && (await frame.locator("canvas.celebrate-layer").count()) === 0, "開いたときの札と絵が消える", 20_000);
       await installCelebrationProbe(frame);
-      const rise = await recordAndWatch(page, frame, "25", `「${E2E_WORK_TITLE}」がカクヨムの週間で80位から25位に上がりました！`);
+      const rise = await recordAndWatch(page, frame, "25", `「${E2E_WORK_TITLE}」がカクヨムの週間で自己最高の80位を抜いて25位になりました！`);
       expect(rise.probe.layers, `お祝いの絵：${JSON.stringify(rise.probe)}`).toBe(1);
       expect(rise.probe.maxBalloons, `風船の数：${JSON.stringify(rise.probe)}`).toBe(RANK_BALLOONS.fireworks);
       expect(rise.probe.sparks, `50位以上上がったのに花火が上がりません：${JSON.stringify(rise.probe)}`).toBeGreaterThan(0);
