@@ -5,7 +5,7 @@ import type { AIRegistry } from "../../../src/ai/registry";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
-import { postingTextHash } from "../../../src/core/postingBodyHash";
+import { postingTextHash, postingTitleHash } from "../../../src/core/postingBodyHash";
 
 /**
  * 修正版の出し直し（作者の依頼 2026-11-03「修正後再投稿に対応してください」。設計書6.68.7）。
@@ -156,6 +156,8 @@ describe("修正版の出し直し", () => {
 
     const result = await postNewEpisode(work, {} as unknown as AIRegistry, episode);
     expect(result.changed).toBe(true);
+    // 出し直しは新しい話を投稿したとは数えない（作者の裁定 2026-11-03 夜）
+    expect(result.postedNew).toBe(false);
 
     // サイトを選ぶ画面には、投稿済みのサイトだけが並ぶ（未投稿のなろうは出さない）
     const sitePick = picks.find((pick) => pick.canPickMany);
@@ -395,5 +397,100 @@ describe("修正版の出し直し", () => {
     expect(env.opened).toEqual([
       "https://syosetu.com/usernoveldatamanage/updateinput/ncode/2930206/noveldataid/12345/",
     ]);
+  });
+
+  /*
+    **題を直した話の出し直しでは、題の貼り替えも案内する**（作者の裁定 2026-11-03 夜）。
+    題と本文の印（`v2:`）は1つに繋いだ値なので、違っても「題か本文のどちらか」までしか
+    分からない。題だけの印（`titleHash`）を記録に持ち、最後に渡した記録の題の印と比べる。
+  */
+  describe("題の貼り替えの案内", () => {
+    const TITLE_HINT = "題（サブタイトル）も貼り替えてください";
+    const postedWith = (site: string, extra: Record<string, unknown>) => ({
+      episodePath: relativeEpisode,
+      site,
+      postedAt: "2026-10-01T00:00:00.000Z",
+      ...extra,
+    });
+    /** 全部のサイトへ出した話でカクヨムだけを出し直し、その案内（2つ目の画面）を返す */
+    async function walkKakuyomu(posts: unknown[], revisions?: unknown[]): Promise<Captured> {
+      writeLedger({ ...ALL_POSTED, posts, ...(revisions ? { revisions } : {}) });
+      const picks = stubQuickPick([
+        (items) => items.filter((item) => item.site === "kakuyomu"),
+        () => undefined,
+      ]);
+      await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+      expect(picks[1].title).toContain("修正版");
+      return picks[1];
+    }
+
+    test("投稿したときの題と今の題が違えば、題の貼り替えも添える（再現：直す前は本文だけを案内した）", async () => {
+      const walk = await walkKakuyomu([
+        postedWith("kakuyomu", {
+          bodyHash: postingTextHash("出会い", body),
+          titleHash: postingTitleHash("出会い"),
+        }),
+        postedWith("narou", {}),
+      ]);
+      expect(walk.placeHolder).toContain(TITLE_HINT);
+      expect(walk.placeHolder).toContain("本文を貼り替えてください");
+    });
+
+    test("題が同じ（本文だけ直した）話には添えない", async () => {
+      const walk = await walkKakuyomu([
+        postedWith("kakuyomu", {
+          bodyHash: postingTextHash("邂逅", "直す前の本文"),
+          titleHash: postingTitleHash("邂逅"),
+        }),
+        postedWith("narou", {}),
+      ]);
+      expect(walk.placeHolder).toContain("本文を貼り替えてください");
+      expect(walk.placeHolder).not.toContain(TITLE_HINT);
+    });
+
+    test("題の印の無い古い記録（0.125.1 まで）では、分からないので添えない", async () => {
+      // 題と本文の印からは題が違うと見えても、題だけが違うのかは分からない
+      const walk = await walkKakuyomu([
+        postedWith("kakuyomu", { bodyHash: postingTextHash("出会い", body) }),
+        postedWith("narou", {}),
+      ]);
+      expect(walk.placeHolder).not.toContain(TITLE_HINT);
+    });
+
+    test("最後に渡したのが出し直しなら、その題と比べる（古い投稿の題へ遡らない）", async () => {
+      const walk = await walkKakuyomu(
+        [postedWith("kakuyomu", { titleHash: postingTitleHash("出会い") }), postedWith("narou", {})],
+        [
+          {
+            episodePath: relativeEpisode,
+            site: "kakuyomu",
+            revisedAt: "2026-10-20T00:00:00.000Z",
+            titleHash: postingTitleHash("邂逅"),
+          },
+        ]
+      );
+      expect(walk.placeHolder).not.toContain(TITLE_HINT);
+    });
+
+    test("最後の出し直しに題の印が無ければ、投稿の記録の題へ遡らず添えない", async () => {
+      const walk = await walkKakuyomu(
+        [postedWith("kakuyomu", { titleHash: postingTitleHash("出会い") }), postedWith("narou", {})],
+        [{ episodePath: relativeEpisode, site: "kakuyomu", revisedAt: "2026-10-20T00:00:00.000Z" }]
+      );
+      expect(walk.placeHolder).not.toContain(TITLE_HINT);
+    });
+
+    test("投稿と出し直しの記録に、そのときの題の印を残す", async () => {
+      writeLedger(PARTLY_POSTED);
+      stubQuickPick([byKey("mode", "post"), byKey("answer", "posted"), () => undefined]);
+      await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+      expect(readLedger().posts.find((post) => post.site === "narou")?.titleHash).toBe(
+        postingTitleHash("邂逅")
+      );
+
+      stubQuickPick([(items) => items.filter((item) => item.site === "narou"), byKey("answer", "revised")]);
+      await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+      expect(readLedger().revisions?.[0].titleHash).toBe(postingTitleHash("邂逅"));
+    });
   });
 });

@@ -172,6 +172,11 @@ describe("作品から投稿を始めたときの、出し直しの促し", () =
     ]);
     const result = await postNewEpisode(work, {} as unknown as AIRegistry);
     expect(result.changed).toBe(true);
+    /*
+      **出し直しだけで終えた回は、新しい話を投稿したとは数えない**（作者の裁定 2026-11-03 夜）。
+      再現：直す前は台帳が変わっただけで「済んだ」になり、はじめの案内などの手順が先へ進んだ
+    */
+    expect(result.postedNew).toBe(false);
 
     expect(picks[0].placeHolder).toBe("第2話は投稿後に直しています。出し直しますか");
     // 直していない第1話は並べない（誤検出しない）
@@ -227,6 +232,8 @@ describe("作品から投稿を始めたときの、出し直しの促し", () =
     ]);
     const result = await postNewEpisode(work, {} as unknown as AIRegistry);
     expect(result.changed).toBe(true);
+    // 出し直しに続けて第3話を出したので、新しい話を投稿したと数える
+    expect(result.postedNew).toBe(true);
     expect(picks[4].title).toContain("第3話");
     expect(picks[4].title).toContain("小説家になろう");
     const ledger = readLedger();

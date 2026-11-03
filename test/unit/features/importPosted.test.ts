@@ -219,6 +219,8 @@ describe("投稿キットの案内の途中で届く（『投稿しました』�
     const result = await postNewEpisode(work, {} as unknown as AIRegistry, scanned[1]);
 
     expect(result.changed).toBe(true);
+    // 預かりを当てる後始末が、新しい話を投稿したことを消さない（手順の「済んだ」に使う。6.68.7）
+    expect(result.postedNew).toBe(true);
     // 「外部で変更されています」で止まっていない
     expect(errors).toEqual([]);
     expect(issuedRef).toMatch(/^[0-9a-f]{24}$/);

@@ -75,6 +75,18 @@ export function postingTextHash(subtitle: string | null | undefined, body: strin
   );
 }
 
+/**
+ * 題（サブタイトル）だけの印（0.125.2。作者の裁定 2026-11-03 夜「題を直した話の出し直しでは、
+ * 題の貼り替えも案内する」）。整えた題の SHA-256（16進64字。頭に何も付けない）。
+ *
+ * **題と本文の印（`postingTextHash`）とは別に取る。** あちらは題と本文を繋いだ1つの値なので、
+ * 違っても「題か本文のどちらかを直した」までしか分からない。題の整え方は同じ
+ * （`normalizePostingSubtitle`。題が無い話と空の題は同じ印）。
+ */
+export function postingTitleHash(subtitle: string | null | undefined): string {
+  return hashText(normalizePostingSubtitle(subtitle));
+}
+
 /** 今の話の印を、古い記録とも比べられる形で作る（`revisionNeed` へ渡す） */
 export function postingTextHashes(
   subtitle: string | null | undefined,

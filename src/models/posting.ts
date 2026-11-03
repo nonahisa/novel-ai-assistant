@@ -643,6 +643,19 @@ export interface PostingRecord {
    */
   bodyHash?: string;
   /**
+   * 投稿したときの題（サブタイトル）だけの印（設計書6.68.7。0.125.2 から。省略できる）。
+   * `core/postingBodyHash.ts` の `postingTitleHash` で取った16進64字。
+   *
+   * **`bodyHash` と別に持つのは、出し直しの案内で「題も貼り替えてください」を添えるため**
+   * （作者の裁定 2026-11-03 夜）。`bodyHash` は題と本文を繋いだ1つの印なので、違っても
+   * 題を直したのか本文を直したのかを切り分けられない。**題の文字列ではなく印で持つ**——
+   * 本文の印と同じ形の決まりで読めて（崩れた値を止めやすい）、台帳に題の写しを増やさない
+   * （題の正は原稿の側にあり、写しは原稿の題を直したときに古いまま残る）。
+   *
+   * 無い記録（0.125.1 までの投稿・基準線）は、題を直したかが「分からない」——案内に添えない。
+   */
+  titleHash?: string;
+  /**
    * サイトが振った話の番号（任意。設計書6.68.7）。あれば出し直しで話の編集画面を直に開く。
    *
    * 台帳はサイトを読みにいかない（6.68.1）ので、ここへ入るのはヘルパーが投稿のあとに
@@ -683,6 +696,8 @@ export interface PostingRevisionRecord {
   order?: number;
   /** 出し直したときの本文の印（`PostingRecord.bodyHash` と同じ形。0.124.0 から） */
   bodyHash?: string;
+  /** 出し直したときの題だけの印（`PostingRecord.titleHash` と同じ形。0.125.2 から） */
+  titleHash?: string;
 }
 
 /**
@@ -1253,6 +1268,18 @@ function readBodyHash(value: unknown, path: string): string | undefined {
   return text;
 }
 
+/** 題だけの印の形（16進64字。`v2:` のような頭は付かない——取り方は1つだけ） */
+const TITLE_HASH_PATTERN = /^[0-9a-f]{64}$/;
+
+/** 題だけの印を読む（6.68.7。0.125.2）。形が違えば止める（`readBodyHash` と同じ厳しさ） */
+function readTitleHash(value: unknown, path: string): string | undefined {
+  optionalString(value, path);
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return undefined;
+  if (!TITLE_HASH_PATTERN.test(text)) invalid(path);
+  return text;
+}
+
 /** サイトの話の番号を読む（6.68.7）。形が違えば止める（理由は `SITE_EPISODE_ID_PATTERN`） */
 function readSiteEpisodeId(value: unknown, path: string): string | undefined {
   optionalString(value, path);
@@ -1340,6 +1367,7 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
       const chapter = typeof entry.chapter === "number" ? entry.chapter : null;
       const order = typeof entry.order === "number" ? entry.order : null;
       const bodyHash = readBodyHash(entry.bodyHash, `${entryPath}.bodyHash`);
+      const titleHash = readTitleHash(entry.titleHash, `${entryPath}.titleHash`);
       const siteEpisodeId = readSiteEpisodeId(
         entry.siteEpisodeId,
         `${entryPath}.siteEpisodeId`
@@ -1361,6 +1389,7 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
             : {}),
         // 本文の印と話の番号（6.68.7）。無い記録には欄を足さない（上と同じ理由）
         ...(bodyHash ? { bodyHash } : {}),
+        ...(titleHash ? { titleHash } : {}),
         ...(siteEpisodeId ? { siteEpisodeId } : {}),
         ...(postRef ? { postRef } : {}),
       };
@@ -1380,12 +1409,14 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
     const chapter = typeof entry.chapter === "number" ? entry.chapter : null;
     const order = typeof entry.order === "number" ? entry.order : null;
     const bodyHash = readBodyHash(entry.bodyHash, `${entryPath}.bodyHash`);
+    const titleHash = readTitleHash(entry.titleHash, `${entryPath}.titleHash`);
     return {
       episodePath: normalizeEpisodePath(entry.episodePath as string),
       site,
       revisedAt: (entry.revisedAt as string).trim(),
       ...(chapter !== null ? { chapter } : order !== null ? { order } : {}),
       ...(bodyHash ? { bodyHash } : {}),
+      ...(titleHash ? { titleHash } : {}),
     };
   });
 
@@ -2004,7 +2035,9 @@ export function withPost(
    * ヘルパーへ渡した貼り込みの札（6.68.8）。封筒でコピーしたときだけ渡す。
    * **前の投稿の札は引き継がない**——札はその貼り込みを指すもので、新しく貼り込めば別の札になる
    */
-  postRef?: string
+  postRef?: string,
+  /** 投稿したときの題だけの印（6.68.7。`postingTitleHash`）。渡さなければ欄を持たない */
+  titleHash?: string
 ): PostingLedger {
   const wanted = toTarget(target);
   const key = postingEpisodeKey(wanted);
@@ -2030,6 +2063,7 @@ export function withPost(
         postedAt,
         ...episodeRefFields(wanted),
         ...(bodyHash ? { bodyHash } : {}),
+        ...(titleHash ? { titleHash } : {}),
         ...(siteEpisodeId ? { siteEpisodeId } : {}),
         ...(postRef ? { postRef } : {}),
       },
@@ -2207,7 +2241,9 @@ export function withRevision(
   target: PostingEpisodeTargetLike,
   site: PostingSiteId,
   revisedAt: string,
-  bodyHash?: string
+  bodyHash?: string,
+  /** 出し直したときの題だけの印（`postingTitleHash`）。渡さなければ欄を持たない */
+  titleHash?: string
 ): PostingLedger {
   const wanted = toTarget(target);
   return {
@@ -2220,34 +2256,77 @@ export function withRevision(
         revisedAt,
         ...episodeRefFields(wanted),
         ...(bodyHash ? { bodyHash } : {}),
+        ...(titleHash ? { titleHash } : {}),
       },
     ],
   };
 }
 
 /**
+ * その話・そのサイトで、最後にサイトへ渡した記録（6.68.7）。**出し直しがあれば最新の出し直し、
+ * 無ければ投稿。** 本文の印（`lastSentBodyHash`）も題の印（`lastSentTitleHash`）もここから引く——
+ * 2つが別の記録を「最後」と読むと、本文と題の比べ先が食い違う。
+ */
+function lastSentRecord(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId
+): { bodyHash?: string; titleHash?: string } | undefined {
+  const revision = revisionFor(ledger, target, site);
+  const post = postRecordFor(ledger, target, site);
+  if (!revision) return post;
+  /*
+    ふつうは出し直しのほうが新しい。投稿の記録があとから書かれた（台帳を手で直した等）
+    ときだけ投稿の記録を採る——日時が読めなければ出し直しを採る
+  */
+  if (post && Date.parse(post.postedAt) > Date.parse(revision.revisedAt)) return post;
+  return revision;
+}
+
+/**
  * その話・そのサイトで、最後にサイトへ渡した本文の印（6.68.7）。
  *
- * **最後に渡したのは、出し直しがあれば最新の出し直し、無ければ投稿。** 最後の記録に
- * 印が無ければ undefined（＝分からない）を返し、**古い記録の印へ遡らない**——印を
- * 持たない版で出し直した直後に、その前の投稿の印と比べて「直した」と言ってしまう。
+ * 最後の記録（`lastSentRecord`）に印が無ければ undefined（＝分からない）を返し、
+ * **古い記録の印へ遡らない**——印を持たない版で出し直した直後に、その前の投稿の印と比べて
+ * 「直した」と言ってしまう。
  */
 export function lastSentBodyHash(
   ledger: PostingLedger,
   target: PostingEpisodeTargetLike,
   site: PostingSiteId
 ): string | undefined {
-  const revision = revisionFor(ledger, target, site);
-  const post = postRecordFor(ledger, target, site);
-  if (!revision) return post?.bodyHash;
-  /*
-    ふつうは出し直しのほうが新しい。投稿の記録があとから書かれた（台帳を手で直した等）
-    ときだけ投稿の記録を採る——日時が読めなければ出し直しを採る
-  */
-  if (post && Date.parse(post.postedAt) > Date.parse(revision.revisedAt)) {
-    return post.bodyHash;
-  }
-  return revision.bodyHash;
+  return lastSentRecord(ledger, target, site)?.bodyHash;
+}
+
+/**
+ * その話・そのサイトで、最後にサイトへ渡した題だけの印（6.68.7。0.125.2）。
+ * 遡らない決まりは `lastSentBodyHash` と同じ。
+ */
+export function lastSentTitleHash(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId
+): string | undefined {
+  return lastSentRecord(ledger, target, site)?.titleHash;
+}
+
+/**
+ * 最後にそのサイトへ渡した題と、今の題が違うと**分かる**か（6.68.7。作者の裁定 2026-11-03 夜）。
+ * 出し直しの案内に「題（サブタイトル）も貼り替えてください」を添えるかに使う。
+ *
+ * 最後の記録に題の印が無い（0.125.1 までの記録・基準線）ときは偽——分からないことを
+ * 「直した」と言わない。題と本文の印（`v2:`）が違っても、題が違うとは言えない。
+ *
+ * @param currentTitleHash 今の題の印（`core/postingBodyHash.ts` の `postingTitleHash`）
+ */
+export function titleChangedSinceSent(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId,
+  currentTitleHash: string
+): boolean {
+  const sent = lastSentTitleHash(ledger, target, site);
+  return sent !== undefined && sent !== currentTitleHash;
 }
 
 /** 出し直しが要るか（`revisionNeed` の答え） */

@@ -8156,11 +8156,12 @@ export async function activate(
       // 未投稿の印が変わるので、記録したときだけ一覧を作り直す
       if (result.changed) treeProvider.refresh(work.id);
       /*
-        **捨てていた戻り値を拾う**（設計書6.104）。台帳が変わらなかった
-        回は、途中の窓を閉じたか台帳を読めなかったかで、**投稿の記録は
-        残っていない**。済んだことにすると案内が先へ行ってしまう。
+        **捨てていた戻り値を拾う**（設計書6.104）。済んだと数えるのは、
+        **新しい話の投稿を記録したときだけ**（`postedNew`。設計書6.68.7、
+        作者の裁定 2026-11-03 夜）。台帳が変わったか（`changed`）で数えると、
+        出し直しの記録や初回の設定・番号の預かりだけで終えた回にも案内が先へ行く。
       */
-      return result.changed ? CHECK_COMPLETED : CHECK_CANCELLED;
+      return result.postedNew ? CHECK_COMPLETED : CHECK_CANCELLED;
     }),
     registerCommand("novelai.postThisEpisode", async (picked?: EpisodeNode) => {
       const node = requireTreeNode(picked, "この話を投稿する");

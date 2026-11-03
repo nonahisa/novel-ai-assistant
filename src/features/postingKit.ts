@@ -19,6 +19,7 @@ import {
   siteWorkNumberFor,
   sitesNeedingRevision,
   siteProfile,
+  titleChangedSinceSent,
   unpostedSites,
   validateNewEpisodeUrl,
   validateRankInput,
@@ -84,6 +85,7 @@ import {
 // 投稿したときの本文の印（6.68.7）。投稿の道と判定の道で同じ切り出しを通す
 import {
   postingTextHashes,
+  postingTitleHash,
   postingUnitsOf,
   type PostingUnit,
 } from "../core/postingBodyHash";
@@ -142,6 +144,19 @@ export interface PostingKitResult {
   changed: boolean;
 }
 
+/** 新話を投稿（`postNewEpisode`）の結果 */
+export interface PostNewEpisodeResult extends PostingKitResult {
+  /**
+   * 新しい話の投稿を1サイトでも記録したか（6.68.7。作者の裁定 2026-11-03 夜）。
+   * 手順（はじめの案内など）の「済んだ」はこちらで見る。
+   *
+   * **`changed` で済んだと数えない。** 台帳は出し直しの記録・初回の設定（基準線）・
+   * ヘルパーから届いた番号の預かりでも変わるので、出し直しだけで終えた回まで
+   * 「新話投稿を済ませた」ことになり、手順が先へ進んでいた
+   */
+  postedNew: boolean;
+}
+
 /**
  * 新話を投稿（6.68.3）。
  *
@@ -152,7 +167,7 @@ export async function postNewEpisode(
   work: WorkEntry,
   registry: AIRegistry,
   episode?: EpisodeFile
-): Promise<PostingKitResult> {
+): Promise<PostNewEpisodeResult> {
   /*
     **案内が開いている間、ヘルパーから届いた番号は預かりへ入る**（設計書6.68.8。`postingKitSession.ts`）。
     受け手が台帳を書くと、この案内の保存が「外部で変更」で止まるため。預かりは『投稿しました』の
@@ -160,12 +175,13 @@ export async function postNewEpisode(
   */
   beginPostingKitSession(work.id);
   const store = new PostingStore(work);
-  let result: PostingKitResult = { changed: false };
+  let result: PostNewEpisodeResult = { changed: false, postedNew: false };
   try {
     result = await postNewEpisodeInSession(work, registry, store, episode);
   } finally {
     const flushed = await flushQueuedUpdates(work, store, endPostingKitSession(work.id));
-    if (flushed) result = { changed: true };
+    // 預かりを書いても新しい話を出したことにはならない——投稿したかは案内の結果のまま
+    if (flushed) result = { ...result, changed: true };
   }
   return result;
 }
@@ -175,13 +191,15 @@ async function postNewEpisodeInSession(
   registry: AIRegistry,
   store: PostingStore,
   episode?: EpisodeFile
-): Promise<PostingKitResult> {
+): Promise<PostNewEpisodeResult> {
   // **この先の記録は、その作品のログファイルへ残す**（0.43.3 と同じ）。
   // 本文を読む処理は話しか受け取らないので、入口で向ける
   useLogFile(work.folderPath);
   let ledger = await load(store, work);
-  if (!ledger) return { changed: false };
+  if (!ledger) return { changed: false, postedNew: false };
   let changed = false;
+  /** 新しい話の投稿を記録したサイト。出し直し・基準線・預かりの書き込みは入れない（6.68.7） */
+  const posted: PostingSiteId[] = [];
 
   const format = await readWorkFormat(work);
   const relativePathOf = (file: EpisodeFile) =>
@@ -207,7 +225,7 @@ async function postNewEpisodeInSession(
       await episodesOf(),
       format
     );
-    if (!configured) return { changed: false };
+    if (!configured) return { changed: false, postedNew: false };
     ledger = configured.ledger;
     changed = configured.changed;
   }
@@ -227,8 +245,8 @@ async function postNewEpisodeInSession(
       relativePathOf,
       format,
     });
-    if (offered.kind === "cancel") return { changed };
-    if (offered.kind === "revised") return { changed: changed || offered.changed };
+    if (offered.kind === "cancel") return { changed, postedNew: posted.length > 0 };
+    if (offered.kind === "revised") return { changed: changed || offered.changed, postedNew: false };
     /*
       出し直しを済ませてから新しい話へ続ける回は、**出し直しを記録したあとの台帳で続ける**。
       手前の台帳のまま続けると、次の保存で出し直しの記録を消してしまう
@@ -247,11 +265,11 @@ async function postNewEpisodeInSession(
         ledger.sites.map((entry) => entry.site)
       )}）。`
     );
-    return { changed };
+    return { changed, postedNew: posted.length > 0 };
   }
 
   const parts = await readEpisode(target, format);
-  if (!parts) return { changed };
+  if (!parts) return { changed, postedNew: posted.length > 0 };
 
   /*
     **台帳は話単位で引く**（設計書6.68.2）。合本（1ファイルに全話）からは
@@ -297,7 +315,7 @@ async function postNewEpisodeInSession(
     */
     const mode =
       sites.length === 0 ? "revise" : await askPostingMode(label, sites, alreadyPosted, edited);
-    if (!mode) return { changed };
+    if (!mode) return { changed, postedNew: posted.length > 0 };
     if (mode === "revise") {
       const result = await reviseEpisode({
         store,
@@ -311,10 +329,10 @@ async function postNewEpisodeInSession(
         edited,
         allPosted: sites.length === 0,
       });
-      return { changed: changed || result.changed };
+      return { changed: changed || result.changed, postedNew: false };
     }
   }
-  if (sites.length === 0) return { changed };
+  if (sites.length === 0) return { changed, postedNew: posted.length > 0 };
 
   /*
     **章の題は、封筒を選んだときに1度だけ引く**（作者の頼み 2026-11-01）。
@@ -325,7 +343,6 @@ async function postNewEpisodeInSession(
   const chapterOf = () =>
     (chapterName ??= chapterNameOf(work, target, episodesOf));
 
-  const posted: PostingSiteId[] = [];
   const skipped: PostingSiteId[] = [];
   let aborted = false;
 
@@ -371,14 +388,16 @@ async function postNewEpisodeInSession(
       site,
       new Date().toISOString(),
       bodyHash,
-      postRefCopied ? postRef : undefined
+      postRefCopied ? postRef : undefined,
+      // 題だけの印も残す（出し直しで「題も貼り替えて」を添えるかを、あとで比べるため）
+      postingTitleHash(parts.subtitle)
     );
     // 案内のあいだに届いた番号を、同じ保存に相乗りさせる（預かりは終えるときにも当て直す）
     const next = applyQueuedPostingUpdates(recorded, queuedPostingUpdatesOf(work.id)).ledger;
     if (!(await save(store, work, next, "投稿済みの記録（投稿キット）"))) {
       // 同期やヘルパーからの取り込みが先に書いた等。ここで止める——読み直さずに
       // 続けると、こちらの古い手持ちで次のサイトぶんも上書きしてしまう
-      return { changed };
+      return { changed, postedNew: posted.length > 0 };
     }
     ledger = next;
     changed = true;
@@ -392,7 +411,7 @@ async function postNewEpisodeInSession(
     await offerAnnouncement(work, registry);
   }
 
-  return { changed };
+  return { changed, postedNew: posted.length > 0 };
 }
 
 /**
@@ -487,6 +506,11 @@ async function walkSite(input: {
    */
   siteEpisodeId?: string;
   /**
+   * 出し直しで、最後にこのサイトへ渡した題と今の題が違うと分かっているか（6.68.7。
+   * 作者の裁定 2026-11-03 夜）。真なら案内に題の貼り替えも添える。分からないときは偽
+   */
+  titleChanged?: boolean;
+  /**
    * 封筒へ入れる貼り込みの札（6.68.8）。封筒をコピーしたら `onCopied` を呼ぶ（題の欄へ入れた字を渡す）。
    * 出し直しでは封筒を出さないので渡さない
    */
@@ -538,6 +562,13 @@ async function walkSite(input: {
           : revisionPage?.kind === "list"
             ? `開いた作品の一覧からこの作品を選び、${input.label}の編集画面を開いて、本文を貼り替えてください。`
             : `${info.label}で作品の管理画面を開き、${input.label}の編集画面を開いて、本文を貼り替えてください（${info.label}の管理画面はこちらからは開けません）。`) +
+      /*
+        題を直した話は、題の欄も貼り替えないとサイトの題が古いまま残る。本文の貼り替えだけを
+        案内すると見落とされる。題が同じ・分からない話には添えない（直していない欄まで触らせない）
+      */
+      (input.titleChanged === true
+        ? "題（サブタイトル）も貼り替えてください（「サブタイトルをコピー」でコピーできます）。"
+        : "") +
       "保存したら「出し直しました」を選んでください"
     : `${copiedText}貼り付けて公開したら「投稿しました」を選んでください`;
   // **黙って落とさない**（6.68.3）。noteには傍点の記法が無いので印を外す
@@ -793,6 +824,8 @@ async function reviseEpisode(input: {
   const revised: PostingSiteId[] = [];
   const skipped: PostingSiteId[] = [];
   let aborted = false;
+  // 今の題の印。最後にそのサイトへ渡した題と比べ、違うと分かるサイトだけ題の貼り替えも案内する
+  const titleHash = postingTitleHash(input.parts.subtitle);
   for (const site of sites) {
     const answer = await walkSite({
       ledger,
@@ -804,6 +837,7 @@ async function reviseEpisode(input: {
       chapterOf: async () => undefined,
       revise: true,
       siteEpisodeId: siteEpisodeIdFor(ledger, input.postTarget, site),
+      titleChanged: titleChangedSinceSent(ledger, input.postTarget, site, titleHash),
     });
     if (answer === "abort") {
       aborted = true;
@@ -818,7 +852,8 @@ async function reviseEpisode(input: {
       input.postTarget,
       site,
       new Date().toISOString(),
-      input.bodyHash
+      input.bodyHash,
+      titleHash
     );
     if (!(await save(input.store, input.work, next, "修正版の出し直しの記録（投稿キット）"))) {
       return { changed, ledger, finished: false };

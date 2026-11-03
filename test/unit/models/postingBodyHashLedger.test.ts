@@ -4,11 +4,13 @@ import {
   hasBodyHashFor,
   isTitledTextHash,
   lastSentBodyHash,
+  lastSentTitleHash,
   parsePostingLedger,
   revisionNeed,
   siteEpisodeIdFor,
   siteWorkNumberFor,
   sitesNeedingRevision,
+  titleChangedSinceSent,
   withPost,
   withRevision,
   withSiteEpisodeId,
@@ -231,5 +233,50 @@ describe("台帳の読み込み", () => {
         revisions: [{ episodePath: "本文/001.txt", site: "kakuyomu", revisedAt: "2026-11-01", bodyHash: "XYZ" }],
       })
     ).toThrow();
+  });
+
+  test("題だけの印（0.125.2）を読める。v2: の付いた値や形の違う値は直さずに止める", () => {
+    const post = { episodePath: "本文/001.txt", site: "kakuyomu", postedAt: "2026-10-01T00:00:00.000Z" };
+    const title = "a".repeat(64);
+    const ledger = parsePostingLedger({
+      ...raw,
+      posts: [{ ...post, titleHash: title }, { ...post, episodePath: "本文/002.txt", titleHash: "" }],
+      revisions: [{ episodePath: "本文/001.txt", site: "kakuyomu", revisedAt: "2026-11-01", titleHash: title }],
+    });
+    expect(ledger.posts[0].titleHash).toBe(title);
+    expect("titleHash" in ledger.posts[1]).toBe(false);
+    expect(ledger.revisions?.[0].titleHash).toBe(title);
+    // 題と本文の印（v2:）を題の欄へ入れた値は、題の印として読まない
+    expect(() => parsePostingLedger({ ...raw, posts: [{ ...post, titleHash: `v2:${title}` }] })).toThrow();
+    expect(() => parsePostingLedger({ ...raw, posts: [{ ...post, titleHash: "短い" }] })).toThrow();
+  });
+});
+
+describe("題の印で、題の貼り替えを案内するかを決める", () => {
+  const A = "a".repeat(64);
+  const B = "b".repeat(64);
+
+  test("最後に渡した題の印と今の題の印が違えば真、同じなら偽", () => {
+    const ledger = withPost(base, "本文/001.txt", "kakuyomu", "2026-10-01T00:00:00.000Z", OLD, undefined, A);
+    expect(lastSentTitleHash(ledger, "本文/001.txt", "kakuyomu")).toBe(A);
+    expect(titleChangedSinceSent(ledger, "本文/001.txt", "kakuyomu", B)).toBe(true);
+    expect(titleChangedSinceSent(ledger, "本文/001.txt", "kakuyomu", A)).toBe(false);
+  });
+
+  test("題の印の無い記録は「分からない」で偽。最新の出し直しに無ければ投稿の印へ遡らない", () => {
+    const old = withPost(base, "本文/001.txt", "kakuyomu", "2026-10-01T00:00:00.000Z", OLD);
+    expect(titleChangedSinceSent(old, "本文/001.txt", "kakuyomu", B)).toBe(false);
+
+    const posted = withPost(base, "本文/001.txt", "kakuyomu", "2026-10-01T00:00:00.000Z", OLD, undefined, A);
+    const revised = withRevision(posted, "本文/001.txt", "kakuyomu", "2026-11-01T00:00:00.000Z", NEW);
+    expect(lastSentTitleHash(revised, "本文/001.txt", "kakuyomu")).toBeUndefined();
+    expect(titleChangedSinceSent(revised, "本文/001.txt", "kakuyomu", B)).toBe(false);
+
+    const revisedWithTitle = withRevision(posted, "本文/001.txt", "kakuyomu", "2026-11-01T00:00:00.000Z", NEW, B);
+    expect(titleChangedSinceSent(revisedWithTitle, "本文/001.txt", "kakuyomu", B)).toBe(false);
+  });
+
+  test("投稿していないサイトでは偽", () => {
+    expect(titleChangedSinceSent(base, "本文/001.txt", "narou", B)).toBe(false);
   });
 });
