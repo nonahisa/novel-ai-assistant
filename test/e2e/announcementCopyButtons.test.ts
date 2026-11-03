@@ -23,7 +23,7 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
 import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
-import { waitUntil } from "./support/wait";
+import { holdsFor, waitUntil } from "./support/wait";
 import { clearNotifications, pickQuickPickRow, quickPickRows } from "./support/workbenchDom";
 
 const EPISODE = "001_はじまり.txt";
@@ -67,6 +67,36 @@ async function readClipboard(session: E2ESession): Promise<string> {
 }
 async function writeClipboard(session: E2ESession, text: string): Promise<void> {
   await session.app.evaluate(({ clipboard }, value) => clipboard.writeText(value), text);
+}
+
+/**
+ * VS Code 本体の知らせの連打よけ（1.141.0 の `NotificationsToasts.SPAM_PROTECTION`）の長さ。
+ * **800ミリ秒のうちに4つ目の知らせが来ると、右下には出さず、通知センターへ黙って入れるだけ**になる
+ * （上限は3つ。数え直しは、前の数え始めから800ミリ秒を過ぎた最初の知らせから）。
+ */
+const TOAST_SPAM_INTERVAL_MS = 800;
+
+/**
+ * 知らせのボタンを、作者と同じ間合いで押す。
+ *
+ * **押す前に、その知らせが連打よけの長さより長く出たままであることを見届ける。**
+ * 画面の動きを止めた設定（`workbench.reduceMotion: on`。2026-11-03 に足した）では、Playwright が
+ * 知らせの現れる動きを待たなくなり、「できました」→ X用 → 活動報告用 → 後書き用 の4つの知らせが
+ * 約350ミリ秒のうちに続いた。4つ目（「X用・活動報告用・後書き用 をコピーしました」）は連打よけに
+ * 当たって右下に出ず、通知センターにだけ入っていた（クリップボードには後書き用が入っていた。
+ * 走らせて確かめた）。人の手で3つのボタンを800ミリ秒のうちに押すことはないので、製品の不具合ではなく
+ * テストの速さの問題。固定の sleep でなく、「出たままである」ことを確かめながら待つ
+ */
+async function pressNoticeButton(page: Page, label: string): Promise<void> {
+  const button = page.locator(".notification-toast .monaco-button", { hasText: label }).first();
+  await holdsFor(
+    async () => (await button.count()) > 0 && (await button.isVisible()),
+    `「${label}」のある知らせが出たまま`,
+    TOAST_SPAM_INTERVAL_MS + 200
+  ).catch(async (error: unknown) => {
+    throw new Error(`${String(error)}（知らせ：${JSON.stringify(await noticeTexts(page))}）`);
+  });
+  await button.click();
 }
 
 const run = promisify(execFile);
@@ -170,7 +200,7 @@ test("告知の通知で「X用をコピー」を押すとクリップボード�
         expect(fake.requests.length, "偽のAIが1回だけ呼ばれたはずです").toBe(1);
 
         /* ── 「X用をコピー」：クリップボードに X 用の文が入り、通知がもう一度出て、残りが並ぶ ── */
-        await page.locator(".notification-toast .monaco-button", { hasText: "X用をコピー" }).first().click();
+        await pressNoticeButton(page, "X用をコピー");
         await waitUntil(
           async () => (await noticeTexts(page)).some((text) => text.includes("X用 をコピーしました")),
           "押したあと、「X用 をコピーしました。続けてコピーできます」の通知が出る",
@@ -192,7 +222,7 @@ test("告知の通知で「X用をコピー」を押すとクリップボード�
         });
 
         /* ── 活動報告用 → 後書き用 ── */
-        await page.locator(".notification-toast .monaco-button", { hasText: "活動報告用をコピー" }).first().click();
+        await pressNoticeButton(page, "活動報告用をコピー");
         await waitUntil(
           async () => (await noticeTexts(page)).some((text) => text.includes("X用・活動報告用 をコピーしました")),
           "「X用・活動報告用 をコピーしました」の通知が出る",
@@ -201,7 +231,7 @@ test("告知の通知で「X用をコピー」を押すとクリップボード�
         await expectClipboard(session, (text) => text === ACTIVITY, "クリップボードに活動報告用の文が入っていません");
         await waitUntil(async () => (await noticeButtons(page)).join("|") === "後書き用をコピー|Xへ貼り付ける（投稿画面を開く）", "残りは後書き用と貼り付けだけ");
 
-        await page.locator(".notification-toast .monaco-button", { hasText: "後書き用をコピー" }).first().click();
+        await pressNoticeButton(page, "後書き用をコピー");
         await waitUntil(
           async () => (await noticeTexts(page)).some((text) => text.includes("X用・活動報告用・後書き用 をコピーしました")),
           "「X用・活動報告用・後書き用 をコピーしました」の通知が出る",

@@ -216,6 +216,20 @@ test("詳細メニューの見出しの「…」の「他のメニューを閉�
         }
       );
       await soloItem.click();
+      /*
+        **開いた直後の品書きは、押しても効かない。** VS Code 本体の品書きの項目は、描かれてから
+        100ミリ秒たって初めて「指を離した」を受け付ける（1.141.0 の `runOnceToEnableMouseUp`。
+        右クリックを離した指で項目を選んでしまわないための作り）。画面の動きを止めた設定
+        （`workbench.reduceMotion: on`。2026-11-03 に足した）では Playwright が品書きの現れる動きを
+        待たなくなり、その100ミリ秒のうちに押していた——品書きは開いたまま、見出しも4つのまま
+        だった（走らせて確かめた）。人の手でそこまで速く押すことはないので、製品の不具合ではない。
+        品書きが開いたままなら、押したことになっていないので、もう一度押す（効いたら品書きは閉じる）
+      */
+      const menuClosed = async () => (await page.locator(".monaco-menu").count()) === 0;
+      await waitUntil(menuClosed, "「他のメニューを閉じる」を押すと品書きが閉じる", 2_000).catch(async () => {
+        if (await soloItem.isVisible().catch(() => false)) await soloItem.click();
+        await waitUntil(menuClosed, "「他のメニューを閉じる」を押し直すと品書きが閉じる", 5_000);
+      });
       await waitUntil(
         async () => {
           const shown = await paneHeaders(page);
