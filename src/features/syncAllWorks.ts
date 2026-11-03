@@ -55,6 +55,7 @@ import {
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 import type { SyncPresave } from "./presaveBeforeSync";
 import { describePresaveFailures } from "../core/syncPresave";
+import { readAutoResendSettings } from "./autoResend";
 
 /**
  * 作品をすべて同期する（設計書5.5.14）。
@@ -119,6 +120,11 @@ export interface SyncAllDeps {
    * 差し替えに縛られる
    */
   editor?: boolean;
+  /**
+   * 自動の送り直しが入っているか（作者の裁定 2026-11-03）。送信が届かなかったときに
+   * 「自動で送ります」と言ってよいかが決まる。省けば設定（`novelai.git.autoResend`）を読む
+   */
+  autoResend?: boolean;
 }
 
 export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
@@ -206,7 +212,7 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   // （2026-10-30、母艦のレビュー）
   deps.monitor.notifyRepositoryChanged?.();
 
-  await report(outcomes, plans);
+  await report(outcomes, plans, deps.autoResend ?? readAutoResendSettings().enabled !== false);
 }
 
 /** 同期のあとの、編集部の提案の取り込み。例外は外へ出さない */
@@ -621,8 +627,17 @@ async function runPlan(
   if (plan.push && !nothingToSend) {
     const result = await push(cwd, deps.run);
     if (!result.ok) {
-      outcome.error = `送信できませんでした: ${result.detail ?? "（詳細なし）"}`;
-      logFailure("すべて同期：送信に失敗", { 置き場: name, 詳細: outcome.error });
+      /*
+        **届いていない事実だけを言う**（作者の裁定 2026-11-03 夜）。git の文は画面に
+        出さずログへ残す——回線が無いのか、拒まれたのかを文から当てない（実装ルール5）。
+        作品の数と次に起きることは報告のまとめの文が言う（`describeOutcomes`）
+      */
+      outcome.pushFailed = true;
+      outcome.error = "GitHub へは届いていません（詳しくはログにあります）";
+      logFailure("すべて同期：送信に失敗", {
+        置き場: name,
+        詳細: result.detail ?? "（詳細なし）",
+      });
       return outcome;
     }
     outcome.pushed = true;
@@ -685,10 +700,11 @@ function describePullFailure(kind: "dirty" | "failed"): string {
 /** 済んだあとの報告 */
 async function report(
   outcomes: readonly SyncTargetOutcome[],
-  plans: readonly SyncTargetPlan[]
+  plans: readonly SyncTargetPlan[],
+  autoResend: boolean
 ): Promise<void> {
   const failed = outcomes.filter((one) => one.error);
-  const summary = describeOutcomes(outcomes) + describeSyncSkips(plans);
+  const summary = describeOutcomes(outcomes, { autoResend }) + describeSyncSkips(plans);
   const next = nextSteps(plans, outcomes);
 
   if (failed.length === 0) {

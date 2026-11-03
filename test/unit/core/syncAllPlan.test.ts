@@ -371,6 +371,124 @@ describe("済んだあとの報告", () => {
   test("何も無ければ、そう書く", () => {
     expect(describeOutcomes([])).toBe("同期するものはありませんでした。");
   });
+
+  /*
+    作者の実機（2026-11-03 夜、ノートPC・0.122.2）：Wi-Fi を切ったまま「保存・同期」を押すと、
+    記録はできたが送信は届かず、届いていないことが作者に伝わらなかった。
+    作者の裁定：**作者が押した同期で届かなかったときは1回だけ知らせる**。
+    原因は当てず、「届いていない」事実と作品の数、次に起きること（自動の送り直しの有無）を言う
+  */
+  describe("送信だけが届かなかったとき（作者の裁定 2026-11-03）", () => {
+    const library = state({
+      trackable: 3,
+      works: [
+        work("w1", "作品A", "C:/書庫/作品A"),
+        work("w2", "作品B", "C:/書庫/作品B"),
+        work("w3", "作品C", "C:/書庫/作品C"),
+      ],
+    });
+    const libraryPlan = planSyncTarget(library);
+
+    test("手元には記録したこと・届いていない作品の数・自動で送ることを言う", () => {
+      const text = describeOutcomes(
+        [
+          {
+            plan: libraryPlan,
+            committed: true,
+            pulled: false,
+            pushed: false,
+            pushFailed: true,
+            error: "GitHub へは届いていません",
+          },
+        ],
+        { autoResend: true }
+      );
+      expect(text).toBe(
+        "手元には記録しました。GitHub へは届いていません（3作品）。" +
+          "ネットにつながったら自動で送ります。"
+      );
+    });
+
+    test("自動の送り直しが切ってあれば、もう一度押すように言う", () => {
+      const text = describeOutcomes(
+        [
+          {
+            plan: libraryPlan,
+            committed: true,
+            pulled: false,
+            pushed: false,
+            pushFailed: true,
+            error: "GitHub へは届いていません",
+          },
+        ],
+        { autoResend: false }
+      );
+      expect(text).toContain("GitHub へは届いていません（3作品）。");
+      expect(text).toContain("ネットにつながったら「保存・同期」をもう一度押してください。");
+      expect(text).not.toContain("自動で送ります");
+    });
+
+    test("関わる作品が分かっていれば、その数で言う", () => {
+      const touched = planSyncTarget({ ...library, involved: [library.works[1]] });
+      const text = describeOutcomes(
+        [
+          {
+            plan: touched,
+            committed: true,
+            pulled: false,
+            pushed: false,
+            pushFailed: true,
+            error: "GitHub へは届いていません",
+          },
+        ],
+        { autoResend: true }
+      );
+      expect(text).toContain("（1作品）");
+    });
+
+    test("記録していない置き場（前からの未送信だけ）なら「記録しました」と言わない", () => {
+      const aheadOnly = planSyncTarget(state({ status: tracked({ ahead: 2 }) }));
+      const text = describeOutcomes(
+        [
+          {
+            plan: aheadOnly,
+            committed: false,
+            pulled: false,
+            pushed: false,
+            pushFailed: true,
+            error: "GitHub へは届いていません",
+          },
+        ],
+        { autoResend: true }
+      );
+      expect(text).not.toContain("手元には記録しました");
+      expect(text).toContain("GitHub へは届いていません（1作品）。");
+    });
+
+    test("ほかの置き場が送れていれば、既存の形で送った数を前に置く", () => {
+      const other = planSyncTarget(
+        state({ folderPath: "C:/別", label: "別", trackable: 1, works: [work("x", "別作品", "C:/別")] })
+      );
+      const text = describeOutcomes(
+        [
+          { plan: other, committed: true, pulled: false, pushed: true },
+          {
+            plan: libraryPlan,
+            committed: true,
+            pulled: false,
+            pushed: false,
+            pushFailed: true,
+            error: "GitHub へは届いていません",
+          },
+        ],
+        { autoResend: true }
+      );
+      expect(text.startsWith("記録 1か所・送信 1か所を済ませました。")).toBe(true);
+      expect(text).toContain("GitHub へは届いていません（3作品）。");
+      // 送信だけ届かなかった所は「最後まで通りませんでした」に数えない（同じことを2度言わない）
+      expect(text).not.toContain("最後まで通りませんでした");
+    });
+  });
 });
 
 describe("記録の結果を、次の手順へ翻訳する", () => {

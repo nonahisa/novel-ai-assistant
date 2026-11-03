@@ -3,7 +3,7 @@ import type { WorkEntry } from "../models/types";
 import { divergenceLine } from "./gitSyncStatusText";
 import { isPathInside, isSameFolder, join } from "./pathText";
 import { settingsToChooseCount, type ConflictWalkStart } from "./divergenceScan";
-import { finishReviewLabel, setupGithubLabel } from "./syncEntryNames";
+import { finishReviewLabel, saveAndSyncLabel, setupGithubLabel } from "./syncEntryNames";
 
 /**
  * 「作品をすべて同期する」で、置き場ごとに何をするかを決める（設計書5.5.14）。
@@ -592,6 +592,12 @@ export interface SyncTargetOutcome {
    */
   conflicted?: boolean;
   /**
+   * 送信だけが GitHub へ届かなかったか（作者の裁定 2026-11-03）。それより前の段
+   * （記録・取り込み）は済んでいる。報告で「届いていない」ことと作品の数を言うための印。
+   * `diverged` と同じく、**理由の文言で見分けない**。届かなかった原因は当てない（実装ルール5）
+   */
+  pushFailed?: boolean;
+  /**
    * 分かれた分を、その場で合わせた結果（設計書5.5.18）。
    *
    * **件数を持つ。** 作者の指摘（2026-09-10）：「競合解決があるかないか
@@ -626,24 +632,68 @@ export interface FoldSummary {
  * **できたことと、できなかったことを両方書く。** 「同期しました」だけだと、
  * 半分しか通っていないときに気づけない。
  */
-export function describeOutcomes(outcomes: readonly SyncTargetOutcome[]): string {
-  const pushed = outcomes.filter((one) => one.pushed).length;
-  const pulled = outcomes.filter((one) => one.pulled).length;
-  const committed = outcomes.filter((one) => one.committed).length;
-  const failed = outcomes.filter((one) => one.error).length;
+export function describeOutcomes(
+  outcomes: readonly SyncTargetOutcome[],
+  options: {
+    /**
+     * 自動の送り直し（`novelai.git.autoResend`）が入っているか。届かなかったときの
+     * 次の一言を事実に合わせる（`gitSync.ts` の `describeDirtyPull` と同じ考え）。
+     * core は設定を読まないので呼び出し側が渡す。省けば入っているとみなす（既定が入）
+     */
+    autoResend?: boolean;
+  } = {}
+): string {
+  // 送信だけ届かなかった置き場は、下の `describeUnsent` がまとめて言う。
+  // 「記録 Nか所」「最後まで通りませんでした」に数えると同じことを2度言う
+  const rest = outcomes.filter((one) => !one.pushFailed);
+  const pushed = rest.filter((one) => one.pushed).length;
+  const pulled = rest.filter((one) => one.pulled).length;
+  const committed = rest.filter((one) => one.committed).length;
+  const failed = rest.filter((one) => one.error).length;
+  const unsent = describeUnsent(outcomes, options.autoResend !== false);
 
   const parts: string[] = [];
   if (committed > 0) parts.push(`記録 ${committed}か所`);
   if (pulled > 0) parts.push(`取り込み ${pulled}か所`);
   if (pushed > 0) parts.push(`送信 ${pushed}か所`);
-  if (parts.length === 0 && failed === 0) return "同期するものはありませんでした。";
+  if (parts.length === 0 && failed === 0 && unsent === "") {
+    return "同期するものはありませんでした。";
+  }
 
   const head = parts.length > 0 ? `${parts.join("・")}を済ませました。` : "";
   const tail =
     failed > 0 ? `${failed}か所は最後まで通りませんでした。` : "";
-  return `${head}${tail}${describePreRecordPulls(outcomes)}${describeFolds(
+  return `${head}${unsent}${tail}${describePreRecordPulls(outcomes)}${describeFolds(
     outcomes
   )}`;
+}
+
+/**
+ * 送信が GitHub へ届かなかった置き場を1文で（作者の裁定 2026-11-03 夜）。
+ *
+ * 「手元には記録しました。GitHub へは届いていません（N作品）。ネットにつながったら
+ * 自動で送ります。」——**原因は当てない**（回線とは限らない。実装ルール5）。言うのは
+ * 届いていない事実と作品の数と、次に起きること。数えるのはその回に関わる作品
+ * （分からなければ置き場の作品ぜんぶ）で、確認の窓・報告の作品名と同じ数え方にする。
+ *
+ * 自動の送り直しが切ってあれば、送るのは作者の操作なので押す所を言う。
+ */
+function describeUnsent(
+  outcomes: readonly SyncTargetOutcome[],
+  autoResend: boolean
+): string {
+  const unsent = outcomes.filter((one) => one.pushFailed);
+  if (unsent.length === 0) return "";
+  const works = unsent.reduce(
+    (sum, one) => sum + (one.plan.target.involved?.length || one.plan.target.works.length || 1),
+    0
+  );
+  // 記録していない置き場（前からの未送信だけ）で「記録しました」と言うと事実と違う
+  const recorded = unsent.some((one) => one.committed) ? "手元には記録しました。" : "";
+  const next = autoResend
+    ? "ネットにつながったら自動で送ります。"
+    : `ネットにつながったら「${saveAndSyncLabel()}」をもう一度押してください。`;
+  return `${recorded}GitHub へは届いていません（${works}作品）。${next}`;
 }
 
 /**

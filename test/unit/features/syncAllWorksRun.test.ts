@@ -739,6 +739,66 @@ describe("記録の前の保存", () => {
 });
 
 /**
+ * ネットにつながらないまま押した「保存・同期」（作者の実機 2026-11-03 夜、ノートPC・0.122.2）。
+ *
+ * Wi-Fi を切ったまま押すと、記録はできたが送信は届かず、届いていないことが作者に
+ * 伝わらなかった。作者の裁定：**作者が押した同期で GitHub へ届かなかったときは1回だけ
+ * 知らせる。** 原因は当てない（git の文はログだけ。実装ルール5）
+ */
+describe("送信が届かなかったとき", () => {
+  /** 取りに行くのも送るのも通らない（回線が無い）。記録するものは「いじめられっ子」に2件 */
+  const offlineRepo: GitCommandRunner = async (args, cwd, timeout) => {
+    if (args[0] === "fetch" || args[0] === "push") {
+      calls.push(args);
+      return { code: 128, stdout: "", stderr: "fatal: unable to access 'https://github.com/'" };
+    }
+    if (args[0] === "rev-list") {
+      calls.push(args);
+      return { code: 0, stdout: "0\t0", stderr: "" };
+    }
+    return busyRepo(args, cwd, timeout);
+  };
+
+  let warnings: Array<{ message: string; modal: boolean }> = [];
+  beforeEach(() => {
+    warnings = [];
+    Object.assign(window, {
+      showWarningMessage: async (message: string, ...rest: unknown[]) => {
+        const options = rest.find(
+          (item): item is { modal?: boolean; detail?: string } =>
+            typeof item === "object" && item !== null
+        );
+        warnings.push({ message, modal: options?.modal === true });
+        shown.push(options?.detail ? `${message}\n${options.detail}` : message);
+        return undefined;
+      },
+    });
+  });
+
+  test("届いていないことと作品の数を1回だけ知らせ、自動で送ることを言う", async () => {
+    await syncAllWorks({ registry, monitor, run: offlineRepo, autoResend: true });
+
+    expect(calls.some((args) => args[0] === "commit")).toBe(true);
+    expect(calls.some((args) => args[0] === "push")).toBe(true);
+    const told = warnings.filter((one) => one.message.includes("GitHub へは届いていません"));
+    expect(told).toHaveLength(1);
+    expect(told[0].message).toContain("手元には記録しました。GitHub へは届いていません（1作品）。");
+    expect(told[0].message).toContain("ネットにつながったら自動で送ります。");
+    // git の文（原因の当て推量の材料）は画面に出さない
+    expect(shown.join("\n")).not.toContain("fatal");
+  });
+
+  test("自動の送り直しが切ってあれば、もう一度押すように言う", async () => {
+    await syncAllWorks({ registry, monitor, run: offlineRepo, autoResend: false });
+
+    const said = warnings.map((one) => one.message).join("\n");
+    expect(said).toContain("GitHub へは届いていません（1作品）。");
+    expect(said).toContain("もう一度押してください");
+    expect(said).not.toContain("自動で送ります");
+  });
+});
+
+/**
  * 同期の途中で［中止］を押す（実機確認リスト A-15「実行中に中止を押すと、途中で止まるか
  * （それまでの記録・送信は残る）」。2026-10-11 作者の指示「機械でできる実機確認」）。
  *
