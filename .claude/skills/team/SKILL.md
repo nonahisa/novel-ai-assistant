@@ -32,7 +32,7 @@ description: この作品の役割分担。まとまった実装・レビュー�
 | 製品：統合小説執筆環境 | 本体の実装・テスト・実機確認・設計書 | novel-ai-assistant |
 | 製品：投稿ヘルパー | ヘルパーの実装・Chrome ウェブストア | novel-post-helper |
 | 製品：Discord | ボットとコミュニティ（製品リポジトリは直さない） | novel-ai-community-bot |
-| 製品：スマホ版 | Android・iOS（novel-ai-mobile） | novel-ai-android |
+| 製品：モバイル版 | Android・iOS（novel-ai-mobile） | novel-ai-android |
 | 製品：オリジナルIME | 設計書・段階0aの測定・専用リポジトリ | （作るまで novel-ai-assistant/docs） |
 
 **作り方（母艦が替わっても続くように）**
