@@ -271,6 +271,10 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
         // 確認の画面（モーダル）を OS のダイアログでなく VS Code の中に描かせる。
         // OS のダイアログは Playwright から読めず、作者の画面の前面にも出てしまう
         "window.dialogStyle": "custom",
+        // 画面の動き（選ぶ画面が開く・閉じるときの動き）を止める。既定の auto は Windows の
+        // 「アニメーション効果」に従うので、作者が設定を変えると選ぶ画面の行が動いている最中に
+        // 押したり Esc を送ったりして、17件が落ちた（2026-11-03）。機械の設定に結果を左右させない
+        "workbench.reduceMotion": "on",
         ...options.settings,
       },
       null,
