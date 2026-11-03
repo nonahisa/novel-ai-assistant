@@ -18,6 +18,7 @@ import { recordEdit } from "../core/actorContext";
 import { logFailure, useLogFile } from "../core/logger";
 import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
 import { notifyDone } from "../views/notify";
+import { followEpisodeFileRenames, renameFollowNotice } from "./episodeLedgers";
 
 /**
  * 話のサブタイトル・本文をコピーする／ファイル名にサブタイトルを付ける
@@ -197,7 +198,14 @@ export async function renameWithSubtitle(
     file: episode.fileName,
     detail: next,
   });
-  notifyDone(`${next} に変えました。`);
+  // **パスで話を指す台帳（投稿状態など）も付け替える**（6.68.2。0.125.4）。
+  // 付け替えないと、投稿済みの話が「未投稿」に見える
+  const summary = await followEpisodeFileRenames(work, [
+    { fromPath: episode.filePath, toPath: target },
+  ]);
+  const notice = renameFollowNotice(`${next} に変えました。`, summary);
+  if (notice.warn) void vscode.window.showWarningMessage(notice.text);
+  else notifyDone(notice.text);
 }
 
 async function read(

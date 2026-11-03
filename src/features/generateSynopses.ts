@@ -48,6 +48,7 @@ import {
   workLog,
 } from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
+import { followEpisodeFileRenames, renameFollowNotice } from "./episodeLedgers";
 import { confirmFormatFit } from "./formatFitPrompt";
 import type { FeatureRunResult } from "../core/proofreadingSuite";
 import { cancelItem, isCancelItem } from "../views/dialogs";
@@ -387,7 +388,7 @@ export async function generateSynopses(
   }
 
   if (subtitleCandidates.length > 0 && !cancelled) {
-    proposeSubtitles(subtitleCandidates, work.folderPath);
+    proposeSubtitles(subtitleCandidates, work);
   }
 
   reportResult({
@@ -474,8 +475,9 @@ function previousSynopsesFor(
  */
 function proposeSubtitles(
   candidates: Array<{ episode: EpisodeBody; suggestions: SubtitleSuggestion[] }>,
-  workFolder: string
+  work: WorkEntry
 ): void {
+  const workFolder = work.folderPath;
   /*
     **「確認する」が押されるのを待たない**（ノートPCの実機、2026-09-23）。
     ここで待つと、知らせを閉じるまで各話あらすじの「動いている」札を持った
@@ -489,7 +491,7 @@ function proposeSubtitles(
       "あとで"
     ),
     async (start) => {
-      if (start === "確認する") await reviewSubtitles(candidates);
+      if (start === "確認する") await reviewSubtitles(candidates, work);
     },
     { label: "サブタイトルの案", workFolder }
   );
@@ -497,7 +499,8 @@ function proposeSubtitles(
 
 /** サブタイトル案を1話ずつ選ばせ、選ばれたらファイル名を変える */
 async function reviewSubtitles(
-  candidates: Array<{ episode: EpisodeBody; suggestions: SubtitleSuggestion[] }>
+  candidates: Array<{ episode: EpisodeBody; suggestions: SubtitleSuggestion[] }>,
+  work: WorkEntry
 ): Promise<void> {
   for (const { episode, suggestions } of candidates) {
     const picked = await vscode.window.showQuickPick(
@@ -534,9 +537,18 @@ async function reviewSubtitles(
       logStep(
         `リネーム: ${episode.file.fileName} → ${path.basename(renamed)}`
       );
-      notifyDone(
-        `${episode.file.fileName} を ${path.basename(renamed)} に変えました。`
+      // **パスで話を指す台帳（投稿状態など）も付け替える**（6.68.2。0.125.4）
+      const summary = await followEpisodeFileRenames(work, [
+        { fromPath: episode.file.filePath, toPath: renamed },
+      ]);
+      // 案を選んでいる間に別の作品を操作していることがあるので、知らせの直前に向け直す
+      useLogFile(work.folderPath);
+      const notice = renameFollowNotice(
+        `${episode.file.fileName} を ${path.basename(renamed)} に変えました。`,
+        summary
       );
+      if (notice.warn) void vscode.window.showWarningMessage(notice.text);
+      else notifyDone(notice.text);
     } catch (error) {
       logFailure(`リネーム（${episode.file.fileName}）`, {
         内容: error instanceof Error ? error.message : String(error),

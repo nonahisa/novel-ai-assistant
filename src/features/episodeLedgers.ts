@@ -484,6 +484,100 @@ async function followPosting(
   }
 }
 
+/** 話の名前だけを変えた1件（絶対パス）。話数は変わらない */
+export interface EpisodeFileRename {
+  fromPath: string;
+  toPath: string;
+}
+
+/**
+ * 話の**名前だけ**を変えたとき、パスで話を指す台帳を付け替える（設計書6.68.2。0.125.4）。
+ *
+ * 製品の中で名前を変える道は3つある——サブタイトルを付ける（右クリック）、
+ * サブタイトル案の採用（各話あらすじのあと）、本文の .md 化。どれも話数の部分は
+ * 残すので、**話数で指す台帳（人物・設定資料・伏線・各話あらすじ）は動かさない**。
+ * 動かすのは相対パスで話を指す4つだけ：章立て・本の設計図・年表・投稿状態。
+ *
+ * **0.125.3 まではここが無く**、名前を変えた話は投稿状態の台帳から見失われ、
+ * 「未投稿」に見えていた（出し直しの促し・題の貼り替えの案内・サイトの話の番号も
+ * 届かない。同じ話を新しい話として二重に出すおそれ）。話数の付け替え
+ * （`followEpisodeLedgers`）と同じ追従の部品を、名前だけの対応表で呼ぶ。
+ *
+ * **製品の外（VS Code のエクスプローラー・OS）で変えた名前は、ここでは追わない。**
+ * 拾う道を足すかは作者の判断を待っている（2026-11-04）。
+ */
+export async function followEpisodeFileRenames(
+  work: WorkEntry,
+  renames: readonly EpisodeFileRename[]
+): Promise<LedgerFollowSummary> {
+  useLogFile(work.folderPath);
+  const summary = emptyLedgerFollowSummary();
+  if (renames.length === 0) return summary;
+  const moves = new Map<string, string>();
+  for (const rename of renames) {
+    moves.set(
+      normalizeEpisodePath(episodePathFor(work.folderPath, rename.fromPath)),
+      normalizeEpisodePath(episodePathFor(work.folderPath, rename.toPath))
+    );
+  }
+  await followChapters(work, moves, undefined, undefined, summary);
+  await followBook(work, moves, undefined, summary);
+  await followTimeline(work, moves, summary);
+  await followPosting(work, moves, undefined, summary);
+  return summary;
+}
+
+/**
+ * 作品を受け取らない入口（本文の .md 化）のために、ファイルから作品を引く口。
+ * 作品の登録簿は `extension.ts` が持つので、起動のときに差し込む
+ * （`onPostingSaved` と同じ形）。差し込まれていなければ台帳を追わない。
+ */
+let renameWorkLookup: ((filePath: string) => WorkEntry | undefined) | undefined;
+
+export function setEpisodeRenameWorkLookup(
+  lookup: ((filePath: string) => WorkEntry | undefined) | undefined
+): void {
+  renameWorkLookup = lookup;
+}
+
+/**
+ * 作品が分かれば `followEpisodeFileRenames` を呼ぶ。**登録した作品の外の
+ * ファイルなら何もしない**（台帳が無い）。
+ */
+export async function followRenamedEpisodeFiles(
+  renames: readonly EpisodeFileRename[],
+  work?: WorkEntry
+): Promise<LedgerFollowSummary | undefined> {
+  if (renames.length === 0) return undefined;
+  const target = work ?? renameWorkLookup?.(renames[0].fromPath);
+  if (!target) return undefined;
+  return followEpisodeFileRenames(target, renames);
+}
+
+/**
+ * 名前を変えた知らせへ添える、台帳の付け替えの結果（黙って書き換えない）。
+ *
+ * **付け替えに失敗したものがあれば、それを先に書く**（失敗を含む知らせの決まり）。
+ * 作者が次にすることは「その台帳を確かめる」なので、`warn` で警告の形にさせる。
+ */
+export function renameFollowNotice(
+  done: string,
+  summary: LedgerFollowSummary | undefined
+): { text: string; warn: boolean } {
+  if (!summary) return { text: done, warn: false };
+  const followed = describeLedgerFollowSummary(summary);
+  if (summary.failures.length > 0) {
+    return {
+      text:
+        `名前は変えましたが、記録の付け替えが済んでいないものがあります：` +
+        `${summary.failures.join("　")}。${done}` +
+        (followed ? followed : ""),
+      warn: true,
+    };
+  }
+  return { text: followed ? `${done}${followed}` : done, warn: false };
+}
+
 function messageOf(error: unknown, context: string): string {
   const message = error instanceof Error ? error.message : String(error);
   // `kind` を持つのはハッシュ照合系のエラーだけ（各話あらすじ・年表は

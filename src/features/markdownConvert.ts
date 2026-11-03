@@ -19,6 +19,11 @@ import {
 import { countSiteNotation, fromSiteNotation } from "../core/ruby";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import {
+  followRenamedEpisodeFiles,
+  renameFollowNotice,
+  type EpisodeFileRename,
+} from "./episodeLedgers";
+import {
   carryAppearanceToRenamed,
   closeRenamedManuscript,
 } from "./manuscriptEditor";
@@ -82,10 +87,18 @@ export async function convertOne(
   }
   // **名前を変えたら、中のルビ・傍点も直す**（設計書6.12.4）
   const imported = await importNotation(decision.plan.to);
-  void vscode.window.showInformationMessage(
+  // **パスで話を指す台帳（投稿状態など）も付け替える**（6.68.2。0.125.4）。
+  // 拡張子が変わると相対パスも変わり、投稿済みの話が「未投稿」に見える
+  const followed = await followRenamedEpisodeFiles([
+    { fromPath: decision.plan.from, toPath: decision.plan.to },
+  ]);
+  const notice = renameFollowNotice(
     `${path.basename(filePath)} を ${path.basename(decision.plan.to)} にしました。` +
-      describeImported([imported])
+      describeImported([imported]),
+    followed
   );
+  if (notice.warn) void vscode.window.showWarningMessage(notice.text);
+  else void vscode.window.showInformationMessage(notice.text);
   return decision.plan.to;
 }
 
@@ -107,11 +120,13 @@ export async function convertFolder(
   }
 
   const done: string[] = [];
+  const renamed: EpisodeFileRename[] = [];
   const failed: string[] = [];
   for (const plan of plans) {
     try {
       await renamePreservingContent(plan);
       done.push(plan.to);
+      renamed.push({ fromPath: plan.from, toPath: plan.to });
     } catch (error) {
       // **1件失敗しても残りは進める。** 途中で止めると、
       // どこまで終わったのかが作者に分からない
@@ -127,6 +142,9 @@ export async function convertFolder(
   const imported = [];
   for (const target of done) imported.push(await importNotation(target));
 
+  // **パスで話を指す台帳（投稿状態など）も付け替える**（6.68.2。0.125.4）。
+  // 済んだ分だけを渡す（失敗した話の記録は元の名前のまま正しい）
+  const followed = await followRenamedEpisodeFiles(renamed);
   const notes = [`${done.length}件を .md にしました。` + describeImported(imported)];
   if (skipped.length > 0) {
     notes.push(
@@ -142,7 +160,9 @@ export async function convertFolder(
   if (failed.length > 0) {
     notes.push(`${failed.length}件は失敗：${failed.join("、")}`);
   }
-  void vscode.window.showInformationMessage(notes.join(" "));
+  const notice = renameFollowNotice(notes.join(" "), followed);
+  if (notice.warn) void vscode.window.showWarningMessage(notice.text);
+  else void vscode.window.showInformationMessage(notice.text);
 
   const mine = plans.find((plan) => plan.from === filePath);
   return mine?.to ?? done[0];

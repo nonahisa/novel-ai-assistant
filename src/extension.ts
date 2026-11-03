@@ -601,6 +601,7 @@ import {
   setWorkCompletion,
 } from "./features/postingKit";
 import { onPostingSaved, onPostingUnknownValues } from "./core/postingStore";
+import { setEpisodeRenameWorkLookup } from "./features/episodeLedgers";
 import {
   importReaderStats,
   recordReaderStats,
@@ -1378,6 +1379,14 @@ export async function activate(
   // 投稿状態の台帳に、この版が知らない値（連載の状態など）があったら一度だけ知らせる
   // （作者の判断 2026-11-01。台帳ごと止めず、その欄だけ読まずに持ち回る）
   context.subscriptions.push(onPostingUnknownValues(notifyPostingUnknownValuesOnce));
+
+  /*
+    **本文の .md 化は作品を受け取らない入口からも呼ばれる**（原稿エディター・ルビ）。
+    名前を変えたあと投稿状態などの台帳を付け替えるのに作品が要るので、ファイルから
+    作品を引く口をここで差し込む（設計書6.68.2。0.125.4）
+  */
+  setEpisodeRenameWorkLookup((filePath) => findWorkForPath(registry, filePath));
+  context.subscriptions.push({ dispose: () => setEpisodeRenameWorkLookup(undefined) });
 
   /*
     順位のお祝い（作者の指示 2026-11-02）。順位は手の記録・ヘルパーの取り込み・なろう殿堂入り
