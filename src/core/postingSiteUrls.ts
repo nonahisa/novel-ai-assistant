@@ -252,8 +252,8 @@ function kakuyomuManageWorkId(
  *
  * - カクヨム：`https://kakuyomu.jp/my/works/{作品ID}/episodes/{話ID}`（話IDは数字。形は本体の指示で
  *   決めた。作品の管理画面 `/my/works/{作品ID}` は確かめてあり、読者向けの話のページ
- *   `/works/{作品ID}/episodes/{話ID}` と同じ番号を使う。**編集画面そのものは作者の Chrome で
- *   まだ読んでいない**）
+ *   `/works/{作品ID}/episodes/{話ID}` と同じ番号を使う。**編集画面のアドレスがこの形なのは、
+ *   2026-11-04 に作者の Chrome で自作の話の編集画面を開いて確かめた**（題「…を編集」と［更新］の画面））
  * - アルファポリス：`https://www.alphapolis.co.jp/mypage/novel/save_episode/{9桁の作品ID}/{話ID}`
  *   （2026-11-01 作者の Chrome で作者用ページを読んだとき、新しい話の `save_episode/{作品ID}` と
  *   並んで話の編集がこの形だと分かった。設計書6.68.5。話IDは数字）
