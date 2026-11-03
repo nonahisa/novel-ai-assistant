@@ -569,8 +569,8 @@ export function renameFollowNotice(
   if (summary.failures.length > 0) {
     return {
       text:
-        `名前は変えましたが、記録の付け替えが済んでいないものがあります：` +
-        `${summary.failures.join("　")}。${done}` +
+        `記録の付け替えが済んでいないものがあります（${summary.failures.join("　")}）。` +
+        `${done}` +
         (followed ? followed : ""),
       warn: true,
     };
