@@ -98,6 +98,11 @@ export interface ReaderStatsHelperLinkDeps {
    */
   importChapters?(): Promise<void>;
   /**
+   * 投稿した話の番号の合図を受けたとき（ヘルパー 0.20.0。設計書6.68.8）。同じ受け口でパスを見分ける。
+   * 無ければ知らないパスと同じ扱い
+   */
+  importPosted?(): Promise<void>;
+  /**
    * Claude Code からのセットアップの依頼を受けたとき（設計書6.87.18）。
    * クエリをそのまま渡す（確かめるのは受けた側）。無ければ知らないパスと同じ扱い
    */
@@ -149,6 +154,10 @@ export class ReaderStatsHelperLink {
     }
     if (action === "chapters" && this.deps.importChapters) {
       await this.deps.importChapters();
+      return;
+    }
+    if (action === "posted" && this.deps.importPosted) {
+      await this.deps.importPosted();
       return;
     }
     if (action === "setup" && this.deps.handleSetupRequest) {

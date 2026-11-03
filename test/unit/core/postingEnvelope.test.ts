@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   buildPostingEnvelope,
+  newPostRef,
   parsePostingEnvelope,
   pasteHelperSites,
   POSTING_ENVELOPE_VERSION,
@@ -216,5 +217,38 @@ describe("貼り込み係に渡せるサイト", () => {
     expect(supportsPasteHelper("narou")).toBe(false);
     expect(supportsPasteHelper("note")).toBe(false);
     expect([...pasteHelperSites()]).toEqual(["kakuyomu", "alphapolis"]);
+  });
+});
+
+/**
+ * 貼り込みの札（設計書6.68.8。ヘルパー 0.20.0 との取り決め 2026-11-03）。
+ * ヘルパーは読まずに持ち、投稿のあとの封筒でそのまま返す。省いてよい欄なので版は1のまま。
+ */
+describe("貼り込みの札", () => {
+  const base = { site: "kakuyomu" as const, title: "第13話 邂逅", body };
+
+  test("渡せば欄が入り、往復で同じ値が読める", () => {
+    const json = buildPostingEnvelope({ ...base, postRef: "k7Qm2xP9" });
+    expect(JSON.parse(json).postRef).toBe("k7Qm2xP9");
+    expect(JSON.parse(json)["novelai-post"]).toBe(1);
+    expect(parsePostingEnvelope(json)?.postRef).toBe("k7Qm2xP9");
+  });
+
+  test("渡さない・空なら欄を作らない", () => {
+    expect("postRef" in JSON.parse(buildPostingEnvelope(base))).toBe(false);
+    expect("postRef" in JSON.parse(buildPostingEnvelope({ ...base, postRef: " " }))).toBe(false);
+  });
+
+  test("形が違う札は組み立てで止め、読み取りでは封筒ごと読まない", () => {
+    expect(() => buildPostingEnvelope({ ...base, postRef: "本文/013.txt" })).toThrow();
+    const raw = JSON.parse(buildPostingEnvelope(base)) as Record<string, unknown>;
+    expect(parsePostingEnvelope(JSON.stringify({ ...raw, postRef: "a/b" }))).toBeNull();
+    expect(parsePostingEnvelope(JSON.stringify({ ...raw, postRef: 5 }))).toBeNull();
+  });
+
+  test("作る札は取り決めの形（英数字24字）で、毎回違う", () => {
+    const first = newPostRef();
+    expect(first).toMatch(/^[0-9a-f]{24}$/);
+    expect(newPostRef()).not.toBe(first);
   });
 });

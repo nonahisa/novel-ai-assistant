@@ -63,16 +63,23 @@ export const CONTESTS_IMPORT_URI_PATH = "/import-contests";
  */
 export const CHAPTERS_IMPORT_URI_PATH = "/import-chapters";
 
+/**
+ * 投稿した話の番号の合図のパス（ヘルパー 0.20.0 との約束。設計書6.68.8）。
+ * 番号はクリップボードの `novelai-posted` で渡る（`postedEnvelope.ts`）。
+ */
+export const POSTED_IMPORT_URI_PATH = "/import-posted";
+
 /** URI のパスが何の合図か。知らないパスは undefined（何もしない） */
 export function readerStatsUriAction(
   uriPath: string
-): "import" | "contests" | "chapters" | "setup" | "run" | undefined {
+): "import" | "contests" | "chapters" | "posted" | "setup" | "run" | undefined {
   // 末尾の `/` だけは許す（ブラウザやOSが付け足すことがある）。
   // 大文字小文字は区別する——約束は1つの綴りで、似た綴りを拾う理由が無い
   const trimmed = uriPath.replace(/\/+$/u, "");
   if (trimmed === READER_STATS_IMPORT_URI_PATH) return "import";
   if (trimmed === CONTESTS_IMPORT_URI_PATH) return "contests";
   if (trimmed === CHAPTERS_IMPORT_URI_PATH) return "chapters";
+  if (trimmed === POSTED_IMPORT_URI_PATH) return "posted";
   /*
     **Claude Code からのセットアップの依頼**（設計書6.87.18）。受け口は1つしか
     持てないので同じ口で見分ける。**クエリを読むのはこのパスだけ**で、

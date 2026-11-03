@@ -24,9 +24,12 @@ import { parseEpisodeTitle } from "./collectedFile";
  *   "workId": "1177354054…",
  *   "pageUrl": "https://kakuyomu.jp/my/works/1177354054…",
  *   "readAt": "2026-09-24T09:00:00.000+09:00",
- *   "episodes": [{ "heading": "１話　転生", "part": "第一章『死の谷』" }]
+ *   "episodes": [{ "heading": "１話　転生", "part": "第一章『死の谷』", "episodeId": "1177354054…" }]
  * }
  * ```
+ *
+ * `episodeId` は省いてよい欄（ヘルパー 0.20.0。設計書6.68.8）。作品管理の画面の行の、
+ * 編集画面へのリンクから読んだサイトの話の番号で、読めない行には付かない。版は1のまま。
  *
  * `part` は**その話が属する章の題**（章の外なら null）。ヘルパーは画面の並びを
  * そのまま写すだけで、話数の読み分けはここでする——2か所で読むと、片方を直した日に
@@ -61,6 +64,8 @@ export type ChaptersClipboardResult =
       readonly pageUrl: string | null;
       readonly readAt: string | null;
       readonly outline: readonly OutlineEpisode[];
+      /** 形が崩れていて捨てた話の番号の数（6.68.8） */
+      readonly droppedEpisodeIds: number;
     }
   /** 章立ての封筒ではない（中身には触れない。クリップボードは作者の私物） */
   | { readonly ok: false; readonly kind: "notFound" }
@@ -107,6 +112,7 @@ export function parseChaptersClipboard(text: string): ChaptersClipboardResult {
   }
 
   const outline: OutlineEpisode[] = [];
+  let droppedEpisodeIds = 0;
   for (const [index, entry] of episodes.entries()) {
     if (typeof entry !== "object" || entry === null) {
       return invalid(`章立ての${index + 1}番目の話の形が正しくありません。`);
@@ -121,11 +127,26 @@ export function parseChaptersClipboard(text: string): ChaptersClipboardResult {
     const heading = clean(record.heading);
     const part = typeof record.part === "string" ? clean(record.part) : "";
     const parsed = parseEpisodeTitle(heading);
+    /*
+      話の番号（ヘルパー 0.20.0。設計書6.68.8）。読めない行には欄が無い。
+      **形が崩れた番号は、その行の番号だけ捨てて数える**——章立ての取り込みは番号に頼らないので、
+      番号の不具合で章立てまで止めない。捨てた数は呼ぶ側が記録と知らせに出す（黙って捨てない）
+    */
+    const rawEpisodeId = record.episodeId;
+    let episodeId: string | undefined;
+    if (rawEpisodeId !== undefined && rawEpisodeId !== null) {
+      if (typeof rawEpisodeId === "string" && EPISODE_ID_PATTERN.test(rawEpisodeId.trim())) {
+        episodeId = rawEpisodeId.trim();
+      } else {
+        droppedEpisodeIds++;
+      }
+    }
     outline.push({
       label: heading || `${index + 1}番目の話`,
       number: parsed.chapter,
       title: parsed.title,
       part: part === "" ? null : part,
+      ...(episodeId ? { episodeId } : {}),
     });
   }
 
@@ -136,8 +157,12 @@ export function parseChaptersClipboard(text: string): ChaptersClipboardResult {
     pageUrl: optionalText(envelope.pageUrl),
     readAt: optionalText(envelope.readAt),
     outline,
+    droppedEpisodeIds,
   };
 }
+
+/** 話の番号の形（`postedEnvelope.ts` と同じ。数字だけの文字列） */
+const EPISODE_ID_PATTERN = /^\d{1,30}$/u;
 
 function invalid(reason: string): ChaptersClipboardResult {
   return { ok: false, kind: "invalid", reason };

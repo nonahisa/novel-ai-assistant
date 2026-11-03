@@ -103,3 +103,36 @@ describe("受け口のパス", () => {
     expect(readerStatsUriAction("/Import-Chapters")).toBeUndefined();
   });
 });
+
+/**
+ * 行の話の番号（ヘルパー 0.20.0。設計書6.68.8）。省いてよい欄で、版は1のまま。
+ * 形の崩れた番号は、その行の番号だけ捨てて数える（章立ての取り込みは止めない）。
+ */
+describe("章立ての行の話の番号", () => {
+  it("読めた行にだけ番号が付き、崩れた番号は数えて捨てる", () => {
+    const result = parseChaptersClipboard(
+      envelope({
+        episodes: [
+          { heading: "１話　潮の匂い", part: null, episodeId: "16816927860000000001" },
+          { heading: "２話　古い地図", part: null },
+          { heading: "３話　嵐の夜", part: null, episodeId: "12a" },
+          { heading: "４話　迷い船", part: null, episodeId: 5 },
+        ],
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.outline.map((episode) => episode.episodeId)).toEqual([
+      "16816927860000000001",
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(result.droppedEpisodeIds).toBe(2);
+  });
+
+  it("投稿した話の番号の合図のパスを見分ける", () => {
+    expect(readerStatsUriAction("/import-posted")).toBe("posted");
+    expect(readerStatsUriAction("/import-posted/")).toBe("posted");
+  });
+});

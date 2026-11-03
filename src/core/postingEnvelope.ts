@@ -1,4 +1,5 @@
 import { POSTING_SITES, type PostingSiteId } from "../models/posting";
+import { randomHex } from "./runtime";
 
 /**
  * 貼り込み係（Chrome拡張）へ渡すJSON封筒（設計書6.79.3）。
@@ -61,6 +62,29 @@ export interface PostingEnvelope {
   chapter?: string;
   /** 変換済みの本文（サイトごとのルビ・傍点の記法は既存の6.68.4が正） */
   body: string;
+  /**
+   * 貼り込みの札（設計書6.68.8。ヘルパー 0.20.0 との取り決め 2026-11-03）。
+   *
+   * ヘルパーは中身を読まずに持ち、投稿のあとに送り返す封筒（`novelai-posted`）へそのまま入れる。
+   * こちらはそれで「どの話の貼り込みだったか」を決める。**乱数にしてあるのは、ファイルの道
+   * （作品フォルダーの名前・話のファイル名）を作者のクリップボードと Chrome の保管庫に通さないため。**
+   *
+   * 省いてよい欄を足しただけなので、形式版数は上げない（`chapter` と同じ）。
+   */
+  postRef?: string;
+}
+
+/** 札の形（ヘルパーとの取り決め。英数字と `-` `_` で1〜64字） */
+const POST_REF_PATTERN = /^[0-9A-Za-z_-]{1,64}$/;
+
+/**
+ * 新しい札を作る（12バイトの乱数を16進で。24字）。
+ *
+ * `globalThis.crypto` から取る（`core/runtime.ts` の `randomHex`）ので、ブラウザ版でも動く。
+ * 重なる見込みは無視できる大きさにしてあり、台帳の中で引けさえすればよい。
+ */
+export function newPostRef(): string {
+  return randomHex(12);
 }
 
 /*
@@ -115,6 +139,8 @@ export function supportsPasteHelper(site: PostingSiteId): boolean {
  *
  * @param input.workId 空・空白だけなら欄ごと書かない
  * @param input.chapter 話が属する章の題。空・空白だけなら欄ごと書かない
+ * @param input.postRef 貼り込みの札。空なら欄ごと書かない。**形が違えば例外**
+ *   （こちらの不具合なので、崩れた札を渡してヘルパーに封筒ごと断らせない）
  */
 export function buildPostingEnvelope(input: {
   site: PostingSiteId;
@@ -122,9 +148,14 @@ export function buildPostingEnvelope(input: {
   title: string;
   chapter?: string | null;
   body: string;
+  postRef?: string | null;
 }): string {
   const workId = (input.workId ?? "").trim();
   const chapter = (input.chapter ?? "").trim();
+  const postRef = (input.postRef ?? "").trim();
+  if (postRef && !POST_REF_PATTERN.test(postRef)) {
+    throw new Error(`貼り込みの札の形が正しくありません: ${postRef}`);
+  }
   return JSON.stringify({
     [MARKER]: POSTING_ENVELOPE_VERSION,
     site: input.site,
@@ -132,6 +163,7 @@ export function buildPostingEnvelope(input: {
     title: input.title,
     ...(chapter ? { chapter } : {}),
     body: input.body,
+    ...(postRef ? { postRef } : {}),
   });
 }
 
@@ -171,10 +203,14 @@ export function parsePostingEnvelope(raw: string): PostingEnvelope | null {
   const known = POSTING_SITES.find((info) => info.id === site);
   if (!known) return null;
 
-  const { title, body, workId, chapter } = value;
+  const { title, body, workId, chapter, postRef } = value;
   if (typeof title !== "string" || typeof body !== "string") return null;
   if (workId !== undefined && typeof workId !== "string") return null;
   if (chapter !== undefined && typeof chapter !== "string") return null;
+  // 札は形まで確かめる（ヘルパーと同じ厳しさ。崩れた札は封筒ごと読まない）
+  if (postRef !== undefined && (typeof postRef !== "string" || !POST_REF_PATTERN.test(postRef))) {
+    return null;
+  }
 
   const trimmedWorkId = (workId ?? "").trim();
   const trimmedChapter = (chapter ?? "").trim();
@@ -185,5 +221,6 @@ export function parsePostingEnvelope(raw: string): PostingEnvelope | null {
     title,
     ...(trimmedChapter ? { chapter: trimmedChapter } : {}),
     body,
+    ...(typeof postRef === "string" ? { postRef } : {}),
   };
 }

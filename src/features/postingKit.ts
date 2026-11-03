@@ -59,8 +59,18 @@ import { convertForPosting } from "../core/postingConvert";
 import { postingCopyTargetFor } from "../core/postingCopyTargets";
 import {
   buildPostingEnvelope,
+  newPostRef,
   supportsPasteHelper,
 } from "../core/postingEnvelope";
+// 案内のあいだにヘルパーから届いた番号の預かり（6.68.8）
+import {
+  applyQueuedPostingUpdates,
+  beginPostingKitSession,
+  endPostingKitSession,
+  queuedPostingUpdatesOf,
+  rememberIssuedPostRef,
+  type QueuedPostingUpdate,
+} from "./postingKitSession";
 // 同じ数字を2度打たせない——投稿ページのURLから作品IDと作品ページを導く
 import {
   deriveSiteProfile,
@@ -87,7 +97,7 @@ import type { WorkFormatKey } from "../core/workFormat";
 // 合本かどうかの判断と、話の選ばせ方は1か所に置く（写しを作らない）
 import { pickCollectedEpisode } from "./pickCollectedEpisode";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
-import { logFailure, useLogFile } from "../core/logger";
+import { logFailure, logLine, useLogFile } from "../core/logger";
 import type { AIRegistry } from "../ai/registry";
 import { generateAnnouncement } from "./generateAnnouncement";
 import { notifyDone } from "../views/notify";
@@ -142,10 +152,32 @@ export async function postNewEpisode(
   registry: AIRegistry,
   episode?: EpisodeFile
 ): Promise<PostingKitResult> {
+  /*
+    **案内が開いている間、ヘルパーから届いた番号は預かりへ入る**（設計書6.68.8。`postingKitSession.ts`）。
+    受け手が台帳を書くと、この案内の保存が「外部で変更」で止まるため。預かりは『投稿しました』の
+    保存に相乗りし、終えるときに残りを書く
+  */
+  beginPostingKitSession(work.id);
+  const store = new PostingStore(work);
+  let result: PostingKitResult = { changed: false };
+  try {
+    result = await postNewEpisodeInSession(work, registry, store, episode);
+  } finally {
+    const flushed = await flushQueuedUpdates(work, store, endPostingKitSession(work.id));
+    if (flushed) result = { changed: true };
+  }
+  return result;
+}
+
+async function postNewEpisodeInSession(
+  work: WorkEntry,
+  registry: AIRegistry,
+  store: PostingStore,
+  episode?: EpisodeFile
+): Promise<PostingKitResult> {
   // **この先の記録は、その作品のログファイルへ残す**（0.43.3 と同じ）。
   // 本文を読む処理は話しか受け取らないので、入口で向ける
   useLogFile(work.folderPath);
-  const store = new PostingStore(work);
   let ledger = await load(store, work);
   if (!ledger) return { changed: false };
   let changed = false;
@@ -297,6 +329,13 @@ export async function postNewEpisode(
   let aborted = false;
 
   for (const site of sites) {
+    /*
+      **札はサイトごとに1つ**（6.68.8）。封筒を何度コピーし直しても同じ札を入れる——
+      ヘルパーが覚えるのは作品ごとに最後の1件なので、札が変わっても困らないが、
+      同じ貼り込みを指す札が2つあると、どちらで照らせばよいかが揺れる
+    */
+    const postRef = newPostRef();
+    let postRefCopied = false;
     const answer = await walkSite({
       ledger,
       site,
@@ -304,6 +343,13 @@ export async function postNewEpisode(
       subtitle: parts.subtitle,
       body: parts.body,
       chapterOf,
+      postRef: {
+        value: postRef,
+        onCopied: (title) => {
+          postRefCopied = true;
+          rememberIssuedPostRef(work.id, postRef, { site, target: postTarget, title });
+        },
+      },
     });
     if (answer === "abort") {
       aborted = true;
@@ -317,7 +363,17 @@ export async function postNewEpisode(
     // **1サイトごとに書く**（まとめて最後に書かない）。途中で閉じても、
     // そこまで出したことは残る。台帳の保存はハッシュ照合つき
     // 本文の印も残す（6.68.7。投稿のあとに直したかを、あとで比べるため）
-    const next = withPost(ledger, postTarget, site, new Date().toISOString(), bodyHash);
+    // 封筒で渡した札も残す（6.68.8。投稿のあとにヘルパーが送り返す番号を、この話へ結ぶため）
+    const recorded = withPost(
+      ledger,
+      postTarget,
+      site,
+      new Date().toISOString(),
+      bodyHash,
+      postRefCopied ? postRef : undefined
+    );
+    // 案内のあいだに届いた番号を、同じ保存に相乗りさせる（預かりは終えるときにも当て直す）
+    const next = applyQueuedPostingUpdates(recorded, queuedPostingUpdatesOf(work.id)).ledger;
     if (!(await save(store, work, next, "投稿済みの記録（投稿キット）"))) {
       // 同期やヘルパーからの取り込みが先に書いた等。ここで止める——読み直さずに
       // 続けると、こちらの古い手持ちで次のサイトぶんも上書きしてしまう
@@ -429,6 +485,11 @@ async function walkSite(input: {
    * あれば話の編集画面を直に開く（6.68.7）。無ければ作品の管理画面
    */
   siteEpisodeId?: string;
+  /**
+   * 封筒へ入れる貼り込みの札（6.68.8）。封筒をコピーしたら `onCopied` を呼ぶ（題の欄へ入れた字を渡す）。
+   * 出し直しでは封筒を出さないので渡さない
+   */
+  postRef?: PostRefSlot;
 }): Promise<SiteAnswer> {
   const info = postingSiteInfo(input.site);
   const entry = input.ledger.sites.find((site) => site.site === input.site);
@@ -604,15 +665,19 @@ async function walkSite(input: {
         章を選ぶ欄をヘルパーが埋める。ほかのサイトのヘルパーは読まずに済ます。
       */
       const chapter = await input.chapterOf();
+      const title = input.subtitle?.trim() || input.label;
       await vscode.env.clipboard.writeText(
         buildPostingEnvelope({
           site: input.site,
           workId: siteProfile(input.ledger, input.site)?.workId,
-          title: input.subtitle?.trim() || input.label,
+          title,
           chapter,
           body,
+          // 札（6.68.8）。ヘルパーが投稿のあとに送り返し、こちらはそれで話を決める
+          postRef: input.postRef?.value,
         })
       );
+      input.postRef?.onCopied(title);
       hint =
         "ヘルパーへ渡す形でコピーしました。投稿画面を開いて、" +
         "統合小説執筆環境ヘルパー（ブラウザ拡張）のボタンを押してください。送信はご自身で";
@@ -620,6 +685,13 @@ async function walkSite(input: {
     }
     return picked.answer;
   }
+}
+
+/** 封筒へ入れる貼り込みの札と、コピーしたときの知らせ先（6.68.8） */
+interface PostRefSlot {
+  readonly value: string;
+  /** 封筒をコピーしたとき（題の欄へ入れた字を渡す） */
+  onCopied(title: string): void;
 }
 
 /** 名指しした話を、どう出すか（6.68.7） */
@@ -1880,16 +1952,79 @@ async function readEpisode(
   return found;
 }
 
+/**
+ * その店が最後に読んだ・書いた台帳（6.68.8）。案内を終えるとき、預かった番号を
+ * **案内が最後に持っていた台帳**へ当てて書く——読み直すと、店の照合の手がかり
+ * （読み込んだときの中身）が入れ替わり、照合の意味が無くなる。
+ */
+const lastLedgerOf = new WeakMap<PostingStore, PostingLedger>();
+
 async function load(
   store: PostingStore,
   work: WorkEntry
 ): Promise<PostingLedger | undefined> {
   try {
-    return await store.load();
+    const ledger = await store.load();
+    lastLedgerOf.set(store, ledger);
+    return ledger;
   } catch (error) {
     await report("投稿状態の読み込み", work, error);
     return undefined;
   }
+}
+
+/**
+ * 案内を終えるとき、まだ台帳へ入っていない預かりを書く（6.68.8）。
+ *
+ * 当たらなかったもの（『投稿しました』を選ばずに終えた話の番号など）は**黙って捨てない**。
+ * 知らせとログに残す。
+ *
+ * @returns 台帳を書いたか
+ */
+async function flushQueuedUpdates(
+  work: WorkEntry,
+  store: PostingStore,
+  queued: readonly QueuedPostingUpdate[]
+): Promise<boolean> {
+  if (queued.length === 0) return false;
+  const ledger = lastLedgerOf.get(store);
+  if (!ledger) {
+    reportUnapplied(work, queued.map((update) => ({ update, reason: "投稿の記録を読めませんでした" })));
+    return false;
+  }
+  const applied = applyQueuedPostingUpdates(ledger, queued);
+  let wrote = false;
+  if (applied.changed) {
+    wrote = await save(store, work, applied.ledger, "ヘルパーから届いた話の番号（投稿キットを終えるとき）");
+    if (!wrote) {
+      reportUnapplied(work, queued.map((update) => ({ update, reason: "投稿の記録を保存できませんでした" })));
+      return false;
+    }
+    useLogFile(work.folderPath);
+    logLine(`ヘルパーから届いた番号を、投稿キットを終えるときに投稿の記録へ入れました（${work.title}）。`);
+  }
+  if (applied.waiting.length > 0) reportUnapplied(work, applied.waiting);
+  return wrote;
+}
+
+/** 預かったのに入れられなかった番号を、知らせとログに残す */
+function reportUnapplied(
+  work: WorkEntry,
+  waiting: readonly { readonly update: QueuedPostingUpdate; readonly reason: string }[]
+): void {
+  useLogFile(work.folderPath);
+  for (const entry of waiting) {
+    const what =
+      entry.update.kind === "episode"
+        ? `${entry.update.label}（${postingSiteInfo(entry.update.site).label}）の話の番号 ${entry.update.episodeId}`
+        : `${postingSiteInfo(entry.update.site).label}の小説番号 ${entry.update.number}`;
+    logLine(`ヘルパーから届いた${what}を記録しませんでした：${entry.reason}`);
+  }
+  void vscode.window.showWarningMessage(
+    `ヘルパーから届いた番号のうち${waiting.length}件は、投稿の記録へ入れませんでした` +
+      "（『投稿しました』を選ばずに終えた話など。出力パネルに記録しました）。" +
+      "投稿の記録があれば、ヘルパーのボタンをもう一度押すと入ります。"
+  );
 }
 
 async function save(
@@ -1904,6 +2039,7 @@ async function save(
 ): Promise<boolean> {
   try {
     await store.save(ledger);
+    lastLedgerOf.set(store, ledger);
     return true;
   } catch (error) {
     await report("投稿状態の保存", work, error, purpose);

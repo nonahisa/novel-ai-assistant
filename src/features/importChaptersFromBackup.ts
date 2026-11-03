@@ -2,13 +2,21 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { Chapter, ChapterSet } from "../models/chapter";
-import { siteProfile } from "../models/posting";
+import { siteProfile, type PostingLedger } from "../models/posting";
+import { planOutlineEpisodeIds } from "../core/postedEnvelope";
+import {
+  applyQueuedPostingUpdates,
+  isPostingKitActive,
+  queuePostingUpdate,
+  type QueuedPostingUpdate,
+} from "./postingKitSession";
 import { ChapterStore, ChapterStoreError } from "../core/chapterStore";
 import { episodePathFor } from "../core/bookStore";
 import {
   addMissingChapters,
   describeChapterImportPlan,
   localOutlineOf,
+  matchOutlineEpisodes,
   planChapterImport,
   type ChapterImportPlan,
   type LocalOutlineSource,
@@ -17,7 +25,7 @@ import {
 import { parseChaptersClipboard } from "../core/chapterEnvelope";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { logFailure, logLine, useLogFile } from "../core/logger";
-import { PostingStore } from "../core/postingStore";
+import { PostingStore, PostingStoreError } from "../core/postingStore";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -102,7 +110,12 @@ export async function importChaptersFromBackup(work: WorkEntry): Promise<boolean
       ? await outlineFromBackupFile()
       : await outlineFromClipboard(work);
   if (!outline) return false;
-  return applyChapterOutline(work, outline.outline, outline.sourceName);
+  const changed = await applyChapterOutline(work, outline.outline, outline.sourceName);
+  // ヘルパーの章立てには話の番号も載る（6.68.8）。章立てを書いたかに関わらず写す
+  if (source.value === "clipboard") {
+    await recordOutlineEpisodeIds(work, outline.outline, outline.droppedEpisodeIds ?? 0);
+  }
+  return changed;
 }
 
 /**
@@ -140,9 +153,13 @@ export async function importChaptersFromHelper(deps: ChapterImportDeps): Promise
   const work = byId ?? (await askWork(works));
   if (!work) return;
 
-  if (await applyChapterOutline(work, read.outline, "カクヨムの作品管理の画面")) {
-    deps.afterChange(work);
-  }
+  const chaptersChanged = await applyChapterOutline(work, read.outline, "カクヨムの作品管理の画面");
+  /*
+    **話の番号は章立てとは別に写す**（6.68.8）。取りこぼしを埋めるのは、章立てが前と同じで
+    章立ての取り込みが何もせずに終わる回（いちばん多い）なので、その結果を待たずに走らせる
+  */
+  const idsChanged = await recordOutlineEpisodeIds(work, read.outline, read.droppedEpisodeIds);
+  if (chaptersChanged || idsChanged) deps.afterChange(work);
 }
 
 /**
@@ -218,6 +235,8 @@ interface OutlineSource {
   readonly outline: readonly OutlineEpisode[];
   /** 確認の画面に出す出どころの名前 */
   readonly sourceName: string;
+  /** ヘルパーの章立てで、形が崩れていて捨てた話の番号の数（6.68.8） */
+  readonly droppedEpisodeIds?: number;
 }
 
 async function outlineFromBackupFile(): Promise<OutlineSource | undefined> {
@@ -283,13 +302,20 @@ async function outlineFromClipboard(work: WorkEntry): Promise<OutlineSource | un
       return undefined;
     }
   }
-  return { outline: read.outline, sourceName: "カクヨムの作品管理の画面" };
+  return {
+    outline: read.outline,
+    sourceName: "カクヨムの作品管理の画面",
+    droppedEpisodeIds: read.droppedEpisodeIds,
+  };
 }
 
 /** クリップボードの章立てを読む。**章立てでなければ中身には触れない**（クリップボードは作者の私物） */
 async function readChaptersClipboard(
   trigger: "menu" | "uri"
-): Promise<{ outline: readonly OutlineEpisode[]; workId: string | null } | undefined> {
+): Promise<
+  | { outline: readonly OutlineEpisode[]; workId: string | null; droppedEpisodeIds: number }
+  | undefined
+> {
   let text: string;
   try {
     text = await vscode.env.clipboard.readText();
@@ -326,7 +352,159 @@ async function readChaptersClipboard(
     );
     return undefined;
   }
-  return { outline: parsed.outline, workId: parsed.workId };
+  return {
+    outline: parsed.outline,
+    workId: parsed.workId,
+    droppedEpisodeIds: parsed.droppedEpisodeIds,
+  };
+}
+
+/* ── 話の番号を投稿の記録へ写す（6.68.8） ──────────────── */
+
+/**
+ * ヘルパーの章立ての行の番号（`episodeId`）を、照らせた話のカクヨムの投稿の記録へ写す。
+ *
+ * - 照らし方は章立てと同じ（題と話数。`matchOutlineEpisodes`）。照らせなかった行の番号は捨てる
+ * - 投稿の記録が無い話には付けない（付ける先が無い）
+ * - **別の番号がある話は、訊いてから替える**（まとめて1回だけ訊く）。同じ番号が別の話にあれば書かない
+ * - 投稿キットの案内が開いている作品には書かず、案内へ預ける（`postingKitSession.ts`）
+ * - 書くのは `設定/投稿状態.json` だけ（`PostingStore` の照合つき）。原稿には触らない
+ *
+ * @returns 投稿の記録を書いたか
+ */
+async function recordOutlineEpisodeIds(
+  work: WorkEntry,
+  outline: readonly OutlineEpisode[],
+  droppedEpisodeIds: number
+): Promise<boolean> {
+  useLogFile(work.folderPath);
+  if (droppedEpisodeIds > 0) {
+    logLine(`章立ての話の番号のうち${droppedEpisodeIds}件は、形が正しくないので読みませんでした。`);
+  }
+  if (!outline.some((episode) => episode.episodeId)) return false;
+  const site = "kakuyomu";
+
+  const store = new PostingStore(work);
+  let ledger: PostingLedger;
+  try {
+    ledger = await store.load();
+  } catch (error) {
+    // 壊れた台帳は直さずに止める（実装ルール2）。章立ての取り込みは済んでいる
+    logFailure("章立ての話の番号：投稿状態の読み込み", {
+      作品: work.title,
+      種類: error instanceof PostingStoreError ? error.kind : "unknown",
+      内容: error instanceof Error ? error.message : String(error),
+    });
+    void vscode.window.showWarningMessage(
+      `投稿の記録を読めなかったため、話の番号は記録しませんでした：${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return false;
+  }
+
+  const locals = await readLocalOutline(work);
+  const plan = planOutlineEpisodeIds(outline, matchOutlineEpisodes(outline, locals), ledger, site);
+  const updates: QueuedPostingUpdate[] = plan.add.map((entry) => ({
+    kind: "episode",
+    site,
+    target: entry.target,
+    episodeId: entry.episodeId,
+    allowReplace: false,
+    label: entry.label,
+  }));
+
+  if (plan.replace.length > 0) {
+    const replaceLabel = "届いた番号に替える";
+    const answer = await vscode.window.showWarningMessage(
+      `${plan.replace.length}話には、カクヨムの別の話の番号が記録されています。作品管理の画面の番号に替えますか？`,
+      {
+        modal: true,
+        detail: plan.replace
+          .slice(0, 20)
+          .map((entry) => `${entry.label}：記録 ${entry.existing} → 画面 ${entry.episodeId}`)
+          .concat(plan.replace.length > 20 ? [`ほか${plan.replace.length - 20}話`] : [])
+          .join("\n"),
+      },
+      replaceLabel
+    );
+    if (answer === replaceLabel) {
+      for (const entry of plan.replace) {
+        updates.push({
+          kind: "episode",
+          site,
+          target: entry.target,
+          episodeId: entry.episodeId,
+          allowReplace: true,
+          label: entry.label,
+        });
+      }
+      logLine(`別の番号が記録されていた${plan.replace.length}話を、作者の答えで作品管理の画面の番号に替えます。`);
+    } else {
+      logLine(`別の番号が記録されていた${plan.replace.length}話は、替えませんでした。`);
+    }
+  }
+  for (const entry of plan.taken) {
+    logLine(`${entry.label}の番号 ${entry.episodeId} は別の話に記録されているので、記録しませんでした。`);
+  }
+  logLine(
+    `章立ての話の番号：入れる ${updates.length}話・記録済み ${plan.same}話・投稿の記録が無い ${plan.noPost}話・` +
+      `照らせなかった ${plan.unmatched}話・別の話と重なる ${plan.taken.length}話。`
+  );
+
+  const notes: string[] = [];
+  if (plan.noPost > 0) notes.push(`投稿の記録が無い${plan.noPost}話`);
+  if (plan.unmatched > 0) notes.push(`手元の話と照らせなかった${plan.unmatched}話`);
+  if (plan.taken.length > 0) notes.push(`同じ番号が別の話に記録されている${plan.taken.length}話`);
+  if (droppedEpisodeIds > 0) notes.push(`番号の形が正しくなかった${droppedEpisodeIds}話`);
+  const skipped = notes.length > 0 ? `（${notes.join("・")}は記録していません）` : "";
+
+  if (updates.length === 0) {
+    if (notes.length > 0) {
+      void vscode.window.showInformationMessage(`カクヨムの話の番号は記録しませんでした${skipped}。`);
+    }
+    return false;
+  }
+
+  if (queueUpdatesIfKitActive(work, updates)) {
+    void vscode.window.showInformationMessage(
+      `カクヨムの話の番号（${updates.length}話）を受け取りました。投稿キットの案内を終えるときに記録します${skipped}。`
+    );
+    return false;
+  }
+  const applied = applyQueuedPostingUpdates(ledger, updates);
+  for (const item of applied.waiting) {
+    logLine(`話の番号を記録できませんでした：${item.reason}`);
+  }
+  if (!applied.changed) return false;
+  try {
+    await store.save(applied.ledger);
+  } catch (error) {
+    logFailure("章立ての話の番号：投稿状態の保存", {
+      作品: work.title,
+      種類: error instanceof PostingStoreError ? error.kind : "unknown",
+      内容: error instanceof Error ? error.message : String(error),
+    });
+    void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    return false;
+  }
+  const written = updates.length - applied.waiting.length;
+  // 記録しなかった話があれば、消える知らせだけにせず残る知らせでも言う（黙って捨てない）
+  notifyDone(
+    `「${work.title}」のカクヨムの話の番号を${written}話ぶん記録しました。` +
+      "修正版を出し直すとき、話の編集画面を直接開きます。",
+    notes.length > 0 ? [`カクヨムの話の番号を${written}話ぶん記録しました${skipped}。`] : []
+  );
+  return true;
+}
+
+/** 投稿キットの案内が開いていれば預ける（案内の保存を止めないため。6.68.8） */
+function queueUpdatesIfKitActive(work: WorkEntry, updates: readonly QueuedPostingUpdate[]): boolean {
+  if (!isPostingKitActive(work.id)) return false;
+  for (const update of updates) queuePostingUpdate(work.id, update);
+  useLogFile(work.folderPath);
+  logLine(`投稿キットの案内が開いているので、章立ての話の番号（${updates.length}話）を預かりました。`);
+  return true;
 }
 
 /* ── 作品へ当てる ─────────────────────────────────────── */

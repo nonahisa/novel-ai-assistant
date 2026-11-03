@@ -650,6 +650,15 @@ export interface PostingRecord {
    * 投稿の記録の欄として足した**（別の配列にすると、どの投稿のIDかを結び直すことになる）。
    */
   siteEpisodeId?: string;
+  /**
+   * ヘルパーへ渡した貼り込みの札（任意。設計書6.68.8）。封筒（`novelai-post`）でコピーして
+   * 投稿した話にだけ入る。ヘルパーが投稿のあとに送り返す封筒（`novelai-posted`）の札と照らして、
+   * どの話の番号かを決める。
+   *
+   * **投稿の記録の欄にしたのは、札が指すのが「その投稿」だから**（別の配列にすると、
+   * 貼り込んだのに投稿しなかった札まで溜まり、片づける決まりが要る）。
+   */
+  postRef?: string;
 }
 
 /**
@@ -851,8 +860,8 @@ export function siteWorkNumberFor(
 /**
  * サイトの中の数字の作品番号を入れる（6.68.7。**元の台帳は書き換えない**）。
  *
- * ヘルパーが話IDと一緒に送り返す番号を受ける口（封筒の欄の形はヘルパーと相談中で、
- * 封筒の読み取りにはまだ繋いでいない）。同じ番号なら台帳をそのまま返す（保存を増やさない）。
+ * ヘルパーが話IDと一緒に送り返す番号を受ける口（`novelai-posted` の `novelNo`。受け手は
+ * `features/importPosted.ts`。6.68.8）。同じ番号なら台帳をそのまま返す（保存を増やさない）。
  *
  * @returns 入れた台帳。番号の形が違えば undefined（呼ぶ側が黙って捨てないように）
  */
@@ -1335,6 +1344,8 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
         entry.siteEpisodeId,
         `${entryPath}.siteEpisodeId`
       );
+      // 札は話の番号と同じ形の決まり（英数字と - _）。崩れていれば直さずに止める
+      const postRef = readSiteEpisodeId(entry.postRef, `${entryPath}.postRef`);
       return {
         episodePath: normalizeEpisodePath(entry.episodePath as string),
         site,
@@ -1351,6 +1362,7 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
         // 本文の印と話の番号（6.68.7）。無い記録には欄を足さない（上と同じ理由）
         ...(bodyHash ? { bodyHash } : {}),
         ...(siteEpisodeId ? { siteEpisodeId } : {}),
+        ...(postRef ? { postRef } : {}),
       };
     }) ?? [];
 
@@ -1987,7 +1999,12 @@ export function withPost(
   site: PostingSiteId,
   postedAt: string,
   /** 投稿したときの本文の印（6.68.7。`postingBodyHash`）。渡さなければ欄を持たない */
-  bodyHash?: string
+  bodyHash?: string,
+  /**
+   * ヘルパーへ渡した貼り込みの札（6.68.8）。封筒でコピーしたときだけ渡す。
+   * **前の投稿の札は引き継がない**——札はその貼り込みを指すもので、新しく貼り込めば別の札になる
+   */
+  postRef?: string
 ): PostingLedger {
   const wanted = toTarget(target);
   const key = postingEpisodeKey(wanted);
@@ -2014,8 +2031,35 @@ export function withPost(
         ...episodeRefFields(wanted),
         ...(bodyHash ? { bodyHash } : {}),
         ...(siteEpisodeId ? { siteEpisodeId } : {}),
+        ...(postRef ? { postRef } : {}),
       },
     ],
+  };
+}
+
+/**
+ * 札で投稿の記録を引く（6.68.8）。**そのサイトの記録だけを見る**（札は1つの貼り込み＝
+ * 1つのサイトへの投稿を指す）。無ければ undefined。
+ */
+export function postRecordForPostRef(
+  ledger: PostingLedger,
+  site: PostingSiteId,
+  postRef: string
+): PostingRecord | undefined {
+  const ref = postRef.trim();
+  if (!ref) return undefined;
+  return ledger.posts.find((post) => post.site === site && post.postRef === ref);
+}
+
+/** 投稿の記録が指す話（`PostingEpisodeTarget` の形。合本の1話なら話数か並び順を持つ） */
+export function postingTargetOfRecord(record: PostingRecord): PostingEpisodeTarget {
+  return {
+    episodePath: record.episodePath,
+    ...(typeof record.chapter === "number"
+      ? { chapter: record.chapter }
+      : typeof record.order === "number"
+        ? { chapter: null, order: record.order }
+        : {}),
   };
 }
 
@@ -2283,8 +2327,8 @@ export function siteEpisodeIdFor(
 /**
  * サイトの話の番号を投稿の記録へ入れる（6.68.7）。**元の台帳は書き換えない。**
  *
- * ヘルパーが投稿のあとに送り返す番号を受ける口（封筒の欄の形はヘルパーと決めている途中で、
- * 封筒の読み取りにはまだ繋いでいない）。
+ * ヘルパーが投稿のあとに送り返す番号を受ける口（`novelai-posted` と `novelai-chapters` の
+ * `episodeId`。受け手は `features/importPosted.ts`。6.68.8）。
  *
  * **その話そのものの記録にだけ入れる。** `postRecordFor` のようにファイルまるごとの記録へ
  * 落とすと、合本の1話の番号がファイル全体の記録に付き、別の話の編集画面を開くことになる。

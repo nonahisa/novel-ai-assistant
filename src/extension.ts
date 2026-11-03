@@ -623,6 +623,7 @@ import {
   importChaptersFromBackup,
   importChaptersFromHelper,
 } from "./features/importChaptersFromBackup";
+import { importPostedFromHelper } from "./features/importPosted";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import {
   describeChosenScope,
@@ -8302,6 +8303,12 @@ export async function activate(
         // カクヨムの章立て（ヘルパー 0.13.0。残課題 B7）。同じ受け口でパスを見分ける
         importChapters: () =>
           importChaptersFromHelper({
+            listWorks: () => registry.list(),
+            afterChange: (work) => treeProvider.refresh(work.id),
+          }),
+        // 投稿した話の番号（ヘルパー 0.20.0。設計書6.68.8）。同じ受け口でパスを見分ける
+        importPosted: () =>
+          importPostedFromHelper({
             listWorks: () => registry.list(),
             afterChange: (work) => treeProvider.refresh(work.id),
           }),

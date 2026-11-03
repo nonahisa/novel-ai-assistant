@@ -53,6 +53,11 @@ export interface OutlineEpisode {
   readonly title: string | null;
   /** その話が属する章の題。章の外（最初の章より前）なら null */
   readonly part: string | null;
+  /**
+   * サイトの話の番号（ヘルパーの章立ての `episodeId`。設計書6.68.8）。読めた行にだけある。
+   * 章立てには使わず、照らせた話の投稿の記録へ写す（`importChaptersFromBackup.ts`）
+   */
+  readonly episodeId?: string;
 }
 
 /** 手元の作品の1話（読むのは呼ぶ側） */
@@ -65,6 +70,11 @@ export interface LocalOutlineEpisode {
   readonly title: string | null;
   /** 作者に見せる見出し（「第3話」。読めなければファイル名） */
   readonly label: string;
+  /**
+   * 合本の中の話なら、その話の話数と並び（`CollectedEpisode` の `chapter`・`order`）。
+   * 投稿の記録の鍵（`PostingEpisodeTarget`）を組むのに使う。合本でなければ無い
+   */
+  readonly collected?: { readonly chapter: number | null; readonly order: number };
 }
 
 /** 手元の原稿ファイル1つぶんの材料（読むのは呼ぶ側。**作品一覧に出る順**で渡す） */
@@ -111,6 +121,7 @@ export function localOutlineOf(
             index === 0
               ? source.label
               : `${source.label}の中の「${episode.title ?? `${episode.order}番目の話`}」`,
+          collected: { chapter: episode.chapter, order: episode.order },
         });
       });
       continue;
@@ -341,6 +352,22 @@ export function addMissingChapters(
     ...existing,
     ...proposed.filter((chapter) => !known.has(chapter.startEpisodePath)),
   ];
+}
+
+/**
+ * サイトの話の並びを、手元の話へ1つずつ当てた結果（設計書6.68.8。章立ての `episodeId` を
+ * 投稿の記録へ写すのに使う）。**照らし方は章立ての取り込みと同じ**（`matchOutline`）で、
+ * 話数だけで当てる道（`byNumber`）は使わない——作者が確かめていない当て方で番号を書かない。
+ *
+ * 章の見出しが1つも無い作品・章立てが同じ作品でも使えるよう、章の計画とは別に呼ぶ。
+ *
+ * @returns サイトの話ごとの手元の話（当てられなかった話は undefined）
+ */
+export function matchOutlineEpisodes(
+  outline: readonly OutlineEpisode[],
+  locals: readonly LocalOutlineEpisode[]
+): readonly (LocalOutlineEpisode | undefined)[] {
+  return matchOutline(outline, locals, false).locals;
 }
 
 /* ── 照らし合わせ ─────────────────────────────────────── */
