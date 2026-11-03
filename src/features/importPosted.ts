@@ -430,10 +430,12 @@ async function commit(
 ): Promise<void> {
   useLogFile(entry.work.folderPath);
   if (isPostingKitActive(entry.work.id)) {
-    for (const update of updates) queuePostingUpdate(entry.work.id, update);
+    // 預かりは保管庫に残る（VS Code を閉じても消えない。作者の答え 2026-11-03 昼）
+    for (const update of updates) await queuePostingUpdate(entry.work.id, update);
     logLine(`投稿キットの案内が開いているので、届いた番号を預かりました（${entry.work.title}）。`);
     void vscode.window.showInformationMessage(
-      "番号を受け取りました。投稿キットで「投稿しました」を選ぶと（または案内を終えると）、投稿の記録に入れます。"
+      "番号を受け取りました。投稿キットで「投稿しました」を選ぶと（または案内を終えると）、投稿の記録に入れます。" +
+        "VS Code を閉じても預かったままにし、投稿の記録ができていれば次に開いたときに入れます。"
     );
     return;
   }

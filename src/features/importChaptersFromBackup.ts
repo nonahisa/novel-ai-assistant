@@ -466,7 +466,7 @@ async function recordOutlineEpisodeIds(
     return false;
   }
 
-  if (queueUpdatesIfKitActive(work, updates)) {
+  if (await queueUpdatesIfKitActive(work, updates)) {
     void vscode.window.showInformationMessage(
       `カクヨムの話の番号（${updates.length}話）を受け取りました。投稿キットの案内を終えるときに記録します${skipped}。`
     );
@@ -499,9 +499,12 @@ async function recordOutlineEpisodeIds(
 }
 
 /** 投稿キットの案内が開いていれば預ける（案内の保存を止めないため。6.68.8） */
-function queueUpdatesIfKitActive(work: WorkEntry, updates: readonly QueuedPostingUpdate[]): boolean {
+async function queueUpdatesIfKitActive(
+  work: WorkEntry,
+  updates: readonly QueuedPostingUpdate[]
+): Promise<boolean> {
   if (!isPostingKitActive(work.id)) return false;
-  for (const update of updates) queuePostingUpdate(work.id, update);
+  for (const update of updates) await queuePostingUpdate(work.id, update);
   useLogFile(work.folderPath);
   logLine(`投稿キットの案内が開いているので、章立ての話の番号（${updates.length}話）を預かりました。`);
   return true;

@@ -69,8 +69,9 @@ import {
   endPostingKitSession,
   queuedPostingUpdatesOf,
   rememberIssuedPostRef,
-  type QueuedPostingUpdate,
+  type StoredPostingUpdate,
 } from "./postingKitSession";
+import { settlePendingForWork } from "./postedPendingSettle";
 // 同じ数字を2度打たせない——投稿ページのURLから作品IDと作品ページを導く
 import {
   deriveSiteProfile,
@@ -1974,57 +1975,34 @@ async function load(
 }
 
 /**
- * 案内を終えるとき、まだ台帳へ入っていない預かりを書く（6.68.8）。
+ * 案内を終えるとき、預かりを台帳へ入れて片づける（6.68.8）。**案内が最後に持っていた台帳と店で**
+ * 当てる（読み直すと、店の照合の手がかりが入れ替わる）。台帳を読めていなければ何もしない
+ * ——預かりは保管庫に残り、次の機会（次の案内・次の起動）に入る。
  *
- * 当たらなかったもの（『投稿しました』を選ばずに終えた話の番号など）は**黙って捨てない**。
- * 知らせとログに残す。
+ * 入らなかったもの（『投稿しました』を選ばずに終えた話など）の扱いは `postingKitSession.ts` の冒頭。
  *
  * @returns 台帳を書いたか
  */
 async function flushQueuedUpdates(
   work: WorkEntry,
   store: PostingStore,
-  queued: readonly QueuedPostingUpdate[]
+  stored: readonly StoredPostingUpdate[]
 ): Promise<boolean> {
-  if (queued.length === 0) return false;
+  if (stored.length === 0) return false;
   const ledger = lastLedgerOf.get(store);
   if (!ledger) {
-    reportUnapplied(work, queued.map((update) => ({ update, reason: "投稿の記録を読めませんでした" })));
+    useLogFile(work.folderPath);
+    logLine("投稿の記録を読めていないので、預かった番号はそのまま残します。");
     return false;
   }
-  const applied = applyQueuedPostingUpdates(ledger, queued);
-  let wrote = false;
-  if (applied.changed) {
-    wrote = await save(store, work, applied.ledger, "ヘルパーから届いた話の番号（投稿キットを終えるとき）");
-    if (!wrote) {
-      reportUnapplied(work, queued.map((update) => ({ update, reason: "投稿の記録を保存できませんでした" })));
-      return false;
-    }
-    useLogFile(work.folderPath);
-    logLine(`ヘルパーから届いた番号を、投稿キットを終えるときに投稿の記録へ入れました（${work.title}）。`);
-  }
-  if (applied.waiting.length > 0) reportUnapplied(work, applied.waiting);
-  return wrote;
-}
-
-/** 預かったのに入れられなかった番号を、知らせとログに残す */
-function reportUnapplied(
-  work: WorkEntry,
-  waiting: readonly { readonly update: QueuedPostingUpdate; readonly reason: string }[]
-): void {
-  useLogFile(work.folderPath);
-  for (const entry of waiting) {
-    const what =
-      entry.update.kind === "episode"
-        ? `${entry.update.label}（${postingSiteInfo(entry.update.site).label}）の話の番号 ${entry.update.episodeId}`
-        : `${postingSiteInfo(entry.update.site).label}の小説番号 ${entry.update.number}`;
-    logLine(`ヘルパーから届いた${what}を記録しませんでした：${entry.reason}`);
-  }
-  void vscode.window.showWarningMessage(
-    `ヘルパーから届いた番号のうち${waiting.length}件は、投稿の記録へ入れませんでした` +
-      "（『投稿しました』を選ばずに終えた話など。出力パネルに記録しました）。" +
-      "投稿の記録があれば、ヘルパーのボタンをもう一度押すと入ります。"
-  );
+  return settlePendingForWork({
+    work,
+    store,
+    ledger,
+    trigger: "kitEnd",
+    stored,
+    save: (next) => save(store, work, next, "ヘルパーから届いた話の番号（投稿キットを終えるとき）"),
+  });
 }
 
 async function save(

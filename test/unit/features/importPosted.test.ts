@@ -29,6 +29,24 @@ vi.mock("../../../src/core/scanner", () => ({
 
 const { importPostedFromHelper } = await import("../../../src/features/importPosted");
 const { postNewEpisode } = await import("../../../src/features/postingKit");
+const { settlePendingOnStartup } = await import("../../../src/features/postedPendingSettle");
+const { storedPostingUpdatesOf, usePostingPendingMemory } = await import(
+  "../../../src/features/postingKitSession"
+);
+
+/** 保管庫の作り物（本物と同じく JSON に通した形で持つ） */
+function freshMemento() {
+  const values = new Map<string, unknown>();
+  return {
+    get<T>(key: string, defaultValue: T): T {
+      return values.has(key) ? (values.get(key) as T) : defaultValue;
+    },
+    update(key: string, value: unknown): Thenable<void> {
+      values.set(key, JSON.parse(JSON.stringify(value)));
+      return Promise.resolve();
+    },
+  };
+}
 
 const work: WorkEntry = {
   id: "work_posted",
@@ -159,6 +177,7 @@ beforeEach(() => {
   errors.length = 0;
   changedWorks.length = 0;
   warningAnswer = undefined;
+  usePostingPendingMemory(freshMemento());
   env.clipboard.text = "";
   workspace.textDocuments = [];
   workspace.fs = memoryFs(disk);
@@ -241,8 +260,8 @@ describe("投稿キットの案内の途中で届く（『投稿しました』�
     expect(posts.find((p) => p.site === "alphapolis")?.siteEpisodeId).toBeUndefined();
   });
 
-  test("『投稿しました』を選ばずに終えたら、預かった番号は書かず、そう知らせる", async () => {
-    writeLedger({});
+  /** 封筒をコピーし、番号を受け取ってから、『投稿しました』を選ばずに中止する */
+  async function abortAfterNumberArrives(): Promise<void> {
     stubQuickPick([
       (items) => items.find((item) => item.answer === "envelope"),
       async () => {
@@ -253,8 +272,50 @@ describe("投稿キットの案内の途中で届く（『投稿しました』�
       },
     ]);
     await postNewEpisode(work, {} as unknown as AIRegistry, scanned[1]);
+  }
+
+  test("『投稿しました』を選ばずに終えたら、台帳は書かず、番号は保管庫に預かったままにする", async () => {
+    writeLedger({});
+    await abortAfterNumberArrives();
     expect(readLedger().posts).toEqual([]);
-    expect(warned.some((message) => message.includes("投稿の記録へ入れませんでした"))).toBe(true);
+    expect(informed.some((message) => message.includes("預かっておきます"))).toBe(true);
+    expect(storedPostingUpdatesOf(work.id)).toHaveLength(1);
+  });
+
+  test("（再現）VS Code を閉じて開き直したあと、投稿キットで『投稿しました』を選ぶと預かった番号が入り、預かりは消える", async () => {
+    writeLedger({});
+    await abortAfterNumberArrives();
+    // VS Code を閉じて開き直した（保管庫は残る。案内の札は消える）
+    stubQuickPick([
+      (items) => items.find((item) => item.answer === "posted"),
+      () => undefined,
+    ]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, scanned[1]);
+    expect(errors).toEqual([]);
+    expect(readLedger().posts[0].siteEpisodeId).toBe("16816927859000000123");
+    expect(storedPostingUpdatesOf(work.id)).toEqual([]);
+  });
+
+  test("（再現）別の手で投稿の記録ができていれば、次に VS Code を開いたときに入る", async () => {
+    writeLedger({});
+    await abortAfterNumberArrives();
+    // 作者がほかの道（別の端末から同期された・台帳を手で直した等）で投稿の記録を作った
+    writeLedger({ posts: [post013] });
+    await settlePendingOnStartup(deps);
+    expect(readLedger().posts[0].siteEpisodeId).toBe("16816927859000000123");
+    expect(storedPostingUpdatesOf(work.id)).toEqual([]);
+    expect(changedWorks).toContain(work.id);
+  });
+
+  test("開いたときに入れる前にも、上書きしない決まりを通す（別の番号がある話は替えずに預かりから外す）", async () => {
+    writeLedger({});
+    await abortAfterNumberArrives();
+    writeLedger({ posts: [{ ...post013, siteEpisodeId: "999" }] });
+    const before = disk.get(ledgerPath);
+    await settlePendingOnStartup(deps);
+    expect(disk.get(ledgerPath)).toBe(before);
+    expect(storedPostingUpdatesOf(work.id)).toEqual([]);
+    expect(warned.some((message) => message.includes("預かりから外しました"))).toBe(true);
   });
 });
 

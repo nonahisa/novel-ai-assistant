@@ -624,6 +624,8 @@ import {
   importChaptersFromHelper,
 } from "./features/importChaptersFromBackup";
 import { importPostedFromHelper } from "./features/importPosted";
+import { usePostingPendingMemory } from "./features/postingKitSession";
+import { settlePendingOnStartup } from "./features/postedPendingSettle";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import {
   describeChosenScope,
@@ -8281,6 +8283,17 @@ export async function activate(
 
   // 投稿サイトのリンクを開く口（`openSiteLink`）。Chrome でないとき初回だけ出す案内の覚え
   initSiteLinkGuide(verifiedState(context.globalState));
+
+  /*
+    ヘルパーから届いた番号の預かり（設計書6.68.8）。VS Code を閉じても残す（作者の答え
+    2026-11-03 昼）ので、全体の保管庫に置き、開いたときに投稿の記録へ入れて片づける。
+    起動を待たせないよう、終わりを待たずに走らせる（失敗はログに残る）
+  */
+  usePostingPendingMemory(verifiedState(context.globalState));
+  void settlePendingOnStartup({
+    listWorks: () => registry.list(),
+    afterChange: (work) => treeProvider.refresh(work.id),
+  });
 
   /*
     ヘルパーからの受け口（設計書6.79.7「ヘルパーからの受け口」）。ヘルパーが読者の反応を
