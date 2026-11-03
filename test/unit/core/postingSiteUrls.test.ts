@@ -3,12 +3,14 @@ import {
   authorOnlyPage,
   authorOnlyPageNotice,
   deriveSiteProfile,
+  episodeEditPageUrl,
   followNewEpisodeUrl,
   NEW_EPISODE_URL_FOLLOW_QUESTION,
   newEpisodeUrlDraft,
   planNewEpisodeUrlOnWorkIdChange,
   postingPageUrl,
   readerStatsPageUrl,
+  revisionPageUrl,
   workManagePageUrl,
 } from "../../../src/core/postingSiteUrls";
 
@@ -457,5 +459,66 @@ describe("出し直しで開く作品の管理画面", () => {
       )
     ).toBeUndefined();
     expect(workManagePageUrl("note", undefined, "https://note.com/notes/new")).toBeUndefined();
+  });
+});
+
+/**
+ * 出し直しで、話の編集画面を直に開く（設計書6.68.7。作者の依頼 2026-11-03「再投稿ページのURLは
+ * 解析できますか？」）。サイトの話の番号が投稿の記録にあるときだけ。無ければ作品の管理画面へ落とす。
+ */
+describe("出し直しで開く話の編集画面", () => {
+  test("カクヨムは /my/works/{作品ID}/episodes/{話ID}", () => {
+    expect(
+      episodeEditPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, "16816927860000000001")
+    ).toBe("https://kakuyomu.jp/my/works/16816927859/episodes/16816927860000000001");
+    // 作品IDが台帳に無ければ投稿ページのURLから
+    expect(episodeEditPageUrl("kakuyomu", undefined, 実機.newEpisodeUrl, "5")).toBe(
+      `https://kakuyomu.jp/my/works/${実機.workId}/episodes/5`
+    );
+  });
+
+  test("アルファポリスは /mypage/novel/save_episode/{9桁}/{話ID}", () => {
+    const postUrl = "https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366";
+    expect(episodeEditPageUrl("alphapolis", undefined, postUrl, "987654")).toBe(
+      "https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366/987654"
+    );
+  });
+
+  test("なろう・noteは話の番号があっても組み立てない（なろうは数字の小説番号が要る）", () => {
+    expect(
+      episodeEditPageUrl(
+        "narou",
+        { workId: "n1234ab" },
+        "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/",
+        "12345"
+      )
+    ).toBeUndefined();
+    expect(episodeEditPageUrl("note", undefined, undefined, "1")).toBeUndefined();
+  });
+
+  test("数字でない話の番号はパスへ入れない（別のページを開かせない）", () => {
+    for (const id of ["new", "1/../2", "", " ", "１２"]) {
+      expect(episodeEditPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, id), id).toBeUndefined();
+    }
+    expect(episodeEditPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, undefined)).toBeUndefined();
+  });
+
+  test("話の番号が無ければ作品の管理画面へ落とし、どちらも無理なら undefined", () => {
+    expect(revisionPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, "7")).toEqual({
+      url: "https://kakuyomu.jp/my/works/16816927859/episodes/7",
+      kind: "episode",
+    });
+    expect(revisionPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, undefined)).toEqual({
+      url: "https://kakuyomu.jp/my/works/16816927859",
+      kind: "work",
+    });
+    expect(
+      revisionPageUrl(
+        "narou",
+        { workId: "n1234ab" },
+        "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/",
+        "12345"
+      )
+    ).toBeUndefined();
   });
 });

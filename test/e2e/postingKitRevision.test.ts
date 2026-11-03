@@ -9,7 +9,10 @@
  * - 「修正版を出し直す」→ サイトを選ぶ画面には投稿済みのカクヨムだけが並ぶ → Enter
  * - 題「… の修正版を カクヨム へ」の案内が出る。本文がクリップボードに入り、開こうとしたのは
  *   **作品の管理画面**（`/my/works/{作品ID}`）で、新しい話の投稿ページではない
- * - 「出し直しました」→ 台帳の `revisions` に1件入り、`posts` は1件のまま。告知の質問は出ない
+ * - 「出し直しました」→ 台帳の `revisions` に1件入り（出し直したときの本文の印つき）、`posts` は1件のまま。
+ *   告知の質問は出ない
+ * - 作品の「新話投稿」を押すと、投稿のあとに本文を直した話（台帳の印と今の本文が違う話）があれば、
+ *   話を選ぶ前に「… は投稿後に直しています。出し直しますか」と促す（作者の裁定 2026-11-03 昼）
  *
  * **外のブラウザは開かせない**（`postingKitSteps.test.ts` と同じく本体側の `shell.openExternal` を替える）。
  * AI は呼ばない。クリップボードは本物の OS のものを通るので、走らせたあと前の中身へ戻す。
@@ -21,7 +24,16 @@ import { expect, test } from "vitest";
 import { SIDEBAR_LAUNCH, collapseSidebarPane, expandTreeRow, showSidebar, treeContextMenu, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { dialogText, pickQuickPickRow, quickPickRows, quickPickTitle, pressDialogButton } from "./support/workbenchDom";
+import {
+  dialogText,
+  pickQuickPickRow,
+  quickPickPlaceholder,
+  quickPickRows,
+  quickPickTitle,
+  pressDialogButton,
+} from "./support/workbenchDom";
+import { runCommand } from "./support/quickInput";
+import { postingBodyHash } from "../../src/core/postingBodyHash";
 
 const EPISODES = [
   { name: "第1話_はじまり.txt", text: "　朝の駅は静かだった。\n　直したあとの一文。\n" },
@@ -30,7 +42,14 @@ const EPISODES = [
 const KAKUYOMU_POST_URL = "https://kakuyomu.jp/my/works/1177354054934574437/episodes/new";
 const KAKUYOMU_MANAGE_URL = "https://kakuyomu.jp/my/works/1177354054934574437";
 const NAROU_POST_URL = "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/";
-const POSTED = { episodePath: "本文/第1話_はじまり.txt", site: "kakuyomu", postedAt: "2026-10-01T00:00:00.000Z" };
+/** 投稿したときの本文（いまの第1話は、このあとに「直したあとの一文。」を足した） */
+const POSTED_TEXT = "　朝の駅は静かだった。\n";
+const POSTED = {
+  episodePath: "本文/第1話_はじまり.txt",
+  site: "kakuyomu",
+  postedAt: "2026-10-01T00:00:00.000Z",
+  bodyHash: postingBodyHash(POSTED_TEXT),
+};
 
 /** カクヨムへは出した・なろうはまだ */
 const LEDGER = {
@@ -116,7 +135,7 @@ test("話の右クリック「この話を投稿する」から修正版を出�
         const sites = (await quickPickRows(page)).map((row) => row.label);
         expect(sites.some((label) => label.includes("カクヨム")), `カクヨムが並ばない（${JSON.stringify(sites)}）`).toBe(true);
         expect(sites.some((label) => label.includes("小説家になろう")), `未投稿のなろうが並んだ（${JSON.stringify(sites)}）`).toBe(false);
-        // 既定で全部に印が付いている。Enter でそのまま決める
+        // 投稿のあとに直したカクヨムに既定で印が付いている。Enter でそのまま決める
         await page.keyboard.press("Enter");
 
         await waitTitle(page, "の修正版を カクヨム へ", "「… の修正版を カクヨム へ」の案内が出る");
@@ -136,11 +155,53 @@ test("話の右クリック「この話を投稿する」から修正版を出�
         );
         const saved = await ledger(session);
         expect(saved.posts, "投稿の記録が変わった（出し直しは新しい話として数えない）").toEqual([POSTED]);
-        expect(saved.revisions?.[0]).toMatchObject({ episodePath: "本文/第1話_はじまり.txt", site: "kakuyomu" });
+        expect(saved.revisions?.[0]).toMatchObject({
+          episodePath: "本文/第1話_はじまり.txt",
+          site: "kakuyomu",
+          // 出し直したときの本文の印（次に「直したか」を比べる相手になる）
+          bodyHash: postingBodyHash(EPISODES[0].text),
+        });
 
         // 告知の質問は出さない（新しい話ではない）
         await page.waitForTimeout(1_500);
         expect(await quickPickTitle(page), "出し直しのあとに告知の質問が出た").not.toBe("投稿おつかれさまでした");
+      } finally {
+        await session.app.evaluate(({ clipboard }, value) => clipboard.writeText(value), before).catch(() => undefined);
+      }
+    },
+    LAUNCH
+  );
+}, 180_000);
+
+test("作品の「新話投稿」で、投稿のあとに直した話があれば出し直しを促し、選ぶと出し直しの流れへ進む", async () => {
+  await withVsCode(
+    "新話投稿での出し直しの促し",
+    EPISODES,
+    async (session) => {
+      const { page } = session;
+      const before = await session.app.evaluate(({ clipboard }) => clipboard.readText()).catch(() => "");
+      try {
+        await blockBrowser(session);
+        await runCommand(page, "新話投稿");
+        await waitTitle(page, "投稿のあとに直した話があります", "出し直しの促しが出る");
+        const placeHolder = await quickPickPlaceholder(page);
+        expect(placeHolder ?? "", "促しの文が違う").toContain("は投稿後に直しています。出し直しますか");
+        const rows = (await quickPickRows(page)).map((row) => row.label);
+        expect(rows.some((label) => label.includes("第1話") && label.includes("出し直す")), `第1話の出し直しが無い（${JSON.stringify(rows)}）`).toBe(true);
+        // 直していない第2話は並べない。未投稿の話があるので「新しい話を投稿する」で先へ進める
+        expect(rows.some((label) => label.includes("第2話")), `直していない第2話が並んだ（${JSON.stringify(rows)}）`).toBe(false);
+        expect(rows.some((label) => label.includes("新しい話を投稿する")), `「新しい話を投稿する」が無い（${JSON.stringify(rows)}）`).toBe(true);
+
+        await pickQuickPickRow(page, "を出し直す");
+        await waitTitle(page, "修正版を出し直すサイト", "出し直すサイトを選ぶ画面が出る");
+        await page.keyboard.press("Enter");
+        await waitTitle(page, "の修正版を カクヨム へ", "「… の修正版を カクヨム へ」の案内が出る");
+        await waitUntil(async () => (await openedUrls(session)).length > 0, "作品の管理画面を開こうとする", 15_000);
+        expect(await openedUrls(session)).toEqual([KAKUYOMU_MANAGE_URL]);
+
+        await pickQuickPickRow(page, "出し直しました");
+        await waitUntil(async () => ((await ledger(session)).revisions ?? []).length === 1, "台帳に出し直しの記録が1件入る", 20_000);
+        expect((await ledger(session)).posts, "投稿の記録が変わった").toEqual([POSTED]);
       } finally {
         await session.app.evaluate(({ clipboard }, value) => clipboard.writeText(value), before).catch(() => undefined);
       }

@@ -631,6 +631,22 @@ export interface PostingRecord {
    * 「3番目」と「第3話」が同じ記録になってはいけない。
    */
   order?: number;
+  /**
+   * 投稿したときの本文の印（設計書6.68.7。作者の裁定 2026-11-03 昼）。
+   * `core/postingBodyHash.ts` の `postingBodyHash` で取った値。
+   *
+   * **これから投稿する分からしか入らない。** 無い記録（それより前の投稿・基準線）は、
+   * 投稿のあとに直したかどうかが「分からない」——出し直しが要るとは言わない。
+   */
+  bodyHash?: string;
+  /**
+   * サイトが振った話の番号（任意。設計書6.68.7）。あれば出し直しで話の編集画面を直に開く。
+   *
+   * 台帳はサイトを読みにいかない（6.68.1）ので、ここへ入るのはヘルパーが投稿のあとに
+   * 送り返した値だけ（`withSiteEpisodeId`）。**作者の投稿日時を塗り替えないよう、
+   * 投稿の記録の欄として足した**（別の配列にすると、どの投稿のIDかを結び直すことになる）。
+   */
+  siteEpisodeId?: string;
 }
 
 /**
@@ -640,7 +656,9 @@ export interface PostingRecord {
  * `posts` に混ぜると未投稿の数や「投稿した日時」が狂う。`posts` に欄を足す形にしなかったのは、
  * 投稿した日時（読者が初めて読めた日）を出し直しの日時で塗り替えないため。
  *
- * 同じ話・同じサイトは**1件に保つ**（日時は新しいほう。`posts` と同じ流儀）。
+ * **履歴で持つ**（同じ話・同じサイトでも足していく。作者の裁定 2026-11-03 昼「履歴は見れなくするか、
+ * 折り畳んでください」）。0.123.0 の台帳は同じ話・サイトを1件に保っていたが、同じ配列の形なので
+ * そのまま読める。画面に出すのは最新の1件だけ（`revisionFor`）。
  * 話の指し方は `PostingRecord` と同じ（合本の1話は `chapter` か `order`）。
  */
 export interface PostingRevisionRecord {
@@ -651,6 +669,8 @@ export interface PostingRevisionRecord {
   revisedAt: string;
   chapter?: number;
   order?: number;
+  /** 出し直したときの本文の印（`PostingRecord.bodyHash` と同じ。0.124.0 から） */
+  bodyHash?: string;
 }
 
 /**
@@ -1117,6 +1137,38 @@ export interface SkippedSiteCompletion {
  * 勝手に直して上書きすると、作者が貼ったURLや投稿の記録が黙って消える
  * （章立て・本の設計図と同じ約束）。
  */
+/** 本文の印の形（SHA-256 の16進64字。`core/hash.ts` の `hashText` が返す形） */
+const BODY_HASH_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * サイトの話の番号として受け付ける形。**URL のパスへそのまま入る**ので、
+ * `/`・`?`・`#`・`..` が入りうる形を通さない（別のページを開かせない）。
+ * サイトごとの細かい形（カクヨム・アルファポリスは数字）は URL を作る側が確かめる。
+ */
+const SITE_EPISODE_ID_PATTERN = /^[0-9A-Za-z_-]{1,64}$/;
+
+/**
+ * 本文の印を読む（6.68.7）。**形が違えば直さずに止める**（`chapter` と同じ厳しさ）——
+ * 崩れた印を「違う本文」と読むと、直していない話まで出し直しを促す。
+ * 空文字は欄ごと無いものとして読む。
+ */
+function readBodyHash(value: unknown, path: string): string | undefined {
+  optionalString(value, path);
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return undefined;
+  if (!BODY_HASH_PATTERN.test(text)) invalid(path);
+  return text;
+}
+
+/** サイトの話の番号を読む（6.68.7）。形が違えば止める（理由は `SITE_EPISODE_ID_PATTERN`） */
+function readSiteEpisodeId(value: unknown, path: string): string | undefined {
+  optionalString(value, path);
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return undefined;
+  if (!SITE_EPISODE_ID_PATTERN.test(text)) invalid(path);
+  return text;
+}
+
 export function parsePostingLedger(raw: unknown): PostingLedger {
   return readPostingLedger(raw).ledger;
 }
@@ -1194,6 +1246,11 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
       optionalNullableNumber(entry.order, `${entryPath}.order`);
       const chapter = typeof entry.chapter === "number" ? entry.chapter : null;
       const order = typeof entry.order === "number" ? entry.order : null;
+      const bodyHash = readBodyHash(entry.bodyHash, `${entryPath}.bodyHash`);
+      const siteEpisodeId = readSiteEpisodeId(
+        entry.siteEpisodeId,
+        `${entryPath}.siteEpisodeId`
+      );
       return {
         episodePath: normalizeEpisodePath(entry.episodePath as string),
         site,
@@ -1207,6 +1264,9 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
           : order !== null
             ? { order }
             : {}),
+        // 本文の印と話の番号（6.68.7）。無い記録には欄を足さない（上と同じ理由）
+        ...(bodyHash ? { bodyHash } : {}),
+        ...(siteEpisodeId ? { siteEpisodeId } : {}),
       };
     }) ?? [];
 
@@ -1223,11 +1283,13 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
     optionalNullableNumber(entry.order, `${entryPath}.order`);
     const chapter = typeof entry.chapter === "number" ? entry.chapter : null;
     const order = typeof entry.order === "number" ? entry.order : null;
+    const bodyHash = readBodyHash(entry.bodyHash, `${entryPath}.bodyHash`);
     return {
       episodePath: normalizeEpisodePath(entry.episodePath as string),
       site,
       revisedAt: (entry.revisedAt as string).trim(),
       ...(chapter !== null ? { chapter } : order !== null ? { order } : {}),
+      ...(bodyHash ? { bodyHash } : {}),
     };
   });
 
@@ -1828,17 +1890,24 @@ export function withPost(
   ledger: PostingLedger,
   target: PostingEpisodeTargetLike,
   site: PostingSiteId,
-  postedAt: string
+  postedAt: string,
+  /** 投稿したときの本文の印（6.68.7。`postingBodyHash`）。渡さなければ欄を持たない */
+  bodyHash?: string
 ): PostingLedger {
   const wanted = toTarget(target);
   const key = postingEpisodeKey(wanted);
+  const sameKey = (post: PostingRecord) =>
+    post.site === site && postingEpisodeKey(post) === key;
   /*
     **同じ鍵の記録だけを置き換える。** 合本の第3話を出し直しても、
     第4話の記録や、ファイルまるごとの古い記録には触らない。
   */
-  const kept = ledger.posts.filter(
-    (post) => !(post.site === site && postingEpisodeKey(post) === key)
-  );
+  const kept = ledger.posts.filter((post) => !sameKey(post));
+  /*
+    **サイトの話の番号は引き継ぐ**（6.68.7）。番号はヘルパーが送り返した値で、
+    この関数を呼ぶ側は知らない——置き換えで消すと、編集画面を直に開けなくなる。
+  */
+  const siteEpisodeId = ledger.posts.find(sameKey)?.siteEpisodeId;
   return {
     ...ledger,
     posts: [
@@ -1848,6 +1917,8 @@ export function withPost(
         site,
         postedAt,
         ...episodeRefFields(wanted),
+        ...(bodyHash ? { bodyHash } : {}),
+        ...(siteEpisodeId ? { siteEpisodeId } : {}),
       },
     ],
   };
@@ -1952,47 +2023,190 @@ export function postRecordFor(
   );
 }
 
+/**
+ * その話・そのサイトの出し直しの履歴（6.68.7）。**新しい順。**
+ *
+ * 日時が同じ（または読めない）ものは、台帳の後ろにあるほうを新しいと読む——
+ * `withRevision` は末尾へ足すので、後ろほど後から記録したものである。
+ */
+export function revisionsFor(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId
+): PostingRevisionRecord[] {
+  const key = postingEpisodeKey(target);
+  return (ledger.revisions ?? [])
+    .map((record, index) => ({ record, index }))
+    .filter(({ record }) => record.site === site && postingEpisodeKey(record) === key)
+    .sort((left, right) => {
+      const byTime = Date.parse(right.record.revisedAt) - Date.parse(left.record.revisedAt);
+      return Number.isFinite(byTime) && byTime !== 0 ? byTime : right.index - left.index;
+    })
+    .map(({ record }) => record);
+}
+
 /** その話・そのサイトで、いちばん最近に修正版を出し直した記録 */
 export function revisionFor(
   ledger: PostingLedger,
   target: PostingEpisodeTargetLike,
   site: PostingSiteId
 ): PostingRevisionRecord | undefined {
-  const key = postingEpisodeKey(target);
-  return (ledger.revisions ?? []).find(
-    (record) => record.site === site && postingEpisodeKey(record) === key
-  );
+  return revisionsFor(ledger, target, site)[0];
 }
 
 /**
  * 「修正版を出し直しました」を記録する（6.68.7）。**元の台帳は書き換えない。**
  *
  * **`posts` には触らない**——出し直しは新しい話を出したことにならない。未投稿の数も、
- * 投稿した日時も変わらない。同じ話・同じサイトの記録は1件に保つ（日時は新しいほう）。
+ * 投稿した日時も変わらない。**履歴として末尾へ足す**（同じ話・同じサイトでも消さない。
+ * 作者の裁定 2026-11-03 昼）。
+ *
+ * @param bodyHash 出し直したときの本文の印（`postingBodyHash`）。渡さなければ欄を持たない
  */
 export function withRevision(
   ledger: PostingLedger,
   target: PostingEpisodeTargetLike,
   site: PostingSiteId,
-  revisedAt: string
+  revisedAt: string,
+  bodyHash?: string
 ): PostingLedger {
   const wanted = toTarget(target);
-  const key = postingEpisodeKey(wanted);
-  const kept = (ledger.revisions ?? []).filter(
-    (record) => !(record.site === site && postingEpisodeKey(record) === key)
-  );
   return {
     ...ledger,
     revisions: [
-      ...kept,
+      ...(ledger.revisions ?? []),
       {
         episodePath: normalizeEpisodePath(wanted.episodePath),
         site,
         revisedAt,
         ...episodeRefFields(wanted),
+        ...(bodyHash ? { bodyHash } : {}),
       },
     ],
   };
+}
+
+/**
+ * その話・そのサイトで、最後にサイトへ渡した本文の印（6.68.7）。
+ *
+ * **最後に渡したのは、出し直しがあれば最新の出し直し、無ければ投稿。** 最後の記録に
+ * 印が無ければ undefined（＝分からない）を返し、**古い記録の印へ遡らない**——印を
+ * 持たない版で出し直した直後に、その前の投稿の印と比べて「直した」と言ってしまう。
+ */
+export function lastSentBodyHash(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId
+): string | undefined {
+  const revision = revisionFor(ledger, target, site);
+  const post = postRecordFor(ledger, target, site);
+  if (!revision) return post?.bodyHash;
+  /*
+    ふつうは出し直しのほうが新しい。投稿の記録があとから書かれた（台帳を手で直した等）
+    ときだけ投稿の記録を採る——日時が読めなければ出し直しを採る
+  */
+  if (post && Date.parse(post.postedAt) > Date.parse(revision.revisedAt)) {
+    return post.bodyHash;
+  }
+  return revision.bodyHash;
+}
+
+/** 出し直しが要るか（`revisionNeed` の答え） */
+export type RevisionNeed = "changed" | "same" | "unknown";
+
+/**
+ * 出し直しが要るか（6.68.7）。
+ *
+ * - `"changed"`：最後にサイトへ渡した本文と今の本文が違う（投稿のあとに直した）
+ * - `"same"`：同じ
+ * - `"unknown"`：印が無い（0.124.0 より前の記録・基準線）か、そのサイトへまだ出していない
+ *
+ * @param currentHash 今の本文の印（`core/postingBodyHash.ts` の `postingBodyHash`）。
+ *   **`models` は印を計算しない**（本文の正規化がメモ行の判定など `core` の部品を使うため）
+ */
+export function revisionNeed(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId,
+  currentHash: string
+): RevisionNeed {
+  if (!isPosted(ledger, target, site)) return "unknown";
+  const sent = lastSentBodyHash(ledger, target, site);
+  if (!sent) return "unknown";
+  return sent === currentHash ? "same" : "changed";
+}
+
+/**
+ * その話で、出し直しが要るサイト（登録したサイトのうち、投稿のあとに本文を直したもの）。
+ * 並びは `POSTING_SITES` の順（`postedSites` と同じ）。
+ */
+export function sitesNeedingRevision(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  currentHash: string
+): PostingSiteId[] {
+  return postedSites(ledger, target).filter(
+    (site) => revisionNeed(ledger, target, site, currentHash) === "changed"
+  );
+}
+
+/**
+ * そのファイルに、本文の印つきの記録が1つでもあるか（6.68.7）。
+ *
+ * 作品から投稿を始めたときに「出し直しが要る話」を探すが、**印の無いファイルは読まない**
+ * （200話の作品で、印を持たない話まで全部読ませない）。合本の1話の記録もファイルで拾う。
+ */
+export function hasBodyHashFor(ledger: PostingLedger, episodePath: string): boolean {
+  const wanted = normalizeEpisodePath(episodePath);
+  const hit = (record: { episodePath: string; bodyHash?: string }) =>
+    Boolean(record.bodyHash) && normalizeEpisodePath(record.episodePath) === wanted;
+  return ledger.posts.some(hit) || (ledger.revisions ?? []).some(hit);
+}
+
+/**
+ * その話・そのサイトの、サイトの話の番号（6.68.7）。
+ *
+ * **その話そのものの記録だけを見る**（ファイルまるごとの記録へは落とさない。理由は
+ * `withSiteEpisodeId`）。
+ */
+export function siteEpisodeIdFor(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId
+): string | undefined {
+  const key = postingEpisodeKey(target);
+  return ledger.posts.find((post) => post.site === site && postingEpisodeKey(post) === key)
+    ?.siteEpisodeId;
+}
+
+/**
+ * サイトの話の番号を投稿の記録へ入れる（6.68.7）。**元の台帳は書き換えない。**
+ *
+ * ヘルパーが投稿のあとに送り返す番号を受ける口（封筒の欄の形はヘルパーと決めている途中で、
+ * 封筒の読み取りにはまだ繋いでいない）。
+ *
+ * **その話そのものの記録にだけ入れる。** `postRecordFor` のようにファイルまるごとの記録へ
+ * 落とすと、合本の1話の番号がファイル全体の記録に付き、別の話の編集画面を開くことになる。
+ *
+ * @returns 入れた台帳。当てる記録が無い（まだ投稿の記録が無い）か、番号の形が違えば undefined
+ *   （呼ぶ側が黙って捨てないように、入らなかったことを返す）
+ */
+export function withSiteEpisodeId(
+  ledger: PostingLedger,
+  target: PostingEpisodeTargetLike,
+  site: PostingSiteId,
+  siteEpisodeId: string
+): PostingLedger | undefined {
+  const id = siteEpisodeId.trim();
+  if (!SITE_EPISODE_ID_PATTERN.test(id)) return undefined;
+  const key = postingEpisodeKey(target);
+  const index = ledger.posts.findIndex(
+    (post) => post.site === site && postingEpisodeKey(post) === key
+  );
+  if (index < 0) return undefined;
+  const posts = [...ledger.posts];
+  posts[index] = { ...posts[index], siteEpisodeId: id };
+  return { ...ledger, posts };
 }
 
 /**

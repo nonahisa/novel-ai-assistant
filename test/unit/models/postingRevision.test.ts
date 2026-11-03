@@ -6,6 +6,8 @@ import {
   postedSites,
   postRecordFor,
   revisionFor,
+  revisionsFor,
+  revisionNeed,
   unpostedSites,
   withRevision,
   type PostingLedger,
@@ -48,18 +50,47 @@ describe("出し直しの記録", () => {
     expect(base.revisions).toBeUndefined();
   });
 
-  test("同じ話・同じサイトは1件に保ち、合本の別の話には触らない", () => {
+  test("同じ話・同じサイトでも履歴として足していき、最新は日時で引く（作者の裁定 2026-11-03 昼）", () => {
     const first = withRevision(base, { episodePath: "本文/all.txt", chapter: 3 }, "kakuyomu", "2026-11-01T00:00:00.000Z");
     const second = withRevision(first, { episodePath: "本文/all.txt", chapter: 4 }, "kakuyomu", "2026-11-02T00:00:00.000Z");
     const third = withRevision(second, { episodePath: "本文/all.txt", chapter: 3 }, "kakuyomu", "2026-11-03T00:00:00.000Z");
-    expect(third.revisions).toHaveLength(2);
+    // 0.123.0 は同じ話・サイトを1件に保っていた（2件）。いまは消さずに3件
+    expect(third.revisions).toHaveLength(3);
     expect(revisionFor(third, { episodePath: "本文/all.txt", chapter: 3 }, "kakuyomu")?.revisedAt).toBe(
       "2026-11-03T00:00:00.000Z"
     );
     expect(revisionFor(third, { episodePath: "本文/all.txt", chapter: 4 }, "kakuyomu")?.revisedAt).toBe(
       "2026-11-02T00:00:00.000Z"
     );
-    expect(third.revisions?.find((record) => record.chapter === 3)).toMatchObject({ chapter: 3 });
+    expect(
+      revisionsFor(third, { episodePath: "本文/all.txt", chapter: 3 }, "kakuyomu").map((record) => record.revisedAt)
+    ).toEqual(["2026-11-03T00:00:00.000Z", "2026-11-01T00:00:00.000Z"]);
+  });
+
+  test("履歴の並びが日時順でなくても、最新は日時で引く。日時が同じなら後ろの記録", () => {
+    const ledger: PostingLedger = {
+      ...base,
+      revisions: [
+        { episodePath: "本文/001.txt", site: "kakuyomu", revisedAt: "2026-11-05T00:00:00.000Z", bodyHash: "a".repeat(64) },
+        { episodePath: "本文/001.txt", site: "kakuyomu", revisedAt: "2026-11-02T00:00:00.000Z" },
+      ],
+    };
+    expect(revisionFor(ledger, "本文/001.txt", "kakuyomu")?.revisedAt).toBe("2026-11-05T00:00:00.000Z");
+    const tied = withRevision(ledger, "本文/001.txt", "kakuyomu", "2026-11-05T00:00:00.000Z", "b".repeat(64));
+    expect(revisionFor(tied, "本文/001.txt", "kakuyomu")?.bodyHash).toBe("b".repeat(64));
+  });
+
+  test("0.123.0 の台帳（同じ話・サイトが1件だけの形）も、そのまま読めて最新を引ける", () => {
+    const ledger = parsePostingLedger({
+      schemaVersion: "1",
+      sites: [{ site: "kakuyomu", newEpisodeUrl: "https://kakuyomu.jp/my/works/1/episodes/new" }],
+      posts: [{ episodePath: "本文/001.txt", site: "kakuyomu", postedAt: "2026-10-01T00:00:00.000Z" }],
+      revisions: [{ episodePath: "本文/001.txt", site: "kakuyomu", revisedAt: "2026-11-03T00:00:00.000Z" }],
+      rankings: [],
+    });
+    expect(revisionFor(ledger, "本文/001.txt", "kakuyomu")?.revisedAt).toBe("2026-11-03T00:00:00.000Z");
+    // 印の無い記録は「分からない」（出し直しが要るとは言わない）
+    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", "c".repeat(64))).toBe("unknown");
   });
 
   test("投稿の記録は、その話の記録を先に、無ければファイルまるごとの記録を引く", () => {

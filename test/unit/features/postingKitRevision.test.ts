@@ -5,6 +5,7 @@ import type { AIRegistry } from "../../../src/ai/registry";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { postingBodyHash } from "../../../src/core/postingBodyHash";
 
 /**
  * 修正版の出し直し（作者の依頼 2026-11-03「修正後再投稿に対応してください」。設計書6.68.7）。
@@ -227,50 +228,50 @@ describe("修正版の出し直し", () => {
     expect(picks[0].title).toContain("小説家になろう");
   });
 
-  test("全部のサイトに出した話では、出し直しを先頭に出し、投稿済みのサイトすべてを選べる", async () => {
-    writeLedger({
-      ...PARTLY_POSTED,
-      posts: [
-        ...PARTLY_POSTED.posts,
-        { episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z" },
-      ],
-    });
+  /** 両方のサイトへ出した台帳 */
+  const ALL_POSTED = {
+    ...PARTLY_POSTED,
+    posts: [
+      ...PARTLY_POSTED.posts,
+      { episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z" },
+    ],
+  };
+
+  test("全部のサイトに出した話では、出し方を訊かずに出し直しのサイト選びへ進み、投稿済みのサイトすべてを選べる", async () => {
+    writeLedger(ALL_POSTED);
     const picks = stubQuickPick([
-      byKey("mode", "revise"),
       (items) => items.filter((item) => item.site === "narou"),
       byKey("answer", "revised"),
     ]);
     await postNewEpisode(work, {} as unknown as AIRegistry, episode);
 
-    expect(picks[0].items[0].mode).toBe("revise");
-    expect(picks[1].items.map((item) => item.site)).toEqual(["narou", "kakuyomu"]);
-    // 既定で全部に印が付いている（直した話は、出したサイトすべてで直すのがふつう）
-    expect(picks[1].items.every((item) => item.picked === true)).toBe(true);
+    // 最初の画面がサイト選び（出し方の画面は出さない。選べることが出し直ししか無い）
+    expect(picks[0].canPickMany).toBe(true);
+    expect(picks[0].items.map((item) => item.site)).toEqual(["narou", "kakuyomu"]);
+    expect(picks[0].placeHolder).toContain("すべてへ投稿済み");
+    // 印の無い記録だけなので、直したサイトは分からない → 既定で全部に印
+    expect(picks[0].items.every((item) => item.picked === true)).toBe(true);
 
-    // なろうは管理画面の形を確かめていないので、何も開かない（推測のURLを開かせない）。
+    // なろうは管理画面を組み立てられない（Nコードでなく数字の小説番号で指す）ので、何も開かない。
     // 代わりに、どこを開けばよいかを言う
     expect(env.opened).toEqual([]);
-    expect(picks[2].placeHolder).toContain("第13話");
-    expect(picks[2].placeHolder).toContain("編集画面");
+    expect(picks[1].placeHolder).toContain("第13話");
+    expect(picks[1].placeHolder).toContain("編集画面");
 
     const ledger = readLedger();
     expect(ledger.posts).toHaveLength(2);
     expect(ledger.revisions?.map((record) => record.site)).toEqual(["narou"]);
   });
 
-  test("全部のサイトに出した話で「新しい話としてもう一度出す」を選ぶと、今までどおり全サイトを案内する", async () => {
-    writeLedger({
-      ...PARTLY_POSTED,
-      posts: [
-        ...PARTLY_POSTED.posts,
-        { episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z" },
-      ],
-    });
-    const picks = stubQuickPick([byKey("mode", "repost"), () => undefined]);
+  test("全部のサイトに出した話で「新しい話としてもう一度すべてのサイトへ出す」は出さない（作者の裁定 2026-11-03 昼）", async () => {
+    writeLedger(ALL_POSTED);
+    const picks = stubQuickPick([() => undefined]);
     await postNewEpisode(work, {} as unknown as AIRegistry, episode);
-    expect(picks[1].title).toContain("小説家になろう");
-    expect(picks[1].title).not.toContain("修正版");
-    expect(env.opened).toContain(narouUrl);
+    const labels = picks.flatMap((pick) => pick.items.map((item) => item.label));
+    expect(labels.some((label) => label.includes("新しい話としてもう一度"))).toBe(false);
+    expect(picks.some((pick) => pick.items.some((item) => item.mode === "repost"))).toBe(false);
+    // 新しい話の投稿ページは開かない
+    expect(env.opened).toEqual([]);
   });
 
   test("アルファポリスは作品の管理画面（/mypage/content/detail/9桁）を開く", async () => {
@@ -278,22 +279,81 @@ describe("修正版の出し直し", () => {
       sites: [{ site: "alphapolis", newEpisodeUrl: alphapolisUrl }],
       posts: [{ episodePath: relativeEpisode, site: "alphapolis", postedAt: "2026-10-01T00:00:00.000Z" }],
     });
-    stubQuickPick([byKey("mode", "revise"), (items) => items, byKey("answer", "skip")]);
+    stubQuickPick([(items) => items, byKey("answer", "skip")]);
     await postNewEpisode(work, {} as unknown as AIRegistry, episode);
     expect(env.opened).toEqual(["https://www.alphapolis.co.jp/mypage/content/detail/123456789"]);
     // 飛ばしたら記録しない
     expect(readLedger().revisions).toBeUndefined();
   });
 
-  test("出し直しを2回記録しても、同じ話・同じサイトの記録は1件に保つ（日時は新しいほう）", async () => {
+  test("サイトの話の番号が記録にあれば、話の編集画面を直に開く（カクヨム・アルファポリス）", async () => {
+    writeLedger({
+      sites: [
+        { site: "kakuyomu", newEpisodeUrl: kakuyomuUrl },
+        { site: "alphapolis", newEpisodeUrl: alphapolisUrl },
+      ],
+      siteProfiles: [{ site: "kakuyomu", workId: "16816927859" }],
+      posts: [
+        { episodePath: relativeEpisode, site: "kakuyomu", postedAt: "2026-10-01T00:00:00.000Z", siteEpisodeId: "16816927860" },
+        { episodePath: relativeEpisode, site: "alphapolis", postedAt: "2026-10-01T00:00:00.000Z", siteEpisodeId: "987654" },
+      ],
+    });
+    const picks = stubQuickPick([(items) => items, byKey("answer", "skip"), byKey("answer", "skip")]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+    expect(env.opened).toEqual([
+      "https://kakuyomu.jp/my/works/16816927859/episodes/16816927860",
+      "https://www.alphapolis.co.jp/mypage/novel/save_episode/123456789/987654",
+    ]);
+    expect(picks[1].placeHolder).toContain("開いた第13話の編集画面");
+    expect(picks[1].items.some((item) => item.label.includes("話の編集画面をもう一度開く"))).toBe(true);
+  });
+
+  test("出し直しを2回記録すると、同じ話・同じサイトでも履歴として2件残る（作者の裁定 2026-11-03 昼）", async () => {
     writeLedger({
       ...PARTLY_POSTED,
       revisions: [{ episodePath: relativeEpisode, site: "kakuyomu", revisedAt: "2026-10-05T00:00:00.000Z" }],
     });
-    stubQuickPick([byKey("mode", "revise"), (items) => items, byKey("answer", "revised")]);
+    const picks = stubQuickPick([byKey("mode", "revise"), (items) => items, byKey("answer", "revised")]);
     await postNewEpisode(work, {} as unknown as AIRegistry, episode);
     const revisions = readLedger().revisions ?? [];
-    expect(revisions).toHaveLength(1);
-    expect(revisions[0].revisedAt).not.toBe("2026-10-05T00:00:00.000Z");
+    expect(revisions).toHaveLength(2);
+    expect(revisions[0].revisedAt).toBe("2026-10-05T00:00:00.000Z");
+    expect(revisions[1].revisedAt).not.toBe("2026-10-05T00:00:00.000Z");
+    // サイト選びの画面には最新の出し直しだけを添える（履歴は並べない）
+    const sitePick = picks.find((pick) => pick.canPickMany);
+    const description = String(sitePick?.items[0].description ?? "");
+    expect(description).toContain("修正版 2026-10-05");
+    expect(description.match(/修正版/g)).toHaveLength(1);
+  });
+
+  test("投稿と出し直しの記録に、そのときの本文の印を残す（6.68.7）", async () => {
+    writeLedger(PARTLY_POSTED);
+    stubQuickPick([byKey("mode", "post"), byKey("answer", "posted"), () => undefined]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+    const posted = readLedger().posts.find((post) => post.site === "narou");
+    expect(posted?.bodyHash).toBe(postingBodyHash(body));
+
+    stubQuickPick([(items) => items, byKey("answer", "revised"), byKey("answer", "revised")]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+    const revisions = readLedger().revisions ?? [];
+    expect(revisions).toHaveLength(2);
+    expect(revisions.every((record) => record.bodyHash === postingBodyHash(body))).toBe(true);
+  });
+
+  test("話を名指ししたとき、投稿のあとに直したサイトだけに既定で印を付け、そう添える", async () => {
+    writeLedger({
+      ...ALL_POSTED,
+      posts: [
+        { episodePath: relativeEpisode, site: "kakuyomu", postedAt: "2026-10-01T00:00:00.000Z", bodyHash: postingBodyHash("直す前の本文") },
+        { episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z", bodyHash: postingBodyHash(body) },
+      ],
+    });
+    const picks = stubQuickPick([() => undefined]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+    const kakuyomu = picks[0].items.find((item) => item.site === "kakuyomu");
+    const narou = picks[0].items.find((item) => item.site === "narou");
+    expect(kakuyomu?.picked).toBe(true);
+    expect(String(kakuyomu?.description)).toContain("投稿後に直しています");
+    expect(narou?.picked).toBe(false);
   });
 });

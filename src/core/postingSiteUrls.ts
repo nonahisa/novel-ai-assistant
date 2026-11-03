@@ -151,20 +151,26 @@ export function readerStatsPageUrl(
 /**
  * 修正版を出し直すときに開く、作品の管理画面（設計書6.68.7。作者の依頼 2026-11-03）。
  *
- * ## 話の編集画面は組み立てない
- *
- * 話の編集画面は、どのサイトも**サイトが振った話の番号**で話を指す（アルファポリスなら
- * `save_episode/{作品ID}/{話ID}`）。台帳が知っているのは作品IDと手元のファイルだけで、
- * 話の番号はどこにも残っていない（ページを読みにいけば分かるが、6.68.1 で読まないと決めている）。
- * だから作品の管理画面を開き、そこから作者が話を選ぶ。
+ * 話の編集画面を直に開けるのは、投稿の記録にサイトの話の番号があるときだけ
+ * （`episodeEditPageUrl`）。無ければここで作品の管理画面を開き、そこから作者が話を選ぶ。
  *
  * ## 組み立てるのは形を確かめたサイトだけ
  *
  * - カクヨム：`/my/works/{作品ID}`（`readerStatsPageUrl` と同じ画面。話の一覧が並ぶ）
  * - アルファポリス：`/mypage/content/detail/{9桁の作品ID}`（2026-11-01 作者の Chrome で確かめた）
- * - なろう・note：組み立てない（なろうの管理画面はNコードでなくサイト内部の番号で作品を指すと
- *   見ている。noteは作品の単位が無い）。**推測のURLを開かせない**——とくに新しい話の投稿ページを
- *   代わりに開くと、修正版がもう1本の新しい話として公開される
+ * - なろう：**組み立てられない**（2026-11-03 に公開の情報で確かめた）。作品の管理画面は
+ *   `https://syosetu.com/usernovelmanage/top/ncode/{小説番号}/` で、`ncode/` の後ろは
+ *   **Nコードではなくサイト内部の数字の小説番号**である。根拠：①実在の作品ページ
+ *   `ncode.syosetu.com/n8562hc/` の本文に、その作者の別作品の管理画面として
+ *   `syosetu.com/usernovelmanage/top/ncode/2930206/` が載っている。同じページの感想・レビューの
+ *   リンクも `ncode/1848378/` と数字で作品を指す ②なろうへ投稿する公開のツール
+ *   （GitHub の ichir0roie/ai-novel-core の `tool/narou.py`・`.claude/docs/narou.md`、2026-10 の
+ *   画面と突き合わせ済みと書かれている）が、同じ形に「小説の番号。Nコードではない」を入れている。
+ *   台帳が持つのはNコード（`n1234ab`）だけで、Nコードから小説番号を引く公開の道は無い
+ * - note：組み立てない（作品の単位が無い）
+ *
+ * **推測のURLを開かせない**——とくに新しい話の投稿ページを代わりに開くと、修正版がもう1本の
+ * 新しい話として公開される。組み立てられないサイトでは、呼ぶ側が開かずに案内だけ出す。
  *
  * 作品IDは台帳の値を先に見て、無ければ投稿ページのURLから導く（`readerStatsPageUrl` と同じ順）。
  *
@@ -177,13 +183,98 @@ export function workManagePageUrl(
 ): string | undefined {
   if (site === "kakuyomu") return readerStatsPageUrl(site, profile, postUrl);
   if (site === "alphapolis") {
-    const workId =
-      alphapolisWorkId(profile?.workId) ?? deriveSiteProfile(site, postUrl).workId;
+    const workId = alphapolisManageWorkId(profile, postUrl);
     return workId
       ? `https://www.alphapolis.co.jp/mypage/content/detail/${workId}`
       : undefined;
   }
   return undefined;
+}
+
+/** アルファポリスの作品ID（9桁）。台帳の値が先、無ければ投稿ページのURLから */
+function alphapolisManageWorkId(
+  profile: PostingSiteProfile | undefined,
+  postUrl?: string | null
+): string | undefined {
+  return alphapolisWorkId(profile?.workId) ?? deriveSiteProfile("alphapolis", postUrl).workId;
+}
+
+/** カクヨムの作品ID（数字）。台帳の値が先、無ければ投稿ページのURLから（`readerStatsPageUrl` と同じ） */
+function kakuyomuManageWorkId(
+  profile: PostingSiteProfile | undefined,
+  postUrl?: string | null
+): string | undefined {
+  const stored = (profile?.workId ?? "").trim();
+  return /^\d+$/.test(stored) ? stored : deriveSiteProfile("kakuyomu", postUrl).workId;
+}
+
+/**
+ * 出し直しで、話の編集画面を直に開くURL（設計書6.68.7。作者の依頼 2026-11-03「再投稿ページのURLは
+ * 解析できますか？」）。
+ *
+ * 話の編集画面はどのサイトも**サイトが振った話の番号**で話を指す。台帳はサイトを読みにいかない
+ * （6.68.1）ので、番号は投稿の記録の `siteEpisodeId`（ヘルパーが投稿のあとに送り返す値）にしか無い。
+ *
+ * - カクヨム：`https://kakuyomu.jp/my/works/{作品ID}/episodes/{話ID}`（話IDは数字。形は本体の指示で
+ *   決めた。作品の管理画面 `/my/works/{作品ID}` は確かめてあり、読者向けの話のページ
+ *   `/works/{作品ID}/episodes/{話ID}` と同じ番号を使う。**編集画面そのものは作者の Chrome で
+ *   まだ読んでいない**）
+ * - アルファポリス：`https://www.alphapolis.co.jp/mypage/novel/save_episode/{9桁の作品ID}/{話ID}`
+ *   （2026-11-01 作者の Chrome で作者用ページを読んだとき、新しい話の `save_episode/{作品ID}` と
+ *   並んで話の編集がこの形だと分かった。設計書6.68.5。話IDは数字）
+ * - なろう：組み立てない。話の編集は `usernoveldatamanage/updateinput/ncode/{小説番号}/noveldataid/{部分の番号}/`
+ *   で、作品の管理画面と同じく**数字の小説番号**が要る（`workManagePageUrl` の根拠を参照）。
+ *   話の番号だけでは開けない
+ * - note：組み立てない
+ *
+ * **番号の形はサイトごとに確かめる**（数字だけ）。台帳の欄は手で直せるので、形の違う番号を
+ * パスへそのまま入れて別のページを開かせない。
+ *
+ * @returns 開けるURL。組み立てられなければ undefined（呼ぶ側は作品の管理画面へ落とす）
+ */
+export function episodeEditPageUrl(
+  site: PostingSiteId,
+  profile: PostingSiteProfile | undefined,
+  postUrl: string | null | undefined,
+  siteEpisodeId: string | null | undefined
+): string | undefined {
+  const episodeId = (siteEpisodeId ?? "").trim();
+  if (!/^\d+$/.test(episodeId)) return undefined;
+  if (site === "kakuyomu") {
+    const workId = kakuyomuManageWorkId(profile, postUrl);
+    return workId ? `https://kakuyomu.jp/my/works/${workId}/episodes/${episodeId}` : undefined;
+  }
+  if (site === "alphapolis") {
+    const workId = alphapolisManageWorkId(profile, postUrl);
+    return workId
+      ? `https://www.alphapolis.co.jp/mypage/novel/save_episode/${workId}/${episodeId}`
+      : undefined;
+  }
+  return undefined;
+}
+
+/** 出し直しで開く画面（話の編集画面か、作品の管理画面か） */
+export interface RevisionPage {
+  url: string;
+  /** `"episode"`＝話の編集画面を直に開く／`"work"`＝作品の管理画面から話を選んでもらう */
+  kind: "episode" | "work";
+}
+
+/**
+ * 出し直しで開く画面を決める（6.68.7）。**話の編集画面を先に、組めなければ作品の管理画面へ落とす。**
+ *
+ * @returns どちらも組み立てられなければ undefined（なろう・note。何も開かず案内だけ）
+ */
+export function revisionPageUrl(
+  site: PostingSiteId,
+  profile: PostingSiteProfile | undefined,
+  postUrl: string | null | undefined,
+  siteEpisodeId: string | null | undefined
+): RevisionPage | undefined {
+  const episode = episodeEditPageUrl(site, profile, postUrl, siteEpisodeId);
+  if (episode) return { url: episode, kind: "episode" };
+  const work = workManagePageUrl(site, profile, postUrl);
+  return work ? { url: work, kind: "work" } : undefined;
 }
 
 /**
