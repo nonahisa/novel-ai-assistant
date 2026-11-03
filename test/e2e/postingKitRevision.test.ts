@@ -33,7 +33,7 @@ import {
   pressDialogButton,
 } from "./support/workbenchDom";
 import { runCommand } from "./support/quickInput";
-import { postingBodyHash } from "../../src/core/postingBodyHash";
+import { postingTextHash } from "../../src/core/postingBodyHash";
 
 const EPISODES = [
   { name: "第1話_はじまり.txt", text: "　朝の駅は静かだった。\n　直したあとの一文。\n" },
@@ -48,7 +48,8 @@ const POSTED = {
   episodePath: "本文/第1話_はじまり.txt",
   site: "kakuyomu",
   postedAt: "2026-10-01T00:00:00.000Z",
-  bodyHash: postingBodyHash(POSTED_TEXT),
+  // 題と本文の両方の印（0.124.1 の取り方）。題はファイル名から読む「はじまり」
+  bodyHash: postingTextHash("はじまり", POSTED_TEXT),
 };
 
 /** カクヨムへは出した・なろうはまだ */
@@ -158,8 +159,8 @@ test("話の右クリック「この話を投稿する」から修正版を出�
         expect(saved.revisions?.[0]).toMatchObject({
           episodePath: "本文/第1話_はじまり.txt",
           site: "kakuyomu",
-          // 出し直したときの本文の印（次に「直したか」を比べる相手になる）
-          bodyHash: postingBodyHash(EPISODES[0].text),
+          // 出し直したときの題と本文の印（次に「直したか」を比べる相手になる）
+          bodyHash: postingTextHash("はじまり", EPISODES[0].text),
         });
 
         // 告知の質問は出さない（新しい話ではない）
@@ -202,6 +203,13 @@ test("作品の「新話投稿」で、投稿のあとに直した話があれ�
         await pickQuickPickRow(page, "出し直しました");
         await waitUntil(async () => ((await ledger(session)).revisions ?? []).length === 1, "台帳に出し直しの記録が1件入る", 20_000);
         expect((await ledger(session)).posts, "投稿の記録が変わった").toEqual([POSTED]);
+
+        // 未投稿の話が残っているので、続けて新しい話を投稿するかを訊く（作者の答え 2026-11-03 昼）
+        await waitTitle(page, "続けて新しい話を投稿しますか", "続けて新しい話を投稿するかを訊く");
+        await pickQuickPickRow(page, "続けて新しい話を投稿する");
+        await waitTitle(page, "小説家になろう", "未投稿の話の新しい話の案内（なろう）が出る");
+        await pickQuickPickRow(page, "中止する");
+        expect((await ledger(session)).revisions ?? [], "続けた新話投稿で、出し直しの記録が消えた").toHaveLength(1);
       } finally {
         await session.app.evaluate(({ clipboard }, value) => clipboard.writeText(value), before).catch(() => undefined);
       }

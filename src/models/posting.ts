@@ -633,7 +633,10 @@ export interface PostingRecord {
   order?: number;
   /**
    * 投稿したときの本文の印（設計書6.68.7。作者の裁定 2026-11-03 昼）。
-   * `core/postingBodyHash.ts` の `postingBodyHash` で取った値。
+   * `core/postingBodyHash.ts` の `postingTextHash` で取った値。
+   *
+   * 形は2つある（`isTitledTextHash`）。0.124.1 からは**話の題と本文の両方**の印で、頭に
+   * `v2:` が付く。0.124.0 の印は本文だけの16進64字（頭に何も付かない）。
    *
    * **これから投稿する分からしか入らない。** 無い記録（それより前の投稿・基準線）は、
    * 投稿のあとに直したかどうかが「分からない」——出し直しが要るとは言わない。
@@ -669,7 +672,7 @@ export interface PostingRevisionRecord {
   revisedAt: string;
   chapter?: number;
   order?: number;
-  /** 出し直したときの本文の印（`PostingRecord.bodyHash` と同じ。0.124.0 から） */
+  /** 出し直したときの本文の印（`PostingRecord.bodyHash` と同じ形。0.124.0 から） */
   bodyHash?: string;
 }
 
@@ -822,6 +825,59 @@ export interface PostingSiteFacts {
   completionAt?: string;
   ownedVia?: ReaderStatsOwnedVia;
   ownedViaAt?: string;
+  /**
+   * サイトの中の数字の作品番号（設計書6.68.7。いまはなろうの「小説番号」だけ）。`siteWorkNumberAt` は入れた日時。
+   *
+   * なろうの作者用の画面（作品の管理・話の編集）は、Nコード（`siteProfiles.workId`）ではなく
+   * この番号で作品を指す。台帳はサイトを読みにいかない（6.68.1）ので、入るのはヘルパーが
+   * 送り返した値だけ（`withSiteWorkNumber`）。**作者の手入力の欄（`siteProfiles`）には入れない**
+   * ——作品情報の画面で欄を組み直すと消える恐れがあり、作者が打つ値でもない。
+   */
+  siteWorkNumber?: string;
+  siteWorkNumberAt?: string;
+}
+
+/** サイトの中の数字の作品番号の形（URL のパスへ入るので、数字だけ） */
+const SITE_WORK_NUMBER_PATTERN = /^\d{1,20}$/;
+
+/** そのサイトの、サイトの中の数字の作品番号（`PostingSiteFacts.siteWorkNumber`） */
+export function siteWorkNumberFor(
+  ledger: PostingLedger,
+  site: PostingSiteId
+): string | undefined {
+  return siteFactsFor(ledger, site)?.siteWorkNumber;
+}
+
+/**
+ * サイトの中の数字の作品番号を入れる（6.68.7。**元の台帳は書き換えない**）。
+ *
+ * ヘルパーが話IDと一緒に送り返す番号を受ける口（封筒の欄の形はヘルパーと相談中で、
+ * 封筒の読み取りにはまだ繋いでいない）。同じ番号なら台帳をそのまま返す（保存を増やさない）。
+ *
+ * @returns 入れた台帳。番号の形が違えば undefined（呼ぶ側が黙って捨てないように）
+ */
+export function withSiteWorkNumber(
+  ledger: PostingLedger,
+  site: PostingSiteId,
+  siteWorkNumber: string,
+  recordedAt: string
+): PostingLedger | undefined {
+  const number = siteWorkNumber.trim();
+  if (!SITE_WORK_NUMBER_PATTERN.test(number)) return undefined;
+  const current = siteFactsFor(ledger, site);
+  if (current?.siteWorkNumber === number) return ledger;
+  const next: PostingSiteFacts = {
+    ...(current ?? { site }),
+    siteWorkNumber: number,
+    siteWorkNumberAt: recordedAt,
+  };
+  const facts = ledger.siteFacts ?? [];
+  return {
+    ...ledger,
+    siteFacts: current
+      ? facts.map((entry) => (entry.site === site ? next : entry))
+      : [...facts, next],
+  };
 }
 
 /** タグの付け替え1回ぶん */
@@ -1137,8 +1193,36 @@ export interface SkippedSiteCompletion {
  * 勝手に直して上書きすると、作者が貼ったURLや投稿の記録が黙って消える
  * （章立て・本の設計図と同じ約束）。
  */
-/** 本文の印の形（SHA-256 の16進64字。`core/hash.ts` の `hashText` が返す形） */
-const BODY_HASH_PATTERN = /^[0-9a-f]{64}$/;
+/**
+ * 本文の印の形（SHA-256 の16進64字。`core/hash.ts` の `hashText` が返す形）。
+ * 頭の `v2:` は題も含めた印（0.124.1 から。`TITLED_TEXT_HASH_PREFIX`）、無ければ本文だけの印（0.124.0）
+ */
+const BODY_HASH_PATTERN = /^(?:v2:)?[0-9a-f]{64}$/;
+
+/**
+ * 題と本文の両方で取った印の頭（0.124.1。作者の答え 2026-11-03 昼「題だけ直した話も促す」）。
+ *
+ * **印の取り方を変えたので、どちらの取り方の印かを値に持たせる。** 0.124.0 の印（本文だけ）を
+ * 今の取り方と比べると、直していない話まで全部「直した」になる。頭の印で見分け、古い印は
+ * 本文だけの印どうしで比べる（`revisionNeed`）。
+ */
+export const TITLED_TEXT_HASH_PREFIX = "v2:";
+
+/** 題と本文の両方で取った印か（`TITLED_TEXT_HASH_PREFIX`） */
+export function isTitledTextHash(hash: string): boolean {
+  return hash.startsWith(TITLED_TEXT_HASH_PREFIX);
+}
+
+/**
+ * 今の話の印（`core/postingBodyHash.ts` の `postingTextHashes` が作る）。
+ * 古い印（本文だけ）とも比べられるよう、2つの取り方の両方を持つ。
+ */
+export interface PostingTextHashes {
+  /** 題と本文の両方の印（`v2:` 付き）。記録にはこちらを残す */
+  titled: string;
+  /** 本文だけの印（0.124.0 の取り方）。古い記録と比べるときだけ使う */
+  bodyOnly: string;
+}
 
 /**
  * サイトの話の番号として受け付ける形。**URL のパスへそのまま入る**ので、
@@ -1566,6 +1650,7 @@ function readSiteFactsRow(
     ["tags", "tagsAt"],
     ["completion", "completionAt"],
     ["ownedVia", "ownedViaAt"],
+    ["siteWorkNumber", "siteWorkNumberAt"],
   ] as const;
   for (const [key, atKey] of pairs) {
     if (entry[key] === undefined && entry[atKey] === undefined) continue;
@@ -1586,10 +1671,20 @@ function readSiteFactsRow(
       } else {
         onUnknownCompletion({ site, completion: entry.completion as string, completionAt: at });
       }
-    } else {
+    } else if (key === "ownedVia") {
       if (!isReaderStatsOwnedVia(entry.ownedVia)) invalid(`${entryPath}.ownedVia`);
       facts.ownedVia = entry.ownedVia;
       facts.ownedViaAt = at;
+    } else {
+      // 作品番号（6.68.7）。URL のパスへ入るので、数字でなければ直さずに止める
+      if (
+        typeof entry.siteWorkNumber !== "string" ||
+        !SITE_WORK_NUMBER_PATTERN.test(entry.siteWorkNumber.trim())
+      ) {
+        invalid(`${entryPath}.siteWorkNumber`);
+      }
+      facts.siteWorkNumber = (entry.siteWorkNumber as string).trim();
+      facts.siteWorkNumberAt = at;
     }
   }
   return facts;
@@ -2121,32 +2216,38 @@ export type RevisionNeed = "changed" | "same" | "unknown";
  * - `"same"`：同じ
  * - `"unknown"`：印が無い（0.124.0 より前の記録・基準線）か、そのサイトへまだ出していない
  *
- * @param currentHash 今の本文の印（`core/postingBodyHash.ts` の `postingBodyHash`）。
+ * **0.124.0 の印（本文だけ。頭に `v2:` が無い）との比べ方**：本文だけの印どうしで比べ、違えば
+ * `"changed"`（本文を直したことは確か）、同じなら `"unknown"`（題を直したかは、その印からは
+ * 分からない）。同じを `"same"` にすると、題だけ直した話を「直していない」と言い切ることになる。
+ * 今の取り方に揃えて比べると、直していない話まで全部「直した」になる（取り方が違うため）。
+ *
+ * @param current 今の話の印（`core/postingBodyHash.ts` の `postingTextHashes`）。
  *   **`models` は印を計算しない**（本文の正規化がメモ行の判定など `core` の部品を使うため）
  */
 export function revisionNeed(
   ledger: PostingLedger,
   target: PostingEpisodeTargetLike,
   site: PostingSiteId,
-  currentHash: string
+  current: PostingTextHashes
 ): RevisionNeed {
   if (!isPosted(ledger, target, site)) return "unknown";
   const sent = lastSentBodyHash(ledger, target, site);
   if (!sent) return "unknown";
-  return sent === currentHash ? "same" : "changed";
+  if (isTitledTextHash(sent)) return sent === current.titled ? "same" : "changed";
+  return sent === current.bodyOnly ? "unknown" : "changed";
 }
 
 /**
- * その話で、出し直しが要るサイト（登録したサイトのうち、投稿のあとに本文を直したもの）。
+ * その話で、出し直しが要るサイト（登録したサイトのうち、投稿のあとに本文か題を直したもの）。
  * 並びは `POSTING_SITES` の順（`postedSites` と同じ）。
  */
 export function sitesNeedingRevision(
   ledger: PostingLedger,
   target: PostingEpisodeTargetLike,
-  currentHash: string
+  current: PostingTextHashes
 ): PostingSiteId[] {
   return postedSites(ledger, target).filter(
-    (site) => revisionNeed(ledger, target, site, currentHash) === "changed"
+    (site) => revisionNeed(ledger, target, site, current) === "changed"
   );
 }
 

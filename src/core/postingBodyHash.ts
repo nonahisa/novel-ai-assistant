@@ -4,6 +4,7 @@ import { isCollectedFile } from "./episodeLabel";
 import { hashText } from "./hash";
 import { toLf } from "./eolSpace";
 import { stripMemoLines } from "./sceneMemo";
+import { TITLED_TEXT_HASH_PREFIX, type PostingTextHashes } from "../models/posting";
 
 /**
  * 投稿したときの本文の印（設計書6.68.7。作者の裁定 2026-11-03 昼「出し直しが要る話を示す」）。
@@ -28,22 +29,58 @@ import { stripMemoLines } from "./sceneMemo";
  * する——同じ話を4サイトへ出したとき、どのサイトの記録とも同じ物差しで比べられるように。
  * 変換の作りを直す（版を上げる）たびに全話が「直した」になることも避けられる。
  *
- * サブタイトルは印に入れない（本文だけ。サブタイトルの直しは促さない）。
+ * **話の題（サブタイトル）も印に入れる**（0.124.1。`postingTextHash`）。題も投稿欄へ貼るので、
+ * 題だけ直した話も出し直しを促す。0.124.0 の印は本文だけ（`postingBodyHash`）。
  *
  * VS Code API に依存しない（ブラウザ版でも同じ値になる。`hash.ts` は自前の SHA-256）。
  */
 export function normalizePostingBody(body: string): string {
-  return stripMemoLines(toLf(body).replace(/^﻿/, ""))
+  return stripMemoLines(toLf(body).replace(/^\uFEFF/, ""))
     .split("\n")
-    .map((line) => line.replace(/[ \t　]+$/, ""))
+    .map((line) => line.replace(/[ \t\u3000]+$/, ""))
     .join("\n")
     .replace(/^\n+/, "")
     .replace(/\n+$/, "");
 }
 
-/** 本文の印（`normalizePostingBody` を通した本文の SHA-256。16進64字） */
+/**
+ * 本文だけの印（`normalizePostingBody` を通した本文の SHA-256。16進64字）。
+ *
+ * **0.124.0 の記録に残っている取り方。** いま記録に残すのは題も含めた `postingTextHash` で、
+ * こちらは古い記録と比べるときだけ使う（`models/posting.ts` の `revisionNeed`）。
+ */
 export function postingBodyHash(body: string): string {
   return hashText(normalizePostingBody(body));
+}
+
+/**
+ * 話の題を、印を取る前に整える。前後の空白（全角を含む）だけを落とす。
+ * 題が無い話（`null`）と空の題は同じに扱う——どちらも投稿欄には何も入らない。
+ */
+function normalizePostingSubtitle(subtitle: string | null | undefined): string {
+  return (subtitle ?? "").trim();
+}
+
+/**
+ * 題と本文の両方の印（0.124.1。作者の答え 2026-11-03 昼「題だけ直した話も出し直しを促す」）。
+ *
+ * 投稿欄には題も貼るので、題だけ直した話も「直した」に数える。題と本文の間に `\u0000`
+ * （題にも本文にも現れない字）を挟み、「題の末尾を本文の頭へ移した」直しも別の印にする。
+ * 頭に `v2:`（`TITLED_TEXT_HASH_PREFIX`）を付け、0.124.0 の本文だけの印と見分ける。
+ */
+export function postingTextHash(subtitle: string | null | undefined, body: string): string {
+  return (
+    TITLED_TEXT_HASH_PREFIX +
+    hashText(`${normalizePostingSubtitle(subtitle)}\u0000${normalizePostingBody(body)}`)
+  );
+}
+
+/** 今の話の印を、古い記録とも比べられる形で作る（`revisionNeed` へ渡す） */
+export function postingTextHashes(
+  subtitle: string | null | undefined,
+  body: string
+): PostingTextHashes {
+  return { titled: postingTextHash(subtitle, body), bodyOnly: postingBodyHash(body) };
 }
 
 /** 1つのファイルから投稿する単位（ふつうの話は1つ、合本は話の数だけ） */

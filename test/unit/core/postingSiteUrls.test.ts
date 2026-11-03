@@ -5,6 +5,7 @@ import {
   deriveSiteProfile,
   episodeEditPageUrl,
   followNewEpisodeUrl,
+  NAROU_WORK_LIST_URL,
   NEW_EPISODE_URL_FOLLOW_QUESTION,
   newEpisodeUrlDraft,
   planNewEpisodeUrlOnWorkIdChange,
@@ -450,7 +451,7 @@ describe("出し直しで開く作品の管理画面", () => {
     expect(workManagePageUrl("alphapolis", undefined, undefined)).toBeUndefined();
   });
 
-  test("なろう・noteは組み立てない（投稿ページのURLがあっても、それを返さない）", () => {
+  test("なろうは小説番号が無ければ組み立てない（Nコードや投稿ページのURLからは作らない）。noteも組み立てない", () => {
     expect(
       workManagePageUrl(
         "narou",
@@ -460,6 +461,16 @@ describe("出し直しで開く作品の管理画面", () => {
     ).toBeUndefined();
     expect(workManagePageUrl("note", undefined, "https://note.com/notes/new")).toBeUndefined();
   });
+
+  test("なろうは小説番号（数字）があれば /usernovelmanage/top/ncode/{小説番号}/", () => {
+    expect(workManagePageUrl("narou", { workId: "n1234ab" }, undefined, "2930206")).toBe(
+      "https://syosetu.com/usernovelmanage/top/ncode/2930206/"
+    );
+    // 数字でない番号はパスへ入れない
+    for (const number of ["n1234ab", "1/../2", "", "２９"]) {
+      expect(workManagePageUrl("narou", undefined, undefined, number), number).toBeUndefined();
+    }
+  });
 });
 
 /**
@@ -467,58 +478,73 @@ describe("出し直しで開く作品の管理画面", () => {
  * 解析できますか？」）。サイトの話の番号が投稿の記録にあるときだけ。無ければ作品の管理画面へ落とす。
  */
 describe("出し直しで開く話の編集画面", () => {
+  const narouPostUrl = "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/";
+
   test("カクヨムは /my/works/{作品ID}/episodes/{話ID}", () => {
     expect(
-      episodeEditPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, "16816927860000000001")
+      episodeEditPageUrl({
+        site: "kakuyomu",
+        profile: { workId: "16816927859" },
+        postUrl: 実機.newEpisodeUrl,
+        siteEpisodeId: "16816927860000000001",
+      })
     ).toBe("https://kakuyomu.jp/my/works/16816927859/episodes/16816927860000000001");
     // 作品IDが台帳に無ければ投稿ページのURLから
-    expect(episodeEditPageUrl("kakuyomu", undefined, 実機.newEpisodeUrl, "5")).toBe(
-      `https://kakuyomu.jp/my/works/${実機.workId}/episodes/5`
-    );
+    expect(
+      episodeEditPageUrl({ site: "kakuyomu", profile: undefined, postUrl: 実機.newEpisodeUrl, siteEpisodeId: "5" })
+    ).toBe(`https://kakuyomu.jp/my/works/${実機.workId}/episodes/5`);
   });
 
   test("アルファポリスは /mypage/novel/save_episode/{9桁}/{話ID}", () => {
     const postUrl = "https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366";
-    expect(episodeEditPageUrl("alphapolis", undefined, postUrl, "987654")).toBe(
-      "https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366/987654"
-    );
+    expect(
+      episodeEditPageUrl({ site: "alphapolis", profile: undefined, postUrl, siteEpisodeId: "987654" })
+    ).toBe("https://www.alphapolis.co.jp/mypage/novel/save_episode/637622366/987654");
   });
 
-  test("なろう・noteは話の番号があっても組み立てない（なろうは数字の小説番号が要る）", () => {
+  test("なろうは小説番号と話の番号（部分の番号）の両方があるときだけ /usernoveldatamanage/updateinput/…", () => {
     expect(
-      episodeEditPageUrl(
-        "narou",
-        { workId: "n1234ab" },
-        "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/",
-        "12345"
-      )
+      episodeEditPageUrl({
+        site: "narou",
+        profile: { workId: "n1234ab" },
+        postUrl: narouPostUrl,
+        siteEpisodeId: "12345",
+        siteWorkNumber: "2930206",
+      })
+    ).toBe("https://syosetu.com/usernoveldatamanage/updateinput/ncode/2930206/noveldataid/12345/");
+    // 小説番号が無ければ、話の番号だけでは開けない
+    expect(
+      episodeEditPageUrl({ site: "narou", profile: { workId: "n1234ab" }, postUrl: narouPostUrl, siteEpisodeId: "12345" })
     ).toBeUndefined();
-    expect(episodeEditPageUrl("note", undefined, undefined, "1")).toBeUndefined();
+    expect(episodeEditPageUrl({ site: "note", profile: undefined, siteEpisodeId: "1" })).toBeUndefined();
   });
 
   test("数字でない話の番号はパスへ入れない（別のページを開かせない）", () => {
     for (const id of ["new", "1/../2", "", " ", "１２"]) {
-      expect(episodeEditPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, id), id).toBeUndefined();
+      expect(
+        episodeEditPageUrl({ site: "kakuyomu", profile: { workId: "16816927859" }, postUrl: 実機.newEpisodeUrl, siteEpisodeId: id }),
+        id
+      ).toBeUndefined();
     }
-    expect(episodeEditPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, undefined)).toBeUndefined();
+    expect(
+      episodeEditPageUrl({ site: "kakuyomu", profile: { workId: "16816927859" }, postUrl: 実機.newEpisodeUrl })
+    ).toBeUndefined();
   });
 
-  test("話の番号が無ければ作品の管理画面へ落とし、どちらも無理なら undefined", () => {
-    expect(revisionPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, "7")).toEqual({
-      url: "https://kakuyomu.jp/my/works/16816927859/episodes/7",
-      kind: "episode",
-    });
-    expect(revisionPageUrl("kakuyomu", { workId: "16816927859" }, 実機.newEpisodeUrl, undefined)).toEqual({
-      url: "https://kakuyomu.jp/my/works/16816927859",
-      kind: "work",
-    });
+  test("話の番号が無ければ作品の管理画面へ、なろうで小説番号も無ければ自分の作品の一覧へ落とす", () => {
     expect(
-      revisionPageUrl(
-        "narou",
-        { workId: "n1234ab" },
-        "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/",
-        "12345"
-      )
-    ).toBeUndefined();
+      revisionPageUrl({ site: "kakuyomu", profile: { workId: "16816927859" }, postUrl: 実機.newEpisodeUrl, siteEpisodeId: "7" })
+    ).toEqual({ url: "https://kakuyomu.jp/my/works/16816927859/episodes/7", kind: "episode" });
+    expect(
+      revisionPageUrl({ site: "kakuyomu", profile: { workId: "16816927859" }, postUrl: 実機.newEpisodeUrl })
+    ).toEqual({ url: "https://kakuyomu.jp/my/works/16816927859", kind: "work" });
+    expect(
+      revisionPageUrl({ site: "narou", profile: { workId: "n1234ab" }, postUrl: narouPostUrl, siteWorkNumber: "2930206" })
+    ).toEqual({ url: "https://syosetu.com/usernovelmanage/top/ncode/2930206/", kind: "work" });
+    expect(
+      revisionPageUrl({ site: "narou", profile: { workId: "n1234ab" }, postUrl: narouPostUrl, siteEpisodeId: "12345" })
+    ).toEqual({ url: NAROU_WORK_LIST_URL, kind: "list" });
+    expect(NAROU_WORK_LIST_URL).toBe("https://syosetu.com/usernovel/list/");
+    expect(revisionPageUrl({ site: "note", profile: undefined, postUrl: "https://note.com/notes/new" })).toBeUndefined();
   });
 });

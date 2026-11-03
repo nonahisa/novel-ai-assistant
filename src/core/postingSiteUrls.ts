@@ -149,6 +149,29 @@ export function readerStatsPageUrl(
 }
 
 /**
+ * なろうの「自分の作品の一覧」（6.68.7。作者の答え 2026-11-03 昼）。
+ *
+ * 作品の管理画面は数字の小説番号が要る（`workManagePageUrl`）。番号が台帳に無いあいだは、
+ * 番号の要らないこの一覧を開き、そこから作者に作品を選んでもらう。形の根拠は、なろうへ投稿する
+ * 公開のツール（GitHub の ichir0roie/ai-novel-core の `tool/narou.py`。2026-10 の画面と突き合わせ
+ * 済みとある）が作品一覧の URL として持つ値と、本体の指示（2026-11-03）。
+ */
+export const NAROU_WORK_LIST_URL = "https://syosetu.com/usernovel/list/";
+
+/** 出し直しで開く画面を決めるのに要るもの */
+export interface RevisionPageInput {
+  site: PostingSiteId;
+  /** 台帳にあるそのサイトの作品情報（作品ID） */
+  profile: PostingSiteProfile | undefined;
+  /** 台帳にある投稿ページのURL（作品IDが無いときの拠りどころ） */
+  postUrl?: string | null;
+  /** 投稿の記録にあるサイトの話の番号（`PostingRecord.siteEpisodeId`） */
+  siteEpisodeId?: string | null;
+  /** サイトの中の数字の作品番号（なろうの小説番号。`PostingSiteFacts.siteWorkNumber`） */
+  siteWorkNumber?: string | null;
+}
+
+/**
  * 修正版を出し直すときに開く、作品の管理画面（設計書6.68.7。作者の依頼 2026-11-03）。
  *
  * 話の編集画面を直に開けるのは、投稿の記録にサイトの話の番号があるときだけ
@@ -158,15 +181,15 @@ export function readerStatsPageUrl(
  *
  * - カクヨム：`/my/works/{作品ID}`（`readerStatsPageUrl` と同じ画面。話の一覧が並ぶ）
  * - アルファポリス：`/mypage/content/detail/{9桁の作品ID}`（2026-11-01 作者の Chrome で確かめた）
- * - なろう：**組み立てられない**（2026-11-03 に公開の情報で確かめた）。作品の管理画面は
- *   `https://syosetu.com/usernovelmanage/top/ncode/{小説番号}/` で、`ncode/` の後ろは
- *   **Nコードではなくサイト内部の数字の小説番号**である。根拠：①実在の作品ページ
- *   `ncode.syosetu.com/n8562hc/` の本文に、その作者の別作品の管理画面として
- *   `syosetu.com/usernovelmanage/top/ncode/2930206/` が載っている。同じページの感想・レビューの
- *   リンクも `ncode/1848378/` と数字で作品を指す ②なろうへ投稿する公開のツール
+ * - なろう：**小説番号（`siteWorkNumber`）があるときだけ** `https://syosetu.com/usernovelmanage/top/ncode/{小説番号}/`。
+ *   `ncode/` の後ろは**Nコードではなくサイト内部の数字の小説番号**である（2026-11-03 に公開の情報で
+ *   確かめた）。根拠：①実在の作品ページ `ncode.syosetu.com/n8562hc/` の本文に、その作者の別作品の
+ *   管理画面として `syosetu.com/usernovelmanage/top/ncode/2930206/` が載っている。同じページの感想・
+ *   レビューのリンクも `ncode/1848378/` と数字で作品を指す ②なろうへ投稿する公開のツール
  *   （GitHub の ichir0roie/ai-novel-core の `tool/narou.py`・`.claude/docs/narou.md`、2026-10 の
  *   画面と突き合わせ済みと書かれている）が、同じ形に「小説の番号。Nコードではない」を入れている。
- *   台帳が持つのはNコード（`n1234ab`）だけで、Nコードから小説番号を引く公開の道は無い
+ *   Nコード（`siteProfiles.workId`）から小説番号を引く公開の道は無いので、番号はヘルパーが送り返す
+ *   （作者の答え 2026-11-03 昼）。番号が無いあいだは `revisionPageUrl` が作品の一覧へ落とす
  * - note：組み立てない（作品の単位が無い）
  *
  * **推測のURLを開かせない**——とくに新しい話の投稿ページを代わりに開くと、修正版がもう1本の
@@ -174,12 +197,14 @@ export function readerStatsPageUrl(
  *
  * 作品IDは台帳の値を先に見て、無ければ投稿ページのURLから導く（`readerStatsPageUrl` と同じ順）。
  *
- * @returns 開けるURL。組み立てられなければ undefined（呼ぶ側は開かずに案内だけ出す）
+ * @param siteWorkNumber なろうの小説番号（数字だけ受け付ける）
+ * @returns 開けるURL。組み立てられなければ undefined
  */
 export function workManagePageUrl(
   site: PostingSiteId,
   profile: PostingSiteProfile | undefined,
-  postUrl?: string | null
+  postUrl?: string | null,
+  siteWorkNumber?: string | null
 ): string | undefined {
   if (site === "kakuyomu") return readerStatsPageUrl(site, profile, postUrl);
   if (site === "alphapolis") {
@@ -188,7 +213,17 @@ export function workManagePageUrl(
       ? `https://www.alphapolis.co.jp/mypage/content/detail/${workId}`
       : undefined;
   }
+  if (site === "narou") {
+    const number = narouNovelNumber(siteWorkNumber);
+    return number ? `https://syosetu.com/usernovelmanage/top/ncode/${number}/` : undefined;
+  }
   return undefined;
+}
+
+/** なろうの小説番号（数字だけ）。形が違えば undefined——URL のパスへそのまま入るため */
+function narouNovelNumber(value: string | null | undefined): string | undefined {
+  const number = (value ?? "").trim();
+  return /^\d{1,20}$/.test(number) ? number : undefined;
 }
 
 /** アルファポリスの作品ID（9桁）。台帳の値が先、無ければ投稿ページのURLから */
@@ -222,9 +257,9 @@ function kakuyomuManageWorkId(
  * - アルファポリス：`https://www.alphapolis.co.jp/mypage/novel/save_episode/{9桁の作品ID}/{話ID}`
  *   （2026-11-01 作者の Chrome で作者用ページを読んだとき、新しい話の `save_episode/{作品ID}` と
  *   並んで話の編集がこの形だと分かった。設計書6.68.5。話IDは数字）
- * - なろう：組み立てない。話の編集は `usernoveldatamanage/updateinput/ncode/{小説番号}/noveldataid/{部分の番号}/`
- *   で、作品の管理画面と同じく**数字の小説番号**が要る（`workManagePageUrl` の根拠を参照）。
- *   話の番号だけでは開けない
+ * - なろう：`https://syosetu.com/usernoveldatamanage/updateinput/ncode/{小説番号}/noveldataid/{部分の番号}/`
+ *   （根拠は `workManagePageUrl` の②と同じツールの `EDIT_URL`）。**小説番号と話の番号の両方**が
+ *   要る。話の番号は `siteEpisodeId`（なろうでは「部分の番号」）
  * - note：組み立てない
  *
  * **番号の形はサイトごとに確かめる**（数字だけ）。台帳の欄は手で直せるので、形の違う番号を
@@ -232,13 +267,9 @@ function kakuyomuManageWorkId(
  *
  * @returns 開けるURL。組み立てられなければ undefined（呼ぶ側は作品の管理画面へ落とす）
  */
-export function episodeEditPageUrl(
-  site: PostingSiteId,
-  profile: PostingSiteProfile | undefined,
-  postUrl: string | null | undefined,
-  siteEpisodeId: string | null | undefined
-): string | undefined {
-  const episodeId = (siteEpisodeId ?? "").trim();
+export function episodeEditPageUrl(input: RevisionPageInput): string | undefined {
+  const { site, profile, postUrl } = input;
+  const episodeId = (input.siteEpisodeId ?? "").trim();
   if (!/^\d+$/.test(episodeId)) return undefined;
   if (site === "kakuyomu") {
     const workId = kakuyomuManageWorkId(profile, postUrl);
@@ -250,31 +281,38 @@ export function episodeEditPageUrl(
       ? `https://www.alphapolis.co.jp/mypage/novel/save_episode/${workId}/${episodeId}`
       : undefined;
   }
+  if (site === "narou") {
+    const number = narouNovelNumber(input.siteWorkNumber);
+    return number
+      ? `https://syosetu.com/usernoveldatamanage/updateinput/ncode/${number}/noveldataid/${episodeId}/`
+      : undefined;
+  }
   return undefined;
 }
 
-/** 出し直しで開く画面（話の編集画面か、作品の管理画面か） */
+/** 出し直しで開く画面 */
 export interface RevisionPage {
   url: string;
-  /** `"episode"`＝話の編集画面を直に開く／`"work"`＝作品の管理画面から話を選んでもらう */
-  kind: "episode" | "work";
+  /**
+   * `"episode"`＝話の編集画面を直に開く／`"work"`＝作品の管理画面から話を選んでもらう／
+   * `"list"`＝自分の作品の一覧から作品と話を選んでもらう（なろうで小説番号が無いとき）
+   */
+  kind: "episode" | "work" | "list";
 }
 
 /**
- * 出し直しで開く画面を決める（6.68.7）。**話の編集画面を先に、組めなければ作品の管理画面へ落とす。**
+ * 出し直しで開く画面を決める（6.68.7）。**話の編集画面 → 作品の管理画面 → 作品の一覧（なろう）の順。**
  *
- * @returns どちらも組み立てられなければ undefined（なろう・note。何も開かず案内だけ）
+ * @returns どれも組み立てられなければ undefined（note。何も開かず案内だけ）
  */
-export function revisionPageUrl(
-  site: PostingSiteId,
-  profile: PostingSiteProfile | undefined,
-  postUrl: string | null | undefined,
-  siteEpisodeId: string | null | undefined
-): RevisionPage | undefined {
-  const episode = episodeEditPageUrl(site, profile, postUrl, siteEpisodeId);
+export function revisionPageUrl(input: RevisionPageInput): RevisionPage | undefined {
+  const episode = episodeEditPageUrl(input);
   if (episode) return { url: episode, kind: "episode" };
-  const work = workManagePageUrl(site, profile, postUrl);
-  return work ? { url: work, kind: "work" } : undefined;
+  const work = workManagePageUrl(input.site, input.profile, input.postUrl, input.siteWorkNumber);
+  if (work) return { url: work, kind: "work" };
+  // なろうは小説番号が届くまで、番号の要らない自分の作品の一覧を開く（作者の答え 2026-11-03 昼）
+  if (input.site === "narou") return { url: NAROU_WORK_LIST_URL, kind: "list" };
+  return undefined;
 }
 
 /**

@@ -5,7 +5,7 @@ import type { AIRegistry } from "../../../src/ai/registry";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
-import { postingBodyHash } from "../../../src/core/postingBodyHash";
+import { postingTextHash } from "../../../src/core/postingBodyHash";
 
 /**
  * 修正版の出し直し（作者の依頼 2026-11-03「修正後再投稿に対応してください」。設計書6.68.7）。
@@ -252,11 +252,13 @@ describe("修正版の出し直し", () => {
     // 印の無い記録だけなので、直したサイトは分からない → 既定で全部に印
     expect(picks[0].items.every((item) => item.picked === true)).toBe(true);
 
-    // なろうは管理画面を組み立てられない（Nコードでなく数字の小説番号で指す）ので、何も開かない。
-    // 代わりに、どこを開けばよいかを言う
-    expect(env.opened).toEqual([]);
+    // なろうの管理画面は数字の小説番号で作品を指す。番号がまだ届いていないので、
+    // 番号の要らない「自分の作品の一覧」を開き、そこから選ぶよう言う（作者の答え 2026-11-03 昼）
+    expect(env.opened).toEqual(["https://syosetu.com/usernovel/list/"]);
+    expect(picks[1].placeHolder).toContain("作品の一覧");
     expect(picks[1].placeHolder).toContain("第13話");
     expect(picks[1].placeHolder).toContain("編集画面");
+    expect(picks[1].items.some((item) => item.label.includes("作品の一覧をもう一度開く"))).toBe(true);
 
     const ledger = readLedger();
     expect(ledger.posts).toHaveLength(2);
@@ -331,21 +333,21 @@ describe("修正版の出し直し", () => {
     stubQuickPick([byKey("mode", "post"), byKey("answer", "posted"), () => undefined]);
     await postNewEpisode(work, {} as unknown as AIRegistry, episode);
     const posted = readLedger().posts.find((post) => post.site === "narou");
-    expect(posted?.bodyHash).toBe(postingBodyHash(body));
+    expect(posted?.bodyHash).toBe(postingTextHash("邂逅", body));
 
     stubQuickPick([(items) => items, byKey("answer", "revised"), byKey("answer", "revised")]);
     await postNewEpisode(work, {} as unknown as AIRegistry, episode);
     const revisions = readLedger().revisions ?? [];
     expect(revisions).toHaveLength(2);
-    expect(revisions.every((record) => record.bodyHash === postingBodyHash(body))).toBe(true);
+    expect(revisions.every((record) => record.bodyHash === postingTextHash("邂逅", body))).toBe(true);
   });
 
   test("話を名指ししたとき、投稿のあとに直したサイトだけに既定で印を付け、そう添える", async () => {
     writeLedger({
       ...ALL_POSTED,
       posts: [
-        { episodePath: relativeEpisode, site: "kakuyomu", postedAt: "2026-10-01T00:00:00.000Z", bodyHash: postingBodyHash("直す前の本文") },
-        { episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z", bodyHash: postingBodyHash(body) },
+        { episodePath: relativeEpisode, site: "kakuyomu", postedAt: "2026-10-01T00:00:00.000Z", bodyHash: postingTextHash("邂逅", "直す前の本文") },
+        { episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z", bodyHash: postingTextHash("邂逅", body) },
       ],
     });
     const picks = stubQuickPick([() => undefined]);
@@ -355,5 +357,43 @@ describe("修正版の出し直し", () => {
     expect(kakuyomu?.picked).toBe(true);
     expect(String(kakuyomu?.description)).toContain("投稿後に直しています");
     expect(narou?.picked).toBe(false);
+  });
+
+  test("題（サブタイトル）だけ直した話も「投稿後に直しています」と言う（作者の答え 2026-11-03 昼）", async () => {
+    writeLedger({
+      ...ALL_POSTED,
+      posts: [
+        // 本文は同じで、投稿したときの題は「出会い」だった（いまのファイル名の題は「邂逅」）
+        { episodePath: relativeEpisode, site: "kakuyomu", postedAt: "2026-10-01T00:00:00.000Z", bodyHash: postingTextHash("出会い", body) },
+        { episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z", bodyHash: postingTextHash("邂逅", body) },
+      ],
+    });
+    const picks = stubQuickPick([() => undefined]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+    expect(picks[0].items.find((item) => item.site === "kakuyomu")?.picked).toBe(true);
+    expect(picks[0].items.find((item) => item.site === "narou")?.picked).toBe(false);
+  });
+
+  test("なろうは小説番号が台帳にあれば作品の管理画面を、話の番号もあれば話の編集画面を開く", async () => {
+    writeLedger({
+      sites: [{ site: "narou", newEpisodeUrl: narouUrl }],
+      siteFacts: [{ site: "narou", siteWorkNumber: "2930206", siteWorkNumberAt: "2026-11-03T00:00:00.000Z" }],
+      posts: [{ episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z" }],
+    });
+    stubQuickPick([(items) => items, byKey("answer", "skip")]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+    expect(env.opened).toEqual(["https://syosetu.com/usernovelmanage/top/ncode/2930206/"]);
+
+    env.opened.length = 0;
+    writeLedger({
+      sites: [{ site: "narou", newEpisodeUrl: narouUrl }],
+      siteFacts: [{ site: "narou", siteWorkNumber: "2930206", siteWorkNumberAt: "2026-11-03T00:00:00.000Z" }],
+      posts: [{ episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z", siteEpisodeId: "12345" }],
+    });
+    stubQuickPick([(items) => items, byKey("answer", "skip")]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+    expect(env.opened).toEqual([
+      "https://syosetu.com/usernoveldatamanage/updateinput/ncode/2930206/noveldataid/12345/",
+    ]);
   });
 });

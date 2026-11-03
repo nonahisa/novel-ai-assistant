@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   normalizePostingBody,
   postingBodyHash,
+  postingTextHash,
+  postingTextHashes,
   postingUnitsOf,
 } from "../../../src/core/postingBodyHash";
 
@@ -35,7 +37,7 @@ describe("読者が読む本文が変わらない編集では、印を変えな�
   });
 
   test("先頭の BOM", () => {
-    expect(postingBodyHash(`﻿${body}`)).toBe(postingBodyHash(body));
+    expect(postingBodyHash(`\uFEFF${body}`)).toBe(postingBodyHash(body));
   });
 });
 
@@ -63,6 +65,30 @@ test("正規化した本文は、前後の空行と行末の空白を落とし�
 
 test("印は16進64字（台帳が読み込みで確かめる形）", () => {
   expect(postingBodyHash(body)).toMatch(/^[0-9a-f]{64}$/);
+});
+
+describe("題と本文の両方の印（0.124.1。作者の答え 2026-11-03 昼「題だけ直した話も促す」）", () => {
+  test("頭に v2: が付き、本文だけの印と見分けられる", () => {
+    expect(postingTextHash("邂逅", body)).toMatch(/^v2:[0-9a-f]{64}$/);
+    expect(postingTextHashes("邂逅", body)).toEqual({
+      titled: postingTextHash("邂逅", body),
+      bodyOnly: postingBodyHash(body),
+    });
+  });
+
+  test("題だけ直しても印が変わる（見逃さない）", () => {
+    expect(postingTextHash("別離", body)).not.toBe(postingTextHash("邂逅", body));
+  });
+
+  test("題の前後の空白・題が無いことの書き方では変わらない（誤検出を出さない）", () => {
+    expect(postingTextHash("　邂逅 ", body)).toBe(postingTextHash("邂逅", body));
+    expect(postingTextHash(null, body)).toBe(postingTextHash("", body));
+    expect(postingTextHash("邂逅", body.replace(/\n/g, "\r\n"))).toBe(postingTextHash("邂逅", body));
+  });
+
+  test("題の末尾を本文の頭へ移した直しも別の印にする（題と本文の境を印に入れる）", () => {
+    expect(postingTextHash("邂逅", "そして本文")).not.toBe(postingTextHash("邂逅そして", "本文"));
+  });
 });
 
 describe("投稿する単位への切り出し", () => {

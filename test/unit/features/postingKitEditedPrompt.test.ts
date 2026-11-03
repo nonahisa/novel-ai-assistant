@@ -2,7 +2,7 @@ import * as path from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
-import { postingBodyHash } from "../../../src/core/postingBodyHash";
+import { postingBodyHash, postingTextHash } from "../../../src/core/postingBodyHash";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 
@@ -127,7 +127,8 @@ const posted = (episodePath: string, site: string, text?: string) => ({
   episodePath,
   site,
   postedAt: "2026-10-01T00:00:00.000Z",
-  ...(text !== undefined ? { bodyHash: postingBodyHash(text) } : {}),
+  // 題の無い話（ファイル名にも中にも題が無い）の、題と本文の印（0.124.1 の取り方）
+  ...(text !== undefined ? { bodyHash: postingTextHash(null, text) } : {}),
 });
 
 describe("作品から投稿を始めたときの、出し直しの促し", () => {
@@ -193,9 +194,88 @@ describe("作品から投稿を始めたときの、出し直しの促し", () =
       expect.objectContaining({
         episodePath: "本文/002.txt",
         site: "kakuyomu",
-        bodyHash: postingBodyHash("　二話目を直した。"),
+        bodyHash: postingTextHash(null, "　二話目を直した。"),
       }),
     ]);
+
+    // 未投稿の第3話が残っているので、続けて新しい話を投稿するかを訊く（答えずに閉じたので、そこで終わる）
+    expect(picks[3].title).toBe("続けて新しい話を投稿しますか");
+    expect(picks).toHaveLength(4);
+  });
+
+  test("出し直しのあと「続けて新しい話を投稿する」を選ぶと、未投稿の第3話へ進み、出し直しの記録も消えない", async () => {
+    writeLedger({
+      sites: SITES,
+      posts: [
+        posted("本文/001.txt", "narou", "　一話目。"),
+        posted("本文/001.txt", "kakuyomu", "　一話目。"),
+        posted("本文/002.txt", "narou", "　二話目。"),
+        posted("本文/002.txt", "kakuyomu", "　二話目。"),
+      ],
+    });
+    const picks = stubQuickPick([
+      (items) => items.find((item) => item.label.includes("第2話")),
+      (items) => items.filter((item) => item.site === "kakuyomu"),
+      (items) => items.find((item) => item.answer === "revised"),
+      (items) => items.find((item) => item.proceed === true),
+      // 第3話をなろうへ
+      (items) => items.find((item) => item.answer === "posted"),
+      // カクヨムは飛ばす
+      (items) => items.find((item) => item.answer === "skip"),
+      // 告知は作らない
+      () => undefined,
+    ]);
+    const result = await postNewEpisode(work, {} as unknown as AIRegistry);
+    expect(result.changed).toBe(true);
+    expect(picks[4].title).toContain("第3話");
+    expect(picks[4].title).toContain("小説家になろう");
+    const ledger = readLedger();
+    expect(ledger.revisions).toHaveLength(1);
+    expect(ledger.posts).toContainEqual(
+      expect.objectContaining({ episodePath: "本文/003.txt", site: "narou", bodyHash: postingTextHash(null, "　三話目。") })
+    );
+  });
+
+  test("出し直しを途中で中止したら、続けるかを訊かない", async () => {
+    writeLedger({
+      sites: SITES,
+      posts: [posted("本文/002.txt", "narou", "　二話目。"), posted("本文/002.txt", "kakuyomu", "　二話目。")],
+    });
+    const picks = stubQuickPick([
+      (items) => items.find((item) => item.label.includes("第2話")),
+      (items) => items,
+      (items) => items.find((item) => item.label.includes("中止")),
+    ]);
+    await postNewEpisode(work, {} as unknown as AIRegistry);
+    expect(picks.some((pick) => pick.title === "続けて新しい話を投稿しますか")).toBe(false);
+  });
+
+  test("題だけ直した話も促す", async () => {
+    // 中の【タイトル】を直した（本文は同じ）
+    writeFile(ep2, ["【タイトル】", "別れの朝", "", "【本文】", "　二話目。"].join("\n"));
+    writeLedger({
+      sites: [{ site: "kakuyomu", newEpisodeUrl: kakuyomuUrl }],
+      posts: [{ ...posted("本文/002.txt", "kakuyomu"), bodyHash: postingTextHash("別れ", "　二話目。") }],
+    });
+    const picks = stubQuickPick([() => undefined]);
+    await postNewEpisode(work, {} as unknown as AIRegistry);
+    expect(picks[0].title).toBe("投稿のあとに直した話があります");
+    expect(picks[0].placeHolder).toContain("第2話");
+  });
+
+  test("0.124.0 の印（本文だけ）は、本文が違えば促し、同じなら題が分からないので促さない", async () => {
+    writeLedger({
+      sites: [{ site: "kakuyomu", newEpisodeUrl: kakuyomuUrl }],
+      posts: [
+        { ...posted("本文/001.txt", "kakuyomu"), bodyHash: postingBodyHash("　一話目。") },
+        { ...posted("本文/002.txt", "kakuyomu"), bodyHash: postingBodyHash("　二話目。") },
+      ],
+    });
+    const picks = stubQuickPick([() => undefined]);
+    await postNewEpisode(work, {} as unknown as AIRegistry);
+    expect(picks[0].title).toBe("投稿のあとに直した話があります");
+    const offered = picks[0].items.filter((item) => item.label.includes("出し直す"));
+    expect(offered.map((item) => item.label)).toEqual([expect.stringContaining("第2話")]);
   });
 
   test("出し直したあとは、同じ話をもう促さない（最新の出し直しの印と比べる）", async () => {
@@ -207,7 +287,7 @@ describe("作品から投稿を始めたときの、出し直しの促し", () =
           episodePath: "本文/002.txt",
           site: "kakuyomu",
           revisedAt: "2026-11-01T00:00:00.000Z",
-          bodyHash: postingBodyHash("　二話目を直した。"),
+          bodyHash: postingTextHash(null, "　二話目を直した。"),
         },
       ],
     });

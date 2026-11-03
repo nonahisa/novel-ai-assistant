@@ -16,6 +16,7 @@ import {
   revisionFor,
   siteEpisodeIdFor,
   siteFactsFor,
+  siteWorkNumberFor,
   sitesNeedingRevision,
   siteProfile,
   unpostedSites,
@@ -71,7 +72,7 @@ import {
 } from "../core/postingSiteUrls";
 // 投稿したときの本文の印（6.68.7）。投稿の道と判定の道で同じ切り出しを通す
 import {
-  postingBodyHash,
+  postingTextHashes,
   postingUnitsOf,
   type PostingUnit,
 } from "../core/postingBodyHash";
@@ -195,6 +196,14 @@ export async function postNewEpisode(
     });
     if (offered.kind === "cancel") return { changed };
     if (offered.kind === "revised") return { changed: changed || offered.changed };
+    /*
+      出し直しを済ませてから新しい話へ続ける回は、**出し直しを記録したあとの台帳で続ける**。
+      手前の台帳のまま続けると、次の保存で出し直しの記録を消してしまう
+    */
+    if (offered.ledger) {
+      ledger = offered.ledger;
+      changed = changed || offered.changed === true;
+    }
   }
 
   const target =
@@ -224,8 +233,12 @@ export async function postNewEpisode(
       : {}),
   };
   const label = postingLabelOf(target, parts.collected, format);
-  // 投稿・出し直しの記録に残す本文の印（6.68.7）。合本の1話は、その話の本文だけで取る
-  const bodyHash = postingBodyHash(parts.body);
+  /*
+    投稿・出し直しの記録に残す印（6.68.7）。題と本文の両方で取る（0.124.1。題だけ直した話も促す）。
+    合本の1話は、その話の題と本文だけで取る。古い記録（本文だけの印）と比べる形も一緒に作る
+  */
+  const hashes = postingTextHashes(parts.subtitle, parts.body);
+  const bodyHash = hashes.titled;
 
   const sites = unpostedSites(ledger, postTarget);
 
@@ -243,7 +256,7 @@ export async function postNewEpisode(
   */
   const alreadyPosted = postedSites(ledger, postTarget);
   if (episode && alreadyPosted.length > 0) {
-    const edited = sitesNeedingRevision(ledger, postTarget, bodyHash);
+    const edited = sitesNeedingRevision(ledger, postTarget, hashes);
     /*
       **全部のサイトへ出した話は、出し直しだけ**（作者の裁定 2026-11-03 昼。0.123.0 にあった
       「新しい話としてもう一度すべてのサイトへ出す」は消した——同じ話を新しい話として
@@ -434,16 +447,18 @@ async function walkSite(input: {
   /*
     **出し直しでは、新しい話の投稿ページを開かない**（6.68.7）。修正版をそこへ貼ると、
     同じ話がもう1本の新しい話として公開される。サイトの話の番号が記録にあれば話の編集画面を
-    直に開き、無ければ作品の管理画面を開いて、そこから作者に話を選んでもらう。
-    どちらも組み立てられないサイト（なろう・note）では何も開かず、どこを開くかを言う
+    直に開き、無ければ作品の管理画面を開いて、そこから作者に話を選んでもらう。なろうで小説番号が
+    まだ届いていなければ、自分の作品の一覧を開く（作者の答え 2026-11-03 昼）。
+    どれも組み立てられないサイト（note）では何も開かず、どこを開くかを言う
   */
   const revisionPage = revise
-    ? revisionPageUrl(
-        input.site,
-        siteProfile(input.ledger, input.site),
-        entry.newEpisodeUrl,
-        input.siteEpisodeId
-      )
+    ? revisionPageUrl({
+        site: input.site,
+        profile: siteProfile(input.ledger, input.site),
+        postUrl: entry.newEpisodeUrl,
+        siteEpisodeId: input.siteEpisodeId,
+        siteWorkNumber: siteWorkNumberFor(input.ledger, input.site),
+      })
     : undefined;
   const pageUrl = revise ? revisionPage?.url : entry.newEpisodeUrl;
 
@@ -456,9 +471,11 @@ async function walkSite(input: {
     ? copiedText +
       (revisionPage?.kind === "episode"
         ? `開いた${input.label}の編集画面で、本文を貼り替えてください。`
-        : revisionPage
+        : revisionPage?.kind === "work"
           ? `開いた作品の管理画面から${input.label}の編集画面を開いて、本文を貼り替えてください。`
-          : `${info.label}で作品の管理画面を開き、${input.label}の編集画面を開いて、本文を貼り替えてください（${info.label}の管理画面はこちらからは開けません）。`) +
+          : revisionPage?.kind === "list"
+            ? `開いた作品の一覧からこの作品を選び、${input.label}の編集画面を開いて、本文を貼り替えてください。`
+            : `${info.label}で作品の管理画面を開き、${input.label}の編集画面を開いて、本文を貼り替えてください（${info.label}の管理画面はこちらからは開けません）。`) +
       "保存したら「出し直しました」を選んでください"
     : `${copiedText}貼り付けて公開したら「投稿しました」を選んでください`;
   // **黙って落とさない**（6.68.3）。noteには傍点の記法が無いので印を外す
@@ -519,7 +536,9 @@ async function walkSite(input: {
                 label:
                   revisionPage?.kind === "episode"
                     ? "$(link-external) 話の編集画面をもう一度開く"
-                    : "$(link-external) 作品の管理画面をもう一度開く",
+                    : revisionPage?.kind === "list"
+                      ? "$(link-external) 作品の一覧をもう一度開く"
+                      : "$(link-external) 作品の管理画面をもう一度開く",
                 detail: "閉じてしまったときに。本文はコピーし直しません",
                 answer: "reopen" as const,
               },
@@ -662,6 +681,15 @@ async function askPostingMode(
  * **更新告知は誘わない。** 告知は「新しい話が読めます」を知らせるもので、直した話を
  * 新着として告げると読者の受け取りと食い違う。
  */
+/** 出し直しの流れの結果 */
+interface RevisionOutcome {
+  changed: boolean;
+  /** 出し直しを記録したあとの台帳（続けて新しい話を投稿するときは、これで続ける） */
+  ledger: PostingLedger;
+  /** 最後まで通ったか（サイト選びを閉じた・中止した・保存で止まったときは偽） */
+  finished: boolean;
+}
+
 async function reviseEpisode(input: {
   store: PostingStore;
   work: WorkEntry;
@@ -669,14 +697,14 @@ async function reviseEpisode(input: {
   postTarget: PostingEpisodeTarget;
   label: string;
   parts: { subtitle: string | null; body: string };
-  /** 出し直す本文の印（`postingBodyHash`） */
+  /** 出し直す話の印（題と本文。`postingTextHash`） */
   bodyHash: string;
   candidates: readonly PostingSiteId[];
   /** 投稿のあとに本文を直したと分かっているサイト。あれば既定でこれだけに印を付ける */
   edited: readonly PostingSiteId[];
   /** 登録したサイトすべてへ投稿済みか（サイト選びの文を変える） */
   allPosted: boolean;
-}): Promise<PostingKitResult> {
+}): Promise<RevisionOutcome> {
   let ledger = input.ledger;
   const sites = await askRevisionSites({
     ledger,
@@ -686,7 +714,7 @@ async function reviseEpisode(input: {
     edited: input.edited,
     allPosted: input.allPosted,
   });
-  if (!sites || sites.length === 0) return { changed: false };
+  if (!sites || sites.length === 0) return { changed: false, ledger, finished: false };
 
   let changed = false;
   const revised: PostingSiteId[] = [];
@@ -720,7 +748,7 @@ async function reviseEpisode(input: {
       input.bodyHash
     );
     if (!(await save(input.store, input.work, next, "修正版の出し直しの記録（投稿キット）"))) {
-      return { changed };
+      return { changed, ledger, finished: false };
     }
     ledger = next;
     changed = true;
@@ -736,7 +764,7 @@ async function reviseEpisode(input: {
   if (notes.length > 0) {
     void vscode.window.showInformationMessage(`${input.label}：${notes.join("／")}。`);
   }
-  return { changed };
+  return { changed, ledger, finished: !aborted };
 }
 
 /**
@@ -794,25 +822,26 @@ async function askRevisionSites(input: {
   return picked.map((item) => item.site);
 }
 
-/** 投稿のあとに本文を直した話（作品から投稿を始めたときの促しに使う） */
+/** 投稿のあとに本文か題を直した話（作品から投稿を始めたときの促しに使う） */
 interface EditedEpisode {
   file: EpisodeFile;
   postTarget: PostingEpisodeTarget;
   label: string;
   unit: PostingUnit;
+  /** 記録に残す印（題と本文。`postingTextHash`） */
   bodyHash: string;
   /** 投稿のあとに直したサイト（印が違うもの） */
   sites: PostingSiteId[];
 }
 
 /**
- * 投稿のあとに本文を直した話を探す（6.68.7）。
+ * 投稿のあとに本文か題を直した話を探す（6.68.7）。
  *
  * **本文の印つきの記録がある話だけを読む**（`hasBodyHashFor`）。印の無い話は直したかどうかが
  * 分からないので、読んでも促せない。競合の印がある話は飛ばす（そのまま出し直すと競合の印ごと
  * 公開される。名指しして出すときは `readEpisode` が止める）。
  *
- * 切り出しは投稿の道と同じ `postingUnitsOf`（合本は話ごと、その話の本文だけで印を取る）。
+ * 切り出しは投稿の道と同じ `postingUnitsOf`（合本は話ごと、その話の題と本文だけで印を取る）。
  * **読めない話があっても探すのは止めない**——ログへ残して次の話へ進む（促しは補助で、
  * 新しい話の投稿を止める理由にしない）。
  */
@@ -847,15 +876,15 @@ async function findEditedEpisodes(input: {
           ? { chapter: unit.collected.chapter, order: unit.collected.order }
           : {}),
       };
-      const bodyHash = postingBodyHash(unit.body);
-      const sites = sitesNeedingRevision(input.ledger, postTarget, bodyHash);
+      const hashes = postingTextHashes(unit.subtitle, unit.body);
+      const sites = sitesNeedingRevision(input.ledger, postTarget, hashes);
       if (sites.length === 0) continue;
       found.push({
         file,
         postTarget,
         label: postingLabelOf(file, unit.collected, input.format),
         unit,
-        bodyHash,
+        bodyHash: hashes.titled,
         sites,
       });
     }
@@ -863,13 +892,28 @@ async function findEditedEpisodes(input: {
   return found;
 }
 
+/** 未投稿の話が残っているか（競合の印がある話は数えない。`pickOldestUnposted` と同じ線） */
+function hasUnpostedEpisode(
+  ledger: PostingLedger,
+  episodes: readonly EpisodeFile[],
+  relativePathOf: (file: EpisodeFile) => string
+): boolean {
+  return (
+    firstUnpostedEpisodePath(
+      ledger,
+      episodes.filter((file) => !file.hasConflictMarkers).map(relativePathOf)
+    ) !== undefined
+  );
+}
+
 /**
- * 作品から投稿を始めたとき、投稿のあとに本文を直した話があれば出し直しを促す（6.68.7。
+ * 作品から投稿を始めたとき、投稿のあとに本文か題を直した話があれば出し直しを促す（6.68.7。
  * 作者の裁定 2026-11-03 昼）。
  *
- * - `"continue"`：直した話が無い、または「出し直さない」を選んだ（新しい話の投稿へ進む）
- * - `"revised"`：出し直しの流れを通った（新しい話の投稿へは進まない——1回の操作で2つの流れを
- *   続けると、どこまで済んだのかが分かりにくい。続きはもう一度「投稿」を押せば出る）
+ * - `"continue"`：直した話が無い、「出し直さない」を選んだ、または出し直しのあと「続けて新しい話を
+ *   投稿する」を選んだ（新しい話の投稿へ進む。出し直したときは、記録したあとの台帳を `ledger` に返す）
+ * - `"revised"`：出し直しの流れを通り、新しい話へは続けない（未投稿の話が無い・続けないを選んだ・
+ *   途中で中止した）
  * - `"cancel"`：取りやめた
  */
 async function offerRevisionOfEditedEpisodes(input: {
@@ -879,7 +923,11 @@ async function offerRevisionOfEditedEpisodes(input: {
   episodes: readonly EpisodeFile[];
   relativePathOf: (file: EpisodeFile) => string;
   format: WorkFormatKey | undefined;
-}): Promise<{ kind: "continue" } | { kind: "cancel" } | { kind: "revised"; changed: boolean }> {
+}): Promise<
+  | { kind: "continue"; ledger?: PostingLedger; changed?: boolean }
+  | { kind: "cancel" }
+  | { kind: "revised"; changed: boolean }
+> {
   const edited = await findEditedEpisodes(input);
   if (edited.length === 0) return { kind: "continue" };
 
@@ -887,11 +935,7 @@ async function offerRevisionOfEditedEpisodes(input: {
   const shown = edited.slice(0, 3).map((entry) => entry.label);
   const rest = edited.length - shown.length;
   const names = shown.join("・") + (rest > 0 ? `ほか${rest}話` : "");
-  const hasUnposted =
-    firstUnpostedEpisodePath(
-      input.ledger,
-      input.episodes.filter((file) => !file.hasConflictMarkers).map(input.relativePathOf)
-    ) !== undefined;
+  const hasUnposted = hasUnpostedEpisode(input.ledger, input.episodes, input.relativePathOf);
 
   type OfferItem = vscode.QuickPickItem & { edited?: EditedEpisode; skip?: true };
   const items: OfferItem[] = [
@@ -931,6 +975,37 @@ async function offerRevisionOfEditedEpisodes(input: {
     edited: target.sites,
     allPosted: unpostedSites(input.ledger, target.postTarget).length === 0,
   });
+
+  /*
+    **出し直しを済ませたら、未投稿の話があるときだけ続けるかを訊く**（作者の答え 2026-11-03 昼）。
+    中止した・サイト選びを閉じた・保存で止まった回は訊かない（作者が止めた流れを先へ進めない）。
+    出し直しは未投稿の数を変えないので、ここで数え直さなくてよいが、台帳は記録したあとのもので見る
+  */
+  if (
+    !result.finished ||
+    !hasUnpostedEpisode(result.ledger, input.episodes, input.relativePathOf)
+  ) {
+    return { kind: "revised", changed: result.changed };
+  }
+  const next = await vscode.window.showQuickPick(
+    [
+      {
+        label: "$(rocket) 続けて新しい話を投稿する",
+        detail: "未投稿のいちばん古い話を案内します",
+        proceed: true as const,
+      },
+      // 閉じる道（取りやめ）を兼ねる。あとで「新話投稿」を押せば続きから案内する
+      cancelItem("ここで終える"),
+    ],
+    {
+      title: "続けて新しい話を投稿しますか",
+      placeHolder: `${target.label}の出し直しを終えました。続けて新しい話を投稿しますか`,
+      ignoreFocusOut: true,
+    }
+  );
+  if (next && "proceed" in next && next.proceed) {
+    return { kind: "continue", ledger: result.ledger, changed: result.changed };
+  }
   return { kind: "revised", changed: result.changed };
 }
 
