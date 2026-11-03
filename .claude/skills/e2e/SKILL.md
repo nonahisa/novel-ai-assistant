@@ -106,3 +106,12 @@ npm run typecheck:tests                            # 型（test/e2e/tsconfig.jso
 ## 広報の動画
 
 同じ土台で撮る（`npm run promo:record`。ffmpeg が要る。台本は `test/e2e/promo/*.promo.ts`）。押す絵は `clickWithCursor`——**矢印が目標の上にあることを機械で確かめてから押す**（`assertCursorOn`。外れたら撮影を失敗にする）。詳細は設計書 6.114。
+
+## 画面の動きと押す間合い（2026-11-03）
+
+- **テスト用 VS Code の画面の動きは止めてある**（`support/vscodeApp.ts` の settings.json に `"workbench.reduceMotion": "on"`）。既定の auto は Windows の「アニメーション効果」に従うので、作者が設定を切り替えたら、選ぶ画面の行が動いている最中に押す・Esc を送るなどで17件（12ファイル）が落ちた。**外さない**
+- 動きを止めると Playwright が「落ち着くのを待つ」時間が無くなり、人には無理な速さで押す。VS Code の仕掛けに当たる2つ：
+  - **通知の連打よけ**：800ms に4つ目の通知は右下に出さず、通知センターへ入れるだけ（`NotificationsToasts.SPAM_PROTECTION`）。続けて通知のボタンを押すときは、その通知が 1 秒出たままなのを `holdsFor` で見届けてから押す（`announcementCopyButtons` の `pressNoticeButton`）
+  - **品書きは開いて 100ms は押しても効かない**（`runOnceToEnableMouseUp`）。押したあと品書きが閉じなければ1度だけ押し直す（`menuNoticeFollowUps`）。右クリックの品書きの部品（`support/sidebar.ts`）は Enter で選び直す形で、もとから避けている
+- **全件が同じ形で落ちたら、先に古い版で同じテストを回す。** 作業場（`git worktree add --detach <道> <コミット>`、`npm ci`、`npm run build`）で古い版を組み、落ちたテストを1〜2本回す。古い版でも落ちれば機械の側。`repositoryRoot` はテストのファイルの場所から決まるので、作業場の dist で走る
+- **「環境のせい」と書く前に、土台の作りを読む。** 窓を前に出さないのは `keepOutOfTheWay` の作りどおりで、前面の窓が Claude アプリのままでも正しい（11-03 に「前面に出られない」と書いて取り消した）。落ちた瞬間の `document.activeElement`・`document.hasFocus()`・選ぶ画面の display を書き出し、`HTMLElement.prototype.focus` を包んで呼び元の stack を取ると、どこで焦点が動いたかが分かる（Esc で閉じたのに一覧が出たままに見えたのは、閉じる動きの最中だった）

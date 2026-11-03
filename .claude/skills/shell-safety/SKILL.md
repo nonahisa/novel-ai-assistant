@@ -30,3 +30,7 @@ description: node -e・printf・sed・perl・heredoc・Edit/Write で文字列�
 ## エージェントへ指示を出すとき
 
 上の表の「壊さない書き方」を、指示に**そのまま写す**。エージェントは会話の文脈を持たないので、この記録を知らない。
+
+## PowerShell の WriteAllLines は改行を CRLF にする（2026-11-04）
+
+`[IO.File]::WriteAllLines` は行の終わりに CRLF を付ける。LF のファイル（`docs/実機確認リスト.md` など）を行の配列で書き直すと、ファイル全体が CRLF になる（git は差分を小さく見せるが、作業場のファイルは変わっている）。**読むのも書くのも `ReadAllText`／`WriteAllText`（UTF-8・BOM なし）で文字列のまま扱い**、行を足すなら元の改行（`"`n"` か `"`r`n"`）を調べて合わせる。
