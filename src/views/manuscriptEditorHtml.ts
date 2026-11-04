@@ -197,6 +197,11 @@ body.aloud #aloud { display: flex; }
 }
 /* 使えない理由と、その場で起きたこと（声が止まった等）を出す */
 #aloudNote { opacity: 0.85; }
+/* 人物の声（設計書6.42.3）。選んでいる読み方の操作だけを出す */
+#aloud .engine-only { display: none; }
+body.aloudengine #aloud .engine-only { display: inline-block; }
+body.aloudengine #aloud .os-only { display: none; }
+#aloudCast { opacity: 0.85; }
 
 /* ── 本文を探す列（Ctrl+F。作者の裁定、2026-10-02。設計書6.25） ─────
    読み上げの列と同じく、使わないあいだは列ごと畳む */
@@ -1012,8 +1017,18 @@ body.clipped #cheer { white-space: normal; }
     </select>
   </label>
   <label class="pick">声
+    <select id="aloudEngine" title="OSの声で読むか、手元の音声合成のエンジン（AivisSpeech・VOICEVOX）で人物ごとに声を変えて読むかを選びます。人物の声は試作で、テスト中の機能です">
+      <option value="os">OSの声</option>
+      <option value="engine">人物の声（AivisSpeech・VOICEVOX）【試作・テスト中】</option>
+    </select>
+  </label>
+  <label class="pick os-only">
     <select id="aloudVoice" title="読み上げに使う声。この端末に入っている日本語の声だけが並びます"></select>
   </label>
+  <button id="aloudVoiceAssign" class="engine-only" title="（試作・テスト中）語り手（地の文）・台詞の既定・人物ごとの声を、エンジンの話者から選びます。作品ごとに覚えます">声の割り当て</button>
+  <button id="aloudCastRun" class="engine-only" title="（試作・テスト中）この話の台詞ごとに、誰が言ったかと気持ち（喜び・怒りなど）をAIが推定します。本文は書き換えません">台詞の話者と感情（AI）</button>
+  <button id="aloudCastOpen" class="engine-only" title="（試作・テスト中）台詞ごとの話者と感情の一覧を開きます。直した行は、推定し直しても残ります">台詞の一覧</button>
+  <span id="aloudCast" class="engine-only"></span>
   <button id="aloudMark" title="いま読んでいる文の上にメモの印を置いて、一時停止します">⚑ 引っかかった</button>
   <button id="aloudDictRun" title="この話の中で、読みが2通りある語（十分・音・一日など）をAIが確かめ、読み上げの読みを直します。本文は書き換えません">読みを確かめる（AI）</button>
   <button id="aloudDictOpen" title="読みの辞書の一覧を開きます。読みを直したり、項目を消したりできます">読みの一覧</button>
@@ -5517,6 +5532,10 @@ ${RESUME_WRITING_LABEL ? `
         aloudVoiceName = message.readAloudVoice;
         aloudPaintVoices();
       }
+      // 人物の声（設計書6.42.3）。使えるかは毎回、覚えている選択は最初の1回だけ受ける
+      if (message.voiceEngine && typeof message.voiceEngine === "object") {
+        voiceTakeUsable(message.voiceEngine, message.readAloudEngine === true);
+      }
       /*
         **本文が変わったら、計画を取り直す。** 位置が動いたまま読み続けると、
         光る場所が本文とずれる（「引っかかった」でメモの行が1つ増えるのも、
@@ -5550,6 +5569,10 @@ ${RESUME_WRITING_LABEL ? `
       aloudTakeMarkSkipped();
     } else if (message.type === "readingDictionaryStatus") {
       aloudDictTakeStatus(message);
+    } else if (message.type === "voiceAudio") {
+      voiceTakeAudio(message);
+    } else if (message.type === "voiceCastStatus") {
+      voiceTakeCastStatus(message);
     } else if (message.type === "showReading") {
       // 詳細メニューの「原稿を読み上げる」。**列を出すだけ**（設計書6.42）
       aloudOpenRow();
@@ -9183,8 +9206,17 @@ ${IME_ENTER_GUARD_SOURCE}
   /** 遅らせてある「読み始め」。止めるときに取り消す */
   let aloudTimer = null;
 
-  /** この環境で声を出せるか（ブラウザ版・音声合成の無い環境では出せない） */
+  /**
+   * この環境で声を出せるか（ブラウザ版・音声合成の無い環境では出せない）。
+   * 人物の声で読むときは、OSの声ではなく音を鳴らす仕組み（Web Audio）があるかを見る
+   */
   function aloudUsable() {
+    if (voiceMode) return voiceAudioUsable();
+    return aloudOsUsable();
+  }
+
+  /** OSの声（speechSynthesis）があるか */
+  function aloudOsUsable() {
     return (
       !!window.speechSynthesis &&
       typeof window.SpeechSynthesisUtterance === "function"
@@ -9201,7 +9233,7 @@ ${IME_ENTER_GUARD_SOURCE}
    * **一覧は非同期に揃う**ので、voiceschanged でも呼び直す。
    */
   function aloudLoadVoices() {
-    if (!aloudUsable()) {
+    if (!aloudOsUsable()) {
       aloudPaintState();
       return;
     }
@@ -9281,7 +9313,11 @@ ${IME_ENTER_GUARD_SOURCE}
    */
   function aloudPaintState() {
     let reason = "";
-    if (!aloudUsable()) {
+    if (voiceMode) {
+      // 人物の声：エンジンに届く環境か・音を鳴らせるか（声の一覧はエンジンの側）
+      if (!voiceUsable) reason = voiceReason || "この環境では人物の声が使えません";
+      else if (!voiceAudioUsable()) reason = "この環境では音を鳴らせません";
+    } else if (!aloudUsable()) {
       reason = "この環境では読み上げが使えません";
     } else if (aloudVoices.length === 0) {
       reason =
@@ -9310,6 +9346,11 @@ ${IME_ENTER_GUARD_SOURCE}
   function aloudSpeak(index) {
     if (!aloudPlan || index < 0 || index >= aloudPlan.length) {
       aloudFinish();
+      return;
+    }
+    // 人物の声は、拡張機能に作らせた音を続けて鳴らす（設計書6.42.3）
+    if (voiceMode) {
+      voiceSpeakFrom(index);
       return;
     }
     const sentence = aloudPlan[index];
@@ -9371,7 +9412,8 @@ ${IME_ENTER_GUARD_SOURCE}
     // 先に主を降ろす。古い声の知らせ（interrupted）を新しい声と取り違えない
     aloudUtterance = null;
     aloudSelfStop = true;
-    if (!aloudUsable()) return;
+    voiceStopAll();
+    if (!aloudOsUsable()) return;
     try {
       window.speechSynthesis.cancel();
     } catch (error) {
@@ -9576,7 +9618,7 @@ ${IME_ENTER_GUARD_SOURCE}
    * 打った直後の本文とずれる。
    */
   function aloudAskPlan() {
-    vscode.postMessage({ type: "readingPlan", text: aloudTextNow() });
+    vscode.postMessage({ type: "readingPlan", text: aloudTextNow(), voiced: voiceMode });
   }
 
   /**
@@ -9609,9 +9651,19 @@ ${IME_ENTER_GUARD_SOURCE}
     ) {
       return;
     }
+    // 読み方を切り替える前に頼んだ計画は使わない（声の単位の切り方が違う）
+    if (!!message.voiced !== voiceMode) return;
     aloudPlan = Array.isArray(message.sentences) ? message.sentences : [];
     // 印を打ったぶんが本文へ入った。もう一度押してよい
     aloudMarking = false;
+    voicePlanId = typeof message.planId === "number" ? message.planId : 0;
+    if (voiceMode && typeof message.voiceProblem === "string") {
+      // エンジンに繋がらない等。**止めて理由を出す**（OSの声の道は［声］で残る）
+      aloudFinish();
+      aloudProblem = message.voiceProblem;
+      aloudPaintState();
+      return;
+    }
 
     if (aloudStartAt !== null) {
       const at = aloudStartAt;
@@ -9636,6 +9688,12 @@ ${IME_ENTER_GUARD_SOURCE}
     aloudSpeech = aloudPlan[same].speech;
     // 位置が動いているので、光らせ直す（声はそのまま続いている）
     aloudShow(aloudPlan[same]);
+    /*
+      **人物の声は、その文の頭から鳴らし直す。** 先に予約した音は古い計画の
+      番号で並んでいて、新しい計画とは数え方がずれうる。作った音は控えに
+      あるので、鳴らし直しはすぐ始まる
+    */
+    if (voiceMode && !aloudPaused) aloudJump(same);
   }
 
   /**
@@ -9698,7 +9756,11 @@ ${IME_ENTER_GUARD_SOURCE}
    * 出すので、ここでは頼んで予約するだけである。
    */
   function aloudStart() {
-    if (!aloudUsable() || aloudVoices.length === 0) return;
+    if (voiceMode) {
+      if (!voiceUsable || !voiceAudioUsable()) return;
+    } else if (!aloudUsable() || aloudVoices.length === 0) {
+      return;
+    }
     aloudProblem = "";
     aloudStartAt = aloudCaretOffset();
     aloudAskPlan();
@@ -9717,6 +9779,7 @@ ${IME_ENTER_GUARD_SOURCE}
     aloudLoadVoices();
     // 辞書の様子（件数・本文に見当たらない数）を出す
     aloudDictAsk("status");
+    if (voiceMode) voiceCastAsk("status");
     // **列のぶんだけ本文の面が縮む。** 折り返し幅が変わるので、重ね敷きの
     // 枠を測り直す（測り直さないと、用語の色が1行ずつずれる）
     scheduleAlignMarks();
@@ -9803,6 +9866,269 @@ ${IME_ENTER_GUARD_SOURCE}
     aloudDictRun.disabled = true;
     aloudDictOpen.disabled = true;
     aloudDictAsk("open");
+  });
+
+  /* ── 人物の声で朗読する（AivisSpeech／VOICEVOX。設計書6.42.3） ── */
+
+  /**
+   * 音は拡張機能が作る（この画面から 127.0.0.1 のエンジンは CORS で叩けない）。
+   * ここは番号で音を頼み、届いた WAV を Web Audio で**続けて鳴らす**だけである。
+   *
+   * ## 途切れずに鳴らす
+   *
+   * 1文ずつ「鳴り終わったら次を頼む」と、作るあいだ黙る。そこで、いま鳴らす文の
+   * 後ろも先に頼んでおき（拡張機能の側でも先読みする）、届いた音を
+   * AudioContext の時計で**前の音が終わる時刻に予約**する。文と文の間は
+   * 計画に添えてある gapMs（語り↔台詞は少し長め）。
+   *
+   * ## 止め方はこれまでと同じ
+   *
+   * 止める・飛ぶ・一時停止は aloudCancel を通る（そこから voiceStopAll）。
+   * 続けるのは今の文の頭から。光らせ方も OS の声と同じ aloudShow を使う。
+   */
+  const aloudEngine = document.getElementById("aloudEngine");
+  const aloudVoiceAssign = document.getElementById("aloudVoiceAssign");
+  const aloudCastRun = document.getElementById("aloudCastRun");
+  const aloudCastOpen = document.getElementById("aloudCastOpen");
+  const aloudCast = document.getElementById("aloudCast");
+  /** 先に頼んでおく文の数（いま鳴らす文を含む） */
+  const VOICE_AHEAD = 3;
+
+  /** 人物の声で読む */
+  let voiceMode = false;
+  /** この環境で人物の声が使えるか（拡張機能が決めて送る） */
+  let voiceUsable = false;
+  let voiceReason = "";
+  /** 覚えている選択を受け取ったか（受けるのは最初の1回だけ） */
+  let voiceModeTaken = false;
+  /** 届いた計画の番号（音を頼むときに添える） */
+  let voicePlanId = 0;
+  /** 音を鳴らす入れ物。最初に鳴らすときに作る */
+  let voiceCtx = null;
+  /** 鳴らす世代。**止めるたびに進める**（古い音の答えを捨てる目印） */
+  let voiceGen = 0;
+  /** 予約した音 */
+  let voiceSources = [];
+  /** 届いて、まだ予約していない音（文の添字 → AudioBuffer） */
+  let voiceBuffers = new Map();
+  /** 頼んだ文の添字 */
+  let voiceRequested = new Set();
+  /** 次に予約する文の添字 */
+  let voiceNext = -1;
+  /** 最後に予約した音が終わる時刻（AudioContext の時計。0 なら未予約） */
+  let voiceEndAt = 0;
+  /** 光らせる合図（音の始まりに合わせる） */
+  let voiceTimers = [];
+
+  function voiceAudioUsable() {
+    return typeof window.AudioContext === "function";
+  }
+
+  /** 使えるかを受け取る。使えなければ選択肢を押せなくして理由を出す */
+  function voiceTakeUsable(state, remembered) {
+    voiceUsable = state.ok === true;
+    voiceReason = typeof state.reason === "string" ? state.reason : "";
+    const option = aloudEngine.querySelector('option[value="engine"]');
+    if (option) option.disabled = !voiceUsable;
+    aloudEngine.title = voiceUsable
+      ? "OSの声で読むか、手元の音声合成のエンジン（AivisSpeech・VOICEVOX）で人物ごとに声を変えて読むかを選びます"
+      : voiceReason;
+    if (!voiceModeTaken) {
+      voiceModeTaken = true;
+      if (remembered && voiceUsable) voiceSetMode(true, false);
+    }
+    if (!voiceUsable && voiceMode) voiceSetMode(false, false);
+    aloudPaintState();
+  }
+
+  /** 読み方を切り替える。**読んでいる途中なら止める**（切り方も声も変わる） */
+  function voiceSetMode(on, remember) {
+    if (on && !voiceUsable) on = false;
+    if (aloudOn || aloudStartAt !== null) aloudFinish();
+    voiceMode = on;
+    aloudPlan = null;
+    aloudEngine.value = on ? "engine" : "os";
+    document.body.classList.toggle("aloudengine", on);
+    if (remember) vscode.postMessage({ type: "readingEngine", on: on });
+    if (on && document.body.classList.contains("aloud")) voiceCastAsk("status");
+    aloudPaintState();
+    // 列のボタンが変わって折り返し幅が変わる（重ね敷きの枠を測り直す）
+    scheduleAlignMarks();
+  }
+
+  aloudEngine.addEventListener("change", function () {
+    voiceSetMode(aloudEngine.value === "engine", true);
+  });
+
+  /** 予約した音を全部止める。**aloudCancel からだけ呼ぶ**（止め方を1つに集める） */
+  function voiceStopAll() {
+    voiceGen++;
+    for (const timer of voiceTimers) clearTimeout(timer);
+    voiceTimers = [];
+    for (const source of voiceSources) {
+      try {
+        source.onended = null;
+        source.stop();
+      } catch (error) {
+        /* 鳴り終わっていれば止めるものが無い */
+      }
+    }
+    voiceSources = [];
+    voiceBuffers = new Map();
+    voiceRequested = new Set();
+    voiceNext = -1;
+    voiceEndAt = 0;
+  }
+
+  /** その文から鳴らし始める（aloudSpeak から。止めたあと＝世代は進んでいる） */
+  function voiceSpeakFrom(index) {
+    const sentence = aloudPlan[index];
+    aloudAt = index;
+    aloudSpeech = sentence.speech;
+    aloudOn = true;
+    aloudPaused = false;
+    aloudShow(sentence);
+    try {
+      if (!voiceCtx) voiceCtx = new AudioContext();
+      // 押した手応えの中で起こす（自動再生の決まりで止まっていることがある）
+      if (voiceCtx.state === "suspended") voiceCtx.resume();
+    } catch (error) {
+      aloudFinish();
+      aloudProblem = "音を鳴らす準備ができませんでした";
+      aloudPaintState();
+      return;
+    }
+    voiceNext = index;
+    voiceEndAt = 0;
+    for (let i = index; i < index + VOICE_AHEAD; i++) voiceRequest(i);
+    aloudPaintState();
+  }
+
+  function voiceRequest(index) {
+    if (!aloudPlan || index < 0 || index >= aloudPlan.length) return;
+    if (voiceRequested.has(index)) return;
+    voiceRequested.add(index);
+    vscode.postMessage({
+      type: "voiceAudio",
+      planId: voicePlanId,
+      index: index,
+      rate: aloudRateNow(),
+      gen: voiceGen,
+    });
+  }
+
+  /** base64 の WAV を、decodeAudioData に渡せる形へ */
+  function voiceBytes(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  /** 音が届いた。**古い世代・古い計画の音は捨てる** */
+  function voiceTakeAudio(message) {
+    if (message.gen !== voiceGen || message.planId !== voicePlanId) return;
+    if (!voiceMode || !aloudOn || aloudPaused || !voiceCtx) return;
+    if (typeof message.problem === "string") {
+      // 理由は終えたあとに置く（aloudFinish は前の理由を消す）
+      aloudFinish();
+      aloudProblem = message.problem;
+      aloudPaintState();
+      return;
+    }
+    if (typeof message.wav !== "string" || typeof message.index !== "number") return;
+    const gen = voiceGen;
+    const index = message.index;
+    let data;
+    try {
+      data = voiceBytes(message.wav);
+    } catch (error) {
+      return;
+    }
+    voiceCtx.decodeAudioData(data).then(
+      function (buffer) {
+        if (gen !== voiceGen) return;
+        voiceBuffers.set(index, buffer);
+        voiceSchedule();
+      },
+      function () {
+        if (gen !== voiceGen) return;
+        aloudFinish();
+        aloudProblem = "届いた音を鳴らせませんでした";
+        aloudPaintState();
+      }
+    );
+  }
+
+  /**
+   * 届いた音を、**前の音が終わる時刻**に予約する（順番どおりに、続けて）。
+   * 光らせるのは音が鳴り始める時刻で、その文の後ろをもう1つ頼む。
+   */
+  function voiceSchedule() {
+    const gen = voiceGen;
+    while (voiceNext >= 0 && voiceBuffers.has(voiceNext)) {
+      const index = voiceNext;
+      const buffer = voiceBuffers.get(index);
+      voiceBuffers.delete(index);
+      const sentence = aloudPlan[index];
+      const gap =
+        voiceEndAt === 0 ? 0 : (typeof sentence.gapMs === "number" ? sentence.gapMs : 0) / 1000;
+      const startAt = Math.max(voiceCtx.currentTime + 0.03, voiceEndAt + gap);
+      const source = voiceCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(voiceCtx.destination);
+      source.start(startAt);
+      voiceSources.push(source);
+      voiceEndAt = startAt + buffer.duration;
+      const last = index === aloudPlan.length - 1;
+      source.onended = function () {
+        voiceSources = voiceSources.filter(function (s) { return s !== source; });
+        if (last && gen === voiceGen && aloudOn && !aloudPaused) aloudFinish();
+      };
+      const wait = Math.max(0, (startAt - voiceCtx.currentTime) * 1000);
+      voiceTimers.push(
+        setTimeout(function () {
+          if (gen !== voiceGen || !aloudPlan || index >= aloudPlan.length) return;
+          aloudAt = index;
+          aloudSpeech = aloudPlan[index].speech;
+          aloudShow(aloudPlan[index]);
+          voiceRequest(index + VOICE_AHEAD);
+        }, wait)
+      );
+      voiceNext = index + 1;
+    }
+  }
+
+  function voiceCastAsk(action) {
+    vscode.postMessage({ type: "voiceCast", action: action, text: aloudTextNow() });
+  }
+
+  function voiceCastBusy(busy) {
+    aloudVoiceAssign.disabled = busy;
+    aloudCastRun.disabled = busy;
+    aloudCastOpen.disabled = busy;
+  }
+
+  /** 様子が届いた（操作が終わった）。ボタンを押せる形へ戻す */
+  function voiceTakeCastStatus(message) {
+    voiceCastBusy(false);
+    aloudCast.textContent = typeof message.note === "string" ? message.note : "";
+  }
+
+  aloudVoiceAssign.addEventListener("click", function () {
+    // 選び直した声は次の［▶ 読む］から。読んでいる途中の音は古い声のまま
+    voiceCastBusy(true);
+    voiceCastAsk("assign");
+  });
+  aloudCastRun.addEventListener("click", function () {
+    // **終わるまで押せなくする。** 続けて押すと、同じ話を2回送る
+    voiceCastBusy(true);
+    aloudCast.textContent = "台詞の話者と感情を推定しています…";
+    voiceCastAsk("run");
+  });
+  aloudCastOpen.addEventListener("click", function () {
+    voiceCastBusy(true);
+    voiceCastAsk("open");
   });
 
   aloudRate.addEventListener("change", function () {

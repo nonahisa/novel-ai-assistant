@@ -123,6 +123,7 @@ describe("プロンプト設計書の形", () => {
     ["P-51", "src/prompts/travelDistanceExtract.ts", "TRAVEL_DISTANCE_EXTRACT_VERSION"],
     ["P-52", "src/prompts/sceneTimeCue.ts", "SCENE_TIME_CUE_VERSION"],
     ["P-53", "src/prompts/sceneMindExtract.ts", "SCENE_MIND_EXTRACT_VERSION"],
+    ["P-54", "src/prompts/voiceCast.ts", "VOICE_CAST_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(
