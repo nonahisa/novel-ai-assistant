@@ -9,6 +9,7 @@ import {
   push,
   readRepoRoot,
   readSyncStatus,
+  refreshAfterFetch,
   runGit,
   type GitCommandRunner,
   type GitSyncStatus,
@@ -95,6 +96,13 @@ interface HandoffOutcome {
   done: boolean;
   /** 通らなかった理由（ログと知らせに出す） */
   detail?: string;
+  /** 点検した置き場（点検のあとに作り直す対象を絞るのに使う） */
+  target: HandoffTarget;
+  /**
+   * 「何もしなかった」ときだけ、点検の最後に読んだ状態。見張りの持つ状態と同じなら、
+   * その置き場は作り直さない（`refreshAfterInspection`）
+   */
+  settled?: GitSyncStatus;
 }
 
 /**
@@ -144,7 +152,7 @@ export async function runStartupHandoff(deps: HandoffDeps): Promise<void> {
 
   // 点検で状態が変わっているので、一覧とステータスバーを作り直す。
   // **ここでは取りに行かない**（たった今取ってきたばかりである）
-  await deps.monitor.refreshAll({ fetch: false });
+  await refreshAfterInspection(deps, targets, outcomes);
   await refreshUnsentMark(deps);
   // 点検で取り込んだときだけ、承認待ちや設定資料が届いたかもしれないと知らせる
   // （メニューの印の数え直し。起動直後の数えは点検より先に走っている）。
@@ -159,6 +167,93 @@ export async function runStartupHandoff(deps: HandoffDeps): Promise<void> {
   }
 
   await reportStartup(deps, previous, outcomes, deferred.length);
+}
+
+/**
+ * 点検のあとに、見張りの持つ状態を作り直す対象を絞る（2026-11-05）。
+ *
+ * それまでは全作品を丸ごと作り直していた（書庫で作品7つなら、置き場ぜんぶの読み5本＋
+ * 作品ごと3本で20本超）。点検は置き場ごとに最後の状態を読んでいるので、
+ *
+ * - 「何もしなかった」置き場で、**見張りがすでに同じ状態を持っている**なら、
+ *   作り直しても同じ答えになるので省く
+ * - 動かした置き場（取り込み・送信・合わせた）、止めた置き場、点検しなかった置き場
+ *   （上限を超えたぶん・途中で落ちたもの）、見張りがまだ状態を持っていない置き場は、
+ *   これまでどおり読み直す（作業木が変わっている）。置き場の中の兄弟の作品は
+ *   `refreshRoot` がまとめて読む
+ *
+ * **迷ったら読み直す側へ倒す**。見張りに `refreshRoot` が無い（代役）、または
+ * 省ける置き場が1つも無いときは、これまでと同じ `refreshAll` を呼ぶ。
+ * 見張りの状態は点検とは別に、ファイルの見張りが書くたびに追いつく。
+ */
+async function refreshAfterInspection(
+  deps: HandoffDeps,
+  targets: readonly HandoffTarget[],
+  outcomes: readonly HandoffOutcome[]
+): Promise<void> {
+  const monitor = deps.monitor;
+  const settledIds = new Set<string>();
+  for (const outcome of outcomes) {
+    const settled = outcome.settled;
+    if (!settled) continue;
+    const same = outcome.target.works.every((work) => {
+      const held = monitor.statusFor(work.id);
+      return held !== undefined && sameRootState(held, settled);
+    });
+    if (same) for (const work of outcome.target.works) settledIds.add(work.id);
+  }
+  if (!monitor.refreshRoot || settledIds.size === 0) {
+    await monitor.refreshAll({ fetch: false });
+    return;
+  }
+
+  const options = { fetch: false, notify: false };
+  const done = new Set<string>(settledIds);
+  // 置き場ごとに1回（先頭の作品で。兄弟は `refreshRoot` が同じ一巡で読む）
+  for (const target of targets) {
+    if (target.works.every((work) => done.has(work.id))) continue;
+    await monitor.refreshRoot(target.works[0], options);
+    for (const work of target.works) done.add(work.id);
+  }
+  // どの置き場にも入らなかった作品（リポジトリでない・git が無いなど）
+  for (const work of deps.registry.list()) {
+    if (done.has(work.id)) continue;
+    await monitor.refresh(work, options);
+  }
+}
+
+/**
+ * 置き場ぜんぶの値（作品ごとの `…Here` は除く）が同じか。
+ * **知らない形・失敗は「違う」とする**（読み直す側へ倒す）
+ */
+function sameRootState(held: GitSyncStatus, fresh: GitSyncStatus): boolean {
+  if (held.kind !== fresh.kind) return false;
+  switch (fresh.kind) {
+    case "tracked": {
+      const other = held as typeof fresh;
+      return (
+        other.root === fresh.root &&
+        other.branch === fresh.branch &&
+        other.upstream === fresh.upstream &&
+        other.ahead === fresh.ahead &&
+        other.behind === fresh.behind &&
+        other.dirty === fresh.dirty &&
+        other.unmerged === fresh.unmerged
+      );
+    }
+    case "no_upstream": {
+      const other = held as typeof fresh;
+      return (
+        other.root === fresh.root && other.branch === fresh.branch && other.dirty === fresh.dirty
+      );
+    }
+    case "no_remote": {
+      const other = held as typeof fresh;
+      return other.root === fresh.root && other.dirty === fresh.dirty;
+    }
+    default:
+      return false;
+  }
 }
 
 /** 置き場ごとにまとめる。**ここではまだネットワークに出ない** */
@@ -182,7 +277,8 @@ async function collectTargets(deps: HandoffDeps): Promise<HandoffTarget[]> {
       already.works.push(work);
       continue;
     }
-    const status = await readSyncStatus(work.folderPath, deps.run);
+    // 根は上で調べてあるので、状態読みの最初の「根の確かめ」は省く（2026-11-05）
+    const status = await readSyncStatus(work.folderPath, deps.run, undefined, known);
     if (!("root" in status)) continue;
     const found = byRoot.get(status.root);
     if (found) {
@@ -233,13 +329,23 @@ async function handleTarget(
     2026-11-01。0.120.0 までの版が足した行が、記録されない未記録の変更として取り込みを
     止め続けていた）。足しただけと言い切れないときは触らず、下の「記録していない変更」で止まる
   */
-  await rescueEditorGitignore(
+  const rescued = await rescueEditorGitignore(
     target.root,
     target.works.map((work) => work.folderPath),
     run
   );
 
-  const status = await readSyncStatus(target.root, deps.run);
+  /*
+    **fetch のあとは、変わりうるものだけを読み直す**（2026-11-05。全作品同期の確認の窓と同じ）。
+    fetch が動かすのは上流の参照と遅れの数だけなので、作業木の数・remote・枝は集めたときの
+    値を使う。**例外は `.gitignore` を戻したとき**：作業木が変わったので丸ごと読み直す。
+    集めてからここまでに作者が書いた分は、取り込みの手前の守り（`pullFastForward` の
+    未記録の確認）と、点検のあとの見張りの作り直しが拾う
+  */
+  const status =
+    rescued === "restored"
+      ? await readSyncStatus(target.root, deps.run)
+      : await refreshAfterFetch(target.status, target.root, deps.run);
   const overlap = await readOverlap(target.root, status, run);
   const action = planHandoff({
     status,
@@ -249,22 +355,22 @@ async function handleTarget(
 
   switch (action.kind) {
     case "nothing":
-      return { label: target.label, action, done: true };
+      return { label: target.label, action, done: true, target, settled: status };
     case "blocked":
-      return { label: target.label, action, done: false };
+      return { label: target.label, action, done: false, target };
     case "take":
       return await takeRemote(deps, target, action);
     case "send":
       return await sendLocal(deps, target, action);
     case "fold":
-      return await foldBoth(deps, target, action);
+      return await foldBoth(deps, target, action, status);
     case "ask":
       // **止めて訊く。** ここでは動かさず、報告から競合解決へ渡す
       logStep(
         `分かれていて、同じファイルが両方で変わっている（${target.label}／` +
           `${action.overlap.length}件）`
       );
-      return { label: target.label, action, done: false };
+      return { label: target.label, action, done: false, target };
   }
 }
 
@@ -310,13 +416,13 @@ async function takeRemote(
 
   if (result.ok) {
     logStep(`開いたときに取り込んだ（${target.label}／${action.behind}件）`);
-    return { label: target.label, action, done: true };
+    return { label: target.label, action, done: true, target };
   }
   logFailure("開いたときの取り込みに失敗", {
     置き場: target.label,
     詳細: "detail" in result.failure ? result.failure.detail : result.failure.kind,
   });
-  return { label: target.label, action, done: false, detail: "取り込めませんでした" };
+  return { label: target.label, action, done: false, detail: "取り込めませんでした", target };
 }
 
 /** ローカルに溜まっている。**送る**（作者の裁定） */
@@ -331,24 +437,29 @@ async function sendLocal(
   const result = await push(target.root, deps.run);
   if (result.ok) {
     logStep(`開いたときに送信した（${target.label}／${action.ahead}件）`);
-    return { label: target.label, action, done: true };
+    return { label: target.label, action, done: true, target };
   }
   logFailure("開いたときの送信に失敗", {
     置き場: target.label,
     詳細: result.detail ?? "（詳細なし）",
   });
-  return { label: target.label, action, done: false, detail: "送信できませんでした" };
+  return { label: target.label, action, done: false, detail: "送信できませんでした", target };
 }
 
 /** 両方に動きがあり、ファイルが重ならない。**黙って揃える**（作者の裁定） */
 async function foldBoth(
   deps: HandoffDeps,
   target: HandoffTarget,
-  action: Extract<HandoffAction, { kind: "fold" }>
+  action: Extract<HandoffAction, { kind: "fold" }>,
+  /**
+   * 点検の流れで、ついさっき読んだ状態（2026-11-05）。以前はここで丸ごと読み直していたが、
+   * 間にあるのは重なりの調べ（変更ファイル名の取得）だけで、上流の名前は変わらない。
+   * 合わせる本体（`foldDivergence`）は、動かす前に未記録の変更を自分で数え直す
+   */
+  status: GitSyncStatus
 ): Promise<HandoffOutcome> {
-  const status = await readSyncStatus(target.root, deps.run);
   if (status.kind !== "tracked") {
-    return { label: target.label, action, done: false, detail: "状態が変わりました" };
+    return { label: target.label, action, done: false, detail: "状態が変わりました", target };
   }
 
   const { foldDivergence } = await import("./resolveDivergence.js");
@@ -383,7 +494,7 @@ async function foldBoth(
       dirty: action.dirty,
       overlap: folded.authored,
     };
-    return { label: target.label, action: asked, done: false };
+    return { label: target.label, action: asked, done: false, target };
   }
 
   if (!folded.ok) {
@@ -391,7 +502,7 @@ async function foldBoth(
       置き場: target.label,
       詳細: folded.reason,
     });
-    return { label: target.label, action, done: false, detail: "合わせられませんでした" };
+    return { label: target.label, action, done: false, detail: "合わせられませんでした", target };
   }
 
   // 合わせただけでは手元に溜まったまま。**揃えるとは、送るところまでである**
@@ -401,13 +512,13 @@ async function foldBoth(
       置き場: target.label,
       詳細: sent.detail ?? "（詳細なし）",
     });
-    return { label: target.label, action, done: false, detail: "合わせましたが送信できませんでした" };
+    return { label: target.label, action, done: false, detail: "合わせましたが送信できませんでした", target };
   }
 
   logStep(
     `開いたときに合わせて送った（${target.label}／取り込み ${folded.incoming}件）`
   );
-  return { label: target.label, action, done: true };
+  return { label: target.label, action, done: true, target };
 }
 
 /**

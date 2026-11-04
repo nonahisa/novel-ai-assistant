@@ -36,6 +36,14 @@ export interface GitSyncMonitorLike extends vscode.Disposable {
     work: WorkEntry,
     options: { fetch: boolean; notify: boolean }
   ): Promise<GitSyncStatus>;
+  /**
+   * その作品と同じ置き場の作品をみな数え直す。開いたときの点検が、動いた置き場だけを
+   * 作り直すのに使う。**代役は持たない**（ブラウザ版には git が無い）
+   */
+  refreshRoot?(
+    work: WorkEntry,
+    options: { fetch: boolean; notify: boolean }
+  ): Promise<GitSyncStatus>;
   pull(work: WorkEntry): Promise<boolean>;
   /**
    * 受け取るだけ（取り寄せて、遅れていれば早送りで取り込む）。**問いも知らせも出さない**
