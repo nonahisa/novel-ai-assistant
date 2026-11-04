@@ -92,7 +92,13 @@ export type AssignableFeature =
     作業**で、手元の小さいモデルでも足りる。ほかの機能と相乗りさせると、
     推敲のために選んだ大きなクラウドのAIへ、押すたびに1話ぶん送ることになる。
   */
-  | "readingDictionary";
+  | "readingDictionary"
+  /*
+    人物の声で朗読する——台詞の話者と感情の推定（P-54。設計書6.42.3）。
+    読みの辞書と分けるのは、要る地力が違うから。読みは語を見るだけだが、
+    話者は前後の地の文と人物の口調を突き合わせて決める。
+  */
+  | "voiceCast";
 
 /**
  * 機能の表示名。**画面に出す名前はここだけが持つ。**
@@ -110,6 +116,7 @@ export const ASSIGNABLE_FEATURE_LABELS: Record<AssignableFeature, string> = {
   chat: "AIに相談",
   transcribe: "写真の書き起こし",
   readingDictionary: "読み上げの読みの確かめ",
+  voiceCast: "朗読の台詞の話者と感情",
 };
 
 /** 選択画面に並べる順。重い（＝手元AIの効きが大きい）ものから */
@@ -125,6 +132,7 @@ export const ASSIGNABLE_FEATURES: AssignableFeature[] = [
   "chat",
   "transcribe",
   "readingDictionary",
+  "voiceCast",
 ];
 
 export interface FeatureAssignment {

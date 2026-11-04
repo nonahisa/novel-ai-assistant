@@ -118,9 +118,12 @@ import {
 import {
   READ_ALOUD_MEMO_TEXT,
   buildReadingPlan,
+  type ReadingSentence,
   isReadingMemoLine,
 } from "../core/readAloud";
 import type { ReadingSpan } from "../core/readingDictionary";
+import type { VoicePlanUnit } from "../core/voiceCast";
+import { bytesToBase64 } from "../core/voiceEngine";
 import { IME_TEXT_MAX, mergeReadingSpans } from "../core/imeReading";
 import { IME_WORD_BEFORE_MAX } from "../core/imeWordReading";
 import { pickPostingTarget } from "./ruby";
@@ -1806,7 +1809,20 @@ type Incoming =
    * 表示は120ミリ秒ずれることがあり（`scheduleSend`）、こちらの本文で
    * 計画を作ると、光らせる位置が打った分だけずれる。
    */
-  | { type: "readingPlan"; text: string }
+  | { type: "readingPlan"; text: string; voiced?: boolean }
+  /**
+   * 人物の声で読む文の音を作ってほしい（設計書6.42.3）。`planId` は届いた計画の
+   * 番号で、いまの計画と違えば作らない（打って計画が変わった後の古い頼み）。
+   * `gen` は画面の鳴らす世代で、そのまま返す（画面が古い答えを捨てる目印）
+   */
+  | { type: "voiceAudio"; planId: number; index: number; rate: number; gen: number }
+  /**
+   * 人物の声の操作（設計書6.42.3）。`run` は［台詞の話者と感情（AI）］、`open` は
+   * ［台詞の一覧］、`assign` は［声の割り当て］、`status` は列の一言の問い合わせ
+   */
+  | { type: "voiceCast"; action: "run" | "open" | "assign" | "status"; text: string }
+  /** 人物の声で読むかを覚える（端末ごと） */
+  | { type: "readingEngine"; on: boolean }
   /** 読んでいる文の行に、シーンメモの印を置く */
   | { type: "readingMark"; line: number }
   /** 選ばれた声を覚える（端末ごと。作品には書かない） */
@@ -1840,6 +1856,32 @@ type Incoming =
    * SNS記事は短いとはいえ、閉じている面のために組む理由は無い。
    */
   | { type: "notePreview"; on: boolean };
+
+/**
+ * 人物の声で朗読する口（設計書6.42.3）。実体は `features/voiceReading.ts`。
+ * **どれも作者向けの文で失敗を返す**（投げない）。原因は決め打ちしない。
+ */
+export interface VoiceReadingDeps {
+  /** この環境で使えるか。ブラウザ版では手元のエンジンに届かないので使えない */
+  usable(): { ok: true } | { ok: false; reason: string };
+  /** 計画の文ごとに声を決める（エンジンの話者の一覧を引く） */
+  plan(
+    filePath: string,
+    text: string,
+    sentences: readonly ReadingSentence[]
+  ): Promise<{ units: VoicePlanUnit[] } | { problem: string }>;
+  /** 文の音（WAV）を作る。先の数文も並べて作っておく（先読み） */
+  audio(
+    units: readonly VoicePlanUnit[],
+    index: number,
+    rate: number
+  ): Promise<{ wav: Uint8Array } | { problem: string }>;
+  /** 列の一言（推定した台詞の数・声の割り当て） */
+  status(filePath: string, text: string): Promise<string>;
+  runCast(filePath: string, text: string): Promise<void>;
+  manageCast(filePath: string, text: string): Promise<void>;
+  assignVoices(filePath: string): Promise<void>;
+}
 
 export interface ManuscriptEditorDeps {
   highlighter: TermHighlighter;
@@ -2017,6 +2059,17 @@ export interface ManuscriptEditorDeps {
   readAloudVoice?: () => string | undefined;
   /** 選ばれた声を覚える */
   saveReadAloudVoice?: (name: string) => Promise<void>;
+  /** 人物の声で読むか（端末に覚える。設計書6.42.3） */
+  readAloudEngine?: () => boolean;
+  saveReadAloudEngine?: (on: boolean) => Promise<void>;
+  /**
+   * 人物の声で朗読する（AivisSpeech／VOICEVOX。設計書6.42.3）。
+   *
+   * **繋ぐのは `extension.ts` だけ**（読みの辞書と同じ理由——原稿エディタに
+   * AIの登録簿を抱えさせない）。省略できる形にしてあるのは、この画面が
+   * OSの声だけでも読み上げられるため。
+   */
+  voiceReading?: VoiceReadingDeps;
   /**
    * 読み上げの読みの辞書（設計書6.42.1）。
    *
@@ -2342,6 +2395,14 @@ export class ManuscriptEditorProvider
         // （設計書6.42）。覚えていなければ画面が最初の声を選ぶ
         readAloudVoice: this.deps.readAloudVoice?.(),
         /*
+          人物の声で読めるか（設計書6.42.3）。**使えない環境では、選択肢を
+          消さずに押せなくして理由を出す**（ブラウザ版はこの PC のエンジンに届かない）
+        */
+        voiceEngine: this.deps.voiceReading
+          ? this.deps.voiceReading.usable()
+          : { ok: false, reason: "この画面では人物の声を使えません" },
+        readAloudEngine: this.deps.readAloudEngine?.() ?? false,
+        /*
           **取り消し・やり直しで戻ったときだけ添える**（設計書6.25.8）。
           添えてあれば、画面は差分からカーソルをずらすのをやめ、
           ここへ置く。添えなければ今までどおり。
@@ -2375,6 +2436,12 @@ export class ManuscriptEditorProvider
     let pendingReveal: { line: number; caret: RevealCaret } | undefined;
     /** 読み上げの列を頼まれたが、画面がまだ動き出していない（設計書6.42） */
     let pendingReading = false;
+    /**
+     * 人物の声で読む計画（設計書6.42.3）。**文ごとの声はこちらが持ち、画面は
+     * 番号で音を頼むだけ**——画面から届く文字列やスタイルIDで合成しない
+     */
+    let voicePlan: { id: number; units: VoicePlanUnit[] } | undefined;
+    let voicePlanSeq = 0;
     const revealLineNow = (line: number, caret: RevealCaret): void => {
       void panel.webview.postMessage({ type: "revealLine", line, caret });
     };
@@ -3306,18 +3373,123 @@ export class ManuscriptEditorProvider
               }）`
             );
           }
+          const readings = mergeReadingSpans(dictionary?.spans ?? [], names);
+          const voiceReading = this.deps.voiceReading;
+          if (message.voiced === true && voiceReading) {
+            /*
+              **人物の声で読む**（設計書6.42.3）。台詞と地の文の境目でも切り、
+              文ごとの声を決めてこちらへ控える。エンジンに繋がらなければ
+              理由を添えて返す（画面は止めて理由を出す。OSの声の道は残る）
+            */
+            const sentences = buildReadingPlan(message.text, notation, readings, {
+              splitDialogue: true,
+            });
+            const usable = voiceReading.usable();
+            const planned = usable.ok
+              ? await voiceReading.plan(fromUri(document.uri), message.text, sentences)
+              : { problem: usable.reason };
+            voicePlanSeq++;
+            if ("problem" in planned) {
+              voicePlan = undefined;
+              await panel.webview.postMessage({
+                type: "readingPlan",
+                sentences,
+                textLength: message.text.length,
+                voiced: true,
+                planId: voicePlanSeq,
+                voiceProblem: planned.problem,
+              });
+              break;
+            }
+            voicePlan = { id: voicePlanSeq, units: planned.units };
+            await panel.webview.postMessage({
+              type: "readingPlan",
+              sentences: sentences.map((sentence, i) => ({
+                ...sentence,
+                gapMs: planned.units[i]?.gapMs ?? 0,
+                who: planned.units[i]?.who ?? "",
+              })),
+              textLength: message.text.length,
+              voiced: true,
+              planId: voicePlanSeq,
+            });
+            break;
+          }
           await panel.webview.postMessage({
             type: "readingPlan",
-            sentences: buildReadingPlan(
-              message.text,
-              notation,
-              mergeReadingSpans(dictionary?.spans ?? [], names)
-            ),
+            sentences: buildReadingPlan(message.text, notation, readings),
             // 画面が「自分が送った本文の計画か」を確かめるための目印
             textLength: message.text.length,
           });
           break;
         }
+
+        case "voiceAudio": {
+          /*
+            **画面から届く値を信用しない**——番号と速さの形を見て、いまの計画の
+            番号のときだけ作る。作った音は世代を添えて返す（画面が古い答えを捨てる）
+          */
+          const voiceReading = this.deps.voiceReading;
+          const plan = voicePlan;
+          if (
+            !voiceReading ||
+            !plan ||
+            message.planId !== plan.id ||
+            !Number.isInteger(message.index) ||
+            message.index < 0 ||
+            message.index >= plan.units.length ||
+            typeof message.rate !== "number" ||
+            typeof message.gen !== "number"
+          ) {
+            break;
+          }
+          const result = await voiceReading.audio(plan.units, message.index, message.rate);
+          await panel.webview.postMessage({
+            type: "voiceAudio",
+            planId: message.planId,
+            index: message.index,
+            gen: message.gen,
+            ...("wav" in result
+              ? { wav: bytesToBase64(result.wav) }
+              : { problem: result.problem }),
+          });
+          break;
+        }
+
+        case "voiceCast": {
+          const voiceReading = this.deps.voiceReading;
+          const filePath = fromUri(document.uri);
+          if (!voiceReading) {
+            await panel.webview.postMessage({ type: "voiceCastStatus", note: "" });
+            break;
+          }
+          const usable = voiceReading.usable();
+          if (!usable.ok) {
+            // **ほかの道から呼ばれても理由を出す**（設計書5.8.16。画面では押せなくしてある）
+            if (message.action !== "status") {
+              void vscode.window.showInformationMessage(usable.reason);
+            }
+            await panel.webview.postMessage({ type: "voiceCastStatus", note: usable.reason });
+            break;
+          }
+          const text = typeof message.text === "string" ? message.text : "";
+          try {
+            if (message.action === "run") await voiceReading.runCast(filePath, text);
+            else if (message.action === "open") await voiceReading.manageCast(filePath, text);
+            else if (message.action === "assign") await voiceReading.assignVoices(filePath);
+          } finally {
+            // どの操作のあとも、失敗しても様子を返す（画面は返るまでボタンを押せなくしている）
+            await panel.webview.postMessage({
+              type: "voiceCastStatus",
+              note: await voiceReading.status(filePath, text),
+            });
+          }
+          break;
+        }
+
+        case "readingEngine":
+          await this.deps.saveReadAloudEngine?.(message.on === true);
+          break;
 
         case "readingDictionary": {
           const filePath = fromUri(document.uri);

@@ -1,0 +1,561 @@
+import { hashText } from "./hash";
+
+/**
+ * 手元の音声合成エンジン（AivisSpeech / VOICEVOX）との口（設計書6.42.3）。
+ *
+ * どちらも同じ HTTP の口（VOICEVOX 互換API）を持つ：
+ *
+ * - `GET /speakers` … 話者とスタイルの一覧
+ * - `POST /audio_query?text=&speaker=<スタイルID>` … 読み方と調子の下ごしらえ（JSON）
+ * - `POST /synthesis?speaker=<スタイルID>` … 下ごしらえの JSON を送ると WAV が返る
+ *
+ * ## ここは vscode に触らない
+ *
+ * 一覧の読み取り・調子の足し引き・控えの鍵は、どれも純粋な計算である。
+ * HTTP も `fetch` を外から渡せる形にして、テストの中で立てる偽のエンジンへ
+ * 向けられるようにする（本物のエンジンはテストでは動かさない）。
+ *
+ * ## 叩くのは拡張機能の側
+ *
+ * 原稿エディタの画面（WebView）から `http://127.0.0.1` を叩くと、エンジンが
+ * 画面の出どころを許していないので CORS で弾かれる。拡張機能の側で叩き、
+ * できた WAV を画面へ渡す。
+ */
+
+/** AivisSpeech の既定の口。VOICEVOX は `http://127.0.0.1:50021` */
+export const DEFAULT_VOICE_ENGINE_URL = "http://127.0.0.1:10101";
+
+/** 話者のスタイル1つ（「ノーマル」「上機嫌」など） */
+export interface VoiceStyle {
+  name: string;
+  id: number;
+}
+
+/** 話者1人 */
+export interface VoiceSpeaker {
+  name: string;
+  uuid: string;
+  styles: VoiceStyle[];
+}
+
+/** エンジンとのやり取りの失敗。**原因は決め打ちしない**（実装ルール5） */
+export class VoiceEngineError extends Error {
+  constructor(
+    /**
+     * - `unreachable` … 応答が無い（エンジンが動いていない・口が違う・遮られた。どれかは分からない）
+     * - `http` … 応答はあったが成功ではない（本文は `detail` に。ログへ残す）
+     * - `badResponse` … 成功の応答だが、形が読めない
+     * - `aborted` … 中止した
+     */
+    readonly kind: "unreachable" | "http" | "badResponse" | "aborted",
+    message: string,
+    /** ログへ残す詳しいこと（エンジンの返した本文など） */
+    readonly detail?: string
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * 設定に書かれた口を整える。**http と https 以外は受けない**（`file:` などへ
+ * 本文を送らない）。末尾の `/` は落とす。読めなければ undefined
+ */
+export function normalizeEngineUrl(raw: string | undefined): string | undefined {
+  const text = (raw ?? "").trim();
+  if (text === "") return undefined;
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+  return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+/**
+ * `/speakers` の答えを読む。**形の崩れた話者・スタイルは落とし、残りで続ける**
+ * （1人の崩れで一覧ぜんぶを使えなくしない）。
+ *
+ * スタイルに `type` があり `talk` 以外（歌声の `sing`・`frame_decode` など）は
+ * 読み上げに使えないので落とす。`type` が無い古い形は話し声として扱う。
+ * 一覧そのものが配列でなければ投げる。
+ */
+export function parseSpeakers(json: unknown): VoiceSpeaker[] {
+  if (!Array.isArray(json)) {
+    throw new VoiceEngineError(
+      "badResponse",
+      "話者の一覧の形が読めません",
+      JSON.stringify(json)?.slice(0, 300)
+    );
+  }
+  const speakers: VoiceSpeaker[] = [];
+  for (const item of json) {
+    if (typeof item !== "object" || item === null) continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.name !== "string" || !Array.isArray(record.styles)) continue;
+    const styles: VoiceStyle[] = [];
+    for (const style of record.styles) {
+      if (typeof style !== "object" || style === null) continue;
+      const s = style as Record<string, unknown>;
+      if (typeof s.name !== "string" || typeof s.id !== "number") continue;
+      if (!Number.isInteger(s.id)) continue;
+      if (typeof s.type === "string" && s.type !== "talk") continue;
+      styles.push({ name: s.name, id: s.id });
+    }
+    if (styles.length === 0) continue;
+    speakers.push({
+      name: record.name,
+      uuid: typeof record.speaker_uuid === "string" ? record.speaker_uuid : record.name,
+      styles,
+    });
+  }
+  return speakers;
+}
+
+/** スタイルIDから話者とスタイルを引く */
+export function findStyle(
+  speakers: readonly VoiceSpeaker[],
+  styleId: number
+): { speaker: VoiceSpeaker; style: VoiceStyle } | undefined {
+  for (const speaker of speakers) {
+    const style = speaker.styles.find((s) => s.id === styleId);
+    if (style) return { speaker, style };
+  }
+  return undefined;
+}
+
+/*
+  ── 感情 ─────────────────────────────
+*/
+
+/**
+ * 台詞の感情（設計書6.42.3）。**少数の固定の列挙**にする——AIに自由に書かせると
+ * 「切ない」「やや怒り気味」が返り、声の調子へ落とせない。
+ */
+export const VOICE_EMOTIONS = [
+  "平静",
+  "喜び",
+  "怒り",
+  "悲しみ",
+  "驚き",
+  "恐れ",
+  "照れ",
+  "ささやき",
+  "叫び",
+] as const;
+export type VoiceEmotion = (typeof VOICE_EMOTIONS)[number];
+
+export const VOICE_INTENSITIES = ["弱", "中", "強"] as const;
+export type VoiceIntensity = (typeof VOICE_INTENSITIES)[number];
+
+export function isVoiceEmotion(value: unknown): value is VoiceEmotion {
+  return typeof value === "string" && (VOICE_EMOTIONS as readonly string[]).includes(value);
+}
+
+export function isVoiceIntensity(value: unknown): value is VoiceIntensity {
+  return (
+    typeof value === "string" && (VOICE_INTENSITIES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * 感情に近いスタイルの名前の候補（前から順に探す。名前に**含まれていれば**当たり）。
+ *
+ * AivisSpeech の話者はスタイルの名前が話者ごとに違う（「上機嫌」「怒り・悲しみ」
+ * 「テンション高め」「落ち着き」…）。VOICEVOX も「あまあま」「ツンツン」
+ * 「ささやき」「ヒソヒソ」など。ここは**よくある名前の当てずっぽうの表**で、
+ * 作者は声の割り当てのファイル（`emotionStyles`）で話者に合わせて上書きできる。
+ * 平静は候補を持たない（選んだスタイルのまま）。
+ */
+export const EMOTION_STYLE_CANDIDATES: Record<VoiceEmotion, readonly string[]> = {
+  平静: [],
+  喜び: ["上機嫌", "喜び", "楽しい", "嬉しい", "あまあま", "テンション高め"],
+  怒り: ["怒り", "ツンツン", "不機嫌", "怒"],
+  悲しみ: ["悲しみ", "哀しみ", "かなしい", "泣き", "落ち込み"],
+  驚き: ["驚き", "びっくり", "テンション高め"],
+  恐れ: ["怯え", "恐怖", "不安", "おびえ", "ヒソヒソ"],
+  照れ: ["照れ", "恥ずかしい", "あまあま"],
+  ささやき: ["ささやき", "囁き", "ヒソヒソ", "内緒話"],
+  叫び: ["叫び", "絶叫", "テンション高め", "怒り"],
+};
+
+/** 声の調子（audio_query の6つの欄へ当てる値） */
+export interface VoiceParams {
+  speedScale: number;
+  pitchScale: number;
+  intonationScale: number;
+  volumeScale: number;
+  prePhonemeLength: number;
+  postPhonemeLength: number;
+}
+
+/**
+ * 感情ごとの調子の寄せ方（「中」の強さのとき）。
+ *
+ * - `speed`・`intonation`・`volume` は**倍率の差**（0.1 なら 1.1 倍）
+ * - `pitch` は**足す値**（VOICEVOX の pitchScale は 0 が標準で、±0.15 ほどが聞ける幅）
+ * - `post` は文の後ろの無音（秒）に足す値
+ *
+ * 値は耳で決めるもので、作者の Windows で AivisSpeech を鳴らして詰める
+ * （実機確認リスト）。ここに置いたのは最初の見当である。
+ */
+const EMOTION_SHIFT: Record<
+  VoiceEmotion,
+  { speed: number; pitch: number; intonation: number; volume: number; post: number }
+> = {
+  平静: { speed: 0, pitch: 0, intonation: 0, volume: 0, post: 0 },
+  喜び: { speed: 0.04, pitch: 0.03, intonation: 0.15, volume: 0.03, post: 0 },
+  怒り: { speed: 0.06, pitch: -0.01, intonation: 0.25, volume: 0.1, post: 0 },
+  悲しみ: { speed: -0.1, pitch: -0.04, intonation: -0.15, volume: -0.08, post: 0.15 },
+  驚き: { speed: 0.05, pitch: 0.06, intonation: 0.3, volume: 0.05, post: 0 },
+  恐れ: { speed: 0.06, pitch: 0.02, intonation: -0.1, volume: -0.1, post: 0.05 },
+  照れ: { speed: -0.05, pitch: 0.03, intonation: 0.05, volume: -0.1, post: 0.05 },
+  ささやき: { speed: -0.06, pitch: 0, intonation: -0.2, volume: -0.35, post: 0.05 },
+  叫び: { speed: 0.05, pitch: 0.04, intonation: 0.35, volume: 0.25, post: 0 },
+};
+
+const INTENSITY_FACTOR: Record<VoiceIntensity, number> = { 弱: 0.5, 中: 1, 強: 1.5 };
+
+/**
+ * 文の前後の無音（秒）。エンジンの既定（0.1 前後）より短くする——文と文の
+ * 間は画面の側で決めて鳴らす（`VOICE_GAP_*`）ので、ここで足すと二重に空く。
+ */
+export const VOICE_PRE_PHONEME = 0.05;
+export const VOICE_POST_PHONEME = 0.05;
+
+/**
+ * 感情と強さから調子を作る。
+ *
+ * @param styled 感情に近いスタイルが見つかって、それで読むか。**スタイルが
+ *   感情を持っているので、調子の寄せは半分にする**（両方で寄せると大げさになる）
+ * @param rate 列の速さ（`readAloudRate`。0.5〜2）。speedScale に掛ける
+ */
+export function voiceParamsFor(
+  emotion: VoiceEmotion,
+  intensity: VoiceIntensity,
+  styled: boolean,
+  rate: number
+): VoiceParams {
+  const shift = EMOTION_SHIFT[emotion];
+  const k = INTENSITY_FACTOR[intensity] * (styled ? 0.5 : 1);
+  const safeRate = Number.isFinite(rate) ? clamp(rate, 0.5, 2) : 1;
+  return {
+    speedScale: round(clamp((1 + shift.speed * k) * safeRate, 0.5, 2)),
+    pitchScale: round(clamp(shift.pitch * k, -0.15, 0.15)),
+    intonationScale: round(clamp(1 + shift.intonation * k, 0, 2)),
+    volumeScale: round(clamp(1 + shift.volume * k, 0, 2)),
+    prePhonemeLength: VOICE_PRE_PHONEME,
+    postPhonemeLength: round(clamp(VOICE_POST_PHONEME + shift.post * k, 0, 1.5)),
+  };
+}
+
+/**
+ * 感情に合うスタイルを選ぶ。
+ *
+ * 選んだスタイル（`baseStyleId`）の話者の中から、感情の候補の名前を含む
+ * スタイルを探す。作者の上書き（`overrides`）があれば先にそれを見る。
+ * 見つからなければ選んだスタイルのまま（調子だけで寄せる）。
+ */
+export function pickStyleForEmotion(
+  speakers: readonly VoiceSpeaker[],
+  baseStyleId: number,
+  emotion: VoiceEmotion,
+  overrides: Partial<Record<VoiceEmotion, readonly string[]>> = {}
+): { styleId: number; styled: boolean } {
+  if (emotion === "平静") return { styleId: baseStyleId, styled: false };
+  const found = findStyle(speakers, baseStyleId);
+  if (!found) return { styleId: baseStyleId, styled: false };
+  const candidates = [...(overrides[emotion] ?? []), ...EMOTION_STYLE_CANDIDATES[emotion]];
+  for (const candidate of candidates) {
+    if (candidate === "") continue;
+    const style = found.speaker.styles.find(
+      (s) => s.id !== baseStyleId && s.name.includes(candidate)
+    );
+    if (style) return { styleId: style.id, styled: true };
+  }
+  return { styleId: baseStyleId, styled: false };
+}
+
+/**
+ * audio_query の答えへ調子を当てる。**知らない欄はそのまま残す**（エンジンの
+ * 版で欄が増えても壊さない）。元の値は捨てる——こちらの調子は「標準から
+ * どれだけ寄せるか」で作ってあるので、エンジンの既定に掛け合わせない
+ */
+export function applyVoiceParams(
+  query: Record<string, unknown>,
+  params: VoiceParams
+): Record<string, unknown> {
+  return { ...query, ...params };
+}
+
+/**
+ * 合成の控えの鍵。文字列・スタイルID・調子・エンジンの口のどれかが違えば別の音
+ */
+export function synthesisKey(
+  engineUrl: string,
+  styleId: number,
+  text: string,
+  params: VoiceParams
+): string {
+  return hashText(
+    JSON.stringify([
+      engineUrl,
+      styleId,
+      text,
+      params.speedScale,
+      params.pitchScale,
+      params.intonationScale,
+      params.volumeScale,
+      params.prePhonemeLength,
+      params.postPhonemeLength,
+    ])
+  );
+}
+
+/**
+ * 合成した音の控え（メモリの中だけ。**上限つき**）。
+ *
+ * 一時停止して続ける・同じ文から読み直す・先読みした文を鳴らす、のどれも
+ * 同じ文をもう一度作らずに済む。上限を超えたら古く使ったものから捨てる
+ * （1文の WAV は数十〜数百KB。1話ぶん読むと数十MBになりうる）。
+ */
+export class SynthesisCache {
+  private readonly entries = new Map<string, Uint8Array>();
+  private bytes = 0;
+
+  constructor(
+    private readonly maxEntries = 300,
+    private readonly maxBytes = 64 * 1024 * 1024
+  ) {}
+
+  get(key: string): Uint8Array | undefined {
+    const value = this.entries.get(key);
+    if (!value) return undefined;
+    // 使ったものを後ろへ（古く使ったものから捨てるため）
+    this.entries.delete(key);
+    this.entries.set(key, value);
+    return value;
+  }
+
+  set(key: string, value: Uint8Array): void {
+    const old = this.entries.get(key);
+    if (old) {
+      this.bytes -= old.byteLength;
+      this.entries.delete(key);
+    }
+    // 1つで上限を超えるものはしまわない（ほかを全部追い出すことになる）
+    if (value.byteLength > this.maxBytes) return;
+    this.entries.set(key, value);
+    this.bytes += value.byteLength;
+    while (this.entries.size > this.maxEntries || this.bytes > this.maxBytes) {
+      const oldest = this.entries.keys().next();
+      if (oldest.done) break;
+      const dropped = this.entries.get(oldest.value);
+      this.entries.delete(oldest.value);
+      if (dropped) this.bytes -= dropped.byteLength;
+    }
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+
+  get totalBytes(): number {
+    return this.bytes;
+  }
+
+  clear(): void {
+    this.entries.clear();
+    this.bytes = 0;
+  }
+}
+
+/*
+  ── HTTP ─────────────────────────────
+*/
+
+/** 差し替えられる fetch（テストでは偽のエンジンへ向ける） */
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+/** 1回の問い合わせを待つ長さ。合成は長い文で数秒かかる */
+const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * VOICEVOX 互換のエンジンへの口。**接続先・fetch は外から渡す。**
+ */
+export class VoiceEngineClient {
+  constructor(
+    readonly baseUrl: string,
+    private readonly fetchImpl: FetchLike = (input, init) => fetch(input, init)
+  ) {}
+
+  async speakers(signal?: AbortSignal): Promise<VoiceSpeaker[]> {
+    const response = await this.request("/speakers", { method: "GET" }, signal);
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch (error) {
+      throw new VoiceEngineError(
+        "badResponse",
+        "話者の一覧を読めません",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    return parseSpeakers(json);
+  }
+
+  async audioQuery(
+    text: string,
+    styleId: number,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ text, speaker: String(styleId) });
+    const response = await this.request(
+      `/audio_query?${query.toString()}`,
+      { method: "POST" },
+      signal
+    );
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch (error) {
+      throw new VoiceEngineError(
+        "badResponse",
+        "読み方の下ごしらえ（audio_query）を読めません",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    if (typeof json !== "object" || json === null || Array.isArray(json)) {
+      throw new VoiceEngineError(
+        "badResponse",
+        "読み方の下ごしらえ（audio_query）の形が読めません",
+        JSON.stringify(json)?.slice(0, 300)
+      );
+    }
+    return json as Record<string, unknown>;
+  }
+
+  async synthesis(
+    query: Record<string, unknown>,
+    styleId: number,
+    signal?: AbortSignal
+  ): Promise<Uint8Array> {
+    const response = await this.request(
+      `/synthesis?speaker=${encodeURIComponent(String(styleId))}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "audio/wav" },
+        body: JSON.stringify(query),
+      },
+      signal
+    );
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    // WAV の頭（RIFF）でなければ音ではない。画面で decode に失敗するより先に止める
+    if (
+      bytes.length < 12 ||
+      bytes[0] !== 0x52 ||
+      bytes[1] !== 0x49 ||
+      bytes[2] !== 0x46 ||
+      bytes[3] !== 0x46
+    ) {
+      throw new VoiceEngineError("badResponse", "合成の答えが WAV ではありません");
+    }
+    return bytes;
+  }
+
+  /** 文字列・スタイル・調子から WAV を作る（下ごしらえ→調子を当てる→合成） */
+  async speak(
+    text: string,
+    styleId: number,
+    params: VoiceParams,
+    signal?: AbortSignal
+  ): Promise<Uint8Array> {
+    const query = await this.audioQuery(text, styleId, signal);
+    return this.synthesis(applyVoiceParams(query, params), styleId, signal);
+  }
+
+  private async request(
+    pathAndQuery: string,
+    init: RequestInit,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const onAbort = (): void => controller.abort();
+    signal?.addEventListener("abort", onAbort);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}${pathAndQuery}`, {
+        ...init,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (signal?.aborted) throw new VoiceEngineError("aborted", "中止しました");
+      throw new VoiceEngineError(
+        "unreachable",
+        `音声合成のエンジン（${this.baseUrl}）から応答がありません`,
+        error instanceof Error ? error.message : String(error)
+      );
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+    if (!response.ok) {
+      let body = "";
+      try {
+        body = (await response.text()).slice(0, 500);
+      } catch {
+        body = "";
+      }
+      throw new VoiceEngineError(
+        "http",
+        `音声合成のエンジンが HTTP ${response.status} を返しました`,
+        body
+      );
+    }
+    return response;
+  }
+}
+
+/**
+ * 失敗したときに作者がする次の操作（1つ）。**原因を決め打ちしない**——
+ * 応答が無いのは、エンジンが動いていない・口の設定が違う・別のものが
+ * 口を使っている、のどれか分からない。
+ */
+export function voiceEngineNextStep(error: VoiceEngineError): string {
+  if (error.kind === "unreachable") {
+    return (
+      "音声合成のエンジンに繋がりませんでした。AivisSpeech（または VOICEVOX）を起動してから、もう一度押してください。" +
+      "［声］で OS の声を選べば、エンジンなしでも読めます。"
+    );
+  }
+  if (error.kind === "aborted") return "中止しました。";
+  return (
+    `音声合成のエンジンが受け付けませんでした（${error.message}）。` +
+    "［声の割り当て］で声を選び直してから、もう一度押してください。詳しくはログにあります。"
+  );
+}
+
+/**
+ * 音を画面へ渡すための base64。**`Buffer` を使わない**（ブラウザ版の束にも
+ * 入るファイルなので、Node だけのものに頼らない。設計書5.8）。
+ * 大きな配列を1度に `String.fromCharCode` へ渡すと引数の上限で落ちるので、刻む
+ */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + step));
+  }
+  return btoa(binary);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** 浮動小数の端数を揃える（控えの鍵が 1.0000000002 で割れないように） */
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}

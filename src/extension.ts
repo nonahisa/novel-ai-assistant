@@ -710,6 +710,17 @@ const MARKDOWN_DECLINED_KEY = "novelai.manuscript.markdownDeclined";
 const READ_ALOUD_VOICE_KEY = "novelai.readAloud.voice";
 
 /**
+ * 人物の声（AivisSpeech／VOICEVOX）で読むかの記憶先（設計書6.42.3）。
+ * エンジンが入っているかは端末ごとに違うので、声の選択と同じく端末に残す。
+ */
+const READ_ALOUD_ENGINE_KEY = "novelai.readAloud.engine";
+
+/** 人物の声の実体（使うときに初めて読む。起動を重くしない） */
+function loadVoiceReading(): Promise<typeof import("./features/voiceReading.js")> {
+  return import("./features/voiceReading.js");
+}
+
+/**
  * この起動が始まった時刻。
  *
  * **提案パネルの一覧は、端末に残らない。** VS Code を閉じると消えるので、
@@ -2247,6 +2258,68 @@ export async function activate(
     readAloudVoice: () => context.globalState.get<string>(READ_ALOUD_VOICE_KEY),
     saveReadAloudVoice: async (name) => {
       await verifiedState(context.globalState).update(READ_ALOUD_VOICE_KEY, name);
+    },
+    readAloudEngine: () => context.globalState.get<boolean>(READ_ALOUD_ENGINE_KEY, false),
+    saveReadAloudEngine: async (on) => {
+      await verifiedState(context.globalState).update(READ_ALOUD_ENGINE_KEY, on);
+    },
+    /*
+      人物の声で朗読する（設計書6.42.3）。**繋ぐのはここだけ**（読みの辞書と同じ）。
+      実体は動的 import で読み、ブラウザ版では使えない理由を返す——vscode.dev から
+      見た 127.0.0.1 は作者の PC ではないので、手元のエンジンに届かない（設計書5.8）
+    */
+    voiceReading: {
+      usable: () =>
+        canRunProcesses()
+          ? { ok: true }
+          : {
+              ok: false,
+              reason:
+                "ブラウザ版の VS Code からは、この PC で動く音声合成のエンジン（AivisSpeech・VOICEVOX）に届きません。手元の VS Code で開くと使えます。",
+            },
+      plan: async (filePath, text, sentences) => {
+        const { voiceReadingService } = await loadVoiceReading();
+        return voiceReadingService().plan(workOfPath(registry, filePath), filePath, text, sentences);
+      },
+      audio: async (units, index, rate) => {
+        const { voiceReadingService } = await loadVoiceReading();
+        return voiceReadingService().audio(units, index, rate);
+      },
+      status: async (filePath, text) => {
+        const work = workOfPath(registry, filePath);
+        if (!work) return "人物の声の割り当ては、作品に登録した原稿で使えます";
+        const { voiceCastStatus } = await loadVoiceReading();
+        return voiceCastStatus({ work, episodePath: filePath, text });
+      },
+      runCast: async (filePath, text) => {
+        const work = workOfPath(registry, filePath);
+        if (!work) {
+          void vscode.window.showInformationMessage(
+            "台詞の話者と感情の推定は、作品に登録した原稿で使えます。"
+          );
+          return;
+        }
+        const { runVoiceCast } = await loadVoiceReading();
+        await runVoiceCast({ work, episodePath: filePath, text }, aiRegistry);
+      },
+      manageCast: async (filePath, text) => {
+        const work = workOfPath(registry, filePath);
+        if (!work) {
+          void vscode.window.showInformationMessage("台詞の一覧は、作品に登録した原稿で使えます。");
+          return;
+        }
+        const { manageVoiceCast } = await loadVoiceReading();
+        await manageVoiceCast({ work, episodePath: filePath, text });
+      },
+      assignVoices: async (filePath) => {
+        const work = workOfPath(registry, filePath);
+        if (!work) {
+          void vscode.window.showInformationMessage("声の割り当ては、作品に登録した原稿で使えます。");
+          return;
+        }
+        const { assignVoices, voiceReadingService } = await loadVoiceReading();
+        await assignVoices(work, voiceReadingService());
+      },
     },
     markdownDeclined: () =>
       context.globalState.get<string[]>(MARKDOWN_DECLINED_KEY, []),
