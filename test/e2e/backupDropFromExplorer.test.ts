@@ -140,18 +140,27 @@ async function watchWorkbenchDrag(page: Page): Promise<void> {
     if ((window as Window & { __e2eWorkbenchWatch?: boolean }).__e2eWorkbenchWatch) return;
     (window as Window & { __e2eWorkbenchWatch?: boolean }).__e2eWorkbenchWatch = true;
     // dragend も控える：落ちたときに「drop が無いまま引きずりが終わった」のか「まだ終わっていない」のかを分けるため
-    for (const type of ["dragstart", "drop", "dragend"]) {
+    // dragenter も控える（落とし先に入ったかを見るため。前と同じ便は重ねない。dragover は下の「受け付けたか」で控える）
+    for (const type of ["dragstart", "dragenter", "drop", "dragend"]) {
       document.addEventListener(
         type,
         (event) => {
           const record = (window as Window & { __e2eWorkbenchDrag?: { events: string[]; data: Record<string, string> } }).__e2eWorkbenchDrag;
           if (!record) return;
           const element = event.target instanceof Element ? event.target : null;
-          record.events.push(`${type}:${element?.tagName ?? "?"}.${String(element?.className ?? "").slice(0, 40)}`);
+          const entry = `${type}:${element?.tagName ?? "?"}.${String(element?.className ?? "").slice(0, 40)}`;
+          if (record.events[record.events.length - 1] !== entry) record.events.push(entry);
         },
         true
       );
     }
+    // 落とし先が受け付けたか（dragover を止めたか・dropEffect）。泡の側で、各所の処理が済んだあとに読む
+    document.addEventListener("dragover", (event) => {
+      const record = (window as Window & { __e2eWorkbenchDrag?: { events: string[]; data: Record<string, string> } }).__e2eWorkbenchDrag;
+      if (!record) return;
+      const entry = `dragover-after:effect=${(event as DragEvent).dataTransfer?.dropEffect ?? "?"},prevented=${String(event.defaultPrevented)}`;
+      if (record.events[record.events.length - 1] !== entry) record.events.push(entry);
+    });
     // 中身はエクスプローラーが dragstart で載せ終えたあと（泡の側）に読む
     document.addEventListener("dragstart", (event) => {
       const transfer = (event as DragEvent).dataTransfer;
@@ -169,7 +178,7 @@ async function workbenchDrag(page: Page): Promise<{ events: string[]; data: Reco
 }
 
 /** エクスプローラーの行を、相談画面の真ん中へ本物の引きずりで落とす（`shift` なら途中で Shift を押す） */
-async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise<void> {
+async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise<boolean> {
   const row = await explorerRow(page).boundingBox();
   const frameElement = await chat.parentFrame()?.frameElement();
   const box = frameElement ? await frameElement.boundingBox() : null;
@@ -178,10 +187,40 @@ async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise
   await page.mouse.down();
   // 少し動かして引きずりを始めてから Shift を押す（作者の手と同じ順。先に押すと行の範囲選択になる）
   await page.mouse.move(row.x + row.width / 2 + 20, row.y + row.height / 2 + 5, { steps: 5 });
+  /*
+    **dragstart が来るのを見届けてから先へ進む。** 遅い機械では dragstart が最初の小さな動きより遅れ、
+    その前に先の動きへ進むと Playwright が引きずりを引き取らない（ノートPCで毎回「3回引きずっても
+    drop が起きない」で落ちた。母艦では出ない）。起きたことで待つので、速い機械では待たない。
+    来なければ、この回は諦めて指を離し、false を返す（呼び出し側がやり直す）
+  */
+  const started = await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("dragstart:")), "本体の文書で dragstart が起きる", 4_000)
+    .then(() => true)
+    .catch(() => false);
+  if (!started) {
+    await page.mouse.up();
+    return false;
+  }
   if (shift) await page.keyboard.down("Shift");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 20 });
+  const centerX = box.x + box.width / 2;
+  const centerY = box.y + box.height / 2;
+  await page.mouse.move(centerX, centerY, { steps: 20 });
+  /*
+    **落とし先（相談画面の WebView の上に VS Code が敷く受け皿、または WebView の枠そのもの）に引きずりが
+    入ったのを見届けてから指を離す。** 負荷をかけた機械では、dragstart は来ても、指を離すのが落とし先に
+    入る前になり、drop が誰にも届かず dragend だけで終わった（2026-11-04 負荷をかけて確かめた）。
+    入らないままなら少し動かして促し、それでも入らなければ離す（落ちたときの文に便が残る）
+  */
+  const reachedTarget = async () => (await workbenchDrag(page)).events.some((event) => /^dragenter:(IFRAME\.webview|DIV\.webview-overlay)/.test(event));
+  const entered = await waitUntil(reachedTarget, "引きずりが落とし先に入る", 3_000)
+    .then(() => true)
+    .catch(() => false);
+  if (!entered) {
+    await page.mouse.move(centerX + 4, centerY + 4, { steps: 3 });
+    await waitUntil(reachedTarget, "引きずりが落とし先に入る（動かし直し）", 3_000).catch(() => undefined);
+  }
   await page.mouse.up();
   if (shift) await page.keyboard.up("Shift");
+  return true;
 }
 
 /**
@@ -197,11 +236,11 @@ async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise
  */
 async function dragRowUntilDropped(session: E2ESession, chat: Frame, shift: boolean): Promise<void> {
   const { page } = session;
-  const tries: string[][] = [];
+  const tries: string[] = [];
   for (let attempt = 1; attempt <= 3; attempt++) {
     await watchWorkbenchDrag(page);
-    await dragRowOntoChat(page, chat, shift);
-    const dropped = await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("drop:")), "本体の文書で drop が起きる", 5_000)
+    const started = await dragRowOntoChat(page, chat, shift);
+    const dropped = started && await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("drop:")), "本体の文書で drop が起きる", 5_000)
       .then(() => true)
       .catch(() => false);
     if (dropped) {
@@ -209,7 +248,6 @@ async function dragRowUntilDropped(session: E2ESession, chat: Frame, shift: bool
       if (attempt > 1) console.warn(`[E2E] 引きずりを ${attempt} 回目で落とせました（前の回の本体の便：${JSON.stringify(tries)}）`);
       return;
     }
-    tries.push((await workbenchDrag(page)).events);
     /*
       引き取られなかった引きずりは、本体の窓の中で「引きずり中」のまま残り、次の引きずりが始まらない
       （Escape では消えず、2回目・3回目は dragstart すら来なかった。2026-10-25）。Playwright が
@@ -222,10 +260,20 @@ async function dragRowUntilDropped(session: E2ESession, chat: Frame, shift: bool
       await cdp.detach().catch(() => undefined);
     }
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(300);
+    /*
+      引きずり状態が戻ったこと（dragend が来たか）を確かめてから次の回へ進む。固定の待ちでなく起きたことで
+      待つ。dragstart が来なかった回は始まっていないので dragend も来ない（それは正常）。
+      戻らないまま次へ進んでも失敗の文に残るよう、戻ったかを回の記録に書く
+    */
+    const ended = started
+      ? await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("dragend:")), "引きずりが終わる（dragend）", 2_000)
+          .then(() => true)
+          .catch(() => false)
+      : true;
+    tries.push(`${attempt}回目：${started ? "dragstart 来た" : "dragstart 来ず"}／dragend ${started ? (ended ? "来た" : "来ず") : "不要"}／便=${JSON.stringify((await workbenchDrag(page)).events)}`);
   }
   throw new Error(
-    `本体の文書で drop が起きるまで3回引きずりましたが、起きません（回ごとの本体の便：${JSON.stringify(tries)}／面に来た便：${JSON.stringify(await dragsInChat(chat))}／タブ：${JSON.stringify(await editorGroupTabs(page))}）`
+    `本体の文書で drop が起きるまで3回引きずりましたが、起きません（回ごとの様子：${JSON.stringify(tries)}／面に来た便：${JSON.stringify(await dragsInChat(chat))}／タブ：${JSON.stringify(await editorGroupTabs(page))}）`
   );
 }
 

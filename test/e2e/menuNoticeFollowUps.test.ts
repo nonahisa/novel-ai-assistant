@@ -197,6 +197,8 @@ test("詳細メニューの見出しの「…」の「他のメニューを閉�
       await waitUntil(async () => (await contextMenuLabels(page)).length > 0, "見出しの右クリックの品書きが出る", 10_000);
       const rightClick = await contextMenuLabels(page);
       await page.keyboard.press("Escape");
+      // 右クリックの品書きが閉じ切ってから「…」へ進む（閉じる途中の品書きが、次に開く品書きを巻き込む恐れ）
+      await waitUntil(async () => (await page.locator(".monaco-menu").count()) === 0, "見出しの右クリックの品書きが閉じる", 5_000).catch(() => undefined);
       // 見出しに指を載せると「…」が出る
       await header.hover();
       const more = header.locator(".actions .action-label.codicon-toolbar-more, .actions .codicon-toolbar-more").first();
@@ -204,17 +206,42 @@ test("詳細メニューの見出しの「…」の「他のメニューを閉�
         const actions = await header.evaluate((node) => Array.from(node.querySelectorAll(".actions .action-label")).map((el) => `${el.getAttribute("aria-label")}|${el.className}`));
         throw new Error(`${String(error)}（見出しの押し口：${JSON.stringify(actions)}／右クリックの品書き：${JSON.stringify(rightClick)}）`);
       });
-      await more.click();
       /*
         「…」の品書きは影の DOM（shadow root）の中に描かれ、`document.querySelectorAll` では見えない。
-        Playwright の locator は影の中まで探すので、そちらで探す
+        Playwright の locator は影の中まで探すので、そちらで探す。
+
+        **遅い機械では、押した「…」の品書きが開いてすぐ閉じる**ことがある（ノートPCで毎回、母艦では出ない。
+        見出しの組み直しや吹き出しが押した直後に割り込む、と読んだ——割り込み元は確かめていない）。
+        ここは製品が関わる前の段なので、「起きたこと」＝品書きが開いて項目が並ぶ、を確かめ、
+        開かない・目当ての項目が無いなら Escape で閉じて押し直す（3回まで）。回ごとの様子は失敗の文に出す
       */
       const soloItem = page.locator(".monaco-menu .action-label", { hasText: "他のメニューを閉じる" }).first();
-      await waitUntil(async () => (await soloItem.count()) > 0 && (await soloItem.isVisible()), "見出しの「…」に「他のメニューを閉じる」が出る", 10_000).catch(
-        async (error: unknown) => {
-          throw new Error(`${String(error)}（右クリックの品書き：${JSON.stringify(rightClick)}）`);
-        }
-      );
+      const menuItems = async (): Promise<string[]> =>
+        page
+          .locator(".monaco-menu .action-label")
+          .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? "").trim()).filter((text) => text.length > 0))
+          .catch(() => []);
+      const moreTries: string[] = [];
+      let soloShown = false;
+      for (let attempt = 1; attempt <= 3 && !soloShown; attempt++) {
+        await dismissWorkbenchHover(page);
+        await header.hover();
+        await waitUntil(async () => (await more.count()) > 0 && (await more.isVisible()), "見出しに「…」が出る", 5_000).catch(() => undefined);
+        await more.click();
+        soloShown = await waitUntil(async () => (await soloItem.count()) > 0 && (await soloItem.isVisible()), "見出しの「…」に「他のメニューを閉じる」が出る", 4_000)
+          .then(() => true)
+          .catch(() => false);
+        if (soloShown) break;
+        moreTries.push(`${attempt}回目：開いた品書きの項目=${JSON.stringify(await menuItems())}`);
+        await page.keyboard.press("Escape");
+        await waitUntil(async () => (await page.locator(".monaco-menu").count()) === 0, "品書きが閉じる", 3_000).catch(() => undefined);
+      }
+      if (!soloShown) {
+        const viewport = page.viewportSize() ?? (await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })));
+        throw new Error(
+          `見出しの「…」に「他のメニューを閉じる」が出ません（3回押しました。${moreTries.join("／")}／窓の大きさ：${JSON.stringify(viewport)}／右クリックの品書き：${JSON.stringify(rightClick)}）`
+        );
+      }
       await soloItem.click();
       /*
         **開いた直後の品書きは、押しても効かない。** VS Code 本体の品書きの項目は、描かれてから
