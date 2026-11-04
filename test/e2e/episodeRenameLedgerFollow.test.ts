@@ -13,12 +13,16 @@
  *    「…名前が変わった話が1つあります。…付け替えますか」が1回だけ出る。［付け替える］で台帳が
  *    新しい名前になる。［付け替えない］を選ぶと、開き直しても同じ組では訊かれない
  *
+ * 4. 上の問いが出ても、**書いている途中の焦点を取らない**：話を開いてすぐ打ち始め、問いが出る前後で
+ *    打った字がすべて原稿に入り、焦点が原稿の入力欄に残る（0.125.5 の実機確認の残り）
+ *
  * AI は呼ばない。GitHub も呼ばない。
  */
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
+import { composeText, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { runCommand } from "./support/quickInput";
 import { SIDEBAR_LAUNCH, showSidebar, treeContextMenu, treeRowLabels, treeRow, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, restartVsCode, withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -275,6 +279,102 @@ test("［付け替えない］を選ぶと台帳は変わらず、開き直し�
           throw new Error(`${String(error)}（知らせ：${JSON.stringify(await noticeLines(session.page))}）`);
         }
       );
+      expect(await postedPaths(session)).toEqual(["本文/第1話_はじまり.txt"]);
+    },
+    launchWith("本文/第1話_はじまり.txt", "はじまり")
+  );
+}, 300_000);
+
+test("名前が変わった話の問いが右下に出ても、書いている途中の焦点は取られず、打った字がすべて原稿に入る", async () => {
+  await withVsCode(
+    "改名の台帳追従（打ちながら問いが出る）",
+    [{ name: "第1話_はじまり.txt", text: BODY }],
+    async (session) => {
+      await restartVsCode(session, {
+        beforeRelaunch: async () => {
+          await rename(path.join(session.manuscriptFolder, "第1話_はじまり.txt"), path.join(session.manuscriptFolder, "第1話_出会い.txt"));
+        },
+      });
+      // 開き直すと窓（page）が替わるので、開き直したあとで取り出す
+      const { page } = session;
+      await showSidebar(page, E2E_WORK_TITLE);
+
+      // 話を開く前から、問いのトーストへ焦点が入ったらすべて記録する（問いは話を開いてすぐ出るので、
+      // 打ち始めるより前に出て焦点を取った場合も、原稿を押し直した後では分からなくなる）
+      await page.evaluate(() => {
+        const log: string[] = [];
+        (window as unknown as { __toastFocus: string[] }).__toastFocus = log;
+        document.addEventListener(
+          "focusin",
+          (event) => {
+            const target = event.target as Element | null;
+            if (target?.closest?.(".notification-toast, .notifications-toasts")) log.push(`${target.tagName}.${target.className}`);
+          },
+          true
+        );
+      });
+
+      // 話を開いたら、問いを待たずにすぐ打ち始める（作者が書き出す動き）
+      const frame = await openEpisode(page, "第1話_出会い.txt", "朝の駅は静かだった");
+      await placeCaretAfter(frame, "静かだった。");
+
+      // 原稿の入力欄が焦点を持っているか（原稿の面の中）と、問いのトースト（本体側）へ焦点が移っていないか
+      const composeHasFocus = (): Promise<boolean> => frame.evaluate(() => document.activeElement?.id === "compose");
+      const toastHasFocus = (): Promise<boolean> =>
+        page.evaluate(() => {
+          const active = document.activeElement;
+          return active !== null && active.closest(".notification-toast, .notifications-toasts") !== null;
+        });
+
+      let typed = "";
+      let toastSeenAfter = -1;
+      const lostFocusAt: string[] = [];
+      // 1文字ずつ0.25秒おきに打つ。問いはこの間に出る（出る前と出たあとの両方を打つ）
+      const chars = [..."ゆっくり一文字ずつ打ち続けます。問いが出ても止まりません。"];
+      for (const [index, char] of chars.entries()) {
+        await page.keyboard.insertText(char);
+        typed += char;
+        if (toastSeenAfter < 0 && (await questionToasts(page)).length > 0) toastSeenAfter = index + 1;
+        if (!(await composeHasFocus())) lostFocusAt.push(`${index + 1}字目の後で原稿の入力欄が焦点を失った`);
+        if (await toastHasFocus()) lostFocusAt.push(`${index + 1}字目の後で問いのトーストに焦点が移った`);
+        await page.waitForTimeout(250);
+      }
+      // 打ち終わるまでに問いが出ていなければ、ここで出るのを待ってから、出たあとにも打つ
+      if (toastSeenAfter < 0) {
+        await waitUntil(async () => (await questionToasts(page)).length > 0, "右下に「名前が変わった話が1つあります」の問いが出る", 30_000).catch(
+          async (error: unknown) => {
+            throw new Error(`${String(error)}（知らせ：${JSON.stringify(await noticeLines(page))}）`);
+          }
+        );
+        toastSeenAfter = chars.length;
+      }
+      for (const char of [..."問いのあとの追記。"]) {
+        await page.keyboard.insertText(char);
+        typed += char;
+        if (!(await composeHasFocus())) lostFocusAt.push("問いが出たあとに原稿の入力欄が焦点を失った");
+        if (await toastHasFocus()) lostFocusAt.push("問いが出たあとに問いのトーストに焦点が移った");
+        await page.waitForTimeout(150);
+      }
+      // 問いは出たままでも、焦点は原稿のまま（少し見続ける）
+      await holdsFor(async () => (await composeHasFocus()) && !(await toastHasFocus()), "問いが出たあとも焦点が原稿の入力欄にある", 3_000);
+      expect(lostFocusAt, "打っている途中で焦点が動いた").toEqual([]);
+      // 話を開く前から見張っていた記録：問いのトーストへ焦点が一度でも入っていない
+      // （自分で原稿を押して焦点を戻した後では見逃すので、開く前から記録しておく）
+      expect(await page.evaluate(() => (window as unknown as { __toastFocus: string[] }).__toastFocus), "問いのトーストが焦点を取った").toEqual([]);
+
+      // 打った字がすべて画面の原稿に入り、保存でファイルにも入る
+      await waitUntil(async () => (await composeText(frame)).includes(typed), "打った字がすべて原稿の面に出る").catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（打った字：${typed}／面：${JSON.stringify(await composeText(frame))}）`);
+      });
+      await page.keyboard.press("Control+KeyS");
+      const file = path.join(session.manuscriptFolder, "第1話_出会い.txt");
+      const expected = `　朝の駅は静かだった。${typed}\n`;
+      await waitUntil(async () => (await readFile(file, "utf8").catch(() => "")).replace(/\r\n/g, "\n") === expected, "打った字がすべてファイルに入る", 15_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（ファイル：${JSON.stringify(await readFile(file, "utf8").catch(() => "読めない"))}／期待：${JSON.stringify(expected)}）`);
+        }
+      );
+      // 台帳は答えるまで変わらない
       expect(await postedPaths(session)).toEqual(["本文/第1話_はじまり.txt"]);
     },
     launchWith("本文/第1話_はじまり.txt", "はじまり")

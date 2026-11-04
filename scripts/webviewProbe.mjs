@@ -97,7 +97,7 @@ async function collectWebviewFrames(cdpPort) {
     for (const frame of frames) {
       if (seen.has(frame.id)) continue;
       seen.add(frame.id);
-      found.push({ url: frame.url, title: frame.title, text: frame.text });
+      found.push({ url: frame.url, title: frame.title, text: frame.text, pages: frame.pages });
     }
   }
   return found;
@@ -123,10 +123,15 @@ async function framesOfTarget(webSocketUrl) {
           contextId: executionContextId,
           returnByValue: true,
           expression:
-            "({ title: document.title, text: document.body ? document.body.innerText : '' })",
+            // pages：タブで切り替わる面（section.page）の中身。隠れた面は innerText に出ないので、
+            // textContent で別に読む（前に出ていない「なろうの反応」の1行を確かめるため）。
+            // body 全体の textContent は script の文字列まで拾うので使わない
+            "({ title: document.title, text: document.body ? document.body.innerText : ''," +
+            " pages: Array.from(document.querySelectorAll('section.page')).map(function (el) {" +
+            " return { id: el.id, text: el.textContent || '', narouApiButtons: el.querySelectorAll('.narou-api button, .narou-api input').length }; }) })",
         });
-        const read = value && value.value ? value.value : { title: "", text: "" };
-        result.push({ id: frame.id, url: frame.url, title: read.title, text: read.text });
+        const read = value && value.value ? value.value : { title: "", text: "", pages: [] };
+        result.push({ id: frame.id, url: frame.url, title: read.title, text: read.text, pages: read.pages || [] });
       } catch {
         // 別プロセスのフレームは、この標的からは読めない（その標的の番で読む）
       }

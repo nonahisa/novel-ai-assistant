@@ -369,6 +369,76 @@ export async function run(): Promise<void> {
     }
   );
 
+  /*
+    **なろうの反応：ブラウザ版ではボタンを出さず1行だけ**（0.121.0。実機確認リストの残り）。
+    なろうAPIはCORSで読めるか確かめていないので、ブラウザ版では取得のボタンも同意のチェックも
+    出さない（設計書5.8.16）。なろうに載っている作品（投稿状態の台帳になろうが入っている）で、
+    執筆統計を開き直して確かめる。「なろうの反応」の面は前に出ていないので、隠れた面の中身を
+    覗く口の `pages`（section.page の textContent）で読む。
+  */
+  await runCase(
+    "なろうの反応は、ブラウザ版ではボタンの代わりに「パソコンの VS Code で使えます」の1行が出る",
+    failures,
+    async () => {
+      assert(registered !== undefined, "作品が登録されていないため確かめられません");
+      const NCODE = "n1234ab";
+      const ledgerUri = toUri(join(registered.folderPath, "設定", "投稿状態.json"));
+      const ledger = {
+        schemaVersion: "1",
+        sites: [
+          {
+            site: "narou",
+            newEpisodeUrl: `https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/${NCODE}/`,
+          },
+        ],
+        siteProfiles: [{ site: "narou", workId: NCODE }],
+        posts: [],
+        rankings: [],
+        readerStats: [],
+      };
+      await vscode.workspace.fs.createDirectory(toUri(join(registered.folderPath, "設定")));
+      await vscode.workspace.fs.writeFile(
+        ledgerUri,
+        new TextEncoder().encode(`${JSON.stringify(ledger, null, 2)}\n`)
+      );
+      try {
+        // 開いている執筆統計は台帳を読む前のもの。閉じて、開き直す
+        const open = findWebviewTab(WRITING_STATS_VIEW_TYPE);
+        if (open !== undefined) {
+          await vscode.window.tabGroups.close(open.tab);
+          for (let attempt = 0; attempt < 50 && findWebviewTab(WRITING_STATS_VIEW_TYPE); attempt++) {
+            await delay(100);
+          }
+        }
+        await runCommand("novelai.showWritingStats");
+        await waitForWebviewTab(WRITING_STATS_VIEW_TYPE);
+
+        const LINE = "なろうAPIによる作品情報取得は、パソコンの VS Code で使えます。";
+        let page: { id: string; text: string; narouApiButtons: number } | undefined;
+        let last: ProbeFrame[] = [];
+        for (let attempt = 0; attempt < 40 && page === undefined; attempt++) {
+          last = await readWebviewFrames();
+          page = last
+            .filter((frame) => frame.title === "執筆量")
+            .flatMap((frame) => frame.pages ?? [])
+            .find((p) => p.id === "page-site-narou" && p.text.includes(LINE));
+          if (page === undefined) await delay(250);
+        }
+        assert(
+          page !== undefined,
+          `「なろうの反応」の面に「${LINE}」が出ませんでした。見えた面: ${JSON.stringify(
+            last.flatMap((frame) => frame.pages ?? []).map((p) => `${p.id}:${p.text.replace(/\s+/g, " ").slice(0, 60)}`)
+          )}`
+        );
+        assert(page.narouApiButtons === 0, `ブラウザ版なのに、なろうAPIの欄にボタンかチェックがあります（${page.narouApiButtons}個）`);
+        assert(!page.text.includes("ガイドライン"), "ブラウザ版なのに、ガイドラインの案内が出ています");
+        assert(!page.text.includes("Nコードを登録すると"), "ブラウザ版なのに、Nコード無しの案内が出ています");
+      } finally {
+        await vscode.workspace.fs.delete(ledgerUri).then(undefined, () => undefined);
+      }
+    }
+  );
+
   await runCase("プロットモードが開き、中身が描かれる", failures, async () => {
     assert(registered !== undefined, "作品が登録されていないため確かめられません");
     await runCommand("novelai.openPlotMode");
@@ -805,6 +875,8 @@ interface ProbeFrame {
   url: string;
   title: string;
   text: string;
+  /** タブで切り替わる面（section.page）の中身。隠れた面も読める */
+  pages?: Array<{ id: string; text: string; narouApiButtons: number }>;
 }
 
 async function readWebviewFrames(): Promise<ProbeFrame[]> {
