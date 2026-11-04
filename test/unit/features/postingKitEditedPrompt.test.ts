@@ -2,7 +2,11 @@ import * as path from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
-import { postingBodyHash, postingTextHash } from "../../../src/core/postingBodyHash";
+import {
+  postingBodyHash,
+  postingNotationTextHash,
+  postingTextHash,
+} from "../../../src/core/postingBodyHash";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 
@@ -199,7 +203,7 @@ describe("作品から投稿を始めたときの、出し直しの促し", () =
       expect.objectContaining({
         episodePath: "本文/002.txt",
         site: "kakuyomu",
-        bodyHash: postingTextHash(null, "　二話目を直した。"),
+        bodyHash: postingNotationTextHash(null, "　二話目を直した。"),
       }),
     ]);
 
@@ -239,7 +243,7 @@ describe("作品から投稿を始めたときの、出し直しの促し", () =
     const ledger = readLedger();
     expect(ledger.revisions).toHaveLength(1);
     expect(ledger.posts).toContainEqual(
-      expect.objectContaining({ episodePath: "本文/003.txt", site: "narou", bodyHash: postingTextHash(null, "　三話目。") })
+      expect.objectContaining({ episodePath: "本文/003.txt", site: "narou", bodyHash: postingNotationTextHash(null, "　三話目。") })
     );
   });
 

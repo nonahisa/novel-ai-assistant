@@ -635,8 +635,10 @@ export interface PostingRecord {
    * 投稿したときの本文の印（設計書6.68.7。作者の裁定 2026-11-03 昼）。
    * `core/postingBodyHash.ts` の `postingTextHash` で取った値。
    *
-   * 形は2つある（`isTitledTextHash`）。0.124.1 からは**話の題と本文の両方**の印で、頭に
-   * `v2:` が付く。0.124.0 の印は本文だけの16進64字（頭に何も付かない）。
+   * 形は3つある（`isNotationTextHash`・`isTitledTextHash`）。0.126.4 からはルビ・傍点の書き方を
+   * 寄せてから取った題と本文の印で、頭に `v3:` が付く（`postingNotationTextHash`）。
+   * 0.124.1〜0.126.3 は**話の題と本文の両方**の印で、頭に `v2:` が付く。
+   * 0.124.0 の印は本文だけの16進64字（頭に何も付かない）。
    *
    * **これから投稿する分からしか入らない。** 無い記録（それより前の投稿・基準線）は、
    * 投稿のあとに直したかどうかが「分からない」——出し直しが要るとは言わない。
@@ -1219,9 +1221,10 @@ export interface SkippedSiteCompletion {
  */
 /**
  * 本文の印の形（SHA-256 の16進64字。`core/hash.ts` の `hashText` が返す形）。
- * 頭の `v2:` は題も含めた印（0.124.1 から。`TITLED_TEXT_HASH_PREFIX`）、無ければ本文だけの印（0.124.0）
+ * 頭の `v2:` は題も含めた印（0.124.1 から。`TITLED_TEXT_HASH_PREFIX`）、無ければ本文だけの印（0.124.0）。
+ * `v3:` はルビ・傍点の書き方を寄せてから取った印（0.126.4 から。`NOTATION_TEXT_HASH_PREFIX`）
  */
-const BODY_HASH_PATTERN = /^(?:v2:)?[0-9a-f]{64}$/;
+const BODY_HASH_PATTERN = /^(?:v[23]:)?[0-9a-f]{64}$/;
 
 /**
  * 題と本文の両方で取った印の頭（0.124.1。作者の答え 2026-11-03 昼「題だけ直した話も促す」）。
@@ -1238,14 +1241,39 @@ export function isTitledTextHash(hash: string): boolean {
 }
 
 /**
+ * ルビ・傍点の書き方を寄せてから取った、題と本文の印の頭（0.126.4）。
+ *
+ * **本文の .md 化（設計書6.12.4）が `｜漢字《かんじ》` を `{漢字|かんじ}` へ直すので、
+ * `v2:` の取り方では .md にしただけの話まで「投稿のあとに直した」になっていた。** 取り方を
+ * 変えたので頭の印を替え、台帳に残っている `v2:`・無印の記録は書き換えずに、それぞれの
+ * 取り方で比べる（`revisionNeed`）。
+ */
+export const NOTATION_TEXT_HASH_PREFIX = "v3:";
+
+/** ルビ・傍点の書き方を寄せてから取った印か（`NOTATION_TEXT_HASH_PREFIX`） */
+export function isNotationTextHash(hash: string): boolean {
+  return hash.startsWith(NOTATION_TEXT_HASH_PREFIX);
+}
+
+/**
  * 今の話の印（`core/postingBodyHash.ts` の `postingTextHashes` が作る）。
- * 古い印（本文だけ）とも比べられるよう、2つの取り方の両方を持つ。
+ * 古い記録とも比べられるよう、3つの取り方のそれぞれで持つ。
  */
 export interface PostingTextHashes {
-  /** 題と本文の両方の印（`v2:` 付き）。記録にはこちらを残す */
+  /** ルビ・傍点の書き方を寄せた、題と本文の印（`v3:` 付き）。記録にはこちらを残す */
+  notation: string;
+  /** 題と本文の両方の印（`v2:` 付き。0.124.1〜0.126.3 の取り方）。古い記録と比べるときだけ使う */
   titled: string;
   /** 本文だけの印（0.124.0 の取り方）。古い記録と比べるときだけ使う */
   bodyOnly: string;
+  /**
+   * 今の話を投稿サイトの書き方（`｜漢字《かんじ》`）へ戻した写しの、`v2:` の取り方の印。
+   * .md 化しただけの話を、古い記録との比べで「直した」と言わないため。一致すれば、
+   * 投稿した本文は写しそのもの（書き方の違いしか無い）と分かる
+   */
+  titledCopies: readonly string[];
+  /** 同じ写しの、本文だけの取り方の印（0.124.0 の記録と比べるときだけ使う） */
+  bodyOnlyCopies: readonly string[];
 }
 
 /**
@@ -2317,16 +2345,20 @@ export function lastSentTitleHash(
  * 最後の記録に題の印が無い（0.125.1 までの記録・基準線）ときは偽——分からないことを
  * 「直した」と言わない。題と本文の印（`v2:`）が違っても、題が違うとは言えない。
  *
- * @param currentTitleHash 今の題の印（`core/postingBodyHash.ts` の `postingTitleHash`）
+ * @param currentTitleHash 今の題の印（`core/postingBodyHash.ts` の `postingTitleHash`）。
+ *   候補の並び（`postingTitleHashCandidates`）も受ける——.md 化で題のルビの書き方だけが
+ *   変わった話に「題も貼り替えて」と添えないため（0.126.4）。どれかと一致すれば「違う」と言わない
  */
 export function titleChangedSinceSent(
   ledger: PostingLedger,
   target: PostingEpisodeTargetLike,
   site: PostingSiteId,
-  currentTitleHash: string
+  currentTitleHash: string | readonly string[]
 ): boolean {
   const sent = lastSentTitleHash(ledger, target, site);
-  return sent !== undefined && sent !== currentTitleHash;
+  if (sent === undefined) return false;
+  const candidates = typeof currentTitleHash === "string" ? [currentTitleHash] : currentTitleHash;
+  return !candidates.includes(sent);
 }
 
 /** 出し直しが要るか（`revisionNeed` の答え） */
@@ -2344,6 +2376,11 @@ export type RevisionNeed = "changed" | "same" | "unknown";
  * 分からない）。同じを `"same"` にすると、題だけ直した話を「直していない」と言い切ることになる。
  * 今の取り方に揃えて比べると、直していない話まで全部「直した」になる（取り方が違うため）。
  *
+ * **`v3:`（0.126.4 から記録する印）** はルビ・傍点の書き方の違いを同じとみなす（.md 化しただけの
+ * 話を「直した」と言わない）。`v2:`・無印の記録は書き換えず、今の本文を投稿サイトの書き方へ
+ * 戻した写しの印（`titledCopies`・`bodyOnlyCopies`）とも比べる——一致すれば投稿した本文は
+ * その写しそのものなので、偽の「同じ」は出ない。
+ *
  * @param current 今の話の印（`core/postingBodyHash.ts` の `postingTextHashes`）。
  *   **`models` は印を計算しない**（本文の正規化がメモ行の判定など `core` の部品を使うため）
  */
@@ -2356,8 +2393,13 @@ export function revisionNeed(
   if (!isPosted(ledger, target, site)) return "unknown";
   const sent = lastSentBodyHash(ledger, target, site);
   if (!sent) return "unknown";
-  if (isTitledTextHash(sent)) return sent === current.titled ? "same" : "changed";
-  return sent === current.bodyOnly ? "unknown" : "changed";
+  if (isNotationTextHash(sent)) return sent === current.notation ? "same" : "changed";
+  if (isTitledTextHash(sent)) {
+    return sent === current.titled || current.titledCopies.includes(sent) ? "same" : "changed";
+  }
+  return sent === current.bodyOnly || current.bodyOnlyCopies.includes(sent)
+    ? "unknown"
+    : "changed";
 }
 
 /**

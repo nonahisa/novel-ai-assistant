@@ -86,6 +86,7 @@ import {
 import {
   postingTextHashes,
   postingTitleHash,
+  postingTitleHashCandidates,
   postingUnitsOf,
   type PostingUnit,
 } from "../core/postingBodyHash";
@@ -286,10 +287,12 @@ async function postNewEpisodeInSession(
   const label = postingLabelOf(target, parts.collected, format);
   /*
     投稿・出し直しの記録に残す印（6.68.7）。題と本文の両方で取る（0.124.1。題だけ直した話も促す）。
-    合本の1話は、その話の題と本文だけで取る。古い記録（本文だけの印）と比べる形も一緒に作る
+    合本の1話は、その話の題と本文だけで取る。古い記録（本文だけの印）と比べる形も一緒に作る。
+    記録に残すのはルビ・傍点の書き方を寄せた印（`v3:`。0.126.4）——.md にしただけの話を
+    「投稿のあとに直した」と言わないため
   */
   const hashes = postingTextHashes(parts.subtitle, parts.body);
-  const bodyHash = hashes.titled;
+  const bodyHash = hashes.notation;
 
   const sites = unpostedSites(ledger, postTarget);
 
@@ -826,6 +829,8 @@ async function reviseEpisode(input: {
   let aborted = false;
   // 今の題の印。最後にそのサイトへ渡した題と比べ、違うと分かるサイトだけ題の貼り替えも案内する
   const titleHash = postingTitleHash(input.parts.subtitle);
+  // 比べるときは、題を投稿サイトの書き方へ戻した写しも候補にする（.md 化でルビの書き方だけ変わった題）
+  const titleCandidates = postingTitleHashCandidates(input.parts.subtitle);
   for (const site of sites) {
     const answer = await walkSite({
       ledger,
@@ -837,7 +842,7 @@ async function reviseEpisode(input: {
       chapterOf: async () => undefined,
       revise: true,
       siteEpisodeId: siteEpisodeIdFor(ledger, input.postTarget, site),
-      titleChanged: titleChangedSinceSent(ledger, input.postTarget, site, titleHash),
+      titleChanged: titleChangedSinceSent(ledger, input.postTarget, site, titleCandidates),
     });
     if (answer === "abort") {
       aborted = true;
@@ -992,7 +997,7 @@ async function findEditedEpisodes(input: {
         postTarget,
         label: postingLabelOf(file, unit.collected, input.format),
         unit,
-        bodyHash: hashes.titled,
+        bodyHash: hashes.notation,
         sites,
       });
     }

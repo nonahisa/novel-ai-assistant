@@ -503,7 +503,9 @@ async function hashConfirmedPairs(
           const { units, collected } = postingUnitsOf(text, subtitle);
           if (collected) return false;
           const hashes = postingTextHashes(units[0].subtitle, units[0].body);
-          return sent.has(hashes.titled) || sent.has(hashes.bodyOnly);
+          return (
+            sent.has(hashes.notation) || sent.has(hashes.titled) || sent.has(hashes.bodyOnly)
+          );
         });
         if (hit) confirmed.add(`${item.fromRel}\u0000${candidate}`);
       } catch {

@@ -1,11 +1,16 @@
 import { describe, expect, test } from "vitest";
 import {
+  canonicalPostingNotation,
   normalizePostingBody,
   postingBodyHash,
+  postingNotationTextHash,
   postingTextHash,
   postingTextHashes,
+  postingTitleHash,
+  postingTitleHashCandidates,
   postingUnitsOf,
 } from "../../../src/core/postingBodyHash";
+import { fromSiteNotation } from "../../../src/core/ruby";
 
 /**
  * 投稿したときの本文の印（設計書6.68.7。作者の裁定 2026-11-03 昼）。
@@ -70,7 +75,7 @@ test("印は16進64字（台帳が読み込みで確かめる形）", () => {
 describe("題と本文の両方の印（0.124.1。作者の答え 2026-11-03 昼「題だけ直した話も促す」）", () => {
   test("頭に v2: が付き、本文だけの印と見分けられる", () => {
     expect(postingTextHash("邂逅", body)).toMatch(/^v2:[0-9a-f]{64}$/);
-    expect(postingTextHashes("邂逅", body)).toEqual({
+    expect(postingTextHashes("邂逅", body)).toMatchObject({
       titled: postingTextHash("邂逅", body),
       bodyOnly: postingBodyHash(body),
     });
@@ -88,6 +93,72 @@ describe("題と本文の両方の印（0.124.1。作者の答え 2026-11-03 昼
 
   test("題の末尾を本文の頭へ移した直しも別の印にする（題と本文の境を印に入れる）", () => {
     expect(postingTextHash("邂逅", "そして本文")).not.toBe(postingTextHash("邂逅そして", "本文"));
+  });
+});
+
+describe("ルビ・傍点の書き方を寄せた印（v3:。0.126.4。.md 化しただけの話を「直した」と言わない）", () => {
+  /** 投稿サイトの書き方が全部入った本文（縦線あり・半角縦線・縦線なし・アルファポリス・傍点2通り） */
+  const siteBody = [
+    "　｜白銀《しろがね》の街に、雪《ゆき》が降っていた。",
+    "　|漢字《かんじ》と#約束__やくそく__#。",
+    "　《《それ》》は、｜誰《・》も知らない。",
+  ].join("\n");
+
+  test("頭に v3: が付き、今の話の印として記録に残す値になる", () => {
+    expect(postingNotationTextHash("邂逅", siteBody)).toMatch(/^v3:[0-9a-f]{64}$/);
+    expect(postingTextHashes("邂逅", siteBody).notation).toBe(postingNotationTextHash("邂逅", siteBody));
+  });
+
+  test(".md 化の取り込み（fromSiteNotation）を通した本文と題は、同じ印（誤検出を出さない）", () => {
+    const converted = fromSiteNotation(siteBody);
+    expect(converted).not.toBe(siteBody);
+    expect(postingNotationTextHash(fromSiteNotation("｜雪《ゆき》の朝"), converted)).toBe(
+      postingNotationTextHash("｜雪《ゆき》の朝", siteBody)
+    );
+  });
+
+  test("寄せ方は、もう1度かけても変わらない（.md 化を2度通しても同じ印）", () => {
+    const once = canonicalPostingNotation(siteBody);
+    expect(canonicalPostingNotation(once)).toBe(once);
+    expect(fromSiteNotation(once)).toBe(once);
+  });
+
+  test("縦線の有無や傍点の書き方の違いでは変わらない", () => {
+    expect(postingNotationTextHash(null, "｜漢字《かんじ》")).toBe(postingNotationTextHash(null, "漢字《かんじ》"));
+    expect(postingNotationTextHash(null, "《《強調》》")).toBe(postingNotationTextHash(null, "｜強調《・・》"));
+  });
+
+  test("見逃さない：読み・字・題を直せば印が変わる", () => {
+    const base = postingNotationTextHash("邂逅", siteBody);
+    expect(postingNotationTextHash("邂逅", siteBody.replace("しろがね", "ぎんいろ"))).not.toBe(base);
+    expect(postingNotationTextHash("邂逅", siteBody.replace("降って", "舞って"))).not.toBe(base);
+    expect(postingNotationTextHash("別離", siteBody)).not.toBe(base);
+    // ルビを外す（読者にはルビが見えなくなる）
+    expect(postingNotationTextHash("邂逅", siteBody.replace("｜白銀《しろがね》", "白銀"))).not.toBe(base);
+  });
+
+  test("古い印（v2:・無印）と比べる写しは、.md 化した本文から投稿サイトの書き方へ戻したもの", () => {
+    const posted = "　｜白銀《しろがね》の街に、《《雪》》が降っていた。";
+    const hashes = postingTextHashes("邂逅", fromSiteNotation(posted));
+    expect(hashes.titled).not.toBe(postingTextHash("邂逅", posted));
+    expect(hashes.titledCopies).toContain(postingTextHash("邂逅", posted));
+    expect(hashes.bodyOnlyCopies).toContain(postingBodyHash(posted));
+    // なろうの傍点（ルビでの代用）で出した話も戻せる
+    const narou = "　｜白銀《しろがね》の街に、｜雪《・》が降っていた。";
+    expect(hashes.titledCopies).toContain(postingTextHash("邂逅", narou));
+  });
+
+  test("記法の無い本文では、写しを増やさない", () => {
+    const hashes = postingTextHashes("邂逅", "　雪が降っていた。");
+    expect(hashes.titledCopies).toEqual([]);
+    expect(hashes.bodyOnlyCopies).toEqual([]);
+    expect(postingTitleHashCandidates("邂逅")).toEqual([postingTitleHash("邂逅")]);
+  });
+
+  test("題の印の候補には、題を投稿サイトの書き方へ戻した写しも入る（題の記録の取り方は変えない）", () => {
+    const candidates = postingTitleHashCandidates(fromSiteNotation("｜雪《ゆき》の朝"));
+    expect(candidates[0]).toBe(postingTitleHash("{雪|ゆき}の朝"));
+    expect(candidates).toContain(postingTitleHash("｜雪《ゆき》の朝"));
   });
 });
 

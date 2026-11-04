@@ -5,7 +5,11 @@ import type { AIRegistry } from "../../../src/ai/registry";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
-import { postingTextHash, postingTitleHash } from "../../../src/core/postingBodyHash";
+import {
+  postingNotationTextHash,
+  postingTextHash,
+  postingTitleHash,
+} from "../../../src/core/postingBodyHash";
 
 /**
  * 修正版の出し直し（作者の依頼 2026-11-03「修正後再投稿に対応してください」。設計書6.68.7）。
@@ -335,13 +339,13 @@ describe("修正版の出し直し", () => {
     stubQuickPick([byKey("mode", "post"), byKey("answer", "posted"), () => undefined]);
     await postNewEpisode(work, {} as unknown as AIRegistry, episode);
     const posted = readLedger().posts.find((post) => post.site === "narou");
-    expect(posted?.bodyHash).toBe(postingTextHash("邂逅", body));
+    expect(posted?.bodyHash).toBe(postingNotationTextHash("邂逅", body));
 
     stubQuickPick([(items) => items, byKey("answer", "revised"), byKey("answer", "revised")]);
     await postNewEpisode(work, {} as unknown as AIRegistry, episode);
     const revisions = readLedger().revisions ?? [];
     expect(revisions).toHaveLength(2);
-    expect(revisions.every((record) => record.bodyHash === postingTextHash("邂逅", body))).toBe(true);
+    expect(revisions.every((record) => record.bodyHash === postingNotationTextHash("邂逅", body))).toBe(true);
   });
 
   test("話を名指ししたとき、投稿のあとに直したサイトだけに既定で印を付け、そう添える", async () => {

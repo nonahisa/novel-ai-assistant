@@ -41,7 +41,11 @@ import {
   quickPickTitle,
 } from "./support/workbenchDom";
 import { runCommand } from "./support/quickInput";
-import { postingTextHash, postingTitleHash } from "../../src/core/postingBodyHash";
+import {
+  postingNotationTextHash,
+  postingTextHash,
+  postingTitleHash,
+} from "../../src/core/postingBodyHash";
 
 const TITLE_HINT = "題（サブタイトル）も貼り替えてください（「サブタイトルをコピー」でコピーできます）。";
 const BODY_HINT = "本文を貼り替えてください";
@@ -179,7 +183,7 @@ test("題を直した話を出し直すと、案内に「題（サブタイト�
           episodePath: EPISODE_PATH,
           site: "kakuyomu",
           titleHash: postingTitleHash("はじまり"),
-          bodyHash: postingTextHash("はじまり", EDITED_TEXT),
+          bodyHash: postingNotationTextHash("はじまり", EDITED_TEXT),
         });
         expect(saved.posts, "投稿の記録が変わった（出し直しは新しい話として数えない）").toEqual([postedRecord("出会い")]);
       });

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   emptyPostingLedger,
   hasBodyHashFor,
+  isNotationTextHash,
   isTitledTextHash,
   lastSentBodyHash,
   lastSentTitleHash,
@@ -31,8 +32,20 @@ import {
 const OLD = `v2:${"1".repeat(64)}`;
 const NEW = `v2:${"2".repeat(64)}`;
 const NEWER = `v2:${"3".repeat(64)}`;
-/** 今の話の印（本文だけの印は、ここでは古い記録と比べないので何でもよい） */
-const cur = (titled: string): PostingTextHashes => ({ titled, bodyOnly: "f".repeat(64) });
+/** 今の話の印（本文だけの印・v3: の印は、ここでは比べないので何でもよい） */
+const cur = (titled: string): PostingTextHashes => hashesOf({ titled });
+
+/** 今の話の印。渡さなかった取り方は、どの記録とも一致しない値にする */
+function hashesOf(parts: Partial<PostingTextHashes>): PostingTextHashes {
+  return {
+    notation: `v3:${"e".repeat(64)}`,
+    titled: `v2:${"d".repeat(64)}`,
+    bodyOnly: "f".repeat(64),
+    titledCopies: [],
+    bodyOnlyCopies: [],
+    ...parts,
+  };
+}
 
 const base: PostingLedger = {
   ...emptyPostingLedger(),
@@ -100,17 +113,45 @@ describe("0.124.0 の印（本文だけ・頭に v2: が無い）との比べ方
   const ledger = withPost(base, "本文/001.txt", "kakuyomu", "2026-10-01T00:00:00.000Z", legacyBody);
 
   test("本文だけの印どうしで比べ、違えば「直した」（本文を直したことは確か）", () => {
-    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", { titled: NEW, bodyOnly: "5".repeat(64) })).toBe("changed");
+    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", hashesOf({ titled: NEW, bodyOnly: "5".repeat(64) }))).toBe("changed");
   });
 
   test("本文だけの印が同じなら「分からない」（題を直したかは、その印からは分からない）", () => {
-    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", { titled: NEW, bodyOnly: legacyBody })).toBe("unknown");
-    expect(sitesNeedingRevision(ledger, "本文/001.txt", { titled: NEW, bodyOnly: legacyBody })).toEqual([]);
+    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", hashesOf({ titled: NEW, bodyOnly: legacyBody }))).toBe("unknown");
+    expect(sitesNeedingRevision(ledger, "本文/001.txt", hashesOf({ titled: NEW, bodyOnly: legacyBody }))).toEqual([]);
+  });
+
+  test("投稿サイトの書き方へ戻した写しの印が同じなら「分からない」（.md 化しただけ。0.126.4）", () => {
+    const current = hashesOf({ titled: NEW, bodyOnly: "5".repeat(64), bodyOnlyCopies: [legacyBody] });
+    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", current)).toBe("unknown");
   });
 
   test("今の取り方の印（v2:）と古い印を取り違えない", () => {
     expect(isTitledTextHash(NEW)).toBe(true);
     expect(isTitledTextHash(legacyBody)).toBe(false);
+  });
+});
+
+describe("ルビ・傍点の書き方を寄せた印（v3:。0.126.4）との比べ方", () => {
+  const V3 = `v3:${"6".repeat(64)}`;
+  const ledger = withPost(base, "本文/001.txt", "kakuyomu", "2026-10-01T00:00:00.000Z", V3);
+
+  test("v3: の印は v3: の印どうしで比べる（v2: の印や写しとは比べない）", () => {
+    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", hashesOf({ notation: V3 }))).toBe("same");
+    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", hashesOf({ titled: V3, titledCopies: [V3] }))).toBe("changed");
+    expect(isNotationTextHash(V3)).toBe(true);
+    expect(isTitledTextHash(V3)).toBe(false);
+  });
+
+  test("台帳に書いた v3: の印を読み戻せる（形の決まりが通す）", () => {
+    const raw: unknown = JSON.parse(JSON.stringify(ledger));
+    expect(parsePostingLedger(raw).posts[0].bodyHash).toBe(V3);
+  });
+
+  test("v2: の記録は、投稿サイトの書き方へ戻した写しの印が同じなら「同じ」", () => {
+    const v2 = withPost(base, "本文/001.txt", "kakuyomu", "2026-10-01T00:00:00.000Z", OLD);
+    expect(revisionNeed(v2, "本文/001.txt", "kakuyomu", hashesOf({ titledCopies: [OLD] }))).toBe("same");
+    expect(revisionNeed(v2, "本文/001.txt", "kakuyomu", hashesOf({ titledCopies: [NEW] }))).toBe("changed");
   });
 });
 

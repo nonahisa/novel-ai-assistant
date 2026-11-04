@@ -33,7 +33,7 @@ import {
   pressDialogButton,
 } from "./support/workbenchDom";
 import { runCommand } from "./support/quickInput";
-import { postingTextHash } from "../../src/core/postingBodyHash";
+import { postingNotationTextHash, postingTextHash } from "../../src/core/postingBodyHash";
 
 const EPISODES = [
   { name: "第1話_はじまり.txt", text: "　朝の駅は静かだった。\n　直したあとの一文。\n" },
@@ -160,7 +160,7 @@ test("話の右クリック「この話を投稿する」から修正版を出�
           episodePath: "本文/第1話_はじまり.txt",
           site: "kakuyomu",
           // 出し直したときの題と本文の印（次に「直したか」を比べる相手になる）
-          bodyHash: postingTextHash("はじまり", EPISODES[0].text),
+          bodyHash: postingNotationTextHash("はじまり", EPISODES[0].text),
         });
 
         // 告知の質問は出さない（新しい話ではない）

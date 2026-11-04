@@ -90,7 +90,13 @@ describe("出し直しの記録", () => {
     });
     expect(revisionFor(ledger, "本文/001.txt", "kakuyomu")?.revisedAt).toBe("2026-11-03T00:00:00.000Z");
     // 印の無い記録は「分からない」（出し直しが要るとは言わない）
-    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", { titled: `v2:${"c".repeat(64)}`, bodyOnly: "c".repeat(64) })).toBe("unknown");
+    expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", {
+      notation: `v3:${"c".repeat(64)}`,
+      titled: `v2:${"c".repeat(64)}`,
+      bodyOnly: "c".repeat(64),
+      titledCopies: [],
+      bodyOnlyCopies: [],
+    })).toBe("unknown");
   });
 
   test("投稿の記録は、その話の記録を先に、無ければファイルまるごとの記録を引く", () => {
