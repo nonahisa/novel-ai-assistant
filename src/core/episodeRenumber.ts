@@ -1058,6 +1058,51 @@ export function renumberSynopses<
   return { episodes: next, changed, orphaned };
 }
 
+/**
+ * 話の**名前だけ**を変えたとき、話数の読めない話のあらすじの指し先を付け替える
+ * （設計書6.68.2）。
+ *
+ * あらすじは話数の読めない話（「幕間.txt」など）だけを**ファイル名**で引く
+ * （`synopsisKey` の `?#ファイル名`）。名前を変えて付け替えないと、あらすじが一覧から
+ * 消える。**話数のある行は名前で動かさない**——話数で引けるので付いてくるうえ、
+ * 名前で引くと別のフォルダーの同じ名前の話（番外編の `幕間.txt`）を巻き込む。
+ *
+ * **新しい名前のあらすじが既にあれば付け替えない**（`collisions` で返す）。2行が
+ * 同じ鍵になると、読み込みのたびの重複の片付け（`dedupeSynopsisEpisodes`）が片方を
+ * 落とし、作者が書き直したあらすじが消えうる。
+ */
+export function renameUnnumberedSynopses<
+  T extends { chapter: number | null; fileName: string }
+>(
+  episodes: readonly T[],
+  renames: ReadonlyArray<{ fromFileName: string; toFileName: string }>
+): { episodes: T[]; changed: number; collisions: string[] } {
+  const taken = new Set(
+    episodes
+      .filter((episode) => episode.chapter === null)
+      .map((episode) => path.normalizeForComparison(episode.fileName))
+  );
+  let changed = 0;
+  const collisions: string[] = [];
+  const next = episodes.map((episode) => {
+    if (episode.chapter !== null) return episode;
+    const rename = renames.find(
+      (item) =>
+        sameFileName(item.fromFileName, episode.fileName) &&
+        !sameFileName(item.fromFileName, item.toFileName)
+    );
+    if (!rename) return episode;
+    if (taken.has(path.normalizeForComparison(rename.toFileName))) {
+      collisions.push(episode.fileName);
+      return episode;
+    }
+    taken.add(path.normalizeForComparison(rename.toFileName));
+    changed++;
+    return { ...episode, fileName: rename.toFileName };
+  });
+  return { episodes: next, changed, collisions };
+}
+
 /** ファイル名が同じか。Windowsは大文字小文字を区別しない */
 function sameFileName(left: string, right: string): boolean {
   return (

@@ -18,6 +18,7 @@ import {
   episodeNumberMoves,
   relativeMoves,
   renamedFileNamesByNumber,
+  renameUnnumberedSynopses,
   renumberBookPositions,
   renumberCharacter,
   renumberChapterSet,
@@ -32,6 +33,8 @@ import {
 import { PostingStore, PostingStoreError } from "../core/postingStore";
 import { normalizeEpisodePath } from "../models/chapter";
 import { logFailure, useLogFile } from "../core/logger";
+import * as paths from "../core/paths";
+import { moveReadingDictionary } from "../core/readingDictionaryStore";
 
 /**
  * 話数を指している台帳を、付け替えと同じ操作の中で追従させる（設計書6.67.3）。
@@ -91,6 +94,11 @@ export interface LedgerFollowSummary {
    * ——予定の話の扱いに、付け替えの計画（基準の話数・最後まで済んだか）が要る
    */
   episodePlots: number;
+  /**
+   * 新しい名前へ付け替えた読みの辞書（`.aiwriter/readings/`）。話の名前だけを変えたとき
+   * だけ数える（辞書は話の相対パスを名前にして置くので、話数に関わらず外れる。設計書6.68.2）
+   */
+  readingDictionaries: number;
   /** 台帳ごとの失敗。「台帳名：理由」の形。原稿の付け替えは失敗しても戻さない */
   failures: string[];
 }
@@ -115,6 +123,7 @@ export function emptyLedgerFollowSummary(): LedgerFollowSummary {
     posting: 0,
     postingDropped: 0,
     episodePlots: 0,
+    readingDictionaries: 0,
     failures: [],
   };
 }
@@ -525,7 +534,63 @@ export async function followEpisodeFileRenames(
   await followBook(work, moves, undefined, summary);
   await followTimeline(work, moves, summary);
   await followPosting(work, moves, undefined, summary);
+  /*
+    **名前で引く記録も2つある**（0.126.3 まで付いてこなかった）。話数の読めない話の
+    各話あらすじ（ファイル名で引く）と、読みの辞書（話の相対パスを名前にして置く。
+    話数に関わらず）。作者の書いた中身は変えず、指し先だけを付け替える
+  */
+  await followUnnumberedSynopses(work, renames, summary);
+  await followReadingDictionaries(work, renames, summary);
   return summary;
+}
+
+async function followUnnumberedSynopses(
+  work: WorkEntry,
+  renames: readonly EpisodeFileRename[],
+  summary: LedgerFollowSummary
+): Promise<void> {
+  try {
+    const store = new SynopsisStore(work);
+    const set = await store.load();
+    if (set.episodes.length === 0) return;
+    const result = renameUnnumberedSynopses(
+      set.episodes,
+      renames.map((rename) => ({
+        fromFileName: paths.basename(rename.fromPath),
+        toFileName: paths.basename(rename.toPath),
+      }))
+    );
+    for (const name of result.collisions) {
+      summary.failures.push(
+        `各話あらすじ「${name}」：新しい名前のあらすじが既にあるため、付け替えませんでした`
+      );
+    }
+    if (result.changed === 0) return;
+    // 退避→新規作成（`SynopsisStore.save`。既存ファイルは上書きできない決まり）
+    await store.save({ ...set, episodes: result.episodes });
+    summary.synopses += result.changed;
+  } catch (error) {
+    summary.failures.push(`各話あらすじ：${messageOf(error, "各話あらすじの名前の追従")}`);
+  }
+}
+
+/** 1話ずつ動かし、**動かせたものだけを数える**（`saveEachRecord` と同じ考え） */
+async function followReadingDictionaries(
+  work: WorkEntry,
+  renames: readonly EpisodeFileRename[],
+  summary: LedgerFollowSummary
+): Promise<void> {
+  for (const rename of renames) {
+    try {
+      if (await moveReadingDictionary(work, rename.fromPath, rename.toPath)) {
+        summary.readingDictionaries++;
+      }
+    } catch (error) {
+      summary.failures.push(
+        `読みの辞書「${paths.basename(rename.fromPath)}」：${messageOf(error, "読みの辞書の名前の追従")}`
+      );
+    }
+  }
 }
 
 /**
@@ -618,6 +683,7 @@ export function describeLedgerFollowSummary(summary: LedgerFollowSummary): strin
     parts.push(`保留中の人物更新案${summary.pendingCharacterUpdates}件`);
   if (summary.posting > 0) parts.push(`投稿状態${summary.posting}件`);
   if (summary.episodePlots > 0) parts.push(`単話プロット${summary.episodePlots}件`);
+  if (summary.readingDictionaries > 0) parts.push(`読みの辞書${summary.readingDictionaries}件`);
 
   const notes: string[] = [];
   // **章の開始が動いたことは、件数ではなく章の名前で伝える**（作者は

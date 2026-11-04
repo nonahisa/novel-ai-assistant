@@ -109,6 +109,47 @@ export async function saveReadingDictionary(
   return hashText(text);
 }
 
+/**
+ * 話の名前を変えたとき、その話の辞書を新しい名前へ付け替える（設計書6.68.2）。
+ * 辞書は話の相対パスを名前にして置くので、話数に関わらず付け替えないと外れる。
+ *
+ * **作者の直した中身は変えない。** ファイルごと動かし（中身はそのまま）、中の
+ * `episode`（どの話の辞書か）だけを新しいパスへ書き直す。返すのは付け替えたか。
+ *
+ * - 旧い名前の辞書が無ければ何もしない（false）
+ * - **旧い辞書が壊れていたら動かさずに投げる**（直さない。実装ルール2）
+ * - **新しい名前に辞書が既にあれば、どちらにも触れずに投げる**（上書きしない）
+ */
+export async function moveReadingDictionary(
+  work: WorkEntry,
+  fromEpisodePath: string,
+  toEpisodePath: string
+): Promise<boolean> {
+  const from = readingDictionaryPath(work, fromEpisodePath);
+  const to = readingDictionaryPath(work, toEpisodePath);
+  if (path.normalizeForComparison(from) === path.normalizeForComparison(to)) return false;
+  if ((await readTextOrUndefined(from)) === undefined) return false;
+  // 先に読めるかを確かめる（壊れた辞書を動かしてから止まると、どこにあるか分からなくなる）
+  await loadReadingDictionary(work, fromEpisodePath);
+  if ((await readTextOrUndefined(to)) !== undefined) {
+    throw new Error(
+      `「${path.basename(toEpisodePath)}」にはもう読みの辞書があるので、` +
+        `「${path.basename(fromEpisodePath)}」の辞書を付け替えませんでした（どちらも残しています）。`
+    );
+  }
+  await vscode.workspace.fs.rename(path.toUri(from), path.toUri(to), { overwrite: false });
+  /*
+    中の `episode` は動かしたあとに直す。ここで失敗しても辞書は新しい名前の所にあり、
+    読み上げは置き場の名前で引くので効く（`episode` は後から辿るための控え）
+  */
+  const moved = await loadReadingDictionary(work, toEpisodePath);
+  const episode = episodeRelativePath(work, toEpisodePath);
+  if (moved.file.episode !== episode) {
+    await saveReadingDictionary(work, toEpisodePath, { ...moved.file, episode }, moved.hash);
+  }
+  return true;
+}
+
 async function readTextOrUndefined(file: string): Promise<string | undefined> {
   let bytes: Uint8Array;
   try {
