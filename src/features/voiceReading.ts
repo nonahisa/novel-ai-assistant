@@ -637,24 +637,29 @@ export async function manageVoiceCast(target: VoiceCastTarget): Promise<void> {
     });
     if (!picked || isCancelItem(picked) || !("dialogue" in picked)) return;
 
+    // どの段でも［戻る］か閉じたら、直さずに一覧へ戻る
     const speaker = await vscode.window.showQuickPick(
       [
         { label: "不明", id: null as string | null, name: null as string | null },
         ...people.map((p) => ({ label: p.name, description: p.aliases.join("、"), id: p.id, name: p.name })),
+        cancelItem("戻る"),
       ],
       { title: `${picked.dialogue.quote.slice(0, 30)} の話者` }
     );
-    if (!speaker) continue;
+    if (!speaker || isCancelItem(speaker) || !("id" in speaker)) continue;
     const emotion = await vscode.window.showQuickPick(
-      VOICE_EMOTIONS.map((e) => ({ label: e as VoiceEmotion })),
+      [...VOICE_EMOTIONS.map((e) => ({ label: e as VoiceEmotion, emotion: e })), cancelItem("戻る")],
       { title: "感情" }
     );
-    if (!emotion) continue;
+    if (!emotion || isCancelItem(emotion) || !("emotion" in emotion)) continue;
     const intensity = await vscode.window.showQuickPick(
-      VOICE_INTENSITIES.map((i) => ({ label: i as VoiceIntensity })),
+      [
+        ...VOICE_INTENSITIES.map((i) => ({ label: i as VoiceIntensity, intensity: i })),
+        cancelItem("戻る"),
+      ],
       { title: "強さ" }
     );
-    if (!intensity) continue;
+    if (!intensity || isCancelItem(intensity) || !("intensity" in intensity)) continue;
     try {
       await saveVoiceCast(
         work,
@@ -664,8 +669,8 @@ export async function manageVoiceCast(target: VoiceCastTarget): Promise<void> {
           entries: editCastEntry(loaded.file.entries, picked.dialogue, {
             speakerId: speaker.id,
             speakerName: speaker.name,
-            emotion: emotion.label,
-            intensity: intensity.label,
+            emotion: emotion.emotion,
+            intensity: intensity.intensity,
           }),
         },
         loaded.hash
@@ -730,20 +735,23 @@ export async function assignVoices(work: WorkEntry, service: VoiceReadingService
     if (!picked || isCancelItem(picked) || !("slot" in picked)) return;
 
     const voice = await vscode.window.showQuickPick(
-      speakers.flatMap((speaker) =>
-        speaker.styles.map((style) => ({
-          label: `${speaker.name}／${style.name}`,
-          ref: {
-            speakerUuid: speaker.uuid,
-            speakerName: speaker.name,
-            styleName: style.name,
-            styleId: style.id,
-          } satisfies VoiceRef,
-        }))
-      ),
+      [
+        ...speakers.flatMap((speaker) =>
+          speaker.styles.map((style) => ({
+            label: `${speaker.name}／${style.name}`,
+            ref: {
+              speakerUuid: speaker.uuid,
+              speakerName: speaker.name,
+              styleName: style.name,
+              styleId: style.id,
+            } satisfies VoiceRef,
+          }))
+        ),
+        cancelItem("戻る"),
+      ],
       { title: `${picked.label}の声`, matchOnDescription: true }
     );
-    if (!voice) continue;
+    if (!voice || isCancelItem(voice) || !("ref" in voice)) continue;
     const next: VoiceAssignmentFile = { ...file, characters: { ...file.characters } };
     if (picked.slot === "narrator") next.narrator = voice.ref;
     else if (picked.slot === "dialogueDefault") next.dialogueDefault = voice.ref;
