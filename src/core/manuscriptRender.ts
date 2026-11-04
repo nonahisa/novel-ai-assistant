@@ -3,7 +3,10 @@ import {
   SITE_RUBY_BARE_SOURCE,
   SITE_RUBY_BAR_SOURCE,
 } from "./ruby";
-import { TermIndex, type TermKind, type TermMatch } from "./termIndex";
+// **型だけを読む。** 値として読むと、外から呼ぶ束（bundle:core）へこの部品が入ったとき
+// esbuild が「使われない import」を外出しと数えて止まった（0.126.0。朗読の試作が
+// 束の入口から readAloud → ここまで届くようになった）
+import type { TermIndex, TermKind, TermMatch } from "./termIndex";
 import { memoLineRanges } from "./sceneMemo";
 import { escapeHtml } from "./htmlEscape";
 
