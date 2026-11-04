@@ -15,7 +15,16 @@ import { sanitizeFileName } from "./episodeParser";
  */
 export async function renameEpisodeFile(
   file: EpisodeFile,
-  subtitle: string
+  subtitle: string,
+  /**
+   * 名前の前後で呼ぶ手当て。開いている原稿エディターの見た目を新しい名前へ
+   * 持って行く・古い面を閉じる、は画面側（features）の仕事で、core からは
+   * 呼べない（依存の向き）ので、呼ぶ側から差し込む。
+   */
+  hooks?: {
+    beforeRename?: (from: string, to: string) => void;
+    afterRename?: (from: string) => void;
+  }
 ): Promise<string> {
   const cleaned = sanitizeFileName(subtitle).trim();
   if (!cleaned) {
@@ -35,12 +44,16 @@ export async function renameEpisodeFile(
     throw new Error(`${path.basename(target)} が既にあります。`);
   }
 
+  // 見た目の持ち越しは、画面がまだ元の名前で開いているうちに取る
+  hooks?.beforeRename?.(file.filePath, target);
   await vscode.workspace.fs.rename(
     path.toUri(file.filePath),
     path.toUri(target),
     // 上書きを許すと、同名の別の話が消える
     { overwrite: false }
   );
+  // 改名が通ってから閉じる（失敗したときに面だけが消えないように）
+  hooks?.afterRename?.(file.filePath);
   return target;
 }
 

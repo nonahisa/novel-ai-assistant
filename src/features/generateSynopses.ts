@@ -48,6 +48,10 @@ import {
   workLog,
 } from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
+import {
+  carryAppearanceToRenamed,
+  closeRenamedManuscript,
+} from "./manuscriptEditor";
 import { followEpisodeFileRenames, renameFollowNotice } from "./episodeLedgers";
 import { confirmFormatFit } from "./formatFitPrompt";
 import type { FeatureRunResult } from "../core/proofreadingSuite";
@@ -532,7 +536,13 @@ async function reviewSubtitles(
     try {
       const renamed = await renameEpisodeFile(
         episode.file,
-        picked.suggestion.text
+        picked.suggestion.text,
+        // 開いている原稿エディターの見た目を新しい名前へ持って行き、古い面を閉じる
+        // （.md 化と同じ手当て。設計書6.25.5・6.12.1）
+        {
+          beforeRename: carryAppearanceToRenamed,
+          afterRename: closeRenamedManuscript,
+        }
       );
       logStep(
         `リネーム: ${episode.file.fileName} → ${path.basename(renamed)}`

@@ -20,6 +20,10 @@ import { logFailure, useLogFile } from "../core/logger";
 import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
 import { notifyDone } from "../views/notify";
 import { followEpisodeFileRenames, renameFollowNotice } from "./episodeLedgers";
+import {
+  carryAppearanceToRenamed,
+  closeRenamedManuscript,
+} from "./manuscriptEditor";
 
 /**
  * 話のサブタイトル・本文をコピーする／ファイル名にサブタイトルを付ける
@@ -176,12 +180,17 @@ export async function renameWithSubtitle(
 
   const target = path.join(path.dirname(episode.filePath), next);
   try {
+    // **開いている原稿エディターの見た目を新しい名前へ持って行く**
+    // （.md 化と同じ手当て。名前を変える前に取る。設計書6.25.5）
+    carryAppearanceToRenamed(episode.filePath, target);
     // **上書きしない。** 同じ名前があれば失敗させる
     await vscode.workspace.fs.rename(
       path.toUri(episode.filePath),
       path.toUri(target),
       { overwrite: false }
     );
+    // 古い名前の面を閉じる（残すと保存で消えたはずのファイルが復活する。6.12.1）
+    closeRenamedManuscript(episode.filePath);
   } catch (error) {
     void vscode.window.showErrorMessage(
       `名前を変えられませんでした: ${
