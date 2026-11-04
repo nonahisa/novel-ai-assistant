@@ -134,6 +134,21 @@ describe("名前だけを変えたとき、パスで話を指す台帳がつい�
     expect(timeline.episodes[0].filePath).toBe("本文/003_湖畔の誓い.txt");
   });
 
+  test("題が中の【タイトル】にだけある話（一覧の題が【タイトル】で埋まっている）にも、サブタイトルを付けられる", async () => {
+    // 走査（scanner.ts）はファイル名に題が無いと `subtitle` を【タイトル】で埋める。
+    // それを「いまファイル名に付いている題」と取り違え、「既にサブタイトルが付いています」で
+    // 止まっていた（2026-11-04 画面テストで見つかった）
+    disk.set(
+      diskPath("本文", "003.txt"),
+      encoder.encode("【タイトル】\n湖畔の誓い\n\n【本文（1行）】\n本文です。")
+    );
+    window.showWarningMessage = (async () => "変える") as typeof window.showWarningMessage;
+
+    await renameWithSubtitle(work, { ...episodeFile("003.txt"), subtitle: "湖畔の誓い" });
+
+    expect(disk.has(diskPath("本文", "003_湖畔の誓い.txt"))).toBe(true);
+  });
+
   test(".md 化しても投稿済みのまま（拡張子が変わると相対パスも変わる）", async () => {
     disk.set(diskPath("本文", "003.txt"), encoder.encode("本文です。"));
     await seedLedgers("本文/003.txt");

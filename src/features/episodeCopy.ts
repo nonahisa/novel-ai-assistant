@@ -5,6 +5,7 @@ import { extractEpisodeParts, nameWithSubtitle } from "../core/episodeCopy";
 import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
 import { readTextFile } from "../core/textFile";
+import { parseEpisodeFileName } from "../core/episodeParser";
 // 貼り付け先を訊く画面は1つにする（写すと、片方だけ選べる先が増える）
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
@@ -146,7 +147,11 @@ export async function renameWithSubtitle(
     formatChapterLabel(episode)
   );
 
-  const next = nameWithSubtitle(episode.fileName, episode.subtitle, subtitle);
+  // **いまファイル名に付いている題は、ファイル名から読む。** `episode.subtitle` は
+  // 走査（scanner.ts）がファイル名に題が無いと【タイトル】で埋めるので、それを渡すと
+  // 「既に付いている」と取り違えて止まる（2026-11-04 画面テストで見つかった）
+  const nameSubtitle = parseEpisodeFileName(episode.fileName).subtitle ?? null;
+  const next = nameWithSubtitle(episode.fileName, nameSubtitle, subtitle);
   if (!next) {
     void vscode.window.showInformationMessage(
       subtitle
