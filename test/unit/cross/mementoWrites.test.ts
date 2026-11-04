@@ -172,6 +172,7 @@ const KEYS: KeyRow[] = [
   { key: "novelai.contests.inbox", literalIn: "features/contestImport.ts", writtenIn: "features/contestImport.ts", write: /\.update\(CONTEST_INBOX_KEY\b/g, guarded: true },
   { key: "novelai.readerStats.seenClipboard", literalIn: "features/readerStatsHelperLink.ts", writtenIn: "features/readerStatsHelperLink.ts", write: /\.update\(\s*SEEN_FINGERPRINTS_KEY\b/g, guarded: true },
   { key: "novelai.readerStats.declinedWorkIds", literalIn: "features/readerStatsRegister.ts", writtenIn: "features/readerStatsRegister.ts", write: /\.update\(DECLINED_READER_STATS_IDS_KEY\b/g, guarded: true },
+  { key: "novelai.declinedEpisodeRenames", literalIn: "features/episodeRenameWatch.ts", writtenIn: "features/episodeRenameWatch.ts", write: /\.update\(DECLINED_RENAMES_KEY\b/g, guarded: true },
   { key: "novelai.ownWorks.unregistered", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(UNREGISTERED_OWN_WORKS_KEY\b/g, guarded: true },
   { key: "novelai.ownWorks.pendingReaderStats", literalIn: "features/unregisteredOwnWorks.ts", writtenIn: "features/unregisteredOwnWorks.ts", write: /\.update\(PENDING_OWN_WORK_STATS_KEY\b/g, guarded: true },
   // 未登録の自分の作品の順位の控え（2026-11-02。ヘルパーの束の rankings）

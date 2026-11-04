@@ -503,8 +503,9 @@ export interface EpisodeFileRename {
  * 届かない。同じ話を新しい話として二重に出すおそれ）。話数の付け替え
  * （`followEpisodeLedgers`）と同じ追従の部品を、名前だけの対応表で呼ぶ。
  *
- * **製品の外（VS Code のエクスプローラー・OS）で変えた名前は、ここでは追わない。**
- * 拾う道を足すかは作者の判断を待っている（2026-11-04）。
+ * **製品の外で変えた名前も、ここを通して追う**（作者の決定 2026-11-04）。拾うのは
+ * `episodeRenameWatch.ts`：VS Code のエクスプローラーでの改名は `onDidRenameFiles` で
+ * 訊かずに、OS・git pull での改名は次に作品を開いたときに訊いてから、ここへ渡す。
  */
 export async function followEpisodeFileRenames(
   work: WorkEntry,

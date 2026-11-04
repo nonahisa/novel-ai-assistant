@@ -603,6 +603,10 @@ import {
 import { onPostingSaved, onPostingUnknownValues } from "./core/postingStore";
 import { setEpisodeRenameWorkLookup } from "./features/episodeLedgers";
 import {
+  RenameDriftChecker,
+  registerExplorerRenameFollow,
+} from "./features/episodeRenameWatch";
+import {
   importReaderStats,
   recordReaderStats,
 } from "./features/readerStats";
@@ -1387,6 +1391,31 @@ export async function activate(
   */
   setEpisodeRenameWorkLookup((filePath) => findWorkForPath(registry, filePath));
   context.subscriptions.push({ dispose: () => setEpisodeRenameWorkLookup(undefined) });
+
+  /*
+    **製品の外で変えた話の名前も、パスで話を指す台帳へ追わせる**（設計書6.68.2。作者の決定
+    2026-11-04）。エクスプローラーの改名は訊かずに付け替え、OS・git pull の改名は次に
+    作品を開いたときに訊く（`renameDriftChecker`。合図は下の2か所）
+  */
+  context.subscriptions.push(
+    registerExplorerRenameFollow((filePath) => findWorkForPath(registry, filePath))
+  );
+  const renameDriftChecker = new RenameDriftChecker({
+    memento: verifiedState(context.globalState),
+  });
+  const checkRenameDriftOfActive = (): void => {
+    const uri = activeManuscriptUri();
+    if (!uri) return;
+    void renameDriftChecker.checkOnEpisodeOpened(fromUri(uri), (filePath) =>
+      findWorkForPath(registry, filePath)
+    );
+  };
+  context.subscriptions.push(
+    // 素のエディターで話を開いたとき
+    vscode.window.onDidChangeActiveTextEditor(() => checkRenameDriftOfActive()),
+    // 原稿エディター（WebView）は TextEditor を持たないので、タブの切り替えで見る
+    vscode.window.tabGroups.onDidChangeTabs(() => checkRenameDriftOfActive())
+  );
 
   /*
     順位のお祝い（作者の指示 2026-11-02）。順位は手の記録・ヘルパーの取り込み・なろう殿堂入り
@@ -4702,6 +4731,8 @@ export async function activate(
       );
       if (!picked || !("work" in picked)) return;
       stepProvider.selectWork(picked.work.id);
+      // 作者が作品を選んだのは「作品を開いた」合図。名前が変わった話があれば訊く（6.68.2）
+      void renameDriftChecker.checkOnOpen(picked.work);
       // **末尾の件数は選んだ作品のもの**なので、切り替えたら出し直す
       // （そうしないと、前の作品の件数が並んだままになる）。
       // **選び直したら全作品を数え直す**（86fcc341 より前と同じ。2026-10-30、母艦の再レビュー）。
