@@ -30,7 +30,7 @@ description: この作品の役割分担。まとまった実装・レビュー�
 |---|---|---|
 | **母艦**（版ごとに替わる） | 作者への判断の依頼・ノートPCとの連絡・製品のあいだの食い違いの点検・**配布**（GitHub Release・Marketplace・Open VSX。［Approve］の依頼も母艦から）・進捗パネル | novel-ai-assistant |
 | 製品：統合小説執筆環境 | 本体の実装・テスト・実機確認・設計書 | novel-ai-assistant |
-| 製品：投稿ヘルパー | ヘルパーの実装・Chrome ウェブストア | novel-post-helper |
+| 製品：投稿ヘルパー | ヘルパーの実装・Chrome ウェブストア | novel-post-helper（リポジトリは nonahisa/novel-ai-helper） |
 | 製品：Discord | ボットとコミュニティ（製品リポジトリは直さない） | novel-ai-community-bot |
 | 製品：モバイル版 | Android・iOS（novel-ai-mobile） | novel-ai-android |
 | 製品：オリジナルIME | 設計書・段階0aの測定・専用リポジトリ | nonahisa/novel-ime（非公開。手元は C:\Users\nonah\Documents\novel-ime） |
