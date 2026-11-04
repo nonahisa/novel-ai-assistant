@@ -137,6 +137,9 @@ async function watchWorkbenchDrag(page: Page): Promise<void> {
   await page.evaluate(() => {
     const target = window as Window & { __e2eWorkbenchDrag?: { events: string[]; data: Record<string, string> } };
     target.__e2eWorkbenchDrag = { events: [], data: {} };
+    // 2回目以降の観察は、聞き手を重ねず控えだけ空にする
+    const previousOver = (window as Window & { __e2eOver?: { count: number; last: string; lastOutside: boolean; lastShift: boolean; sawOutsideShift: boolean; sawShift: boolean } }).__e2eOver;
+    if (previousOver) Object.assign(previousOver, { count: 0, last: "?", lastOutside: false, lastShift: false, sawOutsideShift: false, sawShift: false });
     if ((window as Window & { __e2eWorkbenchWatch?: boolean }).__e2eWorkbenchWatch) return;
     (window as Window & { __e2eWorkbenchWatch?: boolean }).__e2eWorkbenchWatch = true;
     // dragend も控える：落ちたときに「drop が無いまま引きずりが終わった」のか「まだ終わっていない」のかを分けるため
@@ -161,6 +164,26 @@ async function watchWorkbenchDrag(page: Page): Promise<void> {
       const entry = `dragover-after:effect=${(event as DragEvent).dataTransfer?.dropEffect ?? "?"},prevented=${String(event.defaultPrevented)}`;
       if (record.events[record.events.length - 1] !== entry) record.events.push(entry);
     });
+    /*
+      dragover の対象と shiftKey を控える（ノートPCの失敗を「エクスプローラーの上から進んでいない」のか
+      「エディター側まで来て IFRAME だけ来ない」のかで見分けるため）。outside は、対象がサイドバー
+      （エクスプローラー）の外にあること。キャプチャ段で読む（各所が止める前の、実際の対象と修飾キー）
+    */
+    const over = { count: 0, last: "?", lastOutside: false, lastShift: false, sawOutsideShift: false, sawShift: false };
+    (window as Window & { __e2eOver?: typeof over }).__e2eOver = over;
+    document.addEventListener(
+      "dragover",
+      (event) => {
+        const element = event.target instanceof Element ? event.target : null;
+        over.count += 1;
+        over.last = `${element?.tagName ?? "?"}.${String(element?.className ?? "").slice(0, 40)}`;
+        over.lastOutside = element !== null && element.closest(".part.sidebar") === null;
+        over.lastShift = (event as DragEvent).shiftKey;
+        if (over.lastOutside && over.lastShift) over.sawOutsideShift = true;
+        if (over.lastShift) over.sawShift = true;
+      },
+      true
+    );
     // 中身はエクスプローラーが dragstart で載せ終えたあと（泡の側）に読む
     document.addEventListener("dragstart", (event) => {
       const transfer = (event as DragEvent).dataTransfer;
@@ -177,50 +200,113 @@ async function workbenchDrag(page: Page): Promise<{ events: string[]; data: Reco
   );
 }
 
-/** エクスプローラーの行を、相談画面の真ん中へ本物の引きずりで落とす（`shift` なら途中で Shift を押す） */
-async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise<boolean> {
+interface OverState {
+  count: number;
+  last: string;
+  lastOutside: boolean;
+  lastShift: boolean;
+  sawOutsideShift: boolean;
+  sawShift: boolean;
+}
+
+/** 最後の dragover の対象・shiftKey・エクスプローラーの外へ出たか */
+async function overState(page: Page): Promise<OverState> {
+  return page.evaluate(
+    () =>
+      (window as Window & { __e2eOver?: { count: number; last: string; lastOutside: boolean; lastShift: boolean; sawOutsideShift: boolean; sawShift: boolean } }).__e2eOver ?? {
+        count: 0,
+        last: "?",
+        lastOutside: false,
+        lastShift: false,
+        sawOutsideShift: false,
+        sawShift: false,
+      }
+  );
+}
+
+function describeOver(state: OverState): string {
+  return `最後の dragover=${state.last}／shiftKey=${String(state.lastShift)}／エクスプローラーの外=${String(state.lastOutside)}／dragover ${state.count}回／外でShiftあり=${String(state.sawOutsideShift)}／Shift付きdragover有り=${String(state.sawShift)}`;
+}
+
+/** 引きずりの 1 回の結果。`released` が false なら、離さずに取り消した（`why` に理由） */
+interface DragAttempt {
+  started: boolean;
+  released: boolean;
+  why: string;
+}
+
+/**
+ * エクスプローラーの行を、相談画面の真ん中へ本物の引きずりで落とす（`shift` なら途中で Shift を押す）。
+ *
+ * **落とし先へは少しずつ動かし、dragover の対象がエクスプローラーの外へ出たのを見てから先へ進む。**
+ * 1回で大きく動かすと、遅い機械では位置がエクスプローラーの上から先へ進まないまま離してしまい、
+ * drop が誰にも届かなかった（ノートPCで Shift ありだけ3回とも落ちた）。固定の待ちは延ばさず、
+ * 動かしたあとの dragover が来たかで待つ。Shift ありは、エクスプローラーの外で shiftKey 付きの
+ * dragover と、WebView の枠（または覆い）への dragenter を見届けてから離す。
+ * 見届けられなければ離さずに Escape で取り消し、`released: false` を返す（呼び出し側がやり直す）
+ */
+async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise<DragAttempt> {
   const row = await explorerRow(page).boundingBox();
   const frameElement = await chat.parentFrame()?.frameElement();
   const box = frameElement ? await frameElement.boundingBox() : null;
   if (!row || !box) throw new Error(`引きずりの位置が取れません（行：${JSON.stringify(row)}／面：${JSON.stringify(box)}）`);
+  const startX = row.x + row.width / 2 + 20;
+  const startY = row.y + row.height / 2 + 5;
   await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2);
   await page.mouse.down();
   // 少し動かして引きずりを始めてから Shift を押す（作者の手と同じ順。先に押すと行の範囲選択になる）
-  await page.mouse.move(row.x + row.width / 2 + 20, row.y + row.height / 2 + 5, { steps: 5 });
+  await page.mouse.move(startX, startY, { steps: 5 });
   /*
     **dragstart が来るのを見届けてから先へ進む。** 遅い機械では dragstart が最初の小さな動きより遅れ、
-    その前に先の動きへ進むと Playwright が引きずりを引き取らない（ノートPCで毎回「3回引きずっても
-    drop が起きない」で落ちた。母艦では出ない）。起きたことで待つので、速い機械では待たない。
-    来なければ、この回は諦めて指を離し、false を返す（呼び出し側がやり直す）
+    その前に先の動きへ進むと Playwright が引きずりを引き取らない。来なければこの回は諦めて指を離す
   */
   const started = await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("dragstart:")), "本体の文書で dragstart が起きる", 4_000)
     .then(() => true)
     .catch(() => false);
   if (!started) {
     await page.mouse.up();
-    return false;
+    return { started: false, released: false, why: "dragstart 来ず" };
   }
   if (shift) await page.keyboard.down("Shift");
   const centerX = box.x + box.width / 2;
   const centerY = box.y + box.height / 2;
-  await page.mouse.move(centerX, centerY, { steps: 20 });
-  /*
-    **落とし先（相談画面の WebView の上に VS Code が敷く受け皿、または WebView の枠そのもの）に引きずりが
-    入ったのを見届けてから指を離す。** 負荷をかけた機械では、dragstart は来ても、指を離すのが落とし先に
-    入る前になり、drop が誰にも届かず dragend だけで終わった（2026-11-04 負荷をかけて確かめた）。
-    入らないままなら少し動かして促し、それでも入らなければ離す（落ちたときの文に便が残る）
-  */
-  const reachedTarget = async () => (await workbenchDrag(page)).events.some((event) => /^dragenter:(IFRAME\.webview|DIV\.webview-overlay)/.test(event));
-  const entered = await waitUntil(reachedTarget, "引きずりが落とし先に入る", 3_000)
-    .then(() => true)
-    .catch(() => false);
-  if (!entered) {
-    await page.mouse.move(centerX + 4, centerY + 4, { steps: 3 });
-    await waitUntil(reachedTarget, "引きずりが落とし先に入る（動かし直し）", 3_000).catch(() => undefined);
+
+  // 動かすたびに、その動きのあとの dragover が来る（来た数が増える）のを待つ。遅い機械では長くなり、速い機械では待たない
+  const moveAndSettle = async (x: number, y: number): Promise<OverState> => {
+    const before = (await overState(page)).count;
+    await page.mouse.move(x, y, { steps: 2 });
+    await waitUntil(async () => (await overState(page)).count > before, "動かしたあとの dragover が来る", 1_500).catch(() => undefined);
+    return overState(page);
+  };
+  const reachedFrame = async () => (await workbenchDrag(page)).events.some((event) => /^dragenter:(IFRAME\.webview|DIV\.webview-overlay)/.test(event));
+  const ready = async (state: OverState) => (shift ? state.sawShift && (await reachedFrame()) : state.lastOutside);
+
+  // 1) エクスプローラーの外（エディター側・WebView の枠・覆い）へ出るまで、少しずつ動かす
+  const STEPS = 30;
+  let state = await overState(page);
+  for (let i = 1; i <= STEPS && !state.lastOutside && !(await reachedFrame()); i++) {
+    state = await moveAndSettle(startX + ((centerX - startX) * i) / STEPS, startY + ((centerY - startY) * i) / STEPS);
+  }
+  // 2) 真ん中で、Shift ありなら枠への dragenter と shiftKey 付きの dragover が揃うまで、小さく揺らして促す
+  const wiggles = [0, 6, -6, 12, -12, 0];
+  for (let i = 0; i < wiggles.length && !(await ready(state)); i++) {
+    state = await moveAndSettle(centerX + wiggles[i], centerY + wiggles[i]);
+    if (!(await ready(state))) await waitUntil(async () => ready(await overState(page)), "引きずりが落とし先に入る", 1_500).catch(() => undefined);
+    state = await overState(page);
+  }
+  if (!(await ready(state))) {
+    /*
+      離さずに取り消す。Playwright は Escape で自分の引きずりを取り消す（dragCancel を送って状態を戻す）ので、
+      先に Escape、そのあとで指を離す（逆だと取り消しでなく drop になる）
+    */
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    if (shift) await page.keyboard.up("Shift");
+    return { started: true, released: false, why: `落とし先に入らず取り消し（${describeOver(state)}／枠へのdragenter=${String(await reachedFrame())}）` };
   }
   await page.mouse.up();
   if (shift) await page.keyboard.up("Shift");
-  return true;
+  return { started: true, released: true, why: describeOver(state) };
 }
 
 /**
@@ -239,8 +325,9 @@ async function dragRowUntilDropped(session: E2ESession, chat: Frame, shift: bool
   const tries: string[] = [];
   for (let attempt = 1; attempt <= 3; attempt++) {
     await watchWorkbenchDrag(page);
-    const started = await dragRowOntoChat(page, chat, shift);
-    const dropped = started && await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("drop:")), "本体の文書で drop が起きる", 5_000)
+    const attempted = await dragRowOntoChat(page, chat, shift);
+    const started = attempted.started;
+    const dropped = attempted.released && await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("drop:")), "本体の文書で drop が起きる", 5_000)
       .then(() => true)
       .catch(() => false);
     if (dropped) {
@@ -270,7 +357,7 @@ async function dragRowUntilDropped(session: E2ESession, chat: Frame, shift: bool
           .then(() => true)
           .catch(() => false)
       : true;
-    tries.push(`${attempt}回目：${started ? "dragstart 来た" : "dragstart 来ず"}／dragend ${started ? (ended ? "来た" : "来ず") : "不要"}／便=${JSON.stringify((await workbenchDrag(page)).events)}`);
+    tries.push(`${attempt}回目：${started ? "dragstart 来た" : "dragstart 来ず"}／${attempted.released ? "離した" : "離さず"}／${attempted.why}／dragend ${started ? (ended ? "来た" : "来ず") : "不要"}／便=${JSON.stringify((await workbenchDrag(page)).events)}`);
   }
   throw new Error(
     `本体の文書で drop が起きるまで3回引きずりましたが、起きません（回ごとの様子：${JSON.stringify(tries)}／面に来た便：${JSON.stringify(await dragsInChat(chat))}／タブ：${JSON.stringify(await editorGroupTabs(page))}）`
