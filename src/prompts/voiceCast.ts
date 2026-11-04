@@ -28,7 +28,7 @@ import { CAST_UNKNOWN_SPEAKER, type CastPerson } from "../core/voiceCast";
  *
  * プロンプトを変更したら version を上げること。
  */
-export const VOICE_CAST_VERSION = "1.0";
+export const VOICE_CAST_VERSION = "1.1";
 
 /**
  * 1回に送る本文の上限（字）。読みの辞書（P-50）と同じ大きさにする——小さいモデルは
@@ -85,7 +85,9 @@ ${input.text}
 【答え方】
 - number：台詞の番号（1〜${input.count}）。**すべての番号に答えます**
 - speaker：その台詞を言った人物の名前。上の【登場人物】の名前か別名を、書かれているとおりに写します。
-  分からないとき・一覧にいない人物のときは「${CAST_UNKNOWN_SPEAKER}」にします。推測で一覧の誰かに当てはめないでください
+  分からないときは「${CAST_UNKNOWN_SPEAKER}」にします。推測で一覧の誰かに当てはめないでください
+  **【登場人物】にいない人物の台詞は、必ず「${CAST_UNKNOWN_SPEAKER}」にします。** 名前の無い兵士・師匠・取調官・店員など、役名や呼び名だけで呼ばれる人物も、一覧にいない人物です。
+  その台詞を、会話の相手や直前に話した人物に当ててはいけません（一覧の誰かが答えているとは限りません）
 - emotion：台詞の気持ち。次のどれか1つ：${VOICE_EMOTIONS.join("、")}
   とくに気持ちが出ていない台詞は「平静」です。小声・内緒話は「ささやき」、大声で叫ぶ台詞は「叫び」です
 - intensity：気持ちの強さ。次のどれか1つ：${VOICE_INTENSITIES.join("、")}

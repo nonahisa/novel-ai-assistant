@@ -235,6 +235,50 @@ async function unloadOthers(keep: string): Promise<void> {
   }
 }
 
+/*
+  段3 VC_PHASE=regold：台詞の取り出しの規則を変えたとき、正解を新しい台詞の並びへ合わせ直す。
+  古い規則のコードで VC_REGOLD_SIDE=old を1回回して台詞の位置を控え、新しい規則のコードで
+  回すと、位置が残った台詞の正解だけを写した新しい正解を VC_OUT に書く（外れた台詞は正解からも外れる）。
+*/
+describe.skipIf(PHASE !== "regold" || !ROOT || !OUT || (process.env.VC_GOLD ?? "") === "")(
+  "正解を台詞の並びに合わせ直す",
+  () => {
+    test("位置で突き合わせる", () => {
+      fs.mkdirSync(OUT!, { recursive: true });
+      for (const goldPath of (process.env.VC_GOLD ?? "").split(";").map((s) => s.trim()).filter(Boolean)) {
+        const gold = JSON.parse(fs.readFileSync(goldPath, "utf-8")) as GoldFile;
+        const text = readUtf8(path.join(ROOT!, gold.work, gold.episode));
+        const dialogues = castDialogues(text);
+        const dumpFile = path.join(OUT!, `old-starts-${path.basename(goldPath).length}.json`);
+        if (process.env.VC_REGOLD_SIDE === "old") {
+          if (gold.gold.length !== dialogues.length) {
+            throw new Error(`古い規則の台詞数 ${dialogues.length} が正解の ${gold.gold.length} と合いません`);
+          }
+          fs.writeFileSync(dumpFile, JSON.stringify(dialogues.map((d) => d.start)), "utf-8");
+          continue;
+        }
+        const oldStarts = JSON.parse(fs.readFileSync(dumpFile, "utf-8")) as number[];
+        const indexOfStart = new Map(oldStarts.map((s, i) => [s, i]));
+        const kept = dialogues.map((d) => {
+          const i = indexOfStart.get(d.start);
+          if (i === undefined) throw new Error(`新しい台詞が古い規則に無い: ${d.quote.slice(0, 20)}`);
+          return gold.gold[i];
+        });
+        const dropped = gold.gold.length - kept.length;
+        const out = {
+          ...gold,
+          note: `${gold.note}（行頭の括弧だけを台詞にする規則に合わせ直し。外した台詞 ${dropped} 件）`,
+          gold: kept,
+        };
+        const outFile = path.join(OUT!, path.basename(goldPath).replace(/\.json$/, "-新.json"));
+        fs.writeFileSync(outFile, JSON.stringify(out, null, 2), "utf-8");
+        fs.appendFileSync(path.join(OUT!, "regold-report.md"), `${gold.work}/${gold.episode}: ${gold.gold.length} -> ${kept.length}\n`, "utf-8");
+      }
+      expect(true).toBe(true);
+    });
+  }
+);
+
 const GOLD_FILES = (process.env.VC_GOLD ?? "").split(";").map((s) => s.trim()).filter(Boolean);
 const MODELS = (process.env.VC_MODELS ?? "gemma4:e4b").split(";").map((s) => s.trim()).filter(Boolean);
 
@@ -320,6 +364,13 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
               const items = parseCastResult(content);
               if (!items) {
                 failedChunks++;
+                // 失敗した答えの本文を残す（何が返って読めなかったかを後で見る）
+                fs.mkdirSync(OUT!, { recursive: true });
+                fs.writeFileSync(
+                  path.join(OUT!, `fail-${model.replace(/[:/]/g, "_")}-${path.basename(goldPath).length}-${failedChunks}.json`),
+                  JSON.stringify({ done_reason: (j as { done_reason?: string }).done_reason, content }, null, 2),
+                  "utf-8"
+                );
                 continue;
               }
               const checked = validateCastItems(items, chunk.dialogues.length, peopleForChunk(chunk, people));

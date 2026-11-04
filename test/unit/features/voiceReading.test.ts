@@ -111,7 +111,7 @@ const { buildReadingPlan } = await import("../../../src/core/readAloud");
 type Registry = import("../../../src/ai/registry").AIRegistry;
 
 const work = { id: "w1", title: "鉛の海", folderPath: "/w" } as WorkEntry;
-const TEXT = "「やった！」と灯は笑った。\n蓮は「静かにしろ」と囁いた。";
+const TEXT = "「やった！」と灯は笑った。\n「静かにしろ」と蓮は囁いた。";
 
 function castEntry(quote: string, patch: Partial<CastEntry>): CastEntry {
   return {
@@ -182,9 +182,8 @@ describe("偽のエンジンで朗読の音を作る", () => {
     expect(planned.units.map((u) => [u.speech, u.who, u.styleId])).toEqual([
       ["「やった！」", "灯", 888753761], // まいの「上機嫌」へ
       ["と灯は笑った。", "語り", 1325133120],
-      ["蓮は", "語り", 1325133120],
       ["「静かにしろ」", "蓮", 1325133121], // 花音の「ささやき」へ
-      ["と囁いた。", "語り", 1325133120],
+      ["と蓮は囁いた。", "語り", 1325133120],
     ]);
 
     const first = await service.audio(planned.units, 0, 1);
@@ -211,8 +210,9 @@ describe("偽のエンジンで朗読の音を作る", () => {
     const before = engine.requests.length;
     await service.audio(planned.units, 1, 1);
     await service.audio(planned.units, 0, 1);
-    // index 1 の先読みで index 4 だけが新しく作られる
-    await vi.waitFor(() => expect(engine!.requests.length).toBe(before + 2));
+    // 4文すべてが先読みで作り済みなので、どちらもエンジンへ新しく頼まない
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(engine!.requests.length).toBe(before);
   });
 
   test("速さを変えると speedScale に掛かり、別の音として作る", async () => {

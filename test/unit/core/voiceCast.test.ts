@@ -41,10 +41,10 @@ describe("台詞を並べて区切る", () => {
   });
 
   test("台詞の頭に区切りの中の番号を差し込む。シーンメモは送らない。台詞の無い区切りは送らない", () => {
-    const text = "地の文だけ。\n// メモ「ここ」\n灯は「行こう」と言い、蓮は「ああ」と答えた。";
+    const text = "地の文だけ。\n// メモ「ここ」\n「行こう」と灯は言った。\n　「ああ」と蓮は答えた。";
     const chunks = castChunksOf(text, 2000);
     expect(chunks).toHaveLength(1);
-    expect(chunks[0].text).toBe("地の文だけ。\n灯は〔1〕「行こう」と言い、蓮は〔2〕「ああ」と答えた。");
+    expect(chunks[0].text).toBe("地の文だけ。\n〔1〕「行こう」と灯は言った。\n　〔2〕「ああ」と蓮は答えた。");
     expect(chunks[0].dialogues.map((d) => d.quote)).toEqual(["「行こう」", "「ああ」"]);
   });
 
@@ -244,5 +244,59 @@ describe("文ごとの声", () => {
     expect(
       voicePlanUnits({ sentences, dialogues: [], cast: [], assignment: { version: 1, characters: {} }, speakers: [] })
     ).toBeUndefined();
+  });
+});
+
+describe("一覧にいない人物の台詞（役名だけの人物）", () => {
+  test("話者の欄に指示の言葉（役名・兵士・一覧にいない人物・会話の相手）が入って返ったら捨てて数える", () => {
+    const { guesses, dropped } = validateCastItems(
+      [
+        { number: 1, speaker: "役名", emotion: "平静", intensity: "中" },
+        { number: 1, speaker: "兵士", emotion: "平静", intensity: "中" },
+        { number: 1, speaker: "一覧にいない人物", emotion: "平静", intensity: "中" },
+        { number: 1, speaker: "会話の相手", emotion: "平静", intensity: "中" },
+        { number: 1, speaker: "直前の話者", emotion: "平静", intensity: "中" },
+        { number: 2, speaker: "不明", emotion: "平静", intensity: "中" },
+      ],
+      2,
+      people
+    );
+    expect([...guesses.keys()]).toEqual([2]);
+    expect(guesses.get(2)?.speakerId).toBeNull();
+    expect(countDropReasons(dropped)).toEqual({ 話者が指示の言葉のまま: 5 });
+  });
+
+  test("一覧に本当に「兵士」という人物がいれば、指示の言葉としては捨てない", () => {
+    const withSoldier: CastPerson[] = [
+      ...people,
+      { id: "c-soldier", name: "兵士", aliases: [], speechStyle: null },
+    ];
+    const { guesses, dropped } = validateCastItems(
+      [{ number: 1, speaker: "兵士", emotion: "平静", intensity: "中" }],
+      1,
+      withSoldier
+    );
+    expect(dropped).toEqual([]);
+    expect(guesses.get(1)?.speakerId).toBe("c-soldier");
+  });
+
+  test("不明の台詞は、台詞の既定の声で読む（人物の声にしない）", () => {
+    const speakers = parseSpeakers(FAKE_SPEAKERS);
+    const text = "「止まれ」";
+    const sentences = buildReadingPlan(text, "curly", [], { splitDialogue: true });
+    const kanon = {
+      speakerUuid: "uuid-kanon",
+      speakerName: "花音",
+      styleName: "ノーマル",
+      styleId: 1325133120,
+    };
+    const units = voicePlanUnits({
+      sentences,
+      dialogues: castDialogues(text),
+      cast: [{ ...entry("「止まれ」", 0, "ai"), speakerId: null, speakerName: null }],
+      assignment: { version: 1, narrator: kanon, dialogueDefault: kanon, characters: {} },
+      speakers,
+    });
+    expect(units?.map((u) => [u.styleId, u.who])).toEqual([[1325133120, "台詞"]]);
   });
 });

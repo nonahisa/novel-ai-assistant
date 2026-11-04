@@ -347,14 +347,26 @@ export function voiceDialogueSpans(text: string): DialogueSpan[] {
     .split("\n")
     .map((line) => (isMemoLine(line) ? " ".repeat(line.length) : line))
     .join("\n");
-  return foldNestedOpeners(
+  // **行頭の連なりだけを台詞にする**（作者の裁定、2026-11-05）。地の文の途中で
+  // 語に付けた括弧（`空気を指す「風」は…`）まで台詞にすると、語りの途中で声が
+  // 切り替わる。台詞は行頭（字下げのあと）から始まるものと、それに空白だけを
+  // 挟んで続くもの（`「はい」「いいえ」` の2つ目）に限る。
+  const out: DialogueSpan[] = [];
+  let prevEnd = -1;
+  for (const span of foldNestedOpeners(
     masked,
     quotedSpans(masked, { unclosedToEnd: false })
-  ).filter((span) => {
-    if (masked[span.start] === "「") return true;
+  )) {
     const lineHead = masked.lastIndexOf("\n", span.start - 1) + 1;
-    return /^[\s　]*$/.test(masked.slice(lineHead, span.start));
-  });
+    const atHead = /^[ \t　]*$/.test(masked.slice(lineHead, span.start));
+    const chained =
+      prevEnd >= lineHead && /^[ \t　]*$/.test(masked.slice(prevEnd, span.start));
+    if (atHead || chained) {
+      out.push(span);
+      prevEnd = span.end;
+    }
+  }
+  return out;
 }
 
 /**
