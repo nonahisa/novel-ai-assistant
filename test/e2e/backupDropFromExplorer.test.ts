@@ -245,7 +245,40 @@ interface DragAttempt {
  * dragover と、WebView の枠（または覆い）への dragenter を見届けてから離す。
  * 見届けられなければ離さずに Escape で取り消し、`released: false` を返す（呼び出し側がやり直す）
  */
+/**
+ * 途中の様子を標準出力へ1行ずつ出し、控えにも残す。
+ *
+ * ノートPCでは Shift ありの件が、診断の文を出す前にテストの制限時間（180秒）で止まり、
+ * どこで止まったか分からなかった（2026-11-04）。どの段まで進んだかを逐次出す
+ */
+const dragSteps: string[] = [];
+function stepLog(text: string): void {
+  const line = `[E2E 引きずり ${new Date().toISOString().slice(11, 23)}] ${text}`;
+  dragSteps.push(line);
+  console.log(line);
+}
+
+/** 1回の試しの上限。3回で制限時間（180秒）の手前に収まるようにする */
+const ATTEMPT_LIMIT_MS = 40_000;
+
+/** 上限を過ぎたら、そこまでの様子を添えて投げる（引きずりの途中で Playwright の操作が戻らない形を捕まえる） */
+async function withAttemptLimit<T>(label: string, run: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label}が ${ATTEMPT_LIMIT_MS}ms で終わりません（途中の様子：${JSON.stringify(dragSteps.slice(-40))}）`)),
+      ATTEMPT_LIMIT_MS
+    );
+  });
+  try {
+    return await Promise.race([run(), limit]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise<DragAttempt> {
+  stepLog(`始め（Shift ${shift ? "あり" : "なし"}）`);
   const row = await explorerRow(page).boundingBox();
   const frameElement = await chat.parentFrame()?.frameElement();
   const box = frameElement ? await frameElement.boundingBox() : null;
@@ -254,8 +287,10 @@ async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise
   const startY = row.y + row.height / 2 + 5;
   await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2);
   await page.mouse.down();
+  stepLog("行の上で押した");
   // 少し動かして引きずりを始めてから Shift を押す（作者の手と同じ順。先に押すと行の範囲選択になる）
   await page.mouse.move(startX, startY, { steps: 5 });
+  stepLog("最初の小さな動きを終えた");
   /*
     **dragstart が来るのを見届けてから先へ進む。** 遅い機械では dragstart が最初の小さな動きより遅れ、
     その前に先の動きへ進むと Playwright が引きずりを引き取らない。来なければこの回は諦めて指を離す
@@ -264,10 +299,15 @@ async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise
     .then(() => true)
     .catch(() => false);
   if (!started) {
+    stepLog("dragstart 来ず。指を離す");
     await page.mouse.up();
     return { started: false, released: false, why: "dragstart 来ず" };
   }
-  if (shift) await page.keyboard.down("Shift");
+  stepLog("dragstart 来た");
+  if (shift) {
+    await page.keyboard.down("Shift");
+    stepLog("Shift を押した");
+  }
   const centerX = box.x + box.width / 2;
   const centerY = box.y + box.height / 2;
 
@@ -286,15 +326,19 @@ async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise
   let state = await overState(page);
   for (let i = 1; i <= STEPS && !state.lastOutside && !(await reachedFrame()); i++) {
     state = await moveAndSettle(startX + ((centerX - startX) * i) / STEPS, startY + ((centerY - startY) * i) / STEPS);
+    if (i % 5 === 0) stepLog(`${i}/${STEPS}歩：${describeOver(state)}`);
   }
+  stepLog(`外へ出る動きを終えた：${describeOver(state)}／枠へのdragenter=${String(await reachedFrame())}`);
   // 2) 真ん中で、Shift ありなら枠への dragenter と shiftKey 付きの dragover が揃うまで、小さく揺らして促す
   const wiggles = [0, 6, -6, 12, -12, 0];
   for (let i = 0; i < wiggles.length && !(await ready(state)); i++) {
     state = await moveAndSettle(centerX + wiggles[i], centerY + wiggles[i]);
     if (!(await ready(state))) await waitUntil(async () => ready(await overState(page)), "引きずりが落とし先に入る", 1_500).catch(() => undefined);
     state = await overState(page);
+    stepLog(`揺らし ${i + 1}/${wiggles.length}：${describeOver(state)}`);
   }
   if (!(await ready(state))) {
+    stepLog("落とし先に入らず。Escape で取り消す");
     /*
       離さずに取り消す。Playwright は Escape で自分の引きずりを取り消す（dragCancel を送って状態を戻す）ので、
       先に Escape、そのあとで指を離す（逆だと取り消しでなく drop になる）
@@ -302,10 +346,13 @@ async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise
     await page.keyboard.press("Escape");
     await page.mouse.up();
     if (shift) await page.keyboard.up("Shift");
+    stepLog("取り消しを終えた");
     return { started: true, released: false, why: `落とし先に入らず取り消し（${describeOver(state)}／枠へのdragenter=${String(await reachedFrame())}）` };
   }
+  stepLog("落とし先に入った。指を離す");
   await page.mouse.up();
   if (shift) await page.keyboard.up("Shift");
+  stepLog("指を離した");
   return { started: true, released: true, why: describeOver(state) };
 }
 
@@ -323,13 +370,16 @@ async function dragRowOntoChat(page: Page, chat: Frame, shift: boolean): Promise
 async function dragRowUntilDropped(session: E2ESession, chat: Frame, shift: boolean): Promise<void> {
   const { page } = session;
   const tries: string[] = [];
+  dragSteps.length = 0;
   for (let attempt = 1; attempt <= 3; attempt++) {
+    stepLog(`${attempt}回目の試し`);
     await watchWorkbenchDrag(page);
-    const attempted = await dragRowOntoChat(page, chat, shift);
+    const attempted = await withAttemptLimit(`${attempt}回目の引きずり`, () => dragRowOntoChat(page, chat, shift));
     const started = attempted.started;
     const dropped = attempted.released && await waitUntil(async () => (await workbenchDrag(page)).events.some((event) => event.startsWith("drop:")), "本体の文書で drop が起きる", 5_000)
       .then(() => true)
       .catch(() => false);
+    stepLog(`${attempt}回目：drop ${dropped ? "来た" : "来ず"}`);
     if (dropped) {
       // やり直して通った回は、どれだけ揺れているかが後で分かるようにログへ残す
       if (attempt > 1) console.warn(`[E2E] 引きずりを ${attempt} 回目で落とせました（前の回の本体の便：${JSON.stringify(tries)}）`);
@@ -340,13 +390,17 @@ async function dragRowUntilDropped(session: E2ESession, chat: Frame, shift: bool
       （Escape では消えず、2回目・3回目は dragstart すら来なかった。2026-10-25）。Playwright が
       取り消しに使うのと同じ dragCancel の便を本体の窓へ送って終わらせてから、やり直す
     */
-    const cdp = await session.app.context().newCDPSession(page);
-    try {
-      await cdp.send("Input.dispatchDragEvent", { type: "dragCancel", x: 0, y: 0, data: { items: [], dragOperationsMask: 65535 } }).catch(() => undefined);
-    } finally {
-      await cdp.detach().catch(() => undefined);
-    }
-    await page.keyboard.press("Escape");
+    await withAttemptLimit(`${attempt}回目の引きずりの取り消し`, async () => {
+      stepLog("dragCancel を送る");
+      const cdp = await session.app.context().newCDPSession(page);
+      try {
+        await cdp.send("Input.dispatchDragEvent", { type: "dragCancel", x: 0, y: 0, data: { items: [], dragOperationsMask: 65535 } }).catch(() => undefined);
+      } finally {
+        await cdp.detach().catch(() => undefined);
+      }
+      await page.keyboard.press("Escape");
+      stepLog("dragCancel と Escape を送った");
+    });
     /*
       引きずり状態が戻ったこと（dragend が来たか）を確かめてから次の回へ進む。固定の待ちでなく起きたことで
       待つ。dragstart が来なかった回は始まっていないので dragend も来ない（それは正常）。
