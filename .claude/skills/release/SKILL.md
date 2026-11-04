@@ -32,7 +32,7 @@ node scripts/checkMarketplace.mjs
 
 ```powershell
 $env:ELECTRON_RUN_AS_NODE = $null
-npm run package:vsix      # 全リリースゲート（check → bundle:core → integration → web → audit）＋ vsce package
+npm run package:vsix      # 全リリースゲート（check（bundle:core を含む）→ integration → web → audit）＋ vsce package
 npm run verify:vsix       # 内容・隔離インストール・版の照合。SHA-256 が出る
 npm run test:e2e          # 画面の自動テスト（ゲートの外。Marketplace へ出す版では必ず通す）
 ```

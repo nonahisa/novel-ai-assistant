@@ -123,3 +123,43 @@ describe("台詞と見る範囲", () => {
     expect(voiceDialogueSpans("「閉じないまま、話が終わる。")).toEqual([]);
   });
 });
+
+describe("括弧を重ねた台詞を1つに畳む（偽の台詞を作らない）", () => {
+  function quotes(text: string): string[] {
+    return voiceDialogueSpans(text).map((s) => text.slice(s.start, s.end));
+  }
+
+  test("「「はぁい」」は1つの台詞", () => {
+    expect(quotes("「「はぁい」」")).toEqual(["「「はぁい」」"]);
+  });
+
+  test("「「「いらっしゃいませ」」」」は余った閉じ括弧まで1つの台詞", () => {
+    expect(quotes("「「「いらっしゃいませ」」」」")).toEqual(["「「「いらっしゃいませ」」」」"]);
+  });
+
+  test("重ねた台詞のあとの台詞は別の台詞のまま", () => {
+    expect(quotes("「「「やっぱりそうなんのか。」」」」「あれから…」")).toEqual([
+      "「「「やっぱりそうなんのか。」」」」",
+      "「あれから…」",
+    ]);
+  });
+
+  test("ふつうの「はい」と行頭の『心の声』は今までどおり", () => {
+    expect(quotes("「はい」と彼は言った。\n『心の声』")).toEqual(["「はい」", "『心の声』"]);
+  });
+
+  test("計画に、括弧1字だけの文を作らない", () => {
+    const a = "「「「いらっしゃいませ」」」」";
+    expect(pieces(a)).toEqual([[a, "dialogue", 0]]);
+    const b = "「「はぁい」」";
+    expect(pieces(b)).toEqual([[b, "dialogue", 0]]);
+  });
+
+  test("括弧だけの文は人物の声の計画から除く（OS の声の計画は変えない）", () => {
+    const text = "彼は笑った。\n」";
+    const split = buildReadingPlan(text, "curly", [], { splitDialogue: true });
+    expect(split.map((s) => s.speech)).toEqual(["彼は笑った。"]);
+    const os = buildReadingPlan(text, "curly", []);
+    expect(os.map((s) => s.speech)).toEqual(["彼は笑った。", "」"]);
+  });
+});

@@ -162,7 +162,8 @@ export function buildReadingPlan(
           i + 1,
           notation,
           lineSpans,
-          dialogues
+          dialogues,
+          options.splitDialogue === true
         );
         // 記号と空白しか無かった文は捨てる（声に渡すものが無い）
         if (sentence) plan.push(sentence);
@@ -346,11 +347,62 @@ export function voiceDialogueSpans(text: string): DialogueSpan[] {
     .split("\n")
     .map((line) => (isMemoLine(line) ? " ".repeat(line.length) : line))
     .join("\n");
-  return quotedSpans(masked, { unclosedToEnd: false }).filter((span) => {
+  return foldNestedOpeners(
+    masked,
+    quotedSpans(masked, { unclosedToEnd: false })
+  ).filter((span) => {
     if (masked[span.start] === "「") return true;
     const lineHead = masked.lastIndexOf("\n", span.start - 1) + 1;
     return /^[\s　]*$/.test(masked.slice(lineHead, span.start));
   });
+}
+
+/**
+ * 括弧を重ねた台詞（「「はぁい」」、「「「…」」」」）を1つの台詞に畳む。
+ *
+ * `quotedSpans` の「閉じ忘れの立て直し」は、2つ目の開き括弧で前の台詞を1字で
+ * 閉じてしまう。ここから開き括弧1字だけの偽の台詞が出て、台詞の番号とAIへの
+ * 質問が増え、声のエンジンへ1字の文が渡っていた。`quotedSpans` は他の機能も
+ * 使うので触らず、人物の声の読みだけで畳む。
+ *
+ * - 開き括弧1字だけの範囲に、同じ種類の開き括弧で始まる範囲が隙間なく続くとき、
+ *   それらと、台詞の後ろに余った閉じ括弧の連なりを1つにする
+ * - 畳めなかった開き括弧1字だけの範囲（中身の無い台詞）は台詞にしない
+ */
+function foldNestedOpeners(
+  text: string,
+  spans: readonly DialogueSpan[]
+): DialogueSpan[] {
+  const out: DialogueSpan[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    const first = spans[i];
+    if (first.end - first.start !== 1) {
+      out.push(first);
+      continue;
+    }
+    const opener = text[first.start];
+    let tail = first.end;
+    let closedByReal = false;
+    let j = i + 1;
+    // 1字の開き括弧が隙間なく続くあいだ飲み込み、本物の台詞に当たったら終える
+    while (j < spans.length && spans[j].start === tail && text[tail] === opener) {
+      const next = spans[j];
+      tail = next.end;
+      j++;
+      if (next.end - next.start !== 1) {
+        closedByReal = true;
+        break;
+      }
+    }
+    i = j - 1;
+    // 閉じる台詞に行き着かなかった開き括弧だけの並びは、中身の無い台詞
+    if (!closedByReal) continue;
+    const closer = opener === "「" ? "」" : "』";
+    let end = tail;
+    while (text[end] === closer) end++;
+    out.push({ start: first.start, end });
+  }
+  return out;
 }
 
 /** その位置を含む台詞の添字（無ければ -1） */
@@ -400,7 +452,8 @@ function makeSentence(
   line: number,
   notation: NotationMode,
   spans: readonly ReadingSpan[],
-  dialogues: readonly DialogueSpan[]
+  dialogues: readonly DialogueSpan[],
+  dropBracketOnly: boolean
 ): ReadingSentence | undefined {
   let start = rawStart;
   let end = rawEnd;
@@ -413,6 +466,9 @@ function makeSentence(
     notation
   );
   if (speech === "") return undefined;
+  // 人物の声の計画だけ：括弧しか無い文（台詞の余った閉じ括弧など）は声に渡さない。
+  // OS の声の読み上げは従来のまま（動きを変えない）
+  if (dropBracketOnly && /^[「」『』]+$/.test(speech)) return undefined;
   const dialogue = dialogueAt(dialogues, start);
   return dialogue < 0
     ? { start, end, line, speech, kind: "narration" }
