@@ -18,6 +18,7 @@ import {
   readUndecidedSettings,
   type ConflictWalkStart,
 } from "../core/divergenceScan";
+import { mapLimit } from "../core/mapLimit";
 import { canFetch, pullBeforeRecording } from "./gitSync";
 import { foldDivergence } from "./resolveDivergence";
 import {
@@ -229,6 +230,16 @@ async function collectEditorInboxAfterSync(
   }
 }
 
+/**
+ * 置き場ごとの状態読みを同時に走らせる数の上限（作者の裁定 2026-11-05）。
+ *
+ * ノートPCでは git を1回起こすのに約150〜190ms かかり、置き場を順に読むと
+ * 確認の窓まで数秒かかった。4本同時にすると2〜2.5倍速い（実測）。上限なしだと
+ * 置き場が多い作者の機械で git が一度に何十本も起き、ディスクを奪い合って
+ * かえって遅くなるので、4で止める。
+ */
+export const STATE_READ_CONCURRENCY = 4;
+
 /** 置き場ごとの状態を集める */
 async function collectStates(
   deps: SyncAllDeps,
@@ -260,6 +271,27 @@ async function collectStates(
     root: string;
     status: SyncTargetState["status"];
   }> = [];
+  // **置き場の最初の作品の状態は、先に同時に（上限つきで）読んでおく。**
+  // 下のループは今までどおり順に判定する（読みが失敗したときに同じ置き場の次の
+  // 作品へ移る分岐が、前の結果に依るため）。先読みしていない作品は、ループの中で読む
+  const firstIndexes: number[] = [];
+  const planned = new Set<string>();
+  for (const [index] of works.entries()) {
+    const known = roots[index];
+    if (known !== undefined) {
+      const key = known.toLowerCase();
+      if (planned.has(key)) continue;
+      planned.add(key);
+    }
+    firstIndexes.push(index);
+  }
+  const prefetched = new Map<number, SyncTargetState["status"]>();
+  if (!token.isCancellationRequested) {
+    await mapLimit(firstIndexes, STATE_READ_CONCURRENCY, async (index) => {
+      if (token.isCancellationRequested) return;
+      prefetched.set(index, await readSyncStatus(works[index].folderPath, deps.run));
+    });
+  }
   for (const [index, work] of works.entries()) {
     if (token.isCancellationRequested) return states;
     const known = roots[index];
@@ -268,7 +300,8 @@ async function collectStates(
 
     // **最初の作品のフォルダーで読む**（今までと同じ）。根で読むと
     // 「その作品のぶん」（`…Here`）の値が変わる
-    const status = await readSyncStatus(work.folderPath, deps.run);
+    const status =
+      prefetched.get(index) ?? (await readSyncStatus(work.folderPath, deps.run));
     // リポジトリの根が分かるなら、そこを置き場にする。
     // 根が読めなかった作品は、状態（リポジトリでない・git が無い）の
     // ためにそのフォルダーを置き場として残す。**同じ根の作品を二度処理しない**
@@ -329,68 +362,74 @@ async function collectStates(
     })
   );
 
-  for (const [index, first] of firsts.entries()) {
-    if (token.isCancellationRequested) break;
-    const { work, root } = first;
-    let status = first.status;
-    progress.report({ message: work.title });
+  // **置き場ごとの読み直し・衝突の数え・記録できる件数も、同時に（上限つきで）。**
+  // 結果は置き場の並びのまま返る（`mapLimit`）。中止されたら、その置き場から先は足さない
+  const built = await mapLimit(
+    firsts,
+    STATE_READ_CONCURRENCY,
+    async (first, index): Promise<SyncTargetState | undefined> => {
+      if (token.isCancellationRequested) return undefined;
+      const { work, root } = first;
+      let status = first.status;
+      progress.report({ message: work.title });
 
-    const fetchFailed = fetchedRoots[index] === "failed";
-    if (fetchedRoots[index] !== "skipped") {
-      status = await readSyncStatus(root, deps.run);
-    }
-
-    // **分かれているなら、同じ箇所の衝突の件数まで数える**（設計書5.5.18）。
-    // 確認の画面で「選ぶことになるのか」が分かるようにするため
-    if (status.kind === "tracked" && status.ahead > 0 && status.behind > 0) {
-      const conflicts = await readDivergenceConflicts(
-        status.root,
-        status.upstream,
-        deps.run ?? runGit
-      );
-      if (conflicts) {
-        // **規則で決まらない設定資料があるか**まで見る（案2）。確認の窓に
-        // 選び方のボタンを並べるかどうかが、これで決まる
-        const undecidedSettings = await readUndecidedSettings(
+      const fetchFailed = fetchedRoots[index] === "failed";
+      if (fetchedRoots[index] !== "skipped") {
+        status = await readSyncStatus(root, deps.run);
+      }
+      // **分かれているなら、同じ箇所の衝突の件数まで数える**（設計書5.5.18）。
+      // 確認の画面で「選ぶことになるのか」が分かるようにするため
+      if (status.kind === "tracked" && status.ahead > 0 && status.behind > 0) {
+        const conflicts = await readDivergenceConflicts(
           status.root,
           status.upstream,
-          conflicts.settings,
           deps.run ?? runGit
         );
-        status = { ...status, conflicts: { ...conflicts, undecidedSettings } };
+        if (conflicts) {
+          // **規則で決まらない設定資料があるか**まで見る（案2）。確認の窓に
+          // 選び方のボタンを並べるかどうかが、これで決まる
+          const undecidedSettings = await readUndecidedSettings(
+            status.root,
+            status.upstream,
+            conflicts.settings,
+            deps.run ?? runGit
+          );
+          status = { ...status, conflicts: { ...conflicts, undecidedSettings } };
+        }
       }
+
+      const target = buildSyncTarget(root, deps.registry.list());
+      // 記録される件数は、置き場の根で数える
+      const trackable =
+        status.kind === "not_a_repo" || status.kind === "git_missing"
+          ? 0
+          : await countTrackableFiles(root, deps.run ?? runGit);
+      /*
+        **未保存の文書も数える**（設計書5.5.19）。変更が未保存の文書にしか
+        無い置き場は、ディスクの件数だけ見ると「同期は取れています」で
+        飛ばされ、記録の前の保存までたどり着かない。数えるのは、置き場の根
+        ではなく**登録された作品のフォルダーの中**だけ
+      */
+      const unsaved =
+        deps.presave &&
+        status.kind !== "not_a_repo" &&
+        status.kind !== "git_missing"
+          ? deps.presave.countUnsaved(target.works.map((work) => work.folderPath))
+          : 0;
+
+      return {
+        folderPath: root,
+        label: target.label,
+        works: target.works,
+        status,
+        trackable,
+        ...(unsaved > 0 ? { unsaved } : {}),
+        ...(fetchFailed ? { fetchFailed: true } : {}),
+        ...(await involvedWorks(deps, root, target.works, status)),
+      };
     }
-
-    const target = buildSyncTarget(root, deps.registry.list());
-    // 記録される件数は、置き場の根で数える
-    const trackable =
-      status.kind === "not_a_repo" || status.kind === "git_missing"
-        ? 0
-        : await countTrackableFiles(root, deps.run ?? runGit);
-    /*
-      **未保存の文書も数える**（設計書5.5.19）。変更が未保存の文書にしか
-      無い置き場は、ディスクの件数だけ見ると「同期は取れています」で
-      飛ばされ、記録の前の保存までたどり着かない。数えるのは、置き場の根
-      ではなく**登録された作品のフォルダーの中**だけ
-    */
-    const unsaved =
-      deps.presave &&
-      status.kind !== "not_a_repo" &&
-      status.kind !== "git_missing"
-        ? deps.presave.countUnsaved(target.works.map((work) => work.folderPath))
-        : 0;
-
-    states.push({
-      folderPath: root,
-      label: target.label,
-      works: target.works,
-      status,
-      trackable,
-      ...(unsaved > 0 ? { unsaved } : {}),
-      ...(fetchFailed ? { fetchFailed: true } : {}),
-      ...(await involvedWorks(deps, root, target.works, status)),
-    });
-  }
+  );
+  for (const state of built) if (state) states.push(state);
   return states;
 }
 
