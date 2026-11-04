@@ -225,6 +225,31 @@ test("閉じている間に名前が変わった投稿済みの話は、開き�
   );
 }, 300_000);
 
+test("開き直してすぐ（作品一覧を待たずに）話を開いても、作品が読み込まれたら1回だけ訊かれる", async () => {
+  // 登録簿を読み込む前に開いた話は作品を引けない。製品はその話を覚え、登録簿が変わった合図で
+  // もう一度見る（2026-11-04。以前はここで問いが出ず、別の話を開くまで確かめが始まらなかった）
+  await withVsCode(
+    "改名の台帳追従（開き直してすぐ開く）",
+    [{ name: "第1話_はじまり.txt", text: BODY }],
+    async (session) => {
+      await restartVsCode(session, {
+        beforeRelaunch: async () => {
+          await rename(path.join(session.manuscriptFolder, "第1話_はじまり.txt"), path.join(session.manuscriptFolder, "第1話_出会い.txt"));
+        },
+      });
+      const { page } = session;
+      await quickOpen(page, "第1話_出会い.txt");
+      await waitUntil(async () => (await questionToasts(page)).length > 0, "右下に「名前が変わった話が1つあります」の問いが出る", 30_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（知らせ：${JSON.stringify(await noticeLines(page))}）`);
+        }
+      );
+      await holdsFor(async () => (await questionToasts(page)).length === 1, "問いが1枚のまま", 4_000);
+    },
+    launchWith("本文/第1話_はじまり.txt", "はじまり")
+  );
+}, 300_000);
+
 test("［付け替えない］を選ぶと台帳は変わらず、開き直しても同じ組では訊かれない", async () => {
   await withVsCode(
     "改名の台帳追従（付け替えない）",
@@ -239,7 +264,10 @@ test("［付け替えない］を選ぶと台帳は変わらず、開き直し�
       await waitUntil(async () => (await questionToasts(session.page)).length === 0, "問いが閉じる", 10_000);
       expect(await postedPaths(session), "［付け替えない］なのに台帳が変わった").toEqual(["本文/第1話_はじまり.txt"]);
 
-      // 開き直す（ディスクの名前は新しいまま）。同じ組は覚えているので訊かない
+      // 開き直す（ディスクの名前は新しいまま）。同じ組は覚えているので訊かない。
+      // 覚えた組（globalState）は書いたあと2秒まで見張って当て直す作り（verifiedMemento の
+      // LATE_CHECK_DELAYS_MS）なので、見張りが終わるまで待ってから閉じる（人が押してすぐ閉じる間合いではない）
+      await session.page.waitForTimeout(3_000);
       await restartVsCode(session);
       await quickOpen(session.page, "第1話_出会い.txt");
       await holdsFor(async () => (await questionToasts(session.page)).length === 0, "開き直したあと、同じ組では問いが出ない", 8_000).catch(

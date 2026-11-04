@@ -343,6 +343,24 @@ describe("OS や git pull で名前が変わったとき（次に作品を開い
     expect(asked).toHaveLength(1);
   });
 
+  test("登録簿を読み込む前に話を開いても、読み込めたら（登録簿が変わったら）その話で訊く", async () => {
+    // 開き直した直後は作品の登録簿がまだ空のことがあり、そのとき開いた話は作品を引けない。
+    // 引けなかった話を覚えておき、登録簿が変わった合図でもう一度見る（2026-11-04 画面テストで見つかった）
+    await seedLedgers("本文/003.txt");
+    answer(undefined);
+    const once = checker(memento(), ["本文/003_湖畔の誓い.txt"]);
+    let loaded = false;
+    const lateLookup = (filePath: string) => (loaded ? lookup(filePath) : undefined);
+    await once.checkOnEpisodeOpened(diskPath("本文", "003_湖畔の誓い.txt"), lateLookup);
+    expect(asked).toEqual([]);
+    loaded = true;
+    await once.retryPendingOpen();
+    expect(asked).toHaveLength(1);
+    // 一度見たら覚えた話は捨てる（登録簿がまた変わっても訊き直さない）
+    await once.retryPendingOpen();
+    expect(asked).toHaveLength(1);
+  });
+
   test("食い違いが無ければ何も訊かない", async () => {
     await seedLedgers("本文/003.txt");
     answer("付け替える");

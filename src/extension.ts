@@ -1414,8 +1414,20 @@ export async function activate(
     // 素のエディターで話を開いたとき
     vscode.window.onDidChangeActiveTextEditor(() => checkRenameDriftOfActive()),
     // 原稿エディター（WebView）は TextEditor を持たないので、タブの切り替えで見る
-    vscode.window.tabGroups.onDidChangeTabs(() => checkRenameDriftOfActive())
+    vscode.window.tabGroups.onDidChangeTabs(() => checkRenameDriftOfActive()),
+    // 登録簿を読み込む前に開いた話は作品を引けない。登録簿が変わったらその話をもう一度見る
+    registry.onDidChange(() => {
+      void renameDriftChecker.retryPendingOpen();
+      checkRenameDriftOfActive();
+    })
   );
+  /*
+    **起動のときに前面にある話も「開いた」に数える。** 話を開いたことでこの拡張機能が起きた場合、
+    開いた合図（タブの切り替え）は起きる前に過ぎていて、二度と来ない。作者が「次に作品を開いた
+    とき」と決めた時機をここで取りこぼさないため（2026-11-04 画面テストで見つかった）。
+    起動の直後はまだ打ち始めていないので、書いている最中に割り込むことにはならない
+  */
+  checkRenameDriftOfActive();
 
   /*
     順位のお祝い（作者の指示 2026-11-02）。順位は手の記録・ヘルパーの取り込み・なろう殿堂入り

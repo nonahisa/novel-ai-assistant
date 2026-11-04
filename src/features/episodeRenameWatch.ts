@@ -284,6 +284,10 @@ export class RenameDriftChecker {
   private readonly checked = new Set<string>();
   private readonly memento: RenameMemento;
   private readonly listEpisodePaths: (work: WorkEntry) => Promise<string[]>;
+  /** 作品を引けなかった、最後に開いた話（登録簿の読み込み待ち） */
+  private pendingOpen:
+    | { filePath: string; lookup: (filePath: string) => WorkEntry | undefined }
+    | undefined;
 
   constructor(options: {
     memento: RenameMemento;
@@ -323,11 +327,35 @@ export class RenameDriftChecker {
     lookup: (filePath: string) => WorkEntry | undefined
   ): Promise<void> {
     const work = lookup(filePath);
-    if (!work || this.checked.has(work.id)) return;
+    if (!work) {
+      /*
+        **作品を引けなかった話は覚えておく。** 開き直した直後は作品の登録簿がまだ空のことがあり、
+        このまま捨てると、別の話を開くまで確かめが始まらない（作者の決めた「次に作品を開いたときに
+        訊く」が効かない。2026-11-04 画面テストで見つかった）。登録簿が変わった合図で
+        `retryPendingOpen` がもう一度見る。覚えるのは最後に開いた1件だけ
+      */
+      this.pendingOpen = { filePath, lookup };
+      return;
+    }
+    this.pendingOpen = undefined;
+    if (this.checked.has(work.id)) return;
     const { settingsRel } = await workFolders(work);
     const rel = normalizeEpisodePath(episodePathFor(work.folderPath, filePath));
     if (!isEpisodeBodyRelPath(rel, settingsRel)) return;
     await this.checkOnOpen(work);
+  }
+
+  /**
+   * 作品の登録簿が変わった合図で呼ぶ。作品を引けずに覚えておいた話があれば、もう一度見る。
+   * **新しく話を開いたことにはしない**——覚えているのは作者が実際に開いた話だけなので、
+   * 起動時に元から開いていたタブ（数えない決まり）を拾い直すことはない
+   */
+  async retryPendingOpen(): Promise<void> {
+    const pending = this.pendingOpen;
+    if (!pending) return;
+    if (!pending.lookup(pending.filePath)) return;
+    this.pendingOpen = undefined;
+    await this.checkOnEpisodeOpened(pending.filePath, pending.lookup);
   }
 
   private declined(): Set<string> {
