@@ -635,7 +635,7 @@ export interface PostingRecord {
    * 投稿したときの本文の印（設計書6.68.7。作者の裁定 2026-11-03 昼）。
    * `core/postingBodyHash.ts` の `postingTextHash` で取った値。
    *
-   * 形は3つある（`isNotationTextHash`・`isTitledTextHash`）。0.126.4 からはルビ・傍点の書き方を
+   * 形は3つある（`isNotationTextHash`・`isTitledTextHash`）。0.127.0 からはルビ・傍点の書き方を
    * 寄せてから取った題と本文の印で、頭に `v3:` が付く（`postingNotationTextHash`）。
    * 0.124.1〜0.126.3 は**話の題と本文の両方**の印で、頭に `v2:` が付く。
    * 0.124.0 の印は本文だけの16進64字（頭に何も付かない）。
@@ -1222,7 +1222,7 @@ export interface SkippedSiteCompletion {
 /**
  * 本文の印の形（SHA-256 の16進64字。`core/hash.ts` の `hashText` が返す形）。
  * 頭の `v2:` は題も含めた印（0.124.1 から。`TITLED_TEXT_HASH_PREFIX`）、無ければ本文だけの印（0.124.0）。
- * `v3:` はルビ・傍点の書き方を寄せてから取った印（0.126.4 から。`NOTATION_TEXT_HASH_PREFIX`）
+ * `v3:` はルビ・傍点の書き方を寄せてから取った印（0.127.0 から。`NOTATION_TEXT_HASH_PREFIX`）
  */
 const BODY_HASH_PATTERN = /^(?:v[23]:)?[0-9a-f]{64}$/;
 
@@ -1241,7 +1241,7 @@ export function isTitledTextHash(hash: string): boolean {
 }
 
 /**
- * ルビ・傍点の書き方を寄せてから取った、題と本文の印の頭（0.126.4）。
+ * ルビ・傍点の書き方を寄せてから取った、題と本文の印の頭（0.127.0）。
  *
  * **本文の .md 化（設計書6.12.4）が `｜漢字《かんじ》` を `{漢字|かんじ}` へ直すので、
  * `v2:` の取り方では .md にしただけの話まで「投稿のあとに直した」になっていた。** 取り方を
@@ -2347,7 +2347,7 @@ export function lastSentTitleHash(
  *
  * @param currentTitleHash 今の題の印（`core/postingBodyHash.ts` の `postingTitleHash`）。
  *   候補の並び（`postingTitleHashCandidates`）も受ける——.md 化で題のルビの書き方だけが
- *   変わった話に「題も貼り替えて」と添えないため（0.126.4）。どれかと一致すれば「違う」と言わない
+ *   変わった話に「題も貼り替えて」と添えないため（0.127.0）。どれかと一致すれば「違う」と言わない
  */
 export function titleChangedSinceSent(
   ledger: PostingLedger,
@@ -2376,7 +2376,7 @@ export type RevisionNeed = "changed" | "same" | "unknown";
  * 分からない）。同じを `"same"` にすると、題だけ直した話を「直していない」と言い切ることになる。
  * 今の取り方に揃えて比べると、直していない話まで全部「直した」になる（取り方が違うため）。
  *
- * **`v3:`（0.126.4 から記録する印）** はルビ・傍点の書き方の違いを同じとみなす（.md 化しただけの
+ * **`v3:`（0.127.0 から記録する印）** はルビ・傍点の書き方の違いを同じとみなす（.md 化しただけの
  * 話を「直した」と言わない）。`v2:`・無印の記録は書き換えず、今の本文を投稿サイトの書き方へ
  * 戻した写しの印（`titledCopies`・`bodyOnlyCopies`）とも比べる——一致すれば投稿した本文は
  * その写しそのものなので、偽の「同じ」は出ない。

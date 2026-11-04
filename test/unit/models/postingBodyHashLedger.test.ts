@@ -121,7 +121,7 @@ describe("0.124.0 の印（本文だけ・頭に v2: が無い）との比べ方
     expect(sitesNeedingRevision(ledger, "本文/001.txt", hashesOf({ titled: NEW, bodyOnly: legacyBody }))).toEqual([]);
   });
 
-  test("投稿サイトの書き方へ戻した写しの印が同じなら「分からない」（.md 化しただけ。0.126.4）", () => {
+  test("投稿サイトの書き方へ戻した写しの印が同じなら「分からない」（.md 化しただけ。0.127.0）", () => {
     const current = hashesOf({ titled: NEW, bodyOnly: "5".repeat(64), bodyOnlyCopies: [legacyBody] });
     expect(revisionNeed(ledger, "本文/001.txt", "kakuyomu", current)).toBe("unknown");
   });
@@ -132,7 +132,7 @@ describe("0.124.0 の印（本文だけ・頭に v2: が無い）との比べ方
   });
 });
 
-describe("ルビ・傍点の書き方を寄せた印（v3:。0.126.4）との比べ方", () => {
+describe("ルビ・傍点の書き方を寄せた印（v3:。0.127.0）との比べ方", () => {
   const V3 = `v3:${"6".repeat(64)}`;
   const ledger = withPost(base, "本文/001.txt", "kakuyomu", "2026-10-01T00:00:00.000Z", V3);
 
