@@ -108,6 +108,7 @@ export const REMEMBERABLE_CONFIRMS: readonly RememberableConfirm[] = [
   { id: "ai.paid.workChat", label: "AIへの相談：料金の確認" },
   { id: "ai.paid.plotAdvice", label: "プロットの相談：料金の確認" },
   { id: "ai.paid.readingDictionary", label: "読み上げの読みの確かめ：料金の確認" },
+  { id: "ai.paid.voiceCast", label: "朗読の台詞の話者と感情：料金の確認" },
 
   // ── 未解決の競合があるファイルを外して続けるか ──
   {

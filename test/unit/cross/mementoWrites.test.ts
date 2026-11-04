@@ -160,6 +160,7 @@ const KEYS: KeyRow[] = [
   { key: "novelai.tuningNudge.shown", literalIn: "features/tuningNudge.ts", writtenIn: "features/tuningNudge.ts", write: /\.patch<string\[\]>\(SHOWN_KEY\b/g, guarded: true },
   { key: "novelai.tuningNudge.muted", literalIn: "features/tuningNudge.ts", writtenIn: "features/tuningNudge.ts", write: /\.update\(MUTED_KEY\b/g, guarded: true },
   { key: "novelai.readAloud.voice", literalIn: "extension.ts", writtenIn: "extension.ts", write: /\.update\(READ_ALOUD_VOICE_KEY\b/g, guarded: true },
+  { key: "novelai.readAloud.engine", literalIn: "extension.ts", writtenIn: "extension.ts", write: /\.update\(READ_ALOUD_ENGINE_KEY\b/g, guarded: true },
   { key: "novelai.manuscript.markdownDeclined", literalIn: "extension.ts", writtenIn: "extension.ts", write: /\.patch<string\[\]>\(\s*MARKDOWN_DECLINED_KEY\b/g, guarded: true },
   { key: "novelai.actions.expandedGroups", literalIn: "extension.ts", writtenIn: "extension.ts", write: /rememberInBackground\(ACTION_GROUPS_KEY\b/g, guarded: true },
   { key: "novelai.steps.expandedGroups", literalIn: "extension.ts", writtenIn: "extension.ts", write: /rememberInBackground\(STEP_GROUPS_KEY\b/g, guarded: true },

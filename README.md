@@ -374,6 +374,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 | `novelai.manuscriptEditor.vertical` | `true` | 「原稿エディターで開く」で開いた原稿を、はじめから縦書きにする |
 | `novelai.manuscriptEditor.fontFamily` | （空） | 原稿の画面で使う書体。空なら明朝体 |
 | `novelai.manuscriptEditor.readAloudRate` | `1` | 読み上げの速さ（0.5〜2） |
+| `novelai.readAloud.voiceEngineUrl` | `http://127.0.0.1:10101` | 人物の声で朗読するときの音声合成のエンジンの接続先（AivisSpeech。VOICEVOX は `http://127.0.0.1:50021`）。この PC の外のホストを書くと、本文がそのホストへ送られます（最初に確認を出します）。試作・テスト中 |
 | `novelai.episodeFileExtension` | `.txt` | 新規ファイルの既定の拡張子 |
 | `novelai.episodeNumberDigits` | `3` | 話数のゼロ埋め桁数（3なら `001.txt`） |
 | `novelai.chatter.enabled` | `true` | 書いている最中に、AIが相談パネルへひとこと差し込む（Ollamaのみ） |

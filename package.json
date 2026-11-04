@@ -2190,6 +2190,11 @@
           "maximum": 2,
           "description": "読み上げの速さ。1が標準（原稿の画面の「読み上げ」でも、その場だけ変えられる）。"
         },
+        "novelai.readAloud.voiceEngineUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:10101",
+          "markdownDescription": "人物の声で朗読するときの、音声合成のエンジンの接続先。\n\n・AivisSpeech の既定は `http://127.0.0.1:10101`\n・VOICEVOX の既定は `http://127.0.0.1:50021`\n・エンジンはこの PC で起動しておく（ブラウザ版の VS Code からは届かない）\n\n**この PC の外のホストを書くと、本文がそのホストへ送られます。** 最初に確認を出します。\n\n（試作・テスト中の機能です）"
+        },
         "novelai.logs.retentionDays": {
           "type": "number",
           "default": 7,

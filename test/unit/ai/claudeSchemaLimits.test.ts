@@ -52,6 +52,11 @@ const BUILDER_ARGS: Record<string, unknown[][]> = {
   buildSceneMindExtractSchema: [
     [{ bodyNames: ["密倉文佳", "文佳"], mindNames: ["密倉文佳", "文佳", "三門太志", "太志"] }],
   ],
+  // P-54 朗読の台詞の話者と感情（人物の名前・別名で話者の列挙を組む）
+  buildVoiceCastSchema: [
+    [[{ id: "a", name: "灯", aliases: ["あかりちゃん"], speechStyle: null }]],
+    [[]],
+  ],
 };
 
 async function collectSchemas(): Promise<Array<{ name: string; schema: unknown }>> {

@@ -5,6 +5,7 @@ import {
 } from "./manuscriptRender";
 import { MEMO_LINE_PATTERN, isMemoLine } from "./sceneMemo";
 import type { ReadingSpan } from "./readingDictionary";
+import { quotedSpans } from "./quotedSpans";
 
 /**
  * 読み上げ（音読推敲。設計書6.42）。
@@ -44,6 +45,30 @@ export interface ReadingSentence {
   line: number;
   /** 声へ渡す文字列（原文の写し。本文には戻らない） */
   speech: string;
+  /**
+   * 地の文か台詞か（設計書6.42.3）。**文の頭が台詞の括弧の内側なら台詞。**
+   * 人物の声で読むとき、地の文は語り手の声、台詞は話者の声に分ける
+   */
+  kind: ReadingSentenceKind;
+  /**
+   * 台詞なら、その話の中で何番目の台詞か（0始まり。`voiceDialogueSpans` の添字）。
+   * 台詞ごとの話者と感情の推定（6.42.3）を、この番号で引く
+   */
+  dialogue?: number;
+}
+
+export type ReadingSentenceKind = "narration" | "dialogue";
+
+/** 計画の作り方の選択 */
+export interface ReadingPlanOptions {
+  /**
+   * 台詞と地の文の境目でも文を切る（設計書6.42.3。人物の声で読むとき）。
+   *
+   * **OSの声では切らない**（既定）。`「はい」と彼は頷いた。` を2つの声の単位に
+   * 割ると、OSの声は単位の間で毎回途切れる。人物の声は拡張機能の側で先に
+   * 作って続けて鳴らすので、割っても途切れない
+   */
+  splitDialogue?: boolean;
 }
 
 /**
@@ -106,10 +131,12 @@ const EDGE_SPACE = /^[\s　]+|[\s　]+$/g;
 export function buildReadingPlan(
   text: string,
   notation: NotationMode,
-  readings: readonly ReadingSpan[] = []
+  readings: readonly ReadingSpan[] = [],
+  options: ReadingPlanOptions = {}
 ): ReadingSentence[] {
   const plan: ReadingSentence[] = [];
   const lines = text.split("\n");
+  const dialogues = voiceDialogueSpans(text);
   let lineStart = 0;
 
   for (let i = 0; i < lines.length; i++) {
@@ -124,14 +151,18 @@ export function buildReadingPlan(
         lineStart + line.length,
         inNotation
       );
-      for (const piece of splitSentences(line, inNotation)) {
+      const cuts = options.splitDialogue
+        ? dialogueCuts(line, lineStart, dialogues, inNotation)
+        : [];
+      for (const piece of splitSentences(line, inNotation, cuts)) {
         const sentence = makeSentence(
           text,
           lineStart + piece.start,
           lineStart + piece.end,
           i + 1,
           notation,
-          lineSpans
+          lineSpans,
+          dialogues
         );
         // 記号と空白しか無かった文は捨てる（声に渡すものが無い）
         if (sentence) plan.push(sentence);
@@ -206,7 +237,8 @@ function notationMask(line: string, notation: NotationMode): boolean[] {
  */
 function splitSentences(
   line: string,
-  inNotation: readonly boolean[]
+  inNotation: readonly boolean[],
+  cuts: readonly number[] = []
 ): Piece[] {
   const pieces: Piece[] = [];
   let start = 0;
@@ -235,10 +267,99 @@ function splitSentences(
   if (start < line.length) pieces.push({ start, end: line.length });
 
   const split: Piece[] = [];
-  for (const piece of pieces) {
+  for (const piece of splitAtCuts(pieces, cuts)) {
     split.push(...splitLongPiece(line, piece, inNotation));
   }
   return split;
+}
+
+/** 切れ目（行の中の位置）で、さらに割る。切れ目は記法の外のものだけが来る */
+function splitAtCuts(pieces: readonly Piece[], cuts: readonly number[]): Piece[] {
+  if (cuts.length === 0) return [...pieces];
+  const out: Piece[] = [];
+  for (const piece of pieces) {
+    let start = piece.start;
+    for (const cut of cuts) {
+      if (cut <= start || cut >= piece.end) continue;
+      out.push({ start, end: cut });
+      start = cut;
+    }
+    out.push({ start, end: piece.end });
+  }
+  return out;
+}
+
+/**
+ * 台詞の境目（行の中の位置）。台詞の開き括弧の手前と、閉じ括弧の後ろ。
+ *
+ * **閉じ括弧のすぐ後ろの句読点は台詞の側に含める**——`「行こう」。` の `。` を
+ * 地の文へ回すと、句点だけの文ができる（声に渡すものが無いのに1単位を使う）。
+ * 記法の内側（ルビの親文字の中の括弧）では切らない。
+ */
+function dialogueCuts(
+  line: string,
+  lineStart: number,
+  dialogues: readonly DialogueSpan[],
+  inNotation: readonly boolean[]
+): number[] {
+  const lineEnd = lineStart + line.length;
+  const cuts = new Set<number>();
+  for (const span of dialogues) {
+    if (span.end <= lineStart || span.start >= lineEnd) continue;
+    const head = span.start - lineStart;
+    if (head > 0 && !inNotation[head]) cuts.add(head);
+    let tail = span.end - lineStart;
+    if (tail <= 0 || tail >= line.length) continue;
+    while (
+      tail < line.length &&
+      !inNotation[tail] &&
+      (SENTENCE_END.indexOf(line[tail]) >= 0 || line[tail] === "、")
+    ) {
+      tail++;
+    }
+    if (tail < line.length && !inNotation[tail] && !inNotation[tail - 1]) {
+      cuts.add(tail);
+    }
+  }
+  return [...cuts].sort((a, b) => a - b);
+}
+
+/** 台詞の範囲（元の本文の位置） */
+export interface DialogueSpan {
+  start: number;
+  end: number;
+}
+
+/**
+ * 人物の声で読むときに「台詞」と見る範囲（設計書6.42.3）。
+ *
+ * - 見分け方は `core/quotedSpans.ts` の1つだけ（入れ子・閉じ忘れの立て直しを写さない）
+ * - **「」は台詞。『』は行頭で開くときだけ台詞**——地の文の『死の谷』（書名・
+ *   呼び名）を台詞の声で読むと、語りの途中で声が変わる。電話や心の声の『』は
+ *   行頭に置かれることが多いので、そちらは台詞にする
+ * - 最後まで閉じない台詞は台詞と見ない（話の残り全部が台詞の声になるより、
+ *   語り手の声のほうがまだ聞ける）
+ * - シーンメモの行の中の括弧は数えない（読まない行である）
+ */
+export function voiceDialogueSpans(text: string): DialogueSpan[] {
+  const masked = text
+    .split("\n")
+    .map((line) => (isMemoLine(line) ? " ".repeat(line.length) : line))
+    .join("\n");
+  return quotedSpans(masked, { unclosedToEnd: false }).filter((span) => {
+    if (masked[span.start] === "「") return true;
+    const lineHead = masked.lastIndexOf("\n", span.start - 1) + 1;
+    return /^[\s　]*$/.test(masked.slice(lineHead, span.start));
+  });
+}
+
+/** その位置を含む台詞の添字（無ければ -1） */
+function dialogueAt(dialogues: readonly DialogueSpan[], offset: number): number {
+  for (let i = 0; i < dialogues.length; i++) {
+    if (dialogues[i].start > offset) break;
+    if (offset < dialogues[i].end) return i;
+  }
+  return -1;
 }
 
 /**
@@ -278,7 +399,8 @@ function makeSentence(
   rawEnd: number,
   line: number,
   notation: NotationMode,
-  spans: readonly ReadingSpan[]
+  spans: readonly ReadingSpan[],
+  dialogues: readonly DialogueSpan[]
 ): ReadingSentence | undefined {
   let start = rawStart;
   let end = rawEnd;
@@ -291,7 +413,10 @@ function makeSentence(
     notation
   );
   if (speech === "") return undefined;
-  return { start, end, line, speech };
+  const dialogue = dialogueAt(dialogues, start);
+  return dialogue < 0
+    ? { start, end, line, speech, kind: "narration" }
+    : { start, end, line, speech, kind: "dialogue", dialogue };
 }
 
 /**
