@@ -1,6 +1,6 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { Uri, window, workspace } from "../support/vscodeStub";
+import { FileType, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 import type { WorkEntry } from "../../../src/models/types";
 import {
@@ -210,7 +210,9 @@ describe("OS や git pull で名前が変わったとき（次に作品を開い
     workspace.textDocuments = [];
     workspace.fs = memoryFs(disk, {
       methods: ["createDirectory", "readFile", "writeFile", "rename", "delete", "stat", "readDirectory"],
-      readDirectory: "filesOnly",
+      // 本文の置き場（本文フォルダー）があるかを、走査と同じ決め方で見るため
+      folderStat: { type: FileType.Directory, ctime: 0, mtime: 0, size: 0 },
+      readDirectory: "nested",
     });
     window.showInformationMessage = originalInfo;
     window.showWarningMessage = originalWarning;
@@ -227,11 +229,26 @@ describe("OS や git pull で名前が変わったとき（次に作品を開い
     store: ReturnType<typeof memento>,
     current: string[]
   ): RenameDriftChecker {
+    // 今ある話はディスクにも置く（本文フォルダーがあることになる）
+    for (const rel of current) {
+      const filePath = diskPath(...rel.split("/"));
+      if (!disk.has(filePath)) disk.set(filePath, encoder.encode("本文です。"));
+    }
     return new RenameDriftChecker({
       memento: store,
       listEpisodePaths: async () => current.map((rel) => diskPath(...rel.split("/"))),
     });
   }
+
+  test("本文フォルダーそのものの名前を変えたあと開いても、訊かず台帳も変えない", async () => {
+    // 作品設定（既定）は本文の置き場を「本文」と言うが、作者が「原稿」へ変えた。
+    // 走査は作品の根へ落ちて原稿/003.txt を見つけるが、それを候補にしない
+    await seedLedgers("本文/003.txt");
+    answer("付け替える");
+    await checker(memento(), ["原稿/003.txt"]).checkOnOpen(work);
+    expect(asked).toEqual([]);
+    expect(await postingPaths()).toEqual(["本文/003.txt"]);
+  });
 
   test("候補が1つなら訊き、［付け替える］で付け替える", async () => {
     await seedLedgers("本文/003.txt");

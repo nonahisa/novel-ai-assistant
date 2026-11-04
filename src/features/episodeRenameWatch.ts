@@ -7,6 +7,7 @@ import { TimelineStore } from "../core/timelineStore";
 import { PostingStore } from "../core/postingStore";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { scanWork } from "../core/scanner";
+import { resolveManuscriptDir } from "../core/manuscriptFolder";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeFileName } from "../core/episodeParser";
 import { postingTextHashes, postingUnitsOf } from "../core/postingBodyHash";
@@ -101,7 +102,7 @@ async function collectLedgerEpisodePaths(work: WorkEntry): Promise<string[]> {
 /** 作品の本文フォルダーと設定フォルダー（相対パス）。作品設定が読めなければ既定の名前 */
 async function workFolders(
   work: WorkEntry
-): Promise<{ manuscriptRel: string; settingsRel: string }> {
+): Promise<{ manuscriptRel: string; settingsRel: string; walkedRel: string }> {
   let config;
   try {
     config = await readWorkConfig(work);
@@ -113,9 +114,22 @@ async function workFolders(
   }
   const p = workPaths(work, config);
   return {
-    manuscriptRel: episodePathFor(work.folderPath, p.manuscript),
+    manuscriptRel: normalizeEpisodePath(episodePathFor(work.folderPath, p.manuscript)),
     settingsRel: episodePathFor(work.folderPath, p.settings),
+    /*
+      走査が実際に歩く場所（`resolveManuscriptDir`。走査と同じ決め方）。本文フォルダーが
+      無い・空なら作品の根（`""`）になる。作品設定どおりなら `manuscriptRel` と同じ
+    */
+    walkedRel: normalizeEpisodePath(
+      episodePathFor(work.folderPath, await resolveManuscriptDir(p))
+    ),
   };
+}
+
+/** `child` が `parent` の下か（相対パスどうし。`parent` が根（`""`・`"."`）なら常に真） */
+function isUnderRel(parent: string, child: string): boolean {
+  if (!parent || parent === ".") return true;
+  return child === parent || child.startsWith(`${parent}/`);
 }
 
 /**
@@ -323,9 +337,20 @@ export class RenameDriftChecker {
   private async check(work: WorkEntry): Promise<void> {
     const ledgerPaths = await collectLedgerEpisodePaths(work);
     if (ledgerPaths.length === 0) return;
-    const current = (await this.listEpisodePaths(work)).map((filePath) =>
-      normalizeEpisodePath(episodePathFor(work.folderPath, filePath))
-    );
+    /*
+      **本文の置き場（作品設定の manuscriptDir。書いていなければ既定）が無くなっていたら、
+      訊かず何もしない**（作者の裁定 2026-11-04。控えめな側に倒す）。本文フォルダーそのものの
+      名前を変えると、走査は作品の根へ落ちて新しいフォルダーの話を見つけるが、台帳だけ付け替えると
+      作品設定は旧名のまま残り、走査と台帳が別の場所を見る。根へ落ちて見つかった話は候補にしない
+    */
+    const folders = await workFolders(work);
+    const placeGone =
+      folders.walkedRel !== folders.manuscriptRel &&
+      ledgerPaths.some((entry) => isUnderRel(folders.manuscriptRel, entry));
+    if (placeGone) return;
+    const current = (await this.listEpisodePaths(work))
+      .map((filePath) => normalizeEpisodePath(episodePathFor(work.folderPath, filePath)))
+      .filter((entry) => isUnderRel(folders.walkedRel, entry));
     const list = findRenameDriftCandidates(ledgerPaths, current);
     if (list.length === 0) return;
     const confirmed = await hashConfirmedPairs(work, list);
