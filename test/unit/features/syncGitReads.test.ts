@@ -107,8 +107,8 @@ describe("作品をすべて同期：状態を集める段（collectStates）", 
 
     // 根は作品ごとに調べる（どの置き場に入っているかで分けるため）
     expect(calls.filter((key) => key === "rev-parse --show-toplevel")).toHaveLength(3);
-    // 置き場ぜんぶの読みは、取り寄せの前の1回と後の1回（4命令ずつ）だけ
-    expect(wholeRepoReads(calls)).toBe(8);
+    // 置き場ぜんぶの読みは、取り寄せの前に4命令、後は上流の数え（rev-list）だけ
+    expect(wholeRepoReads(calls)).toBe(5);
     // 取り寄せは置き場ごとに1回
     expect(calls.filter((key) => key.startsWith("fetch"))).toHaveLength(1);
   });
@@ -220,11 +220,11 @@ describe("母艦のレビュー（2026-10-30）", () => {
     let failOnce = true;
     // 根だけの読み（readRepoRoot）は通るが、最初の作品の状態の読みが一度だけ失敗する
     const run: GitCommandRunner = async (args, cwd, timeout, options) => {
-      if (failOnce && args.join(" ") === "rev-parse --is-inside-work-tree --show-toplevel") {
+      if (failOnce && args.join(" ") === "status --porcelain") {
         failOnce = false;
         calls.push(args.join(" "));
-        // 中なのに根が出てこない＝readSyncStatus は failed（根なし）を返す
-        return { code: 0, stdout: "true\n", stderr: "" };
+        // 作業木の状態が読めない＝readSyncStatus は failed（根なし）を返す
+        return { code: 1, stdout: "true\n", stderr: "" };
       }
       return base(args, cwd, timeout, options);
     };
@@ -257,9 +257,9 @@ describe("母艦のレビュー（2026-10-30）", () => {
     const base = libraryGit();
     let failOnce = true;
     const run: GitCommandRunner = async (args, cwd, timeout, options) => {
-      if (failOnce && args.join(" ") === "rev-parse --is-inside-work-tree --show-toplevel") {
+      if (failOnce && args.join(" ") === "status --porcelain") {
         failOnce = false;
-        return { code: 0, stdout: "true\n", stderr: "" };
+        return { code: 1, stdout: "true\n", stderr: "" };
       }
       return base(args, cwd, timeout, options);
     };
@@ -285,8 +285,8 @@ describe("母艦のレビュー（2026-10-30）", () => {
     const base = libraryGit();
     // 根だけの読みは通るが、状態の読みは毎回根なしで失敗する
     const run: GitCommandRunner = async (args, cwd, timeout, options) => {
-      if (args.join(" ") === "rev-parse --is-inside-work-tree --show-toplevel") {
-        return { code: 0, stdout: "true\n", stderr: "" };
+      if (args.join(" ") === "status --porcelain") {
+        return { code: 1, stdout: "true\n", stderr: "" };
       }
       return base(args, cwd, timeout, options);
     };

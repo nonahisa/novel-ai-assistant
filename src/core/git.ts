@@ -435,16 +435,22 @@ function runWholeRepo(
 export async function readSyncStatus(
   cwd: string,
   run: GitCommandRunner = runGit,
-  batch?: SyncStatusBatch
+  batch?: SyncStatusBatch,
+  knownRoot?: string
 ): Promise<GitSyncStatus> {
   // 作業ツリーの中かどうかと根を**1回で**読む（2行出る）。
   // 分けて2回走らせていたが、git の起動が待ちのほぼ全部なので1回にした
-  // （2026-10-29 の測定）。答えの分かれ方は分けていたときと同じにする
-  const located = await run(
-    ["rev-parse", "--is-inside-work-tree", "--show-toplevel"],
-    cwd,
-    LOCAL_TIMEOUT_MS
-  );
+  // （2026-10-29 の測定）。答えの分かれ方は分けていたときと同じにする。
+  // 呼び手が `readRepoRoot` で根を読めているなら、作業ツリーの中であることも
+  // 根も分かっている（`--show-toplevel` は作業ツリーの外・`.git` の中では
+  // 失敗する）ので、同じ命令をもう一度走らせない
+  const located: GitCommandResult = knownRoot
+    ? { code: 0, stdout: `true\n${knownRoot}`, stderr: "" }
+    : await run(
+        ["rev-parse", "--is-inside-work-tree", "--show-toplevel"],
+        cwd,
+        LOCAL_TIMEOUT_MS
+      );
   const [insideLine = "", rootLine = ""] = located.stdout.split(/\r?\n/);
   const inside = insideLine.trim();
   if (located.code !== 0) {
@@ -563,6 +569,74 @@ export async function readSyncStatus(
     dirty: working.dirty,
     dirtyHere: working.dirtyHere,
     unmerged: working.unmerged,
+  };
+}
+
+/**
+ * fetch のあとの読み直し。**fetch で変わりうるものだけ**を読む（2026-11-05）。
+ *
+ * fetch が変えるのはリモートの追跡の参照だけで、作業木（status）・remote の
+ * 一覧・今の枝は変わらない。変わりうるのは上流の解決（初めて現れることもある）と
+ * ahead／behind の数だけなので、残りは fetch の前に読んだ `previous` の値を使う。
+ * 結果は `readSyncStatus(root, run)`（置き場の根を訊ねる）と同じ形にする——
+ * `…Here` は根で訊ねたときと同じく置き場ぜんぶの値になる。
+ *
+ * - tracked：上流の解決＋数え直しの2本（丸ごと読むと6本）
+ * - no_upstream：まず上流の解決1本。まだ無ければ前の値のまま。現れたときは
+ *   `unmerged` など前の状態に無い値が要るので、丸ごと読み直す
+ * - それ以外（detached・no_remote・失敗など）：丸ごと読み直す（速さより正しさ）
+ */
+export async function refreshAfterFetch(
+  previous: GitSyncStatus,
+  root: string,
+  run: GitCommandRunner = runGit
+): Promise<GitSyncStatus> {
+  if (previous.kind !== "tracked" && previous.kind !== "no_upstream") {
+    return readSyncStatus(root, run);
+  }
+  const upstreamResult = await run(
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    root,
+    LOCAL_TIMEOUT_MS
+  );
+  if (upstreamResult.code !== 0) {
+    return {
+      kind: "no_upstream",
+      root: previous.root,
+      branch: previous.branch,
+      dirty: previous.dirty,
+      dirtyHere: previous.dirty,
+    };
+  }
+  if (previous.kind !== "tracked") return readSyncStatus(root, run);
+  const upstream = upstreamResult.stdout.trim();
+  const counts = await run(
+    ["rev-list", "--left-right", "--count", `${upstream}...HEAD`],
+    root,
+    LOCAL_TIMEOUT_MS
+  );
+  if (counts.code !== 0) {
+    return { kind: "failed", detail: describeFailure(counts) };
+  }
+  const parsed = parseAheadBehind(counts.stdout);
+  if (!parsed) {
+    return {
+      kind: "failed",
+      detail: `コミット数を解析できません: ${counts.stdout.trim()}`,
+    };
+  }
+  return {
+    kind: "tracked",
+    root: previous.root,
+    branch: previous.branch,
+    upstream,
+    behind: parsed.behind,
+    ahead: parsed.ahead,
+    behindHere: parsed.behind,
+    aheadHere: parsed.ahead,
+    dirty: previous.dirty,
+    dirtyHere: previous.dirty,
+    unmerged: previous.unmerged,
   };
 }
 

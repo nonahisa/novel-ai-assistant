@@ -8,6 +8,7 @@ import {
   readPendingPaths,
   readRepoRoot,
   readSyncStatus,
+  refreshAfterFetch,
   runGit,
   type GitCommandRunner,
 } from "../core/git";
@@ -289,7 +290,10 @@ async function collectStates(
   if (!token.isCancellationRequested) {
     await mapLimit(firstIndexes, STATE_READ_CONCURRENCY, async (index) => {
       if (token.isCancellationRequested) return;
-      prefetched.set(index, await readSyncStatus(works[index].folderPath, deps.run));
+      prefetched.set(
+        index,
+        await readSyncStatus(works[index].folderPath, deps.run, undefined, roots[index])
+      );
     });
   }
   for (const [index, work] of works.entries()) {
@@ -301,7 +305,8 @@ async function collectStates(
     // **最初の作品のフォルダーで読む**（今までと同じ）。根で読むと
     // 「その作品のぶん」（`…Here`）の値が変わる
     const status =
-      prefetched.get(index) ?? (await readSyncStatus(work.folderPath, deps.run));
+      prefetched.get(index) ??
+      (await readSyncStatus(work.folderPath, deps.run, undefined, known));
     // リポジトリの根が分かるなら、そこを置き場にする。
     // 根が読めなかった作品は、状態（リポジトリでない・git が無い）の
     // ためにそのフォルダーを置き場として残す。**同じ根の作品を二度処理しない**
@@ -375,7 +380,8 @@ async function collectStates(
 
       const fetchFailed = fetchedRoots[index] === "failed";
       if (fetchedRoots[index] !== "skipped") {
-        status = await readSyncStatus(root, deps.run);
+        // fetch で変わるのは上流の参照と ahead／behind だけ。残りは前に読んだ値を使う
+        status = await refreshAfterFetch(status, root, deps.run);
       }
       // **分かれているなら、同じ箇所の衝突の件数まで数える**（設計書5.5.18）。
       // 確認の画面で「選ぶことになるのか」が分かるようにするため
