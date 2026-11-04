@@ -199,6 +199,28 @@ describe("行頭から始まる括弧だけを台詞にする（地の文の語�
     expect(quotes("前の行は「地の文」\n「次の行の台詞」")).toEqual(["「次の行の台詞」"]);
   });
 
+  test("行頭に人物名を置く書き方（教頭先生「…」「…」）は台詞（作者の答え 2026-11-05 朝）", () => {
+    expect(quotes("教頭先生「何故中学校が」「僕の能力の」")).toEqual(["「何故中学校が」", "「僕の能力の」"]);
+    expect(quotes("　ジャック「行くぞ」")).toEqual(["「行くぞ」"]);
+    expect(quotes("師匠：「待て」")).toEqual(["「待て」"]);
+  });
+
+  test("名前の形でも、台詞のあとに地の文が続く・ひらがなを含む語なら地の文のまま", () => {
+    expect(quotes("先生「はい」と言った。")).toEqual([]);
+    expect(quotes("前の行は「地の文」")).toEqual([]);
+    expect(quotes("空気を指す「風」")).toEqual([]);
+    expect(quotes("昨日、先生「はい」")).toEqual([]);
+  });
+
+  test("文の区切り（。！？）のあとも行頭と同じに扱う（作者の答え「B」2026-11-05 朝）", () => {
+    expect(quotes("　他日面接日のことである。「貴方は」「本店の」")).toEqual(["「貴方は」", "「本店の」"]);
+    expect(quotes("　難問はあった。教頭先生「何故か」「僕の」")).toEqual(["「何故か」", "「僕の」"]);
+    expect(quotes("驚いた！「待て」")).toEqual(["「待て」"]);
+    // 区切りのあとでも、ひらがなの入った語に続く括弧・文の途中の語の括弧は地の文のまま
+    expect(quotes("結果は出た。徴兵検査の結果は「合格」と云う。")).toEqual([]);
+    expect(quotes("雨だ。空気を指す「風」は吹く。")).toEqual([]);
+  });
+
   test("OS の声の計画（splitDialogue なし）は、これまでどおり1文のまま", () => {
     const text = "空気を指す「風」は吹く。";
     expect(buildReadingPlan(text, "curly", []).map((s) => s.speech)).toEqual([text]);

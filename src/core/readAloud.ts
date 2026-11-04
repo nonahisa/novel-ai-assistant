@@ -351,23 +351,78 @@ export function voiceDialogueSpans(text: string): DialogueSpan[] {
   // 語に付けた括弧（`空気を指す「風」は…`）まで台詞にすると、語りの途中で声が
   // 切り替わる。台詞は行頭（字下げのあと）から始まるものと、それに空白だけを
   // 挟んで続くもの（`「はい」「いいえ」` の2つ目）に限る。
+  //
+  // **行頭に人物名を置く書き方（`教頭先生「…」「…」`）も台詞にする**（作者の答え、
+  // 2026-11-05 朝）。見分けは「行頭から、空白・句読点・括弧を含まない短い語（1〜12字。
+  // 後ろに：を付けてもよい）のすぐあとに括弧が開き、その台詞（と空白だけを挟んで続く
+  // 台詞）で行が終わる」。地の文の語の括弧（`空気を指す「風」は…`・`彼は「行こう」と
+  // 言った。`）は、閉じたあとに地の文が続くので台詞にならない
+  const spans = foldNestedOpeners(masked, quotedSpans(masked, { unclosedToEnd: false }));
+  const blank = (from: number, to: number) => /^[ \t　]*$/.test(masked.slice(from, to));
   const out: DialogueSpan[] = [];
   let prevEnd = -1;
-  for (const span of foldNestedOpeners(
-    masked,
-    quotedSpans(masked, { unclosedToEnd: false })
-  )) {
-    const lineHead = masked.lastIndexOf("\n", span.start - 1) + 1;
-    const atHead = /^[ \t　]*$/.test(masked.slice(lineHead, span.start));
-    const chained =
-      prevEnd >= lineHead && /^[ \t　]*$/.test(masked.slice(prevEnd, span.start));
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i];
+    // **文の頭も行頭と同じに扱う**（作者の答え「B」、2026-11-05 朝）。地の文と台詞を
+    // 1行に続けて書く作品（`…難問はあった。教頭先生「…」`・`…ことである。「貴方は…」`）の
+    // 会話を拾うため。同じ行の、この括弧より前の最後の文の区切り（。！？）の直後を頭とする
+    const lineHead = sentenceHeadBefore(
+      masked,
+      masked.lastIndexOf("\n", span.start - 1) + 1,
+      span.start
+    );
+    const atHead = blank(lineHead, span.start);
+    const chained = prevEnd >= lineHead && blank(prevEnd, span.start);
     if (atHead || chained) {
       out.push(span);
       prevEnd = span.end;
+      continue;
     }
+    if (!NAME_BEFORE_DIALOGUE.test(masked.slice(lineHead, span.start))) continue;
+    // 同じ行で空白だけを挟んで続く台詞をまとめ、そのあと行が終わるかを見る
+    let last = i;
+    while (
+      last + 1 < spans.length &&
+      spans[last + 1].start > spans[last].end - 1 &&
+      !masked.slice(spans[last].end, spans[last + 1].start).includes("\n") &&
+      blank(spans[last].end, spans[last + 1].start)
+    ) {
+      last++;
+    }
+    const lineEndAt = masked.indexOf("\n", spans[last].end);
+    const lineEnd = lineEndAt < 0 ? masked.length : lineEndAt;
+    if (!blank(spans[last].end, lineEnd)) continue;
+    for (let k = i; k <= last; k++) out.push(spans[k]);
+    prevEnd = spans[last].end;
+    i = last;
   }
   return out;
 }
+
+/**
+ * 同じ行の `at` より前で、最後の文の区切り（。！？）の直後の位置。無ければ行頭。
+ * 括弧の中の区切り（`「はい。」`）も区切りに数える——閉じたあとに続く台詞は
+ * どのみち「空白だけを挟んで続く台詞」として拾われ、地の文が挟まれば区切りの
+ * あとから数え直すのが、文の頭の見方として自然なため
+ */
+function sentenceHeadBefore(text: string, lineHead: number, at: number): number {
+  for (let i = at - 1; i >= lineHead; i--) {
+    if ("。！？!?".includes(text[i])) return i + 1;
+  }
+  return lineHead;
+}
+
+/**
+ * 行頭に置いた人物名（字下げのあと、漢字・カタカナ・英数字の1〜12字。後ろの：は可）。
+ * `教頭先生「…」`・`ジャック「…」` の名前に当たる。
+ *
+ * **ひらがなを含む語は名前と見ない**——`前の行は「地の文」` の「前の行は」のように、
+ * 助詞（の・は・を）の入った地の文の頭と見分けられないため。ひらがなの名前
+ * （`まどか「…」`）は地の文の声になるが、取り違えて地の文を台詞の声で読むより
+ * 害が小さい。地の文の語と見分ける残りは、呼び出し側が「その台詞で行が終わるか」を見る
+ */
+const NAME_BEFORE_DIALOGUE =
+  /^[ \t　]*[\p{Script=Han}\p{Script=Katakana}ー々〆A-Za-zＡ-Ｚａ-ｚ0-9０-９]{1,12}[：:]?$/u;
 
 /**
  * 括弧を重ねた台詞（「「はぁい」」、「「「…」」」」）を1つの台詞に畳む。
