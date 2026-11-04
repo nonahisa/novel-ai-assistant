@@ -9,7 +9,10 @@ import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { scanWork } from "../core/scanner";
 import { resolveManuscriptDir } from "../core/manuscriptFolder";
 import { readTextFile } from "../core/textFile";
-import { listReadingDictionaryEpisodes } from "../core/readingDictionaryStore";
+import {
+  listReadingDictionaryEpisodes,
+  moveReadingDictionary,
+} from "../core/readingDictionaryStore";
 import { parseEpisodeFileName } from "../core/episodeParser";
 import { postingTextHashes, postingUnitsOf } from "../core/postingBodyHash";
 import {
@@ -23,7 +26,7 @@ import {
   type RenameDriftPair,
 } from "../core/episodeRenameDrift";
 import { normalizeEpisodePath } from "../models/chapter";
-import { logFailure, useLogFile } from "../core/logger";
+import { logFailure, logLine, useLogFile } from "../core/logger";
 import { notifyDone } from "../views/notify";
 import {
   describeLedgerFollowSummary,
@@ -388,7 +391,8 @@ export class RenameDriftChecker {
 
   private async check(work: WorkEntry): Promise<void> {
     const ledgerPaths = await collectLedgerEpisodePaths(work);
-    if (ledgerPaths.length === 0) return;
+    const dictionaryPaths = await collectReadingDictionaryPaths(work);
+    if (ledgerPaths.length === 0 && dictionaryPaths.length === 0) return;
     /*
       **本文の置き場（作品設定の manuscriptDir。書いていなければ既定）が無くなっていたら、
       訊かず何もしない**（作者の裁定 2026-11-04。控えめな側に倒す）。本文フォルダーそのものの
@@ -398,12 +402,20 @@ export class RenameDriftChecker {
     const folders = await workFolders(work);
     const placeGone =
       folders.walkedRel !== folders.manuscriptRel &&
-      ledgerPaths.some((entry) => isUnderRel(folders.manuscriptRel, entry));
+      [...ledgerPaths, ...dictionaryPaths].some((entry) =>
+        isUnderRel(folders.manuscriptRel, entry)
+      );
     if (placeGone) return;
     const current = (await this.listEpisodePaths(work))
       .map((filePath) => normalizeEpisodePath(episodePathFor(work.folderPath, filePath)))
       .filter((entry) => isUnderRel(folders.walkedRel, entry));
     const list = findRenameDriftCandidates(ledgerPaths, current);
+    /*
+      **読みの辞書しか無い話は、問いに入れず黙って付け替える**（作者の答え 2026-11-05。
+      問いを増やさない）。4つの台帳にも載っている話は、下の問いのほうで扱い、
+      ［付け替える］のときに辞書も付いてくる（`followEpisodeFileRenames`）
+    */
+    await this.followDictionaryOnly(work, ledgerPaths, dictionaryPaths, current, list);
     if (list.length === 0) return;
     const confirmed = await hashConfirmedPairs(work, list);
     const { pairs } = decideRenameDrift(list, (fromRel, toRel) =>
@@ -426,6 +438,49 @@ export class RenameDriftChecker {
     }
     if (picked !== ACCEPT_LABEL) return;
     showLedgerNotice(await applyRenameDrift(work, asking));
+  }
+
+  /**
+   * 読みの辞書しか無い話（4つの台帳に載っていない話）の改名を、訊かずに付け替える。
+   *
+   * 候補の決め方は台帳と同じ（話数が同じ・今の話のうち台帳にも辞書にも載っていないもの・
+   * 同じフォルダーを先に。1つに決まらなければ何もしない）。台帳側の問いの候補になっている
+   * 新しい名前は、取り合いになるので使わない。件数は知らせず、作品のログに残す。
+   */
+  private async followDictionaryOnly(
+    work: WorkEntry,
+    ledgerPaths: readonly string[],
+    dictionaryPaths: readonly string[],
+    current: readonly string[],
+    ledgerList: ReadonlyArray<{ candidates: string[] }>
+  ): Promise<void> {
+    const ledgerSet = new Set(ledgerPaths.map(normalizeEpisodePath));
+    const dictionaryOnly = new Set(
+      dictionaryPaths.filter((entry) => !ledgerSet.has(normalizeEpisodePath(entry)))
+    );
+    if (dictionaryOnly.size === 0) return;
+    const claimedByLedger = new Set(ledgerList.flatMap((item) => item.candidates));
+    const list = findRenameDriftCandidates([...ledgerPaths, ...dictionaryPaths], current).filter(
+      (item) => dictionaryOnly.has(item.fromRel)
+    );
+    const { pairs } = decideRenameDrift(list);
+    let moved = 0;
+    useLogFile(work.folderPath);
+    for (const pair of pairs) {
+      if (claimedByLedger.has(pair.toRel)) continue;
+      const fromPath = paths.join(work.folderPath, pair.fromRel);
+      const toPath = paths.join(work.folderPath, pair.toRel);
+      if ((await exists(fromPath)) || !(await exists(toPath))) continue;
+      try {
+        if (await moveReadingDictionary(work, fromPath, toPath)) moved++;
+      } catch (error) {
+        // 行き先に辞書が既にある・辞書が壊れている：どちらにも触れずに残す（上書きしない）
+        logFailure(`名前が変わった話の読みの辞書「${paths.basename(pair.fromRel)}」の付け替え`, {
+          内容: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (moved > 0) logLine(`読みの辞書${moved}件を新しい名前へ付け替えました`);
   }
 }
 
