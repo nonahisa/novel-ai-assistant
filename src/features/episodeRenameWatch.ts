@@ -9,6 +9,7 @@ import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { scanWork } from "../core/scanner";
 import { resolveManuscriptDir } from "../core/manuscriptFolder";
 import { readTextFile } from "../core/textFile";
+import { listReadingDictionaryEpisodes } from "../core/readingDictionaryStore";
 import { parseEpisodeFileName } from "../core/episodeParser";
 import { postingTextHashes, postingUnitsOf } from "../core/postingBodyHash";
 import {
@@ -97,6 +98,20 @@ async function collectLedgerEpisodePaths(work: WorkEntry): Promise<string[]> {
     for (const revision of ledger.revisions ?? []) add(revision.episodePath);
   });
   return [...found];
+}
+
+/** 読みの辞書のある話の相対パス。読めなければ空（付け替えはせず、ログにだけ残す） */
+async function collectReadingDictionaryPaths(work: WorkEntry): Promise<string[]> {
+  try {
+    return (await listReadingDictionaryEpisodes(work)).map((filePath) =>
+      normalizeEpisodePath(episodePathFor(work.folderPath, filePath))
+    );
+  } catch (error) {
+    logFailure("名前の変更の追従：読みの辞書の一覧", {
+      内容: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
 }
 
 /** 作品の本文フォルダーと設定フォルダー（相対パス）。作品設定が読めなければ既定の名前 */
@@ -208,9 +223,18 @@ export async function followExplorerRenames(
       }))
       .filter((item) => item.fromRel !== normalizeEpisodePath(folders.manuscriptRel));
     if (relative.length === 0) continue;
+    /*
+      **フォルダーの改名では、読みの辞書のある話も歩く**（4つの台帳に載っていない話の辞書も
+      付いてくるように）。各話あらすじは名前（フォルダーを含まない）で引くので、フォルダーの
+      改名では変わらず引ける。ここだけで足し、開いたときに訊く道（`RenameDriftChecker`）の
+      候補には入れない——辞書しか無い話まで訊くかは作者の判断が要る
+    */
     const moves = ledgerMovesForRenames(
       relative,
-      await collectLedgerEpisodePaths(work),
+      [
+        ...(await collectLedgerEpisodePaths(work)),
+        ...(await collectReadingDictionaryPaths(work)),
+      ],
       folders.settingsRel
     );
     if (moves.size === 0) continue;

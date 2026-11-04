@@ -9,6 +9,7 @@ import {
   describeLedgerFollowSummary,
   emptyLedgerFollowSummary,
   followEpisodeFileRenames,
+  followEpisodeLedgers,
   setEpisodeRenameWorkLookup,
 } from "../../../src/features/episodeLedgers";
 import {
@@ -291,6 +292,115 @@ describe("名前を変えたとき、各話あらすじと読みの辞書がつ�
         readingDictionaries: 2,
       });
       expect(text).toBe("各話あらすじ1件・読みの辞書2件を付け替えました。");
+    });
+  });
+
+  /** 1話ぶんの辞書を置く（読みで見分ける） */
+  async function seedDictionary(rel: string, reading: string): Promise<void> {
+    const episodePath = diskPath(...rel.split("/"));
+    const loaded = await loadReadingDictionary(work, episodePath);
+    await saveReadingDictionary(
+      work,
+      episodePath,
+      { ...loaded.file, entries: [{ word: "十分", quote: "十分に", reading, source: "author" }] },
+      loaded.hash
+    );
+  }
+
+  async function readingOf(rel: string): Promise<string | undefined> {
+    const loaded = await loadReadingDictionary(work, diskPath(...rel.split("/")));
+    if (loaded.hash === undefined) return undefined;
+    expect(loaded.file.episode).toBe(rel);
+    return loaded.file.entries[0]?.reading;
+  }
+
+  function renumbered(fromName: string, toName: string, oldNumber: number, newNumber: number) {
+    return {
+      fromPath: diskPath("本文", fromName),
+      toPath: diskPath("本文", toName),
+      fromFileName: fromName,
+      toFileName: toName,
+      oldNumber,
+      newNumber,
+    };
+  }
+
+  describe("話数の付け替え（挿入・削除）でも、読みの辞書がついてくる", () => {
+    test("挿入：後ろの話から順に1つずつずれ、辞書も同じ話についていく", async () => {
+      await seedDictionary("本文/003.txt", "さん");
+      await seedDictionary("本文/004.txt", "よん");
+
+      // 付け替えは後ろから（行き先が空いている順）。`done` はその順のまま渡ってくる
+      const summary = await followEpisodeLedgers(work, [
+        renumbered("004.txt", "005.txt", 4, 5),
+        renumbered("003.txt", "004.txt", 3, 4),
+      ]);
+
+      expect(await readingOf("本文/004.txt")).toBe("さん");
+      expect(await readingOf("本文/005.txt")).toBe("よん");
+      expect(await readingOf("本文/003.txt")).toBeUndefined();
+      expect(summary.readingDictionaries).toBe(2);
+      expect(summary.failures).toEqual([]);
+    });
+
+    test("削除：消えた話の辞書は次の話へ渡さず控えに残し、残っていることを知らせる", async () => {
+      await seedDictionary("本文/003.txt", "さん");
+      await seedDictionary("本文/004.txt", "よん");
+      await seedDictionary("本文/005.txt", "ご");
+
+      const summary = await followEpisodeLedgers(
+        work,
+        [renumbered("004.txt", "003.txt", 4, 3), renumbered("005.txt", "004.txt", 5, 4)],
+        { filePath: diskPath("本文", "003.txt"), number: 3 }
+      );
+
+      // 消えた話の読みが、詰めて同じ名前になった別の話に効かない
+      expect(await readingOf("本文/003.txt")).toBe("よん");
+      expect(await readingOf("本文/004.txt")).toBe("ご");
+      expect(summary.readingDictionaries).toBe(2);
+      expect(summary.readingDictionariesOrphaned).toBe(1);
+      expect(summary.failures).toEqual([]);
+      // 消えた話の辞書は消さない（中身ごと控えに残る）
+      const kept = [...disk.entries()].filter(([key]) => key.includes(".removed"));
+      expect(kept).toHaveLength(1);
+      expect(new TextDecoder().decode(kept[0][1])).toContain("さん");
+      expect(describeLedgerFollowSummary(summary)).toContain("消えた話の読みの辞書が1件残っています");
+    });
+
+    test("削除：最後の話を消したときは、辞書をその場に残して知らせる", async () => {
+      await seedDictionary("本文/005.txt", "ご");
+
+      const summary = await followEpisodeLedgers(work, [], {
+        filePath: diskPath("本文", "005.txt"),
+        number: 5,
+      });
+
+      expect(await readingOf("本文/005.txt")).toBe("ご");
+      expect(summary.readingDictionariesOrphaned).toBe(1);
+    });
+  });
+
+  describe("エクスプローラーで章フォルダーの名前を変えたとき", () => {
+    test("4つの台帳に載っていない話でも、読みの辞書と話数の無い話のあらすじがついてくる", async () => {
+      await seedDictionary("本文/第一章/003.txt", "さん");
+      await seedDictionary("本文/第一章/幕間.txt", "まくあい");
+      const store = new SynopsisStore(work);
+      await store.save({ ...(await store.load()), episodes: [synopsisRow("幕間.txt", null)] });
+      // 別のフォルダーの辞書は巻き込まない
+      await seedDictionary("本文/第二章/004.txt", "よん");
+
+      const outcomes = await followExplorerRenames(
+        [{ fromPath: diskPath("本文", "第一章"), toPath: diskPath("本文", "第一章 旅立ち") }],
+        lookup
+      );
+
+      expect(await readingOf("本文/第一章 旅立ち/003.txt")).toBe("さん");
+      expect(await readingOf("本文/第一章 旅立ち/幕間.txt")).toBe("まくあい");
+      expect(await readingOf("本文/第二章/004.txt")).toBe("よん");
+      // あらすじは名前（フォルダーを含まない）で引くので、フォルダーの改名では変わらずに引ける
+      const set = await store.load();
+      expect(findSynopsis(set, "幕間.txt", null)?.authorNotes).toBe("作者のメモ");
+      expect(outcomes[0]?.notice?.text).toContain("読みの辞書2件");
     });
   });
 });

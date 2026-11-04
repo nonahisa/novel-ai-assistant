@@ -150,6 +150,70 @@ export async function moveReadingDictionary(
   return true;
 }
 
+/** その話の辞書が置いてあるか（中身は読まない。壊れていても「ある」） */
+export async function readingDictionaryExists(
+  work: WorkEntry,
+  episodePath: string
+): Promise<boolean> {
+  return (await readTextOrUndefined(readingDictionaryPath(work, episodePath))) !== undefined;
+}
+
+/**
+ * 消えた話の辞書を、話の名前にならない控えの名前（`<元の名前>.removed.json`）へ退ける。
+ * 返すのは控えのファイル名。
+ *
+ * **消さない**（作者の直した読みが入っている）。退けるのは、詰めた後ろの話が同じ名前に
+ * 来るときだけ——そのまま置くと、消えた話の読みが別の話に効き、後ろの話の辞書も
+ * 行き先が埋まっていて付け替えられない。控えの名前は `.txt`/`.md` で終わらないので、
+ * どの話の辞書の名前とも重ならない。
+ */
+export async function setAsideReadingDictionary(
+  work: WorkEntry,
+  episodePath: string
+): Promise<string> {
+  const from = readingDictionaryPath(work, episodePath);
+  const base = from.replace(/\.json$/, "");
+  for (let index = 1; index <= 100; index++) {
+    const aside = `${base}.removed${index === 1 ? "" : `-${index}`}.json`;
+    if ((await readTextOrUndefined(aside)) !== undefined) continue;
+    await vscode.workspace.fs.rename(path.toUri(from), path.toUri(aside), { overwrite: false });
+    return path.basename(aside);
+  }
+  throw new Error(`消えた話「${path.basename(episodePath)}」の読みの辞書の控えの名前が空いていません。`);
+}
+
+/**
+ * 置いてある辞書の、話の絶対パスの一覧。フォルダーの改名で、台帳に載っていない話の
+ * 辞書も付け替えるために使う。
+ *
+ * **置き場の名前と中の `episode` が合うものだけ**を返す（付け替えは置き場の名前で
+ * 引くので、合わないものは指し先を確かめられない）。読めない辞書は飛ばす（直さない）。
+ */
+export async function listReadingDictionaryEpisodes(work: WorkEntry): Promise<string[]> {
+  const folder = path.join(workPaths(work).aiwriter, READINGS_DIRECTORY);
+  let entries: [string, vscode.FileType][];
+  try {
+    entries = await vscode.workspace.fs.readDirectory(path.toUri(folder));
+  } catch (error) {
+    if (isNotFound(error)) return [];
+    throw error;
+  }
+  const found: string[] = [];
+  for (const [name, type] of entries) {
+    if (type !== vscode.FileType.File || !name.endsWith(".json")) continue;
+    try {
+      const text = await readTextOrUndefined(path.join(folder, name));
+      if (text === undefined) continue;
+      const episode = parseReadingDictionary(text).episode;
+      if (!episode || readingDictionaryFileName(episode) !== name) continue;
+      found.push(path.join(work.folderPath, ...episode.split("/")));
+    } catch {
+      // 読めない辞書は付け替えの候補にしない（壊れたものは直さず、そのまま置く）
+    }
+  }
+  return found;
+}
+
 async function readTextOrUndefined(file: string): Promise<string | undefined> {
   let bytes: Uint8Array;
   try {

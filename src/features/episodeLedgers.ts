@@ -34,7 +34,11 @@ import { PostingStore, PostingStoreError } from "../core/postingStore";
 import { normalizeEpisodePath } from "../models/chapter";
 import { logFailure, useLogFile } from "../core/logger";
 import * as paths from "../core/paths";
-import { moveReadingDictionary } from "../core/readingDictionaryStore";
+import {
+  moveReadingDictionary,
+  readingDictionaryExists,
+  setAsideReadingDictionary,
+} from "../core/readingDictionaryStore";
 
 /**
  * 話数を指している台帳を、付け替えと同じ操作の中で追従させる（設計書6.67.3）。
@@ -99,6 +103,11 @@ export interface LedgerFollowSummary {
    * だけ数える（辞書は話の相対パスを名前にして置くので、話数に関わらず外れる。設計書6.68.2）
    */
   readingDictionaries: number;
+  /**
+   * 消えた話の読みの辞書（消さずに残した）。あらすじの `synopsesOrphaned` と同じく、
+   * **黙って残さない**ために数える
+   */
+  readingDictionariesOrphaned: number;
   /** 台帳ごとの失敗。「台帳名：理由」の形。原稿の付け替えは失敗しても戻さない */
   failures: string[];
 }
@@ -124,6 +133,7 @@ export function emptyLedgerFollowSummary(): LedgerFollowSummary {
     postingDropped: 0,
     episodePlots: 0,
     readingDictionaries: 0,
+    readingDictionariesOrphaned: 0,
     failures: [],
   };
 }
@@ -181,8 +191,44 @@ export async function followEpisodeLedgers(
   await followTimeline(work, moves, summary);
   await followPendingCharacterUpdates(work, shift, summary);
   await followPosting(work, moves, removedPaths?.path, summary);
+  await followRenumberedReadingDictionaries(work, done, removed, summary);
 
   return summary;
+}
+
+/**
+ * 話数の付け替えで名前が変わった話の、読みの辞書を付け替える（設計書6.68.2）。
+ *
+ * **`done` の順（実際に名前を変えた順）のまま動かす。** 付け替えは行き先が空いている順に
+ * 並んでいるので、同じ順で動かせば辞書の行き先も必ず空いている。
+ *
+ * 消えた話の辞書は**消さない**。詰めた後ろの話が同じ名前に来るときだけ控えの名前へ退ける
+ * （`setAsideReadingDictionary`）——そのままだと、消えた話の読みが別の話に効く。
+ */
+async function followRenumberedReadingDictionaries(
+  work: WorkEntry,
+  done: readonly EpisodeRename[],
+  removed: RemovedEpisode | undefined,
+  summary: LedgerFollowSummary
+): Promise<void> {
+  if (removed) {
+    try {
+      if (await readingDictionaryExists(work, removed.filePath)) {
+        const reused = done.some(
+          (item) =>
+            paths.normalizeForComparison(item.toPath) ===
+            paths.normalizeForComparison(removed.filePath)
+        );
+        if (reused) await setAsideReadingDictionary(work, removed.filePath);
+        summary.readingDictionariesOrphaned++;
+      }
+    } catch (error) {
+      summary.failures.push(
+        `読みの辞書「${paths.basename(removed.filePath)}」：${messageOf(error, "消えた話の読みの辞書の退け")}`
+      );
+    }
+  }
+  await followReadingDictionaries(work, done, summary);
 }
 
 async function followChapters(
@@ -698,6 +744,8 @@ export function describeLedgerFollowSummary(summary: LedgerFollowSummary): strin
     notes.push(`消えた話を指す挿絵・ページ位置が${summary.bookOrphaned}件残っています`);
   if (summary.synopsesOrphaned > 0)
     notes.push(`消えた話のあらすじが${summary.synopsesOrphaned}件残っています`);
+  if (summary.readingDictionariesOrphaned > 0)
+    notes.push(`消えた話の読みの辞書が${summary.readingDictionariesOrphaned}件残っています`);
   // **外したことは必ず言う。** 残すと別の話が投稿済みに見えるので落としたが、
   // 黙って落とすと「出したはずの記録が消えた」と読まれる
   if (summary.postingDropped > 0)
