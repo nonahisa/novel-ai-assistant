@@ -33,7 +33,7 @@ description: この作品の役割分担。まとまった実装・レビュー�
 | 製品：投稿ヘルパー | ヘルパーの実装・Chrome ウェブストア | novel-post-helper |
 | 製品：Discord | ボットとコミュニティ（製品リポジトリは直さない） | novel-ai-community-bot |
 | 製品：モバイル版 | Android・iOS（novel-ai-mobile） | novel-ai-android |
-| 製品：オリジナルIME | 設計書・段階0aの測定・専用リポジトリ | （作るまで novel-ai-assistant/docs） |
+| 製品：オリジナルIME | 設計書・段階0aの測定・専用リポジトリ | nonahisa/novel-ime（非公開。手元は C:\Users\nonah\Documents\novel-ime） |
 
 2026-11-04 朝に、この5つを新しく立てて母艦の下から切り離した（start_session のあと detach_session。作者の指示「セッションは改名ではなく新しく立ててください」）。サイドバーのまとまり「統合小説執筆環境」に母艦と並べてある。次の母艦は作らずに、このまとまりへ入るだけでよい
 
