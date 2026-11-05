@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { PROCEDURE_REFERENCED_COMMANDS } from "../../../src/core/procedures";
+import { TOUR_REFERENCED_COMMANDS } from "../../../src/core/procedures";
 import { announceCommandFinished } from "../../../src/core/guidedTour";
 import {
   CHECK_CANCELLED,
@@ -72,7 +72,7 @@ function providers(): {
 describe("押す場所を引けること", () => {
   test("手順書きの全段が、どちらかのツリーで見つかる", () => {
     const { actions, steps } = providers();
-    const missing = [...new Set(PROCEDURE_REFERENCED_COMMANDS)].filter(
+    const missing = [...new Set(TOUR_REFERENCED_COMMANDS)].filter(
       (command) =>
         !steps.findActionNode(command) && !actions.findActionNode(command)
     );
@@ -116,7 +116,7 @@ describe("押す場所を引けること", () => {
 describe("親をたどれること（reveal の前提）", () => {
   test("詳細メニュー：操作 → 小分類か分類 → 最上位", () => {
     const { actions } = providers();
-    for (const command of new Set(PROCEDURE_REFERENCED_COMMANDS)) {
+    for (const command of new Set(TOUR_REFERENCED_COMMANDS)) {
       const node = actions.findActionNode(command);
       if (!node) continue;
       // 最上位（分類）へ着くまでたどれること。無限に回らないよう上限を置く
@@ -135,7 +135,7 @@ describe("親をたどれること（reveal の前提）", () => {
 
   test("簡単ステップメニュー：操作 → 小分類か段階 → 最上位", () => {
     const { steps } = providers();
-    for (const command of new Set(PROCEDURE_REFERENCED_COMMANDS)) {
+    for (const command of new Set(TOUR_REFERENCED_COMMANDS)) {
       const node = steps.findActionNode(command);
       if (!node) continue;
       let cursor: StepNode | undefined = node;
@@ -555,7 +555,7 @@ describe("取りやめを名乗れる段が、行き渡っていること", () =
   };
 
   test("手順書きの全段が、取りやめを名乗れる", () => {
-    const silent = [...new Set(PROCEDURE_REFERENCED_COMMANDS)].filter(
+    const silent = [...new Set(TOUR_REFERENCED_COMMANDS)].filter(
       (command) => {
         const body = registrationOf(command);
         if (body.includes("CHECK_CANCELLED")) return false;
@@ -600,7 +600,7 @@ describe("取りやめを名乗れる段が、行き渡っていること", () =
       // `targetReader.ts` が印を返す（設計書6.108.6。読者の手順書き2本の段）
       "novelai.openTargetReader",
     ]);
-    const silent = [...new Set(PROCEDURE_REFERENCED_COMMANDS)].filter(
+    const silent = [...new Set(TOUR_REFERENCED_COMMANDS)].filter(
       (command) =>
         !returnsFromCallee.has(command) &&
         !registrationOf(command).includes("CHECK_COMPLETED") &&

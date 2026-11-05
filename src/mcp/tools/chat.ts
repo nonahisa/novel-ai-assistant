@@ -22,6 +22,13 @@ import {
   type RequestedFileAccess,
 } from "../../core/chatFileRequest";
 import { episodeLabel } from "../../core/episodeLabel";
+import { findMenuMentions } from "../../core/menuMentions";
+import {
+  guideMenuEntries,
+  withMenuPaths,
+  type MenuPathCard,
+} from "../../core/menuPath";
+import { readWorkFolderMode } from "./editorGuard";
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import { parseEpisodeMetadata } from "../../core/metadataParser";
 import { parseCollectedFile } from "../../core/collectedFile";
@@ -747,6 +754,13 @@ export interface ChatValidateResult {
    * 必ず見せる」）。
    */
   writerStyleNote?: string;
+  /**
+   * 答えの中で名指しされたメニュー項目と、その場所の図（設計書6.118）。
+   *
+   * 製品の相談パネルが札に添えるものと同じ（`core/menuPath.ts` の `withMenuPaths`）。
+   * 名指しが無ければ省く。モードは `folder` の印で読む（省いたときは作者モード）
+   */
+  menuPaths?: MenuPathCard[];
 }
 
 /**
@@ -837,6 +851,16 @@ export function chatValidate(input: {
         "この答えの直す時期の読み取りは反映済みです（同じ答えは二度効かせません）。";
     }
   }
+
+  /*
+    **名指しされた項目の場所の図**（設計書6.118）。製品の相談パネルは札に図を添えて出す。
+    外から相談を撃つ側にも同じものを返さないと、測ったものが製品の姿でなくなる
+    （設計書6.87.6 の3と同じ理由）
+  */
+  const mode =
+    input.folder && readWorkFolderMode(input.folder) === "editor" ? "editor" : "author";
+  const mentioned = findMenuMentions(answer.reply, guideMenuEntries(mode));
+  if (mentioned.length > 0) result.menuPaths = withMenuPaths(mentioned, mode);
 
   return result;
 }

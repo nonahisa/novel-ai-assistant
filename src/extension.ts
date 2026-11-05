@@ -3593,6 +3593,8 @@ export async function activate(
     stepProvider,
     actionView,
     actionProvider,
+    // 編集者モードでは一番上の編集者メニューを先に探す（設計書6.118）
+    editorMenu: { view: editorMenuView, provider: editorMenuProvider, active: isEditorMode },
     // 選ぶだけでは薄くて気づけなかった（作者の報告、2026-09-22）。
     // 指している項目に「▶」の印を残す先を渡す
     marker: actionDecorations,

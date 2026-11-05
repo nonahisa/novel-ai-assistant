@@ -31,7 +31,7 @@ const index = buildFeatureIndex();
  * **1つにしておく**——作品の質問へ渡すものは目次そのものなので、同じ上限で見る。
  * 2か所に数字を書いていたら、目次だけ 2,700 へ上げて片方が 2,600 のまま残った。
  */
-const INDEX_CHAR_LIMIT = 2700;
+const INDEX_CHAR_LIMIT = 2900;
 
 function allActions() {
   return ACTION_TREE.flatMap((group) =>
@@ -370,8 +370,25 @@ describe("相談へ渡す目次", () => {
 
       2,600→2,700：写真から原稿を起こす（設計書6.117）で操作が1つ増え、
       2,600 を数字ぶん越えた（**名前だけ**。説明は混ざっていない）。
+
+      2,700→2,900：編集者モードの目次に、編集者メニューの7つの手順と中の操作の
+      **名前だけ**を足した（設計書6.118。約190字で 2,879字）。作者モードの目次は
+      変わっていない。上限を1つにしておく決まり（`INDEX_CHAR_LIMIT` の説明）に従い、
+      モードで分けずに上げた。
     */
     expect(index.length).toBeLessThan(INDEX_CHAR_LIMIT);
+  });
+
+  test("編集者モードの目次（編集者メニューの7つの手順を足したもの）も同じ上限に収まる", () => {
+    /*
+      編集者モードでは、先頭に編集者メニューの手順の名前を足す（設計書6.118）。
+      **名前だけ**で、説明は混ざっていない。上限は作者モードと同じものを使う——
+      モードで上限を分けると、片方だけ上げて見張りが緩む
+    */
+    const editorIndex = buildFeatureIndex("editor");
+    expect(editorIndex.length, `編集者モードの目次 ${editorIndex.length}字`).toBeLessThan(
+      INDEX_CHAR_LIMIT
+    );
   });
 
   test("原稿を勝手に書き換えない、という断りは必ず入る", () => {

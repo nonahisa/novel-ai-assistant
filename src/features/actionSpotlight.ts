@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { ActionListProvider, ActionNode } from "../views/actionList";
 import type { StepMenuProvider, StepNode } from "../views/stepMenu";
+import type { EditorMenuNode, EditorMenuProvider } from "../views/editorMenu";
 import { SpotlightWorkBinding } from "../core/spotlightWork";
 
 /**
@@ -58,7 +59,7 @@ import { SpotlightWorkBinding } from "../core/spotlightWork";
 export type SpotlightResult =
   | {
       readonly shown: true;
-      readonly view: "steps" | "actions";
+      readonly view: "steps" | "actions" | "editorMenu";
       /** 簡単ステップメニューの作品を、渡された作品へ合わせたときだけ入る */
       readonly alignedWork?: { readonly id: string; readonly title: string };
       /**
@@ -131,6 +132,17 @@ export interface SpotlightTargets {
   readonly detailWork?: (
     workId: string
   ) => { readonly title: string; readonly differs: boolean } | undefined;
+  /**
+   * 編集者メニュー（設計書5.6.6・6.118）。**編集者モードのときだけ**先に探す（`active`）。
+   *
+   * 編集者モードでは簡単ステップメニューが出ず、編集者が見ているのは一番上のこのメニューである。
+   * 渡さなければ探さない（作者モードの振る舞いは変わらない）
+   */
+  readonly editorMenu?: {
+    readonly view: vscode.TreeView<EditorMenuNode>;
+    readonly provider: EditorMenuProvider;
+    readonly active: () => boolean;
+  };
 }
 
 /** 瞬きの間合い。**目が動くだけの長さ**が要る（短すぎると1回に見える） */
@@ -207,12 +219,25 @@ export function createActionSpotlight(
     return found.differs ? { detailWork: { id: workId, title: found.title } } : {};
   }
 
-  /** 先に簡単ステップメニュー、無ければ詳細メニューで光らせる */
+  /**
+   * 先に簡単ステップメニュー、無ければ詳細メニューで光らせる。
+   * 編集者モードでは、簡単ステップメニューの代わりに編集者メニューを先に探す（設計書6.118）
+   */
   async function revealIn(
     command: string,
     alignedWork: { alignedWork?: { id: string; title: string } },
     workId: string | undefined
   ): Promise<SpotlightResult> {
+    const editor = targets.editorMenu;
+    if (editor?.active()) {
+      const editorNode = editor.provider.findActionNode(command);
+      if (
+        editorNode &&
+        (await blink(editor.view, editorNode, editor.provider.getParent(editorNode), sleep, blinkMs))
+      ) {
+        return { shown: true, view: "editorMenu" };
+      }
+    }
     const stepNode = targets.stepProvider.findActionNode(command);
     if (
       stepNode &&
@@ -304,7 +329,9 @@ export function describeSpotlight(result: SpotlightResult): string {
   const where =
     result.view === "steps"
       ? "簡単ステップメニューで光らせました。"
-      : "詳細メニューで光らせました。";
+      : result.view === "editorMenu"
+        ? "編集者メニューで光らせました。"
+        : "詳細メニューで光らせました。";
   const aligned = describeAlignedWork(result);
   return aligned ? `${aligned}${where}` : where;
 }

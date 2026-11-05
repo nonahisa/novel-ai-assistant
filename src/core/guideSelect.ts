@@ -181,10 +181,31 @@ function isEvidenceGram(gram: string): boolean {
  * 規則（漢字だけ・英字だけ）は上の `isEvidenceGram` の説明にある長い経緯の
  * 結果なので、写しを作ると片方だけ古くなる。
  */
+/**
+ * 作者の言い方を、画面の言い方へ寄せる（設計書6.118）。
+ *
+ * 作者は「編集部」と言うが、画面と説明の束は「編集者」で書いてある（画面テスト
+ * `editorialWords` が画面の「編集部」を禁じている）。2文字組みでは「集部」が束のどこにも
+ * 当たらず、「編集部に原稿を渡したい」が「原稿」1組みで別の手順書きへ吸われた。
+ *
+ * **質問の側だけを、ここ1か所で言い換える。** 束選び（`selectGuideBundles`）と手順書き選び
+ * （`procedures.ts`）はどちらも `evidenceGrams` を通るので、同じ規則で当たる——片方だけ
+ * 賢くすると「説明は付くのに手順書きは付かない」が起きる。
+ */
+const QUESTION_REWRITES: readonly (readonly [from: string, to: string])[] = [
+  ["編集部", "編集者"],
+];
+
+export function normalizeGuideQuestion(text: string): string {
+  let out = text;
+  for (const [from, to] of QUESTION_REWRITES) out = out.split(from).join(to);
+  return out;
+}
+
 export function evidenceGrams(sources: readonly string[]): Set<string> {
   const grams = new Set<string>();
   for (const source of sources) {
-    for (const gram of bigrams(source)) {
+    for (const gram of bigrams(normalizeGuideQuestion(source))) {
       if (!isEvidenceGram(gram)) continue;
       grams.add(gram);
     }
@@ -300,10 +321,12 @@ const KATAKANA = /[\p{Script=Katakana}ー]/u;
  */
 export function featureNameTermsIn(sources: readonly string[]): string[] {
   const found = new Set<string>();
+  // 2文字組みと同じ言い換えを通す（`normalizeGuideQuestion`。規則は1か所）
+  const normalized = sources.map((source) => normalizeGuideQuestion(source));
   for (const term of FEATURE_NAME_TERMS) {
     const guardHead = KATAKANA.test(term[0]);
     const guardTail = KATAKANA.test(term[term.length - 1]);
-    for (const source of sources) {
+    for (const source of normalized) {
       let at = source.indexOf(term);
       while (at >= 0) {
         const before = source[at - 1] ?? "";

@@ -7,7 +7,10 @@ import {
   SPOTLIGHT_REQUEST_FILE,
   formatSpotlightRequestLine,
 } from "../../core/spotlightRequest";
+import { findMenuCommandByLabel } from "../../core/menuMentions";
+import { guideMenuEntries, renderMenuPathText } from "../../core/menuPath";
 import { getExternalClientName } from "./accessLog";
+import { readWorkFolderMode } from "./editorGuard";
 import { FOLDER_INPUT, McpToolError } from "./shared";
 
 /**
@@ -75,6 +78,11 @@ export interface SpotlightRequestResult {
   label: string;
   /** 呼んだ側へ返す断り。**いつ光るのかを誤解させない** */
   note: string;
+  /**
+   * その項目の場所の図（設計書6.118。相談パネルの札と同じ `renderMenuPathText`）。
+   * 呼んだ外部AIが作者へそのまま見せられるように返す。項目を解けなければ省く
+   */
+  menuPath?: string;
 }
 
 export function guideSpotlight(
@@ -125,6 +133,7 @@ export function guideSpotlight(
     );
   }
 
+  const menuPath = menuPathFor(input.folder, command, label);
   return {
     requested: true,
     command,
@@ -132,5 +141,20 @@ export function guideSpotlight(
     note:
       "拡張機能が開いていれば 2回点滅します。閉じていれば次に開いたときに光ります。" +
       "押すのは作者です——この道具は光らせるだけで、操作は実行しません。",
+    ...(menuPath ? { menuPath } : {}),
   };
+}
+
+/**
+ * 返事に添える場所の図（設計書6.118）。
+ *
+ * **依頼の行は名前のまま置き（上の説明）、図のためだけにここで解く。** 解けなくても依頼は
+ * 届けたので、図を省くだけにする。モードは作品フォルダーの印で読む（`editorGuard.ts`）——
+ * 確かめられないとき（`unknown`）は作者モードの図にする（図は道を示すだけで、何も書かない）。
+ */
+function menuPathFor(folder: string, command: string, label: string): string | undefined {
+  const mode = readWorkFolderMode(folder) === "editor" ? "editor" : "author";
+  const resolved = command || findMenuCommandByLabel(label, guideMenuEntries(mode));
+  if (!resolved) return undefined;
+  return renderMenuPathText(resolved, mode) || undefined;
 }

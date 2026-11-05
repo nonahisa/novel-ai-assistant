@@ -4,13 +4,17 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { abbreviateTitle, isAbbreviated } from "../core/abbreviateTitle";
 import { processCommandsUsableHere } from "../core/processAvailability";
 import {
+  EDITOR_END_WORK_COMMAND,
+  EDITOR_JOIN_COMMAND,
   EDITOR_MENU_BACK_COMMAND,
   EDITOR_MENU_HELP,
+  EDITOR_MENU_LABELS,
   EDITOR_STEP_DEFS,
-  type EditorMenuEntry,
+  EDITOR_WORK_COMMAND,
   type EditorStepDef,
   type EditorStepKey,
 } from "../core/stepDefs";
+import { resolveEditorEntry } from "../core/menuPath";
 import {
   describeEditorStatus,
   judgeEditorProgress,
@@ -22,7 +26,6 @@ import {
 import {
   disabledHint,
   explainDisabled,
-  findAction,
   REQUIRES_WORK_HINT,
   type ActionItem,
 } from "../core/actionTree";
@@ -42,14 +45,11 @@ import { resolveSelectedWork } from "./stepMenu";
  * 「一番上」に置くには、別のビューを先頭に足して、モードで出し分けるのが壊れにくい。
  */
 
-/** 作品の行を押したときに走るコマンド（作品の切り替え・作品を足す） */
-export const EDITOR_WORK_COMMAND = "novelai.chooseEditorWork";
-
-/** 作品の登録を外す（「この作品の編集を終える」）。中身は詳細メニューと同じ命令 */
-export const EDITOR_END_WORK_COMMAND = "novelai.removeWork";
-
-/** 参加のリンクを貼る（作品を足す） */
-export const EDITOR_JOIN_COMMAND = "novelai.joinAsEditor";
+/*
+  コマンドと行の名前、詳細メニューに無い操作の解き方は core に置いてある（使い方の答えに添える
+  場所の図も同じものを引くため。設計書6.118）。ここからも同じ名前で読めるように出し直す
+*/
+export { EDITOR_END_WORK_COMMAND, EDITOR_JOIN_COMMAND, EDITOR_WORK_COMMAND, resolveEditorEntry };
 
 /** 作品を選んでいないときに押せない理由 */
 export const EDITOR_SELECT_HINT = "一番上で作品を選ぶと使えます";
@@ -82,19 +82,6 @@ export type EditorFactsLoader = (
 interface Loaded {
   progress: EditorProgress;
   lines: EditorStatusLine[];
-}
-
-/** 詳細メニューに無い操作も、詳細メニューの操作と同じ形にして扱う */
-export function resolveEditorEntry(entry: EditorMenuEntry): ActionItem | undefined {
-  if (typeof entry === "string") return findAction(entry);
-  return {
-    kind: "action",
-    command: entry.command,
-    label: entry.label,
-    icon: entry.icon,
-    requiresWork: entry.requiresWork,
-    detail: entry.detail,
-  };
 }
 
 /** 印の見せ方。**分からないものは「まだ」**（作者の指示） */
@@ -195,6 +182,46 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
     return run;
   }
 
+  /**
+   * コマンドIDから、編集者メニューの行を引く（相談・案内・外部AIが光らせるとき。設計書6.118）。
+   *
+   * 中の操作が1つだけの手順は**手順の行そのもの**（押すとそのまま走る）、複数ある手順は
+   * その中の行を返す。無ければ undefined（光らせる側が詳細メニューへ回る）。
+   * 同期で答える——`TreeView.reveal` の前に呼ばれるので、読み込みを待たない。
+   */
+  findActionNode(command: string): EditorMenuNode | undefined {
+    for (const def of EDITOR_STEP_DEFS) {
+      const items = def.entries
+        .map((entry) => resolveEditorEntry(entry))
+        .filter((item): item is ActionItem => item !== undefined);
+      if (items.length === 1) {
+        if (items[0].command === command) return { type: "step", def };
+        continue;
+      }
+      const item = items.find((one) => one.command === command);
+      if (item) return { type: "action", item, parent: def.key };
+    }
+    const help = EDITOR_MENU_HELP.map((entry) => resolveEditorEntry(entry)).find(
+      (item) => item?.command === command
+    );
+    if (help) return { type: "action", item: help, parent: "help" };
+    if (command === EDITOR_MENU_BACK_COMMAND) return { type: "back" };
+    if (command === EDITOR_END_WORK_COMMAND && this.selectedWork()) return { type: "endWork" };
+    if (command === EDITOR_JOIN_COMMAND) {
+      return this.listed().length === 0 ? { type: "join" } : { type: "addWork" };
+    }
+    if (command === EDITOR_WORK_COMMAND && this.listed().length > 0) return { type: "work" };
+    return undefined;
+  }
+
+  /** `TreeView.reveal` が祖先をたどるのに使う。手順の中の行とヘルプの中の行だけが親を持つ */
+  getParent(node: EditorMenuNode): EditorMenuNode | undefined {
+    if (node.type !== "action") return undefined;
+    if (node.parent === "help") return { type: "help" };
+    const def = EDITOR_STEP_DEFS.find((one) => one.key === node.parent);
+    return def ? { type: "step", def } : undefined;
+  }
+
   async getChildren(node?: EditorMenuNode): Promise<EditorMenuNode[]> {
     if (!node) {
       const works = await this.editorWorks();
@@ -247,7 +274,7 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
       case "action":
         return this.actionItem(node.item, node.parent);
       case "help": {
-        const item = new vscode.TreeItem("ヘルプ", vscode.TreeItemCollapsibleState.Collapsed);
+        const item = new vscode.TreeItem(EDITOR_MENU_LABELS.help, vscode.TreeItemCollapsibleState.Collapsed);
         item.id = "editorMenu/help";
         item.iconPath = new vscode.ThemeIcon("question");
         item.tooltip = new vscode.MarkdownString(
@@ -256,34 +283,34 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
         return item;
       }
       case "back": {
-        const item = new vscode.TreeItem("作者モードへ戻る", vscode.TreeItemCollapsibleState.None);
+        const item = new vscode.TreeItem(EDITOR_MENU_LABELS.back, vscode.TreeItemCollapsibleState.None);
         item.id = "editorMenu/back";
         item.iconPath = new vscode.ThemeIcon("arrow-swap");
         item.tooltip = new vscode.MarkdownString(
           "この環境を、自分の作品を書く使い方へ戻す\n\n・いつでも編集者モードへ切り替え直せる"
         );
-        item.command = { command: EDITOR_MENU_BACK_COMMAND, title: "作者モードへ戻る" };
+        item.command = { command: EDITOR_MENU_BACK_COMMAND, title: EDITOR_MENU_LABELS.back };
         return item;
       }
     }
   }
 
   private joinItem(): vscode.TreeItem {
-    const item = new vscode.TreeItem("参加のリンクを貼る", vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(EDITOR_MENU_LABELS.join, vscode.TreeItemCollapsibleState.None);
     item.id = "editorMenu/join";
     item.iconPath = new vscode.ThemeIcon("link");
     item.description = "作者から届いたリンク";
     item.tooltip = new vscode.MarkdownString(
       "作者から届いたリンクを貼って、作品を受け取る\n\n・招待の受諾・取り寄せ・登録まで1回で済む"
     );
-    item.command = { command: EDITOR_JOIN_COMMAND, title: "参加のリンクを貼る" };
+    item.command = { command: EDITOR_JOIN_COMMAND, title: EDITOR_MENU_LABELS.join };
     return item;
   }
 
   private workItem(): vscode.TreeItem {
     const works = this.listed();
     const work = this.selectedWork();
-    const label = work ? `作品：${abbreviateTitle(work.title)}` : "作品を選ぶ";
+    const label = work ? `作品：${abbreviateTitle(work.title)}` : EDITOR_MENU_LABELS.work;
     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
     item.id = "editorMenu/work";
     item.iconPath = new vscode.ThemeIcon("book");
@@ -299,7 +326,7 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
 
   private endWorkItem(): vscode.TreeItem {
     const work = this.selectedWork();
-    const item = new vscode.TreeItem("この作品の編集を終える", vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(EDITOR_MENU_LABELS.endWork, vscode.TreeItemCollapsibleState.None);
     item.id = "editorMenu/endWork";
     item.iconPath = new vscode.ThemeIcon("close");
     item.tooltip = new vscode.MarkdownString(
@@ -309,7 +336,7 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
     if (work) {
       item.command = {
         command: EDITOR_END_WORK_COMMAND,
-        title: "この作品の編集を終える",
+        title: EDITOR_MENU_LABELS.endWork,
         arguments: [{ type: "work", work }],
       };
     }
@@ -318,7 +345,7 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
 
   private addWorkItem(): vscode.TreeItem {
     const item = new vscode.TreeItem(
-      "作品を足す（参加のリンクを貼る）",
+      EDITOR_MENU_LABELS.addWork,
       vscode.TreeItemCollapsibleState.None
     );
     item.id = "editorMenu/addWork";
@@ -326,7 +353,7 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
     item.tooltip = new vscode.MarkdownString(
       "別の作品のリンクが届いたときに貼る\n\n・参加している作品が増え、一番上で切り替えられる"
     );
-    item.command = { command: EDITOR_JOIN_COMMAND, title: "作品を足す（参加のリンクを貼る）" };
+    item.command = { command: EDITOR_JOIN_COMMAND, title: EDITOR_MENU_LABELS.addWork };
     return item;
   }
 

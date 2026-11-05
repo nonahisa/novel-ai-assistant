@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { startTour } from "../core/guidedTour";
-import { PROCEDURES, type Procedure } from "../core/procedures";
+import { TOUR_PROCEDURES, type Procedure } from "../core/procedures";
 import { findAction, REQUIRES_WORK_HINT } from "../views/actionList";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { procedureActionLookup } from "../core/featureGuide";
@@ -72,14 +72,15 @@ export function sceneNeedsWork(procedure: Procedure): boolean {
 }
 
 /**
- * 選べる場面の一覧。並びは `PROCEDURES` のまま。
+ * 選べる場面の一覧。並びは `TOUR_PROCEDURES` のまま（案内に使わない手順書きは出さない。
+ * `procedures.ts` の `tour`）。
  *
  * **案内を組めない場面は出さない。** 段が1つも残らない場面を並べると、
  * 押しても何も始まらない（相談の札が組めない手順を誘わないのと同じ）。
  */
 export function sceneChoices(): SceneChoice[] {
   const choices: SceneChoice[] = [];
-  for (const procedure of PROCEDURES) {
+  for (const procedure of TOUR_PROCEDURES) {
     const tour = startTour(procedure, procedureActionLookup);
     if (!tour) continue;
     choices.push({

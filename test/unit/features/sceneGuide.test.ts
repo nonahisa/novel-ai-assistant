@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 import { window } from "vscode";
-import { PROCEDURES } from "../../../src/core/procedures";
+import { PROCEDURES, TOUR_PROCEDURES } from "../../../src/core/procedures";
 import { startTour } from "../../../src/core/guidedTour";
 import { procedureActionLookup } from "../../../src/core/featureGuide";
 import {
@@ -85,11 +85,11 @@ describe("場面を選ぶ", () => {
   test("手順書きの全部が、同じ順で選べる", () => {
     const choices = sceneChoices();
     expect(choices.map((choice) => choice.key)).toEqual(
-      PROCEDURES.map((procedure) => procedure.key)
+      TOUR_PROCEDURES.map((procedure) => procedure.key)
     );
     expect(choices).toHaveLength(7);
     for (const choice of choices) {
-      const procedure = PROCEDURES.find((entry) => entry.key === choice.key);
+      const procedure = TOUR_PROCEDURES.find((entry) => entry.key === choice.key);
       // 段が1つも欠けずに案内できる（欠けると、画面に無い段を飛ばした案内になる）
       expect(choice.steps, choice.key).toBe(procedure?.steps.length);
       expect(choice.title).toBe(procedure?.title);
@@ -170,7 +170,7 @@ describe("場面を選ぶ", () => {
 
 describe("案内の中の名前が、いまのメニューの名前と一致する", () => {
   test("各段の名前は、詳細メニューの名前そのもの", () => {
-    for (const procedure of PROCEDURES) {
+    for (const procedure of TOUR_PROCEDURES) {
       const tour = startTour(procedure, procedureActionLookup);
       expect(tour?.steps.map((step) => step.command), procedure.key).toEqual(
         procedure.steps.map((step) => step.command)

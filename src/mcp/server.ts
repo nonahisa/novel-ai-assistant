@@ -557,7 +557,8 @@ server.registerTool(
       "**押すのは作者です——この道具は操作を実行しません。** " +
       "原稿も設定資料も台帳も1文字も触りません。" +
       "command（コマンドID）か label（表示名）のどちらかを渡してください。" +
-      "VS Code が閉じていれば、次に開いたときに光ります。",
+      "VS Code が閉じていれば、次に開いたときに光ります。" +
+      "返事の menuPath に、左の端のアイコンからその項目までの場所の図が入ります（作者へそのまま見せられます）。",
     inputSchema: GUIDE_SPOTLIGHT_INPUT,
   },
   tool("guide.spotlight", (args: SpotlightRequestInput) => guideSpotlight(args))

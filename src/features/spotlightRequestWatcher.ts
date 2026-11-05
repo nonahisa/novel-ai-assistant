@@ -12,7 +12,7 @@ import {
   type SpotlightRequestEntry,
 } from "../core/spotlightRequest";
 import { findMenuCommandByLabel } from "../core/menuMentions";
-import { findAction, menuEntries } from "../views/actionList";
+import { guideMenuEntries } from "../core/menuPath";
 import type { ActionSpotlight } from "./actionSpotlight";
 
 /**
@@ -114,7 +114,7 @@ export class SpotlightRequestWatcher {
         );
         return;
       }
-      const item = findAction(command);
+      const item = guideMenuEntries().find((entry) => entry.command === command);
       const who = wanted.client || "名乗りなし";
       void vscode.window.setStatusBarMessage(
         `$(chevron-right) 外部AI（${who}）が「${item?.label ?? command}」を指しました`,
@@ -133,8 +133,10 @@ export class SpotlightRequestWatcher {
    * **作者にはどうしようもない知らせ**が画面に並ぶ。
    */
   private resolve(entry: SpotlightRequestEntry): string | undefined {
+    // 照合先はモードに合わせた一覧（編集者モードでは編集者メニューの項目も入る。設計書6.118）
+    const known = guideMenuEntries();
     if (entry.command) {
-      if (findAction(entry.command)) return entry.command;
+      if (known.some((one) => one.command === entry.command)) return entry.command;
       logStep(`外部AIが知らない操作を指しました（${entry.command}）`);
       return undefined;
     }
@@ -145,7 +147,7 @@ export class SpotlightRequestWatcher {
       **同じラベルが2つあるとき（一覧に出ない隠れた道）は、先に並ぶ
       一覧の項目が光る**（`spotlightFromAI.test.ts` が見張っている）。
     */
-    const found = findMenuCommandByLabel(entry.label, menuEntries());
+    const found = findMenuCommandByLabel(entry.label, known);
     if (!found) {
       logStep(`外部AIが指した項目が見つかりません（${entry.label}）`);
     }

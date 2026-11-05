@@ -302,6 +302,23 @@ button.secondary {
  * **畳んで置く。** AIへ添えた回にだけ出るとはいえ、11行の一覧が
  * 答えの下に開いたまま並ぶと、答えそのものが押し下げられる。
  */
+/*
+ * 光らせる札に添える、メニューの場所の図（設計書6.118）。
+ *
+ * **等幅で、改行と字下げを保つ。** 木の段は字下げで表しているので、詰めると形が崩れる。
+ * 幅の狭い横の枠でも切れないよう、長い行は折り返す（pre-wrap）。
+ */
+.menu-path {
+  margin: 0 0 4px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--vscode-textLink-foreground);
+  background: var(--vscode-textCodeBlock-background);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .glossary { margin-top: 8px; font-size: 12px; }
 .glossary summary {
   cursor: pointer;
@@ -906,6 +923,10 @@ function appendReaderGlossary(turn, entries) {
   **何度でも押せる。** 目を離している間にツリーの選択が動くので、
   無効化すると見失ったときに戻れなくなる（「もう一度光らせる」と同じ考え）。
   **押しても操作は走らない**——光るだけである。
+
+  札の下に、メニューの場所の図を添える（設計書6.118。作者の依頼、2026-11-05
+  「光るのとメニューを開くだけではわかりにくい」）。図は拡張機能の側で組んで届く
+  （entry.path）。ここでは並べるだけで、押しても何も起きない。
 */
 function appendSpotlight(turn, entries) {
   if (!entries || entries.length === 0) return;
@@ -922,6 +943,12 @@ function appendSpotlight(turn, entries) {
       vscode.postMessage({ type: 'spotlight', command: entry.command });
     });
     box.appendChild(button);
+    if (entry.path) {
+      const map = document.createElement('pre');
+      map.className = 'menu-path';
+      map.innerHTML = escapeHtml(entry.path);
+      box.appendChild(map);
+    }
   });
   turn.appendChild(box);
 }

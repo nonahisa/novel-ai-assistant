@@ -476,6 +476,35 @@ export const EDITOR_MENU_HELP: readonly EditorMenuEntry[] = [
 /** 作者モードへ戻る口（入ったら出られない、を起こさない。`EDITOR_ALLOWED` にもある） */
 export const EDITOR_MENU_BACK_COMMAND = "novelai.switchMode";
 
+/*
+  **編集者メニューの手順の外の行**（作品・作品を足す・編集を終える・ヘルプ・戻る）の
+  コマンドと名前。画面（`views/editorMenu.ts`）と、使い方の答えに添える場所の図
+  （`core/menuPath.ts`。設計書6.118）が同じものを引く。画面のファイルは `vscode` を引くので、
+  図を組む側（MCP の束からも読む）が読めるよう、ここへ置く。
+*/
+
+/** 作品の行を押したときに走るコマンド（作品の切り替え） */
+export const EDITOR_WORK_COMMAND = "novelai.chooseEditorWork";
+
+/** 作品の登録を外す（「この作品の編集を終える」）。中身は詳細メニューと同じ命令 */
+export const EDITOR_END_WORK_COMMAND = "novelai.removeWork";
+
+/** 参加のリンクを貼る（作品を足す） */
+export const EDITOR_JOIN_COMMAND = "novelai.joinAsEditor";
+
+/** 編集者メニューの手順の外の行の名前（画面の字そのもの） */
+export const EDITOR_MENU_LABELS = {
+  /** 作品をまだ選んでいないときの作品の行（選ぶと「作品：題名」になる） */
+  work: "作品を選ぶ",
+  endWork: "この作品の編集を終える",
+  /** 参加している作品があるときの足す行 */
+  addWork: "作品を足す（参加のリンクを貼る）",
+  /** 参加している作品がまだ無いときに一番上に出る行 */
+  join: "参加のリンクを貼る",
+  help: "ヘルプ",
+  back: "作者モードへ戻る",
+} as const;
+
 /** 編集者メニューが参照しているコマンドID（テストで実在と許可を確かめる） */
 export const EDITOR_STEP_REFERENCED_COMMANDS: readonly string[] = [
   ...EDITOR_STEP_DEFS.flatMap((def) => def.entries),

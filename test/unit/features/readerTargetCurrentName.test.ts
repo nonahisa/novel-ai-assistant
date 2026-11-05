@@ -25,6 +25,11 @@ import { TARGET_READER_ENTRY_TITLE } from "../../../src/prompts/readerTarget";
  */
 const READER_QUESTION = "読者層を決めたいんですが、どうすればいいですか？";
 const OLD_NAME = "ターゲット読者診断";
+/**
+ * 手順書きの1段目。名前の直後に場所（〔簡単ステップメニュー → …〕。設計書6.118）が付くので、
+ * 名前と、場所の括弧か区切りのコロンが続くことを見る（名前に旧名の続きが付いていないこと）
+ */
+const FIRST_STEP = new RegExp(`1\\. ${TARGET_READER_ENTRY_TITLE}(〔[^〕]*〕)?：`);
 
 describe("読者の相談で渡す材料", () => {
   test("手順書きは、いまの入口の名前で書いてある", () => {
@@ -36,7 +41,7 @@ describe("読者の相談で渡す材料", () => {
       .split("\n\n")
       .find((block) => block.startsWith("【この仕事の手順"));
     expect(procedure).toBeDefined();
-    expect(procedure).toContain(`1. ${TARGET_READER_ENTRY_TITLE}：`);
+    expect(procedure).toMatch(FIRST_STEP);
     expect(procedure).not.toContain(OLD_NAME);
     // 小分類の名前「読者診断」と入口の名前を並べない。e4b は並んだ2つを
     // つないで旧名を作った（2026-09-25 深夜、補足だけで直そうとした回）
@@ -60,6 +65,6 @@ describe("読者の相談で渡す材料", () => {
 
     expect(guide.procedureKey).toBe("readerTarget");
     expect(guide.topic).not.toBe("craft");
-    expect(guide.text).toContain(`1. ${TARGET_READER_ENTRY_TITLE}：`);
+    expect(guide.text).toMatch(FIRST_STEP);
   });
 });

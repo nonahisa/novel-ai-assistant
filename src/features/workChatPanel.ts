@@ -275,8 +275,12 @@ import {
   type ActionSpotlight,
   type SpotlightOptions,
 } from "./actionSpotlight";
-import { findMenuMentions, type MenuEntry } from "../core/menuMentions";
-import { menuEntries } from "../views/actionList";
+import { findMenuMentions } from "../core/menuMentions";
+import {
+  guideMenuEntries,
+  withMenuPaths,
+  type MenuPathCard,
+} from "../core/menuPath";
 import { openInDefaultEditor } from "../views/openDocument";
 // **受け口の確かめだけを静的に読む。** 取り込みの本体（ZIPの展開など）は
 // 落とされたときに初めて読む（`handleBackup` の動的 import）
@@ -522,7 +526,8 @@ interface ChatAnswerExtras {
   options: string[];
   tour?: ChatTourOffer;
   readerGlossary?: ReaderTypeGlossaryEntry[];
-  spotlight?: MenuEntry[];
+  /** 光らせる札。場所の図（設計書6.118）を添えて送る。図は拡張機能の側で組む */
+  spotlight?: MenuPathCard[];
 }
 
 /** 対話式プロット作成の問答の状態（設計書6.4.7。`WorkChatPanel.plotDialogue`） */
@@ -1005,8 +1010,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private async spotlightMentions(
     reply: string,
     workId: string | undefined
-  ): Promise<{ entries: MenuEntry[]; alignedNote?: string }> {
-    const mentions = findMenuMentions(reply, menuEntries());
+  ): Promise<{ entries: MenuPathCard[]; alignedNote?: string }> {
+    /*
+      **照合先はモードに合わせる**（設計書6.118）。編集者モードでは、編集者メニューにしか無い
+      項目（置いた提案の一覧など）も拾う。札には場所の図を添える——光るだけでは、閉じた分類の
+      中のどこを開けばよいか分からない（作者の依頼、2026-11-05）
+    */
+    const mentions = withMenuPaths(findMenuMentions(reply, guideMenuEntries()));
     if (mentions.length === 0 || !this.spotlight) return { entries: mentions };
     if (this.tour.isActive()) return { entries: mentions };
 
@@ -1036,7 +1046,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   private async spotlightCommand(command: string): Promise<void> {
     if (!this.spotlight) return;
-    if (!menuEntries().some((entry) => entry.command === command)) {
+    if (!guideMenuEntries().some((entry) => entry.command === command)) {
       logStep(`相談から知らない操作を光らせようとしました（${command}）`);
       return;
     }

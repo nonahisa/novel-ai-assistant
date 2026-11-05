@@ -1,6 +1,7 @@
 // `MIN_EVIDENCE_HITS`（束選びのしきい値）はここでは使わない。手順書きは
 // 1組みで通す（`PROCEDURE_MIN_HITS`）。理由はその定数の説明にある
 import { countGramHits, evidenceGrams } from "./guideSelect";
+import { activeModeForGuide, type WorkMode } from "./editorMode";
 
 /**
  * 手順書き——よくある仕事の「順番と判断」（作者の指示、2026-09-18）。
@@ -70,6 +71,23 @@ export interface Procedure {
   readonly whenToRead: string;
   /** 順番のある段。並びがそのまま作業の順序である */
   readonly steps: readonly ProcedureStep[];
+  /**
+   * 選んでよいモード（設計書6.118）。無ければ両方。
+   *
+   * 編集者の順路は編集者メニューにしか無く、作者の順路の操作は編集者モードでは押せない。
+   * モードに合わない手順書きを渡すと、画面に無い場所を案内することになる。
+   */
+  readonly modes?: readonly WorkMode[];
+  /**
+   * 画面で指しながらの案内（設計書6.104。相談の「画面で案内してもらう」・場面別案内）に使うか。
+   * 無ければ使う。
+   *
+   * **案内は、段の操作が「取りやめた／済んだ」を名乗れることが前提**（`extension.ts` の登録が
+   * `CHECK_CANCELLED` を返す。`guidedTourWiring.test.ts` が見張る）。名乗らない操作を段に置くと、
+   * 取りやめても案内が次へ進む。名乗りを足していない手順書きは `false` にして、相談の材料
+   * （順路の説明）としてだけ渡す
+   */
+  readonly tour?: boolean;
 }
 
 /** 1本あたりの字数の目安。組み上げたあとの字数で測る */
@@ -340,13 +358,119 @@ export const PROCEDURES: readonly Procedure[] = [
       },
     ],
   },
+  {
+    /*
+      **編集者と組む仕事の、作者の側**（作者の依頼 2026-11-05「編集部関係の質問に答えられますか」。
+      設計書6.118）。簡単ステップメニューの「6. 編集者校正・校閲」の並び（渡す → 提案を見る → 解除）
+      そのものである。採否は「編集者の提案を見る」の中で1件ずつ決める。
+
+      **「編集部」と書かない。** 画面の言い方は「編集者」で、作者の「編集部」は質問の側で
+      言い換える（`guideSelect.ts` の `normalizeGuideQuestion`）。「作品」「原稿」も書かない——
+      作品の相談でいちばんよく出る熟語で、しきい値1組みでは割り込む
+    */
+    key: "editorialAuthor",
+    title: "編集者へ渡して提案の採否を決める",
+    whenToRead: "編集者へ渡し、届いた提案を見て採用か見送りを決めるとき、編集者連携を解除するとき",
+    modes: ["author"],
+    // 段の操作が取りやめを名乗っていないので、画面の案内には使わない（`tour` の説明）
+    tour: false,
+    steps: [
+      {
+        command: "novelai.shareWithEditor",
+        why: "この作品だけの非公開の置き場を作り、編集者を招く",
+        check: "初回は編集者の GitHub 名を訊かれる。編集者は本文を書き換えられない",
+      },
+      {
+        command: "novelai.viewEditorProposals",
+        why: "届いた提案を受け取り、まだ決めていないものを並べる",
+        check: "提案パネルで1件ずつ採用か見送りを選ぶ",
+      },
+      {
+        command: "novelai.revokeEditorAccess",
+        why: "組むのをやめるときに、編集者の書き込みの権利を外す",
+        check: "校閲中の印も外れる",
+      },
+    ],
+  },
+  {
+    /*
+      **編集者と組む仕事の、編集者の側**（設計書6.118）。参加してから、編集者メニューの手順1〜7を
+      上から通る。編集者モードでだけ選ぶ（作者モードの画面には編集者メニューが無い）。
+      段の名前は編集者メニューの行の名前で出る（`featureGuide.ts` の `procedureActionLookup`）
+    */
+    key: "editorialEditor",
+    title: "編集者として参加して校閲を返す",
+    whenToRead: "編集者として参加し、受け取った話を校閲し、直しの提案を置いて作者へ返すまで",
+    modes: ["editor"],
+    tour: false,
+    steps: [
+      {
+        command: "novelai.joinAsEditor",
+        why: "作者から届いたリンクを貼る",
+        check: "編集者メニューの一番上に作品が出る",
+      },
+      {
+        command: "novelai.saveAndSync",
+        why: "作者の最新の原稿を受け取る",
+        check: "こちらからは何も送らない",
+      },
+      {
+        command: "novelai.toggleReviewLock",
+        why: "見る話を選び、校閲中だと作者に知らせる",
+        check: "選んだ話を作者が直そうとすると知らせが出る",
+      },
+      {
+        command: "novelai.checkNotation",
+        why: "機械に探させる。誤字脱字と推敲も同じ所にある",
+        check: "提案パネルの［適用］で提案として置く",
+      },
+      {
+        command: "novelai.proposeEditByHand",
+        why: "読んで気づいた直しを自分の言葉で置く",
+        check: "本文は書き換わらない",
+      },
+      {
+        command: "novelai.listPlacedProposals",
+        why: "返す前に置いた提案を見直す",
+        check: "選ぶと本文のその場所が開く",
+      },
+      {
+        command: "novelai.finishReviewAndReturn",
+        why: "校閲中を外し、提案を作者へ届ける",
+        check: "保存していない変更があれば送らずに止まる",
+      },
+      {
+        command: "novelai.viewAuthorDecisions",
+        why: "作者が採ったか見送ったかを見る",
+        check: "受け取ったときに届く",
+      },
+    ],
+  },
 ];
+
+/** そのモードで選んでよい手順書き（`modes` が無いものは両方） */
+export function proceduresForMode(
+  mode: WorkMode,
+  procedures: readonly Procedure[] = PROCEDURES
+): Procedure[] {
+  return procedures.filter((procedure) => !procedure.modes || procedure.modes.includes(mode));
+}
 
 /** 手順書きが参照しているコマンドID（実在するかをテストで確かめる） */
 export const PROCEDURE_REFERENCED_COMMANDS: readonly string[] =
   PROCEDURES.flatMap((procedure) =>
     procedure.steps.map((step) => step.command)
   );
+
+/** 画面で指しながらの案内に使う手順書き（`tour` が `false` でないもの） */
+export const TOUR_PROCEDURES: readonly Procedure[] = PROCEDURES.filter(
+  (procedure) => procedure.tour !== false
+);
+
+/** 案内に使う手順書きが参照しているコマンドID（取りやめの名乗りを見張る範囲） */
+export const TOUR_REFERENCED_COMMANDS: readonly string[] = TOUR_PROCEDURES.flatMap(
+  (procedure) => procedure.steps.map((step) => step.command)
+);
 
 /** 段が指す操作について、呼び出し側が渡すもの */
 export interface ProcedureActionInfo {
@@ -363,6 +487,11 @@ export interface ProcedureActionInfo {
    * 順路として用を成さない。
    */
   readonly prerequisiteNote?: string;
+  /**
+   * 画面のどこにあるか（区画から親まで。`core/menuPath.ts` の `shortMenuPath`。設計書6.118）。
+   * 最初の一押し（左の端のアイコン）は、手順書きを渡す見出しに1回だけ書く
+   */
+  readonly where?: string;
 }
 
 /** コマンドIDから操作の実体を引く口。`views` を `core` へ持ち込まないための形 */
@@ -440,8 +569,13 @@ export function selectProcedure(input: {
   procedures?: readonly Procedure[];
   /** 通し方。既定は `PROCEDURE_MIN_HITS`（測り直し用の口） */
   rules?: ProcedureSelectRules;
+  /** いまのモード。既定は `activeModeForGuide()`。合わない手順書き（`modes`）は選ばない */
+  mode?: WorkMode;
 }): Procedure | undefined {
-  const procedures = input.procedures ?? PROCEDURES;
+  const procedures = proceduresForMode(
+    input.mode ?? activeModeForGuide(),
+    input.procedures ?? PROCEDURES
+  );
   const minHits = input.rules?.minHits ?? PROCEDURE_MIN_HITS;
   const grams = evidenceGrams([
     input.question,
@@ -489,8 +623,10 @@ export function renderProcedure(
     // 前提は段の末尾に足す。「先に何が要るか」は、その操作を押す直前に
     // 読めないと意味がない
     const needs = action.prerequisiteNote ? ` ${action.prerequisiteNote}` : "";
+    // 場所は名前の直後に置く。AIが名前と場所を組で写せるように（設計書6.118）
+    const where = action.where ? `〔${action.where}〕` : "";
     lines.push(
-      `${number}. ${action.label}${note}：${step.why} → ${step.check}${needs}`
+      `${number}. ${action.label}${note}${where}：${step.why} → ${step.check}${needs}`
     );
   }
 

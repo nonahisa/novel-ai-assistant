@@ -22,6 +22,16 @@ import {
   selectProcedure,
   type ProcedureActionInfo,
 } from "./procedures";
+import { activeModeForGuide, type WorkMode } from "./editorMode";
+import {
+  MENU_PATH_START,
+  MENU_SECTION_NAMES,
+  findEditorMenuOnlyAction,
+  menuPathsOf,
+  resolveEditorEntry,
+  shortMenuPath,
+} from "./menuPath";
+import { EDITOR_STEP_DEFS } from "./stepDefs";
 
 /**
  * 「この拡張機能の使い方」をAIへ渡すための説明を組み立てる。
@@ -203,7 +213,7 @@ function guideEntries<T extends ActionItem | ActionSection>(
  * 「作者が書いた内容は上書きしない」は、**どんな相談でもAIが逆を答えては
  * いけない**ことなので、質問の中身にかかわらず常に渡す。
  */
-export function buildFeatureIndex(): string {
+export function buildFeatureIndex(mode: WorkMode = activeModeForGuide()): string {
   const lines: string[] = ["【詳細メニューの操作】"];
 
   // **画面に無い操作を案内させない。** 環境によって出さない操作があるので、
@@ -257,6 +267,8 @@ export function buildFeatureIndex(): string {
       : "";
 
   return [
+    // 編集者モードでは、編集者が最初に見るメニューを先頭に置く（設計書6.118）
+    ...(mode === "editor" ? [editorMenuIndex(), ""] : []),
     lines.join("\n"),
     ...(hidden ? [hidden] : []),
     "",
@@ -266,6 +278,25 @@ export function buildFeatureIndex(): string {
     "",
     extraGuideSection("この拡張機能の考え方"),
   ].join("\n");
+}
+
+/**
+ * 編集者メニューの目次（編集者モードのときだけ。設計書6.118）。
+ *
+ * 編集者モードでは簡単ステップメニューが出ず、横の枠の一番上に編集者メニューが出る
+ * （設計書5.6.6）。目次に無いと、AIは編集者に詳細メニューの道しか案内できない。
+ * **名前だけ**を並べる（目次は毎回送る。説明は手順書き「編集者として参加して校閲を返す」が持つ）。
+ * 中に複数の操作がある手順は、その名前を括弧に並べる——光らせる札はこの名前で拾う。
+ */
+function editorMenuIndex(): string {
+  const lines = [`【${MENU_SECTION_NAMES.editorMenu}（横の枠の一番上。手順を上から順に押す）】`];
+  for (const def of EDITOR_STEP_DEFS) {
+    const names = def.entries
+      .map((entry) => resolveEditorEntry(entry)?.label)
+      .filter((label): label is string => label !== undefined);
+    lines.push(names.length > 1 ? `・${def.label}（${names.join("、")}）` : `・${def.label}`);
+  }
+  return lines.join("\n");
 }
 
 /** 小分類を、束としてだけ割るときの1つぶん */
@@ -545,7 +576,8 @@ export function buildFeatureGuideForQuestion(input: {
     // 操作ごとの説明はその裏づけである
     blocks.push(
       [
-        "【この仕事の手順（この順で通ります。押す場所は目次から探してください）】",
+        // 〔〕は画面の場所（区画から親まで。設計書6.118）。どれも左の端のアイコンを押してから開く
+        `【この仕事の手順（この順で通ります。〔〕は場所で、どれも${MENU_PATH_START}を押してから開きます）】`,
         procedureText,
       ].join("\n")
     );
@@ -584,17 +616,35 @@ export function buildFeatureGuideForQuestion(input: {
  * 案内してしまうことのないように。
  */
 export function procedureActionLookup(
-  command: string
+  command: string,
+  mode: WorkMode = activeModeForGuide()
 ): ProcedureActionInfo | undefined {
-  const action = findAction(command);
+  const runtime = processCommandsUsableHere();
+  const inTree = findAction(command);
+  if (inTree && !isItemVisibleInRuntime(inTree, runtime)) return undefined;
+  const paths = menuPathsOf(command, mode, runtime);
+  /*
+    **編集者メニューにしか無い操作**（置いた提案の一覧など）も引く（設計書6.118）。
+    ただし、そのモードの画面に道が無ければ引かない——作者モードの画面には編集者メニューが無い
+  */
+  const action = inTree ?? (paths.length > 0 ? findEditorMenuOnlyAction(command) : undefined);
   if (!action) return undefined;
-  if (!isItemVisibleInRuntime(action, processCommandsUsableHere())) return undefined;
 
-  const needs = prerequisiteNoteOf(action);
+  /*
+    **名前は、そのモードの画面に出ている字で渡す。** 編集者メニューの手順の行は、押すとそのまま
+    走る操作でも「1. 作者の最新の原稿を受け取る」のように詳細メニューと違う名前で並ぶ。
+    詳細メニューの名前で案内すると、編集者は一番上のメニューで見つけられない
+  */
+  const first = paths[0];
+  const label =
+    first?.place === "editorMenu" ? (first.trail[first.trail.length - 1] ?? action.label) : action.label;
+  const needs = inTree ? prerequisiteNoteOf(inTree) : "";
+  const where = shortMenuPath(command, mode, runtime);
   return {
-    label: action.label,
+    label,
     ...(action.note ? { note: action.note } : {}),
     ...(needs ? { prerequisiteNote: needs } : {}),
+    ...(where ? { where } : {}),
   };
 }
 

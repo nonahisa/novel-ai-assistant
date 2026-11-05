@@ -13,7 +13,12 @@ import {
   findAction,
   prerequisiteNoteOf,
 } from "../../../src/views/actionList";
-import { buildFeatureGuideForQuestion } from "../../../src/core/featureGuide";
+import {
+  buildFeatureGuideForQuestion,
+  procedureActionLookup,
+} from "../../../src/core/featureGuide";
+import { EDITOR_STEP_REFERENCED_COMMANDS } from "../../../src/core/stepDefs";
+import { findEditorMenuOnlyAction } from "../../../src/core/menuPath";
 
 /**
  * 手順書き——よくある仕事の「順番と判断」（`src/core/procedures.ts`）。
@@ -48,14 +53,22 @@ describe("手順書きの中身", () => {
     // 7本目は「狙いと実態のずれを見る」（設計書6.108）。読者の手順書きを
     // 2本に分けたのは、**決める仕事と、決めたあとの仕事**が別だからである
     // （1本にまとめると600字に収まらず、当たりの文も混ざる）
+    //
+    // 8本目・9本目は編集者と組む仕事の作者の側と編集者の側（設計書6.118。作者の依頼
+    // 2026-11-05「編集部関係の質問に答えられますか」）。モードで片方だけを選ぶ（`modes`）ので、
+    // 1回の相談で比べる相手は8本のまま
     expect(PROCEDURES.length).toBeGreaterThanOrEqual(4);
-    expect(PROCEDURES.length).toBeLessThanOrEqual(7);
+    expect(PROCEDURES.length).toBeLessThanOrEqual(9);
   });
 
-  test("段が指す操作は、すべて詳細メニューに実在する", () => {
+  test("段が指す操作は、すべて詳細メニューか編集者メニューに実在する", () => {
     // 参照が切れると、その段は黙って落ちる（`renderProcedure`）。
-    // 画面からは1行消えるだけで気づけないので、ここで止める
-    const known = new Set(allActions().map((action) => action.command));
+    // 画面からは1行消えるだけで気づけないので、ここで止める。
+    // 編集者メニューにしか無い操作（置いた提案の一覧など）は、そちらの定義を引く
+    const known = new Set([
+      ...allActions().map((action) => action.command),
+      ...EDITOR_STEP_REFERENCED_COMMANDS,
+    ]);
     const missing = PROCEDURE_REFERENCED_COMMANDS.filter(
       (command) => !known.has(command)
     );
@@ -75,8 +88,12 @@ describe("手順書きの中身", () => {
       const text = renderProcedure(procedure, lookup);
       for (const step of procedure.steps) {
         const action = findAction(step.command);
+        // 編集者メニューにしか無い操作は、この引き方（詳細メニューだけ）では引かない。
+        // 名前の出どころは下の「段の側には名前が無い」と、編集者モードの検査
+        // （`editorialGuide.test.ts`）で見る
+        if (!action) continue;
         expect(text, `${procedure.key}/${step.command}`).toContain(
-          action!.label
+          action.label
         );
       }
       /*
@@ -89,7 +106,8 @@ describe("手順書きの中身", () => {
       */
       const raw = JSON.stringify(procedure.steps);
       for (const step of procedure.steps) {
-        const action = findAction(step.command);
+        const action =
+          findAction(step.command) ?? findEditorMenuOnlyAction(step.command);
         expect(raw, `${procedure.key}: ${action!.label}`).not.toContain(
           action!.label
         );
@@ -116,7 +134,10 @@ describe("手順書きの中身", () => {
     for (const procedure of PROCEDURES) {
       const text = renderProcedure(procedure, lookup);
       for (const step of procedure.steps) {
-        const note = prerequisiteNoteOf(findAction(step.command)!);
+        // 編集者メニューにしか無い操作は前提（`needs`）を持たない
+        const action = findAction(step.command);
+        if (!action) continue;
+        const note = prerequisiteNoteOf(action);
         if (!note) continue;
         expect(text, `${procedure.key}/${step.command}`).toContain(note);
       }
@@ -129,10 +150,20 @@ describe("手順書きの中身", () => {
       払う。収まらないときは段を減らすか、理由と見どころを短くする
       （設計書6.27の行き止まりへ戻らないため）。
     */
-    const tooLong = PROCEDURES.map((procedure) => ({
-      key: procedure.key,
-      length: renderProcedure(procedure, lookup).length,
-    })).filter((entry) => entry.length > PROCEDURE_CHAR_LIMIT);
+    /*
+      **製品の引き方（`procedureActionLookup`）で測る**（設計書6.118）。段には場所（〔簡単
+      ステップメニュー → …〕）が付くので、名前だけを引くこの試験の `lookup` で測ると
+      送る量を少なく見積もる。モードは手順書きが選ばれるモードで引く
+    */
+    const tooLong = PROCEDURES.map((procedure) => {
+      const mode = procedure.modes?.[0] ?? "author";
+      return {
+        key: procedure.key,
+        length: renderProcedure(procedure, (command) =>
+          procedureActionLookup(command, mode)
+        ).length,
+      };
+    }).filter((entry) => entry.length > PROCEDURE_CHAR_LIMIT);
 
     expect(tooLong.map((entry) => `${entry.key}: ${entry.length}字`)).toEqual(
       []

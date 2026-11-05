@@ -1,5 +1,5 @@
 import {
-  PROCEDURES,
+  TOUR_PROCEDURES,
   type Procedure,
   type ProcedureActionLookup,
 } from "./procedures";
@@ -195,7 +195,8 @@ export function startTour(
 export function startTourByKey(
   key: string,
   lookup: ProcedureActionLookup,
-  procedures: readonly Procedure[] = PROCEDURES
+  // 案内に使わない手順書き（`procedures.ts` の `tour`）は、鍵が届いても始めない
+  procedures: readonly Procedure[] = TOUR_PROCEDURES
 ): TourState | undefined {
   const procedure = procedures.find((entry) => entry.key === key);
   return procedure ? startTour(procedure, lookup) : undefined;

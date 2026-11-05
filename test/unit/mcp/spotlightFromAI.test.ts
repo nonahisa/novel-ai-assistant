@@ -84,7 +84,8 @@ describe("内部（相談パネル）の繋ぎ目", () => {
 
   test("答えの中の名指しから、同じ ActionSpotlight を通している", () => {
     // **写しを作らない。** 案内と答えで瞬き方が変わると、直し漏れが出る
-    expect(panel).toContain("findMenuMentions(reply, menuEntries())");
+    // 照合先はモードに合わせた一覧（編集者メニューの項目も拾う。設計書6.118）
+    expect(panel).toContain("findMenuMentions(reply, guideMenuEntries())");
     // 相談の作品を添えて呼ぶ（作者の報告、2026-10-31）ので、引数は改行をまたぐ
     expect(panel).toMatch(/this\.spotlight\.show\(\s*mentions\[0\]\.command/);
     // **案内中は自動で光らせない**（段の印と奪い合いになる）
@@ -99,7 +100,7 @@ describe("内部（相談パネル）の繋ぎ目", () => {
     expect(at).toBeGreaterThan(-1);
     const body = panel.slice(at, at + 1_200);
     // メニューに実在するものだけを通す
-    expect(body).toContain("menuEntries().some((entry) => entry.command === command)");
+    expect(body).toContain("guideMenuEntries().some((entry) => entry.command === command)");
     // **`executeCommand` はここに出てこない**（光らせるだけ）
     expect(body, "コマンドを実行している").not.toContain("executeCommand");
   });
