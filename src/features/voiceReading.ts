@@ -10,7 +10,9 @@ import { AIError } from "../ai/types";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { withCancellableProgress } from "../views/progress";
 import { cancelItem, isCancelItem } from "../views/dialogs";
-import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
+import { confirmRun, notifyDone, rememberLabel, warnWithLog } from "../views/notify";
+import { rememberedAnswer, withRemembered } from "../core/confirmMemory";
+import { readConfirmMemory, saveConfirmMemory } from "../core/confirmMemoryStore";
 import { reportAIError } from "./reportAIError";
 import { CharacterStore } from "../core/characterStore";
 import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
@@ -282,22 +284,46 @@ export class VoiceReadingService {
 }
 
 /**
- * 本文を、この PC の外のホストへ送ってよいかを訊く（モーダル）。
+ * 本文を、この PC の外のホストへ送ってよいかを訊く。
  * 設定の接続先に別のホストを書いたときだけ出る。閉じたら送らない。
  *
- * 共通の確認の口（`confirmRun`）で出し、［送る（以降は訊かない）］を選べば、そのホストだけ
- * 覚える（鍵は `voice.remoteHost.<ホスト:ポート>`。作者の答え 2026-11-05）。覚えるのは
- * 送ると答えたときだけ。別のホスト・ポートに変わったら鍵が変わるので、必ず訊き直す。
+ * **画面の真ん中の窓（モーダル）で訊く**（作者の答え 2026-11-05「真ん中の窓に戻す」）。本文が外へ
+ * 出る確認なので、画面上部の選択の窓では目立ちが足りない。ボタンは［送る］と
+ * ［送る（以降は訊かない）］の2つで、後者を選べばそのホストだけ覚える（鍵は
+ * `voice.remoteHost.<ホスト:ポート>`）。覚えるのは送ると答えたときだけ。別のホスト・ポートに
+ * 変わったら鍵が変わるので、必ず訊き直す。覚えた答えは「訊かないことにした確認を見直す」と
+ * 設定から外せる（設計書6.89）
  */
 async function askSendToRemoteHost(host: string): Promise<boolean> {
-  return confirmRun(`本文が ${host} へ送られます。`, "送る", {
-    kind: "warning",
-    detail:
-      `人物の声で読むために、読む文を ${host} の音声合成のエンジンへ送ります。` +
-      "このホストはこの PC の外にあるため、送った文は相手に届きます。" +
-      "心当たりのないホストなら、送らないでください（設定 novelai.readAloud.voiceEngineUrl で変えられます）。",
-    remember: { id: voiceRemoteHostConfirmId(host) },
-  });
+  const id = voiceRemoteHostConfirmId(host);
+  const send = "送る";
+  if (rememberedAnswer(readConfirmMemory(), id) === send) {
+    logStep(`確認を省略（以降は訊かない）: ${id} / ${send}`);
+    return true;
+  }
+  const sendAndRemember = rememberLabel(send);
+  const picked = await vscode.window.showWarningMessage(
+    `本文が ${host} へ送られます。`,
+    {
+      modal: true,
+      detail:
+        `人物の声で読むために、読む文を ${host} の音声合成のエンジンへ送ります。` +
+        "このホストはこの PC の外にあるため、送った文は相手に届きます。" +
+        "心当たりのないホストなら、送らないでください（設定 novelai.readAloud.voiceEngineUrl で変えられます）。",
+    },
+    send,
+    sendAndRemember
+  );
+  if (picked === sendAndRemember) {
+    try {
+      await saveConfirmMemory(withRemembered(readConfirmMemory(), id, send));
+      logStep(`以降は訊かないことにしました: ${id} / ${send}`);
+    } catch (error) {
+      // 覚えられなくても、送ると答えたことは変わらない（次にまた訊くだけ）
+      logStep(`「以降は訊かない」を覚えられませんでした: ${id} / ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return picked === send || picked === sendAndRemember;
 }
 
 let shared: VoiceReadingService | undefined;

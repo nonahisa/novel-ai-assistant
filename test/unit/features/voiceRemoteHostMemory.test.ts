@@ -1,21 +1,35 @@
 import { describe, expect, test } from "vitest";
 import { VoiceReadingService } from "../../../src/features/voiceReading";
 import { buildReadingPlan } from "../../../src/core/readAloud";
-import { workspace } from "../support/vscodeStub";
-import { answerConfirms } from "../support/confirmPicker";
+import { window, workspace } from "../support/vscodeStub";
 import { describeRemembered, withoutRemembered } from "../../../src/core/confirmMemory";
 import { readConfirmMemory, saveConfirmMemory } from "../../../src/core/confirmMemoryStore";
 
 /**
  * 外のホストへ本文を送る確認を、ホストごとに「以降は訊かない」にできる（設計書6.42.3・6.89）。
  *
- * 製品の確認の窓（`confirmRun`）と覚え書きの読み書きを本物のまま通し、
+ * 確認は画面の真ん中の窓（モーダル。作者の答え 2026-11-05）。覚え書きの読み書きは本物のまま通し、
  * 設定だけを「書いたら次の読みで返る」入れ物に差し替える（= 次の起動で残るかを見る）。
  */
 
 const HOST = "192.168.1.20:10101";
 const SEND = "送る";
 const SEND_AND_REMEMBER = "送る（以降は訊かない）";
+/** 真ん中の窓（モーダルの警告）の答えを差し替え、出た窓を控える */
+function answerConfirms(answer: string | undefined) {
+  const shown: Array<{ message: string; modal: boolean; buttons: string[] }> = [];
+  const original = window.showWarningMessage;
+  window.showWarningMessage = (async (message: string, options: { modal?: boolean }, ...buttons: string[]) => {
+    shown.push({ message, modal: options?.modal === true, buttons });
+    return answer;
+  }) as unknown as typeof window.showWarningMessage;
+  return {
+    shown,
+    restore: () => {
+      window.showWarningMessage = original;
+    },
+  };
+}
 
 function stubSettingStore(initial: Record<string, string> = {}) {
   let stored: Record<string, string> = { ...initial };
@@ -74,6 +88,7 @@ describe("外のホストへ送る確認：ホストごとに「以降は訊か�
       expect(await speak(`http://${HOST}`)).toBe(true);
       expect(first.shown).toHaveLength(1);
       expect(first.shown[0].buttons).toEqual([SEND, SEND_AND_REMEMBER]);
+      expect(first.shown[0].modal, "真ん中の窓（モーダル）で訊く").toBe(true);
       expect(store.current()).toEqual({});
     } finally {
       first.restore();
