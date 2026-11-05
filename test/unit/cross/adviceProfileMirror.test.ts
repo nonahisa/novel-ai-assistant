@@ -41,6 +41,7 @@ import type { WorkEntry } from "../../../src/models/types";
  */
 
 /** 試験のあいだだけ使う置き場。**本物の保管庫も作品も触らない** */
+let tempRoot = "";
 let storage = "";
 let work = "";
 let previousEnv: string | undefined;
@@ -93,6 +94,7 @@ function filesUnder(root: string): string[] {
 
 beforeEach(() => {
   const root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-advice-"));
+  tempRoot = root;
   storage = nodePath.join(root, "storage");
   work = nodePath.join(root, "作品");
   fs.mkdirSync(storage, { recursive: true });
@@ -102,6 +104,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // 一時フォルダーを残さない（2026-11-05。%TEMP% に数万個溜まっていた）
+  fs.rmSync(tempRoot, { recursive: true, force: true });
   if (previousEnv === undefined) delete process.env[ADVICE_STORAGE_ENV];
   else process.env[ADVICE_STORAGE_ENV] = previousEnv;
 });

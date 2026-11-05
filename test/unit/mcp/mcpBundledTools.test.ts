@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
@@ -172,6 +172,13 @@ describe("許可の鍵——古い印をそのまま読む", () => {
 
 describe("門番——feature ごとに断る", () => {
   const temporary: string[] = [];
+
+  // 作った作品フォルダーを残さない（2026-11-05。%TEMP% に6千個以上溜まっていた）
+  afterEach(() => {
+    for (const folder of temporary.splice(0)) {
+      fs.rmSync(folder, { recursive: true, force: true });
+    }
+  });
 
   function workWith(tools: string[]): string {
     const folder = fs.mkdtempSync(

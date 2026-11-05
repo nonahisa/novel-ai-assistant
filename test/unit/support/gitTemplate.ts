@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
+import { afterAll } from "vitest";
 
 /**
  * 本物の git の倉庫を、**テストのファイルごとに1回だけ作って、テストごとに写す**
@@ -47,14 +48,27 @@ export function gitTemplate(
   build: (dir: string) => void
 ): GitTemplate {
   let template: string | undefined;
+  const made: string[] = [];
+  // **作った一時フォルダーは、このファイルの最後に全部消す**（2026-11-05）。
+  // 以前は消さずに、実行のたびに %TEMP% へ数百個ずつ溜めていた（29万個に達した）。
+  // 呼んだ側が後始末を書き忘れないよう、雛形を作る時点で自分で見張りを登録する
+  afterAll(() => {
+    for (const dir of made.splice(0)) {
+      // git の中身は読み取り専用のことがある。force と再試行で確実に消す
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+    template = undefined;
+  });
   return {
     copy() {
       if (!template) {
         const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), `${prefix}tpl-`));
+        made.push(dir);
         build(dir);
         template = dir;
       }
       const dest = fs.mkdtempSync(nodePath.join(os.tmpdir(), prefix));
+      made.push(dest);
       // 時刻も写す。索引（.git/index）が覚えている更新時刻とずれると、
       // git は中身を読み直して確かめる——結果は同じだが、そのぶん遅くなる
       fs.cpSync(template, dest, { recursive: true, preserveTimestamps: true });

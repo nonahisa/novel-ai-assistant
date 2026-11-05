@@ -38,6 +38,7 @@ import {
  * 4. 拡張機能が書き出す／取り込むこと。**作品フォルダーへは書かないこと**
  */
 
+let tempRoot = "";
 let storage = "";
 let work = "";
 let previousEnv: string | undefined;
@@ -103,6 +104,7 @@ function filesUnder(root: string): string[] {
 
 beforeEach(() => {
   const root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-writer-"));
+  tempRoot = root;
   storage = nodePath.join(root, "storage");
   work = nodePath.join(root, "作品");
   fs.mkdirSync(storage, { recursive: true });
@@ -112,6 +114,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // 一時フォルダーを残さない（2026-11-05。%TEMP% に数万個溜まっていた）
+  fs.rmSync(tempRoot, { recursive: true, force: true });
   if (previousEnv === undefined) delete process.env[ADVICE_STORAGE_ENV];
   else process.env[ADVICE_STORAGE_ENV] = previousEnv;
 });
