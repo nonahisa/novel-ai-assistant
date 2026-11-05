@@ -15,7 +15,7 @@ import {
   type SynopsisDoc,
 } from "../core/synopsisDoc";
 import { hasUnsavedOpenDocument } from "../core/openDocumentEdit";
-import { logFailure, useLogFile } from "../core/logger";
+import { workLog } from "../core/logger";
 import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
 import { loadSynopsisChapterMarks } from "../core/synopsisChapters";
 import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
@@ -246,9 +246,10 @@ async function refreshSynopsisDocAfterEpisodeEdit(work: WorkEntry): Promise<void
     await applyToSynopsisDoc(work, (current) => current);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    // 記録はこの作品のログへ（呼び手が向けていても、ここで向け直して取り違えない）
-    useLogFile(work.folderPath);
-    logFailure("各話あらすじの読み物の作り直し", { 詳細: detail });
+    // 記録はこの作品のログへ。共有の書き先は動かさず、この行だけ作品に固定する
+    workLog(work.folderPath).failure("各話あらすじの読み物の作り直し", {
+      詳細: detail,
+    });
     void vscode.window.showWarningMessage(
       `${SYNOPSIS_LABEL}の各話あらすじの部分を作り直せませんでした。${detail}` +
         `（あらすじ本体は保存済みです。［${REGENERATE_SYNOPSIS_DOC_COMMAND}］で作り直せます）`

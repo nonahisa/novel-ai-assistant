@@ -37,6 +37,11 @@ vi.mock("../../../src/core/logger", () => ({
   },
   logLine: () => undefined,
   useLogFile: () => undefined,
+  workLog: () => ({
+    line: () => undefined,
+    step: () => undefined,
+    failure: () => undefined,
+  }),
 }));
 
 const { WorkChatPanel } = await import("../../../src/features/workChatPanel");

@@ -31,6 +31,11 @@ vi.mock("../../../src/core/logger", () => ({
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
+  workLog: () => ({
+    line: () => undefined,
+    step: () => undefined,
+    failure: () => undefined,
+  }),
 }));
 
 /** AIに届くか。**接続できない道**の試験だけ false にする（既定は届く） */

@@ -264,7 +264,7 @@ import {
   SEARCH_TERMS_SYSTEM_PROMPT,
   SEARCH_TERMS_TEMPERATURE,
 } from "../prompts/searchTerms";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import { logFailure, logStep, useLogFile, workLog } from "../core/logger";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
 import { cancelItem } from "../views/dialogs";
@@ -1141,7 +1141,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     try {
       profile = await new ReaderTargetStore(work).load();
     } catch (error) {
-      logFailure("相談: 読者像の台帳を読めませんでした", {
+      // 書き先はこの作品に固定（共有の書き先は別の作品を向いていることがある）
+      workLog(work.folderPath).failure("相談: 読者像の台帳を読めませんでした", {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),
       });
@@ -2927,7 +2928,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const loaded = await store.loadAll();
       return loaded.records;
     } catch (error) {
-      logFailure("再読込の照合に使う資料を読めなかった", {
+      workLog(work.folderPath).failure("再読込の照合に使う資料を読めなかった", {
         種別: kind,
         理由: error instanceof Error ? error.message : String(error),
       });
@@ -2967,7 +2968,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談からの再読込", {
+      workLog(staged.work.folderPath).failure("相談からの再読込", {
         内容: message,
         詳細: failureDetail(error),
       });
@@ -3023,7 +3024,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const resolved = await this.resolveLocateTarget(staged);
     if (!resolved) {
       const named = staged.locate.path ?? "";
-      logFailure("相談の「そこを見せて」：指されたファイルが無い", {
+      workLog(staged.work.folderPath).failure("相談の「そこを見せて」：指されたファイルが無い", {
         指定: named,
         作品: staged.work.title,
       });
@@ -3123,7 +3124,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // された一文で、作者には読めず、次に何をすればよいかも分からない。
       // 中身はログへ残す（開発側はそこで追える）
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談の「そこを見せて」：開けなかった", {
+      workLog(staged.work.folderPath).failure("相談の「そこを見せて」：開けなかった", {
         場所: target,
         内容: message,
       });
@@ -3163,7 +3164,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (await pathExists(requested)) return { filePath: requested };
     } catch (error) {
       // 実在を確かめられないだけなら、引き当てへ進む（開けるかは次で分かる）
-      logFailure("相談の「そこを見せて」：実在を確かめられなかった", {
+      workLog(staged.work.folderPath).failure("相談の「そこを見せて」：実在を確かめられなかった", {
         指定: staged.locate.path,
         理由: error instanceof Error ? error.message : String(error),
       });
@@ -3176,16 +3177,16 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const { episodes } = await scanWork(staged.work);
       const found = resolveEpisodeByNumber(episodes, chapter);
       if (!found) return undefined;
-      const line = await this.collectedLineOf(found, chapter);
+      const line = await this.collectedLineOf(found, chapter, staged.work);
       // **引き当てたことは残す。** 画面には出さない（作者にとっては
       // 「そこが開いた」だけでよい）が、外したときに追えないと直せない
-      logStep(
+      workLog(staged.work.folderPath).step(
         `相談: 指されたファイル「${staged.locate.path}」は無いので、` +
           `第${chapter}話（${found.fileName}${line !== undefined ? ` の${line}行目` : ""}）を開きました`
       );
       return { filePath: found.filePath, line };
     } catch (error) {
-      logFailure("相談の「そこを見せて」：作品を走査できなかった", {
+      workLog(staged.work.folderPath).failure("相談の「そこを見せて」：作品を走査できなかった", {
         理由: error instanceof Error ? error.message : String(error),
       });
       return undefined;
@@ -3200,14 +3201,15 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   private async collectedLineOf(
     episode: EpisodeFile,
-    chapter: number
+    chapter: number,
+    work: WorkEntry
   ): Promise<number | undefined> {
     if (!isCollectedFile(episode.collectedCount)) return undefined;
     try {
       const { text } = await readTextFile(episode.filePath);
       return collectedEpisodeLineOf(text, chapter);
     } catch (error) {
-      logFailure("相談の「そこを見せて」：合本を読めなかった", {
+      workLog(work.folderPath).failure("相談の「そこを見せて」：合本を読めなかった", {
         場所: episode.fileName,
         理由: error instanceof Error ? error.message : String(error),
       });
@@ -3243,7 +3245,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private async runStagedNow(id: string, label: string): Promise<void> {
     const staged = this.pendingRuns.get(id);
     if (!staged) return;
-    logStep(`相談: 頼まれたので押すのを待たずに動かした（${staged.kind}）`);
+    workLog(staged.work.folderPath).step(
+      `相談: 頼まれたので押すのを待たずに動かした（${staged.kind}）`
+    );
     this.postAll({
       type: "note",
       message: chatRunNowMessage(staged.kind, isEditorMode(), label),
@@ -3252,7 +3256,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       await this.runner.run(staged.work, staged.kind, staged.filePath);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談からの機能起動（頼まれて今すぐ）", {
+      workLog(staged.work.folderPath).failure("相談からの機能起動（頼まれて今すぐ）", {
         内容: message,
         詳細: failureDetail(error),
       });
@@ -3279,7 +3283,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談からの機能起動", {
+      workLog(staged.work.folderPath).failure("相談からの機能起動", {
         内容: message,
         詳細: failureDetail(error),
       });
@@ -3343,7 +3347,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       */
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談からの書き込み", {
+      workLog(staged.work.folderPath).failure("相談からの書き込み", {
         内容: message,
         詳細: failureDetail(error),
       });
@@ -3401,7 +3405,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       */
       const after = await readChatEditTarget(undo.work, undo.edit.target);
       if (after !== undo.before) {
-        logFailure("相談からの書き込みの取り消し", {
+        workLog(undo.work.folderPath).failure("相談からの書き込みの取り消し", {
           内容: "書き戻したが、値が元へ戻っていない",
           場所: `${where.file} / ${where.item}`,
         });
@@ -3426,7 +3430,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談からの書き込みの取り消し", {
+      workLog(undo.work.folderPath).failure("相談からの書き込みの取り消し", {
         内容: message,
         詳細: failureDetail(error),
       });
@@ -3678,7 +3682,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談の「できること」からの機能起動", {
+      workLog(context.work.folderPath).failure("相談の「できること」からの機能起動", {
         内容: message,
         詳細: failureDetail(error),
       });
@@ -3752,7 +3756,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談メモの保存", { 内容: message });
+      workLog(context.work.folderPath).failure("相談メモの保存", {
+        内容: message,
+      });
       this.postError(`保存できませんでした: ${message}`);
     }
   }
@@ -3812,7 +3818,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       this.postAll({ type: "note", message: describeChatSync(result) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談から資料への反映", {
+      workLog(context.work.folderPath).failure("相談から資料への反映", {
         内容: message,
         詳細: failureDetail(error),
       });

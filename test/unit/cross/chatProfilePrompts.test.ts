@@ -331,7 +331,8 @@ describe("診断していなければ、何も足さない（相談は止めな�
     expect(at, "readerProfileFor が無い").toBeGreaterThanOrEqual(0);
     const body = source.slice(at, source.indexOf("\n  }", at));
     expect(body).toContain("catch (error)");
-    expect(body).toContain("logFailure(");
+    // 書き先はこの作品に固定して残す（workLog の failure）
+    expect(body).toContain(".failure(");
     // 投げ直したら相談が止まる
     expect(body).not.toContain("throw");
   });

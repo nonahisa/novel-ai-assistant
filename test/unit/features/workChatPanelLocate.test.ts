@@ -24,6 +24,11 @@ vi.mock("../../../src/core/logger", () => ({
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
+  workLog: () => ({
+    line: () => undefined,
+    step: () => undefined,
+    failure: () => undefined,
+  }),
 }));
 
 const revealed: Array<{ filePath: string; line: number; hasManuscript: boolean }> = [];

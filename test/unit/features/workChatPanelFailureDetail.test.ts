@@ -25,6 +25,14 @@ vi.mock("../../../src/core/logger", () => ({
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
+  // 作品固定の書き先（workLog）で書く失敗も、同じ控えへ集める
+  workLog: () => ({
+    line: () => undefined,
+    step: () => undefined,
+    failure: (context: string, detail: Record<string, unknown>) => {
+      failures.push({ context, detail });
+    },
+  }),
 }));
 
 /** 相談の記録はディスクへ書く。ここでは配線を見ないので黙らせる */

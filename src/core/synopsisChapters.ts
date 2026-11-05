@@ -7,7 +7,7 @@ import type { WorkFormatKey } from "./workFormat";
 import { ChapterStore } from "./chapterStore";
 import { readWorkFormat } from "./workFormatStore";
 import { scanWork } from "./scanner";
-import { logFailure } from "./logger";
+import { workLog } from "./logger";
 
 /**
  * 各話あらすじの文書へ挟む「章の印」を作る（設計書6.66.4の3）。
@@ -88,7 +88,8 @@ export async function loadSynopsisChapterMarks(
   try {
     chapters = (await new ChapterStore(work).load()).chapters;
   } catch (error) {
-    logFailure("あらすじの文書の章立て", {
+    // 書き先はこの作品に固定（共有の書き先は別の作品を向いていることがある）
+    workLog(work.folderPath).failure("あらすじの文書の章立て", {
       作品: work.title,
       内容: error instanceof Error ? error.message : String(error),
     });
@@ -107,7 +108,7 @@ export async function loadSynopsisChapterMarks(
       await readWorkFormat(work)
     );
   } catch (error) {
-    logFailure("あらすじの文書の章立て", {
+    workLog(work.folderPath).failure("あらすじの文書の章立て", {
       作品: work.title,
       内容: error instanceof Error ? error.message : String(error),
     });
