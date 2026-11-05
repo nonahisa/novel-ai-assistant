@@ -75,8 +75,10 @@ describe("編集者モードの質問", () => {
     expect(built.procedureKey).toBe("editorialEditor");
     expect(built.selected).toContain("作品管理 → 編集者連携");
     // 段の名前は編集者メニューの行の名前で出る（詳細メニューの「保存・同期」ではない）
-    expect(built.text).toContain("1. 作者の最新の原稿を受け取る〔編集者メニュー〕");
-    expect(built.text).toContain("置いた提案の一覧〔編集者メニュー → 5. 置いた提案を見直す〕");
+    expect(built.text).toContain("\n・1. 作者の最新の原稿を受け取る〔編集者メニュー〕：");
+    expect(built.text).toContain("\n・置いた提案の一覧〔編集者メニュー → 5. 置いた提案を見直す〕：");
+    // 名前の番号に手順書きの番号を重ねない（「2. 1. …」にしない）
+    expect(built.text).not.toMatch(/\d+\. \d+\. /);
   });
 
   test("編集者モードでは、作者の側の手順書きを選ばない", () => {

@@ -411,7 +411,7 @@ export const PROCEDURES: readonly Procedure[] = [
       },
       {
         command: "novelai.saveAndSync",
-        why: "作者の最新の原稿を受け取る",
+        why: "校閲を始める前に、GitHub から受け取る",
         check: "こちらからは何も送らない",
       },
       {
@@ -421,7 +421,7 @@ export const PROCEDURES: readonly Procedure[] = [
       },
       {
         command: "novelai.checkNotation",
-        why: "機械に探させる。誤字脱字と推敲も同じ所にある",
+        why: "AIを使わずに直す候補を探す。誤字脱字と推敲も同じ所にある",
         check: "提案パネルの［適用］で提案として置く",
       },
       {
@@ -614,10 +614,20 @@ export function renderProcedure(
 ): string {
   const lines: string[] = [`■ ${procedure.title}（${procedure.whenToRead}）`];
 
-  let number = 0;
-  for (const step of procedure.steps) {
+  const resolved = procedure.steps.flatMap((step) => {
     const action = lookup(step.command);
-    if (!action) continue;
+    return action ? [{ step, action }] : [];
+  });
+  /*
+    **名前が番号で始まる段があれば、手順書きの番号を付けない**（設計書6.118）。編集者メニューの
+    手順の行は「1. 作者の最新の原稿を受け取る」のように番号ごと名前で、そこへ手順書きの番号を
+    重ねると「2. 1. …」になり、どちらの番号が順序か読めない。名前の番号は削らない——画面の字と
+    違えると、光らせる札が拾えなくなる。並びはそのまま作業の順（見出しで「この順」と言う）
+  */
+  const numbered = !resolved.some(({ action }) => /^\d+\.\s/.test(action.label));
+
+  let number = 0;
+  for (const { step, action } of resolved) {
     number += 1;
     const note = action.note ? `（${action.note}）` : "";
     // 前提は段の末尾に足す。「先に何が要るか」は、その操作を押す直前に
@@ -625,8 +635,9 @@ export function renderProcedure(
     const needs = action.prerequisiteNote ? ` ${action.prerequisiteNote}` : "";
     // 場所は名前の直後に置く。AIが名前と場所を組で写せるように（設計書6.118）
     const where = action.where ? `〔${action.where}〕` : "";
+    const head = numbered ? `${number}. ` : "・";
     lines.push(
-      `${number}. ${action.label}${note}${where}：${step.why} → ${step.check}${needs}`
+      `${head}${action.label}${note}${where}：${step.why} → ${step.check}${needs}`
     );
   }
 
