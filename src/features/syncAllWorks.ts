@@ -155,7 +155,7 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
     const next = nextSteps(plans, []);
     whenNoticePicked(
       vscode.window.showInformationMessage(
-        `同期するものはありませんでした。${describeSyncSkips(plans)}`,
+        `同期するものはありませんでした。${describeSyncSkips(plans, "after")}`,
         ...next.map((step) => step.label)
       ),
       (picked) => runNextStep(next, picked),
@@ -749,7 +749,7 @@ async function report(
   autoResend: boolean
 ): Promise<void> {
   const failed = outcomes.filter((one) => one.error);
-  const summary = describeOutcomes(outcomes, { autoResend }) + describeSyncSkips(plans);
+  const summary = describeOutcomes(outcomes, { autoResend }) + describeSyncSkips(plans, "after");
   const next = nextSteps(plans, outcomes);
 
   if (failed.length === 0) {

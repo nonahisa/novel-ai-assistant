@@ -115,12 +115,12 @@ describe("置き場が多いときの確認の窓", () => {
     const confirm = shown.find((text) => text.includes("か所を同期します"));
     expect(confirm).toBeDefined();
     const text = confirm as string;
-    // リポジトリでない置き場3は、同期する側に入らず「次は同期しません」に回る。他の6か所は入る
+    // リポジトリでない置き場3は、同期する側に入らず「以下は同期しません」に回る。他の6か所は入る
     expect(text).toContain(`${PLACES - 1}か所を同期します`);
     const order = [0, 1, 2, 4, 5, 6].map((n) => text.indexOf(`作品${n}`));
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(text.slice(0, text.indexOf("次は同期しません"))).not.toContain("作品3");
+    expect(text.slice(0, text.indexOf("以下は同期しません"))).not.toContain("作品3");
     expect(text).toContain("作品3：Gitで管理していません");
     // 件数は置き場ごとの値（取り違えていない）
     for (const n of [0, 1, 2, 4, 5, 6]) {

@@ -435,7 +435,14 @@ export function worksTouchedByPaths(
  * `syncAllWorks` の中に置いていたが、**出す文言そのものを試験から
  * 見たい**ので、VS Code に依存しない側へ移した。
  */
-export function describeSyncSkips(plans: readonly SyncTargetPlan[]): string {
+export function describeSyncSkips(
+  plans: readonly SyncTargetPlan[],
+  /**
+   * 前の確認の窓か、あとの報告か（作者の答え 2026-11-05：場面で分ける）。
+   * 以前は両方「次は同期しません。」で、あとの報告では「次回は同期しない」と読めた
+   */
+  when: "before" | "after" = "before"
+): string {
   const skipped = plans.filter(
     (plan) => plan.skip && !plan.commit && !plan.pull && !plan.push
   );
@@ -449,7 +456,8 @@ export function describeSyncSkips(plans: readonly SyncTargetPlan[]): string {
         }`
     )
     .join("\n");
-  return `\n\n次は同期しません。\n${detail}`;
+  const head = when === "after" ? "以下は同期できませんでした。" : "以下は同期しません。";
+  return `\n\n${head}\n${detail}`;
 }
 
 /** 確認の窓のボタン。**押された文字で分けるので、定数を1か所に置く** */

@@ -437,7 +437,7 @@ test("原稿エディターで打って保存しないうちに全作品同期�
       expect(confirm ?? "", "保存してから記録することが、押す前に見える").toMatch(
         new RegExp(`・${E2E_WORK_TITLE}：記録( \\d+件)?（未保存 1件を先に保存）`)
       );
-      // git の無い作品は同期の相手に入らず、「次は同期しません」の側に理由つきで並ぶ
+      // git の無い作品は同期の相手に入らず、「以下は同期しません」の側に理由つきで並ぶ
       expect(confirm).toContain(`・${OTHER_TITLE}：Gitで管理していません`);
       await pressDialogButton(page, "同期する");
 

@@ -275,7 +275,7 @@ describe("母艦のレビュー（2026-10-30）", () => {
 
     // 書庫は「同期するもの無し」。1作品目の一時的な失敗は、同じ書庫が読めたので出さない
     expect(shown.join("\n")).toContain("同期するものはありませんでした。");
-    expect(shown.join("\n")).not.toContain("次は同期しません");
+    expect(shown.join("\n")).not.toContain("以下は同期できませんでした");
   });
 
   test("同じ置き場が最後まで読めなかったときは、その失敗を報告に残す", async () => {
@@ -300,7 +300,7 @@ describe("母艦のレビュー（2026-10-30）", () => {
 
     await syncAllWorks({ registry, monitor, run });
 
-    expect(shown.join("\n")).toContain("次は同期しません");
+    expect(shown.join("\n")).toContain("以下は同期できませんでした");
   });
 
   test("開いたときの点検で何も取り込まなかったときは、置き場の中身が変わったと知らせない", async () => {
