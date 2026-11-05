@@ -1,3 +1,4 @@
+import { settleLogWrites, useLogFile } from "../core/logger";
 import * as assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -193,6 +194,8 @@ async function checkTypedTextReachesDocument(): Promise<void> {
     assert.equal(saved.replace(/\r\n/g, "\n"), "一行目の字\n二行目");
   } finally {
     view.close();
+    useLogFile(undefined);
+    await settleLogWrites();
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
@@ -246,6 +249,8 @@ async function checkClipboardMenu(): Promise<void> {
   } finally {
     view.close();
     await vscode.env.clipboard.writeText(saved);
+    useLogFile(undefined);
+    await settleLogWrites();
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
@@ -264,6 +269,8 @@ async function checkTypedTextSurvivesClose(): Promise<void> {
     assert.equal(await document.save(), true, "保存できませんでした");
     assert.equal(await fs.readFile(file, "utf8"), "閉じる前に打った字");
   } finally {
+    useLogFile(undefined);
+    await settleLogWrites();
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }

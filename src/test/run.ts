@@ -1,3 +1,4 @@
+import { settleLogWrites, useLogFile } from "../core/logger";
 import * as assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -188,6 +189,8 @@ export async function run(): Promise<void> {
       assert.equal(loaded.errors.length, 0);
       assert.equal(loaded.characters[0].authorNotes, "作者のメモ");
     } finally {
+      useLogFile(undefined);
+      await settleLogWrites();
       await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
@@ -254,6 +257,8 @@ export async function run(): Promise<void> {
       assert.equal(proposed.authorNotes, "作者のメモ");
       assert.equal(proposed.exportNote, "公開時の注記");
     } finally {
+      useLogFile(undefined);
+      await settleLogWrites();
       await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
@@ -303,6 +308,8 @@ export async function run(): Promise<void> {
       };
       assert.equal(retired.name, "リン");
     } finally {
+      useLogFile(undefined);
+      await settleLogWrites();
       await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
@@ -350,6 +357,8 @@ export async function run(): Promise<void> {
       assert.equal(after.characters[0].authorNotes, "作者のメモ");
       assert.equal(await pending.count(), 0);
     } finally {
+      useLogFile(undefined);
+      await settleLogWrites();
       await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
@@ -385,6 +394,8 @@ export async function run(): Promise<void> {
       assert.equal(loaded.characters[0].personality, "無鉄砲");
       assert.equal(loaded.characters[0].role, "主人公");
     } finally {
+      useLogFile(undefined);
+      await settleLogWrites();
       await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
@@ -438,6 +449,8 @@ export async function run(): Promise<void> {
       assert.ok(ignore.includes(".aiwriter/cache/"));
       assert.ok(ignore.includes(".novelai-recovery/"));
     } finally {
+      useLogFile(undefined);
+      await settleLogWrites();
       await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
@@ -476,6 +489,8 @@ export async function run(): Promise<void> {
       });
       assert.equal(await fs.readFile(characterPath, "utf8"), externallyEditedJson);
     } finally {
+      useLogFile(undefined);
+      await settleLogWrites();
       await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
@@ -556,6 +571,8 @@ export async function run(): Promise<void> {
         ["灯"]
       );
     } finally {
+      useLogFile(undefined);
+      await settleLogWrites();
       await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
@@ -624,6 +641,8 @@ export async function run(): Promise<void> {
           monitor.dispose();
         }
       } finally {
+        useLogFile(undefined);
+        await settleLogWrites();
         await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
@@ -722,6 +741,8 @@ export async function run(): Promise<void> {
         );
         assert.equal((await unmergedPaths(a)).length, 0);
       } finally {
+        useLogFile(undefined);
+        await settleLogWrites();
         await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
@@ -764,6 +785,8 @@ export async function run(): Promise<void> {
         );
         assert.equal(after.records[0].name, "fire");
       } finally {
+        useLogFile(undefined);
+        await settleLogWrites();
         await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
@@ -829,6 +852,8 @@ export async function run(): Promise<void> {
           saved,
           vscode.ConfigurationTarget.Global
         );
+        useLogFile(undefined);
+        await settleLogWrites();
         await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
@@ -862,6 +887,8 @@ export async function run(): Promise<void> {
         assert.equal(opened.viewType, MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
       } finally {
         await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+        useLogFile(undefined);
+        await settleLogWrites();
         await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     }
@@ -1142,6 +1169,8 @@ async function checkRunRequestRoundTrip(): Promise<void> {
     Object.defineProperty(vscode.window, "showWarningMessage", warningDescriptor);
     // 走らせた機能のログ（.aiwriter/logs）の書き込みが、終わった直後にまだ続いていることがある。
     // 消す最中に書かれると ENOTEMPTY で落ちる（2026-09-25、配布前の検査で1度落ちた）ので、少し待ってやり直す
+    useLogFile(undefined);
+    await settleLogWrites();
     await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }

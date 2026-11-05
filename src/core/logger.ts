@@ -136,6 +136,19 @@ export function aiCallLog(
  */
 const MAX_ACTION_LOG_BYTES = 1_000_000;
 
+/**
+ * 書きかけのログの書き込みが終わるのを待つ（試験の後始末のため）。
+ *
+ * ログは待ち行列で順に書くので、呼んだ処理が終わったあとにも書き込みが届く。開発用の試験が
+ * 一時フォルダーを消したあとにそれが届くと、`.aiwriter/logs/actions.log` だけのフォルダーが
+ * 作り直されて %TEMP% に残っていた（2026-11-05、数百個）。消す前にこれを待つ。
+ * もう1つの道は、あとの処理が書き先を決め直さずに `logLine` を呼び、消した作品のログへ書くこと
+ * （共有の書き先 `logFilePath` が残っているため）。試験は消す前に `useLogFile(undefined)` で外す
+ */
+export function settleLogWrites(): Promise<void> {
+  return writeQueue;
+}
+
 function appendToFile(text: string, target: string | undefined): void {
   if (!target) return;
 

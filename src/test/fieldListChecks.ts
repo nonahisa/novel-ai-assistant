@@ -1,3 +1,4 @@
+import { settleLogWrites, useLogFile } from "../core/logger";
 import * as assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -687,6 +688,8 @@ async function pendingFiles(work: WorkEntry): Promise<string[]> {
 
 async function removeTemporary(root: string): Promise<void> {
   // 書き終えた直後のログ（.aiwriter/logs）が残っていることがある（run.ts と同じ待ち方）
+  useLogFile(undefined);
+  await settleLogWrites();
   await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
