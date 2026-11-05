@@ -15,7 +15,7 @@
  *    作品一覧の見出しのボタンは「保存・同期」。どの行にも「編集部」が残っていない（320）
  * 2. 編集者モードへ切り替えた瞬間（326。2026-11-05 夜からは設計書5.6.6）：簡単ステップメニューが消え、
  *    横の枠の一番上に編集者メニュー（「1. 作者の最新の原稿を受け取る」〜「7. 作者の採否を見る」）が出る。
- *    一番上の作品の行を押すと、作品の選び直し（「校閲する作品」）が出る。詳細メニューの「編集者連携」に
+ *    作者モードで登録した自分の作品は出さず、一番上は「参加のリンクを貼る」になる。詳細メニューの「編集者連携」に
  *    「校閲開始／終了」「修正を提案する」「校閲を終えて返す」と「編集者提案確認」が出て、「編集者の提案を見る」は無い
  *    （333・317）。「修正を提案する」（325）：本文を選ばずに押すと「修正したい所を本文で選んでから押してください
  *    （右クリックからも出せます）。」、素のエディターで選んでから押すと入力欄「修正を提案する（1/2）：修正案」へ進む。
@@ -33,7 +33,7 @@ import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { findAction } from "../../src/core/actionTree";
 import { quickInputMessage, waitForQuickInput } from "./support/quickInput";
-import { SIDEBAR_LAUNCH, scrollTreeUntilRow, showSidebar, treeRow } from "./support/sidebar";
+import { SIDEBAR_LAUNCH, scrollTreeUntilRow, showSidebar } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import {
@@ -46,7 +46,6 @@ import {
   pressWorkbenchKey,
   quickInputWaitContext,
   quickOpen,
-  quickPickTitle,
   textEditorVisibleText,
 } from "./support/workbenchDom";
 
@@ -260,16 +259,16 @@ test("作者モードのメニューは作者の操作だけで、編集者モ�
       );
       await waitUntil(async () => (await page.locator(".pane-header", { hasText: "簡単ステップメニュー" }).count()) === 0, "編集者モードでは簡単ステップメニューが消える", 10_000);
       /*
-        一番上は作品の行（「作品：〈作品名〉」）。押すと、参加している作品の選び直し（作品を足す口つき）が出る
-        （単体テスト `stepMenuEditorMode.test.ts` の「編集者メニューの並び」も同じ所を見ている）
+        この作品は作者モードで登録した自分の作品なので、編集者メニューには出さない（作者の指示 2026-11-05 夜
+        「編集モードだと自分の作品を出さないようにしてください」。`core/editorWorks.ts`）。一番上は作品の行ではなく
+        参加の口になる。参加した作品の行と、押したときの選び直し（「校閲する作品」）は `editorMenuFlow.test.ts` が見ている
       */
       const rows = await paneRows(page, "編集者メニュー");
-      expect(rows[0]?.label, `一番上：${JSON.stringify(rows.slice(0, 2))}`).toBe(`作品：${E2E_WORK_TITLE}`);
-      await treeRow(page, "作品：").click();
-      await waitUntil(async () => (await quickPickTitle(page)) === "校閲する作品", "作品の行を押すと、校閲する作品の選び直しが出る", 10_000).catch(async (error: unknown) => {
-        throw new Error(`${String(error)}（選ぶ画面：${JSON.stringify(await quickPickTitle(page))}）`);
-      });
-      await page.keyboard.press("Escape");
+      expect(rows[0]?.label, `一番上：${JSON.stringify(rows.slice(0, 2))}`).toBe("参加のリンクを貼る");
+      expect(
+        rows.some((row) => row.label === `作品：${E2E_WORK_TITLE}`),
+        `自分の作品が編集者メニューに出ています：${JSON.stringify(rows)}`
+      ).toBe(false);
 
       // 詳細メニューの編集者連携に、編集者の操作が出る
       await focusPane(page, "詳細メニュー");
