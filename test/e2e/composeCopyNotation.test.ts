@@ -36,8 +36,15 @@ async function readClipboard(session: E2ESession): Promise<{ text: string; html:
   return session.app.evaluate(({ clipboard }) => ({ text: clipboard.readText(), html: clipboard.readHTML() }));
 }
 
-/** 面の中身を全部選んでコピーする（`copy` は製品の面が受ける） */
-async function copyAll(session: E2ESession, frame: Frame): Promise<{ text: string; html: string }> {
+/**
+ * 面の中身を全部選んでコピーする（`copy` は製品の面が受ける）。
+ *
+ * `marker` は、コピーした字の終わりに必ずある字（「見た。」など）。全件の画面テストで1回だけ、読んだ字が
+ * 「ﾁ@ﾁbﾓﾔ…」と化けて返り、単独で走らせ直すと通った（2026-11-06、0.129.0 の配布前の検査）。書き込みの途中や、
+ * ほかのプロセスがクリップボードを開いている間に読むと化けることがあるので、「目印が入っている」かつ
+ * 「少し置いて読み直しても同じ」になるまで読み直す。製品が違う字を入れたときは、待ちきれずに中身を添えて落ちる
+ */
+async function copyAll(session: E2ESession, frame: Frame, marker: string): Promise<{ text: string; html: string }> {
   await frame.locator("#compose").click();
   // 前のコピーと取り違えない：先にクリップボードを空にする
   await session.app.evaluate(({ clipboard }) => clipboard.clear());
@@ -47,9 +54,12 @@ async function copyAll(session: E2ESession, frame: Frame): Promise<{ text: strin
   await waitUntil(
     async () => {
       copied = await readClipboard(session);
-      return copied.text !== "";
+      if (!copied.text.includes(marker) || !copied.html.includes("<ruby>")) return false;
+      await session.page.waitForTimeout(150);
+      const again = await readClipboard(session);
+      return again.text === copied.text && again.html === copied.html;
     },
-    "コピーしたあと、OS のクリップボードに字が入る",
+    `コピーしたあと、OS のクリップボードに「${marker}」まで入った字が落ち着く`,
     10_000
   ).catch(async (error: unknown) => {
     throw new Error(`${String(error)}（クリップボード：${JSON.stringify(copied)}／面の字：${JSON.stringify(await composeText(frame))}）`);
@@ -75,7 +85,7 @@ test("コピーすると、素のテキストは｜灯《あかり》の記法�
       try {
         /* ── .txt の原稿 ── */
         const frame = await openEpisode(page, TXT, "見た");
-        const copied = await copyAll(session, frame);
+        const copied = await copyAll(session, frame, "見た。");
         expect(copied.text.replace(/\r\n/g, "\n").trim(), "素のテキストが、投稿サイトの記法になっていない").toBe(PLAIN.trim());
         expect(copied.text, "読み仮名が記法の外（地の文）に混ざっている").not.toMatch(/あかり[^》]/);
         expect(copied.text, "ルビの内部の記法 {灯|あかり} のまま入っている").not.toContain("{灯|あかり}");
@@ -104,7 +114,7 @@ test("コピーすると、素のテキストは｜灯《あかり》の記法�
 
         /* ── .md の原稿：{灯|あかり} ではなく ｜灯《あかり》 で入る ── */
         const mdFrame = await openEpisode(page, MD, "見えた");
-        const mdCopied = await copyAll(session, mdFrame);
+        const mdCopied = await copyAll(session, mdFrame, "見えた。");
         expect(mdCopied.text.replace(/\r\n/g, "\n").trim(), ".md の原稿の素のテキストが、投稿サイトの記法になっていない").toBe(PLAIN_MD.trim());
         expect(mdCopied.text, ".md のコピーに {灯|あかり} が残っている").not.toContain("{灯|あかり}");
         expect(mdCopied.html, ".md のコピーの HTML に <ruby> が無い").toContain("<ruby>灯<rt>あかり</rt></ruby>");
