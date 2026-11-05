@@ -72,6 +72,29 @@ async function actionLogLines(session: E2ESession): Promise<string[]> {
   return text.replace(/\r\n/g, "\n").split("\n");
 }
 
+/**
+ * 保管庫の記録（`user-data/User/globalStorage/<拡張機能>/.aiwriter/logs/actions.log`）の行。
+ *
+ * **モデルの読める長さの行は、作品ではなく保管庫に残る**（作品の決まらない処理・AIチューニングの記録は
+ * 保管庫へ。作者の裁定 2026-09-19、設計書の記録の書き先）。0.127.2 までは、直前に使った作品の記録へ
+ * 偶然入っていたので作品の記録を読んでいたが、0.127.3 で命令の入口で書き先を外すようにしてから、
+ * 設計どおり保管庫へ入るようになった（2026-11-05、0.127.5 の全件で落ちた）
+ */
+async function vaultLogLines(session: E2ESession): Promise<string[]> {
+  const files: string[] = [];
+  const walk = async (folder: string, depth: number): Promise<void> => {
+    if (depth > 6) return;
+    for (const entry of await readdir(folder, { withFileTypes: true }).catch(() => [])) {
+      const full = path.join(folder, entry.name);
+      if (entry.isDirectory()) await walk(full, depth + 1);
+      else if (entry.name === "actions.log" && path.basename(folder) === "logs") files.push(full);
+    }
+  };
+  await walk(path.join(session.root, "user-data", "User", "globalStorage"), 0);
+  const texts = await Promise.all(files.map((file) => readFile(file, "utf8").catch(() => "")));
+  return texts.join("\n").replace(/\r\n/g, "\n").split("\n");
+}
+
 /** 「作者の実測 N トークンを使います」の行（`ai/ollamaProvider.ts` の `withMeasured` の文を写す） */
 function measuredLine(tokens: number): string {
   return `Ollama：${FAKE_OLLAMA_MODEL} の読める長さは、作者の実測 ${tokens} トークンを使います（申告 ${DECLARED_TOKENS}。AIチューニングの記録から）。`;
@@ -241,10 +264,10 @@ test("申告より短いところで頭打ちになるモデルで読める長�
         await page.keyboard.press("Escape");
         await waitUntil(async () => (await quickPickTitle(page)) === undefined, "モデル選択の一覧が閉じる", 10_000);
 
-        /* ── 3. 出力パネルの行（actions.log で読む）：一覧を開いた時点で出ている ── */
+        /* ── 3. 出力パネルの行（保管庫の actions.log で読む）：一覧を開いた時点で出ている ── */
         const line = measuredLine(measured);
         await waitUntil(
-          async () => (await actionLogLines(session)).some((text) => text.includes(line)),
+          async () => (await vaultLogLines(session)).some((text) => text.includes(line)),
           "「作者の実測 N トークンを使います」の行が書かれる",
           15_000
         ).catch(async (error: unknown) => {
@@ -306,7 +329,8 @@ test("申告より短いところで頭打ちになるモデルで読める長�
         ).toBe(true);
 
         /* ── 3（続き）. 実測を使う行は、一覧と誤字脱字の両方を通しても1度だけ ── */
-        const measuredLines = lines.filter((text) => text.includes(line));
+        // 一覧を開いたときは保管庫、誤字脱字の中では作品の記録へ書かれうるので、両方を合わせて1度だけ
+        const measuredLines = [...(await vaultLogLines(session)), ...lines].filter((text) => text.includes(line));
         expect(measuredLines, `「作者の実測 ${measured} トークンを使います」の行が1度だけでない`).toHaveLength(1);
       },
       fakeOllamaLaunch(fake)
