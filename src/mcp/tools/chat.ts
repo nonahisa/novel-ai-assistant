@@ -660,8 +660,12 @@ export function chatPrompt(
     「入れると操作の話へ寄りやすい」ので外していたが、それでは製品と
     違う材料で測ることになる（CLAUDE.md の失敗5）。
   */
+  // 材料は撃った作品のモードに合わせる（作者の裁定 2026-11-06）。編集用の写しなら編集者向けの目次と順路
+  const guideMode = readWorkFolderMode(input.folder) === "editor" ? "editor" : "author";
   const guide =
-    input.featureIndex === false ? undefined : workChatFeatureGuide(input.question, history);
+    input.featureIndex === false
+      ? undefined
+      : workChatFeatureGuide(input.question, history, guideMode);
   const base = buildWorkChatSystemPrompt({
     featureIndex: guide?.featureIndex ?? false,
     paid: input.paid,

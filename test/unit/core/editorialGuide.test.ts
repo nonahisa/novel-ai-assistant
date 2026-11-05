@@ -9,7 +9,7 @@ import {
   featureNameTermsIn,
   normalizeGuideQuestion,
 } from "../../../src/core/guideSelect";
-import { selectProcedure } from "../../../src/core/procedures";
+import { PROCEDURES, proceduresForMode, selectProcedure } from "../../../src/core/procedures";
 import { EDITOR_STEP_DEFS } from "../../../src/core/stepDefs";
 import { MENU_PATH_START } from "../../../src/core/menuPath";
 
@@ -92,5 +92,29 @@ describe("編集者モードの質問", () => {
     expect(index).toContain("【編集者メニュー");
     for (const def of EDITOR_STEP_DEFS) expect(index).toContain(def.label);
     expect(index).toContain("置いた提案の一覧");
+  });
+});
+
+describe("手順書きはモードで分ける（作者の裁定 2026-11-06）", () => {
+  test("編集者モードで選べる手順書きは、編集者と組む仕事の1本だけ", () => {
+    expect(proceduresForMode("editor").map((procedure) => procedure.key)).toEqual(["editorialEditor"]);
+  });
+
+  test("作者モードでは、編集者の側の1本だけを除いて全部選べる", () => {
+    const keys = proceduresForMode("author").map((procedure) => procedure.key);
+    expect(keys).not.toContain("editorialEditor");
+    expect(keys).toEqual(PROCEDURES.filter((procedure) => procedure.key !== "editorialEditor").map((procedure) => procedure.key));
+  });
+
+  test("編集者モードで「推敲して仕上げたい」と訊いても、作者向けの順路を渡さない", () => {
+    expect(selectProcedure({ question: "推敲して仕上げたい。どの順でやればいい？", mode: "editor" })?.key).not.toBe("polish");
+    expect(selectProcedure({ question: "推敲して仕上げたい。どの順でやればいい？", mode: "author" })?.key).toBe("polish");
+  });
+
+  test("束を組むときにモードを渡せる（画面のモードと違う作品を MCP から撃つとき）", () => {
+    setActiveModeForGuide("author");
+    const built = buildFeatureGuideForQuestion({ question: "編集部に参加するには？", mode: "editor" });
+    expect(built.procedureKey).toBe("editorialEditor");
+    expect(built.text).toContain("【編集者メニュー");
   });
 });

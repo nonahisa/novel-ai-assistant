@@ -13,6 +13,7 @@ import {
 import { readerReactionChatBlockFor } from "../../../src/core/readerAdviceChat";
 import { emptyPostingLedger } from "../../../src/models/posting";
 import { CHARACTER_NAMES_HEADING } from "../../../src/core/chatFileRequest";
+import { EDITOR_SHARE_MANIFEST_FILE } from "../../../src/core/editingRepo";
 
 /**
  * MCP の相談が、製品の相談（P-21、`features/workChatPanel.ts`）と**同じ材料**を
@@ -222,5 +223,24 @@ describe("作品の材料（人物名）", () => {
 
     expect(result.reference).toContain(`${CHARACTER_NAMES_HEADING}灯`);
     expect(result.reference.join("\n")).not.toContain("通りすがりの男");
+  });
+});
+
+describe("材料はその作品のモードに合わせる（作者の裁定 2026-11-06）", () => {
+  test("編集用の写しで撃つと、編集者向けの手順書きと目次が付く", () => {
+    const folder = workWithoutReader();
+    fs.mkdirSync(nodePath.join(folder, ".aiwriter"), { recursive: true });
+    fs.writeFileSync(nodePath.join(folder, ".aiwriter", EDITOR_SHARE_MANIFEST_FILE), "{}");
+    const question = "編集部に参加するには？";
+
+    const result = chatPrompt({ folder, question });
+    expect(result.featureGuide?.procedure).toBe(buildFeatureGuideForQuestion({ question, mode: "editor" }).procedure);
+    expect(result.userPrompt).toContain("【編集者メニュー");
+  });
+
+  test("作者の作品で撃つと、作者向けの目次（編集者メニューは載らない）", () => {
+    const folder = workWithoutReader();
+    const result = chatPrompt({ folder, question: "誤字脱字検知はどこから使えますか" });
+    expect(result.userPrompt).not.toContain("【編集者メニュー");
   });
 });

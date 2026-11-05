@@ -12,6 +12,7 @@ import { READER_TYPES } from "./readerTarget";
 import type { ReaderAim } from "./targetSheetDoc";
 import { clipReason } from "./targetSheetAdvice";
 import { buildFeatureGuideForQuestion } from "./featureGuide";
+import type { WorkMode } from "./editorMode";
 import { CHARACTER_NAMES_HEADING } from "./chatFileRequest";
 
 /**
@@ -70,11 +71,14 @@ export function workChatOverviewFocus(
  */
 export function workChatFeatureGuide(
   question: string,
-  history: readonly WorkChatTurn[]
+  history: readonly WorkChatTurn[],
+  /** 省けば画面のモード。MCP は撃った作品のモードを渡す（`buildFeatureGuideForQuestion` の `mode`） */
+  mode?: WorkMode
 ): ReturnType<typeof buildFeatureGuideForQuestion> & { featureIndex: boolean } {
   const guide = buildFeatureGuideForQuestion({
     question,
     recentAuthorTurns: lastAuthorTurnsOf(history),
+    ...(mode ? { mode } : {}),
   });
   return { ...guide, featureIndex: guide.topic !== "craft" };
 }

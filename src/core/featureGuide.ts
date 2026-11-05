@@ -511,6 +511,12 @@ export function buildFeatureGuideForQuestion(input: {
   question: string;
   /** 直前の作者の発言。「それはどこ？」のような追い質問で話題を引き継ぐ */
   recentAuthorTurns?: string[];
+  /**
+   * どのモードの画面に向けて組むか。既定は `activeModeForGuide()`。
+   * MCP から撃つときは、画面のモードではなく**撃った作品のモード**を渡す（作者の裁定 2026-11-06
+   * 「モードに合わせる」）。編集用の写しなのに作者向けの目次と順路を渡すと、編集者の画面に無い場所を案内する
+   */
+  mode?: WorkMode;
 }): {
   text: string;
   selected: string[];
@@ -526,6 +532,7 @@ export function buildFeatureGuideForQuestion(input: {
    */
   procedureKey?: string;
 } {
+  const mode = input.mode ?? activeModeForGuide();
   const bundles = buildGuideBundles();
   // 束選びをもう一度走らせることになるが、**判定の規則は1か所に置く**ほうが
   // 大事である（「選ばれたら howto」をここへ書くと、`chatTopic.ts` と
@@ -549,9 +556,10 @@ export function buildFeatureGuideForQuestion(input: {
       : selectProcedure({
           question: input.question,
           recentAuthorTurns: input.recentAuthorTurns,
+          mode,
         });
   const procedureText = procedure
-    ? renderProcedure(procedure, procedureActionLookup)
+    ? renderProcedure(procedure, (command) => procedureActionLookup(command, mode))
     : "";
 
   /*
@@ -570,7 +578,7 @@ export function buildFeatureGuideForQuestion(input: {
 
   // 迷ったとき（`unknown`）は渡す側へ倒す。落として答えられなくなるより、
   // 載せて無駄になるほうがよい
-  const blocks = [topic === "craft" ? NO_INDEX_NOTICE : buildFeatureIndex()];
+  const blocks = [topic === "craft" ? NO_INDEX_NOTICE : buildFeatureIndex(mode)];
   if (procedureText) {
     // **順路を、説明より先に置く。** 作者が知りたいのは「どの順でやるか」で、
     // 操作ごとの説明はその裏づけである

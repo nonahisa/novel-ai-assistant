@@ -109,6 +109,8 @@ export const PROCEDURES: readonly Procedure[] = [
   {
     key: "newWork",
     title: "新しい作品を始める",
+    // 作者向けの順路。編集者モードの相談では使わない（作者の裁定 2026-11-06）
+    modes: ["author"],
     // ステップ1（作品登録）→ 2（新作構想）→ 3（執筆の場）の道
     // 「登場人物の名前の重なり」と書いていたが、**「人物」1組みで
     // 『この人物の動機がぼやけている』のような作品の相談を引き当てた**
@@ -150,6 +152,8 @@ export const PROCEDURES: readonly Procedure[] = [
   {
     key: "importWork",
     title: "書いてある作品を登録して整える",
+    // 作者向けの順路。編集者モードの相談では使わない（作者の裁定 2026-11-06）
+    modes: ["author"],
     // ステップ1（作品登録）→ 3（資料生成）の道
     /*
       **「本文」と「人物」を、わざと書いていない**（2026-09-21）。
@@ -195,6 +199,8 @@ export const PROCEDURES: readonly Procedure[] = [
   {
     key: "polish",
     title: "推敲して仕上げる",
+    // 作者向けの順路。編集者モードの相談では使わない（作者の裁定 2026-11-06）
+    modes: ["author"],
     // ステップ4（自己校正）の、文の直しの側
     whenToRead:
       "誤字脱字・表記ゆれ・推敲・冒頭の診断など、書いた本文を人に見せる前に" +
@@ -220,6 +226,8 @@ export const PROCEDURES: readonly Procedure[] = [
   {
     key: "consistency",
     title: "矛盾を洗う",
+    // 作者向けの順路。編集者モードの相談では使わない（作者の裁定 2026-11-06）
+    modes: ["author"],
     // ステップ4（自己校正）の、話の整合の側
     whenToRead:
       "設定資料と本文の食い違いの検知、プロットからの逸脱、伏線の回収漏れを" +
@@ -250,6 +258,8 @@ export const PROCEDURES: readonly Procedure[] = [
   {
     key: "posting",
     title: "投稿の準備をする",
+    // 作者向けの順路。編集者モードの相談では使わない（作者の裁定 2026-11-06）
+    modes: ["author"],
     // ステップ5（投稿脱稿）の道
     whenToRead:
       "新話を投稿する前に、各話あらすじ・作品紹介文・キャッチコピーを整えて、" +
@@ -296,6 +306,8 @@ export const PROCEDURES: readonly Procedure[] = [
     */
     key: "readerTarget",
     title: "ターゲット読者を決める",
+    // 作者向けの順路。編集者モードの相談では使わない（作者の裁定 2026-11-06）
+    modes: ["author"],
     // **「読者」を持つのはこの1本だけ**にしてある。ほかの手順へ書くと、
     // 読者の相談がそちらへ吸われる（しきい値は1組み）
     /*
@@ -344,6 +356,8 @@ export const PROCEDURES: readonly Procedure[] = [
     */
     key: "targetSheet",
     title: "狙いと実態のずれを見る",
+    // 作者向けの順路。編集者モードの相談では使わない（作者の裁定 2026-11-06）
+    modes: ["author"],
     whenToRead:
       "ターゲットシートで、狙いと実態のずれや、各読者層との一致度を見るとき、" +
       "読者層を広げる・絞るの向かう先を決めるとき",
