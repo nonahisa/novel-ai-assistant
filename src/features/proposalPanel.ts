@@ -83,7 +83,7 @@ import {
   type RecheckItem,
   type RecheckOutcome,
 } from "./recheckProposal";
-import { logFailure, logLine, logStep, useLogFile } from "../core/logger";
+import { logFailure, logLine, logStep, useLogFile, workLog } from "../core/logger";
 import {
   batchVerbFromLabel,
   describeRecordUpdateBatchLog,
@@ -1223,7 +1223,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         )
         .catch((error: unknown) =>
           // 読み直せなくても検知は止めない。理由はログへ
-          logLine(
+          workLog(work.folderPath).line(
             `校正・メモパネル：指摘を書いたあとの読み直し（または開く）に失敗しました（${
               error instanceof Error ? error.message : String(error)
             }）。`
@@ -3068,7 +3068,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       this.onCategorySettled?.(work, category);
     } catch (error) {
       // 受け手の失敗で、済んだ適用を失敗に見せない。記録だけ残す
-      logFailure("提案パネル：決め終えたときの合図", {
+      workLog(work.folderPath).failure("提案パネル：決め終えたときの合図", {
         分類: category,
         理由: error instanceof Error ? error.message : String(error),
       });

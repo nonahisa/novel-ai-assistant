@@ -6,7 +6,7 @@ import { withOptionalSketchPosition, type Location } from "../models/location";
 import { createLocationStore } from "../core/abilityStore";
 import { SettingsStoreError } from "../core/settingsStore";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import { logFailure, logStep, useLogFile, workLog } from "../core/logger";
 import { buildLocationSketch, type LocationSketch } from "../core/locationSketch";
 import { buildLocationSketchPanelHtml } from "../views/locationSketchPanelHtml";
 import { createNonce } from "../core/webviewNonce";
@@ -136,7 +136,7 @@ class LocationSketchPanel {
       watcher.onDidDelete(schedule);
       this.watcher = watcher;
     } catch (error) {
-      logStep(
+      workLog(this.work.folderPath).step(
         "場所の略図：場所の置き場を見張れませんでした（資料を直しても図は開き直すまで古いままです）：" +
           (error instanceof Error ? error.message : String(error))
       );

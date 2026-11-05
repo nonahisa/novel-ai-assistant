@@ -24,7 +24,7 @@ import {
   type StreakBook,
 } from "../core/celebrationStreaks";
 import { AchievementStore } from "../core/achievementStore";
-import { logFailure, useLogFile } from "../core/logger";
+import { logFailure, useLogFile, workLog } from "../core/logger";
 import { verifiedState } from "../core/verifiedMemento";
 import {
   mergeDailyStats,
@@ -415,7 +415,7 @@ export async function offerCelebration(
     const payload = await connected.pendingFor(work);
     if (payload) await panel.webview.postMessage({ type: "celebrate", payload });
   } catch (error) {
-    logFailure("執筆統計の祝い", {
+    workLog(work?.folderPath).failure("執筆統計の祝い", {
       詳細: error instanceof Error ? error.message : String(error),
     });
   }

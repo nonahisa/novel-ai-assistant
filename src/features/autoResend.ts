@@ -274,13 +274,18 @@ export class AutoResender implements vscode.Disposable {
     trigger: ResendTrigger
   ): Promise<ResendAttempt> {
     const outcome: ResendAttempt = { sent: [], failed: [], skipped: [] };
+    // 例外の記録を、最後に扱っていた置き場の書き先へ書くために覚える
+    // （共有の書き先は直前の別の操作のもので、作品の記録に残らない）
+    let current: ResendTarget<WorkEntry> | undefined;
     try {
       for (const target of targets) {
         // 置き場の間で作者が同期を押したら、そこで手を引く
         if (this.busy()) break;
+        current = target;
         await this.resendOne(target, works, trigger, outcome);
       }
     } catch (error) {
+      if (current) await useSyncLog(current.root, current.works);
       logFailure("自動の送り直しで例外", {
         詳細: error instanceof Error ? error.message : String(error),
       });
@@ -292,6 +297,7 @@ export class AutoResender implements vscode.Disposable {
       try {
         await this.deps.afterSent?.();
       } catch (error) {
+        if (current) await useSyncLog(current.root, current.works);
         logFailure("自動の送り直しのあと、印を付け直せなかった", {
           詳細: error instanceof Error ? error.message : String(error),
         });

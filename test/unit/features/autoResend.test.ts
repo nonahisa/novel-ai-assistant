@@ -395,6 +395,38 @@ describe("いつ試すか", () => {
   });
 });
 
+describe("失敗の記録の書き先（2026-11-05 の書き先の洗い出し）", () => {
+  test("印を付け直せなかった失敗は、書き先を置き場へ決め直してから書く", async () => {
+    repo.online = true;
+    const resender = new AutoResender({
+      registry,
+      monitor,
+      run: fakeGit,
+      isSyncBusy: () => busy,
+      settings: () => settings,
+      now: () => clock,
+      afterSent: async () => {
+        // 控えを作り直す途中で、別の操作が共有の書き先を向け直した
+        useLogFile("C:/別の作品");
+        throw new Error("印を書けない");
+      },
+    });
+
+    await resender.attempt("interval");
+
+    const failure = vi
+      .mocked(logFailure)
+      .mock.calls.findIndex(([context]) => String(context).includes("印を付け直せなかった"));
+    expect(failure).toBeGreaterThanOrEqual(0);
+    const failedAt = vi.mocked(logFailure).mock.invocationCallOrder[failure];
+    const redirectedAt = vi.mocked(useLogFile).mock.invocationCallOrder[0];
+    const lastSyncLogAt = Math.max(...vi.mocked(useLogFiles).mock.invocationCallOrder);
+    // 向け直された「あと」に、置き場の作品の記録へ決め直している
+    expect(lastSyncLogAt).toBeGreaterThan(redirectedAt);
+    expect(lastSyncLogAt).toBeLessThan(failedAt);
+  });
+});
+
 describe("送り直しの最中に同期が押されたら（逆向きの排他）", () => {
   const tick = () => new Promise((done) => setTimeout(done, 10));
 

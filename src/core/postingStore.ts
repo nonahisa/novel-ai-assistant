@@ -18,7 +18,7 @@ import {
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { hashBytes } from "./textFile";
 import { atomicWriteFile } from "./atomicWrite";
-import { logStep } from "./logger";
+import { workLog } from "./logger";
 
 /**
  * 投稿状態の台帳（`設定/投稿状態.json`）の読み書き（設計書6.68.2）。
@@ -204,7 +204,7 @@ export class PostingStore {
       */
       this.skippedReaderStatsRows = read.skippedReaderStatsRows;
       if (read.skippedReaderStats > 0) {
-        logStep(
+        workLog(this.work.folderPath).step(
           `設定/${POSTING_FILE}: この版が知らない指標しか無い読者の反応を ` +
             `${read.skippedReaderStats}件 読み飛ばしました（保存時もそのまま持ち回します）`
         );
@@ -229,7 +229,7 @@ export class PostingStore {
       画面の側（core から通知を出さない）。何度も同じ知らせが出ないようにするのも、あちら
     */
     if (unknownNotes.length > 0) {
-      logStep(
+      workLog(this.work.folderPath).step(
         `設定/${POSTING_FILE}: この版が知らない値を読まずに持ち回します（${unknownNotes.join("、")}）`
       );
       unknownValuesListener?.({ filePath: target, notes: unknownNotes });

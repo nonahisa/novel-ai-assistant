@@ -627,7 +627,7 @@ async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
     } catch (error) {
       // **数えて残す。** 黙って落とすと、その話のメモが無いことにされる
       notices.push(`${episode.fileName} を読めませんでした。`);
-      logFailure("校正・メモパネル：本文の読み込み", {
+      workLog(work.folderPath).failure("校正・メモパネル：本文の読み込み", {
         ファイル: episode.filePath,
         詳細: messageOf(error),
       });
@@ -979,7 +979,7 @@ class SceneMemoPanel {
       this.post();
     } catch (error) {
       const detail = messageOf(error);
-      logFailure("校正・メモパネル", { 作品: this.work.title, 内容: detail });
+      workLog(this.work.folderPath).failure("校正・メモパネル", { 作品: this.work.title, 内容: detail });
       void vscode.window.showErrorMessage(
         `校正・メモパネルを読み込めませんでした。${detail}`
       );
@@ -1098,7 +1098,7 @@ class SceneMemoPanel {
       }
     } catch (error) {
       const detail = messageOf(error);
-      logFailure("校正・メモパネル", { 作品: this.work.title, 内容: detail });
+      workLog(this.work.folderPath).failure("校正・メモパネル", { 作品: this.work.title, 内容: detail });
       void vscode.window.showErrorMessage(
         `校正・メモパネルでエラーが起きました。${detail}`
       );
@@ -1406,7 +1406,7 @@ class SceneMemoPanel {
       }
     } catch (error) {
       if (this.adviceAborts.get(findingId) !== controller) return;
-      logFailure("校正・メモパネル：AIに相談", {
+      workLog(this.work.folderPath).failure("校正・メモパネル：AIに相談", {
         作品: this.work.title,
         詳細: messageOf(error),
       });

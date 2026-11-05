@@ -142,7 +142,9 @@ export interface ProposeChaptersOptions {
 export class ChapterProposalApplier {
   constructor(
     private readonly store: ChapterStore,
-    private set: ChapterSet
+    private set: ChapterSet,
+    /** 失敗の記録をその作品の操作の記録へ書くため（共有の書き先に頼らない） */
+    private readonly workFolder?: string
   ) {}
 
   /** いま台帳に入っている章（提案の文言を作るのに使う） */
@@ -198,7 +200,7 @@ export class ChapterProposalApplier {
       await this.store.save(next);
     } catch (error) {
       const detail = messageOf(error);
-      logFailure("章立ての提案の反映", {
+      workLog(this.workFolder).failure("章立ての提案の反映", {
         章: entry.name,
         開始の話: entry.startEpisodePath,
         種類: error instanceof ChapterStoreError ? error.kind : "unknown",
@@ -230,7 +232,7 @@ export class ChapterProposalApplier {
     try {
       this.set = await this.store.load();
     } catch (reloadError) {
-      logFailure("章立ての提案の反映（読み直し）", {
+      workLog(this.workFolder).failure("章立ての提案の反映（読み直し）", {
         内容: messageOf(reloadError),
       });
       return detail;
@@ -612,7 +614,7 @@ export async function suggestChapterName(
     return false;
   }
 
-  const applied = await new ChapterProposalApplier(store, set).apply({
+  const applied = await new ChapterProposalApplier(store, set, work.folderPath).apply({
     name: picked.name,
     startEpisodePath: chapter.startEpisodePath,
   });
@@ -644,7 +646,7 @@ export function showChapterProposals(
   candidates: readonly ChapterProposalCandidate[],
   options: ProposeChaptersOptions
 ): void {
-  const applier = new ChapterProposalApplier(material.store, material.set);
+  const applier = new ChapterProposalApplier(material.store, material.set, work.folderPath);
   const byId = new Map<
     string,
     {
@@ -997,7 +999,8 @@ export function buildChapterRanges(
  * 粗くなるだけで、操作そのものは止めない）。
  */
 async function readMaterialFiles(
-  scanned: readonly EpisodeFile[]
+  scanned: readonly EpisodeFile[],
+  workFolder: string
 ): Promise<ChapterMaterialFile[]> {
   const files: ChapterMaterialFile[] = [];
   for (const file of scanned) {
@@ -1009,7 +1012,7 @@ async function readMaterialFiles(
       const { text } = await readTextFile(file.filePath);
       files.push({ file, collected: parseCollectedFile(text) });
     } catch (error) {
-      logFailure("章立ての材料：合本を読めなかった", {
+      workLog(workFolder).failure("章立ての材料：合本を読めなかった", {
         ファイル: file.fileName,
         内容: messageOf(error),
       });
@@ -1053,7 +1056,7 @@ async function collectMaterial(
   }
 
   const entries = buildChapterMaterialEntries({
-    files: await readMaterialFiles(scan.episodes),
+    files: await readMaterialFiles(scan.episodes, work.folderPath),
     synopses,
     format,
   });
@@ -1225,7 +1228,7 @@ async function reportStoreFailure(
   error: unknown
 ): Promise<void> {
   const message = messageOf(error);
-  logFailure(what, {
+  workLog(work.folderPath).failure(what, {
     作品: work.title,
     種類: error instanceof ChapterStoreError ? error.kind : "unknown",
     内容: message,

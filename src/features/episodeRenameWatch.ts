@@ -26,7 +26,7 @@ import {
   type RenameDriftPair,
 } from "../core/episodeRenameDrift";
 import { normalizeEpisodePath } from "../models/chapter";
-import { logFailure, logLine, useLogFile } from "../core/logger";
+import { logFailure, logLine, useLogFile, workLog } from "../core/logger";
 import { notifyDone } from "../views/notify";
 import {
   describeLedgerFollowSummary,
@@ -77,7 +77,7 @@ async function collectLedgerEpisodePaths(work: WorkEntry): Promise<string[]> {
     try {
       await run();
     } catch (error) {
-      logFailure(`名前の変更の追従：${label}の読み込み`, {
+      workLog(work.folderPath).failure(`名前の変更の追従：${label}の読み込み`, {
         内容: error instanceof Error ? error.message : String(error),
       });
     }
@@ -110,7 +110,7 @@ async function collectReadingDictionaryPaths(work: WorkEntry): Promise<string[]>
       normalizeEpisodePath(episodePathFor(work.folderPath, filePath))
     );
   } catch (error) {
-    logFailure("名前の変更の追従：読みの辞書の一覧", {
+    workLog(work.folderPath).failure("名前の変更の追従：読みの辞書の一覧", {
       内容: error instanceof Error ? error.message : String(error),
     });
     return [];
@@ -126,7 +126,7 @@ async function workFolders(
     config = await readWorkConfig(work);
   } catch (error) {
     // 作品設定が壊れていても、既定の名前で判定はできる（設定は直さない）
-    logFailure("名前の変更の追従：作品設定の読み込み", {
+    workLog(work.folderPath).failure("名前の変更の追従：作品設定の読み込み", {
       内容: error instanceof Error ? error.message : String(error),
     });
   }

@@ -7,7 +7,7 @@ import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { revealFolder } from "../views/openDocument";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import { logStep, useLogFile, workLog } from "../core/logger";
 import { buildRelationGraphPanelHtml } from "../views/relationGraphPanelHtml";
 import {
   buildRelationGraph,
@@ -272,7 +272,7 @@ class RelationGraphPanel {
       watcher.onDidDelete(schedule);
       this.watcher = watcher;
     } catch (error) {
-      logStep(
+      workLog(this.work.folderPath).step(
         "人物相関図：人物の置き場を見張れませんでした（資料を直しても図は開き直すまで古いままです）：" +
           (error instanceof Error ? error.message : String(error))
       );
@@ -374,7 +374,7 @@ class RelationGraphPanel {
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      logFailure("人物相関図", { 作品: this.work.title, 内容: detail });
+      workLog(this.work.folderPath).failure("人物相関図", { 作品: this.work.title, 内容: detail });
       void vscode.window.showErrorMessage(`人物相関図でエラーが起きました。${detail}`);
     }
   }

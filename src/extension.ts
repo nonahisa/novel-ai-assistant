@@ -211,6 +211,7 @@ import {
   setFallbackLogRoot,
   showLog,
   useLogFile,
+  workLog,
 } from "./core/logger";
 import { probeGeneration } from "./ai/generationProbe";
 import { FETCH_CEILING_RECOVERY } from "./ai/types";
@@ -3998,7 +3999,7 @@ export async function activate(
     try {
       await syncPlotCharacters(work);
     } catch (error) {
-      logFailure("プロットからの人物反映に失敗", {
+      workLog(work.folderPath).failure("プロットからの人物反映に失敗", {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),
       });
@@ -4015,7 +4016,7 @@ export async function activate(
       await new SessionStore(work, deviceId).record(filePath);
     } catch (error) {
       // 記録できなくても執筆は続けられる。黙って諦めずログには残す
-      logFailure("最終編集環境の記録に失敗", {
+      workLog(work.folderPath).failure("最終編集環境の記録に失敗", {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),
       });
@@ -4129,7 +4130,7 @@ export async function activate(
         )}字）${skipped ? `。${skipped}` : ""}`
       );
     } catch (error) {
-      logFailure("登録後の集計", {
+      workLog(entry.folderPath).failure("登録後の集計", {
         作品: entry.title,
         詳細: error instanceof Error ? error.message : String(error),
       });
