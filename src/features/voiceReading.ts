@@ -15,6 +15,7 @@ import { reportAIError } from "./reportAIError";
 import { CharacterStore } from "../core/characterStore";
 import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
 import { hashText } from "../core/hash";
+import { voiceRemoteHostConfirmId } from "../core/confirmMemory";
 import { logFailure, logStep, responseExcerptForLog, useLogFile } from "../core/logger";
 import type { ReadingSentence } from "../core/readAloud";
 import {
@@ -283,21 +284,20 @@ export class VoiceReadingService {
 /**
  * 本文を、この PC の外のホストへ送ってよいかを訊く（モーダル）。
  * 設定の接続先に別のホストを書いたときだけ出る。閉じたら送らない。
+ *
+ * 共通の確認の口（`confirmRun`）で出し、［送る（以降は訊かない）］を選べば、そのホストだけ
+ * 覚える（鍵は `voice.remoteHost.<ホスト:ポート>`。作者の答え 2026-11-05）。覚えるのは
+ * 送ると答えたときだけ。別のホスト・ポートに変わったら鍵が変わるので、必ず訊き直す。
  */
 async function askSendToRemoteHost(host: string): Promise<boolean> {
-  const send = "送る";
-  const answer = await vscode.window.showWarningMessage(
-    `本文が ${host} へ送られます。`,
-    {
-      modal: true,
-      detail:
-        `人物の声で読むために、読む文を ${host} の音声合成のエンジンへ送ります。` +
-        "このホストはこの PC の外にあるため、送った文は相手に届きます。" +
-        "心当たりのないホストなら、送らないでください（設定 novelai.readAloud.voiceEngineUrl で変えられます）。",
-    },
-    send
-  );
-  return answer === send;
+  return confirmRun(`本文が ${host} へ送られます。`, "送る", {
+    kind: "warning",
+    detail:
+      `人物の声で読むために、読む文を ${host} の音声合成のエンジンへ送ります。` +
+      "このホストはこの PC の外にあるため、送った文は相手に届きます。" +
+      "心当たりのないホストなら、送らないでください（設定 novelai.readAloud.voiceEngineUrl で変えられます）。",
+    remember: { id: voiceRemoteHostConfirmId(host) },
+  });
 }
 
 let shared: VoiceReadingService | undefined;

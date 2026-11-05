@@ -101,6 +101,54 @@ describe("見直しの一覧", () => {
   });
 });
 
+/**
+ * 外の音声エンジンへ本文を送る確認だけは、固定の一覧の外で「ホストごと」に覚える。
+ * 覚えてよい形は `voice.remoteHost.<ホスト[:ポート]>` ただ1つ。
+ */
+describe("人物の声の送り先（voice.remoteHost.<ホスト:ポート>）", () => {
+  test.each([
+    "voice.remoteHost.192.168.1.20:10101",
+    "voice.remoteHost.voice.example.com:10101",
+    "voice.remoteHost.voice.example.com",
+    "voice.remoteHost.[fd00::1]:10101",
+  ])("%s は覚えてよい", (id) => {
+    expect(isRememberable(id)).toBe(true);
+    expect(rememberedAnswer(withRemembered({}, id, "送る"), id)).toBe("送る");
+  });
+
+  test.each([
+    "voice.remoteHostX",
+    "voice.remoteHost.",
+    "voice.remoteHost",
+    "voice.remoteHost.a b:10101",
+    "voice.remoteHost.host:port",
+    "voice.remoteHost.host:10101:1",
+    "voice.remoteHost.host/path",
+    "voice.other.192.168.1.20:10101",
+    "x.voice.remoteHost.192.168.1.20:10101",
+  ])("%s は覚えない", (id) => {
+    expect(isRememberable(id)).toBe(false);
+    expect(withRemembered({}, id, "送る")).toEqual({});
+    expect(rememberedAnswer({ [id]: "送る" }, id)).toBeUndefined();
+  });
+
+  test("見直しの画面での名前", () => {
+    const id = "voice.remoteHost.192.168.1.20:10101";
+    expect(describeRemembered({ [id]: "送る" })).toEqual([
+      {
+        id,
+        label: "人物の声の送り先：192.168.1.20:10101へ本文を送る",
+        answer: "送る",
+      },
+    ]);
+  });
+
+  test("形の合わない似た id は、見直しでは「使われていない確認」として残る（外せる）", () => {
+    const listed = describeRemembered({ "voice.remoteHostX": "送る" });
+    expect(listed[0].label).toContain(UNKNOWN_CONFIRM_LABEL);
+  });
+});
+
 describe("一覧の形", () => {
   test("id が重複しない", () => {
     const ids = REMEMBERABLE_CONFIRMS.map((entry) => entry.id);

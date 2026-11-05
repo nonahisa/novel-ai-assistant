@@ -36,6 +36,15 @@
  *
  * ここは `vscode` に依存しない。読み書きは `features/confirmMemoryStore.ts`
  * が受け持つ（依存の向きは `features` → `core`）。
+ *
+ * **例外がひとつだけある——人物の声の送り先**（`voice.remoteHost.<ホスト:ポート>`。
+ * 作者の答え 2026-11-05）。この PC の外の音声エンジンへ本文を送ってよいか、の確認である。
+ * 一覧の外で「この形の id だけ」を覚えてよいことにしている。
+ * 送る**中身**は毎回違うが、確認しているのは**送り先**で、作者が一度確かめたホストなら
+ * 毎回同じ答えになる。危ないのは知らないホスト・変わったホストで、それは id に
+ * ホストとポートを含めることで**別の確認**になり、覚えていても必ず訊き直す。
+ * 形が合わないもの（`voice.remoteHostX`・ホストの無いもの）は覚えない。
+ * 断った答えは覚えない（上の約束どおり）。
  */
 
 /** 覚えてよい確認ひとつ */
@@ -150,9 +159,30 @@ export type ConfirmMemory = Readonly<Record<string, string>>;
 
 const REMEMBERABLE_IDS = new Set(REMEMBERABLE_CONFIRMS.map((item) => item.id));
 
+/** 人物の声の送り先の確認の id の頭（後ろに `ホスト[:ポート]` が続く） */
+export const VOICE_REMOTE_HOST_PREFIX = "voice.remoteHost.";
+
+/**
+ * `ホスト` か `ホスト:ポート`。ホストは名前・IPv4（英数字と . と -）か、角括弧の IPv6。
+ * 空白・スラッシュ・制御文字は通さない（`URL.host` が返す形だけを受ける）。
+ */
+const REMOTE_HOST_SHAPE = /^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
+
+/** 人物の声の送り先の確認の id を作る（`host` は `URL.host`＝ホスト[:ポート]） */
+export function voiceRemoteHostConfirmId(host: string): string {
+  return `${VOICE_REMOTE_HOST_PREFIX}${host}`;
+}
+
+/** 人物の声の送り先の確認の id なら、後ろのホスト[:ポート]を返す。形が合わなければ undefined */
+function voiceRemoteHostOf(id: string): string | undefined {
+  if (!id.startsWith(VOICE_REMOTE_HOST_PREFIX)) return undefined;
+  const host = id.slice(VOICE_REMOTE_HOST_PREFIX.length);
+  return REMOTE_HOST_SHAPE.test(host) ? host : undefined;
+}
+
 /** その確認は、覚えてよいものとして登録されているか */
 export function isRememberable(id: string): boolean {
-  return REMEMBERABLE_IDS.has(id);
+  return REMEMBERABLE_IDS.has(id) || voiceRemoteHostOf(id) !== undefined;
 }
 
 /**
@@ -204,6 +234,11 @@ export function withoutAll(): ConfirmMemory {
 /** 一覧に無い id を見直しの画面に出すときの名前 */
 export const UNKNOWN_CONFIRM_LABEL = "（いまは使われていない確認）";
 
+function voiceRemoteHostLabel(id: string): string | undefined {
+  const host = voiceRemoteHostOf(id);
+  return host === undefined ? undefined : `人物の声の送り先：${host}へ本文を送る`;
+}
+
 /**
  * いま覚えているものを、人が読める形で並べる。
  *
@@ -220,7 +255,7 @@ export function describeRemembered(
     .filter(([, answer]) => typeof answer === "string" && answer.length > 0)
     .map(([id, answer]) => ({
       id,
-      label: labels.get(id) ?? `${UNKNOWN_CONFIRM_LABEL} ${id}`,
+      label: labels.get(id) ?? voiceRemoteHostLabel(id) ?? `${UNKNOWN_CONFIRM_LABEL} ${id}`,
       answer,
     }));
 }
