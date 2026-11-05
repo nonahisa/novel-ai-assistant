@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
-import type { WorkEntry } from "../models/types";
+import type { EpisodeFile, WorkEntry } from "../models/types";
+import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
 import { ProposalStore } from "../core/proposalStore";
 import {
   categoryLabel,
@@ -405,6 +406,32 @@ interface EpisodePickItem extends vscode.QuickPickItem {
  * 話の並びは作品一覧と同じ（`scanWork` の順）。最初の候補は前に出ているタブの話。
  * 間の話をまとめて `acquire` する（鍵は話ごとに1行ずつ）。
  */
+/**
+ * 校閲の範囲を選ぶ一覧の、話の行の名前。
+ *
+ * **題に含まれる話数は落とす**（`stripChapterLabel`）。投稿サイトから取り込んだ話は題が
+ * 「第1話 薄皮の向こう側」と話数を含むので、前に「第1話」を付けると「第1話　第1話 …」と
+ * 二重になった（作者の報告、2026-11-05）。見出しは作品一覧と同じ `formatChapterLabel`
+ */
+export function reviewEpisodeLabel(
+  episode: Pick<EpisodeFile, "fileName" | "subtitle" | "kind" | "chapterStart" | "chapterEnd" | "date" | "dateSeq">
+): string {
+  const chapter = formatChapterLabel(episode);
+  if (!chapter) return episode.fileName;
+  const title = stripChapterLabel(episode.subtitle, chapter);
+  return title ? `${chapter}　${title}` : chapter;
+}
+
+/**
+ * 一覧の先頭に置く近道の行（「開いている話」「始めの話だけ」）。
+ *
+ * **話の行と見分けがつく名前にする。** 同じ名前で先頭にもう1行置くと、同じ話が二度並んだ
+ * 重複に見えた（作者の報告、2026-11-05）。名前は「〈近道の名前〉：〈話〉」にする
+ */
+export function shortcutPickItem<T extends vscode.QuickPickItem>(item: T, note: string): T {
+  return { ...item, label: `$(arrow-right) ${note}：${item.label}`, description: item.description };
+}
+
 async function startRangeReview(
   work: WorkEntry,
   activeUri: vscode.Uri | undefined
@@ -415,10 +442,7 @@ async function startRangeReview(
     return;
   }
   const items: EpisodePickItem[] = episodes.map((episode) => ({
-    label:
-      episode.chapterStart !== null
-        ? `第${episode.chapterStart}話${episode.subtitle ? `　${episode.subtitle}` : ""}`
-        : episode.fileName,
+    label: reviewEpisodeLabel(episode),
     description: episode.fileName,
     relative: normalizeFile(path.relative(work.folderPath, episode.filePath)),
   }));
@@ -482,7 +506,7 @@ async function pickEpisode(
     全部の話を出す。
   */
   const shortcut: EpisodePickItem | undefined = items[activeIndex]
-    ? { ...items[activeIndex], description: `${shortcutNote}（${items[activeIndex].description ?? ""}）` }
+    ? shortcutPickItem(items[activeIndex], shortcutNote)
     : undefined;
   const entries: vscode.QuickPickItem[] = [...(shortcut ? [shortcut] : []), ...items];
   const picked = await vscode.window.showQuickPick([...entries, cancelItem()], {
