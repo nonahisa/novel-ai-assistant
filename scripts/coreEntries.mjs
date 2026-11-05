@@ -27,6 +27,8 @@ export const CORE_ENTRY_NAMES = [
   "chunker",
   "episodeChunks",
   "guideSelect",
+  // 使い方の答えの材料を Discord のボットへ渡す口（2026-11-06）。名前と形は guideExport.test.ts が見張る
+  "guideExport",
   "settingsSummary",
   "collectedFile",
   "episodeLabel",
