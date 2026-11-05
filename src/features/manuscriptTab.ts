@@ -6,9 +6,38 @@ import {
   MANUSCRIPT_EDITOR_VIEW_TYPE,
 } from "../core/manuscriptViewTypes";
 import { SUPPORTED_EXTENSIONS } from "../models/types";
-import { logLine } from "../core/logger";
-// ログの書き先：呼ぶ側が向ける（原稿を開く共通の口は作品を受け取らない。
-// 前に出したことの1行だけで、向いていなければ出力パネルにだけ残る）
+import { logLine, workLog } from "../core/logger";
+import type { WorkEntry } from "../models/types";
+// ログの書き先：下の logForFile が、ファイルから作品を引いて作品ごとに決める
+// （引けない登録外のファイルだけ、共有の書き先＝保管庫のまま）
+
+let workOfForLog: ((filePath: string) => WorkEntry | undefined) | undefined;
+
+/** 記録の書き先を決める作品の引き方を渡す（原稿エディターの入口が起動時に渡す） */
+export function setManuscriptLogWorkOf(
+  workOf: ((filePath: string) => WorkEntry | undefined) | undefined
+): void {
+  workOfForLog = workOf;
+}
+
+/**
+ * 原稿エディターの記録を、**その原稿の作品の `actions.log` へ**書く。
+ *
+ * 共有の書き先（`useLogFile`）は動かさず、呼び出しごとに `workLog` で書き先を持つ
+ * （0.127.3 のあと。命令の入口で書き先を外すので、決めずに書いた行は保管庫へ行く。
+ * 共有の値を書き換えると、同時に動いているほかの操作の行がこの作品へ紛れる）。
+ * 作品が引けない（登録外のファイル）ときは、これまでどおり共有の書き先（保管庫）へ。
+ */
+export function logForFile(filePath: string, text: string): void {
+  let folder: string | undefined;
+  try {
+    folder = workOfForLog?.(filePath)?.folderPath;
+  } catch {
+    // 引けなくても記録は出す
+  }
+  if (folder) workLog(folder).line(text);
+  else logLine(text);
+}
 
 /**
  * 「いま作者が見ている本文」を、タブの側から見つける（設計書6.25.4）。
@@ -252,7 +281,8 @@ export async function openManuscriptFile(
   const existing = existingManuscriptTab(manuscriptLedgerKey(location));
   if (existing) {
     // 前に出すだけで済ませる。入口か列が違うと2枚目になる
-    logLine(
+    logForFile(
+      fromUri(uri),
       `原稿エディタ：${fromUri(uri)} のタブが${existing.column}列目にあるので、そのタブを前に出します（入口: ${existing.viewType}）。`
     );
     await vscode.commands.executeCommand(
@@ -265,7 +295,8 @@ export async function openManuscriptFile(
   }
   // **新しく開くときも1行残す**（6.25.11）。2026-10-03 の実機では、同じ原稿の
   // 2枚目が何から開いたのかを示す行が無く、この口を通ったかどうかも言えなかった
-  logLine(
+  logForFile(
+    fromUri(uri),
     `原稿エディタ：${fromUri(uri)} のタブが無いので、新しく開きます（入口: ${viewType}／列: ${describeColumn(column)}）。`
   );
   await vscode.commands.executeCommand("vscode.openWith", uri, viewType, column);
@@ -293,7 +324,9 @@ export function revealManuscriptPanelInPlace(
   if (column === undefined) {
     // どちらも読めないときだけ VS Code の既定に任せる。**理由は残す**——
     // 2枚目が出たとき、この枝を通ったかどうかが分からないと追えない
-    logLine(
+    // 鍵は場所の表記（ファイルの場所そのものではない）なので、引けなければ保管庫へ倒れる
+    logForFile(
+      key,
       `原稿エディタ：${key} の面の列が読めないため、列を指定せずに前に出します（前面の列に2枚目ができることがあります）。`
     );
     panel.reveal(undefined, false);

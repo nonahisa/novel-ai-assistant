@@ -68,7 +68,8 @@ describe("原稿エディタが外の変更に追いつく", () => {
    */
   test("原稿エディタのログは、作品のログファイルへ向ける", () => {
     expect(source).toContain("private async logForDocument(");
-    expect(source).toContain("if (found) useLogFile(found.work.folderPath);");
+    // 共有の書き先を書き換えず、呼び出しごとに作品の書き先を持つ（0.127.3 のあと）
+    expect(source).toContain("if (folder) workLog(folder).line(text);");
     // 画面からの log・外からの変更・読み直しの確認の3経路が通る
     expect(source).toContain("case \"log\":");
     expect(source).toContain("await this.logForDocument(");

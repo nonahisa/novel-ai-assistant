@@ -27,8 +27,10 @@ import {
 } from "../core/manuscriptViewTypes";
 import {
   existingManuscriptTab,
+  logForFile,
   manuscriptLedgerKey,
   manuscriptTabColumns,
+  setManuscriptLogWorkOf,
   openManuscriptFile,
   revealManuscriptPanelInPlace,
 } from "./manuscriptTab";
@@ -130,7 +132,7 @@ import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
 import { copyEmphasisFor } from "../core/postingCopyTargets";
 import { askText } from "../views/dialogs";
-import { logLine, useLogFile } from "../core/logger";
+import { logLine, useLogFile, workLog } from "../core/logger";
 import { readTextFile } from "../core/textFile";
 import type { TermHighlighter } from "../views/termHighlight";
 import type { TermKind } from "../core/termIndex";
@@ -488,10 +490,13 @@ export function watchDisconnectedManuscripts(
           const found = tabs.find((tab) => tab.key === key);
           return found ? paths.basename(fromUri(found.uri)) : key;
         });
-        // 書き先を向けてから記録する（作品が引けなければ保管庫へ倒れる）
+        // 記録は最初の画面の作品の書き先へ（作品が引けなければ保管庫へ倒れる）。
+        // 共有の書き先は動かさない——ほかの命令の行が紛れるため
         const first = tabs.find((tab) => tab.key === lost[0]);
-        useLogFile(first ? workOf?.(fromUri(first.uri))?.folderPath : undefined);
-        void warnDisconnected(names);
+        void warnDisconnected(
+          names,
+          first ? workOf?.(fromUri(first.uri))?.folderPath : undefined
+        );
       }
       // 猶予の間に別のタブが前に出ていたら、そちらを見直す
       check();
@@ -515,10 +520,13 @@ export function watchDisconnectedManuscripts(
   };
 }
 
-async function warnDisconnected(names: readonly string[]): Promise<void> {
-  logLine(
-    `原稿エディター：つながりの切れた画面を見つけた（${names.length}件。拡張機能ホストの起動し直しの見込み）`
-  );
+async function warnDisconnected(
+  names: readonly string[],
+  workFolder?: string
+): Promise<void> {
+  const text = `原稿エディター：つながりの切れた画面を見つけた（${names.length}件。拡張機能ホストの起動し直しの見込み）`;
+  if (workFolder) workLog(workFolder).line(text);
+  else logLine(text);
   /*
     **モーダルにして、再読み込みを既定のボタンにする。** 画面の下の欄の赤字は
     4秒で出るが、作者はそのまま打ち続け、タブを閉じて控えを失うことがある。
@@ -898,13 +906,14 @@ export function closeRenamedManuscript(from: string): void {
       document.isDirty && manuscriptLedgerKey(document.uri) === manuscriptLedgerKey(from)
   );
   if (dirty) {
-    logLine(
+    logForFile(
+      from,
       `原稿エディタ：${from} は未保存のため、面を閉じませんでした（打ちかけを消さない）。`
     );
     return;
   }
 
-  logLine(`原稿エディタ：名前が変わったため ${from} の面を閉じます。`);
+  logForFile(from, `原稿エディタ：名前が変わったため ${from} の面を閉じます。`);
   for (const open of faces) open.panel.dispose();
 }
 
@@ -981,7 +990,8 @@ export async function insertMemoLineAbove(
   );
   if (!(await vscode.workspace.applyEdit(change))) {
     // **黙って終わらない。** 押しても何も起きないときの手がかりを残す
-    logLine(
+    logForFile(
+      fromUri(document.uri),
       `メモ：${fromUri(document.uri)} の ${index + 1}行目に付箋を挿せませんでした。`
     );
     void vscode.window.showWarningMessage(
@@ -1166,7 +1176,8 @@ export async function openManuscriptVertical(uri: vscode.Uri): Promise<void> {
   const live = await waitFor(() => openManuscripts.get(key));
   const now = live?.appearance();
   if (!live || !now) {
-    logLine(
+    logForFile(
+      fromUri(uri),
       `原稿エディタ：${fromUri(uri)} のタブを前に出しましたが、画面の見た目を読めなかったため縦書きへ切り替えていません。画面の［縦書きにする］を押してください。`
     );
     return;
@@ -1240,7 +1251,8 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
       **次にできることまで書く。** 読み上げは原稿エディタの中にもあるので、
       そちらから押せば同じことができる。
     */
-    logLine(
+    logForFile(
+      filePath,
       `読み上げ：${filePath} を開けなかったため、読み上げの列を出せませんでした。`
     );
     void vscode.window.showWarningMessage(
@@ -1309,7 +1321,8 @@ async function pickReadAloudTarget(
     }
   } catch (error) {
     // **走査に失敗しても、押しても何も起きないで終わらせない**（下で断る）
-    logLine(
+    // 作品は分かっているので、その作品の書き先へ直接書く
+    workLog(work.folderPath).line(
       `読み上げ：${work.title} の話を走査できませんでした（${
         error instanceof Error ? error.message : String(error)
       }）。`
@@ -1361,7 +1374,8 @@ export async function removeMemoLineInOpenManuscript(
   // 段落の切れ目が増えてしまう
   change.delete(document.uri, document.lineAt(index).rangeIncludingLineBreak);
   if (!(await vscode.workspace.applyEdit(change))) {
-    logLine(
+    logForFile(
+      filePath,
       `原稿エディタ：メモの行を消せませんでした（${filePath} ${line}行目）。`
     );
     return { kind: "changed" };
@@ -1403,7 +1417,8 @@ export async function restoreMemoLineInOpenManuscript(
   const change = new vscode.WorkspaceEdit();
   change.insert(document.uri, document.positionAt(point.offset), point.insert);
   if (!(await vscode.workspace.applyEdit(change))) {
-    logLine(
+    logForFile(
+      filePath,
       `原稿エディタ：済みにしたメモの行を戻せませんでした（${filePath} ${removed.line}行目）。`
     );
     return { kind: "changed" };
@@ -2149,7 +2164,10 @@ export class ManuscriptEditorProvider
     private readonly orientation: ManuscriptOrientation = "setting",
     /** 開き直すときに使う入口のID（「最新話を書く」で同じ向きを保つ） */
     private readonly viewType: string = MANUSCRIPT_EDITOR_VIEW_TYPE
-  ) {}
+  ) {
+    // 画面の外の関数（モジュールの関数）も、同じ引き方で記録の書き先を決める
+    setManuscriptLogWorkOf((filePath) => deps.workOf(filePath));
+  }
 
   /**
    * つながりの切れた画面を閉じる前に、本文のコピーを頼んだ原稿の鍵
@@ -2986,7 +3004,8 @@ export class ManuscriptEditorProvider
             () => applyScreenEdit(item),
             reportApplied,
             (error) =>
-              logLine(
+              logForFile(
+                fromUri(document.uri),
                 `原稿エディタ：打った内容を文書へ当てる途中で失敗しました：${
                   error instanceof Error ? error.message : String(error)
                 }`
@@ -3179,7 +3198,8 @@ export class ManuscriptEditorProvider
           try {
             text = await vscode.env.clipboard.readText();
           } catch (error) {
-            logLine(
+            logForFile(
+              fromUri(document.uri),
               `原稿エディター：クリップボードを読めませんでした（${
                 error instanceof Error ? error.message : String(error)
               }）`
@@ -3196,7 +3216,8 @@ export class ManuscriptEditorProvider
               await vscode.env.clipboard.writeText(message.text);
               ok = true;
             } catch (error) {
-              logLine(
+              logForFile(
+                fromUri(document.uri),
                 `原稿エディター：クリップボードへ写せませんでした（${
                   error instanceof Error ? error.message : String(error)
                 }）`
@@ -3217,7 +3238,9 @@ export class ManuscriptEditorProvider
             // **黙って戻らない**（作者の報告、2026-08-28「用語上で右クリック
             // したとき、パネルの説明は切り替わりません」）。ここで落ちると
             // 押しても何も起きないので、どこで止まったかを残す
-            logLine(
+            // 作品が引けなかった場面なので、書き先は保管庫へ倒れる
+            logForFile(
+              fromUri(document.uri),
               "原稿エディタ：右クリックの設定資料——この原稿が属する作品を" +
                 "見つけられませんでした"
             );
@@ -3656,7 +3679,8 @@ export class ManuscriptEditorProvider
       open.revealLine(line);
       return true;
     }
-    logLine(
+    logForFile(
+      filePath,
       `原稿エディタ：${filePath} は台帳にありません（鍵: ${key}）。開き直します。`
     );
 
@@ -3675,7 +3699,8 @@ export class ManuscriptEditorProvider
         ? manuscriptViewTypeFor(await kindOf(episodeWork))
         : undefined);
     if (!viewType) {
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} は作品の話ではないため、素のエディタへ譲ります。`
       );
       return false;
@@ -3690,7 +3715,10 @@ export class ManuscriptEditorProvider
       起きる（0.96.19 で列を渡すようにした）。
     */
     const choice = columnForLocation(filePath);
-    logLine(`原稿エディタ：${filePath} を開きます（${choice.reason}）。`);
+    logForFile(
+      filePath,
+      `原稿エディタ：${filePath} を開きます（${choice.reason}）。`
+    );
     await openManuscriptFile(uri, viewType, choice.column);
     /*
       **台帳に載るまで待つ。**
@@ -3705,7 +3733,8 @@ export class ManuscriptEditorProvider
     // **開けなかったときは引き受けない。** ここで true を返すと、
     // 押しても何も起きないまま終わる（素のエディタへも行かない）
     if (!opened) {
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} を開けなかったため、行を示せませんでした（鍵: ${key}）。`
       );
       return false;
@@ -3738,7 +3767,8 @@ export class ManuscriptEditorProvider
     const shown = await waitFor(() => openManuscripts.get(key));
     if (!shown) {
       // 拡張機能ホストが起動し直したあとの面は、つながり直さない
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} のタブを前に出しましたが、画面とつながりませんでした（鍵: ${key}）。`
       );
       return this.askDisconnectedReveal(filePath, key, existing, line);
@@ -3793,7 +3823,8 @@ export class ManuscriptEditorProvider
     if (choice === RELOAD_WINDOW_ITEM) {
       // 覚えてから再読み込みする（再読み込みでこの拡張機能も読み込み直される）
       await this.writeReloadJump(makeManuscriptReloadJump(key, line, new Date()));
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} の画面がつながっていないため、ウィンドウを再読み込みします（再読み込みのあと${line}行目を示す）。`
       );
       await vscode.commands.executeCommand("workbench.action.reloadWindow");
@@ -3802,7 +3833,8 @@ export class ManuscriptEditorProvider
 
     if (choice === CLOSE_AND_REOPEN_ITEM) {
       this.copyAskedKeys.add(key);
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} を閉じて開き直す前に、本文のコピーを頼みました。`
       );
       await vscode.window.showInformationMessage(
@@ -3825,7 +3857,8 @@ export class ManuscriptEditorProvider
     }
 
     // 取りやめ（Esc）。素のエディタも開かない——開くと同じ話の2枚目ができる
-    logLine(
+    logForFile(
+      filePath,
       `原稿エディタ：${filePath} の画面がつながっていませんが、作者が取りやめたので何もしません。`
     );
     return true;
@@ -3851,7 +3884,8 @@ export class ManuscriptEditorProvider
           manuscriptLedgerKey(candidate.input.uri) === key
       );
     if (!tab) {
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} を開き直そうとしましたが、タブが見つかりませんでした。`
       );
       return;
@@ -3859,19 +3893,22 @@ export class ManuscriptEditorProvider
     // VS Code の普通の閉じ方で閉じる（未保存なら保存するかを作者が選べる）
     const closed = await vscode.window.tabGroups.close(tab);
     if (!closed) {
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} のタブが閉じられなかったため、開き直しを取りやめました。`
       );
       return;
     }
-    logLine(
+    logForFile(
+      filePath,
       `原稿エディタ：${filePath} のつながりの切れたタブを閉じ、${existing.column}列目へ開き直します（入口: ${existing.viewType}）。`
     );
     // 共通の口を通す（タブはもう無いので、渡した入口と列で新しく開く。6.25.11）
     await openManuscriptFile(filePath, existing.viewType, existing.column);
     const opened = await waitFor(() => openManuscripts.get(key));
     if (!opened) {
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} を開き直しましたが、画面とつながらず、行を示せませんでした。`
       );
       return;
@@ -3905,7 +3942,8 @@ export class ManuscriptEditorProvider
       return isEpisode ? found.work : undefined;
     } catch (error) {
       // **走査に失敗しても、飛べなくならない。** 素のエディタへ譲る
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} が作品の話かを確かめられませんでした（${
           error instanceof Error ? error.message : String(error)
         }）。`
@@ -3955,13 +3993,20 @@ export class ManuscriptEditorProvider
     document: vscode.TextDocument,
     text: string
   ): Promise<void> {
-    try {
-      const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
-      if (found) useLogFile(found.work.folderPath);
-    } catch {
-      // 作品を引けなくてもログは出す
+    // 共有の書き先は動かさず、呼び出しごとに作品の書き先を持つ（0.127.3 のあと）。
+    // 登録簿で引けなければ、設定資料の索引でも引いてみる
+    const filePath = fromUri(document.uri);
+    let folder = this.deps.workOf(filePath)?.folderPath;
+    if (!folder) {
+      try {
+        folder = (await this.deps.highlighter.indexFor(filePath))?.work
+          .folderPath;
+      } catch {
+        // 作品を引けなくてもログは出す
+      }
     }
-    logLine(text);
+    if (folder) workLog(folder).line(text);
+    else logLine(text);
   }
 
   /**
@@ -4001,7 +4046,8 @@ export class ManuscriptEditorProvider
       // **黙って捨てない。** 当たらなかった場合、このあと文書の側の本文が
       // 画面へ送り返され、打った内容が消えたように見える。理由が残っていないと
       // 「勝手に消えた」としか分からない
-      logLine(
+      logForFile(
+        fromUri(document.uri),
         `原稿エディタ：打った内容を文書へ当てられませんでした（${edit.start}〜${edit.end}）。`
       );
       return "failed";
@@ -4016,7 +4062,8 @@ export class ManuscriptEditorProvider
       する（core/manuscriptSave.ts の editTakenByDocument）
     */
     if (!(await editTakenByDocument(() => document.isDirty))) {
-      logLine(
+      logForFile(
+        fromUri(document.uri),
         `原稿エディタ：打った内容を文書へ当てたのに、文書が未保存になりませんでした（${edit.start}〜${edit.end}。原稿が読み取り専用の見込み。保存されません）。`
       );
       return "ignored";
@@ -4236,7 +4283,8 @@ export class ManuscriptEditorProvider
       });
     } catch (error) {
       // **字数が出ないだけで、書くほうは止めない。** 黙って諦めずに残す
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：下段の字数を出せませんでした（${
           error instanceof Error ? error.message : String(error)
         }）。`
@@ -4575,7 +4623,8 @@ export class ManuscriptEditorProvider
     // 作者には「振ったのに反映されない」としか見えない
     // （シーンメモの挿入と同じ扱いに揃える。0.28.2）
     if (!(await vscode.workspace.applyEdit(change))) {
-      logLine(
+      logForFile(
+        fromUri(document.uri),
         `${label}：${fromUri(document.uri)} の ${start}〜${end} に入れられませんでした。`
       );
       void vscode.window.showWarningMessage(
@@ -4635,7 +4684,8 @@ export class ManuscriptEditorProvider
       );
     }
     if (!(await vscode.workspace.applyEdit(change))) {
-      logLine(
+      logForFile(
+        fromUri(document.uri),
         `傍点：${fromUri(document.uri)} の ${start}〜${end} の傍点を外せませんでした。`
       );
       void vscode.window.showWarningMessage(
@@ -5001,7 +5051,8 @@ export class ManuscriptEditorProvider
     const live = await waitFor(() => openManuscripts.get(key));
     const outcome = settleCarriedAppearance(pendingAppearance, key, live);
     if (outcome === "discarded") {
-      logLine(
+      logForFile(
+        filePath,
         `原稿エディタ：${filePath} のタブを前に出しましたが、画面が立ち上がらなかったため、前の話の見た目は引き継がずに捨てました（後日開いたときに古い見た目が当たらないように）。`
       );
     }
