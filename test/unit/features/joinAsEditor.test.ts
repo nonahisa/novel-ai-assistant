@@ -48,8 +48,22 @@ describe("編集者として参加：作品の数", () => {
     Object.assign(window, { showInputBox: undefined });
   });
 
-  test("作者モードで作品が登録済みでも、止めずにリンクを訊く", async () => {
+  /*
+    作者モードの環境に作品があれば止める（作者の答え 2026-11-05 夜「作品があれば止める」）。
+    参加すると環境ごと編集者モードになり、作者自身の作品まで編集者モードで開くことになる
+  */
+  test("作者モードで作品が登録済みなら、リンクを訊く前に理由を出して止まる", async () => {
     await joinAsEditor({ list: () => works } as never);
+
+    expect(asked).not.toHaveBeenCalled();
+    const text = warnings.join("\n");
+    expect(text).toContain("このままでは参加できません");
+    expect(text).toContain("1 件の作品が登録されている");
+    expect(text).not.toContain("つまで");
+  });
+
+  test("作者モードで作品が0件なら、止めずにリンクを訊く", async () => {
+    await joinAsEditor({ list: () => [] } as never);
 
     expect(asked).toHaveBeenCalled();
     expect(warnings.join("\n")).not.toContain("このままでは参加できません");
