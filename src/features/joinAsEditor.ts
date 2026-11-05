@@ -11,7 +11,7 @@ import {
 } from "../core/githubCollaboration";
 import { describeRepoRefProblem, parseGithubRepoRef } from "../core/githubRepoRef";
 import { cloneWithCredential } from "./shareWithEditor";
-import { isGitAvailable } from "../core/git";
+import { isGitAvailable, runGit } from "../core/git";
 import {
   ensureGithubAuthToken,
 } from "../core/gitSetup";
@@ -39,6 +39,13 @@ import { applyMode, describeModeChange } from "./switchMode";
  * **リンクは貼ってもらう。** URI ハンドラは拡張機能に1つしか持てず、読者統計の
  * ヘルパー連携が使っているので使わない。
  */
+/** 作品の送り先（origin）の GitHub の持ち主と名前。読めなければ undefined */
+async function originRepoOf(folder: string): Promise<{ owner: string; repo: string } | undefined> {
+  const result = await runGit(["remote", "get-url", "origin"], folder, 15_000).catch(() => undefined);
+  const url = result && result.code === 0 ? result.stdout.trim() : "";
+  return url ? parseGithubRepoRef(url) : undefined;
+}
+
 export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   const mode = currentMode();
   const registered = registry.list();
@@ -47,15 +54,19 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   // 登録を断られると、置き場に中途半端なフォルダーが残る）
   // **作者モードからでも同じ。** 登録してからモードを切り替えるので、先に数えないと
   // 作品が複数のまま編集者モードになり、「作品は1つまで」の仕切りをすり抜ける
-  if (registered.length >= EDITOR_WORK_LIMIT) {
+  /*
+    **編集者モードで作品がもうあるときは、リンクを見てから案内を分ける**（作者の答え 2026-11-05）。
+    編集者（kmizu さん）が、作者の最新の原稿を受け取ろうとして「参加」を押し直し、
+    「先にその作品の登録を外してください」と出て、どうすればよいか分からなかった。
+    同じ作品のリンクなら「もう参加している・受け取るのは保存・同期」と言い、
+    別の作品のリンクのときだけ「登録を外して」と案内する
+  */
+  const joined = mode === "editor" && registered.length >= EDITOR_WORK_LIMIT ? registered[0] : undefined;
+  if (!joined && registered.length >= EDITOR_WORK_LIMIT) {
     void vscode.window.showWarningMessage(
-      mode === "editor"
-        ? `編集者モードの環境で登録できる作品は ${EDITOR_WORK_LIMIT} つまでです` +
-            `（いまは「${registered[0]?.title ?? "登録済みの作品"}」）。` +
-            "別の作品に参加するには、先にその作品の登録を外してください。"
-        : `編集者として参加すると、この環境は編集者モード（作品は ${EDITOR_WORK_LIMIT} つまで）になります。` +
-            `いま ${registered.length} 件の作品が登録されているため、このままでは参加できません。` +
-            "登録を外すか、別の VS Code の環境（プロファイル）で参加してください。"
+      `編集者として参加すると、この環境は編集者モード（作品は ${EDITOR_WORK_LIMIT} つまで）になります。` +
+        `いま ${registered.length} 件の作品が登録されているため、このままでは参加できません。` +
+        "登録を外すか、別の VS Code の環境（プロファイル）で参加してください。"
     );
     return;
   }
@@ -90,6 +101,31 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   if (!link) return;
   const ref = parseGithubRepoRef(link);
   if (!ref) return;
+
+  if (joined) {
+    // 取り寄せる前に止める（取り寄せたあとで断ると、置き場に中途半端なフォルダーが残る）
+    const origin = await originRepoOf(joined.folderPath);
+    const same =
+      origin !== undefined &&
+      origin.owner.toLowerCase() === ref.owner.toLowerCase() &&
+      origin.repo.toLowerCase() === ref.repo.toLowerCase();
+    if (same) {
+      void vscode.window.showInformationMessage(
+        `「${joined.title}」には、もう編集者として参加しています。` +
+          "作者の最新の原稿を受け取るには、簡単ステップメニュー「1. 編集者として参加」の「保存・同期」を押してください。"
+      );
+      return;
+    }
+    void vscode.window.showWarningMessage(
+      `編集者モードの環境で登録できる作品は ${EDITOR_WORK_LIMIT} つまでです` +
+        `（いまは「${joined.title}」）。` +
+        `別の作品（${ref.owner}/${ref.repo}）に参加するには、先に「${joined.title}」の登録を外してください。` +
+        (origin === undefined
+          ? `「${joined.title}」の最新の原稿を受け取りたいだけなら、参加し直さずに「保存・同期」を押してください。`
+          : "")
+    );
+    return;
+  }
 
   // 置き場。**訊かない**（既定の置き場の下の `編集部/<リポジトリ名>`）。
   // 既定が決められないときだけ選んでもらう

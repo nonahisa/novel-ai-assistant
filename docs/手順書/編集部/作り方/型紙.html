@@ -1,0 +1,289 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>編集者の校閲手順書</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=BIZ+UDGothic&display=swap">
+<style>
+/* 作業手順の紙：左に段の番号、右に説明と画面。赤い〇は画面の中の印なので、ページの色は紺と淡い青灰でまとめる */
+:root {
+  --bg: #f6f8fa;
+  --paper: #ffffff;
+  --ink: #1d2733;
+  --muted: #5b6876;
+  --line: #d9e0e7;
+  --accent: #1f4e79;
+  --accent-soft: #e6eef6;
+  --ring: #e53935;
+  --note-bg: #fff7e6;
+  --note-line: #e8c66b;
+  --font-body: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", sans-serif;
+  --font-mono: "BIZ UDGothic", "Consolas", "MS Gothic", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171d; --paper: #1a2129; --ink: #e3e9ef; --muted: #9aa8b6; --line: #2e3945;
+    --accent: #8fb8e0; --accent-soft: #1f2d3b; --ring: #ff6b66; --note-bg: #2b2414; --note-line: #7a6326;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171d; --paper: #1a2129; --ink: #e3e9ef; --muted: #9aa8b6; --line: #2e3945;
+  --accent: #8fb8e0; --accent-soft: #1f2d3b; --ring: #ff6b66; --note-bg: #2b2414; --note-line: #7a6326;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.85;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+.wrap { max-width: 860px; margin: 0 auto; display: grid; gap: 28px; }
+header { display: grid; gap: 8px; }
+.eyebrow { font-size: 13px; letter-spacing: .08em; color: var(--muted); }
+h1 { font-size: 30px; line-height: 1.4; margin: 0; text-wrap: balance; }
+h2 { font-size: 21px; line-height: 1.5; margin: 0; text-wrap: balance; }
+h3 { font-size: 16px; margin: 0; }
+p { margin: 0; }
+.lead { color: var(--muted); max-width: 40em; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; display: grid; gap: 12px; }
+.legend { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ring-sample { width: 46px; height: 24px; border: 3px solid var(--ring); border-radius: 50%; flex: none; }
+ul, ol { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
+code, .ui { font-family: var(--font-mono); font-size: .92em; background: var(--accent-soft); color: var(--ink); padding: 1px 6px; border-radius: 4px; }
+.toc { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 16px; padding: 0; list-style: none; }
+.toc a { color: var(--accent); text-decoration: none; }
+.toc a:hover, .toc a:focus-visible { text-decoration: underline; }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.step { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 16px; align-items: start; }
+.num { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: var(--paper); display: grid; place-items: center; font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+.body { display: grid; gap: 14px; min-width: 0; }
+figure { margin: 0; display: grid; gap: 6px; }
+figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+figcaption { font-size: 14px; color: var(--muted); }
+details { font-size: 14px; }
+summary { cursor: pointer; color: var(--accent); }
+details img { margin-top: 8px; }
+.note { background: var(--note-bg); border: 1px solid var(--note-line); border-radius: 8px; padding: 12px 14px; font-size: 15px; display: grid; gap: 4px; }
+.faq { display: grid; gap: 14px; }
+.faq div { display: grid; gap: 2px; }
+footer { color: var(--muted); font-size: 13px; }
+@media (max-width: 560px) {
+  h1 { font-size: 24px; }
+  .step { grid-template-columns: 1fr; gap: 10px; }
+}
+</style></head><body>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">統合小説執筆環境　編集者向け</div>
+    <h1>校閲して作者へ返すまでの手順</h1>
+    <p class="lead">hisa の作品を、ご自分の VS Code で校閲していただくための手順です。本文は書き換わらず、直しも意見もすべて「提案」として作者に届きます。Live Share や、作者の画面の共有は要りません。</p>
+  </header>
+
+  <section class="card">
+    <h2>この手順書の見かた</h2>
+    <div class="legend"><span class="ring-sample" aria-hidden="true"></span><p>画面の中の赤い〇が、次に押す所です。</p></div>
+    <p>画面は見本の作品「春を待つ灯（見本）」で撮りました。お手元では hisa の作品の名前が出ます。メニューの <span class="ui">File</span> や <span class="ui">Cancel</span> など VS Code 本体の表示が英語で写っていますが、日本語の VS Code では日本語で出ます。</p>
+  </section>
+
+  <section class="card">
+    <h2>はじめに用意するもの</h2>
+    <ul>
+      <li>VS Code と Git</li>
+      <li>拡張機能「統合小説執筆環境」0.127.5 以降（拡張機能の画面で <span class="ui">nonahisa.novel-ai-assistant</span> を探して入れるか、［更新］を押す）</li>
+      <li>GitHub のアカウント。VS Code の左下の人の形のアイコンから、GitHub にサインインしておく</li>
+      <li>AI は無くてもかまいません。「表記ゆれ検知」は AI を使わずに動きます</li>
+    </ul>
+  </section>
+
+  <nav class="card" aria-label="目次">
+    <h2>手順</h2>
+    <ol class="toc">
+      <li><a href="#s1">1. メニューを開く</a></li>
+      <li><a href="#s2">2. 編集者として参加する</a></li>
+      <li><a href="#s3">3. 校閲する範囲を押さえる</a></li>
+      <li><a href="#s4">4. 検知で探す</a></li>
+      <li><a href="#s5">5. 自分の言葉で修正を書く</a></li>
+      <li><a href="#s6">6. 置いた提案を見る</a></li>
+      <li><a href="#s7">7. 校閲を終えて返す</a></li>
+      <li><a href="#s8">8. 作者モードへ戻る</a></li>
+    </ol>
+  </nav>
+
+  <section class="card step" id="s1">
+    <div class="num">1</div>
+    <div class="body">
+      <h2>メニューを開く</h2>
+      <p>左の端の「統合小説執筆環境」のアイコン（ペンとキーボードの絵）を押すと、左の列に「簡単ステップメニュー」が出ます。編集者として参加すると、1〜7 の段が校閲の順に並びます。上から順に進めれば大丈夫です。</p>
+      <figure>
+        <img src="{{IMG:01_アイコンと簡単ステップメニュー_拡大}}" alt="左の端のアイコンと、簡単ステップメニューの1から7の段" width="372" height="786" loading="lazy">
+        <figcaption>左の端のアイコンを押す →「1. 編集者として参加」から始めます</figcaption>
+      </figure>
+      <details><summary>画面全体を見る</summary><img src="{{IMG:01_アイコンと簡単ステップメニュー}}" alt="画面全体" width="1280" height="800" loading="lazy"></details>
+    </div>
+  </section>
+
+  <section class="card step" id="s2">
+    <div class="num">2</div>
+    <div class="body">
+      <h2>編集者として参加する（最初の1回だけ）</h2>
+      <p>まだ参加していないときは、左の列の「詳細メニュー」→「作品管理」→「編集者連携」→「編集者として参加」を押します。</p>
+      <figure>
+        <img src="{{IMG:02_詳細メニューの編集部連携_拡大}}" alt="詳細メニューの編集者連携を開き、編集者として参加を囲んだ画面" width="348" height="786" loading="lazy">
+        <figcaption>「編集者連携」の中に、校閲で使う操作がまとまっています</figcaption>
+      </figure>
+      <details><summary>画面全体を見る</summary><img src="{{IMG:02_詳細メニューの編集部連携}}" alt="画面全体" width="1280" height="800" loading="lazy"></details>
+      <p>上に入力欄が出るので、hisa から届いたリンク（<code>https://github.com/…</code>）を貼り付けて Enter を押します。招待の受け入れ、作品の取り寄せ、登録、編集者モードへの切り替えまでが1回で済みます。終わると「『作品の名前』に編集者として参加しました。」と知らせが出ます。</p>
+      <figure>
+        <img src="{{IMG:03_参加のリンクを貼る_拡大}}" alt="編集者として参加の入力欄にリンクを貼ったところ" width="733" height="143" loading="lazy">
+        <figcaption>画像のリンクは見本です。届いたリンクを貼ってください</figcaption>
+      </figure>
+      <details><summary>画面全体を見る</summary><img src="{{IMG:03_参加のリンクを貼る}}" alt="画面全体" width="1280" height="800" loading="lazy"></details>
+      <div class="note">
+        <p>編集者モードに切り替わると、詳細メニューの多くは押せなくなります。押すと理由が出るので、故障ではありません。</p>
+        <p>すでに参加が済んでいれば、この段は飛ばしてかまいません。hisa が原稿を直したあとは、簡単ステップメニュー「1. 編集者として参加」の中の「保存・同期」で最新を受け取れます（受け取るだけで、送るのは手順7だけです）。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card step" id="s3">
+    <div class="num">3</div>
+    <div class="body">
+      <h2>校閲する範囲を押さえる</h2>
+      <p>簡単ステップメニュー「2. 校閲する範囲を押さえる」→「校閲開始／終了」を押し、始めの話と終わりの話を選びます。範囲の話は、hisa の側で書けなくなります（校閲中に本文がずれないようにするためです）。</p>
+      <figure>
+        <img src="{{IMG:04a_校閲の始めの話_拡大}}" alt="校閲の始めの話を選ぶ画面" width="655" height="255" loading="lazy">
+        <figcaption>始めの話を押す</figcaption>
+      </figure>
+      <figure>
+        <img src="{{IMG:04b_校閲の終わりの話_拡大}}" alt="校閲の終わりの話を選ぶ画面" width="654" height="255" loading="lazy">
+        <figcaption>続けて終わりの話を押す</figcaption>
+      </figure>
+      <figure>
+        <img src="{{IMG:04c_校閲中を選ぶ_拡大}}" alt="校閲中を選ぶ画面" width="651" height="233" loading="lazy">
+        <figcaption>「校閲中」を押すと、下の帯に「第1話〜第3話を校閲中にしました。」と出ます</figcaption>
+      </figure>
+      <details><summary>画面全体を見る（3枚）</summary><img src="{{IMG:04a_校閲の始めの話}}" alt="始めの話を選ぶ画面全体" width="1280" height="800" loading="lazy"><img src="{{IMG:04b_校閲の終わりの話}}" alt="終わりの話を選ぶ画面全体" width="1280" height="800" loading="lazy"><img src="{{IMG:04c_校閲中を選ぶ}}" alt="校閲中を選ぶ画面全体" width="1280" height="800" loading="lazy"></details>
+    </div>
+  </section>
+
+  <section class="card step" id="s4">
+    <div class="num">4</div>
+    <div class="body">
+      <h2>検知で探す</h2>
+      <p>簡単ステップメニュー「3. 検知で探す」→「表記ゆれ検知」を押すと、書き方の揺れた組が並びます。揃えたい組にチェックを付けて［OK］を押します。AI があれば「誤字脱字検知」「推敲」も使えます。</p>
+      <figure>
+        <img src="{{IMG:05a_表記ゆれの組を選ぶ_拡大}}" alt="表記ゆれの組にチェックを付け、OKを囲んだ画面" width="663" height="229" loading="lazy">
+        <figcaption>揃えたい組にチェック →［OK］</figcaption>
+      </figure>
+      <figure>
+        <img src="{{IMG:05b_揃え先を選ぶ_拡大}}" alt="どちらの書き方に揃えるかを選ぶ画面" width="656" height="233" loading="lazy">
+        <figcaption>どちらの書き方に揃えるかを選ぶ</figcaption>
+      </figure>
+      <p>右に「提案」パネルが開き、直す候補が並びます。直したほうがよいものに［適用］を押してください。本文は書き換わらず、作者への提案として置かれます。</p>
+      <figure>
+        <img src="{{IMG:05c_提案パネルの適用_拡大}}" alt="提案パネルの適用ボタンを囲んだ画面" width="400" height="377" loading="lazy">
+        <figcaption>［適用］を押しても本文は変わりません</figcaption>
+      </figure>
+      <details><summary>画面全体を見る（3枚）</summary><img src="{{IMG:05a_表記ゆれの組を選ぶ}}" alt="表記ゆれの組を選ぶ画面全体" width="1280" height="800" loading="lazy"><img src="{{IMG:05b_揃え先を選ぶ}}" alt="揃え先を選ぶ画面全体" width="1280" height="800" loading="lazy"><img src="{{IMG:05c_提案パネルの適用}}" alt="提案パネルの画面全体" width="1280" height="800" loading="lazy"></details>
+    </div>
+  </section>
+
+  <section class="card step" id="s5">
+    <div class="num">5</div>
+    <div class="body">
+      <h2>自分の言葉で修正を書く</h2>
+      <p>原稿の本文で直したい所をなぞって選び、右クリックして「修正を提案する」を押します。簡単ステップメニュー「4. 修正を提案する」からも出せます（先に本文を選んでおいてください）。</p>
+      <figure>
+        <img src="{{IMG:06_右クリックの品書き_拡大}}" alt="本文を選んで右クリックし、修正を提案するを囲んだ画面" width="359" height="517" loading="lazy">
+        <figcaption>本文を選んで右クリック →「修正を提案する」</figcaption>
+      </figure>
+      <details><summary>画面全体を見る</summary><img src="{{IMG:06_右クリックの品書き}}" alt="画面全体" width="1280" height="800" loading="lazy"></details>
+      <p>入力欄が2つ続けて出ます。1つ目は修正案です。最初は選んだ字が入っているので、直した形に書き換えて Enter を押します。修正案を空にすると、意見だけを送れます。</p>
+      <figure>
+        <img src="{{IMG:07a_直した案_拡大}}" alt="修正を提案する（1/2）修正案の入力欄" width="733" height="161" loading="lazy">
+        <figcaption>1つ目：修正案</figcaption>
+      </figure>
+      <p>2つ目に、直す理由や意見をひと言書いて Enter を押します（空でも送れます）。下の帯に「〜行目に提案を置きました。」と出れば済みです。</p>
+      <figure>
+        <img src="{{IMG:07b_ひと言_拡大}}" alt="修正を提案する（2/2）理由・意見の入力欄" width="733" height="143" loading="lazy">
+        <figcaption>2つ目：理由・意見</figcaption>
+      </figure>
+      <details><summary>画面全体を見る（2枚）</summary><img src="{{IMG:07a_直した案}}" alt="直した案の画面全体" width="1280" height="800" loading="lazy"><img src="{{IMG:07b_ひと言}}" alt="理由・意見の画面全体" width="1280" height="800" loading="lazy"></details>
+      <div class="note"><p>行についての意見だけを伝えるなら、同じ右クリックの品書きの下のほうにある「ここにメモを足す」でも送れます。これも本文には書かれず、意見として作者に届きます。</p></div>
+    </div>
+  </section>
+
+  <section class="card step" id="s6">
+    <div class="num">6</div>
+    <div class="body">
+      <h2>置いた提案を見る</h2>
+      <p>簡単ステップメニュー「5. 置いた提案を見る」→「編集者提案確認」を押すと、置いた提案の数が右下に出ます。採るかどうかは作者が決めるので、ここでは数を確かめるだけです。</p>
+      <figure>
+        <img src="{{IMG:08_編集部提案確認_拡大}}" alt="編集者提案確認を押して、右下に未決の提案の数が出た画面" width="1211" height="571" loading="lazy">
+        <figcaption>例：「未決の提案が 2 件あります。採るかどうかは作者が決めます」</figcaption>
+      </figure>
+      <details><summary>画面全体を見る</summary><img src="{{IMG:08_編集部提案確認}}" alt="画面全体" width="1280" height="800" loading="lazy"></details>
+    </div>
+  </section>
+
+  <section class="card step" id="s7">
+    <div class="num">7</div>
+    <div class="body">
+      <h2>校閲を終えて返す</h2>
+      <p>終わったら、簡単ステップメニュー「6. 校閲を終えて返す」→「校閲を終えて返す」を押します。確認の窓に、外す校閲の範囲の印（ロック）の数と、送る提案の数が出るので、［返す］を押します。提案・ロック・編集履歴が GitHub 経由で作者へ送られ、範囲の印は外れます。本文は送りません。済むと「校閲を終えて、提案 N 件を作者へ返しました。」と出ます。</p>
+      <figure>
+        <img src="{{IMG:09_校閲を終えて返す確認_拡大}}" alt="校閲を終えて返す確認の窓の返すボタンを囲んだ画面" width="498" height="245" loading="lazy">
+        <figcaption>［返す］を押す</figcaption>
+      </figure>
+      <details><summary>画面全体を見る</summary><img src="{{IMG:09_校閲を終えて返す確認}}" alt="画面全体" width="1280" height="800" loading="lazy"></details>
+      <div class="note">
+        <p>作者が採るか見送るかを決めると、結果が送り返されます。次に VS Code を開いたとき、または簡単ステップメニュー「1. 編集者として参加」の「保存・同期」を押したときに、右下に「作者が提案を決めました（採用 N・見送り N・読まれた N）。」と出ます。「読まれた」は、意見だけの提案を作者が［読んだ］にした数です（採用には数えません）。</p>
+      </div>
+      <figure>
+        <img src="{{IMG:11a_作者の採否の知らせ_拡大}}" alt="右下に、作者が提案を決めましたの知らせが出た画面" width="0" height="0" loading="lazy">
+        <figcaption>作者の採否が届いたときの知らせ（赤い〇で囲んだ所）。数秒で消えます</figcaption>
+      </figure>
+      <details><summary>画面全体を見る</summary><img src="{{IMG:11a_作者の採否の知らせ}}" alt="画面全体" width="0" height="0" loading="lazy"></details>
+      <p><strong>見逃したときは、右下のベル（通知）を押してください。</strong>VS Code を開いているあいだに出た知らせが、一覧に残っています。</p>
+      <figure>
+        <img src="{{IMG:11b_ベルの一覧_拡大}}" alt="下の帯のベルを押して、知らせの一覧に作者が提案を決めましたが残っている画面" width="0" height="0" loading="lazy">
+        <figcaption>右下のベルを押す → 一覧に「作者が提案を決めました…」が残っています</figcaption>
+      </figure>
+      <details><summary>画面全体を見る</summary><img src="{{IMG:11b_ベルの一覧}}" alt="画面全体" width="0" height="0" loading="lazy"></details>
+      <div class="note">
+        <p>ベルの一覧は、VS Code を閉じて開き直すと空になり、同じ知らせは二度出ません。開き直したあとに採否を確かめたいときは、簡単ステップメニュー「5. 置いた提案を見る」→「編集者提案確認」を押してください。「未決の提案はありません（これまでに 3 件の提案がありました）。これまでの採否：採用 1・見送り 1・読まれた 1。」のように、これまでの採否の数が出ます。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card step" id="s8">
+    <div class="num">8</div>
+    <div class="body">
+      <h2>作者モードへ戻る（ご自分の作品で使うとき）</h2>
+      <p>校閲が済んで、ご自分の作品でこの拡張機能を使うときは、簡単ステップメニュー「7. 作者モードへ戻る」→「作者／編集者切替」を押し、［作者に戻す］を押します。</p>
+      <figure>
+        <img src="{{IMG:10a_作者モードへ戻る確認_拡大}}" alt="作者モードへ戻す確認の窓の作者に戻すボタンを囲んだ画面" width="498" height="245" loading="lazy">
+        <figcaption>［作者に戻す］を押す</figcaption>
+      </figure>
+      <figure>
+        <img src="{{IMG:10b_作者モードに戻った_拡大}}" alt="作者モードに戻しましたの知らせ" width="484" height="84" loading="lazy">
+        <figcaption>「作者モードに戻しました。」と出て、メニューが作者向けの並びに替わります</figcaption>
+      </figure>
+      <details><summary>画面全体を見る（2枚）</summary><img src="{{IMG:10a_作者モードへ戻る確認}}" alt="作者モードへ戻す確認の画面全体" width="1280" height="800" loading="lazy"><img src="{{IMG:10b_作者モードに戻った}}" alt="作者モードに戻った画面全体" width="1280" height="800" loading="lazy"></details>
+    </div>
+  </section>
+
+  <section class="card faq">
+    <h2>よくある疑問</h2>
+    <div><h3>前もって clone しておく必要はありますか？</h3><p>ありません。「編集者として参加」でリンクを貼ると、取り寄せまで拡張機能が行います。リンクを VS Code の外（ブラウザなど）で開くと、エクスプローラーやブラウザが開くだけで参加になりません。</p></div>
+    <div><h3>本文を直接書き換えてしまわないか心配です</h3><p>編集者モードでは、［適用］も「修正を提案する」も、本文を変えずに提案として置きます。作者が採ったときに初めて本文に入ります。</p></div>
+    <div><h3>押しても何も起きない・理由が出る</h3><p>編集者モードでは使えない操作です。出た文をそのまま hisa に送ってください。</p></div>
+    <div><h3>迷ったときは</h3><p>その場の画面の写しを hisa に送ってください。次に押す所をお伝えします。</p></div>
+  </section>
+
+  <footer>統合小説執筆環境 0.127.5 の画面で撮影（2026年11月5日）</footer>
+</div>
+</body></html>
