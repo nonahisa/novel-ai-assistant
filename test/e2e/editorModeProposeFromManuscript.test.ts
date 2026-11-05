@@ -53,7 +53,8 @@ test("編集者モードで原稿エディターの本文を選んでから詳�
       const { page, workFolder, manuscriptFolder } = session;
       await showSidebar(page, E2E_WORK_TITLE);
       // 木は見えている行しか描かないので、詳細メニューだけを開いて背を高くする（押す前に整えておく）
-      for (const pane of ["作品一覧", "簡単ステップメニュー", "AIに相談"]) await setSidebarPane(page, pane, false);
+      // 編集者モードでは簡単ステップメニューが出ず、一番上に編集者メニューが出る（0.128.0。設計書5.6.6）
+      for (const pane of ["作品一覧", "編集者メニュー", "AIに相談"]) await setSidebarPane(page, pane, false);
       await setSidebarPane(page, "詳細メニュー", true);
       await scrollTreeUntilRow(page, "執筆データ", "作品管理");
       await expandTreeRow(page, "作品管理");

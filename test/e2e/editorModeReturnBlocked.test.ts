@@ -198,7 +198,8 @@ test("編集者モードの詳細メニュー「GitHub作品管理」に「分�
       await pressWorkbenchKey(page, SHOW_SIDEBAR_PRESS);
       await page.locator(".pane-header", { hasText: "詳細メニュー" }).first().waitFor({ state: "visible", timeout: 15_000 });
       await collapseSidebarPane(page, "AIに相談");
-      await collapseSidebarPane(page, "簡単ステップメニュー");
+      // 編集者モードでは簡単ステップメニューが出ず、一番上に編集者メニューが出る（0.128.0。設計書5.6.6）
+      await collapseSidebarPane(page, "編集者メニュー");
 
       await detailChildren(page, "作品管理");
       const github = await detailChildren(page, "GitHub作品管理");
