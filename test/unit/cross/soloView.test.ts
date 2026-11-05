@@ -37,6 +37,8 @@ const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as Manifest;
 
 /** 左側に縦に並ぶ4つのビューと、`soloView` に入れる短い名前の対応 */
 const SIDEBAR_VIEWS = [
+  // 編集者メニューは編集者モードでだけ出る（設計書5.6.6）。ほかのビューと同じく1つだけ残せる
+  { id: "novelai.editorMenu", solo: "editorMenu", command: "novelai.soloEditorMenu" },
   { id: "novelai.works", solo: "works", command: "novelai.soloWorks" },
   { id: "novelai.steps", solo: "steps", command: "novelai.soloSteps" },
   { id: "novelai.actions", solo: "actions", command: "novelai.soloActions" },

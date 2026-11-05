@@ -70,6 +70,14 @@ const EDITOR_ALLOWED = new Set<string>([
   "novelai.joinAsEditor",
   "novelai.finishReviewAndReturn",
 
+  // 編集者メニュー（作者の指示 2026-11-05 夜。設計書5.6.6）。編集者は複数の作品に参加でき、
+  // 一番上で切り替える。「この作品の編集を終える」は作品の登録を外す（フォルダーは消さない）。
+  // 置いた提案と作者の採否は、本文の場所へ飛べる一覧で見る（読むだけ）
+  "novelai.chooseEditorWork",
+  "novelai.removeWork",
+  "novelai.listPlacedProposals",
+  "novelai.viewAuthorDecisions",
+
   // **戻る道を必ず残す。** 入ったら出られない、が起きてはならない
   "novelai.switchMode",
 
@@ -197,34 +205,4 @@ export function describeMcpBlocked(tool: string, mode: WorkFolderMode): string {
 /** 一覧を外から見たいとき（テストと画面の説明で使う） */
 export function editorAllowedCommands(): string[] {
   return [...EDITOR_ALLOWED].sort();
-}
-
-/**
- * 編集者モードで登録できる作品の数（設計書5.7.4）。
- *
- * **編集部は1作品だけを見る。** 校閲を頼まれた作品と、頼まれていない作品を
- * 同じ画面に並べると、取り違えて別の作品へ提案を書きかねない。
- */
-export const EDITOR_WORK_LIMIT = 1;
-
-/**
- * いま作品を足せるか。
- *
- * **これは守りではない。** 手元にファイルがある以上、別のエディタで開けば
- * 読めてしまう。**本当に守るのはGitHubの招待範囲のほうである**
- * （リポジトリ単位でしか権限をかけられないので、編集部へ渡すときは
- * その作品だけを入れたリポジトリを切り出す）。ここで止めるのは、
- * 作者と編集部の双方が取り違えないようにするためである。
- */
-export function canRegisterWork(mode: WorkMode, registered: number): boolean {
-  return mode === "author" || registered < EDITOR_WORK_LIMIT;
-}
-
-/** 足せないときの説明。**何のためにそうしているかまで言う** */
-export function describeWorkLimit(registeredTitle: string): string {
-  return (
-    `編集者モードでは、作品を1つだけ登録できます（いまは「${registeredTitle}」）。` +
-    "別の作品を校閲するときは、いまの登録を解除してから追加してください。" +
-    "取り違えて別の作品へ提案を書かないための仕切りです。"
-  );
 }

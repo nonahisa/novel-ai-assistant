@@ -55,9 +55,24 @@ describe("横の相談パネルの高さ", () => {
     // **畳んだ区画には initialSize が使われない**（2026-10-23 夜の測定。開くと最小の120pxに落ちた）。
     // 値があっても畳んでいれば効かないので、畳まないことも一緒に見張る
     expect(chat?.visibility).not.toBe("collapsed");
-    const others = views
-      .filter((view) => view.id !== "novelai.chatView")
-      .reduce((sum, view) => sum + (view.initialSize ?? 20), 0);
+    /*
+      同時に出るビューだけを数える。編集者メニューは編集者モードでだけ出て、そのときは
+      簡単ステップメニューが出ない（設計書5.6.6）。どちらのモードでも、相談のほかは3つ
+    */
+    const shownIn = (mode: "author" | "editor") =>
+      views.filter((view) => {
+        const when = (view as { when?: string }).when ?? "";
+        return mode === "author"
+          ? !when.includes("config.novelai.mode == 'editor'")
+          : !when.includes("config.novelai.mode != 'editor'");
+      });
+    const others = Math.max(
+      ...(["author", "editor"] as const).map((mode) =>
+        shownIn(mode)
+          .filter((view) => view.id !== "novelai.chatView")
+          .reduce((sum, view) => sum + (view.initialSize ?? 20), 0)
+      )
+    );
     expect(chat?.initialSize).toBeTypeOf("number");
     expect(chat!.initialSize!).toBeGreaterThanOrEqual(others);
   });

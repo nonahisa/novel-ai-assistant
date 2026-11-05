@@ -207,6 +207,11 @@
     "views": {
       "novelai": [
         {
+          "id": "novelai.editorMenu",
+          "name": "編集者メニュー",
+          "when": "config.novelai.mode == 'editor' && !novelai.focusChat && (!novelai.soloView || novelai.soloView == 'editorMenu')"
+        },
+        {
           "id": "novelai.works",
           "name": "作品一覧",
           "when": "!novelai.focusChat && (!novelai.soloView || novelai.soloView == 'works')"
@@ -214,7 +219,7 @@
         {
           "id": "novelai.steps",
           "name": "簡単ステップメニュー",
-          "when": "!novelai.focusChat && (!novelai.soloView || novelai.soloView == 'steps')"
+          "when": "config.novelai.mode != 'editor' && !novelai.focusChat && (!novelai.soloView || novelai.soloView == 'steps')"
         },
         {
           "id": "novelai.actions",
@@ -1518,6 +1523,30 @@
         "title": "対話式プロット作成",
         "category": "統合小説執筆環境",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "novelai.chooseEditorWork",
+        "title": "校閲する作品を選ぶ",
+        "category": "統合小説執筆環境",
+        "icon": "$(book)"
+      },
+      {
+        "command": "novelai.listPlacedProposals",
+        "title": "置いた提案の一覧",
+        "category": "統合小説執筆環境",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "novelai.viewAuthorDecisions",
+        "title": "作者の採否を見る",
+        "category": "統合小説執筆環境",
+        "icon": "$(feedback)"
+      },
+      {
+        "command": "novelai.soloEditorMenu",
+        "title": "他のメニューを閉じる",
+        "category": "統合小説執筆環境",
+        "icon": "$(screen-full)"
       }
     ],
     "menus": {
@@ -1595,6 +1624,16 @@
         {
           "command": "novelai.soloChat",
           "when": "view == novelai.chatView && !novelai.soloView",
+          "group": "1_solo@1"
+        },
+        {
+          "command": "novelai.showAllViews",
+          "when": "view == novelai.editorMenu && novelai.soloView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "novelai.soloEditorMenu",
+          "when": "view == novelai.editorMenu && !novelai.soloView",
           "group": "1_solo@1"
         }
       ],
@@ -2111,7 +2150,6 @@
           "command": "novelai.shareWithEditor",
           "when": "!novelai.processesBlocked"
         },
-
         {
           "command": "novelai.joinAsEditor",
           "when": "!novelai.processesBlocked"
@@ -2143,6 +2181,22 @@
         {
           "command": "novelai.connectClaudeCode",
           "when": "!novelai.processesBlocked"
+        },
+        {
+          "command": "novelai.chooseEditorWork",
+          "when": "config.novelai.mode == 'editor'"
+        },
+        {
+          "command": "novelai.listPlacedProposals",
+          "when": "config.novelai.mode == 'editor'"
+        },
+        {
+          "command": "novelai.viewAuthorDecisions",
+          "when": "config.novelai.mode == 'editor'"
+        },
+        {
+          "command": "novelai.soloEditorMenu",
+          "when": "false"
         }
       ]
     },

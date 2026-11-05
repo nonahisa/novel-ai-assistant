@@ -283,6 +283,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // 作品のタイプで出し分ける理由がない
   "novelai.setAuthorReaderType": "allTypes",
   "novelai.chooseStepWork": "allTypes",
+  "novelai.chooseEditorWork": "allTypes",
+  "novelai.listPlacedProposals": "allTypes",
+  "novelai.viewAuthorDecisions": "allTypes",
 
   // ── 執筆量・記録 ──
   "novelai.showWritingStats": "allTypes",
@@ -455,6 +458,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // ── 画面の出し入れ・ヘルプ ──
   "novelai.soloWorks": "allTypes",
   "novelai.soloSteps": "allTypes",
+  "novelai.soloEditorMenu": "allTypes",
   "novelai.soloActions": "allTypes",
   "novelai.soloChat": "allTypes",
   "novelai.showAllViews": "allTypes",

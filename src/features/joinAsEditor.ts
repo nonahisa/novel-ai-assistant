@@ -3,7 +3,6 @@ import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { readWorkConfig } from "../core/workRegistry";
 import { currentMode } from "../core/actorContext";
-import { EDITOR_WORK_LIMIT } from "../core/editorMode";
 import { joinEditorDestination } from "../core/editingRepo";
 import {
   acceptEditorInvitation,
@@ -33,8 +32,8 @@ import { applyMode, describeModeChange } from "./switchMode";
  * 1回で通す。以前は GitHub の画面で招待を受け、手で clone して、モードを切り替えて
  * いた。
  *
- * **順は 受諾 → 取り寄せ → 登録 → モード。** 先にモードを編集者にすると、
- * 登録が「作品は1つまで」の制限に当たる（`canRegisterWork`）。
+ * **順は 受諾 → 取り寄せ → 登録 → モード。** 登録の前に編集者モードにすると、
+ * 取り寄せに失敗したとき、作品の無い編集者モードの環境が残る。
  *
  * **リンクは貼ってもらう。** URI ハンドラは拡張機能に1つしか持てず、読者統計の
  * ヘルパー連携が使っているので使わない。
@@ -46,31 +45,48 @@ async function originRepoOf(folder: string): Promise<{ owner: string; repo: stri
   return url ? parseGithubRepoRef(url) : undefined;
 }
 
-export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
+/** 参加している作品のうち、送り先がそのリンクと同じもの（大文字小文字は見ない） */
+async function findJoinedWork(
+  works: readonly WorkEntry[],
+  ref: { owner: string; repo: string }
+): Promise<WorkEntry | undefined> {
+  for (const work of works) {
+    const origin = await originRepoOf(work.folderPath);
+    if (
+      origin !== undefined &&
+      origin.owner.toLowerCase() === ref.owner.toLowerCase() &&
+      origin.repo.toLowerCase() === ref.repo.toLowerCase()
+    ) {
+      return work;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 参加が済んだときの結果。**参加した作品を返す**（編集者メニューがその作品を選ぶ）。
+ * もう参加していた作品のリンクなら、その作品を `already` で返す
+ */
+export type JoinAsEditorResult =
+  | { kind: "joined"; work: WorkEntry }
+  | { kind: "already"; work: WorkEntry }
+  | undefined;
+
+/** 編集者メニューの受け取りの手順の名前（案内の文で指す） */
+export const RECEIVE_STEP_LABEL = "1. 作者の最新の原稿を受け取る";
+
+export async function joinAsEditor(registry: WorkRegistry): Promise<JoinAsEditorResult> {
   const mode = currentMode();
   const registered = registry.list();
-
-  // 編集者モードの環境は作品1つまで。**取り寄せる前に**止める（取り寄せたあとで
-  // 登録を断られると、置き場に中途半端なフォルダーが残る）
-  // **作者モードからでも同じ。** 登録してからモードを切り替えるので、先に数えないと
-  // 作品が複数のまま編集者モードになり、「作品は1つまで」の仕切りをすり抜ける
   /*
-    **編集者モードで作品がもうあるときは、リンクを見てから案内を分ける**（作者の答え 2026-11-05）。
-    編集者（kmizu さん）が、作者の最新の原稿を受け取ろうとして「参加」を押し直し、
-    「先にその作品の登録を外してください」と出て、どうすればよいか分からなかった。
-    同じ作品のリンクなら「もう参加している・受け取るのは保存・同期」と言い、
-    別の作品のリンクのときだけ「登録を外して」と案内する
-  */
-  const joined = mode === "editor" && registered.length >= EDITOR_WORK_LIMIT ? registered[0] : undefined;
-  if (!joined && registered.length >= EDITOR_WORK_LIMIT) {
-    void vscode.window.showWarningMessage(
-      `編集者として参加すると、この環境は編集者モード（作品は ${EDITOR_WORK_LIMIT} つまで）になります。` +
-        `いま ${registered.length} 件の作品が登録されているため、このままでは参加できません。` +
-        "登録を外すか、別の VS Code の環境（プロファイル）で参加してください。"
-    );
-    return;
-  }
+    **編集者は複数の作品に参加できる**（作者の指示 2026-11-05 夜。以前は「作品は1つまで」で、
+    2作品目のリンクを貼ると「登録を外して」と出た）。参加のリンクを貼ると作品が増え、
+    編集者メニューの一番上で切り替える。
 
+    作者モードの環境から参加するときも、作品の数では止めない（以前は「作品は1つまで」を
+    すり抜けないよう、作品があると止めていた）。確認の窓で、この環境が編集者モードになる
+    ことと使えなくなる操作を先に見せる
+  */
   if (!(await isGitAvailable())) {
     // ボタンが押されるのを待たずに戻る（`whenNoticePicked`。待つと「いま動いています」が出続ける）
     whenNoticePicked(
@@ -102,29 +118,21 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   const ref = parseGithubRepoRef(link);
   if (!ref) return;
 
-  if (joined) {
-    // 取り寄せる前に止める（取り寄せたあとで断ると、置き場に中途半端なフォルダーが残る）
-    const origin = await originRepoOf(joined.folderPath);
-    const same =
-      origin !== undefined &&
-      origin.owner.toLowerCase() === ref.owner.toLowerCase() &&
-      origin.repo.toLowerCase() === ref.repo.toLowerCase();
-    if (same) {
+  /*
+    **同じ作品のリンクなら、参加し直さずに受け取りへ案内する**（作者の答え 2026-11-05。0.127.6）。
+    編集者（kmizu さん）が、作者の最新の原稿を受け取ろうとして「参加」を押し直し、迷った。
+    編集者モードで参加している作品の送り先（origin）と比べ、同じなら取り寄せる前に止める。
+    作者モードの環境の作品（自分の作品）は比べない——置き場の重なりは下の「すでに存在します」で止まる
+  */
+  if (mode === "editor") {
+    const already = await findJoinedWork(registered, ref);
+    if (already) {
       void vscode.window.showInformationMessage(
-        `「${joined.title}」には、もう編集者として参加しています。` +
-          "作者の最新の原稿を受け取るには、簡単ステップメニュー「1. 編集者として参加」の「保存・同期」を押してください。"
+        `「${already.title}」には、もう編集者として参加しています。` +
+          `作者の最新の原稿を受け取るには、編集者メニューの「${RECEIVE_STEP_LABEL}」を押してください。`
       );
-      return;
+      return { kind: "already", work: already };
     }
-    void vscode.window.showWarningMessage(
-      `編集者モードの環境で登録できる作品は ${EDITOR_WORK_LIMIT} つまでです` +
-        `（いまは「${joined.title}」）。` +
-        `別の作品（${ref.owner}/${ref.repo}）に参加するには、先に「${joined.title}」の登録を外してください。` +
-        (origin === undefined
-          ? `「${joined.title}」の最新の原稿を受け取りたいだけなら、参加し直さずに「保存・同期」を押してください。`
-          : "")
-    );
-    return;
   }
 
   // 置き場。**訊かない**（既定の置き場の下の `編集部/<リポジトリ名>`）。
@@ -230,7 +238,7 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
   const title = await titleOf(destination, ref.repo);
   const entry = await registry.addExisting(destination, title);
   if (!entry) {
-    // 登録の側が断った理由（重複・作品数の上限）は、登録簿が別に知らせている。
+    // 登録の側が断った理由（重複など）は、登録簿が別に知らせている。
     // ここでは、取り寄せた場所が残っていることと、次の手を言う
     void vscode.window.showWarningMessage(
       "取り寄せは終わりましたが、作品として登録できませんでした。" +
@@ -240,13 +248,14 @@ export async function joinAsEditor(registry: WorkRegistry): Promise<void> {
     return;
   }
 
-  // **登録のあとでモードを切り替える**（先だと作品1つの制限に当たる）
+  // **登録のあとでモードを切り替える**（取り寄せに失敗したとき、作品の無い編集者モードを残さない）
   if (switching) await applyMode("editor");
 
   notifyDone(
     `「${entry.title}」に編集者として参加しました。` +
       "開いたときに、作者からの更新が自動で取り込まれます。"
   );
+  return { kind: "joined", work: entry };
 }
 
 /** 鍵を覚えさせてから取り寄せる。通らなければ `gh` で取り寄せる */

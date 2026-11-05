@@ -1,5 +1,4 @@
 import type * as vscode from "vscode";
-import type { ProposalView } from "../models/proposal";
 
 /**
  * 編集者の側で「もう知らせた作者の採否」を覚える（作者の判断 2026-11-01「届いたら知らせる」）。
@@ -46,11 +45,6 @@ export const globalDecisionMemory: DecisionMemory = {
 };
 
 /**
- * 採否1件を見分ける鍵。**決め直し（見送り → 採用）は別の鍵になる**ので、もう一度知らせる。
- * 時刻だけでなく状態も混ぜるのは、同じ時刻の書き直しを見落とさないため。
+ * 採否1件を見分ける鍵。本体は `models/proposal.ts`（編集者メニューの進み具合も同じ鍵で読む）
  */
-export function decisionKey(view: ProposalView): string | undefined {
-  const decision = view.decision;
-  if (!decision) return undefined;
-  return `${decision.proposalId}|${decision.time}|${decision.status}`;
-}
+export { decisionKey } from "../models/proposal";

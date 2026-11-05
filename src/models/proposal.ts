@@ -176,6 +176,20 @@ export function describeDecisionCounts(counts: DecisionCounts): string {
   return `採用 ${counts.accepted}・見送り ${counts.rejected}・読まれた ${counts.read}`;
 }
 
+/**
+ * 採否1件を見分ける鍵（編集者の側で「もう知らせた・見た採否」を覚えるのに使う）。
+ * **決め直し（見送り → 採用）は別の鍵になる**ので、もう一度知らせる。
+ * 時刻だけでなく状態も混ぜるのは、同じ時刻の書き直しを見落とさないため。
+ *
+ * 知らせ（`editingAutomation.ts`）と編集者メニューの進み具合（`core/editorProgress.ts`）の
+ * 両方が同じ鍵で読むよう、VS Code に依らないここへ置く（`features/decisionMemory.ts` から移した）
+ */
+export function decisionKey(view: ProposalView): string | undefined {
+  const decision = view.decision;
+  if (!decision) return undefined;
+  return `${decision.proposalId}|${decision.time}|${decision.status}`;
+}
+
 function isNewer(candidate: string, current: string): boolean {
   const left = Date.parse(candidate);
   const right = Date.parse(current);

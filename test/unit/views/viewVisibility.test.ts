@@ -52,23 +52,37 @@ function evaluateWhen(
   return Boolean(new Function("ctx", `return (${js});`)(context));
 }
 
-function visibleViews(context: Record<string, unknown>): string[] {
-  return VIEWS.filter((view) => evaluateWhen(view.when, context)).map(
-    (view) => view.id
-  );
+/**
+ * 出るビュー。モード（設定 `novelai.mode`）も式に出てくるので、既定は作者モードで評価する。
+ * 編集者モードでは、簡単ステップメニューの代わりに一番上の編集者メニューが出る（設計書5.6.6）
+ */
+function visibleViews(
+  context: Record<string, unknown>,
+  mode: "author" | "editor" = "author"
+): string[] {
+  return VIEWS.filter((view) =>
+    evaluateWhen(view.when, { "config.novelai.mode": mode, ...context })
+  ).map((view) => view.id);
 }
+
+/** そのモードで出るはずのビュー（印が立っていないとき） */
+const AUTHOR_VIEWS = ["novelai.works", "novelai.steps", "novelai.actions", "novelai.chatView"];
+const EDITOR_VIEWS = ["novelai.editorMenu", "novelai.works", "novelai.actions", "novelai.chatView"];
 
 describe("起動直後は、4つのビューがすべて出る", () => {
   test("印の初期値では、どのビューも隠れない", () => {
     const shown = visibleViews(initialViewContext());
 
-    expect(shown).toEqual(VIEWS.map((view) => view.id));
+    expect(shown).toEqual(AUTHOR_VIEWS);
+    expect(visibleViews(initialViewContext(), "editor")).toEqual(EDITOR_VIEWS);
     // 相談のビューが落ちるのが、作者の見た症状である
     expect(shown).toContain("novelai.chatView");
   });
 
   test("4つとも `package.json` に在る（式の取り違えを防ぐ）", () => {
+    // 編集者メニューは編集者モードでだけ出る。一番上に置くので配列の先頭
     expect(VIEWS.map((view) => view.id)).toEqual([
+      "novelai.editorMenu",
       "novelai.works",
       "novelai.steps",
       "novelai.actions",
@@ -123,7 +137,8 @@ describe("起動のたびに素の状態へ戻す", () => {
       context[key] = value;
     });
 
-    expect(visibleViews(context)).toEqual(VIEWS.map((view) => view.id));
+    expect(visibleViews(context)).toEqual(AUTHOR_VIEWS);
+    expect(visibleViews(context, "editor")).toEqual(EDITOR_VIEWS);
   });
 });
 
@@ -135,7 +150,7 @@ describe("起動のたびに素の状態へ戻す", () => {
  * 隠れているビューは作者には開きようがなかった（`novelai.openChat` は印に触れなかった）。
  */
 describe("相談を開くときに、隠れた相談のビューを出し直す", () => {
-  const SOLO_VALUES = [undefined, "works", "steps", "actions", "chat"] as const;
+  const SOLO_VALUES = [undefined, "works", "steps", "editorMenu", "actions", "chat"] as const;
 
   test("出し直しが要るかの判断は、package.json の when 式と食い違わない", () => {
     for (const solo of SOLO_VALUES) {

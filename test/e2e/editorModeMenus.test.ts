@@ -13,8 +13,9 @@
  *    1つだけあり（「編集者提案取込」「編集者提案確認」は無い）、「校閲開始／終了」「修正を提案する」
  *    「校閲を終えて返す」も無い。「GitHub作品管理」は「GitHub初期設定」「保存・同期」「復元」の3つだけ。
  *    作品一覧の見出しのボタンは「保存・同期」。どの行にも「編集部」が残っていない（320）
- * 2. 編集者モードへ切り替えた瞬間（326）：簡単ステップメニューが「1. 編集者として参加」〜「7. 作者モードへ戻る」
- *    とヘルプに替わり、最上段は作品の名前だけで、押しても作品の選び直しが出ない。詳細メニューの「編集者連携」に
+ * 2. 編集者モードへ切り替えた瞬間（326。2026-11-05 夜からは設計書5.6.6）：簡単ステップメニューが消え、
+ *    横の枠の一番上に編集者メニュー（「1. 作者の最新の原稿を受け取る」〜「7. 作者の採否を見る」）が出る。
+ *    一番上の作品の行を押すと、作品の選び直し（「校閲する作品」）が出る。詳細メニューの「編集者連携」に
  *    「校閲開始／終了」「修正を提案する」「校閲を終えて返す」と「編集者提案確認」が出て、「編集者の提案を見る」は無い
  *    （333・317）。「修正を提案する」（325）：本文を選ばずに押すと「修正したい所を本文で選んでから押してください
  *    （右クリックからも出せます）。」、素のエディターで選んでから押すと入力欄「修正を提案する（1/2）：修正案」へ進む。
@@ -34,7 +35,7 @@ import { findAction } from "../../src/core/actionTree";
 import { quickInputMessage, waitForQuickInput } from "./support/quickInput";
 import { SIDEBAR_LAUNCH, scrollTreeUntilRow, showSidebar, treeRow } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
-import { holdsFor, waitUntil } from "./support/wait";
+import { waitUntil } from "./support/wait";
 import {
   clearNotifications,
   dialogText,
@@ -83,10 +84,15 @@ async function setSidebarPane(page: Page, title: string, expanded: boolean): Pro
   await waitUntil(async () => (await now()) === expanded, `左の列の「${title}」を${expanded ? "開く" : "畳む"}`, 5_000);
 }
 
-/** 1つの区画だけを開き、ほかを畳む（木は見えている行しか描かないので、背を高くする） */
+/**
+ * 1つの区画だけを開き、ほかを畳む（木は見えている行しか描かないので、背を高くする）。
+ * 簡単ステップメニューは作者モードだけ、編集者メニューは編集者モードだけに出るので、出ていない区画は飛ばす
+ */
 async function focusPane(page: Page, title: string): Promise<void> {
-  for (const other of ["作品一覧", "簡単ステップメニュー", "詳細メニュー", "AIに相談"]) {
-    if (other !== title) await setSidebarPane(page, other, false);
+  for (const other of ["編集者メニュー", "作品一覧", "簡単ステップメニュー", "詳細メニュー", "AIに相談"]) {
+    if (other === title) continue;
+    if ((await page.locator(".pane-header", { hasText: other }).count()) === 0) continue;
+    await setSidebarPane(page, other, false);
   }
   await setSidebarPane(page, title, true);
 }
@@ -171,15 +177,22 @@ async function openPlain(session: E2ESession): Promise<void> {
 
 const AUTHOR_STEPS = ["1. 作品登録", "2. 新作構想", "3. 作品執筆", "4. 自己校正", "5. 投稿脱稿", "6. 編集者校正・校閲", "7. 電子出版等", "ヘルプ"];
 const EDITOR_STEPS = [
-  "1. 編集者として参加",
-  "2. 校閲する範囲を押さえる",
-  "3. 検知で探す",
-  "4. 修正を提案する",
-  "5. 置いた提案を見る",
-  "6. 校閲を終えて返す",
-  "7. 作者モードへ戻る",
+  "1. 作者の最新の原稿を受け取る",
+  "2. 校閲する話を選ぶ",
+  "3. 機械に探させる",
+  "4. 直しを提案する・メモ（意見）を書く",
+  "5. 置いた提案を見直す",
+  "6. 校閲を終えて作者へ返す",
+  "7. 作者の採否を見る",
   "ヘルプ",
 ];
+
+/** 編集者メニューの手順の行（「1. …」とヘルプ）を並びの順に */
+async function editorMenuLabels(page: Page): Promise<string[]> {
+  return (await paneRows(page, "編集者メニュー"))
+    .map((row) => row.label)
+    .filter((label) => /^\d\. /.test(label) || label === "ヘルプ");
+}
 const EDITOR_ONLY = ["校閲開始／終了", "修正を提案する", "校閲を終えて返す"];
 
 test("作者モードのメニューは作者の操作だけで、編集者モードへ切り替えた瞬間に簡単ステップメニューと詳細メニューの編集者連携が描き直され、「修正を提案する」は選ばずに押すと案内・選んで押すと修正案の入力へ進み、作者モードへ戻すと元の並びに戻る", async () => {
@@ -239,23 +252,24 @@ test("作者モードのメニューは作者の操作だけで、編集者モ�
       const settingsFile = path.join(root, "user-data", "User", "settings.json");
       await waitUntil(async () => /"novelai\.mode"\s*:\s*"editor"/.test(await readFile(settingsFile, "utf8").catch(() => "")), "設定 novelai.mode が editor になる", 15_000);
 
-      // 再読み込みせずに、簡単ステップメニューが編集者の並びに替わる
-      await waitUntil(async () => JSON.stringify(await stepLabels(page)) === JSON.stringify(EDITOR_STEPS), "簡単ステップメニューが編集者の並びに替わる", 15_000).catch(
+      // 再読み込みせずに、簡単ステップメニューが消え、一番上に編集者メニューが出る（設計書5.6.6）
+      await waitUntil(async () => JSON.stringify(await editorMenuLabels(page)) === JSON.stringify(EDITOR_STEPS), "編集者メニューが出て、手順が並ぶ", 15_000).catch(
         async (error: unknown) => {
-          throw new Error(`${String(error)}（いまの段：${JSON.stringify(await stepLabels(page))}）`);
+          throw new Error(`${String(error)}（いまの手順：${JSON.stringify(await editorMenuLabels(page))}）`);
         }
       );
+      await waitUntil(async () => (await page.locator(".pane-header", { hasText: "簡単ステップメニュー" }).count()) === 0, "編集者モードでは簡単ステップメニューが消える", 10_000);
       /*
-        最上段は作品の名前を出すだけ。押しても作品の選び直しは出ない。行の字は作者モードと同じ
-        「選択作品：〈作品名〉」のまま（単体テスト `stepMenuEditorMode.test.ts` の「編集者モードの最上段」も
-        名前を含むことと、押す口が無いことを見ている）。項目の「名前だけ」は押す口が無いことと読む
+        一番上は作品の行（「作品：〈作品名〉」）。押すと、参加している作品の選び直し（作品を足す口つき）が出る
+        （単体テスト `stepMenuEditorMode.test.ts` の「編集者メニューの並び」も同じ所を見ている）
       */
-      const rows = await paneRows(page, "簡単ステップメニュー");
-      expect(rows[0]?.label, `最上段：${JSON.stringify(rows.slice(0, 2))}`).toContain(E2E_WORK_TITLE);
-      await treeRow(page, "選択作品：").click();
-      await holdsFor(async () => (await quickPickTitle(page)) === undefined, "編集者モードの最上段を押しても作品の選び直しが出ない", 3_000).catch(async (error: unknown) => {
+      const rows = await paneRows(page, "編集者メニュー");
+      expect(rows[0]?.label, `一番上：${JSON.stringify(rows.slice(0, 2))}`).toBe(`作品：${E2E_WORK_TITLE}`);
+      await treeRow(page, "作品：").click();
+      await waitUntil(async () => (await quickPickTitle(page)) === "校閲する作品", "作品の行を押すと、校閲する作品の選び直しが出る", 10_000).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（選ぶ画面：${JSON.stringify(await quickPickTitle(page))}）`);
       });
+      await page.keyboard.press("Escape");
 
       // 詳細メニューの編集者連携に、編集者の操作が出る
       await focusPane(page, "詳細メニュー");

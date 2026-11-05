@@ -83,7 +83,7 @@ export async function collectUnregisteredWorks(
   registry: WorkRegistry,
   onRegistered: () => void
 ): Promise<void> {
-  // 編集部は1作品だけを見る建前なので、まとめて登録する道を通さない（5.7.4）
+  // 編集者の作品は「編集者として参加」で1つずつ受け取るので、まとめて登録する道を通さない（5.7.4）
   if (isEditorMode()) {
     await vscode.window.showWarningMessage(
       "編集者モードでは、書庫からまとめて登録することはできません。"

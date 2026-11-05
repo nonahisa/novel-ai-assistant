@@ -17,7 +17,6 @@ import { atomicWriteFile } from "./atomicWrite";
 import { buildPlotTemplate } from "./plotTemplate";
 import { parseWorkKind } from "./workKind";
 import { parseNameOrigin } from "./nameOriginFit";
-import { canRegisterWork, describeWorkLimit } from "./editorMode";
 import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
 import { parsePdfExportConfig } from "./pdfExportConfig";
@@ -401,20 +400,6 @@ export class WorkRegistry {
   }
 
   /**
-   * 編集者モードの上限に引っかかっていないか（設計書5.7.4）。
-   *
-   * **登録の入口をここ1か所にまとめる。** `add` と `addExisting` の
-   * どちらからでも通るので、片方だけ塞いで素通りする、が起きない。
-   */
-  private blockedByEditorLimit(works: WorkEntry[]): boolean {
-    if (canRegisterWork(currentMode(), works.length)) return false;
-    void vscode.window.showWarningMessage(
-      describeWorkLimit(works[0]?.title ?? "登録済みの作品")
-    );
-    return true;
-  }
-
-  /**
    * その場所に登録されている作品（2026-09-24）。
    *
    * **比べ方は `path.isSameFolder` の1か所に任せる**——ドライブ文字や
@@ -509,7 +494,6 @@ export class WorkRegistry {
     const normalized = path.tidyFolderPath(folderPath);
 
     if (this.blockedAsDuplicate(works, normalized)) return undefined;
-    if (this.blockedByEditorLimit(works)) return undefined;
 
     const entry: WorkEntry = {
       id: `work_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -535,7 +519,6 @@ export class WorkRegistry {
     // 比べ方と保存する表記は `add` と同じ（2026-09-24）
     const normalized = path.tidyFolderPath(folderPath);
     if (this.blockedAsDuplicate(works, normalized)) return undefined;
-    if (this.blockedByEditorLimit(works)) return undefined;
 
     const entry: WorkEntry = {
       id: `work_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,

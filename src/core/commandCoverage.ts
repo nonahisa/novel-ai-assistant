@@ -216,6 +216,10 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.copyBodyForPosting": { class: "A", label: "コピー（投稿サイト用）", via: "novel.read kind: posting" },
   "novelai.copySubtitle": { class: "A", label: "サブタイトルをコピー" },
   "novelai.chooseStepWork": { class: "C3", label: "ステップメニューの作品を選ぶ" },
+  // 編集者メニュー（設計書5.6.6）。作品の切り替えは画面の中の選択。一覧は本文の場所へ飛ぶ画面
+  "novelai.chooseEditorWork": { class: "C3", label: "校閲する作品を選ぶ" },
+  "novelai.listPlacedProposals": { class: "C3", label: "置いた提案の一覧" },
+  "novelai.viewAuthorDecisions": { class: "C3", label: "作者の採否を見る" },
   "novelai.addWorkMemo": { class: "C1", label: "メモ追加" },
   "novelai.removeWorkMemo": { class: "C4", label: "メモを削除（ごみ箱へ）", reason: "消す" },
   "novelai.transferMemoToWork": { class: "C4", label: "このメモを作品へ移管", reason: "作者の判断" },
@@ -272,6 +276,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.exitChatFocus": { class: "C3", label: "作品一覧とメニューを出す" },
   "novelai.soloWorks": { class: "C3", label: "他のメニューを閉じる" },
   "novelai.soloSteps": { class: "C3", label: "他のメニューを閉じる" },
+  "novelai.soloEditorMenu": { class: "C3", label: "他のメニューを閉じる" },
   "novelai.soloActions": { class: "C3", label: "他のメニューを閉じる" },
   "novelai.soloChat": { class: "C3", label: "他のメニューを閉じる" },
   "novelai.showAllViews": { class: "C3", label: "すべてのメニューを出す" },

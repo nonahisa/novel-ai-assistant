@@ -144,6 +144,9 @@ import {
   stepNodeKey,
   stepViewDescription,
 } from "./views/stepMenu";
+import { EditorMenuProvider } from "./views/editorMenu";
+import { readEditorMenuFacts } from "./features/editorMenuFacts";
+import { showEditorProposalList } from "./features/editorProposalList";
 import {
   FOCUS_CHAT_KEY,
   SOLO_VIEW_KEY,
@@ -442,7 +445,7 @@ import {
   openNeighborEpisodePlot,
   visibleEpisodePlotOf,
 } from "./features/episodePlotNav";
-import { askText, cancelItem } from "./views/dialogs";
+import { askText, cancelItem, isCancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
 import { manageConfirmSkips } from "./features/manageConfirmSkips";
 import { AdvicePolicyStore } from "./core/advicePolicyStore";
@@ -563,7 +566,10 @@ import { startAiAssignmentsSnapshot } from "./features/aiAssignmentsSnapshot";
 import { isEditorMode } from "./core/actorContext";
 import { describeBlocked, setActiveModeForGuide } from "./core/editorMode";
 import { conflictFixHint } from "./core/syncEntryNames";
-import { rememberDecisionMemory } from "./features/decisionMemory";
+import {
+  globalDecisionMemory,
+  rememberDecisionMemory,
+} from "./features/decisionMemory";
 import {
   primeEditorProposals,
   rememberProposalPanel,
@@ -1108,6 +1114,14 @@ export async function activate(
   let onCommandFinished: ((command: string) => void) | undefined;
 
   /**
+   * 命令が終わるたびに編集者メニューの進み具合を読み直す口（設計書5.6.6）。
+   * 提案を置く・校閲の範囲を選ぶ・返すは、どれも台帳のファイルを書くだけで知らせを出さない。
+   * 命令の終わりに読み直せば、押した手順の印がその場で「済み」に変わる。
+   * 編集者メニューはこの包みより後で組み立てるので、後から差し込む
+   */
+  let afterAnyCommand: (() => void) | undefined;
+
+  /**
    * 相談から光らせた詳細メニューの項目に結んだ、相談の作品を受け取る口
    * （作者の判断 2026-11-01。設計書6.104）。
    *
@@ -1343,6 +1357,7 @@ export async function activate(
         }
         // 作品を決めずに終わった操作の印も残さない（ほかの操作の印には触らない）
         dropAsk();
+        afterAnyCommand?.();
       }
     });
 
@@ -2802,6 +2817,67 @@ export async function activate(
   );
   context.subscriptions.push(stepView);
 
+  /*
+    **編集者メニュー**（作者の指示 2026-11-05 夜。設計書5.6.6）。編集者モードでだけ、横の枠の
+    一番上に出る（`package.json` の `when`）。選んだ作品は簡単ステップメニューと分け合う——
+    「直前に使った作品」（`lastWorkMemory`）も同じ覚えを読むので、別に持つと食い違う
+  */
+  /** 編集者メニューが同期の状態を読ませた作品（1作品につき1回だけ。読みが重ならないように） */
+  const editorMenuStatusAsked = new Set<string>();
+  const editorMenuProvider = new EditorMenuProvider(
+    registry,
+    {
+      get: () => context.globalState.get<string>(STEP_WORK_KEY),
+      set: (id) => stepProvider.selectWork(id),
+    },
+    (work) =>
+      readEditorMenuFacts(work, {
+        syncStatus: (target) => {
+          const status = gitSync.statusFor(target.id);
+          /*
+            **まだ一度も読んでいない作品は、ここで1回だけ読ませる**（取得はしない）。起動のときの点検が
+            終わるまで同期の見張りの控えが空のことがあり（画面テストで90秒空のままの回があった）、
+            そのあいだ「1. 作者の最新の原稿を受け取る」が「GitHub の状態を読めていません」のままになる。
+            読み終えると見張りの知らせ（`onDidChange`）で描き直る
+          */
+          if (!status && canRunProcesses() && !editorMenuStatusAsked.has(target.id)) {
+            editorMenuStatusAsked.add(target.id);
+            void gitSync.refresh(target, { fetch: false, notify: false }).catch(() => undefined);
+          }
+          return status;
+        },
+        decisionMemory: globalDecisionMemory,
+      })
+  );
+  const editorMenuView = vscode.window.createTreeView("novelai.editorMenu", {
+    treeDataProvider: editorMenuProvider,
+  });
+  context.subscriptions.push(editorMenuView);
+  /*
+    読み直す合図：選び直し・件数の数え直し（簡単ステップメニューの描き直しに相乗りする）・
+    同期の状態の変化（提案を置くと「記録していない変更」が増える）・命令の終わり。
+    **作者モードでは読まない**（ビューが出ていないのに台帳を読みに行かない）
+  */
+  const refreshEditorMenu = (): void => {
+    if (isEditorMode()) editorMenuProvider.refresh();
+  };
+  context.subscriptions.push(
+    stepProvider.onDidChangeTreeData(refreshEditorMenu),
+    gitSync.onDidChange(refreshEditorMenu)
+  );
+  /*
+    命令の終わりには、選んでいる作品の同期の状態も読み直す（取得はしない）。提案を置くと
+    「記録していない変更」が増え、それが「まだ返していません」の手がかりになる
+  */
+  afterAnyCommand = () => {
+    if (!isEditorMode()) return;
+    editorMenuProvider.refresh();
+    const work = editorMenuProvider.selectedWork();
+    if (work && canRunProcesses()) {
+      void gitSync.refresh(work, { fetch: false, notify: false }).catch(() => undefined);
+    }
+  };
+
   /**
    * 未反映の件数を数え直す。抽出・反映のあと、作品を選び直したあとに呼ぶ。
    *
@@ -2831,6 +2907,15 @@ export async function activate(
       setActiveModeForGuide(isEditorMode() ? "editor" : "author");
       stepProvider.refresh();
       actionProvider.refresh();
+      editorMenuProvider.refresh();
+      /*
+        **編集者モードへ切り替えたら、編集者メニューを開いて前へ出す**（作者の指示 2026-11-05 夜
+        「一番上に編集者専用のメニュー」）。ほかのビューを畳む命令は VS Code に無いので、
+        前へ出すまでにする。起動のたびには出さない（`viewVisibility.ts` の考え方）
+      */
+      if (isEditorMode()) {
+        void vscode.commands.executeCommand("novelai.editorMenu.focus").then(undefined, () => undefined);
+      }
     })
   );
   // 起動直後にも数える。前回の抽出で溜まったままのことがある
@@ -3668,6 +3753,7 @@ export async function activate(
     // 押したビューを残したいだけなのに選択画面が1枚挟まる
     registerCommand("novelai.soloWorks", () => setSoloView("works")),
     registerCommand("novelai.soloSteps", () => setSoloView("steps")),
+    registerCommand("novelai.soloEditorMenu", () => setSoloView("editorMenu")),
     registerCommand("novelai.soloActions", () => setSoloView("actions")),
     registerCommand("novelai.soloChat", () => setSoloView("chat")),
     registerCommand("novelai.showAllViews", () => setSoloView(undefined))
@@ -4807,6 +4893,51 @@ export async function activate(
     })
   );
 
+  /*
+    編集者メニューの一番上（作品の行）から呼ばれる（作者の指示 2026-11-05 夜。設計書5.6.6）。
+    参加している作品から選び直す。**作品を足す口も同じ選択肢に置く**——編集者が作品を
+    切り替えようとして、目当ての作品がまだ無いと気づく場所がここだから
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.chooseEditorWork", async () => {
+      const works = registry.list();
+      const current = editorMenuProvider.selectedWork();
+      const addLabel = "作品を足す（参加のリンクを貼る）";
+      const picked = await vscode.window.showQuickPick(
+        [
+          ...works.map((work) => ({
+            label: abbreviateTitle(work.title),
+            description: work.id === current?.id ? "いま選んでいる作品" : work.folderPath,
+            detail: isAbbreviated(work.title) ? work.title : undefined,
+            work,
+          })),
+          { label: `$(add) ${addLabel}`, add: true as const },
+          cancelItem(),
+        ],
+        { title: "校閲する作品", placeHolder: "下の手順と状態は、選んだ作品に効きます" }
+      );
+      if (!picked || isCancelItem(picked)) return;
+      if ("add" in picked) {
+        await vscode.commands.executeCommand("novelai.joinAsEditor");
+        return;
+      }
+      if (!("work" in picked)) return;
+      stepProvider.selectWork(picked.work.id);
+      refreshActionBadges();
+    }),
+    // 置いた提案の一覧と、作者の採否（読むだけ。本文の場所へ飛べる）
+    registerCommand("novelai.listPlacedProposals", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await showEditorProposalList(work, "placed", globalDecisionMemory);
+    }),
+    registerCommand("novelai.viewAuthorDecisions", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await showEditorProposalList(work, "decided", globalDecisionMemory);
+    })
+  );
+
   // 簡単ステップメニューの最上段（作品選択窓）から呼ばれる。
   // **選ぶのはIDだけ**で、実在の確認は表示のたびにメニュー側が行う
   context.subscriptions.push(
@@ -4995,12 +5126,28 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
 
+        /*
+          **編集者モードでは「この作品の編集を終える」として訊く**（作者の指示 2026-11-05 夜。
+          設計書5.6.6）。中身は同じ登録の解除で、取り寄せたフォルダーは残す。返していない提案は
+          解除すると編集者メニューから返せなくなるので、先に返すよう添える
+        */
+        const editor = isEditorMode();
+        const confirmLabel = editor ? "編集を終える" : "登録を解除";
         const answer = await vscode.window.showWarningMessage(
-          `「${work.title}」の登録を解除しますか？\nフォルダとファイルは削除されません。`,
-          { modal: true },
-          "登録を解除"
+          editor
+            ? `「${work.title}」の編集を終えますか？`
+            : `「${work.title}」の登録を解除しますか？\nフォルダとファイルは削除されません。`,
+          editor
+            ? {
+                modal: true,
+                detail:
+                  "この作品の登録を解除します。取り寄せたフォルダーはそのまま残ります。\n" +
+                  "置いた提案をまだ作者へ返していなければ、先に「6. 校閲を終えて作者へ返す」を押してください。",
+              }
+            : { modal: true },
+          confirmLabel
         );
-        if (answer !== "登録を解除") return;
+        if (answer !== confirmLabel) return;
 
         await registry.remove(work.id);
         treeProvider.refresh();
@@ -8178,7 +8325,9 @@ export async function activate(
         return;
       }
       const { joinAsEditor } = await import("./features/joinAsEditor.js");
-      await joinAsEditor(registry);
+      const joined = await joinAsEditor(registry);
+      // 参加した作品（もう参加していた作品）を、編集者メニューの選んだ作品にする
+      if (joined) stepProvider.selectWork(joined.work.id);
     }),
     // 編集部との連携を解除する（作者モード専用。決裂したときの、作者側からの解除）
     registerCommand(
@@ -8214,6 +8363,12 @@ export async function activate(
           "./features/finishReview.js"
         );
         await finishReviewAndReturn(work);
+        /*
+          返したあとの同期の状態（送っていない記録が0）を読み直す。返す処理は見張りを通さずに
+          git を直に呼ぶので、読み直さないと編集者メニューの「6」がしばらく「まだ返していません」のまま
+          （画面テスト editorMenuFlow で見つけた）
+        */
+        await gitSync.refresh(work, { fetch: false, notify: false }).catch(() => undefined);
       }
     ),
     // 旧「編集部提案取込」。受け取ったあと並べるところまで、新しい命令と同じにする

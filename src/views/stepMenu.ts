@@ -29,7 +29,6 @@ import {
 } from "./actionList";
 // 段の定義は core に置いた（相談の目次が入口を導くのに使うため。`core/stepDefs.ts`）
 import {
-  EDITOR_STEP_DEFS,
   STEP_DEFS,
   type StepDef,
   type StepPlaceholder,
@@ -228,27 +227,17 @@ export const STEP_MENU: readonly Step[] = resolved.steps;
  */
 export const STEP_MENU_MISSING_COMMANDS: readonly string[] = resolved.missing;
 
-const editorResolved = resolveSteps(EDITOR_STEP_DEFS, actionIndex());
-
-/** 編集者モードの簡単ステップメニュー（設計書6.29.6。作者の指示 2026-11-01） */
-export const EDITOR_STEP_MENU: readonly Step[] = editorResolved.steps;
-
-/** 編集者モードの並びで、実体が見つからなかった参照。**空でなければならない** */
-export const EDITOR_STEP_MENU_MISSING_COMMANDS: readonly string[] =
-  editorResolved.missing;
-
 /**
  * そのモードで並べる段。**作者モードの並びは何も変えない。**
- * 表示のたびにモードを読むので、切り替えた直後の描画から替わる
- * （描き直しの合図は `extension.ts` が設定 `novelai.mode` の変化を見て出す）
+ *
+ * **編集者モードでは何も並べない**（作者の指示 2026-11-05 夜。設計書5.6.6）。編集者モードでは
+ * 簡単ステップメニューのビューそのものを出さず、一番上の編集者メニュー（`editorMenu.ts`）が
+ * 手順を持つ。空にしておくと、相談から光らせる案内（`findActionNode`）が見えないビューの行を
+ * 指さずに、詳細メニューへ回る
  */
 export function stepMenuFor(mode: WorkMode): readonly Step[] {
-  return mode === "editor" ? EDITOR_STEP_MENU : STEP_MENU;
+  return mode === "editor" ? [] : STEP_MENU;
 }
-
-/** 編集者モードで作品が無いときの、最上段の薄字（作品は参加で受け取る） */
-export const EDITOR_STEP_NO_WORK_HINT = "編集者として参加（ステップ1）から";
-
 
 /** 最上段の作品選択窓を押したときに走るコマンド */
 export const STEP_WORK_COMMAND = "novelai.chooseStepWork";
@@ -399,9 +388,7 @@ export function stepNodeKey(node: StepNode): string {
 /** 保存された値のうち、いまも存在する段階・小分類だけを残す */
 export function restoreExpandedSteps(saved: string[]): Set<string> {
   const known = new Set<string>();
-  // 両方のモードの段を知っておく。片方だけだと、モードを切り替えて起動し直したときに
-  // もう片方で開いていた段の覚えが消える
-  for (const step of [...STEP_MENU, ...EDITOR_STEP_MENU]) {
+  for (const step of STEP_MENU) {
     known.add(step.label);
     for (const entry of step.entries) {
       if (entry.kind === "section") known.add(`${step.label}/${entry.label}`);
@@ -765,7 +752,6 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     const works = this.registry.list();
     const selected = this.selectedWork();
     const view = describeSelector(selected, works.length > 0);
-    if (currentMode() === "editor") return editorSelectorItem(view, selected, works.length);
 
     const item = new vscode.TreeItem(
       view.label,
@@ -922,42 +908,6 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     }
     return total;
   }
-}
-
-/**
- * 編集者モードの最上段（作者の指示 2026-11-01）。
- *
- * **作品の名前を出すだけで、選び直す口は付けない。** 編集者モードで預かる作品は
- * 1つまでなので、選ぶものが無い。ただし何かの事情で2つ以上登録されていて、
- * まだ選んでいないときだけは、選ぶ口を残す（残さないと下の操作が押せないまま止まる）
- */
-function editorSelectorItem(
-  view: { label: string; description: string; fullTitle?: string },
-  selected: WorkEntry | undefined,
-  workCount: number
-): vscode.TreeItem {
-  const item = new vscode.TreeItem(view.label, vscode.TreeItemCollapsibleState.None);
-  item.description =
-    workCount === 0 ? EDITOR_STEP_NO_WORK_HINT : view.description;
-  item.contextValue = "stepWorkSelector";
-  item.iconPath =
-    workCount === 0
-      ? new vscode.ThemeIcon("book", new vscode.ThemeColor("disabledForeground"))
-      : new vscode.ThemeIcon("book");
-  item.tooltip = new vscode.MarkdownString(
-    workCount === 0
-      ? "まだ作品を受け取っていません。\n\n" +
-          "・「1. 編集者として参加」で、作者から届いたリンクを貼る"
-      : (view.fullTitle ? `**${view.fullTitle}**\n\n` : "") +
-          "下に並ぶ操作は、校閲で預かっているこの作品に効く"
-  );
-  if (!selected && workCount > 1) {
-    item.command = {
-      command: STEP_WORK_COMMAND,
-      title: "簡単ステップメニューの作品を選ぶ",
-    };
-  }
-  return item;
 }
 
 function stepChild(
