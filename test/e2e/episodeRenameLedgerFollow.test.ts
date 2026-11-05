@@ -223,7 +223,22 @@ test("話数の読めない話をエクスプローラー（F2）で改名する
       await page.keyboard.insertText("幕間_湖畔");
       await page.keyboard.press("Enter");
 
-      const notice = await waitNotice(page, "読みの辞書1件", "知らせに「読みの辞書1件」が出る");
+      /*
+        **先に、ディスクで名前が変わったのを見届ける。** 0.127.0 の全件の回（母艦・約1時間）で、知らせを
+        20秒待っても出ずに落ちた（単独・ファイル全体では通る）。名前の入力が入らなかったのか、改名のあとの
+        付け替えが遅れたのかを、失敗の文で見分けられるようにする
+      */
+      const renamedPath = path.join(session.manuscriptFolder, "幕間_湖畔.txt");
+      const exists = (file: string) => readFile(file).then(() => true, () => false);
+      await waitUntil(async () => exists(renamedPath), "ディスクで「幕間_湖畔.txt」に名前が変わる", 20_000).catch(async (error: unknown) => {
+        throw new Error(
+          `${String(error)}（元の名前が残っている：${String(await exists(path.join(session.manuscriptFolder, "幕間.txt")))}／入力欄：${String(await input.isVisible())}／知らせ：${JSON.stringify(await noticeLines(page))}）`
+        );
+      });
+      const notice = await waitNotice(page, "読みの辞書1件", "知らせに「読みの辞書1件」が出る").catch(async (error: unknown) => {
+        const dictionaryMoved = await exists(path.join(session.workFolder, ".aiwriter", "readings", "本文__幕間_湖畔.txt.json"));
+        throw new Error(`${String(error)}（名前は変わった／読みの辞書が新しい名前へ移った：${String(dictionaryMoved)}）`);
+      });
       expect(notice, "付け替えた知らせの文").toContain("各話あらすじ1件");
       const readJson = async (...parts: string[]) => JSON.parse(await readFile(path.join(session.workFolder, ...parts), "utf8")) as Record<string, unknown>;
       await waitUntil(

@@ -171,7 +171,16 @@ test("送り先へ届かないまま下の帯から「保存・同期」を押�
       );
       // きっかけは問わない。テストは焦点を動かさないが、画面の外の窓でも VS Code が焦点の合図
       // （focus）を出すことがあり、1回目の走りは interval より先に focus で送った（2026-11-04）
-      expect(await actionsLog(session), "送ったのが自動の送り直しではありません").toMatch(/自動の送り直し：送った（[^）]*きっかけ (interval|focus|wake|wake-retry)/);
+      //
+      // **ログの行が書かれるのを待ってから見る。** 記録の書き込みは1秒まとめなので、送り先に届いた直後に
+      // 読むと行がまだ無いことがある（2026-11-05、母艦の全件と単独3回のうち1回で、届いているのに行が無いまま
+      // 落ちた）。待っても無ければ、ほかの道で送ったということなので、ログの末尾を添えて落とす
+      const RESENT = /自動の送り直し：送った（[^）]*きっかけ (interval|focus|wake|wake-retry)/;
+      await waitUntil(async () => RESENT.test(await actionsLog(session)), "ログに「自動の送り直し：送った」が書かれる", 10_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（送ったのが自動の送り直しではない見込み。ログの末尾：${JSON.stringify((await actionsLog(session)).slice(-800))}）`);
+        }
+      );
 
       // 届いたときは知らせを出さない（右下・中央の窓とも）。記録の書き込みは1秒まとめなので、数秒見続ける
       await holdsFor(
