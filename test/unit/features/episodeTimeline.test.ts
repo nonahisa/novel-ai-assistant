@@ -19,6 +19,7 @@ const keys = ["getConfiguration", "onDidChangeConfiguration", "registerTimelineP
 let show = false;
 let listeners: Listener[] = [];
 let registered = 0;
+let lastArgs: unknown[] = [];
 let disposed = 0;
 
 function fakeContext(): vscode.ExtensionContext {
@@ -45,8 +46,9 @@ beforeEach(() => {
     listeners.push(listener);
     return { dispose() {} };
   };
-  workspace.registerTimelineProvider = () => {
+  workspace.registerTimelineProvider = (...args: unknown[]) => {
     registered += 1;
+    lastArgs = args;
     return { dispose: () => { disposed += 1; } };
   };
 });
@@ -71,6 +73,20 @@ describe("タイムラインの欄の登録", () => {
 
     flip(false);
     expect(disposed).toBe(1);
+  });
+
+  test("正式な口（1.145）の形で呼ぶ：id・名前・場所の仕組み・提供役の4つ。変わったら onDidChangeTimeline で知らせる", () => {
+    // 提案中の頃の (scheme, provider) で呼ぶと、1.145 では断られて欄に何も出なかった（画面テスト episodeTimelineFollow）
+    show = true;
+    registerEpisodeTimeline(fakeContext(), () => undefined);
+    expect(registered).toBe(1);
+    expect(lastArgs).toHaveLength(4);
+    expect(typeof lastArgs[0]).toBe("string");
+    expect(typeof lastArgs[1]).toBe("string");
+    expect(lastArgs[2]).toEqual(["file", "vscode-vfs"]);
+    const provider = lastArgs[3] as { provideTimeline?: unknown; onDidChangeTimeline?: unknown };
+    expect(typeof provider.provideTimeline).toBe("function");
+    expect(typeof provider.onDidChangeTimeline).toBe("function");
   });
 
   test("口が無い版では何もしない", () => {

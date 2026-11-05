@@ -60,15 +60,15 @@ interface TimelineOptionsLike {
   limit?: number | { timestamp: number; id?: string };
 }
 
-interface TimelineChangeEventLike {
-  uri: vscode.Uri;
-  reset?: boolean;
-}
-
+/**
+ * 正式な口（1.145）の形。2026-11-06 に 1.145.0 の拡張機能ホストの中身で確かめた：
+ * `registerTimelineProvider(id, label, scheme, provider)` の4つを取り、変わったことは
+ * `provider.onDidChangeTimeline` に **Uri（か Uri の並び、全部なら undefined）** で知らせる。
+ * 提案中の頃の `registerTimelineProvider(scheme, provider)`・`onDidChange({ uri })` で呼ぶと、
+ * 断られて欄に何も出なかった（画面テスト `episodeTimelineFollow`）
+ */
 interface TimelineProviderLike {
-  readonly id: string;
-  readonly label: string;
-  onDidChange?: vscode.Event<TimelineChangeEventLike | undefined>;
+  onDidChangeTimeline?: vscode.Event<vscode.Uri | readonly vscode.Uri[] | undefined>;
   provideTimeline(
     uri: vscode.Uri,
     options: TimelineOptionsLike,
@@ -77,9 +77,15 @@ interface TimelineProviderLike {
 }
 
 type RegisterTimelineProvider = (
+  id: string,
+  label: string,
   scheme: string | string[],
   provider: TimelineProviderLike
 ) => vscode.Disposable;
+
+/** 欄の絞り込み（漏斗のボタン）に出る名前と、その鍵 */
+const TIMELINE_SOURCE_ID = "novelai.episodeTimeline";
+const TIMELINE_SOURCE_LABEL = "統合小説執筆環境の記録";
 
 /** 設定の名前。**ここ1か所** */
 export const TIMELINE_SETTING = "timeline.show";
@@ -123,13 +129,11 @@ export function registerEpisodeTimeline(
   findWork: (filePath: string) => WorkEntry | undefined
 ): void {
   let registration: vscode.Disposable | undefined;
-  const changed = new vscode.EventEmitter<TimelineChangeEventLike | undefined>();
+  const changed = new vscode.EventEmitter<vscode.Uri | undefined>();
   context.subscriptions.push(changed);
 
   const provider: TimelineProviderLike = {
-    id: "novelai.episodeTimeline",
-    label: "統合小説執筆環境",
-    onDidChange: changed.event,
+    onDidChangeTimeline: changed.event,
     provideTimeline: async (uri, options, token) => {
       const filePath = path.fromUri(uri);
       const work = findWork(filePath);
@@ -153,7 +157,7 @@ export function registerEpisodeTimeline(
     const register = timelineRegistrar();
     if (!register) return;
     try {
-      registration = register(TIMELINE_SCHEMES, provider);
+      registration = register(TIMELINE_SOURCE_ID, TIMELINE_SOURCE_LABEL, TIMELINE_SCHEMES, provider);
     } catch (error) {
       // 正式になる前の版は、口が在っても呼ぶと断る。作者に知らせるほどのことではない
       logLine(
@@ -172,7 +176,7 @@ export function registerEpisodeTimeline(
     }),
     // 保存すると退避の写しや編集履歴が増えることがある。その話の欄を読み直させる
     vscode.workspace.onDidSaveTextDocument((document) => {
-      if (registration) changed.fire({ uri: document.uri });
+      if (registration) changed.fire(document.uri);
     }),
     { dispose: () => registration?.dispose() }
   );
