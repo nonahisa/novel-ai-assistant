@@ -158,8 +158,9 @@ test("簡単ステップメニュー「6. 編集者校正・校閲」の「作�
       await runCommand(page, labelOf("novelai.toggleReviewLock"));
       // 始めの話：先頭の近道「開いている話」を選ぶ（開いているのは 001）
       const startRows = await waitForQuickPick(page, "校閲する範囲：始めの話を選びます", 20_000);
-      expect(startRows[0]?.description, `先頭の行が「開いている話」の近道ではありません：${JSON.stringify(startRows)}`).toContain("開いている話");
-      await pickQuickPickRow(page, "開いている話");
+      // 0.127.7 から近道の札は名前の頭（「開いている話：第1話　駅」）。話の行と同じ名前に見えないようにした
+      expect(startRows[0]?.label, `先頭の行が「開いている話」の近道ではありません：${JSON.stringify(startRows)}`).toContain("開いている話：");
+      await pickQuickPickRow(page, "開いている話：");
       // 終わりの話：003 まで（002 は間の話。004 は範囲の外）
       await waitForQuickPick(page, "校閲する範囲：終わりの話を選びます", 20_000);
       await pickQuickPickRow(page, EPISODE_3);
