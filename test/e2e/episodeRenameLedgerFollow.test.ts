@@ -22,7 +22,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { composeText, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { composeText, frontFrameShowing, placeCaretAfter } from "./support/manuscriptFrame";
 import { runCommand } from "./support/quickInput";
 import { SIDEBAR_LAUNCH, showSidebar, treeContextMenu, treeRowLabels, treeRow, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, restartVsCode, withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -104,6 +104,25 @@ async function waitNotice(page: Page, needle: string, what: string): Promise<str
   return found;
 }
 
+/**
+ * 開き直したあと、名前の変わった話を開く。**Ctrl+P で開けなければ、作品一覧の行から開く。**
+ *
+ * 0.127.1 の母艦の全件と続けての走りで、開き直して作品一覧を出したあとの Ctrl+P の候補が30秒空のまま
+ * （入力欄は開いて値も入っている）落ちる件が、走るたびに増えた（作品一覧には改名後の話が出ていて、
+ * 製品は話を見つけている。空なのは VS Code のファイル検索の候補）。このテストが見張るのは改名の問いと
+ * 台帳なので、話を開く手段は問わない。どちらで開いたかは出力に残す
+ */
+async function openRenamedEpisode(page: Page, fileName: string, head: string): Promise<void> {
+  try {
+    await quickOpen(page, fileName);
+  } catch (error) {
+    console.warn(`openRenamedEpisode: Ctrl+P で「${fileName}」を開けなかったので、作品一覧の行から開きます（${String(error)}）`);
+    await page.keyboard.press("Escape");
+    await expandWork(page, head);
+    await treeRow(page, head).first().click();
+  }
+}
+
 /** 作品の行を開いて、話の行が並ぶまで待つ */
 async function expandWork(page: Page, firstEpisodeHead: string): Promise<void> {
   await showSidebar(page, E2E_WORK_TITLE);
@@ -146,7 +165,7 @@ test("エクスプローラー（本物の F2）で投稿済みの話の名前�
     [{ name: "第1話_はじまり.txt", text: BODY }],
     async (session) => {
       const { page } = session;
-      await quickOpen(page, "第1話_はじまり.txt");
+      await openRenamedEpisode(page, "第1話_はじまり.txt", "第1話");
       await runCommand(page, "Reveal Active File in Explorer View");
       // エクスプローラーで当該ファイルの行が選ばれて焦点を持つまで待つ
       const row = page.locator(".explorer-viewlet .monaco-list-row.focused, .explorer-viewlet .monaco-list-row.selected", { hasText: "第1話_はじまり" }).first();
@@ -209,7 +228,7 @@ test("話数の読めない話をエクスプローラー（F2）で改名する
     [{ name: "第1話_はじまり.txt", text: BODY }, { name: "幕間.txt", text: "　十分に待った。\n" }],
     async (session) => {
       const { page } = session;
-      await quickOpen(page, "幕間.txt");
+      await openRenamedEpisode(page, "幕間.txt", "幕間");
       await runCommand(page, "Reveal Active File in Explorer View");
       const row = page.locator(".explorer-viewlet .monaco-list-row.focused, .explorer-viewlet .monaco-list-row.selected", { hasText: "幕間" }).first();
       await waitUntil(async () => (await row.count()) > 0, "エクスプローラーで幕間の行が選ばれる", 20_000);
@@ -300,7 +319,7 @@ test("閉じている間に名前が変わった投稿済みの話は、開き�
       const { page } = session;
       expect(await postedPaths(session), "開き直しただけで台帳が変わった").toEqual(["本文/第1話_はじまり.txt"]);
 
-      await quickOpen(page, "第1話_出会い.txt");
+      await openRenamedEpisode(page, "第1話_出会い.txt", "第1話");
       await waitUntil(async () => (await questionToasts(page)).length > 0, "右下に「名前が変わった話が1つあります」の問いが出る", 30_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（知らせ：${JSON.stringify(await noticeLines(page))}）`);
@@ -334,7 +353,7 @@ test("開き直してすぐ（作品一覧を待たずに）話を開いても�
         },
       });
       const { page } = session;
-      await quickOpen(page, "第1話_出会い.txt");
+      await openRenamedEpisode(page, "第1話_出会い.txt", "第1話");
       await waitUntil(async () => (await questionToasts(page)).length > 0, "右下に「名前が変わった話が1つあります」の問いが出る", 30_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（知らせ：${JSON.stringify(await noticeLines(page))}）`);
@@ -352,7 +371,7 @@ test("［付け替えない］を選ぶと台帳は変わらず、開き直し�
     [{ name: "第1話_はじまり.txt", text: BODY }],
     async (session) => {
       await renameWhileClosedAndOpen(session);
-      await quickOpen(session.page, "第1話_出会い.txt");
+      await openRenamedEpisode(session.page, "第1話_出会い.txt", "第1話");
       await waitUntil(async () => (await questionToasts(session.page)).length > 0, "右下に問いが出る", 30_000).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（知らせ：${JSON.stringify(await noticeLines(session.page))}）`);
       });
@@ -365,7 +384,7 @@ test("［付け替えない］を選ぶと台帳は変わらず、開き直し�
       // LATE_CHECK_DELAYS_MS）なので、見張りが終わるまで待ってから閉じる（人が押してすぐ閉じる間合いではない）
       await session.page.waitForTimeout(3_000);
       await restartVsCode(session);
-      await quickOpen(session.page, "第1話_出会い.txt");
+      await openRenamedEpisode(session.page, "第1話_出会い.txt", "第1話");
       await holdsFor(async () => (await questionToasts(session.page)).length === 0, "開き直したあと、同じ組では問いが出ない", 8_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（知らせ：${JSON.stringify(await noticeLines(session.page))}）`);
@@ -407,7 +426,8 @@ test("名前が変わった話の問いが右下に出ても、書いている�
       });
 
       // 話を開いたら、問いを待たずにすぐ打ち始める（作者が書き出す動き）
-      const frame = await openEpisode(page, "第1話_出会い.txt", "朝の駅は静かだった");
+      await openRenamedEpisode(page, "第1話_出会い.txt", "第1話");
+      const frame = await frontFrameShowing(page, "朝の駅は静かだった", "原稿エディターで「第1話_出会い.txt」の本文が前に出ている面に描かれる", 30_000);
       await placeCaretAfter(frame, "静かだった。");
 
       // 原稿の入力欄が焦点を持っているか（原稿の面の中）と、問いのトースト（本体側）へ焦点が移っていないか
