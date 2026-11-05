@@ -86,7 +86,25 @@ async function openedUrls(session: E2ESession): Promise<string[]> {
 }
 
 async function ledger(session: E2ESession): Promise<{ posts?: unknown[]; revisions?: Array<Record<string, unknown>> }> {
-  const text = await readFile(path.join(session.workFolder, "設定", "投稿状態.json"), "utf8");
+  /*
+    **台帳が読めるようになるのを待ってから読む。** 製品は台帳の書き換えを「退避 → 新規作成」で行うので、
+    書き換えの最中は一瞬ファイルが無い（遅い機械の1回目だけ ENOENT で落ちた）。固定の待ちは足さず、
+    読めた時点で進む
+  */
+  let text = "";
+  await waitUntil(
+    async () => {
+      try {
+        text = await readFile(path.join(session.workFolder, "設定", "投稿状態.json"), "utf8");
+        JSON.parse(text);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    "台帳（設定\\投稿状態.json）が読める",
+    10_000
+  );
   return JSON.parse(text) as { posts?: unknown[]; revisions?: Array<Record<string, unknown>> };
 }
 

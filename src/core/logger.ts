@@ -171,8 +171,26 @@ export function settleLogWrites(): Promise<void> {
   return writeQueue;
 }
 
+/** 書き先ごとの、まだ書いていない行（次の書き込みでまとめて書く） */
+let pendingLines = new Map<string, string[]>();
+let flushQueued = false;
+
 function appendToFile(text: string, targets: readonly string[]): void {
   if (targets.length === 0) return;
+
+  /*
+    **待っている行は、書き先ごとに1回の読み書きへまとめる**（2026-11-05）。
+    1行ごとにファイルを丸ごと読んで書き直す作りなので、書庫の全作品（7つ）へ向けた
+    ところに行が10本続くと、読み書き140回になる。待ち行列の順は保ったまま、
+    前の書き込みが終わるまでに溜まった行を1回で書く（読み書きは書き先の数だけ）。
+  */
+  for (const target of targets) {
+    const lines = pendingLines.get(target);
+    if (lines) lines.push(text);
+    else pendingLines.set(target, [text]);
+  }
+  if (flushQueued) return;
+  flushQueued = true;
 
   // 失敗しても本来の処理は止めない。ログが書けないことより、
   // 抽出が中断するほうが作者にとって困る。
@@ -180,9 +198,12 @@ function appendToFile(text: string, targets: readonly string[]): void {
   // （1か所の失敗でほかの書き先を落とさない）
   writeQueue = writeQueue
     .then(async () => {
-      for (const target of targets) {
+      flushQueued = false;
+      const batch = pendingLines;
+      pendingLines = new Map();
+      for (const [target, lines] of batch) {
         try {
-          await appendOne(text, target);
+          await appendOne(lines.join("\n"), target);
         } catch {
           // 次の書き先へ
         }

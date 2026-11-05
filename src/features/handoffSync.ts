@@ -310,13 +310,25 @@ async function handleTarget(
   target: HandoffTarget
 ): Promise<HandoffOutcome> {
   const run = deps.run ?? runGit;
-  // 書庫なら書庫のログへ（設計書5.7.9。先頭の作品のログへ紛れさせない）
-  await useSyncLog(target.root, target.works);
+  /*
+    **記録の書き先は、書く必要が出たときに初めて決める**（2026-11-05。点検が遅くなった件）。
+    これまでは置き場に入った時点で、書庫の全作品のログへ向けていた。何もしなかった回は
+    1行も書かないのに、共有の書き先だけが全作品（書庫7つなら7ファイル）のまま残り、
+    点検と同じ時間帯に走るほかの処理の行が、1行ごとに7ファイルの読み書きになっていた。
+    書庫なら書庫の作品のログへ（設計書5.7.9。先頭の作品のログへ紛れさせない）
+  */
+  let logAimed = false;
+  const aimLog = async (): Promise<void> => {
+    if (logAimed) return;
+    logAimed = true;
+    await useSyncLog(target.root, target.works);
+  };
 
   // 取りに行く。**失敗しても止めない**——オフラインでの執筆は普通にある
   if (canFetchStatus(target.status)) {
     const fetched = await fetchRemote(target.root, deps.run);
     if (!fetched.ok) {
+      await aimLog();
       logFailure("開いたときの点検でfetchに失敗", {
         置き場: target.label,
         詳細: fetched.detail ?? "（詳細なし）",
@@ -346,12 +358,16 @@ async function handleTarget(
     rescued === "restored"
       ? await readSyncStatus(target.root, deps.run)
       : await refreshAfterFetch(target.status, target.root, deps.run);
+  // 重なりの調べは、分かれているとき（両側に動きがあるとき）だけ失敗を書く
+  if (status.kind === "tracked" && status.ahead > 0 && status.behind > 0) await aimLog();
   const overlap = await readOverlap(target.root, status, run);
   const action = planHandoff({
     status,
     overlap,
     unsaved: hasUnsavedInside(target.root),
   });
+  // 何もしない回は書かない。動かす・止める回は、以後の行を置き場の作品のログへ
+  if (action.kind !== "nothing") await aimLog();
 
   switch (action.kind) {
     case "nothing":
