@@ -594,6 +594,16 @@ export class WorkRegistry {
     return renamed;
   }
 
+  /**
+   * 「編集者として参加」で登録した印を付ける（設計書5.6.6）。編集者モードでは、この印のある作品だけを
+   * 編集者メニューに出す。登録簿の書き方の決まりどおり `mutate` を通す
+   */
+  async markJoinedAsEditor(id: string): Promise<void> {
+    await this.mutate((current) =>
+      current.map((w) => (w.id === id ? { ...w, joinedAsEditor: true } : w))
+    );
+  }
+
   /** 登録を解除する（フォルダ本体は削除しない） */
   async remove(id: string): Promise<void> {
     await this.mutate((current) => current.filter((w) => w.id !== id));

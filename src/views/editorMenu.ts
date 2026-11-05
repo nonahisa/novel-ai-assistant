@@ -117,13 +117,34 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
   constructor(
     private readonly registry: WorkRegistry,
     private readonly selection: EditorWorkSelection,
-    private readonly loadFacts: EditorFactsLoader
+    private readonly loadFacts: EditorFactsLoader,
+    /**
+     * 編集者メニューに出す作品へ絞る（参加した作品だけ。自分の作品は出さない。設計書5.6.6）。
+     * 写しの印を読むので非同期。試験で差し替える。渡さなければ絞らない
+     */
+    private readonly filterWorks: (works: readonly WorkEntry[]) => Promise<WorkEntry[]> = async (works) => [...works]
   ) {
     registry.onDidChange(() => this.refresh());
   }
 
+  /**
+   * 絞った作品の控え。根の `getChildren` が読み直す（`getTreeItem` は同期で答えるので、控えを読む）。
+   * 読む前は登録簿のまま
+   */
+  private works: WorkEntry[] | undefined;
+
+  /** 参加した作品（編集者メニューに出す作品）。作品の切り替えの選択肢もこれを使う */
+  async editorWorks(): Promise<WorkEntry[]> {
+    this.works = await this.filterWorks(this.registry.list()).catch(() => [...this.registry.list()]);
+    return this.works;
+  }
+
+  private listed(): WorkEntry[] {
+    return this.works ?? [...this.registry.list()];
+  }
+
   selectedWork(): WorkEntry | undefined {
-    return resolveSelectedWork(this.registry.list(), this.selection.get());
+    return resolveSelectedWork(this.listed(), this.selection.get());
   }
 
   /** 台帳・同期の状態・モードが変わったら呼ぶ。読み直してから描き直す */
@@ -176,7 +197,7 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
 
   async getChildren(node?: EditorMenuNode): Promise<EditorMenuNode[]> {
     if (!node) {
-      const works = this.registry.list();
+      const works = await this.editorWorks();
       const work = this.selectedWork();
       if (work) await this.load(work);
       const steps = EDITOR_STEP_DEFS.map((def) => ({ type: "step" as const, def }));
@@ -260,7 +281,7 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
   }
 
   private workItem(): vscode.TreeItem {
-    const works = this.registry.list();
+    const works = this.listed();
     const work = this.selectedWork();
     const label = work ? `作品：${abbreviateTitle(work.title)}` : "作品を選ぶ";
     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
@@ -320,7 +341,7 @@ export class EditorMenuProvider implements vscode.TreeDataProvider<EditorMenuNod
 
   /** 押せない理由。作品が無いのか、選んでいないのかを分ける */
   private hintFor(item: ActionItem): string | undefined {
-    const works = this.registry.list();
+    const works = this.listed();
     const selected = this.selectedWork();
     const runtime = processCommandsUsableHere();
     const hint = disabledHint(item, selected !== undefined, "editor", runtime);

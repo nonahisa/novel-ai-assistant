@@ -5,7 +5,13 @@ import type { GitSyncStatus } from "../core/git";
 import { FileLockStore } from "../core/fileLockStore";
 import { ProposalStore } from "../core/proposalStore";
 import { tryGitUserName } from "../core/gitAttribution";
-import { describeLockRange } from "../core/editingRepo";
+import {
+  describeLockRange,
+  EDITING_SITE_FILE,
+  EDITOR_SHARE_MANIFEST_FILE,
+} from "../core/editingRepo";
+import { workPaths } from "../core/workRegistry";
+import { isJoinedWork, type EditorCopyMark } from "../core/editorWorks";
 import {
   lastReceivedFromReflog,
   type EditorProgressFacts,
@@ -99,4 +105,38 @@ async function readLastReceived(root: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * 作品フォルダーの写しの印を読む（`core/editorWorks.ts` の `isJoinedWork` へ渡す）。
+ * 写しの印（`.aiwriter/editor-share-manifest.json`）が在り作者の印（`.aiwriter/editing.json`）が無ければ
+ * `present`、写しの印が無いと確かめられれば `absent`、どちらとも言えなければ `unknown`（出す側に倒す）
+ */
+export async function editorCopyMarkOf(work: WorkEntry): Promise<EditorCopyMark> {
+  const state = async (name: string): Promise<"present" | "absent" | "unreadable"> => {
+    try {
+      const stat = await vscode.workspace.fs.stat(
+        path.toUri(path.join(workPaths(work).aiwriter, name))
+      );
+      return stat.type === vscode.FileType.File ? "present" : "unreadable";
+    } catch (error) {
+      return error instanceof vscode.FileSystemError && error.code === "FileNotFound"
+        ? "absent"
+        : "unreadable";
+    }
+  };
+  const copy = await state(EDITOR_SHARE_MANIFEST_FILE);
+  if (copy === "absent") return "absent";
+  if (copy === "unreadable") return "unknown";
+  return (await state(EDITING_SITE_FILE)) === "present" ? "unknown" : "present";
+}
+
+/** 編集者メニューに出す作品（参加した作品だけ。自分の作品は出さない。設計書5.6.6） */
+export async function joinedWorksOf(works: readonly WorkEntry[]): Promise<WorkEntry[]> {
+  const marks = await Promise.all(
+    works.map((work) =>
+      work.joinedAsEditor ? Promise.resolve<EditorCopyMark>("present") : editorCopyMarkOf(work)
+    )
+  );
+  return works.filter((work, index) => isJoinedWork(work, marks[index]));
 }

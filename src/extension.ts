@@ -145,7 +145,7 @@ import {
   stepViewDescription,
 } from "./views/stepMenu";
 import { EditorMenuProvider } from "./views/editorMenu";
-import { readEditorMenuFacts } from "./features/editorMenuFacts";
+import { joinedWorksOf, readEditorMenuFacts } from "./features/editorMenuFacts";
 import { showEditorProposalList } from "./features/editorProposalList";
 import {
   FOCUS_CHAT_KEY,
@@ -2847,7 +2847,9 @@ export async function activate(
           return status;
         },
         decisionMemory: globalDecisionMemory,
-      })
+      }),
+    // 編集者モードでは自分の作品を出さない（作者の指示 2026-11-05 夜。設計書5.6.6）
+    joinedWorksOf
   );
   const editorMenuView = vscode.window.createTreeView("novelai.editorMenu", {
     treeDataProvider: editorMenuProvider,
@@ -4900,7 +4902,8 @@ export async function activate(
   */
   context.subscriptions.push(
     registerCommand("novelai.chooseEditorWork", async () => {
-      const works = registry.list();
+      // 参加した作品だけを並べる（自分の作品は出さない。設計書5.6.6）
+      const works = await editorMenuProvider.editorWorks();
       const current = editorMenuProvider.selectedWork();
       const addLabel = "作品を足す（参加のリンクを貼る）";
       const picked = await vscode.window.showQuickPick(
@@ -8326,8 +8329,13 @@ export async function activate(
       }
       const { joinAsEditor } = await import("./features/joinAsEditor.js");
       const joined = await joinAsEditor(registry);
-      // 参加した作品（もう参加していた作品）を、編集者メニューの選んだ作品にする
-      if (joined) stepProvider.selectWork(joined.work.id);
+      if (joined) {
+        // 参加で登録した印（編集者メニューは、この印のある作品だけを出す。設計書5.6.6）。
+        // もう参加していた作品にも付ける（0.127.x までに参加した作品は印が無い）
+        if (!joined.work.joinedAsEditor) await registry.markJoinedAsEditor(joined.work.id);
+        // 参加した作品（もう参加していた作品）を、編集者メニューの選んだ作品にする
+        stepProvider.selectWork(joined.work.id);
+      }
     }),
     // 編集部との連携を解除する（作者モード専用。決裂したときの、作者側からの解除）
     registerCommand(

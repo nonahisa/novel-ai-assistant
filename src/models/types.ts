@@ -8,6 +8,11 @@ export interface WorkEntry {
   folderPath: string;
   /** 登録日時 (ISO8601) */
   registeredAt: string;
+  /**
+   * 「編集者として参加」で登録した作品か（2026-11-05 夜。設計書5.6.6）。編集者モードの
+   * 編集者メニューは、この印のある作品（と、印の無い既存の参加作品）だけを出す
+   */
+  joinedAsEditor?: boolean;
 }
 
 /**
