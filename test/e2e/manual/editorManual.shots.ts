@@ -41,7 +41,7 @@ import { test } from "vitest";
 import { fakeOllamaLaunch, startFakeOllama } from "../support/fakeOllama";
 import { addLocalRemote, git, initRepoWithFirstCommit } from "../support/gitFixture";
 import { memoPanelFrame, openEpisode, selectText } from "../support/manuscriptFrame";
-import { fillInput } from "../support/quickInput";
+import { fillInput, runCommand } from "../support/quickInput";
 import { proposalPanelFrame, readJsonLines } from "../support/sampleFinding";
 import { SIDEBAR_LAUNCH, treeRowLabels } from "../support/sidebar";
 import { withVsCode, type FixtureEpisode } from "../support/vscodeApp";
@@ -436,6 +436,144 @@ test("編集者向けの手順書の画面ショットを撮る", async () => {
           await page.mouse.click(SIZE.width * 0.7, SIZE.height * 0.45);
           await page.waitForTimeout(500);
           await page.keyboard.press("Escape");
+        },
+      })
+    );
+  } finally {
+    await fake.close();
+  }
+});
+
+/*
+  11 作者の採否が届いた知らせと、ベル（通知の一覧）に残る知らせ（手順7の注記。
+  編集者が「前回の採否はどこに出る？」と探せなかったため。リーダーの依頼 2026-11-05）。
+  別の窓で撮る：採否の行を台帳へ入れると、上の本編の「未決の提案が 2 件」の数が変わってしまう。
+  採否は、作者が決めて送り返したあとに編集者の写しへ届く形（台帳の decision の行）を、
+  登録のあとに作品の台帳へ書いて記録し、簡単ステップメニューの「保存・同期」で受け取る道（開いたときの点検と同じ関数）で出す。
+  **覚えは globalState なので、同じ採否は2度知らせない**（開き直すと知らせは出ず、ベルの一覧も空になる——下で確かめる）。
+*/
+const DECISION_FILE = "本文/003_春の灯.txt";
+const DECIDED: ReadonlyArray<{ target: string; suggestion: string; reason: string; category: string; status: "accepted" | "rejected" | "read" }> = [
+  { target: "もうそこまで来ていた", suggestion: "もうすぐそこまで来ていた", reason: "「すぐ」を足すと、春の近さが伝わります", category: "編集者の提案", status: "accepted" },
+  { target: "全ての窓", suggestion: "すべての窓", reason: "表記をそろえます", category: "編集者の提案", status: "rejected" },
+  { target: "娘は笑った", suggestion: "", reason: "ここで娘の表情をもう少し", category: "編集者の意見", status: "read" },
+];
+
+test("編集者の環境で、作者の採否が届いた知らせと、ベルの一覧の知らせを撮る", async () => {
+  const fake = await startFakeOllama(() => "OK");
+  try {
+    await withVsCode(
+      "手順書・編集部の採否",
+      EPISODES,
+      async (session) => {
+        const { page, workFolder } = session;
+        await clearNotifications(page);
+        await pressWorkbenchKey(page, "Control+Alt+Shift+KeyJ");
+        await setPaneExpanded(page, "AIに相談", false).catch(() => undefined);
+        await setPaneExpanded(page, "作品一覧", false);
+        await setPaneExpanded(page, ACTION_PANE, false);
+        await setPaneExpanded(page, STEP_PANE, true);
+
+        // 作者が決めて送り返した形（提案3件と、その採否3件）を台帳へ置いて記録する（登録のあと）
+        const ledgerFolder = path.join(workFolder, ".aiwriter", "proposals");
+        await mkdir(ledgerFolder, { recursive: true });
+        const lines: string[] = [];
+        for (const [index, entry] of DECIDED.entries()) {
+          const id = `pmanual${index}`;
+          lines.push(
+            JSON.stringify({
+              kind: "proposal",
+              id,
+              time: `2026-11-04T10:0${index}:00.000Z`,
+              proposer: EDITOR_NAME,
+              file: DECISION_FILE,
+              line: index + 1,
+              original: entry.target,
+              target: entry.target,
+              suggestion: entry.suggestion,
+              reason: entry.reason,
+              category: entry.category,
+            })
+          );
+        }
+        for (const [index, entry] of DECIDED.entries()) {
+          lines.push(
+            JSON.stringify({ kind: "decision", proposalId: `pmanual${index}`, time: `2026-11-05T09:0${index}:00.000Z`, decidedBy: "作者（見本）", status: entry.status, note: "" })
+          );
+        }
+        await writeFile(path.join(ledgerFolder, "proposals.jsonl"), `${lines.join("\n")}\n`, "utf8");
+        await git(workFolder, ["add", "-A"]);
+        await git(workFolder, ["commit", "--quiet", "-m", "作者の採否を受け取った"]);
+        await clearNotifications(page);
+
+        /* ── 11a 「保存・同期」で受け取ると、右下に採否の知らせが出る ── */
+        await clickStepEntry(page, "1. 編集者として参加", "保存・同期");
+        const decisionText = "作者が提案を決めました";
+        await waitUntil(
+          async () => (await notificationTexts(page)).some((text) => text.includes(decisionText)),
+          "「作者が提案を決めました」の知らせが出る",
+          30_000
+        ).catch(async (error: unknown) => {
+          throw new Error(`${String(error)}（右下の知らせ：${JSON.stringify(await notificationTexts(page))}／下の帯：${JSON.stringify(await statusBarTexts(page))}）`);
+        });
+        process.stdout.write(`[手順書] 11a の知らせ：${JSON.stringify(await notificationTexts(page))}\n`);
+        const toast = page.locator(".notification-toast", { hasText: decisionText }).first();
+        // 知らせは数秒で消えるので、マウスは動かさずすぐ撮る（一覧に残るかはあとで見る）
+        await shoot(page, "11a_作者の採否の知らせ", [{ locator: toast.locator(".notification-list-item-message span").first(), label: "作者が提案を決めました の知らせ" }], [toast]);
+
+        /* ── 11b ベルを押すと、過去の知らせの一覧にその知らせが残っている ── */
+        await waitUntil(async () => (await page.locator(".notification-toast").count()) === 0, "右下の知らせが消える（自動）", 30_000).catch(() => undefined);
+        const bell = page.locator('.part.statusbar .statusbar-item[id="status.notifications"] a, .part.statusbar #status\\.notifications a').first();
+        await bell.click();
+        const center = page.locator(".notifications-center").first();
+        await center.waitFor({ state: "visible", timeout: 10_000 });
+        const listed = page.locator(".notifications-center .notification-list-item", { hasText: decisionText }).first();
+        await listed.waitFor({ state: "visible", timeout: 10_000 });
+        process.stdout.write(`[手順書] 11b のベルの一覧：${JSON.stringify(await page.locator(".notifications-center .notification-list-item").allInnerTexts())}\n`);
+        await page.mouse.move(SIZE.width - 10, SIZE.height - 40);
+        await page.waitForTimeout(300);
+        await shoot(page, "11b_ベルの一覧", [
+          // ベルは窓の右下の角で、囲みが切れる。囲みを内側（左上）へずらす（ベル自体は囲みの中に入る）
+          { locator: bell, label: "下の帯のベル", fit: (box) => ({ ...box, x: box.x - 6, y: box.y - 6 }) },
+          { locator: listed.locator(".notification-list-item-message span").first(), label: "一覧に残った知らせ" },
+        ], [center, bell], 40);
+
+        /* ── 開き直しで消えるか（撮らない。注記に書くための確認） ── */
+        await page.keyboard.press("Escape");
+        await runCommand(page, "Developer: Reload Window");
+        await page.waitForTimeout(8_000);
+        await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
+        await page.waitForTimeout(6_000);
+        const afterReload = await notificationTexts(page);
+        process.stdout.write(`[手順書] 開き直し後の右下の知らせ：${JSON.stringify(afterReload)}\n`);
+        await page.locator('.part.statusbar #status\\.notifications a').first().click().catch(() => undefined);
+        await page.waitForTimeout(800);
+        const centerAfter = await page.locator(".notifications-center .notification-list-item").allInnerTexts().catch(() => [] as string[]);
+        process.stdout.write(`[手順書] 開き直し後のベルの一覧：${JSON.stringify(centerAfter)}\n`);
+        // 見逃した・開き直したあとに採否を見る道：「編集者提案確認」の知らせに「これまでの採否」が出る
+        await page.keyboard.press("Escape");
+        await clearNotifications(page);
+        await clickStepEntry(page, "5. 置いた提案を見る", "編集者提案確認");
+        await waitUntil(async () => (await notificationTexts(page)).some((text) => text.includes("提案")), "編集者提案確認の知らせが出る", 15_000).catch(() => undefined);
+        process.stdout.write(`[手順書] 開き直し後の「編集者提案確認」：${JSON.stringify(await notificationTexts(page))}\n`);
+        if (centerAfter.some((text) => text.includes(decisionText)) || afterReload.some((text) => text.includes(decisionText))) {
+          process.stdout.write("[手順書] 開き直しのあとも知らせが残っている／もう一度出た\n");
+        } else {
+          process.stdout.write("[手順書] 開き直すと、ベルの一覧から知らせは消え、同じ知らせは出ない\n");
+        }
+      },
+      fakeOllamaLaunch(fake, {
+        settings: SETTINGS,
+        keybindings: SIDEBAR_LAUNCH.keybindings,
+        windowSize: SIZE,
+        workTitle: WORK_TITLE,
+        prepareWork: async ({ workFolder }) => {
+          const aiwriter = path.join(workFolder, ".aiwriter");
+          await mkdir(aiwriter, { recursive: true });
+          await writeFile(path.join(aiwriter, "editor-share-manifest.json"), `${JSON.stringify({ files: [] }, null, 2)}\n`, "utf8");
+          await initRepoWithFirstCommit(workFolder);
+          await git(workFolder, ["config", "user.name", EDITOR_NAME]);
+          await addLocalRemote(workFolder, path.join(path.dirname(path.dirname(workFolder)), "送り先.git"));
         },
       })
     );

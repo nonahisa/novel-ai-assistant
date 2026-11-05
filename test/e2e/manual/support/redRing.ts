@@ -30,6 +30,11 @@ export interface RingTarget {
   locator: Locator;
   /** 失敗の文に出す名前（「［返す］」など） */
   label: string;
+  /**
+   * 囲む位置を、目標の箱から変えたいとき（窓の端で楕円が切れるので内側へずらす、字の幅だけに絞る）。
+   * 目標の四隅と真ん中が囲みの内側にあることは、ずらしたあとも確かめる
+   */
+  fit?: (box: Clip) => Clip;
 }
 
 interface Ellipse {
@@ -74,7 +79,7 @@ export async function drawRings(page: Page, targets: readonly RingTarget[]): Pro
     if (!box || box.width === 0 || box.height === 0) {
       throw new Error(`囲む「${target.label}」が画面に見えていません（boundingBox が取れない）`);
     }
-    ellipses.push({ ...ellipseAround(box), label: target.label });
+    ellipses.push({ ...ellipseAround(target.fit ? target.fit(box) : box), label: target.label });
   }
   await page.evaluate(
     ({ ellipses, color, width, top }) => {
@@ -127,7 +132,9 @@ async function verifyRings(page: Page, targets: readonly RingTarget[]): Promise<
     const ring = drawn[index];
     const box = await target.locator.boundingBox();
     if (!ring || !box) throw new Error(`「${target.label}」の囲みか目標が消えました`);
-    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const ringBox = target.fit ? target.fit(box) : box;
+    const center = { x: ringBox.x + ringBox.width / 2, y: ringBox.y + ringBox.height / 2 };
+    const targetCenter = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     if (Math.abs(ring.cx - center.x) > 4 || Math.abs(ring.cy - center.y) > 4) {
       throw new Error(
         `「${target.label}」の囲みの中心 (${ring.cx.toFixed(1)}, ${ring.cy.toFixed(1)}) が目標の中心 (${center.x.toFixed(1)}, ${center.y.toFixed(1)}) からずれています`
@@ -135,7 +142,7 @@ async function verifyRings(page: Page, targets: readonly RingTarget[]): Promise<
     }
     const inset = 2;
     const points = [
-      center,
+      targetCenter,
       { x: box.x + inset, y: box.y + inset },
       { x: box.x + box.width - inset, y: box.y + inset },
       { x: box.x + inset, y: box.y + box.height - inset },
