@@ -1208,12 +1208,25 @@ export async function activate(
     "novelai.works"
   );
 
+  /** 本体が走っている命令の数（記録の書き先を外してよいかの判断に使う） */
+  let commandsInFlight = 0;
+
   const registerCommand: typeof vscode.commands.registerCommand = (
     command,
     callback,
     thisArg
   ) =>
     vscode.commands.registerCommand(command, async (...args: unknown[]) => {
+      /*
+        **記録の書き先は、命令の入口で外す**（作者の裁定 2026-11-05）。
+        書き先は拡張機能の中で共有の1つの値なので、`useLogFile` を呼ばない
+        命令は、直前に別の命令が決めた作品のログへ書いていた（試験で、前の試験の
+        作品フォルダーにログが入っていた）。外せば既定の置き場（保管庫）へ行く。
+        命令は自分で作品を決めるなら、そのとき `useLogFile` で向け直す。
+        **ほかの命令が走っている間は外さない**——長い処理が後から行を書くとき、
+        共有の値を外すとその行が保管庫へ逸れる（外さないのは今までと同じ振る舞い）
+      */
+      if (commandsInFlight === 0) useLogFile(undefined);
       /*
         **詳細メニューから押した印は、最初に外す**（作者の判断 2026-11-02）。
         本体には「引数なし」として届け、作品を決める所で毎回選ばせる
@@ -1274,6 +1287,7 @@ export async function activate(
       }
       const syncBusy = isSyncBusyCommand(command);
       if (syncBusy) syncCommandsRunning += 1;
+      commandsInFlight += 1;
       try {
         // **数を増やしてから待つ。** 先に数えておけば、待っている間に
         // 送り直しの次の試行が始まることはない
@@ -1319,6 +1333,7 @@ export async function activate(
         // **失敗しても、途中で止めても必ず解く。** 解き忘れると、その操作が
         // 二度と押せなくなる（重複起動より重い壊れ方）
         endCommand(runningCommands, command);
+        commandsInFlight -= 1;
         if (syncBusy) syncCommandsRunning -= 1;
         // この操作のために置いた相談の作品は、終わったら片づける
         // （ほかの操作が置き直していれば触らない）

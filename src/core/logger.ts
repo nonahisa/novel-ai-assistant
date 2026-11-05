@@ -22,7 +22,7 @@ import { concatBytes } from "./concatBytes";
 let channel: vscode.OutputChannel | undefined;
 
 /** ログを書き込む先。作品を開いたときに設定する */
-let logFilePath: string | undefined;
+let logFilePaths: readonly string[] = [];
 /** 書き込みは順番に行う。並行して呼ばれると行が混ざる */
 let writeQueue: Promise<void> = Promise.resolve();
 
@@ -54,7 +54,28 @@ export function setFallbackLogRoot(rootPath: string): void {
  * **作品が分かるなら作品の下、分からないなら拡張機能の保管庫**である。
  */
 export function useLogFile(workFolderPath: string | undefined): void {
-  logFilePath = resolveLogFilePath(workFolderPath);
+  useLogFiles(workFolderPath === undefined ? [] : [workFolderPath]);
+}
+
+/**
+ * ログの書き先を**複数**に向ける（作者の裁定 2026-11-05、残課題 J10）。
+ *
+ * 書庫をまとめて同期した記録は、その同期に関わった作品それぞれのログへ同じ行を
+ * 書く。空配列は「書き先を決めない」＝`useLogFile(undefined)` と同じで、
+ * 既定の置き場（`setFallbackLogRoot`）へ書く。
+ */
+export function useLogFiles(workFolderPaths: readonly string[]): void {
+  if (workFolderPaths.length === 0) {
+    const fallback = resolveLogFilePath(undefined);
+    logFilePaths = fallback ? [fallback] : [];
+    return;
+  }
+  const resolved: string[] = [];
+  for (const folder of workFolderPaths) {
+    const file = resolveLogFilePath(folder);
+    if (file && !resolved.includes(file)) resolved.push(file);
+  }
+  logFilePaths = resolved;
 }
 
 function resolveLogFilePath(
@@ -89,7 +110,8 @@ export interface WorkLog {
  */
 export function workLog(workFolderPath: string | undefined): WorkLog {
   const target = resolveLogFilePath(workFolderPath);
-  const line = (message: string): void => writeLine(message, target);
+  const line = (message: string): void =>
+    writeLine(message, target ? [target] : []);
   return {
     line,
     step: line,
@@ -143,38 +165,48 @@ const MAX_ACTION_LOG_BYTES = 1_000_000;
  * 一時フォルダーを消したあとにそれが届くと、`.aiwriter/logs/actions.log` だけのフォルダーが
  * 作り直されて %TEMP% に残っていた（2026-11-05、数百個）。消す前にこれを待つ。
  * もう1つの道は、あとの処理が書き先を決め直さずに `logLine` を呼び、消した作品のログへ書くこと
- * （共有の書き先 `logFilePath` が残っているため）。試験は消す前に `useLogFile(undefined)` で外す
+ * （共有の書き先 `logFilePaths` が残っているため）。試験は消す前に `useLogFile(undefined)` で外す
  */
 export function settleLogWrites(): Promise<void> {
   return writeQueue;
 }
 
-function appendToFile(text: string, target: string | undefined): void {
-  if (!target) return;
+function appendToFile(text: string, targets: readonly string[]): void {
+  if (targets.length === 0) return;
 
   // 失敗しても本来の処理は止めない。ログが書けないことより、
-  // 抽出が中断するほうが作者にとって困る
+  // 抽出が中断するほうが作者にとって困る。
+  // 書き先が複数でも待ち行列は1本のまま、書き先ごとに順に書く
+  // （1か所の失敗でほかの書き先を落とさない）
   writeQueue = writeQueue
     .then(async () => {
-      const uri = path.toUri(target);
-      await vscode.workspace.fs.createDirectory(
-        path.toUri(path.dirname(target))
-      );
-      let existing: Uint8Array;
-      try {
-        existing = await vscode.workspace.fs.readFile(uri);
-      } catch {
-        existing = new Uint8Array();
+      for (const target of targets) {
+        try {
+          await appendOne(text, target);
+        } catch {
+          // 次の書き先へ
+        }
       }
-      const addition = new TextEncoder().encode(`${text}\n`);
-      // 上限を超えたら古いほうから捨てる。直近が読めることを優先する
-      const merged =
-        existing.byteLength + addition.byteLength > MAX_ACTION_LOG_BYTES
-          ? addition
-          : concatBytes(existing, addition);
-      await vscode.workspace.fs.writeFile(uri, merged);
     })
     .catch(() => undefined);
+}
+
+async function appendOne(text: string, target: string): Promise<void> {
+  const uri = path.toUri(target);
+  await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
+  let existing: Uint8Array;
+  try {
+    existing = await vscode.workspace.fs.readFile(uri);
+  } catch {
+    existing = new Uint8Array();
+  }
+  const addition = new TextEncoder().encode(`${text}\n`);
+  // 上限を超えたら古いほうから捨てる。直近が読めることを優先する
+  const merged =
+    existing.byteLength + addition.byteLength > MAX_ACTION_LOG_BYTES
+      ? addition
+      : concatBytes(existing, addition);
+  await vscode.workspace.fs.writeFile(uri, merged);
 }
 
 export function outputChannel(): vscode.OutputChannel {
@@ -214,13 +246,13 @@ export function formatLogTime(now: Date = new Date()): string {
 
 export function logLine(message: string): void {
   // 書き先は**呼ばれた瞬間の**共有の値で決まる（長い処理は `workLog` を使う）
-  writeLine(message, logFilePath);
+  writeLine(message, logFilePaths);
 }
 
-function writeLine(message: string, target: string | undefined): void {
+function writeLine(message: string, targets: readonly string[]): void {
   const line = `[${formatLogTime()}] ${redactSecrets(message)}`;
   outputChannel().appendLine(line);
-  appendToFile(line, target);
+  appendToFile(line, targets);
 }
 
 /**

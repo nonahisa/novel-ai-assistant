@@ -4,6 +4,7 @@ vi.mock("../../../src/core/logger", () => ({
   logFailure: vi.fn(),
   logStep: vi.fn(),
   useLogFile: vi.fn(),
+  useLogFiles: vi.fn(),
   showLog: vi.fn(),
 }));
 

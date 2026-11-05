@@ -524,7 +524,7 @@ async function runPlan(
     書庫なら**書庫のログ**（設計書5.7.9。2026-10-03 までは先頭の作品の
     ログへ紛れていた）。登録済みの作品が無い置き場では向けない（書き先が無い）。
   */
-  await useSyncLog(cwd, plan.target.works);
+  await useSyncLog(cwd, plan.target.works, plan.target.involved);
 
   /*
     **記録の前に、作品の中の未保存を保存する**（設計書5.5.19。作者の裁定

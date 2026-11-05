@@ -4,6 +4,7 @@ vi.mock("../../../src/core/logger", () => ({
   logFailure: vi.fn(),
   logStep: vi.fn(),
   useLogFile: vi.fn(),
+  useLogFiles: vi.fn(),
 }));
 
 import {
@@ -14,7 +15,7 @@ import {
 import type { GitCommandRunner, GitSyncStatus } from "../../../src/core/git";
 import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
 import type { WorkEntry } from "../../../src/models/types";
-import { logFailure, logStep, useLogFile } from "../../../src/core/logger";
+import { logFailure, logStep, useLogFile, useLogFiles } from "../../../src/core/logger";
 import { statusBarMessages, window, workspace } from "../support/vscodeStub";
 
 /**
@@ -162,6 +163,7 @@ beforeEach(() => {
   vi.mocked(logFailure).mockClear();
   vi.mocked(logStep).mockClear();
   vi.mocked(useLogFile).mockClear();
+  vi.mocked(useLogFiles).mockClear();
   // 書庫のログの置き場（Gitから外す印を置く）。書いたものを覚えておく
   written = new Map();
   workspace.fs = {
@@ -251,15 +253,15 @@ describe("回線が戻ったら送り直す（2026-10-01 の再現）", () => {
    * 書庫の同期の記録は、先頭の作品ではなく書庫のログへ（作者の裁定、
    * 2026-10-03。設計書5.7.9）。書庫の直下のログはGitから外す印と一緒に置く
    */
-  test("送り直しの記録は、先頭の作品ではなく書庫のログへ書く", async () => {
+  test("送り直しの記録は、先頭の作品だけでなく書庫の全作品のログへ書き、書庫の直下へは書かない", async () => {
     await makeResender().attempt("interval");
-    expect(vi.mocked(useLogFile).mock.calls.map((call) => call[0])).toEqual([
-      library,
+    expect(vi.mocked(useLogFiles).mock.calls.map((call) => call[0])).toEqual([
+      works.map((work) => work.folderPath),
     ]);
-    const ignore = [...written.entries()].find(([key]) =>
-      key.replace(/\\/g, "/").endsWith("書庫/.aiwriter/logs/.gitignore")
+    const underLibrary = [...written.keys()].filter((key) =>
+      key.replace(/\\/g, "/").includes("書庫/.aiwriter/")
     );
-    expect(ignore?.[1]).toBe("*\n");
+    expect(underLibrary).toEqual([]);
   });
 
   test("押し付け（force）は決してしない", async () => {
