@@ -2266,6 +2266,11 @@
           "default": false,
           "markdownDescription": "提案パネルを、画面下のパネル領域（出力・ターミナルと同じ場所）にも出す。\n\n・既定では出さない（提案パネルはエディターの右の列に開く）\n・どちらに出しても中身は同じ"
         },
+        "novelai.timeline.show": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "左のエクスプローラーの下の「タイムライン」欄に、話ごとの記録を出す。\n\n・開いている話の、編集履歴・提案と採否・AIの指摘・投稿と出し直し・外のAIが使った記録・書き換える前の控え（新しい5件）\n・git の履歴と並んで出る\n・既定では出さない\n・VS Code 1.145 より前では出ない"
+        },
         "novelai.chatter.enabled": {
           "type": "boolean",
           "default": true,

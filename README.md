@@ -480,6 +480,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 | `novelai.logs.retentionDays` | `7` | ログに残す日数（`0`で消さない） |
 | `novelai.findings.retentionDays` | `3` | AIの指摘を並べ続ける日数（`0`でずっと並べる） |
 | `novelai.proposals.showInBottomPanel` | `false` | 提案パネルを画面下のパネル領域にも出す（既定はエディターの右の列だけ） |
+| `novelai.timeline.show` | `false` | 左のエクスプローラーの下の「タイムライン」欄に、話ごとの記録（編集履歴・提案・指摘・投稿・控えなど）を出す |
 
 `novelai.modelTuning` は「AIが実際に読める長さを測る」が書き込む記録です（手で書く項目ではありません）。`novelai.claude.maxOutputTokens` は旧設定で、`novelai.maxOutputTokens` に置き換わりました。
 

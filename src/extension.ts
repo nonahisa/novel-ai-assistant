@@ -327,6 +327,7 @@ import {
   routeOfDeleteAnswer,
 } from "./core/episodeDeleteChoice";
 import { POSTING_MENU_ENTRIES } from "./core/postingMenu";
+import { registerEpisodeTimeline } from "./features/episodeTimeline";
 import { SETTINGS_DOC_CHOICES } from "./core/settingsDocChoices";
 import {
   selectableWorkFormats,
@@ -8213,6 +8214,9 @@ export async function activate(
       }
     )
   );
+
+  // 「タイムライン」欄に話ごとの記録を出す（設計書6.119。設定で選んだときだけ）
+  registerEpisodeTimeline(context, (filePath) => findWorkForPath(registry, filePath));
 
   context.subscriptions.push(
     registerCommand(

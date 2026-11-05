@@ -233,15 +233,55 @@ export async function createManagedRecoveryPath(
   );
 }
 
+/** 退避の写しの名前の形。**作る側（上）・整理（下）・一覧（`listManagedRecoveries`）で同じものを見る** */
+function managedRecoveryPattern(key: string): RegExp {
+  return new RegExp(
+    `^${key}-(\\d{13})-\\d{8}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.bak$`,
+    "i"
+  );
+}
+
+export interface ManagedRecoveryEntry {
+  /** 写しの場所 */
+  path: string;
+  /** 退避した時刻（名前の13桁。ミリ秒） */
+  timestamp: number;
+}
+
+/**
+ * そのファイルの退避の写しを、新しいものから並べる（タイムラインの欄。設計書6.119）。
+ *
+ * **名前の決め方を写さないためにここへ置いた。** 鍵（`recoveryKey`）と
+ * 置き場（`recoveryDirectoryFor`）を外で組み直すと、片方を直した日に
+ * 写しが見つからなくなる。読めなければ空を返す（欄が出ないだけで済む）。
+ */
+export async function listManagedRecoveries(
+  canonicalPath: string
+): Promise<ManagedRecoveryEntry[]> {
+  const directory = recoveryDirectoryFor(canonicalPath);
+  const pattern = managedRecoveryPattern(recoveryKey(canonicalPath));
+  let entries: [string, vscode.FileType][];
+  try {
+    entries = await vscode.workspace.fs.readDirectory(path.toUri(directory));
+  } catch {
+    return [];
+  }
+  const found: ManagedRecoveryEntry[] = [];
+  for (const [name, type] of entries) {
+    if (type !== vscode.FileType.File) continue;
+    const match = pattern.exec(name);
+    if (!match) continue;
+    found.push({ path: path.join(directory, name), timestamp: Number(match[1]) });
+  }
+  return found.sort((left, right) => right.timestamp - left.timestamp);
+}
+
 export async function pruneManagedRecoveries(
   canonicalPath: string
 ): Promise<void> {
   const directory = recoveryDirectoryFor(canonicalPath);
   const key = recoveryKey(canonicalPath);
-  const pattern = new RegExp(
-    `^${key}-\\d{13}-\\d{8}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.bak$`,
-    "i"
-  );
+  const pattern = managedRecoveryPattern(key);
 
   let entries: [string, vscode.FileType][];
   try {
