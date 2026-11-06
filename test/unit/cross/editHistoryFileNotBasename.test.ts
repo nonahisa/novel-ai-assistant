@@ -9,7 +9,7 @@ import * as path from "node:path";
  * ## なぜ機械で止めるか
  *
  * `file` は「作品フォルダーからの相対パス」（`core/editHistoryFormat.ts`）。
- * 0.130.3 までは11か所が名前だけを書いており、章ごとのフォルダーに同じ名前の話が
+ * 0.130.3 までは17か所が名前だけを書いており、章ごとのフォルダーに同じ名前の話が
  * あると、タイムラインの欄がほかの章の話の記録まで拾っていた。呼び手は機能ごとに
  * 散っているので、新しく足す1か所がまた `basename` を写しやすい。
  *
@@ -26,7 +26,7 @@ function walk(dir: string, out: string[]): void {
 }
 
 describe("編集履歴の file", () => {
-  test("recordEdit の file に path.basename を渡していない", () => {
+  test("recordEdit の file に名前だけ（basename・fileName・split の最後）を渡していない", () => {
     const files: string[] = [];
     walk(SRC, files);
     const offenders: string[] = [];
@@ -35,7 +35,13 @@ describe("編集履歴の file", () => {
       // 呼び出しの引数（最初の `});` まで）だけを見る。画面の文の basename は対象外
       const calls = text.matchAll(/recordEdit\(([\s\S]*?)\}\);/g);
       for (const call of calls) {
-        if (/\bfile:\s*path\.basename\(/.test(call[1])) {
+        // 名前だけになる形は3通りあった：`path.basename(...)`・画面用に持っている
+        // `.fileName`・区切りで割った最後（`.split("/").pop()`）
+        const nameOnly =
+          /\bfile:\s*path\.basename\(/.test(call[1]) ||
+          /\bfile:\s*[\w.]*\.fileName\b/.test(call[1]) ||
+          /\bfile:[^,\n]*\.split\(\s*["'`]\/["'`]\s*\)\.pop\(\)/.test(call[1]);
+        if (nameOnly) {
           const line = text.slice(0, call.index).split("\n").length;
           offenders.push(`${path.relative(SRC, file)}:${line}`);
         }

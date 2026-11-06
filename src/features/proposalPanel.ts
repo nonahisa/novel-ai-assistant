@@ -3743,7 +3743,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     await recordEdit(work, {
       actor: "ai",
       action: `${this.category}の指摘を反映した`,
-      file: item.fileName,
+      // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）
+      file: editHistoryFile(work.folderPath, item.filePath),
       detail: `${item.line}行 「${item.target}」→「${item.suggestion}」`,
     });
     await appendAiActionLog(work, {
@@ -3858,7 +3859,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         direction === "apply"
           ? "バックアップとの違いを採った"
           : "バックアップとの違いを採ったのを戻した",
-      file: item.fileName,
+      file: editHistoryFile(work.folderPath, item.filePath),
       detail:
         `${item.reason} ${block.startLine}行目から` +
         `（手元${block.local.length}行→バックアップ${block.replacement.length}行）`,
@@ -4096,7 +4097,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     await recordEdit(work, {
       actor: "author",
       action: `${this.category}の反映を戻した`,
-      file: item.fileName,
+      file: editHistoryFile(work.folderPath, item.filePath),
       detail: `${item.line}行 「${item.suggestion}」→「${item.target}」`,
     });
     await appendAiActionLog(work, {
@@ -4396,7 +4397,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     await recordEdit(work, {
       actor: manualActor(),
       action: "「直さない語」に登録した",
-      file: item.fileName,
+      file: editHistoryFile(work.folderPath, item.filePath),
       detail: item.target,
     });
     await this.dismissIssue(id);

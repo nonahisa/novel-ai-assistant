@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
 import * as nodePath from "path";
-import { editHistoryFile } from "../../../src/core/editHistoryFormat";
-import { recordPointsToEpisode } from "../../../src/core/episodeTimeline";
+import {
+  editHistoryFile,
+  type EditHistoryEntry,
+} from "../../../src/core/editHistoryFormat";
+import {
+  buildEpisodeTimeline,
+  recordPointsToEpisode,
+} from "../../../src/core/episodeTimeline";
 
 /**
  * 編集履歴の `file` に入れる形（作品フォルダーからの相対・`/` 区切り）。
@@ -40,5 +46,43 @@ describe("editHistoryFile", () => {
 
   test("0.130.3 までの名前だけの記録も、これまでどおり読める", () => {
     expect(recordPointsToEpisode("Episode_0001.md", work, chapter1)).toBe(true);
+  });
+});
+
+describe("タイムラインの「反映した」の行", () => {
+  function applied(file: string, time: string): EditHistoryEntry {
+    return {
+      time,
+      actor: "ai",
+      actorName: "作者",
+      action: "誤字脱字の指摘を反映した",
+      file,
+      detail: "3行 「走つた」→「走った」",
+    };
+  }
+  const labels = (episodePath: string, edits: EditHistoryEntry[]) =>
+    buildEpisodeTimeline({ workFolder: work, episodePath, edits }).map(
+      (entry) => entry.label
+    );
+
+  test("新しい相対の記録は、書いた章の話にだけ出る", () => {
+    const edits = [
+      applied(editHistoryFile(work, chapter1), "2026-11-06T10:00:00.000Z"),
+    ];
+    expect(labels(chapter1, edits).some((label) => label.includes("反映した"))).toBe(true);
+    expect(labels(chapter2, edits)).toEqual([]);
+  });
+
+  test("古い名前だけの記録も、その名前の話に出る（どの章かは見分けられない）", () => {
+    const edits = [applied("Episode_0001.md", "2026-11-05T10:00:00.000Z")];
+    expect(labels(chapter1, edits).some((label) => label.includes("反映した"))).toBe(true);
+  });
+
+  test("古い記録と新しい記録が混ざっていても、両方が並ぶ", () => {
+    const edits = [
+      applied("Episode_0001.md", "2026-11-05T10:00:00.000Z"),
+      applied(editHistoryFile(work, chapter1), "2026-11-06T10:00:00.000Z"),
+    ];
+    expect(labels(chapter1, edits).filter((label) => label.includes("反映した"))).toHaveLength(2);
   });
 });
