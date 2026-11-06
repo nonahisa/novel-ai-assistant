@@ -7,24 +7,37 @@ import {
   type DriveFileEntry,
 } from "./driveApi";
 import {
+  DRIVE_DELETED,
   buildDriveManifest,
+  checkManifestArrival,
   isIgnoredSyncPath,
   isSafeSyncPath,
   isSendableSyncPath,
+  joinDriveLineage,
+  localDriveLineage,
   parseDriveManifest,
-  planDriveReceiveChecked,
+  planDriveReceive,
+  planDriveSend,
   serializeDriveManifest,
+  type DriveConflictSide,
+  type DriveLineage,
   type DriveManifest,
+  type DrivePeer,
   type DriveSyncDecision,
 } from "./driveSyncPlan";
 import { cloneDriveSyncRecord, type DriveSyncRecord } from "./driveSyncRecord";
 import { hashBytes } from "./hash";
-import { decideSettingsConflict, type SettingsConflictDecision } from "./settingsConflictRule";
+import {
+  decideSettingsConflict,
+  isSettingsJsonPath,
+  type SettingsConflictDecision,
+} from "./settingsConflictRule";
 
 /**
- * Google ドライブで2台をそろえる「送る」「受け取る」の手順（設計書5.10。段階2、0.132.0）。
+ * Google ドライブで作品をそろえる「送る」「受け取る」の手順（設計書5.10。段階2、0.132.0。
+ * 3台以上へ 0.133.0）。
  *
- * 段階1の計画（`driveSyncPlan.ts`）と Drive の口（`driveApi.ts`）をつなぐ。
+ * 計画（`driveSyncPlan.ts`）と Drive の口（`driveApi.ts`）をつなぐ。
  * **手元のファイルの読み書きも差し替えられる形**にした（`LocalWorkFiles`・
  * `LocalWorkWriter`）。core は原稿へ直に書かない——手元の原稿へ書く口は
  * 呼び手が `writeTextFilePreservingFormat`（既にある話）と `atomicWriteFile` の
@@ -45,14 +58,13 @@ import { decideSettingsConflict, type SettingsConflictDecision } from "./setting
  *   フォルダーに置かないのは、作品の根に `manifest.json` という話があると
  *   名前がぶつかるため。名前に「/」を使えるかは見立て（`driveApi.ts`）
  * - 作品のフォルダー名は**呼び手が決めて渡す**（`DriveSyncLayout.workFolderName`）。
- *   2台で同じでなければならないが、今の作品の設定（`config.json`）には
- *   2台で共通の識別子が無い。誰がどう作るかは段階3で決める
+ *   どの端末でも同じでなければならないが、今の作品の設定（`config.json`）には
+ *   端末に共通の識別子が無い。誰がどう作るかは段階3で決める
  *
- * ## 2台より多いとき
+ * ## 相手は何台でもよい（設計書5.10.6）
  *
- * 作者が決めた使い道は2台（5.10.1）。印は道ごとに1つなので、3台目の目録を
- * 同じ印で比べると基準が混ざる。**向こうの端末のフォルダーが2つ以上あれば
- * 何もしない**（`several_peers`）で返す。
+ * 作品のフォルダーの中の、自分以外の端末のフォルダー全部を相手にする。比べは
+ * 中身の系譜でするので、相手の台数で規則は変わらない（`planDriveReceive`）。
  */
 
 /** ドライブの根に作るフォルダーの名前（作者がドライブの画面で見る） */
@@ -66,7 +78,7 @@ export const DRIVE_FILES_FOLDER_NAME = "files";
 const MY_DRIVE = "root";
 
 export interface DriveSyncLayout {
-  /** 作品のフォルダー名。2台で同じもの */
+  /** 作品のフォルダー名。どの端末でも同じもの */
   workFolderName: string;
   /** この端末のID（`core/device.ts`） */
   deviceId: string;
@@ -100,8 +112,8 @@ export type LocalWriteOutcome =
  *
  * **書けた中身は、向こうの中身とバイトまで同じでなければならない。**
  * 書く口が改行や文字コードを手元の形へ直すと、書けたもののハッシュが
- * 目録と違い、次に「手元が変わった」と読んで送り返す——2台で永久に
- * 往復する。そこで `writtenHash` が向こうのハッシュと違えば印を進めず、
+ * 目録と違い、次に「手元で書いた」と読んで送り返す——端末の間で永久に
+ * 往復する。そこで `writtenHash` が向こうのハッシュと違えば系譜を進めず、
  * 失敗に数える（受け取ったバイトの形をどう書くかは段階3の呼び手が決める）
  */
 export interface LocalWorkWriter {
@@ -119,7 +131,7 @@ export type DriveSendResult =
       unchanged: number;
       /** 同じ名前のフォルダーが重なっていた数（2台が同時に初めて送ったとき） */
       duplicateFolders: number;
-      /** 新しい控え。**呼び手が保存する** */
+      /** 新しい控え（系譜の頭を送った中身へ進めたもの）。**呼び手が保存する** */
       record: DriveSyncRecord;
     }
   /**
@@ -132,10 +144,8 @@ export type DriveSendResult =
 
 /**
  * 手元の作品を、この端末のフォルダーへ送る。変わったファイルだけを書き、
- * **最後に目録を書く**（設計書5.10.3）。
- *
- * @param input.peerManifest 最後に受け取った向こうの目録（**届ききったもの**）。
- *   選び終えた食い違いの持ち越しを外すのに使う（`buildDriveManifest`）
+ * **最後に目録を書く**（設計書5.10.3）。目録には系譜を載せ（`planDriveSend`）、
+ * 送れたら控えの系譜の頭を送った中身へ進める。
  */
 export async function sendToDrive(input: {
   client: DriveClient;
@@ -144,10 +154,11 @@ export async function sendToDrive(input: {
   record: DriveSyncRecord;
   ignoredPaths: readonly string[];
   now: Date;
-  peerManifest?: DriveManifest;
 }): Promise<DriveSendResult> {
   const { client, layout } = input;
   const uploaded: string[] = [];
+  const isSendable = (entry: string) =>
+    isSendableSyncPath(entry, { ownDeviceId: layout.deviceId, ignoredPaths: input.ignoredPaths });
   try {
     const root = await client.ensureFolder(MY_DRIVE, layout.rootFolderName ?? DRIVE_ROOT_FOLDER_NAME);
     const work = await client.ensureFolder(root.id, layout.workFolderName);
@@ -167,22 +178,20 @@ export async function sendToDrive(input: {
     }
 
     const remoteByName = byName(await client.listChildren(files.id));
-    const paths = (await input.local.list())
-      .filter((entry) =>
-        isSendableSyncPath(entry, { ownDeviceId: layout.deviceId, ignoredPaths: input.ignoredPaths })
-      )
-      .sort();
+    const paths = (await input.local.list()).filter(isSendable).sort();
 
     const sent = new Map<string, string>();
+    const settingsTexts = new Map<string, string>();
     let unchanged = 0;
     for (const entry of paths) {
       const bytes = await input.local.read(entry);
-      // 一覧のあとで消えた。目録に載せない（次の回で「消えた」になる）
+      // 一覧のあとで消えた。目録には「消えた」で載る（控えに頭があれば）
       if (bytes === undefined) continue;
       const hash = hashBytes(bytes);
       sent.set(entry, hash);
+      if (isSettingsJsonPath(entry)) settingsTexts.set(entry, decodeUtf8(bytes));
       const existing = remoteByName.get(entry);
-      if (existing && (previous?.files.get(entry) === hash || existing.sha256Checksum === hash)) {
+      if (existing && (previous?.files.get(entry)?.hash === hash || existing.sha256Checksum === hash)) {
         unchanged += 1;
         continue;
       }
@@ -191,30 +200,30 @@ export async function sendToDrive(input: {
       uploaded.push(entry);
     }
 
+    const lineages = planDriveSend({
+      lineage: input.record.lineage,
+      local: sent,
+      previous,
+      isSendable,
+    });
     const round = Math.max(input.record.lastRound, previous?.round ?? 0) + 1;
     const manifest = buildDriveManifest({
       deviceId: layout.deviceId,
       deviceName: layout.deviceName,
       round,
       sentAt: input.now.toISOString(),
-      files: sent,
-      previous,
-      resolvedConflicts: input.record.pendingResolutions,
-      peerManifest: input.peerManifest,
-      marks: input.record.marks,
+      files: lineages,
     });
     const manifestBytes = new TextEncoder().encode(serializeDriveManifest(manifest));
     if (manifestEntry) await client.updateFile(manifestEntry.id, manifestBytes);
     else await client.createFile(device.id, DRIVE_MANIFEST_NAME, manifestBytes, "application/json");
 
+    // 目録まで書けたので、送った中身を系譜の頭にする。相手がこれを送り返してきても、
+    // 相手の中身はこちらの祖先（または同じ）なので食い違いにならない
     const record = cloneDriveSyncRecord(input.record);
     record.lastRound = round;
-    record.pendingResolutions.clear();
-    for (const [entry, hash] of sent) {
-      if (record.marks.get(entry) === hash) continue;
-      const list = record.sentSinceMark.get(entry) ?? [];
-      if (!list.includes(hash)) list.push(hash);
-      record.sentSinceMark.set(entry, list);
+    for (const [entry, lineage] of lineages) {
+      setHead(record, entry, lineage, settingsTexts.get(entry));
     }
     return { kind: "sent", manifest, uploaded, unchanged, duplicateFolders, record };
   } catch (error) {
@@ -223,57 +232,83 @@ export async function sendToDrive(input: {
   }
 }
 
-/** 食い違い1件と、見比べに要る両側の中身 */
+/** 食い違いの相手1件と、その中身（目録のハッシュと合うことを確かめたもの） */
+export interface DriveConflictRemote extends DriveConflictSide {
+  bytes: Uint8Array;
+}
+
+/** 食い違い1件と、見比べに要る中身 */
 export interface DriveConflictReport {
   decision: Extract<DriveSyncDecision, { kind: "conflict" }>;
   /** 手元の中身（手元で消していれば undefined） */
   localBytes: Uint8Array | undefined;
-  /** 向こうの中身（目録のハッシュと合うことを確かめたもの） */
+  /** 食い違いの相手の一覧（端末と中身）。**どう選ばせるかは呼び手が決める** */
+  remotes: DriveConflictRemote[];
+  /** `remotes[0]` の中身（相手が1台のときの見比べに） */
   remoteBytes: Uint8Array;
   /** 設定資料で `decideSettingsConflict` が決めなかった理由 */
   settingsReason?: string;
 }
 
+/** 届ききっていない相手（その相手の分だけ受け取りを見送った） */
+export interface DriveNotArrived {
+  peerDeviceId: string;
+  missing: string[];
+  mismatched: string[];
+}
+
 export type DriveReceiveResult =
-  /** まだ向こうが一度も送っていない */
+  /** まだどの相手も一度も送っていない */
   | { kind: "nothing_yet" }
-  /** 向こうの端末が2つ以上ある。何もしない（このファイルの説明） */
-  | { kind: "several_peers"; deviceIds: string[] }
-  /** 向こうの目録が読めない。直さずに止める */
+  /** 相手の目録が1つでも読めない。直さずに止める（何も書いていない） */
   | { kind: "unreadable"; peerDeviceId: string; reason: string }
-  /** まだ届ききっていません。**何も書いていない** */
-  | { kind: "not_arrived"; peerDeviceId: string; missing: string[]; mismatched: string[] }
+  /**
+   * どの相手もまだ届ききっていません。**何も書いていない**。
+   * 先頭の相手の分を `peerDeviceId` 以下に、全部を `waiting` に
+   */
+  | ({ kind: "not_arrived"; waiting: DriveNotArrived[] } & DriveNotArrived)
   /** ドライブを読む前・計画の前に止まった。何も書いていない */
   | { kind: "failed"; error: DriveApiError }
   | {
       kind: "received";
-      peerDeviceId: string;
-      /** 届ききった向こうの目録。次に送るとき `peerManifest` に渡す */
-      peerManifest: DriveManifest;
+      /** 比べに使った相手（届ききったもの） */
+      peers: DrivePeer[];
+      /** 届ききっていないので見送った相手。次の受け取りで比べる */
+      waiting: DriveNotArrived[];
       /** 手元へ書いた道（受け取った・新しく置いた・設定資料を合わせた） */
       written: string[];
-      /** 中身は書かず印だけ進めた道 */
+      /** 中身は書かず系譜だけ進めた道 */
       advanced: string[];
       /** 設定資料で `decideSettingsConflict` が決めたもの */
       settingsDecided: { path: string; side: "ours" | "theirs" | "merged"; reason: string }[];
       /** 食い違い。**機械は選ばない**——作者に見比べてもらう */
       conflicts: DriveConflictReport[];
       /** 向こうで消えた（手元では消さない。知らせるだけ） */
-      remoteDeleted: { path: string; localChanged: boolean }[];
-      /** 書けなかったもの（この道の印は進めていない） */
+      remoteDeleted: { path: string; localChanged: boolean; from: string[] }[];
+      /** 書けなかったもの（この道の系譜は進めていない） */
       failures: { path: string; reason: string }[];
-      /** ドライブの失敗で途中から先をやめた（やめる前に書いた分の印は `record` に入っている） */
+      /** ドライブの失敗で途中から先をやめた（やめる前に書いた分の系譜は `record` に入っている） */
       stoppedBy?: DriveApiError;
       /** 新しい控え。**呼び手が保存する**（途中で止まっても保存する） */
       record: DriveSyncRecord;
     };
 
+/** 読み込んだ相手1台（届いたかを確かめる前） */
+interface LoadedPeer extends DrivePeer {
+  filesByPath: Map<string, DriveFileEntry>;
+  /** 中身を読んだもの（届いたかを確かめるために読んだ分も） */
+  cache: Map<string, Uint8Array>;
+}
+
 /**
- * 向こうの端末のフォルダーから受け取る（設計書5.10.4）。
+ * 相手の端末のフォルダー全部から受け取る（設計書5.10.6）。
  *
- * 目録のハッシュと実際の中身が全部合うまで何も書かない。合えば3点比較の
- * 計画に従い、1件ずつ書く。**1件の失敗で全体を止めない**——書けた道だけ
- * 印を進め、書けなかった道は失敗に数える。
+ * 相手ごとに、目録のハッシュと実際の中身が全部合うかを確かめ、**合わない相手は
+ * 見送る**（`waiting`。ほかの相手の分は進める——送る途中で止まった端末が
+ * 長く戻らないと、ほかの全部の受け取りが止まるため）。目録が読めない相手が
+ * 1つでもあれば、何も書かずに止める。合った相手全部と系譜で比べ、1件ずつ書く。
+ * **1件の失敗で全体を止めない**——書けた道だけ系譜を進め、書けなかった道は
+ * 失敗に数える。
  */
 export async function receiveFromDrive(input: {
   client: DriveClient;
@@ -285,16 +320,15 @@ export async function receiveFromDrive(input: {
 }): Promise<DriveReceiveResult> {
   const { client, layout } = input;
 
-  let peer: { deviceId: string; manifest: DriveManifest; filesById: Map<string, DriveFileEntry> };
-  const cache = new Map<string, Uint8Array>();
-  let actual: Map<string, string>;
+  const arrived: LoadedPeer[] = [];
+  const waiting: DriveNotArrived[] = [];
   try {
     const roots = await client.findFolders(MY_DRIVE, layout.rootFolderName ?? DRIVE_ROOT_FOLDER_NAME);
     if (roots.length === 0) return { kind: "nothing_yet" };
     const works = await client.findFolders(roots[0].id, layout.workFolderName);
     if (works.length === 0) return { kind: "nothing_yet" };
 
-    const peers = oldestByName(
+    const peerFolders = oldestByName(
       (await client.listChildren(works[0].id)).filter(
         (entry) =>
           entry.mimeType === DRIVE_FOLDER_MIME &&
@@ -302,45 +336,62 @@ export async function receiveFromDrive(input: {
           entry.name !== layout.deviceId
       )
     );
-    if (peers.size === 0) return { kind: "nothing_yet" };
-    if (peers.size > 1) return { kind: "several_peers", deviceIds: [...peers.keys()].sort() };
-    const [peerDeviceId, peerFolder] = [...peers][0];
+    for (const peerDeviceId of [...peerFolders.keys()].sort()) {
+      const peerFolder = peerFolders.get(peerDeviceId) as DriveFileEntry;
+      const peerChildren = await client.listChildren(peerFolder.id);
+      const manifestEntry = oldestFileNamed(peerChildren, DRIVE_MANIFEST_NAME);
+      // フォルダーだけ作って目録をまだ書いていない端末（初めて送る途中）
+      if (!manifestEntry) continue;
+      const read = parseDriveManifest(decodeUtf8(await client.readFile(manifestEntry.id)));
+      if (!read.ok) return { kind: "unreadable", peerDeviceId, reason: read.reason };
+      if (read.manifest.deviceId !== peerDeviceId) {
+        return { kind: "unreadable", peerDeviceId, reason: "目録の端末IDがフォルダーの名前と違います" };
+      }
 
-    const peerChildren = await client.listChildren(peerFolder.id);
-    const manifestEntry = oldestFileNamed(peerChildren, DRIVE_MANIFEST_NAME);
-    if (!manifestEntry) return { kind: "nothing_yet" };
-    const read = parseDriveManifest(decodeUtf8(await client.readFile(manifestEntry.id)));
-    if (!read.ok) return { kind: "unreadable", peerDeviceId, reason: read.reason };
-    if (read.manifest.deviceId !== peerDeviceId) {
-      return { kind: "unreadable", peerDeviceId, reason: "目録の端末IDがフォルダーの名前と違います" };
-    }
+      const filesFolder = oldestByName(
+        peerChildren.filter((entry) => entry.mimeType === DRIVE_FOLDER_MIME)
+      ).get(DRIVE_FILES_FOLDER_NAME);
+      const remoteByName = filesFolder ? byName(await client.listChildren(filesFolder.id)) : new Map<string, DriveFileEntry>();
 
-    const filesFolder = oldestByName(
-      peerChildren.filter((entry) => entry.mimeType === DRIVE_FOLDER_MIME)
-    ).get(DRIVE_FILES_FOLDER_NAME);
-    const remoteByName = filesFolder ? byName(await client.listChildren(filesFolder.id)) : new Map();
-
-    // 届ききったか：ドライブが申告するハッシュが目録と合えば読まずに済ませ、
-    // 合わない・無いものは中身を読んで確かめる（申告の表記は見立てなので、
-    // 合わなくても「違う」とは決めない）
-    actual = new Map<string, string>();
-    const filesById = new Map<string, DriveFileEntry>();
-    for (const [entry, hash] of read.manifest.files) {
-      const remote = remoteByName.get(entry);
-      if (!remote) continue;
-      filesById.set(entry, remote);
-      if (remote.sha256Checksum?.toLowerCase() === hash) {
-        actual.set(entry, hash);
+      // 届ききったか：ドライブが申告するハッシュが目録と合えば読まずに済ませ、
+      // 合わない・無いものは中身を読んで確かめる（申告の表記は見立てなので、
+      // 合わなくても「違う」とは決めない）
+      const actual = new Map<string, string>();
+      const filesByPath = new Map<string, DriveFileEntry>();
+      const cache = new Map<string, Uint8Array>();
+      for (const [entry, lineage] of read.manifest.files) {
+        if (lineage.hash === DRIVE_DELETED) continue;
+        const remote = remoteByName.get(entry);
+        if (!remote) continue;
+        filesByPath.set(entry, remote);
+        if (remote.sha256Checksum?.toLowerCase() === lineage.hash) {
+          actual.set(entry, lineage.hash);
+          continue;
+        }
+        const bytes = await client.readFile(remote.id);
+        cache.set(entry, bytes);
+        actual.set(entry, hashBytes(bytes));
+      }
+      const arrival = checkManifestArrival(read.manifest, actual);
+      if (!arrival.arrived) {
+        waiting.push({ peerDeviceId, missing: arrival.missing, mismatched: arrival.mismatched });
         continue;
       }
-      const bytes = await client.readFile(remote.id);
-      cache.set(entry, bytes);
-      actual.set(entry, hashBytes(bytes));
+      arrived.push({
+        deviceId: peerDeviceId,
+        deviceName: read.manifest.deviceName,
+        manifest: read.manifest,
+        filesByPath,
+        cache,
+      });
     }
-    peer = { deviceId: peerDeviceId, manifest: read.manifest, filesById };
   } catch (error) {
     if (error instanceof DriveApiError) return { kind: "failed", error };
     throw error;
+  }
+  if (arrived.length === 0) {
+    if (waiting.length === 0) return { kind: "nothing_yet" };
+    return { kind: "not_arrived", ...waiting[0], waiting };
   }
 
   const localBytes = new Map<string, Uint8Array>();
@@ -354,30 +405,19 @@ export async function receiveFromDrive(input: {
     localHashes.set(entry, hashBytes(bytes));
   }
 
-  const plan = planDriveReceiveChecked({
-    marks: input.record.marks,
+  const decisions = planDriveReceive({
+    lineage: input.record.lineage,
     local: localHashes,
-    manifest: peer.manifest,
-    actualRemoteHashes: actual,
+    peers: arrived,
     ignoredPaths: input.ignoredPaths,
     ownDeviceId: layout.deviceId,
-    consumedResolutions: input.record.consumedResolutions.get(peer.deviceId),
-    ownSent: input.record.sentSinceMark,
   });
-  if (plan.kind === "not_arrived") {
-    return {
-      kind: "not_arrived",
-      peerDeviceId: peer.deviceId,
-      missing: plan.missing,
-      mismatched: plan.mismatched,
-    };
-  }
 
   const record = cloneDriveSyncRecord(input.record);
   const result: Extract<DriveReceiveResult, { kind: "received" }> = {
     kind: "received",
-    peerDeviceId: peer.deviceId,
-    peerManifest: peer.manifest,
+    peers: arrived.map(({ deviceId, deviceName, manifest }) => ({ deviceId, deviceName, manifest })),
+    waiting,
     written: [],
     advanced: [],
     settingsDecided: [],
@@ -389,49 +429,58 @@ export async function receiveFromDrive(input: {
 
   /**
    * 向こうの中身。**書く前に目録のハッシュと合うことを確かめる**——届ききったかを
-   * 申告のハッシュで済ませた道は、ここで初めて中身を読む
+   * 申告のハッシュで済ませた道は、ここで初めて中身を読む。同じ中身を持つ端末が
+   * いくつかあれば、先頭から読む
    */
-  const remoteBytesOf = async (entry: string, expected: string): Promise<Uint8Array | undefined> => {
-    let bytes = cache.get(entry);
-    if (!bytes) {
-      const remote = peer.filesById.get(entry);
-      if (!remote) return undefined;
-      bytes = await client.readFile(remote.id);
-      cache.set(entry, bytes);
+  const remoteBytesOf = async (
+    from: readonly string[],
+    entry: string,
+    expected: string
+  ): Promise<Uint8Array | undefined> => {
+    for (const deviceId of from) {
+      const peer = arrived.find((item) => item.deviceId === deviceId);
+      if (!peer) continue;
+      let bytes = peer.cache.get(entry);
+      if (!bytes) {
+        const remote = peer.filesByPath.get(entry);
+        if (!remote) continue;
+        bytes = await client.readFile(remote.id);
+        peer.cache.set(entry, bytes);
+      }
+      if (hashBytes(bytes) === expected) return bytes;
     }
-    return hashBytes(bytes) === expected ? bytes : undefined;
+    return undefined;
   };
+  const idsOf = (side: DriveConflictSide) => side.devices.map((device) => device.deviceId);
 
   const notMatching = "向こうの中身が目録と合いません（まだ書いている途中かもしれません）";
 
-  for (const decision of plan.decisions) {
+  for (const decision of decisions) {
     try {
       switch (decision.kind) {
         case "none":
           break;
         case "remote_deleted":
-          result.remoteDeleted.push({ path: decision.path, localChanged: decision.localChanged });
+          result.remoteDeleted.push({
+            path: decision.path,
+            localChanged: decision.localChanged,
+            from: decision.from,
+          });
           break;
         case "advance": {
-          let baseText: string | undefined;
-          if (decision.settings && decision.hash !== null) {
-            const bytes =
-              localHashes.get(decision.path) === decision.hash
-                ? localBytes.get(decision.path)
-                : await remoteBytesOf(decision.path, decision.hash);
-            if (bytes === undefined) {
-              result.failures.push({ path: decision.path, reason: notMatching });
-              break;
-            }
-            baseText = decodeUtf8(bytes);
-          }
-          setMark(record, decision.path, decision.hash, baseText);
+          // 中身は手元と同じ（または両方で消えた）。設定資料の控えは手元の中身で
+          const bytes = localBytes.get(decision.path);
+          const text =
+            decision.settings && decision.lineage.hash !== DRIVE_DELETED && bytes !== undefined
+              ? decodeUtf8(bytes)
+              : undefined;
+          setHead(record, decision.path, decision.lineage, text);
           result.advanced.push(decision.path);
           break;
         }
         case "receive":
         case "create": {
-          const bytes = await remoteBytesOf(decision.path, decision.remoteHash);
+          const bytes = await remoteBytesOf(decision.from, decision.path, decision.remoteHash);
           if (bytes === undefined) {
             result.failures.push({ path: decision.path, reason: notMatching });
             break;
@@ -441,56 +490,63 @@ export async function receiveFromDrive(input: {
               ? await input.writer.replace(decision.path, bytes, decision.expectedLocalHash)
               : await input.writer.create(decision.path, bytes);
           if (!recordWrite(result, decision.path, outcome, decision.remoteHash)) break;
-          setMark(record, decision.path, decision.remoteHash, decision.settings ? decodeUtf8(bytes) : undefined);
-          if (decision.kind === "receive" && decision.viaResolution && decision.resolutionRound !== undefined) {
-            const rounds = record.consumedResolutions.get(peer.deviceId) ?? new Map<string, number>();
-            rounds.set(decision.path, decision.resolutionRound);
-            record.consumedResolutions.set(peer.deviceId, rounds);
-          }
+          setHead(record, decision.path, decision.lineage, decision.settings ? decodeUtf8(bytes) : undefined);
           break;
         }
         case "conflict": {
-          const remoteBytes = await remoteBytesOf(decision.path, decision.remoteHash);
-          if (remoteBytes === undefined) {
+          const remotes: DriveConflictRemote[] = [];
+          for (const side of decision.remotes) {
+            const bytes = await remoteBytesOf(idsOf(side), decision.path, side.lineage.hash);
+            if (bytes === undefined) break;
+            remotes.push({ ...side, bytes });
+          }
+          if (remotes.length !== decision.remotes.length) {
             result.failures.push({ path: decision.path, reason: notMatching });
             break;
           }
           const ours = localBytes.get(decision.path);
-          if (decision.settings && ours !== undefined && decision.localHash !== null) {
-            // 控えの中身が、計画が比べた祖先（`markHash`）と同じものの時だけ使う。
-            // 祖先が向こうの印へ比べ直されたとき（`planDriveReceive`）、控えは
-            // こちらの古い印の中身なので、それを祖先として合わせると混ぜ方を誤る
-            const stored = record.settingsBases.get(decision.path);
-            const base =
-              stored !== undefined &&
-              decision.markHash !== null &&
-              hashBytes(new TextEncoder().encode(stored)) === decision.markHash
-                ? stored
-                : undefined;
+          // 設定資料は、相手が1つのときだけ項目ごとに合わせる（3つ以上を一度に
+          // 合わせる規則は無い。作者に見比べてもらう）
+          if (
+            decision.settings &&
+            remotes.length === 1 &&
+            ours !== undefined &&
+            decision.localHash !== null &&
+            decision.local !== null
+          ) {
+            const base = commonSettingsBase(record, decision.path, decision.local, remotes[0].lineage);
             const decided = decideSettingsConflict({
               base,
               ours: decodeUtf8(ours),
-              theirs: decodeUtf8(remoteBytes),
+              theirs: decodeUtf8(remotes[0].bytes),
             });
             if (decided.side !== "conflict") {
               await applySettingsDecision(result, input.writer, {
-                decision,
-                decided,
-                remoteBytes,
+                path: decision.path,
+                local: decision.local,
                 localHash: decision.localHash,
+                localText: decodeUtf8(ours),
+                remote: remotes[0],
+                decided,
               });
               break;
             }
-            result.conflicts.push({ decision, localBytes: ours, remoteBytes, settingsReason: decided.reason });
+            result.conflicts.push({
+              decision,
+              localBytes: ours,
+              remotes,
+              remoteBytes: remotes[0].bytes,
+              settingsReason: decided.reason,
+            });
             break;
           }
-          result.conflicts.push({ decision, localBytes: ours, remoteBytes });
+          result.conflicts.push({ decision, localBytes: ours, remotes, remoteBytes: remotes[0].bytes });
           break;
         }
       }
     } catch (error) {
       // ドライブの失敗はその先も続く見込みが高い（ネットが切れた等）。ここまでの
-      // 印を残して止める。手元の書き込みの例外は呼び手の不具合なので投げ直す
+      // 系譜を残して止める。手元の書き込みの例外は呼び手の不具合なので投げ直す
       if (error instanceof DriveApiError) {
         result.stoppedBy = error;
         break;
@@ -501,19 +557,40 @@ export async function receiveFromDrive(input: {
   return result;
 }
 
+/**
+ * 設定資料の食い違いの base（共通の祖先の中身）。控えにある頭の中身が、
+ * 手元の系譜にも相手の祖先にも入っているときだけ使う——そうでなければ
+ * 共通の祖先だと言えず、それを base に合わせると混ぜ方を誤る
+ */
+function commonSettingsBase(
+  record: DriveSyncRecord,
+  entry: string,
+  local: DriveLineage,
+  remote: DriveLineage
+): string | undefined {
+  const stored = record.settingsBases.get(entry);
+  if (stored === undefined) return undefined;
+  const hash = hashBytes(new TextEncoder().encode(stored));
+  const inLocal = local.hash === hash || local.ancestors.includes(hash);
+  return inLocal && remote.ancestors.includes(hash) ? stored : undefined;
+}
+
 /** 作者が食い違いで選んだもの（今の「残す文を選ぶ」と同じ3つ。設計書5.10.4） */
 export type DriveConflictChoice = "local" | "remote" | "both";
 
 /**
- * 作者が食い違いを選んだあとの処理。選んだことは**次に送るとき目録に載る**
- * （`DriveSyncRecord.pendingResolutions`）ので、もう1台では訊き直さない。
+ * 作者が食い違いを選んだあとの処理（合流。設計書5.10.6）。
  *
- * - `local`（左を残す）：手元は書かない。印は向こうの中身へ進める（見比べて
- *   退けたものを、次の受け取りで「向こうが変わった」と読まないため）
- * - `remote`（右を残す）：向こうの中身を書く。向こうと同じ中身になるので、
- *   選んだことを送る必要は無い
- * - `both`（両方とも残す）：向こうの中身を `sidePath`（`sideFileName` で作った
- *   別の名前）へ新しく置き、手元はそのまま。印は向こうへ進める
+ * **1回に比べるのは手元と相手1つ**（`peerDeviceId` で選ぶ。相手が1つなら省ける）。
+ * 選んだ結果の系譜に、退けた側の中身も祖先として入れる（`joinDriveLineage`）。
+ * 次に送るとほかの端末へ届き、同じ食い違いを2度訊かない。相手が2つ以上
+ * 食い違っていれば、1つ選んだあと**受け取り直す**と、残りとの食い違いが
+ * 新しい報告として出る（古い報告で続けて選ぶと断る）。
+ *
+ * - `local`（手元を残す）：手元は書かない
+ * - `remote`（相手を残す）：相手の中身を書く
+ * - `both`（両方とも残す）：相手の中身を `sidePath`（`sideFileName` で作った
+ *   別の名前）へ新しく置き、手元はそのまま
  */
 export async function applyDriveConflictChoice(input: {
   report: DriveConflictReport;
@@ -521,69 +598,95 @@ export async function applyDriveConflictChoice(input: {
   record: DriveSyncRecord;
   writer: LocalWorkWriter;
   sidePath?: string;
+  peerDeviceId?: string;
 }): Promise<{ ok: true; record: DriveSyncRecord } | { ok: false; reason: string }> {
-  const { decision, remoteBytes } = input.report;
+  const { decision } = input.report;
+  const remote =
+    input.peerDeviceId === undefined
+      ? input.report.remotes.length === 1
+        ? input.report.remotes[0]
+        : undefined
+      : input.report.remotes.find((side) =>
+          side.devices.some((device) => device.deviceId === input.peerDeviceId)
+        );
+  if (!remote) return { ok: false, reason: "どの端末の中身と比べたのかが分かりません" };
+
+  // 報告のあとで控えが変わっていれば（同じ報告でもう選んだ等）、古い報告では選ばない。
+  // 報告の系譜は、同じ中身の相手の祖先を足したもの（`planDriveReceive`）なので
+  // 控えと同じとは限らない。選ぶと `gen` が報告より大きくなるので、それで見分ける
+  const current = localDriveLineage(input.record.lineage.get(decision.path), decision.localHash ?? undefined);
+  if (!stillCurrent(current, decision.local)) {
+    return { ok: false, reason: "前の選択のあとで控えが変わっています。受け取り直してください" };
+  }
+  const local = decision.local;
   const record = cloneDriveSyncRecord(input.record);
-  const baseText = decision.settings ? decodeUtf8(remoteBytes) : undefined;
+  const remoteText = decision.settings ? decodeUtf8(remote.bytes) : undefined;
 
   if (input.choice === "remote") {
     const outcome =
       decision.localHash === null
-        ? await input.writer.create(decision.path, remoteBytes)
-        : await input.writer.replace(decision.path, remoteBytes, decision.localHash);
+        ? await input.writer.create(decision.path, remote.bytes)
+        : await input.writer.replace(decision.path, remote.bytes, decision.localHash);
     if (!outcome.ok) return { ok: false, reason: outcome.reason };
-    if (outcome.writtenHash !== decision.remoteHash) {
+    if (outcome.writtenHash !== remote.lineage.hash) {
       return { ok: false, reason: "書いた中身が向こうの中身と合いません" };
     }
-    setMark(record, decision.path, decision.remoteHash, baseText);
+    setHead(record, decision.path, joinDriveLineage(remote.lineage, local ? [local] : []), remoteText);
     return { ok: true, record };
   }
 
+  // 手元を残す。手元がこのファイルを知らない（相手どうしだけの食い違いで、手元に
+  // 一度も無い）ときは、残す中身が無い
+  if (!local) return { ok: false, reason: "このパソコンにはこのファイルがありません" };
   if (input.choice === "both") {
     if (!input.sidePath || !isSafeSyncPath(input.sidePath)) {
       return { ok: false, reason: "両方とも残すための別の名前がありません" };
     }
-    const outcome = await input.writer.create(input.sidePath, remoteBytes);
+    const outcome = await input.writer.create(input.sidePath, remote.bytes);
     if (!outcome.ok) return { ok: false, reason: outcome.reason };
   }
-
-  setMark(record, decision.path, decision.remoteHash, baseText);
-  record.pendingResolutions.set(decision.path, decision.remoteHash);
+  const localText =
+    decision.settings && input.report.localBytes !== undefined ? decodeUtf8(input.report.localBytes) : undefined;
+  setHead(record, decision.path, joinDriveLineage(local, [remote.lineage]), localText);
   return { ok: true, record };
 }
 
-/** 設定資料を `decideSettingsConflict` の決めたとおりにする */
+/** 設定資料を `decideSettingsConflict` の決めたとおりにする（相手が1つのとき） */
 async function applySettingsDecision(
   result: Extract<DriveReceiveResult, { kind: "received" }>,
   writer: LocalWorkWriter,
   input: {
-    decision: Extract<DriveSyncDecision, { kind: "conflict" }>;
-    decided: Exclude<SettingsConflictDecision, { side: "conflict" }>;
-    remoteBytes: Uint8Array;
+    path: string;
+    local: DriveLineage;
     localHash: string;
+    localText: string;
+    remote: DriveConflictRemote;
+    decided: Exclude<SettingsConflictDecision, { side: "conflict" }>;
   }
 ): Promise<void> {
-  const { decision, decided, remoteBytes } = input;
-  const theirsText = decodeUtf8(remoteBytes);
+  const { path: entry, local, remote, decided } = input;
   if (decided.side === "theirs") {
-    const outcome = await writer.replace(decision.path, remoteBytes, input.localHash);
-    if (!recordWrite(result, decision.path, outcome, decision.remoteHash)) return;
+    const outcome = await writer.replace(entry, remote.bytes, input.localHash);
+    if (!recordWrite(result, entry, outcome, remote.lineage.hash)) return;
+    setHead(result.record, entry, joinDriveLineage(remote.lineage, [local]), decodeUtf8(remote.bytes));
   } else if (decided.side === "merged") {
-    // 合わせた中身は向こうとも手元とも違う。書けたハッシュは問わない（次に送る）
-    const outcome = await writer.replace(decision.path, new TextEncoder().encode(decided.text), input.localHash);
+    const outcome = await writer.replace(entry, new TextEncoder().encode(decided.text), input.localHash);
     if (!outcome.ok) {
-      result.failures.push({ path: decision.path, reason: outcome.reason });
+      result.failures.push({ path: entry, reason: outcome.reason });
       return;
     }
-    result.written.push(decision.path);
+    result.written.push(entry);
+    // 合わせた中身は手元とも向こうとも違う新しい中身。両方を祖先に持たせる。
+    // 系譜の頭は実際に書けた中身のハッシュにする（次に送るのはそれなので）
+    setHead(result.record, entry, joinDriveLineage(local, [remote.lineage], outcome.writtenHash), decided.text);
+  } else {
+    // こちらを残した。書かずに、相手の中身を祖先へ入れる
+    setHead(result.record, entry, joinDriveLineage(local, [remote.lineage]), input.localText);
   }
-  // 印は向こうの中身へ。こちらが残した・合わせた中身は、選び終えた印を付けて次に送る
-  setMark(result.record, decision.path, decision.remoteHash, theirsText);
-  if (decided.side !== "theirs") result.record.pendingResolutions.set(decision.path, decision.remoteHash);
-  result.settingsDecided.push({ path: decision.path, side: decided.side, reason: decided.reason });
+  result.settingsDecided.push({ path: entry, side: decided.side, reason: decided.reason });
 }
 
-/** 書いた結果を数える。印を進めてよければ true */
+/** 書いた結果を数える。系譜を進めてよければ true */
 function recordWrite(
   result: Extract<DriveReceiveResult, { kind: "received" }>,
   entry: string,
@@ -596,35 +699,35 @@ function recordWrite(
   }
   result.written.push(entry);
   if (outcome.writtenHash !== remoteHash) {
-    // 書く口が中身の形を変えた。印を進めると2台で永久に往復する（`LocalWorkWriter` の説明）
+    // 書く口が中身の形を変えた。系譜を進めると端末の間で永久に往復する（`LocalWorkWriter` の説明）
     result.failures.push({
       path: entry,
-      reason: "書いた中身が向こうの中身とバイトで合いません（印は進めていません）",
+      reason: "書いた中身が向こうの中身とバイトで合いません（系譜は進めていません）",
     });
     return false;
   }
   return true;
 }
 
-/** 印を置く（null なら外す）。印が進んだ道の「送った中身」は空にする */
-function setMark(
+/** 系譜の頭を置く。設定資料の控えは中身があれば置き、無ければ外す */
+function setHead(
   record: DriveSyncRecord,
   entry: string,
-  hash: string | null,
+  lineage: DriveLineage,
   settingsText: string | undefined
 ): void {
-  record.sentSinceMark.delete(entry);
-  if (hash === null) {
-    record.marks.delete(entry);
-    record.settingsBases.delete(entry);
-    return;
-  }
-  record.marks.set(entry, hash);
-  if (settingsText !== undefined) record.settingsBases.set(entry, settingsText);
+  record.lineage.set(entry, lineage);
+  if (settingsText !== undefined && lineage.hash !== DRIVE_DELETED) record.settingsBases.set(entry, settingsText);
   else record.settingsBases.delete(entry);
 }
 
-/** 同じ名前が重なっていれば古いものを採る（2台が同じものを選ぶように） */
+/** 控えの今（`current`）が、報告を作ったときの手元（`reported`）から進んでいないか */
+function stillCurrent(current: DriveLineage | undefined, reported: DriveLineage | null): boolean {
+  if (current === undefined || reported === null) return current === undefined && reported === null;
+  return current.hash === reported.hash && current.gen <= reported.gen;
+}
+
+/** 同じ名前が重なっていれば古いものを採る（どの端末も同じものを選ぶように） */
 function oldestByName(entries: DriveFileEntry[]): Map<string, DriveFileEntry> {
   const out = new Map<string, DriveFileEntry>();
   for (const entry of [...entries].sort(compareDriveEntriesByAge)) {

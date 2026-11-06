@@ -7,7 +7,7 @@ import {
   parseDriveSyncRecord,
   serializeDriveSyncRecord,
 } from "../../../src/core/driveSyncRecord";
-import { isIgnoredSyncPath } from "../../../src/core/driveSyncPlan";
+import { DRIVE_DELETED, DRIVE_LINEAGE_LIMIT, isIgnoredSyncPath } from "../../../src/core/driveSyncPlan";
 import { hashText } from "../../../src/core/hash";
 import { SRC, chainTo, relativeName, walkStaticImports } from "../support/importGraph";
 
@@ -16,16 +16,14 @@ const H1 = hashText("このパソコンで書いた中身");
 
 function filled() {
   const record = emptyDriveSyncRecord("desk-a1b2");
-  record.marks.set("本文/第1話.txt", H0);
+  record.lineage.set("本文/第1話.txt", { hash: H1, gen: 1, ancestors: [H0] });
+  record.lineage.set("本文/第2話.txt", { hash: DRIVE_DELETED, gen: 2, ancestors: [H1, H0] });
   record.settingsBases.set("設定/人物/char_001.json", "{\n  \"id\": \"char_001\"\n}\n");
-  record.sentSinceMark.set("本文/第1話.txt", [H1]);
-  record.consumedResolutions.set("note-c3d4", new Map([["本文/第2話.txt", 3]]));
-  record.pendingResolutions.set("本文/第3話.txt", H1);
   record.lastRound = 4;
   return record;
 }
 
-describe("端末別の控え（印）", () => {
+describe("端末別の控え（系譜。0.133.0）", () => {
   test("置き場は .aiwriter/drive-sync/<端末ID>.json で、ドライブへは送らない", () => {
     expect(driveSyncRecordPath("desk-a1b2")).toBe(".aiwriter/drive-sync/desk-a1b2.json");
     expect(isIgnoredSyncPath(driveSyncRecordPath("desk-a1b2"), [])).toBe(true);
@@ -44,26 +42,30 @@ describe("端末別の控え（印）", () => {
   test("写しを変えても元の控えは変わらない", () => {
     const record = filled();
     const copy = cloneDriveSyncRecord(record);
-    copy.marks.clear();
-    copy.sentSinceMark.get("本文/第1話.txt")?.push(H0);
-    copy.consumedResolutions.get("note-c3d4")?.clear();
-    expect(record.marks.size).toBe(1);
-    expect(record.sentSinceMark.get("本文/第1話.txt")).toEqual([H1]);
-    expect(record.consumedResolutions.get("note-c3d4")?.size).toBe(1);
+    copy.lineage.clear();
+    copy.settingsBases.clear();
+    expect(record.lineage.size).toBe(2);
+    expect(record.settingsBases.size).toBe(1);
   });
 
   const good = JSON.parse(serializeDriveSyncRecord(filled())) as Record<string, unknown>;
+  const lineageOf = (value: unknown) => JSON.stringify({ ...good, lineage: { "本文/第1話.txt": value } });
+  const tooLong = Array.from({ length: DRIVE_LINEAGE_LIMIT + 1 }, (_, i) => hashText(String(i)));
   const broken: [string, string][] = [
     ["JSONでない", "{"],
-    ["版が違う", JSON.stringify({ ...good, formatVersion: 2 })],
+    ["版が違う", JSON.stringify({ ...good, formatVersion: 3 })],
+    // 版1（印・送った中身・使った選択）は配っていないので読まない
+    ["版1", JSON.stringify({ ...good, formatVersion: 1 })],
     ["ほかの端末の控え", JSON.stringify({ ...good, deviceId: "note-c3d4" })],
     ["回の番号が負", JSON.stringify({ ...good, lastRound: -1 })],
-    ["印のハッシュが壊れている", JSON.stringify({ ...good, marks: { "本文/第1話.txt": "abc" } })],
-    ["印の道が作品の外", JSON.stringify({ ...good, marks: { "../外.txt": H0 } })],
-    ["送った中身が配列でない", JSON.stringify({ ...good, sentSinceMark: { "本文/第1話.txt": H1 } })],
-    ["使った選択の端末IDが壊れている", JSON.stringify({ ...good, consumedResolutions: { "端末": {} } })],
-    ["使った選択の回が0", JSON.stringify({ ...good, consumedResolutions: { "note-c3d4": { "a.txt": 0 } } })],
-    ["送っていない選択が無い", JSON.stringify({ ...good, pendingResolutions: undefined })],
+    ["系譜が無い", JSON.stringify({ ...good, lineage: undefined })],
+    ["系譜の道が作品の外", JSON.stringify({ ...good, lineage: { "../外.txt": { hash: H0, gen: 0, ancestors: [] } } })],
+    ["中身のハッシュが壊れている", lineageOf({ hash: "abc", gen: 0, ancestors: [] })],
+    ["祖先のハッシュが壊れている", lineageOf({ hash: H1, gen: 1, ancestors: ["x"] })],
+    ["回の数が負", lineageOf({ hash: H1, gen: -1, ancestors: [] })],
+    ["祖先が配列でない", lineageOf({ hash: H1, gen: 1, ancestors: H0 })],
+    ["祖先が上限より長い", lineageOf({ hash: H1, gen: 1, ancestors: tooLong })],
+    ["設定資料の控えが文字でない", JSON.stringify({ ...good, settingsBases: { "設定/a.json": 1 } })],
   ];
 
   test.each(broken)("%s → 読めない（直さない）", (_label, text) => {

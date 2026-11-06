@@ -8,7 +8,7 @@ import {
   type DriveReceiveResult,
   type DriveSendResult,
 } from "../../../src/core/driveSyncEngine";
-import type { DriveManifest } from "../../../src/core/driveSyncPlan";
+import { DRIVE_LINEAGE_LIMIT } from "../../../src/core/driveSyncPlan";
 import { emptyDriveSyncRecord, type DriveSyncRecord } from "../../../src/core/driveSyncRecord";
 import { IGNORED_PATHS } from "../../../src/core/workRegistry";
 import { createFakeDrive, createFakeWork, type FakeDrive, type FakeWork } from "../support/fakeDrive";
@@ -30,7 +30,6 @@ interface Device {
   id: string;
   work: FakeWork;
   record: DriveSyncRecord;
-  peerManifest?: DriveManifest;
   send(): Promise<DriveSendResult>;
   receive(): Promise<DriveReceiveResult>;
 }
@@ -51,7 +50,6 @@ function makeDevice(drive: FakeDrive, id: string, name: string, initial: Record<
         record: device.record,
         ignoredPaths: IGNORED_PATHS,
         now: new Date("2026-11-07T12:00:00.000Z"),
-        peerManifest: device.peerManifest,
       });
       if (result.kind === "sent") device.record = result.record;
       return result;
@@ -65,10 +63,7 @@ function makeDevice(drive: FakeDrive, id: string, name: string, initial: Record<
         record: device.record,
         ignoredPaths: IGNORED_PATHS,
       });
-      if (result.kind === "received") {
-        device.record = result.record;
-        device.peerManifest = result.peerManifest;
-      }
+      if (result.kind === "received") device.record = result.record;
       return result;
     },
   };
@@ -204,9 +199,12 @@ describe("2台で同じ話を直した → 片方で選んで送り返す", () =
     const back = received(await a.receive());
     countConflicts("送り返された", back, []);
     expect(back.written).toEqual([]);
-    // 相手が受け取ったので、次の送りで「選び終えた」は外れる
+    // 2台とも同じ中身・同じ系譜になった。A が送り直しても B は何も書かず、訊かない
     const next = await a.send();
-    expect(next.kind === "sent" && next.manifest.resolvedConflicts.size).toBe(0);
+    expect(next).toMatchObject({ kind: "sent", uploaded: [] });
+    const settled = received(await b.receive());
+    countConflicts("選んだ結果がそろったあと", settled, []);
+    expect(settled.written).toEqual([]);
   });
 
   test("B が受け取ったあと、元に戻して B の文になっても、A の古い選択で押し流さない", async () => {
@@ -360,8 +358,8 @@ describe("届ききっていない・ネットの失敗", () => {
     const result = received(await b.receive());
     expect(result.stoppedBy?.kind).toBe("network");
     expect(result.written).toEqual([EP1]);
-    expect(result.record.marks.has(EP1)).toBe(true);
-    expect(result.record.marks.has(EP2)).toBe(false);
+    expect(result.record.lineage.has(EP1)).toBe(true);
+    expect(result.record.lineage.has(EP2)).toBe(false);
     drive.clearFault();
     const later = received(await b.receive());
     expect(later.written).toEqual([EP2]);
@@ -381,14 +379,16 @@ describe("届ききっていない・ネットの失敗", () => {
     expect(await a.send()).toMatchObject({ kind: "own_manifest_unreadable" });
   });
 
-  test("まだ誰も送っていない・向こうが2台以上なら何もしない", async () => {
+  test("まだ誰も送っていなければ何もしない。相手が2台以上でも全部と比べて受け取る（0.133.0）", async () => {
     const drive = createFakeDrive();
     const b = makeDevice(drive, "note-c3d4", "ノートPC");
     expect(await b.receive()).toEqual({ kind: "nothing_yet" });
     await makeDevice(drive, "desk-a1b2", "母艦", { [EP1]: "一" }).send();
     await makeDevice(drive, "tab-e5f6", "タブレット", { [EP1]: "一" }).send();
-    expect(await b.receive()).toEqual({ kind: "several_peers", deviceIds: ["desk-a1b2", "tab-e5f6"] });
-    expect(b.work.disk.size).toBe(0);
+    const atB = received(await b.receive());
+    countConflicts("はじめての2台が同じ中身", atB, []);
+    expect(atB.peers.map((peer) => peer.deviceId)).toEqual(["desk-a1b2", "tab-e5f6"]);
+    expect(b.work.text(EP1)).toBe("一");
   });
 });
 
@@ -422,7 +422,7 @@ describe("手元の原稿を守る", () => {
     b.work.setNormalizeEol(true);
     const atB = received(await b.receive());
     expect(atB.failures).toMatchObject([{ path: EP1, reason: expect.stringContaining("バイト") }]);
-    expect(atB.record.marks.has(EP1)).toBe(false);
+    expect(atB.record.lineage.has(EP1)).toBe(false);
   });
 
   test("向こうで消えた話は手元で消さず、知らせるだけ", async () => {
@@ -434,7 +434,7 @@ describe("手元の原稿を守る", () => {
     a.work.remove(EP2);
     await a.send();
     const atB = received(await b.receive());
-    expect(atB.remoteDeleted).toEqual([{ path: EP2, localChanged: false }]);
+    expect(atB.remoteDeleted).toEqual([{ path: EP2, localChanged: false, from: ["desk-a1b2"] }]);
     expect(b.work.text(EP2)).toBe("二");
   });
 
@@ -467,6 +467,325 @@ describe("手元の原稿を守る", () => {
   });
 });
 
+/** 端末をそろえる：順に「受け取って送る」を2周。食い違いは出ない前提の下ごしらえ */
+async function syncAll(devices: Device[]) {
+  for (let lap = 0; lap < 2; lap++) {
+    for (const device of devices) {
+      const result = await device.receive();
+      if (result.kind === "received") expect(result.conflicts).toEqual([]);
+      await device.send();
+    }
+  }
+}
+
+/** 食い違いを選ぶ（相手は端末IDで指す。相手が1つなら省ける） */
+async function choose(
+  device: Device,
+  report: DriveReceiveResultConflict,
+  choice: "local" | "remote" | "both",
+  peerDeviceId?: string
+) {
+  const chosen = await applyDriveConflictChoice({
+    report,
+    choice,
+    record: device.record,
+    writer: device.work.writer,
+    peerDeviceId,
+  });
+  if (!chosen.ok) throw new Error(chosen.reason);
+  device.record = chosen.record;
+}
+type DriveReceiveResultConflict = Extract<DriveReceiveResult, { kind: "received" }>["conflicts"][number];
+
+const IDS = ["desk-a1b2", "note-c3d4", "tab-e5f6", "mac-g7h8"] as const;
+
+function devicesOn(drive: FakeDrive, count: number, initial: Record<string, string>) {
+  return IDS.slice(0, count).map((id, i) => makeDevice(drive, id, `端末${i + 1}`, i === 0 ? initial : {}));
+}
+
+describe("3台・4台でそろえる（中身の系譜。0.133.0）", () => {
+  test("A→B→C の順送り：C は B の中身を1回で受け取り、A も B の中身を受け取る", async () => {
+    const drive = createFakeDrive();
+    const [a, b, c] = devicesOn(drive, 3, { [EP1]: "一" });
+    await a.send();
+    received(await b.receive());
+    b.work.write(EP1, "一。B が書き足した");
+    await b.send();
+    const atC = received(await c.receive());
+    countConflicts("3台：順送りの先", atC, []);
+    expect(atC.written).toEqual([EP1]);
+    expect(c.work.text(EP1)).toBe("一。B が書き足した");
+    const atA = received(await a.receive());
+    countConflicts("3台：順送りの元", atA, []);
+    expect(a.work.text(EP1)).toBe("一。B が書き足した");
+    // C が送り返しても、A は何も書かない
+    await c.send();
+    const back = received(await a.receive());
+    countConflicts("3台：順送りが戻る", back, []);
+    expect(back.written).toEqual([]);
+  });
+
+  test("4台の順送り：A→B→C→D と書き足していくと、D と A は最後の中身を1回で受け取る", async () => {
+    const drive = createFakeDrive();
+    const [a, b, c, d] = devicesOn(drive, 4, { [EP1]: "一" });
+    await a.send();
+    for (const [device, text] of [[b, "一二"], [c, "一二三"]] as const) {
+      received(await device.receive());
+      device.work.write(EP1, text);
+      await device.send();
+    }
+    const atD = received(await d.receive());
+    countConflicts("4台：順送りの先", atD, []);
+    expect(atD.written).toEqual([EP1]);
+    expect(d.work.text(EP1)).toBe("一二三");
+    const atA = received(await a.receive());
+    countConflicts("4台：順送りの元", atA, []);
+    expect(a.work.text(EP1)).toBe("一二三");
+  });
+
+  test("2台が同時に直す：直した2台は訊かれ、直していない台も訊かれる。選んだ結果が届くと誰も訊き直さない", async () => {
+    const drive = createFakeDrive();
+    const [a, b, c] = devicesOn(drive, 3, { [EP1]: "元の文", [EP2]: "第2話" });
+    await syncAll([a, b, c]);
+    a.work.write(EP1, "A が直した文");
+    b.work.write(EP1, "B が直した文");
+    await a.send();
+    await b.send();
+
+    // C は直していないが、A と B の中身はどちらも C より新しく、互いに食い違う
+    const atC = received(await c.receive());
+    countConflicts("3台：2台が同時に直したのを3台目が見る", atC, [EP1]);
+    expect(atC.conflicts[0].remotes.map((side) => side.devices[0].deviceId)).toEqual(["desk-a1b2", "note-c3d4"]);
+    expect(atC.conflicts[0].decision.localIsAncestor).toBe(true);
+    expect(c.work.text(EP1)).toBe("元の文");
+
+    const atA = received(await a.receive());
+    countConflicts("3台：2台が同時に直した（直した側）", atA, [EP1]);
+    // C は元の文のまま（A の祖先）なので、相手の一覧には B だけが出る
+    expect(atA.conflicts[0].remotes.map((side) => side.devices[0].deviceId)).toEqual(["note-c3d4"]);
+    await choose(a, atA.conflicts[0], "local");
+    await a.send();
+
+    const cAgain = received(await c.receive());
+    countConflicts("3台：選んだ結果が3台目に届く", cAgain, []);
+    expect(c.work.text(EP1)).toBe("A が直した文");
+    const atB = received(await b.receive());
+    countConflicts("3台：選んだ結果がもう1台に届く", atB, []);
+    expect(b.work.text(EP1)).toBe("A が直した文");
+
+    await b.send();
+    await c.send();
+    for (const device of [a, b, c]) {
+      const settled = received(await device.receive());
+      countConflicts(`3台：そろったあと（${device.id}）`, settled, []);
+      expect(settled.written).toEqual([]);
+    }
+  });
+
+  test("3台が同時に直す：1つずつ選ぶ（選ぶ→受け取り直す→選ぶ）。選び終えたらほかの2台は訊かれない", async () => {
+    const drive = createFakeDrive();
+    const [a, b, c] = devicesOn(drive, 3, { [EP1]: "元の文" });
+    await syncAll([a, b, c]);
+    a.work.write(EP1, "A の文");
+    b.work.write(EP1, "B の文");
+    c.work.write(EP1, "C の文");
+    await a.send();
+    await b.send();
+    await c.send();
+
+    const first = received(await a.receive());
+    countConflicts("3台：3台が同時に直した（1回目）", first, [EP1]);
+    const report = first.conflicts[0];
+    expect(report.remotes.map((side) => side.devices[0].deviceId)).toEqual(["note-c3d4", "tab-e5f6"]);
+    // 相手が2つのときは、どちらと比べたかを言わないと選ばない
+    expect(
+      await applyDriveConflictChoice({ report, choice: "local", record: a.record, writer: a.work.writer })
+    ).toMatchObject({ ok: false });
+    await choose(a, report, "local", "note-c3d4");
+    // 同じ報告でもう一度選ぼうとすると断る（受け取り直してから）
+    expect(
+      await applyDriveConflictChoice({
+        report,
+        choice: "local",
+        record: a.record,
+        writer: a.work.writer,
+        peerDeviceId: "tab-e5f6",
+      })
+    ).toMatchObject({ ok: false });
+
+    const second = received(await a.receive());
+    countConflicts("3台：3台が同時に直した（2回目は残りの1台だけ）", second, [EP1]);
+    expect(second.conflicts[0].remotes.map((side) => side.devices[0].deviceId)).toEqual(["tab-e5f6"]);
+    await choose(a, second.conflicts[0], "remote");
+    expect(a.work.text(EP1)).toBe("C の文");
+
+    const third = received(await a.receive());
+    countConflicts("3台：3台が同時に直した（選び終えた）", third, []);
+    await a.send();
+    for (const device of [b, c]) {
+      const atPeer = received(await device.receive());
+      countConflicts(`3台：3台の食い違いの結果が届く（${device.id}）`, atPeer, []);
+      expect(device.work.text(EP1)).toBe("C の文");
+    }
+  });
+
+  test("4台：選んだ結果が届けば、まだ受け取っていなかった2台も訊かれない", async () => {
+    const drive = createFakeDrive();
+    const [a, b, c, d] = devicesOn(drive, 4, { [EP1]: "元の文" });
+    await syncAll([a, b, c, d]);
+    a.work.write(EP1, "A の文");
+    b.work.write(EP1, "B の文");
+    await b.send();
+    const atA = received(await a.receive());
+    countConflicts("4台：直した2台の片方", atA, [EP1]);
+    await choose(a, atA.conflicts[0], "remote");
+    await a.send();
+    for (const device of [c, d, b]) {
+      const atPeer = received(await device.receive());
+      countConflicts(`4台：選んだ結果が届く（${device.id}）`, atPeer, []);
+      expect(device.work.text(EP1)).toBe("B の文");
+    }
+  });
+
+  test("2台が同じ食い違いを別々に選んだ：もう一度訊く。片方で選び直せば、もう片方は訊かれずにそろう", async () => {
+    const drive = createFakeDrive();
+    const [a, b] = devicesOn(drive, 2, { [EP1]: "元の文" });
+    await syncAll([a, b]);
+    a.work.write(EP1, "A の文");
+    b.work.write(EP1, "B の文");
+    await a.send();
+    await b.send();
+    // 2台とも相手の送りを見てから、それぞれ「手元を残す」を選んだ
+    const atA = received(await a.receive());
+    const atB = received(await b.receive());
+    countConflicts("別々に選ぶ前（A）", atA, [EP1]);
+    countConflicts("別々に選ぶ前（B）", atB, [EP1]);
+    await choose(a, atA.conflicts[0], "local");
+    await choose(b, atB.conflicts[0], "local");
+    await a.send();
+    await b.send();
+    // 作者の選びが2台で食い違ったので、機械は決めずにもう一度訊く
+    const again = received(await a.receive());
+    countConflicts("別々に選んだあと（A）", again, [EP1]);
+    await choose(a, again.conflicts[0], "local");
+    await a.send();
+    const atB2 = received(await b.receive());
+    countConflicts("選び直した結果が届く（B）", atB2, []);
+    expect(b.work.text(EP1)).toBe("A の文");
+    const settled = received(await a.receive());
+    countConflicts("選び直したあと（A）", settled, []);
+  });
+
+  test("書いてから元に戻した中身は、新しい中身として受け取る（食い違いにしない）", async () => {
+    const drive = createFakeDrive();
+    const [a, b, c] = devicesOn(drive, 3, { [EP1]: "元の文" });
+    await syncAll([a, b, c]);
+    a.work.write(EP1, "書き直した文");
+    await a.send();
+    received(await b.receive());
+    expect(b.work.text(EP1)).toBe("書き直した文");
+    await b.send();
+    a.work.write(EP1, "元の文");
+    await a.send();
+    const atB = received(await b.receive());
+    countConflicts("元に戻した（受け取っていた台）", atB, []);
+    expect(b.work.text(EP1)).toBe("元の文");
+    const atC = received(await c.receive());
+    countConflicts("元に戻した（書き直しを知らない台）", atC, []);
+    expect(c.work.text(EP1)).toBe("元の文");
+  });
+});
+
+describe("祖先の上限（DRIVE_LINEAGE_LIMIT）を越えたら食い違いにする", () => {
+  async function editedTimes(times: number) {
+    const drive = createFakeDrive();
+    const [a, b, c] = devicesOn(drive, 3, { [EP1]: "第0版" });
+    await syncAll([a, b, c]);
+    for (let i = 1; i <= times; i++) {
+      a.work.write(EP1, `第${i}版`);
+      await a.send();
+    }
+    return { a, b, c };
+  }
+
+  test(`${DRIVE_LINEAGE_LIMIT}回までなら、待っていた台は受け取る`, async () => {
+    const { c } = await editedTimes(DRIVE_LINEAGE_LIMIT);
+    const atC = received(await c.receive());
+    countConflicts("祖先の上限ちょうど", atC, []);
+    expect(c.work.text(EP1)).toBe(`第${DRIVE_LINEAGE_LIMIT}版`);
+  });
+
+  test(`${DRIVE_LINEAGE_LIMIT + 1}回を越えると、比べられないので食い違いにする（黙って上書きしない）`, async () => {
+    const { b, c } = await editedTimes(DRIVE_LINEAGE_LIMIT + 1);
+    const atC = received(await c.receive());
+    countConflicts("祖先の上限を越えた", atC, [EP1]);
+    expect(c.work.text(EP1)).toBe("第0版");
+    // 相手の一覧は越えた1つだけ（B は C と同じ第0版）
+    expect(atC.conflicts[0].remotes.map((side) => side.devices[0].deviceId)).toEqual(["desk-a1b2"]);
+    expect(b.work.text(EP1)).toBe("第0版");
+  });
+});
+
+describe("消したファイル（3台）", () => {
+  async function deletedAtA() {
+    const drive = createFakeDrive();
+    const [a, b, c] = devicesOn(drive, 3, { [EP1]: "一", [EP2]: "二" });
+    await syncAll([a, b, c]);
+    a.work.remove(EP2);
+    await a.send();
+    return { a, b, c };
+  }
+
+  test("消した台の知らせは、ほかの台で消さずに知らせるだけ。送り返されても消した台に戻ってこない", async () => {
+    const { a, b, c } = await deletedAtA();
+    for (const device of [b, c]) {
+      const atPeer = received(await device.receive());
+      countConflicts(`消した知らせ（${device.id}）`, atPeer, []);
+      expect(atPeer.remoteDeleted).toMatchObject([{ path: EP2, localChanged: false }]);
+      expect(device.work.text(EP2)).toBe("二");
+      await device.send();
+    }
+    const atA = received(await a.receive());
+    countConflicts("消したあとで送り返された", atA, []);
+    expect(a.work.text(EP2)).toBeUndefined();
+  });
+
+  test("消した台と、書き足した台が分かれた：消した台では食い違い、もう1台は書き足しを受け取る", async () => {
+    const { a, b, c } = await deletedAtA();
+    b.work.write(EP2, "二。B が書き足した");
+    await b.send();
+    const atA = received(await a.receive());
+    countConflicts("消した×書き足した（消した台）", atA, [EP2]);
+    expect(atA.conflicts[0].decision.localHash).toBeNull();
+    expect(a.work.text(EP2)).toBeUndefined();
+    const atC = received(await c.receive());
+    countConflicts("消した×書き足した（3台目）", atC, []);
+    expect(c.work.text(EP2)).toBe("二。B が書き足した");
+    // 消した台で「相手を残す」を選ぶと、書き足しが戻り、ほかの台は訊かれない
+    await choose(a, atA.conflicts[0], "remote");
+    expect(a.work.text(EP2)).toBe("二。B が書き足した");
+    await a.send();
+    for (const device of [b, c]) {
+      const atPeer = received(await device.receive());
+      countConflicts(`書き足しを戻した結果が届く（${device.id}）`, atPeer, []);
+    }
+  });
+
+  test("2台で消した：残りの1台に知らせ、消した2台どうしでは何も訊かない", async () => {
+    const { a, b, c } = await deletedAtA();
+    b.work.remove(EP2);
+    await b.send();
+    const atB = received(await b.receive());
+    countConflicts("2台で消した（B）", atB, []);
+    const atA = received(await a.receive());
+    countConflicts("2台で消した（A）", atA, []);
+    const atC = received(await c.receive());
+    countConflicts("2台で消した（3台目）", atC, []);
+    expect(atC.remoteDeleted).toMatchObject([{ path: EP2, localChanged: false }]);
+    expect(c.work.text(EP2)).toBe("二");
+  });
+});
+
 describe("見逃しと誤検出を数える（往復の場面をまとめて）", () => {
   test("場面ごとの正解の食い違いと、実際に訊いたものが全部一致する", () => {
     let missed = 0;
@@ -478,10 +797,10 @@ describe("見逃しと誤検出を数える（往復の場面をまとめて）"
       falsePositive += actual.filter((entry) => !expected.includes(entry)).length;
     }
     expect({ missed, falsePositive }).toEqual({ missed: 0, falsePositive: 0 });
-    // 場面が減って「全部通った」にならないよう、数も押さえる
-    expect(tally.length).toBeGreaterThanOrEqual(18);
-    // 訊くべき食い違いが0件だと見逃しは測れない
-    expect(expectedTotal).toBeGreaterThanOrEqual(2);
+    // 場面が減って「全部通った」にならないよう、数も押さえる（0.133.0 で 3台・4台を足して60場面）
+    expect(tally.length).toBeGreaterThanOrEqual(60);
+    // 訊くべき食い違いが0件だと見逃しは測れない（0.133.0 で12件）
+    expect(expectedTotal).toBeGreaterThanOrEqual(12);
   });
 });
 
