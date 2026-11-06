@@ -8,6 +8,7 @@ import {
 } from "./driveApi";
 import {
   buildDriveManifest,
+  isIgnoredSyncPath,
   isSafeSyncPath,
   isSendableSyncPath,
   parseDriveManifest,
@@ -345,7 +346,8 @@ export async function receiveFromDrive(input: {
   const localBytes = new Map<string, Uint8Array>();
   const localHashes = new Map<string, string>();
   for (const entry of await input.local.list()) {
-    if (!isSafeSyncPath(entry)) continue;
+    // 送らないもの（キャッシュ等）は計画でも外すので、読まずに済ませる（規則4）
+    if (!isSafeSyncPath(entry) || isIgnoredSyncPath(entry, input.ignoredPaths)) continue;
     const bytes = await input.local.read(entry);
     if (bytes === undefined) continue;
     localBytes.set(entry, bytes);
