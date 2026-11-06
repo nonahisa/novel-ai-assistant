@@ -16,6 +16,7 @@ import {
 } from "./pickCollectedEpisode";
 import { readWorkFormat } from "../core/workFormatStore";
 import { recordEdit } from "../core/actorContext";
+import { editHistoryFile } from "../core/editHistoryFormat";
 import { logFailure, useLogFile } from "../core/logger";
 import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
 import { notifyDone } from "../views/notify";
@@ -209,7 +210,10 @@ export async function renameWithSubtitle(
   await recordEdit(work, {
     actor: "author",
     action: "ファイル名にサブタイトルを付けた",
-    file: episode.fileName,
+    // **改名したあとの場所で残す**（0.130.4）。名前だけだとほかの章の同じ名前の話と
+    // 取り違え、元の場所で残すと改名した話のタイムラインに出ない。元の名前は
+    // 「ファイル名にサブタイトルを付けた」で読める（付けたのはサブタイトルだけ）
+    file: editHistoryFile(work.folderPath, target),
     detail: next,
   });
   // **パスで話を指す台帳（投稿状態など）も付け替える**（6.68.2。0.125.4）。

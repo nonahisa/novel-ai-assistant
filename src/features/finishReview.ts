@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { isEditorMode, recordEdit } from "../core/actorContext";
+import { editHistoryFile } from "../core/editHistoryFormat";
+import * as paths from "../core/paths";
 import { tryGitUserName } from "../core/gitAttribution";
 import {
   commitPaths,
@@ -176,7 +178,12 @@ export async function finishReviewAndReturn(
         await recordEdit(work, {
           actor: "editor",
           action: "校閲のロックを外した",
-          file: lock.file.split("/").pop() ?? lock.file,
+          // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）。
+          // ロックの台帳の file は作品からの相対（`normalizeFile` 済み）
+          file: editHistoryFile(
+            work.folderPath,
+            paths.join(work.folderPath, ...lock.file.split("/").filter(Boolean))
+          ),
           detail: "校閲を終えて返す",
         });
       }

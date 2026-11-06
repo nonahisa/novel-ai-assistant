@@ -16,6 +16,7 @@ import {
 import { FileLockStore } from "../core/fileLockStore";
 import { describeLock, normalizeFile } from "../models/fileLock";
 import { isEditorMode, recordEdit } from "../core/actorContext";
+import { editHistoryFile } from "../core/editHistoryFormat";
 import { finishReviewLabel, saveAndSyncLabel } from "../core/syncEntryNames";
 import { tryGitUserName } from "../core/gitAttribution";
 import {
@@ -352,7 +353,8 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
     await recordEdit(work, {
       actor: holderKind,
       action: "校閲のロックを外した",
-      file: path.basename(relative),
+      // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）
+      file: editHistoryFile(work.folderPath, filePath),
       detail: current.holder && current.holder !== who
         ? `${current.holder} が押さえていたものを外しました`
         : "",
@@ -372,7 +374,7 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
   await recordEdit(work, {
     actor: holderKind,
     action: "校閲のロックをかけた",
-    file: path.basename(relative),
+    file: editHistoryFile(work.folderPath, filePath),
     detail: note,
   });
   void vscode.window.showInformationMessage(
@@ -608,7 +610,10 @@ export async function acceptProposal(
   await recordEdit(work, {
     actor: "author",
     action: "編集者の提案を採り入れた",
-    file: path.basename(proposal.file),
+    // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）。
+    // `proposal.file` は相対だが、提案パネルからは `path.relative` の `\` 区切りで
+    // 来るので、組み立て直した場所から履歴の形へ揃える
+    file: editHistoryFile(work.folderPath, absolute),
     detail: `${proposal.line}行 「${proposal.target}」→「${proposal.suggestion}」`,
   });
   startReturnIfFinished(work);
@@ -639,7 +644,7 @@ async function acknowledgeProposal(
   await recordEdit(work, {
     actor: "author",
     action: "編集者の意見を読んだ",
-    file: path.basename(proposal.file),
+    file: editHistoryFile(work.folderPath, path.join(work.folderPath, proposal.file)),
     detail: `${proposal.line}行 「${proposal.target}」`,
   });
   startReturnIfFinished(work);
@@ -666,11 +671,15 @@ function startReturnIfFinished(work: WorkEntry): void {
     });
 }
 
-/** 却下する。**本文には触らない** */
+/**
+ * 却下する。**本文には触らない**
+ *
+ * `file` は編集履歴へそのまま書く（作品からの相対。`editHistoryFile` で作って渡す）。
+ */
 export async function rejectProposal(
   work: WorkEntry,
   proposalIdValue: string,
-  fileName: string
+  file: string
 ): Promise<void> {
   const who = (await tryGitUserName(work.folderPath)) ?? "";
   await new ProposalStore(work).decide([
@@ -685,7 +694,7 @@ export async function rejectProposal(
   await recordEdit(work, {
     actor: "author",
     action: "編集者の提案を見送った",
-    file: fileName,
+    file,
     detail: "",
   });
   startReturnIfFinished(work);

@@ -19,6 +19,7 @@ import {
 } from "../core/textFile";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { manualActor, recordEdit } from "../core/actorContext";
+import { editHistoryFile } from "../core/editHistoryFormat";
 import { withCancellableProgress } from "../views/progress";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
@@ -198,7 +199,8 @@ async function convertAll(
           await recordEdit(work, {
             actor: manualActor(),
             action: "改行コードを揃えた",
-            file: path.basename(filePath),
+            // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）
+            file: editHistoryFile(work.folderPath, filePath),
             // **元の値は `content` から取る。** 書き込みの指定が持つ改行は
             // 揃えた**あと**の値なので、そちらを使うと「LF → LF」になる
             detail:

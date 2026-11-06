@@ -11,6 +11,7 @@ import { encodeForNewFile, readTextFile } from "../core/textFile";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import { logFailure, useLogFile } from "../core/logger";
 import { recordEdit } from "../core/actorContext";
+import { editHistoryFile } from "../core/editHistoryFormat";
 import { ChapterStore, ChapterStoreError } from "../core/chapterStore";
 import { episodePathFor } from "../core/bookStore";
 import {
@@ -185,7 +186,8 @@ export async function splitCollectedFile(
   await recordEdit(work, {
     actor: "author",
     action: "合本のファイルを話ごとに分けた",
-    file: path.basename(filePath),
+    // 名前だけにしない（ほかの章の同じ名前の合本と取り違える。0.130.4）
+    file: editHistoryFile(work.folderPath, filePath),
     detail: `${created.length}件へ分割`,
   });
 

@@ -29,7 +29,7 @@ import {
 } from "../core/workStyle";
 import { fromLfText, toLf } from "../core/eolSpace";
 import { manualActor, recordEdit } from "../core/actorContext";
-import * as path from "../core/paths";
+import { editHistoryFile } from "../core/editHistoryFormat";
 import { fromUri } from "../core/paths";
 import { KeepWordStore } from "../core/keepWordStore";
 import { blankMemoLines } from "../core/sceneMemo";
@@ -245,7 +245,8 @@ export async function runDictationClean(
     await recordEdit(work, {
       actor: manualActor(),
       action: "口述筆記の整文を反映した",
-      file: path.basename(fromUri(document.uri)),
+      // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）
+      file: editHistoryFile(work.folderPath, fromUri(document.uri)),
       detail: `${original.length}字 → ${checked.text.length}字`,
     });
   }

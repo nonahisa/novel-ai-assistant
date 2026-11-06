@@ -1,4 +1,6 @@
 import { parseActorKind, type ActorKind } from "../models/actor";
+// `paths.ts` は vscode を読むので、MCP（VS Code の外）でも読める半分だけを使う
+import * as paths from "./pathText";
 
 /**
  * 編集履歴（設計書5.6）の**読み方と置き場所の名前**。VS Code API に依存しない。
@@ -21,10 +23,35 @@ export interface EditHistoryEntry {
   actorName: string;
   /** 何をしたか。作者が読む言葉で入れる（「誤字を直した」など） */
   action: string;
-  /** どのファイルか。作品フォルダーからの相対パス。無ければ空 */
+  /**
+   * どのファイルか。作品フォルダーからの相対パス（区切りは `/`）。無ければ空。
+   * **0.130.3 までの記録には、ファイル名だけのものが混じる**（読む側は
+   * `episodeTimeline.ts` の `recordPointsToEpisode` で両方を読み分ける）
+   */
   file: string;
   /** 補足。直した中身など。無ければ空 */
   detail: string;
+}
+
+/**
+ * 編集履歴の `file` に入れる形（作品フォルダーからの相対・`/` 区切り）。
+ *
+ * **ファイル名だけ（`basename`）を書かない。** 章ごとのフォルダーに同じ名前の話
+ * （`第1章/episode_0001.md`）があると、タイムラインの欄がほかの章の話の記録まで
+ * 拾ってしまう（0.130.4 で直した）。
+ *
+ * - 区切りを `/` に揃える：履歴は同期され、Windows と Mac・ブラウザ版の両方で読まれる
+ * - **大小は変えない**：ブラウザ版の場所の比べ方（`isSamePath`）は大小を区別する
+ * - 比べる前に URI の符号を解く：ブラウザ版では作品の場所が生の日本語、開いた
+ *   文書の場所が符号化された形で来ることがあり、そのまま相対を取ると外へ出て見える
+ * - 作品の外のファイルは、場所をそのまま残す（相対で表すと `../` が付いて読めない）
+ */
+export function editHistoryFile(workFolder: string, filePath: string): string {
+  if (!filePath) return "";
+  if (!workFolder || !paths.isPathInside(workFolder, filePath)) return filePath;
+  return paths
+    .relative(paths.decodeUriEscapes(workFolder), paths.decodeUriEscapes(filePath))
+    .replace(/\\/g, "/");
 }
 
 /**
