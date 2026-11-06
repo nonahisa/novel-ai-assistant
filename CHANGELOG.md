@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.131.2 - 2026-11-06
+
+- 直したこと
+  - Homebrew が入っていない Mac で Ollama の入れ方を案内するとき、「Linuxでは、この1行で入ります」と出ていたのを直しました。Mac では Mac 向けの文が出ます
+  - Git と GitHub CLI の入れ方の案内でも、Homebrew が入っていない Mac に Linux 向けの文が出ていたのを直しました。Git は xcode-select --install で入れる方法を、GitHub CLI は配布ページから Mac 用のファイルを取ってくる方法を案内します
+
 ## 0.131.1 - 2026-11-06
 
 - 変えたこと

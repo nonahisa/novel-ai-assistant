@@ -55,8 +55,28 @@ export interface Requirement {
     /** 打ち込む1行。無ければ配布ページだけ示す */
     command?: string;
     page: string;
+    /** Linux など、Mac 以外で添える一言 */
     note: string;
+    /**
+     * Mac（Homebrew が無いとき）で添える一言。無ければ `note` を使う。
+     * `note` を Linux 向けに書いた項目で、Mac に「Linuxでは」と出さないため
+     */
+    macNote?: string;
   };
+}
+
+/**
+ * 自分で入れてもらう案内に添える一言を、OS に合わせて選ぶ。
+ *
+ * OS は呼び出し側から受け取る（`process.platform` の値）。ここで `node:os` を
+ * 読まないのは、`core` がブラウザ版の束にも入るため（設計書5.8）。
+ */
+export function manualInstallNote(
+  steps: NonNullable<Requirement["manualSteps"]>,
+  platform: string
+): string {
+  if (platform === "darwin" && steps.macNote) return steps.macNote;
+  return steps.note;
 }
 
 /**
@@ -143,6 +163,13 @@ export const REQUIREMENTS: Requirement[] = [
       note:
         "Linuxでは、この1行で入ります。取ってきたスクリプトをそのまま実行する形なので、" +
         "気になる場合は先に https://ollama.com/install.sh を開いて中身をご覧ください。",
+      // Mac でもこの1行は Ollama の公式の配布ページが示す入れ方で、アプリを
+      // /Applications へ置く（2026-11-06 に配布ページと install.sh で確かめた）。
+      // 「管理者のアカウントが要る」かは確かめていないので書かない
+      macNote:
+        "Macでも、この1行で入ります。取ってきたスクリプトをそのまま実行する形なので、" +
+        "気になる場合は先に https://ollama.com/install.sh を開いて中身をご覧ください。" +
+        "配布ページからアプリを取ってきて入れることもできます。",
     },
   },
   {
@@ -180,6 +207,10 @@ export const REQUIREMENTS: Requirement[] = [
     manualSteps: {
       page: "https://git-scm.com/downloads",
       note: "多くのLinuxでは、パッケージ管理から入ります（例：sudo apt install git）。",
+      // git-scm.com の Mac の頁が示す、Homebrew を使わない道（2026-11-06 に確かめた）
+      macNote:
+        "Macでは、ターミナルで xcode-select --install を実行すると、" +
+        "Apple のコマンドラインツールと一緒に入ります。",
     },
   },
   {
@@ -196,6 +227,8 @@ export const REQUIREMENTS: Requirement[] = [
     manualSteps: {
       page: "https://cli.github.com/",
       note: "多くのLinuxでは、パッケージ管理から入ります（例：sudo apt install gh）。",
+      // cli.github.com が Homebrew のほかに示すのは、Mac 用の zip だけ（2026-11-06 に確かめた）
+      macNote: "Macでは、配布ページから Mac 用のファイル（zip）を取ってきて入れられます。",
     },
   },
 ];

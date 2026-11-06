@@ -5,7 +5,10 @@ import {
   interpretBrewResult,
   type CommandResult,
 } from "../../../src/core/packageInstall";
-import { REQUIREMENTS } from "../../../src/core/requirements";
+import {
+  REQUIREMENTS,
+  manualInstallNote,
+} from "../../../src/core/requirements";
 
 /**
  * WindowsのほかにMacとLinuxでも案内する（作者の指示、2026-08-19）。
@@ -121,6 +124,54 @@ describe("要件ごとの入れ方", () => {
     // **取ってきたスクリプトをそのまま実行する形である。**
     // それを伏せて「この1行で入ります」とだけ言わない
     expect(ollama.manualSteps?.note).toContain("スクリプト");
+  });
+
+  test("Macの案内に「Linux」と出さない", () => {
+    // Homebrew の無い Mac でも install.sh の1行を出すが、添え書きが
+    // 「Linuxでは、この1行で入ります」のままで、Mac の方を迷わせていた
+    const note = manualInstallNote(ollama.manualSteps!, "darwin");
+
+    expect(note).not.toContain("Linux");
+    expect(note).toContain("Mac");
+    expect(note).toContain("スクリプト");
+  });
+
+  test("Linuxの案内は、これまでの文のまま", () => {
+    const note = manualInstallNote(ollama.manualSteps!, "linux");
+
+    expect(note).toBe(ollama.manualSteps!.note);
+    expect(note).toContain("Linuxでは、この1行で入ります。");
+  });
+
+  test("GitとGitHub CLIも、Macの案内に「Linux」「apt」と出さない", () => {
+    // Homebrew の無い Mac で「多くのLinuxでは…sudo apt install」と出ていた
+    for (const id of ["git", "gh"]) {
+      const requirement = REQUIREMENTS.find((r) => r.id === id)!;
+      const note = manualInstallNote(requirement.manualSteps!, "darwin");
+
+      expect(note, id).not.toContain("Linux");
+      expect(note, id).not.toContain("apt");
+      expect(note, id).toContain("Mac");
+    }
+  });
+
+  test("GitのMacの案内は、Appleのコマンドラインツールの道を示す", () => {
+    // git-scm.com の Mac の頁が示す入れ方（2026-11-06 に確かめた）
+    const git = REQUIREMENTS.find((r) => r.id === "git")!;
+
+    expect(manualInstallNote(git.manualSteps!, "darwin")).toContain(
+      "xcode-select --install"
+    );
+  });
+
+  test("GitとGitHub CLIのLinuxの案内は、これまでの文のまま", () => {
+    for (const id of ["git", "gh"]) {
+      const requirement = REQUIREMENTS.find((r) => r.id === id)!;
+
+      expect(manualInstallNote(requirement.manualSteps!, "linux"), id).toBe(
+        `多くのLinuxでは、パッケージ管理から入ります（例：sudo apt install ${id}）。`
+      );
+    }
   });
 
   test("GitとGitHub CLIにも入れ方がある", () => {
