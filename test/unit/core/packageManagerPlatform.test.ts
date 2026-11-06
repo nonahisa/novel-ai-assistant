@@ -5,7 +5,10 @@ import {
   interpretBrewResult,
   type CommandResult,
 } from "../../../src/core/packageInstall";
-import { REQUIREMENTS } from "../../../src/core/requirements";
+import {
+  REQUIREMENTS,
+  manualInstallNote,
+} from "../../../src/core/requirements";
 
 /**
  * WindowsのほかにMacとLinuxでも案内する（作者の指示、2026-08-19）。
@@ -121,6 +124,23 @@ describe("要件ごとの入れ方", () => {
     // **取ってきたスクリプトをそのまま実行する形である。**
     // それを伏せて「この1行で入ります」とだけ言わない
     expect(ollama.manualSteps?.note).toContain("スクリプト");
+  });
+
+  test("Macの案内に「Linux」と出さない", () => {
+    // Homebrew の無い Mac でも install.sh の1行を出すが、添え書きが
+    // 「Linuxでは、この1行で入ります」のままで、Mac の方を迷わせていた
+    const note = manualInstallNote(ollama.manualSteps!, "darwin");
+
+    expect(note).not.toContain("Linux");
+    expect(note).toContain("Mac");
+    expect(note).toContain("スクリプト");
+  });
+
+  test("Linuxの案内は、これまでの文のまま", () => {
+    const note = manualInstallNote(ollama.manualSteps!, "linux");
+
+    expect(note).toBe(ollama.manualSteps!.note);
+    expect(note).toContain("Linuxでは、この1行で入ります。");
   });
 
   test("GitとGitHub CLIにも入れ方がある", () => {

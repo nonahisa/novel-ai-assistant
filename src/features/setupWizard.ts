@@ -16,6 +16,7 @@ import {
   RECOMMENDED_EMBEDDING_MODEL,
   REQUIREMENTS,
   totalSizeLabel,
+  manualInstallNote,
   type Requirement,
   type RequirementId,
   type RequirementState,
@@ -410,7 +411,8 @@ async function guideManualInstall(
         steps.command
           ? `ターミナルで次の1行を実行してください。\n\n  ${steps.command}\n`
           : "",
-        steps.note,
+        // Mac にも install.sh の1行を出すので、添え書きも Mac 向けに替える
+        manualInstallNote(steps, process.platform),
       ]
         .filter(Boolean)
         .join("\n"),
