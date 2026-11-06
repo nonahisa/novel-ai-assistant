@@ -76,6 +76,12 @@ test("入口の画面ショット（左端のアイコンと、詳細メニュ�
         label: "左の「統合小説執筆環境」のアイコン",
       };
       for (const shot of SHOTS) {
+        // 簡単ステップメニューの1枚は、詳細メニューを畳んで欄を高くする（2026-11-06 作者の裁定「撮り直す」）。
+        // 2つとも開くと欄が半分ずつに分かれ、「5. 投稿脱稿」が下で切れていた。詳細メニューの1枚は両方を開いたまま
+        await setPaneExpanded(page, ACTION_PANE, shot.pane !== STEP_PANE);
+        await dismissWorkbenchHover(page).catch(() => undefined);
+        await page.mouse.move(SIZE.width - 10, SIZE.height - 40);
+        await page.waitForTimeout(400);
         await drawRings(page, [
           icon,
           { locator: page.locator(".pane-header", { hasText: shot.pane }).first().locator(".title").first(), label: `「${shot.pane}」の見出し` },
