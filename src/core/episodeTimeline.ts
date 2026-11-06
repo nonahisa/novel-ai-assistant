@@ -59,6 +59,11 @@ export interface AiActionLine {
   category: string;
   action: string;
   file: string;
+  /**
+   * 作品フォルダーからの相対の場所（0.130.2 から書く。作者の裁定 2026-11-06
+   * 「ファイルで照合する」）。それより前の行には無く、名前（`file`）で照合する
+   */
+  path?: string;
   line: number;
   target: string;
   suggestion: string;
@@ -88,7 +93,8 @@ export const TIMELINE_RECOVERY_LIMIT = 5;
  * **記録ごとに書き方が違う**ので、ここ1か所で読み分ける。
  *
  * - 作品フォルダーからの相対（編集履歴・提案・指摘・投稿の台帳）
- * - **名前だけ**（`ai_actions.log`。提案パネルが `basename` を入れている）
+ * - **名前だけ**（`ai_actions.log` の `file`。提案パネルが `basename` を入れている。
+ *   場所の `path` を持つ行は `workRelativePointsToEpisode` で照らす）
  * - 絶対の場所や URI（外の AI の記録。MCP に渡された `filePath` をそのまま残す）
  *
  * 比べるのは `isSamePath`（ブラウザ版の符号化の割れを吸う）。相対を自分で
@@ -110,6 +116,27 @@ export function recordPointsToEpisode(
       paths.pathKeyForComparison(file) ===
       paths.pathKeyForComparison(paths.basename(episodePath))
     );
+  }
+  if (!workFolder) return false;
+  return workRelativePointsToEpisode(file, workFolder, episodePath);
+}
+
+/**
+ * 作品フォルダーからの相対と分かっている記録（`ai_actions.log` の `path`）を照らす。
+ *
+ * `recordPointsToEpisode` に渡すと、作品の直下の話（`第1話.txt`）は区切りを
+ * 持たないので「名前だけ」と読まれ、別のフォルダーの同じ名前の話にも当たってしまう。
+ * 相対と分かっているなら、必ず作品フォルダーから組み立てて比べる。
+ */
+function workRelativePointsToEpisode(
+  recordPath: string,
+  workFolder: string,
+  episodePath: string
+): boolean {
+  const file = recordPath.trim();
+  if (!file || !episodePath) return false;
+  if (paths.isAbsolute(file) || paths.isUriString(file)) {
+    return paths.isSamePath(file, episodePath);
   }
   if (!workFolder) return false;
   return paths.isSamePath(
@@ -142,6 +169,7 @@ export function parseAiActionLog(text: string): AiActionLine[] {
       category: typeof record.category === "string" ? record.category : "",
       action: record.action,
       file: record.file,
+      ...(typeof record.path === "string" && record.path.trim() ? { path: record.path } : {}),
       line: typeof record.line === "number" ? record.line : 0,
       target: typeof record.target === "string" ? record.target : "",
       suggestion: typeof record.suggestion === "string" ? record.suggestion : "",
@@ -218,17 +246,20 @@ function lines(...parts: (string | undefined | false)[]): string {
  * 時刻の読めない記録は出さない（時刻順の欄に置き場所が無い）。
  * 提案と指摘は「出たとき」と「決めたとき」を別の項目にする——採否は
  * 出たときとは別の日に起きることが多く、1つにまとめるとどちらかの時刻が消える。
+ * 逆に、1回の採否が複数の記録に残ったものは1つにまとめる（`mergeSameEvents`）。
  */
 export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineEntry[] {
   const { workFolder, episodePath } = sources;
   const hits = (file: string) => recordPointsToEpisode(file, workFolder, episodePath);
   const entries: TimelineEntry[] = [];
+  /** 同じ1回の操作を見分ける手がかり（`mergeSameEvents`）。項目そのものには持たせない */
+  const hints = new Map<TimelineEntry, MergeHint>();
 
   (sources.edits ?? []).forEach((edit, index) => {
     if (!hits(edit.file)) return;
     const timestamp = isoTime(edit.time);
     if (timestamp === undefined) return;
-    entries.push({
+    const entry: TimelineEntry = {
       id: `edit:${edit.time}:${index}`,
       timestamp,
       kind: "edit",
@@ -236,7 +267,10 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
       description: [actorLabel(edit.actor), edit.actorName].filter(Boolean).join(" "),
       detail: lines(`編集履歴：${edit.action}`, edit.actorName && `誰が：${edit.actorName}`, edit.detail),
       open: "editHistory",
-    });
+    };
+    entries.push(entry);
+    const key = editEventKey(edit.detail);
+    if (key) hints.set(entry, { rank: 2, key });
   });
 
   for (const proposal of sources.proposals ?? []) {
@@ -262,7 +296,7 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
     const decidedAt = isoTime(decision?.time);
     if (decision && decidedAt !== undefined) {
       const status = PROPOSAL_STATUS_LABELS[decision.status] ?? decision.status;
-      entries.push({
+      const entry: TimelineEntry = {
         id: `proposalDecision:${proposal.id}:${decision.time}`,
         timestamp: decidedAt,
         kind: "proposal",
@@ -270,7 +304,16 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
         description: decision.decidedBy,
         detail: lines(`編集者の提案を${status}`, body, decision.note && `覚え書き：${decision.note}`),
         open: "editorProposals",
-      });
+      };
+      entries.push(entry);
+      // 採ったときは編集履歴にも「編集者の提案を採り入れた」が残る（`acceptProposal`）
+      const key =
+        decision.status === "accepted"
+          ? changeKey(proposal.target, proposal.suggestion)
+          : decision.status === "read"
+            ? readKey(proposal.target)
+            : undefined;
+      if (key) hints.set(entry, { rank: 0, key });
     }
   }
 
@@ -298,7 +341,7 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
     const decidedAt = isoTime(decision?.time);
     if (decision && decidedAt !== undefined) {
       const status = FINDING_STATUS_LABELS[decision.status] ?? decision.status;
-      entries.push({
+      const entry: TimelineEntry = {
         id: `findingDecision:${finding.id}:${decision.time}`,
         timestamp: decidedAt,
         kind: "finding",
@@ -306,17 +349,34 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
         description: "",
         detail: lines(`AIの指摘（${name}）を${status}`, body, decision.note && `覚え書き：${decision.note}`),
         open: "proposalPanel",
-      });
+      };
+      entries.push(entry);
+      const target = finding.target || finding.original;
+      // 採った＝target→suggestion、戻した（pending）＝その逆向き、退けた＝向きなし
+      const key =
+        decision.status === "accepted"
+          ? changeKey(target, finding.suggestion)
+          : decision.status === "pending"
+            ? changeKey(finding.suggestion, target)
+            : decision.status === "dismissed"
+              ? dismissKey(target)
+              : undefined;
+      if (key) hints.set(entry, { rank: 0, key });
     }
   }
 
   (sources.aiActions ?? []).forEach((action, index) => {
-    if (!hits(action.file)) return;
+    // **場所を持つ行は場所で照らす**（作者の裁定 2026-11-06）。持たない古い行だけ名前で照らす
+    // ——7日で消える記録なので、古い行の取り違えは日が経てば無くなる
+    const pointsHere = action.path
+      ? workRelativePointsToEpisode(action.path, workFolder, episodePath)
+      : hits(action.file);
+    if (!pointsHere) return;
     const timestamp = parseLogTime(action.timestamp);
     if (timestamp === undefined) return;
     const what = AI_ACTION_LABELS[action.action] ?? action.action;
     const category = AI_ACTION_CATEGORY_LABELS[action.category] ?? "指摘";
-    entries.push({
+    const entry: TimelineEntry = {
       id: `aiAction:${action.timestamp}:${index}`,
       timestamp,
       kind: "aiAction",
@@ -328,7 +388,17 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
         change(action.target, action.suggestion)
       ),
       open: "proposalPanel",
-    });
+    };
+    entries.push(entry);
+    const key =
+      action.action === "applied"
+        ? changeKey(action.target, action.suggestion)
+        : action.action === "reverted"
+          ? changeKey(action.suggestion, action.target)
+          : action.action === "dismissed" || action.action === "foreshadowed"
+            ? dismissKey(action.target)
+            : undefined;
+    if (key) hints.set(entry, { rank: 1, key });
   });
 
   const ledger = sources.posting;
@@ -403,7 +473,99 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
       });
     });
 
-  return entries.sort((left, right) => right.timestamp - left.timestamp);
+  return mergeSameEvents(entries, hints).sort((left, right) => right.timestamp - left.timestamp);
+}
+
+/**
+ * 同じ1回の操作から残った記録を、1つの項目へまとめる（作者の裁定 2026-11-06
+ * 「同じ出来事は1行にまとめ、中身はその行を開いたときに見せる」）。
+ *
+ * 提案パネルで1回［適用］を押すと、編集履歴（edits.jsonl）・指摘の置き場の判断
+ * （findings.jsonl）・操作ログ（ai_actions.log）の3つに残り、欄に3行並んでいた。
+ *
+ * ## 何を同じ操作と見なすか
+ *
+ * - **中身が同じ**：直した向き（「誤」→「正」）か、退けた語が同じ
+ * - **時刻が近い**：`MERGE_WINDOW_MS` の内。3つは続けて書かれるが、時刻の
+ *   書き方が違う（操作ログは手元の時刻を秒まで）ので、ぴったりは揃わない
+ * - **同じ種類の記録は1つずつ**：同じ直しを2回（適用→戻す→適用）しても、
+ *   それぞれの回で1行ずつ残る
+ *
+ * 残す1行は、判断の記録（提案・指摘の採否）→ 操作ログ → 編集履歴の順に選ぶ。
+ * 判断の記録がいちばん中身（理由・覚え書き）を持ち、押したときの行き先も合う。
+ * まとめた記録の中身は、残す行の説明（指を置いたときに出る中身）の下に足す。
+ * 「出たとき」の行（提案・指摘が届いた時刻）は別の出来事なのでまとめない。
+ */
+const MERGE_WINDOW_MS = 60_000;
+
+interface MergeHint {
+  /** 0：判断の記録／1：操作ログ／2：編集履歴。小さいほうを残す */
+  rank: 0 | 1 | 2;
+  key: string;
+}
+
+function changeKey(from: string, to: string): string | undefined {
+  return from && to ? JSON.stringify(["change", from, to]) : undefined;
+}
+
+function dismissKey(target: string): string | undefined {
+  return target ? JSON.stringify(["dismiss", target]) : undefined;
+}
+
+function readKey(target: string): string | undefined {
+  return target ? JSON.stringify(["read", target]) : undefined;
+}
+
+/**
+ * 編集履歴の補足（「12行 「誤」→「正」」「3行 「選んだ所」」）から手がかりを読む。
+ * 補足は提案パネルと編集者の提案の採り方が書く決まった形（`proposalPanel.ts`・`reviewProposals.ts`）
+ */
+function editEventKey(detail: string): string | undefined {
+  const arrow = /「([\s\S]*)」→「([\s\S]*)」\s*$/.exec(detail);
+  if (arrow) return changeKey(arrow[1], arrow[2]);
+  const single = /「([\s\S]*)」\s*$/.exec(detail);
+  return single ? readKey(single[1]) : undefined;
+}
+
+function mergeSameEvents(
+  entries: TimelineEntry[],
+  hints: Map<TimelineEntry, MergeHint>
+): TimelineEntry[] {
+  if (hints.size < 2) return entries;
+  const absorbed = new Set<TimelineEntry>();
+  const merged = new Map<TimelineEntry, TimelineEntry>();
+
+  const anchors = [...hints.entries()].sort(
+    ([left, a], [right, b]) => a.rank - b.rank || left.timestamp - right.timestamp
+  );
+  for (const [anchor, hint] of anchors) {
+    if (absorbed.has(anchor)) continue;
+    const partners: TimelineEntry[] = [];
+    for (const rank of [1, 2] as const) {
+      if (rank <= hint.rank) continue;
+      let best: TimelineEntry | undefined;
+      for (const [candidate, other] of hints) {
+        if (other.rank !== rank || other.key !== hint.key) continue;
+        if (absorbed.has(candidate) || merged.has(candidate)) continue;
+        const gap = Math.abs(candidate.timestamp - anchor.timestamp);
+        if (gap > MERGE_WINDOW_MS) continue;
+        if (!best || gap < Math.abs(best.timestamp - anchor.timestamp)) best = candidate;
+      }
+      if (best) partners.push(best);
+    }
+    if (partners.length === 0) continue;
+    for (const partner of partners) absorbed.add(partner);
+    merged.set(anchor, {
+      ...anchor,
+      description:
+        anchor.description || partners.find((partner) => partner.description)?.description || "",
+      detail: [anchor.detail, ...partners.map((partner) => partner.detail)].join("\n\n"),
+    });
+  }
+
+  return entries
+    .filter((entry) => !absorbed.has(entry))
+    .map((entry) => merged.get(entry) ?? entry);
 }
 
 function chapterOf(chapter: number | undefined, order: number | undefined): string {

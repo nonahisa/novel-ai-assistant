@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
+import { notifyWorkRecordWritten } from "./workRecordSignal";
 import {
   HISTORY_DIRECTORY,
   HISTORY_FILE,
@@ -74,6 +75,8 @@ export class EditHistory {
       merged.set(existing, 0);
       merged.set(added, existing.byteLength);
       await vscode.workspace.fs.writeFile(uri, merged);
+      // タイムラインの欄に、増えた1行をすぐ出させる（保存の知らせは来ない）
+      notifyWorkRecordWritten(target);
     } catch {
       // 履歴が残らないことより、操作が止まるほうが困る
     }

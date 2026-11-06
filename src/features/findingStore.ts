@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
+import { notifyWorkRecordWritten } from "../core/workRecordSignal";
 import {
   DEFAULT_FINDINGS_RETENTION_DAYS,
   visibleFindings,
@@ -182,6 +183,7 @@ export class FindingStore {
         ? ""
         : lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
     await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+    notifyWorkRecordWritten(this.filePath);
   }
 
   private async appendLines(lines: readonly FindingLine[]): Promise<void> {
@@ -201,6 +203,8 @@ export class FindingStore {
     merged.set(existing, 0);
     merged.set(added, existing.byteLength);
     await vscode.workspace.fs.writeFile(uri, merged);
+    // 採否の行が増えたら、タイムラインの欄をすぐ読み直させる（保存の知らせは来ない）
+    notifyWorkRecordWritten(target);
   }
 }
 

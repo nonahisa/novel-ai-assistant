@@ -4,6 +4,7 @@ import type { WorkEntry } from "../models/types";
 import { runSerialized } from "./ledgerQueue";
 import { mergeProposalJsonl } from "./editingRepo";
 import { workPaths } from "./workRegistry";
+import { notifyWorkRecordWritten } from "./workRecordSignal";
 import {
   resolveProposals,
   type Proposal,
@@ -96,6 +97,7 @@ export class ProposalStore {
       if (merged.added === 0 && merged.text === existing) return 0;
       await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
       await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(merged.text));
+      notifyWorkRecordWritten(target);
       return merged.added;
     });
   }
@@ -123,6 +125,8 @@ export class ProposalStore {
     merged.set(existing, 0);
     merged.set(added, existing.byteLength);
     await vscode.workspace.fs.writeFile(uri, merged);
+    // 提案や採否の行が増えたら、タイムラインの欄をすぐ読み直させる（保存の知らせは来ない）
+    notifyWorkRecordWritten(target);
   }
 }
 

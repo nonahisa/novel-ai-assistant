@@ -15,6 +15,7 @@ import {
   pruneManagedRecoveries,
 } from "./atomicWrite";
 import type { Eol } from "../models/types";
+import { notifyWorkRecordWritten } from "./workRecordSignal";
 
 // バイト列の読み方（文字コード・改行・ハッシュ）は `textDecode.ts` にある
 // ——`vscode` の要らない部分なので、外から呼ぶ束（設計書6.87.8）が
@@ -216,6 +217,8 @@ export async function writeTextFilePreservingFormat(
   }
 
   await pruneManagedRecoveries(filePath);
+  // 退避の写しが1つ増えた。タイムラインの欄に出させる（`workspace.fs` で書いたので保存の知らせは来ない）
+  notifyWorkRecordWritten(filePath);
   // 退避先を呼び出し側へ返す。いま作ったものが最新なので、
   // pruneManagedRecoveries（5世代まで残す）で消えることはない
   return { ok: true, recoveryPath };

@@ -1,6 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as vscode from "vscode";
-import { registerEpisodeTimeline } from "../../../src/features/episodeTimeline";
+import {
+  registerEpisodeTimeline,
+  TIMELINE_REFRESH_DELAY_MS,
+} from "../../../src/features/episodeTimeline";
+import { notifyWorkRecordWritten } from "../../../src/core/workRecordSignal";
 
 /**
  * タイムラインの欄の登録（設計書6.119）。
@@ -87,6 +91,42 @@ describe("タイムラインの欄の登録", () => {
     const provider = lastArgs[3] as { provideTimeline?: unknown; onDidChangeTimeline?: unknown };
     expect(typeof provider.provideTimeline).toBe("function");
     expect(typeof provider.onDidChangeTimeline).toBe("function");
+  });
+
+  test("製品が記録や本文を書いたら（保存を通らなくても）、少し待って1回だけ欄を読み直させる", () => {
+    // 提案パネルの［適用］は workspace.fs で書くので保存の知らせが来ず、欄が古いまま残っていた
+    vi.useFakeTimers();
+    try {
+      show = true;
+      const context = fakeContext();
+      registerEpisodeTimeline(context, () => undefined);
+      const provider = lastArgs[3] as {
+        onDidChangeTimeline: (listener: (uri: unknown) => void) => { dispose(): void };
+      };
+      const fired: unknown[] = [];
+      provider.onDidChangeTimeline((uri) => fired.push(uri));
+
+      // ［適用］1回で、本文・編集履歴・操作ログ・置き場の4つが続けて書かれる
+      notifyWorkRecordWritten("C:/作品/本文/第1話.txt");
+      notifyWorkRecordWritten("C:/作品/.aiwriter/history/edits.jsonl");
+      notifyWorkRecordWritten("C:/作品/.aiwriter/logs/ai_actions.log");
+      notifyWorkRecordWritten("C:/作品/.aiwriter/findings.jsonl");
+      expect(fired).toHaveLength(0);
+      vi.advanceTimersByTime(TIMELINE_REFRESH_DELAY_MS);
+      expect(fired).toHaveLength(1);
+      // どの話の記録かは書き方が混ざっている（相対・名前だけ・絶対）ので、全部を読み直させる
+      expect(fired[0]).toBeUndefined();
+
+      // 欄を出さない設定にしたら、知らせない
+      flip(false);
+      notifyWorkRecordWritten("C:/作品/本文/第1話.txt");
+      vi.advanceTimersByTime(TIMELINE_REFRESH_DELAY_MS);
+      expect(fired).toHaveLength(1);
+
+      for (const subscription of context.subscriptions) subscription.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("口が無い版では何もしない", () => {
