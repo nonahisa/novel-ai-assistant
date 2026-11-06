@@ -8,7 +8,8 @@
  *    （製品が `workspace.fs` で書いたことを `core/workRecordSignal.ts` が知らせ、0.4秒後に読み直させる）
  * 2. 増えるのはその1行だけ。編集履歴「誤字脱字の指摘を反映した」と操作ログ「誤字の指摘を反映した」は
  *    行として出ず、その行の説明（指を置くと出る吹き出し）に、採否・編集履歴・操作ログの3つが並ぶ
- * 3. ［戻す］は「AIの指摘（誤字脱字）を戻した」の1行、［見送る］（前の名前は［無視］）は
+ * 3. ［戻す］は「AIの指摘（誤字脱字）を戻した」の1行（［適用］の回の「を採った」の行は名前も説明もそのまま残る。
+ *    0.130.3、作者の裁定 2026-11-06 夕）、［見送る］（前の名前は［無視］）は
  *    「AIの指摘（誤字脱字）を退けた」の1行になる
  * 4. 固定しない欄（既定）は、提案パネルが前の間は話を指さない。原稿のタブへ戻ると［適用］の回が1行で出る（2件目）
  *
@@ -293,12 +294,11 @@ test.skipIf(!versionAtLeast(E2E_VSCODE_VERSION, [1, 145]))(
         console.log(`［戻す］から欄に行が出るまで ${revertedMs}ms`);
         expect(revertedMs).toBeLessThan(REFRESH_LIMIT_MS);
         /*
-          ［適用］の回の行は、［戻す］のあとも1行のまま残る。ただし**名前が替わる**：指摘の置き場は1件の指摘に
-          最後の判断しか持たない（`models/finding.ts` の `decision`）ので、［戻す］で判断が「戻した」になると
-          「を採った」の判断の行は無くなり、［適用］の回は操作ログ「誤字の指摘を反映した」（編集履歴を吸った1行）で
-          出る（2026-11-06 に見た形。報告して判断待ち）。ここでは「適用の回が1行のまま」だけを見る
+          ［適用］の回の行は、［戻す］のあとも「AIの指摘（誤字脱字）を採った」の名前と中身のまま1行で残る
+          （作者の裁定 2026-11-06 夕「「採った」のまま残す」。0.130.3 の直し）。0.130.2 までは指摘の置き場の
+          最後の判断（`decision`）しか見ず、［戻す］で「を採った」の行が消えて、操作ログ「誤字の指摘を反映した」
+          （編集履歴を吸った1行）に名前が替わっていた
         */
-        const appliedEventRows = (rows: readonly string[]) => countRows(rows, APPLIED_ROW) + countRows(rows, "誤字の指摘を反映した");
         await rowsHold(
           page,
           (rows) =>
@@ -306,10 +306,14 @@ test.skipIf(!versionAtLeast(E2E_VSCODE_VERSION, [1, 145]))(
             countRows(rows, REVERTED_ROW) === 1 &&
             countRows(rows, "反映を戻した") === 0 &&
             countRows(rows, "誤字の指摘を戻した") === 0 &&
-            appliedEventRows(rows) === 1 &&
-            countRows(rows, "誤字脱字の指摘を反映した") === 0,
-          "［戻す］の記録は「を戻した」の1行だけ（編集履歴「誤字脱字の反映を戻した」・操作ログ「誤字の指摘を戻した」は行にならない）。［適用］の回も1行のまま"
+            countRows(rows, APPLIED_ROW) === 1 &&
+            countRows(rows, "反映した") === 0,
+          "［戻す］の記録は「を戻した」の1行だけ（編集履歴「誤字脱字の反映を戻した」・操作ログ「誤字の指摘を戻した」は行にならない）。［適用］の回は「を採った」の1行のまま（「反映した」の行にならない）"
         );
+        const appliedTipAfterUndo = await rowTooltip(page, APPLIED_ROW);
+        expect(appliedTipAfterUndo, `［戻す］のあとの［適用］の行の説明：${appliedTipAfterUndo}`).toContain(APPLIED_ROW);
+        expect(appliedTipAfterUndo, `［戻す］のあとの［適用］の行の説明：${appliedTipAfterUndo}`).toContain("編集履歴：誤字脱字の指摘を反映した");
+        expect(appliedTipAfterUndo, `［戻す］のあとの［適用］の行の説明：${appliedTipAfterUndo}`).toContain("誤字の指摘を反映した");
         console.log(`［戻す］のあとの欄：${await describeTimeline(page)}`);
         const revertedTip = await rowTooltip(page, REVERTED_ROW);
         expect(revertedTip, `［戻す］の行の説明：${revertedTip}`).toContain(REVERTED_ROW);

@@ -157,6 +157,20 @@ describe("置き場のファイル", () => {
     expect((await store.load())[0].status).toBe("accepted");
   });
 
+  test("判断を足し直しても、前の判断は履歴に起きた順で残る（タイムラインの欄が1回ずつ並べる）", async () => {
+    const store = new FindingStore(work);
+    await store.record([finding()]);
+    await store.decide([{ findingId: "f1", time: "2026-09-20T09:00:00.000Z", status: "accepted", note: "" }]);
+    await store.decide([{ findingId: "f1", time: "2026-09-20T09:00:00.000Z", status: "pending", note: "適用を戻した" }]);
+
+    const [view] = await store.load();
+    expect(view.status).toBe("pending");
+    expect(view.decision?.status).toBe("pending");
+    expect(view.decisions?.map((decision) => decision.status)).toEqual(["accepted", "pending"]);
+    // 履歴に行の種類（kind）は持ち込まない（判断の形だけ）
+    expect(view.decisions?.[0]).toEqual({ findingId: "f1", time: "2026-09-20T09:00:00.000Z", status: "accepted", note: "" });
+  });
+
   test("ファイルが無ければ、空として扱う（検知そのものは動く）", async () => {
     expect(await new FindingStore(work).load()).toEqual([]);
   });

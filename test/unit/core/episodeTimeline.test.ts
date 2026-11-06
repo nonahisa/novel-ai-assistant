@@ -8,7 +8,7 @@ import {
   TIMELINE_RECOVERY_LIMIT,
 } from "../../../src/core/episodeTimeline";
 import type { ProposalView } from "../../../src/models/proposal";
-import type { FindingView } from "../../../src/models/finding";
+import { parseFindingLines, resolveFindings, type FindingView } from "../../../src/models/finding";
 import { emptyPostingLedger, type PostingLedger } from "../../../src/models/posting";
 
 /**
@@ -303,6 +303,69 @@ describe("項目に並べる", () => {
       ]);
       expect(entries[0].detail).toContain("推敲の反映を戻した");
       expect(entries[0].detail).toContain("誤字の指摘を戻した");
+    });
+
+    test("採ってから戻した：採った回の行は「を採った」の名前と中身のまま残り、その上に「を戻した」が並ぶ（作者の裁定 2026-11-06 夕）", () => {
+      // 置き場のファイルそのものから読む（採った・戻したの2行が追記で残っている）
+      const views = resolveFindings(
+        parseFindingLines(
+          [
+            JSON.stringify({ kind: "finding", ...finding({}), status: undefined }),
+            JSON.stringify({ kind: "decision", findingId: "f1", time: "2026-11-06T01:00:00.500Z", status: "accepted", note: "" }),
+            JSON.stringify({ kind: "decision", findingId: "f1", time: "2026-11-06T02:00:00.500Z", status: "pending", note: "適用を戻した" }),
+          ].join("\n")
+        )
+      );
+      const entries = buildEpisodeTimeline({
+        workFolder: work,
+        episodePath: episode,
+        edits: [
+          appliedEdit,
+          { ...appliedEdit, time: "2026-11-06T02:00:00.900Z", actor: "author", action: "推敲の反映を戻した", detail: "4行 「降っていた」→「降ってた」" },
+        ],
+        findings: views,
+        aiActions: parseAiActionLog(
+          [
+            appliedLog(localTime("2026-11-06T01:00:01.000Z")),
+            JSON.stringify({ timestamp: localTime("2026-11-06T02:00:01.000Z"), category: "typo", action: "reverted", file: "第1話.txt", path: "本文/第1話.txt", line: 4, target: "降ってた", suggestion: "降っていた" }),
+          ].join("\n")
+        ),
+      });
+      expect(entries.map((entry) => entry.label)).toEqual([
+        "AIの指摘（推敲）を戻した",
+        "AIの指摘（推敲）を採った",
+        "AIの指摘（推敲）「降ってた」→「降っていた」",
+      ]);
+      expect(entries.filter((entry) => entry.kind === "aiAction" || entry.kind === "edit")).toHaveLength(0);
+      const applied = entries[1];
+      expect(applied.detail).toContain("AIの指摘（推敲）を採った");
+      expect(applied.detail).toContain("編集履歴：推敲の指摘を反映した");
+      expect(applied.detail).toContain("誤字の指摘を反映した");
+      expect(applied.detail).not.toContain("戻した");
+      expect(entries[0].detail).toContain("推敲の反映を戻した");
+      // 項目の番号が重ならない（欄が同じ行と見なさない）
+      expect(new Set(entries.map((entry) => entry.id)).size).toBe(entries.length);
+    });
+
+    test("同じミリ秒に採って戻しても、2つの判断の行の番号は重ならない", () => {
+      const time = "2026-11-06T01:00:00.500Z";
+      const entries = buildEpisodeTimeline({
+        workFolder: work,
+        episodePath: episode,
+        findings: [
+          finding({
+            status: "pending",
+            decision: { findingId: "f1", time, status: "pending", note: "" },
+            decisions: [
+              { findingId: "f1", time, status: "accepted", note: "" },
+              { findingId: "f1", time, status: "pending", note: "" },
+            ],
+          }),
+        ],
+      });
+      const decisionRows = entries.filter((entry) => entry.id.startsWith("findingDecision:"));
+      expect(decisionRows.map((entry) => entry.label).sort()).toEqual(["AIの指摘（推敲）を戻した", "AIの指摘（推敲）を採った"]);
+      expect(new Set(decisionRows.map((entry) => entry.id)).size).toBe(2);
     });
 
     test("退けた：操作ログと判断の2つが1行になる（矛盾は直し方を持たないので、語だけで照らす）", () => {
