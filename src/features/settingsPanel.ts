@@ -22,6 +22,10 @@ import {
   type SeparationPlan,
 } from "../core/characterSeparate";
 import {
+  aliasLooksAddressedToOriginal,
+  aliasUsageTowardOriginal,
+} from "../core/separateAliasUsage";
+import {
   describeMergeCandidate,
   findMergeCandidates,
   normalizeName,
@@ -2898,6 +2902,7 @@ export class SettingsPanel {
     }
 
     const moved = plan.movedAliases.map((entry) => `「${entry}」`).join("");
+    const addressNotice = await this.separateAddressNotice(alias, plan);
     // 確認は拡張機能側で出す。WebViewの confirm は使えない（6.5.5と同じ）
     const KEEP = "分ける（この記録はAIに書き換えさせない）";
     const PLAIN = "分ける";
@@ -2906,6 +2911,7 @@ export class SettingsPanel {
       {
         modal: true,
         detail:
+          addressNotice +
           `・「${alias}」という名前だけの人物ができます\n` +
           `・「${record.name}」の別名から ${moved} が外れます\n` +
           `・紹介・役割・性格・登場話・変化の記録は「${record.name}」に残ります（移しません）\n` +
@@ -2949,6 +2955,39 @@ export class SettingsPanel {
       id,
       `「${alias}」を別の人物として分けました。中身は空なので、` +
         "「設定資料を抽出」をもう一度実行すると本文から入ります。"
+    );
+  }
+
+  /**
+   * 分ける前の知らせ（作者の裁定 2026-11-06「分ける前に断る」。`core/separateAliasUsage.ts`）。
+   * 本文での出方がすべて元の人物への呼びかけに見えたら、確認の窓の頭に1段足す。
+   *
+   * **本文が読めなければ何も足さない**（知らせのために分ける操作を止めない）。
+   * 本文は抜粋と同じ口（`loadedExcerptSources`）で読む。シーンメモは抜かれ、
+   * 未解決の競合のある話は外れる（外れたことはその口が帯で知らせる）。
+   */
+  private async separateAddressNotice(alias: string, plan: SeparationPlan): Promise<string> {
+    let texts: string[];
+    try {
+      const sources = await this.loadedExcerptSources();
+      texts = sources.map((source) => source.text);
+    } catch (error) {
+      useLogFile(this.work.folderPath);
+      logLine(
+        `別人に分ける前の本文の読み込みに失敗（知らせを出さずに続ける）: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return "";
+    }
+    const original = plan.original;
+    const usage = aliasUsageTowardOriginal(alias, [original.name, ...original.aliases], texts);
+    if (!aliasLooksAddressedToOriginal(usage)) return "";
+    return (
+      `この呼び名は「${original.name}」への呼びかけに見えます` +
+      `（本文の「${alias}」${usage.total}か所が、どれも「${original.name}」に呼びかけているか、` +
+      `「${original.name}」と同じ所に出ています）。` +
+      "分けても、新しい人物の中身は本文から入らないかもしれません。別の人物なら、このまま分けてください。\n\n"
     );
   }
 

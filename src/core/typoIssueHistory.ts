@@ -7,6 +7,7 @@ import { atomicWriteFile } from "./atomicWrite";
 import { formatLogTime } from "./logger";
 import type { AcceptedTypoIssue } from "./typoCheckValidation";
 import { isRecord } from "./isRecord";
+import { notifyWorkRecordWritten } from "./workRecordSignal";
 
 /**
  * 提案（誤字脱字など）の「無視」履歴と、承認・却下の操作ログ。
@@ -227,10 +228,32 @@ export interface AiActionLogEntry {
     | "resolved"
     | "foreshadowed"
     | "asked";
+  /**
+   * ファイルの**名前だけ**。`loadAppliedFixKeys` の鍵（`名前|target|suggestion`）が
+   * 検知の側の鍵と組になっているので、**中身を相対の場所に変えない**
+   */
   file: string;
+  /**
+   * その話の場所（絶対）。記録には作品フォルダーからの相対 `path` として残す
+   * （作者の裁定 2026-11-06「ファイルで照合する」）。名前だけでは、別のフォルダーの
+   * 同じ名前の話（`第1部/第1話.txt` と `第2部/第1話.txt`）をタイムラインが取り違える。
+   * 渡さなければ `path` は書かない（古い行と同じ形）
+   */
+  filePath?: string;
   line: number;
   target: string;
   suggestion: string;
+}
+
+/**
+ * `ai_actions.log` に残す相対の場所。区切りは `/` に揃える（Windows と Mac で
+ * 同じ行が同じ場所を指すように）。作品の外（別のドライブなど）で相対に
+ * できなければ、絶対の場所のまま残す——読む側（`recordPointsToEpisode`）は両方を読む。
+ */
+export function aiActionLogPath(workFolder: string, filePath: string): string {
+  const relative = path.relative(workFolder, filePath);
+  if (!relative || path.isAbsolute(relative) || path.isUriString(relative)) return filePath;
+  return relative.split(/[\\/]+/).filter(Boolean).join("/");
 }
 
 /**
@@ -249,7 +272,12 @@ export async function appendAiActionLog(
     "logs",
     "ai_actions.log"
   );
-  const line = JSON.stringify({ timestamp: formatLogTime(), ...entry });
+  const { filePath, ...rest } = entry;
+  const line = JSON.stringify({
+    timestamp: formatLogTime(),
+    ...rest,
+    ...(filePath ? { path: aiActionLogPath(work.folderPath, filePath) } : {}),
+  });
 
   try {
     const uri = path.toUri(target);
@@ -267,6 +295,8 @@ export async function appendAiActionLog(
     merged.set(existing, 0);
     merged.set(addition, existing.byteLength);
     await vscode.workspace.fs.writeFile(uri, merged);
+    // タイムラインの欄に、増えた1行をすぐ出させる（保存の知らせは来ない）
+    notifyWorkRecordWritten(target);
   } catch {
     // 記録できなくても、適用・無視そのものは既に完了しているので通知は不要
   }

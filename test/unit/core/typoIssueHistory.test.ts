@@ -228,6 +228,29 @@ describe("却下履歴とAI操作ログ", () => {
     expect(typeof lines[0].timestamp).toBe("string");
   });
 
+  test("話の場所を渡すと、作品フォルダーからの相対の path も残す（file は名前のまま）", async () => {
+    // タイムラインが名前だけで照らすと、別のフォルダーの同じ名前の話を取り違える（作者の裁定 2026-11-06）
+    await appendAiActionLog(work, {
+      category: "typo",
+      action: "applied",
+      file: "第1話.txt",
+      filePath: "C:\\novels\\テスト作品\\第1部\\第1話.txt",
+      line: 3,
+      target: "意外",
+      suggestion: "以外",
+    });
+    const logPath = Uri.file(
+      "C:\\novels\\テスト作品\\.aiwriter\\logs\\ai_actions.log"
+    ).fsPath;
+    const line = JSON.parse(new TextDecoder().decode(files.get(logPath)).trim());
+    expect(line).toMatchObject({ file: "第1話.txt", path: "第1部/第1話.txt" });
+    expect(line).not.toHaveProperty("filePath");
+    // 往復ループ防止の鍵は、これまでどおり名前で作る（検知の側の鍵と組になっている）
+    expect(await loadAppliedFixKeys(work)).toEqual(
+      new Set([appliedFixKey("第1話.txt", "意外", "以外")])
+    );
+  });
+
   describe("適用済みの組の読み込み（往復ループ防止）", () => {
     test("ログが無ければ空集合を返す", async () => {
       expect(await loadAppliedFixKeys(work)).toEqual(new Set());

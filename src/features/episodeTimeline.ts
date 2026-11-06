@@ -10,6 +10,7 @@ import { PostingStore } from "../core/postingStore";
 import { listManagedRecoveries } from "../core/atomicWrite";
 import { readPostingLedger, type PostingLedger } from "../models/posting";
 import { logLine } from "../core/logger";
+import { onWorkRecordWritten } from "../core/workRecordSignal";
 import {
   buildEpisodeTimeline,
   parseAiActionLog,
@@ -90,6 +91,12 @@ const TIMELINE_SOURCE_LABEL = "統合小説執筆環境の記録";
 /** 設定の名前。**ここ1か所** */
 export const TIMELINE_SETTING = "timeline.show";
 
+/**
+ * 製品が書いてから欄を読み直させるまでの待ち（ミリ秒）。［適用］1回で本文と記録3つが
+ * 続けて書かれるので、書き終わるのを待って1回にまとめる（4回読み直さない）
+ */
+export const TIMELINE_REFRESH_DELAY_MS = 400;
+
 /** 手元の作品と、ブラウザ版（GitHub の作品）の場所 */
 const TIMELINE_SCHEMES = ["file", "vscode-vfs"];
 
@@ -169,6 +176,24 @@ export function registerEpisodeTimeline(
     }
   };
 
+  /*
+    製品が `workspace.fs` で書いたとき（提案の［適用］など）は保存の知らせが来ない
+    （作者の裁定 2026-11-06「採ったらすぐ新しくする」）。書いたことは `core/workRecordSignal.ts` が
+    知らせる。**どの話かは決めずに全部を読み直させる**（`fire(undefined)`）——記録の `file` は
+    相対・名前だけ・絶対が混ざっていて、絶対の場所へ戻すほうが取り違える。読み直すのは
+    いま欄に出ている話だけなので重くない
+  */
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleRefresh = (): void => {
+    if (!registration) return;
+    if (refreshTimer !== undefined) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      refreshTimer = undefined;
+      if (registration) changed.fire(undefined);
+    }, TIMELINE_REFRESH_DELAY_MS);
+  };
+  const stopListening = onWorkRecordWritten(scheduleRefresh);
+
   apply();
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
@@ -178,7 +203,13 @@ export function registerEpisodeTimeline(
     vscode.workspace.onDidSaveTextDocument((document) => {
       if (registration) changed.fire(document.uri);
     }),
-    { dispose: () => registration?.dispose() }
+    {
+      dispose: () => {
+        stopListening();
+        if (refreshTimer !== undefined) clearTimeout(refreshTimer);
+        registration?.dispose();
+      },
+    }
   );
 }
 
