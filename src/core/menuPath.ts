@@ -172,7 +172,11 @@ export function menuPathTree(path: MenuPath): string {
 }
 
 /**
- * 操作1つぶんの図の文字列（1行の道順＋小さな木）。行ける道が無ければ空文字。
+ * 操作1つぶんの図の文字列（小さな木）。行ける道が無ければ空文字。
+ *
+ * 1本目の道は木だけにする（作者の裁定 2026-11-07「木だけ」）。木にも最初の一押しから目標まで
+ * 全部入るので、1行の道も並べると、相談や Discord の答えで同じ道が二重（本文の手順と合わせて
+ * 三重）に出ていた。
  *
  * 道が2本以上あるときは、1本目だけを木にし、残りは「ほかの道」として1行ずつ添える
  * （木を何本も並べると長くなり、どれを見ればよいか分からなくなる）。
@@ -187,9 +191,8 @@ export function renderMenuPathText(
   const paths = menuPathsOf(command, mode, runtimeAllowsProcesses);
   const [first, ...rest] = paths;
   if (!first) return "";
-  // 入口（メニューの外）は木にしようが無いので、案内の1行だけ
-  const lines =
-    first.place === "entrance" ? [menuPathLine(first)] : [menuPathLine(first), menuPathTree(first)];
+  // 入口（メニューの外）は木にしようが無いので、案内の1行だけ（menuPathTree が1行の案内を返す）
+  const lines = [menuPathTree(first)];
   for (const other of rest) lines.push(`ほかの道：${menuPathLine(other)}`);
   if (!isCommandAllowed(command, mode)) {
     lines.push("（編集者モードでは押せません。作者の環境で使う操作です）");
