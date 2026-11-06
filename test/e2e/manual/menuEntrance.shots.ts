@@ -22,6 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "playwright-core";
 import { test } from "vitest";
+import { ENTRANCE_SHOTS } from "../../../src/core/entranceShots";
 import { SIDEBAR_LAUNCH } from "../support/sidebar";
 import { withVsCode, type FixtureEpisode } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
@@ -29,10 +30,15 @@ import { clearNotifications, dismissWorkbenchHover, pressWorkbenchKey } from "..
 import { clearRings, drawRings } from "./support/redRing";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const SHOTS = [
-  { pane: "簡単ステップメニュー", out: path.join(repositoryRoot, "media", "promo", "menu-entrance.png") },
-  { pane: "詳細メニュー", out: path.join(repositoryRoot, "media", "promo", "menu-entrance-detail.png") },
-] as const;
+// 撮るものは、ボットへ渡す一覧（`ENTRANCE_SHOTS`）から作る。ここで別に書くと、撮り直して
+// 囲みを変えた日にボットの説明だけが古いまま残る
+const SHOTS = ENTRANCE_SHOTS.map((shot) => {
+  const [iconLabel, headerLabel] = shot.rings;
+  if (shot.rings.length !== 2 || iconLabel === undefined || headerLabel === undefined) {
+    throw new Error(`入口の画面ショット ${shot.file} の囲みは、アイコンと見出しの2つの前提で撮る`);
+  }
+  return { pane: shot.menu, out: path.join(repositoryRoot, ...shot.file.split("/")), iconLabel, headerLabel };
+});
 
 const SIZE = { width: 1280, height: 720 };
 const WORK_TITLE = "春を待つ灯（見本）";
@@ -56,7 +62,7 @@ const SETTINGS: Record<string, unknown> = {
 };
 
 test("入口の画面ショット（左端のアイコンと、詳細メニューの作品管理）を撮る", async () => {
-  await mkdir(path.dirname(SHOTS[0].out), { recursive: true });
+  for (const shot of SHOTS) await mkdir(path.dirname(shot.out), { recursive: true });
   await withVsCode(
     "入口の画面ショット",
     EPISODES,
@@ -71,10 +77,7 @@ test("入口の画面ショット（左端のアイコンと、詳細メニュ�
       await dismissWorkbenchHover(page).catch(() => undefined);
       await page.mouse.move(SIZE.width - 10, SIZE.height - 40);
       await page.waitForTimeout(600);
-      const icon = {
-        locator: page.locator('.part.activitybar .action-item .action-label[aria-label*="統合小説執筆環境"]').first(),
-        label: "左の「統合小説執筆環境」のアイコン",
-      };
+      const iconLocator = page.locator('.part.activitybar .action-item .action-label[aria-label*="統合小説執筆環境"]').first();
       for (const shot of SHOTS) {
         // 簡単ステップメニューの1枚は、詳細メニューを畳んで欄を高くする（2026-11-06 作者の裁定「撮り直す」）。
         // 2つとも開くと欄が半分ずつに分かれ、「5. 投稿脱稿」が下で切れていた。詳細メニューの1枚は両方を開いたまま
@@ -83,8 +86,8 @@ test("入口の画面ショット（左端のアイコンと、詳細メニュ�
         await page.mouse.move(SIZE.width - 10, SIZE.height - 40);
         await page.waitForTimeout(400);
         await drawRings(page, [
-          icon,
-          { locator: page.locator(".pane-header", { hasText: shot.pane }).first().locator(".title").first(), label: `「${shot.pane}」の見出し` },
+          { locator: iconLocator, label: shot.iconLabel },
+          { locator: page.locator(".pane-header", { hasText: shot.pane }).first().locator(".title").first(), label: shot.headerLabel },
         ]);
         await page.waitForTimeout(150);
         await page.screenshot({ path: shot.out });

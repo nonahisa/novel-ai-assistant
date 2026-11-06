@@ -10,6 +10,7 @@
  * **`vscode` に依らない**（`scripts/coreEntries.mjs` の起点に入れ、`bundleCore.mjs` と
  * `mcpReach.test.ts` が見張る）。
  */
+import { ENTRANCE_SHOTS } from "./entranceShots";
 import { procedureActionLookup } from "./featureGuide";
 import {
   MENU_PATH_START,
@@ -20,7 +21,9 @@ import {
 } from "./menuPath";
 import { PROCEDURES, proceduresForMode, renderProcedure } from "./procedures";
 
-/** ボットへ渡す名前の一覧（並びもここが正） */
+/**
+ * ボットへ渡す名前の一覧（並びもここが正）。足すときは末尾へ——前からの9つの並びはボットとの約束
+ */
 export const GUIDE_EXPORT_NAMES = [
   "menuPathsOf",
   "renderMenuPathText",
@@ -31,6 +34,7 @@ export const GUIDE_EXPORT_NAMES = [
   "proceduresForMode",
   "renderProcedure",
   "procedureActionLookup",
+  "ENTRANCE_SHOTS",
 ] as const;
 
 export function guideExport() {
@@ -44,6 +48,7 @@ export function guideExport() {
     proceduresForMode,
     renderProcedure,
     procedureActionLookup,
+    ENTRANCE_SHOTS,
   } satisfies Record<(typeof GUIDE_EXPORT_NAMES)[number], unknown>;
 }
 

@@ -1,4 +1,7 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
+import { ENTRANCE_SHOTS } from "../../../src/core/entranceShots";
 import { GUIDE_EXPORT_NAMES, guideExport } from "../../../src/core/guideExport";
 import { MENU_PATH_START } from "../../../src/core/menuPath";
 import { PROCEDURES } from "../../../src/core/procedures";
@@ -7,8 +10,10 @@ import { PROCEDURES } from "../../../src/core/procedures";
  * Discord のボットが束ねて呼ぶ口の形（2026-11-06）。**名前と形を変えると、ボットだけが黙って壊れる。**
  * 変えるときは、ボットのセッション（製品：Discord）へ先に知らせてからここを直す。
  */
+const repositoryRoot = path.resolve(__dirname, "..", "..", "..");
+
 describe("guideExport（ボットへ渡す口）", () => {
-  test("名前の一覧が、約束した9つのまま", () => {
+  test("名前の一覧が、約束した10の並びのまま（前からの9つ＋末尾の ENTRANCE_SHOTS）", () => {
     expect([...GUIDE_EXPORT_NAMES]).toEqual([
       "menuPathsOf",
       "renderMenuPathText",
@@ -19,7 +24,18 @@ describe("guideExport（ボットへ渡す口）", () => {
       "proceduresForMode",
       "renderProcedure",
       "procedureActionLookup",
+      "ENTRANCE_SHOTS",
     ]);
+  });
+
+  test("入口の画面ショットの一覧：画像が実在し、メニューは2つ・囲みは1枚に2つずつ", () => {
+    const shots = guideExport().ENTRANCE_SHOTS;
+    expect(shots).toBe(ENTRANCE_SHOTS);
+    expect(shots.map((shot) => shot.menu)).toEqual(["簡単ステップメニュー", "詳細メニュー"]);
+    for (const shot of shots) {
+      expect(existsSync(path.join(repositoryRoot, ...shot.file.split("/"))), shot.file).toBe(true);
+      expect(shot.rings, shot.file).toHaveLength(2);
+    }
   });
 
   test("渡す中身は一覧と同じ名前だけで、関数は関数・値は値", () => {

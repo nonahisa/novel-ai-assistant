@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**0.131.0**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.126.2**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.131.1**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.126.2**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 
@@ -313,7 +313,13 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 
 ## Claude Codeから使う（MCPサーバー）
 
-このリポジトリをClaude Codeで開くと、`.mcp.json` の登録により `novel-ai-assistant` のツールが一覧に出ます（`npm run build` で `dist/mcp-server.mjs` が作られます）。VS Codeが起動していなくても動きます。
+VS Code 版の Claude Code から、この拡張機能の道具（MCPサーバー `novel-ai-assistant`）を使えます。
+
+1. 左の端の統合小説執筆環境のアイコン → 詳細メニュー → 作品管理 → 作品別設定 → Claude Code接続 を押します
+2. 何をどこへ書くかが出るので、確かめて［つなぐ］を押します
+3. Claude Code のチャットで「/」を打ち、「novel-ai-assistant:setup」を選ぶと、会話しながら最初の作品まで準備できます
+
+「ヘルプ → はじめに → 統合小説執筆環境をはじめる」の「Claude Code接続（任意）」からもつなげます。一度つなぐと、どのフォルダーで Claude Code を開いても使えます。
 
 使う前に、作品ごとに許可が要ります。既定は拒否で、許可するまで外からは1文字も読めません。VS Codeでその作品を開き、「詳細メニュー → 作品管理 → 作品別設定 → 外部AI許可／取消」から許可してください。許可はこのパソコンだけに効き、いつでも取り消せます。
 
@@ -323,6 +329,10 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 - 手元以外のOllamaへ送るときは `allowRemote` を付けます
 - 読むのは、指定した作品フォルダーの中だけです
 - 読まれた記録は残ります。「執筆データ → 編集履歴」の下に、いつ・どの道具が・本文をどこまで外へ出したかが並びます。許可していない作品へのノックも残ります
+
+### 開発する人向けの使い方
+
+このリポジトリを Claude Code で開くと、`.mcp.json` の登録で `novel-ai-assistant` の道具が一覧に出ます。先に `npm run build` で `dist/mcp-server.mjs` を作っておきます。VS Code が起動していなくても動きます。
 
 ---
 
