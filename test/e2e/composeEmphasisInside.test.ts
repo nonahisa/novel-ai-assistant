@@ -19,6 +19,7 @@ import { turnVertical, VERTICAL_LAUNCH } from "./support/verticalFace";
 import { composeText, openEpisode, selectText } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
+import { tabIsDirty } from "./support/workbenchDom";
 
 const EPISODE = "001_はじまり.txt";
 const SOURCE = "前の字と《《強調文字》》と後ろの字。\n";
@@ -34,6 +35,40 @@ async function fileText(session: E2ESession): Promise<string> {
 async function saveAndWaitFor(session: E2ESession, expected: (text: string) => boolean, label: string) {
   await session.page.keyboard.press("Control+KeyS");
   await waitUntil(async () => expected(await fileText(session)), label, 15_000);
+}
+
+/**
+ * 変換で打った直後の保存。**未保存の印が付くのを待ってから Ctrl+S を押し、届かなければ押し直す。**
+ *
+ * 1時間の全件の途中でだけ、画面には字が入り（「今雨日」）タブに未保存の印が付いているのに、
+ * ファイルは変わらないまま15秒が過ぎて落ちた（0.130.3 の配布前、2026-11-06。単独では3回とも通る）。
+ * 確定した字が拡張機能へ届いて文書が「未保存」になる前に Ctrl+S が押されると、保存は
+ * 書くものが無いまま済み、そのあと字が届いて印だけが残る——負荷の下でだけ起きる順番の
+ * 入れ替わりと見る。作者の手では、打ってから保存までに必ず間がある。
+ * そこで ①印が付くのを待つ ②押す ③数秒で届かず印が残っていれば、もう一度押す（3回まで）。
+ * 中身の正しさは呼び手が確かめる
+ */
+async function saveWithRetry(
+  session: E2ESession,
+  name: string,
+  expected: (text: string) => boolean,
+  label: string
+): Promise<void> {
+  await waitUntil(async () => tabIsDirty(session.page, name), `${name} のタブに未保存の印が付く`, 10_000);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await session.page.keyboard.press("Control+KeyS");
+    try {
+      await waitUntil(async () => expected(await fileTextOf(session, name)), `${label}（${attempt}回目の Ctrl+S）`, 5_000);
+      return;
+    } catch (error) {
+      lastError = error;
+      // 印が消えていれば保存は済んでいる（中身が違うだけ）。押し直しても変わらないので落とす
+      if (!(await tabIsDirty(session.page, name))) break;
+    }
+  }
+  const text = await fileTextOf(session, name).catch(() => "（読めません）");
+  throw new Error(`${String(lastError)}（ファイル：${JSON.stringify(text)}）`);
 }
 
 test("マウスで傍点の語の真ん中を押して打つと、字が語の中に入り、原稿でも《《 》》の中に増える", async () => {
@@ -142,8 +177,7 @@ test("縦書き：傍点の語の真ん中を押して変換で打つと、確�
           throw new Error(`${String(error)}（画面：${JSON.stringify(await composeText(frame))}）`);
         }
       );
-      await session.page.keyboard.press("Control+KeyS");
-      await waitUntil(async () => (await fileTextOf(session, "001_はじまり.md")).includes("雨"), "確定した字がファイルに入る", 15_000);
+      await saveWithRetry(session, "001_はじまり.md", (text) => text.includes("雨"), "確定した字がファイルに入る");
       expect(await fileTextOf(session, "001_はじまり.md")).toBe("前の字と{{今雨日}}と後ろの字。\n");
     },
     VERTICAL_LAUNCH
