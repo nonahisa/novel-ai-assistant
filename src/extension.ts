@@ -217,6 +217,7 @@ import {
   workLog,
 } from "./core/logger";
 import { probeGeneration } from "./ai/generationProbe";
+import { connectionCheckLogLine } from "./features/aiConnectionLog";
 import { FETCH_CEILING_RECOVERY } from "./ai/types";
 import { setVerifiedStateReporter, verifiedState } from "./core/verifiedMemento";
 import {
@@ -6320,6 +6321,16 @@ export async function activate(
       const result = await withProgress("接続を確認しています…", () =>
         resolved.provider.testConnection()
       );
+      // 3つの結果はどれも actions.log へ1行残す。知らせは消えると何も残らず、
+      // 実機確認で裏付けられないため（features/aiConnectionLog.ts）
+      logLine(
+        connectionCheckLogLine(resolved.provider.id, resolved.model, {
+          stage: "list",
+          ok: result.ok,
+          message: result.message,
+          modelCount: result.modelCount,
+        })
+      );
       if (!result.ok) {
         vscode.window.showErrorMessage(result.message);
         return;
@@ -6332,15 +6343,20 @@ export async function activate(
         probeGeneration(resolved.provider, resolved.model)
       );
       if (!probe.ok) {
-        if (probe.error) {
-          logFailure("AI接続の確認（生成の試行）", {
-            種別: probe.error.kind,
-            詳細: probe.error.detail,
-            モデル: resolved.model,
-          });
-        }
+        const probeMessage = probe.message ?? "生成できませんでした。";
+        // 前は AIError のときだけ複数行の記録を残していた。1行の形へ寄せ、
+        // AIError でない例外（種別が無い）も残す
+        logLine(
+          connectionCheckLogLine(resolved.provider.id, resolved.model, {
+            stage: "generate",
+            ok: false,
+            kind: probe.error?.kind,
+            detail: probe.error?.detail,
+            message: probeMessage,
+          })
+        );
         const action = await vscode.window.showErrorMessage(
-          probe.message ?? "生成できませんでした。",
+          probeMessage,
           "ログを表示",
           "閉じる"
         );
@@ -6354,9 +6370,15 @@ export async function activate(
             info.contextWindow
           }）`
         : resolved.model;
-      vscode.window.showInformationMessage(
-        `${result.message}\n使用中: ${detail}\n生成も確認しました。`
+      const doneMessage = `${result.message}\n使用中: ${detail}\n生成も確認しました。`;
+      logLine(
+        connectionCheckLogLine(resolved.provider.id, resolved.model, {
+          stage: "done",
+          ok: true,
+          message: doneMessage,
+        })
       );
+      vscode.window.showInformationMessage(doneMessage);
     })
   );
 
