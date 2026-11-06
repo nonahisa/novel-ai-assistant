@@ -300,7 +300,7 @@ async function confirmWithModal(
     {
       modal: true,
       detail: [
-        `・押さえている校閲のロック ${locks} 件を外します`,
+        `・校閲中にしているファイルのロック ${locks} 件を外します`,
         `・提案 ${proposals} 件（未決）を含む、提案・ロック・編集履歴を GitHub へ送ります`,
         "・本文は送りません",
       ].join("\n"),

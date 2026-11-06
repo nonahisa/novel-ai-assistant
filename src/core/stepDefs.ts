@@ -505,6 +505,18 @@ export const EDITOR_MENU_LABELS = {
   back: "作者モードへ戻る",
 } as const;
 
+/**
+ * 編集者メニューの手順の行の名前（「6. 校閲を終えて作者へ返す」など）。
+ *
+ * 知らせの文で手順を名指すときはここから引く。文に書き写すと、手順の名前や番号を
+ * 変えた日に文だけが古くなる（`syncEntryNames.ts` と同じ考え）
+ */
+export function editorStepLabel(key: EditorStepKey): string {
+  const def = EDITOR_STEP_DEFS.find((one) => one.key === key);
+  if (!def) throw new Error(`編集者メニューに手順 ${key} がありません`);
+  return def.label;
+}
+
 /** 編集者メニューが参照しているコマンドID（テストで実在と許可を確かめる） */
 export const EDITOR_STEP_REFERENCED_COMMANDS: readonly string[] = [
   ...EDITOR_STEP_DEFS.flatMap((def) => def.entries),

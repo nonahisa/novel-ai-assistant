@@ -18,6 +18,13 @@ import { describeLock, normalizeFile } from "../models/fileLock";
 import { isEditorMode, recordEdit } from "../core/actorContext";
 import { editHistoryFile } from "../core/editHistoryFormat";
 import { finishReviewLabel, saveAndSyncLabel } from "../core/syncEntryNames";
+import {
+  reviewLockHeldMessage,
+  reviewLockReleasedOthersDetail,
+  reviewLockTakenMessage,
+  reviewRangeNotifyFailedMessage,
+  reviewRangeStartedMessage,
+} from "../core/reviewLockMessages";
 import { tryGitUserName } from "../core/gitAttribution";
 import {
   readTextFile,
@@ -344,7 +351,7 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
 
   if (current) {
     const answer = await vscode.window.showWarningMessage(
-      `${path.basename(relative)} は押さえられています。`,
+      reviewLockHeldMessage(path.basename(relative)),
       { modal: true, detail: describeLock(current) },
       "外す"
     );
@@ -356,7 +363,7 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
       // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）
       file: editHistoryFile(work.folderPath, filePath),
       detail: current.holder && current.holder !== who
-        ? `${current.holder} が押さえていたものを外しました`
+        ? reviewLockReleasedOthersDetail(current.holder)
         : "",
     });
     // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
@@ -378,7 +385,7 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
     detail: note,
   });
   void vscode.window.showInformationMessage(
-    `${path.basename(relative)} を押さえました。` +
+    reviewLockTakenMessage(path.basename(relative)) +
       // **編集者が送るのは「校閲を終えて返す」だけ**（作者の判断 2026-11-01）。
       // 編集者モードの「保存・同期」は受け取るだけなので、「同期すると」とは言わない
       (holderKind === "editor"
@@ -480,16 +487,16 @@ async function startRangeReview(
     detail: note,
   });
   useLogFile(work.folderPath);
-  notifyDone(`${range}を校閲中にしました。`);
+  // 見出しは下の帯、続き（作者へ届ける手順）は右下の知らせ（帯は1行で切れるため）
+  const started = reviewRangeStartedMessage(range);
+  notifyDone(started.headline, [started.note]);
   // 作者の側が書き続けないよう、鍵はすぐ届ける（記録して送る。失敗しても校閲は始められる）
   if (!canRunProcesses()) return;
   void import("./finishReview.js")
     .then((module) => module.publishLedgerQuietly(work, "校閲の範囲を知らせる"))
     .then((detail) => {
       if (detail) {
-        void vscode.window.showInformationMessage(
-          "校閲の範囲を作者へ知らせられませんでした。同期すると届きます。"
-        );
+        void vscode.window.showInformationMessage(reviewRangeNotifyFailedMessage());
       }
     })
     .catch(() => undefined);
