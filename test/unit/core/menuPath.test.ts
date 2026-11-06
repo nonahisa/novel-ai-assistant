@@ -107,9 +107,12 @@ describe("図の形", () => {
   test("作者モードの「編集者の提案を見る」は、簡単ステップメニューが先で、詳細メニューも添える", () => {
     const text = renderMenuPathText("novelai.viewEditorProposals", "author", true);
     const lines = text.split("\n");
-    expect(lines[0]).toBe(
-      `${MENU_PATH_START} → 簡単ステップメニュー → 6. 編集者校正・校閲 → 編集者の提案を見る`
-    );
+    // 1本目は木（1行の道は出さない。作者の裁定 2026-11-07）
+    expect(lines.slice(0, 3)).toEqual([
+      MENU_PATH_START,
+      "└ 簡単ステップメニュー",
+      "　└ 6. 編集者校正・校閲",
+    ]);
     expect(text).toContain(`${MENU_PATH_TARGET_MARK} 編集者の提案を見る（ここ）`);
     // 兄弟も並ぶ（どこにあるかを周りの行で確かめられる）
     expect(text).toContain("・ 編集者へ渡す");
@@ -120,18 +123,48 @@ describe("図の形", () => {
 
   test("編集者モードの「置いた提案の一覧」は、編集者メニューの5の中", () => {
     const text = renderMenuPathText("novelai.listPlacedProposals", "editor", true);
-    expect(text.split("\n")[0]).toBe(
-      `${MENU_PATH_START} → 編集者メニュー → 5. 置いた提案を見直す → 置いた提案の一覧`
-    );
+    expect(text.split("\n").slice(0, 3)).toEqual([
+      MENU_PATH_START,
+      "└ 編集者メニュー",
+      "　└ 5. 置いた提案を見直す",
+    ]);
+    expect(text).toContain(`${MENU_PATH_TARGET_MARK} 置いた提案の一覧（ここ）`);
   });
 
   test("押すとそのまま走る手順は、手順の行そのものを指す", () => {
     const text = renderMenuPathText("novelai.finishReviewAndReturn", "editor", true);
-    expect(text.split("\n")[0]).toBe(
-      `${MENU_PATH_START} → 編集者メニュー → 6. 校閲を終えて作者へ返す`
-    );
+    expect(text.split("\n").slice(0, 2)).toEqual([MENU_PATH_START, "└ 編集者メニュー"]);
+    expect(text).toContain(`${MENU_PATH_TARGET_MARK} 6. 校閲を終えて作者へ返す（ここ）`);
     // 一番上の階層の兄弟（7つの手順）が並ぶ
     for (const def of EDITOR_STEP_DEFS) expect(text).toContain(def.label);
+  });
+
+  /*
+    作者の裁定（2026-11-07「木だけ」）：1行の道と木の両方を出すと、木にも同じ道が全部入るので
+    相談や Discord の答えで同じ道が二重（本文の手順と合わせて三重）に出ていた。
+    1本目の道は木だけにし、2本目以降の「ほかの道」の1行と入口の1行は残す
+  */
+  test("1本目の道は木だけで、目標までの道が二重に出ない", () => {
+    for (const mode of MODES) {
+      for (const item of treeActions()) {
+        const [first, ...rest] = menuPathsOf(item.command, mode, true);
+        if (!first || first.place === "entrance") continue;
+        const text = renderMenuPathText(item.command, mode, true);
+        const lines = text.split("\n");
+        const label = `${mode} ${item.command}`;
+        // 図の先頭は木の頭（アイコンの行）
+        expect(lines[0], label).toBe(MENU_PATH_START);
+        // 1本目の1行の道は、どの行にも出ない
+        expect(lines.includes(menuPathLine(first)), label).toBe(false);
+        // 「→」でつないだ1行の道は、ほかの道の行にだけある
+        const arrowLines = lines.filter((line) => line.includes(`${MENU_PATH_START} → `));
+        expect(arrowLines.every((line) => line.startsWith("ほかの道：")), label).toBe(true);
+        // 目標の印は木の中に1つだけ
+        expect(lines.filter((line) => line.includes(MENU_PATH_TARGET_MARK)), label).toHaveLength(1);
+        // ほかの道の行は道の数だけ残る
+        expect(lines.filter((line) => line.startsWith("ほかの道：")), label).toHaveLength(rest.length);
+      }
+    }
   });
 
   test("編集者モードで、作者だけの操作はモードの切り替えを添えた入口になる", () => {

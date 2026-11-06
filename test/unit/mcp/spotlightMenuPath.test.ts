@@ -46,7 +46,9 @@ describe("guide.spotlight の返事", () => {
   test("編集者へ渡した写しでは、編集者メニューの図になる", () => {
     markAsEditorCopy();
     const result = guideSpotlight({ folder, label: "置いた提案の一覧" });
-    expect(result.menuPath).toContain("編集者メニュー → 5. 置いた提案を見直す → 置いた提案の一覧");
+    // 図は木だけ（作者の裁定 2026-11-07）。編集者メニューの5の中に印が付く
+    expect(result.menuPath).toContain("└ 編集者メニュー\n　└ 5. 置いた提案を見直す\n");
+    expect(result.menuPath).toContain("置いた提案の一覧（ここ）");
   });
 
   test("解けない名前なら図を省く（依頼そのものは届ける）", () => {
