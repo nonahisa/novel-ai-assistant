@@ -309,10 +309,10 @@ test("右クリック「ファイル名にサブタイトルを付ける」で�
     ],
     async (session) => {
       const { page } = session;
-      await showWork(page, "001");
+      await showWork(page, "第1話");
 
       /* ── 話数のある話 ── */
-      await treeContextMenu(page, "001", "ファイル名にサブタイトルを付ける");
+      await treeContextMenu(page, "第1話", "ファイル名にサブタイトルを付ける");
       await waitDialog(page, "ファイル名を変えます", "名前を変える確認の窓が出る（001.txt）");
       await pressDialogButton(page, "変える");
       await waitEpisodeFiles(session, ["001_湖畔の誓い.txt", "幕間.txt", "閑話.txt"], "001.txt が 001_湖畔の誓い.txt になる");
@@ -397,10 +397,10 @@ test("話の挿入で後ろの話の番号がずれると、各話あらすじ�
     ],
     async (session) => {
       const { page } = session;
-      await showWork(page, "001");
+      await showWork(page, "第1話");
 
       /* ── 第2話の前に挿入：002→003、003→004 ── */
-      await insertBefore(page, "002", "割り込み");
+      await insertBefore(page, "第2話", "割り込み");
       let inserted = "";
       await waitUntil(
         async () => {
@@ -429,7 +429,8 @@ test("話の挿入で後ろの話の番号がずれると、各話あらすじ�
       await clearNotifications(page);
 
       /* ── 挿入した話を削除して詰める：003→002、004→003 ── */
-      const insertedHead = inserted.replace(/\.txt$/, "");
+      // 木の行の名前は「第N話」で始まる（ファイル名ではない）。挿入した話は第2話の位置に入る
+      const insertedHead = "第2話";
       await waitUntil(async () => (await treeRowLabels(page)).some((label) => label.startsWith(insertedHead)), `作品一覧に「${inserted}」の行が出る`, 20_000);
       await deleteAndRenumber(page, insertedHead, inserted);
       await waitEpisodeFiles(session, ["001.txt", "002.txt", "003.txt"], "割り込みの話が消え、003.txt・004.txt が 002.txt・003.txt へ戻る");
@@ -474,9 +475,9 @@ test("番号だけの名前の話を削除して詰めると、消えた話の�
     ],
     async (session) => {
       const { page } = session;
-      await showWork(page, "001");
+      await showWork(page, "第1話");
 
-      await deleteAndRenumber(page, "002", "002.txt");
+      await deleteAndRenumber(page, "第2話", "002.txt");
       await waitEpisodeFiles(session, ["001.txt", "002.txt"], "002.txt が消え、003.txt が 002.txt へ詰まる");
       const notice = await waitNotice(page, "件の話数を付け替えました", "削除の知らせが出る");
       expect(notice, "削除の知らせ").toContain("消えた話の読みの辞書が1件残っています");
@@ -510,9 +511,9 @@ test("挿入で名前がずれた話を原稿エディターで開くと、読�
     ],
     async (session) => {
       const { page } = session;
-      await showWork(page, "001");
+      await showWork(page, "第1話");
 
-      await insertBefore(page, "002", "割り込み");
+      await insertBefore(page, "第2話", "割り込み");
       await waitUntil(
         async () => {
           const files = await episodeFiles(session);
