@@ -34,6 +34,7 @@ import {
   type JsonFileFormat,
 } from "./jsonFileFormat";
 import { EDITING_SITE_FILE, EDITOR_SHARE_MANIFEST_FILE } from "./editingRepo";
+import { DRIVE_SYNC_RECORD_PREFIX } from "./driveSyncPlan";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -892,6 +893,16 @@ export const IME_WORD_READINGS_IGNORE_RULE = ".aiwriter/imeWordReadings.json";
 export const IME_READINGS_IGNORE_RULE = ".aiwriter/imeReadings.json";
 
 /**
+ * Google ドライブで2台をそろえるときの、この端末だけの印（設計書5.10.4。
+ * `.aiwriter/drive-sync/<端末ID>.json`）。**Git へも載せない**——ドライブの
+ * 作品はふつう Git を使わないが、あとで GitHub へ切り替えたとき、端末ごとの
+ * 印が記録されて別の端末へ届くと、向こうの3点比較の基準が狂う。
+ * 一括の `IGNORED_PATHS` へ入れると全作品の .gitignore が書き換わるので、
+ * 印を初めて書く口が `ensureOnUseIgnoreRule` で足す（その口は段階3で作る）。
+ */
+export const DRIVE_SYNC_RECORD_IGNORE_RULE = DRIVE_SYNC_RECORD_PREFIX;
+
+/**
  * **使った作品にだけ足す**除外の行（作者の裁定、2026-10-25 夜。名前の控えは
  * 2026-10-26 に揃えた）。
  *
@@ -904,6 +915,7 @@ export const IME_READINGS_IGNORE_RULE = ".aiwriter/imeReadings.json";
 export const ON_USE_IGNORED_PATHS: readonly string[] = [
   IME_READINGS_IGNORE_RULE,
   IME_WORD_READINGS_IGNORE_RULE,
+  DRIVE_SYNC_RECORD_IGNORE_RULE,
 ];
 
 /** キャッシュの除外規則と、それを打ち消す規則（設計書5.5.7） */
