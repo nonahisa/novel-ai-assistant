@@ -619,7 +619,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             requiresWork: true,
             shownInModes: ["editor"],
             detail:
-              "開いているファイルを「校閲中」として押さえる\n\n" +
+              "開いているファイルを「校閲中」にする\n\n" +
               "・作者が直そうとすると、誰がいつから見ているかが出る\n\n" +
               "・ファイル単位。他の話は今までどおり書ける\n\n" +
               "・終わったらもう一度押して外す\n\n" +
@@ -650,7 +650,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             requiresWork: true,
             shownInModes: ["editor"],
             detail:
-              "押さえている校閲のロックを外し、提案を作者へ返す\n\n" +
+              "校閲中にしているファイルのロックを外し、提案を作者へ返す\n\n" +
               "・送るのは提案・ロック・編集履歴だけ\n\n" +
               "・本文に未記録の変更があれば、送らずに止める\n\n" +
               "編集者モードで使う。",
