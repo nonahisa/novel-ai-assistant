@@ -143,6 +143,37 @@ describe("要件ごとの入れ方", () => {
     expect(note).toContain("Linuxでは、この1行で入ります。");
   });
 
+  test("GitとGitHub CLIも、Macの案内に「Linux」「apt」と出さない", () => {
+    // Homebrew の無い Mac で「多くのLinuxでは…sudo apt install」と出ていた
+    for (const id of ["git", "gh"]) {
+      const requirement = REQUIREMENTS.find((r) => r.id === id)!;
+      const note = manualInstallNote(requirement.manualSteps!, "darwin");
+
+      expect(note, id).not.toContain("Linux");
+      expect(note, id).not.toContain("apt");
+      expect(note, id).toContain("Mac");
+    }
+  });
+
+  test("GitのMacの案内は、Appleのコマンドラインツールの道を示す", () => {
+    // git-scm.com の Mac の頁が示す入れ方（2026-11-06 に確かめた）
+    const git = REQUIREMENTS.find((r) => r.id === "git")!;
+
+    expect(manualInstallNote(git.manualSteps!, "darwin")).toContain(
+      "xcode-select --install"
+    );
+  });
+
+  test("GitとGitHub CLIのLinuxの案内は、これまでの文のまま", () => {
+    for (const id of ["git", "gh"]) {
+      const requirement = REQUIREMENTS.find((r) => r.id === id)!;
+
+      expect(manualInstallNote(requirement.manualSteps!, "linux"), id).toBe(
+        `多くのLinuxでは、パッケージ管理から入ります（例：sudo apt install ${id}）。`
+      );
+    }
+  });
+
   test("GitとGitHub CLIにも入れ方がある", () => {
     for (const id of ["git", "gh"]) {
       const requirement = REQUIREMENTS.find((r) => r.id === id)!;

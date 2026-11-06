@@ -207,6 +207,10 @@ export const REQUIREMENTS: Requirement[] = [
     manualSteps: {
       page: "https://git-scm.com/downloads",
       note: "多くのLinuxでは、パッケージ管理から入ります（例：sudo apt install git）。",
+      // git-scm.com の Mac の頁が示す、Homebrew を使わない道（2026-11-06 に確かめた）
+      macNote:
+        "Macでは、ターミナルで xcode-select --install を実行すると、" +
+        "Apple のコマンドラインツールと一緒に入ります。",
     },
   },
   {
@@ -223,6 +227,8 @@ export const REQUIREMENTS: Requirement[] = [
     manualSteps: {
       page: "https://cli.github.com/",
       note: "多くのLinuxでは、パッケージ管理から入ります（例：sudo apt install gh）。",
+      // cli.github.com が Homebrew のほかに示すのは、Mac 用の zip だけ（2026-11-06 に確かめた）
+      macNote: "Macでは、配布ページから Mac 用のファイル（zip）を取ってきて入れられます。",
     },
   },
 ];
