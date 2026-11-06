@@ -21,6 +21,7 @@ import {
 import { withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { editorGroupTabs } from "./support/workbenchDom";
+import { ADD_SCENE_MEMO_PRESS, OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_はじまり.txt";
 const TEXT = "一行目の文。\n二行目の文。\n// 見張りのメモ\n四行目の文。\n五行目の文。\n";
@@ -32,7 +33,7 @@ test("校正・メモパネルの行を押すと、左の原稿へ戻ってそ�
 
     // 原稿の中から Ctrl+Alt+M で、校正・メモパネルを原稿の横（右の列）に開く
     await placeCaretAfter(frame, "一行目");
-    await page.keyboard.press("Control+Alt+KeyM");
+    await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
     let panel = await memoPanelFrame(page);
     await waitUntil(async () => {
       panel = await memoPanelFrame(page);
@@ -93,7 +94,7 @@ test("校正・メモパネルの行を押すと、左の原稿へ戻ってそ�
     // 念押し：示された行で字を打つと、その行の頭に入る（焦点が左の原稿へ戻っていて、
     // 2枚目へ打っていない）
     await page.keyboard.insertText("印");
-    await page.keyboard.press("Control+KeyS");
+    await page.keyboard.press("ControlOrMeta+KeyS");
     const file = path.join(session.manuscriptFolder, EPISODE);
     await waitUntil(async () => (await readFile(file, "utf8")).includes("印"), "示された行で打った字がファイルに入る");
     const lines = (await readFile(file, "utf8")).replace(/\r\n/g, "\n").split("\n");
@@ -105,7 +106,7 @@ test("校正・メモパネルの行を押すと、左の原稿へ戻ってそ�
     */
     const memoLinesBefore = (await composeText(frames[0])).split("\n").filter((line) => line.startsWith("//")).length;
     await placeCaretAfter(frames[0], "五行目");
-    await page.keyboard.press("Control+Slash");
+    await page.keyboard.press(ADD_SCENE_MEMO_PRESS);
     await waitUntil(
       async () =>
         (await composeText(frames[0])).split("\n").filter((line) => line.startsWith("//")).length === memoLinesBefore + 1,

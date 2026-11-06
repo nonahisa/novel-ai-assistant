@@ -87,7 +87,7 @@ test("同じ話を縦書きと横書きの2枚で開いて、片方で打った�
       expect(await composeText(right)).toContain("【横で足した】");
 
       // 保存すると、両方の字が1つのファイルに入る（ファイルで見る）
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(
         async () => {
           const text = await readEpisode(session);

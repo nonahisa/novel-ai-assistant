@@ -12,6 +12,7 @@ import { statsFrame } from "../support/statsFixture";
 import { waitUntil } from "../support/wait";
 import { activateTab, quickOpen } from "../support/workbenchDom";
 import { recordFeature } from "./support/featureScene";
+import { EDITOR_BOTTOM_PRESS } from "../support/keys";
 
 const ADD = "　傘を持たない彼女は、時計の針ばかりを見つめている。雨は止む気配もなく、最終のアナウンスだけが遠くで響いていた。".repeat(2);
 
@@ -33,15 +34,15 @@ test("目標のお祝いの広報素材を撮る", async () => {
       await quickOpen(page, "001_雨の駅.txt");
       await page.keyboard.press("Control+Alt+Shift+F8");
       await page.waitForTimeout(1_500);
-      await page.keyboard.press("Control+End");
+      await page.keyboard.press(EDITOR_BOTTOM_PRESS);
       // 1回目の保存は基準を置くだけ（増減を数えない）ので、先に1字だけ足して保存しておく
       await page.keyboard.insertText("。");
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await page.waitForTimeout(2_000);
       await caption("書き進めて保存し、目標に届くと");
       await page.keyboard.insertText(ADD);
       await page.waitForTimeout(800);
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await page.waitForTimeout(2_000);
       // 統計は別のタブなので、戻ると見えるようになったところで祝いが上がる
       await activateTab(page, "執筆統計: 雨の駅");

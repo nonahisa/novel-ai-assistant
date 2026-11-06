@@ -53,6 +53,7 @@ import {
   tabIsDirty,
   textEditorVisibleText,
 } from "./support/workbenchDom";
+import { EDITOR_BOTTOM_PRESS } from "./support/keys";
 
 const run = promisify(execFile);
 
@@ -160,7 +161,7 @@ async function typeSaveCloseInManuscript(session: E2ESession, label: string): Pr
   };
   note(`${label}：打った後`, afterType);
 
-  await page.keyboard.press("Control+KeyS");
+  await page.keyboard.press("ControlOrMeta+KeyS");
   await page.waitForTimeout(4_000);
   const afterSave = {
     ...(await snapshot(session)),
@@ -278,7 +279,7 @@ test("B：files.readonlyInclude の原稿を素のテキストエディターで
       await waitUntil(async () => (await textEditorVisibleText(page)).includes("二行目の文"), "素のエディターに本文が出る", 20_000);
       note("B：開いた直後", await snapshot(session));
       await focusTextEditor(page);
-      await page.keyboard.press("Control+End");
+      await page.keyboard.press(EDITOR_BOTTOM_PRESS);
       await page.keyboard.type("足した字");
       await page.waitForTimeout(1_500);
       // 読み取り専用の素のエディターは、打つと「読み取り専用のエディターでは編集できません」の吹き出しを出す
@@ -287,7 +288,7 @@ test("B：files.readonlyInclude の原稿を素のテキストエディターで
         .allInnerTexts()
         .catch(() => [] as string[]);
       note("B：打った後", { ...(await snapshot(session)), visible: await textEditorVisibleText(page), hover });
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await page.waitForTimeout(2_500);
       note("B：Ctrl+S の後", await snapshot(session));
       expect(await fileText(session), "読み取り専用のファイルが書き換わりました").toBe(ORIGINAL);

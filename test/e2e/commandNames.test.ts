@@ -25,6 +25,7 @@ import {
   keybindingsEditorRows,
   OPEN_KEYBINDINGS_BINDING,
 } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const EPISODE = "001_はじまり.txt";
@@ -68,7 +69,7 @@ test("パレット・キーの画面・パネルのタブに「校正・メモ�
 
     // ── パネルのタブと見出し ──
     await placeCaretAfter(frame, "一行目");
-    await page.keyboard.press("Control+Alt+KeyM");
+    await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
     await waitUntil(async () => (await memoPanelFrame(page)) !== undefined, "校正・メモパネルが開く", 30_000);
     const tabs = (await editorGroupTabs(page)).flat();
     expect(

@@ -41,9 +41,9 @@ test("コピー（投稿サイト用）の広報素材を撮る", async () => {
       await page.waitForTimeout(2_500);
       await clearNotifications(page);
       // 貼ってみせる（新しい空のファイルへ）
-      await page.keyboard.press("Control+KeyN");
+      await page.keyboard.press("ControlOrMeta+KeyN");
       await page.waitForTimeout(800);
-      await page.keyboard.press("Control+KeyV");
+      await page.keyboard.press("ControlOrMeta+KeyV");
       await caption("貼ると、ルビは｜切符《きっぷ》の形になっている");
       await page.waitForTimeout(3_500);
     },

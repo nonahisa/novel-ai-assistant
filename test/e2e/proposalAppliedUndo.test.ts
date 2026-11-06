@@ -32,6 +32,7 @@ import {
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { clearNotifications, pressWorkbenchKey } from "./support/workbenchDom";
+import { CLOSE_ACTIVE_EDITOR_PRESS, OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", "　近づいてみると、男は以外にも若かった。", "　ホームの時計が、零時を指していた。", ""].join("\n");
@@ -117,7 +118,7 @@ async function openProposals(page: Page, ready: (frame: Frame) => Promise<boolea
  */
 async function closeProposals(page: Page): Promise<void> {
   await page.locator(".tabs-container .tab", { hasText: "提案" }).first().click();
-  await pressWorkbenchKey(page, "Control+F4");
+  await pressWorkbenchKey(page, CLOSE_ACTIVE_EDITOR_PRESS);
   await waitUntil(async () => (await proposalPanelFrame(page)) === undefined, "提案パネルが閉じる", 10_000);
 }
 
@@ -187,7 +188,7 @@ test("校正・メモパネルの［直す］のあと、提案パネルを閉�
       await placeCaretAfter(frame, "終電を逃した");
 
       // 校正・メモパネルの［直す］（提案パネルは開かない）
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       let memo: Frame | undefined;
       await waitUntil(
         async () => {

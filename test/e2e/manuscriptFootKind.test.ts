@@ -103,10 +103,10 @@ test("下段は「この話で今日 +N字」になり、第1話で1日の目標
       // **最初の保存は、その日の起点（基準線）を置くだけで、書いた量には数えない**（統計の作り）。
       // 先に1字打って保存し、起点を置いてから、目標を超えて打つ
       await page.keyboard.insertText("。");
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(async () => (await footText(firstFrame, "note")).includes("保存しました"), "起点を置く保存が通る", 15_000);
       await page.keyboard.insertText("あ".repeat(30));
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
 
       // 第1話の下段：この話で今日 +30字、目標に届いた一言
       await waitUntil(

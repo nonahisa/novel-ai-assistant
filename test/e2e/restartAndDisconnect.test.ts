@@ -69,6 +69,7 @@ import {
   tabNamesInclude,
   waitForQuickPick,
 } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 /** 拡張機能ホストを再起動するキー（`hostRestartDisconnect.test.ts` と同じ組。起こすたびに別の keybindings.json） */
 const RESTART_HOST_KEY = "ctrl+alt+shift+r";
@@ -158,7 +159,7 @@ test("原稿と校正・メモパネルを左右に開いたまま拡張機能�
       const { page } = session;
       const frame = await openEpisode(page, MEMO_EPISODE, "三行目の文");
       await placeCaretAfter(frame, "一行目の文");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       await waitUntil(
         async () => ((await (await memoPanelFrame(page))?.locator("button.go", { hasText: MEMO_TEXT }).count()) ?? 0) > 0,
         "校正・メモパネルが右に開き、メモの行が出る",
@@ -332,7 +333,7 @@ test("拡張機能ホストの再起動で切れた原稿へ校正・メモパ�
       const frame = await openEpisode(page, MEMO_EPISODE, "三行目の文");
       const verticalBefore = await frame.evaluate(() => document.body.classList.contains("vertical"));
       await placeCaretAfter(frame, "一行目の文");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       await waitUntil(
         async () => ((await (await memoPanelFrame(page))?.locator("button.go", { hasText: MEMO_TEXT }).count()) ?? 0) > 0,
         "校正・メモパネルが右に開き、メモの行が出る",
@@ -608,7 +609,7 @@ test("第1話と第2話を横書きで開いたまま VS Code を開き直し、
 
       // 第2話のタブを閉じ、開き直す：覚えていた見た目（横書き・元の大きさ）で開き、さっきの見た目は当たらない
       await activateTab(page, EP2);
-      await pressWorkbenchKey(page, "Control+KeyW");
+      await pressWorkbenchKey(page, "ControlOrMeta+KeyW");
       await waitUntil(async () => !tabNamesInclude((await editorGroupTabs(page)).flat(), EP2), "第2話のタブが閉じる", 10_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（タブ：${JSON.stringify(await readTabState(page))}）`);

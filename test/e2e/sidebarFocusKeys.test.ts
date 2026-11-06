@@ -31,6 +31,7 @@ import { expandTreeRow, showSidebar, SIDEBAR_LAUNCH, treeRowLabels } from "./sup
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { closeDialog, dialogText, quickPickTitle } from "./support/workbenchDom";
+import { CHECK_TYPOS_PRESS } from "./support/keys";
 
 const EPISODES = [
   { name: "第1話_はじまり.txt", text: "一話の本文。\n" },
@@ -76,7 +77,7 @@ async function typoCheckStarted(page: Page): Promise<string | undefined> {
 
 /** Ctrl+Alt+T を押しても、走った印が3秒出ないこと */
 async function expectTypoKeyIgnored(page: Page, where: string): Promise<void> {
-  await page.keyboard.press("Control+Alt+KeyT");
+  await page.keyboard.press(CHECK_TYPOS_PRESS);
   let seen: string | undefined;
   await holdsFor(
     async () => (seen = await typoCheckStarted(page)) === undefined,
@@ -110,7 +111,7 @@ test("作品一覧の作品の行・検索の欄に焦点があると Ctrl+Alt+T
       await closeDialog(page);
 
       // ── 検索の欄（inputFocus）：本体の「検索」を開くと焦点が入力欄に載る ──
-      await page.keyboard.press("Control+Shift+KeyF");
+      await page.keyboard.press("ControlOrMeta+Shift+KeyF");
       await waitUntil(
         async () => (await focusWhere(page)).element.startsWith("TEXTAREA") || (await focusWhere(page)).element.startsWith("INPUT"),
         "検索の欄に焦点が載る",

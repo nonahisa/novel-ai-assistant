@@ -146,10 +146,10 @@ async function openSample(page: Page): Promise<Frame> {
 async function writeAndSave(page: Page, frame: Frame): Promise<void> {
   await placeCaretAfter(frame, "線路の先をじっと見つめた。");
   await page.keyboard.insertText("。");
-  await page.keyboard.press("Control+KeyS");
+  await page.keyboard.press("ControlOrMeta+KeyS");
   await waitUntil(async () => (await footText(frame, "note")).includes("保存しました"), "起点を置く保存が通る", 15_000);
   await page.keyboard.insertText(CHATTER_TYPED);
-  await page.keyboard.press("Control+KeyS");
+  await page.keyboard.press("ControlOrMeta+KeyS");
   await waitUntil(async () => /この話で今日 \+\d+字/.test(await footText(frame, "counts")), "2回目の保存で下段が「この話で今日 +N字」になる", 30_000).catch(
     async (error: unknown) => {
       throw new Error(`${String(error)}（いまの下段：「${await footText(frame, "counts")}」／知らせ：${await footText(frame, "note")}）`);

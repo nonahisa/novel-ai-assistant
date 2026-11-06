@@ -41,6 +41,7 @@ import {
   toggleQuickPickRow,
   waitForQuickPick,
 } from "./support/workbenchDom";
+import { EDITOR_BOTTOM_PRESS } from "./support/keys";
 
 const EPISODE = "001_はじまり.txt";
 const TEXT = "　朝の駅は静かだった。\n　改札を抜けて、白い息を吐いた。\n";
@@ -220,7 +221,7 @@ test("人物設定の JSON を未保存のまま「一括抽出」を押すと�
       await waitUntil(async () => (await page.locator(".monaco-editor .view-lines", { hasText: "あかり" }).count()) > 0, "人物設定の JSON が素のエディターで開く", 15_000);
       await focusTextEditor(page);
       // JSON を壊さない字（末尾の改行）を足して未保存にする
-      await page.keyboard.press("Control+End");
+      await page.keyboard.press(EDITOR_BOTTOM_PRESS);
       await page.keyboard.press("Enter");
       await waitUntil(async () => tabIsDirty(page, name), "人物設定の JSON のタブに●が付く", 10_000);
       const before = await readFile(characterFile, "utf8");

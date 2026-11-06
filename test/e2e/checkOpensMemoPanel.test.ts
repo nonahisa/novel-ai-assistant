@@ -41,6 +41,7 @@ import {
   toggleQuickPickRow,
   waitForQuickPick,
 } from "./support/workbenchDom";
+import { CHECK_NOTATION_PRESS, OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_星.txt";
 /** 「沢山」1回・「たくさん」2回。表記ゆれの組はこの1組だけ */
@@ -91,7 +92,7 @@ async function runNotationCheck(page: Page, frame: Frame): Promise<number> {
   await placeCaretAfter(frame, "空には");
   const focusedGroup = await activeGroupIndex(page);
   expect(focusedGroup, "押す前は原稿の列（0）に焦点がある").toBe(0);
-  await page.keyboard.press("Control+Alt+KeyH");
+  await page.keyboard.press(CHECK_NOTATION_PRESS);
   await waitUntil(
     async () => (await quickPickTitle(page))?.startsWith("表記ゆれが 1 組見つかりました") === true,
     "表記ゆれの組を選ぶ画面が出る",
@@ -200,7 +201,7 @@ test("校正・メモパネルが提案パネルの後ろに隠れていても�
 
       // 先に校正・メモパネルを開く（まだ指摘は無い）
       await placeCaretAfter(frame, "空には");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       await waitUntil(async () => (await memoPanelFrame(page)) !== undefined, "校正・メモパネルが開く", 30_000);
       const memoBefore = await memoPanelFrame(page);
       if (!memoBefore) throw new Error("校正・メモパネルが見つかりません");

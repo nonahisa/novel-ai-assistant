@@ -42,6 +42,7 @@ import {
   statusBarTexts,
   type QuickPickRow,
 } from "./support/workbenchDom";
+import { CHECK_TYPOS_PRESS } from "./support/keys";
 
 /** 偽のモデルが申告する読める長さ（トークン） */
 const DECLARED_TOKENS = 16_384;
@@ -279,7 +280,7 @@ test("申告より短いところで頭打ちになるモデルで読める長�
         const typoFrom = fake.requests.length;
         const frame = await openEpisode(page, EPISODE, "改札を抜けて");
         await placeCaretAfter(frame, "静かだった。");
-        await page.keyboard.press("Control+Alt+KeyT");
+        await page.keyboard.press(CHECK_TYPOS_PRESS);
         // 量の確認（上部の選ぶ窓。行に「1 チャンク中 1 件を処理します」）で先頭の［実行］を Enter で選ぶ
         let firstRow = "";
         await waitUntil(

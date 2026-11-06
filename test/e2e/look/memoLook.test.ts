@@ -15,6 +15,7 @@ import { resizeWindows, withVsCode } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
 import { clearNotifications, quickOpen } from "../support/workbenchDom";
 import { lookEnabled, lookNote, shootNow, shootPage } from "./lookSupport";
+import { OPEN_SCENE_MEMOS_PRESS } from "../support/keys";
 
 const EPISODE = "001_駅.txt";
 const TEXT = [
@@ -63,7 +64,7 @@ const LONG: SampleFinding = {
 };
 
 async function openMemoPanel(page: Page, minRows: number): Promise<Frame> {
-  await page.keyboard.press("Control+Alt+KeyM");
+  await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
   let memo: Frame | undefined;
   await waitUntil(
     async () => {

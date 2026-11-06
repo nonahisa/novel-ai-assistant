@@ -17,6 +17,7 @@ import { writeSampleFinding } from "./support/sampleFinding";
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { clearNotifications } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 const TEXT = [
@@ -29,7 +30,7 @@ const LONG_SUGGESTION =
   "ホームの大きな時計の針は、まるで時間そのものがそこで止まってしまったかのように、ちょうど零時の真上を静かに、しかしはっきりと指していた。";
 
 async function openMemoPanel(page: Page): Promise<Frame> {
-  await page.keyboard.press("Control+Alt+KeyM");
+  await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
   let memo: Frame | undefined;
   await waitUntil(
     async () => {

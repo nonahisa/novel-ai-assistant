@@ -57,7 +57,7 @@ export async function fillInput(page: Page, text: string): Promise<void> {
   const input = page.locator(`${WIDGET} input`).first();
   await input.waitFor({ state: "visible", timeout: 10_000 });
   await input.click();
-  await page.keyboard.press("Control+KeyA");
+  await page.keyboard.press("ControlOrMeta+KeyA");
   if (text === "") await page.keyboard.press("Delete");
   else await page.keyboard.insertText(text);
 }
@@ -84,7 +84,7 @@ export async function runCommand(page: Page, title: string): Promise<void> {
   */
   const input = page.locator(`${WIDGET} input`).first();
   for (let attempt = 1; ; attempt++) {
-    await pressWorkbenchKey(page, "Control+Shift+KeyP");
+    await pressWorkbenchKey(page, "ControlOrMeta+Shift+KeyP");
     const shown = await input
       .waitFor({ state: "visible", timeout: 5_000 })
       .then(() => true)

@@ -43,6 +43,7 @@ import {
   textEditorVisibleText,
   waitForQuickPick,
 } from "./support/workbenchDom";
+import { EDITOR_TOP_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", ""].join("\n");
@@ -197,12 +198,12 @@ test("編集者メニューを上から順に押すと、範囲を選び・提�
       await quickOpen(page, EPISODE);
       await waitUntil(async () => (await textEditorVisibleText(page)).includes("終電を逃した"), "素のテキストエディターに本文が出る", 20_000);
       await focusTextEditor(page);
-      await page.keyboard.press("Control+Home");
+      await page.keyboard.press(EDITOR_TOP_PRESS);
       await page.keyboard.press("Shift+End");
       await clickRow(page, STEPS[3]);
       await waitUntil(async () => (await treeRow(page, "修正を提案する").count()) > 0, "「4」を開くと「修正を提案する」が並ぶ", 10_000);
       await focusTextEditor(page);
-      await page.keyboard.press("Control+Home");
+      await page.keyboard.press(EDITOR_TOP_PRESS);
       await page.keyboard.press("Shift+End");
       await clickRow(page, "修正を提案する");
       await waitForQuickInput(page, "修正を提案する（1/2）：修正案", 15_000).catch(async (error: unknown) => {

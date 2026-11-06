@@ -550,7 +550,7 @@ test("名前が変わった話の問いが右下に出ても、書いている�
       await waitUntil(async () => (await composeText(frame)).includes(typed), "打った字がすべて原稿の面に出る").catch(async (error: unknown) => {
         throw new Error(`${String(error)}（打った字：${typed}／面：${JSON.stringify(await composeText(frame))}）`);
       });
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       const file = path.join(session.manuscriptFolder, "第1話_出会い.txt");
       const expected = `　朝の駅は静かだった。${typed}\n`;
       await waitUntil(async () => (await readFile(file, "utf8").catch(() => "")).replace(/\r\n/g, "\n") === expected, "打った字がすべてファイルに入る", 15_000).catch(
