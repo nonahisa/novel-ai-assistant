@@ -1,9 +1,12 @@
 import { describe, expect, test } from "vitest";
 import * as path from "node:path";
 import {
+  DRIVE_SYNC_RECORD_PREFIX,
   buildDriveManifest,
   checkManifestArrival,
+  deviceScopedPath,
   isIgnoredSyncPath,
+  isSendableSyncPath,
   isSafeSyncPath,
   parseDriveManifest,
   planDriveReceive,
@@ -31,12 +34,13 @@ const H3 = hashText("さらに書き足した中身");
 
 function manifest(over: Partial<DriveManifest> = {}): DriveManifest {
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     sentAt: "2026-11-06T12:00:00.000Z",
     round: 1,
     deviceId: "device-b",
     deviceName: "ノートPC",
     files: new Map(),
+    bases: new Map(),
     deleted: [],
     resolvedConflicts: new Map(),
     ...over,
@@ -56,8 +60,10 @@ function planOne(input: {
   const deleted: string[] = [];
   if (input.remote === "deleted") deleted.push(file);
   else if (input.remote !== undefined) files.set(file, input.remote);
-  const resolvedConflicts = new Map<string, string>();
-  if (input.resolved !== undefined) resolvedConflicts.set(file, input.resolved);
+  const resolvedConflicts = new Map<string, { against: string; round: number }>();
+  if (input.resolved !== undefined) {
+    resolvedConflicts.set(file, { against: input.resolved, round: 1 });
+  }
 
   const decisions = planDriveReceive({
     marks: new Map(input.mark === undefined ? [] : [[file, input.mark]]),
@@ -497,14 +503,15 @@ describe("目録が届ききったか", () => {
 
 describe("目録の読み取り：壊れた・形の違う目録は直さず「読めない」", () => {
   const good = {
-    formatVersion: 1,
+    formatVersion: 2,
     sentAt: "2026-11-06T12:00:00.000Z",
     round: 3,
     deviceId: "device-b",
     deviceName: "ノートPC",
     files: { "本文/第1話.txt": H1 },
+    bases: { "本文/第1話.txt": H0 },
     deleted: ["本文/第2話.txt"],
-    resolvedConflicts: { "本文/第1話.txt": H2 },
+    resolvedConflicts: { "本文/第1話.txt": { against: H2, round: 2 } },
   };
 
   test("正しい目録は読める", () => {
@@ -514,13 +521,15 @@ describe("目録の読み取り：壊れた・形の違う目録は直さず「�
     expect(result.manifest.round).toBe(3);
     expect(result.manifest.files.get("本文/第1話.txt")).toBe(H1);
     expect(result.manifest.deleted).toEqual(["本文/第2話.txt"]);
-    expect(result.manifest.resolvedConflicts.get("本文/第1話.txt")).toBe(H2);
+    expect(result.manifest.resolvedConflicts.get("本文/第1話.txt")).toEqual({ against: H2, round: 2 });
   });
 
   const broken: [string, string][] = [
     ["JSONでない", "{ formatVersion: 1"],
     ["配列", "[]"],
-    ["版が違う", JSON.stringify({ ...good, formatVersion: 2 })],
+    ["版が違う", JSON.stringify({ ...good, formatVersion: 3 })],
+    // 版1（選び終えた食い違いがハッシュだけ）は配っていないので読まない
+    ["版1", JSON.stringify({ ...good, formatVersion: 1, resolvedConflicts: { "本文/第1話.txt": H2 } })],
     ["版が無い", JSON.stringify({ ...good, formatVersion: undefined })],
     ["回の番号が0", JSON.stringify({ ...good, round: 0 })],
     ["回の番号が小数", JSON.stringify({ ...good, round: 1.5 })],
@@ -537,6 +546,12 @@ describe("目録の読み取り：壊れた・形の違う目録は直さず「�
     ["同じ道が files と deleted の両方", JSON.stringify({ ...good, deleted: ["本文/第1話.txt"] })],
     ["deleted に同じ道が2つ", JSON.stringify({ ...good, deleted: ["a.txt", "a.txt"] })],
     ["選び終えた食い違いのハッシュが壊れている", JSON.stringify({ ...good, resolvedConflicts: { "本文/第1話.txt": 1 } })],
+    ["送った端末の印が無い", JSON.stringify({ ...good, bases: undefined })],
+    ["送っていないファイルの印", JSON.stringify({ ...good, bases: { "本文/第9話.txt": H0 } })],
+    ["印のハッシュが壊れている", JSON.stringify({ ...good, bases: { "本文/第1話.txt": "x" } })],
+    ["選び終えた食い違いがハッシュだけ（版1の形）", JSON.stringify({ ...good, resolvedConflicts: { "本文/第1話.txt": H2 } })],
+    ["選び終えた食い違いの回が0", JSON.stringify({ ...good, resolvedConflicts: { "本文/第1話.txt": { against: H2, round: 0 } } })],
+    ["選び終えた食い違いの回が目録より後", JSON.stringify({ ...good, resolvedConflicts: { "本文/第1話.txt": { against: H2, round: 4 } } })],
   ];
 
   test.each(broken)("%s → 読めない", (_label, text) => {
@@ -611,7 +626,8 @@ describe("目録を組む（送る側）", () => {
       files: new Map([["a.txt", H3]]),
       previous: first,
     });
-    expect(second.resolvedConflicts.get("a.txt")).toBe(H2);
+    // 回の番号は最初に載せた回のまま（受け取った側が「どの選択を使ったか」を控える）
+    expect(second.resolvedConflicts.get("a.txt")).toEqual({ against: H2, round: 1 });
     const third = buildDriveManifest({
       deviceId: "device-a",
       deviceName: "母艦",
@@ -621,6 +637,331 @@ describe("目録を組む（送る側）", () => {
       previous: second,
     });
     expect(third.resolvedConflicts.size).toBe(0);
+  });
+});
+
+describe("選び終えた食い違いの持ち越しを外す（0.132.0）", () => {
+  const FILE = "本文/第3話.txt";
+  const base = {
+    deviceId: "device-a",
+    deviceName: "母艦",
+    sentAt: "2026-11-07T10:00:00.000Z",
+  };
+  // A が B の H2 と見比べて、自分の H1 を残した回
+  const chosen = buildDriveManifest({
+    ...base,
+    round: 1,
+    files: new Map([[FILE, H1]]),
+    resolvedConflicts: new Map([[FILE, H2]]),
+  });
+
+  test("相手の目録が、こちらが前に送った中身を持っていれば外す", () => {
+    const next = buildDriveManifest({
+      ...base,
+      round: 2,
+      files: new Map([[FILE, H1]]),
+      previous: chosen,
+      peerManifest: manifest({ files: new Map([[FILE, H1]]) }),
+    });
+    expect(next.resolvedConflicts.size).toBe(0);
+  });
+
+  test("相手がまだ受け取っていなければ（目録が H2 のまま）持ち越す", () => {
+    const next = buildDriveManifest({
+      ...base,
+      round: 2,
+      files: new Map([[FILE, H1]]),
+      previous: chosen,
+      peerManifest: manifest({ files: new Map([[FILE, H2]]) }),
+    });
+    expect(next.resolvedConflicts.get(FILE)).toEqual({ against: H2, round: 1 });
+  });
+
+  test("選んだあと手元を相手のハッシュへ戻しても、相手が受け取っていなければ外さない", () => {
+    // A が H1 → H2 に戻した。今回の中身は相手と同じだが、相手は前に送った H1 を持っていない
+    const next = buildDriveManifest({
+      ...base,
+      round: 2,
+      files: new Map([[FILE, H2]]),
+      previous: chosen,
+      peerManifest: manifest({ files: new Map([[FILE, H2]]) }),
+    });
+    expect(next.resolvedConflicts.has(FILE)).toBe(true);
+  });
+
+  test("相手の中身が、今回の中身とだけ偶然同じ（前に送った中身ではない）なら外さない", () => {
+    const next = buildDriveManifest({
+      ...base,
+      round: 2,
+      files: new Map([[FILE, H3]]),
+      previous: chosen,
+      peerManifest: manifest({ files: new Map([[FILE, H3]]) }),
+    });
+    expect(next.resolvedConflicts.has(FILE)).toBe(true);
+  });
+
+  test("自分の目録を相手のものとして渡しても外さない", () => {
+    const next = buildDriveManifest({
+      ...base,
+      round: 2,
+      files: new Map([[FILE, H1]]),
+      previous: chosen,
+      peerManifest: chosen,
+    });
+    expect(next.resolvedConflicts.has(FILE)).toBe(true);
+  });
+});
+
+describe("使った選択は、手元が偶然同じハッシュへ戻っても2度効かない（0.132.0）", () => {
+  const FILE = "本文/第3話.txt";
+  // A の目録：B の H2 と見比べて H1 を残した（回1）。A はまだ送り直していない
+  const fromA = manifest({
+    deviceId: "device-a",
+    files: new Map([[FILE, H1]]),
+    resolvedConflicts: new Map([[FILE, { against: H2, round: 1 }]]),
+  });
+
+  test("B が一度受け取ったあと、元に戻して H2 になっても、受け取らない（作者の書き直しを押し流さない）", () => {
+    // B は回1の選択を使って H1 を受け取り、印も H1。そのあと作者が元に戻して H2
+    const decisions = planDriveReceive({
+      marks: new Map([[FILE, H1]]),
+      local: new Map([[FILE, H2]]),
+      manifest: fromA,
+      ignoredPaths: [],
+      consumedResolutions: new Map([[FILE, 1]]),
+    });
+    expect(decisions).toMatchObject([{ kind: "none", reason: "local_changed" }]);
+  });
+
+  test("（比べ）使った控えが無ければ、同じ状況で受け取ってしまう——控えが守りになっている", () => {
+    const decisions = planDriveReceive({
+      marks: new Map([[FILE, H1]]),
+      local: new Map([[FILE, H2]]),
+      manifest: fromA,
+      ignoredPaths: [],
+    });
+    expect(decisions).toMatchObject([{ kind: "receive", viaResolution: true, resolutionRound: 1 }]);
+  });
+
+  test("後の回で選び直した選択は、前の回を使ったあとでも効く", () => {
+    const decisions = planDriveReceive({
+      marks: new Map([[FILE, H0]]),
+      local: new Map([[FILE, H2]]),
+      manifest: manifest({
+        deviceId: "device-a",
+        round: 3,
+        files: new Map([[FILE, H1]]),
+        resolvedConflicts: new Map([[FILE, { against: H2, round: 3 }]]),
+      }),
+      ignoredPaths: [],
+      consumedResolutions: new Map([[FILE, 1]]),
+    });
+    expect(decisions).toMatchObject([{ kind: "receive", viaResolution: true, resolutionRound: 3 }]);
+  });
+});
+
+describe("こちらが送った中身が向こうから戻ってきたとき（0.132.0）", () => {
+  const FILE = "本文/第5話.txt";
+
+  test("送ったあとで書き足していても食い違いにしない（印を向こうへ進めるだけ）", () => {
+    // 印 H0 → A が H1 を送る → A はさらに H3 へ。B は H1 を受け取って、そのまま送り返した
+    const decisions = planDriveReceive({
+      marks: new Map([[FILE, H0]]),
+      local: new Map([[FILE, H3]]),
+      manifest: manifest({ files: new Map([[FILE, H1]]) }),
+      ignoredPaths: [],
+      ownSent: new Map([[FILE, [H1]]]),
+    });
+    expect(decisions).toMatchObject([{ kind: "advance", hash: H1, echo: true }]);
+  });
+
+  test("（比べ）送った控えが無ければ食い違いになる——誤検出だった", () => {
+    const decisions = planDriveReceive({
+      marks: new Map([[FILE, H0]]),
+      local: new Map([[FILE, H3]]),
+      manifest: manifest({ files: new Map([[FILE, H1]]) }),
+      ignoredPaths: [],
+    });
+    expect(decisions).toMatchObject([{ kind: "conflict" }]);
+  });
+
+  test("向こうがこちらの写しのあとで書いていれば（H2）、今までどおり食い違い", () => {
+    const decisions = planDriveReceive({
+      marks: new Map([[FILE, H0]]),
+      local: new Map([[FILE, H3]]),
+      manifest: manifest({ files: new Map([[FILE, H2]]) }),
+      ignoredPaths: [],
+      ownSent: new Map([[FILE, [H1]]]),
+    });
+    expect(decisions).toMatchObject([{ kind: "conflict", localHash: H3, remoteHash: H2 }]);
+  });
+
+  test("見逃しと誤検出を数える：送った控えのある組み合わせ全部", () => {
+    let missed = 0;
+    let falsePositive = 0;
+    let conflicts = 0;
+    let cases = 0;
+    const wrong: string[] = [];
+    for (const mark of [undefined, H0]) {
+      for (const localHash of [undefined, H0, H1, H2, H3]) {
+        for (const remote of [H0, H1, H2]) {
+          if (mark === undefined && (localHash === H0 || remote === H0)) continue;
+          // 控えは H1（こちらが送った中身）。正解は設計の言葉で：
+          // 向こうが送った中身そのもので、印と違う → 向こうは写しを持つだけ。食い違いではない
+          // それ以外は控えが無いときと同じ
+          const withoutSent = planOne({ mark, local: localHash, remote });
+          const echoed = remote === H1 && remote !== mark;
+          const decision = planDriveReceive({
+            marks: new Map(mark === undefined ? [] : [["a.txt", mark]]),
+            local: new Map(localHash === undefined ? [] : [["a.txt", localHash]]),
+            manifest: manifest({ files: new Map([["a.txt", remote]]) }),
+            ignoredPaths: [],
+            ownSent: new Map([["a.txt", [H1]]]),
+          })[0];
+          const expected = echoed ? "advance" : withoutSent.kind;
+          cases += 1;
+          if (expected === "conflict") conflicts += 1;
+          if (expected === "conflict" && decision.kind !== "conflict") missed += 1;
+          if (decision.kind === "conflict" && expected !== "conflict") falsePositive += 1;
+          if (decision.kind !== expected) wrong.push(`印${mark ?? "なし"} 手元${localHash ?? "なし"} 向こう${remote}`);
+        }
+      }
+    }
+    expect({ missed, falsePositive }).toEqual({ missed: 0, falsePositive: 0 });
+    expect(wrong).toEqual([]);
+    // 印なし 4×2＋印あり 5×3＝23。うち食い違いが正解の組（母数）が0でないこと
+    expect(cases).toBe(23);
+    expect(conflicts).toBeGreaterThan(0);
+  });
+});
+
+describe("向こうがこちらの送った中身の上に書いたとき（目録の bases。0.132.0）", () => {
+  const FILE = "本文/第6話.txt";
+
+  test("A が送った H1 を B が受け取り H2 へ書き足した → A は受け取る（印が無くても食い違いにしない）", () => {
+    const decisions = planDriveReceive({
+      marks: new Map(),
+      local: new Map([[FILE, H1]]),
+      manifest: manifest({ files: new Map([[FILE, H2]]), bases: new Map([[FILE, H1]]) }),
+      ignoredPaths: [],
+      ownSent: new Map([[FILE, [H1]]]),
+    });
+    expect(decisions).toMatchObject([{ kind: "receive", expectedLocalHash: H1, remoteHash: H2 }]);
+  });
+
+  test("（比べ）bases が無ければ食い違いになる——いちばんふつうの往復の誤検出だった", () => {
+    const decisions = planDriveReceive({
+      marks: new Map(),
+      local: new Map([[FILE, H1]]),
+      manifest: manifest({ files: new Map([[FILE, H2]]) }),
+      ignoredPaths: [],
+      ownSent: new Map([[FILE, [H1]]]),
+    });
+    expect(decisions).toMatchObject([{ kind: "conflict" }]);
+  });
+
+  test("A が送ったあとさらに書いていて、B も H1 の上に書いた → 食い違い（見逃さない）", () => {
+    const decisions = planDriveReceive({
+      marks: new Map([[FILE, H0]]),
+      local: new Map([[FILE, H3]]),
+      manifest: manifest({ files: new Map([[FILE, H2]]), bases: new Map([[FILE, H1]]) }),
+      ignoredPaths: [],
+      ownSent: new Map([[FILE, [H1]]]),
+    });
+    expect(decisions).toMatchObject([{ kind: "conflict", markHash: H1, localHash: H3, remoteHash: H2 }]);
+  });
+
+  test("B の印がこちらの送っていない中身なら比べ直さない（B が別に書いたものかもしれない）", () => {
+    const decisions = planDriveReceive({
+      marks: new Map(),
+      local: new Map([[FILE, H1]]),
+      manifest: manifest({ files: new Map([[FILE, H2]]), bases: new Map([[FILE, H3]]) }),
+      ignoredPaths: [],
+      ownSent: new Map([[FILE, [H1]]]),
+    });
+    expect(decisions).toMatchObject([{ kind: "conflict" }]);
+  });
+
+  test("向こうの中身がこちらの印と同じなら、古い bases が送った中身と偶然同じでも比べ直さない", () => {
+    // B：H2 を送った → A の H1 を受け取った（印 H1）→ 元に戻して H2 をまた送った（ownSent [H2]）。
+    // A の古い目録（中身 H1・A の印 H2）が届き直しても、B の戻しを押し流さない
+    const decisions = planDriveReceive({
+      marks: new Map([[FILE, H1]]),
+      local: new Map([[FILE, H2]]),
+      manifest: manifest({ files: new Map([[FILE, H1]]), bases: new Map([[FILE, H2]]) }),
+      ignoredPaths: [],
+      ownSent: new Map([[FILE, [H2]]]),
+    });
+    expect(decisions).toMatchObject([{ kind: "none", reason: "local_changed" }]);
+  });
+});
+
+describe("端末ごとのファイル（sessions・stats）の扱い（0.132.0）", () => {
+  const OWN = ".aiwriter/stats/desk-a1b2.json";
+  const PEER = ".aiwriter/stats/note-c3d4.json";
+
+  test("自分の端末のファイルは、向こうの写しと違っても受け取らず食い違いにもしない", () => {
+    const decisions = planDriveReceive({
+      marks: new Map(),
+      local: new Map([[OWN, H1]]),
+      manifest: manifest({ files: new Map([[OWN, H0]]) }),
+      ignoredPaths: [],
+      ownDeviceId: "desk-a1b2",
+    });
+    expect(decisions).toMatchObject([{ path: OWN, kind: "none", reason: "own_device" }]);
+  });
+
+  test("（比べ）端末IDを渡さないと食い違いになる——誤検出だった", () => {
+    const decisions = planDriveReceive({
+      marks: new Map(),
+      local: new Map([[OWN, H1]]),
+      manifest: manifest({ files: new Map([[OWN, H0]]) }),
+      ignoredPaths: [],
+    });
+    expect(decisions).toMatchObject([{ kind: "conflict" }]);
+  });
+
+  test("向こうの端末のファイルは受け取る", () => {
+    const decisions = planDriveReceive({
+      marks: new Map([[PEER, H0]]),
+      local: new Map([[PEER, H0]]),
+      manifest: manifest({ files: new Map([[PEER, H2]]) }),
+      ignoredPaths: [],
+      ownDeviceId: "desk-a1b2",
+    });
+    expect(decisions).toMatchObject([{ path: PEER, kind: "receive" }]);
+  });
+
+  test("道の見分け", () => {
+    expect(deviceScopedPath(".aiwriter/sessions/desk-a1b2.json")).toEqual({ dir: "sessions", deviceId: "desk-a1b2" });
+    expect(deviceScopedPath(OWN)).toEqual({ dir: "stats", deviceId: "desk-a1b2" });
+    // 端末IDの形でない名前・深い道・ほかの置き場は、ふつうのファイル
+    expect(deviceScopedPath(".aiwriter/stats/作者のメモ.json")).toBeUndefined();
+    expect(deviceScopedPath(".aiwriter/stats/a/b.json")).toBeUndefined();
+    expect(deviceScopedPath(".aiwriter/stats/desk-a1b2.txt")).toBeUndefined();
+    expect(deviceScopedPath(".aiwriter/history/desk-a1b2.json")).toBeUndefined();
+    expect(deviceScopedPath("本文/stats/desk-a1b2.json")).toBeUndefined();
+  });
+
+  test("送るのは自分の端末の分だけ。印の置き場はどの端末のものも送らない", () => {
+    const own = { ownDeviceId: "desk-a1b2", ignoredPaths: IGNORED_PATHS };
+    expect(isSendableSyncPath(OWN, own)).toBe(true);
+    expect(isSendableSyncPath(PEER, own)).toBe(false);
+    expect(isSendableSyncPath("本文/第1話.txt", own)).toBe(true);
+    expect(isSendableSyncPath(`${DRIVE_SYNC_RECORD_PREFIX}desk-a1b2.json`, own)).toBe(false);
+    expect(isSendableSyncPath(".aiwriter/cache/x.json", own)).toBe(false);
+    expect(isSendableSyncPath("../外.txt", own)).toBe(false);
+  });
+
+  test("印の置き場は、受け取りの計画にも出さない", () => {
+    const record = `${DRIVE_SYNC_RECORD_PREFIX}note-c3d4.json`;
+    const decisions = planDriveReceive({
+      marks: new Map(),
+      local: new Map(),
+      manifest: manifest({ files: new Map([[record, H2]]) }),
+      ignoredPaths: [],
+    });
+    expect(decisions).toEqual([]);
   });
 });
 

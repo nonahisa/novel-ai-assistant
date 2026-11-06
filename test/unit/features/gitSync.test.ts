@@ -190,6 +190,13 @@ describe("同期対象から外す規則", () => {
     ).toBe(false);
   });
 
+  test("Google ドライブの端末別の印は Git にも載せず、使った作品にだけ足す（0.132.0）", () => {
+    // 一括へ入れると全作品の .gitignore が書き換わる（0.111.16 の失敗と同じ形）
+    expect(ON_USE_IGNORED_PATHS).toContain(".aiwriter/drive-sync/");
+    expect(IGNORED_PATHS).not.toContain(".aiwriter/drive-sync/");
+    expect(missingIgnoreRules(encode("# 作者のメモ\n"))).not.toContain(".aiwriter/drive-sync/");
+  });
+
   test("空の.gitignoreには全部足りない", () => {
     expect(missingIgnoreRules(encode(""))).toEqual([...IGNORED_PATHS]);
   });

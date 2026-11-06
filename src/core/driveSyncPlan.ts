@@ -1,3 +1,4 @@
+import { isValidDeviceId } from "./device";
 import { isSettingsJsonPath } from "./settingsConflictRule";
 
 /**
@@ -13,8 +14,31 @@ import { isSettingsJsonPath } from "./settingsConflictRule";
  * 道は作品フォルダーからの相対で、区切りは「/」にそろえたもの。
  */
 
-/** 目録の形の版。形を変えたら上げる。読む側は知らない版を「読めない」にする */
-export const DRIVE_MANIFEST_FORMAT = 1;
+/**
+ * 目録の形の版。形を変えたら上げる。読む側は知らない版を「読めない」にする。
+ *
+ * 2（0.132.0）：選び終えた食い違いを「相手のハッシュ」だけから
+ * `{ against, round }` の組にした。受け取った側が「この選択はもう使った」と
+ * 覚えるための番号が要ったため（`DriveResolvedConflict`）。送った端末の印
+ * （`bases`）も足した。版1を書いた製品は配っていない（段階1は画面から
+ * 使えなかった）ので、版1は読まない
+ */
+export const DRIVE_MANIFEST_FORMAT = 2;
+
+/**
+ * 選び終えた食い違い1件（設計書5.10.4）。
+ *
+ * - `against`：作者が見比べたときの**相手のハッシュ**。受け取る側は、手元の今が
+ *   これと同じなら選び直させずに受け取る
+ * - `round`：この選択を最初に載せた目録の回の番号。受け取った側は道ごとに
+ *   「どの回の選択まで使ったか」を控え（`DriveSyncRecord.consumedResolutions`）、
+ *   **同じ選択を2度使わない**——使ったあとで手元が偶然 `against` と同じ中身へ
+ *   戻っても（元に戻す・履歴から戻す）、古い選択が作者の書き直しを押し流さない
+ */
+export interface DriveResolvedConflict {
+  against: string;
+  round: number;
+}
 
 /**
  * 送る側が最後に書く目録（`manifest.json`。設計書5.10.3）。
@@ -35,16 +59,22 @@ export interface DriveManifest {
   /** 送ったファイルの道 → 中身のハッシュ。その端末の作品の全部（変わったものだけではない） */
   files: ReadonlyMap<string, string>;
   /**
+   * 送った端末の印：道 → その端末が前回そろえたときのハッシュ（0.132.0）。
+   * `files` にある道だけ。受け取る側は「向こうは、こちらが送ったどの中身の上に
+   * 書いたか」をこれで知る（`planDriveReceive` の説明）。無ければ載せない
+   */
+  bases: ReadonlyMap<string, string>;
+  /**
    * その端末で消えたファイル。**一度消えたものは積んだまま載せる**——
    * 受け取る側は最新の目録しか読まないので、間の回を読み逃しても
    * 消えたことが分かるようにする
    */
   deleted: readonly string[];
   /**
-   * 選び終えた食い違い：道 → そのとき見比べた**相手のハッシュ**（設計書5.10.4）。
-   * 受け取る側は、手元の今がこのハッシュと同じなら選び直させずに受け取る
+   * 選び終えた食い違い：道 → そのとき見比べた**相手のハッシュ**と、載せ始めた回
+   * （設計書5.10.4。`DriveResolvedConflict`）
    */
-  resolvedConflicts: ReadonlyMap<string, string>;
+  resolvedConflicts: ReadonlyMap<string, DriveResolvedConflict>;
 }
 
 export type DriveManifestRead =
@@ -113,8 +143,20 @@ export function parseDriveManifest(text: string): DriveManifestRead {
 
   const files = readHashMap(value.files, "ファイルの一覧");
   if (typeof files === "string") return unreadable(files);
-  const resolvedConflicts = readHashMap(value.resolvedConflicts, "選び終えた食い違い");
+  const bases = readHashMap(value.bases, "送った端末の印");
+  if (typeof bases === "string") return unreadable(bases);
+  for (const entry of bases.keys()) {
+    // 送っていないファイルの印は、何の上に書いたかの手がかりにならない
+    if (!files.has(entry)) return unreadable(`送っていないファイルの印があります（${entry}）`);
+  }
+  const resolvedConflicts = readResolvedConflicts(value.resolvedConflicts);
   if (typeof resolvedConflicts === "string") return unreadable(resolvedConflicts);
+  for (const [entry, resolved] of resolvedConflicts) {
+    // 載せ始めた回は、いま読んでいる目録の回より後にはならない
+    if (resolved.round > round) {
+      return unreadable(`選び終えた食い違いの回の番号が読めません（${entry}）`);
+    }
+  }
 
   if (!Array.isArray(value.deleted)) return unreadable("消えたファイルの一覧が読めません");
   const deleted: string[] = [];
@@ -139,6 +181,7 @@ export function parseDriveManifest(text: string): DriveManifestRead {
       deviceId,
       deviceName,
       files,
+      bases,
       deleted,
       resolvedConflicts,
     },
@@ -150,9 +193,9 @@ export function parseDriveManifest(text: string): DriveManifestRead {
  * ドライブの画面で作者が見比べたときに順番の違いが変更に見えない。
  */
 export function serializeDriveManifest(manifest: DriveManifest): string {
-  const sorted = (map: ReadonlyMap<string, string>) => {
-    const out: Record<string, string> = {};
-    for (const key of [...map.keys()].sort()) out[key] = map.get(key) as string;
+  const sorted = <T>(map: ReadonlyMap<string, T>) => {
+    const out: Record<string, T> = {};
+    for (const key of [...map.keys()].sort()) out[key] = map.get(key) as T;
     return out;
   };
   return (
@@ -164,6 +207,7 @@ export function serializeDriveManifest(manifest: DriveManifest): string {
         deviceId: manifest.deviceId,
         deviceName: manifest.deviceName,
         files: sorted(manifest.files),
+        bases: sorted(manifest.bases),
         deleted: [...manifest.deleted].sort(),
         resolvedConflicts: sorted(manifest.resolvedConflicts),
       },
@@ -181,7 +225,17 @@ export function serializeDriveManifest(manifest: DriveManifest): string {
  *   戻ってきたファイルは外す
  * - 選び終えた食い違い：前の回のものを、そのファイルがある間は持ち越す。
  *   相手が受け取る前に2回送っても、選んだことが消えないようにする。
- *   今回選んだものが前の回のものより優先する
+ *   今回選んだもの（`resolvedConflicts`：道 → 見比べた相手のハッシュ）が
+ *   前の回のものより優先し、回の番号は今回の `round` になる
+ * - **持ち越しを外す**（0.132.0）：相手の目録（`peerManifest`）のその道の
+ *   ハッシュが、**こちらが前の回に送った中身**（`previous.files`）と同じなら、
+ *   相手はこちらの選んだ結果を受け取っている。もう要らないので外す。
+ *   外さないと、相手がそのあと偶然 `against` と同じ中身へ戻したときに、
+ *   古い選択が効いて相手の書き直しを押し流す（受け取る側にも同じ守りを
+ *   置いてある：`planDriveReceive` の `consumedResolutions`）。
+ *   **前の回に送った中身で比べる**のは、相手が受け取れたのはそれだけだから
+ *   ——今回の中身（`files`）で比べると、相手がまだ受け取っていない中身との
+ *   偶然の一致で外れうる。相手の目録は**届ききったものだけ**を渡すこと
  */
 export function buildDriveManifest(input: {
   deviceId: string;
@@ -191,7 +245,14 @@ export function buildDriveManifest(input: {
   files: ReadonlyMap<string, string>;
   previous?: DriveManifest;
   resolvedConflicts?: ReadonlyMap<string, string>;
+  peerManifest?: DriveManifest;
+  /** 送る端末の印（`DriveSyncRecord.marks`）。`files` にある道だけ載せる */
+  marks?: ReadonlyMap<string, string>;
 }): DriveManifest {
+  const bases = new Map<string, string>();
+  for (const [entry, hash] of input.marks ?? []) {
+    if (input.files.has(entry)) bases.set(entry, hash);
+  }
   const deleted = new Set<string>();
   if (input.previous) {
     for (const entry of input.previous.deleted) deleted.add(entry);
@@ -199,12 +260,23 @@ export function buildDriveManifest(input: {
   }
   for (const entry of input.files.keys()) deleted.delete(entry);
 
-  const resolvedConflicts = new Map<string, string>();
-  for (const [entry, hash] of input.previous?.resolvedConflicts ?? []) {
-    if (input.files.has(entry)) resolvedConflicts.set(entry, hash);
+  // 自分の目録を相手のものとして渡されたら、受け取った印にはならない
+  const peer =
+    input.peerManifest && input.peerManifest.deviceId !== input.deviceId
+      ? input.peerManifest
+      : undefined;
+
+  const resolvedConflicts = new Map<string, DriveResolvedConflict>();
+  for (const [entry, resolved] of input.previous?.resolvedConflicts ?? []) {
+    if (!input.files.has(entry)) continue;
+    const sentBefore = input.previous?.files.get(entry);
+    if (peer && sentBefore !== undefined && peer.files.get(entry) === sentBefore) continue;
+    resolvedConflicts.set(entry, resolved);
   }
-  for (const [entry, hash] of input.resolvedConflicts ?? []) {
-    if (input.files.has(entry)) resolvedConflicts.set(entry, hash);
+  for (const [entry, against] of input.resolvedConflicts ?? []) {
+    if (input.files.has(entry)) {
+      resolvedConflicts.set(entry, { against, round: input.round });
+    }
   }
 
   return {
@@ -214,6 +286,7 @@ export function buildDriveManifest(input: {
     deviceId: input.deviceId,
     deviceName: input.deviceName,
     files: new Map(input.files),
+    bases,
     deleted: [...deleted].sort(),
     resolvedConflicts,
   };
@@ -252,11 +325,72 @@ export function checkManifestArrival(
 }
 
 /**
- * どの一覧に書かれていても送らないもの。`IGNORED_PATHS` は Git の除外として
- * 書かれているので、Git が自分で持つ `.git/` を含まない。ドライブでは
- * 製品が自分で一覧を作るので、ここで外す。
+ * ドライブで2台をそろえるときの、この端末だけの控え（印）の置き場
+ * （`.aiwriter/` の下。中身は `core/driveSyncRecord.ts`）。
+ *
+ * `sessions/`・`stats/` と同じく `<端末ID>.json` の1本にする。印は
+ * 「この端末が前回そろえたとき何を見たか」なので、**ほかの端末へ送ると
+ * 意味が壊れる**（向こうの3点比較の基準が、こちらの印に置き換わる）。
  */
-const ALWAYS_IGNORED: readonly string[] = [".git/"];
+export const DRIVE_SYNC_RECORD_DIR = "drive-sync";
+
+/** 印の置き場の、作品フォルダーからの道（「/」で終わる＝その下の全部） */
+export const DRIVE_SYNC_RECORD_PREFIX = `.aiwriter/${DRIVE_SYNC_RECORD_DIR}/`;
+
+/**
+ * どの一覧に書かれていても送らないもの。
+ *
+ * - `.git/`：`IGNORED_PATHS` は Git の除外として書かれているので、Git が自分で
+ *   持つ `.git/` を含まない。ドライブでは製品が自分で一覧を作るので、ここで外す
+ * - 印の置き場：**`IGNORED_PATHS` へは足さない**（0.132.0）。あちらは起動の
+ *   たびに全作品の .gitignore へ足されるので、ドライブを使っていない作品まで
+ *   「記録待ち」になる（0.111.16 の失敗。`workRegistry.ts` の `IGNORED_PATHS`
+ *   の説明）。Git 側は使った作品にだけ足す行（`ON_USE_IGNORED_PATHS`）に置いた
+ */
+const ALWAYS_IGNORED: readonly string[] = [".git/", DRIVE_SYNC_RECORD_PREFIX];
+
+/**
+ * 端末ごとに1本ずつ置くファイルの置き場（設計書5.5.2・5.5.6）。どれも
+ * `<端末ID>.json` で、**書くのはその端末だけ**。
+ */
+const DEVICE_SCOPED_DIRS = ["sessions", "stats"] as const;
+
+export type DeviceScopedDir = (typeof DEVICE_SCOPED_DIRS)[number];
+
+/**
+ * 端末ごとのファイルなら、その持ち主の端末ID。ちがえば undefined。
+ *
+ * ドライブでの扱い（0.132.0。5.5.6 と同じ考え）：
+ * - **自分の端末のファイルは、向こうから受け取らない・食い違いにしない**。
+ *   書くのは自分だけなので、向こうにあるのは前に送った写しでしかない
+ * - **送るのは自分の端末の分だけ**。受け取ったほかの端末の写しを送り返すと、
+ *   持ち主の端末で「自分のファイルが向こうで変わった」に見える
+ */
+export function deviceScopedPath(
+  syncPath: string
+): { dir: DeviceScopedDir; deviceId: string } | undefined {
+  const segments = syncPath.split("/");
+  if (segments.length !== 3 || segments[0] !== ".aiwriter") return undefined;
+  const dir = DEVICE_SCOPED_DIRS.find((name) => name === segments[1]);
+  if (!dir || !segments[2].endsWith(".json")) return undefined;
+  const deviceId = segments[2].slice(0, -".json".length);
+  // 端末IDの形でない名前（作者が置いた別のファイル）は、ふつうのファイルとして扱う
+  return isValidDeviceId(deviceId) ? { dir, deviceId } : undefined;
+}
+
+/**
+ * この端末が送ってよいファイルか（送らないもの・ほかの端末のファイルを除く）。
+ * 送る側の一覧づくりで使う。
+ */
+export function isSendableSyncPath(
+  syncPath: string,
+  input: { ownDeviceId: string; ignoredPaths: readonly string[] }
+): boolean {
+  if (!isSafeSyncPath(syncPath)) return false;
+  if (isIgnoredSyncPath(syncPath, input.ignoredPaths)) return false;
+  const owner = deviceScopedPath(syncPath);
+  return owner === undefined || owner.deviceId === input.ownDeviceId;
+}
 
 /**
  * 送らないものか。`ignoredPaths` は `core/workRegistry.ts` の `IGNORED_PATHS`
@@ -289,14 +423,17 @@ export type DriveNoneReason =
   /** 手元にだけある・向こうの目録にまだ載っていない（次に送る） */
   | "local_only"
   /** 手元にも無く、向こうでも消えている（印も無い） */
-  | "absent";
+  | "absent"
+  /** この端末のファイル（`deviceScopedPath`）。向こうにあるのは写しなので受け取らない */
+  | "own_device";
 
 export type DriveSyncDecision =
   | { kind: "none"; path: string; reason: DriveNoneReason }
   /**
    * 向こうの中身を受け取る。書くときの期待ハッシュは `expectedLocalHash`
    * （3点比較の直前に読んだ手元の今。設計書5.10.2）。
-   * `viaResolution` は、もう1台で選び終えた食い違いの結果として受け取るとき
+   * `viaResolution` は、もう1台で選び終えた食い違いの結果として受け取るとき。
+   * そのときは `resolutionRound`（使った選択の回）を受け取った側が控える
    */
   | {
       kind: "receive";
@@ -304,10 +441,14 @@ export type DriveSyncDecision =
       expectedLocalHash: string;
       remoteHash: string;
       viaResolution: boolean;
+      resolutionRound?: number;
       settings: boolean;
     }
-  /** 中身は書かず、印だけを進める。`hash` が null なら印を外す（両方で消えた） */
-  | { kind: "advance"; path: string; hash: string | null; settings: boolean }
+  /**
+   * 中身は書かず、印だけを進める。`hash` が null なら印を外す（両方で消えた）。
+   * `echo` は「向こうの中身は、こちらが前に送ったもの」（`ownSent`）のとき
+   */
+  | { kind: "advance"; path: string; hash: string | null; settings: boolean; echo?: boolean }
   /** 手元に無い新しいファイルを置く（`atomicWriteFile` の `create`） */
   | { kind: "create"; path: string; remoteHash: string; settings: boolean }
   /**
@@ -333,12 +474,23 @@ export type DriveSyncDecision =
  * @param input.local 手元の今（道 → ハッシュ）
  * @param input.manifest 向こうの目録。**届ききったかは呼び手が先に確かめる**
  *   （`planDriveReceiveChecked` を使えば一緒に確かめる）
+ * @param input.ownDeviceId この端末のID。渡すと、この端末のファイル
+ *   （`deviceScopedPath`）は受け取らない（`own_device`）
+ * @param input.consumedResolutions この目録の送り手の選択を、道ごとに
+ *   どの回まで使ったか（`DriveSyncRecord.consumedResolutions` の送り手の分）。
+ *   使った回より前の選択は、もう効かせない
+ * @param input.ownSent 印を置いてから、この端末が送った中身（道 → ハッシュ）。
+ *   向こうの中身がこのどれかなら、向こうはこちらの写しを持っているだけ
+ *   （`advance` の `echo`）
  */
 export function planDriveReceive(input: {
   marks: ReadonlyMap<string, string>;
   local: ReadonlyMap<string, string>;
   manifest: DriveManifest;
   ignoredPaths: readonly string[];
+  ownDeviceId?: string;
+  consumedResolutions?: ReadonlyMap<string, number>;
+  ownSent?: ReadonlyMap<string, readonly string[]>;
 }): DriveSyncDecision[] {
   const { marks, local, manifest } = input;
   const deleted = new Set(manifest.deleted);
@@ -352,13 +504,28 @@ export function planDriveReceive(input: {
   const decisions: DriveSyncDecision[] = [];
   for (const entry of [...paths].sort()) {
     if (isIgnoredSyncPath(entry, input.ignoredPaths)) continue;
+    if (
+      input.ownDeviceId !== undefined &&
+      deviceScopedPath(entry)?.deviceId === input.ownDeviceId
+    ) {
+      decisions.push({ kind: "none", path: entry, reason: "own_device" });
+      continue;
+    }
+    const resolved = manifest.resolvedConflicts.get(entry);
+    const consumedRound = input.consumedResolutions?.get(entry);
     decisions.push(
       decideOne(entry, {
         mark: marks.get(entry),
         local: local.get(entry),
         remote: manifest.files.get(entry),
+        remoteBase: manifest.bases.get(entry),
         remoteDeleted: deleted.has(entry),
-        resolved: manifest.resolvedConflicts.get(entry),
+        // 使った選択は効かせない（`DriveResolvedConflict.round` の説明）
+        resolved:
+          resolved && (consumedRound === undefined || resolved.round > consumedRound)
+            ? resolved
+            : undefined,
+        ownSent: input.ownSent?.get(entry) ?? [],
       })
     );
   }
@@ -377,6 +544,9 @@ export function planDriveReceiveChecked(input: {
   manifest: DriveManifest;
   actualRemoteHashes: ReadonlyMap<string, string>;
   ignoredPaths: readonly string[];
+  ownDeviceId?: string;
+  consumedResolutions?: ReadonlyMap<string, number>;
+  ownSent?: ReadonlyMap<string, readonly string[]>;
 }): DriveReceivePlan {
   const arrival = checkManifestArrival(input.manifest, input.actualRemoteHashes);
   if (!arrival.arrived) {
@@ -387,8 +557,8 @@ export function planDriveReceiveChecked(input: {
 
 /**
  * 1ファイルの決め方。判定の順に意味がある：
- * 向こうで消えた → 向こうの目録に載っていない → 手元に無い → 中身が同じ →
- * 選び終えた食い違い → 印との比べ。
+ * 向こうで消えた → 向こうの目録に載っていない → こちらの写し → 手元に無い →
+ * 中身が同じ → 選び終えた食い違い → 印との比べ。
  */
 function decideOne(
   entry: string,
@@ -396,12 +566,15 @@ function decideOne(
     mark: string | undefined;
     local: string | undefined;
     remote: string | undefined;
+    remoteBase: string | undefined;
     remoteDeleted: boolean;
-    resolved: string | undefined;
+    resolved: DriveResolvedConflict | undefined;
+    ownSent: readonly string[];
   }
 ): DriveSyncDecision {
   const settings = isSettingsJsonPath(entry);
-  const { mark, local, remote } = s;
+  const { local, remote } = s;
+  let mark = s.mark;
 
   if (s.remoteDeleted) {
     if (local === undefined) {
@@ -424,6 +597,32 @@ function decideOne(
     return { kind: "none", path: entry, reason: local === mark ? "unchanged" : "local_changed" };
   }
 
+  // 向こうの中身は、この端末が印のあとで送ったもの（0.132.0）。向こうは
+  // こちらの写しを受け取っただけで、新しく書いてはいない。送ったあとで
+  // 手元をさらに書いていても食い違いではない——印を向こうへ進めれば、
+  // 手元の続きは次に送られる。これが無いと「送る→書き足す→向こうが受け取って
+  // 送り返す」のたびに、自分の書いたもの同士が食い違いとして訊かれる
+  if (remote !== mark && s.ownSent.includes(remote)) {
+    return { kind: "advance", path: entry, hash: remote, settings, echo: true };
+  }
+
+  // 向こうは、この端末が印のあとで送った中身の上に書いた（0.132.0）。
+  // 向こうの目録の印（`bases`）が、こちらの送った中身のどれかなら、
+  // 2台の共通の祖先はこちらの印ではなくその中身である。そこから比べ直す。
+  // これが無いと「A が送る → B が受け取って書き足す → A が受け取る」という
+  // いちばんふつうの往復が、A では毎回「食い違い」になる（A の印は、A が
+  // 受け取ったときにしか進まないため）。
+  // 向こうの中身がこちらの印と同じなら比べ直さない：向こうは変わっていない
+  // （向こうの印は古い回のもので、同じハッシュへ戻っただけかもしれない）
+  if (
+    s.remoteBase !== undefined &&
+    s.remoteBase !== mark &&
+    remote !== mark &&
+    s.ownSent.includes(s.remoteBase)
+  ) {
+    mark = s.remoteBase;
+  }
+
   if (local === undefined) {
     if (mark === undefined) return { kind: "create", path: entry, remoteHash: remote, settings };
     if (remote === mark) return { kind: "none", path: entry, reason: "local_deleted" };
@@ -442,13 +641,14 @@ function decideOne(
   // 同じ食い違いを2台で2度訊かない（設計書5.10.4）。もう1台の作者は、
   // 手元の今のこの中身と見比べたうえで向こうの中身を選んでいる。
   // 手元がそのあとさらに変わっていれば当たらず、下の比べで食い違いに戻る
-  if (s.resolved === local) {
+  if (s.resolved !== undefined && s.resolved.against === local) {
     return {
       kind: "receive",
       path: entry,
       expectedLocalHash: local,
       remoteHash: remote,
       viaResolution: true,
+      resolutionRound: s.resolved.round,
       settings,
     };
   }
@@ -475,6 +675,28 @@ function unreadable(reason: string): DriveManifestRead {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** 選び終えた食い違いの表を読む。読めなければ理由の文字列を返す */
+function readResolvedConflicts(
+  value: unknown
+): Map<string, DriveResolvedConflict> | string {
+  const label = "選び終えた食い違い";
+  if (!isPlainObject(value)) return `${label}が読めません`;
+  const out = new Map<string, DriveResolvedConflict>();
+  for (const [entry, item] of Object.entries(value)) {
+    if (!isSafeSyncPath(entry)) return `${label}の道が読めません（${entry}）`;
+    if (!isPlainObject(item)) return `${label}の形が読めません（${entry}）`;
+    const { against, round } = item;
+    if (typeof against !== "string" || !HASH_PATTERN.test(against)) {
+      return `${label}のハッシュが読めません（${entry}）`;
+    }
+    if (typeof round !== "number" || !Number.isSafeInteger(round) || round < 1) {
+      return `${label}の回の番号が読めません（${entry}）`;
+    }
+    out.set(entry, { against, round });
+  }
+  return out;
 }
 
 /** 道 → ハッシュの表を読む。読めなければ理由の文字列を返す */
