@@ -337,12 +337,20 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
         open: "proposalPanel",
       });
     }
-    const decision = finding.decision;
-    const decidedAt = isoTime(decision?.time);
-    if (decision && decidedAt !== undefined) {
+    /*
+      **判断は1回ずつ行にする**（作者の裁定 2026-11-06 夕「「採った」のまま残す」）。
+      最後の判断（`decision`）だけを見ると、［適用］→［戻す］で「採った」の回が消え、
+      その回の操作ログ「反映した」が判断の代わりに行の名前になっていた。
+      履歴を持たない手組みの値は、これまでどおり最後の判断だけを出す。
+    */
+    const decisions = finding.decisions ?? (finding.decision ? [finding.decision] : []);
+    decisions.forEach((decision, order) => {
+      const decidedAt = isoTime(decision.time);
+      if (decidedAt === undefined) return;
       const status = FINDING_STATUS_LABELS[decision.status] ?? decision.status;
       const entry: TimelineEntry = {
-        id: `findingDecision:${finding.id}:${decision.time}`,
+        // 並びの番号も入れる：採ってすぐ戻すと、2つの判断が同じミリ秒になる（models/finding.ts）
+        id: `findingDecision:${finding.id}:${decision.time}:${order}`,
         timestamp: decidedAt,
         kind: "finding",
         label: `AIの指摘（${name}）を${status}`,
@@ -362,7 +370,7 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
               ? dismissKey(target)
               : undefined;
       if (key) hints.set(entry, { rank: 0, key });
-    }
+    });
   }
 
   (sources.aiActions ?? []).forEach((action, index) => {

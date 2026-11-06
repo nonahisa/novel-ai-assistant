@@ -230,7 +230,19 @@ export type FindingLine =
 /** 指摘と判断を突き合わせた、いまの状態 */
 export interface FindingView extends Finding {
   status: FindingStatus;
+  /** いま効いている判断（最後の1件）。一覧・採否はこれを見る */
   decision?: FindingDecision;
+  /**
+   * その指摘に付いた判断を全部、**起きた順**（ファイルの並び）に。
+   *
+   * タイムラインの欄（設計書6.119.1）が1回ずつの採否を並べるために持つ。
+   * `decision` だけだと、［適用］→［戻す］で「採った」の回が消え、欄の
+   * その回の行が操作ログの「反映した」に替わっていた（作者の裁定
+   * 2026-11-06 夕「「採った」のまま残す」）。**ファイルの形は変えていない**——
+   * 判断の行はもともと追記で全部残っており、ここで畳まずに並べるだけ。
+   * 手で組み立てた値には無いことがある（そのときは `decision` だけを見る）。
+   */
+  decisions?: FindingDecision[];
 }
 
 const CATEGORIES: ReadonlySet<string> = new Set<FindingCategory>([
@@ -358,6 +370,7 @@ function toFindingLine(value: unknown): FindingLine | undefined {
 export function resolveFindings(lines: FindingLine[]): FindingView[] {
   const findings = new Map<string, Finding>();
   const decisions = new Map<string, FindingDecision>();
+  const history = new Map<string, FindingDecision[]>();
 
   for (const line of lines) {
     if (line.kind === "finding") {
@@ -370,6 +383,10 @@ export function resolveFindings(lines: FindingLine[]): FindingView[] {
       findings.set(line.id, line);
       continue;
     }
+    const { kind: _kind, ...decisionOnly } = line;
+    const past = history.get(line.findingId);
+    if (past) past.push(decisionOnly);
+    else history.set(line.findingId, [decisionOnly]);
     const existing = decisions.get(line.findingId);
     /*
       **同じ時刻なら、後から書かれた行が勝つ。** 時刻はミリ秒までしか無く、
@@ -390,6 +407,7 @@ export function resolveFindings(lines: FindingLine[]): FindingView[] {
       ...finding,
       status: decision?.status ?? "pending",
       decision,
+      decisions: history.get(finding.id) ?? [],
     });
   }
   return views;
