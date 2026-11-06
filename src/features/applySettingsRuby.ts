@@ -25,6 +25,7 @@ import {
 } from "../core/settingsRuby";
 import { rubyNotationFor } from "../core/ruby";
 import { manualActor, recordEdit } from "../core/actorContext";
+import { editHistoryFile } from "../core/editHistoryFormat";
 import { episodeTitle, formatChapterLabel } from "../core/episodeLabel";
 import { openManuscriptTabUris } from "./manuscriptEditor";
 import { logFailure, logStep, useLogFile } from "../core/logger";
@@ -512,7 +513,8 @@ async function writeAll(
           await recordEdit(work, {
             actor: manualActor(),
             action: "設定資料からルビを振った",
-            file: path.basename(entry.filePath),
+            // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）
+            file: editHistoryFile(work.folderPath, entry.filePath),
             detail: `${insertions.length}件（${
               scope === "first" ? "各話の最初の1回だけ" : "出てくるところすべて"
             }）`,
@@ -641,7 +643,7 @@ async function revertRubyApplication(
         await recordEdit(work, {
           actor: manualActor(),
           action: "設定資料のルビを戻した",
-          file: path.basename(entry.filePath),
+          file: editHistoryFile(work.folderPath, entry.filePath),
           detail: `${entry.count}件`,
         });
       } catch (error) {

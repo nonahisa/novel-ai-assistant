@@ -4,6 +4,7 @@ import { fromUri } from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ProposalStore } from "../core/proposalStore";
 import { isEditorMode, recordEdit } from "../core/actorContext";
+import { editHistoryFile } from "../core/editHistoryFormat";
 import { tryGitUserName } from "../core/gitAttribution";
 import { readTextFile } from "../core/textFile";
 import { normalizeFile } from "../models/fileLock";
@@ -218,7 +219,8 @@ export async function proposeByHand(
   await recordEdit(work, {
     actor: "editor",
     action: kind === "memo" ? "メモを提案として置いた" : "修正を提案した",
-    file: path.basename(filePath),
+    // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）
+    file: editHistoryFile(work.folderPath, filePath),
     detail: proposal.suggestion
       ? `${line}行 「${proposal.target}」→「${proposal.suggestion}」`
       : `${line}行 「${quote(proposal.target)}」への意見`,

@@ -38,7 +38,8 @@ describe("改行コードを揃えたら、編集履歴に残す", () => {
     const record = source.indexOf("recordEdit(work, {");
     const block = source.slice(record, record + 500);
     expect(block).toContain("改行コードを揃えた");
-    expect(block).toContain("file: path.basename(filePath)");
+    // 名前だけでなく作品からの相対で残す（ほかの章の同じ名前の話と取り違えない。0.130.4）
+    expect(block).toContain("file: editHistoryFile(work.folderPath, filePath)");
   });
 
   test("残すのは「元 → 先」で、元は変換前の値", () => {

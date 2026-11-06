@@ -27,6 +27,7 @@ import { validateKeepWord } from "../models/keepWord";
 // 「なぜ読みにくいか」の一文。外から指摘を置く道（MCP）も同じものを通す
 import { proposalDetail } from "../core/proofreadValidation";
 import { manualActor, recordEdit } from "../core/actorContext";
+import { editHistoryFile } from "../core/editHistoryFormat";
 import { isEditorMode } from "../core/actorContext";
 import { ProposalStore } from "../core/proposalStore";
 import { proposalId } from "../models/proposal";
@@ -4447,7 +4448,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     await recordEdit(work, {
       actor: "editor",
       action: `${this.category}の修正を提案した`,
-      file: path.basename(item.filePath),
+      // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）
+      file: editHistoryFile(work.folderPath, item.filePath),
       detail: `${item.line}行 「${item.target}」→「${item.suggestion}」`,
     });
   }
@@ -4527,7 +4529,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
     if (item.proposalId) {
       // **提案を見送ったことは、編集部にも伝わる必要がある**
-      await rejectProposal(work, item.proposalId, item.fileName);
+      await rejectProposal(
+        work,
+        item.proposalId,
+        editHistoryFile(work.folderPath, item.filePath)
+      );
       this.markStatus(id, "dismissed");
       return;
     }
