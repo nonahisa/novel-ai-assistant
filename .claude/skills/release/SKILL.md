@@ -65,11 +65,11 @@ gh workflow run publish-marketplace.yml -f version=<版> -f reason=<理由>
 ```
 
 - 手順のファイルは `.github/workflows/publish-marketplace.yml`。Release の VSIX を**作り直さずに**取り寄せ、ノートの SHA-256・VSIX の中の版と照らしてから `vsce publish --packagePath … --oidc` で上げる。**版の段では断らない**（2026-10-31 から。出すかどうかは動かす人が上の表で決める）。`reason`（「バグの直し」「機能」など）は必須で、ログの最初に出る
-- **作者の承認で止まる**（GitHub の Environment `marketplace`。承認者は nonahisa、動かせるのは main だけ）。動かしたら作者に「GitHub の Actions の画面で［Review deployments］→［Approve］を押してください」と頼む。**承認は作者が押す**（こちらから押さない。公開は取り消せない）。押す前に、上げるもの・バイト数・SHA-256・実機確認の済み具合を作者に示す
+- **承認では止まらない**（2026-11-07 作者の決定「承認を省く」。作者が GitHub の Environment `marketplace` の Required reviewers を外した。動かせるのは main だけ、の決まりは残っている）。動かすとそのまま公開まで進み、**公開は取り消せない**。動かす前に、上げるもの・バイト数・SHA-256・実機確認の済み具合を作者へ知らせる。母艦が `gh workflow run` を撃つと自動の判定に「外に公開する操作」で止められることがあるので、そのときは作者に「出してよい」の一言をもらう（迂回しない）。投稿ヘルパーの Chrome ウェブストア（Environment `chrome-web-store`）も同じ日に承認を外した
 - Marketplace 側の登録は、管理画面の「信頼できる出版」の `novel-ai-assistant-publish`（リポジトリ nonahisa/novel-ai-assistant・手順 publish-marketplace.yml・Environment marketplace）。**手順のファイルの名前か Environment を変えたら、この登録も直す**（食い違うと鍵の交換で断られる。PAT へは落ちない）
 - 終わったら手順8（`node scripts/checkMarketplace.mjs`）で反映を確かめる
 - vsce は 4.0.2 以降が要る（devDependencies と手順のファイルの `npx @vscode/vsce@<版>` をそろえる）
-- **Open VSX へも同じ手順の中で上げる**（作者の裁定 2026-10-31「進める」。設計書5.9）。Marketplace の段のあとに `npx ovsx@<版> publish <同じ VSIX>` の段がある（トークンは ovsx が環境変数 `OVSX_PAT` から自分で読む）。承認は Marketplace と共通（同じ Environment の1回）。落ちたら手順は赤になる（`continue-on-error` は付けない。気づけるように）
+- **Open VSX へも同じ手順の中で上げる**（作者の裁定 2026-10-31「進める」。設計書5.9）。Marketplace の段のあとに `npx ovsx@<版> publish <同じ VSIX>` の段がある（トークンは ovsx が環境変数 `OVSX_PAT` から自分で読む）。Environment は Marketplace と共通。落ちたら手順は赤になる（`continue-on-error` は付けない。気づけるように）
   - **初回だけ、作者の手で準備が要る**（こちらは作らない。名前空間が無いと最初の公開が失敗するので省けない）：
     1. Eclipse のアカウントを作る（https://accounts.eclipse.org/user/register 。プロフィールの GitHub ユーザー名に `nonahisa`）
     2. https://open-vsx.org に GitHub でログイン → Settings で Eclipse アカウントを連携 → 発行者の同意書（Publisher Agreement）に署名
