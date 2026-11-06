@@ -49,7 +49,7 @@ interface SynopsisRow {
 
 interface ReadingFile {
   episode: string;
-  entries: Array<{ word: string; quote: string; reading: string }>;
+  entries: Array<{ word: string; quote: string; reading: string; source?: string }>;
 }
 
 /** 各話あらすじの1行（作者が書き直した行。中身は変えずに指し先だけが変わることを見る） */
@@ -78,7 +78,8 @@ function dictionary(fileName: string, reading: string): ReadingFile & { version:
   return {
     version: 1,
     episode: `本文/${fileName}`,
-    entries: [{ word: "十分", quote: "十分に", reading }],
+    // `source` は読み込みの形の検査が必ず見る（無いと壊れた辞書として読み込みが止まり、付け替えも失敗に回る。core/readingDictionary.ts）
+    entries: [{ word: "十分", quote: "十分に", reading, source: "author" }],
   };
 }
 
