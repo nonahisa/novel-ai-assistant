@@ -35,6 +35,7 @@ import {
 import { withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { clearNotifications, editorGroupTabs, quickPickTitle } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS, productKeybinding } from "./support/keys";
 
 const EPISODE = "001_はじまり.txt";
 
@@ -74,7 +75,7 @@ test("原稿エディターで打って Ctrl+S を押すと、下の欄に「保
       });
       const noteSeen = () => frame.evaluate(() => (window as unknown as { __e2eNoteSeen?: string[] }).__e2eNoteSeen ?? []);
 
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(async () => (await fileText(session)).includes("二行目の短い文。"), "Ctrl+S で打った字がファイルに入る", 15_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／下の欄の移り変わり：${JSON.stringify(await noteSeen())}）`);
@@ -120,7 +121,8 @@ function reboundLaunch(): LaunchOptions {
       registerOther,
       // キーボード ショートカットの画面で「校正・メモパネルを開く」のキーを替えたときと同じ2行
       { key: NEW_MEMO_KEY, command: "novelai.openSceneMemos", when: MANUSCRIPT_WHEN, args: { source: "manuscriptEditor" } },
-      { key: "ctrl+alt+m", command: "-novelai.openSceneMemos", when: MANUSCRIPT_WHEN },
+      // 外す行は製品の割り当てと同じキーで書く（Mac の製品のキーは cmd+alt+m。ctrl+alt+m を外しても残る）
+      { key: productKeybinding("novelai.openSceneMemos"), command: "-novelai.openSceneMemos", when: MANUSCRIPT_WHEN },
     ],
     // keybindings.json はこの準備のあとに書かれるので、作品Bの置き場はここで args へ入れる
     prepareWork: async ({ workFolder }) => {
@@ -151,7 +153,7 @@ test("校正・メモパネルを開くキーを別のキーへ替えると、�
       await placeCaretAfter(frame, "一行目");
 
       // 外した Ctrl+Alt+M では開かない（字も入らない）
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       await holdsFor(async () => (await memoPanelFrame(page)) === undefined && (await quickPickTitle(page)) === undefined, "外した Ctrl+Alt+M で何も開かない").catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（${await describeScreen(page)}）`);
@@ -255,7 +257,7 @@ test("選んで右クリック「切り取り」で字が消え、別の所で�
       states.push(afterPaste);
 
       /* ── そのまま Ctrl+S：ファイルに入り、警告の帯が出ない ── */
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(async () => (await fileText(session)) === "一行目の文。\nの文。\n三行目の文。二行目\n", "切り取りと貼り付けがファイルに入る", 15_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／下の欄：${JSON.stringify(await footText(frame, "note"))}）`);
@@ -268,7 +270,7 @@ test("選んで右クリック「切り取り」で字が消え、別の所で�
       await frame.locator("#compose").click();
       for (let press = 1; press <= 4 && (await composeText(frame)) !== original; press++) {
         const before = await composeText(frame);
-        await page.keyboard.press("Control+KeyZ");
+        await page.keyboard.press("ControlOrMeta+KeyZ");
         await waitUntil(async () => (await composeText(frame)) !== before, `${press}回目の Ctrl+Z で画面が戻る`, 10_000).catch(async (error: unknown) => {
           throw new Error(`${String(error)}（いまの画面：${JSON.stringify(await composeText(frame))}／ここまでの移り変わり：${JSON.stringify(states)}）`);
         });
@@ -279,7 +281,7 @@ test("選んで右クリック「切り取り」で字が消え、別の所で�
       expect(states[2], `1回目の Ctrl+Z で、貼り付けが戻っていません（移り変わり：${JSON.stringify(states)}）`).not.toContain("三行目の文。二行目");
 
       // 戻した形も保存できる
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(async () => (await fileText(session)) === ORIGINAL, "Ctrl+Z で戻した形が Ctrl+S でファイルに入る", 15_000).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（ファイル：${JSON.stringify(await fileText(session))}）`);
       });

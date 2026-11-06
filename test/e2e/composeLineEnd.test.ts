@@ -17,6 +17,7 @@ import { caretPosition, composeText, openEpisode, placeCaretAfter, selectText } 
 import { turnVertical, VERTICAL_LAUNCH } from "./support/verticalFace";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
+import { ADD_EMPHASIS_PRESS } from "./support/keys";
 
 const EPISODE = "001_はじまり.md";
 /*
@@ -60,7 +61,7 @@ async function fileText(session: E2ESession): Promise<string> {
 }
 
 async function saveAndWaitFor(session: E2ESession, needle: string): Promise<void> {
-  await session.page.keyboard.press("Control+KeyS");
+  await session.page.keyboard.press("ControlOrMeta+KeyS");
   await waitUntil(async () => (await fileText(session)).includes(needle), `「${needle}」がファイルに入る`, 15_000);
 }
 
@@ -159,7 +160,7 @@ for (const vertical of [true, false]) {
         if (vertical) frame = await turnVertical(session, "いるよ");
         expect(await lineFitsOneRow(frame), "テストの前提（1行目が折り返さない）が崩れています").toBeNull();
         await selectText(frame, "今日");
-        await session.page.keyboard.press("Control+Alt+KeyK");
+        await session.page.keyboard.press(ADD_EMPHASIS_PRESS);
         // 傍点が付いたのを見てから End（End が先に着くと、付ける語の選択が動いてしまう）
         await waitUntil(async () => (await frame.locator("#compose .emphasis").count()) === 1, "傍点が付く");
         await session.page.keyboard.press("End");

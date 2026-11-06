@@ -213,7 +213,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：右クリックの品書き�
 
 /** コマンドパレットに `query` を打って、並びを写真に撮り、行の名前を返して閉じる */
 async function commandPaletteShot(page: Page, query: string, name: string): Promise<string[]> {
-  await page.keyboard.press("Control+Shift+KeyP");
+  await page.keyboard.press("ControlOrMeta+Shift+KeyP");
   await page.locator(".quick-input-widget input").first().waitFor({ state: "visible" });
   await page.keyboard.insertText(query);
   let labels: string[] = [];

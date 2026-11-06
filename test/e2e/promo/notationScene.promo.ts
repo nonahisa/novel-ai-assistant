@@ -11,6 +11,7 @@ import { proposalPanelFrame } from "../support/sampleFinding";
 import { waitUntil } from "../support/wait";
 import { acceptQuickPick, clearNotifications, pickQuickPickRow, quickPickRows, quickPickTitle, toggleQuickPickRow } from "../support/workbenchDom";
 import { recordFeature } from "./support/featureScene";
+import { CHECK_NOTATION_PRESS } from "../support/keys";
 
 const EP1 = "001_雨の駅.txt";
 const EP2 = "002_朝の窓口.txt";
@@ -47,7 +48,7 @@ test("表記ゆれ検知の広報素材を撮る", async () => {
       const frame = await openEpisode(page, EP1, "零時を指した");
       await placeCaretAfter(frame, "終電を逃した");
       await page.waitForTimeout(800);
-      await page.keyboard.press("Control+Alt+KeyH");
+      await page.keyboard.press(CHECK_NOTATION_PRESS);
       await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("表記ゆれが"), "揺れの組が並ぶ", 30_000);
       await page.waitForTimeout(1_500);
       const rows = await quickPickRows(page);

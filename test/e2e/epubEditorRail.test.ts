@@ -131,7 +131,7 @@ test("EPUBエディターで、打ちかけの題名が面を移っても残り�
     const title = epub.locator("#bookTitle");
     await title.waitFor({ state: "visible" });
     await title.click();
-    await page.keyboard.press("Control+KeyA");
+    await page.keyboard.press("ControlOrMeta+KeyA");
     await page.keyboard.insertText("打ちかけの題");
     await railRow(epub, "目次").click();
     await waitUntil(async () => !(await title.isVisible()), "目次の面へ移る（本の設定が隠れる）");

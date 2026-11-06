@@ -29,6 +29,7 @@ import {
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { activeGroupIndex, editorGroupTabs, focusTextEditor } from "./support/workbenchDom";
+import { EDITOR_BOTTOM_PRESS } from "./support/keys";
 
 const EPISODES = [
   { name: "第1話_はじまり.txt", text: "一話の本文。\n" },
@@ -109,11 +110,11 @@ test("話の右クリック「ここから章を始める」で名前を入れ�
       const headingsText = () => plotPanel.evaluate(() => document.getElementById("headings")?.innerText ?? "");
       expect(await headingsText()).not.toContain("見張りの見出し");
       await focusTextEditor(page);
-      await page.keyboard.press("Control+End");
+      await page.keyboard.press(EDITOR_BOTTOM_PRESS);
       await page.keyboard.press("Enter");
       await page.keyboard.insertText("## 見張りの見出し");
       await page.keyboard.press("Enter");
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(
         async () => (await readFile(path.join(session.workFolder, "設定", "plot.md"), "utf8")).includes("## 見張りの見出し"),
         "打った見出しが plot.md に保存される"

@@ -48,6 +48,7 @@ import {
   showTitleCard,
   type CaptionPlace,
 } from "./support/overlay";
+import { OPEN_SCENE_MEMOS_PRESS } from "../support/keys";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 /** 録ったままの動画と MP4 の置き場（`.gitignore` の `/release/` の下。repo に入れない） */
@@ -282,7 +283,7 @@ test("場面2「直す」を撮る", async () => {
       await page.keyboard.press(CLOSE_SIDEBAR_PRESS);
       const frame = await openEpisode(page, EPISODE_1, "零時を指していた");
       await placeCaretAfter(frame, "終電を逃した");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       let panel: Frame | undefined;
       await waitUntil(
         async () => {

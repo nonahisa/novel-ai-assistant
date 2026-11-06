@@ -117,7 +117,7 @@ export async function readListedJson<T>(file: string, timeoutMs = PRESENT_TIMEOU
  */
 export async function saveAndSettle(page: Page, file: string, label: string): Promise<void> {
   const before = (await stat(file)).mtimeMs;
-  await page.keyboard.press("Control+KeyS");
+  await page.keyboard.press("ControlOrMeta+KeyS");
   let last = "";
   try {
     await waitUntil(

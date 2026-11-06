@@ -44,6 +44,7 @@ import {
   quickPickRows,
   quickPickTitle,
 } from "./support/workbenchDom";
+import { CHECK_PROOFREAD_PRESS } from "./support/keys";
 
 const EPISODE = "001_はじまり.txt";
 const TEXT = "　朝の駅は静かだった。\n　改札を抜けて、白い息を吐いた。\n";
@@ -173,7 +174,7 @@ async function typeOne(frame: Frame, page: Page, mark: string): Promise<void> {
  */
 async function pressAndPassScope(frame: Frame, page: Page, label: string, dirty = false): Promise<void> {
   await placeCaretAfter(frame, "静かだった。");
-  await page.keyboard.press("Control+Alt+KeyP");
+  await page.keyboard.press(CHECK_PROOFREAD_PRESS);
   const direct = await waitTopPicker(page, "どこまで見ますか");
   expect(direct.first, `${label}：${dirty ? "打ちかけがあっても" : "保存済みなら"}、範囲の窓から出て先頭は「この話だけ」`).toContain("この話だけ");
   await page.keyboard.press("Enter");
@@ -223,7 +224,7 @@ async function runFlow(session: E2ESession, frame: Frame, label: string): Promis
   /* ── 1：打ちかけ → 最初に出るのは範囲の窓（保存の窓は出ない）。Esc で止めると何も変わらない ── */
   const mark = `【${label}1】`;
   await typeOne(frame, page, mark);
-  await page.keyboard.press("Control+Alt+KeyP");
+  await page.keyboard.press(CHECK_PROOFREAD_PRESS);
   const scope = await waitTopPicker(page, "どこまで見ますか");
   expect(scope.first, `${label}：範囲の窓の先頭`).toContain("この話だけ");
   expect(scope.first, `${label}：範囲の窓の先頭に話のファイル名`).toContain(EPISODE);

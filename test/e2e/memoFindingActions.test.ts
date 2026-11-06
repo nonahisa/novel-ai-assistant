@@ -38,6 +38,7 @@ import {
   editorGroupTabs,
   countTabsNamed,
 } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", "　近づいてみると、男は以外にも若かった。", "　ホームの時計が、零時を指していた。", ""].join("\n");
@@ -56,7 +57,7 @@ async function countIn(frame: Frame, selector: string): Promise<number> {
 
 /** 原稿の中から Ctrl+Alt+M で校正・メモパネルを開き、`selector` の押し口が並ぶまで待つ */
 async function openMemoPanel(page: Page, selector: string): Promise<Frame> {
-  await page.keyboard.press("Control+Alt+KeyM");
+  await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
   let memo: Frame | undefined;
   await waitUntil(
     async () => {

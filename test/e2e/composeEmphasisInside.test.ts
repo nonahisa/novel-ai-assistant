@@ -20,6 +20,7 @@ import { composeText, openEpisode, selectText } from "./support/manuscriptFrame"
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { tabIsDirty } from "./support/workbenchDom";
+import { ADD_EMPHASIS_PRESS } from "./support/keys";
 
 const EPISODE = "001_はじまり.txt";
 const SOURCE = "前の字と《《強調文字》》と後ろの字。\n";
@@ -33,7 +34,7 @@ async function fileText(session: E2ESession): Promise<string> {
 }
 
 async function saveAndWaitFor(session: E2ESession, expected: (text: string) => boolean, label: string) {
-  await session.page.keyboard.press("Control+KeyS");
+  await session.page.keyboard.press("ControlOrMeta+KeyS");
   await waitUntil(async () => expected(await fileText(session)), label, 15_000);
 }
 
@@ -57,7 +58,7 @@ async function saveWithRetry(
   await waitUntil(async () => tabIsDirty(session.page, name), `${name} のタブに未保存の印が付く`, 10_000);
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt++) {
-    await session.page.keyboard.press("Control+KeyS");
+    await session.page.keyboard.press("ControlOrMeta+KeyS");
     try {
       await waitUntil(async () => expected(await fileTextOf(session, name)), `${label}（${attempt}回目の Ctrl+S）`, 5_000);
       return;
@@ -111,7 +112,7 @@ for (const vertical of [true, false]) {
         if (vertical) frame = await turnVertical(session, "後ろの字");
         await installTrace(frame);
         await selectText(frame, "今日");
-        await session.page.keyboard.press("Control+Alt+KeyK");
+        await session.page.keyboard.press(ADD_EMPHASIS_PRESS);
         await waitUntil(async () => (await frame.locator("#compose .emphasis").count()) === 1, "傍点が付く");
         // 本体の選び直し（語ぜんたいを選ぶ）が届いてから押す
         await waitUntil(
@@ -130,7 +131,7 @@ for (const vertical of [true, false]) {
             );
           }
         );
-        await session.page.keyboard.press("Control+KeyS");
+        await session.page.keyboard.press("ControlOrMeta+KeyS");
         await waitUntil(async () => (await fileTextOf(session, "001_はじまり.md")).includes("あ"), "打った字がファイルに入る", 15_000);
         expect(await fileTextOf(session, "001_はじまり.md")).toBe("前の字と{{今あ日}}と後ろの字。\n");
       },

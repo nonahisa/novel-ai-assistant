@@ -42,6 +42,7 @@ import {
   textEditorVisibleText,
   textEditorVisibleTextIn,
 } from "./support/workbenchDom";
+import { EDITOR_TOP_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", "　近づいてみると、男は以外にも若かった。", "　ホームの時計が、零時を指していた。", ""].join("\n");
@@ -194,7 +195,7 @@ test("素のテキストエディターで開いているときの［適用］�
       await waitUntil(async () => (await textEditorVisibleText(page)).includes("零時を指していた"), "素のエディターで話が開く", 20_000);
       // カーソルを3行目の頭に置く（適用する2行目の隣）
       await focusTextEditor(page);
-      await page.keyboard.press("Control+Home");
+      await page.keyboard.press(EDITOR_TOP_PRESS);
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("ArrowDown");
       await waitUntil(async () => (await textEditorCursor(page))?.line === 3, "カーソルが3行目に来る", 5_000);
@@ -231,7 +232,7 @@ test("素のテキストエディターで開いているときの［適用］�
 
       // カーソルは読み直しの前の位置（3行目）に残る。左の列へ焦点を戻して読む
       // （押すとカーソルが動くので、キーで列へ戻る）
-      await page.keyboard.press("Control+1");
+      await page.keyboard.press("ControlOrMeta+1");
       await waitUntil(async () => (await textEditorCursor(page))?.line === 3, "［適用］のあともカーソルが3行目に残る", 5_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（カーソル：${JSON.stringify(await textEditorCursor(page))}）`);

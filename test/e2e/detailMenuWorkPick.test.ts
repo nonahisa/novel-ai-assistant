@@ -171,7 +171,7 @@ test("詳細メニューの「執筆統計」を押すと作品を選ぶ画面�
       await waitUntil(async () => (await quickPickTitle(page)) === undefined, "選ぶ画面が閉じる", 5_000);
 
       /* ── 原稿を閉じて押し直すと、先頭が作品A ── */
-      await pressWorkbenchKey(page, "Control+KeyW");
+      await pressWorkbenchKey(page, "ControlOrMeta+KeyW");
       await waitUntil(async () => !tabNamesInclude((await editorGroupTabs(page)).flat(), OTHER_EPISODE), "作品Bの原稿のタブが閉じる", 10_000).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（タブ：${JSON.stringify(await editorGroupTabs(page))}）`);
       });

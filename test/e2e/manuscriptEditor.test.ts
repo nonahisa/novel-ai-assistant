@@ -24,6 +24,7 @@ import {
 import { tabIsDirty } from "./support/workbenchDom";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
+import { ADD_EMPHASIS_PRESS, ADD_SCENE_MEMO_PRESS } from "./support/keys";
 
 const EPISODE = "001_はじまり.txt";
 
@@ -86,7 +87,7 @@ async function saveLogLines(session: E2ESession): Promise<string> {
 
 /** Ctrl+S を押し、ファイルに `expected` が入るまで待つ */
 async function saveAndWaitFor(session: E2ESession, expected: (text: string) => boolean, label: string) {
-  await session.page.keyboard.press("Control+KeyS");
+  await session.page.keyboard.press("ControlOrMeta+KeyS");
   await waitUntil(async () => expected(await fileText(session)), label, 15_000);
 }
 
@@ -138,7 +139,7 @@ test("Ctrl+/ でカーソル行の上に // の行が入り、F8 で次のメモ
 
       // 行の途中にカーソルを置いて Ctrl+/ → その行の上にメモの行が入る
       await placeCaretAfter(frame, "二行目");
-      await session.page.keyboard.press("Control+Slash");
+      await session.page.keyboard.press(ADD_SCENE_MEMO_PRESS);
       // メモの行は「画面→本体のコマンド→文書」と回って入るので、画面に出てから保存する
       // （すぐ Ctrl+S を押すと、入る前の文書を保存してしまう）
       await waitUntil(
@@ -231,7 +232,7 @@ test(".txt の原稿で《《強調》》の語を選んで Ctrl+Alt+K を押し
       const frame = await openEpisode(session.page, EPISODE, "後ろの字");
       // 組んだ面では印（《《 》》）は見えず、語だけが傍点つきで出る。作者と同じく見えている語を選ぶ
       await selectText(frame, "強調");
-      await session.page.keyboard.press("Control+Alt+KeyK");
+      await session.page.keyboard.press(ADD_EMPHASIS_PRESS);
       /*
         **画面へ送り直しが届くのを待たずに Ctrl+S を押す**（作者の裁定「調べて直す」、
         2026-10-03。設計書6.25.9）。外すのは本体のコマンドが文書へ当て、少し遅れて
@@ -445,7 +446,7 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に行末へ字
       await selectText(frame, "強調");
       await traceInstall(frame);
       await traceMark(frame, "Ctrl+Alt+K を押す");
-      await session.page.keyboard.press("Control+Alt+KeyK");
+      await session.page.keyboard.press(ADD_EMPHASIS_PRESS);
       await waitDirtyQuickly(session);
       await waitSelectionOutsideChunk(frame);
       // 打つ直前の画面の傍点の数（1なら、送り直しがまだ届いていない＝見たい場面）
@@ -526,7 +527,7 @@ test("Ctrl+Alt+K で強調を外した直後に End で行末へ動くと、画�
       await selectText(frame, "強調");
       await traceInstall(frame);
       await traceMark(frame, "Ctrl+Alt+K を押す");
-      await session.page.keyboard.press("Control+Alt+KeyK");
+      await session.page.keyboard.press(ADD_EMPHASIS_PRESS);
       await waitDirtyQuickly(session);
       await waitSelectionOutsideChunk(frame);
       await session.page.keyboard.press("End");
@@ -563,7 +564,7 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に同じ語の
       await selectText(frame, "強調");
       await traceInstall(frame);
       await traceMark(frame, "Ctrl+Alt+K を押す");
-      await session.page.keyboard.press("Control+Alt+KeyK");
+      await session.page.keyboard.press(ADD_EMPHASIS_PRESS);
       await waitDirtyQuickly(session);
       await waitSelectionOutsideChunk(frame);
       const emphasisBeforeTyping = await frame.locator("#compose .emphasis").count();

@@ -44,7 +44,7 @@ test("文字数と原稿用紙換算の広報素材を撮る", async () => {
       await waitUntil(async () => (await statusBarTexts(page)).some((text) => text.includes("字")), "文字数がステータスバーに出る", 20_000);
       await caption("開いているファイルの文字数は、ステータスバーに出る");
       await page.waitForTimeout(2_500);
-      await page.keyboard.press("Control+KeyA");
+      await page.keyboard.press("ControlOrMeta+KeyA");
       await caption("選択した範囲の文字数も出る");
       await page.waitForTimeout(2_500);
       const item = page.locator(".part.statusbar .statusbar-item", { hasText: "字" }).first();

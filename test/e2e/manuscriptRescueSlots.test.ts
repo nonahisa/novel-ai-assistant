@@ -84,7 +84,7 @@ test("帯の控えが開いている間に原稿へ届かなかった字も、�
       expect(await rescueBarText(frame)).toContain("前回、原稿に入らなかった字があります");
       await frame.locator("#rescueRestore").click();
       await waitUntil(async () => (await composeText(frame)).includes("乙"), "戻した字が画面に出る");
-      await session.page.keyboard.press("Control+KeyS");
+      await session.page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(async () => (await fileText(session)).includes("乙"), "戻した字がファイルに入る", 15_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（ファイル：${JSON.stringify(await fileText(session))}）`);

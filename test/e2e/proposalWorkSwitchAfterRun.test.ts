@@ -30,6 +30,7 @@ import {
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { activateTab, clearNotifications, notificationTexts, quickOpen, quickPickRows, quickPickTitle } from "./support/workbenchDom";
+import { CHECK_TYPOS_PRESS } from "./support/keys";
 
 const EPISODE_A = "001_はじまり.txt";
 const TEXT_A = "　朝の駅は静かだった。\n　近づいてみると、男は以外にも若かった。\n";
@@ -124,7 +125,7 @@ test("作品Aの提案パネルを見ている途中で作品Bの誤字脱字検
         );
         if (!frameB) throw new Error("作品Bの原稿の面が見つかりません");
         await placeCaretAfter(frameB, "夜の港");
-        await page.keyboard.press("Control+Alt+KeyT");
+        await page.keyboard.press(CHECK_TYPOS_PRESS);
         await waitUntil(
           async () => {
             await passLocalAiGate(page);

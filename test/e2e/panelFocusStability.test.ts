@@ -26,6 +26,7 @@ import { SIDEBAR_LAUNCH, showSidebar, treeRow } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { clearNotifications, pressWorkbenchKey } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 
@@ -54,7 +55,7 @@ const LAUNCH = {
 };
 
 async function openMemoPanel(page: Page): Promise<Frame> {
-  await page.keyboard.press("Control+Alt+KeyM");
+  await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
   let memo: Frame | undefined;
   await waitUntil(
     async () => {
@@ -99,7 +100,7 @@ test("校正・メモパネルと提案パネルを開いていても、コマ�
       await writeSampleFinding(session.workFolder, SAMPLE);
       await openBothPanels(page);
 
-      await pressWorkbenchKey(page, "Control+Shift+KeyP");
+      await pressWorkbenchKey(page, "ControlOrMeta+Shift+KeyP");
       await waitUntil(() => paletteShown(page), "コマンドパレットが開く");
       await holdsFor(() => paletteShown(page), "開いたコマンドパレット", 5_000);
       await page.keyboard.press("Escape");
@@ -124,7 +125,7 @@ test("校正・メモパネルで［直す］を押して帯が出たあとも�
       );
       await clearNotifications(page);
 
-      await pressWorkbenchKey(page, "Control+Shift+KeyP");
+      await pressWorkbenchKey(page, "ControlOrMeta+Shift+KeyP");
       await waitUntil(() => paletteShown(page), "コマンドパレットが開く");
       await holdsFor(() => paletteShown(page), "開いたコマンドパレット", 5_000);
       await page.keyboard.press("Escape");

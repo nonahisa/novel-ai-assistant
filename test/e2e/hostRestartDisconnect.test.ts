@@ -179,7 +179,7 @@ test("拡張機能ホストを再起動したあと、原稿のタブを前に�
         async () => (await composeText(fresh)).includes("再読み込みのあとに打った字"),
         "打った字が画面に出る"
       );
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(
         async () => (await fileText(session)).includes("再読み込みのあとに打った字"),
         "再読み込みのあとに打った字がファイルに入る",
@@ -227,7 +227,7 @@ test("拡張機能ホストの再起動の前に原稿へ届かなかった字�
 
       await fresh.locator("#rescueRestore").click();
       await waitUntil(async () => (await composeText(fresh)).includes("甲"), "戻した字が画面に出る");
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(async () => (await fileText(session)).includes("甲"), "戻した字がファイルに入る", 15_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（ファイル：${JSON.stringify(await fileText(session))}）`);

@@ -179,7 +179,7 @@ async function rubyAndEmphasis(session: E2ESession, given: Frame, episode: strin
   await waitUntil(async () => await tabIsDirty(page, episode), `${episode}：傍点で文書が変わる`);
   // 送り直しが画面へ届いてから保存する（manuscriptEditor.test.ts の傍点の件と同じ理由）
   await waitUntil(async () => (await frame.locator("#compose .emphasis").count()) > 0, `${episode}：画面に傍点が出る`);
-  await page.keyboard.press("Control+KeyS");
+  await page.keyboard.press("ControlOrMeta+KeyS");
   await waitUntil(async () => {
     const text = await rawFile(session, episode);
     return text.includes("{一行目|いちぎょうめ}") && text.includes("{{三行目}}");
@@ -256,7 +256,7 @@ test("CRLF と LF の原稿で、人物の色が名前そのものに載り、�
       await placeCaretAfter(frame, "五行目の");
       await page.keyboard.insertText("足した字");
       await waitUntil(async () => (await composeText(frame)).includes("五行目の足した字"), "打った字が画面に出る");
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(
         async () => (await rawFile(session, CRLF_EPISODE)).includes("五行目の足した字三門太志。"),
         "打った字がファイルに入る"
