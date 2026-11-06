@@ -328,14 +328,14 @@ async function typeIntoQuickOpen(page: Page, input: Locator, fileName: string): 
     候補を30秒待って落ちた（2026-10-12）
   */
   for (let attempt = 1; ; attempt++) {
-    await pressWorkbenchKey(page, "Control+KeyP");
+    await pressWorkbenchKey(page, "ControlOrMeta+KeyP");
     const shown = await input
       .waitFor({ state: "visible", timeout: 5_000 })
       .then(() => true)
       .catch(() => false);
     if (shown) {
       // 閉じる前の字が残っていても付け足しにならないよう、全部選んでから打つ
-      await page.keyboard.press("Control+KeyA");
+      await page.keyboard.press("ControlOrMeta+KeyA");
       await page.keyboard.insertText(fileName);
       const typed = await waitUntil(
         async () => (await input.isVisible()) && (await input.inputValue()) === fileName,
@@ -410,7 +410,7 @@ export async function markerWidgetShown(page: Page): Promise<boolean> {
  * 待つ**——打った直後は前の一覧が残っていることがあるので、数が落ち着くまで見る
  */
 export async function commandPaletteLabels(page: Page, query: string): Promise<string[]> {
-  await page.keyboard.press("Control+Shift+KeyP");
+  await page.keyboard.press("ControlOrMeta+Shift+KeyP");
   const input = page.locator(".quick-input-widget input");
   await input.waitFor({ state: "visible" });
   await page.keyboard.insertText(query);
@@ -478,7 +478,7 @@ export async function keybindingsEditorRows(page: Page, query: string): Promise<
   }
   await search.waitFor({ state: "visible", timeout: 10_000 });
   await search.click();
-  await page.keyboard.press("Control+KeyA");
+  await page.keyboard.press("ControlOrMeta+KeyA");
   await page.keyboard.insertText(query);
   const read = () =>
     page.evaluate(() =>

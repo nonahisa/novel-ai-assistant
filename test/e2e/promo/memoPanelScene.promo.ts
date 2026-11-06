@@ -8,6 +8,7 @@ import { test } from "vitest";
 import { memoPanelFrame, openEpisode, placeCaretAfter } from "../support/manuscriptFrame";
 import { waitUntil } from "../support/wait";
 import { recordFeature } from "./support/featureScene";
+import { OPEN_SCENE_MEMOS_PRESS } from "../support/keys";
 
 const EPISODE = "001_雨の駅.txt";
 const TEXT = [
@@ -33,7 +34,7 @@ test("メモパネルの広報素材を撮る", async () => {
     open: async ({ page }) => {
       frame = await openEpisode(page, EPISODE, "零時を指していた");
       await placeCaretAfter(frame, "終電を逃した");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       await waitUntil(
         async () => {
           const found = await memoPanelFrame(page);

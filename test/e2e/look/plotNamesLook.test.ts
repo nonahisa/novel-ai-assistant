@@ -22,6 +22,7 @@ import { waitUntil } from "../support/wait";
 import { clearNotifications, dialogText, pickQuickPickRow, pressDialogButton, pressWorkbenchKey, quickPickRows, quickPickTitle } from "../support/workbenchDom";
 import { lookEnabled, lookNote, shootPage, shootPageKeepingToasts } from "./lookSupport";
 import { nameFakeRespond, openPlotMode, openUpdates, panelText, rewritePlotAndSave, runNameSuggest } from "./nameLookSupport";
+import { EDITOR_BOTTOM_PRESS } from "../support/keys";
 
 const PLOT = [
   "# 見本の物語",
@@ -207,7 +208,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：プロットモードの名�
         // plot.md を開いたまま1行足す（保存しない）
         const lines = page.locator(".monaco-editor .view-lines", { hasText: "主要登場人物" }).first();
         await lines.click();
-        await page.keyboard.press("Control+End");
+        await page.keyboard.press(EDITOR_BOTTOM_PRESS);
         await page.keyboard.insertText("書きかけの一行");
         await clearNotifications(page);
         await plot.locator("[data-apply-names]").click();

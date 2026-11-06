@@ -103,7 +103,7 @@ async function settleInFile(
   // 遅らせた便が本体へ着いて当たるのを待ってから保存する（先に保存すると、
   // あとから当たった字は未保存のまま残り、ファイルを待っても入らない）
   await page.waitForTimeout(delayMs + 800);
-  await page.keyboard.press("Control+KeyS");
+  await page.keyboard.press("ControlOrMeta+KeyS");
   await waitUntil(async () => (await readEpisode(session)).includes(expected), label).catch(async (error: unknown) => {
     throw new Error(`${String(error)}（ファイル：${JSON.stringify(await readEpisode(session))}）`);
   });

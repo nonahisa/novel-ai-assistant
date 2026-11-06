@@ -48,6 +48,7 @@ import {
   quickOpen,
   textEditorVisibleText,
 } from "./support/workbenchDom";
+import { EDITOR_TOP_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", ""].join("\n");
@@ -297,7 +298,7 @@ test("作者モードのメニューは作者の操作だけで、編集者モ�
 
       // 素のエディターで1行を選んでから、右クリックにも「修正を提案する」があることを見る
       await focusTextEditor(page);
-      await page.keyboard.press("Control+Home");
+      await page.keyboard.press(EDITOR_TOP_PRESS);
       await page.keyboard.press("Shift+End");
       await dismissWorkbenchHover(page);
       await page.locator(".monaco-editor .view-lines").first().click({ button: "right", position: { x: 40, y: 8 } });
@@ -307,7 +308,7 @@ test("作者モードのメニューは作者の操作だけで、編集者モ�
 
       // 選び直して、詳細メニューから押す → 修正案の入力へ進む
       await focusTextEditor(page);
-      await page.keyboard.press("Control+Home");
+      await page.keyboard.press(EDITOR_TOP_PRESS);
       await page.keyboard.press("Shift+End");
       await (await scrollTreeUntilRow(page, "執筆データ", "修正を提案する")).click();
       await waitForQuickInput(page, "修正を提案する（1/2）：修正案", 15_000).catch(async (error: unknown) => {

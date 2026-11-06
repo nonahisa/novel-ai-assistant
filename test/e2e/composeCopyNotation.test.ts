@@ -21,6 +21,7 @@ import { expect, test } from "vitest";
 import { composeText, openEpisode } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
+import { EDITOR_BOTTOM_PRESS } from "./support/keys";
 
 const TXT = "001_はじまり.txt";
 const MD = "002_つづき.md";
@@ -48,8 +49,8 @@ async function copyAll(session: E2ESession, frame: Frame, marker: string): Promi
   await frame.locator("#compose").click();
   // 前のコピーと取り違えない：先にクリップボードを空にする
   await session.app.evaluate(({ clipboard }) => clipboard.clear());
-  await session.page.keyboard.press("Control+KeyA");
-  await session.page.keyboard.press("Control+KeyC");
+  await session.page.keyboard.press("ControlOrMeta+KeyA");
+  await session.page.keyboard.press("ControlOrMeta+KeyC");
   let copied = { text: "", html: "" };
   await waitUntil(
     async () => {
@@ -93,14 +94,14 @@ test("コピーすると、素のテキストは｜灯《あかり》の記法�
 
         /* ── この面へ貼り戻すと、記法が二重にならず元どおり（行の終わりへ貼る） ── */
         await frame.locator("#compose").click();
-        await page.keyboard.press("Control+End");
-        await page.keyboard.press("Control+KeyV");
+        await page.keyboard.press(EDITOR_BOTTOM_PRESS);
+        await page.keyboard.press("ControlOrMeta+KeyV");
         await waitUntil(async () => (await composeText(frame)).split("見た。").length - 1 >= 2, "貼り戻した字が面に出る（見た。が2回）", 10_000).catch(
           async (error: unknown) => {
             throw new Error(`${String(error)}（面の字：${JSON.stringify(await composeText(frame))}）`);
           }
         );
-        await page.keyboard.press("Control+KeyS");
+        await page.keyboard.press("ControlOrMeta+KeyS");
         await waitUntil(
           async () => (await fileText(session, TXT)).split("｜灯《あかり》").length - 1 >= 2,
           "貼り戻して保存すると、ファイルに記法が2か所入る",

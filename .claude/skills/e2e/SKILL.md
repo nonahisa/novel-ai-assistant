@@ -54,7 +54,8 @@ npm run typecheck:tests                            # 型（test/e2e/tsconfig.jso
 3. **確かめるのは、ファイル → 画面の順。** 本文が変わったかはファイルを読む（`\r\n` を `\n` に揃える）。画面はそのあと。**本文フォルダーを一覧で読むときは、書き込み途中の一時ファイル（`*.novelai-*.tmp`）を拾わない**（製品が保存の途中で一瞬置く）
 4. **「起きない」ことは `holdsFor` で数秒見続ける**（2枚目のタブ・確認の窓・素のエディター）。一瞬だけ見て「無い」としない
 5. 製品のコマンドを押すキーが無いときは、**使い捨ての keybindings.json に足す**（`LaunchOptions.keybindings`）。`ctrl+alt+shift+F1`〜`F12` は埋まった。足すときは `test/e2e` を `ctrl+alt+shift+` で検索し、使われておらず製品の `package.json` のキーとも重ならないもの（`ctrl+alt+shift+` と文字キーなど）を選ぶ
-6. 冒頭のコメントに「何を見張るか」と設計書の節・作者の指示の日付を書く
+6. **キーは Mac でも通る形で押す**（2026-11-06）：VS Code 本体のキーは `ControlOrMeta+…`（`Control+…` と決め打ちしない）。Mac の割り当てが Cmd＋同じキーでない本体のキー（文書の頭・末、エディターを閉じる）と、**製品のキー（package.json の割り当て）は `support/keys.ts` を通す**（`productKey("novelai.xxx")`・`OPEN_SCENE_MEMOS_PRESS` など。製品のキーを外す `-` の行は `productKeybinding`）。使い捨ての `ctrl+alt+shift+…` は Mac でも Control なので `Control+…` のまま
+7. 冒頭のコメントに「何を見張るか」と設計書の節・作者の指示の日付を書く
 
 ## 守ること
 

@@ -51,6 +51,7 @@ import {
   quickInputWaitContext,
   webviewLayers,
 } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 /** 失敗の文へ添える、列とタブ・WebView の重なり・知らせ */
 async function layoutDetail(page: Page): Promise<string> {
@@ -214,7 +215,7 @@ test("縦書きで開いている話で、校正・メモパネルの行を押�
 
       // 原稿の中から Ctrl+Alt+M で、校正・メモパネルを原稿の横（右の列）に開く
       await placeCaretAfter(frame, "一行目");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       let panel: Frame | undefined;
       await waitUntil(
         async () => {

@@ -45,6 +45,7 @@ import { openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { dialogText, pressWorkbenchKey, quickPickRows, quickPickTitle, statusBarTexts } from "./support/workbenchDom";
+import { CHECK_TYPOS_PRESS } from "./support/keys";
 
 const RUN = process.env.NOVELAI_E2E_TWO_WINDOWS === "1";
 
@@ -226,7 +227,7 @@ test.skipIf(!RUN)(
         /* ── 窓1：誤字脱字検知（3〜4チャンク）を走らせる ── */
         const frame = await openEpisode(page1, EPISODE, "発車のベルを待っていた");
         await placeCaretAfter(frame, "発車のベルを待っていた。");
-        await page1.keyboard.press("Control+Alt+KeyT");
+        await page1.keyboard.press(CHECK_TYPOS_PRESS);
         await waitUntil(
           async () => {
             await failOnGpuWarning(page1, "窓1（誤字脱字の始まり）");

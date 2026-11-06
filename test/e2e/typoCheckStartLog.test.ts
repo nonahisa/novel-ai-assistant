@@ -24,6 +24,7 @@ import { openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { activateTab, clearNotifications, quickPickRows, quickPickTitle, statusBarTexts } from "./support/workbenchDom";
+import { CHECK_TYPOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_はじまり.txt";
 const TEXT = "　朝の駅は静かだった。\n　改札を抜けて、白い息を吐いた。\n";
@@ -63,7 +64,7 @@ async function describeState(session: E2ESession, fake: FakeOllama, from: number
 /** 原稿の面に焦点を置いて Ctrl+Alt+T を押す */
 async function pressTypoKey(session: E2ESession, frame: Frame): Promise<void> {
   await placeCaretAfter(frame, "静かだった。");
-  await session.page.keyboard.press("Control+Alt+KeyT");
+  await session.page.keyboard.press(CHECK_TYPOS_PRESS);
 }
 
 /**

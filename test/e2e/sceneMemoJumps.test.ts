@@ -41,6 +41,7 @@ import {
   tabIsDirty,
   tabNamesInclude,
 } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EP1 = "001_いち.txt";
 const EP2 = "002_に.txt";
@@ -129,13 +130,13 @@ test("右クリック「メモ追加」で行の上に // が入り、［済み�
           throw new Error(`${String(error)}（本文：${JSON.stringify(await composeText(frame))}）`);
         }
       );
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(async () => /\n\/\/ ?\n一の三行目。/.test(await fileText(session, EP1)), "足したメモの行がファイルに入る");
       expect((await fileText(session, EP1)).split("\n").slice(0, 2)).toEqual(["一の一行目。", "// 一のメモ"]);
 
       /* ── 校正・メモパネルを横に開く ── */
       await placeCaretAfter(frame, "一の一行目");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       let found: Frame | undefined;
       await waitUntil(async () => {
         found = await memoPanelFrame(page);
@@ -252,7 +253,7 @@ test("［済み］で消えたメモが、校正・メモパネルの帯の［�
       const { page } = session;
       const frame = await openEpisode(page, EP1, "一の三行目");
       await placeCaretAfter(frame, "一の一行目");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       let found: Frame | undefined;
       await waitUntil(async () => {
         found = await memoPanelFrame(page);
@@ -328,7 +329,7 @@ test("校正・メモパネルの［次へ］を続けて押すと、2つの話�
       const { page } = session;
       const frame = await openEpisode(page, EP1, "一の三行目");
       await placeCaretAfter(frame, "一の三行目");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       let found: Frame | undefined;
       await waitUntil(async () => {
         found = await memoPanelFrame(page);
@@ -407,7 +408,7 @@ test("打つ面でも、右クリック「メモ追加」でカーソル行の�
       await waitUntil(async () => (await writeValue(surface)).split("\n").length === 5, "「メモ追加」で打つ面に1行増える");
       const lines = (await writeValue(surface)).split("\n");
       expect(lines[caretLine - 1].trim(), `カーソル行（${caretLine}行目）の上に // が入っていません。本文：${JSON.stringify(lines)}`).toBe("//");
-      await page.keyboard.press("Control+KeyS");
+      await page.keyboard.press("ControlOrMeta+KeyS");
       await waitUntil(async () => (await fileText(session, EP1)).split("\n").some((line) => line.trim() === "//"), "足したメモの行がファイルに入る");
       expect((await fileText(session, EP1)).split("\n").length, "ファイルの行数").toBe(5);
     }

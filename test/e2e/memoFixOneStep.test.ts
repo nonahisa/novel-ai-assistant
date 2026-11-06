@@ -33,6 +33,7 @@ import {
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { clearNotifications, countTabsNamed, dialogText, editorGroupTabs, pressWorkbenchKey } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", "　近づいてみると、男は以外にも若かった。", "　ホームの時計が、零時を指していた。", ""].join("\n");
@@ -90,7 +91,7 @@ async function proposalCount(proposals: Frame): Promise<string> {
 }
 
 async function openMemoPanel(page: Page): Promise<Frame> {
-  await page.keyboard.press("Control+Alt+KeyM");
+  await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
   let memo: Frame | undefined;
   await waitUntil(
     async () => {

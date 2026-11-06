@@ -196,7 +196,7 @@ test("両方で同じ行を直して「両方の書き換えを合わせる」�
       await clearNotifications(page);
 
       /* ── 対照：ignoreFocusOut の無いコマンドパレットは、同じ操作で閉じる ── */
-      await pressWorkbenchKey(page, "Control+Shift+KeyP");
+      await pressWorkbenchKey(page, "ControlOrMeta+Shift+KeyP");
       await waitUntil(async () => (await quickPickTitle(page)) !== undefined || (await page.locator(".quick-input-widget input").first().isVisible()), "コマンドパレットが開く", 10_000);
       await blurQuickInput(page);
       await waitUntil(

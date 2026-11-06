@@ -32,6 +32,7 @@ import { writeSampleFinding, type SampleFinding } from "./support/sampleFinding"
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { clearNotifications, dialogText } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 const QUOTE = "　彼はとても大きな、とても重い、とても古い鞄を、とてもゆっくりと持ち上げた。";
@@ -58,7 +59,7 @@ async function countIn(frame: Frame, selector: string): Promise<number> {
 
 /** 原稿の中から Ctrl+Alt+M で校正・メモパネルを開き、［AIに相談］が並ぶまで待つ（memoFindingActions と同じ形） */
 async function openMemoPanel(page: Page): Promise<Frame> {
-  await page.keyboard.press("Control+Alt+KeyM");
+  await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
   let memo: Frame | undefined;
   await waitUntil(
     async () => {

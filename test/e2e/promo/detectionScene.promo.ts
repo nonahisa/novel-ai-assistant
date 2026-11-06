@@ -12,6 +12,7 @@ import { proposalPanelFrame } from "../support/sampleFinding";
 import { waitUntil } from "../support/wait";
 import { clearNotifications, quickPickRows, quickPickTitle } from "../support/workbenchDom";
 import { recordFeature } from "./support/featureScene";
+import { CHECK_TYPOS_PRESS } from "../support/keys";
 
 const EPISODE = "001_雨の駅.txt";
 const TEXT = [
@@ -42,7 +43,7 @@ test("誤字脱字・推敲・矛盾などの検知の広報素材を撮る", as
       const frame = await openEpisode(page, EPISODE, "零時を指していた");
       await placeCaretAfter(frame, "終電を逃した");
       await page.waitForTimeout(800);
-      await page.keyboard.press("Control+Alt+KeyT");
+      await page.keyboard.press(CHECK_TYPOS_PRESS);
       await waitUntil(
         async () => {
           await passLocalAiGate(page);

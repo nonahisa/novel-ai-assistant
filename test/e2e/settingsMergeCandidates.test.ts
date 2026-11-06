@@ -33,6 +33,7 @@ import { charactersFolder, defaultCharactersFolder, settingsPanelFrame, writeCha
 import { withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { dialogText, quickPickTitle } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const OPEN_SETTINGS_KEY = "ctrl+alt+shift+f1";
 const OPEN_SETTINGS_PRESS = "Control+Alt+Shift+F1";
@@ -305,7 +306,7 @@ test("校正・メモパネルの「人物の重複の候補が 3組あります
       const { page } = session;
       const manuscript = await openEpisode(page, EPISODE, "ギルドマスター");
       await placeCaretAfter(manuscript, "ギルドマスター");
-      await page.keyboard.press("Control+Alt+KeyM");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
 
       let memo: Frame | undefined;
       await waitUntil(async () => {

@@ -121,7 +121,7 @@ async function scenario(secondPressAfterResume: boolean): Promise<void> {
       （設計書6.42。`aloudJumpToClick`）。そうなると次の［⚑］は飛んだ先の文の上に入り、「同じ文の上に2つ」の見張りにならない。
       保存のキーは、面の中に焦点が残っているのでそのまま届く
     */
-    await page.keyboard.press("Control+KeyS");
+    await page.keyboard.press("ControlOrMeta+KeyS");
     await waitUntil(async () => memoCount(await fileText(session)) >= 1, "保存すると、ファイルにメモの行が入る", 15_000).catch(async (error: unknown) => {
       throw new Error(`${String(error)}（ファイル：${JSON.stringify(await fileText(session))}）`);
     });
@@ -142,7 +142,7 @@ async function scenario(secondPressAfterResume: boolean): Promise<void> {
     });
     await frame.locator("#aloudMark").click();
     await page.waitForTimeout(2_500);
-    await page.keyboard.press("Control+KeyS");
+    await page.keyboard.press("ControlOrMeta+KeyS");
     await page.waitForTimeout(1_500);
     const final = await fileText(session);
     expect(

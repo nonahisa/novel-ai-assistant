@@ -16,6 +16,7 @@ import { memoPanelFrame, openEpisode, placeCaretAfter } from "./support/manuscri
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { activeTabNames, tabNamesInclude } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const EPISODE = "001_はじまり.txt";
 const TEXT = "一行目の文。\n// 見張りのメモ\n三行目の文。\n";
@@ -42,7 +43,7 @@ test("校正・メモパネルの［書き出す］で「校正・メモ」の�
 
     const frame = await openEpisode(page, EPISODE, "三行目の文");
     await placeCaretAfter(frame, "一行目");
-    await page.keyboard.press("Control+Alt+KeyM");
+    await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
     let memo = await memoPanelFrame(page);
     await waitUntil(
       async () => {

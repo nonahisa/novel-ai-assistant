@@ -25,6 +25,7 @@ import {
   textEditorCursor,
   textEditorVisibleText,
 } from "./support/workbenchDom";
+import { EDITOR_TOP_PRESS } from "./support/keys";
 
 const TXT = "001_はじまり.txt";
 const TXT_TEXT = "一行目の文。\n二行目の文。\n// 先のメモ\n四行目の文。\n";
@@ -100,7 +101,7 @@ async function openPlain(session: E2ESession, name: string, expected: string): P
   await quickOpen(page, name);
   await waitUntil(async () => (await textEditorVisibleText(page)).includes(expected), `素のエディターで「${name}」が開く`, 20_000);
   await focusTextEditor(page);
-  await page.keyboard.press("Control+Home");
+  await page.keyboard.press(EDITOR_TOP_PRESS);
   await waitUntil(async () => (await textEditorCursor(page))?.line === 1, `「${name}」の1行目へカーソルが来る`, 5_000);
 }
 
@@ -116,7 +117,8 @@ test("素のテキストエディターと .md では、Ctrl+/ と F8 が本体�
 
       // ── .txt（素のエディター）：Ctrl+/ でメモの行が入らず、F8 でメモの行へ飛ばない ──
       await openPlain(session, TXT, "二行目の文");
-      await page.keyboard.press("Control+Slash");
+      // 本体の行コメントも製品のメモも Ctrl+/（Mac は Cmd+/）で同じキーなので、本体のキーとして押す
+      await page.keyboard.press("ControlOrMeta+Slash");
       await page.keyboard.press("F8");
       // 素の .txt には行コメントの決まりが無いので、本体は何も足さない。
       // この拡張機能が奪っていれば、1行目の上に「//」の行が入り、カーソルが3行目へ飛ぶ
@@ -131,7 +133,7 @@ test("素のテキストエディターと .md では、Ctrl+/ と F8 が本体�
 
       // ── .md（素のエディター）：Ctrl+/ で <!-- --> の行コメント、F8 で次の問題 ──
       await openPlain(session, MD, "一行目の文");
-      await page.keyboard.press("Control+Slash");
+      await page.keyboard.press("ControlOrMeta+Slash");
       await waitUntil(
         async () => /^<!--\s*一行目の文。\s*-->$/.test((await textEditorVisibleText(page)).split("\n")[0]),
         ".md で Ctrl+/ を押すと1行目が <!-- --> で囲まれる",

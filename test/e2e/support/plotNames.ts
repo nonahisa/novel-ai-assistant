@@ -338,9 +338,9 @@ export async function rewritePlotAndSave(session: E2ESession, text: string): Pro
       `${String(error)}（エディター：${JSON.stringify(squash(shownText).slice(0, 200))}／ディスク：${JSON.stringify(squash(diskText).slice(0, 200))}）`
     );
   });
-  await page.keyboard.press("Control+KeyA");
+  await page.keyboard.press("ControlOrMeta+KeyA");
   await page.keyboard.insertText(text);
-  await page.keyboard.press("Control+KeyS");
+  await page.keyboard.press("ControlOrMeta+KeyS");
   await waitUntil(async () => (await readPlot(session)) === text, "書き換えた plot.md が保存される", 15_000).catch(async (error: unknown) => {
     // 保存が VS Code に断られた（「ファイルのほうが新しい」など）なら右下の知らせに出るので、文に添える
     const notices = await page

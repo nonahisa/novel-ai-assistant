@@ -20,6 +20,7 @@ import { proposalPanelFrame, writeSampleFinding, type SampleFinding } from "./su
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { activeTabNames, clearNotifications } from "./support/workbenchDom";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
 
 const OTHER_TITLE = "作品B";
 const REGISTER_OTHER_KEY = "ctrl+alt+shift+b";
@@ -49,7 +50,7 @@ async function memoFrameShowing(page: Page, marker: string): Promise<Frame | und
 
 /** 原稿の中から Ctrl+Alt+M で校正・メモパネルを開き、`marker`（その作品の指摘）と［提案パネル］が出るまで待つ */
 async function openMemoFor(page: Page, marker: string, label: string): Promise<Frame> {
-  await page.keyboard.press("Control+Alt+KeyM");
+  await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
   let memo: Frame | undefined;
   await waitUntil(
     async () => {
