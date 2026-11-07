@@ -28,7 +28,7 @@ import {
 } from "./support/sampleFinding";
 import { resizeWindows, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { activeGroupIndex, clearNotifications, pressWorkbenchKey } from "./support/workbenchDom";
+import { activateTab, activeGroupIndex, clearNotifications, pressWorkbenchKey } from "./support/workbenchDom";
 
 const EPISODE = "001_駅.txt";
 const SECOND = "002_つづき.txt";
@@ -223,7 +223,21 @@ async function openClipped(session: E2ESession): Promise<Frame> {
   await pressWorkbenchKey(page, OPEN_PROPOSALS_PRESS);
   await waitUntil(async () => (await proposalPanelFrame(page)) !== undefined, "提案パネルが開く", 15_000);
   // 2話目は提案パネルの列（右の列）で開く。列が2つ並び、焦点が右の列に移るまで待つ
-  await waitUntil(async () => (await activeGroupIndex(page)) === 1, "提案パネルの列に焦点が移る", 15_000);
+  /*
+    **焦点が右の列へ移らなければ、提案パネルのタブを押して移す。** ノートPC（2026-11-07、0.132.3 で4件、
+    0.134.5 で縦書きの2件）で、提案パネルは右の列に開くのに、焦点が左の列に残ったまま15秒過ぎた。
+    落ちるのは向きを変える前の段なので、向きのせいではない。この件が見たいのは「右の列が窓の外へ
+    切れたときの本文の幅」で、焦点の移り方ではないので、移らなければ押して移す
+  */
+  const moved = await waitUntil(async () => (await activeGroupIndex(page)) === 1, "提案パネルの列に焦点が移る", 5_000).then(
+    () => true,
+    () => false
+  );
+  if (!moved) {
+    console.warn(`[manuscriptSurfaceNarrow] 提案パネルを開いても焦点が右の列へ移らないので、タブを押して移します（列 ${await activeGroupIndex(page)}）`);
+    await activateTab(page, "提案");
+    await waitUntil(async () => (await activeGroupIndex(page)) === 1, "提案パネルのタブを押して、右の列に焦点が移る", 10_000);
+  }
   // 提案パネル（WebView）に焦点が移ると、クイックオープンの Ctrl+P が本体へ届かないことがある
   // （このファイルを続けて回して3回に1回ほど落ちた。pressWorkbenchKey の注釈と同じ事情）。
   // 焦点を本体へ戻してから開く

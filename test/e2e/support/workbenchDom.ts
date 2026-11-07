@@ -810,10 +810,30 @@ export async function dialogText(page: Page): Promise<string | undefined> {
   return dialog.first().innerText();
 }
 
-/** 確認の画面のボタンを、名前で押す */
+/**
+ * 確認の画面のボタンを、名前で押す。
+ *
+ * **押した窓が閉じたことを待つ（窓が1つも無くなることではない）。** 削除して話数を詰めるときは、
+ * ［話数を詰める］を押すとすぐ2段目の確認（［削除する］）が出る。2段目が5秒以内に出ると、
+ * 「窓が無くなる」を待つ形では時間切れで落ちる（2026-11-07 ノートPC、episodeRenameSynopsisReading）。
+ * 押した窓の要素が DOM から外れたか、窓の文が押す前と変わったら、閉じたとみなす
+ */
 export async function pressDialogButton(page: Page, label: string): Promise<void> {
+  const box = page.locator(".monaco-dialog-box").first();
+  const before = await box.innerText().catch(() => "");
+  const handle = await box.elementHandle();
   await page.locator(".monaco-dialog-box .monaco-button", { hasText: label }).first().click();
-  await page.locator(".monaco-dialog-box").waitFor({ state: "detached", timeout: 5_000 });
+  await waitUntil(
+    async () => {
+      if (handle && !(await handle.evaluate((element) => element.isConnected).catch(() => false))) return true;
+      const now = await dialogText(page);
+      return now === undefined || now !== before;
+    },
+    `確認の画面の［${label}］を押して、その窓が閉じる`,
+    5_000
+  ).catch(async (error: unknown) => {
+    throw new Error(`${String(error)}（いまの窓：${JSON.stringify(await dialogText(page))}）`);
+  });
 }
 
 /** 確認の画面を Esc で閉じる（何も選ばない） */
