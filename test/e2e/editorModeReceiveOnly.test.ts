@@ -16,15 +16,14 @@
  *    何も送りません。」と「提案は「校閲を終えて返す」で作者へ届きます。」が並び、製品のボタンは［受け取る］だけ
  * 2. ［受け取る］で、作者の直した原稿が手元に入り、手元の記録は作者の側と同じになる（送り先の記録は
  *    作者が送ったときのまま＝こちらからは何も送っていない）。置いてまだ返していない提案（書きかけ）は台帳に残る
- * 3. 続けて「2. 校閲する話を選ぶ」で範囲を押さえると、「…を校閲中にしました。」が出て、
+ *    送り先の記録の数（`rev-list --count`）も［受け取る］の前後で同じ
+ * 3. 続けて「2. 校閲する話を選ぶ」で範囲を選ぶと、下の帯に「〈範囲〉を校閲中にしました。」、右下に
+ *    「直し終えたら、編集者メニューの「6. 校閲を終えて作者へ返す」を押すと、提案が作者へ届きます。」が出て
+ *    （0.132.1。`core/reviewLockMessages.ts` の `reviewRangeStartedMessage`。作者の裁定 2026-11-07 未明）、
  *    「同期すると届きます」のような作者モードの言い方は出ない。鍵は送り先へ届く
  *
- * **項目の「校閲の範囲を押さえたときの知らせが「「校閲を終えて返す」で作者へ届きます。」」は、いまの製品では
- * 範囲の押さえ（`features/reviewProposals.ts` の `startRangeReview`）の知らせではなく、上の確認の窓の詳しくと、
- * 「修正を提案する」の済んだ知らせ（`features/handProposal.ts`）に出る。** 編集者モードの「校閲開始／終了」は
- * 押さえていなければ必ず範囲の選択へ進むので、1話を押さえたときの「…を押さえました。「校閲を終えて返す」で
- * 作者へ届きます。」へは届かない。ここでは確認の窓の詳しくで文を見て、範囲の知らせは製品のいまの文で見る
- * （食い違いは報告に書いた）。
+ * 右下の文は、製品の文の関数をそのまま呼んで引く（手順の名前は編集者メニューの定義から組まれるので、
+ * 写すと片方だけ古くなる）。下の帯の範囲の言い方は話数かファイル名かが製品の読み方で決まるので、形で見る。
  *
  * **GitHub は呼ばない。** 作品フォルダー（編集用リポジトリの写し）を本物の git の置き場にし、送り先は
  * 同じ一時フォルダーの中の裸の置き場（`support/gitFixture.ts` の `addLocalRemote`）、「作者の側」はそれを
@@ -38,8 +37,9 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
+import { reviewRangeStartedMessage } from "../../src/core/reviewLockMessages";
 import { HAND_EDIT_CATEGORY, proposalId } from "../../src/models/proposal";
-import { describeNotices } from "./support/noticeRecord";
+import { describeNotices, waitForNotice } from "./support/noticeRecord";
 import { addLocalRemote, git, gitWhileRunning, initRepoWithFirstCommit } from "./support/gitFixture";
 import { SIDEBAR_LAUNCH } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
@@ -177,6 +177,12 @@ async function remoteHead(session: E2ESession): Promise<string> {
   return (await git(session.root, [`--git-dir=${remote}`, "rev-parse", "main"])).trim();
 }
 
+/** 送り先（裸の置き場）の記録の数 */
+async function remoteCommitCount(session: E2ESession): Promise<number> {
+  const { remote } = places(session.root);
+  return Number((await git(session.root, [`--git-dir=${remote}`, "rev-list", "--count", "--all"])).trim());
+}
+
 /** 確認の窓（モーダル）の製品のボタン。VS Code が足す［キャンセル］は除く */
 async function dialogButtons(page: Page): Promise<string[]> {
   return (await page.locator(".monaco-dialog-box .monaco-button").allInnerTexts())
@@ -184,7 +190,7 @@ async function dialogButtons(page: Page): Promise<string[]> {
     .filter((text) => text !== "" && text !== "Cancel" && text !== "キャンセル");
 }
 
-test("編集者メニューの「1. 作者の最新の原稿を受け取る」は、確認の窓［受け取る］で作者の原稿を受け取るだけで何も送らず、書きかけの提案は残り、続けて範囲を押さえると「校閲中にしました」が出る", async () => {
+test("編集者メニューの「1. 作者の最新の原稿を受け取る」は、確認の窓［受け取る］で作者の原稿を受け取るだけで何も送らず、書きかけの提案は残り、続けて範囲を選ぶと下の帯に「校閲中にしました」、右下に「6. 校閲を終えて作者へ返す」の手順が出る", async () => {
   await withVsCode(
     "編集者モードの受け取るだけの同期",
     [{ name: EPISODE, text: `${LINE}\n` }],
@@ -214,6 +220,7 @@ test("編集者メニューの「1. 作者の最新の原稿を受け取る」�
       const authorHead = await headOf(author);
       const sentBefore = await remoteHead(session);
       expect(sentBefore, "作者の送信が送り先に届いていません").toBe(authorHead);
+      const countBefore = await remoteCommitCount(session);
       const editorBefore = await headOf(workFolder);
       expect(editorBefore, "準備の段で、手元がもう作者の側と同じになっています").not.toBe(authorHead);
       await clearNotifications(page);
@@ -249,6 +256,8 @@ test("編集者メニューの「1. 作者の最新の原稿を受け取る」�
       // こちらからは何も送らない：送り先の記録は作者が送ったときのまま、手元にも送っていない記録は無い
       await holdsFor(async () => (await remoteHead(session)) === sentBefore, "受け取ったあと、送り先の記録が動かない", 3_000);
       expect(await headOf(workFolder), "受け取るだけの環境で、手元に新しい記録ができました").toBe(authorHead);
+      // 枝の先だけでなく、置き場の記録の数そのものも増えていない（別の枝へ送っていない）
+      expect(await remoteCommitCount(session), "［受け取る］のあと、送り先の記録の数が増えました").toBe(countBefore);
       // 書きかけの提案は台帳に残っている（記録もされていない）
       const ledgerText = await readFile(ledger, "utf8");
       expect(ledgerText, "書きかけの提案が台帳から消えました").toContain(DRAFT.reason);
@@ -256,8 +265,9 @@ test("編集者メニューの「1. 作者の最新の原稿を受け取る」�
       const committedLedger = await gitWhileRunning(workFolder, ["show", "HEAD:.aiwriter/proposals/proposals.jsonl"]);
       expect(committedLedger, "書きかけの提案が記録（コミット）に入りました").not.toContain(DRAFT.reason);
 
-      /* ── 3. 「2. 校閲する話を選ぶ」→ 範囲を押さえた知らせ ── */
+      /* ── 3. 「2. 校閲する話を選ぶ」→ 範囲を選んだ知らせ ── */
       await clearNotifications(page);
+      const rangeSince = Date.now();
       await clickMenuRow(page, RANGE_STEP);
       await waitForQuickPick(page, "校閲する範囲：始めの話を選びます");
       await pickQuickPickRow(page, EPISODE);
@@ -266,20 +276,30 @@ test("編集者メニューの「1. 作者の最新の原稿を受け取る」�
       await waitForQuickPick(page, "何をしているかを、作者へ伝えます");
       await pickQuickPickRow(page, "校閲中");
       let shown = "";
-      // 済んだ知らせ（notifyDone）は下の帯に6秒だけ出るので、押した直後から見続ける
+      // 見出しは下の帯（notifyDone）。6秒だけ出るので、押した直後から見続ける。右下には出ない
       await waitUntil(
         async () => {
-          const found = [...(await statusBarTexts(page)), ...(await notificationTexts(page))].find((text) => text.includes("を校閲中にしました"));
+          const found = (await statusBarTexts(page)).find((text) => text.includes("を校閲中にしました"));
           shown = found ?? "";
           return found !== undefined;
         },
-        "「…を校閲中にしました。」が下の帯（または右下の知らせ）に出る",
+        "「…を校閲中にしました。」が下の帯に出る",
         15_000
       ).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（下の帯：${JSON.stringify(await statusBarTexts(page))}／右下の知らせ：${JSON.stringify(await notificationTexts(page))}）`);
       });
       // 範囲の言い方は話数か、読めなければファイル名（`core/editingRepo.ts` の `describeLockRange`）
-      expect(shown, `知らせ：${shown}`).toMatch(/(第1話|001_駅\.txt)を校閲中にしました。/);
+      expect(shown, `下の帯：${shown}`).toMatch(/(第1話|001_駅\.txt)を校閲中にしました。/);
+      // 続き（作者へ届ける手順）は右下の知らせ。範囲に依らない文なので、製品の関数で引く
+      const expectedNote = reviewRangeStartedMessage("第1話").note;
+      expect(expectedNote, "製品の文が、実機確認リストの文から変わっています").toBe(
+        "直し終えたら、編集者メニューの「6. 校閲を終えて作者へ返す」を押すと、提案が作者へ届きます。"
+      );
+      const note = await waitForNotice(session, (message) => message.includes("校閲を終えて作者へ返す"), "範囲を選んだあと、右下に作者へ届ける手順の知らせが出る", {
+        since: rangeSince,
+        timeoutMs: 15_000,
+      });
+      expect(note.replace(/\s+/g, " ").trim(), `右下の知らせ：${note}`).toContain(expectedNote);
       // 鍵は送り先へ届く（作者の側が書き続けないよう、すぐ知らせる道）。届かなかったときの
       // 「同期すると届きます」は、編集者モードでは「保存・同期」が送らないので出てはいけない
       const { remote } = places(root);

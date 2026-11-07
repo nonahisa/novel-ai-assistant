@@ -17,6 +17,11 @@
  * 2. 同期してから「編集者提案確認」（335）：起きている間に作者が採否を送り、「保存・同期」の確認の窓
  *    ［受け取る］で受け取ると、「作者が提案を決めました（…）。」が出て、続けて「編集者提案確認」を押すと
  *    「未決の提案はありません（これまでに 3 件の提案がありました）。これまでの採否：採用 1・見送り 1・読まれた 1。」
+ * 3. 見送りが編集者へ伝わる（315行の残り「見送りが編集部へ伝わるか」。2026-11-07 移した）：見送りを1件含む
+ *    採否を受け取ると「作者が提案を決めました（採用 1・見送り 1・読まれた 1）。」が出て、その知らせの
+ *    ［採否を見る］（0.135.0）を押すと「作者の採否：〈作品〉」のパネル（0.136.0）が開き、見送りの行
+ *    「見送り　「終電」→「最終電車」」が見送りの色分けで並ぶ。作者の答え 2026-11-07「採否はパネルで見せたほうが
+ *    いい」→「知らせのボタンで開く」
  *
  * 知らせは右下の知らせと、**知らせの記録ファイル**（`support/noticeRecord.ts`）の両方で見る。開き直しの部品
  * （`restartVsCode`）は最後に右下の知らせを閉じるので、開いた直後の点検の知らせは記録のほうで数える。
@@ -30,15 +35,24 @@
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Page } from "playwright-core";
+import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { HAND_EDIT_CATEGORY, HAND_MEMO_CATEGORY, proposalId } from "../../src/models/proposal";
 import { describeNotices, recordedNotices, waitForNotice } from "./support/noticeRecord";
 import { addLocalRemote, git, gitWhileRunning, initRepoWithFirstCommit, porcelainLines } from "./support/gitFixture";
 import { runCommand } from "./support/quickInput";
-import { restartVsCode, withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
+import { E2E_WORK_TITLE, restartVsCode, withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { clearNotifications, dialogText, notificationTexts, pressDialogButton, quickInputWaitContext, statusBarTexts } from "./support/workbenchDom";
+import {
+  clearNotifications,
+  dialogText,
+  editorGroupTabs,
+  notificationTexts,
+  pressDialogButton,
+  quickInputWaitContext,
+  statusBarTexts,
+  tabNamesInclude,
+} from "./support/workbenchDom";
 
 const EPISODE = "001_駅.txt";
 const LINE = "　終電を逃した駅のホームに、雨の音だけが残っていた。";
@@ -292,5 +306,106 @@ test("起きている間に作者が採否を送り、「保存・同期」の�
       expect(summary, "作者の側の送り返しの知らせと内訳が違います（意見を読んだものを採用に数えていないか）").toContain("これまでの採否：採用 1・見送り 1・読まれた 1。");
     },
     LAUNCH
+  );
+}, 300_000);
+
+/**
+ * 3件目の見本：手元の git の名乗りを、提案を置いた編集者の名前に揃える。
+ *
+ * **採否のパネル（`features/authorDecisionsPanel.ts`）は、名乗りと同じ名前の提案だけを並べる**
+ * （`editorProposalList.ts` の `loadProposalListFacts`。ほかの編集者の提案を混ぜないため）。
+ * 見本の git の名乗りは「画面テスト」（`initRepoWithFirstCommit`）で、提案の名前は `PROPOSER` なので、
+ * そのままだと届いた知らせ（台帳を絞らずに数える）は出るのにパネルの行が0件になり、
+ * パネルの代わりに「…には、まだ提案を置いていません。」が出る。本物の編集者の環境では、
+ * 提案に入る名前がその人の名乗りなので揃っている——見本の側を本物の形に合わせる。
+ * 1件目・2件目は名乗りを見ないので、そちらの見本は変えない
+ */
+const LAUNCH_AS_PROPOSER: LaunchOptions = {
+  ...LAUNCH,
+  prepareWork: async (context) => {
+    await LAUNCH.prepareWork?.(context);
+    await git(context.workFolder, ["config", "user.name", PROPOSER]);
+  },
+};
+
+/** 右下の知らせのボタンを押す。連打よけで通知の箱へ回っていないこと（1秒出たまま）を見届けてから押す */
+async function pressNoticeButton(session: E2ESession, label: string): Promise<void> {
+  const button = session.page.locator(".notification-toast .monaco-button", { hasText: label }).first();
+  await holdsFor(async () => (await button.count()) > 0 && (await button.isVisible()), `右下の知らせに［${label}］が出たまま`, 1_000).catch(
+    async (error: unknown) => {
+      throw new Error(`${String(error)}（${await describeNotices(session)}）`);
+    }
+  );
+  await button.click();
+}
+
+/** 「作者の採否」パネルの面。目印は見出し「作者の採否（…）」（`views/authorDecisionsPanelHtml.ts`） */
+async function decisionsPanelFrame(page: Page): Promise<Frame | undefined> {
+  for (const frame of page.frames()) {
+    const heading = await frame.evaluate(() => document.querySelector("h1")?.textContent ?? "").catch(() => "");
+    if (heading.startsWith("作者の採否（") && (await frame.locator("#rows").count().catch(() => 0)) > 0) return frame;
+  }
+  return undefined;
+}
+
+test("作者が見送りを含む採否を返すと、編集者の側に「作者が提案を決めました（採用 1・見送り 1・読まれた 1）。」が出て、［採否を見る］で「作者の採否」パネルが開き、見送りの行が並ぶ", async () => {
+  await withVsCode(
+    "見送りが編集者へ伝わる",
+    [{ name: EPISODE, text: `${LINE}\n` }],
+    async (session) => {
+      const { page, workFolder } = session;
+      await settleEditorSide(session);
+      const authorHead = await authorSendsDecisions(session);
+      await clearNotifications(page);
+      const since = Date.now();
+
+      /* ── 保存・同期 → ［受け取る］→ 届いた知らせ ── */
+      await runCommand(page, "保存・同期");
+      let dialog = "";
+      await waitUntil(async () => (dialog = (await dialogText(page)) ?? "").includes("作者の最新の原稿を受け取ります"), "受け取りの確認の窓が出る", 60_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（窓：${JSON.stringify(dialog)}／知らせ：${JSON.stringify(await notificationTexts(page))}）${await quickInputWaitContext(page)}`);
+        }
+      );
+      await pressDialogButton(page, "受け取る");
+      await waitUntil(async () => (await gitWhileRunning(workFolder, ["rev-parse", "HEAD"])).trim() === authorHead, "作者の採否の記録まで受け取る", 60_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（状態：${await gitWhileRunning(workFolder, ["status", "--short", "--branch"])}／${await describeNotices(session, since)}）`);
+        }
+      );
+      const arrived = await waitForNotice(session, (message) => message.includes("作者が提案を決めました"), "受け取ったあと「作者が提案を決めました」が出る", {
+        since,
+        timeoutMs: 30_000,
+      });
+      // 見送りが1件、内訳に入っている（`editingAutomation.ts` の `noticeArrivedDecisions`）
+      expect(arrived).toContain(DECIDED);
+
+      /* ── ［採否を見る］→「作者の採否：〈作品〉」のパネル ── */
+      await pressNoticeButton(session, "採否を見る");
+      const tabName = `作者の採否：${E2E_WORK_TITLE}`;
+      await waitUntil(async () => tabNamesInclude((await editorGroupTabs(page)).flat(), tabName), `タブ「${tabName}」が出る`, 20_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（タブ：${JSON.stringify(await editorGroupTabs(page))}／${await describeNotices(session, since)}）`);
+        }
+      );
+      let panel: Frame | undefined;
+      await waitUntil(async () => (panel = await decisionsPanelFrame(page)) !== undefined, "「作者の採否」パネルの中身が描かれる", 20_000);
+      const frame = panel as Frame;
+      const heading = (await frame.locator("h1").innerText()).trim();
+      expect(heading, "パネルの見出しの内訳が、届いた知らせと違います").toBe("作者の採否（採用 1・見送り 1・読まれた 1）");
+      const labels = (await frame.locator(".row .label").allInnerTexts()).map((text) => text.trim());
+      // 行の名前は「状態　何を」（区切りは全角の空白。`editorProposalList.ts` の `proposalListRows`）
+      const rejected = RETURNED.find((entry) => entry.status === "rejected") as HandProposal;
+      const accepted = RETURNED.find((entry) => entry.status === "accepted") as HandProposal;
+      const read = RETURNED.find((entry) => entry.status === "read") as HandProposal;
+      expect(labels, `パネルの行：${JSON.stringify(labels)}`).toContain(`見送り　「${rejected.target}」→「${rejected.suggestion}」`);
+      expect(labels, `パネルの行：${JSON.stringify(labels)}`).toContain(`採用　「${accepted.target}」→「${accepted.suggestion}」`);
+      expect(labels, `パネルの行：${JSON.stringify(labels)}`).toContain(`読まれた　「${read.target}」への意見`);
+      expect(labels, `パネルの行：${JSON.stringify(labels)}`).toHaveLength(RETURNED.length);
+      // 見送りの行は見送りの色分け（`.row.rejected`）で、1件だけ
+      expect(await frame.locator(".row.rejected").count(), "見送りの色分けの行が1件ではありません").toBe(1);
+      expect((await frame.locator(".row.rejected .label").innerText()).trim()).toBe(`見送り　「${rejected.target}」→「${rejected.suggestion}」`);
+    },
+    LAUNCH_AS_PROPOSER
   );
 }, 300_000);
