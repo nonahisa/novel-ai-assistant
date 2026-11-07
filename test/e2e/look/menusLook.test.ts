@@ -31,6 +31,8 @@ describe.skipIf(!lookEnabled)("見た目の写真：左の列", () => {
         await showSidebar(page, E2E_WORK_TITLE);
         await setPane(page, "作品一覧", false);
         await setPane(page, "簡単ステップメニュー", false);
+        // 横の相談も畳む（開いていると詳細メニューの区画が約5行になり、開いた中身が写らない。Mac 2026-11-07）
+        await setPane(page, "AIに相談", false);
         const clip = { x: 0, y: 30, width: 350, height: 750 };
         await lookNote(`[181] 既定の左の列の幅：${(await page.locator(".part.sidebar").first().boundingBox())?.width}`);
 

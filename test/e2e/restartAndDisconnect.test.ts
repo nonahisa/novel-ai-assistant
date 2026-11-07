@@ -69,7 +69,7 @@ import {
   tabNamesInclude,
   waitForQuickPick,
 } from "./support/workbenchDom";
-import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
+import { OPEN_SCENE_MEMOS_PRESS, keysInTextFor } from "./support/keys";
 
 /** 拡張機能ホストを再起動するキー（`hostRestartDisconnect.test.ts` と同じ組。起こすたびに別の keybindings.json） */
 const RESTART_HOST_KEY = "ctrl+alt+shift+r";
@@ -728,7 +728,7 @@ test("つながりが切れたまま打つと、4秒で赤字「打った字を�
       );
       const second = await unsentText(frame);
       expect(second).toContain("拡張機能の更新や再起動で、つながりが切れたのかもしれません");
-      expect(second).toContain("［本文をコピー］で控えてから、Ctrl+Shift+P →「開発者: ウィンドウの再読み込み」を");
+      expect(second).toContain(keysInTextFor("［本文をコピー］で控えてから、Ctrl+Shift+P →「開発者: ウィンドウの再読み込み」を"));
       expect(second, "タブを閉じる道へ誘わない").toContain("タブは閉じないでください");
       expect((await reopenButtonState(frame)).hidden, "相手がいないので［開き直す］は出さない").toBe(true);
       expect(await frame.locator("#unsentCopy").isVisible(), "2段目にも［本文をコピー］がある").toBe(true);

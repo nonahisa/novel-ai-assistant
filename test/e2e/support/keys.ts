@@ -20,7 +20,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { keyLabel } from "../../../src/core/keyLabels";
+import { keyLabel, keysInText } from "../../../src/core/keyLabels";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -159,6 +159,14 @@ export function productKeybinding(command: string, platform: NodeJS.Platform = p
 export function keyLabelFor(vscodeKey: string, platform: NodeJS.Platform = process.platform): string {
   if (/\s/.test(vscodeKey.trim())) throw new Error(`2段のキー「${vscodeKey}」の札は組めません`);
   return keyLabel(vscodeKey, isMac(platform) ? "mac" : "other");
+}
+
+/**
+ * 製品が知らせの文に書いた「Ctrl+Shift+P」などを、その OS の画面での書き方にする（Mac は「⇧⌘P」）。
+ * 期待の文を組むときに通す——製品は `keysForHost` で同じ規則を通して出す（src/core/keyLabels.ts）
+ */
+export function keysInTextFor(text: string, platform: NodeJS.Platform = process.platform): string {
+  return keysInText(text, isMac(platform) ? "mac" : "other");
 }
 
 /** 製品のコマンドのキーが、その OS の画面にどう出るか（Mac は `mac` の割り当てを記号で） */

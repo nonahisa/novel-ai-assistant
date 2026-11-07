@@ -45,6 +45,7 @@ import { expect, test } from "vitest";
 import { actionLogLines } from "./support/nameCheckPanel";
 import { classOpen, dropEditsToHost, openEpisode, placeCaretAfter, rescueBarText, waitForManuscriptFrame } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
+import { keysInTextFor } from "./support/keys";
 import { holdsFor, waitUntil } from "./support/wait";
 import { clearNotifications, countTabsNamed, editorGroupTabs, notificationTexts, pressWorkbenchKey } from "./support/workbenchDom";
 
@@ -246,7 +247,7 @@ test("拡張機能は応えるが打った字が原稿へ入らないとき、�
       const waited = Date.now() - pressedAt;
       expect(waited, `押してから案内まで ${waited}ms（製品の待ちは3秒）`).toBeGreaterThanOrEqual(2_500);
       const guide = await unsentText(frame);
-      expect(guide).toContain("コマンドパレット（Ctrl+Shift+P）で「開発者: ウィンドウの再読み込み」を実行してください");
+      expect(guide).toContain(keysInTextFor("コマンドパレット（Ctrl+Shift+P）で「開発者: ウィンドウの再読み込み」を実行してください"));
       expect(guide).toContain("開き直した画面で、打った字を戻せます");
       expect((await reopenButtonState(frame)).disabled, "頼んだあとは［開き直す］を押し直せない").toBe(true);
 

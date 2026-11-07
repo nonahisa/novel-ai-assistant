@@ -9,6 +9,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Locator, Page } from "playwright-core";
 import { treeRowLabels } from "../support/sidebar";
+import { waitUntil } from "../support/wait";
 import { clearNotifications, dismissWorkbenchHover } from "../support/workbenchDom";
 
 export const lookEnabled = process.env.NOVELAI_LOOK === "1";
@@ -82,8 +83,12 @@ export async function lookNote(text: string): Promise<void> {
 export async function setPane(page: Page, title: string, open: boolean): Promise<void> {
   const header = page.locator(".pane-header", { hasText: title }).first();
   const isOpen = async () => (await header.getAttribute("class"))?.split(/\s+/).includes("expanded") === true;
+  if ((await header.count()) === 0) return;
   if ((await isOpen()) !== open) {
     await header.click();
+    // 押したつもりで替わらないまま進むと、ほかの部が場所を取ったまま撮る（Mac 2026-11-07：
+    // 作品一覧が広いまま、詳細メニューが約5行になった）。替わるのを待つ
+    await waitUntil(async () => (await isOpen()) === open, `左の列の「${title}」が${open ? "開く" : "畳まれる"}`, 5_000).catch(() => undefined);
     await page.waitForTimeout(400);
   }
 }
@@ -160,10 +165,31 @@ export async function setRow(page: Page, head: string, open: boolean): Promise<v
   await row.waitFor({ state: "attached", timeout: 10_000 });
   await row.scrollIntoViewIfNeeded();
   const expanded = (await row.getAttribute("aria-expanded")) === "true";
-  if (expanded !== open) {
-    await row.click();
-    await page.waitForTimeout(500);
+  if (expanded === open) return;
+  /*
+    **行が区画の見出しの下に隠れていたら、少し上へ戻してから押し直す。** Mac（1440×795、2026-11-07）で、
+    「新作構想」の行は visible・stable なのに「詳細メニュー」の見出しが押す点を覆い、30秒待って落ちた
+    （subtree intercepts pointer events）。DOM の scrollIntoView は木の中の転がしを動かさないので、
+    区画の上でホイールを上へ回して行を見出しの下から出す
+  */
+  for (let attempt = 1; ; attempt++) {
+    const clicked = await row
+      .click({ timeout: 5_000 })
+      .then(() => true)
+      .catch((error: unknown) => {
+        if (attempt >= 4) throw error;
+        return false;
+      });
+    if (clicked) break;
+    const body = row.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' pane-body ')][1]");
+    const box = await body.boundingBox();
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.75);
+      await page.mouse.wheel(0, -60);
+      await page.waitForTimeout(300);
+    }
   }
+  await page.waitForTimeout(500);
 }
 
 /** 人物の色が載っている字（`novelai-term-character` の範囲が指す字）。色が付いたかの待ちに使う */
