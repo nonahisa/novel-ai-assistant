@@ -25,7 +25,7 @@ import {
   keybindingsEditorRows,
   OPEN_KEYBINDINGS_BINDING,
 } from "./support/workbenchDom";
-import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
+import { keyLabelShown, OPEN_SCENE_MEMOS_PRESS, productKeyLabel } from "./support/keys";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const EPISODE = "001_はじまり.txt";
@@ -78,19 +78,23 @@ test("パレット・キーの画面・パネルのタブに「校正・メモ�
     ).toBe(true);
 
     // ── キーボード ショートカットの画面 ──
-    const wanted: Array<[string, RegExp]> = [
-      ["novelai.openSceneMemos", /Ctrl\+Alt\+M/i],
-      ["novelai.nextSceneMemo", /^F8$/i],
-      ["novelai.prevSceneMemo", /Shift\+F8/i],
-      ["novelai.addSceneMemo", /Ctrl\+\//i],
-    ];
-    for (const [command, keys] of wanted) {
+    /*
+      期待するキーの札は package.json の割り当てから組む（keys.ts の productKeyLabel）。Windows は
+      「Ctrl+Alt+M」、Mac は `mac` の割り当てを記号で「⌥⌘M」（macOS の VS Code は札を記号で出す。
+      Mac で `Ctrl+Alt+M` を探して落ちた。2026-11-07）
+    */
+    for (const command of ["novelai.openSceneMemos", "novelai.nextSceneMemo", "novelai.prevSceneMemo", "novelai.addSceneMemo"]) {
+      const label = productKeyLabel(command);
       const name = await paletteNameOf(command);
       const title = name.replace(/^[^:]+: /, "");
       const rows = await keybindingsEditorRows(page, title);
       const row = rows.find((candidate) => candidate.command === name);
       expect(row, `キーの画面に「${name}」がありません（並び：${JSON.stringify(rows)}）`).toBeDefined();
-      expect(row?.keys.replace(/\s+/g, ""), `「${name}」のキー`).toMatch(keys);
+      const shown = (row?.keys ?? "").replace(/\s+/g, "");
+      expect(
+        keyLabelShown(shown, label),
+        `「${name}」のキーが「${label}」でありません（画面の札：${JSON.stringify(shown)}／${process.platform}）`
+      ).toBe(true);
     }
   }, { keybindings: [OPEN_KEYBINDINGS_BINDING] });
 });

@@ -192,7 +192,16 @@ async function waitProductConfirm(session: E2ESession): Promise<{ confirm: strin
         const buttons = await dialogButtons(page);
         const checkbox = await page.locator(".monaco-dialog-box .dialog-checkbox-row").allInnerTexts().catch(() => [] as string[]);
         uriPrompt = `${text.replace(/\s+/g, " ").trim()}［ボタン：${buttons.join("／")}］［チェック欄：${checkbox.join("／") || "なし"}］`;
-        await page.locator(".monaco-dialog-box .monaco-button").first().click();
+        /*
+          **開かせるボタンは名前で押す**（先頭を押さない）。VS Code の自前の窓はボタンの並びを OS で変え、
+          Mac（と Linux）では逆に並べるので先頭が Cancel になる（1.141.0 の rearrangeButtons。Mac で
+          Cancel を押して製品の確認まで届かず落ちた。2026-11-07）。Windows では「Open」が先頭なので
+          押すボタンは前と同じ。「Open」が無い版・言語のときだけ、Cancel 以外の先頭を押す
+        */
+        const buttonsHere = page.locator(".monaco-dialog-box .monaco-button");
+        const open = buttonsHere.filter({ hasText: /^\s*(Open|開く)\s*$/ });
+        if ((await open.count()) > 0) await open.first().click();
+        else await buttonsHere.filter({ hasNotText: /^\s*(Cancel|キャンセル)\s*$/ }).first().click();
       }
       return false;
     },

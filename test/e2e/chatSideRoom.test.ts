@@ -16,7 +16,7 @@ import { chatInputState } from "./support/chatInput";
 import { openEpisode } from "./support/manuscriptFrame";
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { pressWorkbenchKey } from "./support/workbenchDom";
+import { activeElementSummary, pressWorkbenchKey, webviewLayers } from "./support/workbenchDom";
 
 const EPISODE = "001_はじまり.txt";
 const BODY = ["　朝の駅は静かだった。", "　発車のベルが鳴った。", ""].join("\n");
@@ -67,7 +67,19 @@ test("横の相談パネルを開くと、入力欄と［送る］が枠の中�
       15_000
     ).catch(async (error: unknown) => {
       const send = await frame.locator("#send").boundingBox().catch(() => null);
-      throw new Error(`${String(error)}（${await chatInputState(frame)}／［送る］：${JSON.stringify(send)}）`);
+      /*
+        Mac（1.141.0）で、15秒待っても枠の中に見えず落ちた（面の中の hasFocus は false。2026-11-07）。
+        原因が分からないので直さず、次の1回で読めるように様子を足す：本体の焦点・見えている WebView の枠
+        （位置・大きさ・前に出ているか）・窓の大きさ。画面の写真の道は withVsCode が下の行に足す
+      */
+      const viewport = await page
+        .evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
+        .catch(() => null);
+      throw new Error(
+        `${String(error)}（${await chatInputState(frame)}／［送る］：${JSON.stringify(send)}` +
+          `／本体の焦点：${await activeElementSummary(page)}／見えている枠：${JSON.stringify(await webviewLayers(page))}` +
+          `／窓：${JSON.stringify(viewport)}／${process.platform}）`
+      );
     });
     expect(await insideOuter(frame, "#input")).toBe(true);
   }, { keybindings: [{ key: OPEN_SIDE_KEY, command: "novelai.openChat" }] });

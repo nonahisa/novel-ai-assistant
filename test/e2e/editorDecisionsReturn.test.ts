@@ -27,7 +27,6 @@
  * （2台目の環境が要る）。**AI は呼ばない。**
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
@@ -35,7 +34,7 @@ import { parseGithubRepoRef } from "../../src/core/githubRepoRef";
 import { HAND_EDIT_CATEGORY, HAND_MEMO_CATEGORY, proposalId } from "../../src/models/proposal";
 import { git, initRepoWithFirstCommit } from "./support/gitFixture";
 import { OPEN_PROPOSALS_LAUNCH, OPEN_PROPOSALS_PRESS, proposalPanelFrame } from "./support/sampleFinding";
-import { E2E_WORK_TITLE, withVsCode, type LaunchOptions } from "./support/vscodeApp";
+import { E2E_WORK_TITLE, e2eTmpRoot, withVsCode, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { clearNotifications, notificationTexts, pressWorkbenchKey, statusBarTexts } from "./support/workbenchDom";
 
@@ -100,13 +99,13 @@ function places(root: string): { editing: string; remote: string; remoteUrl: str
 /**
  * 送り先の URL が、製品の一致の判定（`sameRepository`）で「持ち主/リポジトリ名」として読めるか。
  * 読めなければ一致が偽になり、GitHub の問い合わせの道へ落ちる。`withVsCode` と同じ一時フォルダーの
- * 置き方（`tmpdir()` の下の `novelai-e2e-…`）で、起こす前に見積もる
+ * 置き方（`e2eTmpRoot()` の下の `novelai-e2e-…`）で、起こす前に見積もる
  */
 function remoteUrlReadable(remoteUrl: string): boolean {
   return parseGithubRepoRef(remoteUrl) !== undefined;
 }
 const REMOTE_URL_READABLE = remoteUrlReadable(
-  remoteUrlOf(path.join(tmpdir(), "novelai-e2e-probe", "editing-remote.git"))
+  remoteUrlOf(path.join(e2eTmpRoot(), "novelai-e2e-probe", "editing-remote.git"))
 );
 
 const LAUNCH: LaunchOptions = {
@@ -201,7 +200,7 @@ async function shownWith(page: Page, text: string): Promise<string | undefined> 
 if (!REMOTE_URL_READABLE) {
   // 飛ばした理由を走りの記録に残す（黙って飛ばすと、見張れていないことに気づけない）
   console.warn(
-    `editorDecisionsReturn を飛ばします：一時フォルダーの道（${tmpdir()}）の頭が英数字・._- の外で、` +
+    `editorDecisionsReturn を飛ばします：一時フォルダーの道（${e2eTmpRoot()}）の頭が英数字・._- の外で、` +
       "送り先の URL が製品の一致の判定で読めず、GitHub への問い合わせへ落ちて外へ通信しうるため"
   );
 }

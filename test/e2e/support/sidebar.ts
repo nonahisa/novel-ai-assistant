@@ -15,7 +15,7 @@
  */
 import type { Locator, Page } from "playwright-core";
 import { waitUntil } from "./wait";
-import { dismissWorkbenchHover, pressWorkbenchKey, startQuickInputWatch } from "./workbenchDom";
+import { activeElementSummary, dismissWorkbenchHover, pressWorkbenchKey, startQuickInputWatch } from "./workbenchDom";
 
 /**
  * 左の列を出すキー（使い捨ての keybindings.json に書く）。F1〜F12 は埋まったので、
@@ -172,7 +172,7 @@ export async function treeContextMenu(page: Page, head: string, item: string): P
   await treeRow(page, head).click({ button: "right" });
   await waitUntil(async () => (await contextMenuLabels(page)).includes(item), `右クリックの品書きに「${item}」が出る`).catch(
     async (error: unknown) => {
-      throw new Error(`${String(error)}（品書き：${(await contextMenuLabels(page)).join(" / ")}）`);
+      throw new Error(`${String(error)}（品書き：${(await contextMenuLabels(page)).join(" / ")}／${await contextMenuState(page, head)}）`);
     }
   );
   const entry = page.locator(".context-view .action-label", { hasText: item }).first();
@@ -206,9 +206,36 @@ export async function treeContextMenu(page: Page, head: string, item: string): P
       (document.querySelector(".context-view .action-item.focused .action-label")?.textContent ?? "").trim()
     );
     if (focused !== "" && !focused.includes(item)) {
-      throw new Error(`右クリックの品書きで「${item}」を押しましたが閉じず、焦点は「${focused}」に載っています`);
+      throw new Error(`右クリックの品書きで「${item}」を押しましたが閉じず、焦点は「${focused}」に載っています（${await contextMenuState(page, head)}）`);
     }
     await page.keyboard.press("Enter");
-    await waitUntil(closed, `右クリックの品書きで「${item}」を選んで閉じる`, 5_000);
+    await waitUntil(closed, `右クリックの品書きで「${item}」を選んで閉じる`, 5_000).catch(async (error: unknown) => {
+      // Mac で5秒で止まった（2026-11-07）。押したあと Enter も送ったうえで閉じない様子を、次の1回で読めるように添える
+      throw new Error(
+        `${String(error)}（押したあと閉じず Enter も送った。Enter の前の焦点の行「${focused}」／` +
+          `品書き：${(await contextMenuLabels(page)).join(" / ")}／${await contextMenuState(page, head)}）`
+      );
+    });
   });
+}
+
+/**
+ * 右クリックの品書きまわりの様子（失敗の文に添える。2026-11-07 に Mac で品書きの件が止まったので足した）。
+ * 品書きの枠（`.context-view`）と中身（`.monaco-menu`）の数、焦点の載った品書きの行、右クリックした行が
+ * 選ばれた・焦点を持ったか、本体の焦点
+ */
+async function contextMenuState(page: Page, head: string): Promise<string> {
+  const counts = await page
+    .evaluate(() => ({
+      contextView: document.querySelectorAll(".context-view").length,
+      menu: document.querySelectorAll(".context-view .monaco-menu").length,
+      focusedItem: (document.querySelector(".context-view .action-item.focused .action-label")?.textContent ?? "").trim(),
+    }))
+    .catch((error: unknown) => String(error));
+  const rowClass = await treeRow(page, head)
+    .first()
+    .getAttribute("class")
+    .catch(() => null);
+  const rowState = rowClass === null ? "行が無い" : ["selected", "focused"].filter((name) => rowClass.split(/\s+/).includes(name)).join("・") || "選ばれていない";
+  return `品書きの数：${JSON.stringify(counts)}／右クリックした行「${head}」：${rowState}／焦点：${await activeElementSummary(page)}／${process.platform}`;
 }
