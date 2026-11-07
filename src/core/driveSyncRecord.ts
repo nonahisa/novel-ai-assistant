@@ -1,4 +1,5 @@
 import {
+  DRIVE_DELETED,
   DRIVE_SYNC_RECORD_PREFIX,
   isSafeSyncPath,
   lineageToJson,
@@ -67,6 +68,46 @@ export type DriveSyncRecordRead =
 /** この端末の控えの、作品フォルダーからの道 */
 export function driveSyncRecordPath(deviceId: string): string {
   return `${DRIVE_SYNC_RECORD_PREFIX}${deviceId}.json`;
+}
+
+/**
+ * 元の文の置き場（設計書5.10.7。0.134.0）：`.aiwriter/drive-sync/bases/<端末ID>/<SHA-256>`。
+ *
+ * 食い違いを行で合わせるには、共通の祖先の中身（元の文）が要る。それはほとんどが
+ * この端末が前に持っていた中身なので、手元の控えの側に置く（ドライブには置かない。
+ * 送る量と書く回数が増え、作者がドライブの画面で見る写しに古い文が並ぶため）。
+ * 控えの置き場の下なので送らない（`driveSyncPlan.ts` の `ALWAYS_IGNORED`）。
+ *
+ * 名前は中身のハッシュ（`hashBytes` の生のバイトのハッシュ。系譜のハッシュと同じ）で、
+ * 中身はそのハッシュになるバイトそのもの。読むときは中身を名前と照らし、合わなければ
+ * 「元の文が無い」として扱う（直さない。壊れた元の文で合わせると原稿を壊す）。
+ */
+export function driveBasePath(deviceId: string, hash: string): string {
+  return `${DRIVE_SYNC_RECORD_PREFIX}bases/${deviceId}/${hash}`;
+}
+
+/**
+ * 置き場に残す中身の数（ファイルごと）：この端末の系譜の頭と祖先のうち、新しいほうから。
+ * 合わせるのに要る元の文は、ほとんどが頭とその少し前なので、8つあれば足りる見込み
+ * （設計書5.10.7）。外れたものはそろえ終えたあとで消す
+ */
+export const DRIVE_BASE_KEEP = 8;
+
+/**
+ * 置き場に残す中身のハッシュ。本文（`isText` が真の道）の系譜の頭と祖先のうち、
+ * 新しいほうから `DRIVE_BASE_KEEP` 個（「消えた」は中身が無いので数えない）。
+ */
+export function driveBaseKeepSet(
+  record: DriveSyncRecord,
+  isText: (syncPath: string) => boolean
+): Set<string> {
+  const keep = new Set<string>();
+  for (const [entry, lineage] of record.lineage) {
+    if (!isText(entry)) continue;
+    const hashes = [lineage.hash, ...lineage.ancestors].filter((hash) => hash !== DRIVE_DELETED);
+    for (const hash of hashes.slice(0, DRIVE_BASE_KEEP)) keep.add(hash);
+  }
+  return keep;
 }
 
 /** まだ一度もそろえていない端末の控え */
