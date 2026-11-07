@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
   keybindingFor,
+  keyLabelFor,
+  keyLabelShown,
   productKey,
+  productKeyLabel,
   productKeybinding,
   productKeybindings,
   toPlaywrightChord,
@@ -60,6 +63,38 @@ describe("画面テストの製品のキー", () => {
         }
       }
     }
+  });
+
+  test("画面に出るキーの札：Windows は「Ctrl+Alt+M」、Mac は mac の割り当てを記号で「⌥⌘M」（並びは Ctrl→Shift→Alt→Cmd）", () => {
+    expect(productKeyLabel("novelai.openSceneMemos", "win32")).toBe("Ctrl+Alt+M");
+    expect(productKeyLabel("novelai.openSceneMemos", "darwin")).toBe("⌥⌘M");
+    expect(productKeyLabel("novelai.nextSceneMemo", "win32")).toBe("F8");
+    expect(productKeyLabel("novelai.nextSceneMemo", "darwin")).toBe("F8");
+    expect(productKeyLabel("novelai.prevSceneMemo", "win32")).toBe("Shift+F8");
+    expect(productKeyLabel("novelai.prevSceneMemo", "darwin")).toBe("⇧F8");
+    expect(productKeyLabel("novelai.addSceneMemo", "win32")).toBe("Ctrl+/");
+    expect(productKeyLabel("novelai.addSceneMemo", "darwin")).toBe("⌘/");
+    // 書いた順によらず VS Code の札の順に並ぶ
+    expect(keyLabelFor("cmd+shift+ctrl+alt+k", "darwin")).toBe("⌃⇧⌥⌘K");
+    expect(keyLabelFor("alt+shift+ctrl+k", "win32")).toBe("Ctrl+Shift+Alt+K");
+    // 実物の割り当ては全部、両方の OS で札に直せる
+    for (const binding of productKeybindings()) {
+      for (const platform of ["win32", "darwin"] as const) {
+        expect(productKeyLabel(binding.command, platform).length, `${binding.command}（${platform}）`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test("札の当て方：前に修飾が付いた別のキーには当てない", () => {
+    expect(keyLabelShown("F8", "F8")).toBe(true);
+    expect(keyLabelShown("Shift+F8", "F8")).toBe(false);
+    expect(keyLabelShown("⇧F8", "F8")).toBe(false);
+    expect(keyLabelShown("Shift+F8", "Shift+F8")).toBe(true);
+    expect(keyLabelShown("Ctrl+Alt+M", "Ctrl+Alt+M")).toBe(true);
+    expect(keyLabelShown("Ctrl+Shift+Alt+M", "Alt+M")).toBe(false);
+    expect(keyLabelShown("⌥⌘M", "⌥⌘M")).toBe(true);
+    expect(keyLabelShown("⌃⌥⌘M", "⌥⌘M")).toBe(false);
+    expect(keyLabelShown("Ctrl+Alt+M", "⌥⌘M")).toBe(false);
   });
 
   test("読めないキー・無いコマンドは、黙って別のキーを押さずに止める", () => {

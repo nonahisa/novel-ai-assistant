@@ -274,6 +274,14 @@ export async function quickOpen(page: Page, fileName: string): Promise<void> {
     入力欄が閉じ・値「002_つづき.txt」のまま候補を30秒待って落ちた（提案パネルのタブを押した直後に
     2話目を開く件。ファイルは起動前に作ってあり、検索の索引の遅れではない）
   */
+  /*
+    **入力欄が開いたまま候補が出ないときも、閉じて打ち直す**（2026-11-07）。Mac で、エクスプローラーで
+    名前を変えた直後に Ctrl+P を開くと、入力欄は開き値も「003.txt」なのに候補の行が0のまま止まった。
+    ファイル検索の索引が改名に追いつくまでの間で、同じ入力欄で待ち続けても絞り込みはやり直されない。
+    1回の待ちを10秒にして、出なければ Escape で閉じて Ctrl+P から打ち直す（5回まで。前の30秒×3回と
+    同じくらいの長さ）。Windows でも通る道は同じ——候補が出れば1回目で抜ける
+  */
+  const attempts = 5;
   for (let attempt = 1; ; attempt++) {
     await typeIntoQuickOpen(page, input, fileName);
     /*
@@ -292,19 +300,28 @@ export async function quickOpen(page: Page, fileName: string): Promise<void> {
         return ((await page.locator(".quick-input-widget .monaco-list-row").first().innerText().catch(() => "")) ?? "").includes(fileName);
       },
       `Ctrl+P の候補の先頭が「${fileName}」になる`,
-      30_000
+      10_000
     )
       .then(() => !closed)
       .catch(() => false);
     if (ready) break;
-    if (!closed || attempt === 3) {
+    const rows = await rowTexts();
+    if (attempt === attempts) {
       const value = await input.inputValue().catch(() => "?");
       throw new Error(
-        `Ctrl+P の候補の先頭に「${fileName}」が出ません（${attempt}回目。出ている候補 ${JSON.stringify(await rowTexts())}／入力欄 ${closed ? "閉じた" : "開いている"}・値 ${JSON.stringify(value)}）`
+        `Ctrl+P の候補の先頭に「${fileName}」が出ません（${attempt}回打ち直しました。最後の候補 ${rows.length}行 ${JSON.stringify(rows)}／` +
+          `入力欄 ${closed ? "閉じた" : "開いている"}・値 ${JSON.stringify(value)}／焦点：${await activeElementSummary(page)}）`
       );
     }
     // 押し直しで通った件も、走りの記録から揺れの頻度を追えるように残す
-    console.warn(`quickOpen: 「${fileName}」の候補を待つ間に入力欄が閉じたので押し直します（${attempt}回目）`);
+    console.warn(
+      `quickOpen: 「${fileName}」の候補を待つ間に${closed ? "入力欄が閉じた" : `先頭に出ない（候補 ${rows.length}行）`}ので打ち直します（${attempt}回目）`
+    );
+    // 開いたままの入力欄で Ctrl+P を押すと候補送りになるので、閉じてから打ち直す
+    if (await input.isVisible().catch(() => false)) {
+      await page.keyboard.press("Escape");
+      await input.waitFor({ state: "hidden", timeout: 2_000 }).catch(() => undefined);
+    }
   }
   await page.keyboard.press("Enter");
   await input.waitFor({ state: "hidden" }).catch((error: unknown) => {
@@ -458,6 +475,41 @@ export async function pressWorkbenchKey(page: Page, chord: string): Promise<void
     window.focus();
   });
   await page.keyboard.press(chord);
+}
+
+/**
+ * 本体の焦点がいまどこにあるかの一言（失敗の文に添える。2026-11-07）。
+ * 要素の名前・class の頭・aria-label と、どのビュー（`.pane` の見出し）や列の中かを返す
+ */
+export async function activeElementSummary(page: Page): Promise<string> {
+  return page
+    .evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      if (!active) return `焦点なし（hasFocus ${String(document.hasFocus())}）`;
+      const className = typeof active.className === "string" ? active.className.split(/\s+/).slice(0, 3).join(".") : "";
+      const label = active.getAttribute("aria-label") ?? "";
+      const pane = active.closest(".pane")?.querySelector(".pane-header")?.textContent?.trim() ?? "";
+      const where = active.closest(".explorer-folders-view")
+        ? "エクスプローラーの木"
+        : active.closest(".editor-group-container")
+          ? "エディターの列"
+          : active.closest(".part.sidebar, .part.auxiliarybar, .part.panel")?.className.split(/\s+/).slice(0, 2).join(".") ?? "その他";
+      return (
+        `${active.tagName.toLowerCase()}${className ? "." + className : ""}` +
+        `${label ? `［${label.slice(0, 40)}］` : ""}／${where}${pane ? `（${pane.slice(0, 30)}）` : ""}／hasFocus ${String(document.hasFocus())}`
+      );
+    })
+    .catch((error: unknown) => `焦点を読めない（${String(error)}）`);
+}
+
+/** 本体の焦点（`document.activeElement`）が `selector` に当たる要素の中にあるか */
+export async function focusInside(page: Page, selector: string): Promise<boolean> {
+  return page
+    .evaluate((wanted) => {
+      const active = document.activeElement;
+      return active !== null && active.closest(wanted) !== null;
+    }, selector)
+    .catch(() => false);
 }
 
 /**

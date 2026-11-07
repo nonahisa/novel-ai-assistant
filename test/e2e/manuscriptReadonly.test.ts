@@ -8,7 +8,7 @@
  * ここでは次の道で、打つ→ Ctrl+S → タブを閉じる、の各段で何が起きるかを書き留める。
  *   A. `files.readonlyInclude` ＋ 原稿エディター
  *   B. `files.readonlyInclude` ＋ 素のテキストエディター（VS Code 本体の扱いを比べる）
- *   C. Windows の読み取り専用属性（attrib +R）＋ 原稿エディター（作者に起こりうるのはこちら）
+ *   C. Windows の読み取り専用属性（attrib +R。Mac では chmod a-w）＋ 原稿エディター（作者に起こりうるのはこちら）
  *   D. A のまま VS Code の窓を閉じる
  *
  * 観測は `[読み取り専用の観測]` の行で標準出力へ出す（報告の材料。通った件の出力は Vitest が
@@ -34,7 +34,7 @@
  */
 import { execFile } from "node:child_process";
 import { appendFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { Frame, Page } from "playwright-core";
@@ -302,36 +302,75 @@ test("B：files.readonlyInclude の原稿を素のテキストエディターで
   );
 });
 
-/* ── C. Windows の読み取り専用属性 ＋ 原稿エディター ── */
+/* ── C. OS の読み取り専用（Windows は attrib +R、Mac は chmod a-w）＋ 原稿エディター ── */
+
+/*
+  Mac には attrib が無いので、同じ「ファイルに書けない」状態を chmod で作る（2026-11-07。Mac で
+  attrib が見つからずに落ちた）。戻しは持ち主に書く権限を返す `u+w`（片づけで一時フォルダーを消せればよい）。
+
+  Mac でも製品の「入らないことを知らされる」道は同じに通る、と読んだ：原稿エディターの保存は
+  VS Code の `document.save()` に任せていて（src/features/manuscriptEditor.ts の saveFromButton、
+  src/core/manuscriptSave.ts）、エラーの番号（EPERM／EACCES）を製品は見ていない。VS Code 1.141.0 の
+  ファイルの読み書き（resources/app/out/mainImpl.js）は EPERM も EACCES も同じ「NoPermissions」へ
+  読み替え、そのうえでファイルの mode に持ち主の書く権限（0o200）が無ければ「File is read-only」
+  （EntryWriteLocked）にする。attrib +R も chmod a-w も 0o200 を落とすので、Windows と同じ知らせになる見込み
+*/
+const isMac = process.platform === "darwin";
+
+async function makeReadonly(target: string): Promise<void> {
+  if (isMac) await run("chmod", ["a-w", target]);
+  else await run("attrib", ["+R", target]);
+}
+
+async function undoReadonly(target: string): Promise<void> {
+  if (isMac) await run("chmod", ["u+w", target]);
+  else await run("attrib", ["-R", target]);
+}
+
+/** 読み取り専用になっているかの控え（Windows は attrib の出力、Mac は mode の8進） */
+async function readonlyAttr(target: string): Promise<string> {
+  if (isMac) return `mode ${((await stat(target)).mode & 0o777).toString(8).padStart(3, "0")}`;
+  return (await run("attrib", [target])).stdout.trim();
+}
 
 test(
-  "C：読み取り専用属性（attrib +R）の原稿を原稿エディターで打つと、字がファイルに入るか、入らないことを知らされる",
+  "C：OS の読み取り専用（Windows は attrib +R、Mac は chmod a-w）の原稿を原稿エディターで打つと、字がファイルに入るか、入らないことを知らされる",
   async () => {
     let target = "";
     const options: LaunchOptions = {
       keybindings: [CLOSE_KEY],
       prepareWork: async ({ manuscriptFolder }) => {
         target = path.join(manuscriptFolder, EPISODE);
-        await run("attrib", ["+R", target]);
+        await makeReadonly(target);
       },
     };
-    await withVsCode(
-      "読み取り専用（属性）の原稿エディター",
-      [{ name: EPISODE, text: ORIGINAL }],
-      async (session) => {
-        try {
-          const attr = (await run("attrib", [target])).stdout.trim();
-          note("C：属性", { attr });
-          const result = await typeSaveCloseInManuscript(session, "C");
-          note("C：結論", result);
-          expect(result.lost && !result.warned, "打った字が保存されず、知らせも確認の窓も出ませんでした").toBe(false);
-        } finally {
-          // 片づけ（一時フォルダーの削除）が属性で止まらないよう外す
-          await run("attrib", ["-R", target]).catch(() => undefined);
-        }
-      },
-      options
-    );
+    try {
+      await withVsCode(
+        "読み取り専用（属性）の原稿エディター",
+        [{ name: EPISODE, text: ORIGINAL }],
+        async (session) => {
+          try {
+            const attr = await readonlyAttr(target);
+            note("C：属性", { attr });
+            if (isMac) {
+              // 書く権限が落ちていなければ、何を見たことにもならない（root で走らせたときなど）
+              // 8進の1桁で書く権限（2）が落ちているのは 0・1・4・5 だけ
+              expect(attr, "chmod a-w のあとも書く権限が残っています").toMatch(/^mode [0145]{3}$/);
+            }
+            const result = await typeSaveCloseInManuscript(session, "C");
+            note("C：結論", result);
+            expect(result.lost && !result.warned, "打った字が保存されず、知らせも確認の窓も出ませんでした").toBe(false);
+          } finally {
+            // 片づけ（一時フォルダーの削除）が属性で止まらないよう外す
+            await undoReadonly(target).catch(() => undefined);
+          }
+        },
+        options
+      );
+    } finally {
+      // 起こす途中で落ちて本体が走らなかったときも、属性を外してから片づけに回す
+      if (target !== "") await undoReadonly(target).catch(() => undefined);
+    }
   }
 );
 

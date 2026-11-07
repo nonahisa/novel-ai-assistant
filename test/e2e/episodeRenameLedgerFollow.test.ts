@@ -20,14 +20,23 @@
  */
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Page } from "playwright-core";
+import type { Locator, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { composeText, frontFrameShowing, placeCaretAfter } from "./support/manuscriptFrame";
 import { runCommand } from "./support/quickInput";
 import { SIDEBAR_LAUNCH, showSidebar, treeContextMenu, treeRowLabels, treeRow, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, restartVsCode, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { dialogText, notificationTexts, pressDialogButton, pressWorkbenchKey, quickOpen, statusBarTexts } from "./support/workbenchDom";
+import {
+  activeElementSummary,
+  dialogText,
+  focusInside,
+  notificationTexts,
+  pressDialogButton,
+  pressWorkbenchKey,
+  quickOpen,
+  statusBarTexts,
+} from "./support/workbenchDom";
 import { postingTextHash, postingTitleHash } from "../../src/core/postingBodyHash";
 
 const KAKUYOMU_POST_URL = "https://kakuyomu.jp/my/works/1177354054934574437/episodes/new";
@@ -87,6 +96,51 @@ async function waitPostedPaths(session: E2ESession, expected: string[], what: st
 /** ステータスバーと右下の知らせの字（完了は帯に6秒だけ出る） */
 async function noticeLines(page: Page): Promise<string[]> {
   return [...(await statusBarTexts(page)), ...(await notificationTexts(page))];
+}
+
+/**
+ * エクスプローラーの選ばれた行で、名前の入力欄を出す（出なければ3回まで押し直す）。
+ *
+ * 行は選ばれても焦点が原稿エディター（WebView）に残ることがあり、キーが本体に届かず名前の入力欄が
+ * 出なかった回がある。行を押してエクスプローラーへ焦点を移してから改名のキーを送る。
+ *
+ * **改名のキーは OS で違う**：Windows・Linux は F2、Mac は Enter（macOS の VS Code の既定の割り当て。
+ * Mac には F2 の割り当てが無く、Mac で入力欄が出ずに落ちた。2026-11-07）。**Mac の Enter は、焦点が
+ * 原稿エディターに残っていると本文に改行を入れてしまう**ので、焦点がエクスプローラーの木の中にあることを
+ * 確かめてから送る。確かめられなければ送らずに押し直し、3回とも駄目なら送らないまま失敗にする
+ */
+async function startExplorerRename(page: Page, row: Locator, input: Locator): Promise<void> {
+  const mac = process.platform === "darwin";
+  const inTree = () => focusInside(page, ".explorer-folders-view");
+  for (let attempt = 1; ; attempt++) {
+    await row.click();
+    if (mac) {
+      const focused = await waitUntil(inTree, "焦点がエクスプローラーの木の中へ移る", 5_000).then(
+        () => true,
+        () => false
+      );
+      // 待ったあとと送る直前のあいだに焦点が動いていないことを、もう一度見てから送る
+      if (focused && (await inTree())) {
+        await page.keyboard.press("Enter");
+      } else if (attempt === 3) {
+        throw new Error(
+          `エクスプローラーの木に焦点が移らないので、改名の Enter を送りませんでした（行を3回押しました。` +
+            `焦点：${await activeElementSummary(page)}／知らせ：${JSON.stringify(await noticeLines(page))}）`
+        );
+      } else {
+        continue;
+      }
+    } else {
+      await pressWorkbenchKey(page, "F2");
+    }
+    if (await input.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) return;
+    if (attempt === 3) {
+      throw new Error(
+        `エクスプローラーの名前の入力欄が出ません（${mac ? "Enter" : "F2"} を送って3回目。焦点：${await activeElementSummary(page)}` +
+          `／知らせ：${JSON.stringify(await noticeLines(page))}）`
+      );
+    }
+  }
 }
 
 async function waitNotice(page: Page, needle: string, what: string): Promise<string> {
@@ -170,18 +224,9 @@ test("エクスプローラー（本物の F2）で投稿済みの話の名前�
       // エクスプローラーで当該ファイルの行が選ばれて焦点を持つまで待つ
       const row = page.locator(".explorer-viewlet .monaco-list-row.focused, .explorer-viewlet .monaco-list-row.selected", { hasText: "第1話_はじまり" }).first();
       await waitUntil(async () => (await row.count()) > 0, "エクスプローラーで第1話の行が選ばれる", 20_000);
-      /*
-        行は選ばれても焦点が原稿エディター（WebView）に残ることがあり、F2 が本体に届かず
-        名前の入力欄が出なかった回がある。行を押してエクスプローラーへ焦点を移してから F2 を送り、
-        出なければ押し直す（3回まで）
-      */
+      // 改名のキー（Windows は F2、Mac は Enter）と押し直しは startExplorerRename
       const input = page.locator(".explorer-viewlet .monaco-inputbox input").first();
-      for (let attempt = 1; ; attempt++) {
-        await row.click();
-        await pressWorkbenchKey(page, "F2");
-        if (await input.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) break;
-        if (attempt === 3) throw new Error(`エクスプローラーの名前の入力欄が出ません（F2 を3回送りました。知らせ：${JSON.stringify(await noticeLines(page))}）`);
-      }
+      await startExplorerRename(page, row, input);
       // 名前の入力欄は拡張子の手前までが選ばれているので、そこへ新しい題を打つ
       await page.keyboard.insertText("第1話_出会い");
       await page.keyboard.press("Enter");
@@ -233,12 +278,7 @@ test("話数の読めない話をエクスプローラー（F2）で改名する
       const row = page.locator(".explorer-viewlet .monaco-list-row.focused, .explorer-viewlet .monaco-list-row.selected", { hasText: "幕間" }).first();
       await waitUntil(async () => (await row.count()) > 0, "エクスプローラーで幕間の行が選ばれる", 20_000);
       const input = page.locator(".explorer-viewlet .monaco-inputbox input").first();
-      for (let attempt = 1; ; attempt++) {
-        await row.click();
-        await pressWorkbenchKey(page, "F2");
-        if (await input.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) break;
-        if (attempt === 3) throw new Error(`エクスプローラーの名前の入力欄が出ません（F2 を3回送りました。知らせ：${JSON.stringify(await noticeLines(page))}）`);
-      }
+      await startExplorerRename(page, row, input);
       await page.keyboard.insertText("幕間_湖畔");
       await page.keyboard.press("Enter");
 

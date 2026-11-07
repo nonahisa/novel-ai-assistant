@@ -146,6 +146,100 @@ export function productKeybinding(command: string, platform: NodeJS.Platform = p
   return keybindingFor(findBinding(command), platform);
 }
 
+/* ── 画面に出るキーの書き方（キーボード ショートカットの画面などと比べるため。2026-11-07） ── */
+
+/**
+ * VS Code が画面に出すキーの札の書き方（1.141.0 の `UILabelProvider` を引いて決めた）。
+ *
+ * - Windows・Linux：修飾は「Ctrl」「Shift」「Alt」、つなぎは「+」（例「Ctrl+Alt+M」）
+ * - **Mac：修飾は記号「⌃」「⇧」「⌥」「⌘」、つなぎは無し**（例「⌥⌘M」）。Mac で commandNames が
+ *   `Ctrl+Alt+M` を探して落ちたのはこのため
+ *
+ * **並びは OS によらず Ctrl → Shift → Alt → Cmd（Windows キー）**。VS Code の札を組む関数が、
+ * 修飾を押された順ではなくこの順で並べてからつなぐ（workbench.desktop.main.js の
+ * `s.ctrlKey&&t.push(e.ctrlKey),s.shiftKey&&…,s.altKey&&…,s.metaKey&&…`）。だから `cmd+alt+m` も
+ * 「⌘⌥M」でなく「⌥⌘M」と出る。Linux の Meta（Super）は製品で使っていないので扱わない
+ */
+const LABEL_MODIFIERS: Record<"mac" | "other", { ctrl: string; shift: string; alt: string; meta: string; separator: string }> = {
+  mac: { ctrl: "⌃", shift: "⇧", alt: "⌥", meta: "⌘", separator: "" },
+  other: { ctrl: "Ctrl", shift: "Shift", alt: "Alt", meta: "Windows", separator: "+" },
+};
+
+/** 英数字・F キー以外のキーの札（製品で使っているもの。VS Code は記号をそのまま出す） */
+const LABEL_KEYS: Record<string, string> = {
+  "/": "/",
+  "\\": "\\",
+  ".": ".",
+  ",": ",",
+  ";": ";",
+  "'": "'",
+  "`": "`",
+  "-": "-",
+  "=": "=",
+  "[": "[",
+  "]": "]",
+};
+
+/**
+ * keybindings.json の書き方のキー（`cmd+alt+m`）を、VS Code が画面に出す札の字（Mac は「⌥⌘M」、
+ * Windows は「Ctrl+Alt+M」）へ直す。2段のキーは受けない（`toPlaywrightChord` と同じ）
+ */
+export function keyLabelFor(vscodeKey: string, platform: NodeJS.Platform = process.platform): string {
+  const trimmed = vscodeKey.trim().toLowerCase();
+  if (/\s/.test(trimmed)) throw new Error(`2段のキー「${vscodeKey}」の札は組めません`);
+  const parts = trimmed.split("+");
+  const last = parts.pop();
+  if (last === undefined || last === "") throw new Error(`キー「${vscodeKey}」を読めません`);
+  const held = { ctrl: false, shift: false, alt: false, meta: false };
+  for (const part of parts) {
+    if (part === "ctrl") held.ctrl = true;
+    else if (part === "shift") held.shift = true;
+    else if (part === "alt") held.alt = true;
+    else if (part === "cmd" || part === "meta" || part === "win") held.meta = true;
+    else throw new Error(`キー「${vscodeKey}」の修飾「${part}」を読めません`);
+  }
+  const labels = LABEL_MODIFIERS[isMac(platform) ? "mac" : "other"];
+  const pieces: string[] = [];
+  // 並びは VS Code の札と同じ Ctrl → Shift → Alt → Cmd（上の説明）
+  if (held.ctrl) pieces.push(labels.ctrl);
+  if (held.shift) pieces.push(labels.shift);
+  if (held.alt) pieces.push(labels.alt);
+  if (held.meta) pieces.push(labels.meta);
+  pieces.push(keyLabelName(last, vscodeKey));
+  return pieces.join(labels.separator);
+}
+
+function keyLabelName(key: string, whole: string): string {
+  if (/^[a-z0-9]$/.test(key)) return key.toUpperCase();
+  if (/^f([1-9]|1[0-9]|2[0-4])$/.test(key)) return key.toUpperCase();
+  const label = LABEL_KEYS[key];
+  if (label !== undefined) return label;
+  throw new Error(`キー「${whole}」の「${key}」の札が分かりません（keys.ts の LABEL_KEYS に足してください）`);
+}
+
+/** 製品のコマンドのキーが、その OS の画面にどう出るか（Mac は `mac` の割り当てを記号で） */
+export function productKeyLabel(command: string, platform: NodeJS.Platform = process.platform): string {
+  return keyLabelFor(productKeybinding(command, platform), platform);
+}
+
+/**
+ * 画面に出たキーの字（空白は除いてから渡す）に、`label` の札が**それだけで**出ているか。
+ *
+ * 前に何かが付いた形（「Shift+F8」の中の「F8」、「⇧F8」の中の「F8」）は別のキーなので当てない。
+ * 後ろは見ない——前の判定（`/Ctrl\+Alt\+M/`）も後ろを縛っていなかったので、Windows の当たり方を変えない
+ */
+export function keyLabelShown(shown: string, label: string): boolean {
+  let from = 0;
+  for (;;) {
+    const at = shown.indexOf(label, from);
+    if (at < 0) return false;
+    if (at === 0) return true;
+    // 直前が修飾の札・つなぎの「+」でなければ、別の札の続きではない
+    if (!/[+⌃⇧⌥⌘A-Za-z]/.test(shown[at - 1])) return true;
+    from = at + 1;
+  }
+}
+
 /* ── 製品のキー（テストから押すもの。コマンドIDの打ち間違いをここ1か所に閉じる） ── */
 
 export const CHECK_TYPOS_PRESS = productKey("novelai.checkTyposForFile");

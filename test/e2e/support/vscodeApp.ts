@@ -16,7 +16,7 @@
  * - **1件ごとに作品も VS Code も作り直す。** 遅くても、前の件の残り（開いたタブ・
  *   保管庫の札）に引きずられないほうを取る
  */
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -208,6 +208,23 @@ export async function editGlobalState(root: string, mutate: (values: Record<stri
   }
 }
 
+/**
+ * 作品の一時フォルダーを作る親（OS の一時フォルダーを、リンクをたどった本当の道にしたもの）。
+ *
+ * Mac の一時フォルダー（/var/folders/…）は /private/var へのリンクで、git などが返す根は
+ * /private/var の側になる。作品の道を /var のまま渡すと、製品が比べる道と食い違う疑いがある
+ * （2026-11-07。Mac の全件の回で）。Windows では一時フォルダーはふつうリンクでないので道は変わらない。
+ * 起こす前に道の形を見積もる件（editorDecisionsReturn）も、同じ親から見積もる
+ */
+export function e2eTmpRoot(): string {
+  try {
+    return realpathSync.native(tmpdir());
+  } catch {
+    // たどれなければ前のまま（作品は作れる。道の食い違いの疑いが残るだけ）
+    return tmpdir();
+  }
+}
+
 /** 開き直し（`restartVsCode`）のために控える、起こしたときの引数（一時フォルダーの根で引く） */
 const relaunchContexts = new Map<
   string,
@@ -219,7 +236,7 @@ const relaunchContexts = new Map<
  * 呼び手は `withVsCode` を使う（片づけと失敗時の写真を引き受けるため）。
  */
 async function launch(episodes: readonly FixtureEpisode[], options: LaunchOptions = {}): Promise<E2ESession> {
-  const root = await mkdtemp(path.join(tmpdir(), "novelai-e2e-"));
+  const root = await mkdtemp(path.join(e2eTmpRoot(), "novelai-e2e-"));
   // **起こす前に台帳へ載せる。** 起動の途中で時間切れになっても、走りの最後の
   // 片づけ（globalSetup）が引数の一時フォルダー名で拾って止める
   await recordLaunch({ root });
@@ -275,6 +292,14 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
         // 「アニメーション効果」に従うので、作者が設定を変えると選ぶ画面の行が動いている最中に
         // 押したり Esc を送ったりして、17件が落ちた（2026-11-03）。機械の設定に結果を左右させない
         "workbench.reduceMotion": "on",
+        /*
+          **Mac では品書き（右クリック・上の帯）も VS Code の中に描かせる。** 1.141.0 の `window.menuStyle`
+          （custom／native／inherit）は Mac の stable の既定が native で、OS のメニューは Playwright から
+          読めない（`custom` なら OS によらず中に描く。workbench.desktop.main.js の判定を引いて確かめた。
+          2026-11-07）。Windows の既定（inherit。題の帯が custom なので中に描く）は変えない。左の列の件は
+          `SIDEBAR_LAUNCH` が前から custom を入れている
+        */
+        ...(process.platform === "darwin" ? { "window.menuStyle": "custom" } : {}),
         ...options.settings,
       },
       null,
