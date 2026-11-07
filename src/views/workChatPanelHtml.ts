@@ -102,7 +102,16 @@ body {
 #context-provider:hover { text-decoration: underline; }
 /* 有料のときは警告の色を優先する（課金の注意は、リンクより先に伝える） */
 #context .paid { color: var(--vscode-editorWarning-foreground, #cca700); }
-#log { flex: 1; overflow-y: auto; padding: 10px; }
+/*
+ * **縮むのは会話の欄だけ**（2026-11-07、Mac の横の相談パネルで［送る］が枠の外へ押し出された）。
+ * 会話は巻いて読めるので、低い枠では会話の欄を先に低くし、入力欄と［送る］の行は枠の下に残す。
+ * 考え中の行・大きい画面のツールバーは縮めない。
+ * 上の行（相談の対象とAIの名前）は、細い枠では4〜5段に折れて 80〜100px を取る。足りないときは
+ * 1段ぶんまで低くして、残りは行の中で巻いて読めるようにする（字は消さない）
+ */
+#thinking, #toolbar { flex: 0 0 auto; }
+#context { flex: 0 100 auto; min-height: calc(1.5em + 13px); overflow-y: auto; }
+#log { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 10px; }
 .turn { margin-bottom: 14px; }
 .turn .who {
   font-size: 11px;
@@ -168,12 +177,33 @@ body {
   color: var(--vscode-descriptionForeground);
 }
 #thinking { padding: 0 10px 10px; color: var(--vscode-descriptionForeground); font-size: 12px; }
-#composer { border-top: 1px solid var(--vscode-panel-border); padding: 8px 10px; }
+/*
+ * 入力の区画は**縦に並べ、足りないときは聞き方の例→入力欄の順に低くする**（2026-11-07）。
+ *
+ * 以前は区画の中身が縮まない作りで、枠が 200px を少し超えた（Mac で 217px）ときに、
+ * 細い枠で聞き方の例が2段・3段に折れて入力欄と［送る］を枠の下へ押し出した
+ * （下の「低いときの詰め方」が効くのは 200px まで。その手前の谷で、どちらの手当ても効かなかった）。
+ * ボタンの行・案内は縮めない——［送る］を残すのがこの区画の役目である。
+ */
+#composer {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--vscode-panel-border);
+  padding: 8px 10px;
+}
+#composer > * { flex: 0 0 auto; }
 /* この画面の入力欄は相談の入力だけ。増えたらここへ足す */
 textarea {
   width: 100%;
   resize: vertical;
-  min-height: 54px;
+  /*
+    ふだんの高さは 54px。枠が低いときは 28px（1行ぶん）まで縮めて［送る］を残す。
+    作者が境目を引いて高くした値（resize の style.height）も、同じく低い枠では縮む——打った字は消えず、巻いて読める
+  */
+  height: 54px;
+  min-height: 28px;
   padding: 6px 8px;
   font-family: inherit;
   font-size: inherit;
@@ -220,7 +250,16 @@ textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
   flex-wrap: wrap;
   gap: 4px;
   margin-bottom: 6px;
+  /*
+    **折れても2段まで。それより多い札は欄の中で巻いて見せる**（2026-11-07）。細い枠で5枚が5段に
+    折れると、それだけで 140px ほど取り、入力欄と［送る］を枠の外へ押し出した。
+    枠がさらに低ければ、入力欄より先にこの欄が縮む（札は消えず、巻けば出る）
+  */
+  max-height: 48px;
+  overflow-y: auto;
 }
+#composer > #examples { flex: 0 100 auto; min-height: 0; }
+#composer > textarea { flex: 0 1 auto; }
 .example {
   border: 1px solid var(--vscode-panel-border);
   border-radius: 10px;
@@ -449,6 +488,16 @@ body.dragging #drop-overlay { display: flex; }
   #composer { padding: 4px 8px; }
   #composer .row { margin-top: 4px; }
   textarea { min-height: 28px; height: 28px; resize: none; }
+  /*
+    いちばん細い枠（左の列の下限 170px）では、面を移るボタン（行の左端）と［送る］が1行に収まらず
+    2段に折れ、100px の枠で［送る］が外へ出た（2026-11-07 に静的に組んで測った）。低いときは折らずに、
+    左端のボタンの字を詰めて（…で切る。押せば同じく動く）［送る］を同じ行に残す。
+    ボタンの名前は書かない——横と大きい画面で同じ CSS を使い、片方にしか無い名前を両方へ出さない
+  */
+  #composer .row { flex-wrap: nowrap; }
+  #composer .row > .action:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #send { flex: 0 0 auto; }
+  #log { padding: 4px 8px; }
 }
 </style>
 </head>

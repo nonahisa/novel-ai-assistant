@@ -7,7 +7,9 @@
  * 単独で24回中4回落ちていた原因）。製品は2段で直した：最初に出すときの高さ（package.json の initialSize）と、
  * 低いときに中を詰める CSS（`views/workChatPanelHtml.ts` の `@media (max-height: 200px)`）。
  *
- * ここで見るのは「開いた直後の形」だけ。押したり打ったりはしない（座標で押すと、落ちたときに
+ * 2件目（2026-11-07）は、境目を引いて低く・細くした形を見る（谷の 201〜260px で押し出された Mac の再現）。
+ *
+ * ここで見るのは形だけ。押したり打ったりはしない（座標で押すと、落ちたときに
  * 高さの問題か押し方の問題かが分からなくなる）。**本物の AI は呼ばない**（相談は送らない）。
  */
 import type { Frame, Page } from "playwright-core";
@@ -16,7 +18,14 @@ import { chatInputState } from "./support/chatInput";
 import { openEpisode } from "./support/manuscriptFrame";
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { activeElementSummary, pressWorkbenchKey, webviewLayers } from "./support/workbenchDom";
+import {
+  activeElementSummary,
+  dragSash,
+  paneHeaderBox,
+  pressWorkbenchKey,
+  sidebarBox,
+  webviewLayers,
+} from "./support/workbenchDom";
 
 const EPISODE = "001_はじまり.txt";
 const BODY = ["　朝の駅は静かだった。", "　発車のベルが鳴った。", ""].join("\n");
@@ -83,4 +92,100 @@ test("横の相談パネルを開くと、入力欄と［送る］が枠の中�
     });
     expect(await insideOuter(frame, "#input")).toBe(true);
   }, { keybindings: [{ key: OPEN_SIDE_KEY, command: "novelai.openChat" }] });
+});
+
+/** 横の相談パネルの外側の枠（本体から見た iframe）の箱 */
+async function outerBox(frame: Frame): Promise<{ x: number; y: number; width: number; height: number } | null> {
+  return (
+    (await frame
+      .parentFrame()
+      ?.frameElement()
+      .then((element) => element.boundingBox())
+      .catch(() => null)) ?? null
+  );
+}
+
+/**
+ * 左の列の境目を引いて、横の相談パネルの枠を `width` 前後の幅・`low`〜`high` の高さにする。
+ * 高さは1回で決まらない（上の区画の最小の高さで止まる・木の描き直しで少し動く）ので、測って数回引き直す
+ */
+async function resizeSideChat(page: Page, frame: Frame, width: number, low: number, high: number): Promise<void> {
+  const sidebar = await sidebarBox(page);
+  if (!sidebar) throw new Error("左の列が見えません");
+  await dragSash(page, "vertical", { x: sidebar.x + sidebar.width, y: sidebar.y + sidebar.height / 2 }, width - sidebar.width);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const box = await outerBox(frame);
+    if (box && box.height >= low && box.height <= high) return;
+    const header = await paneHeaderBox(page, "AIに相談");
+    if (!box || !header) break;
+    // 相談の区画の見出しの真上の境目を下へ引くと、相談が低くなる
+    await dragSash(page, "horizontal", { x: header.x + header.width / 2, y: header.y }, box.height - (low + high) / 2);
+    await page.waitForTimeout(300);
+  }
+  const box = await outerBox(frame);
+  throw new Error(`横の相談パネルの枠を高さ ${low}〜${high}px にできません（枠：${JSON.stringify(box)}／左の列：${JSON.stringify(await sidebarBox(page))}）`);
+}
+
+/** 面の中で、要素の真ん中を押したときに当たるのがその要素自身か（重なりや枠の外で押せない形を拾う） */
+async function hitsItself(frame: Frame, selector: string): Promise<string | undefined> {
+  return frame.evaluate((sel) => {
+    const element = document.querySelector(sel);
+    if (!element) return `${sel} が無い`;
+    const box = element.getBoundingClientRect();
+    const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    if (top && (element === top || element.contains(top))) return undefined;
+    return `${sel} の真ん中に当たるのは ${top ? `${top.tagName.toLowerCase()}#${top.id}.${String(top.className)}` : "なし（面の外）"}`;
+  }, selector);
+}
+
+/**
+ * **低く・細くしても、入力欄と［送る］が枠の中に見えて押せる**（2026-11-07）。
+ *
+ * Mac（1440x795、1.141.0）で、枠の高さ 217px のとき聞き方の例が2段に折れて、入力欄は 2.5px、
+ * ［送る］は 44px 枠の外へ押し出された。低いときの詰め方（`@media (max-height: 200px)`）の手前の
+ * 201〜260px が手当ての無い谷で、細い枠ほど札とボタンが折れて押し出す。作者の機械でも、
+ * パネルを低く・細くすれば起きる。直しは `views/workChatPanelHtml.ts`（縮むのは会話の欄・札の欄・上の行）。
+ *
+ * 谷の中（205〜235px）と、詰め方の効く 200px 以下（165〜195px）の2つの高さを、幅 200px 前後で見る。
+ * **押さない**——押すと送る処理が走る。真ん中で当たるのが［送る］自身であることで「押せる」とみなす。
+ * 2026-11-07 に書いた時点では Windows で未実行（作者が使っている機械では流さない）。初めて走るのは Mac
+ */
+test("横の相談パネルを低く・細くしても、入力欄と［送る］が枠の中に見えて押せる（200px の手前の谷でも）", async () => {
+  await withVsCode("相談パネルを低く細く", [{ name: EPISODE, text: BODY }], async (session) => {
+    const { page } = session;
+    await openEpisode(page, EPISODE, "発車のベルが鳴った");
+    await pressWorkbenchKey(page, OPEN_SIDE_PRESS);
+    let side: Frame | undefined;
+    await waitUntil(async () => (side = await sideChatFrame(page)) !== undefined, "横の相談パネルが開く", 30_000);
+    const frame = side as Frame;
+    // 聞き方の例が届いて並ぶまで待つ（札が折れて押し出すのを見るので、札が無いまま測らない）
+    await waitUntil(
+      async () => (await frame.locator("#examples .example").count().catch(() => 0)) >= 3,
+      "横の相談パネルに聞き方の例が並ぶ",
+      15_000
+    );
+
+    for (const [low, high] of [
+      [205, 235],
+      [165, 195],
+    ] as const) {
+      await resizeSideChat(page, frame, 200, low, high);
+      const box = await outerBox(frame);
+      const where = `枠：${JSON.stringify(box)}`;
+      expect(box!.width, `枠の幅が細くなっていない（${where}）`).toBeLessThanOrEqual(240);
+      await waitUntil(
+        async () => (await insideOuter(frame, "#input")) && (await insideOuter(frame, "#send")),
+        `高さ ${low}〜${high}px で、入力欄と［送る］が枠の中に見える`,
+        10_000
+      ).catch(async (error: unknown) => {
+        const send = await frame.locator("#send").boundingBox().catch(() => null);
+        throw new Error(`${String(error)}（${where}／${await chatInputState(frame)}／［送る］：${JSON.stringify(send)}／${process.platform}）`);
+      });
+      const input = await frame.locator("#input").boundingBox();
+      // 入力欄が潰れて「枠の中にある」だけにならない（1行ぶんは打てる高さ）
+      expect(input!.height, `入力欄が潰れている（${where}／入力欄：${JSON.stringify(input)}）`).toBeGreaterThanOrEqual(24);
+      expect(await hitsItself(frame, "#send"), `［送る］が押せない（${where}）`).toBeUndefined();
+      expect(await hitsItself(frame, "#input"), `入力欄が押せない（${where}）`).toBeUndefined();
+    }
+  }, { keybindings: [{ key: OPEN_SIDE_KEY, command: "novelai.openChat" }], windowSize: { width: 1280, height: 800 } });
 });
