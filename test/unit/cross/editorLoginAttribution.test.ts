@@ -376,18 +376,27 @@ describe("編集者の GitHub のユーザー名を、作者の側に残す", ()
     expect(asked[0].value).toBe(LOGIN);
   });
 
-  test("作者の GitHub 名：引けたら名前、引けなければ書かない（失敗は覚えない）", async () => {
+  test("作者の GitHub 名：引けたら名前、引けなければ書かない（失敗は長く覚えない）", async () => {
     setAuthorTokenSourceForTests(undefined);
+    let clock = 1_000_000;
+    const now = () => clock;
     const fetchLogin = vi
       .fn()
       .mockResolvedValueOnce({ ok: false, detail: "回線" })
       .mockResolvedValueOnce({ ok: true, login: "nonahisa" });
-    const token = async () => "token-a";
-    expect(await authorGithubLogin(work(), { token, fetchLogin })).toBeUndefined();
-    expect(await authorGithubLogin(work(), { token, fetchLogin })).toBe("nonahisa");
+    const token = vi.fn(async () => "token-a");
+    expect(await authorGithubLogin(work(), { token, fetchLogin, now })).toBeUndefined();
+    // 続けて決める間（1分）は引き直さない（［まとめて適用］で1件ごとに待たせない）
+    clock += 30_000;
+    expect(await authorGithubLogin(work(), { token, fetchLogin, now })).toBeUndefined();
+    expect(token).toHaveBeenCalledTimes(1);
+    // 1分を過ぎたら引き直す（失敗は長く覚えない）
+    clock += 31_000;
+    expect(await authorGithubLogin(work(), { token, fetchLogin, now })).toBe("nonahisa");
     // 通ったら、同じ鍵では引き直さない
-    expect(await authorGithubLogin(work(), { token, fetchLogin })).toBe("nonahisa");
+    expect(await authorGithubLogin(work(), { token, fetchLogin, now })).toBe("nonahisa");
     expect(fetchLogin).toHaveBeenCalledTimes(2);
-    expect(await authorGithubLogin(work(), { token: async () => undefined, fetchLogin })).toBeUndefined();
+    clock += 120_000;
+    expect(await authorGithubLogin(work(), { token: async () => undefined, fetchLogin, now })).toBeUndefined();
   });
 });

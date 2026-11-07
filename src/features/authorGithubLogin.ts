@@ -37,6 +37,15 @@ type LoginResult = { ok: true; login: string } | { ok: false; detail: string };
 let remembered: { token: string; login: string } | undefined;
 
 /**
+ * 引けなかったあと、引き直さない短い間（ミリ秒）。
+ *
+ * **失敗は覚えない**（長くは持たない）が、［まとめて適用］で十数件を続けて決めると、鍵の無い
+ * 環境では1件ごとに最大5秒ずつ待つことになる。続けて決める間だけ引き直さない
+ */
+const RETRY_AFTER_FAILURE_MS = 60_000;
+let failedAt: number | undefined;
+
+/**
  * 試験では鍵の出どころを差し替える（`test/unit/support/setup.ts` が毎回「鍵なし」にする）。
  * 差し替えないと、試験の中で採否を決めたときに本物の gh の鍵と GitHub へ出ていく
  */
@@ -47,9 +56,12 @@ export function setAuthorTokenSourceForTests(
 ): void {
   tokenSourceForTests = source;
   remembered = undefined;
+  failedAt = undefined;
 }
 
 export interface AuthorLoginDeps {
+  /** 今の時刻（テストで差し替える） */
+  now?: () => number;
   /** 窓を出さずに取れる鍵 */
   token?: () => Promise<string | undefined>;
   fetchLogin?: (token: string) => Promise<LoginResult>;
@@ -59,24 +71,31 @@ export async function authorGithubLogin(
   work: WorkEntry,
   deps: AuthorLoginDeps = {}
 ): Promise<string | undefined> {
+  const now = (deps.now ?? Date.now)();
+  if (failedAt !== undefined && now - failedAt < RETRY_AFTER_FAILURE_MS) return undefined;
+  const failed = (): undefined => {
+    failedAt = now;
+    return undefined;
+  };
   try {
     const token = await withTimeout((deps.token ?? tokenSourceForTests ?? silentToken)());
-    if (!token) return undefined;
+    if (!token) return failed();
     if (remembered && remembered.token === token) return remembered.login;
     const result = await withTimeout((deps.fetchLogin ?? fetchLogin)(token));
     if (!result) {
       note(work, "時間内に返事がありませんでした");
-      return undefined;
+      return failed();
     }
     if (!result.ok) {
       note(work, result.detail);
-      return undefined;
+      return failed();
     }
+    failedAt = undefined;
     remembered = { token, login: result.login };
     return result.login;
   } catch (error) {
     note(work, error instanceof Error ? error.message : String(error));
-    return undefined;
+    return failed();
   }
 }
 
