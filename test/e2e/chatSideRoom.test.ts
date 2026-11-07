@@ -172,6 +172,8 @@ test("横の相談パネルを低く・細くしても、入力欄と［送る�
       await resizeSideChat(page, frame, 200, low, high);
       const box = await outerBox(frame);
       const where = `枠：${JSON.stringify(box)}`;
+      // 通ったときも、本当に狙った高さ（谷の中か）に入っていたかを出力に残す
+      console.log(`[chatSideRoom] 高さ ${low}〜${high}px の狙いで ${where}`);
       expect(box!.width, `枠の幅が細くなっていない（${where}）`).toBeLessThanOrEqual(240);
       await waitUntil(
         async () => (await insideOuter(frame, "#input")) && (await insideOuter(frame, "#send")),
@@ -187,5 +189,10 @@ test("横の相談パネルを低く・細くしても、入力欄と［送る�
       expect(await hitsItself(frame, "#send"), `［送る］が押せない（${where}）`).toBeUndefined();
       expect(await hitsItself(frame, "#input"), `入力欄が押せない（${where}）`).toBeUndefined();
     }
-  }, { keybindings: [{ key: OPEN_SIDE_KEY, command: "novelai.openChat" }], windowSize: { width: 1280, height: 800 } });
+  }, {
+    keybindings: [{ key: OPEN_SIDE_KEY, command: "novelai.openChat" }],
+    windowSize: { width: 1280, height: 800 },
+    // 境目を引いたあと矢印が区画の見出しの上に残り、吹き出しが次の引き直しに重ならないよう、吹き出しを出さない
+    settings: { "workbench.hover.delay": 600_000 },
+  });
 });

@@ -201,6 +201,8 @@ export async function treeContextMenu(page: Page, head: string, item: string): P
         `${String(shown)}（右クリックを${attempts}回試した／品書き：${(await contextMenuLabels(page)).join(" / ")}／${await contextMenuState(page, head)}）`
       );
     }
+    // 「やり直したら通った」で黙らない。通ったときも、やり直しが要ったことと様子を出力に残す
+    console.warn(`[treeContextMenu] 「${head}」の品書きが組み上がらず、右クリックし直します（${attempt}回目／${await contextMenuState(page, head)}）`);
     // 組み上がらなかった品書きを閉じてから、もう一度右クリックする
     await page.keyboard.press("Escape");
     await waitUntil(
