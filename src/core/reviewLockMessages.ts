@@ -61,3 +61,39 @@ export function reviewLockTakenMessage(fileName: string): string {
 export function reviewLockReleasedOthersDetail(holder: string): string {
   return `${holder} が校閲中にしていたものを外しました`;
 }
+
+/** 原稿エディターの帯に出す、鍵の持ち主と時刻 */
+export interface ReviewLockBannerInput {
+  /**
+   * 編集者の GitHub 名（`.aiwriter/editing.json` の `editorLogin`、無ければ `formerEditorLogin`）。
+   * **鍵の holder（git の名前）は渡さない**——作者が招いたときの名前と違うことがある（0.138.0）
+   */
+  readonly editorLogin?: string;
+  /** 鍵の time（ISO8601） */
+  readonly since: string;
+}
+
+/**
+ * 「11月7日 18:30」。**この端末の時刻で書く**（作者が読む時計）。年は今年でなければ足す。
+ * 読めない時刻なら undefined（時刻を言わない）
+ */
+export function formatLockSince(since: string, now: Date = new Date()): string | undefined {
+  const parsed = new Date(since);
+  if (since.length === 0 || Number.isNaN(parsed.getTime())) return undefined;
+  const year = parsed.getFullYear() === now.getFullYear() ? "" : `${parsed.getFullYear()}年`;
+  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+  return `${year}${parsed.getMonth() + 1}月${parsed.getDate()}日 ${parsed.getHours()}:${minutes}`;
+}
+
+/**
+ * 原稿エディターの、校閲中の帯の文（作者の裁定 2026-11-07。文はこのとおりに）。
+ *
+ * 「この話は校閲中です（編集者 kmizu・11月7日 18:30 から）。編集者が返すと書けます。」
+ * 名前が分からなければ「編集者」とだけ、時刻が読めなければ時刻を言わない。
+ */
+export function reviewLockBannerText(input: ReviewLockBannerInput, now: Date = new Date()): string {
+  const who = input.editorLogin ? `編集者 ${input.editorLogin}` : "編集者";
+  const since = formatLockSince(input.since, now);
+  const detail = since ? `${who}・${since} から` : who;
+  return `この話は校閲中です（${detail}）。編集者が返すと書けます。`;
+}

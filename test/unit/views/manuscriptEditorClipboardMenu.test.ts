@@ -239,6 +239,8 @@ function harness(options: {
     function clearTimeout(id) { env.timers = env.timers.filter((t) => t.id !== id); }
     // 組んで書く面では、選択は品書きを開いた時点に控えてある
     const composeMenuAt = env.composeOn ? { start: env.sel.start, end: env.sel.end } : null;
+    // 校閲中でない（校閲中の止め方は manuscriptEditorReviewLock.test.ts で見る）
+    function refuseWhileReviewLocked() { return false; }
     const composeNotation = "curly";
     const composeCopyEmphasis = "kakuyomu";
     const vscode = { postMessage: (message) => env.posted.push(message) };

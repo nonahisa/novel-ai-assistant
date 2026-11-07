@@ -26,6 +26,35 @@ import {
 const LOCK_DIRECTORY = "locks";
 const LOCK_FILE = "locks.jsonl";
 
+/**
+ * 台帳へ書いたあとに呼ぶ相手（設計書5.7.5.2。0.139.0）。
+ *
+ * 鍵が届く道は多い（開いたときの取りに行き・同期のあとの取り込み・手動の受け取り・
+ * 作者の解除）。**どの道で届いても、開いている原稿エディターの帯と素のエディターの
+ * 読み取り専用を描き直す**ため、書く所（この台帳）で知らせる。道ごとに知らせると、
+ * 足した新しい道が知らせ忘れる。
+ *
+ * VS Code の仕組み（EventEmitter）を使わないのは、この層を VS Code の知らせの形に
+ * 寄せないため（`core` は呼ぶ側を知らない）。
+ */
+type LockLedgerListener = (work: WorkEntry) => void;
+const lockLedgerListeners = new Set<LockLedgerListener>();
+
+export function onLockLedgerWritten(listener: LockLedgerListener): { dispose(): void } {
+  lockLedgerListeners.add(listener);
+  return { dispose: () => void lockLedgerListeners.delete(listener) };
+}
+
+function announceLockLedgerWritten(work: WorkEntry): void {
+  for (const listener of [...lockLedgerListeners]) {
+    try {
+      listener(work);
+    } catch {
+      // 描き直しの失敗で台帳の書き込みを失敗にしない（書けたことは本当）
+    }
+  }
+}
+
 export class FileLockStore {
   constructor(private readonly work: WorkEntry) {}
 
@@ -129,6 +158,7 @@ export class FileLockStore {
       if (merged.added === 0 && merged.text === existing) return 0;
       await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
       await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(merged.text));
+      announceLockLedgerWritten(this.work);
       return merged.added;
     });
   }
@@ -156,6 +186,7 @@ export class FileLockStore {
     merged.set(existing, 0);
     merged.set(added, existing.byteLength);
     await vscode.workspace.fs.writeFile(uri, merged);
+    announceLockLedgerWritten(this.work);
   }
 }
 

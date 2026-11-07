@@ -9,6 +9,8 @@ import * as paths from "../core/paths";
 import { fromUri } from "../core/paths";
 import { isEditorMode } from "../core/actorContext";
 import { editorLockOf } from "../core/fileLockStore";
+import { watchReviewLock } from "./manuscriptReviewLock";
+import { refreshEditorLocksOnOpen } from "./editorLockRefresh";
 import { describeLock } from "../models/fileLock";
 import { scanWork } from "../core/scanner";
 import { pathExists } from "../core/fileSystem";
@@ -1697,6 +1699,10 @@ type Incoming =
    */
   | { type: "clipboardRead" }
   /**
+   * 校閲中の帯の［連携を解除…］（設計書6.25.12）。確かめは解除の命令の側で出す
+   */
+  | { type: "revokeEditorAccess" }
+  /**
    * 右クリックの「コピー」「切り取り」で、画面の中の copy が断られたときの逃げ道。
    * 写したら `clipboardWritten`（`id` と成否）を返す——**切り取りは、成功の返事が
    * 来るまで字を消さない**（写せなかったのに消すと字がどこにも残らない）
@@ -2626,6 +2632,9 @@ export class ManuscriptEditorProvider
     }
 
     const subscriptions: vscode.Disposable[] = [];
+    /** 校閲中の帯の見張り（画面の ready で張る。閉じたら外す。設計書6.25.12） */
+    let reviewLockWatch: { dispose(): void } | undefined;
+    subscriptions.push(new vscode.Disposable(() => reviewLockWatch?.dispose()));
 
     /**
      * 文書が変わるたびに送り直すが、**まとめてから送る**。
@@ -3073,8 +3082,24 @@ export class ManuscriptEditorProvider
         }
 
         case "ready":
-          // 編集部が校閲中の話なら、開いたときに知らせる（［連携を解除…］つき）
-          void this.lockedByEditor(document);
+          /*
+            **編集者が校閲中の話なら、帯と赤い枠で知らせる**（設計書6.25.12。作者の裁定 2026-11-07）。
+            0.138.0 までは右下の知らせだけで、面は書けるように見えた。帯が出るので、開いたときの
+            右下の知らせはやめた（打ったときの知らせは関所に残す）。画面が読み込み直したとき
+            （ready がもう一度来る）は、見張りを張り直して今の状態を送り直す
+          */
+          reviewLockWatch?.dispose();
+          reviewLockWatch = watchReviewLock({
+            work: () => this.deps.workOf(fromUri(document.uri)),
+            filePath: fromUri(document.uri),
+            post: (reviewMessage) => panel.webview.postMessage(reviewMessage),
+            editorMode: isEditorMode,
+          });
+          {
+            // 話を開くたびに、その作品の鍵の台帳を取りに行く（渡している作品だけ。5分あける）
+            const openedWork = this.deps.workOf(fromUri(document.uri));
+            if (openedWork) void refreshEditorLocksOnOpen(openedWork).catch(() => undefined);
+          }
           /*
             **開くときの見た目は、最初の update に添えて渡す**（設計書6.25.5）。
             画面が覚えていた値（message.saved）はここで初めて届く。
@@ -3215,6 +3240,17 @@ export class ManuscriptEditorProvider
             `選んだ${message.text.length.toLocaleString("ja-JP")}字を、` +
               "ルビと傍点の記法のままクリップボードへ入れました。"
           );
+          break;
+        }
+
+        case "revokeEditorAccess": {
+          const lockedWork = this.deps.workOf(fromUri(document.uri));
+          if (lockedWork) {
+            await vscode.commands.executeCommand("novelai.revokeEditorAccess", {
+              type: "work",
+              work: lockedWork,
+            });
+          }
           break;
         }
 
@@ -4101,8 +4137,10 @@ export class ManuscriptEditorProvider
   }
 
   /**
-   * 編集部が校閲中の話か（作者モードのときだけ）。**開いたとき・打ったときに確かめ、
-   * 打ったときは知らせる**（1分に1回まで。［連携を解除…］を添える）。
+   * 編集部が校閲中の話か（作者モードのときだけ）。**打ったときに確かめて知らせる**
+   * （1分に1回まで。［連携を解除…］を添える）。開いたときは画面の帯で知らせる
+   * （`manuscriptReviewLock.ts`。0.139.0）。帯が出ていれば画面は字を打たせないので、
+   * ここへ来るのは画面の止め方の抜け道（変換の字など）か、鍵が画面へ届く前の打鍵である。
    */
   private async lockedByEditor(document: vscode.TextDocument): Promise<boolean> {
     if (isEditorMode()) return false;
