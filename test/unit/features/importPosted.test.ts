@@ -319,6 +319,150 @@ describe("投稿キットの案内の途中で届く（『投稿しました』�
     expect(storedPostingUpdatesOf(work.id)).toEqual([]);
     expect(warned.some((message) => message.includes("預かりから外しました"))).toBe(true);
   });
+
+  test("（実機確認 379 の続き）開き直したあとに『投稿しました』で入った番号で、次の出し直しは話の編集画面を開く", async () => {
+    writeLedger({});
+    await abortAfterNumberArrives();
+    stubQuickPick([(items) => items.find((item) => item.answer === "posted"), () => undefined]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, scanned[1]);
+    expect(readLedger().posts[0].siteEpisodeId).toBe("16816927859000000123");
+
+    // 同じ話をもう一度「この話を投稿する」：カクヨムへは出し終えたので、すぐ出し直しのサイト選びになる
+    env.opened.length = 0;
+    stubQuickPick([(items) => items, (items) => items.find((item) => item.answer === "skip")]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, scanned[1]);
+    expect(env.opened).toEqual(["https://kakuyomu.jp/my/works/16816927859/episodes/16816927859000000123"]);
+  });
+});
+
+/*
+  実機確認リスト 378（0.125.0）の VS Code の側を、受け取りから出し直しまでの1本の流れで見る。
+  番号の受け取り（このファイルの上の件）と、番号があれば編集画面を開くこと（postingKitRevision.test.ts）は
+  別々に見ていたので、**受け取った番号がそのまま出し直しの開く先になるか**はどこも見ていなかった。
+  ヘルパーは本物を使わず、ヘルパー 0.20.0 が話の編集画面で作る封筒（`common/posted.js` の makePostedEnvelope）と
+  同じ形をクリップボードへ置く。ブラウザは開かず、開こうとした URL を `env.opened` で受け取る。
+*/
+describe("ヘルパーから届いた番号で、出し直しの開く先が話の編集画面になる（実機確認 378）", () => {
+  beforeEach(() => {
+    env.opened.length = 0;
+  });
+
+  /** 出し直しのサイト選びで全部を選び、各サイトの案内は「飛ばす」で抜けて、開いた URL を返す */
+  async function reviseAndCollectOpened(episode: EpisodeFile): Promise<string[]> {
+    env.opened.length = 0;
+    stubQuickPick([
+      (items) => items,
+      (items) => items.find((item) => item.answer === "skip"),
+      (items) => items.find((item) => item.answer === "skip"),
+    ]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+    return [...env.opened];
+  }
+
+  test("カクヨム：ヘルパーの封筒で投稿新話を開き、番号が届いてから『投稿しました』→ 出し直しでは作品の管理画面でなく話の編集画面を開く", async () => {
+    writeLedger({});
+    stubQuickPick([
+      (items) => items.find((item) => item.answer === "envelope"),
+      async (items) => {
+        // 作者がヘルパーで貼り込み・投稿し、話の編集画面でヘルパーのアイコンを押した
+        const ref = (JSON.parse(env.clipboard.text) as { postRef: string }).postRef;
+        env.clipboard.text = posted({ postRef: ref, title: "邂逅" });
+        await importPostedFromHelper(deps);
+        return items.find((item) => item.answer === "posted");
+      },
+      () => undefined,
+    ]);
+    await postNewEpisode(work, {} as unknown as AIRegistry, scanned[1]);
+    expect(env.opened).toEqual([kakuyomuUrl]);
+
+    const opened = await reviseAndCollectOpened(scanned[1]);
+    expect(opened).toEqual(["https://kakuyomu.jp/my/works/16816927859/episodes/16816927859000000123"]);
+    expect(opened).not.toContain("https://kakuyomu.jp/my/works/16816927859");
+  });
+
+  test("カクヨム：投稿の記録のあとで番号が届いたときは、記録したと言い、次の出し直しは話の編集画面を開く", async () => {
+    writeLedger({ posts: [post013] });
+    // 番号が届く前は作品の管理画面
+    expect(await reviseAndCollectOpened(scanned[1])).toEqual(["https://kakuyomu.jp/my/works/16816927859"]);
+
+    env.clipboard.text = posted({ title: "邂逅" });
+    await importPostedFromHelper(deps);
+    expect(informed).toContain(
+      "第13話のカクヨムの話の番号（16816927859000000123）を記録しました。修正版を出し直すとき、話の編集画面を直接開きます。"
+    );
+    expect(await reviseAndCollectOpened(scanned[1])).toEqual([
+      "https://kakuyomu.jp/my/works/16816927859/episodes/16816927859000000123",
+    ]);
+  });
+
+  test("アルファポリス：届いた番号で、次の出し直しは /mypage/novel/save_episode/{9桁}/{話の番号} を開く", async () => {
+    writeLedger({
+      sites: [{ site: "alphapolis", newEpisodeUrl: "https://www.alphapolis.co.jp/mypage/novel/save_episode/123456789" }],
+      siteProfiles: [{ site: "alphapolis", workId: "123456789" }],
+      posts: [{ ...post013, site: "alphapolis" }],
+    });
+    expect(await reviseAndCollectOpened(scanned[1])).toEqual([
+      "https://www.alphapolis.co.jp/mypage/content/detail/123456789",
+    ]);
+
+    // ヘルパーが話の編集画面（/mypage/novel/save_episode/123456789/987654）で作る封筒
+    env.clipboard.text = posted({ site: "alphapolis", workId: "123456789", episodeId: "987654", title: "邂逅" });
+    await importPostedFromHelper(deps);
+    expect(errors).toEqual([]);
+    expect(warned).toEqual([]);
+    expect(readLedger().posts[0].siteEpisodeId).toBe("987654");
+    expect(await reviseAndCollectOpened(scanned[1])).toEqual([
+      "https://www.alphapolis.co.jp/mypage/novel/save_episode/123456789/987654",
+    ]);
+  });
+
+  test("なろう：作品の管理画面で押すと初回だけ作品を訊き、2回目は訊かない。覚えた小説番号で、出し直しは作品の管理画面、話の番号が届けば話の編集画面を開く", async () => {
+    writeLedger({
+      sites: [{ site: "narou", newEpisodeUrl: narouUrl }],
+      siteProfiles: [{ site: "narou", workId: "n1234ab" }],
+      posts: [{ ...post013, site: "narou" }],
+    });
+    // 小説番号がまだ無いので、自分の作品の一覧
+    expect(await reviseAndCollectOpened(scanned[1])).toEqual(["https://syosetu.com/usernovel/list/"]);
+
+    const narouManagePage = JSON.stringify({
+      "novelai-posted": 1,
+      site: "narou",
+      novelNo: "1234567",
+      readAt: "2026-11-03T21:40:00.000+09:00",
+    });
+    // 1回目：作品の管理画面（/usernovelmanage/top/ncode/1234567/）で押した。作品を訊く
+    env.clipboard.text = narouManagePage;
+    const first = stubQuickPick([(items) => items.find((item) => item.label === work.title)]);
+    await importPostedFromHelper(deps);
+    expect(first.map((pick) => pick.title)).toEqual(["なろうの小説番号 1234567 の作品（一覧から選びます）"]);
+    expect(informed.some((message) => message.includes("なろうの小説番号（1234567）を覚えました"))).toBe(true);
+
+    // 2回目：同じ画面でもう一度押しても、訊かない
+    env.clipboard.text = narouManagePage;
+    const second = stubQuickPick([]);
+    await importPostedFromHelper(deps);
+    expect(second).toHaveLength(0);
+
+    expect(await reviseAndCollectOpened(scanned[1])).toEqual([
+      "https://syosetu.com/usernovelmanage/top/ncode/1234567/",
+    ]);
+
+    // 話の編集画面（…/updateinput/ncode/1234567/noveldataid/8765432/）で押した。作品は訊かず、話だけ選ぶ
+    env.clipboard.text = JSON.stringify({
+      "novelai-posted": 1,
+      site: "narou",
+      novelNo: "1234567",
+      episodeId: "8765432",
+      readAt: "2026-11-03T21:45:00.000+09:00",
+    });
+    const third = stubQuickPick([(items) => items.find((item) => item.label.includes("13"))]);
+    await importPostedFromHelper(deps);
+    expect(third.some((pick) => pick.title.includes("の作品（一覧から選びます）"))).toBe(false);
+    expect(await reviseAndCollectOpened(scanned[1])).toEqual([
+      "https://syosetu.com/usernoveldatamanage/updateinput/ncode/1234567/noveldataid/8765432/",
+    ]);
+  });
 });
 
 describe("投稿のあとに届く", () => {
