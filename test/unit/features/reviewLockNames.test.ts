@@ -273,7 +273,7 @@ describe("素のエディターで読み取り専用を外して打ったとき�
       const { editorLockOf } = await import("../../../src/core/fileLockStore");
       const { isEditorMode } = await import("../../../src/core/actorContext");
       const uriText = Uri.file(file).toString();
-      const back = pathsMod.fromUri(Uri.parse(uriText));
+      const back = pathsMod.fromUri(Uri.parse(uriText) as unknown as Parameters<typeof pathsMod.fromUri>[0]);
       let lockText: string;
       try {
         lockText = JSON.stringify(await editorLockOf(work(), back));
@@ -299,7 +299,7 @@ describe("素のエディターで読み取り専用を外して打ったとき�
         detail: detailText,
         tabGroups: typeof (window as unknown as { tabGroups?: unknown }).tabGroups,
       };
-      return `手がかり：${JSON.stringify(facts)}／呼んだ命令：`;${JSON.stringify(result.executed)}／知らせ：${JSON.stringify(warnings)}／ログ：${found.join("\n---\n") || "（無し）"}`;
+      return `手がかり：${JSON.stringify(facts)}／呼んだ命令：${JSON.stringify(result.executed)}／知らせ：${JSON.stringify(warnings)}／ログ：${found.join("\n---\n") || "（無し）"}`;
     };
     if (result.document.text !== result.fileText) {
       expect(result.document.text, await diagnose()).toBe(result.fileText);
