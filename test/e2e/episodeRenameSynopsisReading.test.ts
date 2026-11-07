@@ -36,7 +36,7 @@ import { answerInput, waitForQuickInput } from "./support/quickInput";
 import { SIDEBAR_LAUNCH, collapseSidebarPane, expandTreeRow, showSidebar, treeContextMenu, treeRowLabels, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { clearNotifications, dialogText, notificationTexts, pressDialogButton, quickInputWaitContext, statusBarTexts } from "./support/workbenchDom";
+import { clearNotifications, dialogText, editorGroupTabs, notificationTexts, pressDialogButton, quickInputWaitContext, statusBarTexts, tabNamesInclude } from "./support/workbenchDom";
 
 /* ── 見本（作り物の作品） ── */
 
@@ -533,7 +533,24 @@ test("挿入で名前がずれた話を原稿エディターで開くと、読�
         { readings: [`${dictionaryName("003.txt")}:本文/003.txt:じっぷん`] },
         "読みの辞書が 003.txt へ移る"
       );
-      if ((await dialogText(page)) !== undefined) await page.keyboard.press("Escape");
+      /*
+        **製品が挿入した話を開き終えるまで待ってから、003.txt を開く。** 製品は「名前の変更だけを
+        独立したコミットにしますか？」（答えるまで他を触れない窓）に答えたあとで、挿入した話
+        （002_割り込み.txt）を開く（extension.ts の novelai.insertEpisode）。窓を閉じてすぐ 003.txt を
+        開くと、あとから開いた挿入の話が前に出て、003.txt の面が後ろへ回る（2026-11-07 ノートPC）。
+        作者は窓に答えるまで別の話を開けないので、作者の画面では起きない順番である。
+        窓は置き場の様子を読んでから出るので、待っている間に出てきたらそのつど閉じる
+      */
+      await waitUntil(
+        async () => {
+          if ((await dialogText(page)) !== undefined) await page.keyboard.press("Escape");
+          return tabNamesInclude((await editorGroupTabs(page)).flat(), "002_割り込み.txt");
+        },
+        "挿入した話（002_割り込み.txt）のタブが開く",
+        20_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（タブ：${JSON.stringify(await editorGroupTabs(page))}／窓：${(await dialogText(page)) ?? "なし"}）`);
+      });
       await clearNotifications(page);
 
       // 画面：新しい名前の面で、辞書が引け、読みが声に渡る（本文の字は「十分」のまま）
