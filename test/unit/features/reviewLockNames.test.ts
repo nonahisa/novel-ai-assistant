@@ -230,6 +230,14 @@ describe("素のエディターで読み取り専用を外して打ったとき�
     const guard = installEditorLockGuard({ list: () => [work()] }, { readonlyRescues: store });
     document.text = typed;
     changeListener?.({ document, contentChanges: [{ text: "あ" }] });
+    /*
+      **決まった回数では待たない**（CI の遅い機械で、戻す前に見て落ちた。2026-11-07 run 42377118627）。
+      戻す仕事は、控えの書き込み・鍵の台帳の読み・命令の呼び出しと続くので、戻ったのが見えるまで待つ
+    */
+    const until = Date.now() + 3000; // 鍵の無い話（何もしない件）は、ここまで待って抜ける
+    while (Date.now() < until && !(document.text === fileText && executed.includes("workbench.action.files.setActiveEditorReadonlyInSession"))) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     await settle();
     guard.dispose();
     commands.executeCommand = originalExecute;
