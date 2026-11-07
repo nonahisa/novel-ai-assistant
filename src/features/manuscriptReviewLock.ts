@@ -1,7 +1,8 @@
 import type { WorkEntry } from "../models/types";
 import * as paths from "../core/paths";
 import { editorLockOf, onLockLedgerWritten } from "../core/fileLockStore";
-import { reviewLockBannerText } from "../core/reviewLockMessages";
+import { reviewLockBannerText, reviewLockDetail } from "../core/reviewLockMessages";
+import type { FileLock } from "../models/fileLock";
 import { readSite } from "./editingSite";
 
 /**
@@ -38,15 +39,33 @@ export async function reviewLockMessageFor(
     return NOT_LOCKED;
   }
   if (!lock) return NOT_LOCKED;
-  const site = await readSite(work);
   return {
     type: "reviewLock",
     locked: true,
     text: reviewLockBannerText({
-      editorLogin: site.editorLogin ?? site.formerEditorLogin,
+      editorLogin: await reviewLockEditorLogin(work),
       since: lock.since,
     }),
   };
+}
+
+/**
+ * 校閲中の知らせに出す編集者の名前（帯・右下の知らせ・素のエディターの警告で同じ。0.140.1）。
+ * `.aiwriter/editing.json` の GitHub 名、解除したあとは前の編集者の名前。
+ * **鍵の holder（git の名前）は使わない。** 読めなければ undefined（「編集者」とだけ出る）
+ */
+export async function reviewLockEditorLogin(work: WorkEntry): Promise<string | undefined> {
+  try {
+    const site = await readSite(work);
+    return site.editorLogin ?? site.formerEditorLogin;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 「編集者 kmizu・11月7日 18:30 から」。右下の知らせ・警告・書き込みの断りの括弧の中 */
+export async function reviewLockDetailFor(work: WorkEntry, lock: FileLock): Promise<string> {
+  return reviewLockDetail({ editorLogin: await reviewLockEditorLogin(work), since: lock.since });
 }
 
 export interface ReviewLockWatch {

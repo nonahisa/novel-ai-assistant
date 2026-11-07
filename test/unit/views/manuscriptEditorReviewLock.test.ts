@@ -119,7 +119,22 @@ function runBlock(): {
   };
 }
 
-const LOCKED_TEXT = "この話は校閲中です（編集者 kmizu・11月7日 18:30 から）。編集者が返すと書けます。";
+/** 面へ知らせを送り、止められたか（preventDefault が呼ばれたか）を返す */
+function refused(face: FakeElement, type: string, fields: Record<string, unknown>): boolean {
+  let prevented = false;
+  face.fire(type, {
+    cancelable: true,
+    ...fields,
+    preventDefault: () => {
+      prevented = true;
+    },
+    stopImmediatePropagation: () => undefined,
+    stopPropagation: () => undefined,
+  });
+  return prevented;
+}
+
+const LOCKED_TEXT ="この話は校閲中です（編集者 kmizu・11月7日 18:30 から）。編集者が返すと書けます。";
 
 describe("校閲中の帯と赤い枠", () => {
   it("台本は JavaScript として読める", () => {
@@ -136,13 +151,15 @@ describe("校閲中の帯と赤い枠", () => {
     expect(html).toContain("#surface.review-locked #compose");
   });
 
-  it("校閲中を受けたら、帯を出し、枠を赤くし、打つ面を読むだけにする", () => {
+  it("校閲中を受けたら、帯を出し、枠を赤くし、打つ面の打鍵を止める（面は読み取り専用にしない）", () => {
     const screen = runBlock();
     screen.take({ type: "reviewLock", locked: true, text: LOCKED_TEXT });
     expect(screen.band.classes.has("open")).toBe(true);
     expect(screen.bandText.textContent).toBe(LOCKED_TEXT);
     expect(screen.surface.classes.has("review-locked")).toBe(true);
-    expect(screen.write.readOnly).toBe(true);
+    // readOnly の textarea は Chromium でキャレットを描かない（0.140.1。Mac の実機で見えなかった）
+    expect(screen.write.readOnly).toBe(false);
+    expect(refused(screen.write, "beforeinput", { inputType: "insertText" })).toBe(true);
   });
 
   it("校閲中でないを受けたら、帯と枠を消し、また打てるようにする", () => {
@@ -152,21 +169,60 @@ describe("校閲中の帯と赤い枠", () => {
     expect(screen.band.classes.has("open")).toBe(false);
     expect(screen.bandText.textContent).toBe("");
     expect(screen.surface.classes.has("review-locked")).toBe(false);
-    expect(screen.write.readOnly).toBe(false);
+    expect(refused(screen.write, "beforeinput", { inputType: "insertText" })).toBe(false);
+    expect(refused(screen.write, "keydown", { key: "あ" })).toBe(false);
   });
 
-  it("変換の途中で届いたら、確定するまで読むだけにしない（帯と枠は先に出す）", () => {
+  it("変換の途中で届いたら、確定するまで打鍵を止めない（帯と枠は先に出す）", () => {
     const screen = runBlock();
     screen.setComposing(true);
     screen.take({ type: "reviewLock", locked: true, text: LOCKED_TEXT });
     expect(screen.band.classes.has("open")).toBe(true);
-    expect(screen.write.readOnly).toBe(false);
     // 確定した
     screen.setComposing(false);
     screen.write.fire("compositionend");
-    expect(screen.write.readOnly).toBe(false);
     screen.flushTimers();
-    expect(screen.write.readOnly).toBe(true);
+    expect(refused(screen.write, "beforeinput", { inputType: "insertText" })).toBe(true);
+  });
+
+  it("書き換える打鍵（字・改行・消す・Tab）・貼る・切り取る・落とすを、両方の面で止める", () => {
+    const screen = runBlock();
+    screen.take({ type: "reviewLock", locked: true, text: LOCKED_TEXT });
+    for (const face of [screen.write, screen.compose]) {
+      for (const key of ["a", "あ", "Enter", "Backspace", "Delete", "Tab"]) {
+        expect(refused(face, "keydown", { key }), `キー ${key}`).toBe(true);
+      }
+      for (const type of ["paste", "cut", "drop"]) {
+        expect(refused(face, type, {}), type).toBe(true);
+      }
+      expect(refused(face, "beforeinput", { inputType: "historyUndo" }), "元に戻す").toBe(true);
+    }
+  });
+
+  it("カーソルの移動・選択・写す・変換の途中のキーは止めない", () => {
+    const screen = runBlock();
+    screen.take({ type: "reviewLock", locked: true, text: LOCKED_TEXT });
+    for (const face of [screen.write, screen.compose]) {
+      expect(refused(face, "keydown", { key: "ArrowDown" })).toBe(false);
+      expect(refused(face, "keydown", { key: "ArrowLeft", shiftKey: true })).toBe(false);
+      expect(refused(face, "keydown", { key: "c", ctrlKey: true })).toBe(false);
+      expect(refused(face, "keydown", { key: "a", metaKey: true })).toBe(false);
+      // 変換を確定する Enter を止めると、変換が壊れる（確定した字は拡張機能が戻す）
+      expect(refused(face, "keydown", { key: "Enter", isComposing: true })).toBe(false);
+      expect(refused(face, "keydown", { key: "Process" })).toBe(false);
+      expect(refused(face, "copy", {})).toBe(false);
+    }
+  });
+
+  it("面を読み取り専用にする手だて（readOnly・contenteditable=false）を校閲中の区間で使わない", () => {
+    const body = markedBlock("review-lock");
+    expect(body).not.toMatch(/\.readOnly\s*=\s*(locked|true)/);
+    expect(body).not.toMatch(/contenteditable["']?\s*,\s*["']false/);
+    expect(body).not.toMatch(/contentEditable\s*=/);
+    // 打鍵を止める受け口がある
+    for (const type of ["beforeinput", "keydown", "paste", "cut", "drop"]) {
+      expect(body, type).toContain(`"${type}"`);
+    }
   });
 
   it("組んで書く面で打とうとしたら止めて帯を光らせる。変換の字は止めない（取り消せない）", () => {
@@ -210,10 +266,10 @@ describe("校閲中の帯と赤い枠", () => {
   it("打つ面で字のキーを押したら帯を光らせる。矢印・選択・写すは光らせない", () => {
     const screen = runBlock();
     screen.take({ type: "reviewLock", locked: true, text: LOCKED_TEXT });
-    screen.write.fire("keydown", { key: "ArrowDown" });
-    screen.write.fire("keydown", { key: "c", ctrlKey: true });
+    refused(screen.write, "keydown", { key: "ArrowDown" });
+    refused(screen.write, "keydown", { key: "c", ctrlKey: true });
     expect(screen.band.classes.has("flash")).toBe(false);
-    screen.write.fire("keydown", { key: "あ" });
+    refused(screen.write, "keydown", { key: "あ" });
     expect(screen.band.classes.has("flash")).toBe(true);
   });
 

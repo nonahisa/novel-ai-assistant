@@ -92,8 +92,23 @@ export function formatLockSince(since: string, now: Date = new Date()): string |
  * 名前が分からなければ「編集者」とだけ、時刻が読めなければ時刻を言わない。
  */
 export function reviewLockBannerText(input: ReviewLockBannerInput, now: Date = new Date()): string {
-  const who = input.editorLogin ? `編集者 ${input.editorLogin}` : "編集者";
+  return `この話は校閲中です（${reviewLockDetail(input, now)}）。編集者が返すと書けます。`;
+}
+
+/**
+ * 校閲中の知らせに出す「誰が」。名前が分からなければ「編集者」とだけ。
+ * **帯も右下の知らせも、素のエディターの警告も、これで組む**（0.140.1。git の名前を出さない）
+ */
+export function reviewLockWho(editorLogin: string | undefined): string {
+  return editorLogin ? `編集者 ${editorLogin}` : "編集者";
+}
+
+/**
+ * 「編集者 kmizu・11月7日 18:30 から」（帯の括弧の中と同じ形）。時刻が読めなければ名前だけ。
+ * 右下の知らせ・素のエディターの警告・書き込みの断りの括弧の中に使う（0.140.1）
+ */
+export function reviewLockDetail(input: ReviewLockBannerInput, now: Date = new Date()): string {
+  const who = reviewLockWho(input.editorLogin);
   const since = formatLockSince(input.since, now);
-  const detail = since ? `${who}・${since} から` : who;
-  return `この話は校閲中です（${detail}）。編集者が返すと書けます。`;
+  return since ? `${who}・${since} から` : who;
 }

@@ -5407,20 +5407,23 @@ ${RESUME_WRITING_LABEL ? `
   /*
     ── 編集者が校閲中の話（設計書6.25.12。作者の裁定 2026-11-07） ──
     拡張機能が { type: "reviewLock", locked, text } を送ってくる（開いたとき・鍵が届いたとき・
-    外れたとき）。帯と赤い枠を出し、書く面を読むだけにする。カーソルの移動と選択は残す。
+    外れたとき）。帯と赤い枠を出し、字が入らないようにする。カーソルの移動と選択は残す。
 
-    - 打つ面（textarea）は readOnly。日本語入力も始まらない
-    - 組んで書く面（contenteditable）は、読むだけにする手だてが無い（contenteditable を
-      外すとキーでのカーソル移動が消える）。取り消せる打鍵（beforeinput）を止める。
-      **変換（insertCompositionText）は取り消せない**ので、確定した字は拡張機能へ届き、
-      拡張機能が文書へ入れずに本文を送り直す（最後の守り。manuscriptEditor.ts の applyScreenEdit）
-    - **変換の途中で鍵が届いたら、確定するまで読むだけにしない。** 変換中に readOnly へ
-      切り替えると、確定前の字が消えたり二重に入ったりする（冒頭の注意）。帯と枠だけ先に出す
+    - **面は読み取り専用にしない**（0.140.1。Mac の実機でキャレットが見えなかった）。readOnly の
+      textarea も contenteditable="false" の面も、Chromium はキャレットを描かない。読む人が
+      どこを見ているか分からなくなるので、**打鍵のほうを止める**：書き換える打鍵（beforeinput）、
+      字・改行・消す・Tab のキー（keydown）、貼る・切り取る・落とす。どれも両方の面で、ほかの
+      受け口より先に（capture で）止め、下の受け口（自前で入れる composeInsertPlain など）へ行かせない
+    - **変換（insertCompositionText）は取り消せない**ので止めない。確定した字は拡張機能へ届き、
+      拡張機能が文書へ入れずに本文を送り直す——それで面が元へ戻る（最後の守り。manuscriptEditor.ts の
+      applyScreenEdit）。変換を確定する Enter も止めない（止めると変換が壊れる）
+    - **変換の途中で鍵が届いたら、確定するまで止めない。** 変換中に止め方を切り替えると、確定前の
+      字が消えたり二重に入ったりする（冒頭の注意）。帯と枠だけ先に出す
   */
   const reviewLockBand = document.getElementById("reviewLock");
   const reviewLockText = document.getElementById("reviewLockText");
   const reviewLockSurface = document.getElementById("surface");
-  /** 書く面をいま読むだけにしているか */
+  /** いま打鍵を止めているか */
   let reviewLocked = false;
   /** 変換が終わったら当てる状態（null なら待っていない） */
   let reviewLockWanted = null;
@@ -5435,19 +5438,18 @@ ${RESUME_WRITING_LABEL ? `
       reviewLockWanted = locked;
       return;
     }
-    setReviewReadonly(locked);
+    setReviewLocked(locked);
   }
 
-  function setReviewReadonly(locked) {
+  function setReviewLocked(locked) {
     reviewLockWanted = null;
     reviewLocked = locked;
-    write.readOnly = locked;
   }
 
   /** 変換が終わったあとに、待たせていた状態を当てる（確定ぶんの input を待つため1周まわす） */
   function settleReviewLock() {
     if (reviewLockWanted === null || composing) return;
-    setReviewReadonly(reviewLockWanted);
+    setReviewLocked(reviewLockWanted);
   }
   /*
     受け口は reviewListen で張る。ほかの受け口（compositionend・beforeinput の本体）を
@@ -5488,18 +5490,38 @@ ${RESUME_WRITING_LABEL ? `
     return key.length === 1;
   }
 
-  reviewListen(write, "keydown", function (event) {
-    if (!reviewTypingKey(event)) return;
-    refuseWhileReviewLocked();
-  });
-  reviewListen(compose, "beforeinput", function (event) {
-    if (!refuseWhileReviewLocked()) return;
-    // 取り消せない打鍵（変換の字）は、ふだんどおり通す。拡張機能が送り直して戻す
-    if (!event.cancelable) return;
+  /** 止めた打鍵を、ほかの受け口へも行かせない */
+  function reviewSwallow(event) {
     event.preventDefault();
-    // 下の受け口（傍点の語の中へ自前で入れる composeTypeIntoChunk など）まで行かせない
     event.stopImmediatePropagation();
-  }, true);
+  }
+
+  for (const face of [write, compose]) {
+    reviewListen(face, "keydown", function (event) {
+      if (!reviewTypingKey(event)) return;
+      if (!refuseWhileReviewLocked()) return;
+      /*
+        変換の途中のキー（確定の Enter など）と、変換を始めるキー（Process）は止めない。
+        止めると変換が壊れる。確定した字は拡張機能が戻す
+      */
+      if (event.isComposing || composing || event.key === "Process") return;
+      reviewSwallow(event);
+    }, true);
+    reviewListen(face, "beforeinput", function (event) {
+      if (!refuseWhileReviewLocked()) return;
+      // 取り消せない打鍵（変換の字）は、ふだんどおり通す。拡張機能が送り直して戻す
+      if (!event.cancelable) return;
+      // 下の受け口（傍点の語の中へ自前で入れる composeTypeIntoChunk など）まで行かせない
+      reviewSwallow(event);
+    }, true);
+    // 貼る・切り取る・落とすは、組んで書く面では自前の受け口が字を入れる（beforeinput を通らない）
+    for (const type of ["paste", "cut", "drop"]) {
+      reviewListen(face, type, function (event) {
+        if (!refuseWhileReviewLocked()) return;
+        reviewSwallow(event);
+      }, true);
+    }
+  }
 
   reviewLockBand.addEventListener("animationend", function () {
     reviewLockBand.classList.remove("flash");

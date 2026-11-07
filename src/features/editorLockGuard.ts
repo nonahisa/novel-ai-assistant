@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
-import { describeLock } from "../models/fileLock";
+import { reviewLockDetailFor } from "./manuscriptReviewLock";
 import { editorLockOf, onLockLedgerWritten } from "../core/fileLockStore";
 import { isEditorMode } from "../core/actorContext";
 import { setBodyWriteGuard } from "../core/textFile";
@@ -82,10 +82,13 @@ async function warnAboutLockedFile(
   const name = path.basename(filePath);
   useLogFile(work.folderPath);
   logStep(`編集者が校閲中の話を素のエディターで${kind === "opened" ? "開いた" : "保存した"}: ${name}`);
+  /*
+    開いたときの文は、0.139.0 で読み取り専用にした今の動きに合わせる（0.140.1）。名前は帯と同じ
+    GitHub の名前（`reviewLockDetailFor`。鍵の holder の git の名前は出さない）
+  */
   const message =
     kind === "opened"
-      ? `「${name}」は編集者が校閲中です（${describeLock(lock)}）。` +
-        "ここで書いても、校閲が終わるまで編集者へは送られません。"
+      ? `「${name}」は編集者が校閲中のため、読み取り専用にしました（${await reviewLockDetailFor(work, lock)}）。`
       : `「${name}」を保存しました。この話は編集者が校閲中のため、編集者へは送り直されません` +
         "（校閲が終わったあとの送り直しで、作者の版が反映されます）。";
   const action = await vscode.window.showWarningMessage(message, "連携を解除…");
@@ -145,7 +148,7 @@ export function installEditorLockGuard(registry: {
       話: name,
       呼び出し: callerHint(),
     });
-    return describeRefusal(name, describeLock(lock));
+    return describeRefusal(name, await reviewLockDetailFor(work, lock));
   });
 
   const keeper = new SessionReadonlyKeeper({
@@ -164,7 +167,11 @@ export function installEditorLockGuard(registry: {
     vscode.workspace.onDidOpenTextDocument((document) => {
       // 話を開いたら、その作品の鍵の台帳を取りに行く（原稿エディターで開いたときも、ここが鳴る）
       refreshLocksFor(registry, document.uri);
-      void warnAboutLockedFile(registry, document.uri, "opened").catch(() => undefined);
+      /*
+        **ここでは警告を出さない**（0.140.1。Mac の実機で、原稿エディターで開いても素のエディター用の
+        知らせが出た）。原稿エディターで開いても同じ文書の open が鳴るため。原稿エディターには帯がある。
+        素のエディターで開いたときは、前に出たときの知らせ（下の onDidChangeActiveTextEditor）で出す
+      */
     }),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       settleReadonly();

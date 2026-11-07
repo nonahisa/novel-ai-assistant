@@ -197,7 +197,13 @@ async function stopReading(frame: Frame): Promise<void> {
 /** 送り先の確認の窓が出るまで待ち、その文を返す */
 async function waitSendConfirm(page: Page, frame: Frame, host: string, label: string): Promise<string> {
   let text = "";
-  await waitUntil(async () => (text = (await dialogText(page)) ?? "").includes(`本文が ${host} へ送られます。`), label, 30_000).catch(async (error: unknown) => {
+  /*
+    0.140.1 から、OS が端末名を引けると「本文が <名前>（<ホスト>）へ送られます。」になる（127.0.0.2 は、
+    この機械の名前が引ける OS がある）。引けなければ今までどおり「本文が <ホスト> へ送られます。」
+  */
+  const asked = (shown: string) =>
+    shown.includes(`本文が ${host} へ送られます。`) || (shown.includes("本文が ") && shown.includes(`（${host}）へ送られます。`));
+  await waitUntil(async () => asked((text = (await dialogText(page)) ?? "")), label, 30_000).catch(async (error: unknown) => {
     throw new Error(`${String(error)}（窓：${JSON.stringify(text)}／列の注：${JSON.stringify(await frame.locator("#aloudNote").innerText().catch(() => ""))}）${await quickInputWaitContext(page)}`);
   });
   return text;

@@ -425,6 +425,7 @@ import {
   offerRankCelebrationIfOpen,
   openWritingStatsPanel,
   refreshOpenWritingStatsPanels,
+  refreshWritingStatsAfterRepair,
   refreshWritingStatsPanel,
 } from "./features/writingStatsPanel";
 import { logRankCelebrationFailure, notifyRankEvents } from "./features/rankCelebrations";
@@ -910,11 +911,14 @@ export async function activate(
     書き込み（「はじめまして」の印など）こそ送り返しと重なりやすい。
   */
   setVerifiedStateReporter({
-    onRepaired: (key) =>
+    onRepaired: (key) => {
       logFailure("保管庫の書き込みが遅れて消えたので当て直した", {
         鍵: key,
         詳細: "VS Code の globalState で、先の書き込みの送り返しが後から届いた",
-      }),
+      });
+      // 消えていた間に「同意なし」で描いた執筆統計を、当て直した値で描き戻す（0.140.1）
+      void refreshWritingStatsAfterRepair(key).catch(() => undefined);
+    },
     onFailed: (key, error) =>
       logFailure("保管庫の書き込みが遅れて消え、当て直せなかった", {
         鍵: key,

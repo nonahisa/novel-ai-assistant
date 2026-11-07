@@ -193,12 +193,16 @@ export function isVoiceIntensity(value: unknown): value is VoiceIntensity {
  * **英語の名前も候補に入れる**（作者の答え 2026-11-07）。AivisSpeech には「Shout」「Surprise」の
  * ように英語の名前のスタイルを持つ話者がいる。英語は大文字と小文字を区別せずに当てる
  * （`pickStyleForEmotion`）。日本語の候補を先に並べ、英語はそのあとに見る。
+ *
+ * 悲しみの「せつな」「切な」（0.140.1。作者の答え「足す」）は、AivisSpeech の まお・コハク の
+ * 「せつなめ」に当てるため。日本語の候補の最後に置く——「悲しみ」の名のスタイルを持つ話者では、
+ * 今までどおりそちらが選ばれる。
  */
 export const EMOTION_STYLE_CANDIDATES: Record<VoiceEmotion, readonly string[]> = {
   平静: [],
   喜び: ["上機嫌", "喜び", "楽しい", "嬉しい", "あまあま", "テンション高め", "Happy", "Joy", "Fun", "Cheerful"],
   怒り: ["怒り", "ツンツン", "不機嫌", "怒", "Angry", "Anger", "Mad"],
-  悲しみ: ["悲しみ", "哀しみ", "かなしい", "泣き", "落ち込み", "Sad", "Sorrow", "Cry"],
+  悲しみ: ["悲しみ", "哀しみ", "かなしい", "泣き", "落ち込み", "せつな", "切な", "Sad", "Sorrow", "Cry"],
   驚き: ["驚き", "びっくり", "テンション高め", "Surprise", "Surprised", "Amazed"],
   恐れ: ["怯え", "恐怖", "不安", "おびえ", "ヒソヒソ", "Fear", "Scared", "Afraid"],
   照れ: ["照れ", "恥ずかしい", "あまあま", "Shy", "Embarrassed"],

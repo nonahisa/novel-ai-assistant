@@ -233,3 +233,35 @@ describe("英語の名前のスタイルも感情で選ぶ（2026-11-07 作者�
     expect(pickStyleForEmotion(speakers, 100, "平静")).toEqual({ styleId: 100, styled: false });
   });
 });
+
+describe("悲しみに「せつなめ」「切なげ」も当てる（0.140.1。作者の答え「足す」）", () => {
+  // AivisSpeech の話者 まお・コハク は、悲しみに当たるスタイルの名前が「せつなめ」
+  const sorrowful = parseSpeakers([
+    {
+      name: "まお",
+      speaker_uuid: "mao-1",
+      styles: [
+        { name: "ノーマル", id: 200 },
+        { name: "あまあま", id: 201 },
+        { name: "せつなめ", id: 202 },
+      ],
+    },
+    {
+      name: "漢字の話者",
+      speaker_uuid: "kanji-1",
+      styles: [
+        { name: "ノーマル", id: 300 },
+        { name: "切なげ", id: 301 },
+      ],
+    },
+  ]);
+
+  test("「せつなめ」「切なげ」のスタイルが悲しみに選ばれる", () => {
+    expect(pickStyleForEmotion(sorrowful, 200, "悲しみ")).toEqual({ styleId: 202, styled: true });
+    expect(pickStyleForEmotion(sorrowful, 300, "悲しみ")).toEqual({ styleId: 301, styled: true });
+  });
+
+  test("「悲しみ」の名のスタイルがあれば、そちらが先（足した候補は後ろ）", () => {
+    expect(pickStyleForEmotion(speakers, 888753760, "悲しみ").styleId).toBe(888753762);
+  });
+});

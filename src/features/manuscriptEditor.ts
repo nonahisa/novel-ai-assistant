@@ -9,9 +9,8 @@ import * as paths from "../core/paths";
 import { fromUri } from "../core/paths";
 import { isEditorMode } from "../core/actorContext";
 import { editorLockOf } from "../core/fileLockStore";
-import { watchReviewLock } from "./manuscriptReviewLock";
+import { reviewLockDetailFor, watchReviewLock } from "./manuscriptReviewLock";
 import { refreshEditorLocksOnOpen } from "./editorLockRefresh";
-import { describeLock } from "../models/fileLock";
 import { scanWork } from "../core/scanner";
 import { pathExists } from "../core/fileSystem";
 import { nextEpisodeFileNameLike } from "../core/episodeRenumber";
@@ -4159,10 +4158,17 @@ export class ManuscriptEditorProvider
     const last = this.editRejectedNotified.get(key);
     if (last === undefined || now - last >= 60_000) {
       this.editRejectedNotified.set(key, now);
-      void vscode.window
-        .showWarningMessage(
-          `「${paths.basename(filePath)}」は編集者が校閲中のため、書けません（${describeLock(lock)}）。`,
-          "連携を解除…"
+      /*
+        名前は帯と同じ GitHub の名前（git の名前は出さない。0.140.1）。名前を読むのを待たずに
+        返す——打った字を入れないと決めるのを、知らせの文を組む読みで遅らせない
+      */
+      const held = lock;
+      void reviewLockDetailFor(work, held)
+        .then((detail) =>
+          vscode.window.showWarningMessage(
+            `「${paths.basename(filePath)}」は編集者が校閲中のため、書けません（${detail}）。`,
+            "連携を解除…"
+          )
         )
         .then((action) => {
           if (action === "連携を解除…") {

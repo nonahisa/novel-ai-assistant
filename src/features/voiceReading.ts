@@ -18,6 +18,7 @@ import { CharacterStore } from "../core/characterStore";
 import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
 import { hashText } from "../core/hash";
 import { voiceRemoteHostConfirmId } from "../core/confirmMemory";
+import { describeVoiceHost } from "../core/voiceHostName";
 import { logFailure, logStep, responseExcerptForLog, useLogFile } from "../core/logger";
 import type { ReadingSentence } from "../core/readAloud";
 import {
@@ -303,12 +304,25 @@ async function askSendToRemoteHost(host: string): Promise<boolean> {
     return true;
   }
   const sendAndRemember = rememberLabel(send);
+  /*
+    窓には端末名を先に出す（0.140.1。作者の答え 2026-11-07 A）。番地だけではどの機械か
+    分からないため。引けなくても・2秒で返事が無くても止めず、書いた宛先のまま出す（実装ルール5）。
+    覚えの鍵（上の id）は書いた宛先のまま——名前が変わっても訊き直さない
+  */
+  const named = await describeVoiceHost(host);
+  if (named.outcome !== "resolved" && named.outcome !== "skipped") {
+    logStep(
+      `人物の声の送り先の名前を引けませんでした（${host}・${named.outcome}${named.error ? `・${named.error}` : ""}）。書いた宛先のまま訊きます`
+    );
+  }
+  // 全角の括弧で終わるときは、続く助詞との間を空けない（「…（192.168.3.15:10101）へ」）
+  const label = named.label.endsWith("）") ? named.label : `${named.label} `;
   const picked = await vscode.window.showWarningMessage(
-    `本文が ${host} へ送られます。`,
+    `本文が ${label}へ送られます。`,
     {
       modal: true,
       detail:
-        `人物の声で読むために、読む文を ${host} の音声合成のエンジンへ送ります。` +
+        `人物の声で読むために、読む文を ${label}の音声合成のエンジンへ送ります。` +
         "このホストはこの PC の外にあるため、送った文は相手に届きます。" +
         "心当たりのないホストなら、送らないでください（設定 novelai.readAloud.voiceEngineUrl で変えられます）。",
     },

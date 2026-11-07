@@ -29,6 +29,11 @@ const BROWSER_EXTERNAL_BUILTINS = [
     動的に読むので、ブラウザでは読み込まれない
   */
   "node:async_hooks",
+  /*
+    人物の声の送り先の端末名を引く（設計書6.42.3。`core/voiceHostName.ts`）。
+    ブラウザ版では引かない（`isWebRuntime()` で先に返す）ので、読み込まれない
+  */
+  "node:dns",
   "child_process",
   /*
     **`undici` はNodeにしか無い**（設計書6.63）。

@@ -1,5 +1,23 @@
-import { describe, expect, test } from "vitest";
-import { VoiceReadingService } from "../../../src/features/voiceReading";
+import { describe, expect, test, vi } from "vitest";
+
+/*
+  送り先の名前を引く口（0.140.1）。**本物の DNS は引かない**（試験の速さと結果が機械で変わる）。
+  既定は「引けない」、試験ごとに名前を差し替える
+*/
+const names = vi.hoisted(() => ({ reverse: undefined as string | undefined }));
+vi.mock("../../../src/core/voiceHostName", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/core/voiceHostName")>();
+  return {
+    ...actual,
+    describeVoiceHost: (host: string) =>
+      actual.describeVoiceHost(host, {
+        isWeb: false,
+        resolver: { reverse: async () => names.reverse, forward: async () => undefined },
+      }),
+  };
+});
+
+const { VoiceReadingService } = await import("../../../src/features/voiceReading");
 import { buildReadingPlan } from "../../../src/core/readAloud";
 import { window, workspace } from "../support/vscodeStub";
 import { describeRemembered, withoutRemembered } from "../../../src/core/confirmMemory";
@@ -17,10 +35,14 @@ const SEND = "送る";
 const SEND_AND_REMEMBER = "送る（以降は訊かない）";
 /** 真ん中の窓（モーダルの警告）の答えを差し替え、出た窓を控える */
 function answerConfirms(answer: string | undefined) {
-  const shown: Array<{ message: string; modal: boolean; buttons: string[] }> = [];
+  const shown: Array<{ message: string; detail: string; modal: boolean; buttons: string[] }> = [];
   const original = window.showWarningMessage;
-  window.showWarningMessage = (async (message: string, options: { modal?: boolean }, ...buttons: string[]) => {
-    shown.push({ message, modal: options?.modal === true, buttons });
+  window.showWarningMessage = (async (
+    message: string,
+    options: { modal?: boolean; detail?: string },
+    ...buttons: string[]
+  ) => {
+    shown.push({ message, detail: options?.detail ?? "", modal: options?.modal === true, buttons });
     return answer;
   }) as unknown as typeof window.showWarningMessage;
   return {
@@ -168,6 +190,36 @@ describe("外のホストへ送る確認：ホストごとに「以降は訊か�
     try {
       expect(await speak(`http://${HOST}`)).toBe(true);
       expect(picker.shown).toHaveLength(1);
+    } finally {
+      picker.restore();
+      store.restore();
+    }
+  });
+
+  test("番地から端末名を引けたら、窓と詳しい文に「名前（番地:ポート）」で出す。覚えの鍵は書いた宛先のまま（0.140.1）", async () => {
+    const store = stubSettingStore();
+    const picker = answerConfirms(SEND_AND_REMEMBER);
+    names.reverse = "shosai-pc";
+    try {
+      expect(await speak(`http://${HOST}`)).toBe(true);
+      expect(picker.shown[0].message).toBe(`本文が shosai-pc（${HOST}）へ送られます。`);
+      expect(picker.shown[0].detail).toContain(`読む文を shosai-pc（${HOST}）の音声合成のエンジンへ送ります。`);
+      // 名前が変わっても訊き直さない：鍵は設定に書いた宛先（ホスト:ポート）
+      expect(store.current()).toEqual({ [`voice.remoteHost.${HOST}`]: SEND });
+    } finally {
+      names.reverse = undefined;
+      picker.restore();
+      store.restore();
+    }
+  });
+
+  test("端末名を引けなければ、今までどおり番地だけ", async () => {
+    const store = stubSettingStore();
+    const picker = answerConfirms(SEND);
+    try {
+      expect(await speak(`http://${HOST}`)).toBe(true);
+      expect(picker.shown[0].message).toBe(`本文が ${HOST} へ送られます。`);
+      expect(picker.shown[0].detail).toContain(`読む文を ${HOST} の音声合成のエンジンへ送ります。`);
     } finally {
       picker.restore();
       store.restore();
