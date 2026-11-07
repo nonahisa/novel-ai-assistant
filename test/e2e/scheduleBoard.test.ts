@@ -123,7 +123,16 @@ test("段を押すと期日・日数・状態・メモを直して保存でき�
       await field("メモ").locator("textarea").fill("見直しの観点を決める");
       await frame.locator("#detail .buttons button.primary", { hasText: "保存" }).click();
 
-      const readSteps = async () => (await readScheduleFile(workFolder)).schedules[0]?.steps ?? [];
+      // 製品は一時ファイル→置き換えで書く。VS Code の rename（overwrite）は先に元を消すので、
+      // 置き換えの一瞬はファイルが無い（ノートPCの全件で ENOENT が2回続けて出た）。無い間は「まだ」として待つ
+      const readSteps = async () => {
+        try {
+          return (await readScheduleFile(workFolder)).schedules[0]?.steps ?? [];
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+          throw error;
+        }
+      };
       await waitUntil(async () => (await readSteps()).some((step) => step.label === "推敲（直した）"), "保存がファイルに入る", 15_000);
       const saved = (await readSteps()).find((step) => step.id === "sp-revise");
       expect(saved?.label).toBe("推敲（直した）");

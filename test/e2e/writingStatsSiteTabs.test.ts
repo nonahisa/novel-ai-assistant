@@ -279,8 +279,18 @@ test("ガイドラインを開いた記録があると同意のチェックが�
       );
 
       // もう一度入れて、VS Code を起こし直しても同意と「開いた」が残る
-      await frame.locator("#page-site-narou [data-narou-agree]").check();
-      await waitUntil(async () => !(await narouApiState(frame)).fetchDisabled, "入れ直すとボタンが押せる", 15_000);
+      // ノートPCの全件で一度、15秒待っても押せるようにならなかった（前回の全件と単独では通る）。
+      // 外した直後の描き直しにチェックが飲まれた見込みなので、5秒で変わらなければ入れ直し、落ちたときは欄の様子を添える
+      const agree = frame.locator("#page-site-narou [data-narou-agree]");
+      await agree.check();
+      const enabled = async () => !(state = await narouApiState(frame)).fetchDisabled;
+      await waitUntil(enabled, "入れ直すとボタンが押せる", 5_000).catch(async () => {
+        console.warn(`[writingStatsSiteTabs] 入れ直しても5秒押せないので、もう一度入れる（欄：${JSON.stringify(state)}）`);
+        if (!(await agree.isChecked())) await agree.check();
+        await waitUntil(enabled, "入れ直すとボタンが押せる", 10_000).catch(async (error: unknown) => {
+          throw new Error(`${String(error)}（欄：${JSON.stringify(state)}）`);
+        });
+      });
       // 保管庫が本体へ書かれる間を置く（globalState は少しあとで塊ごと送られる。verifiedMemento.ts）
       await page.waitForTimeout(3_000);
       await restartVsCode(session);
