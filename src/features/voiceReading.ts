@@ -171,12 +171,12 @@ export class VoiceReadingService {
     episodePath: string,
     text: string,
     sentences: readonly ReadingSentence[]
-  ): Promise<{ units: VoicePlanUnit[] } | { problem: string }> {
+  ): Promise<{ units: VoicePlanUnit[] } | VoiceProblem> {
     let speakers: VoiceSpeaker[];
     try {
       speakers = await this.speakers();
     } catch (error) {
-      return { problem: describeEngineFailure(error, work) };
+      return engineFailure(error, work);
     }
     let assignment: VoiceAssignmentFile = { version: 1, characters: {} };
     let cast: CastEntry[] = [];
@@ -216,7 +216,7 @@ export class VoiceReadingService {
     index: number,
     rate: number,
     work?: WorkEntry
-  ): Promise<{ wav: Uint8Array } | { problem: string }> {
+  ): Promise<{ wav: Uint8Array } | VoiceProblem> {
     const unit = units[index];
     if (!unit) return { problem: "読む文が見つかりません" };
     const allowed = await this.mayCarryText();
@@ -230,7 +230,7 @@ export class VoiceReadingService {
       // **頼まれた文を先に並べる**（先読みを先に並べると、いま鳴らす文が後回しになる）
       current = this.synthesize(unit, rate);
     } catch (error) {
-      return { problem: describeEngineFailure(error, work) };
+      return engineFailure(error, work);
     }
     for (let ahead = 1; ahead <= PREFETCH_AHEAD; ahead++) {
       const next = units[index + ahead];
@@ -245,7 +245,7 @@ export class VoiceReadingService {
     try {
       return { wav: await current };
     } catch (error) {
-      return { problem: describeEngineFailure(error, work) };
+      return engineFailure(error, work);
     }
   }
 
@@ -339,6 +339,19 @@ function readEngineUrl(): string | undefined {
     .getConfiguration("novelai")
     .get<string>(VOICE_ENGINE_URL_SETTING, DEFAULT_VOICE_ENGINE_URL);
   return normalizeEngineUrl(raw);
+}
+
+/**
+ * 読めなかった理由。**engineDown はエンジンに届かなかった印**——原稿エディターは
+ * この印のときだけ画面の真ん中に窓を出す（voiceEngineDownPrompt）
+ */
+export type VoiceProblem = { problem: string; engineDown?: true };
+
+function engineFailure(error: unknown, work: WorkEntry | undefined): VoiceProblem {
+  const problem = describeEngineFailure(error, work);
+  return error instanceof VoiceEngineError && error.kind === "unreachable"
+    ? { problem, engineDown: true }
+    : { problem };
 }
 
 /**

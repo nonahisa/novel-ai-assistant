@@ -5573,6 +5573,8 @@ ${RESUME_WRITING_LABEL ? `
       aloudTakeMarkSkipped();
     } else if (message.type === "readingDictionaryStatus") {
       aloudDictTakeStatus(message);
+    } else if (message.type === "useOsVoice") {
+      voiceUseOsVoice();
     } else if (message.type === "voiceAudio") {
       voiceTakeAudio(message);
     } else if (message.type === "voiceCastStatus") {
@@ -9958,6 +9960,15 @@ ${IME_ENTER_GUARD_SOURCE}
     aloudPaintState();
     // 列のボタンが変わって折り返し幅が変わる（重ね敷きの枠を測り直す）
     scheduleAlignMarks();
+  }
+
+  /**
+   * エンジンに届かなかった窓で［OSの声で読む］が押された。OSの声へ切り替えて、
+   * いまの場所から読み始める。**覚えている選択は変えない**（エンジンを起こせば次は人物の声で読める）
+   */
+  function voiceUseOsVoice() {
+    voiceSetMode(false, false);
+    aloudStart();
   }
 
   aloudEngine.addEventListener("change", function () {

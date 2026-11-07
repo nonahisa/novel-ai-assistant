@@ -560,6 +560,28 @@ export function voiceEngineNextStep(error: VoiceEngineError): string {
 }
 
 /**
+ * エンジンに届かなかったときに、画面の真ん中に出す窓（2026-11-07 作者の実機確認）。
+ *
+ * **右下の知らせや読み上げの列の小さな文では、作者がしばらく気づかなかった**ので、
+ * 届かなかったときだけ窓にする。ボタンは次の操作の1つ（OSの声で読む）で、閉じるは
+ * VS Code が添える。エンジンが受け付けなかった（http・badResponse）は、読み始めて
+ * すぐ列に理由が出て、選び直す先も列の中にあるので、窓にしない
+ */
+export function voiceEngineDownPrompt(): {
+  message: string;
+  detail: string;
+  useOsVoice: string;
+} {
+  return {
+    message: "音声合成のエンジンに繋がりませんでした。",
+    detail:
+      "AivisSpeech（または VOICEVOX）を起動してから、もう一度［▶ 読む］を押してください。\n\n" +
+      "エンジンなしで読むなら、［OSの声で読む］を押すと、いまの場所から OS の声で読みます。",
+    useOsVoice: "OSの声で読む",
+  };
+}
+
+/**
  * 音を画面へ渡すための base64。**`Buffer` を使わない**（ブラウザ版の束にも
  * 入るファイルなので、Node だけのものに頼らない。設計書5.8）。
  * 大きな配列を1度に `String.fromCharCode` へ渡すと引数の上限で落ちるので、刻む

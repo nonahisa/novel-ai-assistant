@@ -77,4 +77,11 @@ describe("人物の声の画面", () => {
     expect(take).toContain("option.disabled = !voiceUsable");
     expect(take).toContain("aloudEngine.title = voiceUsable");
   });
+
+  it("エンジンに届かなかった窓で［OSの声で読む］を押されたら、OSの声へ切り替えて読み始める（覚えている選択は変えない）", () => {
+    expect(script).toContain('message.type === "useOsVoice"');
+    const use = bodyOf("voiceUseOsVoice", 600);
+    expect(use).toContain("voiceSetMode(false, false)");
+    expect(use).toContain("aloudStart()");
+  });
 });

@@ -239,7 +239,22 @@ describe("偽のエンジンで朗読の音を作る", () => {
     const planned = await service.plan(undefined, "/x.txt", "文。", buildReadingPlan("文。", "curly"));
     expect(planned).toEqual({
       problem: expect.stringContaining("AivisSpeech（または VOICEVOX）を起動してから、もう一度押してください"),
+      // 届かなかったことを印で返す。原稿エディターはこの印で画面の真ん中に窓を出す
+      // （右下の知らせ・列の小さな文では、作者がしばらく気づかなかった。2026-11-07 作者の実機確認）
+      engineDown: true,
     });
+  });
+
+  test("エンジンが途中で落ちたとき：音の頼みも、届かなかった印つきで返す", async () => {
+    engine = await startFakeVoiceEngine();
+    const url = engine.url;
+    const service = new VoiceReadingService(() => url);
+    const planned = await service.plan(undefined, "/x.txt", "文。", buildReadingPlan("文。", "curly"));
+    if (!("units" in planned)) throw new Error(planned.problem);
+    await engine.close();
+    engine = undefined;
+    const result = await service.audio(planned.units, 0, 1);
+    expect(result).toMatchObject({ engineDown: true });
   });
 });
 

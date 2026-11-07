@@ -125,7 +125,7 @@ import {
 } from "../core/readAloud";
 import type { ReadingSpan } from "../core/readingDictionary";
 import type { VoicePlanUnit } from "../core/voiceCast";
-import { bytesToBase64 } from "../core/voiceEngine";
+import { bytesToBase64, voiceEngineDownPrompt } from "../core/voiceEngine";
 import { IME_TEXT_MAX, mergeReadingSpans } from "../core/imeReading";
 import { IME_WORD_BEFORE_MAX } from "../core/imeWordReading";
 import { pickPostingTarget } from "./ruby";
@@ -1884,13 +1884,13 @@ export interface VoiceReadingDeps {
     filePath: string,
     text: string,
     sentences: readonly ReadingSentence[]
-  ): Promise<{ units: VoicePlanUnit[] } | { problem: string }>;
+  ): Promise<{ units: VoicePlanUnit[] } | { problem: string; engineDown?: true }>;
   /** 文の音（WAV）を作る。先の数文も並べて作っておく（先読み） */
   audio(
     units: readonly VoicePlanUnit[],
     index: number,
     rate: number
-  ): Promise<{ wav: Uint8Array } | { problem: string }>;
+  ): Promise<{ wav: Uint8Array } | { problem: string; engineDown?: true }>;
   /** 列の一言（推定した台詞の数・声の割り当て） */
   status(filePath: string, text: string): Promise<string>;
   runCast(filePath: string, text: string): Promise<void>;
@@ -2459,6 +2459,33 @@ export class ManuscriptEditorProvider
      * 番号で音を頼むだけ**——画面から届く文字列やスタイルIDで合成しない
      */
     let voicePlan: { id: number; units: VoicePlanUnit[] } | undefined;
+    /*
+      **エンジンに届かなかったら、画面の真ん中に窓を出す**（2026-11-07 作者の実機確認：
+      列の文だけでは「しばらくわかりませんでした。ポップアップさせてください」）。
+      待たずに出す——受け口が窓の答えを待つと、ほかの頼み（保存など）が止まる
+    */
+    let engineDownAsking = false;
+    const askUseOsVoice = (): void => {
+      if (engineDownAsking) return;
+      engineDownAsking = true;
+      const prompt = voiceEngineDownPrompt();
+      void Promise.resolve(
+        vscode.window.showWarningMessage(
+          prompt.message,
+          { modal: true, detail: prompt.detail },
+          prompt.useOsVoice
+        )
+      )
+        .then(async (picked) => {
+          if (picked === prompt.useOsVoice) {
+            await panel.webview.postMessage({ type: "useOsVoice" });
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          engineDownAsking = false;
+        });
+    };
     let voicePlanSeq = 0;
     const revealLineNow = (line: number, caret: RevealCaret): void => {
       void panel.webview.postMessage({ type: "revealLine", line, caret });
@@ -3422,6 +3449,7 @@ export class ManuscriptEditorProvider
                 planId: voicePlanSeq,
                 voiceProblem: planned.problem,
               });
+              if ("engineDown" in planned && planned.engineDown) askUseOsVoice();
               break;
             }
             voicePlan = { id: voicePlanSeq, units: planned.units };
@@ -3476,6 +3504,7 @@ export class ManuscriptEditorProvider
               ? { wav: bytesToBase64(result.wav) }
               : { problem: result.problem }),
           });
+          if ("engineDown" in result && result.engineDown) askUseOsVoice();
           break;
         }
 

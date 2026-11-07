@@ -11,6 +11,7 @@ import {
   VoiceEngineClient,
   VoiceEngineError,
   voiceEngineNextStep,
+  voiceEngineDownPrompt,
   voiceParamsFor,
 } from "../../../src/core/voiceEngine";
 import { FAKE_SPEAKERS, startFakeVoiceEngine, type FakeEngine } from "../support/fakeVoiceEngine";
@@ -190,5 +191,14 @@ describe("偽のエンジンと話す", () => {
       .catch((e: unknown) => e);
     expect((error as VoiceEngineError).kind).toBe("http");
     expect((error as VoiceEngineError).detail).toContain("合成できません");
+  });
+});
+
+describe("エンジンに届かなかったときの窓（2026-11-07 作者の実機確認）", () => {
+  test("画面の真ん中に出す窓の文と、次の操作のボタン1つ（閉じるは VS Code が添える）", () => {
+    const prompt = voiceEngineDownPrompt();
+    expect(prompt.message).toContain("音声合成のエンジンに繋がりませんでした");
+    expect(prompt.detail).toContain("AivisSpeech（または VOICEVOX）を起動してから");
+    expect(prompt.useOsVoice).toBe("OSの声で読む");
   });
 });
