@@ -979,6 +979,39 @@ body.clipped #cheer { white-space: normal; }
   font-size: 11px;
   padding: 0 6px;
 }
+/* ── 編集者が校閲中の話（設計書6.25.12。作者の裁定 2026-11-07） ──
+   枠も色も変わらないと、作者には「書けた」ように見えた。書く面（縦書き・横書きとも）の
+   枠を赤くし、本文の上に帯を出す。**枠は #surface の印で付ける**——#compose の中身は
+   本文が届くたびに組み直されるので、面そのものに印を置くと消えることがある */
+#reviewLock {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--vscode-errorForeground, #f14c4c);
+  border-bottom: 1px solid var(--vscode-errorForeground, #f14c4c);
+}
+#reviewLock.open { display: flex; }
+#reviewLock span { font-weight: 600; }
+#reviewLock button {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 0 6px;
+}
+/* 打とうとしたら一度光らせる（打てないことに気づいてもらう） */
+#reviewLock.flash { animation: novelai-review-flash 0.6s ease-out 1; }
+@keyframes novelai-review-flash {
+  0% { background: var(--vscode-inputValidation-errorBackground, rgba(241, 76, 76, 0.35)); }
+  100% { background: transparent; }
+}
+#surface.review-locked #write,
+#surface.review-locked #compose {
+  outline: 2px solid var(--vscode-errorForeground, #f14c4c);
+  outline-offset: -2px;
+}
 </style>
 </head>
 <body class="vertical">
@@ -1050,6 +1083,11 @@ body.clipped #cheer { white-space: normal; }
   <button id="rescueRestore" title="前回原稿に入らなかった本文を、いまの原稿へ戻します">戻す</button>
   <button id="rescueDiscard" title="控えを捨てます。原稿はいまのままです">捨てる</button>
   <button id="rescueCopy" title="控えの本文をまるごとクリップボードへ写します">本文をコピー</button>
+</div>
+
+<div id="reviewLock" role="alert">
+  <span id="reviewLockText"></span>
+  <button id="reviewLockRevoke" title="編集者との連携を解除します。解除すると、校閲中の話も書けるようになります（確かめてから解除します）">連携を解除…</button>
 </div>
 
 <div id="surface">
@@ -4765,6 +4803,8 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
 
   /** 写し終わった範囲を消す。消すのは打鍵と同じ道（delete → input の知らせ → 送る） */
   function menuDeleteRange(at) {
+    // 校閲中の切り取りは、写すだけにする（6.25.12）
+    if (refuseWhileReviewLocked()) return;
     // copy の知らせや待ちの間に選択が外れることがあるので、置き直してから消す
     menuRefocus(at);
     if (composeOn) {
@@ -4799,6 +4839,8 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     const wanted = menuPasteWanted;
     menuPasteWanted = null;
     if (!wanted) return;
+    // 校閲中は貼らない（setRangeText は readOnly でも入るので、ここで止める。6.25.12）
+    if (refuseWhileReviewLocked()) return;
     const text = message && typeof message.text === "string" ? message.text : "";
     if (!text) {
       note.textContent = "クリップボードに貼れる字がありません";
@@ -5361,6 +5403,112 @@ ${RESUME_WRITING_LABEL ? `
   /** 本体の本文を一度でも取り込んだか（最初の1便は門を通さない） */
   let updateTaken = false;
 
+  /* review-lock:start */
+  /*
+    ── 編集者が校閲中の話（設計書6.25.12。作者の裁定 2026-11-07） ──
+    拡張機能が { type: "reviewLock", locked, text } を送ってくる（開いたとき・鍵が届いたとき・
+    外れたとき）。帯と赤い枠を出し、書く面を読むだけにする。カーソルの移動と選択は残す。
+
+    - 打つ面（textarea）は readOnly。日本語入力も始まらない
+    - 組んで書く面（contenteditable）は、読むだけにする手だてが無い（contenteditable を
+      外すとキーでのカーソル移動が消える）。取り消せる打鍵（beforeinput）を止める。
+      **変換（insertCompositionText）は取り消せない**ので、確定した字は拡張機能へ届き、
+      拡張機能が文書へ入れずに本文を送り直す（最後の守り。manuscriptEditor.ts の applyScreenEdit）
+    - **変換の途中で鍵が届いたら、確定するまで読むだけにしない。** 変換中に readOnly へ
+      切り替えると、確定前の字が消えたり二重に入ったりする（冒頭の注意）。帯と枠だけ先に出す
+  */
+  const reviewLockBand = document.getElementById("reviewLock");
+  const reviewLockText = document.getElementById("reviewLockText");
+  const reviewLockSurface = document.getElementById("surface");
+  /** 書く面をいま読むだけにしているか */
+  let reviewLocked = false;
+  /** 変換が終わったら当てる状態（null なら待っていない） */
+  let reviewLockWanted = null;
+
+  function takeReviewLock(message) {
+    const locked = message.locked === true;
+    reviewLockText.textContent = locked && typeof message.text === "string" ? message.text : "";
+    reviewLockBand.classList.toggle("open", locked);
+    reviewLockSurface.classList.toggle("review-locked", locked);
+    if (!locked) reviewLockBand.classList.remove("flash");
+    if (composing) {
+      reviewLockWanted = locked;
+      return;
+    }
+    setReviewReadonly(locked);
+  }
+
+  function setReviewReadonly(locked) {
+    reviewLockWanted = null;
+    reviewLocked = locked;
+    write.readOnly = locked;
+  }
+
+  /** 変換が終わったあとに、待たせていた状態を当てる（確定ぶんの input を待つため1周まわす） */
+  function settleReviewLock() {
+    if (reviewLockWanted === null || composing) return;
+    setReviewReadonly(reviewLockWanted);
+  }
+  /*
+    受け口は reviewListen で張る。ほかの受け口（compositionend・beforeinput の本体）を
+    文字列で切り出して確かめるテストがあり、同じ書き方の受け口が先に来ると取り違えるため
+  */
+  function reviewListen(owner, type, fn, capture) {
+    owner.addEventListener(type, fn, capture === true);
+  }
+  reviewListen(write, "compositionend", function () {
+    setTimeout(settleReviewLock, 0);
+  });
+  reviewListen(compose, "compositionend", function () {
+    setTimeout(settleReviewLock, 0);
+  });
+
+  /** 打とうとしたときに帯を一度光らせる（光らせ直すため、印を外して描き直させてから付ける） */
+  function flashReviewLock() {
+    if (!reviewLockBand.classList.contains("open")) return;
+    reviewLockBand.classList.remove("flash");
+    void reviewLockBand.offsetWidth;
+    reviewLockBand.classList.add("flash");
+  }
+
+  /** 校閲中で、この打鍵を止めるか（止めるなら帯を光らせて true） */
+  function refuseWhileReviewLocked() {
+    settleReviewLock();
+    if (!reviewLocked) return false;
+    flashReviewLock();
+    return true;
+  }
+
+  /** 字を打つキーか（カーソルの移動・選択・写すは通す） */
+  function reviewTypingKey(event) {
+    if (event.ctrlKey || event.metaKey || event.altKey) return false;
+    const key = event.key || "";
+    if (key === "Process") return true;
+    if (key === "Enter" || key === "Backspace" || key === "Delete" || key === "Tab") return true;
+    return key.length === 1;
+  }
+
+  reviewListen(write, "keydown", function (event) {
+    if (!reviewTypingKey(event)) return;
+    refuseWhileReviewLocked();
+  });
+  reviewListen(compose, "beforeinput", function (event) {
+    if (!refuseWhileReviewLocked()) return;
+    // 取り消せない打鍵（変換の字）は、ふだんどおり通す。拡張機能が送り直して戻す
+    if (!event.cancelable) return;
+    event.preventDefault();
+    // 下の受け口（傍点の語の中へ自前で入れる composeTypeIntoChunk など）まで行かせない
+    event.stopImmediatePropagation();
+  }, true);
+
+  reviewLockBand.addEventListener("animationend", function () {
+    reviewLockBand.classList.remove("flash");
+  });
+  document.getElementById("reviewLockRevoke").addEventListener("click", function () {
+    vscode.postMessage({ type: "revokeEditorAccess" });
+  });
+  /* review-lock:end */
+
   /* ── 拡張機能からの知らせ ──────────── */
   window.addEventListener("message", function (event) {
     const message = event.data;
@@ -5550,6 +5698,9 @@ ${RESUME_WRITING_LABEL ? `
         頼み直さないと、押したのに読み始めないまま終わる。
       */
       if (aloudOn || aloudStartAt !== null) aloudAskPlan();
+    } else if (message.type === "reviewLock") {
+      // 編集者が校閲中か（設計書6.25.12）。帯・赤い枠・読むだけを切り替える
+      takeReviewLock(message);
     } else if (message.type === "editApplied") {
       // 送った便が文書へ入ったか（設計書6.25.9）
       takeEditApplied(message);
@@ -8177,6 +8328,8 @@ ${RESUME_WRITING_LABEL ? `
    */
   function composeInsertPlain(text) {
     if (!text) return;
+    // 校閲中は貼らない（execCommand は beforeinput を起こさないので、ここで止める。6.25.12）
+    if (refuseWhileReviewLocked()) return;
     const plain = composeNormalizeText(text);
     try {
       // **execCommand を使う。** 自前で節点を差し込むと、
@@ -8236,6 +8389,8 @@ ${RESUME_WRITING_LABEL ? `
     data.setData("text/html", payloads.html);
     data.setData(COMPOSE_NOTATION_FLAVOR, payloads.notation);
     if (!andDelete) return;
+    // 校閲中の切り取りは、写すだけにする（6.25.12）
+    if (refuseWhileReviewLocked()) return;
     // 消すのはブラウザに任せる（自前で消すと取り消し履歴から外れる）
     if (composeTryDelete()) return;
     /*

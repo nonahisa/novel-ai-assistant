@@ -1789,6 +1789,70 @@ export async function importEditorProposalsQuietly(
   });
 }
 
+/** 鍵の台帳だけを取りに行った結果（`refreshEditorLocksQuietly`） */
+export type LockRefreshResult =
+  | { status: "noPointer" }
+  /** 取り寄せ（fetch）が通らなかった。手元の台帳のまま */
+  | { status: "fetchFailed"; detail: string }
+  | {
+      status: "done";
+      /** 新しく編集者の鍵がかかったファイル（作品からの相対パス） */
+      locksAcquired: string[];
+      /** 編集者の鍵が解けたファイル */
+      locksReleased: string[];
+    };
+
+/**
+ * 編集者の鍵の台帳だけを GitHub から取りに行く（設計書5.7.5.2。作者の裁定 2026-11-07）。
+ *
+ * 話を開いたときに呼ぶ。`importEditorProposalsQuietly` とは違い、**編集用フォルダーの作業木を
+ * 動かさない**——`fetch` は取り寄せるだけで、`@{u}` の台帳は `git show` で読む。提案・本文・
+ * 編集履歴には触らない（取り込みは同期のときの道に任せる）。作品の台帳へは
+ * `FileLockStore.mergeIncoming` で足すだけ（実装ルール2）。
+ *
+ * 手元の編集用フォルダーの台帳も混ぜる（同期で取り寄せたのに、作品へまだ入っていない行の分）。
+ * どちらも足すだけなので、二度混ぜても行は増えない。
+ *
+ * **編集用フォルダーごとの順番待ちに載る**（渡す・送り返し・取り込みと git が重ならない）。
+ */
+export async function refreshEditorLocksQuietly(
+  work: WorkEntry,
+  run: GitCommandRunner = runGit
+): Promise<LockRefreshResult> {
+  const pointer = await readPointer(work);
+  if (!pointer || !(await exists(pointer.folderPath))) {
+    return { status: "noPointer" };
+  }
+  const folder = pointer.folderPath;
+  return runSerialized(editingQueueKey(folder), async (): Promise<LockRefreshResult> => {
+    const fetched = await fetchRemote(folder, run);
+    if (!fetched.ok) {
+      return { status: "fetchFailed", detail: fetched.detail ?? "" };
+    }
+    const shown = await run(
+      ["show", `@{u}:${normalizeRelativeKey(LOCK_RELATIVE)}`],
+      folder,
+      15_000
+    );
+    const local = await readTextIfAny(path.join(folder, LOCK_RELATIVE));
+    // 上流に台帳がまだ無い（`show` が通らない）ときは、手元の分だけ
+    const upstream = shown.code === 0 ? shown.stdout : "";
+    const incoming = mergeProposalJsonl(local, upstream).text;
+    if (incoming.trim().length === 0) {
+      return { status: "done", locksAcquired: [], locksReleased: [] };
+    }
+    const store = new FileLockStore(work);
+    const before = editorHeld(await store.load());
+    await store.mergeIncoming(incoming);
+    const after = editorHeld(await store.load());
+    return {
+      status: "done",
+      locksAcquired: [...after].filter((file) => !before.has(file)),
+      locksReleased: [...before].filter((file) => !after.has(file)),
+    };
+  });
+}
+
 /** 編集部が押さえているファイル（`/` 区切りに揃えたもの） */
 function editorHeld(locks: Map<string, { holderKind: string; file: string }>): Set<string> {
   const held = new Set<string>();

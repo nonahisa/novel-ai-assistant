@@ -1268,6 +1268,8 @@ describe("組んで書く面の切り取り（Ctrl+X）", () => {
       "env",
       `
       const COMPOSE_NOTATION_FLAVOR = "application/x-novelai-notation";
+      // 校閲中でない（校閲中の止め方は manuscriptEditorReviewLock.test.ts で見る）
+      function refuseWhileReviewLocked() { return false; }
       const composeNotation = "curly";
       const composeCopyEmphasis = "kakuyomu";
       const note = {
