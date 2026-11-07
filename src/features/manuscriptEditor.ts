@@ -9,9 +9,8 @@ import * as paths from "../core/paths";
 import { fromUri } from "../core/paths";
 import { isEditorMode } from "../core/actorContext";
 import { editorLockOf } from "../core/fileLockStore";
-import { watchReviewLock } from "./manuscriptReviewLock";
+import { reviewLockDetailFor, watchReviewLock } from "./manuscriptReviewLock";
 import { refreshEditorLocksOnOpen } from "./editorLockRefresh";
-import { describeLock } from "../models/fileLock";
 import { scanWork } from "../core/scanner";
 import { pathExists } from "../core/fileSystem";
 import { nextEpisodeFileNameLike } from "../core/episodeRenumber";
@@ -2155,6 +2154,52 @@ export interface ManuscriptEditorDeps {
   };
 }
 
+/** 読み取り専用の原稿の控えを置く覚え（作業場の覚えを `verifiedState` で包んだもの） */
+export type ReadonlyRescueMemento = NonNullable<ManuscriptEditorDeps["readonlyRescues"]>;
+
+/**
+ * 読み取り専用の原稿の控えを書く（変わったときだけ）。
+ * **書く口はここ1か所**（`mementoWrites.test.ts` が数える。設計書5.7.8）——原稿エディターと、
+ * 素のエディターで校閲中の話に打った字を戻すところ（`editorLockRevert.ts`。0.141.1）の両方がここを通る。
+ * 書けなくても打鍵の流れは止めない。記録だけ残す
+ */
+export async function writeReadonlyRescueStore(
+  store: ReadonlyRescueMemento | undefined,
+  write: ReadonlyRescueWrite
+): Promise<void> {
+  if (!write.changed || !store) return;
+  const value: ReadonlyRescueStore | undefined = write.value;
+  try {
+    await store.update(MANUSCRIPT_READONLY_RESCUE_STATE_KEY, value);
+  } catch (error) {
+    logLine(
+      `原稿エディタ：読み取り専用の原稿の控えを作業場の覚えへ書けませんでした：${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+}
+
+/** 素のエディターの打った字を、原稿エディターと同じ控えへ回す（`editorLockRevert.ts`） */
+export async function rescueTypedText(
+  store: ReadonlyRescueMemento | undefined,
+  location: vscode.Uri,
+  text: string,
+  base: string,
+  now: number = Date.now()
+): Promise<void> {
+  if (!store) return;
+  const key = manuscriptLedgerKey(location);
+  await writeReadonlyRescueStore(
+    store,
+    putReadonlyRescue(
+      store.get(MANUSCRIPT_READONLY_RESCUE_STATE_KEY),
+      makeReadonlyRescue(key, text, base, now),
+      now
+    )
+  );
+}
+
 export class ManuscriptEditorProvider
   implements vscode.CustomTextEditorProvider
 {
@@ -2202,17 +2247,7 @@ export class ManuscriptEditorProvider
    * 書けなくても打鍵の流れは止めない（画面の控えは残っている）。記録だけ残す
    */
   private async writeReadonlyRescues(write: ReadonlyRescueWrite): Promise<void> {
-    if (!write.changed || !this.deps.readonlyRescues) return;
-    const value: ReadonlyRescueStore | undefined = write.value;
-    try {
-      await this.deps.readonlyRescues.update(MANUSCRIPT_READONLY_RESCUE_STATE_KEY, value);
-    } catch (error) {
-      logLine(
-        `原稿エディタ：読み取り専用の原稿の控えを作業場の覚えへ書けませんでした：${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
+    await writeReadonlyRescueStore(this.deps.readonlyRescues, write);
   }
 
   /**
@@ -4159,10 +4194,17 @@ export class ManuscriptEditorProvider
     const last = this.editRejectedNotified.get(key);
     if (last === undefined || now - last >= 60_000) {
       this.editRejectedNotified.set(key, now);
-      void vscode.window
-        .showWarningMessage(
-          `「${paths.basename(filePath)}」は編集者が校閲中のため、書けません（${describeLock(lock)}）。`,
-          "連携を解除…"
+      /*
+        名前は帯と同じ GitHub の名前（git の名前は出さない。0.141.1）。名前を読むのを待たずに
+        返す——打った字を入れないと決めるのを、知らせの文を組む読みで遅らせない
+      */
+      const held = lock;
+      void reviewLockDetailFor(work, held)
+        .then((detail) =>
+          vscode.window.showWarningMessage(
+            `「${paths.basename(filePath)}」は編集者が校閲中のため、書けません（${detail}）。`,
+            "連携を解除…"
+          )
         )
         .then((action) => {
           if (action === "連携を解除…") {

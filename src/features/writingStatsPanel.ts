@@ -76,6 +76,7 @@ import {
 import { createNonce } from "../core/webviewNonce";
 import type { PostingLedger } from "../models/posting";
 import { isWebRuntime } from "../core/runtime";
+import { NAROU_API_CONSENT_KEY } from "../core/narouApiGate";
 import {
   fetchNarouApi,
   narouApiPanelState,
@@ -99,6 +100,18 @@ import {
  */
 
 const openPanels = new Map<string, vscode.WebviewPanel>();
+/** 開いているパネルの作品と端末（保管庫の当て直しのあとに組み直すため。0.141.1） */
+const openTargets = new Map<string, { work: WorkEntry; deviceId: string }>();
+
+/**
+ * 統計を組み直すとき、読み直した値より優先する答え。
+ * 同意のチェックを押した直後は、`setNarouApiAgreement` が**書いて確かめた**同意を返す。
+ * 組み直しの長い待ちの間に遅れて届いた古い塊で保管庫の同意が一時消えても（`core/verifiedMemento.ts`
+ * の頭）、確かめ済みの答えで描く。読み直した値で描くと、チェックが外れて戻らなくなった（0.141.1）
+ */
+interface StatsOverride {
+  narouAgreed?: boolean;
+}
 
 /**
  * 拡張機能の保管庫（守りつき）。なろうAPIの同意・回数と、順位のお祝いの印を置く
@@ -138,8 +151,12 @@ export async function openWritingStatsPanel(
     { enableScripts: true, retainContextWhenHidden: true }
   );
   openPanels.set(work.id, panel);
+  openTargets.set(work.id, { work, deviceId });
   context.subscriptions.push(panel);
-  panel.onDidDispose(() => openPanels.delete(work.id));
+  panel.onDidDispose(() => {
+    openPanels.delete(work.id);
+    openTargets.delete(work.id);
+  });
   // 裏に回っていたタブが見えるようになったら、その間に届いた祝いを上げる（設計書6.3.8）
   panel.onDidChangeViewState((event) => {
     if (event.webviewPanel.visible) {
@@ -230,15 +247,17 @@ export async function openWritingStatsPanel(
       return;
     }
     if (parsed.type === "narouAgree") {
+      let agreed: boolean | undefined;
       try {
-        await setNarouApiAgreement(verifiedState(context.globalState), parsed.checked === true);
+        agreed = await setNarouApiAgreement(verifiedState(context.globalState), parsed.checked === true);
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         useLogFile(work.folderPath);
         logFailure("なろうAPIの同意を覚える", { 内容: detail });
         void vscode.window.showErrorMessage(detail);
       }
-      await postStats(panel, work, deviceId);
+      // 確かめ済みの答えで描く（覚えられなかったときは、保管庫を読み直した値で描く）
+      await postStats(panel, work, deviceId, agreed === undefined ? {} : { narouAgreed: agreed });
       return;
     }
     if (parsed.type === "narouFetch") {
@@ -384,8 +403,37 @@ export async function refreshWritingStatsPanel(
 }
 
 /** 統計を組み直して送る（なろうAPIの欄を押したあと） */
-async function postStats(panel: vscode.WebviewPanel, work: WorkEntry, deviceId: string): Promise<void> {
-  panel.webview.postMessage({ type: "stats", data: await buildStatsPanelData(work, deviceId) });
+async function postStats(
+  panel: vscode.WebviewPanel,
+  work: WorkEntry,
+  deviceId: string,
+  override: StatsOverride = {}
+): Promise<void> {
+  panel.webview.postMessage({ type: "stats", data: await buildStatsPanelData(work, deviceId, override) });
+}
+
+/**
+ * 保管庫の書き込みが遅れて消え、当て直したとき（`setVerifiedStateReporter` の `onRepaired`。
+ * extension.ts がつなぐ）。**なろうAPIの同意の鍵なら**、開いている執筆統計をすべて組み直す
+ * （0.141.1）。消えていた間に「同意なし」で描いていても、当て直した同意で描き戻す。
+ * ほかの鍵では組み直さない（統計に関わらない当て直しのたびに全部を組み直さない）
+ */
+export async function refreshWritingStatsAfterRepair(key: string): Promise<void> {
+  if (key !== NAROU_API_CONSENT_KEY) return;
+  for (const [id, panel] of openPanels) {
+    const target = openTargets.get(id);
+    if (!target) continue;
+    try {
+      await postStats(panel, target.work, target.deviceId);
+    } catch (error) {
+      // 組み直せなくても、ほかのパネルは続ける（閉じかけのパネルへ送って投げることがある）
+      useLogFile(target.work.folderPath);
+      logFailure("保管庫の当て直しのあと執筆統計を組み直す", {
+        作品: target.work.title,
+        内容: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 /**
@@ -429,7 +477,7 @@ export async function refreshOpenWritingStatsPanels(
   }
 }
 
-async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
+async function buildStatsPanelData(work: WorkEntry, deviceId: string, override: StatsOverride = {}) {
   const scanned = await scanWork(work);
   const sets = await new WritingStatsStore(work, deviceId).loadAll();
   const days = mergeDailyStats(sets);
@@ -520,7 +568,7 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
       保管庫がつながっていない（パネルを開く前の組み直し）ときは出さない
     */
     narouApi: panelMemento
-      ? narouApiPanelState(panelMemento, siteRecords.ledger, isWebRuntime())
+      ? withNarouOverride(narouApiPanelState(panelMemento, siteRecords.ledger, isWebRuntime()), override)
       : null,
     // 連載中／完結の印と食い違いの知らせ（「概要」に控えめに出す。2026-11-01）
     workFacts: siteRecords.workFacts,
@@ -650,4 +698,20 @@ export async function readSiteRecords(
     });
     return { records: [], workFacts: null, sites: [], error: detail, ledger: null };
   }
+}
+
+/** 確かめ済みの同意を、読み直した欄の状態へ当てる（`StatsOverride`） */
+function withNarouOverride(
+  state: ReturnType<typeof narouApiPanelState>,
+  override: StatsOverride
+): ReturnType<typeof narouApiPanelState> {
+  if (!state || override.narouAgreed === undefined) return state;
+  const agreed = override.narouAgreed;
+  return {
+    ...state,
+    // 同意できたなら開いてある（開く前は同意できない決まり）
+    opened: state.opened || agreed,
+    agreed,
+    agreedAt: agreed ? state.agreedAt : null,
+  };
 }

@@ -1,13 +1,17 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
-import { describeLock } from "../models/fileLock";
+import { reviewLockDetailFor } from "./manuscriptReviewLock";
 import { editorLockOf, onLockLedgerWritten } from "../core/fileLockStore";
 import { isEditorMode } from "../core/actorContext";
 import { setBodyWriteGuard } from "../core/textFile";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { refreshEditorLocksOnOpen } from "./editorLockRefresh";
 import { SessionReadonlyKeeper, type ActiveEditorView } from "./editorLockReadonly";
+import { LockedPlainEditReverter } from "./editorLockRevert";
+import { rescueTypedText, type ReadonlyRescueMemento } from "./manuscriptEditor";
+import { readTextFile } from "../core/textFile";
+import { toLf } from "../core/eolSpace";
 
 /**
  * 編集部が校閲中の話を、作者が書けないようにする（作者の裁定、2026-10-28）。
@@ -82,10 +86,13 @@ async function warnAboutLockedFile(
   const name = path.basename(filePath);
   useLogFile(work.folderPath);
   logStep(`編集者が校閲中の話を素のエディターで${kind === "opened" ? "開いた" : "保存した"}: ${name}`);
+  /*
+    開いたときの文は、0.139.0 で読み取り専用にした今の動きに合わせる（0.141.1）。名前は帯と同じ
+    GitHub の名前（`reviewLockDetailFor`。鍵の holder の git の名前は出さない）
+  */
   const message =
     kind === "opened"
-      ? `「${name}」は編集者が校閲中です（${describeLock(lock)}）。` +
-        "ここで書いても、校閲が終わるまで編集者へは送られません。"
+      ? `「${name}」は編集者が校閲中のため、読み取り専用にしました（${await reviewLockDetailFor(work, lock)}）。`
       : `「${name}」を保存しました。この話は編集者が校閲中のため、編集者へは送り直されません` +
         "（校閲が終わったあとの送り直しで、作者の版が反映されます）。";
   const action = await vscode.window.showWarningMessage(message, "連携を解除…");
@@ -123,9 +130,15 @@ function refreshLocksFor(registry: { list(): readonly WorkEntry[] }, uri: vscode
 /**
  * 関所と、素のエディターへの警告を仕込む。拡張機能の起動時に1回呼ぶ。
  */
-export function installEditorLockGuard(registry: {
-  list(): readonly WorkEntry[];
-}): vscode.Disposable {
+export function installEditorLockGuard(
+  registry: {
+    list(): readonly WorkEntry[];
+  },
+  options: {
+    /** 素のエディターで打った字の控え（原稿エディターと同じ覚え。設計書6.25.9） */
+    readonlyRescues?: ReadonlyRescueMemento;
+  } = {}
+): vscode.Disposable {
   setBodyWriteGuard(async (filePath) => {
     // 編集者モードは本文を書かない（書く道は別の仕組みで塞いである）。作者の本文だけを守る
     if (isEditorMode()) return undefined;
@@ -145,7 +158,7 @@ export function installEditorLockGuard(registry: {
       話: name,
       呼び出し: callerHint(),
     });
-    return describeRefusal(name, describeLock(lock));
+    return describeRefusal(name, await reviewLockDetailFor(work, lock));
   });
 
   const keeper = new SessionReadonlyKeeper({
@@ -160,11 +173,83 @@ export function installEditorLockGuard(registry: {
   });
   const settleReadonly = (): void => void keeper.settle();
 
+  /*
+    作者が吹き出しから読み取り専用を外して打ったら、打った時点で戻す（0.141.1。作者の答え
+    2026-11-07「打った時点で戻す」。editorLockRevert.ts）
+  */
+  const textDocumentOf = (uriText: string): vscode.TextDocument | undefined =>
+    vscode.workspace.textDocuments?.find((document) => document.uri.toString() === uriText) ??
+    (vscode.window.activeTextEditor?.document.uri.toString() === uriText
+      ? vscode.window.activeTextEditor.document
+      : undefined);
+  const reverter = new LockedPlainEditReverter({
+    lockDetail: async (uriText) => {
+      if (isEditorMode()) return undefined;
+      const filePath = path.fromUri(vscode.Uri.parse(uriText));
+      const work = workOfFile(registry, filePath);
+      if (!work) return undefined;
+      try {
+        const lock = await editorLockOf(work, filePath);
+        return lock ? await reviewLockDetailFor(work, lock) : undefined;
+      } catch {
+        // 鍵が読めないときは書かせる側へ倒す（作者の原稿を触れなくしない）
+        return undefined;
+      }
+    },
+    activePlainEditorUri: () => {
+      const active = activeEditorView();
+      return active?.kind === "text" ? active.uri : undefined;
+    },
+    readFileText: async (uriText) => (await readTextFile(path.fromUri(vscode.Uri.parse(uriText)))).text,
+    rescue: (uriText, text, base) =>
+      rescueTypedText(options.readonlyRescues, vscode.Uri.parse(uriText), text, base),
+    revert: async (uriText) => {
+      const filePath = path.fromUri(vscode.Uri.parse(uriText));
+      const work = workOfFile(registry, filePath);
+      if (work) {
+        useLogFile(work.folderPath);
+        logStep(`編集者が校閲中の話に素のエディターで打ったので、ファイルの中身へ戻した: ${path.basename(filePath)}`);
+      }
+      /*
+        **前にいる画面の命令で戻す**（保存しない。ほかの話の未保存の変更を巻き込まない）。
+        確かめている間に前の画面が替わっていたら、その文書だけを書き換えで戻す（保存はしない）
+      */
+      if (activeEditorView()?.uri === uriText) {
+        await vscode.commands.executeCommand("workbench.action.files.revert");
+        return;
+      }
+      const document = textDocumentOf(uriText);
+      if (!document) return;
+      const base = (await readTextFile(filePath)).text;
+      const text = document.eol === vscode.EndOfLine.CRLF ? base.replace(/\n/g, "\r\n") : base;
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(
+        document.uri,
+        new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
+        text
+      );
+      await vscode.workspace.applyEdit(edit);
+    },
+    reapplyReadonly: (uriText) => keeper.reapply(uriText),
+    notify: (message, uriText) => {
+      const work = workOfFile(registry, path.fromUri(vscode.Uri.parse(uriText)));
+      void vscode.window.showWarningMessage(message, "連携を解除…").then((action) => {
+        if (action === "連携を解除…" && work) {
+          void vscode.commands.executeCommand("novelai.revokeEditorAccess", { type: "work", work });
+        }
+      });
+    },
+  });
+
   const subscriptions: Array<{ dispose(): unknown }> = [
     vscode.workspace.onDidOpenTextDocument((document) => {
       // 話を開いたら、その作品の鍵の台帳を取りに行く（原稿エディターで開いたときも、ここが鳴る）
       refreshLocksFor(registry, document.uri);
-      void warnAboutLockedFile(registry, document.uri, "opened").catch(() => undefined);
+      /*
+        **ここでは警告を出さない**（0.141.1。Mac の実機で、原稿エディターで開いても素のエディター用の
+        知らせが出た）。原稿エディターで開いても同じ文書の open が鳴るため。原稿エディターには帯がある。
+        素のエディターで開いたときは、前に出たときの知らせ（下の onDidChangeActiveTextEditor）で出す
+      */
     }),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       settleReadonly();
@@ -174,6 +259,18 @@ export function installEditorLockGuard(registry: {
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       void warnAboutLockedFile(registry, document.uri, "saved").catch(() => undefined);
+    }),
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.contentChanges.length === 0 || event.document.uri.scheme !== "file") return;
+      const document = event.document;
+      void reverter
+        .onChange(document.uri.toString(), path.basename(path.fromUri(document.uri)), () => toLf(document.getText()))
+        .catch((error: unknown) => {
+          logFailure("校閲中の話に素のエディターで打った字を戻す", {
+            話: path.basename(path.fromUri(document.uri)),
+            内容: error instanceof Error ? error.message : String(error),
+          });
+        });
     }),
     // 鍵が届いた・外れた（どの道でも）。前にいる画面を合わせ直す
     onLockLedgerWritten(settleReadonly),

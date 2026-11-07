@@ -425,6 +425,7 @@ import {
   offerRankCelebrationIfOpen,
   openWritingStatsPanel,
   refreshOpenWritingStatsPanels,
+  refreshWritingStatsAfterRepair,
   refreshWritingStatsPanel,
 } from "./features/writingStatsPanel";
 import { logRankCelebrationFailure, notifyRankEvents } from "./features/rankCelebrations";
@@ -910,11 +911,14 @@ export async function activate(
     書き込み（「はじめまして」の印など）こそ送り返しと重なりやすい。
   */
   setVerifiedStateReporter({
-    onRepaired: (key) =>
+    onRepaired: (key) => {
       logFailure("保管庫の書き込みが遅れて消えたので当て直した", {
         鍵: key,
         詳細: "VS Code の globalState で、先の書き込みの送り返しが後から届いた",
-      }),
+      });
+      // 消えていた間に「同意なし」で描いた執筆統計を、当て直した値で描き戻す（0.141.1）
+      void refreshWritingStatsAfterRepair(key).catch(() => undefined);
+    },
     onFailed: (key, error) =>
       logFailure("保管庫の書き込みが遅れて消え、当て直せなかった", {
         鍵: key,
@@ -1427,7 +1431,10 @@ export async function activate(
 
   // 編集部が校閲中の話を、作者が書けないようにする関所と、素のエディターへの警告
   // （作者の裁定、2026-10-28。ブラウザ版でも動く＝git を使わない）
-  context.subscriptions.push(installEditorLockGuard(registry));
+  // 素のエディターで校閲中の話に打った字は、原稿エディターと同じ控えへ回す（0.141.1。設計書6.25.9）
+  context.subscriptions.push(
+    installEditorLockGuard(registry, { readonlyRescues: verifiedState(context.workspaceState) })
+  );
 
   // 投稿状態の台帳に、この版が知らない値（連載の状態など）があったら一度だけ知らせる
   // （作者の判断 2026-11-01。台帳ごと止めず、その欄だけ読まずに持ち回る）

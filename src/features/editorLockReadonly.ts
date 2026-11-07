@@ -49,6 +49,20 @@ export class SessionReadonlyKeeper {
     return this.chain;
   }
 
+  /**
+   * 掛け直す（0.141.1）。作者が画面の吹き出しから読み取り専用を外しても、こちらの印は
+   * 「掛けた」のまま残るので、印を忘れてから合わせ直す（`editorLockRevert.ts`）
+   */
+  reapply(uri: string): Promise<void> {
+    this.chain = this.chain
+      .then(() => {
+        this.madeReadonly.delete(uri);
+        return this.settleNow();
+      })
+      .catch(() => undefined);
+    return this.chain;
+  }
+
   private async settleNow(): Promise<void> {
     const active = this.deps.active();
     if (!active) return;
