@@ -65,9 +65,41 @@ export async function collapseSidebarPane(page: Page, title: string): Promise<vo
   await waitUntil(async () => !(await expanded()), `左の列の「${title}」が畳まれる`, 5_000);
 }
 
-/** 名前（aria-label）が `head` で始まる行 */
-export function treeRow(page: Page, head: string): Locator {
-  return page.locator(`.monaco-list-row[aria-label^="${head.replace(/"/g, '\\"')}"]`).first();
+/**
+ * 行の探し方。ふつうは名前（aria-label）の頭の文字列だけでよい。
+ *
+ * **頭が同じ行が2つあるときは、名前に含む語・含まない語で絞る。** 幕間.txt と閑話.txt は
+ * どちらも種別が「幕間」なので、木の行の名前がどちらも「幕間」で始まる（episodeParser の
+ * detectKind）。頭だけで選ぶと、並びが上の行を押す——Mac（2026-11-07）では閑話.txt が上に来て、
+ * 幕間.txt のつもりで閑話.txt を右クリックしていた
+ */
+export type TreeRowTarget = string | { head: string; contains?: string; lacks?: string };
+
+function quoteAttr(value: string): string {
+  return value.replace(/"/g, '\\"');
+}
+
+/** 失敗の文に出す、行の探し方の言い方 */
+export function treeRowName(target: TreeRowTarget): string {
+  if (typeof target === "string") return target;
+  return [
+    target.head,
+    target.contains ? `「${target.contains}」を含む` : "",
+    target.lacks ? `「${target.lacks}」を含まない` : "",
+  ]
+    .filter((part) => part !== "")
+    .join("・");
+}
+
+/** 名前（aria-label）が `head` で始まる行（`TreeRowTarget` の絞り込みも効く） */
+export function treeRow(page: Page, target: TreeRowTarget): Locator {
+  const spec = typeof target === "string" ? { head: target } : target;
+  const selector = [
+    `.monaco-list-row[aria-label^="${quoteAttr(spec.head)}"]`,
+    spec.contains ? `[aria-label*="${quoteAttr(spec.contains)}"]` : "",
+    spec.lacks ? `:not([aria-label*="${quoteAttr(spec.lacks)}"])` : "",
+  ].join("");
+  return page.locator(selector).first();
 }
 
 /** 名前（aria-label）が `head` で始まる行の、読み上げ用の名前全体（添え書きを含む） */
@@ -166,7 +198,7 @@ export async function contextMenuLabels(page: Page): Promise<string[]> {
 }
 
 /** 行を右クリックし、品書きの `item` を押す */
-export async function treeContextMenu(page: Page, head: string, item: string): Promise<void> {
+export async function treeContextMenu(page: Page, head: TreeRowTarget, item: string): Promise<void> {
   /*
     **前の確認の窓が閉じきるのを待つ。** Mac（1.141.0、2026-11-07）で、確認の窓を閉じた直後の右クリックが
     品書きの入れ物（`.context-view`）だけ出て中身（`.monaco-menu`）が組み上がらないまま止まった
@@ -202,7 +234,7 @@ export async function treeContextMenu(page: Page, head: string, item: string): P
       );
     }
     // 「やり直したら通った」で黙らない。通ったときも、やり直しが要ったことと様子を出力に残す
-    console.warn(`[treeContextMenu] 「${head}」の品書きが組み上がらず、右クリックし直します（${attempt}回目／${await contextMenuState(page, head)}）`);
+    console.warn(`[treeContextMenu] 「${treeRowName(head)}」の品書きが組み上がらず、右クリックし直します（${attempt}回目／${await contextMenuState(page, head)}）`);
     // 組み上がらなかった品書きを閉じてから、もう一度右クリックする
     await page.keyboard.press("Escape");
     await waitUntil(
@@ -261,7 +293,7 @@ export async function treeContextMenu(page: Page, head: string, item: string): P
  * 品書きの枠（`.context-view`）と中身（`.monaco-menu`）の数、焦点の載った品書きの行、右クリックした行が
  * 選ばれた・焦点を持ったか、本体の焦点
  */
-async function contextMenuState(page: Page, head: string): Promise<string> {
+async function contextMenuState(page: Page, head: TreeRowTarget): Promise<string> {
   const counts = await page
     .evaluate(() => ({
       contextView: document.querySelectorAll(".context-view").length,
@@ -274,5 +306,5 @@ async function contextMenuState(page: Page, head: string): Promise<string> {
     .getAttribute("class")
     .catch(() => null);
   const rowState = rowClass === null ? "行が無い" : ["selected", "focused"].filter((name) => rowClass.split(/\s+/).includes(name)).join("・") || "選ばれていない";
-  return `品書きの数：${JSON.stringify(counts)}／右クリックした行「${head}」：${rowState}／焦点：${await activeElementSummary(page)}／${process.platform}`;
+  return `品書きの数：${JSON.stringify(counts)}／右クリックした行「${treeRowName(head)}」：${rowState}／焦点：${await activeElementSummary(page)}／${process.platform}`;
 }

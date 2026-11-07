@@ -336,7 +336,8 @@ test("右クリック「ファイル名にサブタイトルを付ける」で�
 
       /* ── 話数の無い話（【タイトル】から題を読む） ── */
       await waitTreeSettled(page);
-      await treeContextMenu(page, "幕間", "ファイル名にサブタイトルを付ける");
+      // 幕間.txt と閑話.txt は、どちらも木の行の名前が「幕間」で始まる（種別が同じ）。題で見分ける
+      await treeContextMenu(page, { head: "幕間", contains: "星の夜" }, "ファイル名にサブタイトルを付ける");
       await waitDialog(page, "ファイル名を変えます", "名前を変える確認の窓が出る（幕間.txt）");
       await pressDialogButton(page, "変える");
       await waitEpisodeFiles(session, ["001_湖畔の誓い.txt", "幕間_星の夜.txt", "閑話.txt"], "幕間.txt が 幕間_星の夜.txt になる");
@@ -359,7 +360,8 @@ test("右クリック「ファイル名にサブタイトルを付ける」で�
 
       /* ── 話数も【タイトル】も無い話 ── */
       await waitTreeSettled(page);
-      await treeContextMenu(page, "閑話", "ファイル名にサブタイトルを付ける");
+      // 閑話.txt の行も名前は「幕間」で始まり、題が無い（行の名前に「星の夜」を含まないほう）
+      await treeContextMenu(page, { head: "幕間", lacks: "星の夜" }, "ファイル名にサブタイトルを付ける");
       const refused = await waitNotice(page, "閑話.txt からサブタイトルを読み取れませんでした", "題の読めない話で「サブタイトルを読み取れませんでした」が出る");
       expect(refused).toContain("閑話.txt");
       await holdsFor(

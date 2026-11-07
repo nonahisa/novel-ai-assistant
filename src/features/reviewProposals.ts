@@ -496,10 +496,21 @@ async function startRangeReview(
     .then((module) => module.publishLedgerQuietly(work, "校閲の範囲を知らせる"))
     .then((detail) => {
       if (detail) {
+        // 画面の知らせは短くするので、止まった段（記録・送信・合わせ直し）と git の文はログへ残す
+        // （残さないと、どこで止まったかを後からたどれない。0.134.2）
+        useLogFile(work.folderPath);
+        logFailure("校閲の範囲を知らせる", { 作品: work.title, 範囲: range, 詳細: detail });
         void vscode.window.showInformationMessage(reviewRangeNotifyFailedMessage());
       }
     })
-    .catch(() => undefined);
+    .catch((error: unknown) => {
+      useLogFile(work.folderPath);
+      logFailure("校閲の範囲を知らせる", {
+        作品: work.title,
+        範囲: range,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    });
 }
 
 /** 話を1つ選ばせる。最初の候補は `activeIndex`（並びは変えない） */

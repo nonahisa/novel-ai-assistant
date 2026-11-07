@@ -288,7 +288,12 @@ test("編集者メニューの「1. 作者の最新の原稿を受け取る」�
         "校閲の鍵が送り先へ届く",
         30_000
       ).catch(async (error: unknown) => {
-        throw new Error(`${String(error)}（知らせ：${JSON.stringify(await notificationTexts(page))}／${await describeNotices(session)}／状態：${await gitWhileRunning(workFolder, ["status", "--short"])}）`);
+        // 止まった段と git の文は製品のログにある（reviewProposals.ts の「校閲の範囲を知らせる」。0.134.2）
+        const log = await readFile(path.join(workFolder, ".aiwriter", "logs", "actions.log"), "utf8").catch(() => "（ログが無い）");
+        const tail = log.split(/\r?\n/).slice(-30).join("\n");
+        throw new Error(
+          `${String(error)}（知らせ：${JSON.stringify(await notificationTexts(page))}／${await describeNotices(session)}／状態：${await gitWhileRunning(workFolder, ["status", "--short"])}／設定の名乗り：${JSON.stringify(await gitWhileRunning(workFolder, ["config", "--get", "user.name"]).catch(() => "（無い）"))}）\n製品のログの末尾：\n${tail}`
+        );
       });
       await holdsFor(
         async () => !(await notificationTexts(page)).some((text) => text.includes("同期すると")),
