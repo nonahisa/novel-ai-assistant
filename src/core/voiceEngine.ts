@@ -274,7 +274,12 @@ export function voiceParamsFor(
     speedScale: round(clamp((1 + shift.speed * k) * safeRate, 0.5, 2)),
     pitchScale: round(clamp(shift.pitch * k, -0.15, 0.15)),
     intonationScale: round(clamp(1 + shift.intonation * k, 0, 2)),
-    volumeScale: round(clamp(1 + shift.volume * k, 0, 2)),
+    /*
+      **音量は上げない。上限は1**（2026-11-07 作者の答え A。実機確認リスト 19行）。エンジン（AivisSpeech）は
+      音の山を上限いっぱい（32767）で返すので、上げると波形が振り切れて割れる（測定：1.15倍で65点・
+      1.375倍で294点が振り切れ、0.9倍で0点）。強さは抑揚と速さで出す。下げる（ささやき等）は今のまま
+    */
+    volumeScale: round(clamp(1 + shift.volume * k, 0, 1)),
     prePhonemeLength: VOICE_PRE_PHONEME,
     postPhonemeLength: round(clamp(VOICE_POST_PHONEME + shift.post * k, 0, 1.5)),
   };

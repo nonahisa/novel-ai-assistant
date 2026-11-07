@@ -13,6 +13,7 @@ import {
   voiceEngineNextStep,
   voiceEngineDownPrompt,
   voiceParamsFor,
+  VOICE_EMOTIONS,
 } from "../../../src/core/voiceEngine";
 import { FAKE_SPEAKERS, startFakeVoiceEngine, type FakeEngine } from "../support/fakeVoiceEngine";
 
@@ -92,11 +93,19 @@ describe("感情→スタイルと調子", () => {
     expect(calm).toMatchObject({ speedScale: 1, pitchScale: 0, intonationScale: 1, volumeScale: 1 });
     const shout = voiceParamsFor("叫び", "強", false, 1);
     const whisper = voiceParamsFor("ささやき", "強", false, 1);
-    expect(shout.volumeScale).toBeGreaterThan(1);
+    // **音量は上げない**（2026-11-07 作者の答え A）。エンジンは音の山を上限いっぱいで返すので、
+    // 上げると波形が振り切れて割れる（1.15倍で65点・1.375倍で294点。0.9倍で0点）
+    expect(shout.volumeScale).toBe(1);
+    for (const emotion of VOICE_EMOTIONS) {
+      for (const intensity of ["弱", "中", "強"] as const) {
+        expect(voiceParamsFor(emotion, intensity, false, 1).volumeScale).toBeLessThanOrEqual(1);
+      }
+    }
     expect(whisper.volumeScale).toBeLessThan(1);
-    expect(voiceParamsFor("叫び", "弱", false, 1).volumeScale).toBeLessThan(shout.volumeScale);
+    // 強さは抑揚で出す
+    expect(shout.intonationScale).toBeGreaterThan(voiceParamsFor("叫び", "弱", false, 1).intonationScale);
     // スタイルが感情を持っているときは半分
-    expect(voiceParamsFor("叫び", "強", true, 1).volumeScale).toBeLessThan(shout.volumeScale);
+    expect(voiceParamsFor("叫び", "強", true, 1).intonationScale).toBeLessThan(shout.intonationScale);
     expect(voiceParamsFor("平静", "中", false, 1.5).speedScale).toBe(1.5);
     // 範囲の外の速さは畳む
     expect(voiceParamsFor("平静", "中", false, 10).speedScale).toBe(2);
