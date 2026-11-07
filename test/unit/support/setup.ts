@@ -41,4 +41,12 @@ beforeEach(async () => {
   */
   const { setLocalFetchForTests } = await import("../../../src/ai/fetchTimeouts");
   setLocalFetchForTests((url, init) => globalThis.fetch(url, init));
+
+  /*
+    **作者の GitHub 名を引く道を「鍵なし」にする**（`features/authorGithubLogin.ts`。0.138.0）。
+    採否を決める試験が、本物の gh の鍵で GitHub へ出ていかないように。
+    名前を確かめる試験は、自分で鍵と引き方を渡す
+  */
+  const { setAuthorTokenSourceForTests } = await import("../../../src/features/authorGithubLogin");
+  setAuthorTokenSourceForTests(async () => undefined);
 });

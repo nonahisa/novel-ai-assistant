@@ -3,9 +3,11 @@ import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
 import { notifyWorkRecordWritten } from "./workRecordSignal";
+import { runSerialized } from "./ledgerQueue";
 import {
   HISTORY_DIRECTORY,
   HISTORY_FILE,
+  pickIncomingEditorLines,
   sortNewestFirst,
   parseHistory,
   type EditHistoryEntry,
@@ -14,6 +16,7 @@ import {
 // 読み方は VS Code に依存しないファイルへ切り出した（MCP の読む口と共有する）
 export {
   dedupeHistory,
+  historyDisplayName,
   parseHistory,
   sortNewestFirst,
   type EditHistoryEntry,
@@ -57,6 +60,48 @@ export class EditHistory {
    * そのために本来の操作（誤字の適用など）を失敗させるのは本末転倒である。
    */
   async append(entry: EditHistoryEntry): Promise<void> {
+    // **取り込み（`mergeIncomingEditorLines`）と同じ鎖に通す。** どちらも「読む → 足す →
+    // 書き戻す」なので、重なると後から書いたほうが先の行を巻き戻して消す
+    await runSerialized(this.filePath, () => this.appendNow(entry));
+  }
+
+  /**
+   * 編集用の写しから届いた編集履歴のうち、編集者の行だけを足す（設計書5.7.5.9。0.138.0）。
+   *
+   * 選び方は `pickIncomingEditorLines`（同じ行は二度入れない・取り込んだ時点の
+   * GitHub のユーザー名を書き写す）。**今ある行は書き換えない。後ろへ足すだけ。**
+   * 足した行数を返す。
+   */
+  async mergeIncomingEditorLines(
+    incoming: string,
+    editorLogin: string | undefined
+  ): Promise<number> {
+    const target = this.filePath;
+    return runSerialized(target, async () => {
+      const uri = path.toUri(target);
+      let existing: Uint8Array = new Uint8Array();
+      try {
+        existing = await vscode.workspace.fs.readFile(uri);
+      } catch {
+        // まだ無い
+      }
+      const existingText = new TextDecoder().decode(existing);
+      const lines = pickIncomingEditorLines(existingText, incoming, editorLogin);
+      if (lines.length === 0) return 0;
+      // 最後の行が改行で終わっていなければ、つなげる前に改行を補う（行がくっつくと両方読めない）
+      const lead = existingText.length > 0 && !existingText.endsWith("\n") ? "\n" : "";
+      const added = new TextEncoder().encode(lead + lines.join("\n") + "\n");
+      const merged = new Uint8Array(existing.byteLength + added.byteLength);
+      merged.set(existing, 0);
+      merged.set(added, existing.byteLength);
+      await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
+      await vscode.workspace.fs.writeFile(uri, merged);
+      notifyWorkRecordWritten(target);
+      return lines.length;
+    });
+  }
+
+  private async appendNow(entry: EditHistoryEntry): Promise<void> {
     const target = this.filePath;
     const line = JSON.stringify(entry) + "\n";
     try {

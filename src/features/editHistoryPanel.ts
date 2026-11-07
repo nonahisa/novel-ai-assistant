@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { wideViewColumn } from "./editorColumn";
 import type { WorkEntry } from "../models/types";
-import { EditHistory } from "../core/editHistory";
+import { EditHistory, historyDisplayName, type EditHistoryEntry } from "../core/editHistory";
 import { ExternalAccessLog } from "../core/externalAccessStore";
 import { ExternalAccessPermissionStore } from "../core/externalAccessPermissionStore";
 import { describeExternalAccessPermission } from "../core/externalAccessPermission";
@@ -78,7 +78,7 @@ async function postHistory(
   const usageNote = describeAiInstructionUsage(usage);
   void panel.webview.postMessage({
     type: "history",
-    entries,
+    entries: entries.map(forScreen),
     external,
     usageNote: usageNote?.text ?? "",
     usageWarn: usageNote?.warn ?? false,
@@ -88,4 +88,12 @@ async function postHistory(
     // **1つでも許可している接続元があるか**（画面の印の出し分けに使う）
     allowed: permission.clients.length > 0,
   });
+}
+
+/**
+ * 画面へ渡す形。**編集者の行は git の名前を渡さない**（WebView へ届けば、画面のどこかに出うる）。
+ * 名前の欄は `historyDisplayName`（編集者なら GitHub のユーザー名、無ければ空。設計書5.7.5.9）
+ */
+function forScreen(entry: EditHistoryEntry): EditHistoryEntry {
+  return { ...entry, actorName: historyDisplayName(entry) };
 }

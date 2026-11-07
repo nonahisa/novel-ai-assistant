@@ -192,6 +192,9 @@ function toLine(value: unknown): ProposalLine | undefined {
       proposalId,
       time: stringOrEmpty(record.time),
       decidedBy: stringOrEmpty(record.decidedBy),
+      ...(stringOrEmpty(record.decidedByLogin)
+        ? { decidedByLogin: stringOrEmpty(record.decidedByLogin) }
+        : {}),
       status,
       note: stringOrEmpty(record.note),
     };

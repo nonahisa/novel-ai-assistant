@@ -38,6 +38,9 @@ import { canRunProcesses } from "../core/runtime";
 import { scanWork } from "../core/scanner";
 import { describeLockRange } from "../core/editingRepo";
 import { activeTabFileUri } from "./manuscriptTab";
+import { ProposerLoginStore } from "../core/proposerLogins";
+import { editorLoginForProposal } from "./editingSite";
+import { authorGithubLogin } from "./authorGithubLogin";
 
 /**
  * 編集部からの提案を、作者が見て決める（設計書5.6）。
@@ -90,7 +93,8 @@ export async function reviewProposals(
     return;
   }
 
-  panel.showProposals(work, pending.map(toViewItem));
+  const logins = await new ProposerLoginStore(work).load();
+  panel.showProposals(work, pending.map((view) => toViewItem(view, logins)));
   void vscode.window.showInformationMessage(
     `編集者からの提案が ${pending.length} 件あります。` +
       "「提案」パネルで1件ずつご確認ください。"
@@ -201,7 +205,8 @@ export async function showEditorProposals(
     return { pending: 0 };
   }
 
-  panel.showProposals(work, pending.map(toViewItem));
+  const logins = await new ProposerLoginStore(work).load();
+  panel.showProposals(work, pending.map((view) => toViewItem(view, logins)));
   const added = outcome.kind === "received" && outcome.added > 0
     ? `（いま ${outcome.added} 件届きました）`
     : "";
@@ -251,7 +256,8 @@ export async function primeEditorProposals(
     (entry) => entry.status === "pending"
   );
   if (pending.length === 0) return 0;
-  panel.showRestoredProposals(work, pending.map(toViewItem));
+  const logins = await new ProposerLoginStore(work).load();
+  panel.showRestoredProposals(work, pending.map((view) => toViewItem(view, logins)));
   return pending.length;
 }
 
@@ -272,7 +278,10 @@ export async function primeEditorProposalsInPanel(work: WorkEntry): Promise<numb
   return rememberedPanel ? primeEditorProposals(work, rememberedPanel) : 0;
 }
 
-function toViewItem(proposal: ProposalView): ProposalViewItem & {
+function toViewItem(
+  proposal: ProposalView,
+  logins: ReadonlyMap<string, string>
+): ProposalViewItem & {
   proposalId: string;
 } {
   // **編集部が手で書いたものは、分類を頭に添える**（「編集部の直し：…」）。
@@ -291,8 +300,10 @@ function toViewItem(proposal: ProposalView): ProposalViewItem & {
     original: proposal.original,
     target: proposal.target,
     suggestion: proposal.suggestion,
-    reason: proposal.proposer
-      ? `${said}（${proposal.proposer} さんの提案）`
+    // **出した編集者は GitHub のユーザー名で添える**（作者の答え 2026-11-07）。`proposer` は
+    // 編集者のパソコンの git の名前なので出さない。取り込んだ時点の名前を覚えていなければ添えない
+    reason: logins.get(proposal.id)
+      ? `${said}（${logins.get(proposal.id)} の提案）`
       : said,
     confidence: "high",
     status: "pending",
@@ -615,19 +626,21 @@ export async function acceptProposal(
     return { ok: false, reason: "本文を書き戻せませんでした。" };
   }
 
-  const who = (await tryGitUserName(work.folderPath)) ?? "";
+  const { who, decidedByLogin, editorLogin } = await decisionNames(work, proposal.id);
   await new ProposalStore(work).decide([
     {
       proposalId: proposal.id,
       time: new Date().toISOString(),
       decidedBy: who,
+      ...(decidedByLogin ? { decidedByLogin } : {}),
       status: "accepted",
       note: "",
     },
   ]);
   await recordEdit(work, {
     actor: "author",
-    action: "編集者の提案を採り入れた",
+    action: editorLogin ? `編集者 ${editorLogin} の提案を採り入れた` : "編集者の提案を採り入れた",
+    editorLogin,
     // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）。
     // `proposal.file` は相対だが、提案パネルからは `path.relative` の `\` 区切りで
     // 来るので、組み立て直した場所から履歴の形へ揃える
@@ -649,23 +662,47 @@ async function acknowledgeProposal(
   work: WorkEntry,
   proposal: { id: string; file: string; line: number; target: string }
 ): Promise<void> {
-  const who = (await tryGitUserName(work.folderPath)) ?? "";
+  const { who, decidedByLogin, editorLogin } = await decisionNames(work, proposal.id);
   await new ProposalStore(work).decide([
     {
       proposalId: proposal.id,
       time: new Date().toISOString(),
       decidedBy: who,
+      ...(decidedByLogin ? { decidedByLogin } : {}),
       status: "read",
       note: "意見を読んだ",
     },
   ]);
   await recordEdit(work, {
     actor: "author",
-    action: "編集者の意見を読んだ",
+    action: editorLogin ? `編集者 ${editorLogin} の意見を読んだ` : "編集者の意見を読んだ",
+    editorLogin,
     file: editHistoryFile(work.folderPath, path.join(work.folderPath, proposal.file)),
     detail: `${proposal.line}行 「${proposal.target}」`,
   });
   startReturnIfFinished(work);
+}
+
+/**
+ * 採否を決めるときに書き写す名前（設計書5.7.5.9。0.138.0）。
+ *
+ * - `who`：作者の git の名前（今までどおり `decidedBy` に入れる。画面には出さない）
+ * - `decidedByLogin`：作者の GitHub のユーザー名。編集者の側の採否の一覧で出す。引けなければ無し
+ * - `editorLogin`：提案を出した編集者の GitHub のユーザー名。履歴の行に書き写すので、
+ *   解除で `.aiwriter/editing.json` から名前が消えても残る
+ *
+ * 名前が取れなくても採否は書く（名前が無いより、採否が残らないほうが困る）。
+ */
+async function decisionNames(
+  work: WorkEntry,
+  proposalIdValue: string
+): Promise<{ who: string; decidedByLogin?: string; editorLogin?: string }> {
+  const [who, decidedByLogin, editorLogin] = await Promise.all([
+    tryGitUserName(work.folderPath).then((name) => name ?? "", () => ""),
+    authorGithubLogin(work),
+    editorLoginForProposal(work, proposalIdValue).catch(() => undefined),
+  ]);
+  return { who, decidedByLogin, editorLogin };
 }
 
 /**
@@ -699,19 +736,21 @@ export async function rejectProposal(
   proposalIdValue: string,
   file: string
 ): Promise<void> {
-  const who = (await tryGitUserName(work.folderPath)) ?? "";
+  const { who, decidedByLogin, editorLogin } = await decisionNames(work, proposalIdValue);
   await new ProposalStore(work).decide([
     {
       proposalId: proposalIdValue,
       time: new Date().toISOString(),
       decidedBy: who,
+      ...(decidedByLogin ? { decidedByLogin } : {}),
       status: "rejected",
       note: "",
     },
   ]);
   await recordEdit(work, {
     actor: "author",
-    action: "編集者の提案を見送った",
+    action: editorLogin ? `編集者 ${editorLogin} の提案を見送った` : "編集者の提案を見送った",
+    editorLogin,
     file,
     detail: "",
   });

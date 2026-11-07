@@ -61,8 +61,13 @@ export interface Proposal {
 export interface ProposalDecision {
   proposalId: string;
   time: string;
-  /** 決めた人（作者） */
+  /** 決めた人（作者）。作者のパソコンの git の名前なので、**画面には出さない** */
   decidedBy: string;
+  /**
+   * 決めた作者の GitHub のユーザー名（0.138.0。設計書5.7.5.9）。編集者の側の「作者の採否」で
+   * 決めた人として出す。引けなかったとき（サインインが無い・回線が無い）と、それより前の行には無い
+   */
+  decidedByLogin?: string;
   status: ProposalDecisionStatus;
   /** 却下の理由。作者が編集部へ伝えたいことがあれば */
   note: string;

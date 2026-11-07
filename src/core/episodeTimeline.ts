@@ -1,6 +1,6 @@
 import * as paths from "./pathText";
 import { actorLabel } from "../models/actor";
-import type { EditHistoryEntry } from "./editHistoryFormat";
+import { historyDisplayName, type EditHistoryEntry } from "./editHistoryFormat";
 import {
   dedupeExternalAccess,
   describeExternalAccess,
@@ -82,6 +82,11 @@ export interface EpisodeTimelineSources {
   external?: readonly ExternalAccessEntry[];
   /** その話の退避の写し（新しい順でなくてよい。ここで5件に絞る） */
   recoveries?: readonly { path: string; timestamp: number }[];
+  /**
+   * 提案の番号 → 出した編集者の GitHub のユーザー名（作者の側で、取り込んだときに覚えたもの。
+   * 設計書5.7.5.9）。**`proposer`（git の名前）は画面に出さない**ので、無ければ名前なしで出す
+   */
+  proposerLogins?: ReadonlyMap<string, string>;
 }
 
 /** 退避の写しは新しいもの5件まで（作られるのも5世代まで。`RECOVERY_GENERATIONS_PER_FILE`） */
@@ -259,13 +264,15 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
     if (!hits(edit.file)) return;
     const timestamp = isoTime(edit.time);
     if (timestamp === undefined) return;
+    const shownName = historyDisplayName(edit);
     const entry: TimelineEntry = {
       id: `edit:${edit.time}:${index}`,
       timestamp,
       kind: "edit",
       label: edit.action,
-      description: [actorLabel(edit.actor), edit.actorName].filter(Boolean).join(" "),
-      detail: lines(`編集履歴：${edit.action}`, edit.actorName && `誰が：${edit.actorName}`, edit.detail),
+      // 編集者の行は git の名前を出さない（`historyDisplayName`。設計書5.7.5.9）
+      description: [actorLabel(edit.actor), shownName].filter(Boolean).join(" "),
+      detail: lines(`編集履歴：${edit.action}`, shownName && `誰が：${shownName}`, edit.detail),
       open: "editHistory",
     };
     entries.push(entry);
@@ -276,6 +283,9 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
   for (const proposal of sources.proposals ?? []) {
     if (!hits(proposal.file)) continue;
     const proposedAt = isoTime(proposal.time);
+    // **出した人・決めた人は GitHub のユーザー名だけ**（作者の答え 2026-11-07）。`proposer` と
+    // `decidedBy` は git の名前なので出さない
+    const proposerLogin = sources.proposerLogins?.get(proposal.id);
     const body = lines(
       proposal.line > 0 && `${proposal.line}行`,
       change(proposal.target, proposal.suggestion) || proposal.original && `「${quote(proposal.original)}」`,
@@ -287,8 +297,8 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
         timestamp: proposedAt,
         kind: "proposal",
         label: `編集者の提案 ${change(proposal.target, proposal.suggestion)}`.trim(),
-        description: proposal.proposer,
-        detail: lines(`編集者の提案（${proposal.proposer || "名前なし"}）`, body),
+        description: proposerLogin ?? "",
+        detail: lines(`編集者の提案（${proposerLogin ?? "名前なし"}）`, body),
         open: "editorProposals",
       });
     }
@@ -301,7 +311,7 @@ export function buildEpisodeTimeline(sources: EpisodeTimelineSources): TimelineE
         timestamp: decidedAt,
         kind: "proposal",
         label: `編集者の提案を${status}`,
-        description: decision.decidedBy,
+        description: decision.decidedByLogin ?? "",
         detail: lines(`編集者の提案を${status}`, body, decision.note && `覚え書き：${decision.note}`),
         open: "editorProposals",
       };
