@@ -10,6 +10,7 @@ import {
   DRIVE_DELETED,
   buildDriveManifest,
   checkManifestArrival,
+  compareDriveLineage,
   isIgnoredSyncPath,
   isSafeSyncPath,
   isSendableSyncPath,
@@ -25,8 +26,17 @@ import {
   type DrivePeer,
   type DriveSyncDecision,
 } from "./driveSyncPlan";
-import { cloneDriveSyncRecord, type DriveSyncRecord } from "./driveSyncRecord";
+import { cloneDriveSyncRecord, driveBaseKeepSet, type DriveSyncRecord } from "./driveSyncRecord";
+import {
+  assembleDriveMerge,
+  driveTextEol,
+  isDriveMergeTextPath,
+  mergeDriveTexts,
+  verifyDriveMerge,
+  type DriveTextMerge,
+} from "./driveTextMerge";
 import { hashBytes } from "./hash";
+import { hasConflictMarkers } from "./textDecode";
 import {
   decideSettingsConflict,
   isSettingsJsonPath,
@@ -65,6 +75,14 @@ import {
  *
  * 作品のフォルダーの中の、自分以外の端末のフォルダー全部を相手にする。比べは
  * 中身の系譜でするので、相手の台数で規則は変わらない（`planDriveReceive`）。
+ *
+ * ## 直した場所が違えば合わせる（設計書5.10.7。0.134.0）
+ *
+ * 本文（.txt・.md）の食い違いは、元の文（共通の祖先の中身。手元の置き場
+ * `.aiwriter/drive-sync/bases/<端末ID>/` に、系譜の新しいほうから8つ）と比べて行で合わせる
+ * （`driveTextMerge.ts`）。同じ場所が無ければ黙って書き、あればその場所だけを選ばせる
+ * （`applyDriveMergeChoice`）。元の文が無い・競合マーカー・消した×書いた・設定資料は、
+ * ファイルごとに選ばせる（`applyDriveConflictChoice`。3台以上でも1回で選ぶ）。
  */
 
 /** ドライブの根に作るフォルダーの名前（作者がドライブの画面で見る） */
@@ -94,6 +112,16 @@ export interface LocalWorkFiles {
   list(): Promise<string[]>;
   /** 中身の生のバイト。無ければ undefined。**ハッシュは生のバイトで取る**（復号した文字では取らない） */
   read(path: string): Promise<Uint8Array | undefined>;
+  /**
+   * 元の文の置き場（設計書5.10.7。`driveBasePath(この端末のID, ハッシュ)` の下）にある
+   * 中身の名前（ハッシュ）の一覧。置き場が無ければ空
+   */
+  listBases(): Promise<string[]>;
+  /**
+   * 置き場の中身（`driveBasePath(この端末のID, hash)`）。無ければ undefined。
+   * **中身が名前と合うかは core が確かめる**（呼び手は直さずにそのまま返す）
+   */
+  readBase(hash: string): Promise<Uint8Array | undefined>;
 }
 
 export type LocalWriteOutcome =
@@ -119,6 +147,18 @@ export type LocalWriteOutcome =
 export interface LocalWorkWriter {
   replace(path: string, bytes: Uint8Array, expectedLocalHash: string): Promise<LocalWriteOutcome>;
   create(path: string, bytes: Uint8Array): Promise<LocalWriteOutcome>;
+  /**
+   * 元の文の置き場へ置く（`driveBasePath(この端末のID, hash)`。設計書5.10.7）。
+   * 名前が中身のハッシュなので、既にあれば同じ中身——`atomicWriteFile` の `create` で
+   * 置き、既にあれば何もせず `ok: true` を返してよい。作品の中身ではないので、
+   * 作品の数え直しには入れない
+   */
+  writeBase(hash: string, bytes: Uint8Array): Promise<LocalWriteOutcome>;
+  /**
+   * 元の文の置き場から消す（`driveBasePath(この端末のID, hash)`）。**消すのはこの置き場の
+   * 中だけ**——core は名前（ハッシュ）しか渡さないので、原稿の道を消す口にはならない
+   */
+  removeBase(hash: string): Promise<void>;
 }
 
 export type DriveSendResult =
@@ -133,6 +173,8 @@ export type DriveSendResult =
       duplicateFolders: number;
       /** 新しい控え（系譜の頭を送った中身へ進めたもの）。**呼び手が保存する** */
       record: DriveSyncRecord;
+      /** 元の文の置き場へ置けなかったもの（送りは済んでいる。次に食い違ったとき合わせられないだけ） */
+      baseFailures: DriveBaseFailure[];
     }
   /**
    * 途中で止まった。**目録は書いていない**ので、向こうは「まだ届ききって
@@ -151,6 +193,8 @@ export async function sendToDrive(input: {
   client: DriveClient;
   layout: DriveSyncLayout;
   local: LocalWorkFiles;
+  /** 元の文の置き場へ書く口（`writeBase`・`removeBase` だけを使う。原稿は書かない） */
+  writer: LocalWorkWriter;
   record: DriveSyncRecord;
   ignoredPaths: readonly string[];
   now: Date;
@@ -182,6 +226,7 @@ export async function sendToDrive(input: {
 
     const sent = new Map<string, string>();
     const settingsTexts = new Map<string, string>();
+    const stash: BaseStash = new Map();
     let unchanged = 0;
     for (const entry of paths) {
       const bytes = await input.local.read(entry);
@@ -189,6 +234,7 @@ export async function sendToDrive(input: {
       if (bytes === undefined) continue;
       const hash = hashBytes(bytes);
       sent.set(entry, hash);
+      stashBase(stash, entry, hash, bytes);
       if (isSettingsJsonPath(entry)) settingsTexts.set(entry, decodeUtf8(bytes));
       const existing = remoteByName.get(entry);
       if (existing && (previous?.files.get(entry)?.hash === hash || existing.sha256Checksum === hash)) {
@@ -225,7 +271,10 @@ export async function sendToDrive(input: {
     for (const [entry, lineage] of lineages) {
       setHead(record, entry, lineage, settingsTexts.get(entry));
     }
-    return { kind: "sent", manifest, uploaded, unchanged, duplicateFolders, record };
+    // 送った中身は系譜の頭なので、次に食い違ったときの元の文になりうる。置いてから、
+    // 系譜の新しいほうから外れたものを消す（設計書5.10.7）
+    const baseFailures = await storeDriveBases(input.local, input.writer, record, stash, true);
+    return { kind: "sent", manifest, uploaded, unchanged, duplicateFolders, record, baseFailures };
   } catch (error) {
     if (error instanceof DriveApiError) return { kind: "failed", error, uploaded };
     throw error;
@@ -248,6 +297,53 @@ export interface DriveConflictReport {
   remoteBytes: Uint8Array;
   /** 設定資料で `decideSettingsConflict` が決めなかった理由 */
   settingsReason?: string;
+  /**
+   * 行で合わせた結果（設計書5.10.7）。在れば、合わせられた所は当ててあり、
+   * **同じ場所（`merge.text.regions`）だけを選ばせる**（`applyDriveMergeChoice`）。
+   * 無ければファイルごとに選ばせる（`applyDriveConflictChoice`。在るときも使える）
+   */
+  merge?: DriveConflictMerge;
+  /** 行で合わせなかった理由（元の文が無い・競合マーカー等）。ファイルごとに選ばせる */
+  mergeSkipped?: string;
+}
+
+/** 行で合わせた候補1つ（同じ中身の端末はまとめてある） */
+export interface DriveConflictMergeCandidate {
+  /** 中身のハッシュ（`DriveTextMerge` の候補の印） */
+  hash: string;
+  lineage: DriveLineage;
+  /** その中身を持つ端末。このパソコンの中身なら、このパソコン1つ */
+  devices: { deviceId: string; deviceName: string }[];
+  /** このパソコンの中身か（画面で「このパソコン」と出す） */
+  local: boolean;
+  bytes: Uint8Array;
+  /** UTF-8 で読んだ文（改行はそのまま） */
+  text: string;
+}
+
+/** 行で合わせた報告（設計書5.10.7） */
+export interface DriveConflictMerge {
+  /** 元の文（共通の祖先の中身）のハッシュと文 */
+  baseHash: string;
+  baseText: string;
+  /**
+   * 書くときの改行。**元の文の改行**（元の文に改行が無ければ、ハッシュの順で先頭の
+   * 候補の改行）。設計書の「手元の形を保つ」とは、手元だけが改行の形を変えていたときに
+   * ずれる——台ごとに違う改行で書くと、合わせた中身のハッシュが割れて往復するため、
+   * どの台でも同じになる元の文の形を採った（ふだんは同期で同じ形を持っているので一致する）
+   */
+  eol: "\n" | "\r\n";
+  /** 候補（中身のハッシュの順） */
+  candidates: DriveConflictMergeCandidate[];
+  /** 手元の系譜。手元が相手の祖先で候補に入らないときも、合わせた系譜の祖先に入れる */
+  localLineage: DriveLineage;
+  text: DriveTextMerge;
+}
+
+/** 元の文の置き場へ置けなかったもの */
+export interface DriveBaseFailure {
+  hash: string;
+  reason: string;
 }
 
 /** 届ききっていない相手（その相手の分だけ受け取りを見送った） */
@@ -281,6 +377,14 @@ export type DriveReceiveResult =
       advanced: string[];
       /** 設定資料で `decideSettingsConflict` が決めたもの */
       settingsDecided: { path: string; side: "ours" | "theirs" | "merged"; reason: string }[];
+      /**
+       * 本文の食い違いを、直した場所が違うので黙って合わせたもの（設計書5.10.7）。
+       * 知らせには件数だけ（「◯台の直しを合わせました」）。`candidates` は合わせた中身の数、
+       * `devices` はその中身を持つ端末（このパソコンを含む）
+       */
+      merged: { path: string; candidates: number; devices: string[] }[];
+      /** 元の文の置き場へ置けなかったもの（受け取りは済んでいる） */
+      baseFailures: DriveBaseFailure[];
       /** 食い違い。**機械は選ばない**——作者に見比べてもらう */
       conflicts: DriveConflictReport[];
       /** 向こうで消えた（手元では消さない。知らせるだけ） */
@@ -421,11 +525,16 @@ export async function receiveFromDrive(input: {
     written: [],
     advanced: [],
     settingsDecided: [],
+    merged: [],
+    baseFailures: [],
     conflicts: [],
     remoteDeleted: [],
     failures: [],
     record,
   };
+  /** 系譜が進んだ中身（元の文の置き場へ置く候補。最後にまとめて置く） */
+  const stash: BaseStash = new Map();
+  const storedBases = new Set(await input.local.listBases());
 
   /**
    * 向こうの中身。**書く前に目録のハッシュと合うことを確かめる**——届ききったかを
@@ -475,6 +584,7 @@ export async function receiveFromDrive(input: {
               ? decodeUtf8(bytes)
               : undefined;
           setHead(record, decision.path, decision.lineage, text);
+          if (bytes !== undefined) stashBase(stash, decision.path, decision.lineage.hash, bytes);
           result.advanced.push(decision.path);
           break;
         }
@@ -491,6 +601,7 @@ export async function receiveFromDrive(input: {
               : await input.writer.create(decision.path, bytes);
           if (!recordWrite(result, decision.path, outcome, decision.remoteHash)) break;
           setHead(record, decision.path, decision.lineage, decision.settings ? decodeUtf8(bytes) : undefined);
+          stashBase(stash, decision.path, decision.remoteHash, bytes);
           break;
         }
         case "conflict": {
@@ -540,7 +651,48 @@ export async function receiveFromDrive(input: {
             });
             break;
           }
-          result.conflicts.push({ decision, localBytes: ours, remotes, remoteBytes: remotes[0].bytes });
+          // 本文は行で合わせる（設計書5.10.7）。合わせられなければファイルごとに選ばせる
+          const report: DriveConflictReport = { decision, localBytes: ours, remotes, remoteBytes: remotes[0].bytes };
+          const prepared = await prepareDriveMerge({
+            decision,
+            ours,
+            remotes,
+            local: input.local,
+            storedBases,
+            self: { deviceId: layout.deviceId, deviceName: layout.deviceName },
+          });
+          if (typeof prepared === "string") {
+            result.conflicts.push({ ...report, mergeSkipped: prepared });
+            break;
+          }
+          if (prepared.text.regions.length > 0) {
+            // 同じ場所がある。合わせられた所を当てたうえで、その場所だけを選ばせる（まだ書かない）
+            result.conflicts.push({ ...report, merge: prepared });
+            break;
+          }
+          const done = finishDriveMerge(prepared, []);
+          if (typeof done === "string") {
+            // 書く前の確かめに外れた。書かずにファイルごとに選ばせる
+            result.conflicts.push({ ...report, mergeSkipped: done });
+            break;
+          }
+          if (done.hash !== decision.localHash) {
+            // 期待ハッシュは合わせる直前に読んだ手元の今。合わせている間に作者が書いていれば
+            // 書く口が断る（書かずに、次の受け取りで合わせ直す）
+            const outcome = await input.writer.replace(decision.path, done.bytes, decision.localHash as string);
+            if (!recordWrite(result, decision.path, outcome, done.hash)) break;
+          } else {
+            // 合わせた文が手元と同じ（相手の直しはどれも手元に入っていた）。書かずに系譜だけ
+            result.advanced.push(decision.path);
+          }
+          setHead(record, decision.path, done.lineage, undefined);
+          stashBase(stash, decision.path, done.hash, done.bytes);
+          for (const candidate of prepared.candidates) stashBase(stash, decision.path, candidate.hash, candidate.bytes);
+          result.merged.push({
+            path: decision.path,
+            candidates: prepared.candidates.length,
+            devices: [...new Set(prepared.candidates.flatMap((c) => c.devices.map((d) => d.deviceId)))],
+          });
           break;
         }
       }
@@ -554,6 +706,9 @@ export async function receiveFromDrive(input: {
       throw error;
     }
   }
+  // そろえ終えた。系譜が進んだ中身を置き、系譜の新しいほうから外れたものを消す。
+  // ドライブの失敗で途中でやめていても、進まなかった道の頭は控えに残っているので消えない
+  result.baseFailures = await storeDriveBases(input.local, input.writer, record, stash, true);
   return result;
 }
 
@@ -578,19 +733,24 @@ function commonSettingsBase(
 /** 作者が食い違いで選んだもの（今の「残す文を選ぶ」と同じ3つ。設計書5.10.4） */
 export type DriveConflictChoice = "local" | "remote" | "both";
 
+/** 選んだあとの結果。`baseFailures` は元の文の置き場へ置けなかったもの（選びは済んでいる） */
+export type DriveChoiceResult =
+  | { ok: true; record: DriveSyncRecord; baseFailures: DriveBaseFailure[] }
+  | { ok: false; reason: string };
+
 /**
- * 作者が食い違いを選んだあとの処理（合流。設計書5.10.6）。
+ * 作者が食い違いをファイルごとに選んだあとの処理（合流。設計書5.10.6・5.10.7）。
  *
- * **1回に比べるのは手元と相手1つ**（`peerDeviceId` で選ぶ。相手が1つなら省ける）。
- * 選んだ結果の系譜に、退けた側の中身も祖先として入れる（`joinDriveLineage`）。
- * 次に送るとほかの端末へ届き、同じ食い違いを2度訊かない。相手が2つ以上
- * 食い違っていれば、1つ選んだあと**受け取り直す**と、残りとの食い違いが
- * 新しい報告として出る（古い報告で続けて選ぶと断る）。
+ * **候補（手元と相手の全部）を並べて1回で選ぶ**（0.134.0。0.133.0 までは1回に相手1つで、
+ * 選ぶ → 受け取り直す → 選ぶ、だった）。選んだ結果の系譜に、選ばなかった候補の中身も
+ * 全部祖先として入れる（`joinDriveLineage`）。次に送るとほかの端末へ届き、同じ食い違いを
+ * 2度訊かない。行で合わせた報告（`merge` が在る）でも、ファイルごとに選んでよい。
  *
  * - `local`（手元を残す）：手元は書かない
- * - `remote`（相手を残す）：相手の中身を書く
- * - `both`（両方とも残す）：相手の中身を `sidePath`（`sideFileName` で作った
- *   別の名前）へ新しく置き、手元はそのまま
+ * - `remote`（相手を残す）：`peerDeviceId` の相手の中身を書く（相手が1つなら省ける）
+ * - `both`（両方とも残す）：残す候補（手元。`peerDeviceId` を渡せばその相手）を元の名前に、
+ *   **選ばなかった候補を別の名前で新しく置く**。別の名前は `sidePaths`（中身のハッシュ →
+ *   `sideFileName` で作った名前）。別の名前が1つで済むときは `sidePath` でもよい
  */
 export async function applyDriveConflictChoice(input: {
   report: DriveConflictReport;
@@ -598,18 +758,22 @@ export async function applyDriveConflictChoice(input: {
   record: DriveSyncRecord;
   writer: LocalWorkWriter;
   sidePath?: string;
+  sidePaths?: ReadonlyMap<string, string>;
   peerDeviceId?: string;
-}): Promise<{ ok: true; record: DriveSyncRecord } | { ok: false; reason: string }> {
+}): Promise<DriveChoiceResult> {
   const { decision } = input.report;
-  const remote =
+  const remotes = input.report.remotes;
+  const findRemote = (): DriveConflictRemote | undefined =>
     input.peerDeviceId === undefined
-      ? input.report.remotes.length === 1
-        ? input.report.remotes[0]
+      ? remotes.length === 1
+        ? remotes[0]
         : undefined
-      : input.report.remotes.find((side) =>
-          side.devices.some((device) => device.deviceId === input.peerDeviceId)
-        );
-  if (!remote) return { ok: false, reason: "どの端末の中身と比べたのかが分かりません" };
+      : remotes.find((side) => side.devices.some((device) => device.deviceId === input.peerDeviceId));
+
+  // 残す候補：相手を残すときと、相手を名指しした「両方とも残す」は相手。ほかは手元
+  const keepRemote = input.choice === "remote" || (input.choice === "both" && input.peerDeviceId !== undefined);
+  const kept = keepRemote ? findRemote() : undefined;
+  if (keepRemote && !kept) return { ok: false, reason: "どの端末の中身を残すのかが分かりません" };
 
   // 報告のあとで控えが変わっていれば（同じ報告でもう選んだ等）、古い報告では選ばない。
   // 報告の系譜は、同じ中身の相手の祖先を足したもの（`planDriveReceive`）なので
@@ -619,36 +783,269 @@ export async function applyDriveConflictChoice(input: {
     return { ok: false, reason: "前の選択のあとで控えが変わっています。受け取り直してください" };
   }
   const local = decision.local;
-  const record = cloneDriveSyncRecord(input.record);
-  const remoteText = decision.settings ? decodeUtf8(remote.bytes) : undefined;
-
-  if (input.choice === "remote") {
-    const outcome =
-      decision.localHash === null
-        ? await input.writer.create(decision.path, remote.bytes)
-        : await input.writer.replace(decision.path, remote.bytes, decision.localHash);
-    if (!outcome.ok) return { ok: false, reason: outcome.reason };
-    if (outcome.writtenHash !== remote.lineage.hash) {
-      return { ok: false, reason: "書いた中身が向こうの中身と合いません" };
-    }
-    setHead(record, decision.path, joinDriveLineage(remote.lineage, local ? [local] : []), remoteText);
-    return { ok: true, record };
-  }
-
   // 手元を残す。手元がこのファイルを知らない（相手どうしだけの食い違いで、手元に
   // 一度も無い）ときは、残す中身が無い
-  if (!local) return { ok: false, reason: "このパソコンにはこのファイルがありません" };
+  if (!kept && !local) return { ok: false, reason: "このパソコンにはこのファイルがありません" };
+
+  // 選ばなかった候補（中身のある相手と、相手を残すときの手元の中身）
+  const unchosen: { hash: string; bytes: Uint8Array }[] = remotes
+    .filter((side) => side !== kept)
+    .map((side) => ({ hash: side.lineage.hash, bytes: side.bytes }));
+  if (kept && decision.localHash !== null && input.report.localBytes !== undefined) {
+    unchosen.push({ hash: decision.localHash, bytes: input.report.localBytes });
+  }
+
+  // 両方とも残す：別の名前が全部そろっていなければ、何も書かずに断る
+  const sides: { path: string; bytes: Uint8Array }[] = [];
   if (input.choice === "both") {
-    if (!input.sidePath || !isSafeSyncPath(input.sidePath)) {
-      return { ok: false, reason: "両方とも残すための別の名前がありません" };
+    for (const item of unchosen) {
+      const sidePath = input.sidePaths?.get(item.hash) ?? (unchosen.length === 1 ? input.sidePath : undefined);
+      if (!sidePath || !isSafeSyncPath(sidePath) || sidePath === decision.path) {
+        return { ok: false, reason: "両方とも残すための別の名前がありません" };
+      }
+      sides.push({ path: sidePath, bytes: item.bytes });
     }
-    const outcome = await input.writer.create(input.sidePath, remote.bytes);
+    if (new Set(sides.map((side) => side.path)).size !== sides.length) {
+      return { ok: false, reason: "両方とも残すための別の名前が重なっています" };
+    }
+  }
+
+  const record = cloneDriveSyncRecord(input.record);
+  // 別の名前は新しく置くだけ（既にあれば書く口が断る）。元の名前を書き換える前に置く——
+  // 書き換えたあとで止まると、選ばなかった中身がどこにも残らないため
+  for (const side of sides) {
+    const outcome = await input.writer.create(side.path, side.bytes);
     if (!outcome.ok) return { ok: false, reason: outcome.reason };
   }
-  const localText =
-    decision.settings && input.report.localBytes !== undefined ? decodeUtf8(input.report.localBytes) : undefined;
-  setHead(record, decision.path, joinDriveLineage(local, [remote.lineage]), localText);
-  return { ok: true, record };
+
+  const stash: BaseStash = new Map();
+  if (kept) {
+    const outcome =
+      decision.localHash === null
+        ? await input.writer.create(decision.path, kept.bytes)
+        : await input.writer.replace(decision.path, kept.bytes, decision.localHash);
+    if (!outcome.ok) return { ok: false, reason: outcome.reason };
+    if (outcome.writtenHash !== kept.lineage.hash) {
+      return { ok: false, reason: "書いた中身が向こうの中身と合いません" };
+    }
+    const others = [...(local ? [local] : []), ...remotes.filter((side) => side !== kept).map((side) => side.lineage)];
+    setHead(
+      record,
+      decision.path,
+      joinDriveLineage(kept.lineage, others),
+      decision.settings ? decodeUtf8(kept.bytes) : undefined
+    );
+    stashBase(stash, decision.path, kept.lineage.hash, kept.bytes);
+  } else if (local) {
+    const localText =
+      decision.settings && input.report.localBytes !== undefined ? decodeUtf8(input.report.localBytes) : undefined;
+    setHead(record, decision.path, joinDriveLineage(local, remotes.map((side) => side.lineage)), localText);
+    if (decision.localHash !== null && input.report.localBytes !== undefined) {
+      stashBase(stash, decision.path, decision.localHash, input.report.localBytes);
+    }
+  }
+  for (const item of unchosen) stashBase(stash, decision.path, item.hash, item.bytes);
+  const baseFailures = await storeDriveBases(undefined, input.writer, record, stash, false);
+  return { ok: true, record, baseFailures };
+}
+
+/**
+ * 行で合わせた報告で、作者が同じ場所ごとに選んだあとの処理（設計書5.10.7）。
+ *
+ * `picks` は場所ごとに `report.merge.text.regions[i].options` の番号。全部の場所で
+ * 選び終えたら1回で書く（途中でやめたら呼ばない＝何も書かない）。書く前に、
+ * 合わせた文が元の文と候補だけから組まれていることをコードで確かめる
+ * （`verifyDriveMerge`）。期待ハッシュは報告を作ったときの手元の今で、そのあとで
+ * 作者が書いていれば書く口が断る。系譜は全部の候補を祖先に持ち、`gen` を全部より
+ * 1つ上げる（`joinDriveLineage`）。
+ */
+export async function applyDriveMergeChoice(input: {
+  report: DriveConflictReport;
+  picks: readonly number[];
+  record: DriveSyncRecord;
+  writer: LocalWorkWriter;
+}): Promise<DriveChoiceResult> {
+  const { decision, merge } = input.report;
+  if (!merge || decision.localHash === null) return { ok: false, reason: "行で合わせた報告ではありません" };
+  const current = localDriveLineage(input.record.lineage.get(decision.path), decision.localHash);
+  if (!stillCurrent(current, decision.local)) {
+    return { ok: false, reason: "前の選択のあとで控えが変わっています。受け取り直してください" };
+  }
+  const done = finishDriveMerge(merge, input.picks);
+  if (typeof done === "string") return { ok: false, reason: done };
+  if (done.hash !== decision.localHash) {
+    const outcome = await input.writer.replace(decision.path, done.bytes, decision.localHash);
+    if (!outcome.ok) return { ok: false, reason: outcome.reason };
+    if (outcome.writtenHash !== done.hash) return { ok: false, reason: "書いた中身が合わせた中身と合いません" };
+  }
+  const record = cloneDriveSyncRecord(input.record);
+  setHead(record, decision.path, done.lineage, undefined);
+  const stash: BaseStash = new Map();
+  stashBase(stash, decision.path, done.hash, done.bytes);
+  for (const candidate of merge.candidates) stashBase(stash, decision.path, candidate.hash, candidate.bytes);
+  const baseFailures = await storeDriveBases(undefined, input.writer, record, stash, false);
+  return { ok: true, record, baseFailures };
+}
+
+/** 行で読む文の復号。**UTF-8 として読めないものは合わせない**（Shift_JIS 等を壊さない） */
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+function decodeStrict(bytes: Uint8Array): string | undefined {
+  try {
+    return STRICT_UTF8.decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 食い違いを行で合わせる準備（設計書5.10.7 の1〜3）。合わせられなければ理由の文字列
+ * （呼び手はファイルごとの扱いへ回す）。何も書かない。
+ *
+ * - 候補：相手の中身全部と、手元の中身。**手元がどれかの相手の祖先なら手元は候補に
+ *   しない**——手元の直しはその相手に入っているので、手元を候補にすると、相手が
+ *   その後さらに直した所が「同じ場所」に見えて訊いてしまう（誤検出）
+ * - 元の文：手元と相手の全部の系譜に入っている中身のうち、いちばん新しく、置き場に
+ *   中身があるもの。「新しい」は、どの系譜でも頭からの位置の大きいほうで比べ、小さい順
+ *   （同じならハッシュの順）——台によらず同じ元の文を選ぶため。**候補の中身は元の文に
+ *   しない**（2台が同じ食い違いを別々に選ぶと、互いの中身を祖先に持つ。それを元の文に
+ *   すると片方が「変えていない」に見え、作者の選びが割れたことを機械が黙って決めてしまう）
+ */
+async function prepareDriveMerge(input: {
+  decision: Extract<DriveSyncDecision, { kind: "conflict" }>;
+  ours: Uint8Array | undefined;
+  remotes: readonly DriveConflictRemote[];
+  local: LocalWorkFiles;
+  storedBases: ReadonlySet<string>;
+  self: { deviceId: string; deviceName: string };
+}): Promise<DriveConflictMerge | string> {
+  const { decision, ours } = input;
+  if (!isDriveMergeTextPath(decision.path)) return "行で合わせられるファイル（.txt・.md）ではありません";
+  if (decision.local === null || decision.localHash === null || ours === undefined) {
+    return "このパソコンでは消したファイルです";
+  }
+  const localLineage = decision.local;
+
+  const candidates: DriveConflictMergeCandidate[] = [];
+  for (const remote of input.remotes) {
+    const text = decodeStrict(remote.bytes);
+    if (text === undefined) return "UTF-8 として読めない中身があります";
+    candidates.push({ hash: remote.lineage.hash, lineage: remote.lineage, devices: remote.devices, local: false, bytes: remote.bytes, text });
+  }
+  const ourText = decodeStrict(ours);
+  if (ourText === undefined) return "UTF-8 として読めない中身があります";
+  if (hasConflictMarkers(ourText)) return "このパソコンの中身に競合マーカーがあります";
+  const localIsCandidate = !input.remotes.some((remote) => compareDriveLineage(localLineage, remote.lineage) === "newer");
+  if (localIsCandidate) {
+    candidates.push({ hash: decision.localHash, lineage: localLineage, devices: [input.self], local: true, bytes: ours, text: ourText });
+  }
+  candidates.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+  if (candidates.some((candidate) => hasConflictMarkers(candidate.text))) return "競合マーカーのある中身があります";
+
+  // 元の文を選ぶ
+  const lineages = [localLineage, ...input.remotes.map((remote) => remote.lineage)];
+  const positions = lineages.map((lineage) => {
+    const map = new Map<string, number>();
+    [lineage.hash, ...lineage.ancestors].forEach((hash, index) => {
+      if (!map.has(hash)) map.set(hash, index);
+    });
+    return map;
+  });
+  const candidateHashes = new Set(candidates.map((candidate) => candidate.hash));
+  const age = (hash: string) => Math.max(...positions.map((map) => map.get(hash) as number));
+  const common = [...positions[0].keys()]
+    .filter((hash) => hash !== DRIVE_DELETED && !candidateHashes.has(hash) && positions.every((map) => map.has(hash)))
+    .sort((a, b) => age(a) - age(b) || (a < b ? -1 : a > b ? 1 : 0));
+  let base: { hash: string; text: string } | undefined;
+  for (const hash of common) {
+    if (!input.storedBases.has(hash)) continue;
+    const bytes = await input.local.readBase(hash);
+    // 名前と中身が合わない置き場は「元の文が無い」（直さない。壊れた元の文で合わせると原稿を壊す）
+    if (bytes === undefined || hashBytes(bytes) !== hash) continue;
+    const text = decodeStrict(bytes);
+    if (text === undefined) continue;
+    base = { hash, text };
+    break;
+  }
+  if (!base) return "元の文（共通の祖先の中身）が置き場にありません";
+
+  const merged = mergeDriveTexts({
+    base: base.text,
+    candidates: candidates.map((candidate) => ({ id: candidate.hash, text: candidate.text })),
+  });
+  if (merged.kind === "unmergeable") return merged.reason;
+
+  const firstEol = [base.text, ...candidates.map((candidate) => candidate.text)]
+    .map(driveTextEol)
+    .find((eol): eol is "\n" | "\r\n" => eol === "\n" || eol === "\r\n");
+  return {
+    baseHash: base.hash,
+    baseText: base.text,
+    eol: firstEol ?? "\n",
+    candidates,
+    localLineage,
+    text: merged,
+  };
+}
+
+/**
+ * 選んだ答えから書く中身と系譜を作る（設計書5.10.7 の6と守り）。外れたら理由の文字列。
+ *
+ * 合わせた中身が候補のどれかとバイトまで同じなら、その候補の系譜を残した側にする
+ * （新しいハッシュを作らない。作ると、それだけで系譜が分かれる）
+ */
+function finishDriveMerge(
+  merge: DriveConflictMerge,
+  picks: readonly number[]
+): { bytes: Uint8Array; hash: string; lineage: DriveLineage } | string {
+  const text = assembleDriveMerge(merge.text, picks);
+  if (text === undefined) return "選びの数か番号が、同じ場所の数と合いません";
+  const verified = verifyDriveMerge(merge.text, picks, {
+    base: merge.baseText,
+    candidates: merge.candidates.map((candidate) => ({ id: candidate.hash, text: candidate.text })),
+  });
+  if (verified !== true) return `合わせた結果の確かめに外れました（${verified}）`;
+  const bytes = new TextEncoder().encode(merge.eol === "\r\n" ? text.replace(/\n/g, "\r\n") : text);
+  const hash = hashBytes(bytes);
+  const all = [merge.localLineage, ...merge.candidates.filter((c) => !c.local).map((c) => c.lineage)];
+  const kept = merge.candidates.find((candidate) => candidate.hash === hash)?.lineage ?? merge.localLineage;
+  return { bytes, hash, lineage: joinDriveLineage(kept, all.filter((lineage) => lineage !== kept), hash) };
+}
+
+/** 置き場へ置く候補（中身のハッシュ → バイト）。本文だけ */
+type BaseStash = Map<string, Uint8Array>;
+
+function stashBase(stash: BaseStash, entry: string, hash: string, bytes: Uint8Array): void {
+  if (hash !== DRIVE_DELETED && isDriveMergeTextPath(entry)) stash.set(hash, bytes);
+}
+
+/**
+ * 元の文の置き場へ置き、`prune` なら系譜の新しいほうから外れたものを消す（設計書5.10.7）。
+ *
+ * 置くのは、控えの系譜の新しいほうから `DRIVE_BASE_KEEP` 個に入る中身だけ。
+ * 中身がハッシュと合わないものは置かない。置けなくても同期は止めない
+ * （次に食い違ったとき、行で合わせずにファイルごとに訊くだけ）
+ */
+async function storeDriveBases(
+  local: LocalWorkFiles | undefined,
+  writer: LocalWorkWriter,
+  record: DriveSyncRecord,
+  stash: BaseStash,
+  prune: boolean
+): Promise<DriveBaseFailure[]> {
+  const keep = driveBaseKeepSet(record, isDriveMergeTextPath);
+  const listed = new Set(local ? await local.listBases() : []);
+  const failures: DriveBaseFailure[] = [];
+  for (const [hash, bytes] of stash) {
+    if (!keep.has(hash) || listed.has(hash) || hashBytes(bytes) !== hash) continue;
+    const outcome = await writer.writeBase(hash, bytes);
+    if (outcome.ok) listed.add(hash);
+    else failures.push({ hash, reason: outcome.reason });
+  }
+  if (prune && local) {
+    for (const hash of listed) if (!keep.has(hash)) await writer.removeBase(hash);
+  }
+  return failures;
 }
 
 /** 設定資料を `decideSettingsConflict` の決めたとおりにする（相手が1つのとき） */

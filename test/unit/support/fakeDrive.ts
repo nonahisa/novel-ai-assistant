@@ -254,10 +254,19 @@ export function createFakeWork(initial: Record<string, string> = {}) {
   const refuse = new Set<string>();
   /** 書く口が中身の形を変える（改行を LF へ揃える）まね */
   let normalizeEol = false;
+  /**
+   * 元の文の置き場（設計書5.10.7。本物は `.aiwriter/drive-sync/bases/<端末ID>/<ハッシュ>`）。
+   * 作品の中身とは別に持つ（本物でも、作品の一覧・数え直しには入れない）
+   */
+  const bases = new Map<string, Uint8Array>();
+  /** 書く口が呼ばれた直前に動かす（合わせている間に作者が書いた、のまね） */
+  let beforeWrite: ((entry: string) => void) | undefined;
 
   const local: LocalWorkFiles = {
     list: async () => [...disk.keys()],
     read: async (entry) => disk.get(entry)?.slice(),
+    listBases: async () => [...bases.keys()],
+    readBase: async (hash) => bases.get(hash)?.slice(),
   };
 
   const put = (entry: string, bytes: Uint8Array): LocalWriteOutcome => {
@@ -270,6 +279,7 @@ export function createFakeWork(initial: Record<string, string> = {}) {
 
   const writer: LocalWorkWriter = {
     replace: async (entry, bytes, expectedLocalHash) => {
+      beforeWrite?.(entry);
       if (refuse.has(entry)) return { ok: false, reason: "未保存の変更があります" };
       const current = disk.get(entry);
       if (!current || hashBytes(current) !== expectedLocalHash) {
@@ -282,6 +292,14 @@ export function createFakeWork(initial: Record<string, string> = {}) {
       if (disk.has(entry)) return { ok: false, reason: "既にあります" };
       return put(entry, bytes);
     },
+    writeBase: async (hash, bytes) => {
+      // 本物は `atomicWriteFile` の `create`。名前が中身のハッシュなので、既にあれば同じ中身
+      if (!bases.has(hash)) bases.set(hash, bytes.slice());
+      return { ok: true, writtenHash: hashBytes(bytes) };
+    },
+    removeBase: async (hash) => {
+      bases.delete(hash);
+    },
   };
 
   return {
@@ -289,6 +307,10 @@ export function createFakeWork(initial: Record<string, string> = {}) {
     local,
     writer,
     refuse,
+    bases,
+    setBeforeWrite(next: ((entry: string) => void) | undefined) {
+      beforeWrite = next;
+    },
     setNormalizeEol(value: boolean) {
       normalizeEol = value;
     },

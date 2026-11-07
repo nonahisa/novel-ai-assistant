@@ -3,13 +3,20 @@ import * as path from "node:path";
 import { createDriveClient } from "../../../src/core/driveApi";
 import {
   applyDriveConflictChoice,
+  applyDriveMergeChoice,
   receiveFromDrive,
   sendToDrive,
   type DriveReceiveResult,
   type DriveSendResult,
 } from "../../../src/core/driveSyncEngine";
-import { DRIVE_LINEAGE_LIMIT } from "../../../src/core/driveSyncPlan";
-import { emptyDriveSyncRecord, type DriveSyncRecord } from "../../../src/core/driveSyncRecord";
+import { DRIVE_LINEAGE_LIMIT, isIgnoredSyncPath } from "../../../src/core/driveSyncPlan";
+import {
+  DRIVE_BASE_KEEP,
+  driveBasePath,
+  emptyDriveSyncRecord,
+  type DriveSyncRecord,
+} from "../../../src/core/driveSyncRecord";
+import { hashBytes } from "../../../src/core/hash";
 import { IGNORED_PATHS } from "../../../src/core/workRegistry";
 import { createFakeDrive, createFakeWork, type FakeDrive, type FakeWork } from "../support/fakeDrive";
 import { SRC, chainTo, relativeName, walkStaticImports } from "../support/importGraph";
@@ -47,6 +54,7 @@ function makeDevice(drive: FakeDrive, id: string, name: string, initial: Record<
         client,
         layout,
         local: work.local,
+        writer: work.writer,
         record: device.record,
         ignoredPaths: IGNORED_PATHS,
         now: new Date("2026-11-07T12:00:00.000Z"),
@@ -582,7 +590,9 @@ describe("3台・4台でそろえる（中身の系譜。0.133.0）", () => {
     }
   });
 
-  test("3台が同時に直す：1つずつ選ぶ（選ぶ→受け取り直す→選ぶ）。選び終えたらほかの2台は訊かれない", async () => {
+  // 0.134.0 で正解を変えた：0.133.0 は「1回に相手1つ」で、選ぶ→受け取り直す→もう一度訊く（2回目に
+  // 残りの1台で食い違い）だった。設計書5.10.7 で、3台以上は候補を並べて1回で選ぶ形にした
+  test("3台が同時に直す：候補を並べて1回で選ぶ。選び終えたらほかの2台は訊かれない", async () => {
     const drive = createFakeDrive();
     const [a, b, c] = devicesOn(drive, 3, { [EP1]: "元の文" });
     await syncAll([a, b, c]);
@@ -597,30 +607,21 @@ describe("3台・4台でそろえる（中身の系譜。0.133.0）", () => {
     countConflicts("3台：3台が同時に直した（1回目）", first, [EP1]);
     const report = first.conflicts[0];
     expect(report.remotes.map((side) => side.devices[0].deviceId)).toEqual(["note-c3d4", "tab-e5f6"]);
-    // 相手が2つのときは、どちらと比べたかを言わないと選ばない
+    // 1行の原稿を3台が直したので、同じ場所1つに3つの文が並ぶ
+    expect(report.merge?.text.regions.map((region) => region.options.length)).toEqual([3]);
+    // 相手が2つのとき、「相手を残す」はどの相手かを言わないと選ばない
+    expect(
+      await applyDriveConflictChoice({ report, choice: "remote", record: a.record, writer: a.work.writer })
+    ).toMatchObject({ ok: false });
+    await choose(a, report, "remote", "tab-e5f6");
+    expect(a.work.text(EP1)).toBe("C の文");
+    // 同じ報告でもう一度選ぼうとすると断る（受け取り直してから）
     expect(
       await applyDriveConflictChoice({ report, choice: "local", record: a.record, writer: a.work.writer })
     ).toMatchObject({ ok: false });
-    await choose(a, report, "local", "note-c3d4");
-    // 同じ報告でもう一度選ぼうとすると断る（受け取り直してから）
-    expect(
-      await applyDriveConflictChoice({
-        report,
-        choice: "local",
-        record: a.record,
-        writer: a.work.writer,
-        peerDeviceId: "tab-e5f6",
-      })
-    ).toMatchObject({ ok: false });
 
     const second = received(await a.receive());
-    countConflicts("3台：3台が同時に直した（2回目は残りの1台だけ）", second, [EP1]);
-    expect(second.conflicts[0].remotes.map((side) => side.devices[0].deviceId)).toEqual(["tab-e5f6"]);
-    await choose(a, second.conflicts[0], "remote");
-    expect(a.work.text(EP1)).toBe("C の文");
-
-    const third = received(await a.receive());
-    countConflicts("3台：3台が同時に直した（選び終えた）", third, []);
+    countConflicts("3台：3台が同時に直した（1回で選び終えた）", second, []);
     await a.send();
     for (const device of [b, c]) {
       const atPeer = received(await device.receive());
@@ -786,6 +787,381 @@ describe("消したファイル（3台）", () => {
   });
 });
 
+/** 段落を1行ずつ並べた原稿（間に空行なし）。n 行目（1から）を差し替える */
+const PARAS = ["一の段落。", "二の段落。", "三の段落。", "四の段落。", "五の段落。", "六の段落。", "七の段落。", "八の段落。"];
+function story(changes: Record<number, string | null> = {}, eol = "\n"): string {
+  const out: string[] = [];
+  PARAS.forEach((line, i) => {
+    const change = changes[i + 1];
+    if (change === undefined) out.push(line);
+    else if (change !== null) out.push(change);
+  });
+  return out.join(eol) + eol;
+}
+
+/**
+ * 場面ごとの「訊くべき場所の数」と「実際に訊いた場所の数」（設計書5.10.7）。
+ * 合わせた報告は場所の数、ファイルごとの報告は1か所と数える
+ */
+const placeTally: { scene: string; expected: number; actual: number }[] = [];
+function countPlaces(scene: string, result: DriveReceiveResult, expected: number) {
+  const actual =
+    result.kind === "received"
+      ? result.conflicts.reduce((sum, c) => sum + (c.merge ? c.merge.text.regions.length : 1), 0)
+      : 0;
+  placeTally.push({ scene, expected, actual });
+  expect(actual, scene).toBe(expected);
+}
+
+/** そろえた台を用意し、それぞれの台で書いてから、書いた台を全部送る */
+async function editedOn(count: number, edits: (Record<number, string | null> | undefined)[], eols: string[] = []) {
+  const drive = createFakeDrive();
+  const devices = devicesOn(drive, count, { [EP1]: story({}, eols[0] ?? "\n") });
+  await syncAll(devices);
+  devices.forEach((device, i) => {
+    const change = edits[i];
+    if (change) device.work.write(EP1, story(change, eols[i] ?? eols[0] ?? "\n"));
+  });
+  for (const [i, device] of devices.entries()) if (edits[i]) await device.send();
+  return { drive, devices };
+}
+
+/** 全部の台で受け取って送るを2周し、最後の1周で誰も書かず誰も訊かれないことを確かめる */
+async function settles(scene: string, devices: Device[]) {
+  for (let lap = 0; lap < 2; lap++) {
+    for (const device of devices) {
+      const result = received(await device.receive());
+      expect(result.conflicts, `${scene}（${device.id}）`).toEqual([]);
+      await device.send();
+    }
+  }
+  for (const device of devices) {
+    const result = received(await device.receive());
+    countPlaces(`${scene}：そろったあと（${device.id}）`, result, 0);
+    expect(result.written, `${scene}：往復しない（${device.id}）`).toEqual([]);
+  }
+  const texts = new Set(devices.map((device) => device.work.text(EP1)));
+  expect(texts.size, `${scene}：全部の台が同じ文`).toBe(1);
+}
+
+describe("場所が違えば合わせ、同じ場所だけ選ばせる（設計書5.10.7。0.134.0）", () => {
+  test("2台・別の段落：黙って合わせて書く。相手は合わせた文を受け取り、往復しない", async () => {
+    const { devices } = await editedOn(2, [{ 2: "二を A が直した。" }, { 5: "五を B が直した。" }]);
+    const [a, b] = devices;
+    const atA = received(await a.receive());
+    countPlaces("2台・別の段落", atA, 0);
+    expect(atA.merged).toMatchObject([{ path: EP1 }]);
+    expect(a.work.text(EP1)).toBe(story({ 2: "二を A が直した。", 5: "五を B が直した。" }));
+    await a.send();
+    const atB = received(await b.receive());
+    countPlaces("2台・別の段落（合わせた文を受け取る）", atB, 0);
+    expect(atB.written).toEqual([EP1]);
+    expect(b.work.text(EP1)).toBe(a.work.text(EP1));
+    await settles("2台・別の段落", [a, b]);
+  });
+
+  test("2台・別の段落を、2台が別々に合わせても同じ文・同じ系譜の頭になり、往復しない", async () => {
+    const { devices } = await editedOn(2, [{ 1: "一を A。" }, { 6: "六を B。" }]);
+    const [a, b] = devices;
+    const atA = received(await a.receive());
+    const atB = received(await b.receive());
+    countPlaces("2台が別々に合わせる（A）", atA, 0);
+    countPlaces("2台が別々に合わせる（B）", atB, 0);
+    expect(a.work.text(EP1)).toBe(story({ 1: "一を A。", 6: "六を B。" }));
+    expect(b.work.text(EP1)).toBe(a.work.text(EP1));
+    expect(a.record.lineage.get(EP1)?.hash).toBe(b.record.lineage.get(EP1)?.hash);
+    expect(a.record.lineage.get(EP1)?.gen).toBe(b.record.lineage.get(EP1)?.gen);
+    await settles("2台が別々に合わせる", [a, b]);
+  });
+
+  test("2台・同じ段落：その場所だけ選ばせる。選んで書けば相手は訊かれない", async () => {
+    const { devices } = await editedOn(2, [{ 3: "三を A が直した。", 1: "一を A。" }, { 3: "三を B が直した。" }]);
+    const [a, b] = devices;
+    const atA = received(await a.receive());
+    countPlaces("2台・同じ段落", atA, 1);
+    const report = atA.conflicts[0];
+    const merge = report.merge;
+    if (!merge) throw new Error("合わせた報告になっていません");
+    const [region] = merge.text.regions;
+    expect(region.baseLines).toEqual(["三の段落。"]);
+    // 選べる文ごとに、その文を持つ端末を添える（このパソコンも1つの候補）
+    const devicesOf = (index: number) =>
+      region.options[index].candidates.flatMap(
+        (hash) => merge.candidates.find((c) => c.hash === hash)?.devices.map((d) => d.deviceId) ?? []
+      );
+    const optionB = region.options.findIndex((option) => option.lines.join("\n") === "三を B が直した。");
+    expect(devicesOf(optionB)).toEqual(["note-c3d4"]);
+    expect(devicesOf(1 - optionB)).toEqual(["desk-a1b2"]);
+    // 選び終えるまで手元は書き換えない
+    expect(a.work.text(EP1)).toBe(story({ 3: "三を A が直した。", 1: "一を A。" }));
+
+    const chosen = await applyDriveMergeChoice({ report, picks: [optionB], record: a.record, writer: a.work.writer });
+    if (!chosen.ok) throw new Error(chosen.reason);
+    a.record = chosen.record;
+    // 合わせられた所（A の一の段落）は当たり、同じ場所は B の文
+    expect(a.work.text(EP1)).toBe(story({ 1: "一を A。", 3: "三を B が直した。" }));
+    // 同じ報告で2度選ばない
+    expect(
+      await applyDriveMergeChoice({ report, picks: [optionB], record: a.record, writer: a.work.writer })
+    ).toMatchObject({ ok: false });
+    await a.send();
+    const atB = received(await b.receive());
+    countPlaces("2台・同じ段落（選んだ結果が届く）", atB, 0);
+    expect(b.work.text(EP1)).toBe(a.work.text(EP1));
+    await settles("2台・同じ段落", [a, b]);
+  });
+
+  test("選びの数が場所の数と合わなければ選ばない", async () => {
+    const { devices } = await editedOn(2, [{ 3: "三を A。" }, { 3: "三を B。" }]);
+    const [a] = devices;
+    const atA = received(await a.receive());
+    countPlaces("選びの数が合わない", atA, 1);
+    const report = atA.conflicts[0];
+    expect(await applyDriveMergeChoice({ report, picks: [], record: a.record, writer: a.work.writer })).toMatchObject({
+      ok: false,
+    });
+    expect(await applyDriveMergeChoice({ report, picks: [5], record: a.record, writer: a.work.writer })).toMatchObject({
+      ok: false,
+    });
+    expect(a.work.text(EP1)).toBe(story({ 3: "三を A。" }));
+  });
+
+  test("2台・隣り合う段落は同じ場所として訊く（間に変わっていない行が無い）", async () => {
+    const { devices } = await editedOn(2, [{ 3: "三を A。" }, { 4: "四を B。" }]);
+    const atA = received(await devices[0].receive());
+    countPlaces("2台・隣り合う段落", atA, 1);
+  });
+
+  test("2台・片方が段落を消し、片方が直した：訊く。消すほうも選べる", async () => {
+    const { devices } = await editedOn(2, [{ 4: null }, { 4: "四を B が直した。" }]);
+    const [a, b] = devices;
+    const atA = received(await a.receive());
+    countPlaces("2台・消した×直した", atA, 1);
+    const report = atA.conflicts[0];
+    const remove = report.merge?.text.regions[0].options.findIndex((option) => option.lines.length === 0) ?? -1;
+    expect(remove).toBeGreaterThanOrEqual(0);
+    const chosen = await applyDriveMergeChoice({ report, picks: [remove], record: a.record, writer: a.work.writer });
+    if (!chosen.ok) throw new Error(chosen.reason);
+    a.record = chosen.record;
+    expect(a.work.text(EP1)).toBe(story({ 4: null }));
+    await settles("2台・消した×直した", [a, b]);
+  });
+
+  test("2台・同じ直しに加えて片方が別の段落も直した：訊かずに合わせる", async () => {
+    const { devices } = await editedOn(2, [{ 2: "二を直した。", 5: "五を A。" }, { 2: "二を直した。" }]);
+    const [a, b] = devices;
+    const atA = received(await a.receive());
+    countPlaces("2台・同じ直し＋別の段落", atA, 0);
+    expect(a.work.text(EP1)).toBe(story({ 2: "二を直した。", 5: "五を A。" }));
+    await settles("2台・同じ直し＋別の段落", [a, b]);
+  });
+
+  test("2台・改行の形が違う（A は CRLF、B は LF に変えて直した）：そろえて比べ、元の文の改行で書く", async () => {
+    const { devices } = await editedOn(2, [{ 2: "二を A。" }, { 5: "五を B。" }], ["\r\n", "\n"]);
+    const [a, b] = devices;
+    const atA = received(await a.receive());
+    countPlaces("2台・改行の形が違う", atA, 0);
+    expect(a.work.text(EP1)).toBe(story({ 2: "二を A。", 5: "五を B。" }, "\r\n"));
+    await settles("2台・改行の形が違う", [a, b]);
+  });
+
+  test("3台・別の段落：黙って合わせ、ほかの台は合わせた文を1回で受け取る", async () => {
+    const { devices } = await editedOn(3, [{ 1: "一を A。" }, { 3: "三を B。" }, { 5: "五を C。" }]);
+    const [a, b, c] = devices;
+    const atA = received(await a.receive());
+    countPlaces("3台・別の段落", atA, 0);
+    expect(atA.merged).toMatchObject([{ path: EP1, candidates: 3 }]);
+    expect(a.work.text(EP1)).toBe(story({ 1: "一を A。", 3: "三を B。", 5: "五を C。" }));
+    await a.send();
+    for (const device of [b, c]) {
+      const atPeer = received(await device.receive());
+      countPlaces(`3台・別の段落（${device.id}）`, atPeer, 0);
+      expect(device.work.text(EP1)).toBe(a.work.text(EP1));
+    }
+    await settles("3台・別の段落", devices);
+  });
+
+  test("3台・2台が同じ段落、1台は別の段落：同じ場所だけ訊き、別の段落は当てる", async () => {
+    const { devices } = await editedOn(3, [{ 2: "二を A。" }, { 2: "二を B。" }, { 5: "五を C。" }]);
+    const [a, b, c] = devices;
+    const atA = received(await a.receive());
+    countPlaces("3台・2台が同じ段落", atA, 1);
+    const report = atA.conflicts[0];
+    const region = report.merge?.text.regions[0];
+    expect(region?.options.map((option) => option.lines.join("\n")).sort()).toEqual(["二を A。", "二を B。"]);
+    const pickA = region?.options.findIndex((option) => option.lines.join("\n") === "二を A。") ?? -1;
+    const chosen = await applyDriveMergeChoice({ report, picks: [pickA], record: a.record, writer: a.work.writer });
+    if (!chosen.ok) throw new Error(chosen.reason);
+    a.record = chosen.record;
+    expect(a.work.text(EP1)).toBe(story({ 2: "二を A。", 5: "五を C。" }));
+    await a.send();
+    for (const device of [b, c]) {
+      const atPeer = received(await device.receive());
+      countPlaces(`3台・2台が同じ段落（選んだ結果が届く ${device.id}）`, atPeer, 0);
+    }
+    await settles("3台・2台が同じ段落", devices);
+  });
+
+  test("3台・3台とも同じ段落：1か所に3つの文を並べる", async () => {
+    const { devices } = await editedOn(3, [{ 2: "二を A。" }, { 2: "二を B。" }, { 2: "二を C。" }]);
+    const atA = received(await devices[0].receive());
+    countPlaces("3台・3台とも同じ段落", atA, 1);
+    expect(atA.conflicts[0].merge?.text.regions[0].options).toHaveLength(3);
+  });
+
+  test("3台・直していない台が、2台の別の段落の直しを合わせる", async () => {
+    const { devices } = await editedOn(3, [{ 2: "二を A。" }, { 5: "五を B。" }, undefined]);
+    const [, , c] = devices;
+    const atC = received(await c.receive());
+    countPlaces("3台・直していない台が合わせる", atC, 0);
+    expect(c.work.text(EP1)).toBe(story({ 2: "二を A。", 5: "五を B。" }));
+    await settles("3台・直していない台が合わせる", devices);
+  });
+
+  test("4台・別の段落を、4台が別々に合わせても同じ文になる（台を入れ替えても同じ）", async () => {
+    const { devices } = await editedOn(4, [{ 1: "一を A。" }, { 3: "三を B。" }, { 5: null }, { 7: "七を D。" }]);
+    for (const device of devices) {
+      const result = received(await device.receive());
+      countPlaces(`4台・別の段落（${device.id} が合わせる）`, result, 0);
+    }
+    const expected = story({ 1: "一を A。", 3: "三を B。", 5: null, 7: "七を D。" });
+    for (const device of devices) expect(device.work.text(EP1), device.id).toBe(expected);
+    await settles("4台・別の段落", devices);
+  });
+
+  test("4台・2か所でそれぞれ2台が同じ段落：2か所を訊く", async () => {
+    const { devices } = await editedOn(4, [{ 1: "一を A。" }, { 1: "一を B。" }, { 5: "五を C。" }, { 5: "五を D。" }]);
+    const atA = received(await devices[0].receive());
+    countPlaces("4台・2か所", atA, 2);
+  });
+
+  test("元の文が置き場に無い：ファイルごとに訊く（合わせない）", async () => {
+    const { devices } = await editedOn(2, [{ 2: "二を A。" }, { 5: "五を B。" }]);
+    const [a] = devices;
+    a.work.bases.clear();
+    const atA = received(await a.receive());
+    countPlaces("元の文が置き場に無い", atA, 1);
+    expect(atA.conflicts[0].merge).toBeUndefined();
+    expect(atA.conflicts[0].mergeSkipped).toContain("元の文");
+    expect(a.work.text(EP1)).toBe(story({ 2: "二を A。" }));
+  });
+
+  test("置き場の元の文が壊れている（中身が名前のハッシュと合わない）：元の文が無いとして訊く", async () => {
+    const { devices } = await editedOn(2, [{ 2: "二を A。" }, { 5: "五を B。" }]);
+    const [a] = devices;
+    for (const key of a.work.bases.keys()) a.work.bases.set(key, new TextEncoder().encode("壊れた中身"));
+    const atA = received(await a.receive());
+    countPlaces("元の文が壊れている", atA, 1);
+    expect(atA.conflicts[0].merge).toBeUndefined();
+    expect(a.work.text(EP1)).toBe(story({ 2: "二を A。" }));
+  });
+
+  test("候補に競合マーカーがある：合わせずファイルごとに訊く", async () => {
+    const drive = createFakeDrive();
+    const [a, b] = devicesOn(drive, 2, { [EP1]: story() });
+    await syncAll([a, b]);
+    a.work.write(EP1, story({ 2: "二を A。" }));
+    b.work.write(EP1, story({ 5: "<<<<<<< HEAD\n五を B。\n=======\n五。\n>>>>>>> other" }));
+    await b.send();
+    const atA = received(await a.receive());
+    countPlaces("候補に競合マーカー", atA, 1);
+    expect(atA.conflicts[0].merge).toBeUndefined();
+    expect(atA.conflicts[0].mergeSkipped).toContain("競合マーカー");
+  });
+
+  test("合わせている間に作者が書いたら書かない（期待ハッシュは合わせる直前に読んだ手元の今）", async () => {
+    const { devices } = await editedOn(2, [{ 2: "二を A。" }, { 5: "五を B。" }]);
+    const [a] = devices;
+    a.work.setBeforeWrite(() => a.work.write(EP1, story({ 2: "二を A。", 3: "三を作者が今書いた。" })));
+    const before = a.record.lineage.get(EP1);
+    const atA = received(await a.receive());
+    a.work.setBeforeWrite(undefined);
+    expect(atA.failures).toMatchObject([{ path: EP1 }]);
+    expect(atA.merged).toEqual([]);
+    expect(a.work.text(EP1)).toBe(story({ 2: "二を A。", 3: "三を作者が今書いた。" }));
+    expect(atA.record.lineage.get(EP1)).toEqual(before);
+    // 受け取り直すと、作者の今の文で合わせ直す（三の段落は作者、五の段落は B）
+    const again = received(await a.receive());
+    countPlaces("合わせている間に作者が書いた（受け取り直し）", again, 0);
+    expect(a.work.text(EP1)).toBe(story({ 2: "二を A。", 3: "三を作者が今書いた。", 5: "五を B。" }));
+  });
+
+  test("置き場には本文の系譜の新しいほうから8つだけを残し、外れたものは消す（設定資料は置かない）", async () => {
+    const drive = createFakeDrive();
+    const FILE = "設定/人物/char_001.json";
+    const [a, b] = devicesOn(drive, 2, { [EP1]: "第0版\n", [FILE]: "{}\n" });
+    await syncAll([a, b]);
+    for (let i = 1; i <= 12; i++) {
+      a.work.write(EP1, `第${i}版\n`);
+      await a.send();
+    }
+    const hashOf = (text: string) => hashBytes(new TextEncoder().encode(text));
+    const kept = [...a.work.bases.keys()];
+    expect(kept.length).toBeLessThanOrEqual(DRIVE_BASE_KEEP);
+    expect(kept).toContain(hashOf("第12版\n"));
+    expect(kept).not.toContain(hashOf("第0版\n"));
+    expect(kept).not.toContain(hashOf("{}\n"));
+    // 中身はハッシュになるバイトそのもの
+    for (const [hash, bytes] of a.work.bases) expect(hashBytes(bytes)).toBe(hash);
+    // 置き場の道は控えの置き場の下（送らない）
+    expect(isIgnoredSyncPath(driveBasePath("desk-a1b2", hashOf("x")), [])).toBe(true);
+  });
+
+  test("ファイルごと・3台以上：候補を並べて1回で選ぶ。「両方とも残す」は選ばなかった候補を別ファイルで残す", async () => {
+    const { devices } = await editedOn(3, [{ 2: "二を A。" }, { 2: "二を B。" }, { 2: "二を C。" }]);
+    const [a, b, c] = devices;
+    a.work.bases.clear();
+    const atA = received(await a.receive());
+    countPlaces("ファイルごと・3台", atA, 1);
+    const report = atA.conflicts[0];
+    expect(report.merge).toBeUndefined();
+    const sidePaths = new Map(
+      report.remotes.map((side) => [side.lineage.hash, `本文/第1話（${side.devices[0].deviceName}）.txt`])
+    );
+    // 別の名前が足りなければ選ばない
+    expect(
+      await applyDriveConflictChoice({ report, choice: "both", record: a.record, writer: a.work.writer })
+    ).toMatchObject({ ok: false });
+    const chosen = await applyDriveConflictChoice({
+      report,
+      choice: "both",
+      record: a.record,
+      writer: a.work.writer,
+      sidePaths,
+    });
+    if (!chosen.ok) throw new Error(chosen.reason);
+    a.record = chosen.record;
+    expect(a.work.text(EP1)).toBe(story({ 2: "二を A。" }));
+    expect(a.work.text("本文/第1話（端末2）.txt")).toBe(story({ 2: "二を B。" }));
+    expect(a.work.text("本文/第1話（端末3）.txt")).toBe(story({ 2: "二を C。" }));
+    await a.send();
+    for (const device of [b, c]) {
+      const atPeer = received(await device.receive());
+      countPlaces(`ファイルごと・3台（選んだ結果が届く ${device.id}）`, atPeer, 0);
+      expect(device.work.text(EP1)).toBe(story({ 2: "二を A。" }));
+    }
+  });
+});
+
+describe("見逃しと誤検出を数える（訊いた場所の数。設計書5.10.7）", () => {
+  test("場面ごとの訊くべき場所の数と、実際に訊いた数が全部一致する", () => {
+    let missed = 0;
+    let falsePositive = 0;
+    let expectedTotal = 0;
+    for (const { expected, actual } of placeTally) {
+      expectedTotal += expected;
+      if (actual < expected) missed += expected - actual;
+      if (actual > expected) falsePositive += actual - expected;
+    }
+    expect({ missed, falsePositive }).toEqual({ missed: 0, falsePositive: 0 });
+    // 場面が減って「全部通った」にならないよう、数も押さえる（0.134.0 で56場面、
+    // うち黙って合わせる・何も訊かない場面45、訊くべき場所の合計12）
+    expect(placeTally.length).toBeGreaterThanOrEqual(56);
+    expect(placeTally.filter((item) => item.expected === 0).length).toBeGreaterThanOrEqual(45);
+    expect(expectedTotal).toBeGreaterThanOrEqual(12);
+  });
+});
+
 describe("見逃しと誤検出を数える（往復の場面をまとめて）", () => {
   test("場面ごとの正解の食い違いと、実際に訊いたものが全部一致する", () => {
     let missed = 0;
@@ -797,10 +1173,12 @@ describe("見逃しと誤検出を数える（往復の場面をまとめて）"
       falsePositive += actual.filter((entry) => !expected.includes(entry)).length;
     }
     expect({ missed, falsePositive }).toEqual({ missed: 0, falsePositive: 0 });
-    // 場面が減って「全部通った」にならないよう、数も押さえる（0.133.0 で 3台・4台を足して60場面）
-    expect(tally.length).toBeGreaterThanOrEqual(60);
-    // 訊くべき食い違いが0件だと見逃しは測れない（0.133.0 で12件）
-    expect(expectedTotal).toBeGreaterThanOrEqual(12);
+    // 場面が減って「全部通った」にならないよう、数も押さえる（0.133.0 で 3台・4台を足して60場面。
+    // 0.134.0 で「3台が同時に直す」を1回で選ぶ形にし、2回目の受け取りが無くなって59場面）
+    expect(tally.length).toBeGreaterThanOrEqual(59);
+    // 訊くべき食い違いが0件だと見逃しは測れない（0.133.0 で12件。0.134.0 で同じ理由で11件。
+    // 合わせる場面の訊くべき場所は、下の「訊いた場所の数」で別に数える）
+    expect(expectedTotal).toBeGreaterThanOrEqual(11);
   });
 });
 
