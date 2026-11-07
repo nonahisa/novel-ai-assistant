@@ -194,6 +194,55 @@ export async function writeSite(work: WorkEntry, site: EditingSite): Promise<voi
   );
 }
 
+/**
+ * 編集用リポジトリを消したあと、送り先（`remoteUrl`）だけを `.aiwriter/editing.json` から外す
+ * （設計書5.7.5.4）。**ほかの項目は、知らないものも含めて残す**（`readSite` は2項目しか読まないので、
+ * `writeSite(readSite())` では知らない項目が落ちる）。読めない JSON は直さずに止める（実装ルール2）。
+ *
+ * @returns 外したら `true`。初めから無ければ `false`
+ */
+export async function forgetRemoteUrl(work: WorkEntry): Promise<boolean> {
+  const text = await readTextIfAny(sitePath(work));
+  if (text.trim().length === 0) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(
+      "`.aiwriter/editing.json` が読めないため、送り先の記録を外せませんでした（ファイルは直していません）。"
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      "`.aiwriter/editing.json` の形が違うため、送り先の記録を外せませんでした（ファイルは直していません）。"
+    );
+  }
+  const record = { ...(parsed as Record<string, unknown>) };
+  if (!("remoteUrl" in record)) return false;
+  delete record.remoteUrl;
+  await vscode.workspace.fs.writeFile(
+    path.toUri(sitePath(work)),
+    new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`)
+  );
+  return true;
+}
+
+/**
+ * この端末の、編集用フォルダーの場所の覚え（cache）を消す（設計書5.7.5.4）。
+ *
+ * 編集用リポジトリを消したあと、覚えが残っていると次の「編集者へ渡す」が古いフォルダーを
+ * 使い回し（`planShareSource` の `reuse`）、消えた送り先へ送ろうとして止まる。覚えを消せば
+ * 新しく作る道（`create`。置き場は `-2` などの新しいフォルダー）へ進む。**フォルダーそのものは
+ * 消さない**（作者のファイルが入っている）。覚えは決め直せる控えなので、消してよい
+ */
+export async function forgetPointer(work: WorkEntry): Promise<void> {
+  try {
+    await vscode.workspace.fs.delete(path.toUri(pointerPath(work)));
+  } catch {
+    // 初めから無い。消すものが無いだけ
+  }
+}
+
 /** 2つの GitHub の指し方が同じリポジトリか（大小・`.git`・形の違いを吸収する） */
 export function sameRepository(left: string, right: string): boolean {
   const a = parseGithubRepoRef(left);

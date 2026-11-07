@@ -42,6 +42,8 @@ import {
 import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
 import { rescueEditorGitignore } from "./editorGitignoreRescue";
 import { withProgress } from "../views/progress";
+import { isEditorMode } from "../core/actorContext";
+import { globalFetchTroubleMemory } from "./fetchTroubleMemory";
 
 // ツリーのバッジ用は core/gitSyncStatusText.ts へ切り出した。
 // このファイルは静的importするだけでNode専用（node:child_process）を
@@ -740,6 +742,24 @@ export class GitSyncMonitor implements vscode.Disposable {
           作品: work.title,
           詳細: result.detail ?? "（詳細なし）",
         });
+        // **編集者モードでは、作者が連携を解除した／置き場が消えた見込みだけ知らせる**
+        // （設計書5.7.5.4。作者の決定 2026-11-07）。見分けは GitHub の API で行い、
+        // 作品ごとに10分に1回まで・同じ作品で1回だけ。数え直しを API の返事で待たせない
+        if (isEditorMode()) {
+          const run = this.options.run;
+          void import("./editorFetchTrouble.js")
+            .then((trouble) => trouble.noticeAutoFetchFailure(work, run ? { run } : {}))
+            .catch((error: unknown) => {
+              useLogFile(work.folderPath);
+              logFailure("自動の取りに行きの失敗の見分け", {
+                作品: work.title,
+                詳細: error instanceof Error ? error.message : String(error),
+              });
+            });
+        }
+      } else if (isEditorMode()) {
+        // 届いたら忘れる。次にまた届かなくなったら、また知らせる
+        void globalFetchTroubleMemory.clear(work.id);
       }
       // 取り込んだぶんを反映するので読み直す。**一巡で覚えた取り寄せ前の
       // 読みは捨てる**（上流の位置が変わり、遅れの数が古くなる）

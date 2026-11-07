@@ -27,6 +27,7 @@ import { withProgress } from "../views/progress";
 import { notifyDone, whenNoticePicked } from "../views/notify";
 import { findAction } from "../core/actionTree";
 import { CHOOSE_TEXT_TO_KEEP } from "../core/gitSyncMenuText";
+import { globalFetchTroubleMemory } from "./fetchTroubleMemory";
 
 /**
  * 校閲を終えて、作者へ返す（編集者モード専用。作者の裁定、2026-10-28）。
@@ -47,6 +48,13 @@ export interface FinishReviewDeps {
   confirm?: (summary: { locks: number; proposals: number }) => Promise<boolean>;
   /** 誰の名前で鍵を押さえていたか */
   whoAmI?: (work: WorkEntry) => Promise<string>;
+  /**
+   * 送れなかったときの理由の見分けと知らせ（試験の差し替え口）。省けば GitHub の API で
+   * 見分ける（`editorFetchTrouble.ts`）。知らせを出したら `shown: true`
+   */
+  noticeFetchTrouble?: (
+    work: WorkEntry
+  ) => Promise<{ trouble: "revoked" | "offline" | "unknown"; shown: boolean }>;
 }
 
 export type FinishReviewResult =
@@ -56,7 +64,12 @@ export type FinishReviewResult =
   | { kind: "unmerged" }
   | { kind: "bodyChanged"; files: string[] }
   | { kind: "cancelled" }
-  | { kind: "failed"; detail: string };
+  | {
+      kind: "failed";
+      detail: string;
+      /** GitHub の API で見分けた理由（専用の知らせを出したときだけ） */
+      trouble?: "revoked" | "offline" | "unknown";
+    };
 
 /** 本文の書き換えを見つけたときの知らせのボタン（VS Code のソース管理を開く） */
 export const OPEN_SOURCE_CONTROL = "ソース管理を開く";
@@ -189,10 +202,39 @@ export async function finishReviewAndReturn(
       }
     }
 
-    return publishLedgerQuietly(work, "校閲を終えて返す", run);
+    return runSerialized(editingQueueKey(work.folderPath), () =>
+      publishLedgerResult(work, "校閲を終えて返す", run)
+    );
   });
-  if (done) return fail(work, done);
+  if (done) {
+    // **GitHub とのやり取りで止まったなら、理由を GitHub の API で見分けて知らせる**
+    // （設計書5.7.5.4。作者の決定 2026-11-07）。git の文はログへだけ残し、画面へは出さない。
+    // 分からなければ今までの文のまま
+    if (done.remote) {
+      const notice =
+        deps.noticeFetchTrouble ??
+        (async (target: WorkEntry) =>
+          (await import("./editorFetchTrouble.js")).noticeManualFetchFailure(target, { run }));
+      try {
+        const { shown, trouble } = await notice(work);
+        if (shown) {
+          useLogFile(work.folderPath);
+          logFailure("校閲を終えて返す", { 作品: work.title, 詳細: done.detail });
+          return { kind: "failed", detail: done.detail, trouble };
+        }
+      } catch (error) {
+        useLogFile(work.folderPath);
+        logFailure("校閲を終えて返す：受け取れなかった理由の見分け", {
+          作品: work.title,
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return fail(work, done.detail);
+  }
 
+  // 届いたので、「置き場に届きません」の覚えを消す（次にまた届かなくなったら、また知らせる）
+  await globalFetchTroubleMemory.clear(work.id);
   useLogFile(work.folderPath);
   logStep(`校閲を終えて返した（${work.title}／鍵 ${mine.length}件・提案 ${proposals}件）`);
   notifyDone(`校閲を終えて、提案 ${proposals} 件を作者へ返しました。`);
@@ -247,6 +289,24 @@ export async function publishLedger(
   message: string,
   run: GitCommandRunner = runGit
 ): Promise<string | undefined> {
+  return (await publishLedgerResult(work, message, run))?.detail;
+}
+
+/**
+ * 台帳だけを記録して送った失敗。`remote` は GitHub とのやり取り（送信・合わせ直しの取り寄せ）で
+ * 止まったか——手元の記録の失敗まで「ネットにつながっていない」と見分けに回さないため
+ */
+interface PublishFailure {
+  detail: string;
+  remote: boolean;
+}
+
+async function publishLedgerResult(
+  work: WorkEntry,
+  message: string,
+  run: GitCommandRunner
+): Promise<PublishFailure | undefined> {
+  const local = (detail: string): PublishFailure => ({ detail, remote: false });
   // **頭で、本文などの未記録の変更が無いか確かめる**（「返す」の確認と同じ検査）。
   // 「校閲の範囲を知らせる」など、ほかの入口から呼ばれても、台帳の外には触れない
   const working = await run(
@@ -254,27 +314,29 @@ export async function publishLedger(
     work.folderPath,
     15_000
   );
-  if (working.code !== 0) return "作業フォルダーの状態を読めませんでした";
+  if (working.code !== 0) return local("作業フォルダーの状態を読めませんでした");
   const outside = changesOutsideLedger(parseStatusPorcelainPaths(working.stdout));
   if (outside.length > 0) {
-    return `本文などに未記録の変更があるため、送りませんでした（${outside.slice(0, 3).join("、")}）`;
+    return local(
+      `本文などに未記録の変更があるため、送りませんでした（${outside.slice(0, 3).join("、")}）`
+    );
   }
 
   const committed = await commitLedger(work, message, run);
-  if (committed) return committed;
+  if (committed) return local(committed);
 
   let sent = await push(work.folderPath, run);
   if (!sent.ok && (await pushWasRejected(work.folderPath, run))) {
     logStep(`送信が断られたので、台帳を混ぜて合わせ直して送り直す（${work.title}）`);
     // 台帳3本以外に変更か送れていない記録があれば、reset せずに止める（黙って消さない）
     const reconciled = await reconcileDiverged(work.folderPath, run, { ledgerOnly: true });
-    if (!reconciled.ok) return reconciled.detail;
+    if (!reconciled.ok) return { detail: reconciled.detail, remote: true };
     const again = await commitLedger(work, message, run);
-    if (again) return again;
+    if (again) return local(again);
     sent = await push(work.folderPath, run);
   }
   if (!sent.ok) {
-    return `送信に失敗しました: ${sent.detail ?? "（詳細なし）"}`;
+    return { detail: `送信に失敗しました: ${sent.detail ?? "（詳細なし）"}`, remote: true };
   }
   return undefined;
 }

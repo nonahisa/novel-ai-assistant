@@ -688,6 +688,27 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・GitHub で編集者の書き込みの権利を外す\n\n" +
               "作者モードで使う。",
           },
+          /*
+            解除の終わりに訊くのに加え、あとから消す入口（作者の決定 2026-11-07。設計書5.7.5.4）。
+            決めていない提案・校閲中の印・解除前なら消さずに理由を出す
+          */
+          {
+            kind: "action",
+            command: "novelai.deleteEditingRepository",
+            // メニューの幅（全角9字）に収めるため「編集用」を外した。小分類「編集者連携」の中に
+            // あるので、作品の書庫のリポジトリとは取り違えない見込み（作者の確認待ち）。
+            // 確認の窓では「編集用のリポジトリ（owner/repo）」と名前まで書く
+            label: "リポジトリを消す",
+            note: "編集用",
+            icon: "trash",
+            requiresWork: true,
+            shownInModes: ["author"],
+            detail:
+              "編集者との連携を解除したあとに、GitHub の編集用リポジトリを消す\n\n" +
+              "・消すと元に戻せない\n\n" +
+              "・作品の原稿・設定資料と、このパソコンの編集用フォルダーは消さない\n\n" +
+              "・決めていない提案や校閲中の印が残っていれば、消さずに理由を出す",
+          },
           {
             kind: "action",
             command: "novelai.reviewProposals",

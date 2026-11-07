@@ -534,6 +534,60 @@ describe("編集者モードの保存・同期", () => {
   });
 
   /**
+   * 理由を GitHub の API で見分けたとき（設計書5.7.5.4。作者の決定 2026-11-07「分けて知らせる」）。
+   * 「同期するものはありませんでした。」で始めず、専用の知らせ（［この作品の編集を終える］付き）を出す
+   */
+  test("置き場に届かないと分かったら、専用の知らせだけを出す。見分けは取りに行けなかった作品だけ", async () => {
+    const unreachable: GitCommandRunner = async (args, cwd, timeoutMs, options) => {
+      if (args[0] === "fetch") {
+        calls.push(args);
+        return { code: 128, stdout: "", stderr: "remote: Repository not found." };
+      }
+      if (args[0] === "rev-list") {
+        calls.push(args);
+        return { code: 0, stdout: "0\t0", stderr: "" };
+      }
+      return editorCopy(args, cwd, timeoutMs, options);
+    };
+    const diagnosed: string[] = [];
+    const troubles: Array<{ title: string; trouble: string }> = [];
+    await syncAllWorks({
+      registry: copyRegistry,
+      monitor,
+      run: unreachable,
+      editor: true,
+      diagnoseFetch: async (work) => {
+        diagnosed.push(work.title);
+        return "revoked";
+      },
+      showFetchTrouble: (work, trouble) => troubles.push({ title: work.title, trouble }),
+    });
+
+    expect(diagnosed).toEqual(["預かった作品"]);
+    expect(troubles).toEqual([{ title: "預かった作品", trouble: "revoked" }]);
+    expect(shown.join("\n")).not.toContain("同期するものはありませんでした。");
+  });
+
+  test("見分けて分からなかったときは、今までの「受け取れませんでした」のまま", async () => {
+    const offline: GitCommandRunner = async (args, cwd, timeoutMs, options) => {
+      if (args[0] === "fetch") return { code: 128, stdout: "", stderr: "fatal: unable to access" };
+      if (args[0] === "rev-list") return { code: 0, stdout: "0\t0", stderr: "" };
+      return editorCopy(args, cwd, timeoutMs, options);
+    };
+    const troubles: string[] = [];
+    await syncAllWorks({
+      registry: copyRegistry,
+      monitor,
+      run: offline,
+      editor: true,
+      diagnoseFetch: async () => "unknown",
+      showFetchTrouble: (_work, trouble) => troubles.push(trouble),
+    });
+    expect(troubles).toEqual([]);
+    expect(shown.join("\n")).toContain("GitHub から受け取れませんでした");
+  });
+
+  /**
    * 作者の側と分かれているとき（0.122.0 の実機確認の項目。e2e/editorModeSaveSyncDiverged で
    * 見つけた不具合）。計画の段で外した置き場は結果（`outcome.diverged`）を持たないので、
    * 次の手を結果からしか拾わないと、知らせにボタンが1つも付かなかった

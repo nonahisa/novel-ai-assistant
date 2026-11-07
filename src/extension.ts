@@ -574,6 +574,7 @@ import {
   globalDecisionMemory,
   rememberDecisionMemory,
 } from "./features/decisionMemory";
+import { rememberFetchTroubleMemory } from "./features/fetchTroubleMemory";
 import {
   primeEditorProposals,
   rememberProposalPanel,
@@ -3369,6 +3370,8 @@ export async function activate(
   rememberProposalPanel(proposalPanel);
   // 編集者モードで、同期で届いた作者の採否を二度知らせないための覚え（作者の判断 2026-11-01）
   rememberDecisionMemory(verifiedState(context.globalState));
+  // 編集者モードで、「置き場に届きません」を同じ作品で二度知らせないための覚え（設計書5.7.5.4）
+  rememberFetchTroubleMemory(verifiedState(context.globalState));
   context.subscriptions.push(
     // 下段の面。**既定では出さない**（package.json の `when` が設定
     // `novelai.proposals.showInBottomPanel` を見る）。出したときのために登録は残す
@@ -8387,6 +8390,24 @@ export async function activate(
           "./features/revokeEditorAccess.js"
         );
         await revokeEditorAccessFlow(work);
+      }
+    ),
+    // 編集用リポジトリを GitHub から消す（作者モード専用。設計書5.7.5.4、作者の決定 2026-11-07）
+    registerCommand(
+      "novelai.deleteEditingRepository",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        if (!canRunProcesses()) {
+          vscode.window.showWarningMessage(
+            describeProcessesBlocked("novelai.deleteEditingRepository")
+          );
+          return;
+        }
+        const { deleteEditingRepositoryFlow } = await import(
+          "./features/deleteEditingRepository.js"
+        );
+        await deleteEditingRepositoryFlow(work);
       }
     ),
     // 校閲を終えて返す（編集者モード専用）

@@ -987,6 +987,8 @@ describe("校正・校閲の並び", () => {
       "novelai.finishReviewAndReturn",
       "novelai.viewEditorProposals",
       "novelai.revokeEditorAccess",
+      // 解除のあとに編集用リポジトリを消す（作者モードだけ。設計書5.7.5.4、2026-11-07）
+      "novelai.deleteEditingRepository",
       "novelai.reviewProposals",
     ]);
 
