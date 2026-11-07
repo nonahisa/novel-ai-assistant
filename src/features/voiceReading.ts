@@ -69,6 +69,7 @@ import {
   VOICE_CAST_CHUNK_CHARS,
   VOICE_CAST_CONTEXT_AFTER_CHARS,
   VOICE_CAST_CONTEXT_BEFORE_CHARS,
+  VOICE_CAST_FLOW_ENABLED,
   VOICE_CAST_FLOW_MAX,
   VOICE_CAST_MAX_PEOPLE,
   VOICE_CAST_VERSION,
@@ -514,19 +515,28 @@ function dropSummary(dropped: ReadonlyArray<{ reason: string; item: unknown }>):
  *    はっきり書いてある台詞は、コードで話者を決めておく（案 A。1段目で訊かない）
  * 2. 区切りごとに2段で訊く（案 B。版1.3）：1段目は話者だけ、2段目は感情と強さだけ。
  *    訊く番号が無い区切り（全部コードで決まった）は1段目を呼ばない
- *    1段目には、前の区切りまでに決まった話者の流れ（名前だけ。直前の5件まで）を添える
- *    （案 C。版1.4）。流れは前の区切りの答えで決まるので、**区切りを話の順に1つずつ訊く**
+ *    印（`VOICE_CAST_FLOW_ENABLED`。製品の既定は切る。0.142.2）を入れたときだけ、1段目に
+ *    前の区切りまでに決まった話者の流れ（名前だけ。直前の5件まで）を添える（案 C。版1.4）。
+ *    流れは前の区切りの答えで決まるので、**区切りを話の順に1つずつ訊く**
  * 3. 段ごとに、**内容ハッシュ＋プロバイダID＋モデル名＋版＋段**（1段目は添えた流れも）で
  *    控えを引く（実装ルール4）。当たった段は送らない
  * 4. 送る前に台詞の数・呼ぶ回数（段ごとの内訳）・字数を示して確かめる（有料なら料金の確認）
  * 5. 答えを段ごとに検算し、**作者が直した行は残して**AIの行だけ入れ替える
  *
  * 1つでも段が失敗・中止したら書き換えない（済んだ段は控えにあるので、
- * 押し直すと失敗した段から送る）。1段目が失敗したら、それより後ろの区切りの1段目は
- * 送らない（流れが決まらず、押し直したときに頼みが変わって送り直しになるため）。
+ * 押し直すと失敗した段から送る）。流れを添えるときだけ、1段目が失敗したらそれより後ろの
+ * 区切りの1段目は送らない（流れが決まらず、押し直したときに頼みが変わって送り直しになるため）。
+ * 流れを添えないとき（既定）は、区切りの頼みが前の答えに左右されないので、失敗しても後ろを送る。
+ *
+ * `options.flow` は印の上書き（テスト用）。渡さなければ `VOICE_CAST_FLOW_ENABLED` に従う。
  */
-export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry): Promise<void> {
+export async function runVoiceCast(
+  target: VoiceCastTarget,
+  registry: AIRegistry,
+  options?: { flow?: boolean }
+): Promise<void> {
   const { work } = target;
+  const useFlow = options?.flow ?? VOICE_CAST_FLOW_ENABLED;
   useLogFile(work.folderPath);
 
   if (castDialogues(target.text).length === 0) {
@@ -598,14 +608,16 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
     p: Prepared,
     history: ReadonlyArray<string | null>
   ): { request: VoiceCastStageRequest; hash: string } | undefined => {
-    const flow = castFlowNames(history, nameOf, VOICE_CAST_FLOW_MAX);
+    // 流れを添えないときは、流れの無い区切りと同じ頼み・同じ鍵（版1.3 と同じ形）にする
+    const flow = useFlow ? castFlowNames(history, nameOf, VOICE_CAST_FLOW_MAX) : [];
     const request = voiceCastStageRequests(p.chunk, p.people, { flow }).speaker;
     return request ? { request, hash: stageCacheHash("speaker", p.chunk, p.people, flow) } : undefined;
   };
 
   // 送る段を数える（確認の窓のため）。控えに当たる区切りが続く間は、流れも控えから組める。
-  // **最初に当たらない1段目より後ろの1段目は、前の答えが出るまで頼みが決まらない**ので、
-  // 「送るかもしれない」として数える（上限。前と同じ答えが返れば、控えに当たって減る）
+  // 流れを添えるときは、**最初に当たらない1段目より後ろの1段目は、前の答えが出るまで頼みが
+  // 決まらない**ので、「送るかもしれない」として数える（上限。前と同じ答えが返れば、控えに
+  // 当たって減る）。流れを添えないとき（既定）は頼みが前の答えに左右されないので、正確に数える
   let speakerCalls = 0;
   let speakerMaybe = 0;
   let emotionCalls = 0;
@@ -625,7 +637,7 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
             aiSpeakers = cachedSpeakers(cached.items, p.chunk, p.people);
           } else {
             speakerCalls++;
-            flowKnown = false;
+            if (useFlow) flowKnown = false;
             chars += sentChars("speaker", p.chunk);
             pendingChunks.add(p.chunk);
           }
@@ -697,8 +709,8 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
       const controller = new AbortController();
       token.onCancellationRequested(() => controller.abort());
       logStep(
-        `台詞の話者と感情の推定を開始: ${work.title} / 最大${plannedCalls}回（2段に分けて訊く・` +
-          `話者は前の区切りの流れを添えて順に訊く） / ` +
+        `台詞の話者と感情の推定を開始: ${work.title} / ${speakerMaybe > 0 ? "最大" : ""}${plannedCalls}回` +
+          `（2段に分けて訊く${useFlow ? "・話者は前の区切りの流れを添えて順に訊く" : ""}） / ` +
           `${resolved.provider.displayName} / ${resolved.model} / v${VOICE_CAST_VERSION}`
       );
 
@@ -770,7 +782,8 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
                 return;
               }
               if (items) aiSpeakers = cachedSpeakers(items, p.chunk, p.people);
-              else speakerBlocked = true;
+              // 止めるのは流れを添えるときだけ。添えないなら後ろの頼みは変わらないので送ってよい
+              else if (useFlow) speakerBlocked = true;
             }
           }
         }

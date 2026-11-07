@@ -23,6 +23,7 @@ import {
   VOICE_CAST_CHUNK_CHARS,
   VOICE_CAST_CONTEXT_AFTER_CHARS,
   VOICE_CAST_CONTEXT_BEFORE_CHARS,
+  VOICE_CAST_FLOW_ENABLED,
   VOICE_CAST_FLOW_MAX,
   VOICE_CAST_SYSTEM_PROMPT,
   VOICE_CAST_VERSION,
@@ -52,9 +53,11 @@ import { OLLAMA_ENDPOINT } from "./support/liveEnv";
  *   two では「1段目だけの話者の当たり」と「2段で通した当たり」を並べて出す。
  *
  *   1段目に前の区切りの話者の流れを添えるか（案 C。版1.4）は VC_FLOW で切り替える：
- *     on  … 製品と同じ。直前の区切りまでに決まった話者（コードで決めたもの＋1段目の答えの
- *           検算を通ったもの）の名前を、直前の VOICE_CAST_FLOW_MAX 件まで添える。既定
+ *     on  … 直前の区切りまでに決まった話者（コードで決めたもの＋1段目の答えの
+ *           検算を通ったもの）の名前を、直前の VOICE_CAST_FLOW_MAX 件まで添える
+ *           （製品の印 VOICE_CAST_FLOW_ENABLED を上書きして添える）
  *     off … 流れを添えない（版1.3 と同じ頼み）。同じ VC_STAGES・同じ正解で比べる
+ *   既定は製品の印に合わせる（0.142.2 からは off。2026-11-08 の測定で取り違えが増えたため）。
  *   VC_STAGES=one では使わない。報告は cast-report-<VC_STAGES>-flow<on|off>.md に分けて書く。
  *
  *   $env:VC_PHASE = "cast"; $env:VC_STAGES = "two"
@@ -318,8 +321,8 @@ const STAGES = (process.env.VC_STAGES ?? "two").trim().toLowerCase();
 if (PHASE === "cast" && !["one", "two", "speaker"].includes(STAGES)) {
   throw new Error(`VC_STAGES は one・two・speaker のどれかにしてください（${STAGES}）`);
 }
-/** 1段目に前の区切りの話者の流れを添えるか（案 C。版1.4。既定は製品と同じ on） */
-const FLOW = (process.env.VC_FLOW ?? "on").trim().toLowerCase();
+/** 1段目に前の区切りの話者の流れを添えるか（案 C。版1.4。既定は製品の印と同じ） */
+const FLOW = (process.env.VC_FLOW ?? (VOICE_CAST_FLOW_ENABLED ? "on" : "off")).trim().toLowerCase();
 if (PHASE === "cast" && !["on", "off"].includes(FLOW)) {
   throw new Error(`VC_FLOW は on・off のどちらかにしてください（${FLOW}）`);
 }
