@@ -403,7 +403,11 @@ import {
 import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
-import { hasUnsavedChanges } from "./core/textFile";
+import { getOpenDocumentText, hasUnsavedChanges, readTextFile } from "./core/textFile";
+import { buildReadingPlan, type ReadingSentence } from "./core/readAloud";
+import { notationModeFor } from "./core/manuscriptRender";
+import { mergeReadingSpans } from "./core/imeReading";
+import type { Mp3EncoderFactory, Mp3EncoderLike } from "./core/mp3Encode";
 import {
   PROPOSALS_VIEW_ID,
   ProposalPanel,
@@ -735,6 +739,41 @@ const READ_ALOUD_ENGINE_KEY = "novelai.readAloud.engine";
 /** 人物の声の実体（使うときに初めて読む。起動を重くしない） */
 function loadVoiceReading(): Promise<typeof import("./features/voiceReading.js")> {
   return import("./features/voiceReading.js");
+}
+
+/**
+ * 人物の声で音声に書き出す（設計書6.42.4）の実体。朗読と同じく使うときに読む。
+ * 原稿エディターの列と、作品一覧の話の右クリックの2つの入口から呼ぶ
+ */
+function loadVoiceExport(): Promise<typeof import("./features/voiceExport.js")> {
+  return import("./features/voiceExport.js");
+}
+
+/** ブラウザ版で音声に書き出せない理由（朗読と同じく、手元のエンジンに届かない） */
+const VOICE_EXPORT_BROWSER_REASON =
+  "ブラウザ版の VS Code からは、この PC で動く音声合成のエンジン（AivisSpeech・VOICEVOX）に届かないので、音声に書き出せません。手元の VS Code で開くと使えます。";
+
+/** 編集者モードで呼ばれたときの理由（作者の機能。画面と右クリックでは出していない） */
+const VOICE_EXPORT_EDITOR_REASON =
+  "人物の声で音声に書き出すのは作者の機能です。編集者モードでは使えません。";
+
+/**
+ * MP3 の変換の部品を読む（設計書6.42.4）。**拡張機能の束に入れず、`dist/lame.js` を
+ * 使うときに読む**——LAME（LGPL-3.0）を別のファイルのまま配り、差し替えられるようにするため
+ * （`esbuild.js` の `lame`）。`require` に渡すのは文字列の変数なので、esbuild は束ねない
+ */
+function mp3EncoderLoader(extensionPath: string): () => Promise<Mp3EncoderFactory> {
+  return async () => {
+    const file = path.join(extensionPath, "dist", "lame.js");
+    const loaded = require(file) as {
+      Mp3Encoder?: new (channels: number, sampleRate: number, kbps: number) => Mp3EncoderLike;
+    };
+    const Encoder = loaded.Mp3Encoder;
+    if (typeof Encoder !== "function") {
+      throw new Error(`MP3 の変換の部品（${file}）を読めませんでした`);
+    }
+    return (channels, sampleRate, kbps) => new Encoder(channels, sampleRate, kbps);
+  };
 }
 
 /**
@@ -1940,6 +1979,100 @@ export async function activate(
   };
 
   /**
+   * 人物の声で読む文の計画（設計書6.42.3・6.42.4）。**原稿エディターの［▶ 読む］と同じ重ね方**
+   * ——記法・読みの辞書・設定資料の名前の読み・台詞の境目で切る——にする。
+   * 書き出しの入口（列と右クリック）はどちらもここを通す。違う作り方にすると、
+   * 画面で聞いた読みと書き出した音の読みがずれる
+   */
+  const voiceSentencesFor = async (
+    work: WorkEntry,
+    filePath: string,
+    text: string
+  ): Promise<ReadingSentence[]> => {
+    const { readingDictionarySummary } = await import("./features/readingDictionary.js");
+    const dictionary = await readingDictionarySummary({ work, episodePath: filePath, text });
+    // 名前の読みが取れなくても止めない（朗読と同じ扱い。記録だけ残す）
+    let names: Awaited<ReturnType<typeof import("./features/imeReadings.js")["imeNameReadingSpans"]>>["spans"] = [];
+    try {
+      const { imeNameReadingSpans } = await import("./features/imeReadings.js");
+      imeReadingsLoaded = true;
+      const result = await imeNameReadingSpans(work, text);
+      if (result.problem) {
+        useLogFile(work.folderPath);
+        logLine(`音声に書き出す：IMEの読みの控えを使えませんでした（${result.problem}）`);
+      }
+      names = result.spans;
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logLine(
+        `音声に書き出す：設定資料の名前の読みを使えませんでした（${error instanceof Error ? error.message : String(error)}）`
+      );
+    }
+    return buildReadingPlan(text, notationModeFor(filePath), mergeReadingSpans(dictionary.spans, names), {
+      splitDialogue: true,
+    });
+  };
+
+  /**
+   * 人物の声で音声に書き出す（設計書6.42.4）。**ほかの道から呼ばれても理由を出す**
+   * （ブラウザ版・編集者モードでは画面にも右クリックにも出していない。実装ルール7）
+   */
+  const runVoiceExport = async (filePath: string, text?: string): Promise<void> => {
+    if (!canRunProcesses()) {
+      void vscode.window.showInformationMessage(VOICE_EXPORT_BROWSER_REASON);
+      return;
+    }
+    if (isEditorMode()) {
+      void vscode.window.showInformationMessage(VOICE_EXPORT_EDITOR_REASON);
+      return;
+    }
+    const work = workOfPath(registry, filePath);
+    if (!work) {
+      void vscode.window.showInformationMessage("音声への書き出しは、作品に登録した原稿で使えます。");
+      return;
+    }
+    let body = text;
+    if (body === undefined) {
+      // 右クリックから：開いていて未保存なら画面の本文、そうでなければファイル（読むだけ）
+      try {
+        const open = hasUnsavedChanges(filePath) ? getOpenDocumentText(filePath) : undefined;
+        const read = open === undefined ? await readTextFile(filePath) : undefined;
+        if (read?.hasConflictMarkers) {
+          void vscode.window.showWarningMessage(
+            "この話には Git の競合の印（<<<<<<<）が残っているので、音声に書き出しませんでした。競合を解いてから、もう一度押してください。"
+          );
+          return;
+        }
+        body = (open ?? read?.text ?? "").replace(/\r\n?/g, "\n");
+      } catch (error) {
+        void vscode.window.showWarningMessage(
+          `話のファイルを読めませんでした（${error instanceof Error ? error.message : String(error)}）。`
+        );
+        return;
+      }
+    }
+    try {
+      const sentences = await voiceSentencesFor(work, filePath, body);
+      const [{ exportVoiceAudio }, { voiceReadingService }] = await Promise.all([
+        loadVoiceExport(),
+        loadVoiceReading(),
+      ]);
+      await exportVoiceAudio(
+        { work, episodePath: filePath, text: body, sentences },
+        voiceReadingService(),
+        { mp3Encoder: mp3EncoderLoader(context.extensionPath) }
+      );
+    } catch (error) {
+      // 読みの辞書が壊れているなど。**直さずに止めて理由を出す**（実装ルール2）
+      useLogFile(work.folderPath);
+      logLine(`音声に書き出す：止まりました（${error instanceof Error ? error.message : String(error)}）`);
+      void vscode.window.showWarningMessage(
+        `音声に書き出せませんでした（${error instanceof Error ? error.message : String(error)}）。`
+      );
+    }
+  };
+
+  /**
    * 外で変わった資料を、画面へ映し直す（設計書5.4.9）。
    *
    * **読み直しの経路を1本にする。** 以前は知らせの3つのボタンが
@@ -2406,6 +2539,8 @@ export async function activate(
         const { assignVoices, voiceReadingService } = await loadVoiceReading();
         await assignVoices(work, voiceReadingService());
       },
+      // 音声に書き出す（設計書6.42.4）。画面が持っている本文で書き出す（右クリックと同じ道）
+      exportAudio: (filePath, text) => runVoiceExport(filePath, text),
     },
     markdownDeclined: () =>
       context.globalState.get<string[]>(MARKDOWN_DECLINED_KEY, []),
@@ -8207,6 +8342,20 @@ export async function activate(
         treeProvider.refresh(work.id);
       }
     )
+  );
+
+  // 人物の声で音声に書き出す（設計書6.42.4）。作品一覧の話の右クリックから。
+  // 原稿エディターの列の［音声に書き出す］と同じ道（runVoiceExport）を通す
+  context.subscriptions.push(
+    registerCommand("novelai.exportVoiceAudio", async (node?: EpisodeNode) => {
+      if (!node || !("episode" in node)) {
+        void vscode.window.showInformationMessage(
+          "作品一覧の話を右クリックして「人物の声で音声に書き出す」を選んでください。原稿エディターでは読み上げの列の［音声に書き出す］からも書き出せます。"
+        );
+        return;
+      }
+      await runVoiceExport(node.episode.filePath);
+    })
   );
 
   // **改行コードは、作者が押したときだけ揃える**（設計書5.4.2）。

@@ -21,6 +21,9 @@ export const EXPECTED_ARCHIVE_FILES = [
   // 「AI用の指示書を作品に置く」が書き出す登録の中身が `node <この束>` なので、
   // **入っていないと配布版では繋がらない**（2026-09-18 に同梱へ方針を変えた）
   "extension/dist/mcp-server.mjs",
+  // MP3 の変換の部品（LAME の JavaScript 版。LGPL-3.0。設計書6.42.4）。拡張機能の束へ混ぜず、
+  // 別のファイルのまま配る（差し替えられるように）。**入っていないと音声に書き出せない**
+  "extension/dist/lame.js",
   "extension/media/icon.svg",
   // 初回の道案内（設計書6.104 入口2）の段ごとの説明。`package.json` の
   // `contributes.walkthroughs` が指す。**入っていないと段の右側が空になる**

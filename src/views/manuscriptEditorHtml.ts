@@ -201,6 +201,8 @@ body.aloud #aloud { display: flex; }
 /* 人物の声（設計書6.42.3）。選んでいる読み方の操作だけを出す */
 #aloud .engine-only { display: none; }
 body.aloudengine #aloud .engine-only { display: inline-block; }
+/* 編集者モードで隠す［音声に書き出す］（設計書6.42.4）。上の inline-block に負けないように */
+body.aloudengine #aloud .engine-only[hidden] { display: none; }
 body.aloudengine #aloud .os-only { display: none; }
 #aloudCast { opacity: 0.85; }
 
@@ -1062,6 +1064,7 @@ body.clipped #cheer { white-space: normal; }
   <button id="aloudVoiceAssign" class="engine-only" title="（試作・テスト中）語り手（地の文）・台詞の既定・人物ごとの声を、エンジンの話者から選びます。作品ごとに覚えます">声の割り当て</button>
   <button id="aloudCastRun" class="engine-only" title="（試作・テスト中）この話の台詞ごとに、誰が言ったかと気持ち（喜び・怒りなど）をAIが推定します。本文は書き換えません">台詞の話者と感情（AI）</button>
   <button id="aloudCastOpen" class="engine-only" title="（試作・テスト中）台詞ごとの話者と感情の一覧を開きます。直した行は、推定し直しても残ります">台詞の一覧</button>
+  <button id="aloudVoiceExport" class="engine-only" title="（試作・テスト中）この話を人物の声で読み、MP3 の音声ファイルに書き出します。声のライセンスと注意書きも一緒に置きます。置き場は作品の .aiwriter/exports/音声/ です。本文は書き換えません">音声に書き出す</button>
   <span id="aloudCast" class="engine-only"></span>
   <button id="aloudMark" title="いま読んでいる文の上にメモの印を置いて、一時停止します">⚑ 引っかかった</button>
   <button id="aloudDictRun" title="この話の中で、読みが2通りある語（十分・音・一日など）をAIが確かめ、読み上げの読みを直します。本文は書き換えません">読みを確かめる（AI）</button>
@@ -5677,6 +5680,9 @@ ${RESUME_WRITING_LABEL ? `
       document.body.classList.toggle("plain", message.hasTerms === false);
       // 編集者モードか（右クリックの出し分けだけに使う。設計書5.6.1.1）
       if (typeof message.editorMode === "boolean") reviewMode = message.editorMode;
+      // 音声に書き出すのは作者の機能（設計書6.42.4）。編集者モードでは出さない（拡張機能の側でも断る）
+      const voiceExportButton = document.getElementById("aloudVoiceExport");
+      if (voiceExportButton) voiceExportButton.hidden = reviewMode;
       /* ── SNS記事のnote風（設計書6.69） ── */
       if (typeof message.noteLike === "boolean" && message.noteLike !== noteLike) {
         noteLike = message.noteLike;
@@ -10073,6 +10079,7 @@ ${IME_ENTER_GUARD_SOURCE}
   const aloudVoiceAssign = document.getElementById("aloudVoiceAssign");
   const aloudCastRun = document.getElementById("aloudCastRun");
   const aloudCastOpen = document.getElementById("aloudCastOpen");
+  const aloudVoiceExport = document.getElementById("aloudVoiceExport");
   const aloudCast = document.getElementById("aloudCast");
   /** 先に頼んでおく文の数（いま鳴らす文を含む） */
   const VOICE_AHEAD = 3;
@@ -10299,6 +10306,7 @@ ${IME_ENTER_GUARD_SOURCE}
     aloudVoiceAssign.disabled = busy;
     aloudCastRun.disabled = busy;
     aloudCastOpen.disabled = busy;
+    aloudVoiceExport.disabled = busy;
   }
 
   /** 様子が届いた（操作が終わった）。ボタンを押せる形へ戻す */
@@ -10321,6 +10329,11 @@ ${IME_ENTER_GUARD_SOURCE}
   aloudCastOpen.addEventListener("click", function () {
     voiceCastBusy(true);
     voiceCastAsk("open");
+  });
+  aloudVoiceExport.addEventListener("click", function () {
+    // **終わるまで押せなくする。** 続けて押すと、同じ話を2回書き出す（確認の窓は拡張機能の側）
+    voiceCastBusy(true);
+    voiceCastAsk("export");
   });
 
   aloudRate.addEventListener("change", function () {

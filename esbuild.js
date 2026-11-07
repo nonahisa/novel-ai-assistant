@@ -126,20 +126,42 @@ function bundleOptions() {
     logLevel: "info",
   };
 
-  return { desktop, browser, mcp };
+  /**
+   * MP3 の変換の部品（LAME の JavaScript 版 `@breezystack/lamejs`。設計書6.42.4）。
+   *
+   * **拡張機能の束へ混ぜず、別のファイル `dist/lame.js` にする。** LAME は LGPL-3.0 で、
+   * LAME 自身が「別のファイルとして結んで使う」形を勧めている。別のファイルなら、利用者が
+   * この部品だけを差し替えられる。**縮めない**（中身を読める形で配る）。
+   * 拡張機能は音声の書き出しのときだけ、このファイルを読む（`extension.ts` の `loadMp3Encoder`）。
+   * 同梱表示（`scripts/bundledPackages.mjs`）もこの設定を読むので、表示から抜けない。
+   */
+  const lame = {
+    entryPoints: ["src/vendor/lameEntry.ts"],
+    bundle: true,
+    format: "cjs",
+    minify: false,
+    sourcemap: false,
+    sourcesContent: false,
+    platform: "node",
+    outfile: "dist/lame.js",
+    external: [],
+    logLevel: "info",
+  };
+
+  return { desktop, browser, mcp, lame };
 }
 
 async function main() {
   const options = bundleOptions();
-  const desktop = await esbuild.context(options.desktop);
-  const browser = await esbuild.context(options.browser);
-  const mcp = await esbuild.context(options.mcp);
+  const contexts = await Promise.all(
+    [options.desktop, options.browser, options.mcp, options.lame].map((config) => esbuild.context(config))
+  );
 
   if (watch) {
-    await Promise.all([desktop.watch(), browser.watch(), mcp.watch()]);
+    await Promise.all(contexts.map((context) => context.watch()));
   } else {
-    await Promise.all([desktop.rebuild(), browser.rebuild(), mcp.rebuild()]);
-    await Promise.all([desktop.dispose(), browser.dispose(), mcp.dispose()]);
+    await Promise.all(contexts.map((context) => context.rebuild()));
+    await Promise.all(contexts.map((context) => context.dispose()));
   }
 }
 

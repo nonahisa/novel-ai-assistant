@@ -501,6 +501,38 @@ export class VoiceEngineClient {
     return bytes;
   }
 
+  /**
+   * エンジンの名乗り（`GET /engine_manifest`）。どのエンジンか（AivisSpeech・VOICEVOX）を
+   * `brand_name` で見分けるのに使う（設計書6.42.4。口の番号では当てない）。本文は運ばない
+   */
+  engineManifest(signal?: AbortSignal): Promise<unknown> {
+    return this.getJson("/engine_manifest", "エンジンの名乗り（engine_manifest）", signal);
+  }
+
+  /** AivisSpeech の音声合成モデルの一覧（`GET /aivm_models`。ライセンスの全文を含む）。本文は運ばない */
+  aivmModels(signal?: AbortSignal): Promise<unknown> {
+    return this.getJson("/aivm_models", "音声合成モデルの一覧（aivm_models）", signal);
+  }
+
+  /** 話者の情報（`GET /speaker_info`。`policy` が話者・キャラクターの規約）。本文は運ばない */
+  speakerInfo(speakerUuid: string, signal?: AbortSignal): Promise<unknown> {
+    const query = new URLSearchParams({ speaker_uuid: speakerUuid });
+    return this.getJson(`/speaker_info?${query.toString()}`, "話者の情報（speaker_info）", signal);
+  }
+
+  private async getJson(pathAndQuery: string, what: string, signal?: AbortSignal): Promise<unknown> {
+    const response = await this.request(pathAndQuery, { method: "GET" }, signal);
+    try {
+      return await response.json();
+    } catch (error) {
+      throw new VoiceEngineError(
+        "badResponse",
+        `${what}を読めません`,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
   /** 文字列・スタイル・調子から WAV を作る（下ごしらえ→調子を当てる→合成） */
   async speak(
     text: string,

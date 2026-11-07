@@ -144,6 +144,36 @@ export class VoiceReadingService {
     return { ok: true };
   }
 
+  /**
+   * 本文を運ぶ前の確認（`mayCarryText`）を、音の書き出し（設計書6.42.4）からも通すための口。
+   * 画面の朗読と同じ覚え方（ホストごと・この起動の間）を使う
+   */
+  allowCarryText(): Promise<{ ok: true } | { ok: false; host: string }> {
+    return this.mayCarryText();
+  }
+
+  /** いまの接続先のエンジンへの口（書き出しでライセンス・規約を引くのに使う） */
+  engineClient(): VoiceEngineClient {
+    return this.client();
+  }
+
+  /**
+   * 書き出し用に1文の音を作る。**中止を通す**（長い話は数分かかるため）。
+   * 控えにあればそれを使い、新しく作った音は控えへ入れない——1話ぶんの音で
+   * 朗読の控え（64MB）を押し流すと、画面の［▶ 読む］がまた作り直しになる。
+   * 同時に頼む数は朗読と同じ枠（`limited`）で絞る
+   */
+  synthesizeForExport(unit: VoicePlanUnit, rate: number, signal: AbortSignal): Promise<Uint8Array> {
+    const client = this.client();
+    const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate);
+    const cached = this.cache.get(synthesisKey(client.baseUrl, unit.styleId, unit.speech, params));
+    if (cached) return Promise.resolve(cached);
+    return this.limited(() => {
+      if (signal.aborted) throw new VoiceEngineError("aborted", "中止しました");
+      return client.speak(unit.speech, unit.styleId, params, signal);
+    });
+  }
+
   private client(): VoiceEngineClient {
     const url = this.engineUrl();
     if (!url) {

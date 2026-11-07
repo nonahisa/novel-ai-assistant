@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**0.142.2**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.126.2**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.143.0**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.126.2**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 
@@ -208,6 +208,8 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 #### 読み上げ（音読推敲）
 
 ツールバーの「読み上げ」→「▶ 読む」を押すと、OSの音声で読み上げ、読んでいる文が光ります。AIも通信も使いません。「⚑ 引っかかった」を押すと、その文の前にメモを残して一時停止します。
+
+「声」で「人物の声」を選ぶと、手元の AivisSpeech や VOICEVOX で人物ごとに声を変えて読みます。「音声に書き出す」を押すと、1話を音声ファイル（MP3）にでき、クレジットと利用条件の注意書きも同じフォルダーに作ります。試作・テスト中です。
 
 #### メモと校正・メモパネル
 
