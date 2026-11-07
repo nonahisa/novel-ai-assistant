@@ -26,9 +26,17 @@ import { CAST_UNKNOWN_SPEAKER, type CastPerson } from "../core/voiceCast";
  * 話者の欄に「話者」「人物名」が入って返ることを、検算が捨てて数える
  * （CLAUDE.md 失敗3番）。見本の名前は本文に出ない語にする。
  *
+ * ## 話者が書いてある台詞は、話者を考えさせない（版1.2。案 A）
+ *
+ * 地の文に「と灯は言った」と書いてある台詞は、コードが先に話者を決める
+ * （`core/voiceCast.ts` の `castSpeakersFromText`）。その番号は「話者を考える番号」から
+ * 外し、気持ちと強さだけを答えさせる。**番号のあとに名前は書かない**——気持ちを
+ * 決めるのに名前は要らず、書くと隣の台詞にもその名前を写す（引きずる）おそれがある。
+ * スキーマは変えない（決まった番号の speaker の欄は、検算が見ずにコードの値で置き換える）。
+ *
  * プロンプトを変更したら version を上げること。
  */
-export const VOICE_CAST_VERSION = "1.1";
+export const VOICE_CAST_VERSION = "1.2";
 
 /**
  * 1回に送る本文の上限（字）。読みの辞書（P-50）と同じ大きさにする——小さいモデルは
@@ -56,6 +64,29 @@ export interface VoiceCastInput {
   count: number;
   /** 資料の人物 */
   people: readonly CastPerson[];
+  /** 本文に話者が書いてあり、コードで決めた台詞の番号（区切りの中の番号。版1.2） */
+  decided?: readonly number[];
+}
+
+/** 番号を〔1〕〔3〕の形に並べる */
+function numberList(numbers: readonly number[]): string {
+  return numbers.map((n) => `〔${n}〕`).join("");
+}
+
+/** 話者の決まった台詞を伝える節（無ければ空） */
+function decidedSection(count: number, decided: readonly number[]): string {
+  const fixed = [...new Set(decided)].filter((n) => n >= 1 && n <= count).sort((a, b) => a - b);
+  if (fixed.length === 0) return "";
+  const held = new Set(fixed);
+  const ask: number[] = [];
+  for (let n = 1; n <= count; n++) if (!held.has(n)) ask.push(n);
+  return [
+    "",
+    `次の番号は、本文に話し手が書いてあるので話者が決まっています。気持ちと強さだけを答えてください：${numberList(fixed)}`,
+    "（これらの speaker には、本文に書いてある話し手の名前を写します）",
+    ask.length > 0 ? `話者を考えるのは${numberList(ask)}です。` : "話者を考える台詞はありません。",
+    "",
+  ].join("\n");
 }
 
 /** 人物の一覧の1行（名前・別名・口調） */
@@ -75,7 +106,7 @@ export function buildVoiceCastPrompt(input: VoiceCastInput): string {
       : "（登場人物の資料はありません）";
   return `次の本文には台詞が${input.count}個あり、それぞれの頭に〔1〕〜〔${input.count}〕の番号が付いています。
 番号ごとに、話者・感情・強さを答えてください。
-
+${decidedSection(input.count, input.decided ?? [])}
 【登場人物】
 ${people}
 

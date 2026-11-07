@@ -6,9 +6,10 @@ import { quotedSpans } from "../../src/core/quotedSpans";
 import {
   castChunksOf,
   castDialogues,
+  castGuessesForChunk,
+  castSpeakersFromText,
   countDropReasons,
   parseCastResult,
-  validateCastItems,
   type CastPerson,
 } from "../../src/core/voiceCast";
 import {
@@ -28,6 +29,10 @@ import { OLLAMA_ENDPOINT } from "./support/liveEnv";
  *
  *   段1 VC_PHASE=extract : 全作品の全話で台詞の取り出しを数え、おかしな形を拾う
  *   段2 VC_PHASE=cast    : 手元の Ollama で話者と感情を推定し、正解（担当の判断）と比べる
+ *   段4 VC_PHASE=rules   : AIを呼ばず、本文に書いてある話者をコードで決めた分だけを正解と比べる（案 A。版1.2）
+ *
+ *   段2は、製品と同じく本文に書いてある話者をコードで先に決め、AIには感情だけ訊く。
+ *   VC_RULES=off にすると、コードで決めずに全部AIに訊く（版1.2 の頼み方のまま。比べの基準）。
  *
  *   $env:NOVELAI_WORKS = "C:/path/to/作品を集めたフォルダー"
  *   $env:VC_OUT = "出力先フォルダー（原稿の外）"
@@ -281,6 +286,77 @@ describe.skipIf(PHASE !== "regold" || !ROOT || !OUT || (process.env.VC_GOLD ?? "
 
 const GOLD_FILES = (process.env.VC_GOLD ?? "").split(";").map((s) => s.trim()).filter(Boolean);
 const MODELS = (process.env.VC_MODELS ?? "gemma4:e4b").split(";").map((s) => s.trim()).filter(Boolean);
+const RULES_ON = (process.env.VC_RULES ?? "").trim().toLowerCase() !== "off";
+
+/** 正解を読み、本文の台詞の並びと揃っているか確かめる（揃っていなければ比べる意味が無いので止める） */
+function goldAndText(goldPath: string) {
+  const gold = loadGold(goldPath);
+  const text = readUtf8(path.join(ROOT!, gold.work, gold.episode));
+  const dialogues = castDialogues(text);
+  if (gold.gold.length !== dialogues.length) {
+    throw new Error(
+      `正解の台詞数 ${gold.gold.length} と取り出しの ${dialogues.length} が合いません: ${gold.work}/${gold.episode}`
+    );
+  }
+  gold.gold.forEach((g, i) => {
+    if (!dialogues[i].quote.startsWith(g.head)) {
+      throw new Error(`台詞 ${i} の頭が正解と違います: ${g.head} / ${dialogues[i].quote}`);
+    }
+  });
+  const idOfName = new Map<string, string>();
+  for (const p of gold.people) {
+    for (const n of [p.name, ...p.aliases]) idOfName.set(n, p.id);
+  }
+  const goldIdOf = (i: number): string | null => {
+    const g = gold.gold[i];
+    return g.speaker === "不明" ? null : idOfName.get(g.speaker) ?? null;
+  };
+  return { gold, text, dialogues, goldIdOf };
+}
+
+/* 段4：コードで決めた話者だけを採点する（AIを呼ばない。取り違えが0でなければ案 A は失格） */
+describe.skipIf(PHASE !== "rules" || !ROOT || !OUT || GOLD_FILES.length === 0)(
+  "本文に書いてある話者（コードで決めた分）",
+  () => {
+    test("正解と比べる", () => {
+      const report: string[] = ["# 本文に書いてある話者（コードで決めた分）"];
+      for (const goldPath of GOLD_FILES) {
+        const { gold, text, dialogues, goldIdOf } = goldAndText(goldPath);
+        const decided = castSpeakersFromText(text, gold.people);
+        let hit = 0;
+        let wrong = 0;
+        let goldUnknown = 0;
+        const wrongExamples: string[] = [];
+        dialogues.forEach((d, i) => {
+          const id = decided.get(d.index);
+          if (id === undefined) return;
+          const goldId = goldIdOf(i);
+          const name = gold.people.find((p) => p.id === id)?.name;
+          if (goldId === null) {
+            goldUnknown++;
+            wrongExamples.push(`${d.quote.slice(0, 20)} 正:不明 → ${name}`);
+          } else if (goldId === id) {
+            hit++;
+          } else {
+            wrong++;
+            wrongExamples.push(`${d.quote.slice(0, 20)} 正:${gold.gold[i].speaker} → ${name}`);
+          }
+        });
+        const goldKnown = gold.gold.filter((g) => g.speaker !== "不明").length;
+        report.push(
+          "",
+          `## ${gold.work}/${gold.episode}`,
+          `- 台詞 ${dialogues.length}（正解が人物 ${goldKnown}）・コードで決めた ${decided.size}`,
+          `- 当たり ${hit}／取り違え ${wrong}／正解が不明なのに当てた ${goldUnknown}`,
+          `- 取り違え例：${JSON.stringify(wrongExamples)}`
+        );
+      }
+      fs.mkdirSync(OUT!, { recursive: true });
+      fs.writeFileSync(path.join(OUT!, "rules-report.md"), report.join("\n"), "utf-8");
+      expect(true).toBe(true);
+    });
+  }
+);
 
 describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
   "話者と気持ちの推定（手元の Ollama）",
@@ -292,26 +368,22 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
         for (const model of MODELS) {
           await unloadOthers(model);
           for (const goldPath of GOLD_FILES) {
-            const gold = loadGold(goldPath);
-            const text = readUtf8(path.join(ROOT!, gold.work, gold.episode));
-            const dialogues = castDialogues(text);
-            const chunks = castChunksOf(text, VOICE_CAST_CHUNK_CHARS);
-            // 正解は台詞の頭の字が揃っているものだけ。ずれていたら止める（比べる意味が無い）
-            if (gold.gold.length !== dialogues.length) {
-              throw new Error(
-                `正解の台詞数 ${gold.gold.length} と取り出しの ${dialogues.length} が合いません: ${gold.work}/${gold.episode}`
-              );
-            }
-            gold.gold.forEach((g, i) => {
-              if (!dialogues[i].quote.startsWith(g.head)) {
-                throw new Error(`台詞 ${i} の頭が正解と違います: ${g.head} / ${dialogues[i].quote}`);
-              }
-            });
+            const { gold, text, dialogues, goldIdOf } = goldAndText(goldPath);
+            // 製品（features/voiceReading.ts の runVoiceCast）と同じ順：人物の一覧で話者を
+            // 先に決めてから区切る
+            const chunks = castChunksOf(
+              text,
+              VOICE_CAST_CHUNK_CHARS,
+              RULES_ON ? castSpeakersFromText(text, gold.people) : undefined
+            );
             const byIndex = new Map(dialogues.map((d, i) => [d.index, gold.gold[i]]));
-            const idOfName = new Map<string, string>();
-            for (const p of gold.people) {
-              for (const n of [p.name, ...p.aliases]) idOfName.set(n, p.id);
-            }
+            const goldIdByIndex = new Map(dialogues.map((d, i) => [d.index, goldIdOf(i)]));
+            let byCode = 0;
+            let byCodeHit = 0;
+            let byCodeWrong = 0;
+            let byCodeGoldUnknown = 0;
+            let disagreed = 0;
+            let calmFilled = 0;
             const t0 = Date.now();
             let hit = 0;
             let missed = 0;
@@ -333,6 +405,7 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
                 text: chunk.text,
                 count: chunk.dialogues.length,
                 people: peopleForChunk(chunk, people),
+                decided: [...chunk.decided.keys()],
               });
               const body = {
                 model,
@@ -373,8 +446,17 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
                 );
                 continue;
               }
-              const checked = validateCastItems(items, chunk.dialogues.length, peopleForChunk(chunk, people));
+              const checked = castGuessesForChunk(items, chunk, peopleForChunk(chunk, people));
               dropAll.push(...checked.dropped);
+              disagreed += checked.disagreed;
+              calmFilled += checked.calmFilled;
+              for (const [number, id] of chunk.decided) {
+                const goldId = goldIdByIndex.get(chunk.dialogues[number - 1].index) ?? null;
+                byCode++;
+                if (goldId === null) byCodeGoldUnknown++;
+                else if (goldId === id) byCodeHit++;
+                else byCodeWrong++;
+              }
               chunk.dialogues.forEach((d, k) => {
                 const g = byIndex.get(d.index)!;
                 const guess = checked.guesses.get(k + 1);
@@ -383,7 +465,7 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
                   if (g.speaker !== "不明") missedExamples.push(`${d.quote.slice(0, 20)} 正:${g.speaker} → 答え無し／捨て`);
                   return;
                 }
-                const goldId = g.speaker === "不明" ? null : idOfName.get(g.speaker) ?? null;
+                const goldId = goldIdByIndex.get(d.index) ?? null;
                 detail.push(
                   `${d.index}\t${d.quote.slice(0, 14)}\t正:${g.speaker}/${g.emotion}\t答:${
                     guess.speakerId === null ? "不明" : gold.people.find((p) => p.id === guess.speakerId)?.name
@@ -414,6 +496,8 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
               `## ${model} × ${gold.work}/${gold.episode}`,
               `- 台詞 ${dialogues.length}（正解が人物 ${goldKnown}／不明 ${dialogues.length - goldKnown}）・区切り ${chunks.length}（失敗 ${failedChunks}）`,
               `- 当たり ${hit}／見逃し(不明に倒れた) ${missed}／取り違え ${wrong}／答え無し・検算で捨て ${unanswered}`,
+              `- うちコードで決めた ${byCode}（${RULES_ON ? "規則あり" : "VC_RULES=off"}）：当たり ${byCodeHit}／取り違え ${byCodeWrong}／正解が不明なのに当てた ${byCodeGoldUnknown}`,
+              `- コードで決めた台詞で、AIの話者の欄が違った ${disagreed}／感情が無く平静にした ${calmFilled}`,
               `- 正解が不明の台詞：不明のまま ${goldUnknownRight}／人物に当てた ${goldUnknownWrong}`,
               `- 感情一致 ${emoHit}/${emoTotal}（参考）`,
               `- 捨てた理由：${JSON.stringify(countDropReasons(dropAll))}`,

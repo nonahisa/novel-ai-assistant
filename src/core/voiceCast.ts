@@ -52,6 +52,11 @@ export interface CastChunk {
   text: string;
   /** この区切りの台詞（区切りの中の番号は1から。`dialogues[n-1]`） */
   dialogues: CastDialogue[];
+  /**
+   * 本文に話者が書いてあり、コードで決めた台詞（区切りの中の番号 → 人物の id）。
+   * AIには話者を考えさせず、感情と強さだけを訊く（案 A。`castSpeakersFromText`）
+   */
+  decided: Map<number, string>;
 }
 
 /**
@@ -61,8 +66,16 @@ export interface CastChunk {
  * 1つ足しただけで後ろの区切りの字がぜんぶ変わり、控え（チャンクキャッシュ）が
  * 当たらなくなる。台詞の頭がその区切りにあるものだけを数える。
  * 台詞の無い区切りは送らない（話者を訊くものが無い）。
+ *
+ * `decided`（話の台詞の番号 → 人物の id。`castSpeakersFromText` の答え）を渡すと、
+ * 区切りの中の番号に引き直して `CastChunk.decided` に持たせる。本文の〔番号〕は
+ * 変えない——感情は、話者の決まった台詞もAIに訊くので。
  */
-export function castChunksOf(text: string, maxChars: number): CastChunk[] {
+export function castChunksOf(
+  text: string,
+  maxChars: number,
+  decided?: ReadonlyMap<number, string>
+): CastChunk[] {
   const dialogues = castDialogues(text);
   const chunks: CastChunk[] = [];
   const lines = text.split("\n");
@@ -74,7 +87,12 @@ export function castChunksOf(text: string, maxChars: number): CastChunk[] {
 
   const flush = (): void => {
     if (bufferDialogues.length > 0) {
-      chunks.push({ text: buffer.join("\n"), dialogues: bufferDialogues });
+      const local = new Map<number, string>();
+      bufferDialogues.forEach((dialogue, i) => {
+        const id = decided?.get(dialogue.index);
+        if (id !== undefined) local.set(i + 1, id);
+      });
+      chunks.push({ text: buffer.join("\n"), dialogues: bufferDialogues, decided: local });
     }
     buffer = [];
     bufferChars = 0;
@@ -115,6 +133,262 @@ export interface CastPerson {
   name: string;
   aliases: string[];
   speechStyle: string | null;
+}
+
+/*
+  ── 案 A：話者が本文に書いてある台詞は、コードで決める（版1.2。2026-11-07） ──
+
+  小さいモデル（gemma4:e4b）は、地の文に「と灯は言った」と書いてある台詞まで
+  「不明」に倒していた（2026-11-05 の測定で見逃し 3・18）。書いてある所はAIに
+  訊かずに当てる。**取り違えを増やさないことを、見逃しを減らすことより先にする**
+  （指示）ので、窓は狭く、迷ったら当てずにAIへ回す。
+
+  見る窓は3つだけ：
+    (a) 同じ行の、台詞より前の部分（その行に前の台詞が無いとき）
+    (b) 同じ行の、閉じ括弧の直後（次の台詞か行末まで）
+    (c) 直前の空でない行（(a) が空で、その行に台詞が1つも無いとき。シーンメモは飛ばす）
+*/
+
+/**
+ * 「〈名前〉は／が〈これ〉」で話し手と読む動詞（窓 (a)・(c) の文の終わり）。
+ * **「聞いた」は入れない**——訊いたのか聞こえたのか分からない。
+ * 受け身（言われた）は、字が違うので当たらない。
+ * **話す以外の意味で文が終わりやすい動詞も入れない**——続けた（歩き続けた）・返した（本を返した）・
+ * 応えた（期待に応えた）・切り出した（木を切り出した）は、前の修飾と組んで話していない文に当たる。
+ */
+export const CAST_SPEECH_VERBS = [
+  "言い放った",
+  "言い返した",
+  "問いかけた",
+  "口を開いた",
+  "つぶやいた",
+  "ささやいた",
+  "微笑んだ",
+  "苦笑した",
+  "苦笑する",
+  "つぶやく",
+  "ささやく",
+  "答えた",
+  "答える",
+  "叫んだ",
+  "怒鳴った",
+  "怒鳴る",
+  "笑った",
+  "微笑む",
+  "呟いた",
+  "囁いた",
+  "尋ねた",
+  "尋ねる",
+  "訊いた",
+  "訊ねた",
+  "問うた",
+  "告げた",
+  "告げる",
+  "言った",
+  "言う",
+  "叫ぶ",
+  "笑う",
+  "呟く",
+  "囁く",
+  "訊く",
+] as const;
+
+/** 窓 (a)・(c)：文の頭の「〈名前〉は／が」のあと、短い修飾を挟んで発話の動詞で文が終わる */
+const SPEECH_TAIL = new RegExp(
+  `^、?[^。！？!?「」『』、\\n]{0,12}?(?:${[...CAST_SPEECH_VERBS]
+    .sort((a, b) => b.length - a.length)
+    .join("|")})[。！？!?…―─]*$`,
+  "u"
+);
+
+/** 窓 (b)：「と〈名前〉は…」が言った人でない形（受け身・聞いた側） */
+const NOT_SPEAKER_AFTER =
+  /[ぁ-ん]れ(?:た|て|る|ま)|聞いた|聞いて|聞こえ|耳に|教えられ|知らされ|聞かされ/u;
+
+/** 人物の名前と別名の表。**2人が分け合う名前は id を空にする**（どちらとも決めない）。長い名前を先に */
+function castNameTable(people: readonly CastPerson[]): Array<{ name: string; id: string }> {
+  const byName = new Map<string, string>();
+  for (const person of people) {
+    for (const raw of [person.name, ...person.aliases]) {
+      const name = raw.trim();
+      if (name === "") continue;
+      if (byName.has(name) && byName.get(name) !== person.id) byName.set(name, "");
+      else byName.set(name, person.id);
+    }
+  }
+  return [...byName]
+    .map(([name, id]) => ({ name, id }))
+    .sort((a, b) => b.name.length - a.name.length);
+}
+
+/**
+ * 窓に出る人物。**長い名前を先に当て、当たった字は短い名前に使わない**
+ * （一覧に「灯」と「灯里」がいるとき、「灯里」の中の「灯」を数えない）。
+ * 分け合う名前は空の id として入る（呼ぶ側は2人と同じに扱う）。
+ */
+function personsIn(window: string, table: ReadonlyArray<{ name: string; id: string }>): Set<string> {
+  const covered = new Array<boolean>(window.length).fill(false);
+  const found = new Set<string>();
+  for (const { name, id } of table) {
+    for (let at = window.indexOf(name); at >= 0; at = window.indexOf(name, at + 1)) {
+      let free = true;
+      for (let k = at; k < at + name.length; k++) if (covered[k]) free = false;
+      if (!free) continue;
+      for (let k = at; k < at + name.length; k++) covered[k] = true;
+      found.add(id);
+    }
+  }
+  return found;
+}
+
+/** 窓の at から始まる名前（いちばん長いもの） */
+function nameAt(
+  window: string,
+  at: number,
+  table: ReadonlyArray<{ name: string; id: string }>
+): { name: string; id: string } | undefined {
+  return table.find(({ name }) => window.startsWith(name, at));
+}
+
+/**
+ * 名前のすぐあとに付く敬称（「グレイさんが」「プリム様は」）。名前そのものは一覧に
+ * そのまま当たるものだけで、敬称は**同じ人物を呼ぶ形**なので読み飛ばす
+ */
+const HONORIFICS = ["先生", "先輩", "さん", "さま", "くん", "ちゃん", "どの", "様", "殿", "君", "氏"];
+
+/** 窓の at から「〈名前〉〈敬称〉?〈助詞〉」が始まれば、その人物と、助詞のあとの位置 */
+function subjectAt(
+  window: string,
+  at: number,
+  table: ReadonlyArray<{ name: string; id: string }>,
+  particles: readonly string[]
+): { id: string; end: number } | undefined {
+  const hit = nameAt(window, at, table);
+  if (!hit) return undefined;
+  let cursor = at + hit.name.length;
+  const honorific = HONORIFICS.find((h) => window.startsWith(h, cursor));
+  if (honorific) cursor += honorific.length;
+  if (!particles.includes(window.charAt(cursor))) return undefined;
+  return { id: hit.id, end: cursor + 1 };
+}
+
+/** 窓の答え：当てる人物（`person`）か、ほかの窓の答えも止める（`block`） */
+interface WindowVerdict {
+  person?: string;
+  block?: boolean;
+}
+
+/** 窓 (a)・(c)：最後の文が「〈名前〉は／が…言った。」か、窓がまるごと名前（台本の `灯「…」`） */
+function verdictBefore(
+  window: string,
+  table: ReadonlyArray<{ name: string; id: string }>,
+  allowScriptName: boolean
+): WindowVerdict {
+  const body = window.replace(/[ \t　]+$/u, "");
+  if (body.trim() === "") return {};
+  if (allowScriptName) {
+    const head = body.trim().replace(/[：:]$/u, "");
+    const hit = table.find(({ name }) => name === head);
+    if (hit) return hit.id === "" ? { block: true } : { person: hit.id };
+  }
+  // 最後の文（文の終わりの記号が並んだ末尾は、その文に含める）
+  const core = body.replace(/[。！？!?…―─]+$/u, "");
+  const lastEnd = Math.max(
+    ...["。", "！", "？", "!", "?"].map((mark) => core.lastIndexOf(mark))
+  );
+  const sentence = body.slice(lastEnd + 1).replace(/^[ \t　]+/u, "");
+  // 主語は文の頭か、文の最後の読点のすぐあと（「…一瞥して、プリム様は言った。」）
+  const comma = sentence.lastIndexOf("、");
+  const subject = [0, ...(comma >= 0 ? [comma + 1] : [])]
+    .map((at) => subjectAt(sentence, at, table, ["は", "が"]))
+    .find((hit) => hit !== undefined && SPEECH_TAIL.test(sentence.slice(hit.end)));
+  if (!subject) return {};
+  // 話す形の文なのに、別の人物の名前も入っている／名前を2人が分け合う → 迷うので全部止める
+  const persons = personsIn(sentence, table);
+  if (subject.id === "" || persons.size !== 1) return { block: true };
+  return { person: subject.id };
+}
+
+/** 窓 (b)：閉じ括弧の直後が「と〈名前〉は／が／も…」 */
+function verdictAfter(
+  window: string,
+  table: ReadonlyArray<{ name: string; id: string }>
+): WindowVerdict & { quoting: boolean; persons: Set<string> } {
+  const m = /^[ \t　]*、?と、?/u.exec(window);
+  if (!m) return { quoting: false, persons: new Set() };
+  const persons = personsIn(window, table);
+  const subject = subjectAt(window, m[0].length, table, ["は", "が", "も"]);
+  if (!subject) return { quoting: true, persons };
+  const firstSentence = window.slice(m[0].length).split(/[。！？!?]/u)[0];
+  if (NOT_SPEAKER_AFTER.test(firstSentence)) return { quoting: true, persons, block: true };
+  if (subject.id === "" || persons.size !== 1) return { quoting: true, persons, block: true };
+  return { quoting: true, persons, person: subject.id };
+}
+
+/**
+ * 本文に話者がはっきり書いてある台詞の、話者を決める（話の台詞の番号 → 人物の id）。
+ * **決まらない台詞は載せない**（AIへ回す）。
+ *
+ * 名前は、渡した人物の一覧の名前と別名に**そのまま当たるもの**だけ。役名（兵士・師匠）は
+ * 一覧にいなければ当てない。次のときは当てない：
+ * - 同じ窓（文）に一覧の名前が2人以上ある
+ * - 前の窓と後ろの窓で別の人物になる、後ろの「と…」が別の人物に触れている
+ * - 後ろの「と〈名前〉は…」が受け身・聞いた側の形
+ */
+export function castSpeakersFromText(
+  text: string,
+  people: readonly CastPerson[]
+): Map<number, string> {
+  const table = castNameTable(people);
+  const out = new Map<number, string>();
+  if (table.length === 0) return out;
+  const dialogues = castDialogues(text);
+  const lineStartOf = (at: number): number => text.lastIndexOf("\n", at - 1) + 1;
+  const lineEndOf = (at: number): number => {
+    const end = text.indexOf("\n", at);
+    return end < 0 ? text.length : end;
+  };
+
+  dialogues.forEach((dialogue, i) => {
+    const previous = i > 0 ? dialogues[i - 1] : undefined;
+    const next = i + 1 < dialogues.length ? dialogues[i + 1] : undefined;
+    const lineStart = lineStartOf(dialogue.start);
+    let before: WindowVerdict = {};
+    const sameLineHead = text.slice(lineStart, dialogue.start);
+    const previousOnLine = previous !== undefined && previous.end > lineStart;
+    if (!previousOnLine) {
+      if (sameLineHead.trim() !== "") {
+        // (a) 同じ行の台詞の前。台本の書き方（`灯「…」`）もここで拾う
+        before = verdictBefore(sameLineHead, table, true);
+      } else {
+        // (c) 直前の空でない行（シーンメモは飛ばす）。その行に台詞があれば見ない
+        let cursor = lineStart - 1;
+        while (cursor > 0) {
+          const start = lineStartOf(cursor);
+          const line = text.slice(start, cursor);
+          if (line.trim() === "" || isMemoLine(line)) {
+            cursor = start - 1;
+            continue;
+          }
+          const hasDialogue = previous !== undefined && previous.end > start;
+          if (!hasDialogue) before = verdictBefore(line, table, false);
+          break;
+        }
+      }
+    }
+    // (b) 閉じ括弧の直後から、次の台詞か行末まで
+    const afterEnd = Math.min(lineEndOf(dialogue.end), next ? next.start : text.length);
+    const after = verdictAfter(text.slice(dialogue.end, afterEnd), table);
+
+    if (before.block || after.block) return;
+    if (before.person && after.person && before.person !== after.person) return;
+    if (before.person && after.quoting && [...after.persons].some((id) => id !== before.person)) {
+      return;
+    }
+    const person = after.person ?? before.person;
+    if (person !== undefined) out.set(dialogue.index, person);
+  });
+  return out;
 }
 
 /** 推定1つ（検算を通ったもの） */
@@ -172,8 +446,9 @@ export interface CastDrop {
 export function validateCastItems(
   items: readonly unknown[],
   count: number,
-  people: readonly CastPerson[]
-): { guesses: Map<number, CastGuess>; dropped: CastDrop[] } {
+  people: readonly CastPerson[],
+  decided?: ReadonlyMap<number, string>
+): { guesses: Map<number, CastGuess>; dropped: CastDrop[]; disagreed: number } {
   const byName = new Map<string, string>();
   for (const person of people) {
     for (const name of [person.name, ...person.aliases]) {
@@ -185,6 +460,7 @@ export function validateCastItems(
   }
   const guesses = new Map<number, CastGuess>();
   const dropped: CastDrop[] = [];
+  let disagreed = 0;
   for (const item of items) {
     if (typeof item !== "object" || item === null) {
       dropped.push({ reason: "形が違う", item });
@@ -201,12 +477,18 @@ export function validateCastItems(
       continue;
     }
     const speaker = typeof record.speaker === "string" ? record.speaker.trim() : undefined;
-    if (speaker === undefined) {
+    const fixed = decided?.get(number);
+    if (speaker === undefined && fixed === undefined) {
       dropped.push({ reason: "形が違う", item });
       continue;
     }
     let speakerId: string | null = null;
-    if (speaker !== CAST_UNKNOWN_SPEAKER) {
+    if (fixed !== undefined) {
+      // 本文に話者が書いてある台詞（案 A）。**AIの話者の欄は見ない**——頼み方で
+      // 「決まっている」と伝えてあり、ここで捨てると感情まで失う。食い違いは数えるだけ
+      if (speaker === undefined || byName.get(speaker) !== fixed) disagreed++;
+      speakerId = fixed;
+    } else if (speaker !== undefined && speaker !== CAST_UNKNOWN_SPEAKER) {
       const id = byName.get(speaker);
       if (id === undefined || id === "") {
         dropped.push({
@@ -235,7 +517,50 @@ export function validateCastItems(
       intensity: record.intensity,
     });
   }
-  return { guesses, dropped };
+  return { guesses, dropped, disagreed };
+}
+
+/** 1区切りの答えをまとめた結果 */
+export interface CastChunkGuesses {
+  /** 区切りの中の番号 → 推定 */
+  guesses: Map<number, CastGuess>;
+  dropped: CastDrop[];
+  /** 本文に話者が書いてあり、コードで決めた台詞の数 */
+  decidedByText: number;
+  /** そのうち、AIの話者の欄がコードと違った数（測るときの手がかり。結果には使わない） */
+  disagreed: number;
+  /** コードで決めた台詞で、AIの感情が無い・捨てたため「平静・中」にした数 */
+  calmFilled: number;
+}
+
+/**
+ * 1区切りのAIの答えを検算し、コードで決めた話者と混ぜる（AIとコードの両方の道は
+ * ここだけを通る。測る台本も同じ関数を呼ぶ）。
+ *
+ * コードで決めた台詞にAIの感情が無いとき（答えが無い・感情が列挙の外）は、
+ * **話者だけ決めて「平静・中」で保存する**。感情はコードで決めないが、推定の無い
+ * 台詞も読むときは「平静・中」になるので、感情の扱いは今までと変わらない。
+ * 話者が分かっているのに「不明」で読むより良い。
+ */
+export function castGuessesForChunk(
+  items: readonly unknown[],
+  chunk: Pick<CastChunk, "dialogues" | "decided">,
+  people: readonly CastPerson[]
+): CastChunkGuesses {
+  const checked = validateCastItems(items, chunk.dialogues.length, people, chunk.decided);
+  let calmFilled = 0;
+  for (const [number, speakerId] of chunk.decided) {
+    if (checked.guesses.has(number)) continue;
+    checked.guesses.set(number, { speakerId, emotion: "平静", intensity: "中" });
+    calmFilled++;
+  }
+  return {
+    guesses: checked.guesses,
+    dropped: checked.dropped,
+    decidedByText: chunk.decided.size,
+    disagreed: checked.disagreed,
+    calmFilled,
+  };
 }
 
 /** 捨てた理由ごとの件数（ログの1行にする） */
