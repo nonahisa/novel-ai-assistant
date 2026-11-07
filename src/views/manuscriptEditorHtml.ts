@@ -45,6 +45,7 @@ import type { WorkKindKey } from "../core/workKind";
 import { findAction } from "./actionList";
 import { OBSERVE_VISIBLE_WIDTH_SOURCE } from "./visibleWidthScript";
 import { IME_ENTER_GUARD_SOURCE } from "./imeEnterGuardScript";
+import { KEY_LABEL_SCRIPT } from "../core/keyLabels";
 
 /**
  * 測る書体の名前。
@@ -1037,8 +1038,8 @@ body.clipped #cheer { white-space: normal; }
 </div>
 
 <div id="find" role="search">
-  <input id="findInput" type="text" placeholder="本文を探す" title="探す語。Enter で次、Shift+Enter で前、Esc で閉じて見つけた所へ戻ります" />
-  <button id="findPrev" title="前を探す（Shift+Enter）">↑ 前</button>
+  <input id="findInput" data-keys type="text" placeholder="本文を探す" title="探す語。Enter で次、Shift+Enter で前、Esc で閉じて見つけた所へ戻ります" />
+  <button id="findPrev" data-keys title="前を探す（Shift+Enter）">↑ 前</button>
   <button id="findNext" title="次を探す（Enter）">↓ 次</button>
   <span id="findCount"></span>
   <button id="findClose" title="閉じて、見つけた所を選びます（Esc）">閉じる</button>
@@ -1072,23 +1073,26 @@ body.clipped #cheer { white-space: normal; }
 <div id="foot">
   <span id="counts"></span>
   <span id="cheer"></span>
-  <button id="saveCheck" title="打った字を原稿へ送ってから保存し、保存できたかを確かめます（Ctrl+S と違い、保存できなかったときに知らせます）">保存</button>
+  <button id="saveCheck" data-keys title="打った字を原稿へ送ってから保存し、保存できたかを確かめます（Ctrl+S と違い、保存できなかったときに知らせます）">保存</button>
   <span id="saveFail" role="alert">
-    <span id="saveFailText"></span>
+    <span id="saveFailText" data-keys></span>
     <button id="saveFailCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
   </span>
   <span id="unsent" role="alert">
-    <span id="unsentText">打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。</span>
+    <span id="unsentText" data-keys>打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。</span>
     <button id="unsentCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
     <button id="unsentReopen" hidden disabled title="この原稿を原稿エディターで開き直します。先に「本文をコピー」で控えてください（開き直すと、この画面の字は消えます）">開き直す</button>
   </span>
-  <span id="note"></span>
+  <span id="note" data-keys></span>
 </div>
 
 <div id="menu"></div>
 <div id="tip"></div>
 
 <script nonce="${nonce}">
+${KEY_LABEL_SCRIPT}
+// HTML に書いたキーの案内（data-keys の付いた所）を、Mac なら ⌘ の書き方へ（core/keyLabels.ts）
+novelaiApplyKeyLabels(document);
 (function () {
   const vscode = acquireVsCodeApi();
   const write = document.getElementById("write");

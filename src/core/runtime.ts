@@ -58,6 +58,22 @@ export function isWindowsHost(): boolean {
   return hostPlatform() === "win32";
 }
 
+/**
+ * Mac の上で動いているか（画面に出すキーの書き方を ⌘ にするため。`core/keyLabels.ts`）。
+ *
+ * **ブラウザ版は、ブラウザの申告（`navigator.userAgent`）で見る。** 拡張機能は
+ * Web Worker の中で動き、`process` は無いが `navigator` はある。手元の VS Code では
+ * `navigator` を見ない——Node 21 からの `navigator` は「Node.js/24」のような名前しか持たない。
+ * リモート接続（Codespaces など）では、ここが見るのは**拡張機能の居る機械**であって、
+ * 作者の手元の OS ではない（拡張機能の側からは手元の OS を知る道が無い）。
+ */
+export function isMacHost(): boolean {
+  const platform = hostPlatform();
+  if (platform !== undefined) return platform === "darwin";
+  const agent = (globalThis as { navigator?: { userAgent?: unknown } }).navigator?.userAgent;
+  return typeof agent === "string" && /Macintosh|Mac OS X/.test(agent);
+}
+
 /** 環境変数。**ブラウザ版には環境変数が無い**ので、常に undefined */
 export function environmentVariable(name: string): string | undefined {
   return isWebRuntime() ? undefined : process.env[name];

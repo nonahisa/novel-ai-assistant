@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import { canRunProcesses } from "../core/runtime";
 import { conflictFixHint } from "../core/syncEntryNames";
@@ -155,7 +156,7 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     const action = await vscode.window.showWarningMessage(
       "印刷用のファイルは作りましたが、ブラウザを開けませんでした。" +
         "フォルダーの中の .html をダブルクリックすると開きます。" +
-        "開いたら印刷（Ctrl+P）で送信先を「PDFに保存」にしてください。" +
+        keysForHost("開いたら印刷（Ctrl+P）で送信先を「PDFに保存」にしてください。") +
         droppedNote,
       "フォルダーを開く"
     );
@@ -165,7 +166,7 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
 
   const action = await vscode.window.showInformationMessage(
     "ブラウザで開きました。画面に並んだ白い面が、そのまま紙1枚ずつになります。" +
-      "印刷（Ctrl+P）で送信先を「PDFに保存」にするとPDFになります。" +
+      keysForHost("印刷（Ctrl+P）で送信先を「PDFに保存」にするとPDFになります。") +
       "用紙サイズと余白は「既定」のままにし、「ヘッダーとフッター」のチェックは外してください。" +
       droppedNote,
     "フォルダーを開く"

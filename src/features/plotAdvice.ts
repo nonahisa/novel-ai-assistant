@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import {
@@ -617,7 +618,7 @@ export class PlotAdviceSession {
           detail:
             `いまの文：\n${clip(current.trim(), 300)}\n\n案：\n${clip(held.value, 300)}\n\n` +
             // 開いている plot.md へは文書へ当てて書く（回復先への退避は無く、Ctrl+Z で戻す）
-            "置き換える前の plot.md は回復先に退避します（エディターで開いているときは Ctrl+Z で戻せます）。",
+            keysForHost("置き換える前の plot.md は回復先に退避します（エディターで開いているときは Ctrl+Z で戻せます）。"),
         },
         ok
       );

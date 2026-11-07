@@ -218,7 +218,8 @@ describe("画面の［保存］ボタン", () => {
     expect(foot).toMatch(/id="saveFail"/);
     // #note の直前に #unsent がある並びは崩さない（出ている間 #note を隠す CSS が隣を見ている）
     expect(foot.indexOf('id="unsent"')).toBeLessThan(foot.indexOf('id="note"'));
-    expect(foot).toMatch(/<\/span>\s*<span id="note">/);
+    // #note にはキーの書き方を Mac に合わせる印（data-keys。core/keyLabels.ts）が付く
+    expect(foot).toMatch(/<\/span>\s*<span id="note"[^>]*>/);
   });
 
   it("本体の受け口が、受付・結果・届いた返事を保存ボタンの振り分けへ渡す", () => {

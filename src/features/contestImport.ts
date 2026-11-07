@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { isDateKey, type ContestGoal, type WorkGoals } from "../models/workGoals";
@@ -80,7 +81,7 @@ export interface ContestImportDeps {
 
 /** 貼り付けて取り込むときの案内（ヘルパーの読み取りがうまくいかなかったときにも出す） */
 const PASTE_GUIDE =
-  "一覧のページで文章を全部選んでコピー（Ctrl+A → Ctrl+C）し、" +
+  keysForHost("一覧のページで文章を全部選んでコピー（Ctrl+A → Ctrl+C）し、") +
   "「作品目標設定」→「公募の一覧を貼り付けて取り込む」から入れてください。";
 
 export function loadContestInbox(memory: ContestMemory): StoredContest[] {

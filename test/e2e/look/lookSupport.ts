@@ -7,7 +7,8 @@
  */
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import type { Frame, Page } from "playwright-core";
+import type { Frame, Locator, Page } from "playwright-core";
+import { treeRowLabels } from "../support/sidebar";
 import { clearNotifications, dismissWorkbenchHover } from "../support/workbenchDom";
 
 export const lookEnabled = process.env.NOVELAI_LOOK === "1";
@@ -100,9 +101,62 @@ export async function setSidebarWidth(page: Page, width: number): Promise<number
   return (await page.locator(".part.sidebar").first().boundingBox())?.width ?? 0;
 }
 
+/**
+ * 名前（aria-label）の頭が `head` の行を、DOM に出るまで左の列の `paneTitle` の区画を転がして返す。
+ *
+ * **VS Code の木は見えている行しか DOM に描かない**（仮想化）。Mac の画面（1440×795）では窓が
+ * 頼んだ高さ（800）まで伸びず、詳細メニューの下のほうの「環境設定」「ヘルプ」が描かれないまま
+ * `waitFor` が時間切れになった（2026-11-07）。DOM の `scrollIntoView` は木の中の転がしを動かさないので、
+ * 区画の上でホイールを回す。まず下へ、端に着いても（並びが変わらなくなっても）出なければ上へ戻す
+ * ——畳んだあとは行が上へ流れて、上にあることもある。窓の高さは足さない（画面より高くはできない）
+ */
+export async function revealRow(page: Page, head: string, paneTitle = "詳細メニュー", timeoutMs = 30_000): Promise<Locator> {
+  const row = page.locator(`.monaco-list-row[aria-label^="${head}"]`).first();
+  // 木がまだ描き終わっていないだけのこともあるので、転がす前に少し待つ（前の setRow の待ち方を残す）
+  const appeared = await row
+    .waitFor({ state: "attached", timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (appeared) return row;
+  const body = page
+    .locator(".pane", { has: page.locator(".pane-header", { hasText: paneTitle }) })
+    .locator(".pane-body")
+    .first();
+  const deadline = Date.now() + timeoutMs;
+  let direction = 1;
+  let last = "";
+  let unchanged = 0;
+  while ((await row.count()) === 0) {
+    if (Date.now() > deadline) {
+      throw new Error(`「${head}」の行が出るまで「${paneTitle}」を転がしましたが、出ません（いまの行：${(await treeRowLabels(page)).join(" / ")}）`);
+    }
+    const box = await body.boundingBox();
+    if (!box) {
+      // 区画がまだ開いていない・描かれていない。時間切れまで待ち直す
+      await page.waitForTimeout(300);
+      continue;
+    }
+    // 上に貼り付く見出し（sticky scroll）の上で回すと先へ送れないので、区画の下寄りで回す（sidebar.ts と同じ）
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.75);
+    await page.mouse.wheel(0, 120 * direction);
+    await page.waitForTimeout(200);
+    const now = (await treeRowLabels(page)).join("\n");
+    unchanged = now === last ? unchanged + 1 : 0;
+    last = now;
+    if (unchanged >= 3) {
+      if (direction < 0) {
+        throw new Error(`「${head}」の行が「${paneTitle}」のどこにもありません（いまの行：${now.split("\n").join(" / ")}）`);
+      }
+      direction = -1;
+      unchanged = 0;
+    }
+  }
+  return row;
+}
+
 /** 名前（aria-label）の頭が `head` の行を、開く／畳むに揃えて、見える所へ転がす */
 export async function setRow(page: Page, head: string, open: boolean): Promise<void> {
-  const row = page.locator(`.monaco-list-row[aria-label^="${head}"]`).first();
+  const row = await revealRow(page, head);
   await row.waitFor({ state: "attached", timeout: 10_000 });
   await row.scrollIntoViewIfNeeded();
   const expanded = (await row.getAttribute("aria-expanded")) === "true";

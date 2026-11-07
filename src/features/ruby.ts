@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
@@ -439,7 +440,7 @@ export async function importRuby(): Promise<void> {
   // 何件変わるかを数えて示す。黙って本文を書き換えない
   const answer = await vscode.window.showWarningMessage(
     `${describeSiteNotation(source)}を、この拡張機能の書き方へ直します。よろしいですか。`,
-    { modal: true, detail: "取り消し（Ctrl+Z）で元へ戻せます。" },
+    { modal: true, detail: keysForHost("取り消し（Ctrl+Z）で元へ戻せます。") },
     "直す"
   );
   if (answer !== "直す") return;

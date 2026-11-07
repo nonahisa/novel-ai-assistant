@@ -4,6 +4,7 @@ import {
   type NotationMode,
 } from "./manuscriptRender";
 import { stripMemoLines } from "./sceneMemo";
+import { hostKeyOs, keysInText, type KeyOs } from "./keyLabels";
 import { kindLayoutCss, kindLineClass, kindLineCss, kindUsesScriptLayout } from "./kindLines";
 import type { WorkKindKey } from "./workKind";
 import { PRINT_PAGINATE_SCRIPT } from "./printPaginate";
@@ -378,13 +379,13 @@ function buildGuide(preset: PrintPresetInfo, margins: HeaderFooter): string {
  * 案内帯の本体。`paper` は紙の説明（**逃がし済みの**HTML）。
  * 公募の納品用の組版（`printGridHtml.ts`）も同じ帯を出す。
  */
-export function buildPrintGuide(paper: string, margins: HeaderFooter): string {
+export function buildPrintGuide(paper: string, margins: HeaderFooter, os: KeyOs = hostKeyOs()): string {
   return [
     '<div class="print-guide">',
     `<p class="print-guide-lead">この画面の白い面が、そのまま紙1枚ずつになります（<span id="print-page-count">面に分けています…</span>）。` +
       `紙：${paper}。` +
       `上下の余白：${escapeHtml(describeHeaderFooter(margins))}</p>`,
-    "<p>Ctrl+P で印刷の画面を開き、送信先を「PDF に保存」にしてください。" +
+    keysInText("<p>Ctrl+P で印刷の画面を開き、送信先を「PDF に保存」にしてください。", os) +
       "「詳細設定」の「ヘッダーとフッター」のチェックを外してください（入れたままだと、日付とファイルの場所が紙の端に刷られます）。" +
       "用紙サイズ・余白・倍率は「既定」のままにしてください。" +
       "印刷の画面の並びや名前は、ブラウザやその版によって少し違うことがあります。</p>",

@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { CONTEST_RSS_LABEL, CONTEST_RSS_URL, contestsFromRss } from "../core/contestRss";
@@ -37,7 +38,7 @@ const MAX_FEED_CHARS = 5_000_000;
 
 /** ほかの道（取りに行けなかったとき） */
 const OTHER_WAY =
-  "ほかの道として、公募の一覧のページで文章を全部選んでコピー（Ctrl+A → Ctrl+C）し、" +
+  keysForHost("ほかの道として、公募の一覧のページで文章を全部選んでコピー（Ctrl+A → Ctrl+C）し、") +
   "「作品目標設定」→「公募の一覧を貼り付けて取り込む」からも入れられます。";
 
 /** 取りに行く口（テストで差し替える） */

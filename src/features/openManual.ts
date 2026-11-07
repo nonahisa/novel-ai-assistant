@@ -6,7 +6,7 @@ import {
 } from "../views/actionList";
 import { STEP_MENU } from "../views/stepMenu";
 import { canRunProcesses } from "../core/runtime";
-import { EXTRA_GUIDE } from "../core/featureGuide";
+import { extraGuideForHost } from "../core/featureGuide";
 import { entranceOf } from "../core/actionEntrance";
 import { openGeneratedMarkdown } from "../views/openDocument";
 
@@ -146,7 +146,8 @@ function actionChapter(allowsProcesses: boolean): string {
  * マニュアルの記述が違うことになる。
  */
 function guideChapter(): string {
-  const body = EXTRA_GUIDE.split("\n")
+  // キーの書き方だけは作者の OS に合わせる（AI へ渡す説明と同じ直し方。featureGuide.ts の extraGuideForHost）
+  const body = extraGuideForHost().split("\n")
     .map((line) => {
       const heading = /^【(.+)】$/.exec(line.trim());
       return heading ? `### ${heading[1]}` : line;

@@ -33,6 +33,7 @@ import {
   DROP_FILE_EXTENSIONS,
 } from "../core/backupFileKinds";
 import { IME_ENTER_GUARD_SOURCE } from "./imeEnterGuardScript";
+import { KEY_LABEL_SCRIPT } from "../core/keyLabels";
 
 /**
  * 大きく開いたときだけ出すツールバー。
@@ -521,7 +522,7 @@ ${large ? TOOLBAR_HTML : ""}
   <!-- 聞き方の例。中身は拡張機能側から届いたものをその都度作り直す
        （読者像が決まっていれば札が1つ減る）ので、入れ物だけ置く -->
   <div id="examples"></div>
-  <textarea id="input" placeholder="聞きたいことを書いてください（Ctrl+Enterで送信）"></textarea>
+  <textarea id="input" data-keys placeholder="聞きたいことを書いてください（Ctrl+Enterで送信）"></textarea>
   <div class="hint" id="hint"></div>
   <div class="row">
     ${
@@ -536,6 +537,9 @@ ${large ? TOOLBAR_HTML : ""}
   </div>
 </div>
 <script nonce="${nonce}">
+${KEY_LABEL_SCRIPT}
+// HTML に書いたキーの案内（data-keys の付いた所）を、Mac なら ⌘ の書き方へ（core/keyLabels.ts）
+novelaiApplyKeyLabels(document);
 const vscode = acquireVsCodeApi();
 const logEl = document.getElementById('log');
 const emptyEl = document.getElementById('empty');

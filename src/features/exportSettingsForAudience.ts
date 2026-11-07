@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { atomicWriteFile } from "../core/atomicWrite";
@@ -441,7 +442,7 @@ async function announce(
       const action = await vscode.window.showWarningMessage(
         "印刷用のファイルは作りましたが、ブラウザを開けませんでした。" +
           `フォルダーの中の ${name} をダブルクリックすると開きます。` +
-          "開いたら印刷（Ctrl+P）で送信先を「PDFに保存」にしてください。",
+          keysForHost("開いたら印刷（Ctrl+P）で送信先を「PDFに保存」にしてください。"),
         "フォルダーを開く"
       );
       if (action === "フォルダーを開く") await revealFolder(target);
@@ -449,7 +450,7 @@ async function announce(
     }
     const action = await vscode.window.showInformationMessage(
       `${label}の設定資料をブラウザで開きました。` +
-        "印刷（Ctrl+P）で送信先を「PDFに保存」にするとPDFになります。" +
+        keysForHost("印刷（Ctrl+P）で送信先を「PDFに保存」にするとPDFになります。") +
         "種別（人物・場所…）ごとに新しい紙から始まります。",
       "フォルダーを開く"
     );
