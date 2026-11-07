@@ -168,6 +168,12 @@ async function narouApiState(frame: Frame): Promise<{
 }
 
 /**
+ * 同意の日時の行（「（… に同意。外すといつでも取り消せます）」）の印。**句点まで含める**——チェックの
+ * ラベル「…使うことに同意します」にも「に同意」が入っていて、句点が無いと日時が無くても当たる
+ */
+const AGREED_AT_MARK = "に同意。";
+
+/**
  * 同意のチェックを入れ、ボタンが押せて同意の日時が出るまで待つ。
  *
  * ノートPCで、入れたあと15秒待っても押せるようにならずに落ちた（2026-11-07。入れる段と入れ直す段の
@@ -186,12 +192,17 @@ async function checkAgreementAndWait(frame: Frame, step: string): Promise<void> 
   let state = await narouApiState(frame);
   const agreedOnScreen = async () => {
     state = await narouApiState(frame);
-    return !state.fetchDisabled && state.agreeChecked && state.text.includes("に同意");
+    return !state.fetchDisabled && state.agreeChecked && state.text.includes(AGREED_AT_MARK);
   };
   const failWithState = async (error: unknown) => {
     throw new Error(`${String(error)}（欄：${JSON.stringify(state)}）`);
   };
-  await agree.check();
+  // 押した直後に古い統計で欄が描き直されると、Playwright が「押しても変わらない」で投げる。その文には欄の様子が
+  // 付かないので、添えて投げ直す
+  await agree.check().catch(async (error: unknown) => {
+    state = await narouApiState(frame);
+    await failWithState(error);
+  });
   const reached = await waitUntil(agreedOnScreen, step, 5_000).then(
     () => true,
     () => false
@@ -323,7 +334,7 @@ test("ガイドラインを開いた記録があると同意のチェックが�
       // チェックが外れただけなら手元の欄の見た目で、まだ届いていない）
       await frame.locator("#page-site-narou [data-narou-agree]").uncheck();
       await waitUntil(
-        async () => (state = await narouApiState(frame)).fetchDisabled && !state.agreeChecked && !state.text.includes("に同意"),
+        async () => (state = await narouApiState(frame)).fetchDisabled && !state.agreeChecked && !state.text.includes(AGREED_AT_MARK),
         "チェックを外すとボタンがまた押せなくなり、同意の日時が消える",
         15_000
       ).catch(async (error: unknown) => {
