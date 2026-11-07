@@ -136,6 +136,13 @@ describe("はっきりしない台詞は、当てずにAIへ回す", () => {
     expect(decided("　灯は聞いた。\n「誰？」")).toEqual({});
   });
 
+  test("話す以外の意味にもなる動詞（続けた・返した・応えた・切り出した）では拾わない", () => {
+    expect(decided("　灯は歩き続けた。\n「遠いね」")).toEqual({});
+    expect(decided("　灯は本を返した。\n「ありがとう」")).toEqual({});
+    expect(decided("　灯は期待に応えた。\n「やった」")).toEqual({});
+    expect(decided("　灯は木を切り出した。\n「重い」")).toEqual({});
+  });
+
   test("直前の行の名前が、話す言葉で終わっていなければ拾わない", () => {
     expect(decided("　灯は窓の外を見ていた。\n「雨だ」")).toEqual({});
     expect(decided("　灯は言った言葉を思い出していた。\n「雨だ」")).toEqual({});
