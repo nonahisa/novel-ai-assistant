@@ -202,3 +202,34 @@ describe("エンジンに届かなかったときの窓（2026-11-07 作者の�
     expect(prompt.useOsVoice).toBe("OSの声で読む");
   });
 });
+
+describe("英語の名前のスタイルも感情で選ぶ（2026-11-07 作者の答え）", () => {
+  // AivisSpeech の話者には、スタイルの名前が英語のもの（Shout・Surprise など）がある
+  const english = [
+    {
+      name: "英語の話者",
+      speaker_uuid: "en-1",
+      styles: [
+        { name: "Normal", id: 100 },
+        { name: "Happy", id: 101 },
+        { name: "SURPRISE", id: 102 },
+        { name: "shout", id: 103 },
+        { name: "Whisper", id: 104 },
+        { name: "Sad", id: 105 },
+      ],
+    },
+  ];
+  const speakers = parseSpeakers(english);
+
+  test("英語の名前に当たる。大文字と小文字は区別しない", () => {
+    expect(pickStyleForEmotion(speakers, 100, "喜び")).toEqual({ styleId: 101, styled: true });
+    expect(pickStyleForEmotion(speakers, 100, "驚き").styleId).toBe(102);
+    expect(pickStyleForEmotion(speakers, 100, "叫び").styleId).toBe(103);
+    expect(pickStyleForEmotion(speakers, 100, "ささやき").styleId).toBe(104);
+    expect(pickStyleForEmotion(speakers, 100, "悲しみ").styleId).toBe(105);
+  });
+
+  test("平静は選んだスタイルのまま", () => {
+    expect(pickStyleForEmotion(speakers, 100, "平静")).toEqual({ styleId: 100, styled: false });
+  });
+});

@@ -189,17 +189,21 @@ export function isVoiceIntensity(value: unknown): value is VoiceIntensity {
  * 「ささやき」「ヒソヒソ」など。ここは**よくある名前の当てずっぽうの表**で、
  * 作者は声の割り当てのファイル（`emotionStyles`）で話者に合わせて上書きできる。
  * 平静は候補を持たない（選んだスタイルのまま）。
+ *
+ * **英語の名前も候補に入れる**（作者の答え 2026-11-07）。AivisSpeech には「Shout」「Surprise」の
+ * ように英語の名前のスタイルを持つ話者がいる。英語は大文字と小文字を区別せずに当てる
+ * （`pickStyleForEmotion`）。日本語の候補を先に並べ、英語はそのあとに見る。
  */
 export const EMOTION_STYLE_CANDIDATES: Record<VoiceEmotion, readonly string[]> = {
   平静: [],
-  喜び: ["上機嫌", "喜び", "楽しい", "嬉しい", "あまあま", "テンション高め"],
-  怒り: ["怒り", "ツンツン", "不機嫌", "怒"],
-  悲しみ: ["悲しみ", "哀しみ", "かなしい", "泣き", "落ち込み"],
-  驚き: ["驚き", "びっくり", "テンション高め"],
-  恐れ: ["怯え", "恐怖", "不安", "おびえ", "ヒソヒソ"],
-  照れ: ["照れ", "恥ずかしい", "あまあま"],
-  ささやき: ["ささやき", "囁き", "ヒソヒソ", "内緒話"],
-  叫び: ["叫び", "絶叫", "テンション高め", "怒り"],
+  喜び: ["上機嫌", "喜び", "楽しい", "嬉しい", "あまあま", "テンション高め", "Happy", "Joy", "Fun", "Cheerful"],
+  怒り: ["怒り", "ツンツン", "不機嫌", "怒", "Angry", "Anger", "Mad"],
+  悲しみ: ["悲しみ", "哀しみ", "かなしい", "泣き", "落ち込み", "Sad", "Sorrow", "Cry"],
+  驚き: ["驚き", "びっくり", "テンション高め", "Surprise", "Surprised", "Amazed"],
+  恐れ: ["怯え", "恐怖", "不安", "おびえ", "ヒソヒソ", "Fear", "Scared", "Afraid"],
+  照れ: ["照れ", "恥ずかしい", "あまあま", "Shy", "Embarrassed"],
+  ささやき: ["ささやき", "囁き", "ヒソヒソ", "内緒話", "Whisper", "Murmur"],
+  叫び: ["叫び", "絶叫", "テンション高め", "怒り", "Shout", "Scream", "Yell"],
 };
 
 /** 声の調子（audio_query の6つの欄へ当てる値） */
@@ -291,8 +295,10 @@ export function pickStyleForEmotion(
   const candidates = [...(overrides[emotion] ?? []), ...EMOTION_STYLE_CANDIDATES[emotion]];
   for (const candidate of candidates) {
     if (candidate === "") continue;
+    // 英語の名前は大文字と小文字を区別しない（「Shout」「SHOUT」「shout」を同じに見る）
+    const wanted = candidate.toLowerCase();
     const style = found.speaker.styles.find(
-      (s) => s.id !== baseStyleId && s.name.includes(candidate)
+      (s) => s.id !== baseStyleId && s.name.toLowerCase().includes(wanted)
     );
     if (style) return { styleId: style.id, styled: true };
   }
