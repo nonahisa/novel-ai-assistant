@@ -99,4 +99,32 @@ describe("横の相談パネルの高さ", () => {
     const min = Number(/textarea[^{]*\{[^}]*min-height: (\d+)px/.exec(block!.body)![1]);
     expect(min).toBeLessThanOrEqual(32);
   });
+
+  /*
+    2026-11-07、Mac で枠が 217px（詰め方の効く 200px の手前）のとき、細い枠で聞き方の例が折れて
+    ［送る］を 44px 枠の外へ押し出した。高さの境目に頼らず、足りない分は会話の欄・札の欄・上の行が
+    縮む作りにした。形の確かめは画面の自動テスト（chatSideRoom の2件目）と、静的に組んだ測定で行う。
+    ここは、その作りが消えていないことだけを見る
+  */
+  test("200px の手前でも、縮むのは会話の欄・聞き方の例・上の行で、ボタンの行は縮まない", () => {
+    const css = styleOf(SIDEBAR);
+    const rule = (selector: string): string => {
+      const escaped = selector.replace(/[.#>*]/g, (c) => `\\${c}`);
+      const found = new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`).exec(css);
+      expect(found, `${selector} の決まりが無い`).toBeTruthy();
+      return found![1];
+    };
+    expect(rule("#log")).toMatch(/min-height: 0/);
+    expect(rule("#composer")).toMatch(/flex-direction: column/);
+    expect(rule("#composer")).toMatch(/min-height: 0/);
+    // ボタンの行・案内は縮めない（［送る］を残すのが入力の区画の役目）
+    expect(rule("#composer > *")).toMatch(/flex: 0 0 auto/);
+    // 聞き方の例は高さに上限を置き、あふれた札は欄の中で巻く（消さない）
+    expect(rule("#examples")).toMatch(/max-height: \d+px/);
+    expect(rule("#examples")).toMatch(/overflow-y: auto/);
+    expect(rule("#composer > #examples")).toMatch(/min-height: 0/);
+    // 入力欄は、ふだんでも低い枠では1行ぶんまで縮む
+    const min = Number(/min-height: (\d+)px/.exec(rule("textarea"))?.[1]);
+    expect(min).toBeLessThanOrEqual(32);
+  });
 });

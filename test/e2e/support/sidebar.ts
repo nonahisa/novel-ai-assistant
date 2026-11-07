@@ -167,14 +167,51 @@ export async function contextMenuLabels(page: Page): Promise<string[]> {
 
 /** 行を右クリックし、品書きの `item` を押す */
 export async function treeContextMenu(page: Page, head: string, item: string): Promise<void> {
+  /*
+    **前の確認の窓が閉じきるのを待つ。** Mac（1.141.0、2026-11-07）で、確認の窓を閉じた直後の右クリックが
+    品書きの入れ物（`.context-view`）だけ出て中身（`.monaco-menu`）が組み上がらないまま止まった
+    （品書きの数 {"contextView":1,"menu":0}）。窓が無ければすぐ抜ける
+  */
+  await page
+    .locator(".monaco-dialog-box")
+    .first()
+    .waitFor({ state: "detached", timeout: 5_000 })
+    .catch(() => undefined);
   // 前に出ていた吹き出しが品書きの上に残らないよう、先に払う（矢印は右クリックで行の上へ戻る）
   await dismissWorkbenchHover(page);
-  await treeRow(page, head).click({ button: "right" });
-  await waitUntil(async () => (await contextMenuLabels(page)).includes(item), `右クリックの品書きに「${item}」が出る`).catch(
-    async (error: unknown) => {
-      throw new Error(`${String(error)}（品書き：${(await contextMenuLabels(page)).join(" / ")}／${await contextMenuState(page, head)}）`);
+  /*
+    **品書きが組み上がらなければ、閉じて右クリックし直す（3回まで）。** Windows では1回目で項目が出て
+    すぐ抜けるので、道は変わらない。行の選び直しは左クリックでしない——話の行は左クリックで原稿が開き
+    （workTree.ts の item.command）、タブと焦点が変わってテストの前提が崩れる。右クリックそのものが行を選ぶ
+  */
+  const attempts = 3;
+  for (let attempt = 1; ; attempt++) {
+    await treeRow(page, head).click({ button: "right" });
+    const shown = await waitUntil(
+      async () => (await contextMenuLabels(page)).includes(item),
+      `右クリックの品書きに「${item}」が出る`,
+      attempt < attempts ? 5_000 : undefined
+    ).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    if (shown === undefined) break;
+    if (attempt >= attempts) {
+      throw new Error(
+        `${String(shown)}（右クリックを${attempts}回試した／品書き：${(await contextMenuLabels(page)).join(" / ")}／${await contextMenuState(page, head)}）`
+      );
     }
-  );
+    // 「やり直したら通った」で黙らない。通ったときも、やり直しが要ったことと様子を出力に残す
+    console.warn(`[treeContextMenu] 「${head}」の品書きが組み上がらず、右クリックし直します（${attempt}回目／${await contextMenuState(page, head)}）`);
+    // 組み上がらなかった品書きを閉じてから、もう一度右クリックする
+    await page.keyboard.press("Escape");
+    await waitUntil(
+      async () => (await page.locator(".context-view .monaco-menu").count()) === 0,
+      "組み上がらなかった右クリックの品書きが閉じる",
+      3_000
+    ).catch(() => undefined);
+    await dismissWorkbenchHover(page);
+  }
   const entry = page.locator(".context-view .action-label", { hasText: item }).first();
   /*
     **押す前に、品書きの行がいちばん上に出ているかを確かめる。** 吹き出しなどが重なっていると、

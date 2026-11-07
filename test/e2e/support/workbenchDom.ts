@@ -830,3 +830,76 @@ export const OPEN_KEYBINDINGS_BINDING = { key: OPEN_KEYBINDINGS_KEY, command: "w
 /** 知らせを閉じるキー（VS Code での書き方）。keybindings.json へ書く */
 export const CLEAR_NOTIFICATIONS_KEY = "ctrl+alt+shift+f11";
 const CLEAR_NOTIFICATIONS_PRESS = "Control+Alt+Shift+F11";
+
+/** 画面の中の箱（境目・区画の見出しの位置） */
+export interface ScreenBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 区画の境目（`.monaco-sash`）を引いて、区画の大きさを変える（2026-11-07。横の相談パネルを低く・細くして、
+ * 入力欄と［送る］が枠の中に残るかを見るために足した）。
+ *
+ * - `orientation`：`vertical` は縦の境目（左の列の右端など。横へ引く）、`horizontal` は横の境目
+ *   （左の列の区画どうしの間。縦へ引く）
+ * - `near`：引きたい境目のそばの点。縦の境目なら x が、横の境目なら y が一番近いものを選ぶ
+ *   （もう一方の向きでは、その点を含む境目だけを候補にする）
+ * - `delta`：引く量（px）。縦の境目は右へ、横の境目は下へが正
+ *
+ * 見つからなければ、いま在る境目の位置を名乗って落とす（版で DOM が変わったときに読めるように）
+ */
+export async function dragSash(
+  page: Page,
+  orientation: "vertical" | "horizontal",
+  near: { x: number; y: number },
+  delta: number
+): Promise<void> {
+  const sashes: ScreenBox[] = await page.evaluate(
+    (kind) =>
+      Array.from(document.querySelectorAll(`.monaco-sash.${kind}:not(.disabled)`))
+        .map((element) => {
+          const box = (element as HTMLElement).getBoundingClientRect();
+          return { x: box.x, y: box.y, width: box.width, height: box.height };
+        })
+        .filter((box) => box.width > 0 && box.height > 0),
+    orientation
+  );
+  const covers = (box: ScreenBox) =>
+    orientation === "vertical"
+      ? near.y >= box.y && near.y <= box.y + box.height
+      : near.x >= box.x && near.x <= box.x + box.width;
+  const distance = (box: ScreenBox) =>
+    orientation === "vertical" ? Math.abs(box.x + box.width / 2 - near.x) : Math.abs(box.y + box.height / 2 - near.y);
+  const target = sashes.filter(covers).sort((a, b) => distance(a) - distance(b))[0];
+  if (!target || distance(target) > 12) {
+    throw new Error(
+      `点 ${JSON.stringify(near)} のそばに${orientation === "vertical" ? "縦" : "横"}の境目が見つかりません` +
+        `（在る境目 [x, y, 幅, 高さ]：${JSON.stringify(sashes.map((box) => [box.x, box.y, box.width, box.height].map(Math.round)))}）`
+    );
+  }
+  // 掴むのは境目の真ん中の線の上。もう一方の向きは `near` のまま（長い境目の端を掴まない）
+  const startX = orientation === "vertical" ? target.x + target.width / 2 : near.x;
+  const startY = orientation === "vertical" ? near.y : target.y + target.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  // 一気に飛ばすと境目が動きを拾わないことがあるので、何歩かに分けて動かす
+  const steps = 8;
+  for (let i = 1; i <= steps; i++) {
+    const moved = (delta * i) / steps;
+    await page.mouse.move(orientation === "vertical" ? startX + moved : startX, orientation === "vertical" ? startY : startY + moved);
+  }
+  await page.mouse.up();
+}
+
+/** 左の列（`.part.sidebar`）の箱。見えていなければ undefined */
+export async function sidebarBox(page: Page): Promise<ScreenBox | undefined> {
+  return (await page.locator(".part.sidebar").first().boundingBox().catch(() => null)) ?? undefined;
+}
+
+/** 左の列の区画の見出し（「AIに相談」など）の箱。見えていなければ undefined */
+export async function paneHeaderBox(page: Page, title: string): Promise<ScreenBox | undefined> {
+  return (await page.locator(".pane-header", { hasText: title }).first().boundingBox().catch(() => null)) ?? undefined;
+}
