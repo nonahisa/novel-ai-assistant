@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   collectEditorInboxQuietly,
+  DECISIONS_BUTTON,
   returnDecisionsIfFinished,
   type InboxDeps,
   type ReturnDeps,
@@ -167,6 +168,8 @@ function inboxDeps(over: Partial<InboxDeps> = {}): InboxDeps {
     })),
     notify: vi.fn(),
     offer: vi.fn(),
+    offerDecisions: vi.fn(),
+    viewDecisions: vi.fn(async () => undefined),
     primePanel: vi.fn(async () => undefined),
     viewProposals: vi.fn(async () => undefined),
     loadProposals: vi.fn(async () => []),
@@ -296,8 +299,10 @@ describe("編集者モード：同期で届いた作者の採否を知らせる�
 
     await collectEditorInboxQuietly([work("a")], deps);
 
-    expect(deps.notify).toHaveBeenCalledWith(
-      "作者が提案を決めました（採用 1・見送り 1・読まれた 2）。"
+    expect(deps.offerDecisions).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "a" }),
+      "作者が提案を決めました（採用 1・見送り 1・読まれた 2）。",
+      expect.any(Function)
     );
   });
 
@@ -310,14 +315,16 @@ describe("編集者モード：同期で届いた作者の採否を知らせる�
 
     await collectEditorInboxQuietly([work("a")], deps);
     await collectEditorInboxQuietly([work("a")], deps);
-    expect(deps.notify).toHaveBeenCalledTimes(1);
+    expect(deps.offerDecisions).toHaveBeenCalledTimes(1);
 
     // 2件目が届いた
     views = [view("p1", "accepted"), view("p2", "rejected", "2026-11-01T13:00:00.000Z")];
     await collectEditorInboxQuietly([work("a")], deps);
-    expect(deps.notify).toHaveBeenCalledTimes(2);
-    expect(deps.notify).toHaveBeenLastCalledWith(
-      "作者が提案を決めました（採用 0・見送り 1・読まれた 0）。"
+    expect(deps.offerDecisions).toHaveBeenCalledTimes(2);
+    expect(deps.offerDecisions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "a" }),
+      "作者が提案を決めました（採用 0・見送り 1・読まれた 0）。",
+      expect.any(Function)
     );
   });
 
@@ -332,9 +339,29 @@ describe("編集者モード：同期で届いた作者の採否を知らせる�
     views = [view("p1", "accepted", "2026-11-01T14:00:00.000Z")];
     await collectEditorInboxQuietly([work("a")], deps);
 
-    expect(deps.notify).toHaveBeenLastCalledWith(
-      "作者が提案を決めました（採用 1・見送り 0・読まれた 0）。"
+    expect(deps.offerDecisions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "a" }),
+      "作者が提案を決めました（採用 1・見送り 0・読まれた 0）。",
+      expect.any(Function)
     );
+  });
+
+  test("知らせの［採否を見る］を押すと、その作品の作者の採否の一覧を開く（作者の頼み 2026-11-07）", async () => {
+    const opened: string[] = [];
+    const deps = inboxDeps({
+      isEditorMode: () => true,
+      loadProposals: vi.fn(async () => [view("p1", "accepted")]),
+      offerDecisions: vi.fn((target: WorkEntry, _text: string, onView: () => Promise<void>) => {
+        opened.push(target.id);
+        void onView();
+      }),
+      viewDecisions: vi.fn(async (target: WorkEntry) => {
+        opened.push(`一覧:${target.id}`);
+      }),
+    });
+    await collectEditorInboxQuietly([work("a")], deps);
+    expect(opened).toEqual(["a", "一覧:a"]);
+    expect(DECISIONS_BUTTON).toBe("採否を見る");
   });
 
   test("採否が無ければ黙る。読めなくても例外を外へ出さない", async () => {

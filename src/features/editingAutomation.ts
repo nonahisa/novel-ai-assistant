@@ -185,12 +185,36 @@ export interface InboxDeps {
   loadProposals: (work: WorkEntry) => Promise<ProposalView[]>;
   /** 編集者モード：もう知らせた採否の覚え */
   decisionMemory: DecisionMemory;
+  /**
+   * 編集者モード：作者の採否が届いた知らせ。［採否を見る］を押したら `onView` を呼ぶ
+   * （作者の頼み 2026-11-07「採否はパネルで見せたほうがいい」→「知らせのボタンで開く」）。
+   * **答えを待たない**（同期の後始末を編集者の返事まで止めない）
+   */
+  offerDecisions: (work: WorkEntry, text: string, onView: () => Promise<void>) => void;
+  /** 編集者モード：その作品の作者の採否の一覧（編集者メニューの「7. 作者の採否を見る」と同じ）を開く */
+  viewDecisions: (work: WorkEntry) => Promise<void>;
 }
+
+/** 採否が届いた知らせのボタン */
+export const DECISIONS_BUTTON = "採否を見る";
 
 const defaultInboxDeps: InboxDeps = {
   isEditorMode,
   importProposals: (work) => importEditorProposalsQuietly(work),
   notify: (text) => void vscode.window.showInformationMessage(text),
+  offerDecisions: (work, text, onView) => {
+    whenNoticePicked(
+      vscode.window.showInformationMessage(text, DECISIONS_BUTTON),
+      async (picked) => {
+        if (picked === DECISIONS_BUTTON) await onView();
+      },
+      { label: "作者の採否を見る", workFolder: work.folderPath }
+    );
+  },
+  viewDecisions: async (work) => {
+    const { showEditorProposalList } = await import("./editorProposalList.js");
+    await showEditorProposalList(work, "decided", defaultInboxDeps.decisionMemory);
+  },
   offer: (work, text, onView) => {
     whenNoticePicked(
       vscode.window.showInformationMessage(text, VIEW_PROPOSALS_BUTTON),
@@ -313,10 +337,12 @@ async function noticeArrivedDecisions(
         keys.push(key);
       }
       if (arrived.length === 0) continue;
-      deps.notify(
+      deps.offerDecisions(
+        work,
         "作者が提案を決めました" +
           (works.length > 1 ? `（「${work.title}」）` : "") +
-          `（${describeDecisionCounts(summarizeDecisions(arrived))}）。`
+          `（${describeDecisionCounts(summarizeDecisions(arrived))}）。`,
+        () => deps.viewDecisions(work)
       );
       await deps.decisionMemory.add(work.id, keys);
       useLogFile(work.folderPath);
