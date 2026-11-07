@@ -52,12 +52,12 @@ const LOCAL_TIMEOUT_MS = 10_000;
 const FETCH_TIMEOUT_MS = 30_000;
 
 /**
- * gitを実行する。
+ * gitを1回だけ起こす（やり直しはしない。`runGit` がこれを包む）。
  *
  * **シェルを介さない**（`execFile`）。作品フォルダーのパスには空白も
  * 日本語も入るため、シェル経由にすると引用の取り扱いで事故る。
  */
-export const runGit: GitCommandRunner = (args, cwd, timeoutMs, options) =>
+const runGitOnce: GitCommandRunner = (args, cwd, timeoutMs, options) =>
   new Promise((resolve) => {
     const child = execFile(
       "git",
@@ -75,8 +75,15 @@ export const runGit: GitCommandRunner = (args, cwd, timeoutMs, options) =>
           SSH_ASKPASS: "echo",
           // ページャが起動すると終了しないコマンドがある
           GIT_PAGER: "cat",
-          // 出力の言語を固定する。文面で判定はしないが、ログの読み手を揃える
+          // 出力の言語を固定する。ログの読み手を揃えるため。文面で判定するのは
+          // ロックの取り合いだけ（`isIndexLockContention` の理由）
           LC_ALL: "C",
+          // **読むだけの命令に index.lock を握らせない。** `git status` は
+          // 読んだついでに index を書き直そうとして、一瞬 index.lock を握る。
+          // 見張り（`GitSyncMonitor`）の読みが、同じ製品の記録（add・commit）を
+          // 断らせていた（2026-11-07）。失うのは stat の覚えの書き戻しだけで、
+          // 答えは変わらない
+          GIT_OPTIONAL_LOCKS: "0",
         },
         // 巨大な出力でメモリを食わないよう上限を置く
         maxBuffer: 4 * 1024 * 1024,
@@ -98,6 +105,105 @@ export const runGit: GitCommandRunner = (args, cwd, timeoutMs, options) =>
     // 命令（`--pathspec-from-file=-`）が入力の終わりを待ち続ける
     child.stdin?.end(options?.input ?? "");
   });
+
+/**
+ * ほかの git が index.lock を握っていたために断られたか（設計書5.5）。
+ *
+ * **文面で見分ける。** `LC_ALL=C` で起こすので、git の文は
+ * `Unable to create '…/index.lock': File exists.` に決まる（lockfile.c の
+ * 決まった文）。ロックのファイルがあるかを後から見に行く案は採らない——
+ * 取り合いは数十〜数百ミリ秒で解けるので、失敗を受け取ってから見に行くと
+ * もう消えていて、肝心の場面でやり直さない。
+ *
+ * 実装ルール5「エラー文から原因を当てない」はクラウドAIの話で、ここは文面を
+ * 自分で固定した git である。外れたときの害も小さい（同じ命令を数回やり直して、
+ * 駄目なら元の失敗をそのまま返すだけ）。
+ *
+ * **index.lock に限る。** 枝や設定のロック（`refs/heads/…lock`・`config.lock`）は
+ * 今のところ取り合いが起きておらず、やり直してよいかを命令ごとに確かめていない。
+ */
+export function isIndexLockContention(result: GitCommandResult): boolean {
+  // 時間切れ・起動できない（-1）はロックの取り合いではない。やり直すと
+  // 時間切れの上にさらに待ちが重なる
+  if (result.code === 0 || result.code === -1) return false;
+  return /index\.lock['"]?: File exists/.test(result.stderr);
+}
+
+/**
+ * やり直してはいけない命令か。
+ *
+ * **途中で退避を作ってから断られうる命令は、やり直さない。** `stash` と
+ * `--autostash` は、書きかけを退避（stash）してから作業ツリーを戻す。戻す段で
+ * ロックに断られると、退避だけが残った状態から同じ命令をもう一度走らせることに
+ * なり、退避が二重になる。ほかの index を書く命令（add・commit・rm・reset・
+ * checkout・merge・pull）は、index.lock を**最初に**取り、取れなければ何も
+ * 変えずに終わるので、やり直しても記録は二重にならない。
+ */
+function mustNotRetry(args: readonly string[]): boolean {
+  return args[0] === "stash" || args.includes("--autostash");
+}
+
+/** index.lock の取り合いで断られたときの、やり直す前の待ち（ミリ秒）。長さがやり直しの回数 */
+export const INDEX_LOCK_RETRY_DELAYS_MS: readonly number[] = [100, 200, 400, 800, 1600];
+
+/**
+ * やり直しの最後の1回に残しておく時間（ミリ秒）。これより短くなるなら待たずに
+ * 失敗を返す——残り時間の少ない1回は、時間切れで落ちて理由が分かりにくくなる
+ */
+const MIN_ATTEMPT_MS = 1_000;
+
+export interface IndexLockRetryOptions {
+  /** やり直す前の待ち。既定は `INDEX_LOCK_RETRY_DELAYS_MS` */
+  delaysMs?: readonly number[];
+  /** 待つ部品（試験で時間を進めずに済ますため差し替える） */
+  sleep?: (ms: number) => Promise<void>;
+  /** 今の時刻（試験で差し替える） */
+  now?: () => number;
+}
+
+/**
+ * index.lock の取り合いで断られたら、少し待って同じ命令をやり直す実行口を作る。
+ *
+ * - **時間切れと待ちを重ねない。** 呼び手が渡した `timeoutMs` を、やり直しも
+ *   含めた全体の上限にする（2回目以降は残りの時間だけを渡す）。pull のように
+ *   取り寄せのあとで断られる命令でも、呼び手の思う上限を越えない
+ * - 上限（回数か時間）に届いたら、**最後の失敗をそのまま返す**。黙って成功にしない
+ * - 読むだけの命令も同じ口を通るが、`status`・`diff`・`rev-parse` は index.lock を
+ *   取れなくても失敗しない（`GIT_OPTIONAL_LOCKS=0` のうえ、取れなければ書き戻しを
+ *   諦めるだけ）ので、ここでやり直しが起きることは無い
+ */
+export function withIndexLockRetry(
+  run: GitCommandRunner,
+  retry: IndexLockRetryOptions = {}
+): GitCommandRunner {
+  const delays = retry.delaysMs ?? INDEX_LOCK_RETRY_DELAYS_MS;
+  const sleep =
+    retry.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = retry.now ?? (() => Date.now());
+  return async (args, cwd, timeoutMs, options) => {
+    const deadline = now() + timeoutMs;
+    let result = await run(args, cwd, timeoutMs, options);
+    if (mustNotRetry(args)) return result;
+    for (const delay of delays) {
+      if (!isIndexLockContention(result)) return result;
+      if (deadline - now() - delay < MIN_ATTEMPT_MS) return result;
+      await sleep(delay);
+      result = await run(args, cwd, deadline - now(), options);
+    }
+    return result;
+  };
+}
+
+/**
+ * gitを実行する。ほかの git が index.lock を一瞬握っていて断られたときは、
+ * 少し待ってやり直す（`withIndexLockRetry`）。
+ *
+ * 握っている側は、VS Code の組み込み Git（作品フォルダーの書き込みを見て
+ * 状態を読み直す）や、製品の別の道である。製品の外が握るので、製品の中の
+ * 順番待ち（`runSerialized`）では防げない（2026-11-07、Mac の e2e で
+ * 校閲の範囲を知らせる記録が断られた）。
+ */
+export const runGit: GitCommandRunner = withIndexLockRetry(runGitOnce);
 
 /**
  * 1回の命令に並べてよいパスの字数の目安。
