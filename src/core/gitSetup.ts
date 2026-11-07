@@ -327,14 +327,26 @@ function ghNameTaken(detail: string): boolean {
   return /already exists/i.test(detail);
 }
 
+/**
+ * GitHub CLI（gh）の状態。入っていない・入っているがログインがまだ・使える、の3つ。
+ *
+ * セットアップでは「入っているがログインがまだ」を分けて見せる。真偽だけだと、
+ * 入れたあとも「GitHub CLI を入れる」が残り、入れ直しても消えなかった（2026-11-07 Mac）
+ */
+export type GhState = "missing" | "needsLogin" | "ready";
+
+export async function ghState(run: CommandRunner = runCommand): Promise<GhState> {
+  const version = await run("gh", ["--version"], undefined, LOCAL_TIMEOUT_MS);
+  if (version.code !== 0) return "missing";
+  const auth = await run("gh", ["auth", "status"], undefined, LOCAL_TIMEOUT_MS);
+  return auth.code === 0 ? "ready" : "needsLogin";
+}
+
 /** GitHub CLI（gh）が使えて、認証も済んでいるか */
 export async function ghAvailable(
   run: CommandRunner = runCommand
 ): Promise<boolean> {
-  const version = await run("gh", ["--version"], undefined, LOCAL_TIMEOUT_MS);
-  if (version.code !== 0) return false;
-  const auth = await run("gh", ["auth", "status"], undefined, LOCAL_TIMEOUT_MS);
-  return auth.code === 0;
+  return (await ghState(run)) === "ready";
 }
 
 /**

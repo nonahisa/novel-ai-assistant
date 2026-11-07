@@ -9,9 +9,12 @@ import {
 import { AIRegistry, runSetupWizard } from "../ai/registry";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { isGitAvailable } from "../core/git";
-import { ghAvailable } from "../core/gitSetup";
+import { ghState } from "../core/gitSetup";
 import {
   buildSetupPlan,
+  GH_LOGIN_COMMAND,
+  GH_LOGIN_HINT,
+  setupCompleteMessage,
   RECOMMENDED_CHAT_MODEL,
   RECOMMENDED_EMBEDDING_MODEL,
   REQUIREMENTS,
@@ -124,7 +127,8 @@ export async function inspect(): Promise<SetupPlan> {
   });
 
   states.push({ id: "git", present: await isGitAvailable() });
-  states.push({ id: "gh", present: await ghAvailable() });
+  const gh = await ghState();
+  states.push({ id: "gh", present: gh === "ready", needsLogin: gh === "needsLogin" });
 
   return buildSetupPlan(states);
 }
@@ -146,12 +150,17 @@ async function showComplete(
 ): Promise<void> {
   const configure = "使うAIを選ぶ";
   const detail = "一覧を見る";
+  // 任意が残っていれば、その道も出す（「すべて揃った」と読み違えないように文も分ける）
+  const rest = plan.missingOptional.length + plan.needsLogin.length;
+  const optional = "任意のものを見る";
   const picked = await vscode.window.showInformationMessage(
-    "必要なものはすべて揃っています。",
+    setupCompleteMessage(plan),
     configure,
+    ...(rest > 0 ? [optional] : []),
     detail
   );
   if (picked === configure) await runSetupWizard(registry);
+  if (picked === optional) await showPlan(registry, plan, await detectPackageManager());
   if (picked === detail) await showDetail(plan);
 }
 
@@ -192,6 +201,15 @@ async function showPlan(
     });
   }
 
+  // 入っているがログインがまだ（gh）。入れ直しても直らないので、ログインの道を出す
+  for (const entry of plan.needsLogin) {
+    items.push({
+      label: `$(account) ${entry.requirement.label} にログインする`,
+      detail: `任意／入っていますが、GitHub へのログインがまだです。${GH_LOGIN_HINT}`,
+      action: () => guideLogin(registry),
+    });
+  }
+
   if (required.length + optional.length > 1) {
     const all = [...required, ...optional];
     items.push({
@@ -220,7 +238,7 @@ async function showPlan(
   const summary =
     required.length > 0
       ? `AIを使うには あと${required.length}件 必要です`
-      : "必要なものは揃っています（任意のものが未導入）";
+      : "必須のものは揃っています（任意のものがまだです）";
 
   const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
     title: "統合小説執筆環境のセットアップ",
@@ -250,7 +268,7 @@ export function buildSetupDocument(plan: SetupPlan): string {
   ];
 
   for (const entry of plan.entries) {
-    const mark = entry.present ? "済" : entry.requirement.level;
+    const mark = entry.present ? "済" : entry.needsLogin ? "ログイン待ち" : entry.requirement.level;
     lines.push(
       `| ${mark} | ${entry.requirement.label} | ${entry.requirement.purpose.replace(
         /\n/g,
@@ -264,11 +282,17 @@ export function buildSetupDocument(plan: SetupPlan): string {
   for (const entry of plan.entries) {
     lines.push(`## ${entry.requirement.label}`, "");
     lines.push(
-      entry.present ? "**入っています。**" : `**まだ入っていません**（${entry.requirement.level}）。`,
+      entry.present
+        ? "**入っています。**"
+        : entry.needsLogin
+          ? `**入っていますが、ログインがまだです**（${entry.requirement.level}）。`
+          : `**まだ入っていません**（${entry.requirement.level}）。`,
       ""
     );
     lines.push(entry.requirement.purpose, "");
-    if (!entry.present) {
+    if (entry.needsLogin) {
+      lines.push(GH_LOGIN_HINT, "");
+    } else if (!entry.present) {
       lines.push(`入れない場合：${entry.requirement.withoutIt}`, "");
     }
     if (entry.note) lines.push(entry.note, "");
@@ -372,6 +396,39 @@ async function installEntries(
     return;
   }
   await showPlan(registry, after, manager);
+}
+
+/**
+ * gh のログインの案内。**ログインは作者がターミナルで行う**（拡張機能は認証に触れない）。
+ * 打つ1行をクリップボードへ入れられるようにする
+ */
+async function guideLogin(registry: AIRegistry): Promise<void> {
+  const copy = "コマンドをコピー";
+  const answer = await vscode.window.showInformationMessage(
+    "GitHub CLI は入っていますが、GitHub へのログインがまだです。",
+    {
+      modal: true,
+      detail: `ターミナルで次の1行を実行し、表示に沿ってログインしてください。
+
+  ${GH_LOGIN_COMMAND}`,
+    },
+    copy
+  );
+  if (answer !== copy) return;
+  await vscode.env.clipboard.writeText(GH_LOGIN_COMMAND);
+  // 済んだあとに押す道を、この知らせに付ける（メニューに無い名前を言わない）
+  const recheck = "ログインできたので確かめる";
+  const next = await vscode.window.showInformationMessage(
+    "コマンドをクリップボードへ入れました。ターミナルへ貼り付けて実行してください。",
+    recheck
+  );
+  if (next !== recheck) return;
+  const after = await inspect();
+  if (after.complete || after.missingRequired.length === 0) {
+    await showComplete(registry, after);
+    return;
+  }
+  await showPlan(registry, after, await detectPackageManager());
 }
 
 /**

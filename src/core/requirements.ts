@@ -239,12 +239,15 @@ export interface RequirementState {
   present: boolean;
   /** 入っていない理由や補足（版が古いなど） */
   note?: string;
+  /** 入っているが、ログインがまだ（gh）。入れ直しても直らないので「入れる」に並べない */
+  needsLogin?: boolean;
 }
 
 export interface SetupPlanEntry {
   requirement: Requirement;
   present: boolean;
   note?: string;
+  needsLogin?: boolean;
 }
 
 export interface SetupPlan {
@@ -253,6 +256,8 @@ export interface SetupPlan {
   missingRequired: SetupPlanEntry[];
   /** 足りない任意のもの */
   missingOptional: SetupPlanEntry[];
+  /** 入っているが、ログインがまだのもの */
+  needsLogin: SetupPlanEntry[];
   /** すべて揃っているか（任意も含めて） */
   complete: boolean;
 }
@@ -274,6 +279,7 @@ export function buildSetupPlan(states: readonly RequirementState[]): SetupPlan {
       requirement,
       present: state?.present ?? false,
       note: state?.note,
+      needsLogin: !state?.present && state?.needsLogin === true ? true : undefined,
     };
   });
 
@@ -281,16 +287,40 @@ export function buildSetupPlan(states: readonly RequirementState[]): SetupPlan {
     (id === "chatModel" || id === "embeddingModel") && !ollamaPresent;
 
   const missing = entries.filter(
-    (entry) => !entry.present && !needsOllamaFirst(entry.requirement.id)
+    (entry) =>
+      !entry.present && !entry.needsLogin && !needsOllamaFirst(entry.requirement.id)
   );
 
   return {
     entries,
     missingRequired: missing.filter((e) => e.requirement.level === "必須"),
     missingOptional: missing.filter((e) => e.requirement.level === "任意"),
+    needsLogin: entries.filter((entry) => entry.needsLogin === true),
     complete: entries.every((entry) => entry.present),
   };
 }
+
+/**
+ * 必須が揃ったときの知らせ。
+ *
+ * **任意が残っているのに「すべて揃っています」と言わない。** 2026-11-07 の Mac の実機確認で、
+ * bge-m3 や認証前の gh が残っているのに全部揃ったと読める文が出ていた
+ */
+export function setupCompleteMessage(plan: SetupPlan): string {
+  const rest = [
+    ...plan.missingOptional.map((entry) => entry.requirement.label),
+    ...plan.needsLogin.map((entry) => `${entry.requirement.label}（ログインがまだ）`),
+  ];
+  if (rest.length === 0) return "必要なものはすべて揃っています。";
+  return (
+    `必須のものはすべて揃いました。任意のものが${rest.length}件まだです（${rest.join("・")}）。` +
+    "あとからでも入れられます。"
+  );
+}
+
+/** gh のログインの1行。ターミナルで作者が打つ（拡張機能は認証に触れない） */
+export const GH_LOGIN_COMMAND = "gh auth login";
+export const GH_LOGIN_HINT = `ターミナルで「${GH_LOGIN_COMMAND}」を実行すると、GitHub にログインできます。`;
 
 /**
  * 作者に見せる一覧。
@@ -301,6 +331,13 @@ export function buildSetupPlan(states: readonly RequirementState[]): SetupPlan {
 export function describeSetupPlan(plan: SetupPlan): string {
   const lines: string[] = [];
   for (const entry of plan.entries) {
+    if (entry.needsLogin) {
+      lines.push(`[任意] ${entry.requirement.label}（入っています。ログインがまだ）`);
+      lines.push(`     ${entry.requirement.purpose}`);
+      lines.push(`     ${GH_LOGIN_HINT}`);
+      if (entry.note) lines.push(`     ${entry.note}`);
+      continue;
+    }
     const mark = entry.present ? "済" : entry.requirement.level === "必須" ? "要" : "任意";
     const size = entry.requirement.size ? `／${entry.requirement.size}` : "";
     lines.push(`[${mark}] ${entry.requirement.label}${entry.present ? "" : size}`);
