@@ -21,8 +21,10 @@ import { voiceRemoteHostConfirmId } from "../core/confirmMemory";
 import { logFailure, logStep, responseExcerptForLog, useLogFile } from "../core/logger";
 import type { ReadingSentence } from "../core/readAloud";
 import {
+  castChunkSpeakerSequence,
   castChunksOf,
   castDialogues,
+  castFlowNames,
   castGuessesForStages,
   castSpeakersFromText,
   castLookup,
@@ -30,6 +32,7 @@ import {
   editCastEntry,
   mergeCastEntries,
   parseCastResult,
+  validateCastSpeakers,
   voicePlanUnits,
   type CastChunk,
   type CastEntry,
@@ -65,6 +68,7 @@ import {
   VOICE_CAST_CHUNK_CHARS,
   VOICE_CAST_CONTEXT_AFTER_CHARS,
   VOICE_CAST_CONTEXT_BEFORE_CHARS,
+  VOICE_CAST_FLOW_MAX,
   VOICE_CAST_MAX_PEOPLE,
   VOICE_CAST_VERSION,
   voiceCastStageRequests,
@@ -441,9 +445,16 @@ function isCachedCastChunk(value: unknown): value is CachedCastChunk {
  * - 1段目（話者）：本文・前後の本文・送った人物の一覧・コードで決めた話者を含める
  *   （一覧が変われば答えも変わる。決めた番号は頼み方に「答えません」と書くので、
  *   決め方の規則が変わったのに古い答えを引くと、訊かなかった番号の答えが無いまま残る）
+ *   **添えた話者の流れも含める**（版1.4）。前の区切りの答えが変われば、次の区切りも
+ *   訊き直す（同じ流れになれば、その先は当たる）
  * - 2段目（感情）：本文だけ。人物の一覧も1段目の答えも渡さないので、人物を足しても当たる
  */
-function stageCacheHash(stage: VoiceCastStage, chunk: CastChunk, people: readonly CastPerson[]): string {
+function stageCacheHash(
+  stage: VoiceCastStage,
+  chunk: CastChunk,
+  people: readonly CastPerson[],
+  flow: readonly string[] = []
+): string {
   if (stage === "emotion") return hashText(JSON.stringify(["emotion", chunk.text]));
   return hashText(
     JSON.stringify([
@@ -453,8 +464,19 @@ function stageCacheHash(stage: VoiceCastStage, chunk: CastChunk, people: readonl
       chunk.after,
       people.map((p) => [p.id, p.name, p.aliases, p.speechStyle]),
       [...chunk.decided.entries()],
+      // 流れが無い区切りは版1.3 と同じ形の鍵にする（区切りの数が1つの話で余計な差を作らない）
+      ...(flow.length > 0 ? [flow] : []),
     ])
   );
+}
+
+/** 控えから引いた1段目の答えを検算し、番号 → 人物の id（流れを組むため） */
+function cachedSpeakers(
+  items: readonly unknown[],
+  chunk: CastChunk,
+  people: readonly CastPerson[]
+): Map<number, string | null> {
+  return validateCastSpeakers(items, chunk.dialogues.length, people, chunk.decided).speakers;
 }
 
 /** 1段で送る本文の字数（確認の窓に出す。1段目は前後の参考の本文も送る） */
@@ -478,13 +500,16 @@ function dropSummary(dropped: ReadonlyArray<{ reason: string; item: unknown }>):
  *    はっきり書いてある台詞は、コードで話者を決めておく（案 A。1段目で訊かない）
  * 2. 区切りごとに2段で訊く（案 B。版1.3）：1段目は話者だけ、2段目は感情と強さだけ。
  *    訊く番号が無い区切り（全部コードで決まった）は1段目を呼ばない
- * 3. 段ごとに、**内容ハッシュ＋プロバイダID＋モデル名＋版＋段**で控えを引く（実装ルール4）。
- *    当たった段は送らない
+ *    1段目には、前の区切りまでに決まった話者の流れ（名前だけ。直前の5件まで）を添える
+ *    （案 C。版1.4）。流れは前の区切りの答えで決まるので、**区切りを話の順に1つずつ訊く**
+ * 3. 段ごとに、**内容ハッシュ＋プロバイダID＋モデル名＋版＋段**（1段目は添えた流れも）で
+ *    控えを引く（実装ルール4）。当たった段は送らない
  * 4. 送る前に台詞の数・呼ぶ回数（段ごとの内訳）・字数を示して確かめる（有料なら料金の確認）
  * 5. 答えを段ごとに検算し、**作者が直した行は残して**AIの行だけ入れ替える
  *
  * 1つでも段が失敗・中止したら書き換えない（済んだ段は控えにあるので、
- * 押し直すと失敗した段だけ送る）。
+ * 押し直すと失敗した段から送る）。1段目が失敗したら、それより後ろの区切りの1段目は
+ * 送らない（流れが決まらず、押し直したときに頼みが変わって送り直しになるため）。
  */
 export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry): Promise<void> {
   const { work } = target;
@@ -528,42 +553,103 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
   };
   const cache = new ChunkCache(work);
   await cache.load();
+  const nameOf = new Map(people.map((p) => [p.id, p.name]));
+  // 作者が［台詞の一覧］で直した行の話者（話の通し番号 → 人物の id）。流れへ確かな答えとして入れる
+  const authorSpeakers = new Map<number, string | null>();
+  for (const [index, entry] of castLookup(
+    loaded.file.entries.filter((entry) => entry.source === "author"),
+    castDialogues(target.text)
+  )) {
+    authorSpeakers.set(index, entry.speakerId);
+  }
+
+  /**
+   * 区切りごとの用意。2段目（感情）の頼みと鍵は本文だけで決まるので先に作る。
+   * 1段目（話者）の頼みと鍵は、前の区切りまでの話者の流れ（案 C。版1.4）で変わるので、
+   * 区切りを順に歩きながら作る（`speakerStageOf`）。`speakerHash` は最後に混ぜるときに引く鍵
+   */
   const prepared = chunks.map((chunk) => {
     const chunkPeople = peopleForChunk(chunk, people);
     const requests = voiceCastStageRequests(chunk, chunkPeople);
-    const stages = [requests.speaker, requests.emotion]
-      .filter((request): request is VoiceCastStageRequest => request !== undefined)
-      .map((request) => ({ request, hash: stageCacheHash(request.stage, chunk, chunkPeople) }));
-    return { chunk, people: chunkPeople, stages };
+    return {
+      chunk,
+      people: chunkPeople,
+      asksSpeaker: requests.speaker !== undefined,
+      emotion: { request: requests.emotion, hash: stageCacheHash("emotion", chunk, chunkPeople) },
+      speakerHash: undefined as string | undefined,
+    };
   });
-  // 送る段（控えに当たらないもの）。段ごとに控えるので、片方だけ送ることがある
-  const pending = prepared.flatMap(({ chunk, stages }) =>
-    stages
-      .filter(({ hash }) => !isCachedCastChunk(cache.get(hash, base)))
-      .map((stage) => ({ chunk, ...stage }))
-  );
+  type Prepared = (typeof prepared)[number];
+  const speakerStageOf = (
+    p: Prepared,
+    history: ReadonlyArray<string | null>
+  ): { request: VoiceCastStageRequest; hash: string } | undefined => {
+    const flow = castFlowNames(history, nameOf, VOICE_CAST_FLOW_MAX);
+    const request = voiceCastStageRequests(p.chunk, p.people, { flow }).speaker;
+    return request ? { request, hash: stageCacheHash("speaker", p.chunk, p.people, flow) } : undefined;
+  };
 
-  if (pending.length > 0) {
-    const chars = pending.reduce((sum, { chunk, request }) => sum + sentChars(request.stage, chunk), 0);
+  // 送る段を数える（確認の窓のため）。控えに当たる区切りが続く間は、流れも控えから組める。
+  // **最初に当たらない1段目より後ろの1段目は、前の答えが出るまで頼みが決まらない**ので、
+  // 「送るかもしれない」として数える（上限。前と同じ答えが返れば、控えに当たって減る）
+  let speakerCalls = 0;
+  let speakerMaybe = 0;
+  let emotionCalls = 0;
+  let chars = 0;
+  const pendingChunks = new Set<CastChunk>();
+  {
+    const history: Array<string | null> = [];
+    let flowKnown = true;
+    for (const p of prepared) {
+      let aiSpeakers: Map<number, string | null> | undefined;
+      if (p.asksSpeaker) {
+        if (flowKnown) {
+          const stage = speakerStageOf(p, history);
+          p.speakerHash = stage?.hash;
+          const cached = stage ? cache.get(stage.hash, base) : undefined;
+          if (isCachedCastChunk(cached)) {
+            aiSpeakers = cachedSpeakers(cached.items, p.chunk, p.people);
+          } else {
+            speakerCalls++;
+            flowKnown = false;
+            chars += sentChars("speaker", p.chunk);
+            pendingChunks.add(p.chunk);
+          }
+        } else {
+          speakerMaybe++;
+          chars += sentChars("speaker", p.chunk);
+          pendingChunks.add(p.chunk);
+        }
+      }
+      history.push(...castChunkSpeakerSequence(p.chunk, aiSpeakers, authorSpeakers));
+      if (!isCachedCastChunk(cache.get(p.emotion.hash, base))) {
+        emotionCalls++;
+        chars += sentChars("emotion", p.chunk);
+        pendingChunks.add(p.chunk);
+      }
+    }
+  }
+  const plannedCalls = speakerCalls + speakerMaybe + emotionCalls;
+
+  if (plannedCalls > 0) {
     // 台詞の数は区切りで数える（2段とも送る区切りの台詞を2度数えない）
-    const pendingDialogues = [...new Set(pending.map(({ chunk }) => chunk))].reduce(
-      (sum, chunk) => sum + chunk.dialogues.length,
-      0
-    );
-    const speakerCalls = pending.filter(({ request }) => request.stage === "speaker").length;
-    const emotionCalls = pending.length - speakerCalls;
+    const pendingDialogues = [...pendingChunks].reduce((sum, chunk) => sum + chunk.dialogues.length, 0);
     // 2段に分けたので回数は区切りの数の2倍まで増える。内訳を見せて、増えた理由が分かるようにする
-    const breakdown = `話者${speakerCalls}回・感情${emotionCalls}回`;
+    const breakdown = `話者${speakerCalls + speakerMaybe}回・感情${emotionCalls}回`;
+    const upTo = speakerMaybe > 0 ? "最大" : "";
     const ok = resolved.provider.isPaid
       ? await confirmPaidUsage(resolved.provider, {
           actionLabel: "台詞の話者と感情の推定",
           model: resolved.model,
-          calls: pending.length,
+          calls: plannedCalls,
           sends:
             `この話の本文 ${chars.toLocaleString("ja-JP")}字と登場人物の名前・口調` +
             "（前回から変わっていない所は送りません）",
           more: [
             `話者と感情を分けて訊くので、1区切りにつきAIを2回まで呼びます（${breakdown}）。`,
+            ...(speakerMaybe > 0
+              ? ["話者は前の区切りの答えに続けて訊くので、前と同じ答えが返れば回数は減ります。"]
+              : []),
             "本文は書き換えません。推定の結果は作者が［台詞の一覧］で直せます。",
           ],
           remember: { id: "ai.paid.voiceCast" },
@@ -571,7 +657,7 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
         })
       : await confirmRun(
           `この話の台詞${pendingDialogues}個の話者と感情を推定します。` +
-            `AIを${pending.length}回呼びます（${breakdown}。話者と感情を分けて訊きます。` +
+            `AIを${upTo}${plannedCalls}回呼びます（${breakdown}。話者と感情を分けて訊きます。` +
             `${resolved.provider.displayName}・${resolved.model}、` +
             `本文 ${chars.toLocaleString("ja-JP")}字）。前回から変わっていない所は送りません。本文は書き換えません。`,
           "推定する",
@@ -588,22 +674,31 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
   const outputLimit = resolveOutputLimitForSend(resolved.provider.id, resolved.model, "voiceCast");
 
   let failed = 0;
+  /** 前の区切りの1段目が失敗したため、送らなかった1段目の数 */
+  let speakerHeld = 0;
   let cancelled = false;
-  if (pending.length > 0) {
+  let sentCalls = 0;
+  if (plannedCalls > 0) {
     await withCancellableProgress("台詞の話者と感情を推定しています", async (progress, token) => {
       const controller = new AbortController();
       token.onCancellationRequested(() => controller.abort());
       logStep(
-        `台詞の話者と感情の推定を開始: ${work.title} / ${pending.length}回（2段に分けて訊く） / ` +
+        `台詞の話者と感情の推定を開始: ${work.title} / 最大${plannedCalls}回（2段に分けて訊く・` +
+          `話者は前の区切りの流れを添えて順に訊く） / ` +
           `${resolved.provider.displayName} / ${resolved.model} / v${VOICE_CAST_VERSION}`
       );
-      for (let i = 0; i < pending.length; i++) {
-        if (token.isCancellationRequested) {
-          cancelled = true;
-          return;
-        }
-        progress.report({ message: `${i + 1}/${pending.length}`, increment: 100 / pending.length });
-        const { request, hash } = pending[i];
+
+      /** 1段を送り、読めた答えを控えへ入れる。読めた答えか、失敗（undefined）を返す */
+      const send = async (
+        request: VoiceCastStageRequest,
+        hash: string
+      ): Promise<unknown[] | undefined | "cancelled"> => {
+        if (token.isCancellationRequested) return "cancelled";
+        sentCalls++;
+        progress.report({
+          message: `${sentCalls}/${plannedCalls}`,
+          increment: 100 / plannedCalls,
+        });
         const stageLabel = request.stage === "speaker" ? "話者" : "感情";
         try {
           const response = await resolved.provider.generate({
@@ -627,17 +722,52 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
               理由: response.truncated ? "応答が出力上限で切り詰められました" : "応答を読み取れません",
               応答: responseExcerptForLog(response.text),
             });
-            continue;
+            return undefined;
           }
           // 検算は控えから取り出すときに行う（検算を締めたとき古い答えが素通りしないように）
           await cache.set(hash, base, { items } satisfies CachedCastChunk);
+          return items;
         } catch (error) {
-          if (error instanceof AIError && error.kind === "aborted") {
+          if (error instanceof AIError && error.kind === "aborted") return "cancelled";
+          failed++;
+          reportAIError("台詞の話者と感情の推定", error, resolved.provider.id);
+          return undefined;
+        }
+      };
+
+      // **区切りを話の順に訊く**（版1.4）。1段目の頼みに、前の区切りまでの話者の流れを添えるため
+      const history: Array<string | null> = [];
+      let speakerBlocked = false;
+      for (const p of prepared) {
+        let aiSpeakers: Map<number, string | null> | undefined;
+        if (p.asksSpeaker) {
+          if (speakerBlocked) {
+            // 前の1段目が失敗すると、ここの流れが決まらない。送っても、次に押したとき失敗した
+            // 区切りの答えが入って流れが変わり、もう一度送ることになる（無駄撃ち）
+            speakerHeld++;
+          } else {
+            const stage = speakerStageOf(p, history);
+            p.speakerHash = stage?.hash;
+            if (stage) {
+              const cached = cache.get(stage.hash, base);
+              const items = isCachedCastChunk(cached) ? cached.items : await send(stage.request, stage.hash);
+              if (items === "cancelled") {
+                cancelled = true;
+                return;
+              }
+              if (items) aiSpeakers = cachedSpeakers(items, p.chunk, p.people);
+              else speakerBlocked = true;
+            }
+          }
+        }
+        history.push(...castChunkSpeakerSequence(p.chunk, aiSpeakers, authorSpeakers));
+        // 2段目は本文だけで決まる（流れに関わらない）ので、1段目が止まっても送る
+        if (!isCachedCastChunk(cache.get(p.emotion.hash, base))) {
+          const items = await send(p.emotion.request, p.emotion.hash);
+          if (items === "cancelled") {
             cancelled = true;
             return;
           }
-          failed++;
-          reportAIError("台詞の話者と感情の推定", error, resolved.provider.id);
         }
       }
     });
@@ -651,7 +781,10 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
   if (failed > 0) {
     void warnWithLog(
       `台詞の推定で${failed}か所が失敗しました。結果は書き換えていません。` +
-        "もう一度押すと、失敗した所だけを送り直します。"
+        (speakerHeld > 0
+          ? `話者は前の区切りの答えに続けて訊くので、その後ろの${speakerHeld}区切りの話者も送っていません。`
+          : "") +
+        "もう一度押すと、失敗した所から送り直します。"
     );
     return;
   }
@@ -662,20 +795,16 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
   let unanswered = 0;
   let decidedByText = 0;
   let calmFilled = 0;
-  const nameOf = new Map(people.map((p) => [p.id, p.name]));
-  for (const { chunk, people: chunkPeople, stages } of prepared) {
-    const items = new Map<VoiceCastStage, unknown[]>();
-    for (const { request, hash } of stages) {
-      const cached = cache.get(hash, base);
-      if (isCachedCastChunk(cached)) items.set(request.stage, cached.items);
-    }
-    const emotionItems = items.get("emotion");
-    const askedSpeaker = stages.some(({ request }) => request.stage === "speaker");
+  for (const { chunk, people: chunkPeople, asksSpeaker, emotion, speakerHash } of prepared) {
+    const emotionCached = cache.get(emotion.hash, base);
+    const speakerCached = speakerHash !== undefined ? cache.get(speakerHash, base) : undefined;
+    const emotionItems = isCachedCastChunk(emotionCached) ? emotionCached.items : undefined;
+    const speakerItems = isCachedCastChunk(speakerCached) ? speakerCached.items : undefined;
     // 失敗は上で止めているので、ここで控えが欠けるのは控えの読み書きの不調だけ。混ぜずに飛ばす
-    if (!emotionItems || (askedSpeaker && !items.has("speaker"))) continue;
+    if (!emotionItems || (asksSpeaker && !speakerItems)) continue;
     // **AIを信用しない**（実装ルール3）。検算は段ごと。本文に書いてあった話者が先に立つ
     const checked = castGuessesForStages(
-      { speakerItems: items.get("speaker"), emotionItems },
+      { speakerItems, emotionItems },
       chunk,
       chunkPeople
     );
@@ -739,7 +868,7 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
   logStep(
     `台詞の推定が終わりました: 台詞${totalDialogues}個・推定${fresh.length}件` +
       `（うち本文に書いてあった話者${decidedByText}個、その感情が無く平静にした${calmFilled}個）・` +
-      `答えの無かった台詞${unanswered}個・AIを呼んだ回数${pending.length}` +
+      `答えの無かった台詞${unanswered}個・AIを呼んだ回数${sentCalls}` +
       `（控えに当たらなかった段。区切り${chunks.length}）`
   );
   notifyDone(

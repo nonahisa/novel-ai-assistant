@@ -49,12 +49,33 @@ import { CAST_UNKNOWN_SPEAKER, type CastChunk, type CastPerson } from "../core/v
  *   感情まで訊き直すことになる（処理量。実装ルール4）。1段目の取り違えが感情へ移る道も無くなる
  * - 1段目が全部「不明」でも2段目は飛ばさない（感情は話者が不明でも声に効く）
  *
+ * ## 前の区切りの話者の流れを添える（版1.4。案 C）
+ *
+ * 1段目には、すぐ前の区切りまでに決まった話者の**名前だけ**を、直前の
+ * `VOICE_CAST_FLOW_MAX` 件まで古い順に添える（`【前の区切りの話者の流れ】`）。
+ * 区切りの頭の台詞は、前の区切りで誰と誰が話していたかが分からないと決めにくい。
+ * 流れを組むのはコード（`core/voiceCast.ts` の `castFlowNames`）。
+ *
+ * 1つ外すと続けて外す（前の取り違えが次の区切りへ移る）のを抑えるため：
+ * - **確かではない参考**と書き、この区切りの話者は本文から決めるよう頼む。【答え方】にも
+ *   「流れに合わせて当てはめない」を置く（交互に話しているはず、と当てはめさせない）
+ * - 決まらなかった台詞は抜かずに「不明」と書く（抜くと実際より交互に見える）。
+ *   全部「不明」なら節を出さない
+ * - 台詞の本文は添えない（名前の列だけ。前の区切りの字は「前の本文」の節がすでに運ぶ）
+ * - 2段目（感情）には添えない
+ *
  * 1回で訊く頼み方（`buildVoiceCastPrompt`）は版1.2の文のまま残す。測る台本が
  * 2段と比べるために使う（`VC_STAGES=one`）。製品からは呼ばない。
  *
  * プロンプトを変更したら version を上げること。
  */
-export const VOICE_CAST_VERSION = "1.3";
+export const VOICE_CAST_VERSION = "1.4";
+
+/**
+ * 1段目に添える、前の区切りの話者の流れの件数（版1.4。案 C）。直前の数件だけにする——
+ * 古い所まで渡すと、場面が変わったのに前の顔ぶれを引きずる。
+ */
+export const VOICE_CAST_FLOW_MAX = 5;
 
 /**
  * 1段目に添える、区切りの前後の本文の字数（版1.3）。区切りの頭の台詞は、前の区切りに
@@ -215,6 +236,23 @@ export interface VoiceCastSpeakerInput extends VoiceCastInput {
   before?: string;
   /** 区切りのあとの本文（参考。番号なし。空なら節を出さない） */
   after?: string;
+  /**
+   * 前の区切りの話者の流れ（名前の列。古い順。版1.4）。空・無しなら節を出さない。
+   * 件数を切るのも「不明」を書くのも組む側（`castFlowNames`）の仕事
+   */
+  flow?: readonly string[];
+}
+
+/** 前の区切りの話者の流れの節（無ければ空） */
+function flowSection(flow: readonly string[] | undefined): string {
+  if (!flow || flow.length === 0) return "";
+  return [
+    "",
+    "【前の区切りの話者の流れ】（参考。確かではありません）",
+    `この区切りのすぐ前までの台詞の話者を、古い順に並べました（右端が〔1〕の直前の台詞）：${flow.join(" → ")}`,
+    "これは前の区切りまでの推定で、間違っていることがあります。この区切りの話者は本文から決めてください。",
+    "",
+  ].join("\n");
 }
 
 /** 1段目で訊く番号（本文に話者が書いてあった番号を除く） */
@@ -253,7 +291,7 @@ export function buildVoiceCastSpeakerPrompt(input: VoiceCastSpeakerInput): strin
 ${which}
 【登場人物】
 ${people}
-${contextSection("この区切りの前の本文", input.before)}
+${flowSection(input.flow)}${contextSection("この区切りの前の本文", input.before)}
 【本文】
 ${input.text}
 ${contextSection("この区切りのあとの本文", input.after)}
@@ -264,7 +302,13 @@ ${contextSection("この区切りのあとの本文", input.after)}
   **【登場人物】にいない人物の台詞は、必ず「${CAST_UNKNOWN_SPEAKER}」にします。** 名前の無い兵士・師匠・取調官・店員など、役名や呼び名だけで呼ばれる人物も、一覧にいない人物です。
   その台詞を、会話の相手や直前に話した人物に当ててはいけません（一覧の誰かが答えているとは限りません）
   前後の本文は、場面にいる人物を知るための参考です。誰が話しているかは、その台詞の前後の地の文と会話の流れで決めます
-
+${
+  input.flow && input.flow.length > 0
+    ? "  前の区切りの話者の流れも参考です。流れに合わせて交互に当てはめないでください。本文から決められなければ「" +
+      CAST_UNKNOWN_SPEAKER +
+      "」にします\n"
+    : ""
+}
 【出力形式】JSONのみ
 {
   "lines": [
@@ -352,10 +396,15 @@ export interface VoiceCastStageRequest {
 /**
  * 1区切りの2段の頼みを作る（製品も測る台本もここを通る）。
  * **全部の番号の話者が本文で決まった区切りは、1段目を作らない**（訊く番号が無い）。
+ *
+ * `options.flow` は前の区切りの話者の流れ（版1.4）。前の区切りの答えで決まるので
+ * `CastChunk` には持たせず、区切りを順に訊く側が組んで渡す。渡さなければ版1.3 と同じ頼み
+ * （測る台本の `VC_FLOW=off`）。
  */
 export function voiceCastStageRequests(
   chunk: Pick<CastChunk, "text" | "dialogues" | "decided" | "before" | "after">,
-  people: readonly CastPerson[]
+  people: readonly CastPerson[],
+  options?: { flow?: readonly string[] }
 ): { speaker?: VoiceCastStageRequest; emotion: VoiceCastStageRequest } {
   const count = chunk.dialogues.length;
   const decided = [...chunk.decided.keys()];
@@ -377,6 +426,7 @@ export function voiceCastStageRequests(
         decided,
         before: chunk.before,
         after: chunk.after,
+        flow: options?.flow,
       }),
       jsonSchema: buildVoiceCastSpeakerSchema(people),
     },
