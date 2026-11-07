@@ -268,7 +268,38 @@ describe("素のエディターで読み取り専用を外して打ったとき�
         }
       };
       await walk(nodePath.join(root, ".aiwriter"));
-      return `呼んだ命令：${JSON.stringify(result.executed)}／知らせ：${JSON.stringify(warnings)}／ログ：${found.join("\n---\n") || "（無し）"}`;
+      // 戻す道のどこで止まったか（前の画面か・鍵か・編集者モードか）を切り分ける
+      const pathsMod = await import("../../../src/core/paths");
+      const { editorLockOf } = await import("../../../src/core/fileLockStore");
+      const { isEditorMode } = await import("../../../src/core/actorContext");
+      const uriText = Uri.file(file).toString();
+      const back = pathsMod.fromUri(Uri.parse(uriText));
+      let lockText: string;
+      try {
+        lockText = JSON.stringify(await editorLockOf(work(), back));
+      } catch (error) {
+        lockText = `例外 ${error instanceof Error ? error.message : String(error)}`;
+      }
+      let detailText = "";
+      try {
+        const lock = await editorLockOf(work(), back);
+        detailText = lock ? String(await reviewLockDetailFor(work(), lock)) : "（鍵なし）";
+      } catch (error) {
+        detailText = `例外 ${error instanceof Error ? error.message : String(error)}`;
+      }
+      const facts = {
+        tmpdir: os.tmpdir(),
+        file,
+        uriText,
+        back,
+        folder: work().folderPath,
+        relative: pathsMod.relative(work().folderPath, back),
+        editorMode: isEditorMode(),
+        lock: lockText,
+        detail: detailText,
+        tabGroups: typeof (window as unknown as { tabGroups?: unknown }).tabGroups,
+      };
+      return `手がかり：${JSON.stringify(facts)}／呼んだ命令：`;${JSON.stringify(result.executed)}／知らせ：${JSON.stringify(warnings)}／ログ：${found.join("\n---\n") || "（無し）"}`;
     };
     if (result.document.text !== result.fileText) {
       expect(result.document.text, await diagnose()).toBe(result.fileText);
