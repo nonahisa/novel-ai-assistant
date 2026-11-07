@@ -26,7 +26,13 @@ const state = vi.hoisted(() => ({
   warnings: [] as string[],
   done: [] as string[],
   steps: [] as string[],
+  people: [] as Array<{ id: string; name: string; aliases: string[]; speechStyle: string | null }>,
 }));
+
+const DEFAULT_PEOPLE = [
+  { id: "c-akari", name: "灯", aliases: ["あかりちゃん"], speechStyle: "丁寧語で話す" },
+  { id: "c-ren", name: "蓮", aliases: [], speechStyle: null },
+];
 
 vi.mock("../../../src/ai/registry", () => ({
   AIRegistry: class {},
@@ -82,13 +88,7 @@ vi.mock("../../../src/core/chunkCache", () => ({
 vi.mock("../../../src/core/characterStore", () => ({
   CharacterStore: class {
     async loadAll() {
-      return {
-        characters: [
-          { id: "c-akari", name: "灯", aliases: ["あかりちゃん"], speechStyle: "丁寧語で話す" },
-          { id: "c-ren", name: "蓮", aliases: [], speechStyle: null },
-        ],
-        errors: [],
-      };
+      return { characters: state.people, errors: [] };
     }
   },
 }));
@@ -135,6 +135,7 @@ beforeEach(() => {
   state.warnings.length = 0;
   state.done.length = 0;
   state.steps.length = 0;
+  state.people = DEFAULT_PEOPLE.map((p) => ({ ...p, aliases: [...p.aliases] }));
   state.assignment = {
     version: 1,
     narrator: { speakerUuid: "uuid-kanon", speakerName: "花音", styleName: "ノーマル", styleId: 1325133120 },
@@ -317,50 +318,72 @@ describe("この PC の外のエンジンへ本文を送る前の確認", () => 
   });
 });
 
+/** 頼みのスキーマの欄の名前（どちらの段の頼みかを、スキーマで見分ける） */
+function fieldsOf(request: { jsonSchema: unknown }): string[] {
+  const schema = request.jsonSchema as { properties: { lines: { items: { properties: object } } } };
+  return Object.keys(schema.properties.lines.items.properties);
+}
+
+/**
+ * 偽のAI：1段目（話者の欄があるスキーマ）と2段目（感情の欄だけ）で別の答えを返す。
+ * **段を取り違えて頼むと、もう一方の段の答えが返り、検算で落ちる**ので取り違えを拾える
+ */
+function staged(speakerLines: unknown[], emotionLines: unknown[]): void {
+  state.generate.mockImplementation(async (request: { jsonSchema: unknown }) => ({
+    text: JSON.stringify({ lines: fieldsOf(request).includes("speaker") ? speakerLines : emotionLines }),
+  }));
+}
+
 describe("台詞の話者と感情の推定（P-54）", () => {
   // 割当の解決は差し替えてあるので、登録簿の中身は使わない
   const registry = {} as Registry;
   // 話者が地の文に書いていない本文（AIの道を確かめる。書いてあるとコードが先に決める。版1.2）
   const CAST_TEXT = "「やった！」\n「静かにしろ」";
 
-  test("割当 voiceCast のAIへ送り、検算を通ったものだけ保存する。作者の行は残す", async () => {
+  test("割当 voiceCast のAIへ2段で送り（話者だけ→感情だけ）、検算を通ったものだけ保存する。作者の行は残す", async () => {
     state.cast = {
       version: 1,
       episode: "01.txt",
       entries: [castEntry("「静かにしろ」", { speakerId: "c-akari", speakerName: "灯", source: "author" })],
     };
-    state.generate.mockResolvedValue({
-      text: JSON.stringify({
-        lines: [
-          { number: 1, speaker: "あかりちゃん", emotion: "喜び", intensity: "強" },
-          // 作者が直した行は、AIが別の答えを返しても上書きしない
-          { number: 2, speaker: "蓮", emotion: "ささやき", intensity: "中" },
-        ],
-      }),
-    });
+    staged(
+      [
+        { number: 1, speaker: "あかりちゃん" },
+        // 作者が直した行は、AIが別の答えを返しても上書きしない
+        { number: 2, speaker: "蓮" },
+      ],
+      [
+        { number: 1, emotion: "喜び", intensity: "強" },
+        { number: 2, emotion: "ささやき", intensity: "中" },
+      ]
+    );
 
     await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
 
     expect(state.confirmRun).toHaveBeenCalledTimes(1);
     expect(state.confirmRun.mock.calls[0][0]).toContain("台詞2個");
-    expect(state.confirmRun.mock.calls[0][0]).toContain("AIを1回呼びます");
-    expect(state.generate).toHaveBeenCalledTimes(1);
-    const request = state.generate.mock.calls[0][0];
-    expect(request.userPrompt).toContain("〔1〕「やった！」");
-    expect(request.userPrompt).toContain("〔2〕「静かにしろ」");
-    expect(request.userPrompt).toContain("- 灯（別名：あかりちゃん） 口調：丁寧語で話す");
-    expect(request.disableThinking).toBe(true);
-    expect(request.temperature).toBe(0);
-    expect(request.meta.feature).toBe("voiceCast");
-    const schema = request.jsonSchema as {
-      properties: { lines: { items: { properties: { speaker: { enum: string[] } } } } };
-    };
-    expect(schema.properties.lines.items.properties.speaker.enum).toEqual([
-      "不明",
-      "灯",
-      "あかりちゃん",
-      "蓮",
-    ]);
+    // 2段に分けたので、呼ぶ回数は区切りの数の2倍。内訳も示す
+    expect(state.confirmRun.mock.calls[0][0]).toContain("AIを2回呼びます（話者1回・感情1回");
+    expect(state.generate).toHaveBeenCalledTimes(2);
+    const [speakerRequest, emotionRequest] = state.generate.mock.calls.map((c) => c[0]);
+    // 1段目：話者だけ。人物の一覧を渡し、感情は訊かない
+    expect(speakerRequest.userPrompt).toContain("〔1〕「やった！」");
+    expect(speakerRequest.userPrompt).toContain("〔2〕「静かにしろ」");
+    expect(speakerRequest.userPrompt).toContain("- 灯（別名：あかりちゃん） 口調：丁寧語で話す");
+    expect(fieldsOf(speakerRequest)).toEqual(["number", "speaker"]);
+    expect(
+      (speakerRequest.jsonSchema as { properties: { lines: { items: { properties: { speaker: { enum: string[] } } } } } })
+        .properties.lines.items.properties.speaker.enum
+    ).toEqual(["不明", "灯", "あかりちゃん", "蓮"]);
+    // 2段目：感情と強さだけ。人物の一覧は渡さない
+    expect(emotionRequest.userPrompt).toContain("〔1〕「やった！」");
+    expect(emotionRequest.userPrompt).not.toContain("【登場人物】");
+    expect(fieldsOf(emotionRequest)).toEqual(["number", "emotion", "intensity"]);
+    for (const request of [speakerRequest, emotionRequest]) {
+      expect(request.disableThinking).toBe(true);
+      expect(request.temperature).toBe(0);
+      expect(request.meta.feature).toBe("voiceCast");
+    }
 
     expect(state.savedCast).toHaveLength(1);
     expect(state.savedCast[0].hash).toBe("h1");
@@ -372,19 +395,28 @@ describe("台詞の話者と感情の推定（P-54）", () => {
     expect(state.savedCast[0].file.lastRun).toMatchObject({ providerId: "ollama", model: "gemma4:e4b" });
   });
 
-  test("通らない答えは捨てて数える。2回目は控えが当たりAIを呼ばない", async () => {
-    state.generate.mockResolvedValue({
-      text: JSON.stringify({
-        lines: [
-          { number: 1, speaker: "話者", emotion: "喜び", intensity: "中" },
-          { number: 2, speaker: "蓮", emotion: "切ない", intensity: "中" },
-        ],
-      }),
-    });
+  test("通らない答えは段ごとに捨てて数える。2回目は両段とも控えが当たりAIを呼ばない", async () => {
+    staged(
+      [
+        { number: 1, speaker: "話者" },
+        { number: 2, speaker: "蓮" },
+      ],
+      [
+        { number: 1, emotion: "喜び", intensity: "中" },
+        { number: 2, emotion: "切ない", intensity: "中" },
+        { number: 3, emotion: "平静", intensity: "中" },
+      ]
+    );
     await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
-    expect(state.savedCast[0].file.entries).toEqual([]);
-    expect(state.steps.some((s) => s.includes("話者が指示の言葉のまま 1件") && s.includes("感情が列挙の外 1件"))).toBe(true);
-    expect(state.done[0]).toContain("2個は決まらず");
+    // 話者を捨てた台詞も感情は残る。感情を捨てた台詞は、話者が分かれば「平静・中」
+    expect(state.savedCast[0].file.entries).toEqual([
+      castEntry("「やった！」", { emotion: "喜び" }),
+      castEntry("「静かにしろ」", { speakerId: "c-ren", speakerName: "蓮" }),
+    ]);
+    const dropLine = state.steps.find((s) => s.includes("検算で"));
+    expect(dropLine).toContain("話者の段 1件（話者が指示の言葉のまま 1件）");
+    expect(dropLine).toContain("感情の段 2件（感情が列挙の外 1件・番号が区切りに無い 1件）");
+    expect(state.savedCast[0].file.lastRun).toMatchObject({ dropped: 3, droppedSpeaker: 1, droppedEmotion: 2 });
 
     state.generate.mockClear();
     state.confirmRun.mockClear();
@@ -392,6 +424,41 @@ describe("台詞の話者と感情の推定（P-54）", () => {
     expect(state.generate).not.toHaveBeenCalled();
     // 送るものが無ければ確かめない
     expect(state.confirmRun).not.toHaveBeenCalled();
+  });
+
+  test("段ごとの控え：人物の一覧だけが変わったら、1段目だけ送り直す（感情の段は当たる）", async () => {
+    staged([{ number: 1, speaker: "灯" }, { number: 2, speaker: "蓮" }], [
+      { number: 1, emotion: "喜び", intensity: "中" },
+      { number: 2, emotion: "ささやき", intensity: "中" },
+    ]);
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
+    expect(state.generate).toHaveBeenCalledTimes(2);
+
+    state.generate.mockClear();
+    state.people.push({ id: "c-sora", name: "空", aliases: [], speechStyle: null });
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
+    expect(state.generate).toHaveBeenCalledTimes(1);
+    expect(fieldsOf(state.generate.mock.calls[0][0])).toEqual(["number", "speaker"]);
+    expect(state.confirmRun.mock.calls.at(-1)?.[0]).toContain("AIを1回呼びます（話者1回・感情0回");
+  });
+
+  test("1段目が全部「不明」でも、2段目を呼んで感情を残す", async () => {
+    staged(
+      [
+        { number: 1, speaker: "不明" },
+        { number: 2, speaker: "不明" },
+      ],
+      [
+        { number: 1, emotion: "驚き", intensity: "強" },
+        { number: 2, emotion: "恐れ", intensity: "弱" },
+      ]
+    );
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
+    expect(state.generate).toHaveBeenCalledTimes(2);
+    expect(state.savedCast[0].file.entries).toEqual([
+      castEntry("「やった！」", { emotion: "驚き", intensity: "強" }),
+      castEntry("「静かにしろ」", { emotion: "恐れ", intensity: "弱" }),
+    ]);
   });
 
   test("区切りが失敗したら書き換えない", async () => {
@@ -424,22 +491,35 @@ describe("話者が書いてある台詞はコードで決める（P-54 版1.2�
     "「平気」", //                  〔5〕2人の名前がある地の文 → AI
   ].join("\n");
 
-  function answer(lines: Array<[number, string, string]>) {
-    return {
-      text: JSON.stringify({
-        lines: lines.map(([number, speaker, emotion]) => ({ number, speaker, emotion, intensity: "中" })),
-      }),
-    };
+  function answer(lines: Array<[number, string, string]>): void {
+    staged(
+      lines.map(([number, speaker]) => ({ number, speaker })),
+      lines.map(([number, , emotion]) => ({ number, emotion, intensity: "中" }))
+    );
   }
 
-  test("話者を考えさせる番号から、コードで決めた台詞を外す（本文の〔番号〕と感情の問いは残す）", async () => {
-    state.generate.mockResolvedValue(answer([[1, "灯", "喜び"]]));
+  test("1段目は、コードで決めた台詞の話者を訊かない（本文の〔番号〕は残す）。2段目は全部の感情を訊く", async () => {
+    answer([[1, "灯", "喜び"]]);
     await runVoiceCast({ work, episodePath: "/w/01.txt", text: ATTRIBUTED }, registry);
-    const prompt: string = state.generate.mock.calls[0][0].userPrompt;
+    const [speakerRequest, emotionRequest] = state.generate.mock.calls.map((c) => c[0]);
+    const prompt: string = speakerRequest.userPrompt;
     expect(prompt).toContain("〔1〕「行こう」");
     expect(prompt).toContain("〔3〕「港だ」");
-    expect(prompt).toContain("話者が決まっています。気持ちと強さだけを答えてください：〔1〕〔3〕");
-    expect(prompt).toContain("話者を考えるのは〔2〕〔4〕〔5〕です");
+    expect(prompt).toContain("答えるのは〔2〕〔4〕〔5〕だけです");
+    expect(prompt).toContain("〔1〕〔3〕は、本文に話し手が書いてあるので答えません");
+    expect(emotionRequest.userPrompt).toContain("〔1〕〜〔5〕");
+    expect(emotionRequest.userPrompt).not.toContain("本文に話し手が書いてある");
+  });
+
+  test("全部の台詞をコードで決めた区切りは、1段目を呼ばない（感情の段だけ）", async () => {
+    answer([[1, "灯", "喜び"]]);
+    await runVoiceCast(
+      { work, episodePath: "/w/01.txt", text: "「行こう」と灯は言った。\n「港だ」と蓮が答えた。" },
+      registry
+    );
+    expect(state.generate).toHaveBeenCalledTimes(1);
+    expect(fieldsOf(state.generate.mock.calls[0][0])).toEqual(["number", "emotion", "intensity"]);
+    expect(state.confirmRun.mock.calls[0][0]).toContain("AIを1回呼びます（話者0回・感情1回");
   });
 
   test("コードの話者とAIの感情を混ぜる。AIが不明と答えても書いてある話者にする。作者の行は上書きしない", async () => {
@@ -448,16 +528,16 @@ describe("話者が書いてある台詞はコードで決める（P-54 版1.2�
       episode: "01.txt",
       entries: [castEntry("「港だ」", { speakerId: "c-akari", speakerName: "灯", source: "author" })],
     };
-    state.generate.mockResolvedValue(
-      answer([
-        [1, "不明", "喜び"],
-        [2, "不明", "驚き"],
-        [3, "蓮", "平静"],
-        [4, "灯", "叫び"],
-        [5, "不明", "平静"],
-      ])
-    );
+    // 1段目は〔1〕〔3〕を訊いていないので、その答えは捨てて数える（コードの話者のまま）
+    answer([
+      [1, "不明", "喜び"],
+      [2, "不明", "驚き"],
+      [3, "蓮", "平静"],
+      [4, "灯", "叫び"],
+      [5, "不明", "平静"],
+    ]);
     await runVoiceCast({ work, episodePath: "/w/01.txt", text: ATTRIBUTED }, registry);
+    expect(state.steps.some((s) => s.includes("話者の段 2件（話者を訊いていない番号 2件）"))).toBe(true);
     const saved = state.savedCast[0].file.entries;
     const byQuote = new Map(saved.map((e) => [e.quote, e]));
     expect(byQuote.get("「行こう」")).toMatchObject({ speakerId: "c-akari", emotion: "喜び", source: "ai" });

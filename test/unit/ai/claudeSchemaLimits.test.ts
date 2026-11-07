@@ -57,6 +57,11 @@ const BUILDER_ARGS: Record<string, unknown[][]> = {
     [[{ id: "a", name: "灯", aliases: ["あかりちゃん"], speechStyle: null }]],
     [[]],
   ],
+  // P-54 版1.3 の1段目（話者だけ）。列挙の組み方は上と同じ
+  buildVoiceCastSpeakerSchema: [
+    [[{ id: "a", name: "灯", aliases: ["あかりちゃん"], speechStyle: null }]],
+    [[]],
+  ],
 };
 
 async function collectSchemas(): Promise<Array<{ name: string; schema: unknown }>> {

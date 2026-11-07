@@ -7,17 +7,25 @@ import {
   castChunksOf,
   castDialogues,
   castGuessesForChunk,
+  castGuessesForStages,
   castSpeakersFromText,
   countDropReasons,
   parseCastResult,
+  validateCastSpeakers,
+  type CastChunk,
+  type CastDrop,
+  type CastGuess,
   type CastPerson,
 } from "../../src/core/voiceCast";
 import {
   VOICE_CAST_CHUNK_CHARS,
+  VOICE_CAST_CONTEXT_AFTER_CHARS,
+  VOICE_CAST_CONTEXT_BEFORE_CHARS,
   VOICE_CAST_SYSTEM_PROMPT,
   VOICE_CAST_VERSION,
   buildVoiceCastPrompt,
   buildVoiceCastSchema,
+  voiceCastStageRequests,
 } from "../../src/prompts/voiceCast";
 import { decodeByteFallback } from "../../src/core/byteFallback";
 import { contextSizeForPrompt } from "../../src/core/chunker";
@@ -31,8 +39,17 @@ import { OLLAMA_ENDPOINT } from "./support/liveEnv";
  *   段2 VC_PHASE=cast    : 手元の Ollama で話者と感情を推定し、正解（担当の判断）と比べる
  *   段4 VC_PHASE=rules   : AIを呼ばず、本文に書いてある話者をコードで決めた分だけを正解と比べる（案 A。版1.2）
  *
- *   段2は、製品と同じく本文に書いてある話者をコードで先に決め、AIには感情だけ訊く。
- *   VC_RULES=off にすると、コードで決めずに全部AIに訊く（版1.2 の頼み方のまま。比べの基準）。
+ *   段2は、製品と同じく本文に書いてある話者をコードで先に決め、その番号の話者はAIに訊かない。
+ *   VC_RULES=off にすると、コードで決めずに全部AIに訊く（比べの基準）。
+ *
+ *   段2の訊き方は VC_STAGES で切り替える（同じ正解・同じ台本で比べる）：
+ *     two     … 製品と同じ2段（版1.3。1段目で話者だけ、2段目で感情と強さだけ）。既定
+ *     one     … 1回で全部を訊く（版1.2 の頼み方。案 A までの製品と同じ）
+ *     speaker … 2段の1段目だけ（話者だけを測る。感情の段を撃たないぶん早い）
+ *   two では「1段目だけの話者の当たり」と「2段で通した当たり」を並べて出す。
+ *
+ *   $env:VC_PHASE = "cast"; $env:VC_STAGES = "two"
+ *   $env:VC_GOLD = "正解1.json;正解2.json"; $env:VC_MODELS = "gemma4:e4b;gemma4:26b"
  *
  *   $env:NOVELAI_WORKS = "C:/path/to/作品を集めたフォルダー"
  *   $env:VC_OUT = "出力先フォルダー（原稿の外）"
@@ -287,6 +304,117 @@ describe.skipIf(PHASE !== "regold" || !ROOT || !OUT || (process.env.VC_GOLD ?? "
 const GOLD_FILES = (process.env.VC_GOLD ?? "").split(";").map((s) => s.trim()).filter(Boolean);
 const MODELS = (process.env.VC_MODELS ?? "gemma4:e4b").split(";").map((s) => s.trim()).filter(Boolean);
 const RULES_ON = (process.env.VC_RULES ?? "").trim().toLowerCase() !== "off";
+/** 訊き方（one＝1回で全部・two＝製品と同じ2段・speaker＝2段の1段目だけ） */
+const STAGES = (process.env.VC_STAGES ?? "two").trim().toLowerCase();
+if (PHASE === "cast" && !["one", "two", "speaker"].includes(STAGES)) {
+  throw new Error(`VC_STAGES は one・two・speaker のどれかにしてください（${STAGES}）`);
+}
+
+/** 話者の採点（見逃しと取り違えを分けて数える） */
+interface SpeakerScore {
+  hit: number;
+  /** 正解が人物なのに「不明」に倒れた */
+  missed: number;
+  /** 正解と別の人物に当てた */
+  wrong: number;
+  /** 答えが無い・検算で捨てた（正解が人物かどうかを問わない） */
+  unanswered: number;
+  /** 正解が不明（役名だけの人物など）の台詞：不明のまま／人物に当てた */
+  goldUnknownRight: number;
+  goldUnknownWrong: number;
+  wrongExamples: string[];
+  missedExamples: string[];
+}
+
+function newScore(): SpeakerScore {
+  return {
+    hit: 0,
+    missed: 0,
+    wrong: 0,
+    unanswered: 0,
+    goldUnknownRight: 0,
+    goldUnknownWrong: 0,
+    wrongExamples: [],
+    missedExamples: [],
+  };
+}
+
+/** 1つの台詞の話者を採点する（`guessed` は人物の id・null＝不明・undefined＝答え無し） */
+function scoreSpeaker(
+  score: SpeakerScore,
+  quote: string,
+  gold: { speaker: string },
+  goldId: string | null,
+  guessed: string | null | undefined,
+  nameOf: (id: string) => string | undefined
+): void {
+  if (guessed === undefined) {
+    score.unanswered++;
+    if (gold.speaker !== "不明" && score.missedExamples.length < 8) {
+      score.missedExamples.push(`${quote.slice(0, 20)} 正:${gold.speaker} → 答え無し／捨て`);
+    }
+    return;
+  }
+  if (goldId === null) {
+    if (guessed === null) score.goldUnknownRight++;
+    else score.goldUnknownWrong++;
+    return;
+  }
+  if (guessed === goldId) score.hit++;
+  else if (guessed === null) {
+    score.missed++;
+    if (score.missedExamples.length < 8) score.missedExamples.push(`${quote.slice(0, 20)} 正:${gold.speaker} → 不明`);
+  } else {
+    score.wrong++;
+    if (score.wrongExamples.length < 8) {
+      score.wrongExamples.push(`${quote.slice(0, 20)} 正:${gold.speaker} → ${nameOf(guessed)}`);
+    }
+  }
+}
+
+function scoreLines(label: string, score: SpeakerScore): string[] {
+  return [
+    `- ${label}：当たり ${score.hit}／見逃し(不明に倒れた) ${score.missed}／取り違え ${score.wrong}／答え無し・検算で捨て ${score.unanswered}`,
+    `  - 正解が不明の台詞：不明のまま ${score.goldUnknownRight}／人物に当てた ${score.goldUnknownWrong}`,
+    `  - 取り違え例：${JSON.stringify(score.wrongExamples)}`,
+    `  - 見逃し例：${JSON.stringify(score.missedExamples)}`,
+  ];
+}
+
+/** 製品の Ollama プロバイダと同じ形で1回撃つ（num_ctx を明示・format にスキーマ・think:false） */
+async function chatOnce(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+  schema: object
+): Promise<{ content: string; doneReason?: string }> {
+  const body = {
+    model,
+    stream: false,
+    think: false,
+    format: schema,
+    options: {
+      temperature: 0,
+      // 製品の Ollama プロバイダと同じ式。出力の見込みは既定の 8,192
+      num_ctx: contextSizeForPrompt({
+        promptChars: systemPrompt.length + userPrompt.length,
+        outputTokens: 8192,
+        contextWindow: 131072,
+      }),
+    },
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+  };
+  const res = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const j = (await res.json()) as { message?: { content?: string }; done_reason?: string };
+  return { content: decodeByteFallback(j.message?.content ?? ""), doneReason: j.done_reason };
+}
 
 /** 正解を読み、本文の台詞の並びと揃っているか確かめる（揃っていなければ比べる意味が無いので止める） */
 function goldAndText(goldPath: string) {
@@ -370,86 +498,66 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
           for (const goldPath of GOLD_FILES) {
             const { gold, text, dialogues, goldIdOf } = goldAndText(goldPath);
             // 製品（features/voiceReading.ts の runVoiceCast）と同じ順：人物の一覧で話者を
-            // 先に決めてから区切る
-            const chunks = castChunksOf(
+            // 先に決めてから区切る。2段のときは製品と同じく、前後の本文を1段目へ添える
+            const chunks: CastChunk[] = castChunksOf(
               text,
               VOICE_CAST_CHUNK_CHARS,
-              RULES_ON ? castSpeakersFromText(text, gold.people) : undefined
+              RULES_ON ? castSpeakersFromText(text, gold.people) : undefined,
+              STAGES === "one"
+                ? undefined
+                : { before: VOICE_CAST_CONTEXT_BEFORE_CHARS, after: VOICE_CAST_CONTEXT_AFTER_CHARS }
             );
             const byIndex = new Map(dialogues.map((d, i) => [d.index, gold.gold[i]]));
             const goldIdByIndex = new Map(dialogues.map((d, i) => [d.index, goldIdOf(i)]));
+            const nameOf = (id: string): string | undefined => gold.people.find((p) => p.id === id)?.name;
+            const tag = `${model.replace(/[:/]/g, "_")}-${STAGES}-${path.basename(goldPath).length}`;
             let byCode = 0;
             let byCodeHit = 0;
             let byCodeWrong = 0;
             let byCodeGoldUnknown = 0;
             let disagreed = 0;
             let calmFilled = 0;
+            let calls = 0;
+            let skippedSpeakerStage = 0;
             const t0 = Date.now();
-            let hit = 0;
-            let missed = 0;
-            let wrong = 0;
-            let unanswered = 0;
-            let goldUnknownRight = 0;
-            let goldUnknownWrong = 0;
+            /** 1段目だけの話者（コードで決めた分＋1段目の答え）。two・speaker のとき */
+            const stage1 = newScore();
+            /** 最後に保存される形の話者（one は1回の答え、two は2段を混ぜた答え） */
+            const final = newScore();
             let emoHit = 0;
             let emoTotal = 0;
-            const dropAll: Array<{ reason: string; item: unknown }> = [];
+            const dropOne: CastDrop[] = [];
+            const dropSpeaker: CastDrop[] = [];
+            const dropEmotion: CastDrop[] = [];
             const detail: string[] = [];
-            const wrongExamples: string[] = [];
-            const missedExamples: string[] = [];
-            let failedChunks = 0;
+            const failed = { one: 0, speaker: 0, emotion: 0 };
             let ps: Array<{ name: string; size: number; size_vram: number; context_length?: number }> = [];
-            for (const chunk of chunks) {
-              const people = gold.people;
-              const userPrompt = buildVoiceCastPrompt({
-                text: chunk.text,
-                count: chunk.dialogues.length,
-                people: peopleForChunk(chunk, people),
-                decided: [...chunk.decided.keys()],
-              });
-              const body = {
-                model,
-                stream: false,
-                think: false,
-                format: buildVoiceCastSchema(peopleForChunk(chunk, people)),
-                options: {
-                  temperature: 0,
-                  // 製品の Ollama プロバイダと同じ式。出力の見込みは既定の 8,192
-                  num_ctx: contextSizeForPrompt({
-                    promptChars: VOICE_CAST_SYSTEM_PROMPT.length + userPrompt.length,
-                    outputTokens: 8192,
-                    contextWindow: 131072,
-                  }),
-                },
-                messages: [
-                  { role: "system", content: VOICE_CAST_SYSTEM_PROMPT },
-                  { role: "user", content: userPrompt },
-                ],
-              };
-              const res = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
-              });
-              const j = (await res.json()) as { message?: { content?: string } };
-              const content = decodeByteFallback(j.message?.content ?? "");
+
+            /** 撃って読む。読めなければ本文を残して undefined（何が返ったかを後で見る） */
+            const ask = async (
+              stage: keyof typeof failed,
+              systemPrompt: string,
+              userPrompt: string,
+              schema: object
+            ): Promise<unknown[] | undefined> => {
+              calls++;
+              const { content, doneReason } = await chatOnce(model, systemPrompt, userPrompt, schema);
               ps = await ollamaPs();
               const items = parseCastResult(content);
               if (!items) {
-                failedChunks++;
-                // 失敗した答えの本文を残す（何が返って読めなかったかを後で見る）
+                failed[stage]++;
                 fs.mkdirSync(OUT!, { recursive: true });
                 fs.writeFileSync(
-                  path.join(OUT!, `fail-${model.replace(/[:/]/g, "_")}-${path.basename(goldPath).length}-${failedChunks}.json`),
-                  JSON.stringify({ done_reason: (j as { done_reason?: string }).done_reason, content }, null, 2),
+                  path.join(OUT!, `fail-${tag}-${stage}-${failed[stage]}.json`),
+                  JSON.stringify({ done_reason: doneReason, content }, null, 2),
                   "utf-8"
                 );
-                continue;
               }
-              const checked = castGuessesForChunk(items, chunk, peopleForChunk(chunk, people));
-              dropAll.push(...checked.dropped);
-              disagreed += checked.disagreed;
-              calmFilled += checked.calmFilled;
+              return items;
+            };
+
+            for (const chunk of chunks) {
+              const chunkPeople = peopleForChunk(chunk, gold.people);
               for (const [number, id] of chunk.decided) {
                 const goldId = goldIdByIndex.get(chunk.dialogues[number - 1].index) ?? null;
                 byCode++;
@@ -457,64 +565,111 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
                 else if (goldId === id) byCodeHit++;
                 else byCodeWrong++;
               }
+
+              let guesses: Map<number, CastGuess> | undefined;
+              if (STAGES === "one") {
+                const items = await ask(
+                  "one",
+                  VOICE_CAST_SYSTEM_PROMPT,
+                  buildVoiceCastPrompt({
+                    text: chunk.text,
+                    count: chunk.dialogues.length,
+                    people: chunkPeople,
+                    decided: [...chunk.decided.keys()],
+                  }),
+                  buildVoiceCastSchema(chunkPeople)
+                );
+                if (!items) continue;
+                const checked = castGuessesForChunk(items, chunk, chunkPeople);
+                dropOne.push(...checked.dropped);
+                disagreed += checked.disagreed;
+                calmFilled += checked.calmFilled;
+                guesses = checked.guesses;
+              } else {
+                // 製品と同じ頼み（voiceCastStageRequests）。全部コードで決まった区切りは1段目を撃たない
+                const requests = voiceCastStageRequests(chunk, chunkPeople);
+                let speakerItems: unknown[] | undefined;
+                if (requests.speaker) {
+                  speakerItems = await ask(
+                    "speaker",
+                    requests.speaker.systemPrompt,
+                    requests.speaker.userPrompt,
+                    requests.speaker.jsonSchema
+                  );
+                  if (!speakerItems) continue;
+                } else {
+                  skippedSpeakerStage++;
+                }
+                const speakerCheck = speakerItems
+                  ? validateCastSpeakers(speakerItems, chunk.dialogues.length, chunkPeople, chunk.decided)
+                  : { speakers: new Map<number, string | null>(), dropped: [] };
+                dropSpeaker.push(...speakerCheck.dropped);
+                chunk.dialogues.forEach((d, k) => {
+                  const guessed = chunk.decided.get(k + 1) ?? speakerCheck.speakers.get(k + 1);
+                  scoreSpeaker(stage1, d.quote, byIndex.get(d.index)!, goldIdByIndex.get(d.index) ?? null, guessed, nameOf);
+                });
+                if (STAGES === "speaker") continue;
+                const emotionItems = await ask(
+                  "emotion",
+                  requests.emotion.systemPrompt,
+                  requests.emotion.userPrompt,
+                  requests.emotion.jsonSchema
+                );
+                if (!emotionItems) continue;
+                const checked = castGuessesForStages({ speakerItems, emotionItems }, chunk, chunkPeople);
+                dropEmotion.push(...checked.droppedEmotion);
+                calmFilled += checked.calmFilled;
+                guesses = checked.guesses;
+              }
+
               chunk.dialogues.forEach((d, k) => {
                 const g = byIndex.get(d.index)!;
-                const guess = checked.guesses.get(k + 1);
-                if (!guess) {
-                  unanswered++;
-                  if (g.speaker !== "不明") missedExamples.push(`${d.quote.slice(0, 20)} 正:${g.speaker} → 答え無し／捨て`);
-                  return;
-                }
-                const goldId = goldIdByIndex.get(d.index) ?? null;
+                const guess = guesses!.get(k + 1);
+                scoreSpeaker(final, d.quote, g, goldIdByIndex.get(d.index) ?? null, guess?.speakerId, nameOf);
+                if (!guess) return;
                 detail.push(
                   `${d.index}\t${d.quote.slice(0, 14)}\t正:${g.speaker}/${g.emotion}\t答:${
-                    guess.speakerId === null ? "不明" : gold.people.find((p) => p.id === guess.speakerId)?.name
+                    guess.speakerId === null ? "不明" : nameOf(guess.speakerId)
                   }/${guess.emotion}/${guess.intensity}`
                 );
                 emoTotal++;
                 if (guess.emotion === g.emotion) emoHit++;
-                if (goldId === null) {
-                  if (guess.speakerId === null) goldUnknownRight++;
-                  else goldUnknownWrong++;
-                  return;
-                }
-                if (guess.speakerId === goldId) hit++;
-                else if (guess.speakerId === null) {
-                  missed++;
-                  if (missedExamples.length < 6) missedExamples.push(`${d.quote.slice(0, 20)} 正:${g.speaker} → 不明`);
-                } else {
-                  wrong++;
-                  const gotName = gold.people.find((p) => p.id === guess.speakerId)?.name;
-                  if (wrongExamples.length < 8) wrongExamples.push(`${d.quote.slice(0, 20)} 正:${g.speaker} → ${gotName}`);
-                }
               });
             }
             const sec = Math.round((Date.now() - t0) / 1000);
             const goldKnown = gold.gold.filter((g) => g.speaker !== "不明").length;
+            const how =
+              STAGES === "one"
+                ? "1回で全部を訊く（版1.2 の頼み方）"
+                : STAGES === "two"
+                  ? `2段（版 ${VOICE_CAST_VERSION}）`
+                  : `2段の1段目だけ（版 ${VOICE_CAST_VERSION}）`;
             report.push(
               "",
-              `## ${model} × ${gold.work}/${gold.episode}`,
-              `- 台詞 ${dialogues.length}（正解が人物 ${goldKnown}／不明 ${dialogues.length - goldKnown}）・区切り ${chunks.length}（失敗 ${failedChunks}）`,
-              `- 当たり ${hit}／見逃し(不明に倒れた) ${missed}／取り違え ${wrong}／答え無し・検算で捨て ${unanswered}`,
-              `- うちコードで決めた ${byCode}（${RULES_ON ? "規則あり" : "VC_RULES=off"}）：当たり ${byCodeHit}／取り違え ${byCodeWrong}／正解が不明なのに当てた ${byCodeGoldUnknown}`,
-              `- コードで決めた台詞で、AIの話者の欄が違った ${disagreed}／感情が無く平静にした ${calmFilled}`,
-              `- 正解が不明の台詞：不明のまま ${goldUnknownRight}／人物に当てた ${goldUnknownWrong}`,
-              `- 感情一致 ${emoHit}/${emoTotal}（参考）`,
-              `- 捨てた理由：${JSON.stringify(countDropReasons(dropAll))}`,
-              `- 時間 ${sec}秒（版 ${VOICE_CAST_VERSION}）`,
-              `- ps: ${JSON.stringify(ps.map((m) => ({ name: m.name, size: m.size, size_vram: m.size_vram, ctx: m.context_length })))}`,
-              `- 取り違え例：${JSON.stringify(wrongExamples)}`,
-              `- 見逃し例：${JSON.stringify(missedExamples)}`
+              `## ${model} × ${gold.work}/${gold.episode} × VC_STAGES=${STAGES}`,
+              `- 訊き方：${how}・${RULES_ON ? "本文に書いてある話者をコードで決める" : "VC_RULES=off"}`,
+              `- 台詞 ${dialogues.length}（正解が人物 ${goldKnown}／不明 ${dialogues.length - goldKnown}）・区切り ${chunks.length}` +
+                `・AIを呼んだ回数 ${calls}（1段目を呼ばなかった区切り ${skippedSpeakerStage}）` +
+                `・読めなかった答え ${JSON.stringify(failed)}`,
+              ...(STAGES === "one" ? [] : scoreLines("1段目だけの話者", stage1)),
+              ...(STAGES === "speaker" ? [] : scoreLines(STAGES === "two" ? "2段で通した話者" : "話者", final)),
+              `- うちコードで決めた ${byCode}：当たり ${byCodeHit}／取り違え ${byCodeWrong}／正解が不明なのに当てた ${byCodeGoldUnknown}`,
+              ...(STAGES === "one" ? [`- コードで決めた台詞で、AIの話者の欄が違った ${disagreed}`] : []),
+              `- 感情が無く平静にした ${calmFilled}`,
+              ...(STAGES === "speaker" ? [] : [`- 感情一致 ${emoHit}/${emoTotal}（参考）`]),
+              STAGES === "one"
+                ? `- 捨てた理由：${JSON.stringify(countDropReasons(dropOne))}`
+                : `- 捨てた理由：話者の段 ${JSON.stringify(countDropReasons(dropSpeaker))}／感情の段 ${JSON.stringify(countDropReasons(dropEmotion))}`,
+              `- 時間 ${sec}秒`,
+              `- ps: ${JSON.stringify(ps.map((m) => ({ name: m.name, size: m.size, size_vram: m.size_vram, ctx: m.context_length })))}`
             );
             fs.mkdirSync(OUT!, { recursive: true });
-            fs.writeFileSync(path.join(OUT!, "cast-report.md"), report.join("\n"), "utf-8");
-            fs.writeFileSync(
-              path.join(OUT!, `cast-detail-${model.replace(/[:/]/g, "_")}-${path.basename(goldPath).length}.tsv`),
-              detail.join("\n"),
-              "utf-8"
-            );
-            report.push(`- 詳細：cast-detail-${model.replace(/[:/]/g, "_")}-${path.basename(goldPath).length}.tsv`);
-            fs.writeFileSync(path.join(OUT!, "cast-report.md"), report.join("\n"), "utf-8");
+            if (STAGES !== "speaker") {
+              fs.writeFileSync(path.join(OUT!, `cast-detail-${tag}.tsv`), detail.join("\n"), "utf-8");
+              report.push(`- 詳細：cast-detail-${tag}.tsv`);
+            }
+            // 訊き方ごとに別の報告にする（one と two を続けて流しても上書きし合わない）
+            fs.writeFileSync(path.join(OUT!, `cast-report-${STAGES}.md`), report.join("\n"), "utf-8");
           }
         }
         expect(true).toBe(true);
