@@ -121,11 +121,21 @@ vi.mock("vscode", () => {
     Uri: {
       file: (value: string) => ({ fsPath: value, scheme: "file", path: value }),
       parse: (value: string) => ({ fsPath: value, scheme: "file", path: value }),
-      from: (parts: { scheme: string; path: string }) => ({
+      from: (parts: { scheme: string; path: string; authority?: string }) => {
+        // **本物の vscode と同じく断る**（vscode-uri の _validateUri）。場所（authority）が
+        // 無いのに道が「//」で始まると UriError になる。Mac の e2e で、作品の id の代わりに
+        // 渡した「/private/var/…」が鍵の頭に入り、見比べが開かずに落ちた（0.133.2）
+        if (!parts.authority && parts.path.startsWith("//")) {
+          throw new Error(
+            '[UriError]: If a URI does not contain an authority component, then the path cannot begin with two slash characters ("//")'
+          );
+        }
+        return {
         ...parts,
-        fsPath: parts.path,
-        toString: () => `${parts.scheme}:${parts.path}`,
-      }),
+          fsPath: parts.path,
+          toString: () => `${parts.scheme}:${parts.path}`,
+        };
+      },
     },
     Position: class {
       constructor(
@@ -319,6 +329,27 @@ describe("全部、新しいほうを採る", { timeout: 30_000 }, () => {
    * 文面を組む側（`describeFoldSuccess`）ではなく**ここで**する——
    * 混ぜて渡すと、受け取った側にはもう分けようがない。
    */
+  /**
+   * 分かれた履歴の見比べ（`resolveDivergence.ts` の `defaultWalk`）は、作品の id の
+   * 代わりに置き場の根を渡す。Mac・Linux の根は「/」で始まるので、見比べの URI の
+   * 道が「//…」になり、本物の vscode が断って見比べが開かなかった（Mac の e2e、
+   * 2026-11-07。Windows の根は「C:/…」なので起きない）
+   */
+  test("作品の id が「/」で始まっても（Mac の置き場の根）、見比べが開く", async () => {
+    answers.push("全部、新しいほうを採る");
+    picks.push("左の文を残す");
+
+    const result = await walkConflicts(
+      { id: "/private/var/folders/xy/作品", title: "いじめられっ子", folderPath: root },
+      [人物ファイル, 原稿ファイル],
+      { provider: new ConflictContentProvider() }
+    );
+
+    expect(result.aborted).toBe(false);
+    expect(result.resolved).toEqual([原稿ファイル]);
+    expect(read(原稿ファイル)).toBe("こちらの一行。\n");
+  });
+
   test("一括で寄せたものは resolved に入らない", async () => {
     answers.push("全部、新しいほうを採る");
     picks.push("左の文を残す");

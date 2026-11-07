@@ -67,7 +67,11 @@ export class ConflictContentProvider
   register(key: string, label: string, text: string): vscode.Uri {
     const uri = vscode.Uri.from({
       scheme: CONFLICT_SCHEME,
-      path: `/${key}/${label}`,
+      // **鍵は伏せ字にしてから入れる。** 分かれた履歴の見比べは作品の id の代わりに
+      // 置き場の根を渡すので、Mac・Linux では鍵が「/」で始まり、道が「//…」に
+      // なって vscode が断る（UriError。Mac の e2e で見比べが開かなかった、0.133.2）。
+      // 鍵は画面に出ない（見出しは label と vscode.diff の題）ので、読めなくてよい
+      path: `/${encodeURIComponent(key)}/${label}`,
     });
     this.contents.set(uri.toString(), text);
     return uri;
