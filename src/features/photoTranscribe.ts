@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { AIRegistry } from "../ai/registry";
@@ -821,7 +822,7 @@ async function insertAtCaret(work: WorkEntry, text: string): Promise<void> {
   const INSERT = "差し込む";
   const answer = await vscode.window.showInformationMessage(
     `${target.where}に、書き起こした ${lineCount}行（${body.length}字）を差し込みますか？`,
-    { modal: true, detail: "差し込んだあとは、その話の画面で Ctrl+Z で戻せます。保存はいつもどおりです。" },
+    { modal: true, detail: keysForHost("差し込んだあとは、その話の画面で Ctrl+Z で戻せます。保存はいつもどおりです。") },
     INSERT
   );
   if (answer !== INSERT) return;

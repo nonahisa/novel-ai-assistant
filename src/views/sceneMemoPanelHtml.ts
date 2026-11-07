@@ -1,4 +1,6 @@
 import { noteToneClasses } from "../core/sceneMemoRows";
+// 開き直せない画面は台本を持たない（下の説明）ので、キーの書き方は拡張機能の側の OS で決める
+import { hostKeyOs, keysInText, type KeyOs } from "../core/keyLabels";
 
 /**
  * シーンメモのパネル（設計書6.40.4）。
@@ -33,7 +35,7 @@ import { noteToneClasses } from "../core/sceneMemoRows";
  * **台本を持たない**——押せるものを置くと、受ける相手がいないのに押せてしまう。
  * 文と開き直し方だけを出す。作品名は埋め込まない（題はタブに出ている）
  */
-export function buildSceneMemoUnrestorableHtml(cspSource: string): string {
+export function buildSceneMemoUnrestorableHtml(cspSource: string, os: KeyOs = hostKeyOs()): string {
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -55,7 +57,7 @@ body {
 </head>
 <body>
 <p>このパネルがどの作品のものか分からなくなりました（拡張機能が起き直したため）。</p>
-<p>原稿を前に出して Ctrl+Alt+M を押すと、開き直せます。このタブは閉じてかまいません。</p>
+<p>${keysInText("原稿を前に出して Ctrl+Alt+M を押すと、開き直せます。", os)}このタブは閉じてかまいません。</p>
 </body>
 </html>`;
 }

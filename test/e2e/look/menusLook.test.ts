@@ -15,7 +15,7 @@ import { turnVertical, VERTICAL_LAUNCH } from "../support/verticalFace";
 import { E2E_WORK_TITLE, withVsCode } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
 import { focusTextEditor, pressWorkbenchKey, quickOpen, quickPickRows, quickPickTitle, textEditorVisibleText } from "../support/workbenchDom";
-import { lookEnabled, lookNote, setPane, setRow, setSidebarWidth, shootPage, shootWithZoom } from "./lookSupport";
+import { lookEnabled, lookNote, revealRow, setPane, setRow, setSidebarWidth, shootPage, shootWithZoom } from "./lookSupport";
 
 const EPISODE = "001_はじまり.txt";
 const LAUNCH = { ...SIDEBAR_LAUNCH, windowSize: { width: 1280, height: 800 } };
@@ -103,7 +103,8 @@ describe.skipIf(!lookEnabled)("見た目の写真：左の列", () => {
         await setPane(page, "簡単ステップメニュー", false);
         await setRow(page, "ヘルプ", true);
         await shootWithZoom(page, "825-ヘルプの並び", { x: 0, y: 30, width: 350, height: 750 });
-        await treeRow(page, "場面別案内").click();
+        // ヘルプは詳細メニューの最後なので、開いた中の行は窓が低いと描かれていない（Mac の 1440×795）
+        await (await revealRow(page, "場面別案内")).click();
         await waitUntil(async () => (await quickPickTitle(page)) !== undefined, "場面を選ぶ画面が出る", 20_000);
         await page.waitForTimeout(800);
         const rows = await quickPickRows(page);

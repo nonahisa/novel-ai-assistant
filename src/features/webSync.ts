@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 
@@ -32,7 +33,7 @@ export async function showWebSyncGuide(work: WorkEntry): Promise<void> {
         "（gitコマンドを起動できないためです）。",
         "",
         "【保存の手順】",
-        "1. 本文を保存する（Ctrl+S）",
+        keysForHost("1. 本文を保存する（Ctrl+S）"),
         "2. 左端の「ソース管理」を開く",
         "3. 変更したファイルを確かめ、メッセージを書いて確定する",
         "",

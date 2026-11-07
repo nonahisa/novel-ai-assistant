@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import type { ActionListProvider, ActionNode } from "../views/actionList";
 import type { StepMenuProvider, StepNode } from "../views/stepMenu";
@@ -324,7 +325,7 @@ async function reveal<T>(
 /** 光らせた場所の言い方。**画面と記録で同じ言葉を使う** */
 export function describeSpotlight(result: SpotlightResult): string {
   if (!result.shown) {
-    return "この操作はメニューに見当たりませんでした。コマンドパレット（Ctrl+Shift+P）から探してください。";
+    return keysForHost("この操作はメニューに見当たりませんでした。コマンドパレット（Ctrl+Shift+P）から探してください。");
   }
   const where =
     result.view === "steps"

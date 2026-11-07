@@ -1,5 +1,6 @@
 import { TERM_COLORS } from "../core/termColors";
 import { ZOOM_LIMITS } from "../core/relationGraphViewport";
+import { KEY_LABEL_SCRIPT } from "../core/keyLabels";
 
 /**
  * 人物相関図の画面（設計書6.38.4）。
@@ -276,16 +277,19 @@ svg.dragging { cursor: grabbing; }
     <div class="empty" id="empty"></div>
     <svg id="graph" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
     <div id="zoom">
-      <button id="zoomOut" title="図を小さくします（Ctrl+－。Ctrl+ホイールを奥へ回しても同じ）">－</button>
+      <button id="zoomOut" data-keys title="図を小さくします（Ctrl+－。Ctrl+ホイールを奥へ回しても同じ）">－</button>
       <span id="zoomValue" title="図の全体がちょうど収まる大きさを100%とした倍率です"></span>
-      <button id="zoomIn" title="図を大きくします（Ctrl+＋。Ctrl+ホイールを手前へ回すと、マウスの位置を中心に大きくなります）">＋</button>
-      <button id="zoomFit" title="図の全体が欄にちょうど収まる大きさへ戻します（Ctrl+0）">全体を合わせる</button>
+      <button id="zoomIn" data-keys title="図を大きくします（Ctrl+＋。Ctrl+ホイールを手前へ回すと、マウスの位置を中心に大きくなります）">＋</button>
+      <button id="zoomFit" data-keys title="図の全体が欄にちょうど収まる大きさへ戻します（Ctrl+0）">全体を合わせる</button>
     </div>
   </main>
   <aside id="side"></aside>
 </div>
 <footer id="notice"></footer>
 <script nonce="${nonce}">
+${KEY_LABEL_SCRIPT}
+// HTML に書いたキーの案内（data-keys の付いた所）を、Mac なら ⌘ の書き方へ（core/keyLabels.ts）
+novelaiApplyKeyLabels(document);
 const vscode = acquireVsCodeApi();
 const SVG_NS = "http://www.w3.org/2000/svg";
 

@@ -8,6 +8,7 @@ import {
   type ActionSection,
 } from "./actionTree";
 import { processCommandsUsableHere } from "./processAvailability";
+import { keysForHost } from "./keyLabels";
 import { CHAT_MODEL_NOTES, DETECTION_MODEL_NOTES } from "./chatModelNotes";
 import { entranceOf } from "./actionEntrance";
 import {
@@ -147,7 +148,7 @@ export const EXTRA_GUIDE = `
 - Ctrl+Alt+R: 選んだ語にルビを振る（右クリックの「ルビ付与」と同じ）
 - Ctrl+Alt+K: 選んだ語に傍点を付ける。傍点の付いた所なら外れる（右クリックの「傍点付与」と同じ。.md のみ）
 - Ctrl+Alt+… と Ctrl+/・F8 のキーは、原稿エディターを開いているときだけ効き（ほかの画面では VS Code のふだんの動き〈行をコメントにする・次の問題へ〉のまま。原稿エディターを前に出していても、ターミナル・入力欄・サイドバー・下のパネルに焦点があるときは効かない）、開いている原稿の作品・話を対象にする。押したあとに出る窓は先頭が選ばれた状態で開くので Enter で進み（未保存の確認は［保存して実行］、AIの料金・量の確認は［実行］が先頭）、Esc でいつでも取りやめられる。表記ゆれの「揃えたい組」だけは、勝手に直さないよう何も選ばれていないので、選んでから Enter
-- これらのキーは自分で変えられる。VS Code の「キーボード ショートカット」（Ctrl+K Ctrl+S）を開き、「統合小説執筆環境」と打って探す（mac では Ctrl+Alt+… は Cmd+Alt+…、Ctrl+/ は Cmd+/。F8・Shift+F8 はそのまま）
+- これらのキーは自分で変えられる。VS Code の「キーボード ショートカット」（Ctrl+K Ctrl+S）を開き、「統合小説執筆環境」と打って探す
 
 【口述筆記】
 - 声を文字にするのは、この拡張機能ではなくOSの音声入力です。Windowsは Win+H、macOSは fnキーを2回押すと始まります。文字は、いまカーソルのある欄へそのまま入ります
@@ -184,6 +185,17 @@ export const EXTRA_GUIDE = `
 - 同じ本文を二度AIに読ませない。処理済みは記憶され、本文を変えた分だけ作り直す
 - AIを呼ぶ操作には「AI」の印が付く。クラウドのAI（Claude・ChatGPT・Gemini）は実行のたびに課金され（ClaudeはMax・Teamプランなら毎月のAPIクレジットの範囲で使える）、Ollamaは無料
 `.trim();
+
+/**
+ * `EXTRA_GUIDE` を、いま動いている所の OS のキーの書き方にしたもの（`core/keyLabels.ts`）。
+ *
+ * **文は Windows の書き方（Ctrl+S）で1か所に持ち、出すときだけ直す。** Mac の作者には
+ * マニュアルも相談の答えも「⌘S」で届くようにする（2026-11-07、Mac の実機の報告）。
+ * 作者が読むマニュアル（`openManual.ts`）と AI へ渡す説明は、どちらもここを通す
+ */
+export function extraGuideForHost(): string {
+  return keysForHost(EXTRA_GUIDE);
+}
 
 /**
  * 相談へ渡す操作。この環境で動くもの（`visibleEntries`）から、**旧入口**
@@ -700,7 +712,7 @@ function splitSectionItems(
  */
 function extraGuideSection(title: string): string {
   const heading = `【${title}】`;
-  const lines = EXTRA_GUIDE.split("\n");
+  const lines = extraGuideForHost().split("\n");
   const start = lines.indexOf(heading);
   if (start === -1) return "";
 

@@ -1,3 +1,4 @@
+import { keysForHost } from "./keyLabels";
 import {
   describeBlocked,
   EDITOR_BLOCKED_HINT,
@@ -1403,7 +1404,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・同音異義の誤変換を直す\n\n" +
               "・文頭の「えーと」のような言いよどみを取る\n\n" +
               "・対象は選んだところ（原稿エディタなら下段の「口述」→「整える」）\n\n" +
-              "・Ctrl+Z で元に戻せる\n\n" +
+              keysForHost("・Ctrl+Z で元に戻せる\n\n") +
               "・声を文字にするのはOSの音声入力\n\n" +
               "・Windows：Win+H／macOS：fnキー2回\n\n" +
               "言葉は足さない・削らない・言い換えない。",
@@ -1444,7 +1445,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・漢字の直後なら、選ばなくても拾う\n\n" +
               // .txt でも振れる（0.64.6。features/ruby.ts）。.txt には投稿サイトの書き方で入る
               "・.md でも .txt でも振れる（.txt は投稿サイトの書き方）\n\n" +
-              "・.md はプレビュー（Ctrl+Shift+V）で振り仮名として出る",
+              keysForHost("・.md はプレビュー（Ctrl+Shift+V）で振り仮名として出る"),
           },
           {
             kind: "action",

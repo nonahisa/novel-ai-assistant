@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
@@ -134,7 +135,7 @@ export async function runDictationClean(
   const confirmed = await confirmRun(
     `口述で入れた${original.length}字を整えます（AIの呼び出しは1回）。\n` +
       `モデル: ${resolved.model}${costNotice}\n` +
-      "整えたあとは Ctrl+Z で元に戻せます。",
+      keysForHost("整えたあとは Ctrl+Z で元に戻せます。"),
     "実行",
     // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）。作品に
     // 属さない文書で呼ばれたときは出さない（名前が無い）
@@ -340,7 +341,7 @@ async function announceApplied(
 
   if (entry === "manuscriptEditor") {
     void vscode.window.showInformationMessage(
-      `${headline}Ctrl+Z で元に戻せます。${detail}`
+      `${headline}${keysForHost("Ctrl+Z で元に戻せます。")}${detail}`
     );
     return;
   }
@@ -358,7 +359,7 @@ async function announceApplied(
   if (!active || active.toString() !== target.toString()) {
     void vscode.window.showWarningMessage(
       "いま開いているのは別の文書なので、元に戻しませんでした。" +
-        "元の文書を開いて Ctrl+Z を押してください。"
+        keysForHost("元の文書を開いて Ctrl+Z を押してください。")
     );
     return;
   }

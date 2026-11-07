@@ -1,3 +1,4 @@
+import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { isDateKey, type ContestGoal, type WorkGoals } from "../models/workGoals";
@@ -140,7 +141,7 @@ export async function setWorkGoals(
               description: "ヘルパーを使わないとき",
               detail:
                 "ノベルポータル・ツクリテミライの公募の一覧のページで、文章を全部選んでコピー" +
-                "（Ctrl+A → Ctrl+C）してから押してください。",
+                keysForHost("（Ctrl+A → Ctrl+C）してから押してください。"),
               action: "pasteContests" as const,
             },
           ]
