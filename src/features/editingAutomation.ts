@@ -193,6 +193,11 @@ export interface InboxDeps {
   offerDecisions: (work: WorkEntry, text: string, onView: () => Promise<void>) => void;
   /** 編集者モード：その作品の作者の採否の一覧（編集者メニューの「7. 作者の採否を見る」と同じ）を開く */
   viewDecisions: (work: WorkEntry) => Promise<void>;
+  /**
+   * 編集者モード：新しい採否が届いたとき、その作品の採否のパネルが開いていれば描き直す
+   * （0.136.0。パネルは閉じないので、開いたままだと古い一覧が残る）。開いていなければ何もしない
+   */
+  refreshDecisions: (work: WorkEntry) => Promise<void>;
 }
 
 /** 採否が届いた知らせのボタン */
@@ -212,8 +217,12 @@ const defaultInboxDeps: InboxDeps = {
     );
   },
   viewDecisions: async (work) => {
-    const { showEditorProposalList } = await import("./editorProposalList.js");
-    await showEditorProposalList(work, "decided", defaultInboxDeps.decisionMemory);
+    const { showAuthorDecisionsPanel } = await import("./authorDecisionsPanel.js");
+    await showAuthorDecisionsPanel(work, defaultInboxDeps.decisionMemory);
+  },
+  refreshDecisions: async (work) => {
+    const { refreshAuthorDecisionsPanel } = await import("./authorDecisionsPanel.js");
+    await refreshAuthorDecisionsPanel(work);
   },
   offer: (work, text, onView) => {
     whenNoticePicked(
@@ -345,6 +354,7 @@ async function noticeArrivedDecisions(
         () => deps.viewDecisions(work)
       );
       await deps.decisionMemory.add(work.id, keys);
+      await deps.refreshDecisions(work);
       useLogFile(work.folderPath);
       logStep(`作者の採否が届いた（${work.title}・${arrived.length}件）`);
     } catch (error) {

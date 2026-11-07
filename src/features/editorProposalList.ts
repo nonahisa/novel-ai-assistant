@@ -76,36 +76,70 @@ export function proposalListRows(
   });
 }
 
+/** 一覧に並べる行と、件数の見出しに使う自分の提案（QuickPick と採否のパネルで同じ読み方をする） */
+export interface ProposalListFacts {
+  rows: ProposalListRow[];
+  mine: ProposalView[];
+}
+
+export async function loadProposalListFacts(
+  work: WorkEntry,
+  mode: ProposalListMode
+): Promise<ProposalListFacts> {
+  const views = await new ProposalStore(work).load();
+  const who = (await tryGitUserName(work.folderPath)) ?? "";
+  return {
+    rows: proposalListRows(views, mode, who),
+    mine: views.filter((view) => who === "" || view.proposer === who),
+  };
+}
+
+/** 並べるものが無いときの知らせ（QuickPick とパネルで同じ文にする） */
+export function showEmptyProposalListNotice(
+  work: WorkEntry,
+  mode: ProposalListMode,
+  mine: readonly ProposalView[]
+): void {
+  void vscode.window.showInformationMessage(
+    mode === "decided"
+      ? mine.length > 0
+        ? `「${work.title}」の作者の採否は、まだ届いていません（作者の返事待ち ${mine.length}件）。` +
+          "作者が決めると、「1. 作者の最新の原稿を受け取る」で届きます。"
+        : `「${work.title}」には、まだ提案を置いていません。`
+      : `「${work.title}」には、まだ提案を置いていません。` +
+        "「3. 機械に探させる」か「4. 直しを提案する・メモ（意見）を書く」で置けます。"
+  );
+}
+
+/** 採否の一覧を見せたら、並べた採否は「見た」として覚える（7の印が「済み」になる） */
+export async function rememberShownDecisions(
+  work: WorkEntry,
+  rows: readonly ProposalListRow[],
+  memory: DecisionMemory
+): Promise<void> {
+  const keys = rows
+    .map((row) => decisionKey(row.view))
+    .filter((key): key is string => key !== undefined);
+  await memory.add(work.id, keys);
+}
+
+/**
+ * QuickPick の一覧。**いまは「置いた提案」（placed）だけがここを通る。**
+ * 作者の採否（decided）は 0.136.0 から横に残るパネル（`authorDecisionsPanel.ts`）で見せる
+ */
 export async function showEditorProposalList(
   work: WorkEntry,
   mode: ProposalListMode,
   memory: DecisionMemory
 ): Promise<void> {
-  const views = await new ProposalStore(work).load();
-  const who = (await tryGitUserName(work.folderPath)) ?? "";
-  const rows = proposalListRows(views, mode, who);
-  const mine = views.filter((view) => who === "" || view.proposer === who);
+  const { rows, mine } = await loadProposalListFacts(work, mode);
 
   if (rows.length === 0) {
-    void vscode.window.showInformationMessage(
-      mode === "decided"
-        ? mine.length > 0
-          ? `「${work.title}」の作者の採否は、まだ届いていません（作者の返事待ち ${mine.length}件）。` +
-            "作者が決めると、「1. 作者の最新の原稿を受け取る」で届きます。"
-          : `「${work.title}」には、まだ提案を置いていません。`
-        : `「${work.title}」には、まだ提案を置いていません。` +
-          "「3. 機械に探させる」か「4. 直しを提案する・メモ（意見）を書く」で置けます。"
-    );
+    showEmptyProposalListNotice(work, mode, mine);
     return;
   }
 
-  // 採否の一覧を開いたら、並べた採否は「見た」として覚える（7の印が「済み」になる）
-  if (mode === "decided") {
-    const keys = rows
-      .map((row) => decisionKey(row.view))
-      .filter((key): key is string => key !== undefined);
-    await memory.add(work.id, keys);
-  }
+  if (mode === "decided") await rememberShownDecisions(work, rows, memory);
 
   const counts = summarizeDecisions(mine);
   const title =
@@ -125,8 +159,15 @@ export async function showEditorProposalList(
   await revealProposal(work, picked.view);
 }
 
-/** 本文のその行を開く。**開くだけで、書き換えない** */
-async function revealProposal(work: WorkEntry, view: ProposalView): Promise<void> {
+/**
+ * 本文のその行を開く。**開くだけで、書き換えない。**
+ * `viewColumn` は採否のパネルから開くときに渡す（パネルの列に本文を重ねないため）
+ */
+export async function revealProposal(
+  work: WorkEntry,
+  view: ProposalView,
+  viewColumn?: vscode.ViewColumn
+): Promise<void> {
   const uri = path.toUri(path.join(work.folderPath, view.file));
   try {
     await vscode.workspace.fs.stat(uri);
@@ -139,5 +180,6 @@ async function revealProposal(work: WorkEntry, view: ProposalView): Promise<void
   const line = Math.max(0, view.line - 1);
   await vscode.commands.executeCommand("vscode.open", uri, {
     selection: new vscode.Range(line, 0, line, 0),
+    ...(viewColumn !== undefined ? { viewColumn } : {}),
   });
 }
