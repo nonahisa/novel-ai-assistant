@@ -192,7 +192,7 @@ describe("素のエディターの警告（開いたとき）", () => {
 
 describe("素のエディターで読み取り専用を外して打ったとき（0.141.1 の追加 C。作者の答え「打った時点で戻す」）", () => {
   /** 素のエディターで開いている文書の代役。打つと中身が変わり、戻す命令でファイルの中身へ戻る */
-  async function typeIntoPlainEditor(file: string, typed: string) {
+  async function typeIntoPlainEditor(file: string, typed: string, waitMs = 3000) {
     const executed: string[] = [];
     let changeListener: ((event: unknown) => void) | undefined;
     const fileText = await fsp.readFile(file, "utf8");
@@ -234,7 +234,11 @@ describe("素のエディターで読み取り専用を外して打ったとき�
       **決まった回数では待たない**（CI の遅い機械で、戻す前に見て落ちた。2026-11-07 run 42377118627）。
       戻す仕事は、控えの書き込み・鍵の台帳の読み・命令の呼び出しと続くので、戻ったのが見えるまで待つ
     */
-    const until = Date.now() + 3000; // 鍵の無い話（何もしない件）は、ここまで待って抜ける
+    /*
+      鍵のある話は、戻ったのが見えれば抜けるので、上限は長くしてよい。CI の全件の混む中では3秒を超えた
+      （2026-11-07 run 42377837222 で 3,366ms のあいだ戻らずに落ちた）。鍵の無い話（何もしない件）は、上限まで待って抜ける
+    */
+    const until = Date.now() + waitMs;
     while (Date.now() < until && !(document.text === fileText && executed.includes("workbench.action.files.setActiveEditorReadonlyInSession"))) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
@@ -247,7 +251,7 @@ describe("素のエディターで読み取り専用を外して打ったとき�
 
   test("文書がファイルの中身に戻り、打った字が控えに入り、読み取り専用が掛け直され、git の名前の無い知らせが出る", async () => {
     const file = await lockedEpisode({ editorLogin: "kmizu" });
-    const result = await typeIntoPlainEditor(file, "朝の駅は静かだった。あ");
+    const result = await typeIntoPlainEditor(file, "朝の駅は静かだった。あ", 20_000);
     expect(result.document.text).toBe(result.fileText);
     expect(await fsp.readFile(file, "utf8"), "原稿のファイルには書かない").toBe(result.fileText);
     expect(result.executed).toContain("workbench.action.files.revert");
@@ -258,7 +262,7 @@ describe("素のエディターで読み取り専用を外して打ったとき�
     expect(notice, `出た知らせ：${JSON.stringify(warnings)}`).toBeDefined();
     expect(notice).toContain("は編集者が校閲中のため、書けません（編集者 kmizu");
     expect(notice).not.toContain(GIT_NAME);
-  });
+  }, 30_000);
 
   test("鍵の無い話では何もしない", async () => {
     nextFile += 1;
