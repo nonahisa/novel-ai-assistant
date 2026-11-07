@@ -61,7 +61,7 @@ function visibleViews(
   mode: "author" | "editor" = "author"
 ): string[] {
   return VIEWS.filter((view) =>
-    evaluateWhen(view.when, { "config.novelai.mode": mode, ...context })
+    evaluateWhen(view.when, { "novelai.editorMode": mode === "editor", ...context })
   ).map((view) => view.id);
 }
 

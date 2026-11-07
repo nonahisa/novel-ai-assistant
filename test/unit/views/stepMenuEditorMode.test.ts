@@ -297,9 +297,9 @@ describe("モードを切り替えた瞬間に描き直す", () => {
     const views = pkg.contributes.views["novelai"];
     // 一番上（配列の先頭）に置く
     expect(views[0].id).toBe("novelai.editorMenu");
-    expect(views[0].when).toContain("config.novelai.mode == 'editor'");
+    expect(views[0].when).toContain("novelai.editorMode");
     expect(views.find((view) => view.id === "novelai.steps")?.when).toContain(
-      "config.novelai.mode != 'editor'"
+      "!novelai.editorMode"
     );
   });
 });

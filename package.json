@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。※現在テスト中です。",
-  "version": "0.134.7",
+  "version": "0.134.8",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -209,7 +209,7 @@
         {
           "id": "novelai.editorMenu",
           "name": "編集者メニュー",
-          "when": "config.novelai.mode == 'editor' && !novelai.focusChat && (!novelai.soloView || novelai.soloView == 'editorMenu')"
+          "when": "novelai.editorMode && !novelai.focusChat && (!novelai.soloView || novelai.soloView == 'editorMenu')"
         },
         {
           "id": "novelai.works",
@@ -219,7 +219,7 @@
         {
           "id": "novelai.steps",
           "name": "簡単ステップメニュー",
-          "when": "config.novelai.mode != 'editor' && !novelai.focusChat && (!novelai.soloView || novelai.soloView == 'steps')"
+          "when": "!novelai.editorMode && !novelai.focusChat && (!novelai.soloView || novelai.soloView == 'steps')"
         },
         {
           "id": "novelai.actions",
@@ -1834,7 +1834,7 @@
       "editor/context": [
         {
           "command": "novelai.proposeEditByHand",
-          "when": "config.novelai.mode == 'editor' && (resourceExtname == .txt || resourceExtname == .md)",
+          "when": "novelai.editorMode && (resourceExtname == .txt || resourceExtname == .md)",
           "group": "navigation@0"
         },
         {
@@ -1876,7 +1876,7 @@
       "commandPalette": [
         {
           "command": "novelai.proposeEditByHand",
-          "when": "config.novelai.mode == 'editor'"
+          "when": "novelai.editorMode"
         },
         {
           "command": "novelai.collectEditorProposals",
@@ -1884,11 +1884,11 @@
         },
         {
           "command": "novelai.reviewProposals",
-          "when": "config.novelai.mode == 'editor'"
+          "when": "novelai.editorMode"
         },
         {
           "command": "novelai.viewEditorProposals",
-          "when": "config.novelai.mode != 'editor'"
+          "when": "!novelai.editorMode"
         },
         {
           "command": "novelai.episodePlotToPlotMode",
@@ -2184,15 +2184,15 @@
         },
         {
           "command": "novelai.chooseEditorWork",
-          "when": "config.novelai.mode == 'editor'"
+          "when": "novelai.editorMode"
         },
         {
           "command": "novelai.listPlacedProposals",
-          "when": "config.novelai.mode == 'editor'"
+          "when": "novelai.editorMode"
         },
         {
           "command": "novelai.viewAuthorDecisions",
-          "when": "config.novelai.mode == 'editor'"
+          "when": "novelai.editorMode"
         },
         {
           "command": "novelai.soloEditorMenu",

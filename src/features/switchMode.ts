@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { currentMode } from "../core/actorContext";
+import { syncEditorModeContext } from "../core/editorModeContext";
 import { editorAllowedCommands, type WorkMode } from "../core/editorMode";
 
 /**
@@ -48,6 +49,8 @@ export async function applyMode(next: WorkMode): Promise<void> {
   await vscode.workspace
     .getConfiguration("novelai")
     .update("mode", next, vscode.ConfigurationTarget.Global);
+  // 設定の変化の知らせを待たずに、欄の出し分けの印も替える
+  await syncEditorModeContext();
 
   // **戻し方の案内つきなので通知に残す**（設計書6.81の規則3）。
   // 編集者モードは使える操作が減るので、「どうやって戻すか」が読み切れ

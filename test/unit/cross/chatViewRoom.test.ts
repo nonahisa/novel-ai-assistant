@@ -62,9 +62,10 @@ describe("横の相談パネルの高さ", () => {
     const shownIn = (mode: "author" | "editor") =>
       views.filter((view) => {
         const when = (view as { when?: string }).when ?? "";
+        // 「novelai.editorMode」だけ（前に ! が無い）なら編集者モードでだけ出る
         return mode === "author"
-          ? !when.includes("config.novelai.mode == 'editor'")
-          : !when.includes("config.novelai.mode != 'editor'");
+          ? !/(^|[^!])novelai.editorMode/.test(when)
+          : !when.includes("!novelai.editorMode");
       });
     const others = Math.max(
       ...(["author", "editor"] as const).map((mode) =>

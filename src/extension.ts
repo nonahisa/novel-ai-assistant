@@ -566,6 +566,7 @@ import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
 import { startAiAssignmentsSnapshot } from "./features/aiAssignmentsSnapshot";
 import { isEditorMode } from "./core/actorContext";
+import { syncEditorModeContext } from "./core/editorModeContext";
 import { describeBlocked, setActiveModeForGuide } from "./core/editorMode";
 import { conflictFixHint } from "./core/syncEntryNames";
 import {
@@ -876,6 +877,8 @@ export async function activate(
     PROCESSES_BLOCKED_CONTEXT,
     !processCommandsUsableHere()
   );
+  // 編集者メニューと簡単ステップメニューの出し分けの印（設定の読みに頼らない。0.134.8）
+  void syncEditorModeContext();
 
   /**
    * どちらの読み口を選んだか（設計書6.107。0.74.11）。
@@ -2908,6 +2911,7 @@ export async function activate(
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration("novelai.mode")) return;
+      void syncEditorModeContext();
       setActiveModeForGuide(isEditorMode() ? "editor" : "author");
       stepProvider.refresh();
       actionProvider.refresh();
