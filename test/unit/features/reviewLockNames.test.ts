@@ -190,6 +190,81 @@ describe("素のエディターの警告（開いたとき）", () => {
   });
 });
 
+describe("素のエディターで読み取り専用を外して打ったとき（0.140.1 の追加 C。作者の答え「打った時点で戻す」）", () => {
+  /** 素のエディターで開いている文書の代役。打つと中身が変わり、戻す命令でファイルの中身へ戻る */
+  async function typeIntoPlainEditor(file: string, typed: string) {
+    const executed: string[] = [];
+    let changeListener: ((event: unknown) => void) | undefined;
+    const fileText = await fsp.readFile(file, "utf8");
+    const document = {
+      uri: Uri.file(file),
+      text: fileText,
+      getText() {
+        return this.text;
+      },
+    };
+    Object.assign(workspace, {
+      onDidChangeTextDocument: (listener: typeof changeListener) => {
+        changeListener = listener;
+        return { dispose() {} };
+      },
+    });
+    Object.assign(window, { activeTextEditor: { document } });
+    const { commands } = await import("../support/vscodeStub");
+    const originalExecute = commands.executeCommand;
+    commands.executeCommand = (async (command: string) => {
+      executed.push(command);
+      if (command === "workbench.action.files.revert") {
+        document.text = fileText;
+        changeListener?.({ document, contentChanges: [{ text: "" }] });
+      }
+      return undefined;
+    }) as typeof commands.executeCommand;
+    const rescues = new Map<string, unknown>();
+    const store = {
+      get: (key: string) => rescues.get(key),
+      update: async (key: string, value: unknown) => {
+        rescues.set(key, value);
+      },
+    };
+    const guard = installEditorLockGuard({ list: () => [work()] }, { readonlyRescues: store });
+    document.text = typed;
+    changeListener?.({ document, contentChanges: [{ text: "あ" }] });
+    await settle();
+    guard.dispose();
+    commands.executeCommand = originalExecute;
+    Object.assign(window, { activeTextEditor: undefined });
+    return { executed, document, rescues, fileText };
+  }
+
+  test("文書がファイルの中身に戻り、打った字が控えに入り、読み取り専用が掛け直され、git の名前の無い知らせが出る", async () => {
+    const file = await lockedEpisode({ editorLogin: "kmizu" });
+    const result = await typeIntoPlainEditor(file, "朝の駅は静かだった。あ");
+    expect(result.document.text).toBe(result.fileText);
+    expect(await fsp.readFile(file, "utf8"), "原稿のファイルには書かない").toBe(result.fileText);
+    expect(result.executed).toContain("workbench.action.files.revert");
+    expect(result.executed).toContain("workbench.action.files.setActiveEditorReadonlyInSession");
+    const kept = JSON.stringify([...result.rescues.values()]);
+    expect(kept).toContain("朝の駅は静かだった。あ");
+    const notice = warnings.find((message) => message.includes("打った字は控えました"));
+    expect(notice, `出た知らせ：${JSON.stringify(warnings)}`).toBeDefined();
+    expect(notice).toContain("は編集者が校閲中のため、書けません（編集者 kmizu");
+    expect(notice).not.toContain(GIT_NAME);
+  });
+
+  test("鍵の無い話では何もしない", async () => {
+    nextFile += 1;
+    const name = `00${nextFile}_ふつう.txt`;
+    await put(nodePath.join("本文", name), "朝の駅は静かだった。");
+    const file = nodePath.join(root, "本文", name);
+    const result = await typeIntoPlainEditor(file, "朝の駅は静かだった。あ");
+    expect(result.document.text).toBe("朝の駅は静かだった。あ");
+    expect(result.executed).toEqual([]);
+    expect(result.rescues.size).toBe(0);
+    expect(warnings).toEqual([]);
+  });
+});
+
 describe("打ったときの右下の知らせ（原稿エディター）", () => {
   test("鍵の holder（git の名前）を文に使わない", () => {
     // 原稿エディターの打鍵の道は大きな部品の奥にあるので、名前の決め方を通っていることを源で見る

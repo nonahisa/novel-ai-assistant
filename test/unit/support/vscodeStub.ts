@@ -12,6 +12,7 @@ export const workspace = {
   /** 文書を開いた／保存した知らせの購読。試験では何も起きないので、外せるだけ返す */
   onDidOpenTextDocument: (_listener: unknown) => ({ dispose() {} }),
   onDidSaveTextDocument: (_listener: unknown) => ({ dispose() {} }),
+  onDidChangeTextDocument: (_listener: unknown) => ({ dispose() {} }),
   /**
    * 文書への当て込み。**既定は「入った」**——入らなかったときの道を
    * 見るテストは false を返す形へ差し替える。
