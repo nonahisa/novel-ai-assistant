@@ -147,6 +147,7 @@ import {
 import { EditorMenuProvider } from "./views/editorMenu";
 import { joinedWorksOf, readEditorMenuFacts } from "./features/editorMenuFacts";
 import { showEditorProposalList } from "./features/editorProposalList";
+import { showAuthorDecisionsPanel } from "./features/authorDecisionsPanel";
 import {
   FOCUS_CHAT_KEY,
   SOLO_VIEW_KEY,
@@ -4945,7 +4946,8 @@ export async function activate(
     registerCommand("novelai.viewAuthorDecisions", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
       if (!work) return;
-      await showEditorProposalList(work, "decided", globalDecisionMemory);
+      // 作者の採否は横に残るパネルで見せる（作者の答え 2026-11-07。本文と見比べながら1件ずつ見る）
+      await showAuthorDecisionsPanel(work, globalDecisionMemory);
     })
   );
 

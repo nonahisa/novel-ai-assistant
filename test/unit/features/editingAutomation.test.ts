@@ -170,6 +170,7 @@ function inboxDeps(over: Partial<InboxDeps> = {}): InboxDeps {
     offer: vi.fn(),
     offerDecisions: vi.fn(),
     viewDecisions: vi.fn(async () => undefined),
+    refreshDecisions: vi.fn(async () => undefined),
     primePanel: vi.fn(async () => undefined),
     viewProposals: vi.fn(async () => undefined),
     loadProposals: vi.fn(async () => []),
@@ -362,6 +363,20 @@ describe("編集者モード：同期で届いた作者の採否を知らせる�
     await collectEditorInboxQuietly([work("a")], deps);
     expect(opened).toEqual(["a", "一覧:a"]);
     expect(DECISIONS_BUTTON).toBe("採否を見る");
+  });
+
+  test("新しい採否が届いたら、開いている採否のパネルを描き直す（0.136.0）。届かなければ描き直さない", async () => {
+    const deps = inboxDeps({
+      isEditorMode: () => true,
+      loadProposals: vi.fn(async () => [view("p1", "accepted")]),
+    });
+    await collectEditorInboxQuietly([work("a")], deps);
+    expect(deps.refreshDecisions).toHaveBeenCalledTimes(1);
+    expect(deps.refreshDecisions).toHaveBeenLastCalledWith(expect.objectContaining({ id: "a" }));
+
+    // 同じ採否はもう覚えているので、2回目は描き直さない
+    await collectEditorInboxQuietly([work("a")], deps);
+    expect(deps.refreshDecisions).toHaveBeenCalledTimes(1);
   });
 
   test("採否が無ければ黙る。読めなくても例外を外へ出さない", async () => {
