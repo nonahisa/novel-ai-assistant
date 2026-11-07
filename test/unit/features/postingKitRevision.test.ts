@@ -497,4 +497,77 @@ describe("修正版の出し直し", () => {
       expect(readLedger().revisions?.[0].titleHash).toBe(postingTitleHash("邂逅"));
     });
   });
+
+  /*
+    実機確認リスト 375・377 のうち、VS Code の側で決まる所（クリップボードの中身・知らせの全文・案内の全文・
+    開く URL）を締める。本物のサイトで貼れるか・保存できるかは作者の手に残る（docs/手順書/投稿と読み上げの実機確認.md）。
+  */
+  describe("出し直しの貼り替えの材料（実機確認 375・377）", () => {
+    const mdPath = path.join(work.folderPath, "本文", "013_邂逅.md");
+    const mdEpisode: EpisodeFile = { ...episode, filePath: mdPath, fileName: "013_邂逅.md", ext: ".md" };
+    // この拡張機能の書き方（.md）。投稿サイトへはサイトの書き方へ直して渡す
+    const mdBody = ["{漢字|かんじ}を直した。", "", "{{そこ}}だけが違った。"].join("\n");
+
+    test("（375）.md の話をカクヨムへ出し直すと、ルビ・傍点がサイトの書き方でコピーされ、サブタイトルも別にコピーでき、知らせは「第13話：カクヨムへ修正版を出し直したと記録しました。」", async () => {
+      disk.set(Uri.file(mdPath).fsPath, utf8(mdBody));
+      writeLedger({
+        ...PARTLY_POSTED,
+        sites: [{ site: "kakuyomu", newEpisodeUrl: kakuyomuUrl }],
+        posts: [{ episodePath: "本文/013_邂逅.md", site: "kakuyomu", postedAt: "2026-10-01T00:00:00.000Z" }],
+      });
+      const clipboards: string[] = [];
+      const picks = stubQuickPick([
+        (items) => items,
+        (items) => {
+          clipboards.push(env.clipboard.text);
+          return byKey("answer", "subtitle")(items);
+        },
+        (items) => {
+          clipboards.push(env.clipboard.text);
+          return byKey("answer", "body")(items);
+        },
+        (items) => {
+          clipboards.push(env.clipboard.text);
+          return byKey("answer", "revised")(items);
+        },
+      ]);
+      await postNewEpisode(work, {} as unknown as AIRegistry, mdEpisode);
+
+      // 案内を開いた直後：本文はカクヨムの書き方（{|} や {{}} のまま貼らせない）
+      expect(clipboards[0]).toContain("《かんじ》");
+      expect(clipboards[0]).toContain("《《そこ》》");
+      expect(clipboards[0]).not.toContain("{");
+      // ［サブタイトルをコピー］で題だけ、［本文をもう一度コピー］で本文へ戻る
+      expect(clipboards[1]).toBe("邂逅");
+      expect(picks[2].placeHolder).toBe("「邂逅」をコピーしました。次は「本文をもう一度コピー」で本文に戻れます");
+      expect(clipboards[2]).toBe(clipboards[0]);
+
+      expect(informed).toContain("第13話：カクヨムへ修正版を出し直したと記録しました。");
+      const ledger = readLedger();
+      expect(ledger.posts).toHaveLength(1);
+      expect(ledger.revisions).toHaveLength(1);
+    });
+
+    test("（377）なろうで小説番号がまだ無ければ、自分の作品の一覧を開き、案内は一覧から選ぶ文。［作品の一覧をもう一度開く］で同じ一覧を開き直す", async () => {
+      writeLedger({
+        sites: [{ site: "narou", newEpisodeUrl: narouUrl }],
+        siteProfiles: [{ site: "narou", workId: "n1234ab" }],
+        posts: [{ episodePath: relativeEpisode, site: "narou", postedAt: "2026-10-01T00:00:00.000Z" }],
+      });
+      const picks = stubQuickPick([
+        (items) => items,
+        (items) => items.find((item) => String(item.label).includes("作品の一覧をもう一度開く")),
+        byKey("answer", "skip"),
+      ]);
+      await postNewEpisode(work, {} as unknown as AIRegistry, episode);
+
+      expect(picks[1].title).toBe("第13話 の修正版を 小説家になろう へ");
+      expect(picks[1].placeHolder).toContain(
+        "開いた作品の一覧からこの作品を選び、第13話の編集画面を開いて、本文を貼り替えてください。"
+      );
+      // 新しい話の画面（投稿ページ）は開かない
+      expect(env.opened).toEqual(["https://syosetu.com/usernovel/list/", "https://syosetu.com/usernovel/list/"]);
+      expect(readLedger().revisions).toBeUndefined();
+    });
+  });
 });
