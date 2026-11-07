@@ -57,6 +57,20 @@ export interface CastChunk {
    * AIには話者を考えさせず、感情と強さだけを訊く（案 A。`castSpeakersFromText`）
    */
   decided: Map<number, string>;
+  /**
+   * 区切りの前・後ろの本文（〔番号〕を付けない元の字。シーンメモの行は除く）。
+   * 2段に分けた1段目（話者だけ）に参考として添える（案 B。版1.3）——区切りの頭の台詞は、
+   * 前の区切りに書いてある場面の顔ぶれが分からないと話者を決められないため。
+   * `castChunksOf` に `context` を渡さなければ空
+   */
+  before: string;
+  after: string;
+}
+
+/** 区切りの前後に添える本文の字数（`castChunksOf` の `context`） */
+export interface CastChunkContext {
+  before: number;
+  after: number;
 }
 
 /**
@@ -70,11 +84,15 @@ export interface CastChunk {
  * `decided`（話の台詞の番号 → 人物の id。`castSpeakersFromText` の答え）を渡すと、
  * 区切りの中の番号に引き直して `CastChunk.decided` に持たせる。本文の〔番号〕は
  * 変えない——感情は、話者の決まった台詞もAIに訊くので。
+ *
+ * `context` を渡すと、区切りの前後の本文（台詞の無い区切りの地の文も含む）を
+ * `before`・`after` に持たせる（案 B の1段目の参考。版1.3）。
  */
 export function castChunksOf(
   text: string,
   maxChars: number,
-  decided?: ReadonlyMap<number, string>
+  decided?: ReadonlyMap<number, string>,
+  context?: CastChunkContext
 ): CastChunk[] {
   const dialogues = castDialogues(text);
   const chunks: CastChunk[] = [];
@@ -84,6 +102,10 @@ export function castChunksOf(
   let bufferChars = 0;
   let bufferDialogues: CastDialogue[] = [];
   let cursor = 0;
+  // 前後の本文を後から切り出すため、送る行（シーンメモを除く）の元の字を並べておく
+  const plainLines: string[] = [];
+  let bufferFirstLine = 0;
+  const ranges: Array<{ from: number; to: number }> = [];
 
   const flush = (): void => {
     if (bufferDialogues.length > 0) {
@@ -92,11 +114,13 @@ export function castChunksOf(
         const id = decided?.get(dialogue.index);
         if (id !== undefined) local.set(i + 1, id);
       });
-      chunks.push({ text: buffer.join("\n"), dialogues: bufferDialogues, decided: local });
+      chunks.push({ text: buffer.join("\n"), dialogues: bufferDialogues, decided: local, before: "", after: "" });
+      ranges.push({ from: bufferFirstLine, to: plainLines.length });
     }
     buffer = [];
     bufferChars = 0;
     bufferDialogues = [];
+    bufferFirstLine = plainLines.length;
   };
 
   for (const line of lines) {
@@ -116,6 +140,7 @@ export function castChunksOf(
         rendered = `${rendered.slice(0, at)}〔${numbers[i]}〕${rendered.slice(at)}`;
       }
       buffer.push(rendered);
+      plainLines.push(line);
       bufferChars += rendered.length + 1;
       bufferDialogues.push(...here);
     } else {
@@ -124,6 +149,16 @@ export function castChunksOf(
     lineStart = lineEnd + 1;
   }
   flush();
+  if (context && (context.before > 0 || context.after > 0)) {
+    chunks.forEach((chunk, i) => {
+      const { from, to } = ranges[i];
+      // 空の行で始まる・終わる字は、参考として意味が無いので詰める
+      const before = plainLines.slice(0, from).join("\n").replace(/\s+$/u, "");
+      const after = plainLines.slice(to).join("\n").replace(/^\s+/u, "");
+      chunk.before = context.before > 0 ? before.slice(Math.max(0, before.length - context.before)) : "";
+      chunk.after = context.after > 0 ? after.slice(0, context.after) : "";
+    });
+  }
   return chunks;
 }
 
@@ -449,15 +484,8 @@ export function validateCastItems(
   people: readonly CastPerson[],
   decided?: ReadonlyMap<number, string>
 ): { guesses: Map<number, CastGuess>; dropped: CastDrop[]; disagreed: number } {
-  const byName = new Map<string, string>();
-  for (const person of people) {
-    for (const name of [person.name, ...person.aliases]) {
-      const key = name.trim();
-      // 2人が同じ別名を持っていたら、どちらとも決めない（引けないものとして扱う）
-      if (byName.has(key) && byName.get(key) !== person.id) byName.set(key, "");
-      else if (key !== "") byName.set(key, person.id);
-    }
-  }
+  // 2人が同じ別名を持っていたら、どちらとも決めない（引けないものとして扱う）
+  const byName = speakerIdsByName(people);
   const guesses = new Map<number, CastGuess>();
   const dropped: CastDrop[] = [];
   let disagreed = 0;
@@ -518,6 +546,189 @@ export function validateCastItems(
     });
   }
   return { guesses, dropped, disagreed };
+}
+
+/*
+  ── 案 B：訊き方を2段に分ける（版1.3。2026-11-07） ──
+
+  1段目は話者だけ、2段目は感情と強さだけを訊く。検算も段ごとに分け、捨てた答えを
+  段ごとに数える（どちらの段の頼み方を直せばよいかが分かるように）。
+*/
+
+/** 名前・別名 → 人物の id。2人が同じ名前を持っていたら空の id（どちらとも決めない） */
+function speakerIdsByName(people: readonly CastPerson[]): Map<string, string> {
+  const byName = new Map<string, string>();
+  for (const person of people) {
+    for (const name of [person.name, ...person.aliases]) {
+      const key = name.trim();
+      if (byName.has(key) && byName.get(key) !== person.id) byName.set(key, "");
+      else if (key !== "") byName.set(key, person.id);
+    }
+  }
+  return byName;
+}
+
+/**
+ * 番号の検算（段に共通）。通らなければ捨てる理由を返す。
+ * 「2つ目」は、**受け入れた答え**（`accepted`）と同じ番号のときだけ（1回訊きの検算と同じ）
+ */
+function numberProblem(
+  record: Record<string, unknown>,
+  count: number,
+  accepted: { has(number: number): boolean }
+): string | undefined {
+  const number = record.number;
+  if (typeof number !== "number" || !Number.isInteger(number) || number < 1 || number > count) {
+    return "番号が区切りに無い";
+  }
+  if (accepted.has(number)) return "同じ番号の答えが2つ目";
+  return undefined;
+}
+
+/**
+ * 1段目（話者だけ）の答えを検算する。番号 → 人物の id（「不明」は null）。
+ *
+ * **本文に話者が書いてあった番号（`decided`）への答えは捨てて数える**——頼み方で
+ * 「答えません」と伝えてあるので、返ってきたら指示を読んでいない印になる。
+ * コードの話者は混ぜる側（`castGuessesForStages`）が先に立てる。
+ */
+export function validateCastSpeakers(
+  items: readonly unknown[],
+  count: number,
+  people: readonly CastPerson[],
+  decided?: ReadonlyMap<number, string>
+): { speakers: Map<number, string | null>; dropped: CastDrop[] } {
+  const byName = speakerIdsByName(people);
+  const speakers = new Map<number, string | null>();
+  const dropped: CastDrop[] = [];
+  for (const item of items) {
+    if (typeof item !== "object" || item === null) {
+      dropped.push({ reason: "形が違う", item });
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const problem = numberProblem(record, count, speakers);
+    if (problem) {
+      dropped.push({ reason: problem, item });
+      continue;
+    }
+    const number = record.number as number;
+    if (decided?.has(number)) {
+      dropped.push({ reason: "話者を訊いていない番号", item });
+      continue;
+    }
+    if (typeof record.speaker !== "string") {
+      dropped.push({ reason: "形が違う", item });
+      continue;
+    }
+    const speaker = record.speaker.trim();
+    if (speaker === CAST_UNKNOWN_SPEAKER) {
+      speakers.set(number, null);
+      continue;
+    }
+    const id = byName.get(speaker);
+    if (id === undefined || id === "") {
+      dropped.push({
+        reason: SPEAKER_ECHOES.has(speaker)
+          ? "話者が指示の言葉のまま"
+          : id === ""
+            ? "話者の名前が2人に当たる"
+            : "話者が資料の人物に無い",
+        item,
+      });
+      continue;
+    }
+    speakers.set(number, id);
+  }
+  return { speakers, dropped };
+}
+
+/** 2段目（感情と強さだけ）の答えを検算する。話者の欄が付いて返っても見ない */
+export function validateCastEmotions(
+  items: readonly unknown[],
+  count: number
+): { emotions: Map<number, { emotion: VoiceEmotion; intensity: VoiceIntensity }>; dropped: CastDrop[] } {
+  const emotions = new Map<number, { emotion: VoiceEmotion; intensity: VoiceIntensity }>();
+  const dropped: CastDrop[] = [];
+  for (const item of items) {
+    if (typeof item !== "object" || item === null) {
+      dropped.push({ reason: "形が違う", item });
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const problem = numberProblem(record, count, emotions);
+    if (problem) {
+      dropped.push({ reason: problem, item });
+      continue;
+    }
+    const number = record.number as number;
+    if (!isVoiceEmotion(record.emotion)) {
+      dropped.push({ reason: "感情が列挙の外", item });
+      continue;
+    }
+    if (!isVoiceIntensity(record.intensity)) {
+      dropped.push({ reason: "強さが列挙の外", item });
+      continue;
+    }
+    emotions.set(number, { emotion: record.emotion, intensity: record.intensity });
+  }
+  return { emotions, dropped };
+}
+
+/** 2段で訊いた1区切りの答えをまとめた結果 */
+export interface CastStageGuesses {
+  /** 区切りの中の番号 → 推定 */
+  guesses: Map<number, CastGuess>;
+  /** 1段目（話者）の検算で捨てた答え */
+  droppedSpeaker: CastDrop[];
+  /** 2段目（感情と強さ）の検算で捨てた答え */
+  droppedEmotion: CastDrop[];
+  /** 本文に書いてあり、コードで決めた台詞の数 */
+  decidedByText: number;
+  /** 話者は分かったが感情が無い・捨てたため「平静・中」にした数 */
+  calmFilled: number;
+}
+
+/**
+ * 2段の答えを検算して混ぜる（製品も測る台本もここを通る）。
+ *
+ * - 話者：コードで決めた話者 → 1段目の答え の順。1段目を呼ばなかった区切り
+ *   （全部コードで決まった）は `speakerItems` を渡さない
+ * - 感情・強さ：2段目の答え
+ * - 感情が無い（答えが無い・捨てた）台詞は、話者が人物に決まっていれば「平静・中」で残す
+ *   （案 A と同じ扱い。推定の無い台詞も読むときは平静・中なので、感情の扱いは変わらない）。
+ *   話者も分からなければ推定なし
+ * - 話者が「不明」・答えが無い台詞も、感情があれば残す（話者が不明でも感情は声に効く）
+ */
+export function castGuessesForStages(
+  answers: { speakerItems?: readonly unknown[]; emotionItems: readonly unknown[] },
+  chunk: Pick<CastChunk, "dialogues" | "decided">,
+  people: readonly CastPerson[]
+): CastStageGuesses {
+  const count = chunk.dialogues.length;
+  const speakerCheck = answers.speakerItems
+    ? validateCastSpeakers(answers.speakerItems, count, people, chunk.decided)
+    : { speakers: new Map<number, string | null>(), dropped: [] };
+  const emotionCheck = validateCastEmotions(answers.emotionItems, count);
+  const guesses = new Map<number, CastGuess>();
+  let calmFilled = 0;
+  for (let number = 1; number <= count; number++) {
+    const speakerId = chunk.decided.get(number) ?? speakerCheck.speakers.get(number) ?? null;
+    const feeling = emotionCheck.emotions.get(number);
+    if (feeling) {
+      guesses.set(number, { speakerId, ...feeling });
+    } else if (speakerId !== null) {
+      guesses.set(number, { speakerId, emotion: "平静", intensity: "中" });
+      calmFilled++;
+    }
+  }
+  return {
+    guesses,
+    droppedSpeaker: speakerCheck.dropped,
+    droppedEmotion: emotionCheck.dropped,
+    decidedByText: chunk.decided.size,
+    calmFilled,
+  };
 }
 
 /** 1区切りの答えをまとめた結果 */
@@ -608,7 +819,11 @@ export interface CastFile {
     model: string;
     promptVersion: string;
     at: string;
+    /** 検算で捨てた答えの合計（2段で訊いたときは両段の和） */
     dropped: number;
+    /** 2段で訊いたときの段ごとの内訳（版1.3から。前の版のファイルには無い） */
+    droppedSpeaker?: number;
+    droppedEmotion?: number;
   };
 }
 

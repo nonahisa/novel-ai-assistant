@@ -2,7 +2,12 @@ import { describe, expect, test } from "vitest";
 import {
   buildVoiceCastPrompt,
   buildVoiceCastSchema,
+  buildVoiceCastEmotionPrompt,
+  buildVoiceCastEmotionSchema,
+  buildVoiceCastSpeakerPrompt,
+  buildVoiceCastSpeakerSchema,
   VOICE_CAST_EXAMPLE_NAME,
+  voiceCastStageRequests,
   voiceCastPersonLine,
 } from "../../../src/prompts/voiceCast";
 import { validateCastItems } from "../../../src/core/voiceCast";
@@ -76,5 +81,80 @@ describe("P-54 の頼み方", () => {
     );
     expect(guesses.size).toBe(0);
     expect(dropped[0].reason).toBe("話者が資料の人物に無い");
+  });
+});
+
+/**
+ * 案 B「訊き方を2段に分ける」（版1.3）。1段目は話者だけ、2段目は感情と強さだけ。
+ * **段ごとに、もう一方の欄を頼み方にもスキーマにも出さない**（出すと小さいモデルは両方を考え、
+ * 1回で訊いたときと同じになる）。
+ */
+describe("P-54 版1.3：2段の頼み方", () => {
+  test("1段目は話者だけを訊く。感情の列挙もスキーマの感情の欄も出さない", () => {
+    const prompt = buildVoiceCastSpeakerPrompt({
+      text: "〔1〕「行こう」\n〔2〕「どこへ」",
+      count: 2,
+      people,
+      before: "前の地の文。",
+      after: "後ろの地の文。",
+    });
+    expect(prompt).toContain("- 灯（別名：あかりちゃん） 口調：丁寧語。 語尾は「です」");
+    expect(prompt).toContain("〔1〕「行こう」");
+    expect(prompt).toContain("【この区切りの前の本文】");
+    expect(prompt).toContain("前の地の文。");
+    expect(prompt).toContain("後ろの地の文。");
+    expect(prompt).toContain("「不明」");
+    expect(prompt).not.toContain(VOICE_EMOTIONS.join("、"));
+    expect(prompt).not.toContain("emotion");
+    const schema = buildVoiceCastSpeakerSchema(people) as {
+      properties: { lines: { items: { properties: Record<string, { enum?: string[] }>; required: string[] } } };
+    };
+    expect(Object.keys(schema.properties.lines.items.properties)).toEqual(["number", "speaker"]);
+    expect(schema.properties.lines.items.required).toEqual(["number", "speaker"]);
+    expect(schema.properties.lines.items.properties.speaker.enum).toEqual(["不明", "灯", "あかりちゃん", "蓮"]);
+  });
+
+  test("1段目：本文に話者が書いてある番号は訊かない（名前は添えない）。前後の本文が無ければ節を出さない", () => {
+    const prompt = buildVoiceCastSpeakerPrompt({
+      text: "〔1〕「行こう」と灯は言った。\n〔2〕「どこへ」\n〔3〕「港」と蓮が答えた。",
+      count: 3,
+      people,
+      decided: [3, 1],
+    });
+    expect(prompt).toContain("答えるのは〔2〕だけです");
+    expect(prompt).toContain("〔1〕〔3〕は、本文に話し手が書いてあるので答えません");
+    expect(prompt).not.toContain("〔1：");
+    expect(prompt).not.toContain("【この区切りの前の本文】");
+    expect(prompt).not.toContain("【この区切りのあとの本文】");
+  });
+
+  test("2段目は感情と強さだけを訊く。人物の一覧もスキーマの話者の欄も出さない", () => {
+    const prompt = buildVoiceCastEmotionPrompt({ text: "〔1〕「やった！」", count: 1 });
+    expect(prompt).toContain(VOICE_EMOTIONS.join("、"));
+    expect(prompt).toContain("〔1〕「やった！」");
+    expect(prompt).not.toContain("【登場人物】");
+    expect(prompt).not.toContain("speaker");
+    expect(prompt).not.toContain(VOICE_CAST_EXAMPLE_NAME);
+    const schema = buildVoiceCastEmotionSchema() as {
+      properties: { lines: { items: { properties: Record<string, unknown>; required: string[] } } };
+    };
+    expect(Object.keys(schema.properties.lines.items.properties)).toEqual(["number", "emotion", "intensity"]);
+    expect(schema.properties.lines.items.required).toEqual(["number", "emotion", "intensity"]);
+  });
+
+  test("区切りごとの頼み：全部の番号がコードで決まった区切りは、1段目を作らない", () => {
+    const chunk = {
+      text: "〔1〕「行こう」と灯は言った。",
+      dialogues: [{ index: 0, start: 0, end: 5, quote: "「行こう」", nth: 0 }],
+      decided: new Map([[1, "a"]]),
+      before: "",
+      after: "",
+    };
+    const requests = voiceCastStageRequests(chunk, people);
+    expect(requests.speaker).toBeUndefined();
+    expect(requests.emotion.userPrompt).toContain("〔1〕「行こう」");
+    const open = voiceCastStageRequests({ ...chunk, decided: new Map() }, people);
+    expect(open.speaker?.userPrompt).toContain("【登場人物】");
+    expect(open.speaker?.systemPrompt).not.toBe(open.emotion.systemPrompt);
   });
 });
