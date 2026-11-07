@@ -260,8 +260,10 @@ test("自動の同期で先に届いた提案があっても「編集者の提�
       /* ── 2. 前の版の手書きの提案の出方 ── */
       const edit = panel.reasons.find((reason) => reason.includes(DELIVERED[0].reason)) ?? "";
       const memo = panel.reasons.find((reason) => reason.includes(DELIVERED[1].reason)) ?? "";
-      expect(edit, `直しの提案の文：${JSON.stringify(panel.reasons)}`).toContain(`編集者の修正：${DELIVERED[0].reason}（${PROPOSER} さんの提案）`);
-      expect(memo, `意見の提案の文：${JSON.stringify(panel.reasons)}`).toContain(`編集者のメモ：${DELIVERED[1].reason}（${PROPOSER} さんの提案）`);
+      expect(edit, `直しの提案の文：${JSON.stringify(panel.reasons)}`).toContain(`編集者の修正：${DELIVERED[0].reason}`);
+      expect(memo, `意見の提案の文：${JSON.stringify(panel.reasons)}`).toContain(`編集者のメモ：${DELIVERED[1].reason}`);
+      // 編集者の git の名前は出さない（0.138.0。設計書5.7.5.9。前から台帳にある提案は名前の覚えが無いので名前なし）
+      expect(panel.reasons.some((reason) => reason.includes(PROPOSER)), `提案パネルに git の名前が出ています：${JSON.stringify(panel.reasons)}`).toBe(false);
       expect(panel.text.includes("編集部"), `提案パネルに「編集部」が出ています：${panel.text}`).toBe(false);
       expect(all.some((text) => text.includes("編集部")), `知らせに「編集部」が出ています：${JSON.stringify(all)}`).toBe(false);
 

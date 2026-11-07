@@ -35,6 +35,7 @@ import { FileLockStore } from "../core/fileLockStore";
 import { describeLock, normalizeFile } from "../models/fileLock";
 import { tryGitUserName } from "../core/gitAttribution";
 import { acceptProposal, rejectProposal } from "./reviewProposals";
+import { editorLoginForProposal } from "./editingSite";
 // 指摘を数日残す（設計書6.96）。**配線はこのファイルの1か所だけ**
 // （`replaceContents`）。検知ごとに写しを作ると、検知を足した人が
 // 記録を忘れる形になる
@@ -4094,9 +4095,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     */
     await this.rememberDecision(work, item, "pending", "適用を戻した");
 
+    // 編集者の提案を戻したときは、採ったときと同じく出した編集者の GitHub 名を書き写す
+    // （設計書5.7.5.9。git の名前は書かない。名前が分からなければ今までの言い方）
+    const editorLogin = item.proposalId
+      ? await editorLoginForProposal(work, item.proposalId).catch(() => undefined)
+      : undefined;
     await recordEdit(work, {
       actor: "author",
-      action: `${this.category}の反映を戻した`,
+      action: editorLogin
+        ? `編集者 ${editorLogin} の提案の反映を戻した`
+        : `${this.category}の反映を戻した`,
+      ...(editorLogin ? { editorLogin } : {}),
       file: editHistoryFile(work.folderPath, item.filePath),
       detail: `${item.line}行 「${item.suggestion}」→「${item.target}」`,
     });

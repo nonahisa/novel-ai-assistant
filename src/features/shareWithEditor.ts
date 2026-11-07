@@ -14,6 +14,9 @@ import { cloneRepository, cloneWithGh } from "../core/gitClone";
 import { runSerialized } from "../core/ledgerQueue";
 import { FileLockStore } from "../core/fileLockStore";
 import { ProposalStore } from "../core/proposalStore";
+import { ProposerLoginStore } from "../core/proposerLogins";
+import { EditHistory } from "../core/editHistory";
+import { HISTORY_DIRECTORY, HISTORY_FILE } from "../core/editHistoryFormat";
 import { normalizeFile, parseLockEvents, resolveLocks } from "../models/fileLock";
 import {
   addRemote,
@@ -44,7 +47,6 @@ import {
   planShareSource,
   replacedDirectories,
   SHARED_FILES,
-  EDITING_SITE_FILE,
   EDITOR_SHARE_MANIFEST_FILE,
 } from "../core/editingRepo";
 import {
@@ -129,7 +131,7 @@ export async function readPointer(
   }
 }
 
-async function writePointer(
+export async function writePointer(
   work: WorkEntry,
   pointer: EditingPointer
 ): Promise<void> {
@@ -145,87 +147,16 @@ async function writePointer(
   );
 }
 
-/**
- * 編集部の送り先と相手（**同期される**。`.aiwriter/editing.json`、cache の外）。
- *
- * 端末ごとに残す pointer（`folderPath` だけ）と分けた理由：別の機械で「渡す」を
- * 押すと、送り先を知らないために**2つ目のリポジトリを作って**いた。送り先の URL を
- * 同期される場所に置けば、2台目はそれを取り寄せて使える。
- */
-export interface EditingSite {
-  /** 編集用リポジトリの取り寄せ用URL（`https://github.com/owner/repo.git`） */
-  remoteUrl?: string;
-  /** 招待が通った編集部の GitHub 名 */
-  editorLogin?: string;
-}
-
-const SITE_RELATIVE = path.join(".aiwriter", EDITING_SITE_FILE);
-
-function sitePath(work: WorkEntry): string {
-  return path.join(workPaths(work).root, SITE_RELATIVE);
-}
-
-export async function readSite(work: WorkEntry): Promise<EditingSite> {
-  const text = await readTextIfAny(sitePath(work));
-  if (text.trim().length === 0) return {};
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed !== "object" || parsed === null) return {};
-    const record = parsed as Record<string, unknown>;
-    return {
-      ...(typeof record.remoteUrl === "string" && record.remoteUrl.length > 0
-        ? { remoteUrl: record.remoteUrl }
-        : {}),
-      ...(typeof record.editorLogin === "string" && record.editorLogin.length > 0
-        ? { editorLogin: record.editorLogin }
-        : {}),
-    };
-  } catch {
-    return {};
-  }
-}
-
-export async function writeSite(work: WorkEntry, site: EditingSite): Promise<void> {
-  const target = sitePath(work);
-  await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
-  await vscode.workspace.fs.writeFile(
-    path.toUri(target),
-    new TextEncoder().encode(`${JSON.stringify(site, null, 2)}\n`)
-  );
-}
-
-/**
- * 編集用リポジトリを消したあと、送り先（`remoteUrl`）だけを `.aiwriter/editing.json` から外す
- * （設計書5.7.5.4）。**ほかの項目は、知らないものも含めて残す**（`readSite` は2項目しか読まないので、
- * `writeSite(readSite())` では知らない項目が落ちる）。読めない JSON は直さずに止める（実装ルール2）。
- *
- * @returns 外したら `true`。初めから無ければ `false`
- */
-export async function forgetRemoteUrl(work: WorkEntry): Promise<boolean> {
-  const text = await readTextIfAny(sitePath(work));
-  if (text.trim().length === 0) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error(
-      "`.aiwriter/editing.json` が読めないため、送り先の記録を外せませんでした（ファイルは直していません）。"
-    );
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(
-      "`.aiwriter/editing.json` の形が違うため、送り先の記録を外せませんでした（ファイルは直していません）。"
-    );
-  }
-  const record = { ...(parsed as Record<string, unknown>) };
-  if (!("remoteUrl" in record)) return false;
-  delete record.remoteUrl;
-  await vscode.workspace.fs.writeFile(
-    path.toUri(sitePath(work)),
-    new TextEncoder().encode(`${JSON.stringify(record, null, 2)}\n`)
-  );
-  return true;
-}
+// 送り先と相手の記録（`.aiwriter/editing.json`）の読み書きは、ブラウザ版の束からも読むため
+// `editingSite.ts` へ分けた（実装ルール7）。今までの呼び口を壊さないよう、ここからも出す
+export {
+  forgetEditorLogin,
+  forgetRemoteUrl,
+  readSite,
+  writeSite,
+  type EditingSite,
+} from "./editingSite";
+import { readSite, writeSite, type EditingSite } from "./editingSite";
 
 /**
  * この端末の、編集用フォルダーの場所の覚え（cache）を消す（設計書5.7.5.4）。
@@ -278,6 +209,31 @@ const PROPOSAL_RELATIVE = path.join(".aiwriter", "proposals", "proposals.jsonl")
 /** GitHub のユーザー名として受ける形（先頭の `@` は落とす） */
 function cleanLogin(raw: string): string {
   return raw.trim().replace(/^@/, "");
+}
+
+/**
+ * 編集者の GitHub ユーザー名を訊く。取りやめたら `undefined`、空のまま Enter なら `""`。
+ *
+ * **解除のあとは、前の編集者の名前を初めの値に入れる**（`formerEditorLogin`。作者の答え 2026-11-07）。
+ * 同じ人にもう一度渡すときは Enter だけで済む。名前は覚えていない扱いなので、招待は送り直す。
+ */
+export async function askEditorLogin(site: EditingSite): Promise<string | undefined> {
+  const asked = await askText({
+    title: "編集者の GitHub ユーザー名",
+    prompt:
+      "編集者の方の GitHub ユーザー名（招待を送ります。あとで招くなら空のまま Enter）",
+    placeHolder: "例: octocat",
+    ...(site.formerEditorLogin ? { value: site.formerEditorLogin } : {}),
+    ignoreFocusOut: true,
+    validateInput: (value) => {
+      const login = cleanLogin(value);
+      if (login.length === 0) return null;
+      return /^[A-Za-z0-9-]+$/.test(login)
+        ? null
+        : "半角の英数字と - だけが使えます";
+    },
+  });
+  return asked === undefined ? undefined : cleanLogin(asked);
 }
 
 /** 送り先 `origin` があるか（リポジトリを作り終えているか） */
@@ -337,23 +293,10 @@ export async function shareWithEditor(
   // 止まっても、次の回で招待が抜けない）
   let editorLogin = site.editorLogin ?? pointer?.editorLogin;
   if (!editorLogin) {
-    const asked = await askText({
-      title: "編集者の GitHub ユーザー名",
-      prompt:
-        "編集者の方の GitHub ユーザー名（招待を送ります。あとで招くなら空のまま Enter）",
-      placeHolder: "例: octocat",
-      ignoreFocusOut: true,
-      validateInput: (value) => {
-        const login = cleanLogin(value);
-        if (login.length === 0) return null;
-        return /^[A-Za-z0-9-]+$/.test(login)
-          ? null
-          : "半角の英数字と - だけが使えます";
-      },
-    });
+    const asked = await askEditorLogin(site);
     // 取りやめたら、何も始めない
     if (asked === undefined) return;
-    editorLogin = cleanLogin(asked) || undefined;
+    editorLogin = asked || undefined;
   }
 
   const needsSignIn = !repositoryExists && !(await hasGithubSession());
@@ -451,6 +394,8 @@ export async function shareWithEditor(
       : knownLogin
         ? { editorLogin: knownLogin }
         : {}),
+    // 前の編集者の名前は消さない（実装ルール2。次に解除したときに新しい名前で書き換わる）
+    ...(site.formerEditorLogin ? { formerEditorLogin: site.formerEditorLogin } : {}),
   };
   await writeSite(work, nextSite);
 
@@ -1210,6 +1155,8 @@ export async function copyForEditor(
 
 /** 鍵の台帳の、作品フォルダーからの相対パス */
 const LOCK_RELATIVE = path.join(".aiwriter", "locks", "locks.jsonl");
+/** 編集履歴の、作品フォルダーからの相対パス（編集者の行を作者の側へ取り込む。設計書5.7.5.9） */
+const HISTORY_RELATIVE = path.join(".aiwriter", HISTORY_DIRECTORY, HISTORY_FILE);
 
 /**
  * 編集用フォルダーの鍵の台帳から、**編集部が押さえているファイル**を取り出す
@@ -1797,11 +1744,29 @@ export async function importEditorProposalsQuietly(
     };
     const incoming = await readLedger(PROPOSAL_RELATIVE);
     const incomingLocks = await readLedger(LOCK_RELATIVE);
+    const incomingHistory = await readLedger(HISTORY_RELATIVE);
 
+    /*
+      **取り込んだ時点の編集者の GitHub 名を書き写す**（設計書5.7.5.9。作者の答え 2026-11-07）。
+      台帳の `proposer` は編集者の git の名前で、画面には出さない。名前は `.aiwriter/editing.json`
+      にしか無く、解除で消えるので、取り込むたびに提案ごと・履歴の行ごとに残しておく。
+      覚えるのは**この回で新しく入った提案だけ**（前から台帳にある提案は、いつ誰から来たか分からない）
+    */
+    const editorLogin = (await readSite(work)).editorLogin ?? pointer.editorLogin;
+    const proposals = new ProposalStore(work);
+    const idsBefore = new Set((await proposals.load()).map((view) => view.id));
     const added =
-      incoming.trim().length > 0
-        ? await new ProposalStore(work).mergeIncoming(incoming)
-        : 0;
+      incoming.trim().length > 0 ? await proposals.mergeIncoming(incoming) : 0;
+    if (added > 0 && editorLogin) {
+      const fresh = (await proposals.load())
+        .map((view) => view.id)
+        .filter((id) => !idsBefore.has(id));
+      await new ProposerLoginStore(work).remember(fresh, editorLogin);
+    }
+    // 編集者の行（▲）を作者の編集履歴へ。**同じ行は二度入れない**（`pickIncomingEditorLines`）
+    if (incomingHistory.trim().length > 0) {
+      await new EditHistory(work).mergeIncomingEditorLines(incomingHistory, editorLogin);
+    }
 
     let locksAcquired: string[] = [];
     let locksReleased: string[] = [];

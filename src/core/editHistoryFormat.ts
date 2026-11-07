@@ -31,6 +31,16 @@ export interface EditHistoryEntry {
   file: string;
   /** 補足。直した中身など。無ければ空 */
   detail: string;
+  /**
+   * 編集者の GitHub のユーザー名（設計書5.7.5.9。0.138.0 から）。
+   *
+   * **画面に出す編集者の名前はこれだけ**（作者の答え 2026-11-07「GitHub のユーザー名だけ」）。
+   * `actorName` は git の名前（例「Kota Mizushima」）で、画面には出さない。
+   * 作者が編集者の提案を採った・見送った行と、編集用の写しから取り込んだ編集者の行に、
+   * その時点の名前を書き写す。解除で `.aiwriter/editing.json` から名前が消えても、行には残る。
+   * それより前の行には無い（名前なしで出す）。
+   */
+  editorLogin?: string;
 }
 
 /**
@@ -91,14 +101,7 @@ export function dedupeHistory(
   const seen = new Set<string>();
   const kept: EditHistoryEntry[] = [];
   for (const entry of entries) {
-    const key = [
-      entry.time,
-      entry.actor,
-      entry.actorName,
-      entry.action,
-      entry.file,
-      entry.detail,
-    ].join("\u0000");
+    const key = historyKey(entry);
     if (seen.has(key)) continue;
     seen.add(key);
     kept.push(entry);
@@ -134,7 +137,65 @@ function toEntry(value: unknown): EditHistoryEntry | undefined {
     action,
     file: asString(record.file),
     detail: asString(record.detail),
+    ...(typeof record.editorLogin === "string" && record.editorLogin !== ""
+      ? { editorLogin: record.editorLogin }
+      : {}),
   };
+}
+
+/**
+ * 画面に出す「誰が」の名前（編集履歴の画面とタイムラインの欄で同じものを使う）。
+ *
+ * **編集者の行は、git の名前（`actorName`）を出さない**（作者の答え 2026-11-07）。
+ * 編集者の行なら GitHub のユーザー名（`editorLogin`）、無ければ空（印の「編集者」だけが出る）。
+ * 作者と AI の行は、これまでどおり `actorName`。
+ */
+export function historyDisplayName(entry: EditHistoryEntry): string {
+  if (entry.actor === "editor") return entry.editorLogin ?? "";
+  return entry.actorName;
+}
+
+/** 同じ行かを見分ける鍵（`dedupeHistory` と同じ項目。`editorLogin` は混ぜない） */
+function historyKey(entry: EditHistoryEntry): string {
+  return [
+    entry.time,
+    entry.actor,
+    entry.actorName,
+    entry.action,
+    entry.file,
+    entry.detail,
+  ].join("\u0000");
+}
+
+/**
+ * 編集用の写しの編集履歴から、作者の作品へ足す編集者の行を選ぶ（設計書5.7.5.9）。
+ *
+ * - **編集者の行（`actor: "editor"`）だけ**を取る。写しにある作者や AI の行は、作者の作品の
+ *   側が正なので持ち込まない
+ * - **同じ行は二度入れない。** 鍵は `dedupeHistory` と同じ（時刻・誰・何・どこ・中身）で、
+ *   こちらが書き足した `editorLogin` は鍵に混ぜない。混ぜると、名前を足した行と写しの元の行が
+ *   別物に見え、取り込むたびに同じ行が積み上がる
+ * - 足す行には、取り込んだ時点の編集者の GitHub のユーザー名を書き写す（分からなければ書かない）
+ *
+ * 返すのは足す行（JSON の1行ずつ）。書き込みは呼ぶ側（`EditHistory.mergeIncomingEditorLines`）。
+ */
+export function pickIncomingEditorLines(
+  existing: string,
+  incoming: string,
+  editorLogin: string | undefined
+): string[] {
+  const seen = new Set(parseHistory(existing).map(historyKey));
+  const added: string[] = [];
+  for (const entry of parseHistory(incoming)) {
+    if (entry.actor !== "editor") continue;
+    const key = historyKey(entry);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // 写しの行がもとから名前を持っていれば、それを使う（作り変えない）
+    const login = entry.editorLogin ?? editorLogin;
+    added.push(JSON.stringify({ ...entry, ...(login ? { editorLogin: login } : {}) }));
+  }
+  return added;
 }
 
 function asString(value: unknown): string {

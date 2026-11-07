@@ -48,6 +48,8 @@ export async function recordEdit(
     action: string;
     file?: string;
     detail?: string;
+    /** 編集者の GitHub のユーザー名（編集者の提案を決めた行に書き写す。設計書5.7.5.9） */
+    editorLogin?: string;
   }
 ): Promise<void> {
   const record: EditHistoryEntry = {
@@ -57,6 +59,7 @@ export async function recordEdit(
     action: entry.action,
     file: entry.file ?? "",
     detail: entry.detail ?? "",
+    ...(entry.editorLogin ? { editorLogin: entry.editorLogin } : {}),
   };
   await new EditHistory(work).append(record);
 }

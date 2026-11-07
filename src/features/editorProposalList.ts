@@ -67,10 +67,17 @@ export function proposalListRows(
         ? formatWhen(view.decision.time, now)
         : formatWhen(view.time, now);
     const note = view.decision?.note ? `・作者のひと言：${view.decision.note}` : "";
+    // **決めた作者は GitHub のユーザー名だけで添える**（作者の答え 2026-11-07。設計書5.7.5.9）。
+    // `decidedBy` は作者のパソコンの git の名前なので出さない。名前を引けなかった採否と
+    // 0.138.0 より前の採否には `decidedByLogin` が無く、そのときは誰が決めたかを書かない
+    const decider =
+      mode === "decided" && view.decision?.decidedByLogin
+        ? `・決めた作者：${view.decision.decidedByLogin}`
+        : "";
     return {
       label: `${statusWord(view)}　${what}`,
       description: `${path.basename(view.file)} ${view.line}行`,
-      detail: `${categoryLabel(view.category)}：${view.reason}${when ? `（${when}）` : ""}${note}`,
+      detail: `${categoryLabel(view.category)}：${view.reason}${when ? `（${when}）` : ""}${decider}${note}`,
       view,
     };
   });

@@ -17,11 +17,13 @@ import { withProgress } from "../views/progress";
 import { notifyDone } from "../views/notify";
 import {
   acquireGithubToken,
+  forgetEditorLogin,
   hasOrigin,
   readPointer,
   readSite,
   sendToEditor,
-  writeSite,
+  writePointer,
+  type EditingPointer,
   type EditingSite,
 } from "./shareWithEditor";
 
@@ -37,7 +39,8 @@ import {
  * 3. GitHub で編集部の権利を外す（共同編集者なら DELETE collaborators、
  *    招待を受ける前なら DELETE invitations）。**外せなくても、鍵は外す。**
  *    その場合は「GitHub の Settings→Collaborators で手で外してください」と案内する
- * 4. `.aiwriter/editing.json` の `editorLogin` を消す（次に渡すとき、相手の名前を訊き直す）
+ * 4. `.aiwriter/editing.json` の `editorLogin` を消す（次に渡すとき、相手の名前を訊き直す。
+ *    名前は `formerEditorLogin` に写し、訊く欄の初めの値にする。0.138.0）
  * 5. 権利を外せたら、編集用リポジトリも GitHub から消すかを訊く（`deleteEditingRepository.ts`）
  */
 
@@ -170,9 +173,24 @@ export async function revokeEditorAccessFlow(
 
     // 4. 相手の名前を忘れる（次に渡すとき訊き直す）。**読み直してから外す**——送りの途中で
     // 送り先（`remoteUrl`）が書き足されていることがある（`sendToEditor` の `onCreated`）
-    const nextSite: EditingSite = { ...(await readSite(work)) };
-    delete nextSite.editorLogin;
-    await writeSite(work, nextSite);
+    // **名前は「前の編集者」として残す**（`formerEditorLogin`。作者の答え 2026-11-07）。次に渡すとき
+    // 訊く欄の初めの値になる。ほかの項目は、知らないものも含めて残す（`forgetEditorLogin`）
+    try {
+      await forgetEditorLogin(work, login);
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logFailure("編集者の名前の記録を外す", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
+    // 古い版はこの端末の場所の覚えにも名前を書いていた。残すと次の「渡す」が名前を訊かず、
+    // 招待も送らない（`site.editorLogin ?? pointer?.editorLogin`）ので、ここでも外す
+    if (pointer?.editorLogin) {
+      const rest: EditingPointer = { ...pointer };
+      delete rest.editorLogin;
+      await writePointer(work, rest);
+    }
     return { kind: "done", released: mine.length, github };
   };
 

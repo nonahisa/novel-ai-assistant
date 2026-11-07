@@ -4,6 +4,7 @@ import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import { EditHistory } from "../core/editHistory";
 import { ProposalStore } from "../core/proposalStore";
+import { ProposerLoginStore } from "../core/proposerLogins";
 import { FindingStore } from "./findingStore";
 import { ExternalAccessLog } from "../core/externalAccessStore";
 import { PostingStore } from "../core/postingStore";
@@ -218,7 +219,7 @@ export function registerEpisodeTimeline(
  * 飛ばして残りを返す作り（読み手の側の決まり）。それでも投げたら、その種類だけ空にする。
  */
 async function collectEntries(work: WorkEntry, episodePath: string): Promise<TimelineEntry[]> {
-  const [edits, proposals, findings, aiActions, posting, external, recoveries] =
+  const [edits, proposals, findings, aiActions, posting, external, recoveries, proposerLogins] =
     await Promise.all([
       safely(() => new EditHistory(work).load(), []),
       safely(() => new ProposalStore(work).load(), []),
@@ -227,6 +228,7 @@ async function collectEntries(work: WorkEntry, episodePath: string): Promise<Tim
       safely(() => readPostingQuietly(work), undefined),
       safely(() => new ExternalAccessLog(work).load(), []),
       safely(() => listManagedRecoveries(episodePath), []),
+      safely(() => new ProposerLoginStore(work).load(), new Map<string, string>()),
     ]);
   return buildEpisodeTimeline({
     workFolder: work.folderPath,
@@ -238,6 +240,7 @@ async function collectEntries(work: WorkEntry, episodePath: string): Promise<Tim
     posting,
     external,
     recoveries,
+    proposerLogins,
   });
 }
 
