@@ -23,12 +23,13 @@ import type { ReadingSentence } from "../core/readAloud";
 import {
   castChunksOf,
   castDialogues,
+  castGuessesForChunk,
+  castSpeakersFromText,
   castLookup,
   countDropReasons,
   editCastEntry,
   mergeCastEntries,
   parseCastResult,
-  validateCastItems,
   voicePlanUnits,
   type CastChunk,
   type CastEntry,
@@ -431,12 +432,17 @@ function isCachedCastChunk(value: unknown): value is CachedCastChunk {
   );
 }
 
-/** 区切りの控えの鍵。**送った人物の一覧も含める**（一覧が変われば答えも変わる） */
+/**
+ * 区切りの控えの鍵。**送った人物の一覧も含める**（一覧が変われば答えも変わる）。
+ * **コードで決めた話者も含める**——頼み方に「この番号は話者が決まっている」と書くので、
+ * 決め方の規則が変わったのに古い答えを引くと、話者を考えさせなかった答えから話者を取り出す
+ */
 function chunkCacheHash(chunk: CastChunk, people: readonly CastPerson[]): string {
   return hashText(
     JSON.stringify([
       chunk.text,
       people.map((p) => [p.id, p.name, p.aliases, p.speechStyle]),
+      [...chunk.decided.entries()],
     ])
   );
 }
@@ -444,7 +450,8 @@ function chunkCacheHash(chunk: CastChunk, people: readonly CastPerson[]): string
 /**
  * AIで台詞ごとの話者と感情を推定する（P-54）。
  *
- * 1. 本文を行の切れ目で区切り、台詞の頭に〔番号〕を差し込む
+ * 1. 本文を行の切れ目で区切り、台詞の頭に〔番号〕を差し込む。地の文に話者が
+ *    はっきり書いてある台詞は、コードで話者を決めておく（案 A。AIには感情だけ訊く）
  * 2. 区切りごとに、**内容ハッシュ（人物の一覧を含む）＋プロバイダID＋モデル名＋版**で
  *    控えを引く（実装ルール4）。当たった区切りは送らない
  * 3. 送る前に区切りの数・台詞の数を示して確かめる（有料なら料金の確認）
@@ -457,9 +464,7 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
   const { work } = target;
   useLogFile(work.folderPath);
 
-  const chunks = castChunksOf(target.text, VOICE_CAST_CHUNK_CHARS);
-  const totalDialogues = chunks.reduce((sum, c) => sum + c.dialogues.length, 0);
-  if (chunks.length === 0) {
+  if (castDialogues(target.text).length === 0) {
     notifyDone("この話には、話者を推定する台詞（「」）がありません。");
     return;
   }
@@ -474,6 +479,13 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
     void warnWithLog(error instanceof Error ? error.message : String(error));
     return;
   }
+  // 話者の決め方は人物の一覧が要るので、一覧を読んでから区切る
+  const chunks = castChunksOf(
+    target.text,
+    VOICE_CAST_CHUNK_CHARS,
+    castSpeakersFromText(target.text, people)
+  );
+  const totalDialogues = chunks.reduce((sum, c) => sum + c.dialogues.length, 0);
 
   const resolved = await ensureConfigured(registry, "voiceCast");
   if (!resolved) return;
@@ -551,6 +563,7 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
               text: chunk.text,
               count: chunk.dialogues.length,
               people: chunkPeople,
+              decided: [...chunk.decided.keys()],
             }),
             model: resolved.model,
             // 揺らさない。同じ本文には同じ演出を返してほしい
@@ -601,13 +614,18 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
   const fresh: CastEntry[] = [];
   const allDropped: Array<{ reason: string; item: unknown }> = [];
   let unanswered = 0;
+  let decidedByText = 0;
+  let calmFilled = 0;
   const nameOf = new Map(people.map((p) => [p.id, p.name]));
   for (const { chunk, people: chunkPeople, hash } of prepared) {
     const cached = cache.get(hash, base);
     if (!isCachedCastChunk(cached)) continue;
     // **AIを信用しない**（実装ルール3）
-    const checked = validateCastItems(cached.items, chunk.dialogues.length, chunkPeople);
+    // 本文に書いてあった話者はここで混ぜる（AIの話者の欄より先に立つ）
+    const checked = castGuessesForChunk(cached.items, chunk, chunkPeople);
     allDropped.push(...checked.dropped);
+    decidedByText += checked.decidedByText;
+    calmFilled += checked.calmFilled;
     chunk.dialogues.forEach((dialogue, i) => {
       const guess = checked.guesses.get(i + 1);
       // 答えが無い・捨てた台詞は書かない（読むときに「不明・平静」で読む）
@@ -660,7 +678,8 @@ export async function runVoiceCast(target: VoiceCastTarget, registry: AIRegistry
     return;
   }
   logStep(
-    `台詞の推定が終わりました: 台詞${totalDialogues}個・AIの答え${fresh.length}件・` +
+    `台詞の推定が終わりました: 台詞${totalDialogues}個・推定${fresh.length}件` +
+      `（うち本文に書いてあった話者${decidedByText}個、その感情が無く平静にした${calmFilled}個）・` +
       `答えの無かった台詞${unanswered}個・送った区切り${pending.length}/${chunks.length}`
   );
   notifyDone(

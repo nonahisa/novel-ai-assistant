@@ -320,6 +320,8 @@ describe("この PC の外のエンジンへ本文を送る前の確認", () => 
 describe("台詞の話者と感情の推定（P-54）", () => {
   // 割当の解決は差し替えてあるので、登録簿の中身は使わない
   const registry = {} as Registry;
+  // 話者が地の文に書いていない本文（AIの道を確かめる。書いてあるとコードが先に決める。版1.2）
+  const CAST_TEXT = "「やった！」\n「静かにしろ」";
 
   test("割当 voiceCast のAIへ送り、検算を通ったものだけ保存する。作者の行は残す", async () => {
     state.cast = {
@@ -337,7 +339,7 @@ describe("台詞の話者と感情の推定（P-54）", () => {
       }),
     });
 
-    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TEXT }, registry);
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
 
     expect(state.confirmRun).toHaveBeenCalledTimes(1);
     expect(state.confirmRun.mock.calls[0][0]).toContain("台詞2個");
@@ -379,14 +381,14 @@ describe("台詞の話者と感情の推定（P-54）", () => {
         ],
       }),
     });
-    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TEXT }, registry);
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
     expect(state.savedCast[0].file.entries).toEqual([]);
     expect(state.steps.some((s) => s.includes("話者が指示の言葉のまま 1件") && s.includes("感情が列挙の外 1件"))).toBe(true);
     expect(state.done[0]).toContain("2個は決まらず");
 
     state.generate.mockClear();
     state.confirmRun.mockClear();
-    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TEXT }, registry);
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
     expect(state.generate).not.toHaveBeenCalled();
     // 送るものが無ければ確かめない
     expect(state.confirmRun).not.toHaveBeenCalled();
@@ -394,14 +396,78 @@ describe("台詞の話者と感情の推定（P-54）", () => {
 
   test("区切りが失敗したら書き換えない", async () => {
     state.generate.mockResolvedValue({ text: "ごめんなさい" });
-    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TEXT }, registry);
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
     expect(state.savedCast).toHaveLength(0);
     expect(state.warnings[0]).toContain("書き換えていません");
   });
 
   test("確認で取りやめたらAIを呼ばない", async () => {
     state.confirmRun.mockResolvedValueOnce(false);
-    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TEXT }, registry);
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: CAST_TEXT }, registry);
     expect(state.generate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 案 A「書いてある所はコードで決める」（2026-11-07。版1.2）。小さいモデル（e4b）は、
+ * 地の文に「と灯は言った」と書いてある台詞まで「不明」に倒していた（見逃し）。
+ */
+describe("話者が書いてある台詞はコードで決める（P-54 版1.2）", () => {
+  const registry = {} as Registry;
+  const ATTRIBUTED = [
+    "「行こう」と灯は言った。", // 〔1〕直後の「と灯は」→ 灯
+    "「どこへ」", //                〔2〕書いていない → AI
+    "　蓮が答えた。",
+    "「港だ」", //                  〔3〕直前の行の「蓮が答えた」→ 蓮（作者が直した行）
+    "「止まれ」と兵士が叫んだ。", // 〔4〕一覧にいない役名 → AI
+    "　灯は蓮を見て笑った。",
+    "「平気」", //                  〔5〕2人の名前がある地の文 → AI
+  ].join("\n");
+
+  function answer(lines: Array<[number, string, string]>) {
+    return {
+      text: JSON.stringify({
+        lines: lines.map(([number, speaker, emotion]) => ({ number, speaker, emotion, intensity: "中" })),
+      }),
+    };
+  }
+
+  test("話者を考えさせる番号から、コードで決めた台詞を外す（本文の〔番号〕と感情の問いは残す）", async () => {
+    state.generate.mockResolvedValue(answer([[1, "灯", "喜び"]]));
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: ATTRIBUTED }, registry);
+    const prompt: string = state.generate.mock.calls[0][0].userPrompt;
+    expect(prompt).toContain("〔1〕「行こう」");
+    expect(prompt).toContain("〔3〕「港だ」");
+    expect(prompt).toContain("話者が決まっています。気持ちと強さだけを答えてください：〔1〕〔3〕");
+    expect(prompt).toContain("話者を考えるのは〔2〕〔4〕〔5〕です");
+  });
+
+  test("コードの話者とAIの感情を混ぜる。AIが不明と答えても書いてある話者にする。作者の行は上書きしない", async () => {
+    state.cast = {
+      version: 1,
+      episode: "01.txt",
+      entries: [castEntry("「港だ」", { speakerId: "c-akari", speakerName: "灯", source: "author" })],
+    };
+    state.generate.mockResolvedValue(
+      answer([
+        [1, "不明", "喜び"],
+        [2, "不明", "驚き"],
+        [3, "蓮", "平静"],
+        [4, "灯", "叫び"],
+        [5, "不明", "平静"],
+      ])
+    );
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: ATTRIBUTED }, registry);
+    const saved = state.savedCast[0].file.entries;
+    const byQuote = new Map(saved.map((e) => [e.quote, e]));
+    expect(byQuote.get("「行こう」")).toMatchObject({ speakerId: "c-akari", emotion: "喜び", source: "ai" });
+    // 作者の行は、コードの答え（蓮）でもAIの答えでも上書きしない
+    expect(byQuote.get("「港だ」")).toMatchObject({ speakerId: "c-akari", source: "author" });
+    expect(saved.filter((e) => e.quote === "「港だ」")).toHaveLength(1);
+    // 一覧にいない役名の台詞は、コードでは当てない（AIの答えがそのまま通る道）
+    expect(byQuote.get("「止まれ」")).toMatchObject({ speakerId: "c-akari", emotion: "叫び" });
+    // 2人の名前がある地の文の台詞は、コードで決めずAIの「不明」のまま
+    expect(byQuote.get("「平気」")).toMatchObject({ speakerId: null });
+    expect(state.steps.some((s) => s.includes("本文に書いてあった話者2個"))).toBe(true);
   });
 });

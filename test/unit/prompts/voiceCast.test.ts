@@ -25,6 +25,26 @@ describe("P-54 の頼み方", () => {
     expect(prompt).toContain("「不明」");
   });
 
+  test("版1.2：話者の決まった番号は、話者を考える番号から外して伝える（名前は番号に添えない）", () => {
+    const prompt = buildVoiceCastPrompt({
+      text: "〔1〕「行こう」と灯は言った。\n〔2〕「どこへ」\n〔3〕「港」と蓮が答えた。",
+      count: 3,
+      people,
+      decided: [3, 1],
+    });
+    expect(prompt).toContain("気持ちと強さだけを答えてください：〔1〕〔3〕");
+    expect(prompt).toContain("話者を考えるのは〔2〕です。");
+    expect(prompt).not.toContain("〔1：");
+    const all = buildVoiceCastPrompt({ text: "〔1〕「a」", count: 1, people, decided: [1] });
+    expect(all).toContain("話者を考える台詞はありません。");
+  });
+
+  test("話者の決まった台詞が無ければ、その節を出さない", () => {
+    const prompt = buildVoiceCastPrompt({ text: "〔1〕「a」", count: 1, people, decided: [] });
+    expect(prompt).not.toContain("話者が決まっています");
+    expect(prompt).toContain("答えてください。\n\n【登場人物】");
+  });
+
   test("人物がいなくても頼める", () => {
     expect(buildVoiceCastPrompt({ text: "〔1〕「a」", count: 1, people: [] })).toContain(
       "（登場人物の資料はありません）"
