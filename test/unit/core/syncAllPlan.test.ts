@@ -687,4 +687,21 @@ describe("取りに行けなかった置き場", () => {
     expect(plans[0]?.skip).toBe("nothing");
     expect(describeSyncSkips(plans)).toBe("");
   });
+
+  /*
+    編集者の「1. 作者の最新の原稿を受け取る」で、理由を GitHub の API で見分けたとき
+    （設計書5.7.5.4。作者の決定 2026-11-07「分けて知らせる」）。見分けは呼ぶ側
+    （`syncAllWorks.ts`）が API の返事で決め、ここへは結果だけが来る
+  */
+  test("置き場に届かない（404）と分かったら、解除か置き場が無い見込みと言う", () => {
+    const plans = planSyncAll([state({ fetchFailed: true, fetchTrouble: "revoked" })], { editor: true });
+    expect(plans[0]?.skip).toBe("fetch_revoked");
+    expect(describeSyncSkips(plans)).toContain("作者が連携を解除したか、置き場が無くなった見込み");
+  });
+
+  test("通信そのものが失敗したと分かったら、つながってから押し直すよう言う", () => {
+    const plans = planSyncAll([state({ fetchFailed: true, fetchTrouble: "offline" })], { editor: true });
+    expect(plans[0]?.skip).toBe("fetch_offline");
+    expect(describeSyncSkips(plans)).toContain("ネットにつながっていないようです");
+  });
 });

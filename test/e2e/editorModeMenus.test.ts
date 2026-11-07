@@ -224,7 +224,7 @@ test("作者モードのメニューは作者の操作だけで、編集者モ�
       const github = await childrenOf(page, "詳細メニュー", "執筆データ", "GitHub作品管理");
       expect(github, "「GitHub作品管理」の並び").toEqual(["GitHub初期設定", "保存・同期", "復元"]);
       const editorial = await childrenOf(page, "詳細メニュー", "執筆データ", "編集者連携");
-      expect(editorial, "作者の「編集者連携」の並び").toEqual(["作者／編集者切替", "編集者へ渡す", "編集者として参加", "編集者の提案を見る", "編集者連携を解除"]);
+      expect(editorial, "作者の「編集者連携」の並び").toEqual(["作者／編集者切替", "編集者へ渡す", "編集者として参加", "編集者の提案を見る", "編集者連携を解除", "リポジトリを消す"]);
       for (const gone of ["編集者提案取込", "編集者提案確認", ...EDITOR_ONLY]) {
         expect(editorial, `作者の「編集者連携」に「${gone}」があります`).not.toContain(gone);
       }

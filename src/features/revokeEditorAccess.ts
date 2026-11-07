@@ -32,11 +32,13 @@ import {
  * 作者の側から解く手段を置く。
  *
  * 1. 編集部の鍵を、作者の名で release する（鍵の台帳に解除の行を足し、編集履歴にも残す）
- * 2. GitHub で編集部の権利を外す（共同編集者なら DELETE collaborators、
+ * 2. 解除の行を編集用リポジトリへ送る（編集部の側に、鍵が解けたことが届く）。
+ *    **権利を外す前に送る**（作者の決定 2026-11-07）。送れなくても次へ進む
+ * 3. GitHub で編集部の権利を外す（共同編集者なら DELETE collaborators、
  *    招待を受ける前なら DELETE invitations）。**外せなくても、鍵は外す。**
  *    その場合は「GitHub の Settings→Collaborators で手で外してください」と案内する
- * 3. `.aiwriter/editing.json` の `editorLogin` を消す（次に渡すとき、相手の名前を訊き直す）
- * 4. 解除の行を編集用リポジトリへも送る（編集部の側に、鍵が解けたことが届く）
+ * 4. `.aiwriter/editing.json` の `editorLogin` を消す（次に渡すとき、相手の名前を訊き直す）
+ * 5. 権利を外せたら、編集用リポジトリも GitHub から消すかを訊く（`deleteEditingRepository.ts`）
  */
 
 export interface RevokeDeps {
@@ -49,6 +51,10 @@ export interface RevokeDeps {
   revoke?: (token: string, ref: GithubRepoRef, login: string) => Promise<RevokeResult>;
   /** 誰の名で外すか */
   whoAmI?: (work: WorkEntry) => Promise<string>;
+  /** 解除の行を編集用リポジトリへ送る口（試験用。省けば `sendToEditor`） */
+  send?: typeof sendToEditor;
+  /** 解除の終わりに、編集用リポジトリも消すかを訊く口（試験用。省けば `deleteEditingRepositoryFlow`） */
+  offerDelete?: (work: WorkEntry) => Promise<void>;
 }
 
 export type RevokeFlowResult =
@@ -116,7 +122,28 @@ export async function revokeEditorAccessFlow(
       });
     }
 
-    // 2. GitHub で権利を外す。外せなくても、鍵は外した
+    // 2. 解除の行を編集用リポジトリへ送る。**権利を外す前に送る**（作者の決定 2026-11-07
+    // 「先に送ってから権利を外す」）。外したあとでは、編集者の側へ「校閲中の印が外れた」が
+    // 届く前に置き場が見えなくなる。送れなくても権利は外す（決裂したときの解除なので止めない）
+    if (pointer && (await hasOrigin(pointer.folderPath, run))) {
+      const sent = await (deps.send ?? sendToEditor)(work, pointer.folderPath, {
+        run,
+        pointer,
+        site,
+        allowCreate: false,
+        message: `${work.title} の編集部との連携を解除`,
+      });
+      if (!sent.ok) {
+        useLogFile(work.folderPath);
+        logFailure("連携の解除を編集用リポジトリへ送る", { 作品: work.title, 詳細: sent.detail });
+        void vscode.window.showWarningMessage(
+          "解除の記録を編集用リポジトリへ送れませんでした。あとで「編集者へ渡す」を押すと送れます。" +
+            `（${sent.detail}）`
+        );
+      }
+    }
+
+    // 3. GitHub で権利を外す。外せなくても、鍵は外した
     let github: Extract<RevokeFlowResult, { kind: "done" }>["github"] = "skipped";
     const ref = await remoteRef(site, pointer?.folderPath, run);
     if (login && ref) {
@@ -141,29 +168,11 @@ export async function revokeEditorAccessFlow(
       github = "failed";
     }
 
-    // 3. 相手の名前を忘れる（次に渡すとき訊き直す）
-    const nextSite: EditingSite = { ...site };
+    // 4. 相手の名前を忘れる（次に渡すとき訊き直す）。**読み直してから外す**——送りの途中で
+    // 送り先（`remoteUrl`）が書き足されていることがある（`sendToEditor` の `onCreated`）
+    const nextSite: EditingSite = { ...(await readSite(work)) };
     delete nextSite.editorLogin;
     await writeSite(work, nextSite);
-
-    // 4. 解除の行を編集用リポジトリへも送る
-    if (pointer && (await hasOrigin(pointer.folderPath, run))) {
-      const sent = await sendToEditor(work, pointer.folderPath, {
-        run,
-        pointer,
-        site: nextSite,
-        allowCreate: false,
-        message: `${work.title} の編集部との連携を解除`,
-      });
-      if (!sent.ok) {
-        useLogFile(work.folderPath);
-        logFailure("連携の解除を編集用リポジトリへ送る", { 作品: work.title, 詳細: sent.detail });
-        void vscode.window.showWarningMessage(
-          "解除の記録を編集用リポジトリへ送れませんでした。あとで「編集者へ渡す」を押すと送れます。" +
-            `（${sent.detail}）`
-        );
-      }
-    }
     return { kind: "done", released: mine.length, github };
   };
 
@@ -178,12 +187,30 @@ export async function revokeEditorAccessFlow(
       "編集者との連携を解除しました。" +
         (range ? `${range}の校閲中の印を外しました。` : "")
     );
+    // **解除の終わりに、編集用リポジトリも消すかを訊く**（作者の決定 2026-11-07）。権利を
+    // 外せなかったときは訊かない（手で外す案内が先に出ており、窓を重ねると読み落とす。
+    // 消すのは「編集者連携」のメニューの「リポジトリを消す」からいつでもできる）
+    const offer =
+      deps.offerDelete ??
+      (async (target: WorkEntry) => {
+        const { deleteEditingRepositoryFlow } = await import("./deleteEditingRepository.js");
+        await deleteEditingRepositoryFlow(target, { afterRevoke: true });
+      });
+    try {
+      await offer(work);
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logFailure("解除のあとの、編集用リポジトリを消すかの問い", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   return result;
 }
 
 /** 送り先のリポジトリ（覚えている URL、なければ編集用フォルダーの origin） */
-async function remoteRef(
+export async function remoteRef(
   site: EditingSite,
   folder: string | undefined,
   run: GitCommandRunner

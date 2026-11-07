@@ -422,6 +422,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.shareWithEditor": "allTypes",
   "novelai.joinAsEditor": "allTypes",
   "novelai.revokeEditorAccess": "allTypes",
+  "novelai.deleteEditingRepository": "allTypes",
   "novelai.finishReviewAndReturn": "allTypes",
   "novelai.collectEditorProposals": "allTypes",
   "novelai.viewEditorProposals": "allTypes",

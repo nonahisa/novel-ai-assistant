@@ -237,6 +237,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.switchMode": { class: "C4", label: "作者／編集者切替", reason: "設定" },
   "novelai.shareWithEditor": { class: "C4", label: "編集者へ渡す", reason: "送信" },
   "novelai.revokeEditorAccess": { class: "C4", label: "編集者連携を解除", reason: "作者の判断" },
+  "novelai.deleteEditingRepository": { class: "C4", label: "リポジトリを消す", reason: "作者の判断" },
   "novelai.joinAsEditor": { class: "C4", label: "編集者として参加", reason: "設定" },
   "novelai.finishReviewAndReturn": { class: "C4", label: "校閲を終えて返す", reason: "送信" },
   "novelai.collectEditorProposals": { class: "C1", label: "編集者提案取込" },

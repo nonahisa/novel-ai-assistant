@@ -115,3 +115,83 @@ describe("校閲を終えて返す：残す文が決まっていないとき", (
     expect(executed).toContain("novelai.resolveConflicts");
   });
 });
+
+/*
+  送れなかったときの理由（設計書5.7.5.4。作者の決定 2026-11-07「分けて知らせる」）。
+  以前は git の文をそのまま「校閲を終えて返せませんでした: 送信に失敗しました: …」と出していた。
+  GitHub とのやり取りで止まったら API の返事で理由を見分け、分かったときはその知らせだけを出す
+*/
+describe("校閲を終えて返す：GitHub へ送れなかったとき", () => {
+  /** 本文は手つかず。台帳は記録済みで、送信と取り寄せが届かない写し */
+  const unreachable: GitCommandRunner = async (args) => {
+    if (args[0] === "status") return { code: 0, stdout: "", stderr: "" };
+    if (args[0] === "push" || args[0] === "fetch") {
+      return { code: 128, stdout: "", stderr: "remote: Repository not found." };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const errors: string[] = [];
+  beforeEach(() => {
+    errors.length = 0;
+    Object.assign(window, {
+      showErrorMessage: async (message: string) => {
+        errors.push(message);
+        return undefined;
+      },
+    });
+  });
+
+  test("置き場に届かないと分かったら、その知らせだけを出し、git の文は画面に出さない", async () => {
+    status = tracked();
+    const noticed: string[] = [];
+    const result = await finishReviewAndReturn(work, {
+      run: unreachable,
+      confirm: async () => true,
+      whoAmI: async () => "編集者",
+      noticeFetchTrouble: async (target) => {
+        noticed.push(target.title);
+        return { trouble: "revoked", shown: true };
+      },
+    });
+    expect(result.kind === "failed" && result.trouble).toBe("revoked");
+    expect(noticed).toEqual(["預かった作品"]);
+    expect(errors).toEqual([]);
+  });
+
+  test("見分けて分からなければ、今までの失敗の知らせ", async () => {
+    status = tracked();
+    const result = await finishReviewAndReturn(work, {
+      run: unreachable,
+      confirm: async () => true,
+      whoAmI: async () => "編集者",
+      noticeFetchTrouble: async () => ({ trouble: "unknown", shown: false }),
+    });
+    expect(result.kind).toBe("failed");
+    expect(errors.join("\n")).toContain("校閲を終えて返せませんでした");
+  });
+
+  test("手元の記録で止まったときは、見分けに回さない", async () => {
+    status = tracked();
+    const noticed = vi.fn();
+    // 送る前の本文の確かめ（status）が読めない → GitHub へ行く前に止まる
+    let statusCalls = 0;
+    const localFailure: GitCommandRunner = async (args) => {
+      if (args[0] === "status") {
+        statusCalls += 1;
+        // 1回目は「返す」の入口の確かめ（通す）、2回目は送りの頭の確かめ（読めない）
+        return statusCalls === 1
+          ? { code: 0, stdout: "", stderr: "" }
+          : { code: 1, stdout: "", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const result = await finishReviewAndReturn(work, {
+      run: localFailure,
+      confirm: async () => true,
+      whoAmI: async () => "編集者",
+      noticeFetchTrouble: noticed,
+    });
+    expect(result.kind).toBe("failed");
+    expect(noticed).not.toHaveBeenCalled();
+  });
+});

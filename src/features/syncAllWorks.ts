@@ -58,6 +58,7 @@ import type { GitSyncMonitorLike } from "./gitSyncStub";
 import type { SyncPresave } from "./presaveBeforeSync";
 import { describePresaveFailures } from "../core/syncPresave";
 import { readAutoResendSettings } from "./autoResend";
+import { globalFetchTroubleMemory } from "./fetchTroubleMemory";
 
 /**
  * 作品をすべて同期する（設計書5.5.14）。
@@ -127,6 +128,13 @@ export interface SyncAllDeps {
    * 「自動で送ります」と言ってよいかが決まる。省けば設定（`novelai.git.autoResend`）を読む
    */
   autoResend?: boolean;
+  /**
+   * 編集者モードで取りに行きが失敗した作品の、受け取れなかった理由の見分け（設計書5.7.5.4）。
+   * 省けば GitHub の API で見分ける（`editorFetchTrouble.ts`。動的 import）。試験の差し替え口
+   */
+  diagnoseFetch?: (work: WorkEntry) => Promise<"revoked" | "offline" | "unknown">;
+  /** 見分けた理由の知らせ（試験の差し替え口）。省けば `showFetchTrouble` */
+  showFetchTrouble?: (work: WorkEntry, trouble: "revoked" | "offline") => void;
 }
 
 export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
@@ -143,19 +151,26 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
     async (progress, token) => collectStates(deps, works, progress, token)
   );
   if (!states) return;
+  if (deps.editor) await diagnoseEditorFetchTroubles(deps, states);
 
   const plans = planSyncAll(states, { editor: deps.editor });
   const doing = actionablePlans(plans);
   if (doing.length === 0) {
     // 書庫に同期するものが無くても、編集部の提案は届いているかもしれない
     await collectEditorInboxAfterSync(works);
+    // **受け取れなかった理由が分かった置き場は、その知らせを別に出す**（設計書5.7.5.4）。
+    // 「同期するものはありませんでした」で始めると、届いていないことが伝わらない
+    // （届いていないことを先に書く。2026-11-03 の決まり）
+    showFetchTroubles(deps, plans);
+    const rest = plans.filter((plan) => !isFetchTroublePlan(plan));
+    if (rest.length < plans.length && describeSyncSkips(rest, "after") === "") return;
     // **止まっている所があれば、次の手をボタンで出す**（作者の判断 2026-11-01）。
     // 「競合が残っています」「送り先が未設定です」と言うだけでは、押す所が
     // メニューから消えた今は行き止まりになる。ボタンの答えは待たない
-    const next = nextSteps(plans, []);
+    const next = nextSteps(rest, []);
     whenNoticePicked(
       vscode.window.showInformationMessage(
-        `同期するものはありませんでした。${describeSyncSkips(plans, "after")}`,
+        `同期するものはありませんでした。${describeSyncSkips(rest, "after")}`,
         ...next.map((step) => step.label)
       ),
       (picked) => runNextStep(next, picked),
@@ -215,6 +230,81 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   deps.monitor.notifyRepositoryChanged?.();
 
   await report(outcomes, plans, deps.autoResend ?? readAutoResendSettings().enabled !== false);
+  // ほかの置き場を同期した回でも、届かなかった置き場には［この作品の編集を終える］を出す
+  showFetchTroubles(deps, plans);
+}
+
+/** 受け取れなかった理由が分かった（専用の知らせを出す）置き場か */
+function isFetchTroublePlan(plan: SyncTargetPlan): boolean {
+  return plan.skip === "fetch_revoked" || plan.skip === "fetch_offline";
+}
+
+/** 計画の作品（知らせの題・ボタンの行き先） */
+function troubleWorkOf(plan: SyncTargetPlan): WorkEntry | undefined {
+  return plan.target.involved?.[0] ?? plan.target.works[0];
+}
+
+/** 受け取れなかった理由が分かった置き場ごとに、専用の知らせを出す */
+function showFetchTroubles(deps: SyncAllDeps, plans: readonly SyncTargetPlan[]): void {
+  for (const plan of plans) {
+    if (!isFetchTroublePlan(plan)) continue;
+    const work = troubleWorkOf(plan);
+    if (!work) continue;
+    const trouble = plan.skip === "fetch_revoked" ? "revoked" : "offline";
+    if (deps.showFetchTrouble) {
+      deps.showFetchTrouble(work, trouble);
+      continue;
+    }
+    void import("./editorFetchTrouble.js")
+      .then((module) => module.showFetchTrouble(work, trouble))
+      .catch((error: unknown) => {
+        logFailure("受け取れなかった理由の知らせ", {
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }
+}
+
+/**
+ * 編集者モードで、取りに行けなかった置き場の理由を GitHub の API で見分ける（設計書5.7.5.4。
+ * 作者の決定 2026-11-07「分けて知らせる」）。**引くのは失敗した置き場だけ。** 取りに行けた
+ * 置き場は、自動の取りに行きの「もう知らせた」の覚えを消す。見分けに失敗しても同期は止めない
+ */
+async function diagnoseEditorFetchTroubles(
+  deps: SyncAllDeps,
+  states: SyncTargetState[]
+): Promise<void> {
+  for (const state of states) {
+    const work = state.involved?.[0] ?? state.works[0];
+    if (!work) continue;
+    try {
+      if (!state.fetchFailed) {
+        if (state.status.kind === "tracked") {
+          for (const one of state.works) await globalFetchTroubleMemory.clear(one.id);
+        }
+        continue;
+      }
+      const run = deps.run;
+      const diagnose =
+        deps.diagnoseFetch ??
+        (async (target: WorkEntry) =>
+          (await import("./editorFetchTrouble.js")).diagnoseFetchFailure(
+            target,
+            { auto: false },
+            run ? { run } : {}
+          ));
+      const trouble = await diagnose(work);
+      if (trouble === "unknown") continue;
+      state.fetchTrouble = trouble;
+      // 押した操作で知らせるので、開いたときの自動の取りに行きで重ねない
+      if (trouble === "revoked") await globalFetchTroubleMemory.mark(work.id);
+    } catch (error) {
+      logFailure("受け取れなかった理由の見分け", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 /** 同期のあとの、編集部の提案の取り込み。例外は外へ出さない */

@@ -71,6 +71,12 @@ export interface SyncTargetState {
    * ほかにやることが無い置き場だけ、理由を `fetch_failed` に替える
    */
   fetchFailed?: boolean;
+  /**
+   * 取りに行けなかった理由を GitHub の API で見分けた結果（編集者モードだけ。設計書5.7.5.4、
+   * 作者の決定 2026-11-07）。`revoked`＝置き場に届かない（解除か、置き場が無い）、
+   * `offline`＝通信そのものが失敗した。分からなければ付けない（今までの `fetch_failed` の文）
+   */
+  fetchTrouble?: "revoked" | "offline";
 }
 
 /** その置き場でやること */
@@ -131,6 +137,10 @@ export type SkipReason =
    * 「同期は取れています」とは言えない
    */
   | "fetch_failed"
+  /** 取りに行けず、GitHub の API で見ても置き場に届かなかった（`fetchTrouble: "revoked"`） */
+  | "fetch_revoked"
+  /** 取りに行けず、通信そのものが失敗した（`fetchTrouble: "offline"`） */
+  | "fetch_offline"
   /** やることが無い（同期は取れている） */
   | "nothing";
 
@@ -164,6 +174,11 @@ export function skipReasonText(reason: SkipReason): string {
     case "fetch_failed":
       // 理由は当てない（実装ルール5）。git の文はログに残してある
       return "GitHub から受け取れませんでした（詳しくはログにあります）";
+    case "fetch_revoked":
+      // 見分けは git の文でなく GitHub の API の返事（404）で決めてある（`fetchTrouble`）
+      return "置き場に届きませんでした（作者が連携を解除したか、置き場が無くなった見込みです）";
+    case "fetch_offline":
+      return "ネットにつながっていないようです（つながってから、もう一度押してください）";
     case "nothing":
       return "同期は取れています";
   }
@@ -264,7 +279,10 @@ function planReceiveOnly(target: SyncTargetState): SyncTargetPlan {
  * （2026-11-02。遅れの数が古いままなので、取れているかは分からない）
  */
 function nothingOrFetchFailed(target: SyncTargetState): SkipReason {
-  return target.fetchFailed ? "fetch_failed" : "nothing";
+  if (!target.fetchFailed) return "nothing";
+  if (target.fetchTrouble === "revoked") return "fetch_revoked";
+  if (target.fetchTrouble === "offline") return "fetch_offline";
+  return "fetch_failed";
 }
 
 /** 置き場をまとめて、やることを決める */

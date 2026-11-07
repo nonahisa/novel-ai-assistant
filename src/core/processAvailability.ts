@@ -48,6 +48,8 @@ const REQUIRES_PROCESSES = new Set<string>([
   "novelai.joinAsEditor",
   "novelai.finishReviewAndReturn",
   "novelai.revokeEditorAccess",
+  // 消す API はブラウザでも呼べるが、送り先を編集用フォルダーの origin から読む（git）ので並べる
+  "novelai.deleteEditingRepository",
   /*
     **「保存・同期」はここに入れない**（作者の判断 2026-11-01）。同期の入口を1つに
     まとめたので、ブラウザ版でソース管理へ案内していた「同期」（`novelai.gitSync`）の
@@ -178,7 +180,8 @@ export function describeProcessesBlocked(command: string): string {
     command === "novelai.shareWithEditor" ||
     command === "novelai.joinAsEditor" ||
     command === "novelai.finishReviewAndReturn" ||
-    command === "novelai.revokeEditorAccess"
+    command === "novelai.revokeEditorAccess" ||
+    command === "novelai.deleteEditingRepository"
   ) {
     return (
       "編集者とのやり取りはgitコマンドを使うため、ブラウザ版では使えません。" +

@@ -152,6 +152,98 @@ describe("編集部との連携を解除", () => {
     expect(result).toEqual({ kind: "notShared" });
   });
 
+  /*
+    順番（作者の決定 2026-11-07「先に送ってから権利を外す」）。外したあとでは、編集者の側へ
+    「校閲中の印が外れた」が届く前に置き場が見えなくなる
+  */
+  describe("解除の行を送ってから、権利を外す", () => {
+    /** 編集用フォルダーを覚えていて、送り先（origin）もある */
+    const withEditingFolder = async () => {
+      const folder = nodePath.join(base, "編集部", "氷の街-編集用");
+      await fsp.mkdir(nodePath.join(folder, ".git"), { recursive: true });
+      await fsp.mkdir(nodePath.join(root, ".aiwriter", "cache"), { recursive: true });
+      await fsp.writeFile(
+        nodePath.join(root, ".aiwriter", "cache", "editing.json"),
+        JSON.stringify({ folderPath: folder })
+      );
+      return folder;
+    };
+    const run = async (args: readonly string[]) =>
+      args[0] === "remote"
+        ? { code: 0, stdout: "https://github.com/hisa/ice-editing.git\n", stderr: "" }
+        : { code: 0, stdout: "", stderr: "" };
+
+    test("送る → 権利を外す の順。鍵は送る前に外してある", async () => {
+      await withEditingFolder();
+      const order: string[] = [];
+      const result = await revokeEditorAccessFlow(work(), {
+        run,
+        confirm: async () => true,
+        token: async () => "token",
+        whoAmI: async () => "作者",
+        send: async () => {
+          order.push("send");
+          // 送る時点で、解除の行は台帳に入っている
+          expect(await remainingEditorLocks()).toEqual([]);
+          return { ok: true, detail: "" };
+        },
+        revoke: async () => {
+          order.push("revoke");
+          return { ok: true, outcome: "removed" };
+        },
+        offerDelete: async () => {
+          order.push("offerDelete");
+        },
+      });
+      expect(result).toEqual({ kind: "done", released: 2, github: "removed" });
+      expect(order).toEqual(["send", "revoke", "offerDelete"]);
+      expect((await readSite(work())).editorLogin).toBeUndefined();
+    });
+
+    test("送れなくても権利は外し、「送れませんでした」を知らせる", async () => {
+      await withEditingFolder();
+      const revoke = vi.fn(async () => ({ ok: true as const, outcome: "removed" as const }));
+      const result = await revokeEditorAccessFlow(work(), {
+        run,
+        confirm: async () => true,
+        token: async () => "token",
+        whoAmI: async () => "作者",
+        send: async () => ({ ok: false, detail: "送信に失敗しました" }),
+        revoke,
+        offerDelete: async () => undefined,
+      });
+      expect(result).toEqual({ kind: "done", released: 2, github: "removed" });
+      expect(revoke).toHaveBeenCalledTimes(1);
+      expect(warnings.join("\n")).toContain("解除の記録を編集用リポジトリへ送れませんでした");
+    });
+  });
+
+  test("解除の終わりに、編集用リポジトリも消すかを訊く。権利を外せなかったときは訊かない", async () => {
+    const offered: string[] = [];
+    await revokeEditorAccessFlow(work(), {
+      confirm: async () => true,
+      token: async () => "token",
+      revoke: async () => ({ ok: true, outcome: "removed" }),
+      whoAmI: async () => "作者",
+      offerDelete: async (target) => {
+        offered.push(target.title);
+      },
+    });
+    expect(offered).toEqual(["氷の街"]);
+
+    await writeSite(work(), { remoteUrl: "https://github.com/hisa/ice-editing.git", editorLogin: "octocat" });
+    await revokeEditorAccessFlow(work(), {
+      confirm: async () => true,
+      token: async () => "token",
+      revoke: async () => ({ ok: false, reason: "noPermission", detail: "権限がありません" }),
+      whoAmI: async () => "作者",
+      offerDelete: async (target) => {
+        offered.push(target.title);
+      },
+    });
+    expect(offered).toEqual(["氷の街"]);
+  });
+
   test("確認の文に、範囲と相手の名前と、提案を返せなくなることを書く", async () => {
     let seen: { range: string | undefined; login: string | undefined } | undefined;
     await revokeEditorAccessFlow(work(), {

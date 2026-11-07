@@ -446,3 +446,81 @@ export async function acceptEditorInvitation(
     detail: seen.detail,
   };
 }
+
+/**
+ * リポジトリが見えるかだけを訊く（`GET /repos/{owner}/{repo}`。設計書5.7.5.4）。
+ *
+ * 編集者の側で git の取りに行きが失敗したとき、**理由を git の文で当てずに**
+ * （実装ルール5）、ここで見分ける。
+ *
+ * - `visible`＝200（リポジトリはある。取りに行けなかった理由は分からない）
+ * - `notFound`＝404（GitHub は権利の無い非公開リポジトリにも 404 を返すので、
+ *   「解除された」と「消された」は分けられない。どちらも作者の側の事情として扱う）
+ * - `network`＝通信そのものが失敗した（`fetch` が投げた）
+ * - `unknown`＝鍵が無い・401・403・そのほか（鍵の具合などで、判定に使わない）
+ */
+export type RepositoryProbe = "visible" | "notFound" | "network" | "unknown";
+
+export async function probeRepository(
+  token: string | undefined,
+  ref: GithubRepoRef,
+  fetchImpl: typeof fetch = fetch
+): Promise<RepositoryProbe> {
+  if (!token) return "unknown";
+  const result = await callGithub(token, "GET", repoEndpoint(ref), fetchImpl);
+  if (result.ok) return "visible";
+  if (result.kind === "network") return "network";
+  if (result.status === 404) return "notFound";
+  return "unknown";
+}
+
+/** 編集用リポジトリを消せなかった理由。番号から決められる分だけ分ける */
+export type DeleteRepositoryFailure =
+  | "noPermission"
+  | "notFound"
+  | "unauthorized"
+  | "network"
+  | "other";
+
+export type DeleteRepositoryResult =
+  | { ok: true }
+  | { ok: false; reason: DeleteRepositoryFailure; detail: string };
+
+/**
+ * 編集用リポジトリを GitHub から消す（`DELETE /repos/{owner}/{repo}`。204）。
+ *
+ * **消すには `delete_repo` の権限が要る。** ふだんの鍵（`repo`）では 403 になるので、
+ * 呼ぶ側がこの道だけ権限を足した鍵を取る。404 は「もう無い」とも「別のアカウントで
+ * 見えない」とも読めるので、成功とはみなさない（呼ぶ側が手で確かめる案内へ回す）。
+ */
+export async function deleteRepository(
+  token: string,
+  ref: GithubRepoRef,
+  fetchImpl: typeof fetch = fetch
+): Promise<DeleteRepositoryResult> {
+  const result = await callGithub(token, "DELETE", repoEndpoint(ref), fetchImpl);
+  if (result.ok) return { ok: true };
+  if (result.kind === "network") {
+    return { ok: false, reason: "network", detail: result.detail };
+  }
+  if (result.status === 403) {
+    return {
+      ok: false,
+      reason: "noPermission",
+      detail:
+        "このリポジトリを消す権限がありません（GitHubのアカウントと、削除の許可を確かめてください）。",
+    };
+  }
+  if (result.status === 404) {
+    return {
+      ok: false,
+      reason: "notFound",
+      detail:
+        "リポジトリが見つかりませんでした（すでに消えているか、別のGitHubアカウントでサインインしている見込みです）。",
+    };
+  }
+  if (result.status === 401) {
+    return { ok: false, reason: "unauthorized", detail: result.detail };
+  }
+  return { ok: false, reason: "other", detail: result.detail };
+}
