@@ -1034,7 +1034,8 @@ async function storeDriveBases(
   prune: boolean
 ): Promise<DriveBaseFailure[]> {
   const keep = driveBaseKeepSet(record, isDriveMergeTextPath);
-  const listed = new Set(local ? await local.listBases() : []);
+  // ハッシュの形でない名前（作者が手で置いたファイル等）は、置き場のものとして扱わない（消さない）
+  const listed = new Set((local ? await local.listBases() : []).filter((name) => /^[0-9a-f]{64}$/.test(name)));
   const failures: DriveBaseFailure[] = [];
   for (const [hash, bytes] of stash) {
     if (!keep.has(hash) || listed.has(hash) || hashBytes(bytes) !== hash) continue;

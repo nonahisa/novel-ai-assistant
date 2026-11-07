@@ -1091,10 +1091,14 @@ describe("場所が違えば合わせ、同じ場所だけ選ばせる（設計�
     const FILE = "設定/人物/char_001.json";
     const [a, b] = devicesOn(drive, 2, { [EP1]: "第0版\n", [FILE]: "{}\n" });
     await syncAll([a, b]);
+    // 置き場に紛れた、名前がハッシュの形でないファイルは消さない
+    a.work.bases.set("作者のメモ.txt", new TextEncoder().encode("メモ"));
     for (let i = 1; i <= 12; i++) {
       a.work.write(EP1, `第${i}版\n`);
       await a.send();
     }
+    expect(a.work.bases.has("作者のメモ.txt")).toBe(true);
+    a.work.bases.delete("作者のメモ.txt");
     const hashOf = (text: string) => hashBytes(new TextEncoder().encode(text));
     const kept = [...a.work.bases.keys()];
     expect(kept.length).toBeLessThanOrEqual(DRIVE_BASE_KEEP);
@@ -1155,7 +1159,8 @@ describe("見逃しと誤検出を数える（訊いた場所の数。設計書5
     }
     expect({ missed, falsePositive }).toEqual({ missed: 0, falsePositive: 0 });
     // 場面が減って「全部通った」にならないよう、数も押さえる（0.134.0 で56場面、
-    // うち黙って合わせる・何も訊かない場面45、訊くべき場所の合計12）
+    // うち黙って合わせる・何も訊かない場面45、訊くべき場所の合計12。下限は今の数ちょうど。
+    // 場面を減らす直しをしたら、理由を添えてここも下げる）
     expect(placeTally.length).toBeGreaterThanOrEqual(56);
     expect(placeTally.filter((item) => item.expected === 0).length).toBeGreaterThanOrEqual(45);
     expect(expectedTotal).toBeGreaterThanOrEqual(12);
