@@ -69,8 +69,23 @@ describe("原稿エディターへ校閲中を知らせる", () => {
     await fsp.rm(base, { recursive: true, force: true }).catch(() => undefined);
   });
 
-  /** 知らせが落ち着くまで待つ（台帳を読む・書くのは非同期） */
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  /**
+   * 知らせが落ち着くまで待つ（台帳を読む・書くのは非同期）。
+   *
+   * **決まった時間では待たない。** 全件を並べて流すと、台帳の読み書きが 30ms では終わらず
+   * 揺れた（2026-11-07、npm run check で2件）。待ち始めてから送られたら、そのあと100ms
+   * 何も来なくなるまで待つ。何も来なければ2秒で戻る（「送り直さない」を見る件のため）
+   */
+  let lastPostAt = 0;
+  const settle = async (): Promise<void> => {
+    const startedAt = Date.now();
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const now = Date.now();
+      if (lastPostAt >= startedAt && now - lastPostAt >= 100) return;
+      if (lastPostAt < startedAt && now - startedAt >= 2000) return;
+    }
+  };
 
   function watch(posted: unknown[], editorMode = false) {
     return watchReviewLock({
@@ -78,6 +93,7 @@ describe("原稿エディターへ校閲中を知らせる", () => {
       filePath: episode(),
       post: (message) => {
         posted.push(message);
+        lastPostAt = Date.now();
       },
       editorMode: () => editorMode,
     });
