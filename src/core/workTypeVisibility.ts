@@ -415,6 +415,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // EPUB（本にする）は物語向けとして扱う（設計書6.70.1の初案どおり）
   "novelai.exportPdf": "allTypes",
   "novelai.exportEpub": "story",
+  // 人物の声の朗読の書き出し（設計書6.42.4）。読み上げと同じく作品のタイプを問わない
+  "novelai.exportVoiceAudio": "allTypes",
   "novelai.openEpubEditor": "story",
 
   // ── 編集部とのやり取り ──

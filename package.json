@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。※現在テスト中です。",
-  "version": "0.142.1",
+  "version": "0.143.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1160,6 +1160,11 @@
         "icon": "$(book)"
       },
       {
+        "command": "novelai.exportVoiceAudio",
+        "title": "人物の声で音声に書き出す",
+        "category": "統合小説執筆環境"
+      },
+      {
         "command": "novelai.convertToMarkdown",
         "title": "本文 .md 化",
         "category": "統合小説執筆環境",
@@ -1760,6 +1765,11 @@
           "group": "2_copy@0"
         },
         {
+          "command": "novelai.exportVoiceAudio",
+          "when": "view == novelai.works && viewItem =~ /^episode-/ && !novelai.editorMode && !novelai.processesBlocked",
+          "group": "1_actions@5"
+        },
+        {
           "command": "novelai.copySubtitle",
           "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "2_copy@1"
@@ -1880,6 +1890,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "novelai.exportVoiceAudio",
+          "when": "false"
+        },
         {
           "command": "novelai.proposeEditByHand",
           "when": "novelai.editorMode"
@@ -2758,6 +2772,7 @@
     "zod": "4.6.7"
   },
   "dependencies": {
+    "@breezystack/lamejs": "1.2.7",
     "buffer": "^5.7.1",
     "diff": "^8.0.4",
     "fflate": "^0.8.3",

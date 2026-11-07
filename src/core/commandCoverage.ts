@@ -136,6 +136,8 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   // ── 書き出し
   "novelai.exportPdf": { class: "B", label: "PDF出力（印刷用）", via: "run.request feature: exportPdf" },
   "novelai.exportEpub": { class: "B", label: "EPUB出力（試作）", via: "run.request feature: exportEpub" },
+  // 声のライセンスを作者が確かめて書き出すもの（非商用の確認の窓がある）。外のAIからは呼ばせない
+  "novelai.exportVoiceAudio": { class: "C4", label: "人物の声で音声に書き出す", reason: "作者の判断" },
   "novelai.openEpubEditor": { class: "C3", label: "EPUBエディター（試作）" },
   "novelai.exportImeDictionary": { class: "C2", label: "IME辞書出力" },
   "novelai.generateSettingsDocs": { class: "C2", label: "設定資料集出力" },

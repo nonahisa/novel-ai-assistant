@@ -1838,9 +1838,9 @@ type Incoming =
   | { type: "voiceAudio"; planId: number; index: number; rate: number; gen: number }
   /**
    * 人物の声の操作（設計書6.42.3）。`run` は［台詞の話者と感情（AI）］、`open` は
-   * ［台詞の一覧］、`assign` は［声の割り当て］、`status` は列の一言の問い合わせ
+   * ［台詞の一覧］、`assign` は［声の割り当て］、`export` は［音声に書き出す］（設計書6.42.4）、`status` は列の一言の問い合わせ
    */
-  | { type: "voiceCast"; action: "run" | "open" | "assign" | "status"; text: string }
+  | { type: "voiceCast"; action: "run" | "open" | "assign" | "export" | "status"; text: string }
   /** 人物の声で読むかを覚える（端末ごと） */
   | { type: "readingEngine"; on: boolean }
   /** 読んでいる文の行に、シーンメモの印を置く */
@@ -1901,6 +1901,11 @@ export interface VoiceReadingDeps {
   runCast(filePath: string, text: string): Promise<void>;
   manageCast(filePath: string, text: string): Promise<void>;
   assignVoices(filePath: string): Promise<void>;
+  /**
+   * 人物の声で音声（MP3）に書き出す（設計書6.42.4）。画面が持っている本文で書き出す。
+   * 編集者モード・ブラウザ版では理由を出して何もしない（画面でも出していない）
+   */
+  exportAudio(filePath: string, text: string): Promise<void>;
 }
 
 export interface ManuscriptEditorDeps {
