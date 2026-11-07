@@ -167,6 +167,54 @@ async function narouApiState(frame: Frame): Promise<{
   });
 }
 
+/**
+ * 同意の日時の行（「（… に同意。外すといつでも取り消せます）」）の印。**句点まで含める**——チェックの
+ * ラベル「…使うことに同意します」にも「に同意」が入っていて、句点が無いと日時が無くても当たる
+ */
+const AGREED_AT_MARK = "に同意。";
+
+/**
+ * 同意のチェックを入れ、ボタンが押せて同意の日時が出るまで待つ。
+ *
+ * ノートPCで、入れたあと15秒待っても押せるようにならずに落ちた（2026-11-07。入れる段と入れ直す段の
+ * 両方で1回ずつ）。製品の側には、globalState の遅れた送り返しで同意の鍵が一時消え、その間に組んだ統計が
+ * 「同意なし」で欄を描き直す（チェックが外れて戻る）道がある。保管庫は見張りが当て直すが、画面は
+ * 描き直されない（`core/verifiedMemento.ts`・`features/writingStatsPanel.ts` の narouAgree）。
+ *
+ * そこで、5秒で届かなければ様子で分ける：
+ * - **チェックが外れて戻った**——上の製品の弱さの印。押し直して先へ進むが、隠さないよう
+ *   `console.warn` に「チェックが外れて戻った」と欄の様子を残す
+ * - **チェックは入ったまま、ボタンが押せない**——描き直しが遅いだけか、別の原因。押し直さずに
+ *   もう10秒だけ待ち、届かなければ欄の様子を添えて落とす
+ */
+async function checkAgreementAndWait(frame: Frame, step: string): Promise<void> {
+  const agree = frame.locator("#page-site-narou [data-narou-agree]");
+  let state = await narouApiState(frame);
+  const agreedOnScreen = async () => {
+    state = await narouApiState(frame);
+    return !state.fetchDisabled && state.agreeChecked && state.text.includes(AGREED_AT_MARK);
+  };
+  const failWithState = async (error: unknown) => {
+    throw new Error(`${String(error)}（欄：${JSON.stringify(state)}）`);
+  };
+  // 押した直後に古い統計で欄が描き直されると、Playwright が「押しても変わらない」で投げる。その文には欄の様子が
+  // 付かないので、添えて投げ直す
+  await agree.check().catch(async (error: unknown) => {
+    state = await narouApiState(frame);
+    await failWithState(error);
+  });
+  const reached = await waitUntil(agreedOnScreen, step, 5_000).then(
+    () => true,
+    () => false
+  );
+  if (reached) return;
+  if (!state.agreeChecked) {
+    console.warn(`[writingStatsSiteTabs] 入れたチェックが外れて戻った（${step}）。もう一度入れる（欄：${JSON.stringify(state)}）`);
+    await agree.check();
+  }
+  await waitUntil(agreedOnScreen, step, 10_000).catch(failWithState);
+}
+
 /* ── 1. タブの並び・矢印キー・覚えたタブ ── */
 
 test("投稿先を3つ登録した作品では、タブが概要・執筆の推移・話ごと・カクヨム・アルファ・なろうの順に1段で並び、note は出ず、最後で右の矢印キーを押すと先頭へ回り、なろうの反応を見て閉じると次もなろうの反応で開く", async () => {
@@ -262,35 +310,41 @@ test("ガイドラインを開いた記録があると同意のチェックが�
       expect(state.agreeDisabled, "開いた記録があるのに同意のチェックが押せません").toBe(false);
       expect(state.fetchDisabled, "同意の前に取得のボタンが押せます").toBe(true);
 
-      // チェックを入れる → ボタンが押せる・同意の日時が出る
-      await frame.locator("#page-site-narou [data-narou-agree]").check();
-      await waitUntil(async () => !(state = await narouApiState(frame)).fetchDisabled && state.text.includes("に同意"), "チェックを入れるとボタンが押せ、同意の日時が出る", 15_000).catch(
+      /*
+        **チェックを入れる前に、保管庫への書き込みが落ち着くのを待つ。** 開いたときの順位のお祝い
+        （見せ終えた印 `celebrated`）と、なろうのタブを押したこと（`tabSelected`）は、どちらも
+        globalState の**別の鍵**へ書く。globalState は鍵を塊ごと本体へ送り、送り返しで手元を丸ごと
+        差し替えるので、遅れて届いた古い塊が、あとから書いた同意の鍵を一時消すことがある
+        （`core/verifiedMemento.ts` の頭。204行の1.5秒と同じ根）。見張り（最大2秒＋余裕1秒）が
+        過ぎてから押す。お祝いの札と絵が消えたのが、画面の外から見える唯一の落ち着きの印。
+        お祝いは統計のあとに届くので、先に少し置いてから札が消えるのを待つ
+      */
+      await page.waitForTimeout(1_500);
+      await waitUntil(async () => (await bannerText(frame)) === "" && (await frame.locator("canvas.celebrate-layer").count()) === 0, "開いたときのお祝いの札と絵が消える", 20_000).catch(
         async (error: unknown) => {
-          throw new Error(`${String(error)}（欄：${JSON.stringify(state)}）`);
+          throw new Error(`${String(error)}（札：${JSON.stringify(await bannerText(frame))}・欄：${JSON.stringify(await narouApiState(frame))}）`);
         }
       );
+      await page.waitForTimeout(3_000);
 
-      // 外す → 押せない
+      // チェックを入れる → ボタンが押せる・同意の日時が出る
+      await checkAgreementAndWait(frame, "チェックを入れるとボタンが押せ、同意の日時が出る");
+
+      // 外す → 押せない。**同意の日時が消えるまで**待つ（拡張機能からの描き直しが届いた印。
+      // チェックが外れただけなら手元の欄の見た目で、まだ届いていない）
       await frame.locator("#page-site-narou [data-narou-agree]").uncheck();
-      await waitUntil(async () => (state = await narouApiState(frame)).fetchDisabled && !state.agreeChecked, "チェックを外すとボタンがまた押せなくなる", 15_000).catch(
-        async (error: unknown) => {
-          throw new Error(`${String(error)}（欄：${JSON.stringify(state)}）`);
-        }
-      );
+      await waitUntil(
+        async () => (state = await narouApiState(frame)).fetchDisabled && !state.agreeChecked && !state.text.includes(AGREED_AT_MARK),
+        "チェックを外すとボタンがまた押せなくなり、同意の日時が消える",
+        15_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（欄：${JSON.stringify(state)}）`);
+      });
+      // 外したことを覚える書き込みの見張りが終わってから入れ直す（上と同じ理由）
+      await page.waitForTimeout(3_000);
 
       // もう一度入れて、VS Code を起こし直しても同意と「開いた」が残る
-      // ノートPCの全件で一度、15秒待っても押せるようにならなかった（前回の全件と単独では通る）。
-      // 外した直後の描き直しにチェックが飲まれた見込みなので、5秒で変わらなければ入れ直し、落ちたときは欄の様子を添える
-      const agree = frame.locator("#page-site-narou [data-narou-agree]");
-      await agree.check();
-      const enabled = async () => !(state = await narouApiState(frame)).fetchDisabled;
-      await waitUntil(enabled, "入れ直すとボタンが押せる", 5_000).catch(async () => {
-        console.warn(`[writingStatsSiteTabs] 入れ直しても5秒押せないので、もう一度入れる（欄：${JSON.stringify(state)}）`);
-        if (!(await agree.isChecked())) await agree.check();
-        await waitUntil(enabled, "入れ直すとボタンが押せる", 10_000).catch(async (error: unknown) => {
-          throw new Error(`${String(error)}（欄：${JSON.stringify(state)}）`);
-        });
-      });
+      await checkAgreementAndWait(frame, "入れ直すとボタンが押せ、同意の日時が出る");
       // 保管庫が本体へ書かれる間を置く（globalState は少しあとで塊ごと送られる。verifiedMemento.ts）
       await page.waitForTimeout(3_000);
       await restartVsCode(session);

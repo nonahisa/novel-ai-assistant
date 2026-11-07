@@ -19,10 +19,14 @@
  * 6. 開き直して［▶ 読む］を押すと、また窓が出る（許したホストはその起動の間だけ覚える作りなので、外したあとは
  *    開き直してから確かめる。`features/voiceReading.ts` の `allowedRemoteHosts`）
  *
- * **本物の外のホストへは送らない。** 偽の音声エンジンを 127.0.0.2 に立てる。製品が「この PC」と見なすのは
- * 127.0.0.1・localhost・::1 だけ（`core/voiceEngine.ts` の `engineHostOutsideThisPc`）なので、127.0.0.2 は
- * 「外のホスト」として確認の窓が出る。Windows は 127.0.0.0/8 の全部がこの PC へ戻る。127.0.0.2 で待ち受けられない
- * 機械（Mac の既定など）では、理由を出して飛ばす。
+ * **本物の外のホストへは送らない。** 偽の音声エンジンをこの機械の上に立て、製品からは「外」に見える番地で待ち受ける。
+ * 製品が「この PC」と見なすのは 127.0.0.1・localhost・::1 だけ（`core/voiceEngine.ts` の `engineHostOutsideThisPc`）。
+ * - Windows：127.0.0.2（127.0.0.0/8 の全部がこの PC へ戻る）。**LAN の番地は使わない**——そこで待ち受けると、
+ *   Windows Defender の「アクセスを許可」の窓が作者の画面に出ることがある（画面を取らない決まり）
+ * - それ以外：まず 127.0.0.2（Linux は待ち受けられる）。Mac の既定は 127.0.0.1 以外の 127.x を持たないので、
+ *   次に、この機械の LAN の IPv4 の番地（`os.networkInterfaces()` の内向きでないもの）を使う（2026-11-07。Mac で
+ *   写したときも LAN の番地で通した）。待ち受けるのはこの機械の上なので、本文はこの機械の外へは出ない
+ * どれでも待ち受けられなければ、理由を出して飛ばす。選んだ番地が製品から「外」に見えることも、始めに確かめる。
  *
  * **作者の手に残すもの**：窓が「目に留まるか」（見た目の判断）と、本物の別の機械（LAN の AivisSpeech）へ届くこと。
  * 音は鳴らさない（偽のエンジンは無音の WAV を返す。耳では聞かない）。**AI は呼ばない。**
@@ -30,9 +34,11 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFile } from "node:fs/promises";
+import { networkInterfaces } from "node:os";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
+import { engineHostOutsideThisPc } from "../../src/core/voiceEngine";
 import { openEpisode } from "./support/manuscriptFrame";
 import { runCommand } from "./support/quickInput";
 import { restartVsCode, withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -41,10 +47,23 @@ import { acceptQuickPick, closeDialog, dialogText, pressDialogButton, quickInput
 
 const EPISODE = "001_はじまり.txt";
 const TEXT = "　朝の駅は静かだった。\n「おはよう」と彼女が言った。\n";
-const FAKE_HOST_ADDRESS = "127.0.0.2";
+const LOOPBACK_OUTSIDE = "127.0.0.2";
+
+/**
+ * 偽のエンジンを待ち受けさせてみる番地を、試す順に（理由は頭のコメント）。
+ * Windows は 127.0.0.2 だけ。それ以外は 127.0.0.2 のあとに LAN の IPv4（内向きでなく、127.x・169.254.x でないもの）
+ */
+function fakeHostCandidates(): string[] {
+  if (process.platform === "win32") return [LOOPBACK_OUTSIDE];
+  const lan = Object.values(networkInterfaces())
+    .flatMap((entries) => entries ?? [])
+    .filter((entry) => entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("127.") && !entry.address.startsWith("169.254."))
+    .map((entry) => entry.address);
+  return [LOOPBACK_OUTSIDE, ...new Set(lan)];
+}
 
 interface FakeVoiceEngine {
-  /** `127.0.0.2:<port>`（製品が窓に出すホスト） */
+  /** `<番地>:<port>`（製品が窓に出すホスト。Windows なら 127.0.0.2:<port>） */
   host: string;
   /** 受けた頼みの道（`/speakers`・`/audio_query`・`/synthesis`）と、本文を運ぶ頼みの `text` */
   requests: Array<{ path: string; text: string }>;
@@ -73,7 +92,8 @@ function silentWav(): Buffer {
 }
 
 /**
- * 偽の音声エンジン（AivisSpeech・VOICEVOX と同じ口の形）を 127.0.0.2 に立てる。待ち受けられなければ undefined。
+ * 偽の音声エンジン（AivisSpeech・VOICEVOX と同じ口の形）を、`fakeHostCandidates` の番地のうち最初に待ち受けられた所に立てる。
+ * どこでも待ち受けられなければ undefined。
  * 話者は1人・スタイル1つ（声の割り当てが無いとき、製品は最初の話者の最初のスタイルで読む。`core/voiceCast.ts`）
  */
 async function startFakeVoiceEngine(): Promise<FakeVoiceEngine | undefined> {
@@ -103,14 +123,25 @@ async function startFakeVoiceEngine(): Promise<FakeVoiceEngine | undefined> {
       response.end();
     });
   });
-  const listening = await new Promise<boolean>((resolve) => {
-    server.once("error", () => resolve(false));
-    server.listen(0, FAKE_HOST_ADDRESS, () => resolve(true));
-  });
-  if (!listening) return undefined;
+  let address: string | undefined;
+  for (const candidate of fakeHostCandidates()) {
+    const listening = await new Promise<boolean>((resolve) => {
+      const onError = () => resolve(false);
+      server.once("error", onError);
+      server.listen(0, candidate, () => {
+        server.off("error", onError);
+        resolve(true);
+      });
+    });
+    if (listening) {
+      address = candidate;
+      break;
+    }
+  }
+  if (!address) return undefined;
   const { port } = server.address() as AddressInfo;
   return {
-    host: `${FAKE_HOST_ADDRESS}:${port}`,
+    host: `${address}:${port}`,
     requests,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
@@ -183,11 +214,13 @@ test("人物の声の接続先がこの PC の外なら［▶ 読む］で送り
   const fake = await startFakeVoiceEngine();
   if (!fake) {
     // 黙って飛ばすと、見張れていないことに気づけない
-    console.warn(`voiceRemoteHostConfirm を飛ばします：${FAKE_HOST_ADDRESS} で待ち受けられない機械です（Mac の既定など。偽のエンジンを外のホストに見せられない）`);
+    console.warn(`voiceRemoteHostConfirm を飛ばします：${fakeHostCandidates().join("・")} のどれでも待ち受けられない機械です（偽のエンジンを外のホストに見せられない）`);
     context.skip();
     return;
   }
   const memoryId = `voice.remoteHost.${fake.host}`;
+  // 選んだ番地が製品の決め方で「外」に見えなければ、窓が出ないのはテストの側の誤り（先に止める）
+  expect(engineHostOutsideThisPc(`http://${fake.host}`), `偽のエンジンの番地 ${fake.host} が、製品からこの PC と見なされます`).toBe(fake.host);
   try {
     await withVsCode(
       "人物の声の送り先の確認",
@@ -199,7 +232,8 @@ test("人物の声の接続先がこの PC の外なら［▶ 読む］で送り
         const ask = await waitSendConfirm(session.page, frame, fake.host, "［▶ 読む］で送り先の確認の窓が出る");
         expect(ask.replace(/\s+/g, " "), `窓の文：${ask}`).toContain("このホストはこの PC の外にあるため、送った文は相手に届きます。");
         expect(await session.page.locator(".monaco-dialog-box .codicon-dialog-warning").count(), "確認の窓に警告の印がありません").toBeGreaterThan(0);
-        expect(await dialogButtons(session.page), `窓の文：${ask}`).toEqual(["送る", "送る（以降は訊かない）"]);
+        // 並びは OS で違う（Mac は［送る（以降は訊かない）］［Cancel］［送る］）。集まりとして比べる
+        expect([...(await dialogButtons(session.page))].sort(), `窓の文：${ask}`).toEqual(["送る", "送る（以降は訊かない）"].sort());
         expect(textCarrying(fake), "窓で答える前に、本文がエンジンへ届きました").toBe(0);
 
         /* ── 2. 閉じれば送らない ── */
