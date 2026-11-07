@@ -627,6 +627,17 @@ export const Uri = {
       );
     }
     const body = match[3] || "/";
+    /*
+      **`Uri.file` の代役が作る形（`file://c:/…`）を読み戻す。** 本物は `file:///c%3A/…` と書くが、
+      この代役は「/」を1つ少なく書くので、素直に読むとドライブ名（`c:`）が authority に入って道から落ちる。
+      手元（作業場所が C ドライブ）では、落ちた道 `/Users/…` が C ドライブとして読まれて、たまたま合っていた。
+      CI（作業場所が D ドライブ）では D ドライブとして読まれ、校閲中の鍵が見つからずに落ちた
+      （2026-11-07 run 42385294769）。`Uri.file` と同じ path・fsPath へ戻す
+    */
+    if (match[1] === "file" && /^[a-zA-Z]:$/.test(match[2])) {
+      const slashed = `${match[2].toLowerCase()}${body}`;
+      return new StubUri("file", "", slashed, slashed.replace(/\//g, "\\"), decoded.text, decoded.query);
+    }
     return new StubUri(
       match[1],
       match[2],
