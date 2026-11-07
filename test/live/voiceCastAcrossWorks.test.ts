@@ -4,8 +4,10 @@ import * as path from "node:path";
 import { buildReadingPlan, voiceDialogueSpans } from "../../src/core/readAloud";
 import { quotedSpans } from "../../src/core/quotedSpans";
 import {
+  castChunkSpeakerSequence,
   castChunksOf,
   castDialogues,
+  castFlowNames,
   castGuessesForChunk,
   castGuessesForStages,
   castSpeakersFromText,
@@ -21,6 +23,7 @@ import {
   VOICE_CAST_CHUNK_CHARS,
   VOICE_CAST_CONTEXT_AFTER_CHARS,
   VOICE_CAST_CONTEXT_BEFORE_CHARS,
+  VOICE_CAST_FLOW_MAX,
   VOICE_CAST_SYSTEM_PROMPT,
   VOICE_CAST_VERSION,
   buildVoiceCastPrompt,
@@ -47,6 +50,12 @@ import { OLLAMA_ENDPOINT } from "./support/liveEnv";
  *     one     … 1回で全部を訊く（版1.2 の頼み方。案 A までの製品と同じ）
  *     speaker … 2段の1段目だけ（話者だけを測る。感情の段を撃たないぶん早い）
  *   two では「1段目だけの話者の当たり」と「2段で通した当たり」を並べて出す。
+ *
+ *   1段目に前の区切りの話者の流れを添えるか（案 C。版1.4）は VC_FLOW で切り替える：
+ *     on  … 製品と同じ。直前の区切りまでに決まった話者（コードで決めたもの＋1段目の答えの
+ *           検算を通ったもの）の名前を、直前の VOICE_CAST_FLOW_MAX 件まで添える。既定
+ *     off … 流れを添えない（版1.3 と同じ頼み）。同じ VC_STAGES・同じ正解で比べる
+ *   VC_STAGES=one では使わない。報告は cast-report-<VC_STAGES>-flow<on|off>.md に分けて書く。
  *
  *   $env:VC_PHASE = "cast"; $env:VC_STAGES = "two"
  *   $env:VC_GOLD = "正解1.json;正解2.json"; $env:VC_MODELS = "gemma4:e4b;gemma4:26b"
@@ -309,6 +318,12 @@ const STAGES = (process.env.VC_STAGES ?? "two").trim().toLowerCase();
 if (PHASE === "cast" && !["one", "two", "speaker"].includes(STAGES)) {
   throw new Error(`VC_STAGES は one・two・speaker のどれかにしてください（${STAGES}）`);
 }
+/** 1段目に前の区切りの話者の流れを添えるか（案 C。版1.4。既定は製品と同じ on） */
+const FLOW = (process.env.VC_FLOW ?? "on").trim().toLowerCase();
+if (PHASE === "cast" && !["on", "off"].includes(FLOW)) {
+  throw new Error(`VC_FLOW は on・off のどちらかにしてください（${FLOW}）`);
+}
+const FLOW_ON = FLOW === "on" && STAGES !== "one";
 
 /** 話者の採点（見逃しと取り違えを分けて数える） */
 interface SpeakerScore {
@@ -510,7 +525,10 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
             const byIndex = new Map(dialogues.map((d, i) => [d.index, gold.gold[i]]));
             const goldIdByIndex = new Map(dialogues.map((d, i) => [d.index, goldIdOf(i)]));
             const nameOf = (id: string): string | undefined => gold.people.find((p) => p.id === id)?.name;
-            const tag = `${model.replace(/[:/]/g, "_")}-${STAGES}-${path.basename(goldPath).length}`;
+            const tag = `${model.replace(/[:/]/g, "_")}-${STAGES}-flow${FLOW_ON ? "on" : "off"}-${path.basename(goldPath).length}`;
+            /** これまでの区切りで決まった話者（話の順。製品の runVoiceCast と同じ組み方。正解の作者の行は無い） */
+            const history: Array<string | null> = [];
+            const personName = new Map(gold.people.map((p) => [p.id, p.name]));
             let byCode = 0;
             let byCodeHit = 0;
             let byCodeWrong = 0;
@@ -587,7 +605,12 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
                 guesses = checked.guesses;
               } else {
                 // 製品と同じ頼み（voiceCastStageRequests）。全部コードで決まった区切りは1段目を撃たない
-                const requests = voiceCastStageRequests(chunk, chunkPeople);
+                // 案 C：前の区切りまでの話者の流れを添える（VC_FLOW=off では添えない＝版1.3 と同じ頼み）
+                const requests = voiceCastStageRequests(
+                  chunk,
+                  chunkPeople,
+                  FLOW_ON ? { flow: castFlowNames(history, personName, VOICE_CAST_FLOW_MAX) } : undefined
+                );
                 let speakerItems: unknown[] | undefined;
                 if (requests.speaker) {
                   speakerItems = await ask(
@@ -596,7 +619,11 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
                     requests.speaker.userPrompt,
                     requests.speaker.jsonSchema
                   );
-                  if (!speakerItems) continue;
+                  if (!speakerItems) {
+                    // 読めなかった区切りは、流れでは決まらなかった（不明）として続ける
+                    history.push(...castChunkSpeakerSequence(chunk, undefined));
+                    continue;
+                  }
                 } else {
                   skippedSpeakerStage++;
                 }
@@ -604,6 +631,7 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
                   ? validateCastSpeakers(speakerItems, chunk.dialogues.length, chunkPeople, chunk.decided)
                   : { speakers: new Map<number, string | null>(), dropped: [] };
                 dropSpeaker.push(...speakerCheck.dropped);
+                history.push(...castChunkSpeakerSequence(chunk, speakerCheck.speakers));
                 chunk.dialogues.forEach((d, k) => {
                   const guessed = chunk.decided.get(k + 1) ?? speakerCheck.speakers.get(k + 1);
                   scoreSpeaker(stage1, d.quote, byIndex.get(d.index)!, goldIdByIndex.get(d.index) ?? null, guessed, nameOf);
@@ -646,7 +674,7 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
                   : `2段の1段目だけ（版 ${VOICE_CAST_VERSION}）`;
             report.push(
               "",
-              `## ${model} × ${gold.work}/${gold.episode} × VC_STAGES=${STAGES}`,
+              `## ${model} × ${gold.work}/${gold.episode} × VC_STAGES=${STAGES}${STAGES === "one" ? "" : ` × VC_FLOW=${FLOW_ON ? "on" : "off"}`}`,
               `- 訊き方：${how}・${RULES_ON ? "本文に書いてある話者をコードで決める" : "VC_RULES=off"}`,
               `- 台詞 ${dialogues.length}（正解が人物 ${goldKnown}／不明 ${dialogues.length - goldKnown}）・区切り ${chunks.length}` +
                 `・AIを呼んだ回数 ${calls}（1段目を呼ばなかった区切り ${skippedSpeakerStage}）` +
@@ -669,7 +697,11 @@ describe.skipIf(PHASE !== "cast" || !ROOT || !OUT || GOLD_FILES.length === 0)(
               report.push(`- 詳細：cast-detail-${tag}.tsv`);
             }
             // 訊き方ごとに別の報告にする（one と two を続けて流しても上書きし合わない）
-            fs.writeFileSync(path.join(OUT!, `cast-report-${STAGES}.md`), report.join("\n"), "utf-8");
+            fs.writeFileSync(
+              path.join(OUT!, `cast-report-${STAGES}${STAGES === "one" ? "" : `-flow${FLOW_ON ? "on" : "off"}`}.md`),
+              report.join("\n"),
+              "utf-8"
+            );
           }
         }
         expect(true).toBe(true);

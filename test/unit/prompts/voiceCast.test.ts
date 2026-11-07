@@ -158,3 +158,35 @@ describe("P-54 版1.3：2段の頼み方", () => {
     expect(open.speaker?.systemPrompt).not.toBe(open.emotion.systemPrompt);
   });
 });
+
+describe("P-54 版1.4：掛け合いの流れ（案 C）", () => {
+  const chunk = {
+    text: "〔1〕「どこへ」",
+    dialogues: [{ index: 3, start: 0, end: 5, quote: "「どこへ」", nth: 0 }],
+    decided: new Map<number, string>(),
+    before: "",
+    after: "",
+  };
+
+  test("流れを渡すと、1段目に名前の列だけを添える（確かではない参考と書く）。2段目には添えない", () => {
+    const requests = voiceCastStageRequests(chunk, people, { flow: ["灯", "蓮", "不明", "灯"] });
+    const prompt = requests.speaker?.userPrompt ?? "";
+    expect(prompt).toContain("【前の区切りの話者の流れ】");
+    expect(prompt).toContain("灯 → 蓮 → 不明 → 灯");
+    expect(prompt).toContain("確かではありません");
+    // 流れに合わせて当てはめさせない一言が【答え方】にもある
+    expect(prompt).toMatch(/流れに合わせて[^\n]*当てはめ/);
+    expect(requests.emotion.userPrompt).not.toContain("流れ");
+  });
+
+  test("流れを渡さない・空なら節を出さない（測る台本の VC_FLOW=off と同じ頼み）", () => {
+    for (const options of [undefined, {}, { flow: [] }]) {
+      const prompt = voiceCastStageRequests(chunk, people, options).speaker?.userPrompt ?? "";
+      expect(prompt).not.toContain("【前の区切りの話者の流れ】");
+      expect(prompt).not.toContain("→");
+    }
+    const direct = buildVoiceCastSpeakerPrompt({ text: chunk.text, count: 1, people });
+    expect(direct).not.toContain("【前の区切りの話者の流れ】");
+    expect(direct).not.toContain("流れも参考");
+  });
+});

@@ -551,3 +551,124 @@ describe("話者が書いてある台詞はコードで決める（P-54 版1.2�
     expect(state.steps.some((s) => s.includes("本文に書いてあった話者2個"))).toBe(true);
   });
 });
+
+/**
+ * 案 C「掛け合いの流れを渡す」（2026-11-07。版1.4）。2つ目の区切りの1段目に、
+ * 1つ目の区切りまでで決まった話者の名前を、直前の数件だけ添える。
+ */
+describe("前の区切りの話者の流れを1段目に添える（P-54 版1.4）", () => {
+  const registry = {} as Registry;
+  // 長い地の文の行をはさみ、区切りを2つにする（1区切り2,000字。地の文だけの区切りは送らない）
+  const LONG = "　" + "波".repeat(1995);
+  const TWO_CHUNKS = ["「一」", "「二」", "「三」", LONG, "「四」"].join("\n");
+
+  /** 1段目の答えを、区切りの本文で分けて返す偽のAI（区切りごとに違う答えを返せるように） */
+  function byChunk(first: unknown[], second: unknown[]): void {
+    state.generate.mockImplementation(async (request: { jsonSchema: unknown; userPrompt: string }) => {
+      if (!fieldsOf(request).includes("speaker")) {
+        return { text: JSON.stringify({ lines: [{ number: 1, emotion: "平静", intensity: "中" }] }) };
+      }
+      const isFirst = request.userPrompt.includes("〔1〕「一」");
+      return { text: JSON.stringify({ lines: isFirst ? first : second }) };
+    });
+  }
+  const speakerPrompts = (): string[] =>
+    state.generate.mock.calls
+      .map((c) => c[0])
+      .filter((r) => fieldsOf(r).includes("speaker"))
+      .map((r) => r.userPrompt as string);
+
+  test("2つ目の区切りの1段目に、1つ目で決まった話者の流れが入る。「不明」は抜かずに書く。1つ目には無い", async () => {
+    byChunk(
+      [
+        { number: 1, speaker: "灯" },
+        { number: 2, speaker: "不明" },
+        { number: 3, speaker: "蓮" },
+      ],
+      [{ number: 1, speaker: "灯" }]
+    );
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TWO_CHUNKS }, registry);
+    const [first, second] = speakerPrompts();
+    expect(first).not.toContain("【前の区切りの話者の流れ】");
+    expect(second).toContain("【前の区切りの話者の流れ】");
+    expect(second).toContain("灯 → 不明 → 蓮");
+    // 台詞の本文は添えない（名前の列だけ）
+    expect(second.split("【前の区切りの話者の流れ】")[1].split("【")[0]).not.toContain("「一」");
+  });
+
+  test("添えるのは直前の5件まで", async () => {
+    const many = ["「一」", "「二」", "「三」", "「四」", "「五」", "「六」", "「七」", LONG, "「八」"].join("\n");
+    byChunk(
+      [1, 2, 3, 4, 5, 6, 7].map((number) => ({ number, speaker: number % 2 === 1 ? "灯" : "蓮" })),
+      [{ number: 1, speaker: "灯" }]
+    );
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: many }, registry);
+    const second = speakerPrompts()[1];
+    // 〔3〕〜〔7〕＝灯・蓮・灯・蓮・灯
+    expect(second).toContain("：灯 → 蓮 → 灯 → 蓮 → 灯\n");
+  });
+
+  test("前の区切りが全部「不明」なら流れを添えない", async () => {
+    byChunk(
+      [1, 2, 3].map((number) => ({ number, speaker: "不明" })),
+      [{ number: 1, speaker: "灯" }]
+    );
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TWO_CHUNKS }, registry);
+    expect(speakerPrompts()[1]).not.toContain("【前の区切りの話者の流れ】");
+  });
+
+  test("控えの鍵に流れが入る：作者が1つ目の区切りの話者を直すと、2つ目の1段目だけ送り直す（作者の話者が流れに入る）", async () => {
+    byChunk(
+      [
+        { number: 1, speaker: "灯" },
+        { number: 2, speaker: "灯" },
+        { number: 3, speaker: "灯" },
+      ],
+      [{ number: 1, speaker: "灯" }]
+    );
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TWO_CHUNKS }, registry);
+    expect(state.generate).toHaveBeenCalledTimes(4);
+
+    // 何も変えなければ、全部の段が控えに当たる
+    state.generate.mockClear();
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TWO_CHUNKS }, registry);
+    expect(state.generate).not.toHaveBeenCalled();
+
+    // 作者が［台詞の一覧］で〔3〕を蓮に直した
+    state.cast = {
+      ...state.cast!,
+      entries: state.cast!.entries.map((e) =>
+        e.quote === "「三」" ? { ...e, speakerId: "c-ren", speakerName: "蓮", source: "author" as const } : e
+      ),
+    };
+    state.generate.mockClear();
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TWO_CHUNKS }, registry);
+    const sent = state.generate.mock.calls.map((c) => c[0]);
+    expect(sent).toHaveLength(1);
+    expect(fieldsOf(sent[0])).toEqual(["number", "speaker"]);
+    expect(sent[0].userPrompt).toContain("灯 → 灯 → 蓮");
+    // 作者の行は上書きしない
+    expect(state.cast!.entries.find((e) => e.quote === "「三」")).toMatchObject({ speakerId: "c-ren", source: "author" });
+  });
+
+  test("後ろの区切りの1段目の数は前の答え次第なので、確認では「最大」で示す", async () => {
+    byChunk([{ number: 1, speaker: "灯" }], [{ number: 1, speaker: "灯" }]);
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TWO_CHUNKS }, registry);
+    expect(state.confirmRun.mock.calls[0][0]).toContain("AIを最大4回呼びます（話者2回・感情2回");
+  });
+
+  test("1段目が失敗したら、それより後ろの区切りの1段目は送らない（流れが決まらず、次に押すと送り直しになるため）", async () => {
+    state.generate.mockImplementation(async (request: { jsonSchema: unknown; userPrompt: string }) => {
+      if (!fieldsOf(request).includes("speaker")) {
+        return { text: JSON.stringify({ lines: [{ number: 1, emotion: "平静", intensity: "中" }] }) };
+      }
+      return { text: "ごめんなさい" };
+    });
+    await runVoiceCast({ work, episodePath: "/w/01.txt", text: TWO_CHUNKS }, registry);
+    const stages = state.generate.mock.calls.map((c) => (fieldsOf(c[0]).includes("speaker") ? "話者" : "感情"));
+    expect(stages.filter((s) => s === "話者")).toHaveLength(1);
+    expect(stages.filter((s) => s === "感情")).toHaveLength(2);
+    expect(state.savedCast).toHaveLength(0);
+    expect(state.warnings[0]).toContain("書き換えていません");
+  });
+});

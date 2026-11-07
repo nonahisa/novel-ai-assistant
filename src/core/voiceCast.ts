@@ -457,6 +457,11 @@ const SPEAKER_ECHOES = new Set([
   "一覧の人物",
   "会話の相手",
   "直前の話者",
+  // 版1.4：前の区切りの話者の流れを添えた指示の言葉
+  "流れ",
+  "話者の流れ",
+  "前の話者",
+  "前の区切りの話者",
   "speaker",
   "name",
   "",
@@ -729,6 +734,52 @@ export function castGuessesForStages(
     decidedByText: chunk.decided.size,
     calmFilled,
   };
+}
+
+/*
+  ── 案 C：掛け合いの流れを渡す（版1.4。2026-11-07） ──
+
+  1段目で区切りを訊くとき、すぐ前の区切りまでに決まった話者の名前を、直前の数件だけ
+  添える。区切りの頭の台詞は、前の区切りで誰と誰が話していたかが分からないと決めにくい。
+  流れを組むのはここ（コード）で、頼み方（prompts/voiceCast.ts）は名前の列を受け取るだけ。
+*/
+
+/**
+ * 1区切りの台詞の話者を、台詞の順に並べる（流れへ足す分）。
+ *
+ * 決め方の順：作者が［台詞の一覧］で直した行（`author`。話の通し番号で引く）→
+ * 本文に書いてあった話者（`chunk.decided`）→ 1段目の検算を通った答え（`aiSpeakers`）。
+ * どれも無ければ null（不明）。作者の行は確かな答えなので、AIの答えより先に立てる。
+ */
+export function castChunkSpeakerSequence(
+  chunk: Pick<CastChunk, "dialogues" | "decided">,
+  aiSpeakers: ReadonlyMap<number, string | null> | undefined,
+  author?: ReadonlyMap<number, string | null>
+): Array<string | null> {
+  return chunk.dialogues.map((dialogue, i) => {
+    if (author?.has(dialogue.index)) return author.get(dialogue.index) ?? null;
+    return chunk.decided.get(i + 1) ?? aiSpeakers?.get(i + 1) ?? null;
+  });
+}
+
+/**
+ * 流れに添える名前の列（古い順。末尾が、次の区切りの〔1〕の直前の台詞）。
+ *
+ * - 直前の `max` 件だけ。古い所まで渡すと、場面が変わったのに前の顔ぶれを引きずる
+ * - 決まらなかった台詞は**抜かずに「不明」と書く**。抜くと「灯 → 蓮 → 灯」のように
+ *   実際より交互に話しているように見え、流れに合わせた当てはめを誘う
+ * - 資料に無い id（消した人物）も「不明」
+ * - 範囲が全部「不明」なら空を返す（手がかりにならず、添えると控えの鍵だけが変わる）
+ */
+export function castFlowNames(
+  history: ReadonlyArray<string | null>,
+  nameOf: ReadonlyMap<string, string>,
+  max: number
+): string[] {
+  const names = history
+    .slice(Math.max(0, history.length - max))
+    .map((id) => (id === null ? undefined : nameOf.get(id)) ?? CAST_UNKNOWN_SPEAKER);
+  return names.some((name) => name !== CAST_UNKNOWN_SPEAKER) ? names : [];
 }
 
 /** 1区切りの答えをまとめた結果 */
