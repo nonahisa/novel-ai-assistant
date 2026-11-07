@@ -252,6 +252,27 @@ describe("素のエディターで読み取り専用を外して打ったとき�
   test("文書がファイルの中身に戻り、打った字が控えに入り、読み取り専用が掛け直され、git の名前の無い知らせが出る", async () => {
     const file = await lockedEpisode({ editorLogin: "kmizu" });
     const result = await typeIntoPlainEditor(file, "朝の駅は静かだった。あ", 20_000);
+    /*
+      CI（windows-latest）でだけ、20秒待っても戻らない（2026-11-07 run 42383634795）。手元では通る。
+      戻す道の失敗は logFailure へ書かれて見えないので、落ちたときは作品のログと呼んだ命令を添える
+    */
+    const diagnose = async (): Promise<string> => {
+      const found: string[] = [];
+      const walk = async (dir: string): Promise<void> => {
+        for (const entry of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+          const full = nodePath.join(dir, entry.name);
+          if (entry.isDirectory()) await walk(full);
+          else if (/\.(log|md|txt|jsonl)$/i.test(entry.name) && full.includes("logs")) {
+            found.push(`${full}\n${(await fsp.readFile(full, "utf8").catch(() => "")).slice(-3000)}`);
+          }
+        }
+      };
+      await walk(nodePath.join(root, ".aiwriter"));
+      return `呼んだ命令：${JSON.stringify(result.executed)}／知らせ：${JSON.stringify(warnings)}／ログ：${found.join("\n---\n") || "（無し）"}`;
+    };
+    if (result.document.text !== result.fileText) {
+      expect(result.document.text, await diagnose()).toBe(result.fileText);
+    }
     expect(result.document.text).toBe(result.fileText);
     expect(await fsp.readFile(file, "utf8"), "原稿のファイルには書かない").toBe(result.fileText);
     expect(result.executed).toContain("workbench.action.files.revert");
