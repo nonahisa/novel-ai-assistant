@@ -122,6 +122,15 @@ async function openReadingRow(session: E2ESession, marker: string): Promise<Fram
   return frame;
 }
 
+/**
+ * 読み上げの列のボタンを押す。**列（`#aloud`）は上の段（`.tray`）の外にある**ので `clickToolButton` は使えない
+ * （段を探して見つからずに投げる）。［▶ 読む］と同じく直接押す。人物の声の操作は人物の声を選んだときだけ出る
+ */
+async function clickAloudButton(frame: Frame, id: "aloudVoiceAssign" | "aloudVoiceExport"): Promise<void> {
+  await waitUntil(async () => frame.locator(`#${id}`).isVisible().catch(() => false), `読み上げの列に #${id} が出る`, 10_000);
+  await frame.locator(`#${id}`).click();
+}
+
 /** ［声］をそのエンジンにして、［▶ 読む］が押せるまで待つ */
 async function chooseEngine(frame: Frame, choice: "os" | VoiceEngineId): Promise<void> {
   if ((await frame.locator("#aloudEngine").inputValue()) !== choice) await frame.locator("#aloudEngine").selectOption(choice);
@@ -235,7 +244,7 @@ test("［声］で VOICEVOX を選ぶと本文は VOICEVOX の接続先へ届き
 
         /* ── ［声の割り当て］ ── */
         const listTitle = `声の割り当て（この作品の声。選ぶと ${VOICE_ENGINE_LABEL.voicevox} の声から選べます）`;
-        await clickToolButton(frame, "aloudVoiceAssign");
+        await clickAloudButton(frame, "aloudVoiceAssign");
         const rows = await waitForQuickPick(page, listTitle, 20_000);
         expect(rows.map((row) => row.label), `一覧：${JSON.stringify(rows)}`).toContain("語り手（地の文）");
         await page.locator(".quick-input-widget .quick-input-list .monaco-list-row").nth(rows.findIndex((row) => row.label === "語り手（地の文）")).click();
@@ -298,12 +307,12 @@ test("VOICEVOX で選んだ声の人物がいる作品を AivisSpeech で読む�
         const recorded = (await recordedNotices(session)).filter((entry) => entry.message.includes(needle));
         expect(recorded[0]?.message, "一言の文").toBe(notice);
         // 灯の台詞は、割り当てた VOICEVOX の声（1325133121）でなく、代わりの声（エンジンの最初の声 888753760）で AivisSpeech へ
-        await waitUntil(async () => textCarrying(aivis).some((request) => request.path === "/synthesis" && request.text.includes("やった")), "灯の台詞が AivisSpeech へ頼まれる", 20_000).catch(
+        await waitUntil(async () => textCarrying(aivis).some((request) => request.path === "/audio_query" && request.text.includes("やった")), "灯の台詞が AivisSpeech へ頼まれる", 20_000).catch(
           (error: unknown) => {
             throw new Error(`${String(error)}（AivisSpeech：${describeVoiceRequests(aivis)}）`);
           }
         );
-        const akariLine = textCarrying(aivis).find((request) => request.path === "/synthesis" && request.text.includes("やった"));
+        const akariLine = textCarrying(aivis).find((request) => request.path === "/audio_query" && request.text.includes("やった"));
         expect(akariLine?.speaker, `灯の台詞の声：${describeVoiceRequests(aivis)}`).toBe("888753760");
 
         /* ── 読んでいる途中に打つ（計画を取り直す）。一言は出し直さない ── */
@@ -318,7 +327,7 @@ test("VOICEVOX で選んだ声の人物がいる作品を AivisSpeech で読む�
         await stopReading(frame);
 
         /* ── ［声の割り当て］の一覧に、VOICEVOX の声と添えてある ── */
-        await clickToolButton(frame, "aloudVoiceAssign");
+        await clickAloudButton(frame, "aloudVoiceAssign");
         const rows = await waitForQuickPick(page, `声の割り当て（この作品の声。選ぶと ${VOICE_ENGINE_LABEL.aivisspeech} の声から選べます）`, 20_000);
         const akari = rows.find((row) => row.label === "灯");
         expect(akari?.description, `一覧：${JSON.stringify(rows)}`).toBe(`花音／ささやき（${VOICE_ENGINE_LABEL.voicevox}の声）`);
@@ -504,7 +513,7 @@ for (const engine of ["aivisspeech", "voicevox"] as const) {
           const { page } = session;
           const frame = await openReadingRow(session, "朝の駅は静かだった");
           await chooseEngine(frame, engine);
-          await clickToolButton(frame, "aloudVoiceExport");
+          await clickAloudButton(frame, "aloudVoiceExport");
           const confirm = await waitExportConfirm(page);
           expect(confirm, `確認の窓：${confirm}`).toContain(`置き場：`);
           expect(confirm, `確認の窓：${confirm}`).toContain(`.aiwriter/exports/音声/${EPISODE_STEM}`);
