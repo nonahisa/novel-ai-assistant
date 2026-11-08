@@ -9,6 +9,7 @@ import {
 } from "./sceneMemo";
 // 「矛盾（事実の照合）」の分類名。写さずに検知の側の定数を読む
 import { FACT_CONTRADICTION_CATEGORY } from "./factContradiction";
+import { SJIS_MARK_FINDING_LABEL } from "./sjisMarkFinding";
 import type { Finding, FindingCategory } from "../models/finding";
 
 /**
@@ -389,6 +390,8 @@ const FINDING_LABEL_TONES: Readonly<Record<string, FindingToneKey>> = {
   [FACT_CONTRADICTION_CATEGORY]: "factContradiction",
   プロット逸脱: "deviation",
   [EDITOR_PROPOSAL_TAG]: "editorProposal",
+  // 保存の直前に「〓」にした字の説明（0.148.3）。AIの検知ではないので、検知の色は当てない
+  [SJIS_MARK_FINDING_LABEL]: "other",
   指摘: "other",
 };
 
