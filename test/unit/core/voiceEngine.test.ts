@@ -210,6 +210,27 @@ describe("エンジンに届かなかったときの窓（2026-11-07 作者の�
     expect(prompt.detail).toContain("AivisSpeech（または VOICEVOX）を起動してから");
     expect(prompt.useOsVoice).toBe("OSの声で読む");
   });
+
+  test("読む道の窓は、引数を付けても付けなくても同じ（原稿エディターの［▶ 読む］）", () => {
+    expect(voiceEngineDownPrompt("read")).toEqual(voiceEngineDownPrompt());
+    expect(voiceEngineDownPrompt("read").detail).toContain("［▶ 読む］");
+  });
+
+  test("割り当てと書き出しの窓は、同じ見出しで、［OSの声で読む］を付けず、その道に合う文にする", () => {
+    const read = voiceEngineDownPrompt("read");
+    for (const route of ["assign", "export"] as const) {
+      const prompt = voiceEngineDownPrompt(route);
+      expect(prompt.message).toBe(read.message);
+      expect(prompt.detail).toContain("AivisSpeech（または VOICEVOX）を起動してから");
+      // 押せないボタンの名前を文に書かない
+      expect(prompt.detail).not.toContain("［OSの声で読む］");
+      expect("useOsVoice" in prompt).toBe(false);
+    }
+    expect(voiceEngineDownPrompt("assign").detail).toContain("［声の割り当て］");
+    expect(voiceEngineDownPrompt("export").detail).toContain("［音声に書き出す］");
+    // 書き出しは途中のファイルを残さない。窓でもそれを言う
+    expect(voiceEngineDownPrompt("export").detail).toContain("ファイルは作っていません");
+  });
 });
 
 describe("英語の名前のスタイルも感情で選ぶ（2026-11-07 作者の答え）", () => {

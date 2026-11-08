@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { WorkEntry } from "../../../src/models/types";
 import type { CastEntry, CastFile, VoiceAssignmentFile } from "../../../src/core/voiceCast";
 import { startFakeVoiceEngine, type FakeEngine } from "../support/fakeVoiceEngine";
+import { window } from "../support/vscodeStub";
 
 /**
  * 人物の声で朗読する（設計書6.42.3）の流れ。
@@ -106,7 +107,7 @@ vi.mock("../../../src/core/voiceCastStore", () => ({
   saveVoiceAssignment: async () => "h3",
 }));
 
-const { VoiceReadingService, runVoiceCast } = await import("../../../src/features/voiceReading");
+const { VoiceReadingService, runVoiceCast, assignVoices } = await import("../../../src/features/voiceReading");
 const { buildReadingPlan } = await import("../../../src/core/readAloud");
 type Registry = import("../../../src/ai/registry").AIRegistry;
 
@@ -256,6 +257,53 @@ describe("偽のエンジンで朗読の音を作る", () => {
     engine = undefined;
     const result = await service.audio(planned.units, 0, 1);
     expect(result).toMatchObject({ engineDown: true });
+  });
+
+  test("［声の割り当て］でエンジンが動いていないとき：真ん中の窓を出し、右下の知らせは出さない（2026-11-08 作者の実機確認）", async () => {
+    engine = await startFakeVoiceEngine();
+    const url = engine.url;
+    await engine.close();
+    engine = undefined;
+    const shown: Array<{ message: string; options: unknown; items: unknown[] }> = [];
+    const original = window.showWarningMessage;
+    window.showWarningMessage = (async (message: string, options: unknown, ...items: unknown[]) => {
+      shown.push({ message, options, items });
+      return undefined;
+    }) as typeof window.showWarningMessage;
+    try {
+      await assignVoices(work, new VoiceReadingService(() => url));
+    } finally {
+      window.showWarningMessage = original;
+    }
+    expect(state.warnings).toEqual([]);
+    expect(shown).toHaveLength(1);
+    expect(shown[0].message).toContain("音声合成のエンジンに繋がりませんでした");
+    expect(shown[0].options).toMatchObject({
+      modal: true,
+      detail: expect.stringContaining("［声の割り当て］"),
+    });
+    // 割り当ての道では OS の声で読めないので、ボタンは付けない（閉じるだけ）
+    expect(shown[0].items).toEqual([]);
+  });
+
+  test("［声の割り当て］でエンジンが受け付けなかったとき（http）は、今までどおり右下の知らせ", async () => {
+    const service = new VoiceReadingService(
+      () => "http://127.0.0.1:1",
+      async () => new Response("壊れています", { status: 500 })
+    );
+    let modal = 0;
+    const original = window.showWarningMessage;
+    window.showWarningMessage = (async () => {
+      modal++;
+      return undefined;
+    }) as typeof window.showWarningMessage;
+    try {
+      await assignVoices(work, service);
+    } finally {
+      window.showWarningMessage = original;
+    }
+    expect(modal).toBe(0);
+    expect(state.warnings.join("\n")).toContain("受け付けませんでした");
   });
 });
 

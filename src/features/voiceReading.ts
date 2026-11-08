@@ -58,8 +58,10 @@ import {
   VOICE_INTENSITIES,
   VoiceEngineClient,
   VoiceEngineError,
+  voiceEngineDownPrompt,
   voiceEngineNextStep,
   voiceParamsFor,
+  type VoiceEngineDownRoute,
   type FetchLike,
   type VoiceEmotion,
   type VoiceIntensity,
@@ -404,6 +406,27 @@ function engineFailure(error: unknown, work: WorkEntry | undefined): VoiceProble
   return error instanceof VoiceEngineError && error.kind === "unreachable"
     ? { problem, engineDown: true }
     : { problem };
+}
+
+/**
+ * エンジンに届かなかった（unreachable）ときに、画面の真ん中に窓を出す（設計書6.42.3）。
+ * 届いたが受け付けなかった（http・badResponse）は、今までどおり右下の知らせにする。
+ *
+ * **答えを待たない**——ボタンは閉じるだけで、待っても次にすることが無い。
+ * ［OSの声で読む］の付く読む道は、原稿エディターの askUseOsVoice が出す。
+ * 返すのは窓に出した文（書き出しの結果の理由に使う）
+ */
+export function showVoiceEngineDown(route: Exclude<VoiceEngineDownRoute, "read">): string {
+  const prompt = voiceEngineDownPrompt(route);
+  void Promise.resolve(
+    vscode.window.showWarningMessage(prompt.message, { modal: true, detail: prompt.detail })
+  ).catch(() => undefined);
+  return `${prompt.message}${prompt.detail}`;
+}
+
+/** エンジンに届かなかった失敗か（窓にするかどうかの分かれ目） */
+export function isEngineUnreachable(error: unknown): boolean {
+  return error instanceof VoiceEngineError && error.kind === "unreachable";
 }
 
 /**
@@ -1045,7 +1068,10 @@ export async function assignVoices(work: WorkEntry, service: VoiceReadingService
   try {
     speakers = await service.speakers(true);
   } catch (error) {
-    void warnWithLog(describeEngineFailure(error, work));
+    // ログは窓のときも残す（describeEngineFailure が書く。実装ルール5）
+    const problem = describeEngineFailure(error, work);
+    if (isEngineUnreachable(error)) showVoiceEngineDown("assign");
+    else void warnWithLog(problem);
     return;
   }
   if (speakers.length === 0) {

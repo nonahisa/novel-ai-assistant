@@ -612,15 +612,50 @@ export function voiceEngineNextStep(error: VoiceEngineError): string {
  * **右下の知らせや読み上げの列の小さな文では、作者がしばらく気づかなかった**ので、
  * 届かなかったときだけ窓にする。ボタンは次の操作の1つ（OSの声で読む）で、閉じるは
  * VS Code が添える。エンジンが受け付けなかった（http・badResponse）は、読み始めて
- * すぐ列に理由が出て、選び直す先も列の中にあるので、窓にしない
+ * すぐ列に理由が出て、選び直す先も列の中にあるので、窓にしない。
+ *
+ * **［声の割り当て］と［音声に書き出す］でも同じ窓にする**（2026-11-08 作者の実機確認：
+ * 右下の知らせでは「ポップアップさせてください」）。見出しは揃え、詳しい文はその道の
+ * ボタンの名前にする。［OSの声で読む］は読む道でだけ意味があるので、ほかの道には
+ * 付けない（押せないボタンの名前も文に書かない）
  */
-export function voiceEngineDownPrompt(): {
+export type VoiceEngineDownRoute = "read" | "assign" | "export";
+
+const ENGINE_DOWN_MESSAGE = "音声合成のエンジンに繋がりませんでした。";
+
+export function voiceEngineDownPrompt(route?: "read"): {
   message: string;
   detail: string;
   useOsVoice: string;
+};
+export function voiceEngineDownPrompt(route: "assign" | "export"): {
+  message: string;
+  detail: string;
+};
+export function voiceEngineDownPrompt(route: VoiceEngineDownRoute = "read"): {
+  message: string;
+  detail: string;
+  useOsVoice?: string;
 } {
+  if (route === "assign") {
+    return {
+      message: ENGINE_DOWN_MESSAGE,
+      detail:
+        "AivisSpeech（または VOICEVOX）を起動してから、もう一度［声の割り当て］を押してください。\n\n" +
+        "割り当てる声はエンジンの話者から選ぶので、エンジンが動いていないと選べません。" +
+        "エンジンなしで読むなら、［声］で OS の声を選んでください。",
+    };
+  }
+  if (route === "export") {
+    return {
+      message: ENGINE_DOWN_MESSAGE,
+      detail:
+        "AivisSpeech（または VOICEVOX）を起動してから、もう一度［音声に書き出す］を押してください。\n\n" +
+        "音声の書き出しはエンジンの声で作るので、エンジンなしでは書き出せません。ファイルは作っていません。",
+    };
+  }
   return {
-    message: "音声合成のエンジンに繋がりませんでした。",
+    message: ENGINE_DOWN_MESSAGE,
     detail:
       "AivisSpeech（または VOICEVOX）を起動してから、もう一度［▶ 読む］を押してください。\n\n" +
       "エンジンなしで読むなら、［OSの声で読む］を押すと、いまの場所から OS の声で読みます。",
