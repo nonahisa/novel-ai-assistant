@@ -120,7 +120,8 @@ function declaredEncoding(document: vscode.TextDocument): string | undefined {
  * `files.encoding` に従う
  */
 async function isShiftJisOn190(document: vscode.TextDocument, deps: ShiftJisSaveDeps): Promise<boolean> {
-  const bytes = await deps.readBytes(document.uri);
+  // まだディスクに無い（初めて保存する）話は読めない。バイトから決まらないのと同じに扱う
+  const bytes = await deps.readBytes(document.uri).catch(() => new Uint8Array());
   if (bytes.some((byte) => byte >= 0x80)) return decodeBytes(bytes).encoding === "shift_jis";
   return deps.configuredEncoding(document.uri) === VSCODE_SHIFT_JIS;
 }
@@ -232,9 +233,8 @@ export function createUnencodableWarner(deps: UnencodableWarnerDeps): {
 const UTF8_BOM = new Uint8Array([0xef, 0xbb, 0xbf]);
 
 /**
- * 控えを残す。置き場は本文の退避と同じ `.novelai-recovery`（5世代。タイムラインの「控え」に並ぶ）。
- * 中身は UTF-8（BOM 付き）——Shift_JIS では元の字を書けないため。この控えから戻そうとしても、
- * Shift_JIS の原稿へは書けない字があるので書き戻しが場所つきで止まる（黙って「?」にはならない）
+ * 控えを残す。置き場は本文の退避と同じ `.novelai-recovery`（話の隣。5世代。タイムラインの「控え」に
+ * 並び、押すと開く）。中身は UTF-8（BOM 付き）——Shift_JIS では元の字を書けないため
  */
 async function keepUnencodable(filePath: string, text: string): Promise<string | undefined> {
   const recoveryPath = await createManagedRecoveryPath(filePath);

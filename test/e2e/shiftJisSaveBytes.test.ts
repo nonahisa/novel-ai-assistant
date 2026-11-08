@@ -169,7 +169,7 @@ test("自動保存の原稿エディターで「〜」を打つと、押さず�
 
 test("置き換え先の無い「♡」を打って保存すると、真ん中の窓で字と場所が知らされ、元の字を含む控えが残る", async () => {
   await withVsCode("Shift_JIS 書けない字", [{ name: EPISODE, text: BODY }], async (session) => {
-    const { page, workFolder, manuscriptFolder } = session;
+    const { page, manuscriptFolder } = session;
     await quickOpen(page, EPISODE);
     await typeAtEndAndSave(page, "♡");
     // 保存は止められない（VS Code の決まり）ので、ファイルは「?」になる
@@ -194,7 +194,8 @@ test("置き換え先の無い「♡」を打って保存すると、真ん中�
     expect(shown).toContain("?");
     expect(shown).toContain("控え");
 
-    const recoveryFolder = path.join(workFolder, ".novelai-recovery");
+    // 控えの置き場は話の隣（`core/atomicWrite.ts` の recoveryDirectoryFor）
+    const recoveryFolder = path.join(manuscriptFolder, ".novelai-recovery");
     const kept: string[] = [];
     await waitUntil(
       async () => {

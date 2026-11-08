@@ -172,15 +172,26 @@ describe("保存の直前の Shift_JIS の置き換え（onWillSaveTextDocument�
       expect(await fire(fakeDocument({ text: "abc〜" }), utf8.deps)).toEqual([]);
     });
 
-    it("ファイルを読めなくても保存を止めない（書き換え無しで返し、ログに残す）", async () => {
+    it("まだディスクに無い（読めない）話は、設定 files.encoding に従う", async () => {
+      const missing = async (): Promise<Uint8Array> => {
+        throw new Error("FileNotFound");
+      };
+      const sjis = harness({ readBytes: missing, configuredEncoding: () => "shiftjis" });
+      expect((await fire(fakeDocument({ text: "〜" }), sjis.deps))?.map((edit) => edit.newText)).toEqual(["～"]);
+      const unset = harness({ readBytes: missing });
+      expect(await fire(fakeDocument({ text: "〜" }), unset.deps)).toEqual([]);
+    });
+
+    it("途中で失敗しても保存を止めない（書き換え無しで返し、ログに残す）", async () => {
       const h = harness({
-        readBytes: async () => {
-          throw new Error("読めない");
+        readBytes: async () => new TextEncoder().encode("abc"),
+        configuredEncoding: () => {
+          throw new Error("設定を読めない");
         },
       });
       const edits = await fire(fakeDocument({ text: "〜" }), h.deps);
       expect(edits).toEqual([]);
-      expect(h.logs.join("\n")).toContain("読めない");
+      expect(h.logs.join("\n")).toContain("設定を読めない");
     });
   });
 });
