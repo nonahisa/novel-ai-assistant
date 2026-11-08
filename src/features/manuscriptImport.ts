@@ -10,6 +10,7 @@ import {
   IMPORT_CHOICE_LABELS,
   IMPORT_MAX_BYTES,
   adaptImportedNotation,
+  appendSubtitle,
   decodeImportedText,
   describeImportChoices,
   erasedCharCount,
@@ -17,12 +18,20 @@ import {
   isEpisodeBodyEmpty,
   planEpisodeImport,
   replaceEpisodeBody,
+  replaceEpisodeTitle,
+  titleCandidate,
   trimImported,
   type ImportChoice,
   type ImportSource,
 } from "../core/episodeImport";
 import { nextChapterNumber, parseEpisodeFileName } from "../core/episodeParser";
+import { renameEpisodeFile, renamedFileName } from "../core/episodeRename";
+import { pathExists } from "../core/fileSystem";
+import { episodeTitleSlot } from "../core/metadataParser";
+import { copyEmphasisFor } from "../core/postingCopyTargets";
+import type { EmphasisSite } from "../core/ruby";
 import {
+  episodeNameStyleOf,
   episodeNumberOf,
   insertedEpisodeFileName,
   nextEpisodeFileNameLike,
@@ -42,6 +51,8 @@ import { canRunProcesses } from "../core/runtime";
 import { readWordManuscript } from "../core/wordManuscript";
 import { withCancellableProgress } from "../views/progress";
 import { nameNewEpisodes, writeNewEpisodes } from "./addEpisodeFiles";
+import { followEpisodeFileRenames, renameFollowNotice } from "./episodeLedgers";
+import { registeredPostingSites } from "./postingCopyRegistered";
 import { reloadOpenDocumentAfterWrite } from "./reloadAfterWrite";
 
 /**
@@ -116,6 +127,14 @@ export async function importIntoEpisode(input: {
   readonly source: ImportSource;
   readonly scan: ImportScan;
   readonly document?: vscode.TextDocument;
+  /**
+   * 開いている話の名前に題を付けるときの手当て（原稿エディターの見た目を新しい名前へ
+   * 持って行く・古い面を閉じる）。サブタイトルの案と同じものを `extension.ts` が渡す
+   */
+  readonly renameHooks?: {
+    beforeRename?: (from: string, to: string) => void;
+    afterRename?: (from: string) => void;
+  };
 }): Promise<ManuscriptImportResult> {
   const { work, filePath, source, scan } = input;
   const none: ManuscriptImportResult = { changed: false };
@@ -185,17 +204,47 @@ export async function importIntoEpisode(input: {
   const shiftPlan =
     pivot === null || !canRunProcesses() ? null : planInsertion(scan.episodes, pivot, folder);
   const latest = findLatestEpisode(scan.episodes);
+  const collected = (current.collectedCount ?? 0) > 1;
   const plan = planEpisodeImport({
     bodyEmpty: isEpisodeBodyEmpty(disk.text),
-    collected: (current.collectedCount ?? 0) > 1,
+    collected,
     numbered: number !== null,
     isLatest: latest !== undefined && path.isSamePath(latest.filePath, current.filePath),
     shiftCount: shiftPlan?.renames.length ?? 0,
   });
 
+  /*
+    ルビと傍点は作品の投稿先に合わせる（作者の答え 2026-11-08「作品の投稿先に合わせる」）。
+    決め方は原稿エディターの写しと同じ `copyEmphasisFor`——投稿状態の台帳に**最初に登録した**
+    投稿先のうち、ルビの記法を持つもの（note は飛ばす）。登録が無ければカクヨムの形。
+    台帳が読めなくても止めない（`registeredPostingSites` が空を返す）
+  */
+  const emphasis = copyEmphasisFor(await registeredPostingSites(work));
+
+  /*
+    頭の題らしい行は、題にするかを訊く（作者の答え 2026-11-08「題として扱うか訊く」）。
+    空の話では、開いている話に題の置き場（冒頭の欄の題・サブタイトルの無いファイル名）が
+    あるときだけ訊く。置き場の無い話で題にすると、題がどこにも残らない
+  */
+  const candidate = titleCandidate(imported.text, imported.notation);
+  const currentTitlePlace = candidate
+    ? await titlePlaceOf(current, disk.text, candidate.title, collected)
+    : null;
+  let title: string | null = null;
+  let body = imported;
+  if (candidate && (plan.kind === "ask" || currentTitlePlace !== null)) {
+    const useTitle = await askTitle(candidate.title);
+    if (useTitle === undefined) return none;
+    if (useTitle) {
+      title = candidate.title;
+      body = { ...imported, text: candidate.rest, chars: charsOf(candidate.rest, imported.notation) };
+    }
+  }
+
+  const latestSeparator = latest ? (episodeNameStyleOf(latest.fileName)?.separator ?? null) : null;
   const nextFileName =
-    pivot === null ? undefined : nextEpisodeName(scan.episodes, current, folder, pivot);
-  const lastNaming = nameLastEpisode(scan, sourceName);
+    pivot === null ? undefined : nextEpisodeName(scan.episodes, current, folder, pivot, title);
+  const lastNaming = nameLastEpisode(scan, sourceName, title, latestSeparator);
 
   let choice: ImportChoice | "fill";
   if (plan.kind === "fill") {
@@ -203,7 +252,7 @@ export async function importIntoEpisode(input: {
   } else {
     const picked = await askImportChoice(plan.choices, {
       sourceName,
-      importedChars: imported.chars,
+      importedChars: body.chars,
       next: pivot !== null && nextFileName ? { number: pivot, fileName: nextFileName } : undefined,
       shiftCount: shiftPlan?.renames.length ?? 0,
       lastFileName: lastNaming.ok ? lastNaming.named.name : undefined,
@@ -221,7 +270,13 @@ export async function importIntoEpisode(input: {
           work,
           current,
           disk,
-          imported,
+          // 題の置き場の無い話へは、題にすると選んでいても1行目ごと本文に入れる（題を失わない）
+          imported: title !== null && currentTitlePlace === null ? imported : body,
+          title: currentTitlePlace === null ? null : title,
+          titlePlace: currentTitlePlace,
+          keptTitleInBody: title !== null && currentTitlePlace === null,
+          emphasis,
+          renameHooks: input.renameHooks,
           sourceName,
           overwrite: choice === "overwrite",
           cancelled: () => token.isCancellationRequested,
@@ -235,7 +290,8 @@ export async function importIntoEpisode(input: {
           pivot,
           fileName: nextFileName,
           reference: disk,
-          imported,
+          imported: body,
+          emphasis,
           sourceName,
           cancelled: () => token.isCancellationRequested,
         });
@@ -247,7 +303,7 @@ export async function importIntoEpisode(input: {
           return none;
         }
         if (token.isCancellationRequested) return cancelledBeforeWriting();
-        return addAsLast(work, scan, lastNaming.named, imported, sourceName);
+        return addAsLast(work, scan, lastNaming.named, body, emphasis, sourceName);
     }
   });
 }
@@ -340,14 +396,15 @@ async function readImported(
  *
  * 空く番号に今いる話（付け替えで1つ後ろへずれる話）の名前の書き方に合わせる。
  * その番号の話が無い（番号が飛んでいる）ときは、開いている話の書き方で番号だけを
- * 変える。**サブタイトルは付けない**（取り込む文の頭に題らしい行があっても、
- * ファイル名には使わない——本文の一部かもしれず、当て推量で名前にしない）。
+ * 変える。**サブタイトルは、作者が「1行目を題にする」を選んだときだけ付ける**
+ * （区切りは挿入と同じ `insertedEpisodeFileName` の決め方）。
  */
 function nextEpisodeName(
   episodes: readonly EpisodeFile[],
   current: EpisodeFile,
   folder: string,
-  pivot: number
+  pivot: number,
+  title: string | null
 ): string {
   const fallback = episodeNaming();
   const neighbor = episodes.find(
@@ -355,14 +412,18 @@ function nextEpisodeName(
       path.isSamePath(path.dirname(episode.filePath), folder) &&
       episodeNumberOf(episode.fileName) === pivot
   );
-  return neighbor
-    ? insertedEpisodeFileName({
-        neighborFileName: neighbor.fileName,
-        number: pivot,
-        subtitle: "",
-        fallback,
-      })
-    : nextEpisodeFileNameLike({ latestFileName: current.fileName, number: pivot, fallback });
+  if (neighbor) {
+    return insertedEpisodeFileName({
+      neighborFileName: neighbor.fileName,
+      number: pivot,
+      subtitle: title ?? "",
+      fallback,
+    });
+  }
+  const plain = nextEpisodeFileNameLike({ latestFileName: current.fileName, number: pivot, fallback });
+  return title
+    ? appendSubtitle(plain, title, episodeNameStyleOf(current.fileName)?.separator ?? null)
+    : plain;
 }
 
 /**
@@ -371,7 +432,11 @@ function nextEpisodeName(
  */
 function nameLastEpisode(
   scan: ImportScan,
-  sourceName: string
+  sourceName: string,
+  /** 作者が「1行目を題にする」を選んだときの題。名前のサブタイトルにする */
+  title: string | null,
+  /** いちばん新しい話の名前の、番号とサブタイトルの区切り（読めなければ null で `_`） */
+  separator: string | null
 ):
   | { ok: true; named: { file: MissingEpisodeFile; name: string } }
   | { ok: false; reason: string } {
@@ -401,7 +466,66 @@ function nameLastEpisode(
   if (result.named.length === 0) {
     return { ok: false, reason: result.skipped.map((entry) => entry.reason).join("、") };
   }
-  return { ok: true, named: result.named[0] };
+  const named = result.named[0];
+  return {
+    ok: true,
+    named: title ? { ...named, name: appendSubtitle(named.name, title, separator) } : named,
+  };
+}
+
+/** 取り込む文の純文字数（窓に出す。下の欄と同じ数え方） */
+function charsOf(text: string, notation: "markdown" | "plain"): number {
+  return countEpisodeChars(text, {
+    ext: notation === "markdown" ? ".md" : ".txt",
+    excludeRuby: false,
+  }).net;
+}
+
+/** 開いている話の題の置き場 */
+type TitlePlace = "header" | "rename";
+
+/**
+ * 開いている話（空の話・上書き）で、題をどこに置けるか。
+ *
+ * - 冒頭の欄に題の欄がある → その欄（カクヨム形式などのダウンロードファイル）
+ * - 題の欄が無く、ファイル名にサブタイトルが無い → ファイル名のサブタイトル
+ *   （サブタイトルの案と同じ `renameEpisodeFile`。名前がぶつかるなら置けない）
+ * - どちらでもない（もうサブタイトルがある・合本）→ 置けない（null）。題は本文に残す
+ */
+async function titlePlaceOf(
+  current: EpisodeFile,
+  lfText: string,
+  title: string,
+  collected: boolean
+): Promise<TitlePlace | null> {
+  if (collected) return null;
+  if (episodeTitleSlot(lfText)) return "header";
+  if (current.subtitle) return null;
+  const renamed = path.join(path.dirname(current.filePath), renamedFileName(current, title));
+  if (path.isSamePath(renamed, current.filePath) || (await pathExists(renamed))) return null;
+  return "rename";
+}
+
+/**
+ * 「1行目を題にしますか」を訊く。題にする→true、本文に入れる→false、やめる→undefined。
+ */
+async function askTitle(title: string): Promise<boolean | undefined> {
+  const items: (vscode.MessageItem & { use?: boolean })[] = [
+    { title: "題にする", use: true },
+    { title: "本文に入れる", use: false },
+    { title: IMPORT_CANCEL_LABEL, isCloseAffordance: true },
+  ];
+  const answer = await vscode.window.showWarningMessage(
+    `1行目「${title}」を、この話の題にしますか？`,
+    {
+      modal: true,
+      detail:
+        "［題にする］1行目を本文から外し、話の題にします（冒頭の欄に題の欄があればそこへ、" +
+        "無ければファイル名のサブタイトルにします）。\n［本文に入れる］1行目も本文として入れます。",
+    },
+    ...items
+  );
+  return answer?.use;
 }
 
 /** 話を新しく作るときの名前の決まり（`novelai.addEpisode`・「最新話」と同じ設定） */
@@ -447,6 +571,16 @@ async function writeIntoCurrent(input: {
   readonly current: EpisodeFile;
   readonly disk: TextFileContent;
   readonly imported: ImportedText;
+  /** 題にする字（置き場があるときだけ） */
+  readonly title: string | null;
+  readonly titlePlace: TitlePlace | null;
+  /** 題にすると選んだが置き場が無く、1行目を本文に残した */
+  readonly keptTitleInBody: boolean;
+  readonly emphasis: EmphasisSite;
+  readonly renameHooks?: {
+    beforeRename?: (from: string, to: string) => void;
+    afterRename?: (from: string) => void;
+  };
   readonly sourceName: string;
   readonly overwrite: boolean;
   readonly cancelled: () => boolean;
@@ -454,8 +588,18 @@ async function writeIntoCurrent(input: {
   const { work, current, disk, imported, sourceName } = input;
   if (input.cancelled()) return cancelledBeforeWriting();
 
-  const adapted = adaptImportedNotation(imported.text, imported.notation, current.fileName);
-  const newText = replaceEpisodeBody(disk.text, adapted);
+  const adapted = adaptImportedNotation(
+    imported.text,
+    imported.notation,
+    current.fileName,
+    input.emphasis
+  );
+  const withBody = replaceEpisodeBody(disk.text, adapted);
+  // 題は本文と同じ1回の書き込みで冒頭の欄へ入れる（欄が無ければ、書いたあとに名前へ付ける）
+  const newText =
+    input.title && input.titlePlace === "header"
+      ? (replaceEpisodeTitle(withBody, input.title) ?? withBody)
+      : withBody;
   // 空のファイル（0バイト）には末尾の改行の流儀がまだ無い。行の終わりで終える
   // （新しく作る話と同じ）。ハッシュは読んだときのままで照らす
   const format =
@@ -478,7 +622,49 @@ async function writeIntoCurrent(input: {
       "書き換える前の本文は控え（.novelai-recovery）にあります。タイムラインの「書き換える前の控え」から戻せます。"
     : `「${sourceName}」の文（${imported.chars}字）を ${current.fileName} の本文に入れました。`;
   logStep(`原稿エディター：${head}${result.recoveryPath ? `（控え：${result.recoveryPath}）` : ""}`);
-  void vscode.window.showInformationMessage([head, ...imported.notes].join("\n"));
+  const notes = [...imported.notes];
+  if (input.keptTitleInBody) {
+    notes.push("この話には題の置き場（冒頭の題の欄・サブタイトルの無いファイル名）が無いため、1行目は本文に入れました。");
+  }
+
+  if (input.title && input.titlePlace === "rename") {
+    /*
+      題の欄の無い原稿は、サブタイトルの案と同じ道でファイル名に付ける（`renameEpisodeFile`
+      ＋パスで話を指す台帳の追従）。**本文を書けてから名前を変える**——名前が変えられなくても
+      本文は入っており、題は知らせに出すので作者が付け直せる
+    */
+    try {
+      const renamed = await renameEpisodeFile(current, input.title, input.renameHooks);
+      const summary = await followEpisodeFileRenames(work, [
+        { fromPath: current.filePath, toPath: renamed },
+      ]);
+      useLogFile(work.folderPath);
+      const notice = renameFollowNotice(
+        `${head}題「${input.title}」をファイル名に付けました（${path.basename(renamed)}）。`,
+        summary
+      );
+      logStep(`原稿エディター：${notice.text}`);
+      const text = [notice.text, ...notes].join("\n");
+      if (notice.warn) void vscode.window.showWarningMessage(text);
+      else void vscode.window.showInformationMessage(text);
+      return { changed: true, newFilePath: renamed };
+    } catch (error) {
+      logFailure("原稿エディターの取り込み：題をファイル名に付けられなかった", {
+        ファイル: current.filePath,
+        詳細: messageOf(error),
+      });
+      void vscode.window.showWarningMessage(
+        [
+          `題「${input.title}」はファイル名に付けられませんでした（${messageOf(error)}）。本文は入っています。`,
+          head,
+          ...notes,
+        ].join("\n")
+      );
+      return { changed: true };
+    }
+  }
+
+  void vscode.window.showInformationMessage([head, ...notes].join("\n"));
   return { changed: true };
 }
 
@@ -521,11 +707,14 @@ async function addAsNext(input: {
   readonly fileName: string;
   readonly reference: TextFileContent;
   readonly imported: ImportedText;
+  readonly emphasis: EmphasisSite;
   readonly sourceName: string;
   readonly cancelled: () => boolean;
 }): Promise<ManuscriptImportResult> {
   const { work, episodes, pivot, fileName, imported, sourceName } = input;
-  const adapted = trimImported(adaptImportedNotation(imported.text, imported.notation, fileName));
+  const adapted = trimImported(
+    adaptImportedNotation(imported.text, imported.notation, fileName, input.emphasis)
+  );
   // **番号をずらす前に、書けるかを確かめる。** ずらしてから書けないと分かると、
   // 番号が1つ空いたまま残る
   const bytes = encodeForNewFile(adapted, input.reference);
@@ -582,9 +771,12 @@ async function addAsLast(
   scan: ImportScan,
   named: { file: MissingEpisodeFile; name: string },
   imported: ImportedText,
+  emphasis: EmphasisSite,
   sourceName: string
 ): Promise<ManuscriptImportResult> {
-  const text = trimImported(adaptImportedNotation(imported.text, imported.notation, named.name));
+  const text = trimImported(
+    adaptImportedNotation(imported.text, imported.notation, named.name, emphasis)
+  );
   const written = await writeNewEpisodes(work, scan, [
     { name: named.name, file: { ...named.file, content: { kind: "text", text } } },
   ]);

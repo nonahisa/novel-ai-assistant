@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   adaptImportedNotation,
+  appendSubtitle,
   decodeImportedText,
   describeImportChoices,
   erasedCharCount,
   isEpisodeBodyEmpty,
   planEpisodeImport,
   replaceEpisodeBody,
+  replaceEpisodeTitle,
+  titleCandidate,
 } from "../../../src/core/episodeImport";
 
 /**
@@ -221,5 +224,60 @@ describe("ルビと傍点の書き方を入れる先へ寄せる", () => {
       "# 見出し\n{漢字|かんじ}"
     );
     expect(adaptImportedNotation("｜漢字《かんじ》", "plain", "003.txt")).toBe("｜漢字《かんじ》");
+  });
+});
+
+describe("投稿先に合わせた傍点（作者の答え 2026-11-08「作品の投稿先に合わせる」）", () => {
+  it("なろう（アルファポリス）の作品の .txt へは、傍点をルビの代用で入れる", () => {
+    expect(adaptImportedNotation("{{強調}}と{漢字|かんじ}", "markdown", "003.txt", "narou")).toBe(
+      "｜強調《・・》と｜漢字《かんじ》"
+    );
+  });
+
+  it("投稿先の指定が無ければカクヨムの形", () => {
+    expect(adaptImportedNotation("{{強調}}", "markdown", "003.txt")).toBe("《《強調》》");
+  });
+});
+
+describe("頭の題らしい行（作者の答え 2026-11-08「題として扱うか訊く」）", () => {
+  it("短く、句点で終わらず、字下げも括弧も無い1行目のあとに本文が続けば題らしい", () => {
+    expect(titleCandidate("\n第三話　雪の朝\n\n　朝が来た。\n", "plain")).toEqual({
+      title: "第三話　雪の朝",
+      rest: "\n　朝が来た。\n",
+    });
+  });
+
+  it("Markdown の見出しは題らしい（# は落とし、ルビは親文字だけ）", () => {
+    expect(titleCandidate("# {雪|ゆき}の朝\n本文。\n", "markdown")).toEqual({
+      title: "雪の朝",
+      rest: "本文。\n",
+    });
+  });
+
+  it("本文らしい1行目は題にしない（句点で終わる・字下げ・会話・長すぎる・後ろに本文が無い）", () => {
+    expect(titleCandidate("朝が来た。\n二行目。\n", "plain")).toBeNull();
+    expect(titleCandidate("　朝が来た\n二行目。\n", "plain")).toBeNull();
+    expect(titleCandidate("「おはよう」\n二行目。\n", "plain")).toBeNull();
+    expect(titleCandidate(`${"長".repeat(41)}\n二行目。\n`, "plain")).toBeNull();
+    expect(titleCandidate("雪の朝\n", "plain")).toBeNull();
+  });
+
+  it("冒頭の欄の題を差し替える（空の欄なら入れる）", () => {
+    expect(replaceEpisodeTitle("【タイトル】\n古い題\n\n【本文】\n本文。\n", "新しい題")).toBe(
+      "【タイトル】\n新しい題\n\n【本文】\n本文。\n"
+    );
+    expect(replaceEpisodeTitle("【タイトル】\n\n【本文】\n", "新しい題")).toBe(
+      "【タイトル】\n新しい題\n\n【本文】\n"
+    );
+  });
+
+  it("冒頭の欄に題の欄が無ければ null（ほかの置き場で扱う）", () => {
+    expect(replaceEpisodeTitle("本文だけ。\n", "題")).toBeNull();
+    expect(replaceEpisodeTitle("【公開状態】\n未公開\n\n【本文】\n本文。\n", "題")).toBeNull();
+  });
+
+  it("新しく作る話の名前にサブタイトルを付ける（使えない記号は全角へ）", () => {
+    expect(appendSubtitle("006.txt", "雪の朝", null)).toBe("006_雪の朝.txt");
+    expect(appendSubtitle("第6話.md", "雪/朝", " ")).toBe("第6話 雪／朝.md");
   });
 });

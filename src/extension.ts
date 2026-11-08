@@ -543,6 +543,8 @@ import {
   onDidChangeManuscriptStatus,
   watchManuscriptTabs,
   watchDisconnectedManuscripts,
+  carryAppearanceToRenamed,
+  closeRenamedManuscript,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
 // 「すべて同期」の記録の前の保存（設計書5.5.19）。VS Code の文書の保存を呼ぶだけで、Node 専用の部品は引かない
@@ -2507,7 +2509,19 @@ export async function activate(
       }
       const { importIntoEpisode } = await import("./features/manuscriptImport.js");
       const scan = await scanWork(work);
-      const result = await importIntoEpisode({ work, filePath, source, scan, document });
+      const result = await importIntoEpisode({
+        work,
+        filePath,
+        source,
+        scan,
+        document,
+        // 1行目を題にしてファイル名に付けるときは、サブタイトルの案と同じ手当て
+        // （見た目を新しい名前へ持って行き、古い面を閉じる。設計書6.25.5）
+        renameHooks: {
+          beforeRename: carryAppearanceToRenamed,
+          afterRename: closeRenamedManuscript,
+        },
+      });
       if (result.changed) {
         // 取り込んだ文は今日書いた字ではない。基準を置き直して、次の保存で
         // 「今日 +N字」に数えないようにする（新しく作った話も同じ。設計書6.3.2）

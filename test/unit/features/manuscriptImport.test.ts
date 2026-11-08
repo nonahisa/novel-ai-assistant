@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { FileSystemError, FileType, Uri, window, workspace } from "../support/vscodeStub";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { emptyCounts } from "../../../src/core/charCount";
+import { PostingStore } from "../../../src/core/postingStore";
 import { importIntoEpisode } from "../../../src/features/manuscriptImport";
 
 /** ブラウザ版のふり（外部プロセスを起動できない） */
@@ -84,6 +85,8 @@ describe("原稿エディターの取り込み", () => {
   let infos: string[];
   /** 窓で押すボタン（無ければ何も押さない） */
   let press: string | undefined;
+  /** 「1行目を題にしますか」の窓で押すボタン */
+  let pressTitle: string | undefined;
   /** 窓が出たときに走らせる（外で書き換えられた、を写す） */
   let onAsk: (() => void) | undefined;
   /** この名前の付け替えで失敗させる */
@@ -100,6 +103,7 @@ describe("原稿エディターの取り込み", () => {
     warnings = [];
     infos = [];
     press = undefined;
+    pressTitle = undefined;
     onAsk = undefined;
     failRenameFrom = undefined;
     cancelAfterRename = undefined;
@@ -166,7 +170,8 @@ describe("原稿エディターの取り込み", () => {
           titles: buttons.map((button) => button.title),
         });
         onAsk?.();
-        return buttons.find((button) => button.title === press);
+        const answer = message.includes("題にしますか") ? pressTitle : press;
+        return buttons.find((button) => button.title === answer);
       }
       warnings.push(message);
       return undefined;
@@ -395,5 +400,132 @@ describe("原稿エディターの取り込み", () => {
     expect(result).toEqual({ changed: false });
     expect(read("005.txt")).toBe("");
     expect(warnings.join("\n")).toContain("Word の文書として読めませんでした");
+  });
+
+  describe("投稿先に合わせた傍点（作者の答え 2026-11-08）", () => {
+    function wordWithEmphasis(): Uint8Array {
+      const documentXml =
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+        '<w:p><w:r><w:rPr><w:em w:val="dot"/></w:rPr><w:t>強調</w:t></w:r><w:r><w:t>した。</w:t></w:r></w:p>' +
+        "</w:body></w:document>";
+      return zipSync({ "word/document.xml": encoder.encode(documentXml) });
+    }
+
+    test("なろうを先に登録した作品の .txt へは、傍点をなろうの形（ルビの代用）で入れる", async () => {
+      disk.set(diskPath("005.txt"), encoder.encode(""));
+      const store = new PostingStore(work);
+      const ledger = await store.load();
+      await store.save({
+        ...ledger,
+        sites: [
+          {
+            site: "narou",
+            newEpisodeUrl: "https://syosetu.com/usernovelmanage/isnoveluploadmenu/ncode/n1234ab/",
+          },
+          { site: "kakuyomu", newEpisodeUrl: "https://kakuyomu.jp/my/works/1234567890/episodes/new" },
+        ],
+      });
+      disk.set(wordPath, wordWithEmphasis());
+      window.showOpenDialog = async () => [Uri.file(wordPath)];
+
+      await importInto("005.txt", "word");
+
+      expect(read("005.txt")).toBe("｜強調《・・》した。\n");
+    });
+
+    test("投稿先の登録が無ければカクヨムの形", async () => {
+      disk.set(diskPath("005.txt"), encoder.encode(""));
+      disk.set(wordPath, wordWithEmphasis());
+      window.showOpenDialog = async () => [Uri.file(wordPath)];
+
+      await importInto("005.txt", "word");
+
+      expect(read("005.txt")).toBe("《《強調》》した。\n");
+    });
+  });
+
+  describe("1行目を題にするか訊く（作者の答え 2026-11-08）", () => {
+    const TITLED = "雪の朝\n\n　朝が来た。\n";
+
+    test("空の話（冒頭の欄あり）：［題にする］で冒頭の欄の題にし、本文からは外す", async () => {
+      disk.set(diskPath("005.txt"), encoder.encode("【タイトル】\n\n【公開状態】\n未公開\n\n【本文】\n"));
+      disk.set(sourcePath, encoder.encode(TITLED));
+      pressTitle = "題にする";
+
+      const result = await importInto("005.txt");
+
+      expect(asked.map((entry) => entry.message)).toEqual([
+        "1行目「雪の朝」を、この話の題にしますか？",
+      ]);
+      expect(result.changed).toBe(true);
+      expect(read("005.txt")).toBe("【タイトル】\n雪の朝\n\n【公開状態】\n未公開\n\n【本文】\n　朝が来た。\n");
+    });
+
+    test("空の話（題の欄の無い原稿）：［題にする］でファイル名にサブタイトルを付ける", async () => {
+      disk.set(diskPath("005.txt"), encoder.encode(""));
+      disk.set(sourcePath, encoder.encode(TITLED));
+      pressTitle = "題にする";
+
+      const result = await importInto("005.txt");
+
+      expect(result).toEqual({ changed: true, newFilePath: diskPath("005_雪の朝.txt") });
+      expect(disk.has(diskPath("005.txt"))).toBe(false);
+      expect(read("005_雪の朝.txt")).toBe("　朝が来た。\n");
+    });
+
+    test("［本文に入れる］なら今までどおり1行目も本文", async () => {
+      disk.set(diskPath("005.txt"), encoder.encode(""));
+      disk.set(sourcePath, encoder.encode(TITLED));
+      pressTitle = "本文に入れる";
+
+      await importInto("005.txt");
+
+      expect(read("005.txt")).toBe("雪の朝\n\n　朝が来た。\n");
+    });
+
+    test("［やめる］なら何も書かない", async () => {
+      disk.set(diskPath("005.txt"), encoder.encode(""));
+      disk.set(sourcePath, encoder.encode(TITLED));
+
+      const result = await importInto("005.txt");
+
+      expect(result).toEqual({ changed: false });
+      expect(read("005.txt")).toBe("");
+    });
+
+    test("［最後に加える］：題をサブタイトルにした名前で足す", async () => {
+      disk.set(sourcePath, encoder.encode(TITLED));
+      pressTitle = "題にする";
+      press = "最後に加える";
+
+      const result = await importInto("003.txt");
+
+      expect(asked[1].detail).toContain("「006_雪の朝.txt」");
+      expect(result).toEqual({ changed: true, newFilePath: diskPath("006_雪の朝.txt") });
+      expect(read("006_雪の朝.txt")).toBe("　朝が来た。\n");
+    });
+
+    test("［次の話として足す］：題をサブタイトルにした名前で差し込む", async () => {
+      disk.set(sourcePath, encoder.encode(TITLED));
+      pressTitle = "題にする";
+      press = "次の話として足す";
+
+      const result = await importInto("003.txt");
+
+      expect(result).toEqual({ changed: true, newFilePath: diskPath("004_雪の朝.txt") });
+      expect(read("004_雪の朝.txt")).toBe("　朝が来た。\n");
+      expect(read("005.txt")).toBe("第004.txtの本文。\n");
+    });
+
+    test("1行目が本文らしければ訊かない", async () => {
+      disk.set(diskPath("005.txt"), encoder.encode(""));
+      disk.set(sourcePath, encoder.encode("朝が来た。\n二行目。\n"));
+
+      await importInto("005.txt");
+
+      expect(asked).toEqual([]);
+      expect(read("005.txt")).toBe("朝が来た。\n二行目。\n");
+    });
   });
 });

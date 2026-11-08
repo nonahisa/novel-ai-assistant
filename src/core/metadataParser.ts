@@ -229,6 +229,42 @@ export function episodeReadableRanges(rawText: string): TextRange[] | null {
   return ranges;
 }
 
+/**
+ * 冒頭の欄の題（【タイトル】【エピソードタイトル】）の中身の位置（原稿エディターの取り込みで
+ * 題を差し替える。2026-11-08 作者の答え「題として扱うか訊く」。設計書6.25.13）。
+ *
+ * 欄の見つけ方は `episodeReadableRanges` と同じ `locateBlocks` を通す（写しを作らない）。
+ * 中身が空の欄も返す（`empty`。そのときの位置は欄の中身の最初の行の頭）。
+ * 頭の欄の無い原稿・題の欄の無い原稿・合本は null。
+ */
+export function episodeTitleSlot(
+  rawText: string
+): (TextRange & { empty: boolean }) | null {
+  const lines = rawText.split("\n");
+  const located = locateBlocks(lines.map((line) => line.replace(/\r$/, "")));
+  if (!located) return null;
+  const block =
+    TITLE_LABELS.map((label) => located.blocks.find((b) => b.label === label)).find(
+      (b): b is HeaderBlock => b !== undefined
+    ) ?? null;
+  if (!block) return null;
+  let at = 0;
+  const lineStarts: number[] = [];
+  for (const line of lines) {
+    lineStarts.push(at);
+    at += line.length + 1;
+  }
+  const startOf = (line: number): number =>
+    line < lineStarts.length ? lineStarts[line] : rawText.length;
+  const start = startOf(block.firstLine);
+  const end = Math.max(start, startOf(block.endLine) - (block.endLine < lines.length ? 1 : 0));
+  const value = rawText.slice(start, end);
+  if (value.trim() === "") return { start, end: start, empty: true };
+  const lead = value.length - value.replace(/^\s+/, "").length;
+  const trail = value.length - value.replace(/\s+$/, "").length;
+  return { start: start + lead, end: end - trail, empty: false };
+}
+
 export function parseEpisodeMetadata(rawText: string): EpisodeMetadata {
   const text = rawText.replace(/\r\n?/g, "\n");
   const located = locateBlocks(text.split("\n"));

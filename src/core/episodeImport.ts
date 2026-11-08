@@ -1,7 +1,8 @@
 import { countEpisodeChars } from "./episodeCharCount";
-import { episodeReadableRanges, type TextRange } from "./metadataParser";
+import { sanitizeFileName } from "./episodeParser";
+import { episodeReadableRanges, episodeTitleSlot, type TextRange } from "./metadataParser";
 import { decodeBytes, hasConflictMarkers } from "./textDecode";
-import { fromSiteNotation, toSiteNotation } from "./ruby";
+import { fromSiteNotation, stripRuby, toSiteNotation, type EmphasisSite } from "./ruby";
 
 /**
  * 原稿エディターの［入力］→「テキストファイルから」「Word から」で、外のファイルを
@@ -195,14 +196,92 @@ export function erasedCharCount(currentLf: string, ext: string): number {
 export function adaptImportedNotation(
   text: string,
   from: "markdown" | "plain",
-  targetFileName: string
+  targetFileName: string,
+  /**
+   * 傍点の書き方（作者の答え 2026-11-08「作品の投稿先に合わせる」）。作品に登録した
+   * 投稿先から `copyEmphasisFor` で決める（原稿エディターの写しと同じ決め方）。
+   * 省けばカクヨムの形
+   */
+  emphasis: EmphasisSite = "kakuyomu"
 ): string {
   const targetIsMarkdown = targetFileName.toLowerCase().endsWith(".md");
   if (targetIsMarkdown && from === "plain") return fromSiteNotation(text);
   if (!targetIsMarkdown && from === "markdown") {
-    return toSiteNotation(text.replace(/^#{1,6}[ \t　]+/gm, ""), "site");
+    return toSiteNotation(text.replace(/^#{1,6}[ \t　]+/gm, ""), "site", emphasis);
   }
   return text;
+}
+
+/** 題らしい1行目の長さの上限（投稿サイトの話の題の上限より少し短い目安） */
+const TITLE_MAX_LENGTH = 40;
+
+/**
+ * 取り込む文の1行目が題らしいか（作者の答え 2026-11-08「題として扱うか訊く」）。
+ *
+ * **決めつけない。** 題らしければ呼ぶ側が「1行目を題にするか」を訊く。題らしいとみなすのは
+ * 頭の空行を飛ばした最初の行が次のどちらかで、**そのあとに本文が続く**とき。
+ *
+ * - Markdown の見出し（`# 題`）
+ * - 40字以下で、字下げ（空白）で始まらず、会話や括弧（「『（〈【）で始まらず、
+ *   句点や閉じの記号（。．！？」』）…）で終わらない行——本文の段落は字下げか句点を持つ
+ *
+ * 題はルビ・傍点の印を落とした字にする（題の欄とファイル名には記法を入れない）。
+ * `rest` は題の行を除いた残り（頭の空行の扱いは `trimImported` に任せる）。
+ */
+export function titleCandidate(
+  importedLf: string,
+  notation: "markdown" | "plain"
+): { title: string; rest: string } | null {
+  const lines = importedLf.split("\n");
+  const first = lines.findIndex((line) => line.trim() !== "");
+  if (first < 0) return null;
+  const rest = lines.slice(first + 1).join("\n");
+  if (rest.trim() === "") return null;
+  const line = lines[first];
+  const heading = notation === "markdown" ? /^#{1,6}[ \t　]+(.+)$/.exec(line) : null;
+  let raw: string;
+  if (heading) {
+    raw = heading[1];
+  } else {
+    if (/^[\s　]/.test(line)) return null;
+    if (/^[「『（(〈【]/.test(line)) return null;
+    if (/[。．.！？!?」』）)…]\s*$/.test(line)) return null;
+    raw = line;
+  }
+  const title = stripRuby(fromSiteNotation(raw)).trim();
+  if (title === "" || title.length > TITLE_MAX_LENGTH) return null;
+  return { title, rest };
+}
+
+/**
+ * 冒頭の欄の題を差し替える。**題の欄が無ければ null**（呼ぶ側がファイル名へ付けるか、
+ * 題にしないかを決める）。欄の中身が空なら、その行に入れる。
+ */
+export function replaceEpisodeTitle(lfText: string, title: string): string | null {
+  const slot = episodeTitleSlot(lfText);
+  if (!slot) return null;
+  if (slot.empty) {
+    return lfText.slice(0, slot.start) + title + "\n" + lfText.slice(slot.start);
+  }
+  return lfText.slice(0, slot.start) + title + lfText.slice(slot.end);
+}
+
+/**
+ * 新しく作る話の名前に、サブタイトルを付ける（「この話の前に挿入」の名前の付け方と同じ：
+ * 番号の部分はそのまま、使えない記号は全角へ、区切りはいちばん新しい話の書き方。
+ * 書き方が読めなければ `_`）。
+ */
+export function appendSubtitle(
+  fileName: string,
+  subtitle: string,
+  separator: string | null
+): string {
+  const cleaned = sanitizeFileName(subtitle).trim();
+  if (!cleaned) return fileName;
+  const dot = fileName.lastIndexOf(".");
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+  const ext = dot > 0 ? fileName.slice(dot) : "";
+  return `${base}${separator ?? "_"}${cleaned}${ext}`;
 }
 
 /** 取り込むファイルの書き方。Word は Markdown に変換して受け取る */
