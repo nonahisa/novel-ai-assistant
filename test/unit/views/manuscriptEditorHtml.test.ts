@@ -82,8 +82,10 @@ describe("原稿エディタのHTML", () => {
     expect(html).not.toContain("text-orientation: upright");
   });
 
+  // 上の列の［コピー］ボタンは、［出力］→［投稿］の品書きの項目になった（作者の決定 2026-11-08）
   it("投稿サイト用のコピーがある", () => {
-    expect(html).toContain('id="copy"');
+    expect(html).toContain('<button id="posting"');
+    expect(html).toContain('add("コピー（投稿サイト用）"');
   });
 
   it("右クリックの品書きの置き場がある", () => {
@@ -614,11 +616,14 @@ describe("下段と品書きの整理", () => {
     expect(html).not.toContain("#menu .head {");
   });
 
-  /** 書いている手の近く、画面の右下に置く */
-  it("「最新話を書く」は下段の右端に寄せる", () => {
+  /**
+   * 書いている手の近く、下段に置く。**右下は［保存］になった**（作者の決定 2026-11-08）。
+   * ［最新話を書く］は［最新話］と名を変え、前と次の話の隣へ移した
+   */
+  it("［最新話］は下段にあり、右端は［保存］", () => {
     expect(html).toContain('<div id="bottom">');
-    expect(html).toContain('id="latest"');
-    expect(html).toContain("#latest { margin-left: auto; }");
+    expect(html).toMatch(/<button id="latest"[^>]*>最新話<\/button>/);
+    expect(html).toContain("#saveCheck { margin-left: auto; }");
   });
 
   /**
@@ -806,9 +811,12 @@ describe("前の話・次の話", () => {
     expect(stop).toContain("event.stopPropagation();");
   });
 
-  /** 「最新話を書く」は右端のまま（作者の依頼、2026-08-28） */
-  it("最新話を書くは、下段の右端に残る", () => {
-    expect(html).toContain("#latest { margin-left: auto; }");
+  /**
+   * 右端は［保存］（作者の決定 2026-11-08。前は「最新話を書く」が右端だった。2026-08-28）
+   */
+  it("下段の右端は［保存］", () => {
+    expect(html).toContain("#saveCheck { margin-left: auto; }");
+    expect(html).not.toContain("#latest { margin-left: auto; }");
   });
 });
 

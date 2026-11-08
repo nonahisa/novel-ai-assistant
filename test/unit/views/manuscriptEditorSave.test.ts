@@ -212,9 +212,10 @@ function harness(options: { composeOn?: boolean; text?: string } = {}): Harness 
 }
 
 describe("画面の［保存］ボタン", () => {
-  it("下の欄にある（打つ面・組んで書く面で共通の #foot）", () => {
+  it("下段の右端にあり（作者の決定 2026-11-08）、保存できなかった知らせは字数の欄（#foot）に出る", () => {
+    const bottom = html.slice(html.indexOf('<div id="bottom">'), html.indexOf('<div id="foot">'));
+    expect(bottom).toMatch(/<button id="saveCheck"[^>]*>保存<\/button>/);
     const foot = html.slice(html.indexOf('<div id="foot">'), html.indexOf('<div id="menu">'));
-    expect(foot).toMatch(/<button id="saveCheck"[^>]*>保存<\/button>/);
     expect(foot).toMatch(/id="saveFail"/);
     // #note の直前に #unsent がある並びは崩さない（出ている間 #note を隠す CSS が隣を見ている）
     expect(foot.indexOf('id="unsent"')).toBeLessThan(foot.indexOf('id="note"'));

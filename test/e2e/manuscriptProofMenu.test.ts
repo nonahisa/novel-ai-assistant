@@ -18,7 +18,7 @@ import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
-import { composeText, memoPanelFrame, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { clickToolButton, composeText, memoPanelFrame, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { SIDEBAR_LAUNCH } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -65,7 +65,7 @@ async function menuItems(frame: Frame): Promise<{ items: string[]; rules: number
 
 /** ［校正］を押して品書きを開く */
 async function openProofMenu(frame: Frame): Promise<void> {
-  await frame.locator("#proof").click();
+  await clickToolButton(frame, "proof");
   await waitUntil(() => menuOpen(frame), "［校正］の品書きが開く", 5_000);
 }
 
@@ -123,7 +123,7 @@ test("［校正］の品書きは4つの校正と区切りの下の「校正・�
       const ruleAfter = await frame.evaluate(() => (document.querySelector("#menu .rule")?.previousElementSibling?.textContent ?? "").trim());
       expect(ruleAfter).toBe("まとめて校正（作品全体）");
       // もう一度押すと閉じる
-      await frame.locator("#proof").click();
+      await clickToolButton(frame, "proof");
       await waitUntil(async () => !(await menuOpen(frame)), "［校正］を押し直すと品書きが閉じる", 5_000);
       // Esc で閉じる
       await openProofMenu(frame);

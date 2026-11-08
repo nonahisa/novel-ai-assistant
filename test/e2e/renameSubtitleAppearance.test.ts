@@ -16,7 +16,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { frontFrameShowing, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { clickToolButton, frontFrameShowing, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { SIDEBAR_LAUNCH, showSidebar, treeContextMenu, treeRow, treeRowLabels, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -120,10 +120,10 @@ test("縦書き・字の大きさを変えた話を右クリック「ファイ�
       expect(original.size, `字の大きさが読める ${JSON.stringify(original)}`).toBeGreaterThan(0);
       expect(original.compose, `組んで書く面で開く（既定）${JSON.stringify(original)}`).toBe(true);
 
-      await frame.locator("#dir").click();
+      await clickToolButton(frame, "dir");
       await waitUntil(async () => (await faceLook(frame)).vertical, "［縦書きにする］で縦書きになる", 10_000);
-      await frame.locator("#bigger").click();
-      await frame.locator("#bigger").click();
+      await clickToolButton(frame, "bigger");
+      await clickToolButton(frame, "bigger");
       await waitUntil(async () => (await faceLook(frame)).size > original.size, "［＋］で字が大きくなる", 10_000);
       const changed = await faceLook(frame);
       // 見た目の知らせ（appearance）が拡張機能へ届くのを待つ（持ち越す値はそれで決まる。restartAndDisconnect と同じ理由）

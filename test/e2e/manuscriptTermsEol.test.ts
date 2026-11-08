@@ -21,7 +21,7 @@ import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { emptyCharacter } from "../../src/models/character";
-import { composeText, footText, frontFrameAgain, openEpisode, placeCaretAfter, selectText } from "./support/manuscriptFrame";
+import { clickToolButton, composeText, footText, frontFrameAgain, openEpisode, placeCaretAfter, selectText } from "./support/manuscriptFrame";
 import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput";
 import { charactersFolder, settingsPanelFrame, writeCharactersTo } from "./support/settingsFixture";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -168,14 +168,14 @@ async function rubyAndEmphasis(session: E2ESession, given: Frame, episode: strin
   await selectText(frame, "一行目");
   // 狭い窓では、本体の吹き出しが上の帯のボタンに重なって押せない（dismissWorkbenchHover）
   await dismissWorkbenchHover(page);
-  await frame.locator("#ruby").click();
+  await clickToolButton(frame, "ruby");
   await waitForQuickInput(page, "「一行目」の読み");
   await answerInput(page, "いちぎょうめ");
   await waitUntil(async () => (await frame.locator("#compose ruby").count()) > 0, `${episode}：画面にルビが組まれる`);
 
   await selectText(frame, "三行目");
   await dismissWorkbenchHover(page);
-  await frame.locator("#emph").click();
+  await clickToolButton(frame, "emph");
   await waitUntil(async () => await tabIsDirty(page, episode), `${episode}：傍点で文書が変わる`);
   // 送り直しが画面へ届いてから保存する（manuscriptEditor.test.ts の傍点の件と同じ理由）
   await waitUntil(async () => (await frame.locator("#compose .emphasis").count()) > 0, `${episode}：画面に傍点が出る`);

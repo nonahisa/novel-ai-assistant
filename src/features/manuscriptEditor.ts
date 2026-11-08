@@ -1259,7 +1259,7 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
     );
     void vscode.window.showWarningMessage(
       `「${paths.basename(filePath)}」の読み上げを始められませんでした。` +
-        "作品一覧からこの話を開いて、上のバーの「読み上げ」を押してください。"
+        "作品一覧からこの話を開いて、上のバーの「出力」→「読み上げ」を押してください。"
     );
     return;
   }
@@ -1806,6 +1806,11 @@ type Incoming =
    * `check` は画面から届く値なので、繋ぎの側が表（`MANUSCRIPT_PROOF_CHECKS`）で確かめる
    */
   | { type: "runProofCheck"; check?: unknown }
+  /**
+   * ［出力］→［投稿］の品書きから、この話の投稿の操作を呼ぶ（作者の決定 2026-11-08）。
+   * `action` は画面から届く値なので、繋ぎの側が表（`MANUSCRIPT_POSTING_ACTIONS`）で確かめる
+   */
+  | { type: "runPosting"; action?: unknown }
   /** 執筆再開の資料を開く（設計書6.36。右クリックから。0.76.7） */
   | { type: "resumeWriting" }
   /**
@@ -2052,6 +2057,14 @@ export interface ManuscriptEditorDeps {
    * **繋ぐのは `extension.ts` だけ**——校正の命令はあちらにしか無い。
    */
   runProofCheck?: (filePath: string, check: unknown) => Promise<void>;
+  /**
+   * ［出力］→［投稿］の品書き（作者の決定 2026-11-08）。投稿ヘルパーへ渡す（この話を投稿する）・
+   * 投稿サイト設定・投稿と読者の反応を、**作品一覧の右クリックと同じ命令**で呼ぶ。
+   *
+   * **渡すのは原稿のパス。** 作品と話は繋ぎの側がこの原稿から引く（訊き直さない）。
+   * **繋ぐのは `extension.ts` だけ**——投稿の命令はあちらにしか無い。
+   */
+  runPosting?: (filePath: string, action: unknown) => Promise<void>;
   /**
    * この話の単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23
    * 「エディターから単話プロット参照したいです」）。
@@ -3457,6 +3470,10 @@ export class ManuscriptEditorProvider
 
         case "runProofCheck":
           await this.deps.runProofCheck?.(fromUri(document.uri), message.check);
+          break;
+
+        case "runPosting":
+          await this.deps.runPosting?.(fromUri(document.uri), message.action);
           break;
 
         case "openEpisodePlot":
