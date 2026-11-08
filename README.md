@@ -424,7 +424,7 @@ VS Code 版の Claude Code から、この拡張機能の道具（MCPサーバ�
 | `novelai.manuscriptEditor.readAloudRate` | `1` | 読み上げの速さ（0.5〜2） |
 | `novelai.readAloud.aivisSpeechUrl` | `http://127.0.0.1:10101` | 人物の声で朗読するときの AivisSpeech の接続先。この PC の外のホストを書くと、本文がそのホストへ送られます（最初に確認を出します）。試作・テスト中 |
 | `novelai.readAloud.voicevoxUrl` | `http://127.0.0.1:50021` | 人物の声で朗読するときの VOICEVOX の接続先。この PC の外のホストを書くと、本文がそのホストへ送られます（最初に確認を出します）。試作・テスト中 |
-| `novelai.readAloud.voiceEngineUrl` | `http://127.0.0.1:10101` | 古い設定です。既定と違う値を書いてあれば、口が 50021 なら VOICEVOX、それ以外なら AivisSpeech の接続先として使います。新しい設定を書いたエンジンでは、新しい設定を使います |
+| `novelai.readAloud.voiceEngineUrl` | `http://127.0.0.1:10101` | 古い設定です。既定と違う値を書いてあれば、ポート番号が 50021 なら VOICEVOX、それ以外なら AivisSpeech の接続先として使います。新しい設定を書いたエンジンでは、新しい設定を使います |
 | `novelai.episodeFileExtension` | `.txt` | 新規ファイルの既定の拡張子 |
 | `novelai.episodeNumberDigits` | `3` | 話数のゼロ埋め桁数（3なら `001.txt`） |
 | `novelai.chatter.enabled` | `true` | 書いている最中に、AIが相談パネルへひとこと差し込む（Ollamaのみ） |
