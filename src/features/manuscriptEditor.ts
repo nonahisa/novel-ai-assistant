@@ -2514,7 +2514,7 @@ export class ManuscriptEditorProvider
     const askUseOsVoice = (): void => {
       if (engineDownAsking) return;
       engineDownAsking = true;
-      const prompt = voiceEngineDownPrompt();
+      const prompt = voiceEngineDownPrompt("read");
       void Promise.resolve(
         vscode.window.showWarningMessage(
           prompt.message,

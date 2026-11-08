@@ -345,3 +345,78 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     expect(state.progress.some((message) => message.includes("4"))).toBe(true);
   });
 });
+
+describe("エンジンに届かないときは、画面の真ん中の窓（2026-11-08 作者の実機確認）", () => {
+  let engine: FakeEngine | undefined;
+  const shown: Array<{ message: string; options: unknown; items: unknown[] }> = [];
+  let original: typeof window.showWarningMessage;
+  beforeEach(() => {
+    shown.length = 0;
+    original = window.showWarningMessage;
+    window.showWarningMessage = (async (message: string, options: unknown, ...items: unknown[]) => {
+      shown.push({ message, options, items });
+      return undefined;
+    }) as typeof window.showWarningMessage;
+  });
+  afterEach(async () => {
+    window.showWarningMessage = original;
+    await engine?.close();
+    engine = undefined;
+  });
+
+  function expectEngineDownModal(): void {
+    // 右下の知らせ（［ログを見る］）は出さない
+    expect(state.warnings).toEqual([]);
+    expect(shown).toHaveLength(1);
+    expect(shown[0].message).toContain("音声合成のエンジンに繋がりませんでした");
+    expect(shown[0].options).toMatchObject({
+      modal: true,
+      detail: expect.stringContaining("［音声に書き出す］"),
+    });
+    // 書き出しの道では OS の声で読めないので、ボタンは付けない（閉じるだけ）
+    expect(shown[0].items).toEqual([]);
+  }
+
+  test("エンジンを閉じたまま押したとき", async () => {
+    engine = await startFakeVoiceEngine({ pcm: true, terms: ACML_BOTH });
+    const url = engine.url;
+    await engine.close();
+    engine = undefined;
+    const service = new VoiceReadingService(() => url, undefined, async () => true);
+    const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
+    const outcome = await exportVoiceAudio({ work, episodePath: EPISODE, text: TEXT, sentences }, service, lame);
+    expect(outcome.kind).toBe("stopped");
+    expect(exported().size).toBe(0);
+    expectEngineDownModal();
+  });
+
+  test("合成の途中でエンジンに届かなくなったとき（ファイルは作らない）", async () => {
+    engine = await startFakeVoiceEngine({ pcm: true, terms: ACML_BOTH });
+    const url = engine.url;
+    // 本物の fetch で通し、合成の頼みだけ繋がらない形にする（エンジンが落ちたのと同じ）
+    const service = new VoiceReadingService(
+      () => url,
+      async (input, init) => {
+        if (new URL(input).pathname === "/synthesis") throw new TypeError("fetch failed");
+        return fetch(input, init);
+      },
+      async () => true
+    );
+    const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
+    const outcome = await exportVoiceAudio({ work, episodePath: EPISODE, text: TEXT, sentences }, service, lame);
+    expect(outcome.kind).toBe("stopped");
+    expect(exported().size).toBe(0);
+    expectEngineDownModal();
+  });
+
+  test("エンジンが受け付けなかったとき（http）は、今までどおり右下の知らせ", async () => {
+    engine = await startFakeVoiceEngine({ pcm: true, terms: ACML_BOTH, failSynthesis: true });
+    const url = engine.url;
+    const service = new VoiceReadingService(() => url, undefined, async () => true);
+    const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
+    const outcome = await exportVoiceAudio({ work, episodePath: EPISODE, text: TEXT, sentences }, service, lame);
+    expect(outcome.kind).toBe("stopped");
+    expect(shown).toHaveLength(0);
+    expect(state.warnings.join("\n")).toContain("受け付けませんでした");
+  });
+});

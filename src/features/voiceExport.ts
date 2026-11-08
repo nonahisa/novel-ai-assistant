@@ -28,7 +28,7 @@ import { sanitizeFileName } from "../core/episodeParser";
 import { withCancellableProgress } from "../views/progress";
 import { confirmRun, notifyDone, warnWithLog, whenNoticePicked } from "../views/notify";
 import { revealFolder } from "../views/openDocument";
-import type { VoiceReadingService } from "./voiceReading";
+import { isEngineUnreachable, showVoiceEngineDown, type VoiceReadingService } from "./voiceReading";
 
 /**
  * 人物の声の朗読を、音声ファイル（MP3）に書き出す（設計書6.42.4）。
@@ -313,9 +313,18 @@ export async function exportVoiceAudio(
     void warnWithLog(reason);
     return { kind: "stopped", reason };
   };
+  /*
+    **エンジンに届かなかったら、右下でなく画面の真ん中の窓**（2026-11-08 作者の実機確認：
+    「ポップアップさせてください」）。押したすぐ（計画・話者の一覧）でも、合成の途中でも同じ。
+    ログは呼ぶ前に残してある（実装ルール5）
+  */
+  const stopEngineDown = (): VoiceExportOutcome => ({
+    kind: "stopped",
+    reason: showVoiceEngineDown("export"),
+  });
 
   const planned = await service.plan(work, episodePath, target.text, target.sentences);
-  if ("problem" in planned) return stop(planned.problem);
+  if ("problem" in planned) return planned.engineDown ? stopEngineDown() : stop(planned.problem);
   const units = planned.units.filter((unit) => unit.speech.trim() !== "");
   if (units.length === 0) return stop("この話には、読み上げる文がありません。");
 
@@ -326,7 +335,7 @@ export async function exportVoiceAudio(
     brand = engineBrandOf(await service.engineClient().engineManifest());
   } catch (error) {
     logEngineFailure("エンジンの名乗りを引く", error, work);
-    if (error instanceof VoiceEngineError && error.kind === "unreachable") return stop(engineProblem(error));
+    if (isEngineUnreachable(error)) return stopEngineDown();
     brand = undefined;
     speakers = [];
   }
@@ -389,7 +398,7 @@ export async function exportVoiceAudio(
       terms.map(describeVoice).join("、")
   );
 
-  type Made = { mp3: Uint8Array; clip: PcmClip } | { failed: string } | "cancelled";
+  type Made = { mp3: Uint8Array; clip: PcmClip } | { failed: string } | "engineDown" | "cancelled";
   const made: Made = await withCancellableProgress("人物の声で音声に書き出しています", async (progress, token) => {
     const controller = new AbortController();
     token.onCancellationRequested(() => controller.abort());
@@ -428,6 +437,7 @@ export async function exportVoiceAudio(
         return "cancelled";
       }
       logEngineFailure("音を作る", error, work);
+      if (isEngineUnreachable(error)) return "engineDown";
       return { failed: error instanceof WavError ? `${error.message}。` : engineProblem(error) };
     }
   });
@@ -436,6 +446,7 @@ export async function exportVoiceAudio(
     notifyDone("音声の書き出しを中止しました。ファイルは作っていません。");
     return { kind: "cancelled" };
   }
+  if (made === "engineDown") return stopEngineDown();
   if ("failed" in made) return stop(`音声に書き出せませんでした（ファイルは作っていません）。${made.failed}`);
 
   // ── ここから書く（新規作成だけ。上書きしない） ──
