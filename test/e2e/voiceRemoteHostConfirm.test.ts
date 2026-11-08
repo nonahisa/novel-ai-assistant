@@ -39,7 +39,7 @@ import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { engineHostOutsideThisPc } from "../../src/core/voiceEngine";
-import { openEpisode } from "./support/manuscriptFrame";
+import { clickToolButton, openEpisode } from "./support/manuscriptFrame";
 import { runCommand } from "./support/quickInput";
 import { restartVsCode, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -172,7 +172,7 @@ async function rememberedConfirms(session: E2ESession): Promise<Record<string, u
 /** 話を開き、読み上げの列を出して、読み方を「人物の声」にする。押せるようになった面を返す */
 async function openVoiceReading(session: E2ESession): Promise<Frame> {
   const frame = await openEpisode(session.page, EPISODE, "朝の駅は静かだった");
-  await frame.locator("#aloudToggle").click();
+  await clickToolButton(frame, "aloudToggle");
   // 「人物の声」が選べる（拡張機能が使えると知らせてくる）まで待ってから選ぶ。前の選択を覚えていれば、もう選ばれている
   await waitUntil(
     async () => (await frame.locator('#aloudEngine option[value="engine"]').isDisabled().catch(() => true)) === false,

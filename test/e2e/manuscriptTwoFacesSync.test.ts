@@ -17,7 +17,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
-import { composeText, manuscriptFrames, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { clickToolButton, composeText, manuscriptFrames, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { isVerticalFace } from "./support/verticalFace";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
@@ -57,7 +57,7 @@ test("同じ話を縦書きと横書きの2枚で開いて、片方で打った�
       const right = second as Frame;
 
       // 2枚目を縦書きにする（1枚目は横書きのまま）
-      await right.locator("#dir").click();
+      await clickToolButton(right, "dir");
       await waitUntil(async () => await isVerticalFace(right), "2枚目が縦書きになる");
       expect(await isVerticalFace(first), "1枚目は横書きのまま").toBe(false);
 

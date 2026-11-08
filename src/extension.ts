@@ -550,6 +550,7 @@ import {
 import {
   isManuscriptKeyArgs,
   proofCheckCommand,
+  postingActionCommand,
   workForFile,
 } from "./core/manuscriptKeys";
 import { registeredPostingSites } from "./features/postingCopyRegistered";
@@ -1238,7 +1239,9 @@ export async function activate(
   ): Promise<unknown> => {
     const work = filePath ? workForFile(registry.list(), filePath) : undefined;
 
-    if (command === "novelai.checkTyposForFile") {
+    // 話の節点を受ける命令（この話の誤字脱字、［投稿］の「投稿ヘルパーへ渡す」＝この話を投稿する）。
+    // 引数なしで呼ぶと、どちらも「どの行で押されたか」が無いと言って止まる（requireTreeNode）
+    if (command === "novelai.checkTyposForFile" || command === "novelai.postThisEpisode") {
       const episode =
         work && filePath
           ? (await treeProvider.getEpisodes(work)).find((item) =>
@@ -2442,6 +2445,18 @@ export async function activate(
       const command = proofCheckCommand(check);
       if (!command) {
         logStep(`原稿エディターの［校正］：知らない項目が届いたので無視しました（${String(check)}）`);
+        return;
+      }
+      const node = await manuscriptNodeFor(command, filePath);
+      if (node === STOP_MANUSCRIPT_COMMAND) return;
+      await vscode.commands.executeCommand(command, node);
+    },
+    // ［出力］→［投稿］の品書き（作者の決定 2026-11-08）。**作品一覧の右クリックと同じ命令**を、
+    // 押した原稿の作品・話で呼ぶ（節点の作り方は［校正］と同じ `manuscriptNodeFor`）
+    runPosting: async (filePath, action) => {
+      const command = postingActionCommand(action);
+      if (!command) {
+        logStep(`原稿エディターの［投稿］：知らない項目が届いたので無視しました（${String(action)}）`);
         return;
       }
       const node = await manuscriptNodeFor(command, filePath);

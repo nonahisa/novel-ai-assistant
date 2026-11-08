@@ -99,7 +99,10 @@ describe("画面から範囲が届く道", () => {
   );
 
   test("右クリックの「コピー（投稿サイト用）」が、選択の位置を添えて送る", () => {
-    const menu = html.slice(html.indexOf('add("コピー（投稿サイト用）"'));
+    // 右クリックの品書き（openMenu）の中の項目を見る。［出力］→［投稿］の品書きにも同じ名前の
+    // 項目があるが、そちらは前の上の列の［コピー］と同じ便（選択を添えない）
+    const rightClick = html.slice(html.indexOf("function openMenu("));
+    const menu = rightClick.slice(rightClick.indexOf('add("コピー（投稿サイト用）"'));
 
     expect(menu.slice(0, 700)).toContain("menuSelection()");
     expect(menu.slice(0, 700)).toContain('type: "copyForPosting"');

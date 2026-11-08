@@ -5,7 +5,7 @@
  */
 import type { Frame } from "playwright-core";
 import { test } from "vitest";
-import { selectText, openEpisode } from "../support/manuscriptFrame";
+import { clickToolButton, selectText, openEpisode } from "../support/manuscriptFrame";
 import { answerInput, waitForQuickInput } from "../support/quickInput";
 import { waitUntil } from "../support/wait";
 import { recordFeature } from "./support/featureScene";
@@ -34,7 +34,7 @@ test("ルビと傍点の広報素材を撮る", async () => {
       await caption("付けたい語を選んで、［ルビ］を押す");
       await selectText(frame, "切符");
       await page.waitForTimeout(1_500);
-      await frame.locator("#ruby").click();
+      await clickToolButton(frame, "ruby");
       await waitForQuickInput(page, "「切符」の読み");
       await page.waitForTimeout(1_200);
       await answerInput(page, "きっぷ");
@@ -44,7 +44,7 @@ test("ルビと傍点の広報素材を撮る", async () => {
       await selectText(frame, "白い傘");
       await caption("傍点も、選んで［傍点］を押すだけ");
       await page.waitForTimeout(1_200);
-      await frame.locator("#emph").click();
+      await clickToolButton(frame, "emph");
       await waitUntil(async () => (await frame.locator("#compose .emphasis").count()) > 0, "傍点が付く", 15_000);
       await page.waitForTimeout(3_500);
     },

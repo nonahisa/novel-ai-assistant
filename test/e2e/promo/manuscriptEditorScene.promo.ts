@@ -5,7 +5,7 @@
  */
 import type { Frame } from "playwright-core";
 import { test } from "vitest";
-import { composeText, openEpisode, placeCaretAfter } from "../support/manuscriptFrame";
+import { clickToolButton, composeText, openEpisode, placeCaretAfter } from "../support/manuscriptFrame";
 import { waitUntil } from "../support/wait";
 import { recordFeature } from "./support/featureScene";
 
@@ -32,7 +32,7 @@ test("原稿エディターの広報素材を撮る", async () => {
       await page.mouse.move(640, 690);
       await caption("横書きでも、縦書きでも原稿が書ける");
       await page.waitForTimeout(3_000);
-      await frame.locator("#dir").click();
+      await clickToolButton(frame, "dir");
       await waitUntil(
         async () => frame.evaluate(() => getComputedStyle(document.getElementById("compose") as HTMLElement).writingMode.startsWith("vertical")),
         "縦書きになる",

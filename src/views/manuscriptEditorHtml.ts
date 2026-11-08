@@ -155,13 +155,29 @@ button.on {
    理由は隣に文で出す（読み上げなら #aloudNote） */
 button:disabled { opacity: 0.45; cursor: default; }
 button:disabled:hover { background: var(--vscode-button-secondaryBackground); }
-#bar .gap { flex: 1 1 auto; }
-#bar .sep {
+#bar .sep,
+.tray .sep {
   width: 1px;
   align-self: stretch;
   background: var(--vscode-panel-border);
   margin: 0 2px;
 }
+
+/* ── 2段目（作者の決定 2026-11-08。設計書6.25） ─────────────
+   上の列は［入力］［出力］［補助］［表示］の4つだけにし、押すと下にその段が開く。
+   **開くのは1つずつ**（台本の trays）。読み上げの列（#aloud）と同じ形で、
+   使わないあいだは段ごと畳む。狭い窓ではボタンの単位で次の行へ折り返す */
+.tray {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.tray.open { display: flex; }
+.tray button { white-space: nowrap; }
 
 /* ── 読み上げの列（音読推敲。設計書6.42） ─────────────
    **道具箱とは別の列にする。** 読み上げは「いま何をしているところか」が
@@ -285,10 +301,11 @@ body.revealmark:not(.compose):not(.notepv) #aloudmarks { display: block; }
 }
 /* ボタンの字の途中では折り返さない（折り返すのはボタンの単位） */
 #bottom button { white-space: nowrap; }
-/* **画面の右下へ置く**（作者の依頼、2026-08-28）。
-   margin-left: auto にしておくと、この段へ左寄せの要素を足しても
-   このボタンだけが右端に残る（並び順で決め打たない） */
-#latest { margin-left: auto; }
+/* **右下は［保存］**（作者の決定 2026-11-08。設計書6.25.9）。前は［最新話を書く］が
+   右下で、［保存］は字数の欄にあった。margin-left: auto にしておくと、この段へ
+   左寄せの要素を足しても、このボタンだけが右端に残る（並び順で決め打たない）。
+   ［最新話］は前と次の話の隣（前に［口述］があった所）へ移した */
+#saveCheck { margin-left: auto; }
 /* 口述モード（設計書6.83）。**入っているあいだだけ「整える」「やめる」を出す**
    ——押す前から並べても、何を整えるのかがまだ決まっていない */
 .dictate-on { display: none; }
@@ -887,12 +904,6 @@ ruby > rt {
 /* **控えめにするのは、いつも出ているものだけ。** 欄ごと薄くすると、
    届かないときの赤字（#unsent・保存できなかった #saveFail）まで薄くなり、読みにくくなる */
 #foot > :not(#unsent):not(#saveFail) { opacity: 0.85; }
-/* ［保存］（設計書6.25.9）。欄の高さに収める（押すたびに欄が伸びると本文の面が動く） */
-#saveCheck {
-  flex: 0 0 auto;
-  font-size: 11px;
-  padding: 0 8px;
-}
 /* **字数は控えめに出す。** 書いている最中にいつも視界へ入るものなので、
    読みにいったときだけ読める濃さにしておく（数えるのが目的ではない） */
 #counts {
@@ -1018,23 +1029,45 @@ body.clipped #cheer { white-space: normal; }
 </head>
 <body class="vertical">
 <div id="bar">
-  <button id="dir" title="縦書きと横書きを切り替えます">横書きにする</button>
+  <button id="trayInput" class="tray-toggle" data-tray="input" aria-expanded="false" aria-controls="rowInput" title="取り込み（テキストファイル・バックアップ・Word）と口述の段を出し入れします">入力</button>
+  <button id="trayOutput" class="tray-toggle" data-tray="output" aria-expanded="false" aria-controls="rowOutput" title="投稿・読み上げ・PDF の段を出し入れします">出力</button>
+  <button id="trayAssist" class="tray-toggle" data-tray="assist" aria-expanded="false" aria-controls="rowAssist" title="校正・単話プロット・ルビ・傍点の段を出し入れします">補助</button>
+  <button id="trayView" class="tray-toggle" data-tray="view" aria-expanded="false" aria-controls="rowView" title="縦書き／横書き・書体・文字の大きさの段を出し入れします">表示</button>
+</div>
+
+<div id="rowInput" class="tray" data-tray="input">
+  <button id="importText" class="soon" title="テキストファイルを1話として取り込みます（この機能は次の版で入ります）">テキストファイルから</button>
+  <button id="importBackup" class="soon" title="投稿サイトのバックアップから、開いている作品へ話を足します（この機能は次の版で入ります）">バックアップから</button>
+  <button id="importWord" class="soon" title="Word の文書を1話として取り込みます（この機能は次の版で入ります）">Word から</button>
+  <div class="sep"></div>
+  <button id="dictate" title="OSの音声入力で書き取った文を、あとからAIに整えてもらいます。押してから音声入力を始めてください">口述</button>
+  <button id="dictateClean" class="dictate-on" title="口述を始めたところから、いまのカーソルまでをAIに整えてもらいます">整える</button>
+  <button id="dictateCancel" class="dictate-on" title="整えずに口述モードを抜けます。書き取った本文はそのまま残ります">やめる</button>
+</div>
+
+<div id="rowOutput" class="tray" data-tray="output">
+  <button id="posting" aria-haspopup="menu" title="投稿ヘルパーへ渡す・投稿サイト用のコピー・投稿サイト設定を選びます">投稿</button>
+  <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
+  <button id="exportPagePdf" class="soon" title="開いている話を PDF にします（この機能は次の版で入ります）">PDF（この話）</button>
+</div>
+
+<div id="rowAssist" class="tray" data-tray="assist">
+  <button id="proof" aria-haspopup="menu" title="この話の校正（誤字脱字・推敲・表記ゆれ・まとめて校正）を選んで走らせます。校正・メモパネルもここから開けます">校正</button>
+  <button id="episodePlot" title="この話の単話プロットを右の列に開きます。無ければ作るかを訊きます。前後の話へ移ると、右の単話プロットもその話のものに切り替わります">単話プロット</button>
   <div class="sep"></div>
   <button id="ruby" title="選んだ文字にルビを振ります">ルビ</button>
   <button id="emph" title="選んだ文字に傍点を付けます（傍点の付いた所なら外します）">傍点</button>
-  <div class="sep"></div>
-  <button id="copy" title="投稿サイトの記法に直してコピーします">コピー（投稿サイト用）</button>
-  <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
-  <button id="episodePlot" title="この話の単話プロットを右の列に開きます。無ければ作るかを訊きます。前後の話へ移ると、右の単話プロットもその話のものに切り替わります">単話プロット</button>
-  <button id="proof" aria-haspopup="menu" title="この話の校正（誤字脱字・推敲・表記ゆれ・まとめて校正）を選んで走らせます。校正・メモパネルもここから開けます">校正</button>
-  <div class="sep note-only"></div>
-  <button id="noteStyle" class="note-only" title="noteの読み味に近い組版（幅・行間・書体）で表示します。もう一度押すと、いつもの表示に戻ります">note風</button>
-  <button id="notePv" class="note-only" title="noteに貼ったときの見た目を出します。noteに無い記法には印が付きます">貼り付け後</button>
+</div>
+
+<div id="rowView" class="tray" data-tray="view">
+  <button id="dir" title="縦書きと横書きを切り替えます">横書きにする</button>
   <div class="sep"></div>
   <button id="font" title="本文の書体を選びます">書体</button>
   <button id="smaller" title="文字を小さく">ー</button>
   <button id="bigger" title="文字を大きく">＋</button>
-  <div class="gap"></div>
+  <div class="sep note-only"></div>
+  <button id="noteStyle" class="note-only" title="noteの読み味に近い組版（幅・行間・書体）で表示します。もう一度押すと、いつもの表示に戻ります">note風</button>
+  <button id="notePv" class="note-only" title="noteに貼ったときの見た目を出します。noteに無い記法には印が付きます">貼り付け後</button>
 </div>
 
 <div id="aloud">
@@ -1105,16 +1138,13 @@ body.clipped #cheer { white-space: normal; }
   <button id="prev" title="ひとつ前の話を開きます">← 前の話</button>
   <button id="next" title="次の話を開きます。最終話に本文があれば、次の話を作って開きます">次の話 →</button>
   <div class="sep"></div>
-  <button id="dictate" title="OSの音声入力で書き取った文を、あとからAIに整えてもらいます。押してから音声入力を始めてください">口述</button>
-  <button id="dictateClean" class="dictate-on" title="口述を始めたところから、いまのカーソルまでをAIに整えてもらいます">整える</button>
-  <button id="dictateCancel" class="dictate-on" title="整えずに口述モードを抜けます。書き取った本文はそのまま残ります">やめる</button>
-  <button id="latest" title="いちばん新しい話を開きます。白紙でなければ、次の話を作って開きます">最新話を書く</button>
+  <button id="latest" title="いちばん新しい話を開きます。白紙でなければ、次の話を作って開きます">最新話</button>
+  <button id="saveCheck" data-keys title="打った字を原稿へ送ってから保存し、保存できたかを確かめます（Ctrl+S と違い、保存できなかったときに知らせます）">保存</button>
 </div>
 
 <div id="foot">
   <span id="counts"></span>
   <span id="cheer"></span>
-  <button id="saveCheck" data-keys title="打った字を原稿へ送ってから保存し、保存できたかを確かめます（Ctrl+S と違い、保存できなかったときに知らせます）">保存</button>
   <span id="saveFail" role="alert">
     <span id="saveFailText" data-keys></span>
     <button id="saveFailCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
@@ -1801,14 +1831,69 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     }
     openProofMenu(event.currentTarget.getBoundingClientRect());
   });
-  document.getElementById("copy").addEventListener("click", function () {
-    /*
-      **カーソルの行を添える。** 合本（1ファイルに全話）を開いていると、
-      どの話をコピーするのかは位置でしか分からない（設計書6.12.1）。
-      合本でなければ拡張機能側が黙って捨てる。
-    */
-    vscode.postMessage({ type: "copyForPosting", line: caretLine() });
+  /*
+    ［出力］の段の［投稿］（作者の決定 2026-11-08）。［校正］と同じ品書きの箱に、
+    投稿ヘルパーへ渡す・コピー（投稿サイト用）・投稿サイト設定などを出す。
+    **押した瞬間の click は document まで上がって品書きを閉じる**ので、ここで止める
+  */
+  document.getElementById("posting").addEventListener("click", function (event) {
+    event.stopPropagation();
+    if (menu.classList.contains("open") && menuOwner === "posting") {
+      closeMenu();
+      return;
+    }
+    openPostingMenu(event.currentTarget.getBoundingClientRect());
   });
+
+  /*
+    上の列の段の出し入れ（作者の決定 2026-11-08。設計書6.25）。
+    **画面の中だけで終える**——拡張機能へ送るのは、段の中のボタンが機能を呼ぶときだけ。
+    開くのは1つずつで、同じ言葉を押し直すと閉じ、ほかの言葉を押すと切り替わる。
+  */
+  /* trays:start */
+  const trayToggles = Array.prototype.slice.call(document.querySelectorAll("#bar .tray-toggle"));
+  const trayRows = Array.prototype.slice.call(document.querySelectorAll(".tray"));
+  /** いま開いている段（"" は閉じている） */
+  let trayOpen = "";
+  function trayShow(name) {
+    /*
+      **出力の段を離れるときは、読み上げの段も畳む**（畳めば読み上げも止まる）。
+      読み上げの段は出力の段の［読み上げ］で出し入れするので、出力を閉じたまま
+      残すと、止めるボタンが見えないまま声が続く（今の［読み上げ］で畳むときと同じ理由）
+    */
+    if (trayOpen === "output" && name !== "output" && document.body.classList.contains("aloud")) {
+      aloudCloseRow();
+    }
+    trayOpen = name;
+    for (const toggle of trayToggles) {
+      const on = toggle.dataset.tray === name;
+      toggle.classList.toggle("on", on);
+      toggle.setAttribute("aria-expanded", on ? "true" : "false");
+    }
+    for (const row of trayRows) row.classList.toggle("open", row.dataset.tray === name);
+    // **段のぶんだけ本文の面の高さが変わる。** 読み上げの列を出し入れするときと同じく、
+    // 重ね敷きの枠を測り直す（測り直さないと、用語の色が1行ずつずれる）
+    scheduleAlignMarks();
+  }
+  for (const toggle of trayToggles) {
+    toggle.addEventListener("click", function () {
+      trayShow(trayOpen === toggle.dataset.tray ? "" : toggle.dataset.tray);
+    });
+  }
+  /* trays:end */
+
+  /*
+    次の版で作る入口（テキストファイル・バックアップ・Word・PDF。作者の決定 2026-11-08）。
+    **押しても拡張機能へは何も送らない**——似た名前の今ある命令（作品の登録・作品全体の
+    PDF）を代わりに呼ぶと、作者が思ったのと違うことが起きる。下の欄に一言だけ出す
+  */
+  /* soonButtons:start */
+  for (const button of Array.prototype.slice.call(document.querySelectorAll("button.soon"))) {
+    button.addEventListener("click", function () {
+      note.textContent = "この機能は次の版で入ります（" + button.textContent + "）。";
+    });
+  }
+  /* soonButtons:end */
 
   /** 選んでいる文字。組んで書く面では選択範囲、書く面では textarea の選択 */
   function selectionText() {
@@ -4931,6 +5016,61 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
       vscode.postMessage({ type: "openMemos" });
     });
     // ボタンの下に出す。狭い窓では面の中へ収める（右クリックと同じ収め方）
+    placeMenu(anchor.left, anchor.bottom + 2);
+  }
+
+  /**
+   * ［出力］の段の［投稿］の品書き（作者の決定 2026-11-08。設計書6.25）。
+   *
+   * **呼ぶ命令は作品一覧の右クリックと同じ**（core/manuscriptKeys.ts の
+   * MANUSCRIPT_POSTING_ACTIONS）。作品と話は、押した原稿のものを拡張機能側が引く。
+   * 「コピー（投稿サイト用）」だけは、前の上の列の［コピー］と同じ便で送る
+   * ——合本（1ファイルに全話）ではどの話かがカーソルの位置でしか分からない（設計書6.12.1）
+   */
+  function openPostingMenu(anchor) {
+    menu.innerHTML = "";
+    menuTerm = null;
+    menuOwner = "posting";
+    function add(label, title, onClick) {
+      const item = document.createElement("div");
+      item.className = "item";
+      item.textContent = label;
+      item.title = title;
+      item.addEventListener("click", function () {
+        closeMenu();
+        onClick();
+      });
+      menu.appendChild(item);
+    }
+    function run(action) {
+      return function () {
+        // **先に打ちかけの字を送る**（［校正］と同じ）。投稿の案内は保存してから
+        // 本文を読むので、送り損ねると最後に打った字が投稿欄へ渡らない
+        keyHandOver();
+        vscode.postMessage({ type: "runPosting", action: action });
+      };
+    }
+    add(
+      "投稿ヘルパーへ渡す",
+      "この話を投稿する案内を開きます（変換→コピー→投稿ページ→記録）。投稿ヘルパー（ブラウザ拡張）へ渡す形のコピーも選べます",
+      run("helper")
+    );
+    add("コピー（投稿サイト用）", "投稿サイトの記法に直してコピーします", function () {
+      vscode.postMessage({ type: "copyForPosting", line: caretLine() });
+    });
+    const r = document.createElement("div");
+    r.className = "rule";
+    menu.appendChild(r);
+    add(
+      "投稿サイト設定",
+      "この作品を出すサイト・投稿ページのURL・作品情報を登録します",
+      run("settings")
+    );
+    add(
+      "投稿と読者の反応…",
+      "新話投稿・順位や読者の反応の記録など、投稿まわりの操作を選びます",
+      run("readers")
+    );
     placeMenu(anchor.left, anchor.bottom + 2);
   }
 
@@ -9997,6 +10137,9 @@ ${IME_ENTER_GUARD_SOURCE}
    * 押すのは作者である。
    */
   function aloudOpenRow() {
+    // 詳細メニューの「原稿を読み上げる」から来たときも、畳む［読み上げ］が見えるよう
+    // 出力の段を開く（上の列の段の出し入れ。trays）
+    if (trayOpen !== "output") trayShow("output");
     document.body.classList.add("aloud");
     aloudToggle.classList.add("on");
     aloudLoadVoices();
@@ -10008,17 +10151,24 @@ ${IME_ENTER_GUARD_SOURCE}
     scheduleAlignMarks();
   }
 
-  aloudToggle.addEventListener("click", function () {
-    if (!document.body.classList.contains("aloud")) {
-      aloudOpenRow();
-      return;
-    }
+  /**
+   * 読み上げの列を畳む（道具箱のボタンと、出力の段を離れたとき）。
+   */
+  function aloudCloseRow() {
     document.body.classList.remove("aloud");
     aloudToggle.classList.remove("on");
     // 畳むときは必ず止める（見えない列が声を出し続けると、止め方が無い）
     aloudFinish();
     // 畳んだぶん本文の面が広がる。開くときと同じ理由で測り直す
     scheduleAlignMarks();
+  }
+
+  aloudToggle.addEventListener("click", function () {
+    if (!document.body.classList.contains("aloud")) {
+      aloudOpenRow();
+      return;
+    }
+    aloudCloseRow();
   });
 
   aloudPlay.addEventListener("click", function () {
