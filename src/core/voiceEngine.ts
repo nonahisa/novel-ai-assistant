@@ -103,6 +103,9 @@ export function engineHostOutsideThisPc(baseUrl: string): string | undefined {
  * 読み上げに使えないので落とす。`type` が無い古い形は話し声として扱う。
  * 一覧そのものが配列でなければ投げる。
  */
+/** 話す声のスタイルの型（これ以外の型〔歌など〕は朗読に使わない） */
+const TALK_STYLE_TYPES = new Set(["talk", "streaming_talk"]);
+
 export function parseSpeakers(json: unknown): VoiceSpeaker[] {
   if (!Array.isArray(json)) {
     throw new VoiceEngineError(
@@ -122,7 +125,10 @@ export function parseSpeakers(json: unknown): VoiceSpeaker[] {
       const s = style as Record<string, unknown>;
       if (typeof s.name !== "string" || typeof s.id !== "number") continue;
       if (!Number.isInteger(s.id)) continue;
-      if (typeof s.type === "string" && s.type !== "talk") continue;
+      // 話す声だけを使う。**VOICEVOX 0.26 は話す声を "streaming_talk" で返す**（2026-11-08 作者の実機。
+      // "talk" だけを受けていたので44人とも外れ、「話者が1人も見つかりませんでした」と出た）。
+      // 型が無いもの（古い版・AivisSpeech）は話す声として扱い、歌の声（sing など）は外す
+      if (typeof s.type === "string" && !TALK_STYLE_TYPES.has(s.type)) continue;
       styles.push({ name: s.name, id: s.id });
     }
     if (styles.length === 0) continue;

@@ -295,3 +295,29 @@ describe("悲しみに「せつなめ」「切なげ」も当てる（0.141.1。
     expect(pickStyleForEmotion(speakers, 888753760, "悲しみ").styleId).toBe(888753762);
   });
 });
+
+describe("VOICEVOX 0.26 の話者の一覧（2026-11-08 作者の実機）", () => {
+  // VOICEVOX 0.26.1 は、話す声のスタイルの type を "streaming_talk" で返す（44人すべて）。
+  // "talk" だけを受けていたので話者が0人になり、「話者が1人も見つかりませんでした」と出ていた
+  test("type が streaming_talk の声も、話す声として読む。歌の声は外す", () => {
+    const speakers = parseSpeakers([
+      {
+        name: "四国めたん",
+        speaker_uuid: "7ffcb7ce-00ec-4bdc-82cd-45a8889e43ff",
+        styles: [
+          { name: "ノーマル", id: 2, type: "streaming_talk" },
+          { name: "あまあま", id: 0, type: "streaming_talk" },
+        ],
+      },
+      { name: "波音リツ", speaker_uuid: "r", styles: [{ name: "ノーマル", id: 6000, type: "sing" }] },
+      { name: "古い版", speaker_uuid: "o", styles: [{ name: "ノーマル", id: 1, type: "talk" }, { name: "型なし", id: 3 }] },
+    ]);
+    expect(speakers.map((s) => s.name)).toEqual(["四国めたん", "古い版"]);
+    expect(speakers[0]?.styles.map((s) => s.id)).toEqual([2, 0]);
+    expect(speakers[1]?.styles.map((s) => s.id)).toEqual([1, 3]);
+  });
+
+  test("設定の接続先の前後の空白は取り除く", () => {
+    expect(normalizeEngineUrl("http://127.0.0.1:50021 ")).toBe("http://127.0.0.1:50021");
+  });
+});
