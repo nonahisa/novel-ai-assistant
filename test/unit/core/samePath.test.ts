@@ -21,7 +21,7 @@ const host = vi.hoisted(() => ({ windows: false }));
 
 vi.mock("../../../src/core/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../src/core/runtime")>();
-  return { ...actual, isWindowsHost: () => host.windows };
+  return { ...actual, isCaseInsensitiveFileNameHost: () => host.windows };
 });
 
 import {

@@ -48,14 +48,29 @@ export function hostPlatform(): NodeJS.Platform | undefined {
 }
 
 /**
- * Windows の上で動いているか。
+ * Windows の上で動いているか。**分からないとき（ブラウザ版）は false。**
  *
- * **分からないとき（ブラウザ版）は false。** 場所の比べ方で大文字小文字を
- * 区別する側へ倒す（`paths.normalizeForComparison`・`locationCompare.ts` が
- * 以前から取っていた判断をそのまま引き継ぐ）。
+ * 場所の比べ方（大文字小文字を畳むか）は、Mac も含めて下の
+ * `isCaseInsensitiveFileNameHost` が決める（0.148.0 で分けた）。
  */
 export function isWindowsHost(): boolean {
   return hostPlatform() === "win32";
+}
+
+/**
+ * ファイル名の大文字小文字を区別しない OS か（場所を比べる前に小文字へ畳むかを決める）。
+ *
+ * - **Windows（NTFS）と Mac（APFS の既定）は区別しない。** Mac で `touch a.txt A.txt` は
+ *   1つのファイルになる（2026-11-08、Mac のセッションが実機で確かめた）。畳まないと、
+ *   同じ話を別の場所と読む
+ * - **Linux は区別する。** ブラウザ版も分からないので区別する側へ倒す（前からの判断）
+ *
+ * Mac でも大文字小文字を区別する APFS で作った入れ物はあるが、既定ではないので見ない。
+ * VS Code 自身も Linux 以外を「区別しない」として扱っている（ファイルの見張りの比べ方）。
+ */
+export function isCaseInsensitiveFileNameHost(): boolean {
+  const platform = hostPlatform();
+  return platform === "win32" || platform === "darwin";
 }
 
 /**

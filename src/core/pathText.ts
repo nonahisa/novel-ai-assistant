@@ -1,5 +1,5 @@
 import * as nodePath from "path";
-import { isWindowsHost } from "./runtime";
+import { isCaseInsensitiveFileNameHost } from "./runtime";
 
 /**
  * 場所の文字列だけを扱う部分（`paths.ts` の中身のうち、`vscode` が要らないもの）。
@@ -198,7 +198,7 @@ export function normalizeForComparison(location: string): string {
   // 保証は無いので、無ければ大文字小文字を区別する側へ倒す（判定は
   // `runtime.ts` の1か所。**この正規化をほかへ書き写さない**——写しが
   // 8か所あり、どれも分け方を落としてブラウザ版で落ちた。2026-09-23）
-  return isWindowsHost() ? normalized.toLowerCase() : normalized;
+  return isCaseInsensitiveFileNameHost() ? normalized.toLowerCase() : normalized;
 }
 
 /**
@@ -282,7 +282,7 @@ function stripTrailingSeparators(location: string): string {
  *
  * - ドライブ文字の大小（フォルダー選びは `c:`、アドレス欄から貼ると `C:`）
  * - 末尾の `\`
- * - フォルダー名の大小（Windows では同じフォルダー）
+ * - フォルダー名の大小（Windows・Mac では同じフォルダー）
  * - 前後の空白
  *
  * **登録簿の場所を比べる所は、すべてこれ（か `isSameFolder`）を通す。**
@@ -341,7 +341,7 @@ export function goesOutside(base: string, relative: string): boolean {
  * 中にあるのに外と誤判定する。** 区切りまで見る `goesOutside` を通す。
  *
  * - **前方一致では足りない**——`いじめられっ子2` は `いじめられっ子` の中ではない
- * - 大文字小文字は、Windows のときだけ同一視する（`normalizeForComparison`）
+ * - 大文字小文字は、Windows・Mac のときだけ同一視する（`normalizeForComparison`）
  * - 仕組みや場所の違う URI、別のドライブは、相対で表せないので「外」
  * - **URI の日本語は、符号を解いてから比べる**（`decodeUriEscapes`。2026-09-24）。
  *   登録簿の場所は生の日本語、開いた本文の場所は符号化された形で来るので、

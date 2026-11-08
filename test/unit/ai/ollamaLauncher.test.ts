@@ -103,7 +103,10 @@ describe("実行ファイルの探索", () => {
   test("macOSではHomebrewとアプリ内の場所を候補に含める", () => {
     const candidates = executableCandidates("darwin", {}, "/Users/test");
 
+    // Homebrew で入れた Mac には Ollama.app が無く、/opt/homebrew/bin/ollama（Intel の Mac は
+    // /usr/local/bin/ollama）だけがある（2026-11-08、Mac のセッションの機械）。3つとも探す
     expect(candidates).toContain("/opt/homebrew/bin/ollama");
+    expect(candidates).toContain("/usr/local/bin/ollama");
     expect(candidates).toContain(
       "/Applications/Ollama.app/Contents/Resources/ollama"
     );

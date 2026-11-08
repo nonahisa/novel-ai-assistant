@@ -4,7 +4,7 @@ import {
   isUnderFolder,
   isUnderFolderWithExtension,
 } from "../../../src/core/folderWatchMatch";
-import { isWindowsHost } from "../../../src/core/runtime";
+import { isCaseInsensitiveFileNameHost } from "../../../src/core/runtime";
 
 /**
  * 束ねた見張りの絞り込みが、**束ねる前の各見張りの glob と同じ結果になるか**
@@ -71,7 +71,7 @@ describe("「下のどこかの .txt / .md」（本文の見張り）", () => {
     // 場所もパターンも小文字にしてから比べる
     expect(
       isUnderFolderWithExtension(WORK, `${WORK}/第1話.TXT`, ["txt", "md"])
-    ).toBe(isWindowsHost());
+    ).toBe(isCaseInsensitiveFileNameHost());
   });
 });
 
