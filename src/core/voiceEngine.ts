@@ -146,8 +146,11 @@ export class VoiceEngineError extends Error {
      * - `http` … 応答はあったが成功ではない（本文は `detail` に。ログへ残す）
      * - `badResponse` … 成功の応答だが、形が読めない
      * - `aborted` … 中止した
+     * - `timeout` … こちらが決めた待てる時間のうちに答えが来なかった（0.147.1）。**エンジンに
+     *   届かないのとは分ける**——遅い PC では、エンジンは動いていても声づくりに時間がかかる
+     *   （ノートPCの実機確認：8.5秒の音に13.6〜23.3秒）。見分けは文面でなく、自分で切ったかで行う
      */
-    readonly kind: "unreachable" | "http" | "badResponse" | "aborted",
+    readonly kind: "unreachable" | "http" | "badResponse" | "aborted" | "timeout",
     message: string,
     /** ログへ残す詳しいこと（エンジンの返した本文など） */
     readonly detail?: string,
@@ -523,8 +526,54 @@ export class SynthesisCache {
 /** 差し替えられる fetch（テストでは偽のエンジンへ向ける） */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-/** 1回の問い合わせを待つ長さ。合成は長い文で数秒かかる */
+/** 短い問い合わせ（話者の一覧・下ごしらえ・名乗りなど）を待つ長さ */
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * 声づくり（synthesis）を待つ長さ＝基本の長さ＋文の1字あたりの長さ（0.147.1）。
+ *
+ * ノートPCの実機確認（i5-1335U・GPU なし・AivisSpeech を CPU で）では、8.5秒の音（60字ほど）を
+ * 作るのに 13.6〜23.3秒かかった（1字あたり 0.4秒ほど）。長い文ほど長くかかるので、一律の30秒では
+ * 長い文が必ず時間切れになる。1字あたり1秒は、その2倍あまりの余裕。ここで待つのは
+ * 「エンジンが止まったまま」を見分けるためだけで、待つ長さが長くても、作者の中止はすぐ効く
+ */
+const SYNTHESIS_BASE_TIMEOUT_MS = 30_000;
+const SYNTHESIS_PER_CHAR_TIMEOUT_MS = 1_000;
+
+/**
+ * **エンジンの中で順番を待っている時間は数えない**（0.147.1）。
+ *
+ * エンジンは頼みを1つずつ作る。朗読は先読みで2つ並べて頼み、書き出しも2つずつ頼むので、
+ * 後ろの頼みは前の声ができるまでエンジンの中で待つ。頼んでから時計を回すと、その待ちのぶんで
+ * 時間切れになる（ノートPCで「繋がりませんでした」と出て止まった原因）。そこで、同じ接続先への
+ * 頼みを頼んだ順に並べ、**前の頼みがすべて終わって自分が先頭になってから**時計を回す。
+ * 前の頼みが止まったままなら、その頼みが先に時間切れになって列を抜けるので、いつまでも待つことはない。
+ *
+ * 接続先ごとに1本の列（拡張機能の中で1つ。口〔VoiceEngineClient〕は頼むたびに作られるため、
+ * 口の中には持てない）。**エンジンが本当は並べて作れる場合**は、時計が遅れて回り始めるだけで、
+ * 待つ長さが延びる側にしか外れない
+ */
+const engineTurns = new Map<string, Array<() => void>>();
+
+/** 列に並ぶ。先頭なら `begin` をすぐ呼ぶ。返す関数で列を抜ける（次の先頭の `begin` を呼ぶ） */
+function enterEngineTurn(baseUrl: string, begin: () => void): () => void {
+  const queue = engineTurns.get(baseUrl) ?? [];
+  engineTurns.set(baseUrl, queue);
+  queue.push(begin);
+  if (queue.length === 1) begin();
+  let left = false;
+  return () => {
+    if (left) return;
+    left = true;
+    const index = queue.indexOf(begin);
+    if (index >= 0) queue.splice(index, 1);
+    if (queue.length === 0) {
+      if (engineTurns.get(baseUrl) === queue) engineTurns.delete(baseUrl);
+      return;
+    }
+    if (index === 0) queue[0]();
+  };
+}
 
 /**
  * VOICEVOX 互換のエンジンへの口。**接続先・fetch は外から渡す。**
@@ -586,7 +635,9 @@ export class VoiceEngineClient {
   async synthesis(
     query: Record<string, unknown>,
     styleId: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /** 文の字数（待てる長さを文の長さで延ばす。分からなければ基本の長さだけ） */
+    textLength = 0
   ): Promise<Uint8Array> {
     const response = await this.request(
       `/synthesis?speaker=${encodeURIComponent(String(styleId))}`,
@@ -595,7 +646,8 @@ export class VoiceEngineClient {
         headers: { "Content-Type": "application/json", Accept: "audio/wav" },
         body: JSON.stringify(query),
       },
-      signal
+      signal,
+      SYNTHESIS_BASE_TIMEOUT_MS + SYNTHESIS_PER_CHAR_TIMEOUT_MS * Math.max(0, textLength)
     );
     const bytes = new Uint8Array(await response.arrayBuffer());
     // WAV の頭（RIFF）でなければ音ではない。画面で decode に失敗するより先に止める
@@ -651,18 +703,33 @@ export class VoiceEngineClient {
     signal?: AbortSignal
   ): Promise<Uint8Array> {
     const query = await this.audioQuery(text, styleId, signal);
-    return this.synthesis(applyVoiceParams(query, params), styleId, signal);
+    return this.synthesis(applyVoiceParams(query, params), styleId, signal, text.length);
   }
 
   private async request(
     pathAndQuery: string,
     init: RequestInit,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /** 自分の番が来てから待てる長さ（ミリ秒） */
+    timeoutMs = REQUEST_TIMEOUT_MS
   ): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    /*
+      **自分で切ったかを旗で持つ**（0.147.1）。時間切れ・作者の中止・届かないを、エラーの文面で
+      見分けない（実装ルール5。fetch の実装によって文面も例外の型も違う）
+    */
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const leaveTurn = enterEngineTurn(this.baseUrl, () => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs);
+    });
+    // 作者の中止は列の順番を待たずにすぐ効く（時計とは別に、外の合図をそのまま通す）
     const onAbort = (): void => controller.abort();
     signal?.addEventListener("abort", onAbort);
+    if (signal?.aborted) controller.abort();
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.baseUrl}${pathAndQuery}`, {
@@ -670,7 +737,16 @@ export class VoiceEngineClient {
         signal: controller.signal,
       });
     } catch (error) {
+      // 作者の中止をいちばん先に見る（中止と時間切れが重なったら、作者が止めたほうを返す）
       if (signal?.aborted) throw new VoiceEngineError("aborted", "中止しました", undefined, this.engine);
+      if (timedOut) {
+        throw new VoiceEngineError(
+          "timeout",
+          `音声合成のエンジン（${this.baseUrl}）の答えが、${Math.round(timeoutMs / 1000)}秒待っても届きませんでした`,
+          error instanceof Error ? error.message : String(error),
+          this.engine
+        );
+      }
       throw new VoiceEngineError(
         "unreachable",
         `音声合成のエンジン（${this.baseUrl}）から応答がありません`,
@@ -678,7 +754,8 @@ export class VoiceEngineClient {
         this.engine
       );
     } finally {
-      clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
+      leaveTurn();
       signal?.removeEventListener("abort", onAbort);
     }
     if (!response.ok) {
@@ -704,7 +781,15 @@ export class VoiceEngineClient {
  * 応答が無いのは、エンジンが動いていない・口の設定が違う・別のものが
  * 口を使っている、のどれか分からない。
  */
-export function voiceEngineNextStep(error: VoiceEngineError): string {
+export function voiceEngineNextStep(
+  error: VoiceEngineError,
+  /** どの道で失敗したか（時間切れの次の操作は道ごとに違う。届かないときの文は今までどおり） */
+  route: VoiceEngineDownRoute = "read"
+): string {
+  if (error.kind === "timeout") {
+    const prompt = voiceEngineSlowPrompt(route, error.engine);
+    return `${prompt.message}${prompt.detail}`;
+  }
   if (error.kind === "unreachable") {
     // どちらのエンジンか分かれば名指しする（0.146.0。［声］で選んだ側を起こせばよいと分かるように）
     const which = error.engine ? `音声合成のエンジン（${VOICE_ENGINE_LABEL[error.engine]}）` : "音声合成のエンジン";
@@ -830,6 +915,38 @@ export function voiceEngineDownPrompt(
       `${start}を起動してから、もう一度［▶ 読む］を押してください。\n\n` +
       "エンジンなしで読むなら、［OSの声で読む］を押すと、いまの場所から OS の声で読みます。",
     useOsVoice: "OSの声で読む",
+  };
+}
+
+/**
+ * 待てる時間のうちに答えが来なかったとき（`timeout`）の窓（0.147.1。ノートPCの実機確認）。
+ *
+ * **届かないときの窓（`voiceEngineDownPrompt`）とは別の文にする。** 遅い PC では、エンジンは
+ * 動いていても声づくりに時間がかかり、「繋がりませんでした・起動して」は事実と違う案内になる。
+ * ただし「動いています」とは書かない——答えが来なかった理由は、こちらからは分からない
+ * （実装ルール5）。次の操作は道ごとに1つ。読む道は［音声に書き出す］で先に作っておく
+ * （書き出しは待つ前提の道で、できた音は間をあけずに聞ける）。もう片方のエンジン・OS の声は
+ * 勧めない（届かないときだけの道）
+ */
+export function voiceEngineSlowPrompt(
+  route: VoiceEngineDownRoute = "read",
+  engine?: VoiceEngineId
+): { message: string; detail: string } {
+  const which = engine ? `音声合成のエンジン（${VOICE_ENGINE_LABEL[engine]}）` : "音声合成のエンジン";
+  const message = `${which}の答えが、待てる時間のうちに届きませんでした。`;
+  if (route === "assign") {
+    return { message, detail: "少し待ってから、もう一度［声の割り当て］を押してください。" };
+  }
+  if (route === "export") {
+    const name = engine ? VOICE_ENGINE_LABEL[engine] : "AivisSpeech（または VOICEVOX）";
+    return {
+      message,
+      detail: `${name}${engine ? " " : ""}が動いているかを確かめてから、もう一度［音声に書き出す］を押してください。`,
+    };
+  }
+  return {
+    message,
+    detail: "声を作るのに時間がかかっているときは、［音声に書き出す］で先に作っておくと、待たずに聞けます。",
   };
 }
 
