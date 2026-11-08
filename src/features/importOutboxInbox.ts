@@ -102,7 +102,7 @@ function describeWriteFailure(reason: WriteTextFailureReason, detail?: string): 
     case "conflict_markers":
       return "Gitの競合マーカーが残っているため、書きませんでした。先に解消してください。";
     case "encoding_error":
-      return "この文字コード（Shift_JIS）で表せない文字が含まれているため、書きませんでした。";
+      return `この文字コード（Shift_JIS）で表せない文字が含まれているため、書きませんでした。${detail ?? ""}`;
     case "path_conflict":
       return `書き込めませんでした。${detail ?? ""}`.trim();
     case "editor_locked":

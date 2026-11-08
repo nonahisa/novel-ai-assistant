@@ -41,6 +41,16 @@ describe("比べる前に文字を揃える", () => {
     expect(isSameBodyText("¢£¬", "￠￡￢")).toBe(true);
   });
 
+  it("円記号の半角と全角を同じものとして扱う（Shift_JIS へ書くときに ¥ を ￥ へ置き換えるため）", () => {
+    expect(isSameBodyText("¥100", "￥100")).toBe(true);
+  });
+
+  it("Shift_JIS へ書くときに置き換える漢字の組も同じものとして扱う（𠮟と叱・剝と剥）", () => {
+    expect(isSameBodyText("\u{20b9f}られて剝がす", "叱られて剥がす")).toBe(true);
+    // 表に無い組（旧字の國と国）は畳まない
+    expect(isSameBodyText("國", "国")).toBe(false);
+  });
+
   it("改行コードの違いは無視する（Shift_JIS 版は CRLF）", () => {
     expect(isSameBodyText("一行目\r\n二行目", "一行目\n二行目")).toBe(true);
   });

@@ -16,6 +16,13 @@ import {
 } from "./atomicWrite";
 import type { Eol } from "../models/types";
 import { notifyWorkRecordWritten } from "./workRecordSignal";
+import { logLine } from "./logger";
+import {
+  describeSubstitutions,
+  describeUnencodable,
+  substituteForShiftJis,
+  type UnencodableChar,
+} from "./sjisFallback";
 
 // バイト列の読み方（文字コード・改行・ハッシュ）は `textDecode.ts` にある
 // ——`vscode` の要らない部分なので、外から呼ぶ束（設計書6.87.8）が
@@ -134,11 +141,23 @@ export async function writeTextFilePreservingFormat(
   }
 
   // バイト列の作り方は `textEncodePreserving.ts`（MCP の取り込みも同じものを通る。6.115）
-  const bytes = encodePreservingFormat(current, newText, original, {
+  const encoded = encodePreservingFormat(current, newText, original, {
     rewriteEol: options.rewriteEol === true,
   });
-  if (!bytes) {
-    return { ok: false, reason: "encoding_error" };
+  if (!encoded.ok) {
+    // どの字がどこにあるかを、知らせの文に添えられるように返す（作者が直す場所を探さずに済む）
+    return {
+      ok: false,
+      reason: "encoding_error",
+      detail: unencodableDetail(encoded.unencodable),
+    };
+  }
+  const bytes = encoded.bytes;
+  if (encoded.substitutions.length > 0) {
+    // 置き換えは作者に知らせない（作者の決定 2026-11-08）。ログには、何を何に何個かだけ残す（本文の前後は書かない）
+    logLine(
+      `Shift_JIS の原稿へ書くため、字を置き換えました（${path.basename(filePath)}）：${describeSubstitutions(encoded.substitutions)}`
+    );
   }
 
   /**
@@ -228,6 +247,12 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 書けない字の場所の文（知らせの末尾に添える。`encoding_error` の `detail`） */
+function unencodableDetail(found: readonly UnencodableChar[]): string | undefined {
+  if (found.length === 0) return undefined;
+  return `Shift_JIS で書けない字：${describeUnencodable(found)}`;
+}
+
 /**
  * 新しいファイルとして書き出すためのバイト列を作る。
  *
@@ -248,6 +273,15 @@ export function encodeForNewFile(
     normalized += "\n";
   } else if (!original.hasTrailingNewline) {
     normalized = normalized.replace(/\n+$/, "");
+  }
+
+  // 新しく作る話も、書き戻しと同じ表で置き換える（Shift_JIS の作品へ取り込んだ文の「〜」で止めない）
+  if (original.encoding === "shift_jis") {
+    const substituted = substituteForShiftJis(normalized);
+    normalized = substituted.text;
+    if (substituted.substitutions.length > 0) {
+      logLine(`Shift_JIS の新しいファイルへ書くため、字を置き換えました：${describeSubstitutions(substituted.substitutions)}`);
+    }
   }
 
   const body = encodeTextFragment(
