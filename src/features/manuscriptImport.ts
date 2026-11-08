@@ -38,10 +38,10 @@ import {
   type TextFileContent,
   type WriteTextFileResult,
 } from "../core/textFile";
+import { canRunProcesses } from "../core/runtime";
 import { readWordManuscript } from "../core/wordManuscript";
 import { withCancellableProgress } from "../views/progress";
 import { nameNewEpisodes, writeNewEpisodes } from "./addEpisodeFiles";
-import { prepareInsertion, runInsertion } from "./insertEpisode";
 import { reloadOpenDocumentAfterWrite } from "./reloadAfterWrite";
 
 /**
@@ -71,8 +71,10 @@ import { reloadOpenDocumentAfterWrite } from "./reloadAfterWrite";
  *   `mode: "create"` だけ）。ほかの話には触らない
  * - **取り込み元のファイルは書き換えない**（読むだけ）
  *
- * **`insertEpisode.ts` を静的importする**（`core/git.ts`＝`node:child_process` に届く）。
- * `extension.ts` からは必ず動的importで呼ぶこと（設計書5.8.5）。
+ * **`insertEpisode.ts` は［次の話として足す］の中で動的importする**（`core/git.ts`＝
+ * `node:child_process` に届く。設計書5.8.5）。静的に読むと、ブラウザ版ではこのファイルの
+ * 読み込み自体が失敗し、git の要らない空の話・上書き・最後に加えるまで動かなくなる。
+ * ブラウザ版では［次の話として足す］を並べない（使えない操作は出さない。作者の裁定 2026-10-31）
  */
 
 /** 取り込みのあと、呼ぶ側（原稿エディター）がすること */
@@ -179,7 +181,9 @@ export async function importIntoEpisode(input: {
   const folder = path.dirname(current.filePath);
   const number = episodeNumberOf(current.fileName);
   const pivot = number === null ? null : number + 1;
-  const shiftPlan = pivot === null ? null : planInsertion(scan.episodes, pivot, folder);
+  // ブラウザ版では番号ずらし（名前だけのコミットの確認が git を使う）を出さない
+  const shiftPlan =
+    pivot === null || !canRunProcesses() ? null : planInsertion(scan.episodes, pivot, folder);
   const latest = findLatestEpisode(scan.episodes);
   const plan = planEpisodeImport({
     bodyEmpty: isEpisodeBodyEmpty(disk.text),
@@ -532,6 +536,7 @@ async function addAsNext(input: {
     return { changed: false };
   }
 
+  const { prepareInsertion, runInsertion } = await import("./insertEpisode.js");
   const prepared = await prepareInsertion(work, episodes, pivot, input.folder);
   if (!prepared.ok) {
     void vscode.window.showErrorMessage(prepared.message);

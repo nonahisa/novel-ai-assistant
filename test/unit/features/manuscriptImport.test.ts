@@ -1,10 +1,17 @@
 import * as path from "path";
 import { zipSync } from "fflate";
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { FileSystemError, FileType, Uri, window, workspace } from "../support/vscodeStub";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { emptyCounts } from "../../../src/core/charCount";
 import { importIntoEpisode } from "../../../src/features/manuscriptImport";
+
+/** ブラウザ版のふり（外部プロセスを起動できない） */
+const runtime = vi.hoisted(() => ({ processes: true }));
+vi.mock("../../../src/core/runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/core/runtime")>();
+  return { ...actual, canRunProcesses: () => runtime.processes };
+});
 import { cancelRunningTask } from "../../../src/views/progress";
 
 /**
@@ -96,6 +103,7 @@ describe("原稿エディターの取り込み", () => {
     onAsk = undefined;
     failRenameFrom = undefined;
     cancelAfterRename = undefined;
+    runtime.processes = true;
     workspace.textDocuments = [];
     workspace.fs = {
       createDirectory: async () => undefined,
@@ -221,6 +229,15 @@ describe("原稿エディターの取り込み", () => {
     disk.set(sourcePath, encoder.encode("新しい話。\n"));
 
     await importInto("005.txt");
+
+    expect(asked[0].titles).toEqual(["最後に加える", "上書きする", "やめる"]);
+  });
+
+  test("ブラウザ版では［次の話として足す］を並べない（番号ずらしは手元の VS Code だけ）", async () => {
+    disk.set(sourcePath, encoder.encode("新しい話。\n"));
+    runtime.processes = false;
+
+    await importInto("003.txt");
 
     expect(asked[0].titles).toEqual(["最後に加える", "上書きする", "やめる"]);
   });
