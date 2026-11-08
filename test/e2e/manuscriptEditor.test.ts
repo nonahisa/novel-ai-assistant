@@ -548,7 +548,14 @@ test("Ctrl+Alt+K で強調を外した直後に End で行末へ動くと、画�
         `組み直しのあと、カーソルが行末にありません${await report()}`
       ).toEqual({ caret: { lineText: "前の字と強調と後ろの字。", column: 12 }, collapsed: true });
       await session.page.keyboard.insertText("あ");
-      await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る");
+      // 0.146.0 の全件で1度ここが時間切れになった。離れた機械でも原因が読めるよう、画面の出来事と操作ログを添える
+      await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る").catch(
+        async (error: unknown): Promise<never> => {
+          throw new Error(
+            `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／画面：${JSON.stringify(await composeText(frame))}／下の欄：${await footText(frame, "note")}／保存の記録：${await saveLogLines(session)}）${await report()}`
+          );
+        }
+      );
       expect(await fileText(session), `打った字が行末に入っていません${await report()}`).toBe(
         "前の字と強調と後ろの字。あ\n"
       );
