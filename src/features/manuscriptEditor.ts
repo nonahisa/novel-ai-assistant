@@ -127,7 +127,14 @@ import {
 } from "../core/readAloud";
 import type { ReadingSpan } from "../core/readingDictionary";
 import type { VoicePlanUnit } from "../core/voiceCast";
-import { bytesToBase64, voiceEngineDownPrompt } from "../core/voiceEngine";
+import {
+  bytesToBase64,
+  isVoiceEngineId,
+  voiceEngineDownPrompt,
+  type RunningOtherEngine,
+  type VoiceEngineId,
+} from "../core/voiceEngine";
+import { isReadAloudEngineChoice, type ReadAloudEngineChoice } from "./voiceEngineSettings";
 import { IME_TEXT_MAX, mergeReadingSpans } from "../core/imeReading";
 import { IME_WORD_BEFORE_MAX } from "../core/imeWordReading";
 import { pickPostingTarget } from "./ruby";
@@ -1835,7 +1842,15 @@ type Incoming =
    * 表示は120ミリ秒ずれることがあり（`scheduleSend`）、こちらの本文で
    * 計画を作ると、光らせる位置が打った分だけずれる。
    */
-  | { type: "readingPlan"; text: string; voiced?: boolean }
+  | {
+      type: "readingPlan";
+      text: string;
+      voiced?: boolean;
+      /** 人物の声で読むときの、［声］で選んだエンジン（0.146.0。拡張機能の側で形を確かめる） */
+      engine?: string;
+      /** ［▶ 読む］で読み始めたときの頼みか（読んでいる途中の取り直しでは付かない）。一言はこのときだけ出す */
+      start?: boolean;
+    }
   /**
    * 人物の声で読む文の音を作ってほしい（設計書6.42.3）。`planId` は届いた計画の
    * 番号で、いまの計画と違えば作らない（打って計画が変わった後の古い頼み）。
@@ -1846,9 +1861,15 @@ type Incoming =
    * 人物の声の操作（設計書6.42.3）。`run` は［台詞の話者と感情（AI）］、`open` は
    * ［台詞の一覧］、`assign` は［声の割り当て］、`export` は［音声に書き出す］（設計書6.42.4）、`status` は列の一言の問い合わせ
    */
-  | { type: "voiceCast"; action: "run" | "open" | "assign" | "export" | "status"; text: string }
-  /** 人物の声で読むかを覚える（端末ごと） */
-  | { type: "readingEngine"; on: boolean }
+  | {
+      type: "voiceCast";
+      action: "run" | "open" | "assign" | "export" | "status";
+      text: string;
+      /** ［声］で選んだエンジン（0.146.0。割り当てと書き出しで使う） */
+      engine?: string;
+    }
+  /** ［声］の選択を覚える（端末ごと。"os"・"aivisspeech"・"voicevox"） */
+  | { type: "readingEngine"; engine: string }
   /** 読んでいる文の行に、シーンメモの印を置く */
   | { type: "readingMark"; line: number }
   /** 選ばれた声を覚える（端末ごと。作品には書かない） */
@@ -1890,28 +1911,43 @@ type Incoming =
 export interface VoiceReadingDeps {
   /** この環境で使えるか。ブラウザ版では手元のエンジンに届かないので使えない */
   usable(): { ok: true } | { ok: false; reason: string };
-  /** 計画の文ごとに声を決める（エンジンの話者の一覧を引く） */
+  /**
+   * 計画の文ごとに声を決める（そのエンジンの話者の一覧を引く）。割り当てた声が引けなければ
+   * 代わりの声で読み、`notice` に一言を添える
+   */
   plan(
     filePath: string,
     text: string,
-    sentences: readonly ReadingSentence[]
-  ): Promise<{ units: VoicePlanUnit[] } | { problem: string; engineDown?: true }>;
-  /** 文の音（WAV）を作る。先の数文も並べて作っておく（先読み） */
+    sentences: readonly ReadingSentence[],
+    engine: VoiceEngineId,
+    /** `start`：［▶ 読む］で読み始めたときの計画か（声づくりの速さの見張りを始め直す） */
+    options?: { start?: boolean }
+  ): Promise<{ units: VoicePlanUnit[]; notice?: string } | { problem: string; engineDown?: true }>;
+  /**
+   * 文の音（WAV）を作る。先の数文も並べて作っておく（先読み）。声づくりが読む速さに追いつかない
+   * 状態が続いたら、1回の読み上げで1回だけ `slowNotice` を添える
+   */
   audio(
     units: readonly VoicePlanUnit[],
     index: number,
     rate: number
-  ): Promise<{ wav: Uint8Array } | { problem: string; engineDown?: true }>;
+  ): Promise<{ wav: Uint8Array; slowNotice?: string } | { problem: string; engineDown?: true }>;
   /** 列の一言（推定した台詞の数・声の割り当て） */
   status(filePath: string, text: string): Promise<string>;
   runCast(filePath: string, text: string): Promise<void>;
   manageCast(filePath: string, text: string): Promise<void>;
-  assignVoices(filePath: string): Promise<void>;
+  /**
+   * 選んだエンジンに届かなかったとき、もう片方が動いているかを1回だけ短く問い合わせる（0.146.0）。
+   * 外のホストなら先に確認を通す。省略できる（無ければ今までの窓だけ）
+   */
+  otherEngineRunning?(engine: VoiceEngineId): Promise<RunningOtherEngine | undefined>;
+  /** 声の割り当て。選べるのは `engine` の話者で、選んだ声にはその印を付けて書く */
+  assignVoices(filePath: string, engine: VoiceEngineId): Promise<void>;
   /**
    * 人物の声で音声（MP3）に書き出す（設計書6.42.4）。画面が持っている本文で書き出す。
    * 編集者モード・ブラウザ版では理由を出して何もしない（画面でも出していない）
    */
-  exportAudio(filePath: string, text: string): Promise<void>;
+  exportAudio(filePath: string, text: string, engine: VoiceEngineId): Promise<void>;
 }
 
 export interface ManuscriptEditorDeps {
@@ -2098,9 +2134,9 @@ export interface ManuscriptEditorDeps {
   readAloudVoice?: () => string | undefined;
   /** 選ばれた声を覚える */
   saveReadAloudVoice?: (name: string) => Promise<void>;
-  /** 人物の声で読むか（端末に覚える。設計書6.42.3） */
-  readAloudEngine?: () => boolean;
-  saveReadAloudEngine?: (on: boolean) => Promise<void>;
+  /** ［声］の選択（OSの声・AivisSpeech・VOICEVOX。端末に覚える。設計書6.42.3） */
+  readAloudEngine?: () => ReadAloudEngineChoice;
+  saveReadAloudEngine?: (choice: ReadAloudEngineChoice) => Promise<void>;
   /**
    * 人物の声で朗読する（AivisSpeech／VOICEVOX。設計書6.42.3）。
    *
@@ -2479,7 +2515,7 @@ export class ManuscriptEditorProvider
         voiceEngine: this.deps.voiceReading
           ? this.deps.voiceReading.usable()
           : { ok: false, reason: "この画面では人物の声を使えません" },
-        readAloudEngine: this.deps.readAloudEngine?.() ?? false,
+        readAloudEngine: this.deps.readAloudEngine?.() ?? "os",
         /*
           **取り消し・やり直しで戻ったときだけ添える**（設計書6.25.8）。
           添えてあれば、画面は差分からカーソルをずらすのをやめ、
@@ -2525,21 +2561,32 @@ export class ManuscriptEditorProvider
       待たずに出す——受け口が窓の答えを待つと、ほかの頼み（保存など）が止まる
     */
     let engineDownAsking = false;
-    const askUseOsVoice = (): void => {
+    const askUseOsVoice = (engine: VoiceEngineId): void => {
       if (engineDownAsking) return;
       engineDownAsking = true;
-      const prompt = voiceEngineDownPrompt("read");
-      void Promise.resolve(
-        vscode.window.showWarningMessage(
-          prompt.message,
-          { modal: true, detail: prompt.detail },
-          prompt.useOsVoice
-        )
-      )
-        .then(async (picked) => {
-          if (picked === prompt.useOsVoice) {
-            await panel.webview.postMessage({ type: "useOsVoice" });
-          }
+      /*
+        窓にはどちらのエンジンかを入れる（0.146.0）。出す前に、もう片方のエンジンが動いているかを
+        1回だけ短く問い合わせ、動いていれば［〇〇で読む］を足す（ノートPCの実機確認）。
+        問い合わせが投げても窓は出す（今までの窓に戻すだけ）
+      */
+      const voiceReading = this.deps.voiceReading;
+      void Promise.resolve(voiceReading?.otherEngineRunning?.(engine))
+        .catch(() => undefined)
+        .then((running) => {
+          const prompt = voiceEngineDownPrompt("read", engine, running);
+          const buttons = prompt.useOtherEngine
+            ? [prompt.useOtherEngine, prompt.useOsVoice]
+            : [prompt.useOsVoice];
+          return Promise.resolve(
+            vscode.window.showWarningMessage(prompt.message, { modal: true, detail: prompt.detail }, ...buttons)
+          ).then(async (picked) => {
+            if (picked !== undefined && picked === prompt.useOtherEngine && running) {
+              // ［声］をそちらへ切り替えて覚え、いまの場所から読む（画面の voiceUseOtherEngine）
+              await panel.webview.postMessage({ type: "useOtherEngine", engine: running.engine });
+            } else if (picked === prompt.useOsVoice) {
+              await panel.webview.postMessage({ type: "useOsVoice" });
+            }
+          });
         })
         .catch(() => undefined)
         .finally(() => {
@@ -3535,9 +3582,15 @@ export class ManuscriptEditorProvider
               splitDialogue: true,
             });
             const usable = voiceReading.usable();
-            const planned = usable.ok
-              ? await voiceReading.plan(fromUri(document.uri), message.text, sentences)
-              : { problem: usable.reason };
+            // **画面から届く値を信用しない**——エンジンは2つの名前のどちらかだけ受ける
+            const engine = isVoiceEngineId(message.engine) ? message.engine : undefined;
+            const planned = !usable.ok
+              ? { problem: usable.reason }
+              : engine === undefined
+                ? { problem: "［声］で読むエンジン（AivisSpeech・VOICEVOX）を選び直してください。" }
+                : await voiceReading.plan(fromUri(document.uri), message.text, sentences, engine, {
+                    start: message.start === true,
+                  });
             voicePlanSeq++;
             if ("problem" in planned) {
               voicePlan = undefined;
@@ -3547,13 +3600,25 @@ export class ManuscriptEditorProvider
                 readable,
                 textLength: message.text.length,
                 voiced: true,
+                // 画面は「いま選んでいるエンジンの計画か」で受けるので、頼まれたエンジンをそのまま返す
+                engine: message.engine,
                 planId: voicePlanSeq,
                 voiceProblem: planned.problem,
               });
-              if ("engineDown" in planned && planned.engineDown) askUseOsVoice();
+              if ("engineDown" in planned && planned.engineDown && engine) askUseOsVoice(engine);
               break;
             }
             voicePlan = { id: voicePlanSeq, units: planned.units };
+            /*
+              割り当てた声がこのエンジンで引けなかった（0.146.0）。**読み始めたときだけ**一言出す——
+              読んでいる途中に打つと計画を取り直すので、毎回出すと文ごとに出ることになる。
+              答えは待たない（受け口を止めない）
+            */
+            if (planned.notice && message.start === true) {
+              void Promise.resolve(vscode.window.showInformationMessage(planned.notice)).catch(
+                () => undefined
+              );
+            }
             await panel.webview.postMessage({
               type: "readingPlan",
               sentences: sentences.map((sentence, i) => ({
@@ -3564,6 +3629,7 @@ export class ManuscriptEditorProvider
               readable,
               textLength: message.text.length,
               voiced: true,
+              engine,
               planId: voicePlanSeq,
             });
             break;
@@ -3607,7 +3673,19 @@ export class ManuscriptEditorProvider
               ? { wav: bytesToBase64(result.wav) }
               : { problem: result.problem }),
           });
-          if ("engineDown" in result && result.engineDown) askUseOsVoice();
+          if ("engineDown" in result && result.engineDown) {
+            askUseOsVoice(plan.units[message.index].engine);
+          }
+          /*
+            声づくりが読む速さに追いつかない（0.146.0。ノートPCの実機確認）。1回の読み上げで1回だけ
+            届くので、そのまま出す。答えは待たない。もう片方のエンジンへ切り替えるボタンは置かない——
+            そちらで速くなるかはまだ測っていないので、勧める形にしない
+          */
+          if ("slowNotice" in result && result.slowNotice) {
+            void Promise.resolve(vscode.window.showInformationMessage(result.slowNotice)).catch(
+              () => undefined
+            );
+          }
           break;
         }
 
@@ -3628,10 +3706,26 @@ export class ManuscriptEditorProvider
             break;
           }
           const text = typeof message.text === "string" ? message.text : "";
+          // **画面から届く値を信用しない**。エンジンの名前でなければ、割り当ても書き出しもしない
+          const engine = isVoiceEngineId(message.engine) ? message.engine : undefined;
           try {
             if (message.action === "run") await voiceReading.runCast(filePath, text);
             else if (message.action === "open") await voiceReading.manageCast(filePath, text);
-            else if (message.action === "assign") await voiceReading.assignVoices(filePath);
+            else if (message.action === "assign" || message.action === "export") {
+              if (engine === undefined) {
+                void vscode.window.showInformationMessage(
+                  "［声］で人物の声（AivisSpeech か VOICEVOX）を選んでから、もう一度押してください。"
+                );
+              } else if (message.action === "assign") {
+                await voiceReading.assignVoices(filePath, engine);
+              } else {
+                /*
+                  ［音声に書き出す］（設計書6.42.4）。0.143.0 から受け口にこの枝が無く、画面の
+                  ボタンは様子を返すだけだった（右クリックの道だけが書き出した）。0.146.0 で直した
+                */
+                await voiceReading.exportAudio(filePath, text, engine);
+              }
+            }
           } finally {
             // どの操作のあとも、失敗しても様子を返す（画面は返るまでボタンを押せなくしている）
             await panel.webview.postMessage({
@@ -3643,7 +3737,10 @@ export class ManuscriptEditorProvider
         }
 
         case "readingEngine":
-          await this.deps.saveReadAloudEngine?.(message.on === true);
+          // 知らない値は覚えない（画面から届く値を信用しない）
+          if (isReadAloudEngineChoice(message.engine)) {
+            await this.deps.saveReadAloudEngine?.(message.engine);
+          }
           break;
 
         case "readingDictionary": {

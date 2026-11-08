@@ -240,6 +240,12 @@ import {
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
+import { legacyVoiceEngine, type VoiceEngineId } from "./core/voiceEngine";
+import {
+  readAloudEngineChoiceOf,
+  readEngineUrlSettings,
+  storedReadAloudEngine,
+} from "./features/voiceEngineSettings";
 import {
   beginStartupTiming,
   formatStartupMillis,
@@ -736,6 +742,7 @@ const READ_ALOUD_VOICE_KEY = "novelai.readAloud.voice";
 /**
  * 人物の声（AivisSpeech／VOICEVOX）で読むかの記憶先（設計書6.42.3）。
  * エンジンが入っているかは端末ごとに違うので、声の選択と同じく端末に残す。
+ * 0.146.0 からはエンジンの名前を書く（OSの声は false。読み方は `readAloudEngineChoiceOf`）。
  */
 const READ_ALOUD_ENGINE_KEY = "novelai.readAloud.engine";
 
@@ -2022,7 +2029,12 @@ export async function activate(
    * 人物の声で音声に書き出す（設計書6.42.4）。**ほかの道から呼ばれても理由を出す**
    * （ブラウザ版・編集者モードでは画面にも右クリックにも出していない。実装ルール7）
    */
-  const runVoiceExport = async (filePath: string, text?: string): Promise<void> => {
+  const runVoiceExport = async (
+    filePath: string,
+    text?: string,
+    /** 原稿エディターの［声］で選んだエンジン。右クリックからは無い（端末に覚えた選択で決める） */
+    chosenEngine?: VoiceEngineId
+  ): Promise<void> => {
     if (!canRunProcesses()) {
       void vscode.window.showInformationMessage(VOICE_EXPORT_BROWSER_REASON);
       return;
@@ -2062,8 +2074,15 @@ export async function activate(
         loadVoiceExport(),
         loadVoiceReading(),
       ]);
+      /*
+        右クリックから来たら、端末に覚えた［声］の選択で決める。OSの声を選んでいたら、
+        古い接続先の設定が指している側（前の版と同じエンジン）で書き出す
+      */
+      const remembered = readAloudEngineChoiceOf(context.globalState.get<unknown>(READ_ALOUD_ENGINE_KEY));
+      const engine =
+        chosenEngine ?? (remembered === "os" ? legacyVoiceEngine(readEngineUrlSettings()) : remembered);
       await exportVoiceAudio(
-        { work, episodePath: filePath, text: body, sentences },
+        { work, episodePath: filePath, text: body, sentences, engine },
         voiceReadingService(),
         { mp3Encoder: mp3EncoderLoader(context.extensionPath) }
       );
@@ -2495,9 +2514,10 @@ export async function activate(
     saveReadAloudVoice: async (name) => {
       await verifiedState(context.globalState).update(READ_ALOUD_VOICE_KEY, name);
     },
-    readAloudEngine: () => context.globalState.get<boolean>(READ_ALOUD_ENGINE_KEY, false),
-    saveReadAloudEngine: async (on) => {
-      await verifiedState(context.globalState).update(READ_ALOUD_ENGINE_KEY, on);
+    // 前の版の true（人物の声）は、古い接続先の設定が指している側として読む（0.146.0）
+    readAloudEngine: () => readAloudEngineChoiceOf(context.globalState.get<unknown>(READ_ALOUD_ENGINE_KEY)),
+    saveReadAloudEngine: async (choice) => {
+      await verifiedState(context.globalState).update(READ_ALOUD_ENGINE_KEY, storedReadAloudEngine(choice));
     },
     /*
       人物の声で朗読する（設計書6.42.3）。**繋ぐのはここだけ**（読みの辞書と同じ）。
@@ -2513,13 +2533,25 @@ export async function activate(
               reason:
                 "ブラウザ版の VS Code からは、この PC で動く音声合成のエンジン（AivisSpeech・VOICEVOX）に届きません。手元の VS Code で開くと使えます。",
             },
-      plan: async (filePath, text, sentences) => {
+      plan: async (filePath, text, sentences, engine, options) => {
         const { voiceReadingService } = await loadVoiceReading();
-        return voiceReadingService().plan(workOfPath(registry, filePath), filePath, text, sentences);
+        return voiceReadingService().plan(
+          workOfPath(registry, filePath),
+          filePath,
+          text,
+          sentences,
+          engine,
+          options
+        );
       },
       audio: async (units, index, rate) => {
         const { voiceReadingService } = await loadVoiceReading();
         return voiceReadingService().audio(units, index, rate);
+      },
+      // 選んだエンジンに届かなかったときだけ、もう片方を1回問い合わせる（0.146.0）
+      otherEngineRunning: async (engine) => {
+        const { voiceReadingService } = await loadVoiceReading();
+        return voiceReadingService().otherEngineRunning(engine);
       },
       status: async (filePath, text) => {
         const work = workOfPath(registry, filePath);
@@ -2547,17 +2579,17 @@ export async function activate(
         const { manageVoiceCast } = await loadVoiceReading();
         await manageVoiceCast({ work, episodePath: filePath, text });
       },
-      assignVoices: async (filePath) => {
+      assignVoices: async (filePath, engine) => {
         const work = workOfPath(registry, filePath);
         if (!work) {
           void vscode.window.showInformationMessage("声の割り当ては、作品に登録した原稿で使えます。");
           return;
         }
         const { assignVoices, voiceReadingService } = await loadVoiceReading();
-        await assignVoices(work, voiceReadingService());
+        await assignVoices(work, voiceReadingService(), engine);
       },
-      // 音声に書き出す（設計書6.42.4）。画面が持っている本文で書き出す（右クリックと同じ道）
-      exportAudio: (filePath, text) => runVoiceExport(filePath, text),
+      // 音声に書き出す（設計書6.42.4）。画面が持っている本文と、［声］で選んだエンジンで書き出す（右クリックと同じ道）
+      exportAudio: (filePath, text, engine) => runVoiceExport(filePath, text, engine),
     },
     markdownDeclined: () =>
       context.globalState.get<string[]>(MARKDOWN_DECLINED_KEY, []),

@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**0.145.0**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.126.2**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.146.0**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.126.2**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 
@@ -209,7 +209,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 
 ツールバーの「読み上げ」→「▶ 読む」を押すと、OSの音声で読み上げ、読んでいる文が光ります。AIも通信も使いません。「⚑ 引っかかった」を押すと、その文の前にメモを残して一時停止します。
 
-「声」で「人物の声」を選ぶと、手元の AivisSpeech や VOICEVOX で人物ごとに声を変えて読みます。「音声に書き出す」を押すと、1話を音声ファイル（MP3）にでき、クレジットと利用条件の注意書きも同じフォルダーに作ります。試作・テスト中です。
+「声」で「人物の声（AivisSpeech）」か「人物の声（VOICEVOX）」を選ぶと、手元のそのエンジンで人物ごとに声を変えて読みます。「音声に書き出す」を押すと、1話を音声ファイル（MP3）にでき、クレジットと利用条件の注意書きも同じフォルダーに作ります。試作・テスト中です。
 
 #### メモと校正・メモパネル
 
@@ -422,7 +422,9 @@ VS Code 版の Claude Code から、この拡張機能の道具（MCPサーバ�
 | `novelai.manuscriptEditor.vertical` | `true` | 「原稿エディターで開く」で開いた原稿を、はじめから縦書きにする |
 | `novelai.manuscriptEditor.fontFamily` | （空） | 原稿の画面で使う書体。空なら明朝体 |
 | `novelai.manuscriptEditor.readAloudRate` | `1` | 読み上げの速さ（0.5〜2） |
-| `novelai.readAloud.voiceEngineUrl` | `http://127.0.0.1:10101` | 人物の声で朗読するときの音声合成のエンジンの接続先（AivisSpeech。VOICEVOX は `http://127.0.0.1:50021`）。この PC の外のホストを書くと、本文がそのホストへ送られます（最初に確認を出します）。試作・テスト中 |
+| `novelai.readAloud.aivisSpeechUrl` | `http://127.0.0.1:10101` | 人物の声で朗読するときの AivisSpeech の接続先。この PC の外のホストを書くと、本文がそのホストへ送られます（最初に確認を出します）。試作・テスト中 |
+| `novelai.readAloud.voicevoxUrl` | `http://127.0.0.1:50021` | 人物の声で朗読するときの VOICEVOX の接続先。この PC の外のホストを書くと、本文がそのホストへ送られます（最初に確認を出します）。試作・テスト中 |
+| `novelai.readAloud.voiceEngineUrl` | `http://127.0.0.1:10101` | 古い設定です。既定と違う値を書いてあれば、ポート番号が 50021 なら VOICEVOX、それ以外なら AivisSpeech の接続先として使います。新しい設定を書いたエンジンでは、新しい設定を使います |
 | `novelai.episodeFileExtension` | `.txt` | 新規ファイルの既定の拡張子 |
 | `novelai.episodeNumberDigits` | `3` | 話数のゼロ埋め桁数（3なら `001.txt`） |
 | `novelai.chatter.enabled` | `true` | 書いている最中に、AIが相談パネルへひとこと差し込む（Ollamaのみ） |

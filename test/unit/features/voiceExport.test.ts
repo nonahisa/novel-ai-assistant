@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Mp3Encoder } from "@breezystack/lamejs";
 import type { WorkEntry } from "../../../src/models/types";
 import type { CastFile, VoiceAssignmentFile } from "../../../src/core/voiceCast";
+import type { VoiceEngineId } from "../../../src/core/voiceEngine";
 import { window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 import {
@@ -185,13 +186,28 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     engine = undefined;
   });
 
-  async function run(terms: FakeEngineTerms, options: { synthesisDelayMs?: number } = {}) {
-    engine = await startFakeVoiceEngine({ pcm: true, terms, ...options });
+  async function run(
+    terms: FakeEngineTerms,
+    options: { synthesisDelayMs?: number; engine?: VoiceEngineId } = {}
+  ) {
+    const { engine: chosen, ...rest } = options;
+    engine = await startFakeVoiceEngine({ pcm: true, terms, ...rest });
     const url = engine.url;
     const service = new VoiceReadingService(() => url, undefined, async () => true);
     const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
-    return exportVoiceAudio({ work, episodePath: EPISODE, text: TEXT, sentences }, service, lame);
+    // ［声］で選んだエンジン。偽のエンジンの名乗りに合わせる（違えば止まるのは別の試験）
+    const picked = chosen ?? (terms.brand === "VOICEVOX" ? "voicevox" : "aivisspeech");
+    return exportVoiceAudio({ work, episodePath: EPISODE, text: TEXT, sentences, engine: picked }, service, lame);
   }
+
+  test("［声］で選んだエンジンと名乗りが違えば、ライセンスを確かめずに止める（何も作らない）", async () => {
+    const outcome = await run(ACML_BOTH, { engine: "voicevox" });
+    expect(outcome.kind).toBe("stopped");
+    if (outcome.kind !== "stopped") return;
+    expect(outcome.reason).toContain("［声］で VOICEVOX を選んでいますが、接続先のエンジンは AivisSpeech と名乗りました");
+    expect(outcome.reason).toContain("novelai.readAloud.voicevoxUrl");
+    expect(engine!.requests.filter((r) => r.path === "/synthesis")).toHaveLength(0);
+  });
 
   test("1話の MP3 と注意書きと全文ができる", async () => {
     const outcome = await run(ACML_BOTH);
@@ -373,7 +389,11 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
       "次回もお楽しみに。",
     ].join("\n");
     const sentences = buildReadingPlan(text, "site", [], { splitDialogue: true });
-    const outcome = await exportVoiceAudio({ work, episodePath: EPISODE, text, sentences }, service, lame);
+    const outcome = await exportVoiceAudio(
+      { work, episodePath: EPISODE, text, sentences, engine: "aivisspeech" },
+      service,
+      lame
+    );
     expect(outcome.kind).toBe("written");
     const spoken = engine.requests
       .filter((r) => r.path === "/audio_query")
@@ -412,10 +432,11 @@ describe("エンジンに届かないときは、画面の真ん中の窓（2026
     // 右下の知らせ（［ログを見る］）は出さない
     expect(state.warnings).toEqual([]);
     expect(shown).toHaveLength(1);
-    expect(shown[0].message).toContain("音声合成のエンジンに繋がりませんでした");
+    // どちらのエンジンかを窓に入れる（0.146.0）
+    expect(shown[0].message).toContain("音声合成のエンジン（AivisSpeech）に繋がりませんでした");
     expect(shown[0].options).toMatchObject({
       modal: true,
-      detail: expect.stringContaining("［音声に書き出す］"),
+      detail: expect.stringContaining("AivisSpeech を起動してから、もう一度［音声に書き出す］"),
     });
     // 書き出しの道では OS の声で読めないので、ボタンは付けない（閉じるだけ）
     expect(shown[0].items).toEqual([]);
@@ -428,7 +449,11 @@ describe("エンジンに届かないときは、画面の真ん中の窓（2026
     engine = undefined;
     const service = new VoiceReadingService(() => url, undefined, async () => true);
     const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
-    const outcome = await exportVoiceAudio({ work, episodePath: EPISODE, text: TEXT, sentences }, service, lame);
+    const outcome = await exportVoiceAudio(
+      { work, episodePath: EPISODE, text: TEXT, sentences, engine: "aivisspeech" },
+      service,
+      lame
+    );
     expect(outcome.kind).toBe("stopped");
     expect(exported().size).toBe(0);
     expectEngineDownModal();
@@ -447,7 +472,11 @@ describe("エンジンに届かないときは、画面の真ん中の窓（2026
       async () => true
     );
     const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
-    const outcome = await exportVoiceAudio({ work, episodePath: EPISODE, text: TEXT, sentences }, service, lame);
+    const outcome = await exportVoiceAudio(
+      { work, episodePath: EPISODE, text: TEXT, sentences, engine: "aivisspeech" },
+      service,
+      lame
+    );
     expect(outcome.kind).toBe("stopped");
     expect(exported().size).toBe(0);
     expectEngineDownModal();
@@ -458,7 +487,11 @@ describe("エンジンに届かないときは、画面の真ん中の窓（2026
     const url = engine.url;
     const service = new VoiceReadingService(() => url, undefined, async () => true);
     const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
-    const outcome = await exportVoiceAudio({ work, episodePath: EPISODE, text: TEXT, sentences }, service, lame);
+    const outcome = await exportVoiceAudio(
+      { work, episodePath: EPISODE, text: TEXT, sentences, engine: "aivisspeech" },
+      service,
+      lame
+    );
     expect(outcome.kind).toBe("stopped");
     expect(shown).toHaveLength(0);
     expect(state.warnings.join("\n")).toContain("受け付けませんでした");

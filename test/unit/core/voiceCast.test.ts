@@ -199,10 +199,13 @@ describe("文ごとの声", () => {
     styleId: 1325133120,
   };
 
-  test("uuid とスタイルの名前で引き直す（ID が変わっても同じ声）。無ければ ID", () => {
-    expect(resolveVoiceRef({ ...mai, styleId: 1 }, speakers)).toBe(888753760);
-    expect(resolveVoiceRef({ ...mai, speakerUuid: "x", styleName: "x" }, speakers)).toBe(888753760);
-    expect(resolveVoiceRef({ ...mai, speakerUuid: "x", styleName: "x", styleId: 5 }, speakers)).toBeUndefined();
+  test("uuid とスタイルの名前で引き直す（ID が変わっても同じ声）。同じエンジンの印なら、無ければ ID", () => {
+    const tagged = { ...mai, engine: "aivisspeech" as const };
+    expect(resolveVoiceRef({ ...tagged, styleId: 1 }, speakers, "aivisspeech")).toBe(888753760);
+    expect(resolveVoiceRef({ ...tagged, speakerUuid: "x", styleName: "x" }, speakers, "aivisspeech")).toBe(888753760);
+    expect(
+      resolveVoiceRef({ ...tagged, speakerUuid: "x", styleName: "x", styleId: 5 }, speakers, "aivisspeech")
+    ).toBeUndefined();
   });
 
   test("語り手・人物・台詞の既定の声。感情でスタイルが変わり、推定の無い台詞は既定の声で平静", () => {
@@ -220,8 +223,9 @@ describe("文ごとの声", () => {
       cast: [entry("「やった」", 0, "ai")],
       assignment,
       speakers,
+      engine: "aivisspeech",
       names: new Map([["c-akari", "灯"]]),
-    });
+    })?.units;
     expect(units?.map((u) => [u.speech, u.styleId, u.emotion, u.styled, u.who])).toEqual([
       ["「やった」", 888753761, "喜び", true, "灯"],
       ["と灯は言った。", 1325133120, "平静", false, "語り"],
@@ -239,10 +243,18 @@ describe("文ごとの声", () => {
       cast: [],
       assignment: { version: 1, characters: {} },
       speakers,
-    });
+      engine: "aivisspeech",
+    })?.units;
     expect(units?.[0].styleId).toBe(888753760);
     expect(
-      voicePlanUnits({ sentences, dialogues: [], cast: [], assignment: { version: 1, characters: {} }, speakers: [] })
+      voicePlanUnits({
+        sentences,
+        dialogues: [],
+        cast: [],
+        assignment: { version: 1, characters: {} },
+        speakers: [],
+        engine: "aivisspeech",
+      })
     ).toBeUndefined();
   });
 });
@@ -296,7 +308,76 @@ describe("一覧にいない人物の台詞（役名だけの人物）", () => {
       cast: [{ ...entry("「止まれ」", 0, "ai"), speakerId: null, speakerName: null }],
       assignment: { version: 1, narrator: kanon, dialogueDefault: kanon, characters: {} },
       speakers,
-    });
+      engine: "aivisspeech",
+    })?.units;
     expect(units?.map((u) => [u.styleId, u.who])).toEqual([[1325133120, "台詞"]]);
+  });
+});
+
+describe("声の割り当てのエンジンの印（0.146.0）", () => {
+  const speakers = parseSpeakers(FAKE_SPEAKERS);
+  const mai = { speakerUuid: "uuid-mai", speakerName: "まい", styleName: "ノーマル", styleId: 888753760 };
+
+  test("違うエンジンの声は、番号が同じでも引かない（別の声で黙って読まない）", () => {
+    // VOICEVOX の声として選んだ番号が、AivisSpeech の一覧の別の話者の番号と重なる場合
+    const other = { speakerUuid: "uuid-zundamon", speakerName: "ずんだもん", styleName: "ノーマル", styleId: 888753760 };
+    expect(resolveVoiceRef({ ...other, engine: "voicevox" }, speakers, "aivisspeech")).toBeUndefined();
+    // uuid とスタイル名が合っていても、印が違えば引かない
+    expect(resolveVoiceRef({ ...mai, engine: "voicevox" }, speakers, "aivisspeech")).toBeUndefined();
+  });
+
+  test("印の無い前の版の声は、uuid とスタイル名で引けたときだけ使う（番号で探し直さない）", () => {
+    expect(resolveVoiceRef({ ...mai, styleId: 1 }, speakers, "aivisspeech")).toBe(888753760);
+    expect(
+      resolveVoiceRef({ ...mai, speakerUuid: "x", styleName: "x" }, speakers, "aivisspeech")
+    ).toBeUndefined();
+  });
+
+  test("同じエンジンの印の声は、uuid とスタイル名で引け、だめなら番号を見る（モデルの入れ直し）", () => {
+    expect(resolveVoiceRef({ ...mai, styleId: 1, engine: "aivisspeech" }, speakers, "aivisspeech")).toBe(888753760);
+    expect(
+      resolveVoiceRef({ ...mai, speakerUuid: "x", styleName: "x", engine: "aivisspeech" }, speakers, "aivisspeech")
+    ).toBe(888753760);
+  });
+
+  test("エンジンの印を読み書きする。知らない印は直さずに止める", () => {
+    const file = parseVoiceAssignment(
+      JSON.stringify({ version: 1, narrator: { ...mai, engine: "voicevox" }, characters: {} })
+    );
+    expect(file.narrator?.engine).toBe("voicevox");
+    expect(parseVoiceAssignment(JSON.stringify({ version: 1, narrator: mai })).narrator?.engine).toBeUndefined();
+    expect(() =>
+      parseVoiceAssignment(JSON.stringify({ version: 1, narrator: { ...mai, engine: "coeiroink" } }))
+    ).toThrow(/engine/);
+  });
+
+  test("引けない声は語りの声で読み、引けなかった枠を返す（一言は読む側が1回出す）。文にはエンジンの印", () => {
+    const text = "「やった」と灯は言った。";
+    const sentences = buildReadingPlan(text, "curly", [], { splitDialogue: true });
+    const kanon = {
+      speakerUuid: "uuid-kanon",
+      speakerName: "花音",
+      styleName: "ノーマル",
+      styleId: 1325133120,
+      engine: "aivisspeech" as const,
+    };
+    const plan = voicePlanUnits({
+      sentences,
+      dialogues: castDialogues(text),
+      cast: [{ ...entry("「やった」", 0, "ai"), emotion: "平静" }],
+      assignment: {
+        version: 1,
+        narrator: kanon,
+        characters: { "c-akari": { ...mai, engine: "voicevox", characterName: "灯" } },
+      },
+      speakers,
+      engine: "aivisspeech",
+      names: new Map([["c-akari", "灯"]]),
+    });
+    expect(plan?.units.map((u) => [u.styleId, u.engine])).toEqual([
+      [1325133120, "aivisspeech"],
+      [1325133120, "aivisspeech"],
+    ]);
+    expect(plan?.unresolved).toEqual(["灯"]);
   });
 });

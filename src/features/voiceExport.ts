@@ -6,7 +6,14 @@ import type { VoicePlanUnit } from "../core/voiceCast";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { workPaths } from "../core/workRegistry";
 import { logFailure, logStep, useLogFile } from "../core/logger";
-import { findStyle, VoiceEngineError, voiceEngineNextStep, type VoiceSpeaker } from "../core/voiceEngine";
+import {
+  findStyle,
+  VOICE_ENGINE_LABEL,
+  VoiceEngineError,
+  voiceEngineNextStep,
+  type VoiceEngineId,
+  type VoiceSpeaker,
+} from "../core/voiceEngine";
 import { clipSeconds, joinClips, parseWav, WavError, type PcmClip } from "../core/wavPcm";
 import { encodeMp3, type Mp3EncoderFactory } from "../core/mp3Encode";
 import {
@@ -28,7 +35,12 @@ import { sanitizeFileName } from "../core/episodeParser";
 import { withCancellableProgress } from "../views/progress";
 import { confirmRun, notifyDone, warnWithLog, whenNoticePicked } from "../views/notify";
 import { revealFolder } from "../views/openDocument";
-import { isEngineUnreachable, showVoiceEngineDown, type VoiceReadingService } from "./voiceReading";
+import {
+  engineUrlSettingLabel,
+  isEngineUnreachable,
+  showVoiceEngineDown,
+  type VoiceReadingService,
+} from "./voiceReading";
 
 /**
  * 人物の声の朗読を、音声ファイル（MP3）に書き出す（設計書6.42.4）。
@@ -78,7 +90,12 @@ export interface VoiceExportTarget {
   text: string;
   /** 人物の声で読むときの文の計画（`buildReadingPlan(..., { splitDialogue: true })`） */
   sentences: readonly ReadingSentence[];
+  /** ［声］で選んだエンジン（0.146.0） */
+  engine: VoiceEngineId;
 }
+
+/** 名乗り（brand_name）の見分けを、声の割り当ての印へ */
+const ENGINE_OF_BRAND: Record<EngineBrand, VoiceEngineId> = { aivis: "aivisspeech", voicevox: "voicevox" };
 
 export interface VoiceExportDeps {
   /** MP3 の変換器の作り方（製品では `dist/lame.js` を読む。テストはパッケージを直接） */
@@ -116,19 +133,29 @@ interface UsedVoice {
   styles: string[];
 }
 
-function usedVoices(units: readonly VoicePlanUnit[], speakers: readonly VoiceSpeaker[]): UsedVoice[] | string {
-  const byUuid = new Map<string, UsedVoice>();
+/**
+ * 使った声を、**エンジンごと**に話者でまとめる（0.146.0）。スタイルの番号はエンジンごとに
+ * 振られるので、引くのはその文のエンジンの一覧から。いまは1つのエンジンだが、人物ごとに
+ * 混ぜる形（2段目）では、エンジンごとにライセンス・規約を引き分ける
+ */
+function usedVoices(
+  units: readonly VoicePlanUnit[],
+  speakersOf: ReadonlyMap<VoiceEngineId, readonly VoiceSpeaker[]>
+): Map<VoiceEngineId, UsedVoice[]> | string {
+  const byEngine = new Map<VoiceEngineId, Map<string, UsedVoice>>();
   for (const unit of units) {
-    const found = findStyle(speakers, unit.styleId);
+    const found = findStyle(speakersOf.get(unit.engine) ?? [], unit.styleId);
     if (!found) {
       // 計画はいまの一覧から作るので起きないはず。起きたら、どの声か分からないまま書き出さない
-      return `声（スタイル ${unit.styleId}）がエンジンの話者の一覧に見つかりません。［声の割り当て］で選び直してください。`;
+      return `声（${VOICE_ENGINE_LABEL[unit.engine]}のスタイル ${unit.styleId}）がエンジンの話者の一覧に見つかりません。［声の割り当て］で選び直してください。`;
     }
+    const byUuid = byEngine.get(unit.engine) ?? new Map<string, UsedVoice>();
     const entry = byUuid.get(found.speaker.uuid) ?? { speaker: found.speaker, styles: [] };
     if (!entry.styles.includes(found.style.name)) entry.styles.push(found.style.name);
     byUuid.set(found.speaker.uuid, entry);
+    byEngine.set(unit.engine, byUuid);
   }
-  return [...byUuid.values()];
+  return new Map([...byEngine].map(([engine, byUuid]) => [engine, [...byUuid.values()]]));
 }
 
 /**
@@ -138,11 +165,12 @@ function usedVoices(units: readonly VoicePlanUnit[], speakers: readonly VoiceSpe
  */
 async function gatherTerms(
   service: VoiceReadingService,
+  engine: VoiceEngineId,
   brand: EngineBrand,
   voices: readonly UsedVoice[],
   work: WorkEntry
 ): Promise<{ terms: VoiceTerms[] } | { problems: string[] }> {
-  const client = service.engineClient();
+  const client = service.engineClient(engine);
   const problems: string[] = [];
   const terms: VoiceTerms[] = [];
 
@@ -318,45 +346,74 @@ export async function exportVoiceAudio(
     「ポップアップさせてください」）。押したすぐ（計画・話者の一覧）でも、合成の途中でも同じ。
     ログは呼ぶ前に残してある（実装ルール5）
   */
-  const stopEngineDown = (): VoiceExportOutcome => ({
+  /** 届かなかったエンジン（失敗に印があればそれ、無ければ［声］で選んだ側） */
+  const stopEngineDown = (error?: unknown): VoiceExportOutcome => ({
     kind: "stopped",
-    reason: showVoiceEngineDown("export"),
+    reason: showVoiceEngineDown(
+      "export",
+      error instanceof VoiceEngineError && error.engine ? error.engine : target.engine
+    ),
   });
 
-  const planned = await service.plan(work, episodePath, target.text, target.sentences);
+  const planned = await service.plan(work, episodePath, target.text, target.sentences, target.engine);
   if ("problem" in planned) return planned.engineDown ? stopEngineDown() : stop(planned.problem);
   const units = planned.units.filter((unit) => unit.speech.trim() !== "");
   if (units.length === 0) return stop("この話には、読み上げる文がありません。");
 
-  let speakers: VoiceSpeaker[];
-  let brand: { brand: EngineBrand; name: string } | undefined;
-  try {
-    speakers = await service.speakers();
-    brand = engineBrandOf(await service.engineClient().engineManifest());
-  } catch (error) {
-    logEngineFailure("エンジンの名乗りを引く", error, work);
-    if (isEngineUnreachable(error)) return stopEngineDown();
-    brand = undefined;
-    speakers = [];
-  }
-  if (!brand) {
-    // 名乗りが読めない・知らないエンジン。どのライセンスの声か確かめられないので書き出さない
-    return stop(
-      "音声合成のエンジンが AivisSpeech か VOICEVOX か分からないため、声のライセンス・規約を確かめられず、書き出しませんでした。" +
-        "設定 novelai.readAloud.voiceEngineUrl が AivisSpeech（または VOICEVOX）を指しているか確かめてください。詳しくはログにあります。"
-    );
+  /*
+    使うエンジンごとに、話者の一覧と名乗り（brand_name）を引く。いまは［声］で選んだ1つだけだが、
+    人物ごとに混ぜる形（2段目）では文の印から2つになる。**名乗りが選んだ側と違えば止める**——
+    接続先の設定が別のエンジンを指していると、ライセンスを別のエンジンの決まりで確かめてしまう
+  */
+  const engines = [...new Set(units.map((unit) => unit.engine))];
+  const speakersOf = new Map<VoiceEngineId, VoiceSpeaker[]>();
+  const brands = new Map<VoiceEngineId, { brand: EngineBrand; name: string }>();
+  for (const engine of engines) {
+    let brand: { brand: EngineBrand; name: string } | undefined;
+    try {
+      speakersOf.set(engine, await service.speakers(engine));
+      brand = engineBrandOf(await service.engineClient(engine).engineManifest());
+    } catch (error) {
+      logEngineFailure("エンジンの名乗りを引く", error, work);
+      if (isEngineUnreachable(error)) return stopEngineDown(error);
+      brand = undefined;
+    }
+    if (!brand) {
+      // 名乗りが読めない・知らないエンジン。どのライセンスの声か確かめられないので書き出さない
+      return stop(
+        "音声合成のエンジンが AivisSpeech か VOICEVOX か分からないため、声のライセンス・規約を確かめられず、書き出しませんでした。" +
+          `設定 ${engineUrlSettingLabel(engine)} が ${VOICE_ENGINE_LABEL[engine]} を指しているか確かめてください。詳しくはログにあります。`
+      );
+    }
+    if (ENGINE_OF_BRAND[brand.brand] !== engine) {
+      return stop(
+        `［声］で ${VOICE_ENGINE_LABEL[engine]} を選んでいますが、接続先のエンジンは ${brand.name} と名乗りました。` +
+          `声のライセンス・規約を確かめられないので、書き出しませんでした（ファイルは作っていません）。` +
+          `［声］で ${brand.name} を選ぶか、設定 ${engineUrlSettingLabel(engine)} を ${VOICE_ENGINE_LABEL[engine]} の接続先にしてください。`
+      );
+    }
+    brands.set(engine, brand);
   }
 
-  const voices = usedVoices(units, speakers);
+  const voices = usedVoices(units, speakersOf);
   if (typeof voices === "string") return stop(voices);
-  const gathered = await gatherTerms(service, brand.brand, voices, work);
-  if ("problems" in gathered) {
+  const terms: VoiceTerms[] = [];
+  const problems: string[] = [];
+  for (const [engine, list] of voices) {
+    const brand = brands.get(engine);
+    if (!brand) continue;
+    const gathered = await gatherTerms(service, engine, brand.brand, list, work);
+    if ("problems" in gathered) problems.push(...gathered.problems);
+    else terms.push(...gathered.terms);
+  }
+  if (problems.length > 0) {
     return stop(
       `ライセンス・規約を確かめられない声があるので、書き出しませんでした（ファイルは作っていません）。\n` +
-        gathered.problems.map((line) => `・${line}`).join("\n")
+        problems.map((line) => `・${line}`).join("\n")
     );
   }
-  const terms = gathered.terms;
+  /** 注意書きに書くエンジンの名前（混ぜたときは「AivisSpeech・VOICEVOX」） */
+  const engineName = [...brands.values()].map((b) => b.name).join("・");
 
   const stem = episodeStem(episodePath);
   const folder = voiceExportFolder(work, episodePath);
@@ -377,6 +434,8 @@ export async function exportVoiceAudio(
       `「${stem}」を人物の声で音声（MP3）に書き出します。${units.length}文・長さはおおよそ${estimate.replace(/^約/, "")}です。`,
       `置き場：${shownFolder(work, folder)}/`,
       `使う声：${terms.map(describeVoice).join("、")}`,
+      // 割り当てた声が引けず代わりの声で読むなら、書き出す前に分かるようにする（0.146.0）
+      ...(planned.notice ? [planned.notice] : []),
       "本文は書き換えません。長い話は数分かかります（途中で中止できます）。",
     ].join("\n"),
     "書き出す",
@@ -385,20 +444,22 @@ export async function exportVoiceAudio(
   if (!ok) return { kind: "declined" };
 
   // **本文を運ぶ前の確認**（外のホストのエンジンなら、朗読と同じ窓）
-  const allowed = await service.allowCarryText();
-  if (!allowed.ok) {
-    return stop(
-      `本文を ${allowed.host} へ送ることを許可していないので、書き出しませんでした。` +
-        "この PC の外のホストへ送りたくなければ、設定 novelai.readAloud.voiceEngineUrl を http://127.0.0.1:10101 に戻してください。"
-    );
+  for (const engine of engines) {
+    const allowed = await service.allowCarryText(engine);
+    if (!allowed.ok) {
+      return stop(
+        `本文を ${allowed.host} へ送ることを許可していないので、書き出しませんでした。` +
+          `この PC の外のホストへ送りたくなければ、設定 ${engineUrlSettingLabel(engine)} をこの PC の接続先にしてください。`
+      );
+    }
   }
 
   logStep(
-    `人物の声で音声に書き出す：開始 ${work.title} / ${stem} / ${units.length}文・${chars}字 / ${brand.name} / ` +
+    `人物の声で音声に書き出す：開始 ${work.title} / ${stem} / ${units.length}文・${chars}字 / ${engineName} / ` +
       terms.map(describeVoice).join("、")
   );
 
-  type Made = { mp3: Uint8Array; clip: PcmClip } | { failed: string } | "engineDown" | "cancelled";
+  type Made = { mp3: Uint8Array; clip: PcmClip } | { failed: string } | { engineDown: unknown } | "cancelled";
   const made: Made = await withCancellableProgress("人物の声で音声に書き出しています", async (progress, token) => {
     const controller = new AbortController();
     token.onCancellationRequested(() => controller.abort());
@@ -437,7 +498,7 @@ export async function exportVoiceAudio(
         return "cancelled";
       }
       logEngineFailure("音を作る", error, work);
-      if (isEngineUnreachable(error)) return "engineDown";
+      if (isEngineUnreachable(error)) return { engineDown: error };
       return { failed: error instanceof WavError ? `${error.message}。` : engineProblem(error) };
     }
   });
@@ -446,7 +507,7 @@ export async function exportVoiceAudio(
     notifyDone("音声の書き出しを中止しました。ファイルは作っていません。");
     return { kind: "cancelled" };
   }
-  if (made === "engineDown") return stopEngineDown();
+  if ("engineDown" in made) return stopEngineDown(made.engineDown);
   if ("failed" in made) return stop(`音声に書き出せませんでした（ファイルは作っていません）。${made.failed}`);
 
   // ── ここから書く（新規作成だけ。上書きしない） ──
@@ -463,7 +524,7 @@ export async function exportVoiceAudio(
     const notice = buildCreditNotice({
       workTitle: work.title,
       episodeName: stem,
-      engineName: brand.name,
+      engineName,
       at,
       voices: names.licenses.map((l) => ({ terms: l.terms, licenseFile: l.relative })),
     });

@@ -26,7 +26,11 @@ describe("人物の声の画面", () => {
 
   it("読み方の選択と、人物の声の操作がある（人物の声を選んだときだけ出す）", () => {
     expect(html).toContain('<select id="aloudEngine"');
-    expect(html).toContain('<option value="engine">人物の声（AivisSpeech・VOICEVOX）【試作・テスト中】</option>');
+    // エンジンを選べる（0.146.0。作者の決定 2026-11-08）。つねに3つ並べる（前もって問い合わせない）
+    expect(html).toContain('<option value="os">OSの声</option>');
+    expect(html).toContain('<option value="aivisspeech">人物の声（AivisSpeech）【試作・テスト中】</option>');
+    expect(html).toContain('<option value="voicevox">人物の声（VOICEVOX）【試作・テスト中】</option>');
+    expect(html).not.toContain('<option value="engine">');
     for (const id of ["aloudVoiceAssign", "aloudCastRun", "aloudCastOpen"]) {
       expect(html).toMatch(new RegExp('id="' + id + '" class="engine-only"'));
     }
@@ -91,14 +95,36 @@ describe("人物の声の画面", () => {
 
   it("使えない環境では選択肢を押せなくして理由を出す（消さない）", () => {
     const take = bodyOf("voiceTakeUsable");
-    expect(take).toContain("option.disabled = !voiceUsable");
+    expect(take).toContain("for (const option of options) option.disabled = !voiceUsable");
     expect(take).toContain("aloudEngine.title = voiceUsable");
   });
 
   it("エンジンに届かなかった窓で［OSの声で読む］を押されたら、OSの声へ切り替えて読み始める（覚えている選択は変えない）", () => {
     expect(script).toContain('message.type === "useOsVoice"');
     const use = bodyOf("voiceUseOsVoice", 600);
-    expect(use).toContain("voiceSetMode(false, false)");
+    expect(use).toContain('voiceSetMode("os", false)');
     expect(use).toContain("aloudStart()");
+  });
+
+  it("もう片方のエンジンが動いていた窓で［〇〇で読む］を押されたら、［声］をそちらへ切り替えて覚え、読み始める", () => {
+    expect(script).toContain('message.type === "useOtherEngine"');
+    const use = bodyOf("voiceUseOtherEngine", 400);
+    expect(use).toContain("voiceSetMode(engine, true)");
+    expect(use).toContain("aloudStart()");
+  });
+
+  it("計画・割り当て・書き出しの頼みに、選んだエンジンを添える。エンジンの違う計画は使わない", () => {
+    expect(bodyOf("aloudAskPlan", 400)).toContain("engine: voiceEngineName");
+    expect(bodyOf("aloudAskPlan", 400)).toContain("start: start === true");
+    expect(bodyOf("aloudStart", 400)).toContain("aloudAskPlan(true)");
+    expect(bodyOf("aloudTakePlan")).toContain("if (voiceMode && message.engine !== voiceEngineName) return;");
+    expect(bodyOf("voiceCastAsk", 300)).toContain("engine: voiceEngineName");
+    expect(bodyOf("voiceSetMode", 900)).toContain('type: "readingEngine", engine: on ? voiceEngineName : "os"');
+  });
+
+  it("エンジンの選択肢は、使えない環境では2つとも押せなくする", () => {
+    expect(bodyOf("voiceTakeUsable")).toContain(
+      "option[value=\"aivisspeech\"], option[value=\"voicevox\"]"
+    );
   });
 });
