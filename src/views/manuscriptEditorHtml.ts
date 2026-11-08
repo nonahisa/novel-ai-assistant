@@ -9373,6 +9373,11 @@ ${IME_ENTER_GUARD_SOURCE}
   let aloudVoiceName = null;
   /** 計画が届いたら、この位置の文から読み始める（読み始めの予約） */
   let aloudStartAt = null;
+  /**
+   * 読む範囲（題と本文。拡張機能が計画に添えて送る）。**null は全部を読む原稿**。
+   * カーソルが範囲の外（頭の欄・前書き・後書き）なら、題から読み始める（設計書6.42）
+   */
+  let aloudReadable = null;
   /** 速さを作者が触ったか。触ったら、設定が届いても上書きしない */
   let aloudRateTouched = false;
   /**
@@ -9843,6 +9848,7 @@ ${IME_ENTER_GUARD_SOURCE}
     // 読み方を切り替える前に頼んだ計画は使わない（声の単位の切り方が違う）
     if (!!message.voiced !== voiceMode) return;
     aloudPlan = Array.isArray(message.sentences) ? message.sentences : [];
+    aloudReadable = Array.isArray(message.readable) ? message.readable : null;
     // 印を打ったぶんが本文へ入った。もう一度押してよい
     aloudMarking = false;
     voicePlanId = typeof message.planId === "number" ? message.planId : 0;
@@ -9922,6 +9928,19 @@ ${IME_ENTER_GUARD_SOURCE}
   function aloudIndexAt(offset) {
     if (!aloudPlan || aloudPlan.length === 0) return -1;
     if (typeof offset !== "number") return 0;
+    /*
+      **飛ばす欄の中なら、題（無ければ本文の頭）から**（2026-11-08 作者の答え）。
+      計画には題と本文の文しか無いので、後書きの中のカーソルは、このままだと
+      最後の文に当たる。範囲の終わりちょうど（行の末尾）は範囲の内に数える
+    */
+    if (
+      Array.isArray(aloudReadable) &&
+      !aloudReadable.some(function (range) {
+        return offset >= range.start && offset <= range.end;
+      })
+    ) {
+      return 0;
+    }
     for (let i = 0; i < aloudPlan.length; i++) {
       if (offset < aloudPlan[i].end) return i;
     }

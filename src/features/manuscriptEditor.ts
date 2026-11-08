@@ -121,6 +121,7 @@ import {
 import {
   READ_ALOUD_MEMO_TEXT,
   buildReadingPlan,
+  readingRangesOf,
   type ReadingSentence,
   isReadingMemoLine,
 } from "../core/readAloud";
@@ -3500,6 +3501,12 @@ export class ManuscriptEditorProvider
             );
           }
           const readings = mergeReadingSpans(dictionary?.spans ?? [], names);
+          /*
+            **読む範囲（題と本文）を添える**（2026-11-08 作者の答え。設計書6.42）。
+            計画からは頭の欄・前書き・後書きの文が既に外れている。画面はこの範囲で、
+            カーソルが飛ばす欄の中なら題（無ければ本文の頭）から読み始める。null は全部を読む
+          */
+          const readable = readingRangesOf(message.text);
           const voiceReading = this.deps.voiceReading;
           if (message.voiced === true && voiceReading) {
             /*
@@ -3520,6 +3527,7 @@ export class ManuscriptEditorProvider
               await panel.webview.postMessage({
                 type: "readingPlan",
                 sentences,
+                readable,
                 textLength: message.text.length,
                 voiced: true,
                 planId: voicePlanSeq,
@@ -3536,6 +3544,7 @@ export class ManuscriptEditorProvider
                 gapMs: planned.units[i]?.gapMs ?? 0,
                 who: planned.units[i]?.who ?? "",
               })),
+              readable,
               textLength: message.text.length,
               voiced: true,
               planId: voicePlanSeq,
@@ -3545,6 +3554,7 @@ export class ManuscriptEditorProvider
           await panel.webview.postMessage({
             type: "readingPlan",
             sentences: buildReadingPlan(message.text, notation, readings),
+            readable,
             // 画面が「自分が送った本文の計画か」を確かめるための目印
             textLength: message.text.length,
           });
