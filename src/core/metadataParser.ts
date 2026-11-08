@@ -64,6 +64,10 @@ export interface EpisodeMetadata {
 interface HeaderBlock {
   label: string;
   value: string;
+  /** 中身の最初の行（渡した字の行番号。0始まり）。読み上げの範囲（`episodeReadableRanges`）が使う */
+  firstLine: number;
+  /** 中身の終わりの行（含まない） */
+  endLine: number;
 }
 
 const BODY_LABELS = ["本文", "ほんぶん"];
@@ -117,33 +121,119 @@ function endsBody(label: string): boolean {
   return AFTER_BODY_LABELS.includes(label) || /^第\d+章$/.test(label);
 }
 
-export function parseEpisodeMetadata(rawText: string): EpisodeMetadata {
-  const text = rawText.replace(/\r\n?/g, "\n");
-  const lines = text.split("\n");
+/** 見出しで区切った結果（区切りの見つけ方を1か所に置くための中間の形） */
+interface LocatedBlocks {
+  blocks: HeaderBlock[];
+  bodyEndedByLabel: boolean;
+  bodyBlock: HeaderBlock;
+}
 
+/**
+ * 頭書きの欄を見つける。**メタデータ形式でなければ null。**
+ *
+ * `parseEpisodeMetadata`（字を切り出す）と `episodeReadableRanges`（位置を返す）の
+ * 両方がここを通る。見分けの決まり（合本・先頭の【】・【本文】の有無）を2か所に
+ * 書くと、片方だけが古くなって「字数に数えない欄を読み上げる」ことが起きる。
+ *
+ * 行は渡された `lines` の番号のまま返す（頭書きの区切り行を跨いだぶんも足してある）。
+ */
+function locateBlocks(lines: readonly string[]): LocatedBlocks | null {
   // **合本はここでは触らない**（設計書6.65.15の段D）。区切りが2つ以上ある
   // ファイルは `collectedFile.ts` が話ごとに分ける道を持っており、こちらが
   // 半端に切ると「1話目だけの本文」と「全部入りの文字数」が混ざる
   const separators = lines.filter((line) =>
     EPISODE_SEPARATOR.test(line.trim())
   ).length;
-  if (separators > 1) {
-    return emptyMetadata(text);
-  }
+  if (separators > 1) return null;
 
   // 頭書きの区切り行を1本だけ跨ぐ。**見つからなければ先頭のまま**
   // （頭書きの無い原稿を1文字も削らないため）
-  const head = lines.slice(skipLeadingSeparator(lines)).join("\n");
+  const skip = skipLeadingSeparator(lines);
+  const head = lines.slice(skip).join("\n");
 
   // 先頭が【...】で始まらない場合はメタデータ無しと判断する
-  if (!/^\s*【[^】]+】/.test(head)) {
-    return emptyMetadata(text);
+  if (!/^\s*【[^】]+】/.test(head)) return null;
+
+  const split = splitHeaderBlocks(head);
+  if (split.blocks.length === 0) return null;
+  for (const block of split.blocks) {
+    block.firstLine += skip;
+    block.endLine += skip;
   }
 
-  const blocks = splitHeaderBlocks(head);
-  if (blocks.blocks.length === 0) {
-    return emptyMetadata(text);
+  // 【本文（69行）】のように括弧付きのラベルにも対応する
+  const bodyBlock = split.blocks.find((b) =>
+    BODY_LABELS.some((l) => b.label.startsWith(l))
+  );
+  // 本文ラベルが無ければメタデータ形式とみなさない
+  // （【】を装飾として使っている本文を誤判定しないため）
+  if (!bodyBlock) return null;
+
+  return { blocks: split.blocks, bodyEndedByLabel: split.bodyEndedByLabel, bodyBlock };
+}
+
+/** 渡した字の中の範囲（`start` から `end` の手前まで） */
+export interface TextRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * 読み上げと音声の書き出しで読む範囲（2026-11-08 作者の答え。設計書6.42・6.42.4）。
+ *
+ * **読むのは題（【タイトル】の中身）と本文だけ。** 頭の欄（公開状態・日時・文字数）と、
+ * 前書き・後書き・リアクションは読まない。返すのは、題があれば `[題, 本文]`、
+ * 無ければ `[本文]` の順の範囲。
+ *
+ * **null は「全部を読む」。** 頭の欄の無い原稿、合本、見分けに迷う形は null にする
+ * ——1文字でも本文を飛ばすより、余計に読むほうがまし（作者の指示）。
+ *
+ * 位置は**渡した字のまま**で数える（改行を揃えない）。読み上げは画面の字の位置で
+ * 文を光らせるので、ここで CRLF を LF に直すと、改行1つごとに1字ずつずれる。
+ */
+export function episodeReadableRanges(rawText: string): TextRange[] | null {
+  const lines = rawText.split("\n");
+  const located = locateBlocks(lines.map((line) => line.replace(/\r$/, "")));
+  if (!located) return null;
+
+  const lineStarts: number[] = [];
+  let at = 0;
+  for (const line of lines) {
+    lineStarts.push(at);
+    at += line.length + 1;
   }
+  /** その行の頭の位置。末尾を越えたら字の終わり */
+  const startOf = (line: number): number =>
+    line < lineStarts.length ? lineStarts[line] : rawText.length;
+  /** 欄の中身の範囲（最後の行の改行は含めない） */
+  const rangeOf = (block: HeaderBlock): TextRange => {
+    const start = startOf(block.firstLine);
+    const end = Math.max(start, startOf(block.endLine) - (block.endLine < lines.length ? 1 : 0));
+    return { start, end };
+  };
+
+  const ranges: TextRange[] = [];
+  // 題は `parseEpisodeMetadata` の title と同じ選び方（同じ意味の見出しのうち先のもの、
+  // 中身が空なら次）。見出しの語「タイトル」は欄の外なので読まない
+  for (const label of TITLE_LABELS) {
+    const block = located.blocks.find((b) => b.label === label);
+    if (!block || block.value.trim() === "") continue;
+    const whole = rangeOf(block);
+    const value = rawText.slice(whole.start, whole.end);
+    const lead = value.length - value.replace(/^\s+/, "").length;
+    const trail = value.length - value.replace(/\s+$/, "").length;
+    ranges.push({ start: whole.start + lead, end: whole.end - trail });
+    break;
+  }
+  ranges.push(rangeOf(located.bodyBlock));
+  return ranges;
+}
+
+export function parseEpisodeMetadata(rawText: string): EpisodeMetadata {
+  const text = rawText.replace(/\r\n?/g, "\n");
+  const located = locateBlocks(text.split("\n"));
+  if (!located) return emptyMetadata(text);
+  const blocks = located;
 
   const find = (label: string): string | null => {
     const b = blocks.blocks.find((x) => x.label === label);
@@ -159,16 +249,7 @@ export function parseEpisodeMetadata(rawText: string): EpisodeMetadata {
     return null;
   };
 
-  // 【本文（69行）】のように括弧付きのラベルにも対応する
-  const bodyBlock = blocks.blocks.find((b) =>
-    BODY_LABELS.some((l) => b.label.startsWith(l))
-  );
-
-  // 本文ラベルが無ければメタデータ形式とみなさない
-  // （【】を装飾として使っている本文を誤判定しないため）
-  if (!bodyBlock) {
-    return emptyMetadata(text);
-  }
+  const bodyBlock = located.bodyBlock;
 
   return {
     hasMetadata: true,
@@ -223,9 +304,10 @@ function splitHeaderBlocks(text: string): {
   let buffer: string[] = [];
   let bodyEndedByLabel = false;
 
-  const flush = () => {
+  const flush = (endLine: number) => {
     if (current) {
       current.value = buffer.join("\n");
+      current.endLine = endLine;
       blocks.push(current);
     }
   };
@@ -242,14 +324,14 @@ function splitHeaderBlocks(text: string): {
     const m = found !== null && (!isBodyStarted || endsBody(found)) ? found : null;
     if (m !== null) {
       if (isBodyStarted) bodyEndedByLabel = true;
-      flush();
-      current = { label: m, value: "" };
+      flush(i);
+      current = { label: m, value: "", firstLine: i + 1, endLine: i + 1 };
       buffer = [];
     } else {
       buffer.push(line);
     }
   }
-  flush();
+  flush(lines.length);
 
   return { blocks, bodyEndedByLabel };
 }

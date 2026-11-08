@@ -344,6 +344,50 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     await run(ACML_BOTH);
     expect(state.progress.some((message) => message.includes("4"))).toBe(true);
   });
+
+  /**
+   * 書き出しで読むのは題と本文だけ（2026-11-08 作者の答え。設計書6.42.4）。
+   * 頭の欄・前書き・後書きをエンジンへ送らず、確認の窓の文の数にも数えない
+   */
+  test("カクヨム形式の頭の欄・前書き・後書きは書き出さない。文の数も飛ばしたあとで数える", async () => {
+    engine = await startFakeVoiceEngine({ pcm: true, terms: ACML_BOTH });
+    const url = engine.url;
+    const service = new VoiceReadingService(() => url, undefined, async () => true);
+    const text = [
+      "【タイトル】",
+      "はじまり",
+      "",
+      "【公開状態】",
+      "下書き",
+      "",
+      "【文字数】",
+      "5,529文字",
+      "",
+      "【前書き】",
+      "読んでくださってありがとうございます。",
+      "",
+      "【本文】",
+      TEXT,
+      "",
+      "【後書き】",
+      "次回もお楽しみに。",
+    ].join("\n");
+    const sentences = buildReadingPlan(text, "site", [], { splitDialogue: true });
+    const outcome = await exportVoiceAudio({ work, episodePath: EPISODE, text, sentences }, service, lame);
+    expect(outcome.kind).toBe("written");
+    const spoken = engine.requests
+      .filter((r) => r.path === "/audio_query")
+      .map((r) => r.query.text ?? "")
+      .join("\n");
+    expect(spoken).toContain("はじまり");
+    expect(spoken).toContain("やった");
+    for (const word of ["タイトル", "公開状態", "下書き", "文字数", "5,529", "ありがとう", "お楽しみ"]) {
+      expect(spoken, word).not.toContain(word);
+    }
+    // 題1文＋本文4文
+    expect(engine.requests.filter((r) => r.path === "/synthesis")).toHaveLength(5);
+    expect(state.confirms[0].message).toContain("5文");
+  });
 });
 
 describe("エンジンに届かないときは、画面の真ん中の窓（2026-11-08 作者の実機確認）", () => {

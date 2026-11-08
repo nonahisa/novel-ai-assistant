@@ -6,6 +6,7 @@ import {
 import { MEMO_LINE_PATTERN, isMemoLine } from "./sceneMemo";
 import type { ReadingSpan } from "./readingDictionary";
 import { quotedSpans } from "./quotedSpans";
+import { episodeReadableRanges, type TextRange } from "./metadataParser";
 
 /**
  * 読み上げ（音読推敲。設計書6.42）。
@@ -172,7 +173,38 @@ export function buildReadingPlan(
     // 改行1文字ぶんを足して、次の行の頭へ
     lineStart += line.length + 1;
   }
-  return plan;
+  return keepReadable(plan, readingRangesOf(text));
+}
+
+/**
+ * 読む範囲（題と本文）。**null は全部を読む**（頭の欄の無い原稿・合本）。
+ *
+ * 画面はこの範囲で「カーソルが飛ばす欄の中か」を見て、中なら題から読み始める
+ * （2026-11-08 作者の答え）。決まりそのものは `metadataParser.ts` が持つ——字数や本の
+ * 組版と同じ見分け方にしないと、字数に数えない欄を読み上げることになる。
+ */
+export function readingRangesOf(text: string): TextRange[] | null {
+  return episodeReadableRanges(text);
+}
+
+/**
+ * 範囲の外の文を落とす（設計書6.42・6.42.4）。
+ *
+ * **字を切り取ってから文に分けない。** 切り取ると位置が縮み、読んでいる文と光る場所が
+ * ずれる。分けたあとで落とせば、残った文の `start`/`end`/`line` は画面の字のままである。
+ * 文は行をまたがず、欄の境目は行の境目なので、文の頭が範囲に入るかだけを見ればよい。
+ *
+ * 台詞の番号（`dialogue`）は振り直さない。全文の `voiceDialogueSpans` の添字で、
+ * 台詞ごとの話者の推定がその番号で引くため。
+ */
+function keepReadable(
+  plan: ReadingSentence[],
+  ranges: readonly TextRange[] | null
+): ReadingSentence[] {
+  if (!ranges) return plan;
+  return plan.filter((sentence) =>
+    ranges.some((range) => sentence.start >= range.start && sentence.start < range.end)
+  );
 }
 
 /*
