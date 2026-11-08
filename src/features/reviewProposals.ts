@@ -24,7 +24,9 @@ import {
   reviewLockTakenMessage,
   reviewRangeNotifyFailedMessage,
   reviewRangeStartedMessage,
+  reviewLockWho,
 } from "../core/reviewLockMessages";
+import { reviewLockEditorLogin } from "./manuscriptReviewLock";
 import { tryGitUserName } from "../core/gitAttribution";
 import {
   readTextFile,
@@ -410,7 +412,11 @@ export async function confirmNotUnderReview(
   // 解く手段は「編集部連携を解除」（編集部と決裂したとき）
   const action = await vscode.window.showWarningMessage(
     `${path.basename(filePath)} は編集者が校閲中のため、適用できません。`,
-    { modal: true, detail: describeLock(lock) },
+    {
+      modal: true,
+      // 名前は GitHub のユーザー名（鍵の holder の git の名前は出さない）
+      detail: describeLock(lock, reviewLockWho(await reviewLockEditorLogin(work))),
+    },
     "連携を解除…"
   );
   if (action === "連携を解除…") {
@@ -472,7 +478,10 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
   if (current) {
     const answer = await vscode.window.showWarningMessage(
       reviewLockHeldMessage(path.basename(relative)),
-      { modal: true, detail: describeLock(current) },
+      {
+        modal: true,
+        detail: describeLock(current, reviewLockWho(await reviewLockEditorLogin(work))),
+      },
       "外す"
     );
     if (answer !== "外す") return;
@@ -482,8 +491,14 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
       action: "校閲のロックを外した",
       // 名前だけにしない（ほかの章の同じ名前の話と取り違える。0.130.4）
       file: editHistoryFile(work.folderPath, filePath),
+      // 履歴は画面に出る。鍵の holder は git の名前なので使わず、編集者の鍵なら
+      // GitHub の名前、そうでなければ「ほかの人」と言う（名前を推し量らない）
       detail: current.holder && current.holder !== who
-        ? reviewLockReleasedOthersDetail(current.holder)
+        ? reviewLockReleasedOthersDetail(
+            current.holderKind === "editor"
+              ? reviewLockWho(await reviewLockEditorLogin(work))
+              : "ほかの人"
+          )
         : "",
     });
     // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）

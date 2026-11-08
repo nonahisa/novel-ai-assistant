@@ -344,4 +344,15 @@ describe("打ったときの右下の知らせ（原稿エディター）", () =
     );
     expect(guard).not.toMatch(/describeLock\(/);
   });
+
+  test("編集者の校閲の問い・履歴に、鍵の holder（git の名前）を渡さない（2026-11-09）", () => {
+    const source = readFileSync(
+      nodePath.join(__dirname, "..", "..", "..", "src", "features", "reviewProposals.ts"),
+      "utf8"
+    );
+    // 履歴の「〜が校閲中にしていたものを外しました」へ holder を直に渡していた
+    expect(source).not.toMatch(/reviewLockReleasedOthersDetail\(current\.holder\)/);
+    // describeLock は「誰が」を呼び手が決める（GitHub の名前か「編集者」）
+    expect(source).not.toMatch(/describeLock\((lock|current)\)/);
+  });
 });

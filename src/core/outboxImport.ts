@@ -18,6 +18,7 @@ import {
 } from "../models/fileLock";
 import { decodeBytes, hasConflictMarkers, type TextFileContent } from "./textDecode";
 import { sha1Bytes } from "./hash";
+import { reviewLockWho } from "./reviewLockMessages";
 import {
   DEFAULT_FINDINGS_RETENTION_DAYS,
   FINDING_PANEL_STATE_LABELS,
@@ -143,6 +144,12 @@ export interface OutboxImportOptions {
   retentionDays?: number;
   /** 試験のために外から渡す */
   now?: Date;
+  /**
+   * 校閲中の理由に出す、編集者の GitHub のユーザー名（`.aiwriter/editing.json` の
+   * `editorLogin`）。**鍵の holder（git の名前）は出さない**（5.7.5.9。2026-11-09）。
+   * 分からなければ（MCP など）「編集者」とだけ出る
+   */
+  editorLogin?: string;
 }
 
 export type OutboxImportStatus = "imported" | "already" | "refused";
@@ -301,6 +308,8 @@ interface Context {
   io: OutboxImportIo;
   /** 入れた body 記録の鍵 → 書いたあとの blob SHA（前の回の分と、この回の分） */
   bodyShas: Map<string, string>;
+  /** 校閲中の理由に出す「誰が」（「編集者 kmizu」か「編集者」。git の名前は出さない） */
+  lockWho: string;
 }
 
 /**
@@ -384,6 +393,7 @@ export async function importOutboxRecords(
     now,
     io,
     bodyShas,
+    lockWho: reviewLockWho(options.editorLogin),
   };
 
   const results = new Map<string, OutboxImportItem>();
@@ -592,7 +602,7 @@ async function importBody(record: OutboxRecord, context: Context): Promise<BodyO
   if (state instanceof Error) return { ok: false, reason: state.message };
   const lock = lockOf(context.locks, state.relative);
   if (lock && lock.holderKind === "editor") {
-    return { ok: false, reason: `${describeLock(lock)} 校閲が終わってから送り直してください。` };
+    return { ok: false, reason: `${describeLock(lock, context.lockWho)} 校閲が終わってから送り直してください。` };
   }
 
   const base = record.baseBlobSha?.toLowerCase();
@@ -754,7 +764,7 @@ async function importVerdict(record: OutboxRecord, context: Context): Promise<De
   const lock = lockOf(context.locks, view.file);
   if (lock && lock.holderKind === "editor") {
     // パネルは確認の窓を出すが、外からは確かめられないので断る
-    return { ok: false, reason: `${describeLock(lock)} 校閲が終わってから、提案パネルで当ててください。` };
+    return { ok: false, reason: `${describeLock(lock, context.lockWho)} 校閲が終わってから、提案パネルで当ててください。` };
   }
   const applied = applyFindingToText(state.content.text, {
     line,
@@ -871,7 +881,7 @@ async function importEdit(record: OutboxRecord, context: Context): Promise<Decis
   }
   const lock = lockOf(context.locks, view.file);
   if (lock && lock.holderKind === "editor") {
-    return { ok: false, reason: `${describeLock(lock)} 校閲が終わってから直してください。` };
+    return { ok: false, reason: `${describeLock(lock, context.lockWho)} 校閲が終わってから直してください。` };
   }
   const panelState = findingPanelStateOf(view, before, context.retentionDays, context.now).state;
   if (panelState !== "pending") {
