@@ -30,6 +30,17 @@ export default defineConfig({
       手元と CI が同じ結果になる。**製品の振る舞いは変えない。**
     */
     env: { TZ: "Asia/Tokyo" },
+    /*
+      **1件の待ちの上限を 20 秒にする**（既定は 5 秒。2026-11-08）。
+
+      ほかの重いアプリが動いているノートPCで package:vsix を流したら、src を全部
+      たどる見張り（keyLabelsOnMac・browserHiddenMenus・helperRankingsNotForAi）と、
+      本物の git を起こして待つ試験（gitIndexLockRetry）が 5 秒を越えて止まった。
+      単独で流せばどれも通る——遅いのは機械の混み具合で、製品の不具合ではない。
+      上限を上げても、本当に止まった試験は 20 秒で落ちるので見逃さない。
+      件ごとに長い上限を書いてある試験は、そちらが勝つ。
+    */
+    testTimeout: 20_000,
     // 読み口（`core/fileRead.ts`）を `vscode.workspace.fs` 側へ固定する。
     // **試験も Node の上で動く**ので、入れないと本物のディスクを読みにいき、
     // 記憶の中に置いた作り物が見えなくなる（理由は `support/setup.ts`）

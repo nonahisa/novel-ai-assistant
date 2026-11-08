@@ -137,7 +137,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
+  for (const root of roots) fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const read = (work: WorkEntry, relative: string) =>

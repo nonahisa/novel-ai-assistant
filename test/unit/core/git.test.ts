@@ -633,7 +633,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   // 場所は git が無くても作ってあるので、いつも片づける
-  await fs.rm(tempRoot, { recursive: true, force: true });
+  await fs.rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe("実際のgitでの確認", () => {

@@ -339,7 +339,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!gitReady) return;
-  await fs.rm(tempRoot, { recursive: true, force: true });
+  await fs.rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 /** gitがそのパスを除外しているか、git自身に聞く */
