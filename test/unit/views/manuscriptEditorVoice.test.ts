@@ -68,8 +68,25 @@ describe("人物の声の画面", () => {
   });
 
   it("計画を頼むときに読み方を添える。読み方の違う計画は使わない", () => {
-    expect(script).toContain('type: "readingPlan", text: aloudTextNow(), voiced: voiceMode');
+    expect(script).toContain('type: "readingPlan", text: text, voiced: voiceMode');
     expect(bodyOf("aloudTakePlan")).toContain("if (!!message.voiced !== voiceMode) return;");
+  });
+
+  /*
+    作者の実機（2026-11-08、VOICEVOX）：「校正パネルをクリックすると音声が
+    その文の最初に巻き戻ります」。ほかのパネルを押すと原稿の面が前から外れ、
+    拡張機能は onDidChangeViewState で本文を送り直す（update）。画面は update の
+    たびに計画を取り直し、人物の声は取り直すと今の文の頭から鳴らし直す
+    （aloudTakePlan の末尾）。**本文が変わっていない update では取り直さない。**
+  */
+  it("本文が変わっていない update では、読み上げの計画を取り直さない（ほかのパネルを押しても巻き戻らない）", () => {
+    expect(script).toContain(
+      "if (aloudStartAt !== null || (aloudOn && aloudTextNow() !== aloudPlannedText)) aloudAskPlan();"
+    );
+    expect(script).not.toContain("if (aloudOn || aloudStartAt !== null) aloudAskPlan();");
+    expect(bodyOf("aloudAskPlan", 300)).toContain("aloudPlannedText = text;");
+    // 頼んだ本文と同じものを送る（覚えた本文と送った本文が食い違わない）
+    expect(bodyOf("aloudAskPlan", 300)).toContain('type: "readingPlan", text: text, voiced: voiceMode');
   });
 
   it("使えない環境では選択肢を押せなくして理由を出す（消さない）", () => {
