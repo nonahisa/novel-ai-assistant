@@ -12,7 +12,10 @@ import {
   stepsToRun,
 } from "../../../src/core/finishNewWork";
 import { describeFinishReport } from "../../../src/core/finishReportDoc";
-import { PROOFREADING_CHECKS } from "../../../src/core/proofreadingSuite";
+import {
+  CHECK_FEATURES,
+  PROOFREADING_CHECKS,
+} from "../../../src/core/proofreadingSuite";
 import { CHAPTER_PROPOSAL_CATEGORY } from "../../../src/features/proposeChapters";
 import { allActions } from "../../../src/views/actionList";
 import type { WorkEntry } from "../../../src/models/types";
@@ -154,7 +157,9 @@ describe("段の並び", () => {
       こちらだけ古くなる——例外は出ないので、作者からは「一気に走らせたのに
       その検知だけ動いていない」としか見えない。
     */
-    const checks = PROOFREADING_CHECKS.map((check) => check.command);
+    // まとめ実行の一覧ではなく、全件の表を引く（冒頭診断と伏線の検知は
+    // 校正のまとめ実行から外したが、ひと通り仕上げるでは走らせる。2026-11-08）
+    const checks = CHECK_FEATURES.map((check) => check.command);
     const inFinish = FINISH_STEPS.map((step) => step.command);
     const from = inFinish.indexOf(checks[0]);
 

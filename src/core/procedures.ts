@@ -209,7 +209,8 @@ export const PROCEDURES: readonly Procedure[] = [
       {
         command: "novelai.runProofreadingSuite",
         why: "誤字脱字・表記ゆれ・推敲を一度に掛けられる",
-        check: "提案パネルに指摘が並ぶ。1件ずつ適用か見送るかを決める",
+        // 誤字脱字などの指摘は、終わると校正・メモパネルが開いて並ぶ（設計書6.96.5）
+        check: "校正・メモパネルに指摘が並ぶ。1件ずつ直すか見送るかを決める",
       },
       {
         command: "novelai.manageKeepWords",
@@ -397,7 +398,8 @@ export const PROCEDURES: readonly Procedure[] = [
       {
         command: "novelai.viewEditorProposals",
         why: "届いた提案を受け取り、まだ決めていないものを並べる",
-        check: "提案パネルで1件ずつ採用か見送りを選ぶ",
+        // 並べる先は校正・メモパネル（作者の指示 2026-11-08）
+        check: "校正・メモパネルで1件ずつ［採る］か［見送る］を選ぶ",
       },
       {
         command: "novelai.revokeEditorAccess",

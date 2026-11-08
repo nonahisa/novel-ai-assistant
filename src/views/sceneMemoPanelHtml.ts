@@ -451,6 +451,15 @@ el.list.addEventListener("click", function (event) {
     post("dismissFinding", { findingId: row.findingId });
     return;
   }
+  if (act === "proposalAccept" || act === "proposalReject") {
+    // 編集者の提案（2026-11-08）。採る・読んだ・見送るを決めるのは拡張機能の側で、
+    // 提案パネルのころと同じ道を通る。この画面は頼むだけ
+    post("decideProposal", {
+      proposalId: row.proposalId,
+      decision: act === "proposalAccept" ? "accept" : "reject",
+    });
+    return;
+  }
   post("reveal", { filePath: row.filePath, line: row.line });
 });
 
@@ -493,6 +502,32 @@ function renderTags() {
  */
 function renderActions(row) {
   const key = escapeHtml(row.key);
+  if (row.kind === "proposal") {
+    // 編集者の提案（作者の指示 2026-11-08）。決める口が無ければ押し口を出さない
+    if (!row.proposalAction) return "";
+    const buttons = [];
+    if (row.proposalAction === "read") {
+      // 意見だけの提案。直し方は作者が決めるので、［読んだ］と［本文へ］を並べる
+      buttons.push(
+        '<button class="done" data-act="proposalAccept" data-key="' + key +
+          '" title="意見を読んだ印を付けて片づけます（本文は変わりません。読んだことは編集者へ返ります）">読んだ</button>'
+      );
+      buttons.push(
+        '<button class="done" data-act="reveal" data-key="' + key +
+          '" title="原稿のこの行へ飛びます（本文は変わりません）">本文へ</button>'
+      );
+    } else {
+      buttons.push(
+        '<button class="done" data-act="proposalAccept" data-key="' + key +
+          '" title="編集者の修正案を本文へ当てます（採ったことは編集者へ返ります）">採る</button>'
+      );
+    }
+    buttons.push(
+      '<button class="done" data-act="proposalReject" data-key="' + key +
+        '" title="この提案を見送ります（本文は変わりません。見送ったことは編集者へ返ります）">見送る</button>'
+    );
+    return '<span class="acts">' + buttons.join("") + "</span>";
+  }
   if (row.kind === "finding") {
     const buttons = [];
     // 修正案があれば［直す］（1手で本文へ当てる）、無ければ［本文へ］。

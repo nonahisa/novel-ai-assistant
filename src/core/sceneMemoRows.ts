@@ -48,7 +48,41 @@ export interface PlacedFinding extends Finding {
   line: number;
 }
 
-/** 一覧に並ぶ1行。**付箋か指摘のどちらか**で、混ざった型は作らない */
+/**
+ * 編集者の提案を、いまの本文の場所へ結び付けたもの（作者の指示 2026-11-08
+ * 「編集からの提案も校正メモにうつしてください」。設計書6.96.5）。
+ *
+ * **指摘（`PlacedFinding`）とは別の形にする。** 指摘の［直す］は
+ * `applyFinding` の道を通り、提案の［採る］は `acceptProposal` の道を通る。
+ * 同じ形に混ぜると、提案が指摘の適用処理に掴まれて壊れる（6.11.1 と同じ理由）。
+ *
+ * **置き場は `proposals.jsonl` のまま**（5.7.5.8）。指摘の置き場には写さない。
+ */
+export interface PlacedProposal {
+  /** 台帳の提案の番号（`proposals.jsonl` の `id`） */
+  id: string;
+  /** 本文の在りか（作品フォルダーと台帳の相対パスを繋いだもの） */
+  filePath: string;
+  /** 台帳の相対パス（採るときに `acceptProposal` へそのまま渡す） */
+  file: string;
+  /**
+   * 台帳の行（1始まり）。**探し直さない**——採る側（`acceptProposal`）が
+   * この行で照らすので、画面だけ別の行を指すと、押した行と直る行が食い違う
+   */
+  line: number;
+  original: string;
+  target: string;
+  suggestion: string;
+  /** 画面に出す理由（「編集者の修正：…」「（kmizu の提案）」まで添えたもの） */
+  reason: string;
+  /** 直した案が空＝意見だけ（［読んだ］で片づける。本文は変えない） */
+  opinionOnly: boolean;
+}
+
+/** 校正・メモパネルで、編集者の提案に付ける種類の名前（札と絞り込みの言葉） */
+export const EDITOR_PROPOSAL_TAG = "編集者の提案";
+
+/** 一覧に並ぶ1行。**付箋・指摘・編集者の提案のどれか1つ**で、混ざった型は作らない */
 export type NoteRow =
   | {
       kind: "memo";
@@ -64,11 +98,22 @@ export type NoteRow =
       line: number;
       sameLine: boolean;
       finding: PlacedFinding;
+    }
+  | {
+      kind: "proposal";
+      filePath: string;
+      line: number;
+      sameLine: boolean;
+      proposal: PlacedProposal;
     };
 
-/** 同じ行に並んだときの前後。**作者が書いたものを先に読ませる** */
+/**
+ * 同じ行に並んだときの前後。**作者が書いたものを先に読ませる**。
+ * 人（編集者）が書いた提案は、機械の指摘より先に置く
+ */
 function kindRank(row: NoteRow): number {
-  return row.kind === "memo" ? 0 : 1;
+  if (row.kind === "memo") return 0;
+  return row.kind === "proposal" ? 1 : 2;
 }
 
 /**
@@ -79,11 +124,13 @@ function kindRank(row: NoteRow): number {
  *
  * @param fileOrder 話数順のファイルの並び（走査の結果を持つ側が渡す）。
  *   ここに無いファイルは後ろへ回る（**捨てない**）
+ * @param proposals 編集者の提案（作者モードだけ。2026-11-08）。種類で分けず同じ並びに入れる
  */
 export function mergeNoteRows(
   memos: readonly SceneMemo[],
   findings: readonly PlacedFinding[],
-  fileOrder?: readonly string[]
+  fileOrder?: readonly string[],
+  proposals: readonly PlacedProposal[] = []
 ): NoteRow[] {
   const rows: NoteRow[] = [
     ...memos.map<NoteRow>((memo) => ({
@@ -99,6 +146,13 @@ export function mergeNoteRows(
       line: finding.line,
       sameLine: false,
       finding,
+    })),
+    ...proposals.map<NoteRow>((proposal) => ({
+      kind: "proposal",
+      filePath: proposal.filePath,
+      line: proposal.line,
+      sameLine: false,
+      proposal,
     })),
   ];
 
@@ -311,6 +365,9 @@ export const FINDING_TONES = {
   // グラフの色は7色しか無いので、端末の色（テーマが必ず持つ）を借りる
   factContradiction: "var(--vscode-terminal-ansiMagenta, #bc3fbc)",
   deviation: "var(--vscode-charts-green, #89d185)",
+  // 編集者の提案（2026-11-08 から校正・メモパネルに並ぶ）。AIの指摘と見分けるため、
+  // グラフの色のうち指摘が使っていない黄色を当てる
+  editorProposal: "var(--vscode-charts-yellow, #cca700)",
   // 知らない種類（外から置かれた指摘・これから足す検知）。勝手に強調しない
   other: "var(--vscode-charts-foreground, #cccccc)",
 } as const;
@@ -331,6 +388,7 @@ const FINDING_LABEL_TONES: Readonly<Record<string, FindingToneKey>> = {
   矛盾: "contradiction",
   [FACT_CONTRADICTION_CATEGORY]: "factContradiction",
   プロット逸脱: "deviation",
+  [EDITOR_PROPOSAL_TAG]: "editorProposal",
   指摘: "other",
 };
 
@@ -404,6 +462,25 @@ export function findingHeadline(finding: Finding): string {
     return `「${finding.target}」→「${finding.suggestion}」`;
   }
   return finding.message || finding.original;
+}
+
+/**
+ * 編集者の提案の1行に出す文（主文）。
+ *
+ * 直しの提案は直し方を主文にする（指摘の `findingHeadline` と同じ形）。
+ * 意見だけの提案は直し方が無いので、意見（理由）が主文になる。
+ */
+export function proposalHeadline(proposal: PlacedProposal): string {
+  if (!proposal.opinionOnly && proposal.target) {
+    return `「${proposal.target}」→「${proposal.suggestion}」`;
+  }
+  return proposal.reason || proposal.original;
+}
+
+/** 編集者の提案の主文の下に添える補足。主文と同じものは繰り返さない */
+export function proposalNote(proposal: PlacedProposal): string {
+  if (proposal.opinionOnly) return "編集者の意見です（本文は変わりません）";
+  return proposal.reason === proposalHeadline(proposal) ? "" : proposal.reason;
 }
 
 /** 主文の下に添える補足。主文と同じものは繰り返さない */

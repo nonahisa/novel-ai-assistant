@@ -19,7 +19,10 @@
  * ## 直すものの一式は、写さずに `proofreadingSuite.ts` から引く
  *
  * 誤字脱字・表記ゆれ・推敲・冒頭診断・逸脱・矛盾・伏線の並びは、既に
- * `PROOFREADING_CHECKS` が唯一の置き場として持っている。ここへ書き写すと、
+ * `CHECK_FEATURES` が唯一の置き場として持っている。**まとめ実行の一覧
+ * （`PROOFREADING_CHECKS`）ではなく全件を引く**——冒頭診断と伏線の検知は
+ * 校正のまとめ実行から外したが（作者の指示 2026-11-08）、ここでは
+ * 「可能なことをすべて一気に」のとおり走らせる。ここへ書き写すと、
  * **校正へ機能を足したときにこちらだけ古くなる**——しかも例外は出ないので、
  * 作者からは「一気に走らせたのに、その検知だけ動いていない」としか見えない。
  *
@@ -32,7 +35,7 @@
  */
 
 import {
-  PROOFREADING_CHECKS,
+  CHECK_FEATURES,
   describeSuiteRunTime,
   type ProofreadingCheckId,
   type SuiteEstimate,
@@ -160,7 +163,7 @@ export const FINISH_STEPS: readonly FinishStep[] = [
     写しを作るのと同じである。並び自体も「軽いものから重いものへ」と
     理由があって決まっている（設計書6.80）。
   */
-  ...PROOFREADING_CHECKS.map(
+  ...CHECK_FEATURES.map(
     (check): FinishStep => ({
       id: check.id,
       label: check.label,
