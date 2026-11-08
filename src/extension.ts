@@ -100,6 +100,7 @@ import {
   jumpSceneMemo,
   noteSceneMemoCaret,
   openSceneMemoPanel,
+  refreshSceneMemoFindings,
   refreshSceneMemoMergeNotice,
   refreshSceneMemos,
   registerSceneMemoPanelRestore,
@@ -581,8 +582,9 @@ import {
 } from "./features/decisionMemory";
 import { rememberFetchTroubleMemory } from "./features/fetchTroubleMemory";
 import {
-  primeEditorProposals,
-  rememberProposalPanel,
+  decideEditorProposal,
+  loadEditorProposalsForMemo,
+  rememberMemoPanelRefresher,
   reviewProposals,
   showEditorProposals,
   toggleReviewLock,
@@ -3384,6 +3386,14 @@ export async function activate(
       const panel = await openSettingsPanel(context, work, aiRegistry);
       await panel.showMergeCandidates();
     },
+    /*
+      編集者の提案（作者の指示 2026-11-08「編集からの提案も校正メモにうつしてください」。
+      設計書6.96.5）。並べるのは作者モードだけ（編集者モードでは空が返る）。決める道は
+      提案パネルのころと同じ `acceptProposal`（校閲中の関門・台帳への追記・送り返し）
+    */
+    loadEditorProposals: (work) => loadEditorProposalsForMemo(work),
+    decideEditorProposal: (work, proposal, decision) =>
+      decideEditorProposal(work, proposal, decision),
   };
 
   /*
@@ -3481,17 +3491,11 @@ export async function activate(
             詳細: error instanceof Error ? error.message : String(error),
           });
         }
-        try {
-          // **編集部の未決の提案も戻す**（作者の実機 2026-11-01）。戻さないと、
-          // 作品の選び欄に、編集部の提案だけが未決の作品が出なかった
-          await primeEditorProposals(work, panel);
-        } catch (error) {
-          useLogFile(work.folderPath);
-          logFailure("編集者の提案の読み込みに失敗", {
-            作品: work.title,
-            詳細: error instanceof Error ? error.message : String(error),
-          });
-        }
+        /*
+          **編集者の未決の提案は、提案パネルへ戻さない**（作者の指示 2026-11-08）。
+          作者モードでは校正・メモパネルに並ぶ（パネルが開くたびに台帳から読む）。
+          2026-11-01〜11-07 はここで選び欄へ静かに足していた（`primeEditorProposals`）
+        */
         try {
           // **外部AIの台帳の案**（章立て・伏線・予定の段。設計書6.87.24）。
           // 採ったら台帳へ書き、章が変われば作品一覧の折りたたみを作り直す
@@ -3508,8 +3512,9 @@ export async function activate(
       }
     }
   );
-  // 自動の同期で編集部の提案が届いたとき、開いているパネルの選び欄へも足すため
-  rememberProposalPanel(proposalPanel);
+  // 自動の同期で編集者の提案が届いたとき、開いている校正・メモパネルを読み直すため
+  // （2026-11-08 までは提案パネルの選び欄へ足していた）
+  rememberMemoPanelRefresher(refreshSceneMemoFindings);
   // 編集者モードで、同期で届いた作者の採否を二度知らせないための覚え（作者の判断 2026-11-01）
   rememberDecisionMemory(verifiedState(context.globalState));
   // 編集者モードで、「置き場に届きません」を同じ作品で二度知らせないための覚え（設計書5.7.5.4）
@@ -8469,7 +8474,7 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveProposalWork(node);
         if (!work) return;
-        await showEditorProposals(work, proposalPanel);
+        await showEditorProposals(work);
       }
     ),
     registerCommand(
@@ -8478,10 +8483,10 @@ export async function activate(
         const work = await resolveProposalWork(node);
         if (!work) return;
         if (isEditorMode()) {
-          await reviewProposals(work, proposalPanel);
+          await reviewProposals(work);
           return;
         }
-        await showEditorProposals(work, proposalPanel);
+        await showEditorProposals(work);
       }
     ),
     registerCommand(
@@ -8596,7 +8601,7 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveProposalWork(node);
         if (!work) return;
-        await showEditorProposals(work, proposalPanel);
+        await showEditorProposals(work);
       }
     )
   );

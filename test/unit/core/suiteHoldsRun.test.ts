@@ -8,7 +8,7 @@ import {
 } from "../../../src/core/aiSequence";
 import {
   isSuiteHoldingRun,
-  PROOFREADING_CHECKS,
+  CHECK_FEATURES,
 } from "../../../src/core/proofreadingSuite";
 
 /**
@@ -70,10 +70,12 @@ describe("まとめ実行の中の機能は、札を取り直さない", () => {
     "novelai.checkForeshadows": "features/checkForeshadows.ts",
   };
 
-  test("まとめ実行の7工程が、この表と噛み合っている", () => {
+  test("検知の全件の表（7工程）が、この表と噛み合っている", () => {
     // 工程が増えたらここが落ちる。落ちたら、その機能が札を取るかを
-    // 確かめてから表へ足すこと
-    expect(PROOFREADING_CHECKS.map((check) => check.command).sort()).toEqual(
+    // 確かめてから表へ足すこと。**まとめ実行の一覧（5工程）ではなく全件で見る**——
+    // 冒頭診断と伏線の検知はまとめ実行から外したが（2026-11-08）、表に戻したときに
+    // 札の確かめが抜けないように
+    expect(CHECK_FEATURES.map((check) => check.command).sort()).toEqual(
       Object.keys(FEATURE_OF).sort()
     );
   });

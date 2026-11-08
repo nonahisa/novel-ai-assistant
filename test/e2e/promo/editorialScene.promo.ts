@@ -10,9 +10,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "vitest";
-import { composeText, manuscriptFrames, openEpisode } from "../support/manuscriptFrame";
+import { composeText, manuscriptFrames, memoPanelFrame, openEpisode } from "../support/manuscriptFrame";
 import { runCommand } from "../support/quickInput";
-import { proposalPanelFrame } from "../support/sampleFinding";
 import { waitUntil } from "../support/wait";
 import { clearNotifications, pickQuickPickRow, quickPickTitle } from "../support/workbenchDom";
 import { E2E_WORK_TITLE } from "../support/vscodeApp";
@@ -71,18 +70,19 @@ test("編集者の方と一緒に使うの広報素材を撮る", async () => {
             await pickQuickPickRow(page, E2E_WORK_TITLE);
             return false;
           }
-          const panel = await proposalPanelFrame(page);
-          return panel !== undefined && (await panel.locator('[data-action="apply"]').count()) > 0;
+          // 並べる先は校正・メモパネル（作者の指示 2026-11-08。それまでは提案パネル）
+          const panel = await memoPanelFrame(page);
+          return panel !== undefined && (await panel.locator('[data-act="proposalAccept"]').count()) > 0;
         },
-        "提案パネルに編集者の提案が並ぶ",
+        "校正・メモパネルに編集者の提案が並ぶ",
         30_000
       );
       await clearNotifications(page);
       await page.waitForTimeout(3_000);
-      const panel = (await proposalPanelFrame(page)) as NonNullable<Awaited<ReturnType<typeof proposalPanelFrame>>>;
+      const panel = (await memoPanelFrame(page)) as NonNullable<Awaited<ReturnType<typeof memoPanelFrame>>>;
       await caption("作者が1件ずつ、採るか見送るかを決める");
       await page.waitForTimeout(1_500);
-      await panel.locator('[data-action="apply"]').first().click();
+      await panel.locator('[data-act="proposalAccept"]').first().click();
       await waitUntil(
         async () => {
           for (const candidate of await manuscriptFrames(page)) {
@@ -94,7 +94,7 @@ test("編集者の方と一緒に使うの広報素材を撮る", async () => {
         15_000
       );
       await page.waitForTimeout(1_500);
-      const dismiss = panel.locator('[data-action="dismiss"]').first();
+      const dismiss = panel.locator('[data-act="proposalReject"]').first();
       if ((await dismiss.count()) > 0) await dismiss.click();
       await page.waitForTimeout(2_500);
     },

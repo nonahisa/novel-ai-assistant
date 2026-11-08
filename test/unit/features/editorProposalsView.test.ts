@@ -19,6 +19,13 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  *
  * ここでは作者の実データと同じ形（実験用に編集部の proposal 7件・decision 無し、
  * ほかの作品には検知の結果）で確かめる。
+ *
+ * ## 2026-11-08 から、並べる先は校正・メモパネル
+ *
+ * 作者の指示「編集からの提案も校正メモにうつしてください」。作者モードでは、
+ * 「編集者の提案を見る」は校正・メモパネル（`novelai.openSceneMemos`）を開き、
+ * **提案パネルには編集者の提案を並べない**（2つに割れて見えないように）。
+ * 選び欄の取りこぼし（上の起きたこと）は、提案パネルへ並べないことで起きなくなる。
  */
 
 const files = new Map<string, Uint8Array>();
@@ -26,11 +33,18 @@ const posted: Array<Record<string, unknown>> = [];
 const informed: string[] = [];
 const warned: string[] = [];
 let editorMode = false;
+/** 走らせたコマンド（校正・メモパネルを開いたかを見る） */
+const executed: Array<{ command: string; args: unknown[] }> = [];
 
 vi.mock("vscode", () => {
   const noop = () => undefined;
   return {
-    commands: { executeCommand: vi.fn(async () => undefined) },
+    commands: {
+      executeCommand: vi.fn(async (command: string, ...args: unknown[]) => {
+        executed.push({ command, args });
+        return undefined;
+      }),
+    },
     window: {
       showWarningMessage: vi.fn((message: string) => {
         warned.push(message);
@@ -89,7 +103,7 @@ vi.mock("../../../src/core/gitAttribution", () => ({
 
 import { ProposalPanel } from "../../../src/features/proposalPanel";
 import {
-  primeEditorProposals,
+  loadEditorProposalsForMemo,
   showEditorProposals,
   type EditorReceiveOutcome,
   type ShowEditorProposalsDeps,
@@ -204,124 +218,94 @@ function deps(outcome: EditorReceiveOutcome): ShowEditorProposalsDeps {
   return { receive: vi.fn(async () => outcome) };
 }
 
+/** 校正・メモパネルを、その作品で開いたか（Ctrl+Alt+M と同じ口） */
+function openedMemoPanelFor(): WorkEntry[] {
+  return executed
+    .filter((entry) => entry.command === "novelai.openSceneMemos")
+    .map((entry) => (entry.args[0] as { work: WorkEntry }).work);
+}
+
 beforeEach(() => {
   files.clear();
   posted.length = 0;
   informed.length = 0;
   warned.length = 0;
+  executed.length = 0;
   editorMode = false;
 });
 
-describe("提案パネルの作品の選び欄に、未決の編集者の提案がある作品を出す", () => {
-  test("開いたときの読み込みで、実験用が7件で選び欄に出る（ほかの作品の検知の結果があっても）", async () => {
+describe("作者モードでは、編集者の提案を提案パネルに並べない（2026-11-08）", () => {
+  test("「編集者の提案を見る」で、提案パネルの選び欄にも一覧にも編集者の提案が出ない", async () => {
     putSevenProposals();
-    const panel = panelWithOtherWorks();
-    // 直す前は、ここに実験用が無かった
-    expect(latestWorks().map((entry) => entry.title)).not.toContain(experiment.title);
+    // 画面を持ったパネル（ほかの4作品の検知の結果あり）を先に開いておく。並ぶかは送った中身で見る
+    panelWithOtherWorks();
+    const before = latest().workTitle;
 
-    expect(await primeEditorProposals(experiment, panel)).toBe(7);
+    await showEditorProposals(
+      experiment,
+      deps({ kind: "received", added: 0, pullFailed: false, lockMessages: [] })
+    );
 
-    const entry = latestWorks().find((work) => work.id === experiment.id);
-    expect(entry).toMatchObject({ title: experiment.title, remaining: 7 });
-    // ほかの作品の件数は変わらない
+    expect(latestWorks().map((entry) => entry.id)).not.toContain(experiment.id);
+    expect(latest().category).not.toBe("編集者からの提案");
+    // 作者が見ていた提案パネルの画面は動かない
+    expect(latest().workTitle).toBe(before);
+    // ほかの作品の件数も変わらない
     expect(latestWorks().find((work) => work.id === "w-ijime")?.remaining).toBe(9);
   });
 
-  test("静かに戻す：作者が見ている作品の画面は奪わず、知らせも出さない", async () => {
+  test("代わりに校正・メモパネルをその作品で開く", async () => {
     putSevenProposals();
-    const panel = panelWithOtherWorks();
-    const before = latest().workTitle;
 
-    await primeEditorProposals(experiment, panel);
+    await showEditorProposals(
+      experiment,
+      deps({ kind: "received", added: 0, pullFailed: false, lockMessages: [] })
+    );
 
-    expect(latest().workTitle).toBe(before);
-    expect(informed).toEqual([]);
-  });
-
-  test("採否を決めた提案は戻さない（decision があるものは数えない）", async () => {
-    putSevenProposals();
-    const decided = JSON.stringify({
-      kind: "decision",
-      proposalId: "p1",
-      time: "2026-11-01T13:00:00.000Z",
-      decidedBy: "nonahisa",
-      status: "accepted",
-      note: "",
-    });
-    const current = new TextDecoder().decode(files.get(ledgerPath(experiment)));
-    files.set(ledgerPath(experiment), new TextEncoder().encode(`${current}${decided}\n`));
-    const panel = panelWithOtherWorks();
-
-    expect(await primeEditorProposals(experiment, panel)).toBe(6);
-    expect(latestWorks().find((work) => work.id === experiment.id)?.remaining).toBe(6);
-  });
-
-  test("編集者モードでは戻さない（採るのは作者の判断）", async () => {
-    editorMode = true;
-    putSevenProposals();
-    const panel = panelWithOtherWorks();
-
-    expect(await primeEditorProposals(experiment, panel)).toBe(0);
-    expect(latestWorks().map((entry) => entry.id)).not.toContain(experiment.id);
-  });
-
-  test("戻したあとに新しい命令で並べても、二重にならない", async () => {
-    putSevenProposals();
-    const panel = panelWithOtherWorks();
-    await primeEditorProposals(experiment, panel);
-
-    await showEditorProposals(experiment, panel, deps({ kind: "received", added: 0, pullFailed: false, lockMessages: [] }));
-
-    expect(latestWorks().find((work) => work.id === experiment.id)?.remaining).toBe(7);
-    expect(latest().items as unknown[]).toHaveLength(7);
+    expect(openedMemoPanelFor().map((work) => work.id)).toEqual([experiment.id]);
   });
 });
 
 describe("編集者の提案を見る（受け取ってから並べる）", () => {
-  test("新しく届いた分が0件でも、未決の7件を並べる（実機で「すべて取り込み済み」で止まっていた）", async () => {
+  test("新しく届いた分が0件でも、未決の7件を案内する（実機で「すべて取り込み済み」で止まっていた）", async () => {
     putSevenProposals();
-    const panel = panelWithOtherWorks();
 
     const result = await showEditorProposals(
       experiment,
-      panel,
       deps({ kind: "received", added: 0, pullFailed: false, lockMessages: [] })
     );
 
     expect(result.pending).toBe(7);
-    // 作者が押した命令なので、ほかの作品を見ていても実験用へ移る
-    expect(latest().workTitle).toBe(experiment.title);
-    expect(latest().category).toBe("編集者からの提案");
-    expect(latest().items as unknown[]).toHaveLength(7);
+    expect(openedMemoPanelFor()).toHaveLength(1);
     expect(informed.join("\n")).toContain("編集者からの提案が 7 件あります");
+    expect(informed.join("\n")).toContain("校正・メモパネル");
+    expect(informed.join("\n")).not.toContain("「提案」パネル");
     expect(informed.join("\n")).not.toContain("すべて取り込み済み");
+    // 並べる中身は台帳の未決7件（校正・メモパネルはこれを読む）
+    expect(await loadEditorProposalsForMemo(experiment)).toHaveLength(7);
   });
 
   test("いま届いた件数を添える", async () => {
     putSevenProposals();
-    const panel = panelWithOtherWorks();
 
     await showEditorProposals(
       experiment,
-      panel,
       deps({ kind: "received", added: 7, pullFailed: false, lockMessages: [] })
     );
 
     expect(informed.join("\n")).toContain("いま 7 件届きました");
   });
 
-  test("受け取りに失敗しても（ネットが無い等）、手元にある未決を並べ、理由を1文添える", async () => {
+  test("受け取りに失敗しても（ネットが無い等）、手元にある未決を開き、理由を1文添える", async () => {
     putSevenProposals();
-    const panel = panelWithOtherWorks();
 
     const result = await showEditorProposals(
       experiment,
-      panel,
       deps({ kind: "failed", detail: "fatal: unable to access" })
     );
 
     expect(result.pending).toBe(7);
-    expect(latest().items as unknown[]).toHaveLength(7);
+    expect(openedMemoPanelFor()).toHaveLength(1);
     const said = [...informed, ...warned].join("\n");
     expect(said).toContain("GitHubから受け取れませんでした");
     expect(said).toContain("手元にある分");
@@ -329,49 +313,40 @@ describe("編集者の提案を見る（受け取ってから並べる）", () =
     expect(said).not.toContain("fatal");
   });
 
-  test("取り寄せ（早送り）が断られたときも、並べて理由を添える", async () => {
+  test("取り寄せ（早送り）が断られたときも、開いて理由を添える", async () => {
     putSevenProposals();
-    const panel = panelWithOtherWorks();
 
     await showEditorProposals(
       experiment,
-      panel,
       deps({ kind: "received", added: 0, pullFailed: true, lockMessages: [] })
     );
 
-    expect(latest().items as unknown[]).toHaveLength(7);
+    expect(openedMemoPanelFor()).toHaveLength(1);
     expect([...informed, ...warned].join("\n")).toContain("GitHubから受け取れませんでした");
   });
 
-  test("ブラウザ版では受け取らずに、手元の未決を並べて理由を添える", async () => {
+  test("ブラウザ版では受け取らずに、手元の未決を開いて理由を添える", async () => {
     putSevenProposals();
-    const panel = panelWithOtherWorks();
 
-    await showEditorProposals(experiment, panel, deps({ kind: "unavailable" }));
+    await showEditorProposals(experiment, deps({ kind: "unavailable" }));
 
-    expect(latest().items as unknown[]).toHaveLength(7);
+    expect(openedMemoPanelFor()).toHaveLength(1);
     expect([...informed, ...warned].join("\n")).toContain("ブラウザ版");
   });
 
-  test("未決が0件なら「未決の提案はありません」と言い、パネルは動かさない", async () => {
-    const panel = panelWithOtherWorks();
-    const before = latest().workTitle;
-
+  test("未決が0件なら「未決の提案はありません」と言い、パネルは開かない", async () => {
     const result = await showEditorProposals(
       experiment,
-      panel,
       deps({ kind: "received", added: 0, pullFailed: false, lockMessages: [] })
     );
 
     expect(result.pending).toBe(0);
     expect(informed.join("\n")).toContain("未決の提案はありません");
-    expect(latest().workTitle).toBe(before);
+    expect(openedMemoPanelFor()).toEqual([]);
   });
 
   test("まだ渡していない作品で未決が0件なら、その旨も添える", async () => {
-    const panel = panelWithOtherWorks();
-
-    await showEditorProposals(experiment, panel, deps({ kind: "notShared" }));
+    await showEditorProposals(experiment, deps({ kind: "notShared" }));
 
     const said = informed.join("\n");
     expect(said).toContain("未決の提案はありません");
@@ -379,9 +354,7 @@ describe("編集者の提案を見る（受け取ってから並べる）", () =
   });
 
   test("受け取りに失敗して未決も0件なら、0件と失敗の理由の両方を言う", async () => {
-    const panel = panelWithOtherWorks();
-
-    await showEditorProposals(experiment, panel, deps({ kind: "failed", detail: "x" }));
+    await showEditorProposals(experiment, deps({ kind: "failed", detail: "x" }));
 
     const said = [...informed, ...warned].join("\n");
     expect(said).toContain("未決の提案はありません");
@@ -390,11 +363,9 @@ describe("編集者の提案を見る（受け取ってから並べる）", () =
 
   test("校閲の範囲が動いた知らせも出す", async () => {
     putSevenProposals();
-    const panel = panelWithOtherWorks();
 
     await showEditorProposals(
       experiment,
-      panel,
       deps({
         kind: "received",
         added: 0,
@@ -408,16 +379,27 @@ describe("編集者の提案を見る（受け取ってから並べる）", () =
 
   test("本文には触らない（書くのは何も無い）", async () => {
     putSevenProposals();
-    const panel = panelWithOtherWorks();
     const before = new Map(files);
 
     await showEditorProposals(
       experiment,
-      panel,
       deps({ kind: "received", added: 0, pullFailed: false, lockMessages: [] })
     );
 
     expect([...files.keys()]).toEqual([...before.keys()]);
+  });
+
+  test("編集者モードでは、校正・メモパネルを開かない（置いた提案の数を見る道のまま）", async () => {
+    editorMode = true;
+    putSevenProposals();
+
+    await showEditorProposals(
+      experiment,
+      deps({ kind: "received", added: 0, pullFailed: false, lockMessages: [] })
+    );
+
+    expect(openedMemoPanelFor()).toEqual([]);
+    expect(informed.join("\n")).toContain("採るかどうかは作者が決めます");
   });
 });
 
@@ -442,15 +424,8 @@ describe("分類の表示名（作者の判断 2026-11-01「編集者」「修�
       })
     );
     files.set(ledgerPath(experiment), new TextEncoder().encode(`${lines.join("\n")}\n`));
-    const panel = panelWithOtherWorks();
 
-    await showEditorProposals(
-      experiment,
-      panel,
-      deps({ kind: "received", added: 0, pullFailed: false, lockMessages: [] })
-    );
-
-    const reasons = (latest().items as Array<{ reason: string }>).map((item) => item.reason);
+    const reasons = (await loadEditorProposalsForMemo(experiment)).map((row) => row.reason);
     expect(reasons[0]).toMatch(/^編集者の修正：語順/);
     expect(reasons[1]).toMatch(/^編集者のメモ：ここは言い切らない/);
     // 台帳の値は書き換えない（古い版の相手も読めるように）

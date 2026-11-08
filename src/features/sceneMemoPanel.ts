@@ -36,6 +36,7 @@ import {
 import {
   arrangeRows,
   currentFirst,
+  EDITOR_PROPOSAL_TAG,
   findingHeadline,
   findingLabelOf,
   findingNote,
@@ -45,8 +46,11 @@ import {
   tagTonesOf,
   nextNoteRow,
   prevNoteRow,
+  proposalHeadline,
+  proposalNote,
   type NoteRow,
   type PlacedFinding,
+  type PlacedProposal,
 } from "../core/sceneMemoRows";
 import { locateFindings } from "../core/findingLocation";
 import { findingAppliesDirectly, findingFileKey } from "../core/findingSource";
@@ -100,6 +104,13 @@ import { messageOf } from "../core/errorMessage";
  * その文書へ `WorkspaceEdit`、開いていなければ
  * `writeTextFilePreservingFormat`**（ハッシュ照合つき）。
  * `atomicWriteFile` を直に呼ぶ道は作らない（規則1・6.40.6）。
+ *
+ * ## 編集者の提案も、ここへ位置順で混ぜる（作者の指示 2026-11-08）
+ *
+ * 「編集からの提案も校正メモにうつしてください」。作者モードでは、台帳
+ * （`proposals.jsonl`）の未決を読んで並べる（`deps.loadEditorProposals`）。決める
+ * 操作（採る・見送る・読んだ）は `deps.decideEditorProposal` が提案パネルのころと
+ * 同じ道（`acceptProposal`）で行う。**この画面に本文を書き換える処理を書かない。**
  *
  * 修正案の無い指摘の行は［本文へ］で原稿のその行へ飛ぶ（作者の裁定 2026-10-04。
  * 以前の［提案へ］はやめ、提案パネルへ移る口は上の帯の［提案パネル］1つにした）。
@@ -209,6 +220,27 @@ export interface SceneMemoDeps {
    * （繋ぐのは `extension.ts`）。**渡されなければ知らせも出さない**（押せない口を作らない）
    */
   openMergeCandidates?: (work: WorkEntry) => Promise<void>;
+  /**
+   * 台帳の未決の編集者の提案を読む口（作者の指示 2026-11-08。設計書6.96.5）。
+   *
+   * **作者モードのときだけ中身を返す**（`reviewProposals.ts` の
+   * `loadEditorProposalsForMemo`。編集者モードでは空）。**渡されなければ並べない。**
+   */
+  loadEditorProposals?: (
+    work: WorkEntry
+  ) => Promise<ReadonlyArray<Omit<PlacedProposal, "filePath">>>;
+  /**
+   * 行の押し口（［採る］［読んだ］［見送る］）から、編集者の提案を決める口
+   * （`reviewProposals.ts` の `decideEditorProposal`）。
+   *
+   * 提案パネルの［適用］と同じ道（校閲中の関門・`acceptProposal`・台帳への追記・
+   * 決め終えたら送り返し）を通る。**渡されなければ押し口を出さない。**
+   */
+  decideEditorProposal?: (
+    work: WorkEntry,
+    proposal: PlacedProposal,
+    decision: "accept" | "reject"
+  ) => Promise<{ ok: boolean; reason?: string; detail?: string }>;
 }
 
 export async function openSceneMemoPanel(
@@ -508,7 +540,7 @@ export async function jumpSceneMemo(
   direction: "next" | "prev",
   deps: SceneMemoDeps
 ): Promise<void> {
-  const collected = await collectMemos(work);
+  const collected = await collectMemos(work, deps);
   /*
     **指摘も回る**（設計書6.96.5）。作者が直したい順は、付箋とAIの指摘を
     分けた順ではなく本文の順である。一覧では位置順に混ぜておきながら、
@@ -517,7 +549,8 @@ export async function jumpSceneMemo(
   const rows = mergeNoteRows(
     collected.memos,
     collected.findings,
-    collected.order
+    collected.order,
+    collected.proposals
   );
   if (rows.length === 0) {
     void vscode.window.showInformationMessage(
@@ -554,6 +587,8 @@ interface CollectedMemos {
    * ここで捨て直す処理を書くと、捨て方が2か所に分かれる。
    */
   findings: PlacedFinding[];
+  /** 作者モードの、台帳の未決の編集者の提案（2026-11-08） */
+  proposals: PlacedProposal[];
   files: EpisodeFile[];
   /** 話数順のファイルの並び（次へ・戻るの順序の元） */
   order: string[];
@@ -590,7 +625,10 @@ function fileKeyOf(work: WorkEntry, filePath: string): string {
  * こちらが渡す。読み終えたら手放す——合本は70万字あり、指摘の数だけ
  * 抱え続けると開いている間ずっと居座る。
  */
-async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
+async function collectMemos(
+  work: WorkEntry,
+  deps: SceneMemoDeps
+): Promise<CollectedMemos> {
   // **先に指摘を読む。** どのファイルの全文が要るかは、指摘が決める
   const stored = await loadVisibleFindings(work);
   const wanted = new Set(stored.map((finding) => fileKeyOf(work, finding.file)));
@@ -649,14 +687,53 @@ async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
     findings.push({ ...finding, filePath });
   }
 
+  const proposals = await collectEditorProposals(work, deps, absolutePaths, notices);
+
   return {
     memos: sortMemos(memos, order),
     findings,
+    proposals,
     files: scan.episodes,
     order,
     notices,
     collectedTexts,
   };
+}
+
+/**
+ * 台帳の未決の編集者の提案を、本文の場所へ結び付ける（作者の指示 2026-11-08）。
+ *
+ * **指摘と違い、位置が見つからなくても捨てない。** 指摘は「消えたら捨てる」
+ * （6.96.3）が、提案を捨てると作者が見送れず、未決のまま送り返しが永久に走らない。
+ * 行は台帳のまま出す——採る側（`acceptProposal`）がその行で照らし、合わなければ
+ * 理由を返す。走査に無いファイルも、作品の場所と繋いだ道で出す。
+ *
+ * **読めなくても一覧全体は止めない**（付箋と指摘は出す）。理由はログへ、画面には1文。
+ */
+async function collectEditorProposals(
+  work: WorkEntry,
+  deps: SceneMemoDeps,
+  absolutePaths: ReadonlyMap<string, string>,
+  notices: string[]
+): Promise<PlacedProposal[]> {
+  if (!deps.loadEditorProposals) return [];
+  try {
+    const rows = await deps.loadEditorProposals(work);
+    return rows.map((row) => {
+      const joined = paths.join(work.folderPath, row.file);
+      return {
+        ...row,
+        filePath: absolutePaths.get(fileKeyOf(work, joined)) ?? joined,
+      };
+    });
+  } catch (error) {
+    notices.push("編集者の提案を読めませんでした。");
+    workLog(work.folderPath).failure("校正・メモパネル：編集者の提案の読み込み", {
+      作品: work.title,
+      詳細: messageOf(error),
+    });
+    return [];
+  }
 }
 
 /**
@@ -728,6 +805,11 @@ type PanelMessage =
   | { type: "undoFix" }
   /** AIの指摘を退ける。**追記で残す**だけで、指摘の行は書き換えない */
   | { type: "dismissFinding"; findingId: string }
+  /**
+   * 編集者の提案を決める（［採る］［読んだ］は accept、［見送る］は reject）。
+   * 決める中身は拡張機能の側（`deps.decideEditorProposal`）にある
+   */
+  | { type: "decideProposal"; proposalId: string; decision: "accept" | "reject" }
   | { type: "filter"; onlyCurrent: boolean; tag: string; query: string }
   | { type: "export" };
 
@@ -774,6 +856,8 @@ class SceneMemoPanel {
   private memos: SceneMemo[] = [];
   /** いまの本文の位置まで決まったAIの指摘（設計書6.96.5） */
   private findings: PlacedFinding[] = [];
+  /** 作者モードの、台帳の未決の編集者の提案（2026-11-08） */
+  private proposals: PlacedProposal[] = [];
   private files: EpisodeFile[] = [];
   private order: string[] = [];
   private notices: string[] = [];
@@ -941,9 +1025,10 @@ class SceneMemoPanel {
 
   private async load(): Promise<void> {
     try {
-      const collected = await collectMemos(this.work);
+      const collected = await collectMemos(this.work, this.deps);
       this.memos = collected.memos;
       this.findings = collected.findings;
+      this.proposals = collected.proposals;
       this.files = collected.files;
       this.order = collected.order;
       this.notices = collected.notices;
@@ -1086,6 +1171,9 @@ class SceneMemoPanel {
         case "dismissFinding":
           await this.dismissFinding(message.findingId);
           return;
+        case "decideProposal":
+          await this.decideProposal(message.proposalId, message.decision);
+          return;
         case "filter":
           this.onlyCurrent = message.onlyCurrent;
           this.tag = message.tag;
@@ -1118,7 +1206,8 @@ class SceneMemoPanel {
     const rows = mergeNoteRows(
       this.matchedMemos(),
       this.matchedFindings(),
-      this.order
+      this.order,
+      this.matchedProposals()
     );
     const current = currentPosition(this.files);
     const target =
@@ -1458,6 +1547,31 @@ class SceneMemoPanel {
   }
 
   /**
+   * 編集者の提案を決める（作者の指示 2026-11-08。設計書6.96.5）。
+   *
+   * **決める処理はここに書かない**（`deps.decideEditorProposal`。提案パネルの
+   * ［適用］と同じ `acceptProposal` の道）。決められなかったら理由を出し、
+   * 行は残す（読み直せば台帳の未決のまま並ぶ）。
+   */
+  private async decideProposal(
+    proposalId: string,
+    decision: "accept" | "reject"
+  ): Promise<void> {
+    const proposal = this.proposals.find((item) => item.id === proposalId);
+    const decide = this.deps.decideEditorProposal;
+    if (!proposal || !decide) return;
+    const outcome = await decide(this.work, proposal, decision);
+    if (outcome.ok) {
+      if (outcome.detail) void vscode.window.showInformationMessage(outcome.detail);
+    } else if (outcome.reason) {
+      void vscode.window.showWarningMessage(
+        `この提案を決められませんでした。${outcome.reason}`
+      );
+    }
+    await this.load();
+  }
+
+  /**
    * 書き出す1枚。**いま絞り込んで出ているものだけ**を、話ごとに並べる。
    *
    * **Markdownの組み立ては `core/sceneMemoMarkdown.ts` が持つ。**
@@ -1542,6 +1656,29 @@ class SceneMemoPanel {
     });
   }
 
+  /**
+   * 絞り込みに当てはまる編集者の提案。**タグの絞り込みは「編集者の提案」の
+   * 言葉で効かせる**（指摘の種類の呼び名と同じ扱い）。
+   */
+  private matchedProposals(): PlacedProposal[] {
+    const currentKey = this.currentKey;
+    const query = this.query.trim();
+    return this.proposals.filter((proposal) => {
+      const key = paths.pathKeyForComparison(proposal.filePath);
+      if (this.onlyCurrent && currentKey && key !== currentKey) return false;
+      if (this.tag && this.tag !== EDITOR_PROPOSAL_TAG) return false;
+      if (
+        query &&
+        !`${EDITOR_PROPOSAL_TAG} ${proposalHeadline(proposal)} ${proposal.reason} ${proposal.original}`.includes(
+          query
+        )
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
   /** 書き出す1枚の材料。**並びは「この話 → その他」**（付箋だけ） */
   private visibleMemos(): SceneMemo[] {
     return currentFirst(
@@ -1564,7 +1701,12 @@ class SceneMemoPanel {
       順番を取り違えても画面を動かすまで気づけなかった。
     */
     return arrangeRows(
-      mergeNoteRows(this.matchedMemos(), this.matchedFindings(), this.order),
+      mergeNoteRows(
+        this.matchedMemos(),
+        this.matchedFindings(),
+        this.order,
+        this.matchedProposals()
+      ),
       this.currentKey
     );
   }
@@ -1582,7 +1724,7 @@ class SceneMemoPanel {
     const breakdown = byTag
       .map((entry) => `${entry.tag} ${entry.count}`)
       .join("／");
-    const total = this.memos.length + this.findings.length;
+    const total = this.memos.length + this.findings.length + this.proposals.length;
 
     void this.panel.webview.postMessage({
       type: "memos",
@@ -1596,6 +1738,10 @@ class SceneMemoPanel {
           // 件数が1つの数字に溶けると、どちらが増えたのか分からない
           (this.findings.length > 0
             ? `　AIの指摘 ${this.findings.length}件`
+            : "") +
+          // 編集者の提案も別に数える（作者が決める相手が人なので、機械の指摘と溶かさない）
+          (this.proposals.length > 0
+            ? `　${EDITOR_PROPOSAL_TAG} ${this.proposals.length}件`
             : ""),
         rows: rows.map((row) => this.toRow(row, currentKey)),
         hasCurrent: currentKey !== null,
@@ -1609,7 +1755,10 @@ class SceneMemoPanel {
         // 選び口の項目ごとの色の印（作者の要望 2026-10-04「表示ジャンルすべてです」）
         tagTones: tagTonesOf(
           byTag.map((entry) => entry.tag),
-          this.findings.map(findingLabelOf)
+          [
+            ...this.findings.map(findingLabelOf),
+            ...(this.proposals.length > 0 ? [EDITOR_PROPOSAL_TAG] : []),
+          ]
         ),
         query: this.query,
         activeKey: this.activeKey,
@@ -1677,6 +1826,9 @@ class SceneMemoPanel {
       const label = findingLabelOf(finding);
       if (!choices.includes(label)) choices.push(label);
     }
+    if (this.proposals.length > 0 && !choices.includes(EDITOR_PROPOSAL_TAG)) {
+      choices.push(EDITOR_PROPOSAL_TAG);
+    }
     return choices;
   }
 
@@ -1709,6 +1861,34 @@ class SceneMemoPanel {
         raw: memo.raw,
         chapterLabel: where.label,
         title: where.title,
+        section,
+      };
+    }
+
+    if (row.kind === "proposal") {
+      const proposal = row.proposal;
+      return {
+        kind: "proposal",
+        // 付箋（`行:道`）・指摘（`f:`）の鍵と重ならない形にする
+        key: `p:${proposal.id}`,
+        proposalId: proposal.id,
+        filePath: proposal.filePath,
+        line: proposal.line,
+        sameLine: row.sameLine,
+        tag: EDITOR_PROPOSAL_TAG,
+        tagClass: findingToneClass(EDITOR_PROPOSAL_TAG),
+        text: proposalHeadline(proposal),
+        note: proposalNote(proposal),
+        raw: "",
+        chapterLabel: this.labelAt(proposal.filePath).label,
+        title: this.labelAt(proposal.filePath).title,
+        // 直しの提案は［採る］、意見は［読んだ］（提案パネルの［適用］［読んだ］と同じ）。
+        // 決める口が無ければ押し口を出さない（押しても何も起きない口を作らない）
+        proposalAction: this.deps.decideEditorProposal
+          ? proposal.opinionOnly
+            ? "read"
+            : "accept"
+          : null,
         section,
       };
     }

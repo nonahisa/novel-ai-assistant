@@ -9,9 +9,10 @@
  * 1. 作品が2つ（作品A＝編集者に渡した作品・作品B＝校正の指摘が1件ある作品）で、編集者が提案を2件返した
  *    （GitHub の代わりの置き場にだけある）状態で「保存・同期」を押すと、「編集者から提案が 2 件届きました
  *    （「画面テストの作品」）。」と［提案を見る］の知らせが出る。**提案パネルは勝手には開かない**
- * 2. ［提案を見る］を押すと、提案パネルにその作品の提案2件が並ぶ
- * 3. VS Code を閉じて開き直し、提案パネルを開くと、左上の作品の選び欄に「画面テストの作品（2件）」が出る
- *    （作品Bの「（1件）」と並ぶ）。選ぶと2件が並ぶ
+ * 2. ［提案を見る］を押すと、校正・メモパネルにその作品の提案2件が並ぶ（作者の指示 2026-11-08「編集からの
+ *    提案も校正メモにうつしてください」。それまでは提案パネル）
+ * 3. VS Code を閉じて開き直し、提案パネルを開くと、左上の作品の選び欄には作品Bの「（1件）」だけが出て、
+ *    編集者の提案だけの作品（画面テストの作品）は出ない（作者モードの編集者の提案は提案パネルに並べない）
  *
  * 引き金を「保存・同期」にしたのは、開いたときの点検（窓の読み込み直し）の知らせが、起こし直しの部品
  * （`restartVsCode`）が最後に知らせを閉じるのと競るため。同期のあとの取り込み（`editingAutomation.ts` の
@@ -31,6 +32,7 @@ import { expect, test } from "vitest";
 import { HAND_EDIT_CATEGORY, HAND_MEMO_CATEGORY, proposalId } from "../../src/models/proposal";
 import { addLocalRemote, git, initRepoWithFirstCommit } from "./support/gitFixture";
 import { runCommand } from "./support/quickInput";
+import { memoPanelFrame } from "./support/manuscriptFrame";
 import { OPEN_PROPOSALS_LAUNCH, OPEN_PROPOSALS_PRESS, proposalPanelFrame, writeSampleFinding, type SampleFinding } from "./support/sampleFinding";
 import { E2E_WORK_TITLE, restartVsCode, withVsCode, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -159,9 +161,36 @@ async function waitPanel(page: Page, ready: (view: PanelView) => boolean, label:
   return { frame: frame as Frame, view: last as PanelView };
 }
 
+/**
+ * 校正・メモパネルの、編集者の提案の行の文（2026-11-08 から）。提案の行は［見送る］
+ * （`data-act="proposalReject"`）を持つ
+ */
+async function waitMemoProposals(page: Page, count: number, label: string): Promise<string[]> {
+  let last: string[] = [];
+  await waitUntil(
+    async () => {
+      const frame = await memoPanelFrame(page);
+      if (!frame) return false;
+      last = await frame
+        .evaluate(() =>
+          Array.from(document.querySelectorAll(".memo"))
+            .filter((row) => row.querySelector('[data-act="proposalReject"]'))
+            .map((row) => (row.textContent ?? "").replace(/\s+/g, " ").trim())
+        )
+        .catch(() => []);
+      return last.length === count;
+    },
+    label,
+    30_000
+  ).catch(async (error: unknown) => {
+    throw new Error(`${String(error)}（行：${JSON.stringify(last)}／知らせ：${JSON.stringify(await notificationTexts(page))}）`);
+  });
+  return last;
+}
+
 const ARRIVED = `編集者から提案が ${RETURNED.length} 件届きました（「${E2E_WORK_TITLE}」）。`;
 
-test("同期で編集者の提案が届くと［提案を見る］付きの知らせが出て（パネルは勝手に開かない）、押すとその作品の提案が並び、開き直して提案パネルを開くと作品の選び欄にその作品が「（2件）」付きで出る", async () => {
+test("同期で編集者の提案が届くと［提案を見る］付きの知らせが出て（パネルは勝手に開かない）、押すと校正・メモパネルにその作品の提案が並び、開き直した提案パネルの選び欄にはその作品が出ない", async () => {
   await withVsCode(
     "編集者の提案が届いたときの知らせと選び欄",
     [{ name: EPISODE, text: TEXT }],
@@ -193,39 +222,29 @@ test("同期で編集者の提案が届くと［提案を見る］付きの知�
         throw new Error(`${String(error)}（知らせ：${JSON.stringify(await notificationTexts(page))}）`);
       });
 
-      /* ── 2. ［提案を見る］ → その作品の提案が並ぶ ── */
+      /* ── 2. ［提案を見る］ → 校正・メモパネルにその作品の提案が並ぶ（2026-11-08） ── */
       await toast.locator(".monaco-button", { hasText: "提案を見る" }).first().click();
-      const shown = await waitPanel(
-        page,
-        (view) => RETURNED.every((entry) => view.reasons.some((text) => text.includes(entry.reason))),
-        "［提案を見る］で、届いた提案2件が提案パネルに並ぶ"
-      );
-      expect(shown.view.reasons.length, `並んだ行：${JSON.stringify(shown.view.reasons)}`).toBe(RETURNED.length);
-      expect(shown.view.selected, `選び欄で選ばれている作品：${JSON.stringify(shown.view)}`).toContain(E2E_WORK_TITLE);
+      const shown = await waitMemoProposals(page, RETURNED.length, "［提案を見る］で、届いた提案2件が校正・メモパネルに並ぶ");
+      for (const entry of RETURNED) {
+        expect(shown.some((text) => text.includes(entry.reason)), `並んだ行：${JSON.stringify(shown)}`).toBe(true);
+      }
+      // 提案パネルには並べない（2つに割れて見えないように）
+      expect(await proposalPanelFrame(page), "［提案を見る］で提案パネルが開いています").toBeUndefined();
 
-      /* ── 3. 開き直して提案パネルを開く → 選び欄に「（2件）」 ── */
+      /* ── 3. 開き直して提案パネルを開く → 選び欄に編集者の提案だけの作品は出ない ── */
       await restartVsCode(session);
       const reopenedPage = session.page;
       await pressWorkbenchKey(reopenedPage, OPEN_PROPOSALS_PRESS);
       const reopened = await waitPanel(
         reopenedPage,
-        (view) => view.options.some((option) => option.startsWith(E2E_WORK_TITLE)) && view.options.some((option) => option.startsWith(OTHER_TITLE)),
-        "開き直した提案パネルの選び欄に2つの作品が並ぶ"
+        (view) => view.options.some((option) => option.startsWith(OTHER_TITLE)),
+        "開き直した提案パネルの選び欄に作品Bが並ぶ"
       );
-      expect(reopened.view.options, `選び欄：${JSON.stringify(reopened.view)}`).toContain(`${E2E_WORK_TITLE}（${RETURNED.length}件）`);
       expect(reopened.view.options, `選び欄：${JSON.stringify(reopened.view)}`).toContain(`${OTHER_TITLE}（1件）`);
-      // 選ぶと、その作品の提案2件が並ぶ
-      const value = await reopened.frame.evaluate((title) => {
-        const select = document.querySelector("#works select") as HTMLSelectElement;
-        return Array.from(select.options).find((option) => (option.textContent ?? "").startsWith(title))?.value ?? "";
-      }, E2E_WORK_TITLE);
-      await reopened.frame.locator("#works select").selectOption(value);
-      const picked = await waitPanel(
-        reopenedPage,
-        (view) => view.selected.startsWith(E2E_WORK_TITLE) && RETURNED.every((entry) => view.reasons.some((text) => text.includes(entry.reason))),
-        "選び欄で選ぶと、届いた提案2件が並ぶ"
-      );
-      expect(picked.view.reasons.length, `並んだ行：${JSON.stringify(picked.view.reasons)}`).toBe(RETURNED.length);
+      expect(
+        reopened.view.options.some((option) => option.startsWith(E2E_WORK_TITLE)),
+        `編集者の提案だけの作品が提案パネルの選び欄に出ています：${JSON.stringify(reopened.view)}`
+      ).toBe(false);
     },
     launchOptions()
   );

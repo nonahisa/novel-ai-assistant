@@ -166,7 +166,7 @@ describe("走らせる機能の表", () => {
 
     expect(byId.get("notation")).toBe(false);
     expect(byId.get("typos")).toBe(true);
-    expect(byId.get("foreshadows")).toBe(true);
+    expect(byId.get("contradictions")).toBe(true);
   });
 });
 
