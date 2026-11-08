@@ -225,28 +225,36 @@ describe("校閲ロック", () => {
 
 describe("ロックの説明", () => {
   test("誰が・何をしているかを言う", () => {
-    const message = describeLock({
-      file: "episode_0003.md",
-      holder: "kmizu",
-      holderKind: "editor",
-      since: new Date().toISOString(),
-      note: "第3話の校閲",
-    });
+    const message = describeLock(
+      {
+        file: "episode_0003.md",
+        holder: "Kota Mizushima",
+        holderKind: "editor",
+        since: new Date().toISOString(),
+        note: "第3話の校閲",
+      },
+      "編集者 kmizu"
+    );
 
-    expect(message).toContain("kmizu");
+    expect(message).toContain("編集者 kmizu");
     expect(message).toContain("第3話の校閲");
+    // 鍵の holder は git の名前。画面には出さない（2026-11-09）
+    expect(message).not.toContain("Kota Mizushima");
   });
 
   test("長く続いているなら、外し忘れを疑わせる", () => {
     // **「ロックされています」だけでは、待つのか連絡するのか判断できない**
     const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
-    const message = describeLock({
-      file: "a.md",
-      holder: "kmizu",
-      holderKind: "editor",
-      since: twoDaysAgo,
-      note: "",
-    });
+    const message = describeLock(
+      {
+        file: "a.md",
+        holder: "kmizu",
+        holderKind: "editor",
+        since: twoDaysAgo,
+        note: "",
+      },
+      "編集者"
+    );
 
     expect(message).toContain("外し忘れ");
   });

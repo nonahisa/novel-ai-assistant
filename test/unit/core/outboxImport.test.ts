@@ -292,6 +292,28 @@ describe("本文の全体（kind: body）", () => {
     expect(read(io)).toBe(BODY);
   });
 
+  it("校閲中で断る理由に、鍵の holder（git の名前）を出さず、GitHub の名前を出す（2026-11-09）", async () => {
+    const lockLine = enc(
+      JSON.stringify({ kind: "acquire", file: FILE, holder: "編集部の田中", holderKind: "editor", time: NOW.toISOString(), note: "" }) + "\n"
+    );
+    const io = work();
+    io.files.set(".aiwriter/locks/locks.jsonl", lockLine);
+    const named = await importOutboxRecords(io, {
+      isOwner: () => true,
+      records: [bodyRecord()],
+      now: NOW,
+      editorLogin: "kmizu",
+    });
+    expect(named.results[0].reason).toContain("編集者 kmizu");
+    expect(named.results[0].reason).not.toContain("編集部の田中");
+    // 名前が分からなければ「編集者」とだけ（推し量らない）
+    const io2 = work();
+    io2.files.set(".aiwriter/locks/locks.jsonl", lockLine);
+    const unnamed = await importOutboxRecords(io2, { isOwner: () => true, records: [bodyRecord()], now: NOW });
+    expect(unnamed.results[0].reason).not.toContain("編集部の田中");
+    expect(unnamed.results[0].reason).toMatch(/^編集者 が校閲中です/);
+  });
+
   it("2度目は already（同じ本文を二度書かない）", async () => {
     const io = work();
     await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord()], now: NOW });

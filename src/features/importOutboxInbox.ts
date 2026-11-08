@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { saveAndSyncLabel } from "../core/syncEntryNames";
+import { reviewLockEditorLogin } from "./manuscriptReviewLock";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { atomicWriteFile } from "../core/atomicWrite";
@@ -207,6 +208,8 @@ export async function runInboxImport(
           // 受け取り箱の中身は、すべて持ち主の判断（6.115）
           isOwner: () => true,
           records,
+          // 校閲中の理由は GitHub の名前で出す（鍵の holder の git の名前は出さない）
+          editorLogin: await reviewLockEditorLogin(work),
           retentionDays: options.retentionDays,
           now: options.now,
         });

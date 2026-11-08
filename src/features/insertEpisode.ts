@@ -31,10 +31,9 @@ import { pathExists } from "../core/fileSystem";
 /**
  * この話の前に1話ぶん割り込ませる（設計書6.67.4）。
  *
- * **`../core/git.js` を静的importする `episodeRenumberShared.ts` を使う。**
- * そのため `extension.ts` からは必ず動的import（`await import(...)`）で
- * 呼ぶこと——静的importするとNode専用の口（`node:child_process`）がブラウザ
- * 版の起動時に巻き込まれる（設計書5.8.5）。
+ * **ブラウザ版でも動く。** `episodeRenumberShared.ts` は `core/git.ts` を静的に読まず、
+ * 名前だけのコミット（gitが要る）の中で動的に読む。ブラウザ版ではそのコミットの話だけを
+ * 省く（`browserReach.test.ts` が、このファイルから Node専用へ届かないことを見張る）。
  */
 
 export interface InsertEpisodeResult {

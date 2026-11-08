@@ -2,14 +2,11 @@ import * as vscode from "vscode";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import * as path from "../core/paths";
 import { fromUri } from "../core/paths";
-import {
-  commitPaths,
-  readSyncStatus,
-  runGit,
-  runGitForPaths,
-  type GitCommandRunner,
-  type GitSyncStatus,
-} from "../core/git";
+// **値は静的に読まない**（型だけ）。`core/git.ts` は `node:child_process` に届くので、
+// 静的に読むとブラウザ版では「この話の前に挿入」「この話を削除」を押した瞬間に
+// 読み込みが失敗する。git が要る名前だけの独立コミットの中で動的に読む。
+import type { GitCommandRunner, GitSyncStatus } from "../core/git";
+import { canRunProcesses } from "../core/runtime";
 // ログの書き先：呼ぶ側が向ける
 // 話数の付け替えのうち **git に関わる部分だけ**を持つ。受け取るのは
 // リポジトリの根で、作品は分からない（1つの置き場に複数の作品が入る）。
@@ -25,10 +22,10 @@ import { describeLedgerFollowSummary, type LedgerFollowSummary } from "./episode
 /**
  * 挿入・削除で共通に使う部品（設計書6.67）。
  *
- * **`core/git.ts` を静的importする。** `node:child_process` を巻き込むため、
- * このファイルとそれを使う `insertEpisode.ts`／`removeEpisode.ts` は、
- * `extension.ts` から必ず動的import（`await import(...)`）で読み込むこと
- * （`features/gitSync.ts` と同じ約束、設計書5.8.5）。
+ * **`core/git.ts` は静的に読まない**（型の import だけ）。`node:child_process` に届くと、
+ * ブラウザ版では挿入・削除そのもの（git の要らない番号の付け替えと台帳の追従）まで
+ * 読み込みで落ちる。git が要る「名前だけの独立コミット」は、ブラウザ版では訊かずに
+ * 戻り、手元では中で動的 import する（設計書5.8.5・6.67）。
  */
 
 const LOCAL_TIMEOUT_MS = 15_000;
@@ -189,9 +186,16 @@ export async function offerIndependentRenameCommit(
   work: WorkEntry,
   done: readonly EpisodeRename[],
   message: string,
-  run: GitCommandRunner = runGit
+  runOverride?: GitCommandRunner
 ): Promise<void> {
   if (done.length === 0) return;
+  // ブラウザ版には git が無い。コミットの話はしない（番号の付け替えは済んでいる）。
+  // 試験が差し込む runner があるときは、その道で動かす
+  if (!runOverride && !canRunProcesses()) return;
+  const { commitPaths, readSyncStatus, runGit, runGitForPaths } = await import(
+    "../core/git.js"
+  );
+  const run = runOverride ?? runGit;
 
   const status = await readSyncStatus(work.folderPath, run);
   const root = repoRootOf(status);
@@ -248,6 +252,7 @@ async function trackedRenames(
   root: string,
   run: GitCommandRunner
 ): Promise<EpisodeRename[]> {
+  const { runGitForPaths } = await import("../core/git.js");
   // 問い合わせも、話数が多ければ束に分ける（答えは繋げば同じ）
   const result = await runGitForPaths(
     run,

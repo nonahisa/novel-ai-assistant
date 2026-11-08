@@ -79,9 +79,12 @@ export function lockOf(
  *
  * **誰が・いつから・何をしているかを全部言う。** 「ロックされています」
  * だけでは、待てばよいのか連絡すべきなのか判断できない。
+ *
+ * **「誰が」は呼び手が決めて渡す**（`reviewLockWho`＝「編集者 kmizu」か「編集者」。2026-11-09）。
+ * 鍵の holder は編集者のパソコンの git の名前で、画面には出さない決まり（5.7.5.9）。
+ * 引数を省けないようにして、うっかり holder を出す道を作らない。
  */
-export function describeLock(lock: FileLock): string {
-  const who = lock.holder || "編集者";
+export function describeLock(lock: FileLock, who: string): string {
   const since = formatSince(lock.since);
   const what = lock.note ? `（${lock.note}）` : "";
   return `${who} が校閲中です${what}。${since}`;

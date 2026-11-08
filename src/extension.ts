@@ -9165,9 +9165,9 @@ export async function activate(
     話の挿入と削除（設計書6.67）。**木のノードが引数に要る**ので、
     コマンドパレットには出さない（`package.json` の commandPalette）。
 
-    実装は `node:child_process`（`core/git.ts`）を静的importしているため、
-    ここでは動的import（`await import(...)`）を通す
-    （`novelai.gitSync` などと同じ約束、設計書5.8.5）。
+    実装はgitの部品を静的に読まない（名前だけのコミットの中で動的に読む。
+    ブラウザ版ではそのコミットだけ省く。設計書5.8.5・6.67）。
+    ここは重い部品なので動的import（`await import(...)`）を通す。
   */
   context.subscriptions.push(
     registerCommand("novelai.insertEpisodeBefore", async (picked?: EpisodeNode) => {

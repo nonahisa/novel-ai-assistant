@@ -130,6 +130,43 @@ describe("ブラウザ版で起動した瞬間に落ちないか", () => {
 });
 
 /**
+ * ブラウザ版でも押せる操作の、動的 import の先（2026-11-09）。
+ *
+ * **上の検査は `extension.ts` からの静的 import だけをたどる**ので、動的 import
+ * （`await import("./features/insertEpisode.js")`）の先は見ていなかった。動的 import は
+ * 「`canRunProcesses()` で守った正しい道」という前提で外していたが、
+ * **守られていない動的 import もあった**——「この話の前に挿入」（`insertEpisodeBefore`）は
+ * ブラウザ版でも右クリックに出るのに、押した瞬間に `core/git.ts`
+ * （`node:child_process`）を読み込んで失敗していた。
+ *
+ * そこで「ブラウザでも使える操作の入口」を挙げ、**その先から静的に Node専用へ
+ * 届かないこと**を見る。git が要る操作（`processAvailability.ts` の隠す一覧）は
+ * 入口で `canRunProcesses()` を見て隠れるので、ここへは足さない。
+ */
+const BROWSER_USABLE_DYNAMIC_ENTRIES = [
+  "features/insertEpisode.ts",
+  "features/removeEpisode.ts",
+];
+
+describe("ブラウザでも押せる動的 import の入口が、Node専用へ届かない", () => {
+  for (const entry of BROWSER_USABLE_DYNAMIC_ENTRIES) {
+    test(`${entry} の先に、Node専用のファイルが無い`, () => {
+      const reach = walkStaticImports([path.join(SRC, entry)]);
+      const nodeFiles = relativeNames(reach.files).filter((name) =>
+        ["core/git.ts", "core/gitSetup.ts"].includes(name)
+      );
+      const nodeBare = reach.bare
+        .filter((item) => NODE_ONLY.test(item.spec))
+        .map(
+          (item) =>
+            `${path.relative(SRC, item.file).replace(/\\/g, "/")} -> ${item.spec}`
+        );
+      expect([...nodeFiles, ...nodeBare]).toEqual([]);
+    });
+  }
+});
+
+/**
  * 素の `process` を、分けずに使っていないか（2026-09-23）。
  *
  * **ブラウザ版には `process` が無い。** 触った瞬間に
