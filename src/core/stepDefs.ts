@@ -1,3 +1,5 @@
+import { keysForHost } from "./keyLabels";
+
 /**
  * 簡単ステップメニューの**定義**（どの段にどの操作を並べるか）。
  *
@@ -384,7 +386,7 @@ export const EDITOR_STEP_DEFS: readonly EditorStepDef[] = [
     detail:
       "読んで気づいたことを、自分の言葉で作者へ伝える手順\n\n" +
       "・直したい所を本文で選んでから押す\n\n" +
-      "・本文を選んで右クリックしても出せる\n\n" +
+      keysForHost("・本文を選んで右クリックしても出せる\n\n") +
       "本文は書き換わらない。作者が採るかどうかを決める。",
     entries: [
       "novelai.proposeEditByHand",
@@ -396,7 +398,7 @@ export const EDITOR_STEP_DEFS: readonly EditorStepDef[] = [
         detail:
           "本文のいまの行への意見を、提案として置く\n\n" +
           "・直す案は書かず、思ったことだけを作者へ伝える\n\n" +
-          "・本文で行を選んでから押す。右クリックの「ここにメモを足す」と同じ\n\n" +
+          keysForHost("・本文で行を選んでから押す。右クリックの「ここにメモを足す」と同じ\n\n") +
           "本文に行は足さない。",
       },
     ],

@@ -28,6 +28,7 @@ import { notifyDone, whenNoticePicked } from "../views/notify";
 import { findAction } from "../core/actionTree";
 import { CHOOSE_TEXT_TO_KEEP } from "../core/gitSyncMenuText";
 import { globalFetchTroubleMemory } from "./fetchTroubleMemory";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * 校閲を終えて、作者へ返す（編集者モード専用。作者の裁定、2026-10-28）。
@@ -79,7 +80,7 @@ export const OPEN_SOURCE_CONTROL = "ソース管理を開く";
  * 押す前に VS Code が確かめる
  */
 export const BODY_CHANGE_UNDO_HINT =
-  "［ソース管理を開く］で開く一覧で、戻す話を右クリックして「変更を破棄」を選ぶと元に戻せます。" +
+  keysForHost("［ソース管理を開く］で開く一覧で、戻す話を右クリックして「変更を破棄」を選ぶと元に戻せます。") +
   "戻してから、もう一度押してください。";
 
 export async function finishReviewAndReturn(

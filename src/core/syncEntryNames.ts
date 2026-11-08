@@ -1,4 +1,5 @@
 import { findAction } from "./actionTree";
+import { keysForHost } from "./keyLabels";
 
 /**
  * 同期まわりの案内の文で名指す、メニューの項目の名前（作者の判断 2026-11-01）。
@@ -42,7 +43,7 @@ export function finishReviewLabel(): string {
  * 進める流れなので、途中で入力欄を出さない。
  */
 export const IDENTITY_MISSING_HINT =
-  "記録する人の名前が未設定です。作品一覧で作品を右クリックし、" +
+  keysForHost("記録する人の名前が未設定です。作品一覧で作品を右クリックし、") +
   "「GitHubと同期」→「いまの原稿を履歴に残す」を押すと、名前を設定して記録できます。";
 
 /**

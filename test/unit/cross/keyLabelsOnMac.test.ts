@@ -27,6 +27,19 @@ import { buildSceneMemoUnrestorableHtml } from "../../../src/views/sceneMemoPane
 /** Windows の書き方のキー（「Ctrl+」「Shift+」「Alt+」の後ろにキーが続くもの）。「Win+H」は Windows のキーなので見ない */
 const WINDOWS_KEY = /(?<![A-Za-z])(?:Ctrl|Shift|Alt)\+\S/;
 
+/**
+ * 「右クリック」（作者の問い 2026-11-08「右クリックはMacではどう操作しますか？」）。
+ * Mac では文ごとに最初の1回へ「（Mac は control＋クリック）」を添える（`keysInText`）
+ */
+const RIGHT_CLICK = /右クリック/;
+const RIGHT_CLICK_NOTE = "右クリック（Mac は control＋クリック）";
+
+/** 組み立てた文の最初の「右クリック」に添え書きがあるか（無い文・右クリックの無い文は通す） */
+function firstRightClickHasNote(text: string): boolean {
+  const at = text.indexOf("右クリック");
+  return at < 0 || text.startsWith(RIGHT_CLICK_NOTE, at);
+}
+
 describe("Mac として組み立てた画面の文に「Ctrl+」が残らない", () => {
   test("マニュアル（画面と考え方・メニューの説明）", () => {
     const manual = buildUserManual();
@@ -49,6 +62,15 @@ describe("Mac として組み立てた画面の文に「Ctrl+」が残らない"
     expect(guide).toContain("⌘P で印刷の画面を開き");
     // Windows では今までどおり
     expect(buildPrintGuide("A4", emptyHeaderFooter(), "other")).toContain("Ctrl+P で印刷の画面を開き");
+  });
+
+  test("マニュアル・使い方の説明の「右クリック」には、行ごとに最初の1回へ Mac の押し方が添えてある", () => {
+    const texts = [buildUserManual(), extraGuideForHost(), ...buildGuideBundles().map((bundle) => bundle.text)];
+    const left = texts
+      .flatMap((text) => text.split("\n"))
+      .filter((line) => !firstRightClickHasNote(line));
+    expect(left).toEqual([]);
+    expect(buildUserManual()).toContain(RIGHT_CLICK_NOTE);
   });
 
   test("校正・メモパネルを開き直せない画面・メニューに見当たらないときの知らせ", () => {
@@ -87,6 +109,32 @@ const ALLOWED: Array<{ file: string; includes: string; why: string }> = [
     includes,
     why: "data-keys の付いた知らせの欄へ入る",
   })),
+  // 右クリック（2026-11-08）
+  ...["IMEを右クリック →「単語の追加」", "IMEを右クリック →「辞書ツール」"].map((includes) => ({
+    file: "src/core/imeDictionary.ts",
+    includes,
+    why: "Windows のタスクバーの IME の操作。Mac では macHowTo（dictionaryHowTo）を出す",
+  })),
+  {
+    file: "src/features/manuscriptEditor.ts",
+    includes: "原稿エディタ：右クリックの設定資料——",
+    why: "ログへ残す文で、画面には出ない",
+  },
+  {
+    file: "src/views/manuscriptEditorHtml.ts",
+    includes: "原稿エディタ：右クリックの位置を本文の位置に直せませんでした",
+    why: "ログ（type: log）へ残す文で、画面には出ない",
+  },
+  {
+    file: "src/test/manuscriptTyping.ts",
+    includes: "原稿エディター：右クリックの貼り付け・コピーは",
+    why: "統合テストの試験の名前で、作者の画面には出ない",
+  },
+  {
+    file: "src/views/epubEditorPanelHtml.ts",
+    includes: "<!-- 右クリックの自前メニュー",
+    why: "HTML の注釈で、画面には出ない",
+  },
 ];
 
 /** `EXTRA_GUIDE` は Windows の書き方で持ち、出すときに extraGuideForHost で直す */
@@ -152,7 +200,7 @@ describe("画面に出す文のキーは、OS に合わせる部品を通す", (
     expect(source).toContain("novelaiApplyKeyLabels(document);");
   });
 
-  test("src の注釈でない行の「Ctrl+…」は、keysForHost・keysInText・novelaiKeys・data-keys のどれかと同じ行にある", () => {
+  test("src の注釈でない行の「Ctrl+…」「右クリック」は、keysForHost・keysInText・novelaiKeys・data-keys のどれかと同じ行にある", () => {
     const root = path.resolve(__dirname, "../../..");
     const offenders: string[] = [];
     for (const file of sourceFiles(path.join(root, "src"))) {
@@ -167,7 +215,7 @@ describe("画面に出す文のキーは、OS に合わせる部品を通す", (
           if (code.startsWith("`.trim();")) inExtraGuide = false;
           continue;
         }
-        if (!WINDOWS_KEY.test(code)) continue;
+        if (!WINDOWS_KEY.test(code) && !RIGHT_CLICK.test(code)) continue;
         if (CONVERTERS.some((name) => code.includes(name))) continue;
         if (ALLOWED.some((allowed) => allowed.file === rel && code.includes(allowed.includes))) continue;
         offenders.push(`${rel}:${line}: ${code.trim()}`);

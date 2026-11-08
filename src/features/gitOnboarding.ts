@@ -37,6 +37,8 @@ import { withProgress } from "../views/progress";
 import { askText , cancelItem } from "../views/dialogs";
 import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 import { saveAndSyncLabel } from "../core/syncEntryNames";
+import { installGuideFor } from "../core/requirements";
+import { hostPlatform } from "../core/runtime";
 
 /**
  * GitHub同期を始めるまでの案内。
@@ -245,19 +247,20 @@ export async function runSetupStep(
  * 見つからない旨だけを出していると、必要なものが欠けていると誤解させる。
  */
 async function guideGitInstall(): Promise<void> {
-  const command = "winget install --id Git.Git -e";
+  // 入れ方は導入の手引きと同じ表から OS に合わせて作る（Mac は xcode-select か brew）
+  const guide = installGuideFor("git", hostPlatform());
+  const command = guide.command;
   const answer = await vscode.window.showInformationMessage(
     "Gitが見つかりません。\n\n" +
       "履歴を残すこと（書き直す前へ戻す）と、複数の環境で同期することにGitを使います。\n" +
       "執筆・文字数・設定資料・あらすじ・誤字脱字などは、Gitが無くてもすべて使えます。\n\n" +
-      "Windowsなら、ターミナルで次を実行すると入ります。\n" +
-      command,
+      guide.lead +
+      (command ? `\n${command}` : ""),
     { modal: true },
-    "コマンドをコピー",
-    "配布ページを開く"
+    ...(command ? ["コマンドをコピー", "配布ページを開く"] : ["配布ページを開く"])
   );
 
-  if (answer === "コマンドをコピー") {
+  if (answer === "コマンドをコピー" && command) {
     await vscode.env.clipboard.writeText(command);
     notifyDone(
       "コピーしました。ターミナルに貼り付けて実行してください。" +

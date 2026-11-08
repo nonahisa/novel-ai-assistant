@@ -157,6 +157,7 @@ export {
   type EditingSite,
 } from "./editingSite";
 import { readSite, writeSite, type EditingSite } from "./editingSite";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * この端末の、編集用フォルダーの場所の覚え（cache）を消す（設計書5.7.5.4）。
@@ -616,7 +617,7 @@ export async function reconcileDiverged(
                 .join("、")}${outside.length > 3 ? " ほか" : ""}）。` +
               // 編集部の側でだけ通る道（`ledgerOnly`）。「GitHubと同期」は詳細メニューから外し、
               // 編集者の「保存・同期」は受け取るだけなので、書き換えの戻し方を言う（2026-11-01）
-              "本文などの書き換えは、VS Code のソース管理（左の枝分かれの印）で、その話を右クリックして" +
+              keysForHost("本文などの書き換えは、VS Code のソース管理（左の枝分かれの印）で、その話を右クリックして") +
               "「変更を破棄」を選ぶと戻せます。戻してから、もう一度押してください。",
       };
     }

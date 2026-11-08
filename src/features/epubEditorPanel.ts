@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { canRunProcesses } from "../core/runtime";
+import { keysForHost } from "../core/keyLabels";
 import { conflictFixHint } from "../core/syncEntryNames";
 import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
@@ -2179,7 +2180,7 @@ function insertTypeEntries(blocks: readonly BookBlock[]): InsertTypeEntry[] {
         key: type,
         label,
         enabled: true,
-        reason: `${label}の面を、右クリックした面の後ろへ入れます。`,
+        reason: keysForHost(`${label}の面を、右クリックした面の後ろへ入れます。`),
       };
     }
     return {

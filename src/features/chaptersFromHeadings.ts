@@ -16,6 +16,7 @@ import type { Chapter, ChapterSet } from "../models/chapter";
 import { logFailure, useLogFile } from "../core/logger";
 import { confirmRun, notifyDone } from "../views/notify";
 import { withProgress } from "../views/progress";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * 話の見出しから章を立てる（設計書6.66）。
@@ -101,7 +102,7 @@ export async function chaptersFromHeadings(work: WorkEntry): Promise<boolean> {
     void vscode.window.showInformationMessage(
       `合本の途中に章の見出しが${reading.insideCollected}個あります。` +
         "章はファイルからしか始められないため、ここでは立てません。" +
-        "先に合本を右クリックして「話ごとのファイルに分ける」を選んでください（分けるときに章も立ちます）。"
+        keysForHost("先に合本を右クリックして「話ごとのファイルに分ける」を選んでください（分けるときに章も立ちます）。")
     );
     return false;
   }
@@ -116,7 +117,7 @@ export async function chaptersFromHeadings(work: WorkEntry): Promise<boolean> {
     // 台帳は空と確かめてあるので、ここに来るのは「見出しが1つも無い」とき
     void vscode.window.showInformationMessage(
       "話の頭に章の見出し（【第1章】のような行）が見つかりませんでした。" +
-        "章は作品一覧の右クリック「ここから章を始める」で付けられます。"
+        keysForHost("章は作品一覧の右クリック「ここから章を始める」で付けられます。")
     );
     return false;
   }

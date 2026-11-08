@@ -676,6 +676,7 @@ import { setTuningStoreRoot } from "./core/modelTuningStore";
 import { formatDayTime } from "./core/timestampedFileName";
 import { notifyDone, whenNoticePicked } from "./views/notify";
 import { initBackupPickFolder } from "./features/backupPickFolder";
+import { keysForHost } from "./core/keyLabels";
 
 /**
  * **この束を読み終えた時刻**（設計書6.107）。
@@ -4615,7 +4616,7 @@ export async function activate(
   const frameOf = (node: unknown): OwnWorkFrameNode | undefined => {
     if (node instanceof OwnWorkFrameNode) return node;
     void vscode.window.showInformationMessage(
-      "作品一覧の「未登録の自分の作品」の枠を右クリックしてお使いください。"
+      keysForHost("作品一覧の「未登録の自分の作品」の枠を右クリックしてお使いください。")
     );
     return undefined;
   };
@@ -8450,7 +8451,7 @@ export async function activate(
     registerCommand("novelai.exportVoiceAudio", async (node?: EpisodeNode) => {
       if (!node || !("episode" in node)) {
         void vscode.window.showInformationMessage(
-          "作品一覧の話を右クリックして「人物の声で音声に書き出す」を選んでください。原稿エディターでは読み上げの列の［音声に書き出す］からも書き出せます。"
+          keysForHost("作品一覧の話を右クリックして「人物の声で音声に書き出す」を選んでください。原稿エディターでは読み上げの列の［音声に書き出す］からも書き出せます。")
         );
         return;
       }

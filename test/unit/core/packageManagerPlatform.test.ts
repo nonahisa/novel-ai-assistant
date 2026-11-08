@@ -7,6 +7,7 @@ import {
 } from "../../../src/core/packageInstall";
 import {
   REQUIREMENTS,
+  installGuideFor,
   manualInstallNote,
 } from "../../../src/core/requirements";
 
@@ -189,5 +190,28 @@ describe("要件ごとの入れ方", () => {
       expect(requirement.wingetId, id).toBeUndefined();
       expect(requirement.brewFormula, id).toBeUndefined();
     }
+  });
+});
+
+describe("Git が見つからないときの入れ方の案内（導入の手引きと同じ表から作る）", () => {
+  test("Windows は winget の1行", () => {
+    expect(installGuideFor("git", "win32")).toEqual({
+      lead: "Windowsなら、ターミナルで次を実行すると入ります。",
+      command: "winget install --id Git.Git -e",
+    });
+  });
+
+  test("Mac は xcode-select の1行と、Homebrew の道（Windows の winget は出さない）", () => {
+    const guide = installGuideFor("git", "darwin");
+    expect(guide.command).toBe("xcode-select --install");
+    expect(guide.lead).toContain("Apple のコマンドラインツール");
+    expect(guide.lead).toContain("brew install git");
+    expect(guide.lead).not.toContain("winget");
+  });
+
+  test("Linux はパッケージ管理の一言（コピーする1行は無い）", () => {
+    const guide = installGuideFor("git", "linux");
+    expect(guide.lead).toContain("sudo apt install git");
+    expect(guide.command).toBeUndefined();
   });
 });

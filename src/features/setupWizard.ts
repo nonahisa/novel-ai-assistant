@@ -19,6 +19,7 @@ import {
   RECOMMENDED_EMBEDDING_MODEL,
   REQUIREMENTS,
   totalSizeLabel,
+  manualInstallCommand,
   manualInstallNote,
   type Requirement,
   type RequirementId,
@@ -305,6 +306,8 @@ export function buildSetupDocument(plan: SetupPlan): string {
     "",
     "- Ollamaのモデル：`ollama rm <モデル名>` で消せます",
     "- Ollama本体・Git・GitHub CLI：Windowsの「アプリと機能」から削除できます",
+    "- Macでは、アプリ（Ollama など）は「アプリケーション」フォルダーからゴミ箱へ入れると消せます。" +
+      "Homebrew で入れたものは、ターミナルで `brew uninstall <名前>`（例：`brew uninstall ollama`）で消せます",
     "",
     "モデルを消しても、作品のファイルや設定資料は変わりません。"
   );
@@ -455,7 +458,9 @@ async function guideManualInstall(
       ? "Homebrew が見つかりませんでした。"
       : "この環境では自動で入れられません。";
 
-  const actions = steps.command
+  // Mac で Homebrew が無いときは Mac の1行（Git なら xcode-select）を出す
+  const command = manualInstallCommand(steps, process.platform);
+  const actions = command
     ? ["コマンドをコピー", "配布ページを開く"]
     : ["配布ページを開く"];
   const answer = await vscode.window.showWarningMessage(
@@ -465,8 +470,8 @@ async function guideManualInstall(
       detail: [
         why,
         "",
-        steps.command
-          ? `ターミナルで次の1行を実行してください。\n\n  ${steps.command}\n`
+        command
+          ? `ターミナルで次の1行を実行してください。\n\n  ${command}\n`
           : "",
         // Mac にも install.sh の1行を出すので、添え書きも Mac 向けに替える
         manualInstallNote(steps, process.platform),
@@ -477,8 +482,8 @@ async function guideManualInstall(
     ...actions
   );
 
-  if (answer === "コマンドをコピー" && steps.command) {
-    await vscode.env.clipboard.writeText(steps.command);
+  if (answer === "コマンドをコピー" && command) {
+    await vscode.env.clipboard.writeText(command);
     notifyDone(
       "コマンドをクリップボードへ入れました。ターミナルへ貼り付けて実行してください。"
     );

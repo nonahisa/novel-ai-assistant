@@ -5,7 +5,7 @@ import {
   isHelperSiteUrl,
 } from "../core/externalBrowser";
 import { HELPER_DOWNLOAD_URL } from "../core/postingEnvelope";
-import { canRunProcesses, isWindowsHost } from "../core/runtime";
+import { canRunProcesses, isMacHost, isWindowsHost } from "../core/runtime";
 import { logFailure, logStep } from "../core/logger";
 
 /**
@@ -18,7 +18,7 @@ import { logFailure, logStep } from "../core/logger";
  *
  * - 案内のどのボタンを押しても（閉じても）リンクは開く。止める道は作らない
  * - 2回目からは黙って開く（覚えは globalState。`verifiedState` で包んだものを渡す）
- * - ブラウザ版・Windows 以外・登録簿を読めないときは、案内を出さずにそのまま開く
+ * - ブラウザ版・Windows と Mac 以外・登録簿（Mac は LaunchServices の記録）を読めないときは、案内を出さずにそのまま開く
  *   （推し量って Chrome を勧めない）
  * - ヘルパーと関わりの無いリンク（公募の要項など）は、案内を出さずにそのまま開く
  *
@@ -44,16 +44,22 @@ let memory: SiteLinkGuideMemory | undefined;
  * 登録簿を読む口（試験で差し替える）。既定は Windows の登録簿を動的 import で読む
  */
 let readProgId: () => Promise<string | undefined> = readWindowsProgId;
+/** Mac の既定のブラウザの名札を読む口（試験で差し替える。既定は LaunchServices の記録を動的 import で読む） */
+let readBundleId: () => Promise<string | undefined> = readMacBundleId;
 /** 案内を出しているあいだに次のリンクが押されても、案内を2つ出さない */
 let guiding: Promise<void> | undefined;
 
 /** 起動時に覚えの置き場を渡す。渡されていなければ案内は出さない（試験・MCP） */
 export function initSiteLinkGuide(
   state: SiteLinkGuideMemory,
-  options?: { readProgId?: () => Promise<string | undefined> }
+  options?: {
+    readProgId?: () => Promise<string | undefined>;
+    readBundleId?: () => Promise<string | undefined>;
+  }
 ): void {
   memory = state;
   readProgId = options?.readProgId ?? readWindowsProgId;
+  readBundleId = options?.readBundleId ?? readMacBundleId;
 }
 
 /**
@@ -86,8 +92,10 @@ async function guideOnce(url: string): Promise<void> {
       .getConfiguration("workbench")
       .get<string>("externalBrowser");
     const hasSetting = typeof setting === "string" && setting.trim() !== "";
+    // OS の既定は、設定が空のときだけ読む（Windows は登録簿、Mac は LaunchServices。ほかの OS では読まない）
     const progId = hasSetting ? undefined : await readProgId();
-    const decision = decideSiteLinkGuide({ setting, progId, shown: false });
+    const bundleId = hasSetting || progId !== undefined ? undefined : await readBundleId();
+    const decision = decideSiteLinkGuide({ setting, progId, bundleId, shown: false });
     if (!decision.show) return;
     // **出す前に覚える。** 案内を出したまま置かれても、次のリンクで2度目を出さない
     await markShown(state);
@@ -136,4 +144,12 @@ async function readWindowsProgId(): Promise<string | undefined> {
   // Node 専用の部品なので動的 import（実装ルール7。`browserReach.test.ts`）
   const { readDefaultBrowserProgId } = await import("../core/externalBrowserWindows.js");
   return readDefaultBrowserProgId();
+}
+
+/** Mac の既定のブラウザの名札。ブラウザ版・Mac 以外では読まない */
+async function readMacBundleId(): Promise<string | undefined> {
+  if (!canRunProcesses() || !isMacHost()) return undefined;
+  // Node 専用の部品なので動的 import（実装ルール7。`browserReach.test.ts`）
+  const { readDefaultBrowserBundleId } = await import("../core/externalBrowserMac.js");
+  return readDefaultBrowserBundleId();
 }

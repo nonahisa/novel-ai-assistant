@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
+  browserFromBundleId,
+  parseLaunchServicesHttpsHandler,
   browserFromProgId,
   browserFromSetting,
   decideSiteLinkGuide,
@@ -66,6 +68,54 @@ describe("Windows の既定のブラウザ（ProgId）から", () => {
       "    ProgId    REG_SZ    MSEdgeHTM\r\n\r\n";
     expect(parseRegProgId(stdout)).toBe("MSEdgeHTM");
     expect(parseRegProgId("エラー: 指定されたレジストリ キーまたは値が見つかりませんでした。")).toBeUndefined();
+  });
+});
+
+describe("Mac の既定のブラウザ（LaunchServices の https の受け手。作者の決定 2026-11-08）", () => {
+  /** plutil -convert json の出力の形（要る所だけ） */
+  const launchServicesJson = (https: string | undefined): string =>
+    JSON.stringify({
+      LSHandlers: [
+        { LSHandlerContentType: "public.html", LSHandlerRoleAll: "com.apple.safari" },
+        { LSHandlerURLScheme: "http", LSHandlerRoleAll: "com.apple.safari" },
+        ...(https ? [{ LSHandlerURLScheme: "https", LSHandlerRoleAll: https, LSHandlerPreferredVersions: { LSHandlerRoleAll: "-" } }] : []),
+      ],
+    });
+
+  test("JSON から https の LSHandlerRoleAll を拾う", () => {
+    expect(parseLaunchServicesHttpsHandler(launchServicesJson("com.google.chrome"))).toBe("com.google.chrome");
+    // https の行が無い（Safari のまま一度も変えていない Mac）・壊れた文は「分からない」
+    expect(parseLaunchServicesHttpsHandler(launchServicesJson(undefined))).toBeUndefined();
+    expect(parseLaunchServicesHttpsHandler("{")).toBeUndefined();
+    expect(parseLaunchServicesHttpsHandler(JSON.stringify({ LSHandlers: "x" }))).toBeUndefined();
+  });
+
+  test("XML（plutil -convert xml1）からも拾う（入れ子の dict と日付を読み飛ばす）", () => {
+    const xml =
+      '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n\t<key>LSHandlers</key>\n\t<array>\n' +
+      "\t\t<dict>\n\t\t\t<key>LSHandlerModificationDate</key>\n\t\t\t<date>2026-11-08T00:00:00Z</date>\n" +
+      "\t\t\t<key>LSHandlerPreferredVersions</key>\n\t\t\t<dict>\n\t\t\t\t<key>LSHandlerRoleAll</key>\n\t\t\t\t<string>-</string>\n\t\t\t</dict>\n" +
+      "\t\t\t<key>LSHandlerRoleAll</key>\n\t\t\t<string>com.microsoft.edgemac</string>\n" +
+      "\t\t\t<key>LSHandlerURLScheme</key>\n\t\t\t<string>https</string>\n\t\t</dict>\n\t</array>\n</dict>\n</plist>\n";
+    expect(parseLaunchServicesHttpsHandler(xml)).toBe("com.microsoft.edgemac");
+  });
+
+  test("アプリの名札（bundle id）から、Chrome か・名前を決める", () => {
+    expect(browserFromBundleId("com.google.chrome")).toEqual({ chrome: true, name: "Google Chrome" });
+    expect(browserFromBundleId("com.google.Chrome.canary")?.chrome).toBe(true);
+    expect(browserFromBundleId("com.apple.safari")).toEqual({ chrome: false, name: "Safari" });
+    expect(browserFromBundleId("com.microsoft.edgemac")).toEqual({ chrome: false, name: "Microsoft Edge" });
+    expect(browserFromBundleId("org.mozilla.firefox")).toEqual({ chrome: false, name: "Firefox" });
+    expect(browserFromBundleId("com.example.browser")).toEqual({ chrome: false });
+    expect(browserFromBundleId(undefined)).toBeUndefined();
+  });
+
+  test("Mac で Safari が既定なら、名前つきで案内を出す。Chrome なら出さない", () => {
+    expect(decideSiteLinkGuide({ setting: "", bundleId: "com.apple.safari", shown: false })).toEqual({
+      show: true,
+      browserName: "Safari",
+    });
+    expect(decideSiteLinkGuide({ setting: "", bundleId: "com.google.chrome", shown: false })).toEqual({ show: false });
   });
 });
 
