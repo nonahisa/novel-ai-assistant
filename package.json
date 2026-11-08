@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。※現在テスト中です。",
-  "version": "0.146.0",
+  "version": "0.146.1",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -2254,19 +2254,19 @@
         "novelai.manuscriptEditor.vertical": {
           "type": "boolean",
           "default": true,
-          "description": "「原稿エディターで開く」で開いた原稿を、はじめから縦書きにする（画面の上のボタンで切り替え。原稿ごとに覚える）。"
+          "description": "「原稿エディターで開く」で開いた原稿を、はじめから縦書きにする（上の列の［表示］で切り替え。原稿ごとに覚える）。"
         },
         "novelai.manuscriptEditor.fontFamily": {
           "type": "string",
           "default": "",
-          "markdownDescription": "原稿の画面で使う書体。\n\n・原稿の画面の「書体」ボタンから選べる（この端末に入っているものだけ並ぶ）\n・空なら明朝体（游明朝→ヒラギノ明朝→MS明朝の順）\n・ここへ直接書ける（例：`\"Noto Serif JP\", serif`）"
+          "markdownDescription": "原稿の画面で使う書体。\n\n・原稿エディターの上の列の［表示］→［書体］から選べる（この端末に入っているものだけ並ぶ）\n・空なら明朝体（游明朝→ヒラギノ明朝→MS明朝の順）\n・ここへ直接書ける（例：`\"Noto Serif JP\", serif`）"
         },
         "novelai.manuscriptEditor.readAloudRate": {
           "type": "number",
           "default": 1,
           "minimum": 0.5,
           "maximum": 2,
-          "description": "読み上げの速さ。1が標準（原稿の画面の「読み上げ」でも、その場だけ変えられる）。"
+          "description": "読み上げの速さ。1が標準（原稿エディターの上の列の［出力］→［読み上げ］の「速さ」でも、その場だけ変えられる）。"
         },
         "novelai.readAloud.aivisSpeechUrl": {
           "type": "string",

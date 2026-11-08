@@ -1266,7 +1266,7 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
     );
     void vscode.window.showWarningMessage(
       `「${paths.basename(filePath)}」の読み上げを始められませんでした。` +
-        "作品一覧からこの話を開いて、上のバーの「出力」→「読み上げ」を押してください。"
+        "作品一覧からこの話を開いて、原稿エディターの上の列の［出力］→［読み上げ］を押してください。"
     );
     return;
   }

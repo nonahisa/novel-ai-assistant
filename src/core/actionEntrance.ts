@@ -28,7 +28,7 @@ export interface ActionEntrance {
 }
 
 /** 原稿エディターの中にある操作のまとまり（目次の見出し） */
-const IN_MANUSCRIPT_EDITOR = "原稿エディター（上のバー・下段・右クリック）";
+const IN_MANUSCRIPT_EDITOR = "原稿エディター（上の列・下の欄・右クリック）";
 
 /**
  * 導き方では当てられない入口（作者の指定、2026-09-03）。
@@ -64,28 +64,28 @@ const SPECIAL_ENTRANCES: Readonly<Record<string, ActionEntrance>> = {
   },
   "novelai.openVertical": {
     place: IN_MANUSCRIPT_EDITOR,
-    text: "原稿エディターの上のバー「表示」→「縦書きにする」か、本文の右クリックから",
+    text: "原稿エディターの上の列の［表示］→［縦書きにする］か、本文の右クリックから",
   },
   "novelai.readManuscriptAloud": {
     place: IN_MANUSCRIPT_EDITOR,
-    text: "原稿エディターの上のバー「出力」→「読み上げ」から",
+    text: "原稿エディターの上の列の［出力］→［読み上げ］から",
   },
   "novelai.dictationClean": {
     place: IN_MANUSCRIPT_EDITOR,
-    text: "原稿エディターの上のバー「入力」→「口述」→「整える」から。普通のエディターではコマンドパレットから",
+    text: "原稿エディターの上の列の［入力］→［口述］→［整える］から。普通のエディターではコマンドパレットから",
   },
   "novelai.addRuby": {
     place: IN_MANUSCRIPT_EDITOR,
-    text: "原稿エディターの上のバー「補助」→「ルビ」か、右クリックから",
+    text: "原稿エディターの上の列の［補助］→［ルビ］か、右クリックから",
   },
   "novelai.addEmphasis": {
     place: IN_MANUSCRIPT_EDITOR,
-    text: "原稿エディターの上のバー「補助」→「傍点」か、右クリックから",
+    text: "原稿エディターの上の列の［補助］→［傍点］か、右クリックから",
   },
   "novelai.copyForPosting": {
     place: IN_MANUSCRIPT_EDITOR,
     text:
-      "原稿エディターの上のバー「出力」→「投稿」→「コピー（投稿サイト用）」か、右クリックから。" +
+      "原稿エディターの上の列の［出力］→［投稿］→「コピー（投稿サイト用）」か、右クリックから。" +
       "簡単ステップメニューにもあります",
   },
   "novelai.setAdvicePolicy": {

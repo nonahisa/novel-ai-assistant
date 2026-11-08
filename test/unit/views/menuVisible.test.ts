@@ -415,12 +415,12 @@ describe("詳細メニューに出さない操作の、ほかの入口", () => {
         marker: "読者としての好み（${AUTHOR_READER_QUESTIONS.length}問）",
       },
       "novelai.readManuscriptAloud": {
-        where: "原稿エディターの上のバー「出力」→「読み上げ」",
+        where: "原稿エディターの上の列の［出力］→［読み上げ］",
         file: "src/views/manuscriptEditorHtml.ts",
         marker: '<button id="aloudToggle"',
       },
       "novelai.dictationClean": {
-        where: "原稿エディターの上のバー「入力」→「口述」→「整える」",
+        where: "原稿エディターの上の列の［入力］→［口述］→［整える］",
         file: "src/views/manuscriptEditorHtml.ts",
         marker: 'type: "dictationClean"',
       },

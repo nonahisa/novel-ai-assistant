@@ -213,7 +213,7 @@ async function contentSize(app: ElectronApplication): Promise<{ width: number; h
 
 /**
  * 字幕の帯の置き場：左の原稿エディターの真ん中、本文の下の空いた所。
- * 下の真ん中だと、原稿エディターの下のボタン（「最新話を書く」「保存」）にかかった。
+ * 下の真ん中だと、原稿エディターの下のボタン（［最新話］［保存］）にかかった。
  * 見本の本文は8行で、帯の高さまでは届かない
  */
 const CAPTION_PLACE: CaptionPlace = { left: "25%", bottom: "16%" };

@@ -31,7 +31,7 @@ test("ルビと傍点の広報素材を撮る", async () => {
       await page.mouse.move(640, 690);
     },
     play: async ({ page }, caption) => {
-      await caption("付けたい語を選んで、［ルビ］を押す");
+      await caption("付けたい語を選んで、［補助］→［ルビ］を押す");
       await selectText(frame, "切符");
       await page.waitForTimeout(1_500);
       await clickToolButton(frame, "ruby");

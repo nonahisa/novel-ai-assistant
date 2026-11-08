@@ -8348,7 +8348,7 @@ export async function activate(
       if (editor.selection.isEmpty) {
         void vscode.window.showInformationMessage(
           "口述で入れたところを選んでから実行してください。" +
-            "（原稿エディタなら、下段の「口述」→「整える」で範囲を選ばずに使えます）"
+            "（原稿エディターなら、上の列の［入力］→［口述］→［整える］で範囲を選ばずに使えます）"
         );
         return;
       }
