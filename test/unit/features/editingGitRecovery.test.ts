@@ -118,7 +118,7 @@ describe("編集用リポジトリの立ち直り", { timeout: REAL_GIT_TIMEOUT_
 
   afterEach(async () => {
     workspace.fs = {} as typeof workspace.fs;
-    await fsp.rm(base, { recursive: true, force: true }).catch(() => undefined);
+    await fsp.rm(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
   }, REAL_GIT_TIMEOUT_MS);
 
   test("B1：上流がまだ無い（初回の送信が止まった）フォルダーは、取り寄せで止まらない", async () => {

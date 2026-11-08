@@ -4,8 +4,11 @@
  * 作者の側を機械へ移した。作者の決定 2026-11-01「意見を読んだものは採用に数えない」）。
  *
  * 見張ること：
- * 1. 編集者が返した提案3件（直し2件・意見だけ1件）を提案パネルで、意見は［読んだ］、直しの1件は［適用］、
- *    もう1件は［見送る］で決める。**決め終える前は送り返さない**（送り先の記録が進まない）
+ * 1. 編集者が返した提案3件（直し2件・意見だけ1件）を校正・メモパネルで、意見は［読んだ］、直しの1件は［採る］、
+ *    もう1件は［見送る］で決める。**決め終える前は送り返さない**（送り先の記録が進まない）。
+ *    0.144.0 から、作者モードの編集者の提案は提案パネルでなく校正・メモパネルに並ぶ（作者の指示 2026-11-08
+ *    「編集からの提案も校正メモにうつしてください」。設計書6.96.5・5.7.5.8）。パネルは原稿エディターで話を開いて
+ *    Ctrl+Alt+M で開く（作者がふだん開く道）
  * 2. 最後の1件を決めると、下の帯に「採否を編集者へ送り返しました（採用 1・見送り 1・読まれた 1）。」が出る
  *    （読んだ意見は採用に数えない）
  * 3. 送り先（GitHub の代わりの裸の置き場）の提案の台帳に、3件の採否（accepted・rejected・read）が届いている
@@ -26,17 +29,19 @@
  * **見ていないもの（作者の手）**：編集者の環境で同期してから「編集者提案確認」を押したときに同じ内訳が出る所
  * （2台目の環境が要る）。**AI は呼ばない。**
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { parseGithubRepoRef } from "../../src/core/githubRepoRef";
 import { HAND_EDIT_CATEGORY, HAND_MEMO_CATEGORY, proposalId } from "../../src/models/proposal";
 import { git, initRepoWithFirstCommit } from "./support/gitFixture";
-import { OPEN_PROPOSALS_LAUNCH, OPEN_PROPOSALS_PRESS, proposalPanelFrame } from "./support/sampleFinding";
+import { readFileWhenPresent } from "./support/fileSettle";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
+import { memoPanelFrame, openEpisode } from "./support/manuscriptFrame";
 import { E2E_WORK_TITLE, e2eTmpRoot, withVsCode, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { clearNotifications, notificationTexts, pressWorkbenchKey, statusBarTexts } from "./support/workbenchDom";
+import { clearNotifications, notificationTexts, statusBarTexts } from "./support/workbenchDom";
 
 const EPISODE = "001_駅.txt";
 const LINE = "　終電を逃した駅のホームに、雨の音だけが残っていた。";
@@ -109,7 +114,6 @@ const REMOTE_URL_READABLE = remoteUrlReadable(
 );
 
 const LAUNCH: LaunchOptions = {
-  ...OPEN_PROPOSALS_LAUNCH,
   prepareWork: async ({ workFolder }) => {
     const root = path.dirname(path.dirname(workFolder));
     const { editing, remote, remoteUrl } = places(root);
@@ -146,23 +150,38 @@ const LAUNCH: LaunchOptions = {
   },
 };
 
-/** 一覧の中で `reason` を含む行 */
-function issueRow(frame: Frame, reason: string) {
-  return frame.locator("#list .issue", { hasText: reason }).first();
+/**
+ * 校正・メモパネルの、編集者の提案の行のうち `reason` を含む行。提案の行は［見送る］
+ * （`data-act="proposalReject"`）を持つ（`views/sceneMemoPanelHtml.ts` の `renderActions`）
+ */
+function proposalRow(frame: Frame, reason: string) {
+  return frame.locator(".memo", { hasText: reason, has: frame.locator('[data-act="proposalReject"]') }).first();
 }
 
-/** 行のボタン（`action`）を押し、その行が決まった札に変わるまで待つ */
-async function decide(frame: Frame, reason: string, action: "apply" | "dismiss", label: string): Promise<void> {
-  const row = issueRow(frame, reason);
+/** 校正・メモパネルに並ぶ、編集者の提案の行の文 */
+async function proposalRowTexts(frame: Frame): Promise<string[]> {
+  return frame
+    .evaluate(() =>
+      Array.from(document.querySelectorAll(".memo"))
+        .filter((row) => row.querySelector('[data-act="proposalReject"]'))
+        .map((row) => (row.textContent ?? "").replace(/\s+/g, " ").trim())
+    )
+    .catch(() => []);
+}
+
+/**
+ * 行のボタン（［採る］［読んだ］は `proposalAccept`、［見送る］は `proposalReject`）を押し、
+ * その行が一覧から消えるまで待つ（決めた提案は未決でなくなり、パネルの読み直しで並ばなくなる）
+ */
+async function decide(frame: Frame, reason: string, act: "proposalAccept" | "proposalReject", label: string): Promise<void> {
+  const row = proposalRow(frame, reason);
   await waitUntil(async () => (await row.count()) > 0, `${label}：行が並ぶ`, 15_000).catch(async (error: unknown) => {
-    throw new Error(`${String(error)}（一覧：${JSON.stringify((await frame.locator("#list").innerText().catch(() => "")).slice(0, 800))}）`);
+    throw new Error(`${String(error)}（提案の行：${JSON.stringify(await proposalRowTexts(frame))}）`);
   });
-  const button = row.locator(`button[data-action="${action}"]`).first();
-  await button.click();
-  // 決めた行はボタンが消える（札だけになる）か、一覧から消える
+  await row.locator(`button[data-act="${act}"]`).first().click();
   await waitUntil(
-    async () => (await row.count()) === 0 || (await row.locator(`button[data-action="${action}"]`).count()) === 0,
-    `${label}：押したあと、その行が決まった形になる`,
+    async () => (await row.count()) === 0,
+    `${label}：押したあと、その行が一覧から消える`,
     15_000
   ).catch(async (error: unknown) => {
     throw new Error(`${String(error)}（行：${JSON.stringify(await row.innerText().catch(() => ""))}／知らせ：${JSON.stringify(await noticesOf(frame))}）`);
@@ -205,7 +224,7 @@ if (!REMOTE_URL_READABLE) {
   );
 }
 
-test.skipIf(!REMOTE_URL_READABLE)("編集者の提案を、意見は［読んだ］・直しは［適用］と［見送る］で決め終えると、下の帯に「採否を編集者へ送り返しました（採用 1・見送り 1・読まれた 1）。」が出て、送り先の台帳に3件の採否が届く", async () => {
+test.skipIf(!REMOTE_URL_READABLE)("校正・メモパネルで編集者の提案を、意見は［読んだ］・直しは［採る］と［見送る］で決め終えると、下の帯に「採否を編集者へ送り返しました（採用 1・見送り 1・読まれた 1）。」が出て、送り先の台帳に3件の採否が届く", async () => {
   await withVsCode(
     "採否を編集者へ送り返す",
     [{ name: EPISODE, text: TEXT }],
@@ -215,37 +234,45 @@ test.skipIf(!REMOTE_URL_READABLE)("編集者の提案を、意見は［読んだ
       await clearNotifications(page);
       const before = await remoteHead(remote, root);
 
-      await pressWorkbenchKey(page, OPEN_PROPOSALS_PRESS);
+      // 原稿エディターで話を開き、Ctrl+Alt+M で校正・メモパネルを開く（このキーは原稿エディターが前のときだけ効く）
+      await openEpisode(page, EPISODE, "雨の音");
+      await page.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
       let frame: Frame | undefined;
+      let rows: string[] = [];
       await waitUntil(
         async () => {
-          frame = await proposalPanelFrame(page);
+          frame = await memoPanelFrame(page);
           if (!frame) return false;
-          return (await frame.locator("#list .issue").count()) === 3;
+          rows = await proposalRowTexts(frame);
+          return rows.length === 3;
         },
-        "提案パネルに編集者の提案が3件並ぶ",
+        "校正・メモパネルに編集者の提案が3件並ぶ",
         30_000
       ).catch(async (error: unknown) => {
-        throw new Error(`${String(error)}（一覧：${JSON.stringify(frame ? (await frame.locator("#list").innerText().catch(() => "")).slice(0, 800) : "面が無い")}）`);
+        throw new Error(
+          `${String(error)}（提案の行：${JSON.stringify(rows)}／面：${frame ? "あり" : "無い"}／知らせ：${JSON.stringify(await notificationTexts(page))}）`
+        );
       });
       const panel = frame as Frame;
-      // 意見だけの行は［適用］でなく［読んだ］
-      const readButton = issueRow(panel, TO_READ.reason).locator('button[data-action="apply"]').first();
-      expect((await readButton.innerText()).trim(), "意見だけの提案のボタンが［読んだ］ではありません").toBe("読んだ");
+      // 意見だけの行は［採る］でなく［読んだ］（と［本文へ］［見送る］）。直しの行は［採る］［見送る］
+      const readButtons = (await proposalRow(panel, TO_READ.reason).locator(".acts button").allInnerTexts()).map((text) => text.trim());
+      expect(readButtons, "意見だけの提案のボタン").toEqual(["読んだ", "本文へ", "見送る"]);
+      const editButtons = (await proposalRow(panel, TO_ACCEPT.reason).locator(".acts button").allInnerTexts()).map((text) => text.trim());
+      expect(editButtons, "直しの提案のボタン").toEqual(["採る", "見送る"]);
 
       /* ── 1. 決め終える前は送らない ── */
-      await decide(panel, TO_READ.reason, "apply", "意見を［読んだ］");
-      await decide(panel, TO_ACCEPT.reason, "apply", "直しを［適用］");
+      await decide(panel, TO_READ.reason, "proposalAccept", "意見を［読んだ］");
+      await decide(panel, TO_ACCEPT.reason, "proposalAccept", "直しを［採る］");
       await holdsFor(async () => (await remoteHead(remote, root)) === before && (await shownWith(page, "採否を編集者へ送り返しました")) === undefined, "未決が残っている間は送り返さない", 3_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（下の帯：${JSON.stringify(await statusBarTexts(page))}／知らせ：${JSON.stringify(await notificationTexts(page))}）`);
         }
       );
       // 採った直しは本文に入った
-      expect((await readFile(path.join(session.manuscriptFolder, EPISODE), "utf8")).replace(/\r\n/g, "\n")).toBe(`${LINE.replace("雨の音", "雨音")}\n`);
+      expect((await readFileWhenPresent(path.join(session.manuscriptFolder, EPISODE))).replace(/\r\n/g, "\n")).toBe(`${LINE.replace("雨の音", "雨音")}\n`);
 
       /* ── 2. 最後の1件で送り返す ── */
-      await decide(panel, TO_REJECT.reason, "dismiss", "直しを［見送る］");
+      await decide(panel, TO_REJECT.reason, "proposalReject", "直しを［見送る］");
       let shown: string | undefined;
       // 下の帯の完了の知らせは6秒だけ出るので、押した直後から見続ける
       await waitUntil(async () => (shown = await shownWith(page, "採否を編集者へ送り返しました")) !== undefined, "「採否を編集者へ送り返しました」が出る", 30_000).catch(

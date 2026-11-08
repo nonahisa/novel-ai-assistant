@@ -46,7 +46,7 @@ describe("パスを束に分ける", () => {
 let base: string | undefined;
 
 afterEach(() => {
-  if (base) fs.rmSync(base, { recursive: true, force: true });
+  if (base) fs.rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   base = undefined;
 });
 
