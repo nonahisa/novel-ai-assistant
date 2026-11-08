@@ -288,8 +288,10 @@ test("［声］で VOICEVOX を選ぶと本文は VOICEVOX の接続先へ届き
 test("VOICEVOX で選んだ声の人物がいる作品を AivisSpeech で読むと、その台詞は代わりの声で頼み、一言は1回の読み上げで1回だけ（途中で打っても出し直さない）。［声の割り当て］にはエンジンの名前が添えてある", async () => {
   const aivis = await startFakeVoiceEngine({ brand: "AivisSpeech", wavMs: 1_500 });
   const voicevoxClosed = await closedEngineUrl();
-  // 1文1.5秒の音を10文ほど。打つまでのあいだ読み続けているように長めにする
-  const text = ["「やった！」と灯は笑った。", ...Array.from({ length: 9 }, (_, i) => `　雨は${i + 1}度目の角を曲がった。`)].join("\n") + "\n";
+  // 1文1.5秒の音を10文ほど。打つまでのあいだ読み続けているように長めにする。
+  // 回数は漢数字で書く——半角数字は組んで書く面で縦中横の印（span.tcy）に包まれ、
+  // 「9」と「度目の角」が別の字の節点に分かれて placeCaretAfter が見つけられない（0.148.1 の e2e で落ちた）
+  const text = ["「やった！」と灯は笑った。", ...Array.from({ length: 9 }, (_, i) => `　雨は${"一二三四五六七八九"[i]}度目の角を曲がった。`)].join("\n") + "\n";
   const notice = unresolvedVoiceNotice(["灯"], VOICE_ENGINE_LABEL.aivisspeech);
   if (!notice) throw new Error("一言の文が作れません");
   const needle = `割り当てた声のうち 灯 の声が ${VOICE_ENGINE_LABEL.aivisspeech} に見つからないので`;
@@ -317,7 +319,7 @@ test("VOICEVOX で選んだ声の人物がいる作品を AivisSpeech で読む�
 
         /* ── 読んでいる途中に打つ（計画を取り直す）。一言は出し直さない ── */
         expect((await frame.locator("#aloudPlay").innerText()).includes("読む"), "打つ前に読み終わっていました（音を長くする）").toBe(false);
-        await placeCaretAfter(frame, "9度目の角");
+        await placeCaretAfter(frame, "九度目の角");
         await page.keyboard.insertText("ぽ");
         // 記録は1秒まとめて書かれる。打ったあとに出たかもしれない分が載るまで待ってから見続ける
         await new Promise((resolve) => setTimeout(resolve, 2_500));
