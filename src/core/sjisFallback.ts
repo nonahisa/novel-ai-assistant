@@ -124,6 +124,36 @@ export function substituteForShiftJis(text: string): { text: string; substitutio
   return { text: replaced, substitutions: [...counts.values()] };
 }
 
+/** 表の字が1つ、本文のどこにあるか（`index`・`length` は JavaScript の文字列の単位） */
+export interface SjisSubstitutionSpan {
+  index: number;
+  /** 𠮟 はサロゲートの2単位で1字なので、置き換え先（1単位）と長さが違う */
+  length: number;
+  to: string;
+}
+
+/**
+ * 表の字の場所を拾う（置き換えはしない）。VS Code の保存の直前に、**字ごとの小さな書き換え**を
+ * 作るために使う（`features/shiftJisSave.ts`。全文を置き換えると取り消しの履歴とカーソルが崩れる）。
+ * `substituteForShiftJis` と同じ表・同じ拾い方なので、並びと数は必ず揃う。
+ */
+export function findShiftJisSubstitutions(text: string): {
+  spans: SjisSubstitutionSpan[];
+  substitutions: SjisSubstitution[];
+} {
+  const spans: SjisSubstitutionSpan[] = [];
+  const counts = new Map<string, SjisSubstitution>();
+  for (const match of text.matchAll(FALLBACK_PATTERN)) {
+    const char = match[0];
+    const to = FALLBACK.get(char) ?? char;
+    spans.push({ index: match.index ?? 0, length: char.length, to });
+    const seen = counts.get(char);
+    if (seen) seen.count += 1;
+    else counts.set(char, { from: char, to, count: 1 });
+  }
+  return { spans, substitutions: [...counts.values()] };
+}
+
 /** ログへ残す1行の中身（「〜→～ 2個、𠮟→叱 1個」。本文の前後は書かない） */
 export function describeSubstitutions(substitutions: readonly SjisSubstitution[]): string {
   return substitutions.map(({ from, to, count }) => `${from}→${to} ${count}個`).join("、");
@@ -153,6 +183,9 @@ function encodesInShiftJis(char: string): boolean {
  */
 export function findUnencodableShiftJis(text: string): UnencodableChar[] {
   const found: UnencodableChar[] = [];
+  // ほとんどの保存は全部書ける。全文を1回で確かめ、書けない字があるときだけ1字ずつ見る
+  // （VS Code の保存の直前にも呼ぶ。受け口の持ち時間は1.5秒しかない）
+  if (iconv.decode(iconv.encode(text, "shift_jis"), "shift_jis") === text) return found;
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   for (let index = 0; index < lines.length && found.length < UNENCODABLE_LIMIT; index += 1) {
     const chars = Array.from(lines[index]);

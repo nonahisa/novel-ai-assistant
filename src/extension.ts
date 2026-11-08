@@ -265,6 +265,7 @@ import {
 } from "./core/lmAvailability";
 import { probeVsCodeLm } from "./ai/vscodeLmProvider";
 import { installEditorLockGuard } from "./features/editorLockGuard";
+import { installShiftJisSaveGuard } from "./features/shiftJisSave";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
 import { isSyncBusyCommand } from "./core/autoResendPlan";
@@ -1489,6 +1490,10 @@ export async function activate(
   context.subscriptions.push(
     installEditorLockGuard(registry, { readonlyRescues: verifiedState(context.workspaceState) })
   );
+
+  // 作者が VS Code で打って保存する道でも、Shift_JIS の話の「〜」などを黙って置き換える
+  // （0.148.1。設計書5.4.2。VS Code は符号の無い字を「?」にして書くため）
+  context.subscriptions.push(installShiftJisSaveGuard(registry));
 
   // 投稿状態の台帳に、この版が知らない値（連載の状態など）があったら一度だけ知らせる
   // （作者の判断 2026-11-01。台帳ごと止めず、その欄だけ読まずに持ち回る）

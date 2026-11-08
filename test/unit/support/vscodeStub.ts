@@ -12,6 +12,7 @@ export const workspace = {
   /** 文書を開いた／保存した知らせの購読。試験では何も起きないので、外せるだけ返す */
   onDidOpenTextDocument: (_listener: unknown) => ({ dispose() {} }),
   onDidSaveTextDocument: (_listener: unknown) => ({ dispose() {} }),
+  onWillSaveTextDocument: (_listener: unknown) => ({ dispose() {} }),
   onDidChangeTextDocument: (_listener: unknown) => ({ dispose() {} }),
   /**
    * 文書への当て込み。**既定は「入った」**——入らなかったときの道を
@@ -121,6 +122,21 @@ export class Range {
     readonly start: Position,
     readonly end: Position
   ) {}
+}
+
+/**
+ * 1か所の書き換え（保存の直前の `waitUntil` が返す形）。**値を持つだけ**——どこを何に
+ * 替えようとしたかをテスト側が覗く
+ */
+export class TextEdit {
+  constructor(
+    readonly range: Range,
+    readonly newText: string
+  ) {}
+
+  static replace(range: Range, newText: string): TextEdit {
+    return new TextEdit(range, newText);
+  }
 }
 
 /**
