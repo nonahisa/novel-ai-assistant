@@ -4,6 +4,7 @@ import {
   CHECK_CANCELLED,
   CHECK_COMPLETED,
   CHECK_FAILED,
+  CHECK_FEATURES,
   DEFAULT_PROOFREADING_CHECK_IDS,
   PROOFREADING_CHECKS,
   PROOFREADING_SUITE_COMMAND,
@@ -96,6 +97,24 @@ describe("走らせる順番", () => {
       "notation",
       "typos",
       "proofread",
+      "deviations",
+      "contradictions",
+    ]);
+  });
+
+  test("冒頭診断と伏線の検知は、まとめ実行の一覧に無い（作者の指示 2026-11-08）", () => {
+    // 「冒頭分析と伏線の検知は校正ではないと思われます。一括処理からはずしてください」
+    const ids = PROOFREADING_CHECKS.map((check) => check.id);
+
+    expect(ids).not.toContain("opening");
+    expect(ids).not.toContain("foreshadows");
+  });
+
+  test("検知の全件の表には、冒頭診断と伏線の検知が残る（新作をひと通り仕上げるが引く）", () => {
+    expect(CHECK_FEATURES.map((check) => check.id)).toEqual([
+      "notation",
+      "typos",
+      "proofread",
       "opening",
       "deviations",
       "contradictions",
@@ -104,13 +123,19 @@ describe("走らせる順番", () => {
   });
 
   test("選んだ順ではなく、固定の順に並べ直す", () => {
-    const order = sortToRunOrder(["foreshadows", "typos", "notation"]);
+    const order = sortToRunOrder(["contradictions", "typos", "notation"]);
 
     expect(order.map((check) => check.id)).toEqual([
       "notation",
       "typos",
-      "foreshadows",
+      "contradictions",
     ]);
+  });
+
+  test("冒頭診断・伏線の検知のidは、まとめ実行では走らせない", () => {
+    const order = sortToRunOrder(["opening", "foreshadows", "typos"]);
+
+    expect(order.map((check) => check.id)).toEqual(["typos"]);
   });
 
   test("知らないidは捨てる", () => {
@@ -148,6 +173,17 @@ describe("前回の選択の控え", () => {
 
   test("控えの中の知らないidは捨てる", () => {
     expect(parseStoredSelection(["typos", "むかしの名前"])).toEqual(["typos"]);
+  });
+
+  test("前の版の控えに冒頭診断・伏線の検知が入っていても、捨てて走らせない", () => {
+    // 0.143.x までは選べたので、控え（globalState）に残っていることがある
+    expect(
+      parseStoredSelection(["typos", "opening", "contradictions", "foreshadows"])
+    ).toEqual(["typos", "contradictions"]);
+    // 2つだけを選んでいた控えは、空で走らせずに既定へ戻す
+    expect(parseStoredSelection(["opening", "foreshadows"])).toEqual([
+      ...DEFAULT_PROOFREADING_CHECK_IDS,
+    ]);
   });
 
   test("控えが無い・壊れているときは既定に戻す", () => {
@@ -214,7 +250,8 @@ describe("表が実物と噛み合っている", () => {
       )
       .join("\n");
 
-    for (const check of PROOFREADING_CHECKS) {
+    // 全件の表で見る（伏線の候補は、新作をひと通り仕上げるが数える）
+    for (const check of CHECK_FEATURES) {
       if (!check.category) continue;
       expect(
         handedOver,
@@ -237,7 +274,7 @@ describe("表が実物と噛み合っている", () => {
 
   test("冒頭診断だけは、提案パネルへ出さないので数えない", () => {
     // 結果は文書として開く（設計書6.80）。分類を持たせると0件が並ぶ
-    const opening = PROOFREADING_CHECKS.find((check) => check.id === "opening");
+    const opening = CHECK_FEATURES.find((check) => check.id === "opening");
 
     expect(opening?.category).toBeUndefined();
   });

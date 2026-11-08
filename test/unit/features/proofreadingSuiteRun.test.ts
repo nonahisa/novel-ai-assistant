@@ -294,15 +294,27 @@ describe("走らせ方", () => {
   });
 
   test("何も返さないコマンドでも、次へ進む", async () => {
-    // 冒頭診断のように戻り値を持たない入口があっても止まらない
-    selection = ["opening", "contradictions"];
+    // 戻り値を持たない入口があっても止まらない
+    selection = ["deviations", "contradictions"];
 
     await run();
 
     expect(calls).toEqual([
-      "novelai.checkOpening",
+      "novelai.checkDeviations",
       "novelai.checkContradictions",
     ]);
+  });
+
+  test("前回の控えに冒頭診断・伏線の検知が入っていても、走らせない（2026-11-08）", async () => {
+    // 選ぶ画面は控えから初期選択を作るので、控えに残った2つが並ばないことと、
+    // 選んだものにまぎれても走らないことの両方を見る
+    selection = ["typos", "opening", "foreshadows"];
+
+    await run(["typos", "opening", "foreshadows"]);
+
+    expect(offered.map((item) => item.id)).not.toContain("opening");
+    expect(offered.map((item) => item.id)).not.toContain("foreshadows");
+    expect(calls).toEqual(["novelai.checkTypos"]);
   });
 
   test("失敗しても、残りは走らせる", async () => {

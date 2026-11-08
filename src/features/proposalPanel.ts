@@ -31,10 +31,13 @@ import { editHistoryFile } from "../core/editHistoryFormat";
 import { isEditorMode } from "../core/actorContext";
 import { ProposalStore } from "../core/proposalStore";
 import { proposalId } from "../models/proposal";
-import { FileLockStore } from "../core/fileLockStore";
-import { describeLock, normalizeFile } from "../models/fileLock";
+import { normalizeFile } from "../models/fileLock";
 import { tryGitUserName } from "../core/gitAttribution";
-import { acceptProposal, rejectProposal } from "./reviewProposals";
+import {
+  acceptProposal,
+  confirmNotUnderReview,
+  rejectProposal,
+} from "./reviewProposals";
 import { editorLoginForProposal } from "./editingSite";
 // 指摘を数日残す（設計書6.96）。**配線はこのファイルの1か所だけ**
 // （`replaceContents`）。検知ごとに写しを作ると、検知を足した人が
@@ -4467,29 +4470,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   /**
    * 編集部が校閲中でないかを確かめる。
    *
-   * **校閲中の話は断る**（2026-10-28 に作り替え。以前は「それでも直す」を選べた）。
-   * 誰がいつから見ているかを伝え、決裂したときの解く手段（連携の解除）を添える。
+   * **中身は `reviewProposals.ts` の `confirmNotUnderReview`**（2026-11-08 に外へ出した）。
+   * 校正・メモパネルの［採る］（編集者の提案）も同じ関門を通るので、写しを置かない。
    */
   private async confirmNotLocked(
     filePath: string,
     work: WorkEntry
   ): Promise<boolean> {
-    const relative = normalizeFile(path.relative(work.folderPath, filePath));
-    const lock = await new FileLockStore(work).lockFor(relative);
-    if (!lock || lock.holderKind !== "editor") return true;
-
-    // **断る**（作者の裁定、2026-10-28「校閲中の範囲は書けなくする」）。以前は
-    // 「それでも直す」を選べたが、校閲中の話は本文への書き込みの入口で断られる。
-    // 解く手段は「編集部連携を解除」（編集部と決裂したとき）
-    const action = await vscode.window.showWarningMessage(
-      `${path.basename(filePath)} は編集者が校閲中のため、適用できません。`,
-      { modal: true, detail: describeLock(lock) },
-      "連携を解除…"
-    );
-    if (action === "連携を解除…") {
-      await vscode.commands.executeCommand("novelai.revokeEditorAccess", { type: "work", work });
-    }
-    return false;
+    return confirmNotUnderReview(work, filePath);
   }
 
   private async dismissIssue(id: string): Promise<void> {

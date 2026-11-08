@@ -10,7 +10,7 @@ import {
 } from "../models/proposal";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { notifyDone, whenNoticePicked } from "../views/notify";
-import { primeEditorProposalsInPanel } from "./reviewProposals";
+import { refreshEditorProposalsView } from "./reviewProposals";
 import type { ProposalView } from "../models/proposal";
 import {
   decisionKey,
@@ -31,8 +31,9 @@ import {
  * 編集部連携の自動化（作者の裁定、2026-10-28）。
  *
  * - 採否を決め終えたら、編集部へ自動で送り返す（確認窓なし）
- * - 同期のあと、編集部から提案が届いていれば、提案パネルの選び欄へ静かに足し、
- *   ［提案を見る］の付いた知らせを出す（作者の判断 2026-11-01）
+ * - 同期のあと、編集部から提案が届いていれば、開いている校正・メモパネルを読み直し、
+ *   ［提案を見る］の付いた知らせを出す（作者の判断 2026-11-01。並べる先は 2026-11-08 に
+ *   提案パネルから校正・メモパネルへ移した）
  *
  * **Node（git）を使うので、呼ぶ側は `canRunProcesses()` を確かめて動的 import する**
  * （ブラウザ版の束に静的に入れない）。
@@ -177,7 +178,10 @@ export interface InboxDeps {
    * **答えを待たない**（同期の後始末を作者の返事まで止めない）
    */
   offer: (work: WorkEntry, text: string, onView: () => Promise<void>) => void;
-  /** 届いた作品の未決を、提案パネルの選び欄へ静かに足す（開いていなければ何もしない） */
+  /**
+   * 届いた作品の校正・メモパネルが開いていれば、読み直して未決を並べる（開いていなければ
+   * 何もしない）。2026-11-08 までは提案パネルの選び欄へ静かに足していた
+   */
   primePanel: (work: WorkEntry) => Promise<void>;
   /** 「編集部の提案を見る」をその作品で走らせる */
   viewProposals: (work: WorkEntry) => Promise<void>;
@@ -234,7 +238,7 @@ const defaultInboxDeps: InboxDeps = {
     );
   },
   primePanel: async (work) => {
-    await primeEditorProposalsInPanel(work);
+    await refreshEditorProposalsView(work);
   },
   viewProposals: async (work) => {
     // 作品を渡す。引数無しだと作品選択からやり直させる
@@ -298,7 +302,8 @@ async function runInbox(
         **パネルを勝手に開かない**（作者の判断 2026-11-01「知らせに［提案を見る］を付ける」を
         受けた実装の判断。0.120.2）。窓の読み込み直しの最中に
         開いても作者は見ておらず、知らせが2枚（届いた・N件あります）重なるだけだった。
-        選び欄へ静かに足し（知らせが流れても選び欄から辿れる）、知らせのボタンで並べる
+        開いている校正・メモパネルだけを静かに読み直し（知らせが流れても、パネルを
+        開けば並ぶ）、知らせのボタンで開く
       */
       await deps.primePanel(work);
       deps.offer(

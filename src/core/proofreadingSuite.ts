@@ -50,6 +50,16 @@ export interface ProofreadingCheck {
    * （冒頭診断は文書として開く）ので、件数を数えない。
    */
   readonly category?: string;
+  /**
+   * 校正のまとめ実行（選ぶ画面と走らせる列）に入るか（作者の指示、2026-11-08）。
+   *
+   * 「「矛盾」までは校正で良いとして、冒頭分析と伏線の検知は校正ではないと
+   * 思われます。一括処理からはずしてください」。冒頭診断と伏線の検知だけが偽。
+   * **表からは消さない**——「新作をひと通り仕上げる」（`finishNewWork.ts`）は
+   * 全件を引いて走らせ続ける（作者の指示「可能なことをすべて一気に」）。
+   * 詳細メニューからの単独実行も残る。
+   */
+  readonly inSuite: boolean;
 }
 
 /** まとめ実行の入口。`package.json` と詳細メニューが同じIDを使う */
@@ -60,18 +70,22 @@ export const PROOFREADING_SUITE_SELECTION_KEY =
   "novelai.proofreadingSuite.selection";
 
 /**
- * 走らせる機能と、その順番。
+ * 検知の機能の全件と、その順番（まとめ実行に入らないものも含む）。
  *
  * **軽いものから重いものへ並べる**（設計書6.80）。表記ゆれは機械判定で
  * すぐ終わり、伏線は全話をAIで読む。先に軽い結果が届くほうが、待ちながら
  * 読み始められる。**選んだ順では走らせない。**
+ *
+ * 校正のまとめ実行が使うのは、このうち `inSuite` のもの（`PROOFREADING_CHECKS`）。
+ * 全件を引くのは「新作をひと通り仕上げる」。
  */
-export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
+export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
   {
     id: "notation",
     label: "表記ゆれ",
     command: "novelai.checkNotation",
     detail: "同じ語が2通りで書かれている箇所を探します（AIを使いません）。",
+    inSuite: true,
     usesAI: false,
     category: "表記ゆれ",
   },
@@ -80,6 +94,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "誤字脱字",
     command: "novelai.checkTypos",
     detail: "誤変換・脱字など、明らかな入力ミスをAIで探します。",
+    inSuite: true,
     usesAI: true,
     category: "誤字脱字",
   },
@@ -88,6 +103,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "推敲",
     command: "novelai.checkProofread",
     detail: "読みにくい箇所だけをAIで指摘します。",
+    inSuite: true,
     usesAI: true,
     category: "推敲",
   },
@@ -97,6 +113,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "冒頭診断",
     command: "novelai.checkOpening",
     detail: "第1話の冒頭だけを見て、伝わり方と引きを診断します。",
+    inSuite: false,
     usesAI: true,
   },
   {
@@ -104,6 +121,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "プロット逸脱",
     command: "novelai.checkDeviations",
     detail: "プロットと本文を照らし、外れた展開や停滞を探します。",
+    inSuite: true,
     usesAI: true,
     category: "プロット逸脱",
   },
@@ -112,6 +130,7 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "矛盾",
     command: "novelai.checkContradictions",
     detail: "設定資料と本文の食い違いを探します。",
+    inSuite: true,
     usesAI: true,
     category: "矛盾",
   },
@@ -120,16 +139,27 @@ export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] = [
     label: "伏線の検知",
     command: "novelai.checkForeshadows",
     detail: "後の展開を示唆している記述を探し、登録の候補にします。",
+    inSuite: false,
     usesAI: true,
     category: "伏線の候補",
   },
 ];
 
 /**
+ * 校正のまとめ実行で選べる機能（設計書6.80）。
+ *
+ * 冒頭診断と伏線の検知は入らない（作者の指示、2026-11-08）。前の版の控えに
+ * 2つのidが残っていても、`sortToRunOrder` がここに無いidを捨てるので走らない。
+ */
+export const PROOFREADING_CHECKS: readonly ProofreadingCheck[] =
+  CHECK_FEATURES.filter((check) => check.inSuite);
+
+/**
  * はじめて開いたときに選ばれているもの（設計書6.80）。
  *
- * 冒頭診断・逸脱・伏線を外してあるのは、**前提が要る**ためである
- * （プロットや設定資料が無いと、走らせても指摘が出ないか的外れになる）。
+ * 逸脱を外してあるのは、**前提が要る**ためである（プロットが無いと、
+ * 走らせても指摘が出ないか的外れになる）。冒頭診断と伏線の検知は、
+ * そもそもまとめ実行に入らない（2026-11-08）。
  */
 export const DEFAULT_PROOFREADING_CHECK_IDS: readonly ProofreadingCheckId[] = [
   "notation",

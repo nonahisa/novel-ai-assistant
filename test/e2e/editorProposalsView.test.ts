@@ -8,9 +8,9 @@
  * 1. 編集者が返した提案のうち2件が**自動の同期で先に作品の台帳へ届いている**（作品の
  *    `.aiwriter/proposals/proposals.jsonl` に置いてある）状態で、詳細メニュー「作品管理」→「編集者連携」→
  *    「編集者の提案を見る」を押すと、GitHub の代わりの置き場からまだ届いていなかった1件も受け取り、未決の3件が
- *    提案パネルに並び、知らせが「編集者からの提案が 3 件あります。…」になる（「すべて取り込み済み」
+ *    校正・メモパネルに並び（2026-11-08 までは提案パネル）、知らせが「編集者からの提案が 3 件あります。…」になる（「すべて取り込み済み」
  *    「未決の提案はありません」で止まらない）
- * 2. 前の版の編集者が置いた手書きの提案（台帳の分類は今も `編集部の直し`・`編集部のメモ` のまま）が、提案パネルで
+ * 2. 前の版の編集者が置いた手書きの提案（台帳の分類は今も `編集部の直し`・`編集部のメモ` のまま）が、校正・メモパネルで
  *    「編集者の修正：…」「編集者のメモ：…」と出て、パネルにも知らせにも「編集部」が出ない
  * 3. つながらないとき（送り先の置き場の名前を変えて取りに行けなくする。outboxInboxReceiveFirst と同じ手）に押すと、
  *    手元の未決3件が並び（その間に送られた4件目は並ばない）、知らせに「GitHubから受け取れませんでした。」と
@@ -34,8 +34,7 @@ import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { HAND_EDIT_CATEGORY, HAND_MEMO_CATEGORY, proposalId } from "../../src/models/proposal";
 import { addLocalRemote, git, initRepoWithFirstCommit } from "./support/gitFixture";
-import { openEpisode, selectText } from "./support/manuscriptFrame";
-import { proposalPanelFrame } from "./support/sampleFinding";
+import { memoPanelFrame, openEpisode, selectText } from "./support/manuscriptFrame";
 import { SIDEBAR_LAUNCH, expandTreeRow, scrollTreeUntilRow, showSidebar, treeRow } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -183,27 +182,30 @@ interface PanelView {
   text: string;
 }
 
+/**
+ * 校正・メモパネルの、編集者の提案の行だけを読む（作者の指示 2026-11-08。設計書6.96.5）。
+ * 提案の行は［見送る］（`data-act="proposalReject"`）を持つ。行の文（`.go`）に、
+ * 直し方・理由（「編集者の修正：…」）または意見（「編集者のメモ：…」）が入る
+ */
 async function readPanel(frame: Frame): Promise<PanelView> {
   return frame.evaluate(() => {
-    const issues = Array.from(document.querySelectorAll(".issue"));
+    const rows = Array.from(document.querySelectorAll(".memo")).filter((row) =>
+      row.querySelector('[data-act="proposalReject"]')
+    );
     return {
-      count: issues.length,
-      reasons: issues.map((issue) =>
-        Array.from(issue.querySelectorAll(".reason"))
-          .map((node) => (node.textContent ?? "").trim())
-          .join(" ")
-      ),
+      count: rows.length,
+      reasons: rows.map((row) => (row.querySelector(".go")?.textContent ?? "").trim()),
       text: document.body.innerText,
     };
   });
 }
 
-/** 提案パネルに `count` 件並ぶまで待って読む */
+/** 校正・メモパネルに編集者の提案が `count` 件並ぶまで待って読む */
 async function waitPanel(page: Page, count: number, label: string): Promise<PanelView> {
   let last: PanelView | undefined;
   await waitUntil(
     async () => {
-      const frame = await proposalPanelFrame(page);
+      const frame = await memoPanelFrame(page);
       if (!frame) return false;
       last = await readPanel(frame);
       return last.count === count;
@@ -231,7 +233,7 @@ async function waitNotice(page: Page, includes: string, label: string): Promise<
   return found;
 }
 
-test("自動の同期で先に届いた提案があっても「編集者の提案を見る」で未決がすべて提案パネルに並び、前の版の手書きの提案は「編集者の修正：」「編集者のメモ：」と出て、つながらないときは手元の分を並べて「GitHubから受け取れませんでした。」を添える", async () => {
+test("自動の同期で先に届いた提案があっても「編集者の提案を見る」で未決がすべて校正・メモパネルに並び、前の版の手書きの提案は「編集者の修正：」「編集者のメモ：」と出て、つながらないときは手元の分を並べて「GitHubから受け取れませんでした。」を添える", async () => {
   await withVsCode(
     "編集者の提案を見る",
     [{ name: EPISODE, text: TEXT }],
@@ -244,9 +246,9 @@ test("自動の同期で先に届いた提案があっても「編集者の提�
       await pressViewProposals(page);
       const notice = await waitNotice(page, "編集者からの提案が", "「編集者からの提案が N 件あります。」の知らせが出る");
       expect(notice, `知らせ：${notice}`).toContain("編集者からの提案が 3 件あります");
-      expect(notice).toContain("「提案」パネルで1件ずつご確認ください。");
+      expect(notice).toContain("「校正・メモパネル」で1件ずつご確認ください。");
       expect(notice, "つながるのに受け取れなかったと言っています").not.toContain("受け取れませんでした");
-      const panel = await waitPanel(page, 3, "提案パネルに未決の3件が並ぶ");
+      const panel = await waitPanel(page, 3, "校正・メモパネルに未決の3件が並ぶ");
       const all = await notificationTexts(page);
       for (const stopped of ["すべて取り込み済み", "未決の提案はありません"]) {
         expect(all.some((text) => text.includes(stopped)), `「${stopped}」で止まっています：${JSON.stringify(all)}`).toBe(false);
@@ -263,8 +265,8 @@ test("自動の同期で先に届いた提案があっても「編集者の提�
       expect(edit, `直しの提案の文：${JSON.stringify(panel.reasons)}`).toContain(`編集者の修正：${DELIVERED[0].reason}`);
       expect(memo, `意見の提案の文：${JSON.stringify(panel.reasons)}`).toContain(`編集者のメモ：${DELIVERED[1].reason}`);
       // 編集者の git の名前は出さない（0.138.0。設計書5.7.5.9。前から台帳にある提案は名前の覚えが無いので名前なし）
-      expect(panel.reasons.some((reason) => reason.includes(PROPOSER)), `提案パネルに git の名前が出ています：${JSON.stringify(panel.reasons)}`).toBe(false);
-      expect(panel.text.includes("編集部"), `提案パネルに「編集部」が出ています：${panel.text}`).toBe(false);
+      expect(panel.reasons.some((reason) => reason.includes(PROPOSER)), `校正・メモパネルに git の名前が出ています：${JSON.stringify(panel.reasons)}`).toBe(false);
+      expect(panel.text.includes("編集部"), `校正・メモパネルに「編集部」が出ています：${panel.text}`).toBe(false);
       expect(all.some((text) => text.includes("編集部")), `知らせに「編集部」が出ています：${JSON.stringify(all)}`).toBe(false);
 
       /* ── 3. つながらないとき ── */
@@ -280,7 +282,7 @@ test("自動の同期で先に届いた提案があっても「編集者の提�
       const kept = await waitPanel(page, 3, "つながらなくても手元の未決3件が並ぶ");
       await holdsFor(
         async () => {
-          const frame = await proposalPanelFrame(page);
+          const frame = await memoPanelFrame(page);
           return frame !== undefined && (await readPanel(frame)).count === 3;
         },
         "つながらない間に送られた4件目は並ばない",

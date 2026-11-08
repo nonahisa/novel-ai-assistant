@@ -31,7 +31,8 @@ import {
   writeTextFilePreservingFormat,
 } from "../core/textFile";
 import { cancelItem, isCancelItem } from "../views/dialogs";
-import type { ProposalPanel, ProposalViewItem } from "./proposalPanel";
+import type { PlacedProposal } from "../core/sceneMemoRows";
+import { reloadOpenDocumentAfterWrite } from "./reloadAfterWrite";
 import { notifyDone } from "../views/notify";
 import { logFailure, useLogFile } from "../core/logger";
 import { canRunProcesses } from "../core/runtime";
@@ -48,14 +49,14 @@ import { authorGithubLogin } from "./authorGithubLogin";
  * **編集部は本文を書き換えない。** 届くのは「こう直したい」という
  * 申し出だけで、採るかどうかは作者が決める。
  *
- * **既存の提案パネルへ流し込む。** 誤字脱字の指摘と形が同じなので、
- * 適用・無視の道をそのまま使える。**本文を書き換える処理を新しく作らない**
- * （5.4のとおり、書き込み口を増やさない）。
+ * **作者モードでは校正・メモパネルに並べる**（作者の指示 2026-11-08「編集からの
+ * 提案も校正メモにうつしてください」。それまでは提案パネル）。採る・見送る・
+ * 読んだは、行の押し口から `decideEditorProposal` を通る。**本文を書き換える
+ * 処理を新しく作らない**（`acceptProposal` の1本。5.4のとおり、書き込み口を増やさない）。
+ *
+ * 編集者モードでは、置いた提案の数を知らせるだけ（採るのは作者の判断）。
  */
-export async function reviewProposals(
-  work: WorkEntry,
-  panel: ProposalPanel
-): Promise<void> {
+export async function reviewProposals(work: WorkEntry): Promise<void> {
   const store = new ProposalStore(work);
   const all = await store.load();
   const pending = all.filter((entry) => entry.status === "pending");
@@ -93,12 +94,28 @@ export async function reviewProposals(
     return;
   }
 
-  const logins = await new ProposerLoginStore(work).load();
-  panel.showProposals(work, pending.map((view) => toViewItem(view, logins)));
+  await openEditorProposalsInMemoPanel(work);
   void vscode.window.showInformationMessage(
     `編集者からの提案が ${pending.length} 件あります。` +
-      "「提案」パネルで1件ずつご確認ください。"
+      `「${MEMO_PANEL_NAME}」で1件ずつご確認ください。`
   );
+}
+
+/** 知らせに出す、並べる先の画面の名前 */
+const MEMO_PANEL_NAME = "校正・メモパネル";
+
+/**
+ * 校正・メモパネルを、その作品で開く（Ctrl+Alt+M と同じ口）。
+ *
+ * **コマンドを通す。** `sceneMemoPanel.ts` を直に読み込むと、パネルの部品が
+ * この束（提案パネルからも読まれる）へ引き込まれ、読み合いの輪ができる。
+ * 作者が押した命令なので、フォーカスはパネルへ移してよい（検知の自動の開き方とは別）。
+ */
+async function openEditorProposalsInMemoPanel(work: WorkEntry): Promise<void> {
+  await vscode.commands.executeCommand("novelai.openSceneMemos", {
+    type: "work",
+    work,
+  });
 }
 
 /**
@@ -145,20 +162,19 @@ const defaultShowDeps: ShowEditorProposalsDeps = {
  * 終わり、作者は提案がどこにあるのか分からなかった（実機 2026-11-01）。
  *
  * 1. GitHub から受け取る（手動の取込と同じ道）
- * 2. 受け取った分も含めて、**未決の提案をすべて**提案パネルに並べる。
- *    新しく届いた分が0件でも、未決があれば並べる
+ * 2. 受け取った分も含めて、**未決の提案をすべて**校正・メモパネルに並べる
+ *    （2026-11-08 までは提案パネル）。新しく届いた分が0件でも、未決があれば開く
  * 3. 受け取りに失敗しても、手元にある未決は並べ、理由を1文添える
  *
  * **本文には触らない。** 書くのは受け取りの中の提案と鍵の台帳だけ。
  */
 export async function showEditorProposals(
   work: WorkEntry,
-  panel: ProposalPanel,
   deps: ShowEditorProposalsDeps = defaultShowDeps
 ): Promise<{ pending: number }> {
   // **編集者モードでは受け取らない。** 提案を出す側なので、置いた数を見る道へ
   if (isEditorMode()) {
-    await reviewProposals(work, panel);
+    await reviewProposals(work);
     return { pending: 0 };
   }
 
@@ -205,14 +221,17 @@ export async function showEditorProposals(
     return { pending: 0 };
   }
 
-  const logins = await new ProposerLoginStore(work).load();
-  panel.showProposals(work, pending.map((view) => toViewItem(view, logins)));
+  /*
+    **提案パネルには並べない**（作者の指示 2026-11-08）。校正・メモパネルを開けば、
+    パネルが台帳の未決を読む（`loadEditorProposalsForMemo`）。開いていれば読み直す
+  */
+  await openEditorProposalsInMemoPanel(work);
   const added = outcome.kind === "received" && outcome.added > 0
     ? `（いま ${outcome.added} 件届きました）`
     : "";
   const head =
     `編集者からの提案が ${pending.length} 件あります${added}。` +
-    "「提案」パネルで1件ずつご確認ください。";
+    `「${MEMO_PANEL_NAME}」で1件ずつご確認ください。`;
   if (trouble) {
     void vscode.window.showWarningMessage(`${head}${trouble}手元にある分を並べています。`);
   } else {
@@ -241,73 +260,163 @@ function describeReceiveTrouble(outcome: EditorReceiveOutcome): string {
 }
 
 /**
- * 台帳に残っている未決の編集部の提案を、提案パネルへ静かに戻す。**戻した件数を返す。**
+ * 自動の同期で提案が届いたとき、開いている校正・メモパネルを読み直させる口
+ * （`extension.ts` が起動時に1回だけ覚えさせる。`refreshSceneMemoFindings`）。
  *
- * 提案パネルを開いたとき（作品ごと）と、自動の同期で提案が届いたときに呼ぶ。
- * これが無いと、作品の選び欄に未決の編集部の提案がある作品が出なかった
- * （作者の実機 2026-11-01）。**編集者モードでは戻さない**（採るのは作者の判断）。
+ * 同期の後始末（`editingAutomation.ts`）は Node 側の束で動的に読まれ、パネルを
+ * 引数で受け取れない。パネルの部品をここから直に読み込むと読み合いの輪ができるので、
+ * 読み直す関数だけを持つ。
+ *
+ * **2026-11-08 までは提案パネルの選び欄へ静かに足していた**（`primeEditorProposals`）。
+ * 作者モードの編集者の提案は校正・メモパネルへ移ったので、提案パネルへは足さない。
  */
-export async function primeEditorProposals(
-  work: WorkEntry,
-  panel: ProposalPanel
-): Promise<number> {
-  if (isEditorMode()) return 0;
-  const pending = (await new ProposalStore(work).load()).filter(
-    (entry) => entry.status === "pending"
-  );
-  if (pending.length === 0) return 0;
-  const logins = await new ProposerLoginStore(work).load();
-  panel.showRestoredProposals(work, pending.map((view) => toViewItem(view, logins)));
-  return pending.length;
+let memoPanelRefresher: ((workId: string) => Promise<void>) | undefined;
+
+export function rememberMemoPanelRefresher(
+  refresh: (workId: string) => Promise<void>
+): void {
+  memoPanelRefresher = refresh;
 }
 
 /**
- * 自動の同期のあとに戻す先のパネル（`extension.ts` が起動時に1回だけ覚えさせる）。
- *
- * 同期の後始末（`editingAutomation.ts`）は Node 側の束で動的に読まれ、パネルを
- * 引数で受け取れない。パネルは拡張機能に1つだけなので、ここで持つ。
+ * 届いた作品の校正・メモパネルが開いていれば読み直す（開いていなければ何もしない）。
+ * **編集者モードでは何もしない**（校正・メモパネルは編集者モードで使えない画面）。
  */
-let rememberedPanel: ProposalPanel | undefined;
-
-export function rememberProposalPanel(panel: ProposalPanel): void {
-  rememberedPanel = panel;
+export async function refreshEditorProposalsView(work: WorkEntry): Promise<void> {
+  if (isEditorMode() || !memoPanelRefresher) return;
+  await memoPanelRefresher(work.id);
 }
 
-/** 覚えたパネルへ戻す。パネルがまだ無ければ何もしない（開いたときに読まれる） */
-export async function primeEditorProposalsInPanel(work: WorkEntry): Promise<number> {
-  return rememberedPanel ? primeEditorProposals(work, rememberedPanel) : 0;
-}
-
-function toViewItem(
-  proposal: ProposalView,
+/**
+ * 画面に出す提案の理由（提案パネルのころの `toViewItem` と同じ組み立て）。
+ *
+ * - **編集部が手で書いたものは、分類を頭に添える**（「編集者の修正：…」）。
+ *   検知の指摘は理由が種類の一語（「促音の誤り」等）で分かるが、手書きの理由は
+ *   自由な文なので、検知から来たものか人が書いたものかが読み分けられない
+ * - **出した編集者は GitHub のユーザー名で添える**（作者の答え 2026-11-07。0.138.0）。
+ *   `proposer` は編集者のパソコンの git の名前なので出さない。取り込んだ時点の名前を
+ *   覚えていなければ添えない
+ */
+export function editorProposalReason(
+  proposal: Pick<ProposalView, "id" | "category" | "reason">,
   logins: ReadonlyMap<string, string>
-): ProposalViewItem & {
-  proposalId: string;
-} {
-  // **編集部が手で書いたものは、分類を頭に添える**（「編集部の直し：…」）。
-  // 検知の指摘は理由が種類の一語（「促音の誤り」等）で分かるが、手書きの理由は
-  // 自由な文なので、検知から来たものか人が書いたものかが読み分けられない
+): string {
   const said = isHandCategory(proposal.category)
     ? `${categoryLabel(proposal.category)}：${proposal.reason}`
     : proposal.reason;
-  return {
-    id: `proposal:${proposal.id}`,
-    proposalId: proposal.id,
-    filePath: proposal.file,
-    fileName: path.basename(proposal.file),
-    chunkHash: proposal.id,
-    line: proposal.line,
-    original: proposal.original,
-    target: proposal.target,
-    suggestion: proposal.suggestion,
-    // **出した編集者は GitHub のユーザー名で添える**（作者の答え 2026-11-07）。`proposer` は
-    // 編集者のパソコンの git の名前なので出さない。取り込んだ時点の名前を覚えていなければ添えない
-    reason: logins.get(proposal.id)
-      ? `${said}（${logins.get(proposal.id)} の提案）`
-      : said,
-    confidence: "high",
-    status: "pending",
-  };
+  const login = logins.get(proposal.id);
+  return login ? `${said}（${login} の提案）` : said;
+}
+
+/** 校正・メモパネルへ渡す1件（絶対パスはパネルの側が作品の場所と繋ぐ） */
+export type EditorProposalRow = Omit<PlacedProposal, "filePath">;
+
+/**
+ * 校正・メモパネルに並べる、台帳の未決の提案（作者の指示 2026-11-08。設計書6.96.5）。
+ *
+ * **`proposals.jsonl` が正**（5.7.5.8）。指摘の置き場（`findings.jsonl`）には写さず、
+ * 開くたびに台帳から読む。**期限（`novelai.findings.retentionDays`）は掛けない**——
+ * 編集者の提案は作者が決めるまで残るもので、決めないまま隠すと送り返しが永久に走らない。
+ *
+ * **編集者モードでは並べない**（採るのは作者の判断。編集者モードは今のまま提案パネル）。
+ */
+export async function loadEditorProposalsForMemo(
+  work: WorkEntry
+): Promise<EditorProposalRow[]> {
+  if (isEditorMode()) return [];
+  const pending = (await new ProposalStore(work).load()).filter(
+    (entry) => entry.status === "pending"
+  );
+  if (pending.length === 0) return [];
+  const logins = await new ProposerLoginStore(work).load();
+  return pending.map((view) => ({
+    id: view.id,
+    file: view.file,
+    line: view.line,
+    original: view.original,
+    target: view.target,
+    suggestion: view.suggestion,
+    reason: editorProposalReason(view, logins),
+    opinionOnly: isOpinionOnly(view),
+  }));
+}
+
+/** 行の押し口から決めた結果 */
+export interface EditorProposalDecisionOutcome {
+  ok: boolean;
+  /** 決められなかった理由（作者が確認の窓で止めたときは無し） */
+  reason?: string;
+  /** 決めたあとに添える一言 */
+  detail?: string;
+}
+
+/**
+ * 校正・メモパネルの行から、編集者の提案を決める（作者の指示 2026-11-08）。
+ *
+ * - `accept`：直しの提案は本文へ当てる（［採る］）。意見だけの提案は「読んだ」で
+ *   片づける（［読んだ］。本文は変えない）
+ * - `reject`：見送る（［見送る］。本文は変えない）
+ *
+ * **提案パネルの［適用］と同じ道を通す**：校閲中の話は断る（`confirmNotUnderReview`）→
+ * `acceptProposal`（台帳の行で照らす・`writeTextFilePreservingFormat`・採否の記録・
+ * 決め終えたら送り返し）→ 開いている本文の読み直し。台帳（`proposals.jsonl`）へは
+ * decision の行を**足すだけ**（実装ルール2）。
+ */
+export async function decideEditorProposal(
+  work: WorkEntry,
+  proposal: Pick<PlacedProposal, "id" | "file" | "line" | "original" | "target" | "suggestion" | "opinionOnly">,
+  decision: "accept" | "reject"
+): Promise<EditorProposalDecisionOutcome> {
+  // **編集者モードでは決めない**（採るのは作者の判断。画面からは来ない道だが、念のため）
+  if (isEditorMode()) {
+    return { ok: false, reason: "編集者モードでは提案を決められません。" };
+  }
+  const absolute = path.join(work.folderPath, proposal.file);
+  if (decision === "reject") {
+    await rejectProposal(work, proposal.id, editHistoryFile(work.folderPath, absolute));
+    return { ok: true };
+  }
+  if (proposal.opinionOnly) {
+    // 本文には触らないので、校閲中かどうかも確かめない（提案パネルの［読んだ］と同じ）
+    const outcome = await acceptProposal(work, { ...proposal, suggestion: "" });
+    return outcome.ok
+      ? { ok: true, detail: "意見を読みました（本文は変えていません）。" }
+      : { ok: false, reason: outcome.reason };
+  }
+  if (!(await confirmNotUnderReview(work, absolute))) return { ok: false };
+  const outcome = await acceptProposal(work, proposal);
+  if (!outcome.ok) return { ok: false, reason: outcome.reason };
+  // 開いている本文（素のエディター・原稿エディター）を読み直す。提案パネルの［適用］と同じ
+  await reloadOpenDocumentAfterWrite(absolute, work);
+  return { ok: true };
+}
+
+/**
+ * 編集者が校閲中の話か。**校閲中なら断って false を返す**（作者の裁定、2026-10-28
+ * 「校閲中の範囲は書けなくする」）。提案パネルの［適用］と校正・メモパネルの［採る］が
+ * 同じものを通す（2026-11-08 に提案パネルの中から出した）。
+ *
+ * 誰がいつから見ているかを伝え、決裂したときの解く手段（連携の解除）を添える。
+ */
+export async function confirmNotUnderReview(
+  work: WorkEntry,
+  filePath: string
+): Promise<boolean> {
+  const relative = normalizeFile(path.relative(work.folderPath, filePath));
+  const lock = await new FileLockStore(work).lockFor(relative);
+  if (!lock || lock.holderKind !== "editor") return true;
+
+  // 以前は「それでも直す」を選べたが、校閲中の話は本文への書き込みの入口で断られる。
+  // 解く手段は「編集部連携を解除」（編集部と決裂したとき）
+  const action = await vscode.window.showWarningMessage(
+    `${path.basename(filePath)} は編集者が校閲中のため、適用できません。`,
+    { modal: true, detail: describeLock(lock) },
+    "連携を解除…"
+  );
+  if (action === "連携を解除…") {
+    await vscode.commands.executeCommand("novelai.revokeEditorAccess", { type: "work", work });
+  }
+  return false;
 }
 
 /**

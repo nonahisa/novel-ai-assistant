@@ -53,7 +53,7 @@ vi.mock("../../../src/views/progress", () => ({
   withProgress: async <T>(_title: string, run: () => Promise<T>) => run(),
 }));
 
-const { acceptProposal, rejectProposal, primeEditorProposals } = await import(
+const { acceptProposal, rejectProposal, loadEditorProposalsForMemo } = await import(
   "../../../src/features/reviewProposals"
 );
 const { revokeEditorAccessFlow } = await import("../../../src/features/revokeEditorAccess");
@@ -268,12 +268,8 @@ describe("編集者の GitHub のユーザー名を、作者の側に残す", ()
     ]);
     await new ProposerLoginStore(work()).remember(["p1"], LOGIN);
 
-    const shown: Array<{ reason: string }> = [];
-    const panel = {
-      showRestoredProposals: (_work: WorkEntry, items: Array<{ reason: string }>) => shown.push(...items),
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await primeEditorProposals(work(), panel as any);
+    // 作者モードで並べる先は校正・メモパネル（2026-11-08）。行の文は同じ関数で作る
+    const shown = await loadEditorProposalsForMemo(work());
     expect(shown).toHaveLength(1);
     expect(shown[0].reason).toContain("（kmizu の提案）");
     expect(shown[0].reason).not.toContain(GIT_NAME);
