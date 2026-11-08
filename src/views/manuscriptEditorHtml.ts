@@ -5724,8 +5724,14 @@ ${RESUME_WRITING_LABEL ? `
         **読み始めを待っている間（aloudStartAt）も取り直す。** 頼んでから
         返るまでに打つと、届いた計画は長さが合わずに捨てられる。ここで
         頼み直さないと、押したのに読み始めないまま終わる。
+
+        **本文が前に頼んだときと同じなら、読んでいる最中は取り直さない**
+        （2026-11-08）。ほかのパネルを押す・面が前から外れるだけでも本文は
+        送り直される（拡張機能の onDidChangeViewState）。そのたびに取り直すと、
+        人物の声は今の文の頭から鳴らし直す（aloudTakePlan の末尾）ので、
+        読みが巻き戻っていた。
       */
-      if (aloudOn || aloudStartAt !== null) aloudAskPlan();
+      if (aloudStartAt !== null || (aloudOn && aloudTextNow() !== aloudPlannedText)) aloudAskPlan();
     } else if (message.type === "reviewLock") {
       // 編集者が校閲中か（設計書6.25.12）。帯・赤い枠・読むだけを切り替える
       takeReviewLock(message);
@@ -9374,6 +9380,13 @@ ${IME_ENTER_GUARD_SOURCE}
   /** 計画が届いたら、この位置の文から読み始める（読み始めの予約） */
   let aloudStartAt = null;
   /**
+   * 最後に計画を頼んだときの本文。**本文が変わっていない update では取り直さない**
+   * ために覚える（作者の実機、2026-11-08「校正パネルをクリックすると音声が
+   * その文の最初に巻き戻ります」。ほかのパネルを押すと面の出入りで本文が
+   * 送り直され、取り直した人物の声が今の文の頭から鳴り直していた）
+   */
+  let aloudPlannedText = null;
+  /**
    * 読む範囲（題と本文。拡張機能が計画に添えて送る）。**null は全部を読む原稿**。
    * カーソルが範囲の外（頭の欄・前書き・後書き）なら、題から読み始める（設計書6.42）
    */
@@ -9812,7 +9825,9 @@ ${IME_ENTER_GUARD_SOURCE}
    * 打った直後の本文とずれる。
    */
   function aloudAskPlan() {
-    vscode.postMessage({ type: "readingPlan", text: aloudTextNow(), voiced: voiceMode });
+    const text = aloudTextNow();
+    aloudPlannedText = text;
+    vscode.postMessage({ type: "readingPlan", text: text, voiced: voiceMode });
   }
 
   /**

@@ -1107,7 +1107,8 @@ describe("読み上げ", () => {
    * 送る本文は、画面が持っているものそのもの（向こうの文書は120ミリ秒遅れる）。
    */
   it("文へ割るのは拡張機能側に頼む", () => {
-    expect(code).toContain('type: "readingPlan", text: aloudTextNow()');
+    expect(code).toContain('type: "readingPlan", text: text, voiced: voiceMode');
+    expect(code).toContain("const text = aloudTextNow();");
     expect(code).toContain('message.type === "readingPlan"');
     // 面によって本文の出どころが違う
     expect(code).toContain("composeOn ? composeDomToNotation(compose) : write.value");
@@ -1144,7 +1145,10 @@ describe("読み上げ", () => {
       "message.textLength !== aloudTextNow().length"
     );
     // 捨てたぶんは、次の update で頼み直される（読み始めの予約も残す）
-    expect(code).toContain("if (aloudOn || aloudStartAt !== null) aloudAskPlan();");
+    // 捨てたあとに打てば本文が頼んだときと違うので、取り直す（変わっていない update では取り直さない）
+    expect(code).toContain(
+      "if (aloudStartAt !== null || (aloudOn && aloudTextNow() !== aloudPlannedText)) aloudAskPlan();"
+    );
   });
 
   /**
