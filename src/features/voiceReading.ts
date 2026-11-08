@@ -65,6 +65,7 @@ import {
   VoiceEngineError,
   voiceEngineDownPrompt,
   voiceEngineNextStep,
+  voiceEngineSlowPrompt,
   voiceParamsFor,
   type VoiceEngineDownRoute,
   type FetchLike,
@@ -402,7 +403,11 @@ export class VoiceReadingService {
       /*
         **エンジンは1つずつ作る**ので、2つ並べて頼むと、後の頼みは前の音ができるまで
         エンジンの中で待つ。頼んでからの時間で測ると、待ちの分だけ倍近く遅く見える（速い PC でも
-        知らせてしまう）。そこで、前の音ができた時刻より前は数えない（エンジンが1文に使った時間）
+        知らせてしまう）。そこで、前の音ができた時刻より前は数えない（エンジンが1文に使った時間）。
+
+        **時間切れ（timeout）で止まった文は、遅さの数に入れない**（0.147.1）。音が無いので
+        「何秒の音に何秒」が測れず、当て推量の値で知らせることになる。数えずに飛ばすだけで、
+        続けて遅かった数（streak）も切らない——遅い PC では、前後の文の値で知らせが出る
       */
       const busyFrom = Math.max(startedAt, this.lastSynthEndAt);
       this.lastSynthEndAt = Math.max(this.lastSynthEndAt, endedAt);
@@ -517,13 +522,23 @@ function readEngineUrl(engine: VoiceEngineId): string | undefined {
  * 読めなかった理由。**engineDown はエンジンに届かなかった印**——原稿エディターは
  * この印のときだけ画面の真ん中に窓を出す（voiceEngineDownPrompt）
  */
-export type VoiceProblem = { problem: string; engineDown?: true };
+export type VoiceProblem = {
+  problem: string;
+  engineDown?: true;
+  /**
+   * 待てる時間のうちに答えが来なかった印（0.147.1）。原稿エディターは時間切れの窓
+   * （voiceEngineSlowPrompt）を出す。**engineDown とは同時に立てない**——立てると、
+   * もう片方のエンジンへの問い合わせ（otherEngineRunning）と［OSの声で読む］の窓が、
+   * 動いているエンジンに対して出てしまう
+   */
+  engineSlow?: true;
+};
 
 function engineFailure(error: unknown, work: WorkEntry | undefined): VoiceProblem {
   const problem = describeEngineFailure(error, work);
-  return error instanceof VoiceEngineError && error.kind === "unreachable"
-    ? { problem, engineDown: true }
-    : { problem };
+  if (isEngineUnreachable(error)) return { problem, engineDown: true };
+  if (isEngineTimeout(error)) return { problem, engineSlow: true };
+  return { problem };
 }
 
 /**
@@ -548,6 +563,24 @@ export function showVoiceEngineDown(
 /** エンジンに届かなかった失敗か（窓にするかどうかの分かれ目） */
 export function isEngineUnreachable(error: unknown): boolean {
   return error instanceof VoiceEngineError && error.kind === "unreachable";
+}
+
+/** 待てる時間のうちに答えが来なかった失敗か（0.147.1。届かないとは別の窓にする） */
+export function isEngineTimeout(error: unknown): boolean {
+  return error instanceof VoiceEngineError && error.kind === "timeout";
+}
+
+/**
+ * 待てる時間のうちに答えが来なかったときの、画面の真ん中の窓（0.147.1。設計書6.42.3）。
+ * 届かないときの窓（showVoiceEngineDown）と同じく答えを待たない。ボタンは付けない
+ * （次の操作は文の中の1つ。閉じるは VS Code が添える）。返すのは窓に出した文
+ */
+export function showVoiceEngineSlow(route: VoiceEngineDownRoute, engine: VoiceEngineId): string {
+  const prompt = voiceEngineSlowPrompt(route, engine);
+  void Promise.resolve(
+    vscode.window.showWarningMessage(prompt.message, { modal: true, detail: prompt.detail })
+  ).catch(() => undefined);
+  return `${prompt.message}${prompt.detail}`;
 }
 
 /**
@@ -1203,6 +1236,7 @@ export async function assignVoices(
     // ログは窓のときも残す（describeEngineFailure が書く。実装ルール5）
     const problem = describeEngineFailure(error, work);
     if (isEngineUnreachable(error)) showVoiceEngineDown("assign", engine);
+    else if (isEngineTimeout(error)) showVoiceEngineSlow("assign", engine);
     else void warnWithLog(problem);
     return;
   }

@@ -780,3 +780,79 @@ describe("前の区切りの話者の流れを1段目に添える（P-54 版1.4�
     expect(state.warnings[0]).toContain("書き換えていません");
   });
 });
+
+describe("遅い PC で、声づくりの時間切れを届かないと取り違えない（0.147.1。ノートPCの実機確認）", () => {
+  /**
+   * 1つずつ作る偽のエンジン。`synthesisMs` が undefined なら、声づくりの答えを返さない（止まったまま）。
+   * 話者の一覧はすぐ返す
+   */
+  function serialFetch(synthesisMs: number | undefined) {
+    let busyUntil = 0;
+    const impl = (input: string, init?: RequestInit): Promise<Response> =>
+      new Promise<Response>((resolve, reject) => {
+        const path = new URL(input).pathname;
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("This operation was aborted", "AbortError"))
+        );
+        if (path === "/speakers") {
+          resolve(
+            new Response(
+              JSON.stringify([
+                { name: "まい", speaker_uuid: "u", styles: [{ name: "ノーマル", id: 1, type: "talk" }] },
+              ])
+            )
+          );
+          return;
+        }
+        if (path === "/synthesis" && synthesisMs === undefined) return;
+        const took = path === "/synthesis" ? (synthesisMs ?? 0) : 300;
+        const startAt = Math.max(Date.now(), busyUntil);
+        busyUntil = startAt + took;
+        setTimeout(() => {
+          resolve(
+            path === "/synthesis"
+              ? new Response(new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]))
+              : new Response(JSON.stringify({ speedScale: 1 }))
+          );
+        }, busyUntil - Date.now());
+      });
+    return impl;
+  }
+  const TEXT4 = "一つ目の文。二つ目の文。三つ目の文。四つ目の文。";
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("1文25秒かかるエンジンでも、先読みを並べた後ろの文まで音ができる（時間切れで止まらない）", async () => {
+    const service = new VoiceReadingService(() => "http://127.0.0.1:10101", serialFetch(25_000));
+    const sentences = buildReadingPlan(TEXT4, "curly", [], { splitDialogue: true });
+    const planned = await service.plan(undefined, "/x.txt", TEXT4, sentences, "aivisspeech");
+    if (!("units" in planned)) throw new Error(planned.problem);
+    expect(planned.units).toHaveLength(4);
+    const results = planned.units.map((_unit, index) => service.audio(planned.units, index, 1));
+    await vi.advanceTimersByTimeAsync(4 * 26_000);
+    for (const result of await Promise.all(results)) {
+      expect(result).not.toHaveProperty("engineDown");
+      expect(result).not.toHaveProperty("engineSlow");
+      expect("wav" in result).toBe(true);
+    }
+  });
+
+  test("止まったままのエンジンは時間切れの印（engineSlow）で返し、届かない印（engineDown）は立てない", async () => {
+    const service = new VoiceReadingService(() => "http://127.0.0.1:10101", serialFetch(undefined));
+    const planned = await service.plan(undefined, "/x.txt", "文。", buildReadingPlan("文。", "curly"), "aivisspeech");
+    if (!("units" in planned)) throw new Error(planned.problem);
+    const pending = service.audio(planned.units, 0, 1);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    const answer = await pending;
+    expect(answer).toMatchObject({ engineSlow: true });
+    expect(answer).not.toHaveProperty("engineDown");
+    const problem = "problem" in answer ? answer.problem : "";
+    expect(problem).toContain("［音声に書き出す］");
+    expect(problem).not.toContain("繋がりませんでした");
+  });
+});

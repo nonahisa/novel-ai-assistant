@@ -93,6 +93,33 @@ describe("カーソルが飛ばす欄の中なら、題から読む", () => {
     expect(indexAt(p, null, plain.indexOf("灯"))).toBe(1);
   });
 
+  it("ノートPCの .md の第1話（行数つきの【本文（24行）】）で、【公開状態】の中のカーソル → 題から（0.147.1）", () => {
+    // 2026-11-09 ノートPCの実機確認の形。原稿エディターへ届く字は LF（toLf）。人物の声の道と同じく台詞でも切る
+    const md = [
+      "【タイトル】",
+      "第1話　気がついたら幽霊に",
+      "",
+      "【公開状態】",
+      "公開済",
+      "",
+      "【作成日時】",
+      "2023-12-05 23:49:38（+09:00）",
+      "",
+      "【文字数】",
+      "517文字",
+      "",
+      "【本文（24行）】",
+      "「おや、太志じゃないか。死んでしまうとは情けないね」",
+    ].join("\n");
+    for (const voiced of [false, true]) {
+      const p = buildReadingPlan(md, "curly", [], voiced ? { splitDialogue: true } : {});
+      const at = indexAt(p, readingRangesOf(md), md.indexOf("公開済"));
+      expect(at).toBe(0);
+      expect(p[at].speech).toBe("第1話　気がついたら幽霊に");
+      expect(p.map((s) => s.speech).join("")).not.toMatch(/公開|2023|517/);
+    }
+  });
+
   it("届いた計画の範囲を控える（拡張機能が readable を添えて送る）", () => {
     const take = extractFunction(script, "aloudTakePlan");
     expect(take).toContain("message.readable");
