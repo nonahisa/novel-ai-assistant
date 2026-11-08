@@ -1148,11 +1148,11 @@ body.clipped #cheer { white-space: normal; }
   <span id="cheer"></span>
   <span id="saveFail" role="alert">
     <span id="saveFailText" data-keys></span>
-    <button id="saveFailCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
+    <button id="saveFailCopy" title="この画面の本文をまるごとクリップボードへ写します。テキストエディットやメモ帳などへ貼って控えてください">本文をコピー</button>
   </span>
   <span id="unsent" role="alert">
     <span id="unsentText" data-keys>打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。</span>
-    <button id="unsentCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
+    <button id="unsentCopy" title="この画面の本文をまるごとクリップボードへ写します。テキストエディットやメモ帳などへ貼って控えてください">本文をコピー</button>
     <button id="unsentReopen" hidden disabled title="この原稿を原稿エディターで開き直します。先に「本文をコピー」で控えてください（開き直すと、この画面の字は消えます）">開き直す</button>
   </span>
   <span id="note" data-keys></span>
@@ -1658,7 +1658,7 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   /* ── 口述筆記（設計書6.83） ───────────────── */
   /*
     **拡張機能はマイクに触らない。** 声を文字にするのはOSの音声入力
-    （Windows：Win+H／macOS：fnキー2回）で、OSは面へ文字を入れるだけである。
+    （Windows：Win+H／Mac：音声入力のキー。初めは fnキーを2回）で、OSは面へ文字を入れるだけである。
     この画面がしているのは「どこから話し始めたか」を覚えることだけで、
     モード中もこれまでどおり手で打てる。
   */
@@ -1727,7 +1727,7 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     dictationFrom = at;
     document.body.classList.add("dictating");
     note.textContent =
-      "OSの音声入力を始めてください（Windows：Win+H／macOS：fnキー2回）。" +
+      "OSの音声入力を始めてください（Windows：Win+H／Mac：音声入力のキー。初めは fnキーを2回）。" +
       "話し終えたら「整える」を押します";
     dictationRefocus(at);
   });
@@ -2892,11 +2892,11 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
         */
         // 読み取り専用では、開き直しても再読み込みしても入らない。控えるところまで
         (unsentReadonly
-          ? "メモ帳などへ貼って控えてください。"
+          ? "テキストエディットやメモ帳などへ貼って控えてください。"
           : hostSilent()
-            ? "メモ帳などへ貼って控えてから、Ctrl+Shift+P →「開発者: ウィンドウの再読み込み」を" +
+            ? "テキストエディットやメモ帳などへ貼って控えてから、Ctrl+Shift+P →「開発者: ウィンドウの再読み込み」を" +
               "してください（タブは閉じないでください）。"
-            : "メモ帳などへ貼って控えてから、［開き直す］を押してください。")
+            : "テキストエディットやメモ帳などへ貼って控えてから、［開き直す］を押してください。")
       : "写せませんでした。本文を選んで Ctrl+C で写してください。";
     paintUnsent();
   }
@@ -3611,7 +3611,7 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   saveFailCopyButton.addEventListener("click", function () {
     const text = screenText();
     saveFailText.textContent = copyTextDirect(text)
-      ? "本文（" + text.length + "字）をクリップボードへ写しました。メモ帳などへ貼って" +
+      ? "本文（" + text.length + "字）をクリップボードへ写しました。テキストエディットやメモ帳などへ貼って" +
         "控えてから、「開発者: ウィンドウの再読み込み」を実行してください" +
         "（タブを閉じると、画面の控えは消えます）。"
       : "写せませんでした。本文を選んで Ctrl+C で写してください。";
@@ -4858,7 +4858,7 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   const CUT_WAIT_MS = 4000;
   const CUT_FAILED =
     "切り取れませんでした（字は消していません）。" +
-    "Ctrl+C のあと Delete キーで消してください";
+    "Ctrl+C のあと Delete キー（Mac は delete）で消してください";
   /** 拡張機能に写してもらっている切り取り。返事が来るまで消さない */
   let menuCutWanted = null;
 
@@ -4919,7 +4919,7 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
       if (composeTryDelete()) return;
       note.textContent =
         "切り取った字を消せませんでした（写すことはできています）。" +
-        "Delete キーで消してください";
+        "Delete キー（Mac は delete）で消してください";
       return;
     }
     let deleted = false;
@@ -8602,7 +8602,7 @@ ${RESUME_WRITING_LABEL ? `
       if (composeTryDelete()) return;
       note.textContent =
         "切り取った字を消せませんでした（写すことはできています）。" +
-        "Delete キーで消してください";
+        "Delete キー（Mac は delete）で消してください";
     }, 0);
   }
 
@@ -9689,9 +9689,14 @@ ${IME_ENTER_GUARD_SOURCE}
     } else if (!aloudUsable()) {
       reason = "この環境では読み上げが使えません";
     } else if (aloudVoices.length === 0) {
+      // 画面は作者の OS を知っている（キーの札と同じ印）ので、合うほうの手順だけを出す。
+      // 台本を切り出して動かす試験では印が無いので、無ければ Windows の手順にする
       reason =
-        "日本語の声が見つかりません。Windows では 設定 → 時刻と言語 → 音声 → " +
-        "音声を追加 で日本語を入れると使えます";
+        typeof NOVELAI_KEY_MAC !== "undefined" && NOVELAI_KEY_MAC
+          ? "日本語の声が見つかりません。Mac では アップルメニュー → システム設定 → アクセシビリティ → " +
+            "読み上げコンテンツ → システムの声 で日本語の声を入れると使えます"
+          : "日本語の声が見つかりません。Windows では 設定 → 時刻と言語 → 音声 → " +
+            "音声を追加 で日本語を入れると使えます";
     }
     const ready = reason === "";
     aloudNote.textContent = reason || aloudProblem;

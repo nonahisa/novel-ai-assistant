@@ -836,7 +836,7 @@ export function pageSheetCss(
     // （余白がどれだけあるかが分かる）。**紙には刷らない**
     "@media screen {",
     "  body { background: #d8d4cc; }",
-    '  .print-guide { position: sticky; top: 0; z-index: 1; margin: 0; padding: 10px 16px; background: #fff8dc; border-bottom: 1px solid #c8b560; font-family: "Yu Gothic UI", "Meiryo", sans-serif; font-size: 14px; line-height: 1.6; }',
+    '  .print-guide { position: sticky; top: 0; z-index: 1; margin: 0; padding: 10px 16px; background: #fff8dc; border-bottom: 1px solid #c8b560; font-family: "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif; font-size: 14px; line-height: 1.6; }',
     "  .print-guide p { margin: 0; }",
     "  .print-guide-lead { font-weight: bold; }",
     ...PRINT_FIGURE_CSS.map((rule) => `  ${rule}`),

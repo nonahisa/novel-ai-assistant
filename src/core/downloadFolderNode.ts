@@ -15,7 +15,7 @@ import type { DownloadFolderLister } from "./backupArrivalWatch";
  */
 
 /**
- * 既定の場所（Windows の「ダウンロード」）。設定で替えられる（`novelai.ownWorks.downloadFolder`）。
+ * 既定の場所（ホームの「ダウンロード」〔Downloads〕。Windows も Mac も同じ）。設定で替えられる（`novelai.ownWorks.downloadFolder`）。
  *
  * 「ダウンロード」を別のドライブへ移していると、ここは空振りする。そのときのために設定を置く
  * （登録簿の既知のフォルダーを読みにいくより、作者が場所を書けるほうが確かめやすい）

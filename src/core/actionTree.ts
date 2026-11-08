@@ -1,4 +1,5 @@
 import { keysForHost } from "./keyLabels";
+import { isWindowsHost } from "./runtime";
 import {
   describeBlocked,
   EDITOR_BLOCKED_HINT,
@@ -1429,7 +1430,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・対象は選んだところ（原稿エディターなら上の列の［入力］→［口述］→［整える］）\n\n" +
               keysForHost("・Ctrl+Z で元に戻せる\n\n") +
               "・声を文字にするのはOSの音声入力\n\n" +
-              "・Windows：Win+H／macOS：fnキー2回\n\n" +
+              "・Windows：Win+H／Mac：音声入力のキー（初めは fnキーを2回。システム設定で変えられる）\n\n" +
               "言葉は足さない・削らない・言い換えない。",
           },
           // **手で書いた分を、写真から下書きにする**（設計書6.117）。口述の隣に
@@ -2590,7 +2591,8 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "folder-opened",
             requiresWork: false,
             detail:
-              "ollama.exe の場所の指定\n\n" +
+              // Mac・Linux の実行ファイルに .exe は付かない
+              `${isWindowsHost() ? "ollama.exe" : "ollama"} の場所の指定\n\n` +
               "・Ollamaを自動で見つけられないときに使う",
           },
           // 流し受信の入切は、0.43.x で配布版の設定

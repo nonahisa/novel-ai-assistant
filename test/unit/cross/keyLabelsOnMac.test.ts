@@ -103,7 +103,7 @@ const ALLOWED: Array<{ file: string; includes: string; why: string }> = [
     "本文を選んで Ctrl+C で写してください。",
     "Ctrl+S を試してください。",
     "選んだところを写せませんでした。Ctrl+C を試してください",
-    "Ctrl+C のあと Delete キーで消してください",
+    "Ctrl+C のあと Delete キー（Mac は delete）で消してください",
   ].map((includes) => ({
     file: "src/views/manuscriptEditorHtml.ts",
     includes,
