@@ -1086,9 +1086,10 @@ body.clipped #cheer { white-space: normal; }
     </select>
   </label>
   <label class="pick">声
-    <select id="aloudEngine" title="OSの声で読むか、手元の音声合成のエンジン（AivisSpeech・VOICEVOX）で人物ごとに声を変えて読むかを選びます。人物の声は試作で、テスト中の機能です">
+    <select id="aloudEngine" title="OSの声で読むか、手元の音声合成のエンジン（AivisSpeech か VOICEVOX）で人物ごとに声を変えて読むかを選びます。人物の声は試作で、テスト中の機能です">
       <option value="os">OSの声</option>
-      <option value="engine">人物の声（AivisSpeech・VOICEVOX）【試作・テスト中】</option>
+      <option value="aivisspeech">人物の声（AivisSpeech）【試作・テスト中】</option>
+      <option value="voicevox">人物の声（VOICEVOX）【試作・テスト中】</option>
     </select>
   </label>
   <label class="pick os-only">
@@ -5854,7 +5855,7 @@ ${RESUME_WRITING_LABEL ? `
       }
       // 人物の声（設計書6.42.3）。使えるかは毎回、覚えている選択は最初の1回だけ受ける
       if (message.voiceEngine && typeof message.voiceEngine === "object") {
-        voiceTakeUsable(message.voiceEngine, message.readAloudEngine === true);
+        voiceTakeUsable(message.voiceEngine, message.readAloudEngine);
       }
       /*
         **本文が変わったら、計画を取り直す。** 位置が動いたまま読み続けると、
@@ -5900,6 +5901,8 @@ ${RESUME_WRITING_LABEL ? `
       aloudDictTakeStatus(message);
     } else if (message.type === "useOsVoice") {
       voiceUseOsVoice();
+    } else if (message.type === "useOtherEngine") {
+      voiceUseOtherEngine(message.engine);
     } else if (message.type === "voiceAudio") {
       voiceTakeAudio(message);
     } else if (message.type === "voiceCastStatus") {
@@ -9964,10 +9967,15 @@ ${IME_ENTER_GUARD_SOURCE}
    * 遅れて追いつく（scheduleSend）ので、向こうの本文で作られた計画は、
    * 打った直後の本文とずれる。
    */
-  function aloudAskPlan() {
+  function aloudAskPlan(start) {
     const text = aloudTextNow();
     aloudPlannedText = text;
-    vscode.postMessage({ type: "readingPlan", text: text, voiced: voiceMode });
+    vscode.postMessage({
+      type: "readingPlan", text: text, voiced: voiceMode,
+      engine: voiceEngineName,
+      // 読み始めの頼みか（割り当てた声が引けなかった一言は、読み始めにだけ出す）
+      start: start === true,
+    });
   }
 
   /**
@@ -10002,7 +10010,9 @@ ${IME_ENTER_GUARD_SOURCE}
     }
     // 読み方を切り替える前に頼んだ計画は使わない（声の単位の切り方が違う）
     if (!!message.voiced !== voiceMode) return;
-    aloudPlan = Array.isArray(message.sentences) ? message.sentences : [];
+    // エンジンを替える前に頼んだ計画も使わない（声の番号は別のエンジンのもの）
+    if (voiceMode && message.engine !== voiceEngineName) return;
+    aloudPlan =Array.isArray(message.sentences) ? message.sentences : [];
     aloudReadable = Array.isArray(message.readable) ? message.readable : null;
     // 印を打ったぶんが本文へ入った。もう一度押してよい
     aloudMarking = false;
@@ -10126,7 +10136,7 @@ ${IME_ENTER_GUARD_SOURCE}
     }
     aloudProblem = "";
     aloudStartAt = aloudCaretOffset();
-    aloudAskPlan();
+    aloudAskPlan(true);
   }
 
   /**
@@ -10270,6 +10280,15 @@ ${IME_ENTER_GUARD_SOURCE}
 
   /** 人物の声で読む */
   let voiceMode = false;
+  /**
+   * 人物の声のエンジン（"aivisspeech"・"voicevox"。0.146.0）。OSの声のときは最後に選んだ側を
+   * 残す（拡張機能へ送る頼みは voiceMode が真のときだけ使う）
+   */
+  let voiceEngineName = "aivisspeech";
+  /** ［声］の欄の値がエンジンの名前か */
+  function voiceIsEngine(value) {
+    return value === "aivisspeech" || value === "voicevox";
+  }
   /** この環境で人物の声が使えるか（拡張機能が決めて送る） */
   let voiceUsable = false;
   let voiceReason = "";
@@ -10302,28 +10321,35 @@ ${IME_ENTER_GUARD_SOURCE}
   function voiceTakeUsable(state, remembered) {
     voiceUsable = state.ok === true;
     voiceReason = typeof state.reason === "string" ? state.reason : "";
-    const option = aloudEngine.querySelector('option[value="engine"]');
-    if (option) option.disabled = !voiceUsable;
+    // エンジンの選択肢は2つとも押せなくする（どちらも手元のエンジンに届かない理由は同じ）
+    const options = aloudEngine.querySelectorAll('option[value="aivisspeech"], option[value="voicevox"]');
+    for (const option of options) option.disabled = !voiceUsable;
     aloudEngine.title = voiceUsable
-      ? "OSの声で読むか、手元の音声合成のエンジン（AivisSpeech・VOICEVOX）で人物ごとに声を変えて読むかを選びます"
+      ? "OSの声で読むか、手元の音声合成のエンジン（AivisSpeech か VOICEVOX）で人物ごとに声を変えて読むかを選びます"
       : voiceReason;
     if (!voiceModeTaken) {
       voiceModeTaken = true;
-      if (remembered && voiceUsable) voiceSetMode(true, false);
+      // 覚えている選択は "os"・"aivisspeech"・"voicevox"（前の版の「人物の声」は拡張機能が読み替えて送る）
+      if (voiceIsEngine(remembered) && voiceUsable) voiceSetMode(remembered, false);
     }
-    if (!voiceUsable && voiceMode) voiceSetMode(false, false);
+    if (!voiceUsable && voiceMode) voiceSetMode("os", false);
     aloudPaintState();
   }
 
-  /** 読み方を切り替える。**読んでいる途中なら止める**（切り方も声も変わる） */
-  function voiceSetMode(on, remember) {
+  /**
+   * 読み方を切り替える（"os"・"aivisspeech"・"voicevox"）。**読んでいる途中なら止める**
+   * （切り方も声も変わる。エンジンを替えると声の番号も変わる）
+   */
+  function voiceSetMode(choice, remember) {
+    let on = voiceIsEngine(choice);
     if (on && !voiceUsable) on = false;
     if (aloudOn || aloudStartAt !== null) aloudFinish();
     voiceMode = on;
+    if (on) voiceEngineName = choice;
     aloudPlan = null;
-    aloudEngine.value = on ? "engine" : "os";
+    aloudEngine.value = on ? voiceEngineName : "os";
     document.body.classList.toggle("aloudengine", on);
-    if (remember) vscode.postMessage({ type: "readingEngine", on: on });
+    if (remember) vscode.postMessage({ type: "readingEngine", engine: on ? voiceEngineName : "os" });
     if (on && document.body.classList.contains("aloud")) voiceCastAsk("status");
     aloudPaintState();
     // 列のボタンが変わって折り返し幅が変わる（重ね敷きの枠を測り直す）
@@ -10335,12 +10361,22 @@ ${IME_ENTER_GUARD_SOURCE}
    * いまの場所から読み始める。**覚えている選択は変えない**（エンジンを起こせば次は人物の声で読める）
    */
   function voiceUseOsVoice() {
-    voiceSetMode(false, false);
+    voiceSetMode("os", false);
+    aloudStart();
+  }
+
+  /**
+   * 選んだエンジンに届かず、もう片方のエンジンが動いていた窓で［〇〇で読む］が押された（0.146.0）。
+   * **［声］の選択をそちらへ切り替えて覚え**、いまの場所から読み始める
+   */
+  function voiceUseOtherEngine(engine) {
+    if (!voiceIsEngine(engine)) return;
+    voiceSetMode(engine, true);
     aloudStart();
   }
 
   aloudEngine.addEventListener("change", function () {
-    voiceSetMode(aloudEngine.value === "engine", true);
+    voiceSetMode(aloudEngine.value, true);
   });
 
   /** 予約した音を全部止める。**aloudCancel からだけ呼ぶ**（止め方を1つに集める） */
@@ -10483,7 +10519,8 @@ ${IME_ENTER_GUARD_SOURCE}
   }
 
   function voiceCastAsk(action) {
-    vscode.postMessage({ type: "voiceCast", action: action, text: aloudTextNow() });
+    // 割り当てと書き出しは［声］で選んだエンジンで行う（拡張機能の側で形を確かめる）
+    vscode.postMessage({ type: "voiceCast", action: action, text: aloudTextNow(), engine: voiceEngineName });
   }
 
   function voiceCastBusy(busy) {

@@ -97,7 +97,7 @@ async function speak(url: string): Promise<boolean> {
   const { impl } = fakeFetch();
   const service = new VoiceReadingService(() => url, impl);
   const sentences = buildReadingPlan("地の文。", "curly", [], { splitDialogue: true });
-  const planned = await service.plan(undefined, "/x.txt", "地の文。", sentences);
+  const planned = await service.plan(undefined, "/x.txt", "地の文。", sentences, "aivisspeech");
   if (!("units" in planned)) throw new Error(planned.problem);
   return "wav" in (await service.audio(planned.units, 0, 1));
 }

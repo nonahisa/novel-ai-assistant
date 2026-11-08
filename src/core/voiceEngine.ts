@@ -22,8 +22,108 @@ import { hashText } from "./hash";
  * できた WAV を画面へ渡す。
  */
 
-/** AivisSpeech の既定の口。VOICEVOX は `http://127.0.0.1:50021` */
+/** AivisSpeech の既定の口（古い設定 `voiceEngineUrl` の既定でもある）。VOICEVOX は `http://127.0.0.1:50021` */
 export const DEFAULT_VOICE_ENGINE_URL = "http://127.0.0.1:10101";
+
+/*
+  ── どのエンジンか（0.146.0。設計書6.42.3） ──
+
+  作者の決定（2026-11-08）：［声］で AivisSpeech と VOICEVOX を選べるようにし、のちに
+  人物ごとにエンジンを混ぜられるようにする（2段目）。そのため、接続先・話者の一覧の控え・
+  合成の控え・声の割り当て・書き出しのクレジットは、どれも**エンジンを鍵に**持つ。
+*/
+
+/** 音声合成のエンジン。声の割り当て（voices.json）の印にもこの文字列を書く */
+export type VoiceEngineId = "aivisspeech" | "voicevox";
+
+export const VOICE_ENGINE_IDS: readonly VoiceEngineId[] = ["aivisspeech", "voicevox"];
+
+export function isVoiceEngineId(value: unknown): value is VoiceEngineId {
+  return value === "aivisspeech" || value === "voicevox";
+}
+
+/** 画面と知らせに出す名前 */
+export const VOICE_ENGINE_LABEL: Record<VoiceEngineId, string> = {
+  aivisspeech: "AivisSpeech",
+  voicevox: "VOICEVOX",
+};
+
+/** エンジンごとの既定の接続先（どちらも配布元の既定の口） */
+export const DEFAULT_ENGINE_URLS: Record<VoiceEngineId, string> = {
+  aivisspeech: DEFAULT_VOICE_ENGINE_URL,
+  voicevox: "http://127.0.0.1:50021",
+};
+
+/** 設定の鍵（`novelai.` を除いた形）。エンジンごとの接続先 */
+export const ENGINE_URL_SETTING: Record<VoiceEngineId, string> = {
+  aivisspeech: "readAloud.aivisSpeechUrl",
+  voicevox: "readAloud.voicevoxUrl",
+};
+
+/** 古い設定（0.145 まで。エンジン1つ分の接続先）。消さずに読む */
+export const LEGACY_ENGINE_URL_SETTING = "readAloud.voiceEngineUrl";
+
+/**
+ * 古い設定の接続先が、どちらのエンジンを指しているか。
+ *
+ * **口の番号で見る**：50021 なら VOICEVOX、ほかは AivisSpeech。エンジンの名乗り（brand_name）で
+ * 見分けたいところだが、作者の答え（2026-11-08）は「動いているかを前もって問い合わせない」で、
+ * ［声］の欄の選択（前の版の「人物の声」をどちらにするか）は画面を開いたときに決める必要がある。
+ * 番号で当てても、外れたときは新しい設定（`aivisSpeechUrl`・`voicevoxUrl`）を書けば直せる。
+ * 書き出しはこれまでどおり名乗りでエンジンを確かめ、選んだ側と違えば止める（`voiceExport.ts`）。
+ */
+export function legacyEngineOf(url: string): VoiceEngineId {
+  try {
+    return new URL(url).port === "50021" ? "voicevox" : "aivisspeech";
+  } catch {
+    return "aivisspeech";
+  }
+}
+
+/** 設定に**作者が書いた**値（書いていなければ undefined。既定の値はここへ入れない） */
+export interface EngineUrlSettings {
+  aivisSpeechUrl?: string;
+  voicevoxUrl?: string;
+  /** 古い設定 `voiceEngineUrl` */
+  legacyUrl?: string;
+}
+
+/**
+ * エンジンごとの接続先を決める（純粋な計算。設定を読むのは features の側）。
+ *
+ * 1. 新しい設定を書いてあれば、それ（読めない形なら undefined。理由は呼ぶ側が出す）
+ * 2. 古い設定を既定と違う値に書き換えてあり、それがこのエンジンを指していれば（`legacyEngineOf`）、古い設定
+ * 3. どちらでもなければ、このエンジンの既定
+ *
+ * `fromLegacy` は、古い設定から読んだか（知らせに出す設定の名前を選ぶため）。
+ */
+export function resolveEngineUrl(
+  engine: VoiceEngineId,
+  settings: EngineUrlSettings
+): { url: string | undefined; fromLegacy: boolean } {
+  const own = engine === "aivisspeech" ? settings.aivisSpeechUrl : settings.voicevoxUrl;
+  if (own !== undefined) return { url: normalizeEngineUrl(own), fromLegacy: false };
+  const legacy = legacyCustomUrl(settings.legacyUrl);
+  if (legacy !== undefined && legacyEngineOf(legacy) === engine) return { url: legacy, fromLegacy: true };
+  return { url: DEFAULT_ENGINE_URLS[engine], fromLegacy: false };
+}
+
+/** 古い設定が既定と違う値に書き換えてあれば、その値（整えた形） */
+function legacyCustomUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const url = normalizeEngineUrl(raw);
+  if (url === undefined || url === DEFAULT_VOICE_ENGINE_URL) return undefined;
+  return url;
+}
+
+/**
+ * 前の版で「人物の声」を選んでいた人が、どちらのエンジンで読むか（作者の決定 2026-11-08：
+ * 接続先の設定が指している側）。古い設定が既定のままなら AivisSpeech
+ */
+export function legacyVoiceEngine(settings: EngineUrlSettings): VoiceEngineId {
+  const legacy = legacyCustomUrl(settings.legacyUrl);
+  return legacy === undefined ? "aivisspeech" : legacyEngineOf(legacy);
+}
 
 /** 話者のスタイル1つ（「ノーマル」「上機嫌」など） */
 export interface VoiceStyle {
@@ -50,7 +150,9 @@ export class VoiceEngineError extends Error {
     readonly kind: "unreachable" | "http" | "badResponse" | "aborted",
     message: string,
     /** ログへ残す詳しいこと（エンジンの返した本文など） */
-    readonly detail?: string
+    readonly detail?: string,
+    /** どのエンジンへの頼みだったか（知らせにエンジンの名前を出す。分からなければ無し） */
+    readonly engine?: VoiceEngineId
   ) {
     super(message);
   }
@@ -430,7 +532,9 @@ const REQUEST_TIMEOUT_MS = 30_000;
 export class VoiceEngineClient {
   constructor(
     readonly baseUrl: string,
-    private readonly fetchImpl: FetchLike = (input, init) => fetch(input, init)
+    private readonly fetchImpl: FetchLike = (input, init) => fetch(input, init),
+    /** どのエンジンとして叩くか（失敗の知らせにエンジンの名前を出すため） */
+    readonly engine?: VoiceEngineId
   ) {}
 
   async speakers(signal?: AbortSignal): Promise<VoiceSpeaker[]> {
@@ -566,11 +670,12 @@ export class VoiceEngineClient {
         signal: controller.signal,
       });
     } catch (error) {
-      if (signal?.aborted) throw new VoiceEngineError("aborted", "中止しました");
+      if (signal?.aborted) throw new VoiceEngineError("aborted", "中止しました", undefined, this.engine);
       throw new VoiceEngineError(
         "unreachable",
         `音声合成のエンジン（${this.baseUrl}）から応答がありません`,
-        error instanceof Error ? error.message : String(error)
+        error instanceof Error ? error.message : String(error),
+        this.engine
       );
     } finally {
       clearTimeout(timer);
@@ -586,7 +691,8 @@ export class VoiceEngineClient {
       throw new VoiceEngineError(
         "http",
         `音声合成のエンジンが HTTP ${response.status} を返しました`,
-        body
+        body,
+        this.engine
       );
     }
     return response;
@@ -600,8 +706,10 @@ export class VoiceEngineClient {
  */
 export function voiceEngineNextStep(error: VoiceEngineError): string {
   if (error.kind === "unreachable") {
+    // どちらのエンジンか分かれば名指しする（0.146.0。［声］で選んだ側を起こせばよいと分かるように）
+    const which = error.engine ? `音声合成のエンジン（${VOICE_ENGINE_LABEL[error.engine]}）` : "音声合成のエンジン";
     return (
-      "音声合成のエンジンに繋がりませんでした。AivisSpeech（または VOICEVOX）を起動してから、もう一度押してください。" +
+      `${which}に繋がりませんでした。${engineToStart(error.engine)}を起動してから、もう一度押してください。` +
       "［声］で OS の声を選べば、エンジンなしでも読めます。"
     );
   }
@@ -627,43 +735,99 @@ export function voiceEngineNextStep(error: VoiceEngineError): string {
  */
 export type VoiceEngineDownRoute = "read" | "assign" | "export";
 
-const ENGINE_DOWN_MESSAGE = "音声合成のエンジンに繋がりませんでした。";
+/**
+ * 窓の見出し。**どちらのエンジンかを入れる**（0.146.0。作者の決定 2026-11-08：［声］で選べるように
+ * なったので、どちらを起こせばよいかを窓で分かるようにする）。分からないときは今までの文
+ */
+function engineDownMessage(engine: VoiceEngineId | undefined): string {
+  return engine
+    ? `音声合成のエンジン（${VOICE_ENGINE_LABEL[engine]}）に繋がりませんでした。`
+    : "音声合成のエンジンに繋がりませんでした。";
+}
 
-export function voiceEngineDownPrompt(route?: "read"): {
+/**
+ * 「〇〇を起動してから」の〇〇。名指しするときは後ろに空白を付ける（「AivisSpeech を」。
+ * 英字の名前に助詞が詰まると読みにくい）。分からないときは今までの文（括弧で終わるので空けない）
+ */
+function engineToStart(engine: VoiceEngineId | undefined): string {
+  return engine ? `${VOICE_ENGINE_LABEL[engine]} ` : "AivisSpeech（または VOICEVOX）";
+}
+
+/** 届かなかったとき、代わりに動いていたもう片方のエンジン（`otherEngineRunning` の答え） */
+export interface RunningOtherEngine {
+  engine: VoiceEngineId;
+  /** 宛先（`127.0.0.1:10101` の形） */
+  host: string;
+}
+
+export function voiceEngineDownPrompt(
+  route?: "read",
+  engine?: VoiceEngineId,
+  running?: RunningOtherEngine
+): {
   message: string;
   detail: string;
   useOsVoice: string;
+  /** もう片方が動いていたときだけ付くボタン（「AivisSpeech で読む」） */
+  useOtherEngine?: string;
 };
-export function voiceEngineDownPrompt(route: "assign" | "export"): {
+export function voiceEngineDownPrompt(
+  route: "assign" | "export",
+  engine?: VoiceEngineId
+): {
   message: string;
   detail: string;
 };
-export function voiceEngineDownPrompt(route: VoiceEngineDownRoute = "read"): {
+export function voiceEngineDownPrompt(
+  route: VoiceEngineDownRoute = "read",
+  engine?: VoiceEngineId,
+  running?: RunningOtherEngine
+): {
   message: string;
   detail: string;
   useOsVoice?: string;
+  useOtherEngine?: string;
 } {
+  const message = engineDownMessage(engine);
+  const start = engineToStart(engine);
   if (route === "assign") {
     return {
-      message: ENGINE_DOWN_MESSAGE,
+      message,
       detail:
-        "AivisSpeech（または VOICEVOX）を起動してから、もう一度［声の割り当て］を押してください。\n\n" +
+        `${start}を起動してから、もう一度［声の割り当て］を押してください。\n\n` +
         "割り当てる声はエンジンの話者から選ぶので、エンジンが動いていないと選べません。" +
         "エンジンなしで読むなら、［声］で OS の声を選んでください。",
     };
   }
   if (route === "export") {
     return {
-      message: ENGINE_DOWN_MESSAGE,
+      message,
       detail:
-        "AivisSpeech（または VOICEVOX）を起動してから、もう一度［音声に書き出す］を押してください。\n\n" +
+        `${start}を起動してから、もう一度［音声に書き出す］を押してください。\n\n` +
         "音声の書き出しはエンジンの声で作るので、エンジンなしでは書き出せません。ファイルは作っていません。",
     };
   }
+  /*
+    もう片方のエンジンが動いていた（0.146.0。ノートPCの実機確認）。動いている側を先に書き、
+    一押しでそちらへ切り替えて読めるボタンを足す。ほかのボタンは今までどおり
+  */
+  if (running && running.engine !== engine) {
+    const other = VOICE_ENGINE_LABEL[running.engine];
+    return {
+      message,
+      detail:
+        `${other}（${running.host}）が動いています。こちらで読みますか。\n\n` +
+        `［${other} で読む］を押すと、［声］を ${other} に切り替えて、いまの場所から読みます。` +
+        `割り当てた声のうち ${other} に無い声は、代わりの声で読みます。` +
+        `${start}で読むなら、${start}を起動してから、もう一度［▶ 読む］を押してください。`,
+      useOtherEngine: `${other} で読む`,
+      useOsVoice: "OSの声で読む",
+    };
+  }
   return {
-    message: ENGINE_DOWN_MESSAGE,
+    message,
     detail:
-      "AivisSpeech（または VOICEVOX）を起動してから、もう一度［▶ 読む］を押してください。\n\n" +
+      `${start}を起動してから、もう一度［▶ 読む］を押してください。\n\n` +
       "エンジンなしで読むなら、［OSの声で読む］を押すと、いまの場所から OS の声で読みます。",
     useOsVoice: "OSの声で読む",
   };

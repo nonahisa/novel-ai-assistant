@@ -2,10 +2,12 @@ import { isMemoLine } from "./sceneMemo";
 import { voiceDialogueSpans, type ReadingSentence } from "./readAloud";
 import {
   isVoiceEmotion,
+  isVoiceEngineId,
   isVoiceIntensity,
   pickStyleForEmotion,
   VOICE_EMOTIONS,
   type VoiceEmotion,
+  type VoiceEngineId,
   type VoiceIntensity,
   type VoiceSpeaker,
 } from "./voiceEngine";
@@ -1002,14 +1004,32 @@ export function editCastEntry(
  * エンジンの声1つ。**スタイルIDだけで持たない**——AivisSpeech はモデルを
  * 入れ直すと ID が変わることがあるので、話者の uuid とスタイルの名前で引き直し、
  * 引けなければ ID を見る。
+ *
+ * **エンジンの印（`engine`）を持つ**（0.146.0）。スタイルの番号はエンジンごとに振られるので、
+ * AivisSpeech の声として選んだ番号が、VOICEVOX では別人の声の番号になりうる。印の違う声は
+ * 番号で探さない（`resolveVoiceRef`）。人物ごとに印を持つので、のちに人物ごとにエンジンを
+ * 混ぜる形（2段目）も、このファイルの形のまま書ける。
+ *
+ * 印の無い声は、前の版（0.145 まで）で選んだ声。どちらのエンジンの声か分からないので、
+ * uuid とスタイルの名前で引けたときだけ使う。
  */
 export interface VoiceRef {
   speakerUuid: string;
   speakerName: string;
   styleName: string;
   styleId: number;
+  /** 選んだときのエンジン。前の版の声には無い */
+  engine?: VoiceEngineId;
 }
 
+/**
+ * 声の割り当て（`.aiwriter/voices.json`）。
+ *
+ * **版は 1 のまま**、声に任意の欄 `engine` を足した（0.146.0）。前の版の拡張機能は知らない欄を
+ * 落として読むので、別の端末の古い版でも止まらずに読める。版を 2 に上げると、同期した先の
+ * 古い版が「版が違います」で止まる。古い版が書き戻すと印は落ちるが、印の無い声は番号で
+ * 探さないので、別の声で読むことにはならない（語りの声で読み、選び直しを促す）。
+ */
 export interface VoiceAssignmentFile {
   version: 1;
   /** 地の文（語り手） */
@@ -1041,11 +1061,16 @@ function parseVoiceRef(raw: unknown, where: string): VoiceRef {
   ) {
     throw new Error(`${where} の欄が足りないか、形が違います`);
   }
+  // 知らない印は直さずに止める（実装ルール2。勝手に AivisSpeech と読まない）
+  if (r.engine !== undefined && !isVoiceEngineId(r.engine)) {
+    throw new Error(`${where}.engine は "aivisspeech" か "voicevox" にしてください`);
+  }
   return {
     speakerUuid: r.speakerUuid,
     speakerName: r.speakerName,
     styleName: r.styleName,
     styleId: r.styleId,
+    ...(isVoiceEngineId(r.engine) ? { engine: r.engine } : {}),
   };
 }
 
@@ -1090,15 +1115,26 @@ export function parseVoiceAssignment(text: string): VoiceAssignmentFile {
   return out;
 }
 
-/** いまのエンジンの一覧で、声を引き直す（uuid＋スタイルの名前 → スタイルID） */
+/**
+ * いまのエンジンの一覧で、声を引き直す（uuid＋スタイルの名前 → スタイルID）。
+ *
+ * - 印（`ref.engine`）が `engine` と違う … 引かない（番号が同じでも別のエンジンの別人の声）
+ * - 印が同じ … uuid＋スタイルの名前、引けなければ番号（AivisSpeech はモデルを入れ直すと
+ *   番号が変わることがあり、名前が変わることもあるので、同じエンジンの中だけ番号でも探す）
+ * - 印が無い（前の版の声）… uuid＋スタイルの名前で引けたときだけ。**番号で探し直さない**
+ *   （0.145 までは番号でも探したので、エンジンを替えると番号だけ同じ別の声で黙って読んだ）
+ */
 export function resolveVoiceRef(
   ref: VoiceRef | undefined,
-  speakers: readonly VoiceSpeaker[]
+  speakers: readonly VoiceSpeaker[],
+  engine: VoiceEngineId
 ): number | undefined {
   if (!ref) return undefined;
+  if (ref.engine !== undefined && ref.engine !== engine) return undefined;
   const speaker = speakers.find((s) => s.uuid === ref.speakerUuid);
   const byName = speaker?.styles.find((style) => style.name === ref.styleName);
   if (byName) return byName.id;
+  if (ref.engine === undefined) return undefined;
   for (const s of speakers) {
     if (s.styles.some((style) => style.id === ref.styleId)) return ref.styleId;
   }
@@ -1123,6 +1159,11 @@ export const VOICE_GAP_CONTINUE_MS = 30;
 /** 文1つを、どの声・どの感情で読むか */
 export interface VoicePlanUnit {
   speech: string;
+  /**
+   * どのエンジンで作る音か。**音を作る口はこの印で選ぶ**（0.146.0）——いまは1回の読み上げで
+   * 1つのエンジンだが、人物ごとに混ぜる形（2段目）では文ごとに違ってよい
+   */
+  engine: VoiceEngineId;
   styleId: number;
   emotion: VoiceEmotion;
   intensity: VoiceIntensity;
@@ -1140,22 +1181,42 @@ export interface VoicePlanUnit {
  * 声の順：人物の声 → 台詞の既定の声 → 語り手の声 → エンジンの最初の声。
  * 推定が無い台詞は「台詞の既定の声・平静」で読む（推定しなくても朗読はできる）。
  * 一覧が空なら undefined（読めない）。
+ *
+ * 割り当てた声がこのエンジンで引けなければ（違うエンジンの声・入れ直して消えた声）、上の順で
+ * 次の声へ落とし、その枠の名前を `unresolved` に返す（「語り手」「台詞の既定」・人物の名前。
+ * 人物はこの話で台詞を言う人だけ）。**知らせは呼ぶ側が1回の読み上げで1回出す**（文ごとに出さない）
  */
+export interface VoicePlan {
+  units: VoicePlanUnit[];
+  unresolved: string[];
+}
+
 export function voicePlanUnits(input: {
   sentences: readonly ReadingSentence[];
   dialogues: readonly CastDialogue[];
   cast: readonly CastEntry[];
   assignment: VoiceAssignmentFile;
   speakers: readonly VoiceSpeaker[];
+  /** 話者の一覧を引いたエンジン（割り当ての印と照らす） */
+  engine: VoiceEngineId;
   /** 人物の id → 名前（名札に使う。推定の名前より新しい） */
   names?: ReadonlyMap<string, string>;
-}): VoicePlanUnit[] | undefined {
+}): VoicePlan | undefined {
   const first = input.speakers[0]?.styles[0]?.id;
   if (first === undefined) return undefined;
-  const narrator = resolveVoiceRef(input.assignment.narrator, input.speakers) ?? first;
-  const dialogueDefault =
-    resolveVoiceRef(input.assignment.dialogueDefault, input.speakers) ?? narrator;
+  const unresolved: string[] = [];
+  /** 割り当てがあるのに引けなかった枠を覚える（割り当てていない枠は数えない） */
+  const resolve = (ref: VoiceRef | undefined, slot: string): number | undefined => {
+    const id = resolveVoiceRef(ref, input.speakers, input.engine);
+    if (ref && id === undefined && !unresolved.includes(slot)) unresolved.push(slot);
+    return id;
+  };
+  const narrator = resolve(input.assignment.narrator, "語り手") ?? first;
   const lookup = castLookup(input.cast, input.dialogues);
+  // 台詞の既定は、台詞が1つも無い話では使わない（使わない声の知らせを出さない）
+  const hasDialogue = input.sentences.some((sentence) => sentence.kind === "dialogue");
+  const dialogueDefault =
+    (hasDialogue ? resolve(input.assignment.dialogueDefault, "台詞の既定") : undefined) ?? narrator;
 
   const units: VoicePlanUnit[] = [];
   let previous: ReadingSentence | undefined;
@@ -1172,9 +1233,10 @@ export function voicePlanUnits(input: {
         emotion = entry.emotion;
         intensity = entry.intensity;
         if (entry.speakerId) {
-          const own = resolveVoiceRef(input.assignment.characters[entry.speakerId], input.speakers);
-          if (own !== undefined) styleId = own;
           who = input.names?.get(entry.speakerId) ?? entry.speakerName ?? "台詞";
+          const ref = input.assignment.characters[entry.speakerId];
+          const own = resolve(ref, input.names?.get(entry.speakerId) ?? ref?.characterName ?? who);
+          if (own !== undefined) styleId = own;
         }
       }
     }
@@ -1186,6 +1248,7 @@ export function voicePlanUnits(input: {
     );
     units.push({
       speech: sentence.speech,
+      engine: input.engine,
       styleId: picked.styleId,
       emotion,
       intensity,
@@ -1195,7 +1258,19 @@ export function voicePlanUnits(input: {
     });
     previous = sentence;
   }
-  return units;
+  return { units, unresolved };
+}
+
+/**
+ * 引けなかった声の一言（0.146.0。1回の読み上げ・書き出しで1回出す）。
+ * 何の声で読むかと、直す場所（［声の割り当て］）を書く
+ */
+export function unresolvedVoiceNotice(unresolved: readonly string[], engineLabel: string): string | undefined {
+  if (unresolved.length === 0) return undefined;
+  return (
+    `割り当てた声のうち ${unresolved.join("・")} の声が ${engineLabel} に見つからないので、代わりの声（台詞の既定か語りの声）で読みます` +
+    `（ほかのエンジンで選んだ声か、入れ直して消えた声です）。［声の割り当て］で ${engineLabel} の声を選び直してください。`
+  );
 }
 
 function gapBefore(previous: ReadingSentence | undefined, sentence: ReadingSentence): number {

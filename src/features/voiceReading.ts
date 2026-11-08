@@ -33,6 +33,7 @@ import {
   editCastEntry,
   mergeCastEntries,
   parseCastResult,
+  unresolvedVoiceNotice,
   validateCastSpeakers,
   voicePlanUnits,
   type CastChunk,
@@ -49,10 +50,14 @@ import {
   saveVoiceCast,
 } from "../core/voiceCastStore";
 import {
-  DEFAULT_VOICE_ENGINE_URL,
+  DEFAULT_ENGINE_URLS,
+  ENGINE_URL_SETTING,
   engineHostOutsideThisPc,
-  normalizeEngineUrl,
+  LEGACY_ENGINE_URL_SETTING,
+  resolveEngineUrl,
   SynthesisCache,
+  VOICE_ENGINE_LABEL,
+  type VoiceEngineId,
   synthesisKey,
   VOICE_EMOTIONS,
   VOICE_INTENSITIES,
@@ -79,6 +84,8 @@ import {
   type VoiceCastStage,
   type VoiceCastStageRequest,
 } from "../prompts/voiceCast";
+import { readEngineUrlSettings } from "./voiceEngineSettings";
+import { slowPaceNotice, SynthesisPaceWatch, wavSeconds } from "../core/voicePace";
 
 /**
  * 人物の声で朗読する（AivisSpeech／VOICEVOX。設計書6.42.3）。
@@ -94,8 +101,13 @@ import {
  * **本文へは一切書かない。** 推定の結果と声の割り当ては `.aiwriter/` の別のファイル。
  */
 
-/** 設定の鍵（接続先） */
-export const VOICE_ENGINE_URL_SETTING = "readAloud.voiceEngineUrl";
+/** 古い設定の鍵（0.145 まで。エンジン1つ分の接続先。消さずに読む） */
+export const VOICE_ENGINE_URL_SETTING = LEGACY_ENGINE_URL_SETTING;
+
+/** 知らせに出す、そのエンジンの接続先の設定の名前 */
+export function engineUrlSettingLabel(engine: VoiceEngineId): string {
+  return `novelai.${ENGINE_URL_SETTING[engine]}`;
+}
 
 /** 先に作っておく文の数（いま頼まれた文を含めない） */
 const PREFETCH_AHEAD = 3;
@@ -103,15 +115,25 @@ const PREFETCH_AHEAD = 3;
 const SYNTH_CONCURRENCY = 2;
 /** 話者の一覧を引き直すまでの間。作者が話者を足したら、少し待てば並ぶ */
 const SPEAKERS_TTL_MS = 30_000;
+/** 届かなかったときに、もう片方のエンジンへ問い合わせて待つ長さ（窓が出るのを待たせすぎない） */
+export const OTHER_ENGINE_PROBE_MS = 1_500;
 
 /**
  * 音を作る係（拡張機能に1つ）。合成の控え・話者の一覧の控え・作っている途中の
  * 頼みを持つ。
+ *
+ * **エンジンを鍵に持つ**（0.146.0）。接続先・話者の一覧の控えはエンジンごと、音を作る口は
+ * 文の印（`VoicePlanUnit.engine`）で選ぶ。合成の控えの鍵（`synthesisKey`）には前から接続先が
+ * 入っているので、エンジンが違えば別の控えになる。いまは1回の読み上げで1つのエンジンだが、
+ * 人物ごとに混ぜる形（2段目）でも、この係はそのまま2つのエンジンを同時に扱える。
  */
 export class VoiceReadingService {
   private readonly cache = new SynthesisCache();
   private readonly inFlight = new Map<string, Promise<Uint8Array>>();
-  private speakersCache: { url: string; at: number; list: VoiceSpeaker[] } | undefined;
+  private readonly speakersCache = new Map<
+    VoiceEngineId,
+    { url: string; at: number; list: VoiceSpeaker[] }
+  >();
   private running = 0;
   private readonly waiting: Array<() => void> = [];
 
@@ -119,11 +141,20 @@ export class VoiceReadingService {
   private readonly allowedRemoteHosts = new Set<string>();
   private readonly askingRemoteHosts = new Map<string, Promise<boolean>>();
 
+  /** 声づくりが読む速さに追いついているかの見張り（1回の読み上げごとに始め直す。0.146.0） */
+  private readonly pace = new SynthesisPaceWatch();
+  /** 見張りが出した知らせ。次の音の答えに添えて1回だけ渡す */
+  private slowNotice: string | undefined;
+  /** いちばん最後に音ができた時刻（ミリ秒。並べて頼んだときの待ちを数えないため） */
+  private lastSynthEndAt = 0;
+
   constructor(
-    private readonly engineUrl: () => string | undefined = readEngineUrl,
+    private readonly engineUrl: (engine: VoiceEngineId) => string | undefined = readEngineUrl,
     private readonly fetchImpl?: FetchLike,
     /** この PC の外のホストへ本文を送る前の確認。テストで差し替える */
-    private readonly confirmRemoteHost: (host: string) => Promise<boolean> = askSendToRemoteHost
+    private readonly confirmRemoteHost: (host: string) => Promise<boolean> = askSendToRemoteHost,
+    /** 時刻（ミリ秒）。声づくりにかかった時間を測る。テストで差し替える */
+    private readonly now: () => number = () => Date.now()
   ) {}
 
   /**
@@ -131,9 +162,12 @@ export class VoiceReadingService {
    * 最初の1回だけ確認の窓を出す。**断られたら本文を送らない。**
    * 覚えるのはホストごと・この起動の間だけ（設定の宛先を書き換えられても、別のホストなら
    * もう一度訊く）。同時に何文も頼まれても窓は1つだけ出す。
+   * 見るのはそのエンジンの接続先（エンジンごとに別のホストを書ける）。
    */
-  private async mayCarryText(): Promise<{ ok: true } | { ok: false; host: string }> {
-    const url = this.engineUrl();
+  private async mayCarryText(
+    engine: VoiceEngineId
+  ): Promise<{ ok: true } | { ok: false; host: string }> {
+    const url = this.engineUrl(engine);
     const host = url ? engineHostOutsideThisPc(url) : undefined;
     if (host === undefined || this.allowedRemoteHosts.has(host)) return { ok: true };
     let asking = this.askingRemoteHosts.get(host);
@@ -150,13 +184,51 @@ export class VoiceReadingService {
    * 本文を運ぶ前の確認（`mayCarryText`）を、音の書き出し（設計書6.42.4）からも通すための口。
    * 画面の朗読と同じ覚え方（ホストごと・この起動の間）を使う
    */
-  allowCarryText(): Promise<{ ok: true } | { ok: false; host: string }> {
-    return this.mayCarryText();
+  allowCarryText(engine: VoiceEngineId): Promise<{ ok: true } | { ok: false; host: string }> {
+    return this.mayCarryText(engine);
   }
 
-  /** いまの接続先のエンジンへの口（書き出しでライセンス・規約を引くのに使う） */
-  engineClient(): VoiceEngineClient {
-    return this.client();
+  /**
+   * 選んだエンジンに届かなかったとき、**もう片方のエンジンが動いているかを1回だけ短く問い合わせる**
+   * （0.146.0。ノートPCの実機確認：設定は VOICEVOX を指していたが起動しておらず、AivisSpeech は
+   * 動いていたのに読まなかった）。前もっては問い合わせない決まりはそのまま——呼ぶのは読み始めて
+   * 届かなかったときだけ。
+   *
+   * - 問い合わせるのは名乗り（`/engine_manifest`。本文は運ばない）。`timeoutMs` で切る
+   * - もう片方の接続先がこの PC の外なら、**問い合わせる前に**本文を送る前と同じ確認を通す
+   *   （そちらで読むと本文が送られるので、確認なしに外へ繋がない）。断られたら問い合わせない
+   * - 動いていればそのエンジンと宛先（`127.0.0.1:10101` の形）、動いていなければ undefined。
+   *   失敗の中身はログだけ（原因は決め打ちしない）
+   */
+  async otherEngineRunning(
+    engine: VoiceEngineId,
+    timeoutMs = OTHER_ENGINE_PROBE_MS
+  ): Promise<{ engine: VoiceEngineId; host: string } | undefined> {
+    const other: VoiceEngineId = engine === "aivisspeech" ? "voicevox" : "aivisspeech";
+    const url = this.engineUrl(other);
+    if (!url) return undefined;
+    const allowed = await this.mayCarryText(other);
+    if (!allowed.ok) return undefined;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      await new VoiceEngineClient(url, this.fetchImpl, other).engineManifest(controller.signal);
+      return { engine: other, host: new URL(url).host };
+    } catch (error) {
+      logStep(
+        `人物の声：もう片方のエンジン（${VOICE_ENGINE_LABEL[other]}・${url}）も応答しませんでした（${
+          error instanceof Error ? error.message : String(error)
+        }）`
+      );
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** そのエンジンへの口（書き出しでライセンス・規約を引くのに使う） */
+  engineClient(engine: VoiceEngineId): VoiceEngineClient {
+    return this.client(engine);
   }
 
   /**
@@ -166,31 +238,33 @@ export class VoiceReadingService {
    * 同時に頼む数は朗読と同じ枠（`limited`）で絞る
    */
   synthesizeForExport(unit: VoicePlanUnit, rate: number, signal: AbortSignal): Promise<Uint8Array> {
-    const client = this.client();
+    const client = this.client(unit.engine);
     const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate);
     const cached = this.cache.get(synthesisKey(client.baseUrl, unit.styleId, unit.speech, params));
     if (cached) return Promise.resolve(cached);
     return this.limited(() => {
-      if (signal.aborted) throw new VoiceEngineError("aborted", "中止しました");
+      if (signal.aborted) throw new VoiceEngineError("aborted", "中止しました", undefined, unit.engine);
       return client.speak(unit.speech, unit.styleId, params, signal);
     });
   }
 
-  private client(): VoiceEngineClient {
-    const url = this.engineUrl();
+  private client(engine: VoiceEngineId): VoiceEngineClient {
+    const url = this.engineUrl(engine);
     if (!url) {
       throw new VoiceEngineError(
         "badResponse",
-        "音声合成のエンジンの接続先（novelai.readAloud.voiceEngineUrl）が読めません。http://127.0.0.1:10101 の形で書いてください"
+        `${VOICE_ENGINE_LABEL[engine]}の接続先（${engineUrlSettingLabel(engine)}）が読めません。${DEFAULT_ENGINE_URLS[engine]} の形で書いてください`,
+        undefined,
+        engine
       );
     }
-    return new VoiceEngineClient(url, this.fetchImpl);
+    return new VoiceEngineClient(url, this.fetchImpl, engine);
   }
 
-  /** 話者の一覧（少しのあいだ控える） */
-  async speakers(force = false): Promise<VoiceSpeaker[]> {
-    const client = this.client();
-    const cached = this.speakersCache;
+  /** そのエンジンの話者の一覧（少しのあいだ控える。控えはエンジンごと） */
+  async speakers(engine: VoiceEngineId, force = false): Promise<VoiceSpeaker[]> {
+    const client = this.client(engine);
+    const cached = this.speakersCache.get(engine);
     if (
       !force &&
       cached &&
@@ -200,22 +274,33 @@ export class VoiceReadingService {
       return cached.list;
     }
     const list = await client.speakers();
-    this.speakersCache = { url: client.baseUrl, at: Date.now(), list };
+    this.speakersCache.set(engine, { url: client.baseUrl, at: Date.now(), list });
     return list;
   }
 
   /**
-   * 文ごとの声を決める。**失敗は作者向けの文で返す**（投げない）
+   * 文ごとの声を決める。**失敗は作者向けの文で返す**（投げない）。
+   *
+   * 割り当てた声がこのエンジンで引けなければ、代わりの声で読み、`notice` に一言を添えて
+   * 返す（0.146.0。出すのは呼ぶ側で、1回の読み上げで1回）
    */
   async plan(
     work: WorkEntry | undefined,
     episodePath: string,
     text: string,
-    sentences: readonly ReadingSentence[]
-  ): Promise<{ units: VoicePlanUnit[] } | VoiceProblem> {
+    sentences: readonly ReadingSentence[],
+    engine: VoiceEngineId,
+    /** `start`：［▶ 読む］で読み始めたときの計画か（声づくりの速さの見張りを始め直す） */
+    options: { start?: boolean } = {}
+  ): Promise<{ units: VoicePlanUnit[]; notice?: string } | VoiceProblem> {
+    if (options.start) {
+      // 1回の読み上げで1回だけ知らせる。覚えずに、読み始めるたびに見直す（作者の決定 2026-11-08）
+      this.pace.reset();
+      this.slowNotice = undefined;
+    }
     let speakers: VoiceSpeaker[];
     try {
-      speakers = await this.speakers();
+      speakers = await this.speakers(engine);
     } catch (error) {
       return engineFailure(error, work);
     }
@@ -232,21 +317,23 @@ export class VoiceReadingService {
         return { problem: error instanceof Error ? error.message : String(error) };
       }
     }
-    const units = voicePlanUnits({
+    const planned = voicePlanUnits({
       sentences,
       dialogues: castDialogues(text),
       cast,
       assignment,
       speakers,
+      engine,
       names,
     });
-    if (!units) {
+    if (!planned) {
       return {
-        problem:
-          "音声合成のエンジンに話者が1人も見つかりませんでした。AivisSpeech（または VOICEVOX）で話者（音声合成モデル）を入れてから、もう一度押してください。",
+        problem: `音声合成のエンジン（${VOICE_ENGINE_LABEL[engine]}）に話者が1人も見つかりませんでした。${VOICE_ENGINE_LABEL[engine]}で話者（音声合成モデル）を入れてから、もう一度押してください。`,
       };
     }
-    return { units };
+    const notice = unresolvedVoiceNotice(planned.unresolved, VOICE_ENGINE_LABEL[engine]);
+    if (notice) logStep(`人物の声：${notice}`);
+    return notice ? { units: planned.units, notice } : { units: planned.units };
   }
 
   /**
@@ -257,13 +344,13 @@ export class VoiceReadingService {
     index: number,
     rate: number,
     work?: WorkEntry
-  ): Promise<{ wav: Uint8Array } | VoiceProblem> {
+  ): Promise<{ wav: Uint8Array; slowNotice?: string } | VoiceProblem> {
     const unit = units[index];
     if (!unit) return { problem: "読む文が見つかりません" };
-    const allowed = await this.mayCarryText();
+    const allowed = await this.mayCarryText(unit.engine);
     if (!allowed.ok) {
       return {
-        problem: `本文を ${allowed.host} へ送ることを許可していないので、人物の声では読めません。この PC の外のホストへ送りたくなければ、設定 novelai.readAloud.voiceEngineUrl を http://127.0.0.1:10101 に戻すか、［声］で OS の声を選んでください。`,
+        problem: `本文を ${allowed.host} へ送ることを許可していないので、人物の声では読めません。この PC の外のホストへ送りたくなければ、設定 ${engineUrlSettingLabel(unit.engine)} を ${DEFAULT_ENGINE_URLS[unit.engine]} にするか、［声］で OS の声を選んでください。`,
       };
     }
     let current: Promise<Uint8Array>;
@@ -284,7 +371,11 @@ export class VoiceReadingService {
       }
     }
     try {
-      return { wav: await current };
+      const wav = await current;
+      // 声づくりが追いつかない知らせ（先読みの文で出たものも、次の答えに添えて1回だけ）
+      const slowNotice = this.slowNotice;
+      this.slowNotice = undefined;
+      return slowNotice ? { wav, slowNotice } : { wav };
     } catch (error) {
       return engineFailure(error, work);
     }
@@ -292,14 +383,32 @@ export class VoiceReadingService {
 
   /** 1文の音。控え → 作っている途中 → 新しく作る の順に見る */
   synthesize(unit: VoicePlanUnit, rate: number): Promise<Uint8Array> {
-    const client = this.client();
+    const client = this.client(unit.engine);
     const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate);
+    // 鍵には接続先が入る（エンジンが違えば別の音として控える）
     const key = synthesisKey(client.baseUrl, unit.styleId, unit.speech, params);
     const cached = this.cache.get(key);
     if (cached) return Promise.resolve(cached);
     const pending = this.inFlight.get(key);
     if (pending) return pending;
-    const job = this.limited(() => client.speak(unit.speech, unit.styleId, params))
+    const job = this.limited(async () => {
+      /*
+        作るのにかかった時間を測る（0.146.0）。測り始めは**枠が空いて頼んだとき**——枠を待った
+        時間まで数えると、先読みを並べただけで遅く見える。控えから出した音は数えない
+      */
+      const startedAt = this.now();
+      const wav = await client.speak(unit.speech, unit.styleId, params);
+      const endedAt = this.now();
+      /*
+        **エンジンは1つずつ作る**ので、2つ並べて頼むと、後の頼みは前の音ができるまで
+        エンジンの中で待つ。頼んでからの時間で測ると、待ちの分だけ倍近く遅く見える（速い PC でも
+        知らせてしまう）。そこで、前の音ができた時刻より前は数えない（エンジンが1文に使った時間）
+      */
+      const busyFrom = Math.max(startedAt, this.lastSynthEndAt);
+      this.lastSynthEndAt = Math.max(this.lastSynthEndAt, endedAt);
+      this.notePace(unit.engine, (endedAt - busyFrom) / 1000, wav);
+      return wav;
+    })
       .then((wav) => {
         this.cache.set(key, wav);
         return wav;
@@ -307,6 +416,18 @@ export class VoiceReadingService {
       .finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, job);
     return job;
+  }
+
+  /** 1文の速さを見張りへ。追いつかない状態が続いたら、知らせを1回ぶん貯める */
+  private notePace(engine: VoiceEngineId, elapsedSeconds: number, wav: Uint8Array): void {
+    const audioSeconds = wavSeconds(wav);
+    const slow = this.pace.record(elapsedSeconds, audioSeconds);
+    if (!slow) return;
+    this.slowNotice = slowPaceNotice(VOICE_ENGINE_LABEL[engine], slow);
+    logStep(
+      `人物の声：声づくりが読む速さに追いついていません（${VOICE_ENGINE_LABEL[engine]}・` +
+        `1文あたり ${slow.audioSeconds.toFixed(2)}秒の音に ${slow.elapsedSeconds.toFixed(2)}秒）`
+    );
   }
 
   /** 同時に頼む数を絞る */
@@ -363,7 +484,7 @@ async function askSendToRemoteHost(host: string): Promise<boolean> {
       detail:
         `人物の声で読むために、読む文を ${label}の音声合成のエンジンへ送ります。` +
         "このホストはこの PC の外にあるため、送った文は相手に届きます。" +
-        "心当たりのないホストなら、送らないでください（設定 novelai.readAloud.voiceEngineUrl で変えられます）。",
+        "心当たりのないホストなら、送らないでください（接続先は設定 novelai.readAloud.aivisSpeechUrl・novelai.readAloud.voicevoxUrl で変えられます）。",
     },
     send,
     sendAndRemember
@@ -388,11 +509,8 @@ export function voiceReadingService(): VoiceReadingService {
   return shared;
 }
 
-function readEngineUrl(): string | undefined {
-  const raw = vscode.workspace
-    .getConfiguration("novelai")
-    .get<string>(VOICE_ENGINE_URL_SETTING, DEFAULT_VOICE_ENGINE_URL);
-  return normalizeEngineUrl(raw);
+function readEngineUrl(engine: VoiceEngineId): string | undefined {
+  return resolveEngineUrl(engine, readEngineUrlSettings()).url;
 }
 
 /**
@@ -416,8 +534,11 @@ function engineFailure(error: unknown, work: WorkEntry | undefined): VoiceProble
  * ［OSの声で読む］の付く読む道は、原稿エディターの askUseOsVoice が出す。
  * 返すのは窓に出した文（書き出しの結果の理由に使う）
  */
-export function showVoiceEngineDown(route: Exclude<VoiceEngineDownRoute, "read">): string {
-  const prompt = voiceEngineDownPrompt(route);
+export function showVoiceEngineDown(
+  route: Exclude<VoiceEngineDownRoute, "read">,
+  engine: VoiceEngineId
+): string {
+  const prompt = voiceEngineDownPrompt(route, engine);
   void Promise.resolve(
     vscode.window.showWarningMessage(prompt.message, { modal: true, detail: prompt.detail })
   ).catch(() => undefined);
@@ -1062,21 +1183,32 @@ export async function manageVoiceCast(target: VoiceCastTarget): Promise<void> {
   }
 }
 
-/** 声の割り当て（語り手・台詞の既定・人物ごと）。QuickPick で選ぶ */
-export async function assignVoices(work: WorkEntry, service: VoiceReadingService): Promise<void> {
+/**
+ * 声の割り当て（語り手・台詞の既定・人物ごと）。QuickPick で選ぶ。
+ *
+ * 選べるのは［声］で選んだエンジン（`engine`）の話者。**選んだ声にはそのエンジンの印を付けて
+ * 書く**（0.146.0）。ほかのエンジンで選んだ声は、一覧に「〇〇の声」と添えて見せる（消さない。
+ * 人物ごとにエンジンを混ぜる形〔2段目〕では、そのまま使う声になる）
+ */
+export async function assignVoices(
+  work: WorkEntry,
+  service: VoiceReadingService,
+  engine: VoiceEngineId
+): Promise<void> {
+  const engineLabel = VOICE_ENGINE_LABEL[engine];
   let speakers: VoiceSpeaker[];
   try {
-    speakers = await service.speakers(true);
+    speakers = await service.speakers(engine, true);
   } catch (error) {
     // ログは窓のときも残す（describeEngineFailure が書く。実装ルール5）
     const problem = describeEngineFailure(error, work);
-    if (isEngineUnreachable(error)) showVoiceEngineDown("assign");
+    if (isEngineUnreachable(error)) showVoiceEngineDown("assign", engine);
     else void warnWithLog(problem);
     return;
   }
   if (speakers.length === 0) {
     void warnWithLog(
-      "音声合成のエンジンに話者が1人も見つかりませんでした。AivisSpeech（または VOICEVOX）で話者を入れてから、もう一度押してください。"
+      `音声合成のエンジン（${engineLabel}）に話者が1人も見つかりませんでした。${engineLabel}で話者を入れてから、もう一度押してください。`
     );
     return;
   }
@@ -1096,8 +1228,13 @@ export async function assignVoices(work: WorkEntry, service: VoiceReadingService
       return;
     }
     const file = loaded.file;
-    const label = (ref: VoiceRef | undefined): string =>
-      ref ? `${ref.speakerName}／${ref.styleName}` : "未選択";
+    const label = (ref: VoiceRef | undefined): string => {
+      if (!ref) return "未選択";
+      const name = `${ref.speakerName}／${ref.styleName}`;
+      // ほかのエンジンの声・前の版で選んだ声（印が無い）は、いまのエンジンでは読めないことがある
+      if (ref.engine === undefined) return `${name}（前の版で選んだ声）`;
+      return ref.engine === engine ? name : `${name}（${VOICE_ENGINE_LABEL[ref.engine]}の声）`;
+    };
     const targets: Array<vscode.QuickPickItem & { slot: "narrator" | "dialogueDefault" | Character }> = [
       { label: "語り手（地の文）", description: label(file.narrator), slot: "narrator" },
       {
@@ -1112,7 +1249,7 @@ export async function assignVoices(work: WorkEntry, service: VoiceReadingService
       })),
     ];
     const picked = await vscode.window.showQuickPick([...targets, cancelItem("閉じる")], {
-      title: "声の割り当て（この作品の声。選ぶとエンジンの声から選べます）",
+      title: `声の割り当て（この作品の声。選ぶと ${engineLabel} の声から選べます）`,
       matchOnDescription: true,
     });
     if (!picked || isCancelItem(picked) || !("slot" in picked)) return;
@@ -1127,12 +1264,13 @@ export async function assignVoices(work: WorkEntry, service: VoiceReadingService
               speakerName: speaker.name,
               styleName: style.name,
               styleId: style.id,
+              engine,
             } satisfies VoiceRef,
           }))
         ),
         cancelItem("戻る"),
       ],
-      { title: `${picked.label}の声`, matchOnDescription: true }
+      { title: `${picked.label}の声（${engineLabel}）`, matchOnDescription: true }
     );
     if (!voice || isCancelItem(voice) || !("ref" in voice)) continue;
     const next: VoiceAssignmentFile = { ...file, characters: { ...file.characters } };

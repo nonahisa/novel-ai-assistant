@@ -175,11 +175,11 @@ async function openVoiceReading(session: E2ESession): Promise<Frame> {
   await clickToolButton(frame, "aloudToggle");
   // 「人物の声」が選べる（拡張機能が使えると知らせてくる）まで待ってから選ぶ。前の選択を覚えていれば、もう選ばれている
   await waitUntil(
-    async () => (await frame.locator('#aloudEngine option[value="engine"]').isDisabled().catch(() => true)) === false,
+    async () => (await frame.locator('#aloudEngine option[value="aivisspeech"]').isDisabled().catch(() => true)) === false,
     "［声］で「人物の声」が選べる",
     20_000
   );
-  if ((await frame.locator("#aloudEngine").inputValue()) !== "engine") await frame.locator("#aloudEngine").selectOption("engine");
+  if ((await frame.locator("#aloudEngine").inputValue()) !== "aivisspeech") await frame.locator("#aloudEngine").selectOption("aivisspeech");
   await waitUntil(async () => !(await frame.locator("#aloudPlay").isDisabled()), "［▶ 読む］が押せる", 20_000).catch(async (error: unknown) => {
     throw new Error(`${String(error)}（列の注：${JSON.stringify(await frame.locator("#aloudNote").innerText().catch(() => ""))}）`);
   });
@@ -296,7 +296,8 @@ test("人物の声の接続先がこの PC の外なら［▶ 読む］で送り
         await closeDialog(session.page);
         await holdsFor(async () => textCarrying(fake) === beforeAskedAgain, "外したあとの窓を閉じれば、本文は届かない", 3_000);
       },
-      // 接続先は使い捨てのユーザー設定へ（作者の設定には触れない）
+      // 接続先は使い捨てのユーザー設定へ（作者の設定には触れない）。0.146.0 からは古い設定として読まれ、
+      // 口が 50021 でないので AivisSpeech の接続先になる（前の版の設定のまま使えることも、ここで見る）
       { settings: { "novelai.readAloud.voiceEngineUrl": `http://${fake.host}` } }
     );
   } finally {

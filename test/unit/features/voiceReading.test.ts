@@ -179,7 +179,7 @@ describe("偽のエンジンで朗読の音を作る", () => {
     };
     const service = new VoiceReadingService(() => url);
     const sentences = buildReadingPlan(TEXT, "curly", [], { splitDialogue: true });
-    const planned = await service.plan(work, "/w/01.txt", TEXT, sentences);
+    const planned = await service.plan(work, "/w/01.txt", TEXT, sentences, "aivisspeech");
     if (!("units" in planned)) throw new Error(planned.problem);
     expect(planned.units.map((u) => [u.speech, u.who, u.styleId])).toEqual([
       ["「やった！」", "灯", 888753761], // まいの「上機嫌」へ
@@ -222,7 +222,7 @@ describe("偽のエンジンで朗読の音を作る", () => {
     const url = engine.url;
     const service = new VoiceReadingService(() => url);
     const sentences = buildReadingPlan("地の文。", "curly", [], { splitDialogue: true });
-    const planned = await service.plan(undefined, "/x.txt", "地の文。", sentences);
+    const planned = await service.plan(undefined, "/x.txt", "地の文。", sentences, "aivisspeech");
     if (!("units" in planned)) throw new Error(planned.problem);
     await service.audio(planned.units, 0, 1);
     await service.audio(planned.units, 0, 1.5);
@@ -238,9 +238,12 @@ describe("偽のエンジンで朗読の音を作る", () => {
     await engine.close();
     engine = undefined;
     const service = new VoiceReadingService(() => url);
-    const planned = await service.plan(undefined, "/x.txt", "文。", buildReadingPlan("文。", "curly"));
+    const planned = await service.plan(undefined, "/x.txt", "文。", buildReadingPlan("文。", "curly"), "aivisspeech");
     expect(planned).toEqual({
-      problem: expect.stringContaining("AivisSpeech（または VOICEVOX）を起動してから、もう一度押してください"),
+      // どちらのエンジンかを名指しする（0.146.0）
+      problem: expect.stringContaining(
+        "音声合成のエンジン（AivisSpeech）に繋がりませんでした。AivisSpeech を起動してから、もう一度押してください"
+      ),
       // 届かなかったことを印で返す。原稿エディターはこの印で画面の真ん中に窓を出す
       // （右下の知らせ・列の小さな文では、作者がしばらく気づかなかった。2026-11-07 作者の実機確認）
       engineDown: true,
@@ -251,7 +254,7 @@ describe("偽のエンジンで朗読の音を作る", () => {
     engine = await startFakeVoiceEngine();
     const url = engine.url;
     const service = new VoiceReadingService(() => url);
-    const planned = await service.plan(undefined, "/x.txt", "文。", buildReadingPlan("文。", "curly"));
+    const planned = await service.plan(undefined, "/x.txt", "文。", buildReadingPlan("文。", "curly"), "aivisspeech");
     if (!("units" in planned)) throw new Error(planned.problem);
     await engine.close();
     engine = undefined;
@@ -271,16 +274,16 @@ describe("偽のエンジンで朗読の音を作る", () => {
       return undefined;
     }) as typeof window.showWarningMessage;
     try {
-      await assignVoices(work, new VoiceReadingService(() => url));
+      await assignVoices(work, new VoiceReadingService(() => url), "aivisspeech");
     } finally {
       window.showWarningMessage = original;
     }
     expect(state.warnings).toEqual([]);
     expect(shown).toHaveLength(1);
-    expect(shown[0].message).toContain("音声合成のエンジンに繋がりませんでした");
+    expect(shown[0].message).toContain("音声合成のエンジン（AivisSpeech）に繋がりませんでした");
     expect(shown[0].options).toMatchObject({
       modal: true,
-      detail: expect.stringContaining("［声の割り当て］"),
+      detail: expect.stringContaining("AivisSpeech を起動してから、もう一度［声の割り当て］"),
     });
     // 割り当ての道では OS の声で読めないので、ボタンは付けない（閉じるだけ）
     expect(shown[0].items).toEqual([]);
@@ -298,7 +301,7 @@ describe("偽のエンジンで朗読の音を作る", () => {
       return undefined;
     }) as typeof window.showWarningMessage;
     try {
-      await assignVoices(work, service);
+      await assignVoices(work, service, "aivisspeech");
     } finally {
       window.showWarningMessage = original;
     }
@@ -328,7 +331,7 @@ describe("この PC の外のエンジンへ本文を送る前の確認", () => 
   }
   async function planned(service: InstanceType<typeof VoiceReadingService>) {
     const sentences = buildReadingPlan("地の文。", "curly", [], { splitDialogue: true });
-    const result = await service.plan(undefined, "/x.txt", "地の文。", sentences);
+    const result = await service.plan(undefined, "/x.txt", "地の文。", sentences, "aivisspeech");
     if (!("units" in result)) throw new Error(result.problem);
     return result.units;
   }

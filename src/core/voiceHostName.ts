@@ -4,7 +4,7 @@ import { isWebRuntime } from "./runtime";
  * 人物の声で本文を外へ送る前の確認の窓に出す、送り先の名前（設計書6.42.3。実機確認リスト 24行、
  * 作者の答え 2026-11-07 A）。
  *
- * 設定（`novelai.readAloud.voiceEngineUrl`）に番地で書くと、窓には「192.168.3.15:10101」としか
+ * 設定（`novelai.readAloud.aivisSpeechUrl`・`voicevoxUrl`。0.145 までは `voiceEngineUrl`）に番地で書くと、窓には「192.168.3.15:10101」としか
  * 出ず、作者にはどの機械か分からない。そこで OS に名前を問い合わせ、**名前を先に、番地とポートを
  * 括弧で添える**（「書斎のPC（192.168.3.15:10101）」）。
  *
