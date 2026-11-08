@@ -10,10 +10,13 @@
  * 数え方そのものは単体テスト（`core/kindMeasure.test.ts`・`core/celebrations.test.ts`）が見ている。
  * ここで見るのは**本物の画面の下段に出る字**である。見た目の良し悪しは見ていない。**AI は呼ばない。**
  */
+import { readdir } from "node:fs/promises";
+import * as path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { runCommand, waitForQuickInput } from "./support/quickInput";
 import { composeText, footText, manuscriptFrames, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { activateTab, pickQuickPickRow } from "./support/workbenchDom";
@@ -100,11 +103,23 @@ test("下段は「この話で今日 +N字」になり、第1話で1日の目標
       await activateTab(page, "001_はじまり.txt");
       await waitUntil(async () => (await composeText(firstFrame)).includes("一行目の文"), "第1話の面が前に出る", 15_000);
       await placeCaretAfter(firstFrame, "一行目の文。");
-      // **最初の保存は、その日の起点（基準線）を置くだけで、書いた量には数えない**（統計の作り）。
-      // 先に1字打って保存し、起点を置いてから、目標を超えて打つ
-      await page.keyboard.insertText("。");
+      /*
+        **最初の保存は、起点（基準線）を置くだけで、書いた量には数えない**（統計の作り、設計書6.3.2）。
+        そこで、何も打たずに保存して起点を置き、**起点が置かれたことを記録のファイルで確かめてから**
+        目標を超えて打つ。
+
+        以前は「1字（。）打って保存 → 下の欄の『保存しました』を待つ」で起点を置いていたが、
+        3回に2回 +31字 で落ちた（母艦・0.147.0、2026-11-09）。Ctrl+S は VS Code 本体の保存と
+        原稿エディターの［保存］の両方を走らせる（`manuscriptEditorHtml.ts` の keydown。本体の保存を
+        止めない作り）。本体の保存が「。」が文書へ届く前に走ると、**変更の無い文書でも VS Code は
+        保存して onDidSave を出す**ので、そこで「。」を打つ前の13字に起点が置かれ、続く［保存］で
+        「。」の1字が数えられる。どちらに転ぶかは便の届く速さ次第で、打った字は失われず、
+        数え方も作者が打った字のとおり（31字打てば +31字）なので、製品の誤りではない。
+        起点を打つ前の姿に決めてしまえば、本体の保存がどちらに転んでも数は変わらない
+      */
       await page.keyboard.press("ControlOrMeta+KeyS");
-      await waitUntil(async () => (await footText(firstFrame, "note")).includes("保存しました"), "起点を置く保存が通る", 15_000);
+      const baseline = await waitForStatsBaseline(session.workFolder, 13);
+      expect(baseline.days ?? []).toEqual([]);
       await page.keyboard.insertText("あ".repeat(30));
       await page.keyboard.press("ControlOrMeta+KeyS");
 
@@ -141,6 +156,40 @@ test("下段は「この話で今日 +N字」になり、第1話で1日の目標
     { settings: { "novelai.stats.dailyGoal": 20 } }
   );
 });
+
+/** 執筆量の記録（`.aiwriter/stats/<環境>.json`）のうち、ここで見る所だけ */
+interface StatsFile {
+  baseline?: { net: number; fileCount: number };
+  days?: unknown[];
+}
+
+/**
+ * 執筆量の記録に、作品全体 `net` 字の起点が置かれるまで待つ。
+ *
+ * 記録は環境ごとに1つ（ファイル名は環境の名前で決まる）なので、フォルダーの中の .json を読む。
+ * 記録のファイルは製品が一時ファイルからの置き換えで書くが、念のため無い・途中の瞬間は読み直す
+ */
+async function waitForStatsBaseline(workFolder: string, net: number): Promise<StatsFile> {
+  const dir = path.join(workFolder, ".aiwriter", "stats");
+  let last: StatsFile | undefined;
+  const read = async (): Promise<StatsFile | undefined> => {
+    const names = await readdir(dir).catch(() => [] as string[]);
+    const name = names.find((entry) => entry.endsWith(".json"));
+    return name ? readJsonWhenPresent<StatsFile>(path.join(dir, name)) : undefined;
+  };
+  await waitUntil(
+    async () => {
+      last = await read();
+      return last?.baseline?.net === net;
+    },
+    `執筆量の記録に作品${net}字の起点が置かれる`,
+    15_000
+  ).catch((error: unknown) => {
+    throw new Error(`${String(error)}（いまの記録：${JSON.stringify(last ?? "なし")}）`);
+  });
+  if (!last) throw new Error("執筆量の記録が読めません");
+  return last;
+}
 
 /** 下の欄の、目標に届いたときの一言（字数の右。`#cheer`） */
 async function cheerText(frame: Frame): Promise<string> {
