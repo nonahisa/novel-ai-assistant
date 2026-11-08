@@ -49,6 +49,7 @@ import {
   type PageLayoutBlockType,
   type PageTextAxis,
 } from "../models/book";
+import { keysForHost } from "../core/keyLabels";
 
 /** 合成できる要素と、その値をどの欄から取るか（設計書6.65.8） */
 const COVER_ELEMENTS: ReadonlyArray<{ key: string; label: string }> = [
@@ -700,7 +701,7 @@ ${pane("toc", [
   "    </select></label>",
   ornamentRow("tocOrnament"),
   pageLayoutRow("toc"),
-  '    <p class="note">この面を本から外すときは、右の並びでこの面を右クリックして「削除」を選んでください。</p>',
+  keysForHost('    <p class="note">この面を本から外すときは、右の並びでこの面を右クリックして「削除」を選んでください。</p>'),
 ])}
 ${pane("characters", [
   '    <label class="check"><input id="characterPageIcons" type="checkbox"><span>人物イラストを添える</span></label>',
@@ -722,7 +723,7 @@ ${pane("image", [
   '    <p class="note">1枚で1つの面になります（本文の組み方には入りません）。扉絵は何枚でも、好きな位置に挿せます。</p>',
 ])}
 ${pane("body", [
-  '    <p class="note">話と章の一覧です。章の行は章立ての記録から出しています——章の追加・名前の変更・取り外しは、作品一覧の右クリックから行ってください。</p>',
+  keysForHost('    <p class="note">話と章の一覧です。章の行は章立ての記録から出しています——章の追加・名前の変更・取り外しは、作品一覧の右クリックから行ってください。</p>'),
   '    <div id="episodeList"></div>',
   '    <p class="note" id="placementNotice"></p>',
   '    <div id="paragraphList"></div>',
@@ -772,7 +773,7 @@ ${pane("colophon", [ornamentRow("colophonOrnament"), pageLayoutRow("colophon")])
       <span class="rail-label">本の設定</span>
     </button>
     <div id="blockList"></div>
-    <p class="rail-hint">ドラッグで並べ替え。右クリックで挿入・上へ・下へ・削除。</p>
+    <p class="rail-hint">${keysForHost("ドラッグで並べ替え。右クリックで挿入・上へ・下へ・削除。")}</p>
   </nav>
 </main>
 <!-- 右クリックの自前メニュー（webviewにVS Codeのメニューは出ない） -->

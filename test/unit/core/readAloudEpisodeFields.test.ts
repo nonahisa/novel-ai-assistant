@@ -141,3 +141,64 @@ describe("頭の欄の無い原稿は、今までどおり全部を読む", () =
     expect(speeches(text)).toContain("【エピソードタイトル】");
   });
 });
+
+/**
+ * ノートPCの実機確認（2026-11-09。開発ホスト 0.144.2・AivisSpeech）：.md の第1話で、頭の欄
+ * （タイトル・公開状態・公開済・日時の数字）まで読んだ。気になる所は、拡張子が .md（記法は curly）・
+ * CRLF・行数つきの【本文（24行）】・日時の全角括弧。その形を写して、OS の声の道と人物の声の道
+ * （台詞でも切る）の両方で、題と本文だけになるかを見る。
+ */
+describe("ノートPCの .md の第1話の頭の形（0.147.1）", () => {
+  const LINES = [
+    "【タイトル】",
+    "第1話　気がついたら幽霊に",
+    "",
+    "【公開状態】",
+    "公開済",
+    "",
+    "【作成日時】",
+    "2023-12-05 23:49:38（+09:00）",
+    "",
+    "【公開日時】",
+    "2023-12-05 23:49:38（+09:00）",
+    "",
+    "【更新日時】",
+    "2023-12-05 23:49:38（+09:00）",
+    "",
+    "【文字数】",
+    "517文字",
+    "",
+    "【本文（24行）】",
+    "「おや、太志じゃないか。死んでしまうとは情けないね」",
+    "",
+    "　なぜか体育倉庫で目を覚まし、学校を出て帰宅する途中、近所のおばあさんに声をかけられた。",
+  ];
+  const EXPECTED_HEAD = "第1話　気がついたら幽霊に";
+
+  for (const [eol, label] of [
+    ["\r\n", "CRLF（ファイルのまま）"],
+    ["\n", "LF（原稿エディターへ届く字）"],
+  ] as const) {
+    const text = LINES.join(eol);
+    for (const voiced of [false, true]) {
+      it(`${label}・${voiced ? "人物の声" : "OS の声"}：題と本文の文だけを読む`, () => {
+        const plan = buildReadingPlan(text, "curly", [], voiced ? { splitDialogue: true } : {});
+        const spoken = plan.map((s) => s.speech);
+        expect(spoken[0]).toBe(EXPECTED_HEAD);
+        expect(spoken[1]).toContain("おや、太志じゃないか");
+        const joined = spoken.join("");
+        for (const field of ["タイトル", "公開状態", "公開済", "作成日時", "2023", "文字数", "517", "本文（24行）"]) {
+          expect(joined).not.toContain(field);
+        }
+      });
+    }
+    it(`${label}：頭の欄を知っている見出しとして拾う`, () => {
+      const meta = parseEpisodeMetadata(text);
+      expect(meta.hasMetadata).toBe(true);
+      expect(meta.title).toBe(EXPECTED_HEAD);
+      expect(meta.publishState).toBe("公開済");
+      expect(meta.declaredCharCount).toBe(517);
+      expect(episodeReadableRanges(text)).toHaveLength(2);
+    });
+  }
+});

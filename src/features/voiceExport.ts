@@ -37,8 +37,10 @@ import { confirmRun, notifyDone, warnWithLog, whenNoticePicked } from "../views/
 import { revealFolder } from "../views/openDocument";
 import {
   engineUrlSettingLabel,
+  isEngineTimeout,
   isEngineUnreachable,
   showVoiceEngineDown,
+  showVoiceEngineSlow,
   type VoiceReadingService,
 } from "./voiceReading";
 
@@ -262,7 +264,7 @@ function logEngineFailure(step: string, error: unknown, work: WorkEntry, who?: s
 
 /** 作者向けの1文（エンジンの失敗） */
 function engineProblem(error: unknown): string {
-  if (error instanceof VoiceEngineError) return voiceEngineNextStep(error);
+  if (error instanceof VoiceEngineError) return voiceEngineNextStep(error, "export");
   return `音声に書き出せませんでした（${error instanceof Error ? error.message : String(error)}）。詳しくはログにあります。`;
 }
 
@@ -355,8 +357,25 @@ export async function exportVoiceAudio(
     ),
   });
 
+  /*
+    **待てる時間のうちに答えが来なかったら、届かないときとは別の窓**（0.147.1）。声づくりは文の長さと
+    順番待ちを数えずに待つので、ここへ来るのはエンジンが止まったままのとき。1文の時間切れで書き出し
+    全体を止める（作り終えた音を継いだ MP3 は、文が抜けた音になる）
+  */
+  const stopEngineSlow = (error?: unknown): VoiceExportOutcome => ({
+    kind: "stopped",
+    reason: showVoiceEngineSlow(
+      "export",
+      error instanceof VoiceEngineError && error.engine ? error.engine : target.engine
+    ),
+  });
+
   const planned = await service.plan(work, episodePath, target.text, target.sentences, target.engine);
-  if ("problem" in planned) return planned.engineDown ? stopEngineDown() : stop(planned.problem);
+  if ("problem" in planned) {
+    if (planned.engineDown) return stopEngineDown();
+    if (planned.engineSlow) return stopEngineSlow();
+    return stop(planned.problem);
+  }
   const units = planned.units.filter((unit) => unit.speech.trim() !== "");
   if (units.length === 0) return stop("この話には、読み上げる文がありません。");
 
@@ -376,6 +395,7 @@ export async function exportVoiceAudio(
     } catch (error) {
       logEngineFailure("エンジンの名乗りを引く", error, work);
       if (isEngineUnreachable(error)) return stopEngineDown(error);
+      if (isEngineTimeout(error)) return stopEngineSlow(error);
       brand = undefined;
     }
     if (!brand) {
@@ -459,7 +479,12 @@ export async function exportVoiceAudio(
       terms.map(describeVoice).join("、")
   );
 
-  type Made = { mp3: Uint8Array; clip: PcmClip } | { failed: string } | { engineDown: unknown } | "cancelled";
+  type Made =
+    | { mp3: Uint8Array; clip: PcmClip }
+    | { failed: string }
+    | { engineDown: unknown }
+    | { engineSlow: unknown }
+    | "cancelled";
   const made: Made = await withCancellableProgress("人物の声で音声に書き出しています", async (progress, token) => {
     const controller = new AbortController();
     token.onCancellationRequested(() => controller.abort());
@@ -499,6 +524,7 @@ export async function exportVoiceAudio(
       }
       logEngineFailure("音を作る", error, work);
       if (isEngineUnreachable(error)) return { engineDown: error };
+      if (isEngineTimeout(error)) return { engineSlow: error };
       return { failed: error instanceof WavError ? `${error.message}。` : engineProblem(error) };
     }
   });
@@ -508,6 +534,7 @@ export async function exportVoiceAudio(
     return { kind: "cancelled" };
   }
   if ("engineDown" in made) return stopEngineDown(made.engineDown);
+  if ("engineSlow" in made) return stopEngineSlow(made.engineSlow);
   if ("failed" in made) return stop(`音声に書き出せませんでした（ファイルは作っていません）。${made.failed}`);
 
   // ── ここから書く（新規作成だけ。上書きしない） ──

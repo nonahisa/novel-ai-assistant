@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * 作品一覧の右クリックから来た命令の行を受け取る（0.102.8）。
@@ -30,7 +31,7 @@ export function requireTreeNode<T>(
   void warn(
     `「${action}」を始められませんでした。どの行で押されたかを受け取れませんでした` +
       "（作品一覧を読み直している最中に押すと、こうなることがあります）。" +
-      "一覧の表示が落ち着いてから、もう一度その行を右クリックして選んでください。"
+      keysForHost("一覧の表示が落ち着いてから、もう一度その行を右クリックして選んでください。")
   );
   return undefined;
 }

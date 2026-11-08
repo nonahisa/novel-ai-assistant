@@ -26,6 +26,7 @@ import {
   type ReaderStatsEnvelope,
   type ReaderStatsRanking,
 } from "./readerStatsEnvelope";
+import { keysForHost } from "./keyLabels";
 
 /**
  * ヘルパー（Chrome 拡張「統合小説執筆環境ヘルパー」）からの呼び出しの判断
@@ -598,8 +599,8 @@ export function ownWorkFramedNotice(labels: readonly string[]): string {
     `${shown}${rest > 0 ? `ほか${rest}作品` : ""}を作品一覧の「未登録の自分の作品」に載せました。` +
     // ブラウザ版では［バックアップを取る］を隠している（ダウンロードのフォルダーを見られない）
     (canRunProcesses()
-      ? "右クリックの［バックアップを取る］でバックアップを落とすと、自動で登録します"
-      : "サイトから落としたバックアップを、右クリックの［ファイルから取り込む］で選ぶと登録します") +
+      ? keysForHost("右クリックの［バックアップを取る］でバックアップを落とすと、自動で登録します")
+      : keysForHost("サイトから落としたバックアップを、右クリックの［ファイルから取り込む］で選ぶと登録します")) +
     "（読者の反応も控えてあり、登録したら取り込みます）。"
   );
 }

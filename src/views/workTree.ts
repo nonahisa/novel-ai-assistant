@@ -74,6 +74,7 @@ import {
   type UnregisteredOwnWork,
 } from "../core/unregisteredOwnWorks";
 import { processCommandsUsableHere } from "../core/processAvailability";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * 作品一覧の走査を同時に走らせる数（設計書6.1.2）。
@@ -963,8 +964,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           "",
           // ブラウザ版では［バックアップを取る］を隠している（ダウンロードのフォルダーを見られない）
           processCommandsUsableHere()
-            ? "右クリックの［バックアップを取る］でサイトのバックアップの画面を開き、落としたファイルが届くと、そのまま取り込んで作品として登録します。"
-            : "サイトから落としたバックアップを、右クリックの［ファイルから取り込む］で選ぶと作品として登録します。",
+            ? keysForHost("右クリックの［バックアップを取る］でサイトのバックアップの画面を開き、落としたファイルが届くと、そのまま取り込んで作品として登録します。")
+            : keysForHost("サイトから落としたバックアップを、右クリックの［ファイルから取り込む］で選ぶと作品として登録します。"),
           "ファイルを枠へドラッグして落としても取り込めます。",
         ].join("\n")
       );
@@ -1203,7 +1204,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           "この作品のためのメモです。",
           "話数・文字数・あらすじ・投稿・校正のどれにも入りません。",
           "",
-          "右クリックの「メモ追加」から増やせます。",
+          keysForHost("右クリックの「メモ追加」から増やせます。"),
         ].join("\n")
       );
       return item;

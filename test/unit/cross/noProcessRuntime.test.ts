@@ -71,6 +71,29 @@ describe("process が無いところで落ちない", () => {
   });
 });
 
+describe("ファイル名の大文字小文字を区別しない OS（Windows と Mac）", () => {
+  const realPlatform = process.platform;
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: realPlatform });
+  });
+
+  test.each([
+    ["win32", true],
+    ["darwin", true],
+    ["linux", false],
+  ] as const)("%s では %s", (platform, expected) => {
+    Object.defineProperty(process, "platform", { value: platform });
+    expect(runtime.isCaseInsensitiveFileNameHost()).toBe(expected);
+    // 場所の比べ方（2か所）も同じ判定に従う
+    expect(isSameLocation("/Users/a/Novel/第1話.txt", "/users/a/novel/第1話.TXT")).toBe(expected);
+    expect(normalizeForComparison("/Users/A.txt") === normalizeForComparison("/users/a.txt")).toBe(expected);
+  });
+
+  test("ブラウザ版（process が無い）では区別する側", () => {
+    expect(withoutProcess(() => runtime.isCaseInsensitiveFileNameHost())).toBe(false);
+  });
+});
+
 describe("Node の上では、これまでどおり読める", () => {
   test("OS の名前と環境変数", () => {
     expect(runtime.hostPlatform()).toBe(process.platform);

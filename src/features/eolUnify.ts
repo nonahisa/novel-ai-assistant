@@ -271,7 +271,7 @@ function describeWriteFailure(result: WriteTextFileResult): string {
     case "modified_externally":
       return "読み込んだあとに、他の場所から変更されました";
     case "encoding_error":
-      return "元の文字コードで書き出せませんでした";
+      return result.detail ? `元の文字コードで書き出せませんでした（${result.detail}）` : "元の文字コードで書き出せませんでした";
     default:
       return result.detail ?? "書き込めませんでした";
   }

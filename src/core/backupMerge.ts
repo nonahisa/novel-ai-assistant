@@ -20,6 +20,7 @@ import {
 } from "./backupMissingEpisodes";
 import { decodeBytes, hasConflictMarkers } from "./textDecode";
 import type { WorkZipInspection } from "./workZip";
+import { keysForHost } from "./keyLabels";
 
 /**
  * 既にある作品へ、バックアップの中身のうち「足してよいもの」だけを足す計画
@@ -798,7 +799,7 @@ function describeChapterPlan(plan: ChapterMergePlan): string {
       return `${plan.chapters.length}個立てます（${listChapters(plan.chapters)}）。章立ての記録に書くだけで、原稿は書き換えません`;
     case "existing":
       // 違いを見て選ぶ道は別の操作にある（残課題 B7。`importChaptersFromBackup.ts`）
-      return `章立ての記録に既に${plan.existingCount}個あるため、立てません（作者の章を上書きしないため。違いを見て足すときは、作品の右クリック「章立て取込（バックアップから）」）`;
+      return keysForHost(`章立ての記録に既に${plan.existingCount}個あるため、立てません（作者の章を上書きしないため。違いを見て足すときは、作品の右クリック「章立て取込（バックアップから）」）`);
     case "unreadable":
       return "章立ての記録を読めなかったため、立てません";
     case "blocked": {

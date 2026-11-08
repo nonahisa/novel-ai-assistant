@@ -12,9 +12,12 @@ import {
 } from "../core/abilityStore";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { loadSeriesTerms } from "../core/seriesSettings";
+import { isMacHost } from "../core/runtime";
 import {
   DICTIONARY_FORMATS,
+  MAC_BUILTIN_IME_HOW_TO,
   buildDictionary,
+  dictionaryHowTo,
   buildDictionaryPickItems,
   encodeDictionary,
   formatDictionary,
@@ -154,7 +157,9 @@ export async function exportImeDictionary(
       description: format.fileName,
       // 但し書きがある形式は、取り込み手順より先に但し書きを見せる。
       // 「未検証」と知らずに使って原因不明のまま困るのを避けたい
-      detail: format.note ? `${format.note} ${format.howTo}` : format.howTo,
+      detail: format.note
+        ? `${format.note} ${dictionaryHowTo(format, isMacHost())}`
+        : dictionaryHowTo(format, isMacHost()),
       picked: format.defaultPicked,
       dialect: format.dialect,
     })),
@@ -262,7 +267,7 @@ function buildHowToDocument(dialects: ImeDialect[]): string {
     const format = DICTIONARY_FORMATS[dialect];
     lines.push(`## ${format.label}`, "");
     lines.push(`ファイル: \`設定/${format.fileName}\``, "");
-    lines.push(format.howTo, "");
+    lines.push(dictionaryHowTo(format, isMacHost()), "");
     lines.push(`文字コードは ${encodingLabel(format.encoding)} です。`, "");
     if (format.note) lines.push(`**${format.note}**`, "");
     if (format.encoding === "shift_jis") {
@@ -273,6 +278,11 @@ function buildHowToDocument(dialects: ImeDialect[]): string {
         ""
       );
     }
+  }
+
+  if (isMacHost()) {
+    // 作者の Mac は元からある日本語入力を使う（2026-11-08）。書き出しの形は読めないので手順だけ
+    lines.push("## Mac に元からある日本語入力", "", MAC_BUILTIN_IME_HOW_TO, "");
   }
 
   /**

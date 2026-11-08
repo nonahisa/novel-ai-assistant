@@ -18,6 +18,7 @@ import {
 import { notifyDone } from "../views/notify";
 import { askText } from "../views/dialogs";
 import { useLogFile } from "../core/logger";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * 編集部が自分の言葉で直しを書き、提案として置く（設計書5.6.1.1。作者の指示
@@ -44,7 +45,7 @@ export type HandProposalKind = "edit" | "memo";
  * （作者の決定 2026-11-01）。メニューは本文の外にあるので、押す前に本文で選んでおく必要がある
  */
 export const PICK_FIRST_MESSAGE =
-  "修正したい所を本文で選んでから押してください（右クリックからも出せます）。";
+  keysForHost("修正したい所を本文で選んでから押してください（右クリックからも出せます）。");
 
 /** コマンドから押されたときに要るもの。試験で差し替えるため外から渡す */
 export interface ProposeEditCommandDeps {

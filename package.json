@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。※現在テスト中です。",
-  "version": "0.147.0",
+  "version": "0.148.1",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -2449,7 +2449,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "［バックアップを取る］のあと、届いたバックアップを探すフォルダー。\n\n・空なら Windows の「ダウンロード」（ユーザーのフォルダーの下の Downloads）\n・作品一覧の「未登録の自分の作品」の枠で使う\n・見るのは押したあとに来たファイルの名前だけ（ほかのファイルは開かない）\n・30分たつか、取り込むと見るのをやめる\n・ブラウザ版では働かない"
+          "markdownDescription": "［バックアップを取る］のあと、届いたバックアップを探すフォルダー。\n\n・空ならホームの「ダウンロード」（Downloads）\n・作品一覧の「未登録の自分の作品」の枠で使う\n・見るのは押したあとに来たファイルの名前だけ（ほかのファイルは開かない）\n・30分たつか、取り込むと見るのをやめる\n・ブラウザ版では働かない"
         },
         "novelai.episodeFileExtension": {
           "type": "string",

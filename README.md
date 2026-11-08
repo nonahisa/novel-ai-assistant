@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**0.147.0**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.126.2**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.148.1**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.126.2**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 
@@ -41,7 +41,7 @@ Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](htt
 
 ## インストール
 
-VS Codeの拡張機能ビュー（`Ctrl + Shift + X`）で「統合小説執筆環境」を検索してインストールしてください。更新はVS Codeが自動で行います。対応バージョンはVS Code 1.90.0以降です。
+VS Codeの拡張機能ビュー（`Ctrl + Shift + X`、Mac は `Cmd + Shift + X`）で「統合小説執筆環境」を検索してインストールしてください。更新はVS Codeが自動で行います。対応バージョンはVS Code 1.90.0以降です。
 
 ```powershell
 code --install-extension nonahisa.novel-ai-assistant
@@ -60,13 +60,23 @@ gh release download $v --repo nonahisa/novel-ai-assistant --pattern "*.vsix" --c
 code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --force
 ```
 
+Mac のターミナル（zsh）では次のとおりです。`code` が見つからないときは、VS Code のコマンドパレットで「シェル コマンド: PATH 内に 'code' コマンドをインストールします」を選んでから実行してください。
+
+```zsh
+v=$(gh release list --repo nonahisa/novel-ai-assistant --limit 1 --json tagName --jq '.[0].tagName')
+gh release download "$v" --repo nonahisa/novel-ai-assistant --pattern "*.vsix" --clobber
+code --install-extension "./novel-ai-assistant-${v#v}.vsix" --force
+```
+
 画面から入れる場合は、「拡張機能」ビュー右上の `...` →「VSIXからのインストール」で同じファイルを指定します。
 
 </details>
 
 ### 必要なもの
 
-作品の管理・文字数・執筆量のグラフは、入れただけで使えます。AIを使う機能には準備が要ります。はじめて開くと「小説執筆へようこそ」と声をかけるので、［AIを選ぶ］を押すと使うAIを選べます。コマンドパレット（`Ctrl+Shift+P`）で「統合小説執筆環境: セットアップ（必要なものを入れる）」を選ぶと、足りないものを一覧から選んで入れられます。取得量を先に表示し、途中で中止もできます。
+動く OS は Windows と macOS で、VS Code 1.90.0 以降が要ります。Linux では動作を確かめていません。
+
+作品の管理・文字数・執筆量のグラフは、入れただけで使えます。AIを使う機能には準備が要ります。はじめて開くと「小説執筆へようこそ」と声をかけるので、［AIを選ぶ］を押すと使うAIを選べます。コマンドパレット（`Ctrl+Shift+P`、Mac は `Cmd+Shift+P`）で「統合小説執筆環境: セットアップ（必要なものを入れる）」を選ぶと、足りないものを一覧から選んで入れられます。取得量を先に表示し、途中で中止もできます。
 
 | 何 | 何のために | 要否 | 大きさ |
 |---|---|---|---|
@@ -106,7 +116,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 
 左端のアイコンを押すと4つのビューが並びます。
 
-- 作品一覧：登録した作品と話数ファイル。右クリックで作品ごとの操作ができます
+- 作品一覧：登録した作品と話数ファイル。右クリック（Mac は2本指で押すか、control を押しながらクリック）で作品ごとの操作ができます
 - 簡単ステップメニュー：執筆の流れに沿った8つのステップ。迷ったらこちらから
 - 詳細メニュー：全操作の一覧。分類 → 小分類 → 操作の3階層です。新作構想〜電子出版等の5つの分類は、簡単ステップメニューの段と同じ名前です
 - AIに相談：開いている画面についてAIと話す窓
@@ -189,26 +199,26 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 
 原稿エディターの中で使えるキーです。
 
-| キー | すること |
-|---|---|
-| `Ctrl+S` | 保存（下の欄に「保存しました（N字）」が出る） |
-| `Ctrl+F` | 本文を探す（`Enter` で次、`Shift+Enter` で前、`Esc` で閉じる） |
-| `Alt+↑` / `Alt+↓` | 前の話 / 次の話を開く |
-| `Ctrl+＋` / `Ctrl+－` / `Ctrl+0`、`Ctrl+ホイール` | 本文の字の大きさ（`Ctrl+0` で元に戻す） |
-| `Ctrl+Alt+T` | この話の誤字脱字を検知 |
-| `Ctrl+Alt+P` | 推敲（範囲は「この話だけ」が先頭） |
-| `Ctrl+Alt+H` | 表記ゆれ検知 |
-| `Ctrl+Alt+A` | 校正一括実行 |
-| `Ctrl+Alt+M` | 校正・メモパネルを横に開く |
-| `F8` / `Shift+F8` | 次のメモへ / 前のメモへ |
-| `Ctrl+/` | ここにメモを足す |
-| `Ctrl+Alt+C` | AIに相談 |
-| `Ctrl+Alt+R` | 選んだ語にルビを振る |
-| `Ctrl+Alt+K` | 選んだ語に傍点を付ける。傍点の付いた所なら外れる（`.md` のみ） |
+| Windows | Mac | すること |
+|---|---|---|
+| `Ctrl+S` | `Cmd+S` | 保存（下の欄に「保存しました（N字）」が出る） |
+| `Ctrl+F` | `Cmd+F` | 本文を探す（`Enter` で次、`Shift+Enter` で前、`Esc` で閉じる） |
+| `Alt+↑` / `Alt+↓` | `Option+↑` / `Option+↓` | 前の話 / 次の話を開く |
+| `Ctrl+＋` / `Ctrl+－` / `Ctrl+0`、`Ctrl+ホイール` | `Cmd+＋` / `Cmd+－` / `Cmd+0`、`Cmd+ホイール` | 本文の字の大きさ（`Ctrl+0`、Mac は `Cmd+0` で元に戻す） |
+| `Ctrl+Alt+T` | `Cmd+Option+T` | この話の誤字脱字を検知 |
+| `Ctrl+Alt+P` | `Cmd+Option+P` | 推敲（範囲は「この話だけ」が先頭） |
+| `Ctrl+Alt+H` | `Cmd+Option+H` | 表記ゆれ検知 |
+| `Ctrl+Alt+A` | `Cmd+Option+A` | 校正一括実行 |
+| `Ctrl+Alt+M` | `Cmd+Option+M` | 校正・メモパネルを横に開く |
+| `F8` / `Shift+F8` | `F8` / `Shift+F8` | 次のメモへ / 前のメモへ |
+| `Ctrl+/` | `Cmd+/` | ここにメモを足す |
+| `Ctrl+Alt+C` | `Cmd+Option+C` | AIに相談 |
+| `Ctrl+Alt+R` | `Cmd+Option+R` | 選んだ語にルビを振る |
+| `Ctrl+Alt+K` | `Cmd+Option+K` | 選んだ語に傍点を付ける。傍点の付いた所なら外れる（`.md` のみ） |
 
 日本語の変換中のキーと `F6`〜`F10` は、日本語入力のまま使えます。変換中の `F8` は半角カナへの変換になり、次のメモへは移りません。
 
-これらのキーは原稿エディターを開いているときだけ使え、開いている原稿の作品・話に対して働きます。ほかの画面では、`Ctrl+/`・`F8` はVS Codeのふだんの動きのままです。押したあとに出る窓は `Enter` で進み、`Esc` で取りやめられます。キーはVS Codeの「キーボード ショートカット」（`Ctrl+K` `Ctrl+S`）で「統合小説執筆環境」と探すと変えられます（macは `Cmd+Alt+…`）。
+これらのキーは原稿エディターを開いているときだけ使え、開いている原稿の作品・話に対して働きます。ほかの画面では、`Ctrl+/`・`F8` はVS Codeのふだんの動きのままです。押したあとに出る窓は `Enter` で進み、`Esc` で取りやめられます。キーはVS Codeの「キーボード ショートカット」（`Ctrl+K` `Ctrl+S`、Mac は `Cmd+K` `Cmd+S`）で「統合小説執筆環境」と探すと変えられます。
 
 #### テキストファイル・Word から取り込む
 
@@ -273,7 +283,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 
 ### AIを設定する
 
-サイドバー右上の歯車、コマンドパレット（`Ctrl+Shift+P`）の「統合小説執筆環境: AI設定」、または「環境設定 → AI → AI設定」から開きます。使うAIを選ぶと接続テストが走り、モデルの一覧から選べます。
+サイドバー右上の歯車、コマンドパレット（`Ctrl+Shift+P`、Mac は `Cmd+Shift+P`）の「統合小説執筆環境: AI設定」、または「環境設定 → AI → AI設定」から開きます。使うAIを選ぶと接続テストが走り、モデルの一覧から選べます。
 
 | AI | 費用 | APIキーの発行元 |
 |---|---|---|
@@ -431,7 +441,7 @@ VS Code 版の Claude Code から、この拡張機能の道具（MCPサーバ�
 
 ## 設定
 
-`Ctrl + ,` で設定を開き、「novelai」で検索してください。
+`Ctrl + ,`（Mac は `Cmd + ,`）で設定を開き、「novelai」で検索してください。
 
 ### 執筆・表示
 
@@ -461,7 +471,7 @@ VS Code 版の Claude Code から、この拡張機能の道具（MCPサーバ�
 | `novelai.schedule.overlapPenalty` | `0.1` | 自分で進める作業が同じ日に重なったときの、重なり1つごとに落ちる速さの割合 |
 | `novelai.celebrations.enabled` | `true` | 目標に届いたら、執筆統計に風船（大きな目標は花火も）、原稿エディターの下の欄に一言 |
 | `novelai.readerStats.importOnFocus` | `true` | VS Code に戻ったとき、統合小説執筆環境ヘルパーがコピーした読者の反応を取り込むか訊く |
-| `novelai.ownWorks.downloadFolder` | `""`（Windows の「ダウンロード」） | 「未登録の自分の作品」の［バックアップを取る］のあと、届いたバックアップを探すフォルダー |
+| `novelai.ownWorks.downloadFolder` | `""`（ホームの「ダウンロード」〔Downloads〕） | 「未登録の自分の作品」の［バックアップを取る］のあと、届いたバックアップを探すフォルダー |
 | `novelai.epub.ornamentFolder` | `""`（指していない） | EPUBの飾り（`*.svg`）を追加で読み込むフォルダーの絶対パス |
 | `novelai.mode` | `author` | この環境を作者（`author`）と編集者（`editor`）のどちらとして使うか |
 

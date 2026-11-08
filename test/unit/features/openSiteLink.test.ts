@@ -38,12 +38,14 @@ let guides: string[];
 let answer: string | undefined;
 let progIdReads: number;
 
-function init(progId: string | undefined): void {
+function init(progId: string | undefined, bundleId?: string): void {
   initSiteLinkGuide(memory, {
     readProgId: async () => {
       progIdReads += 1;
       return progId;
     },
+    // Mac の読み口も差し替える（Mac で試験を走らせても、本物の既定のブラウザを読みに行かない）
+    readBundleId: async () => bundleId,
   });
 }
 
@@ -76,6 +78,23 @@ beforeEach(() => {
 afterEach(() => {
   Object.assign(workspace, { getConfiguration: original.getConfiguration });
   Object.assign(window, { showInformationMessage: original.showInformationMessage });
+});
+
+describe("Mac の既定のブラウザ（作者の決定 2026-11-08）", () => {
+  test("Safari が既定なら、Windows と同じ案内を Safari の名前で出してから開く", async () => {
+    init(undefined, "com.apple.safari");
+    await openSiteLink(KAKUYOMU);
+    expect(guides).toHaveLength(1);
+    expect(guides[0]).toContain("リンクは Safari で開きます。");
+    expect(env.opened).toEqual([KAKUYOMU]);
+  });
+
+  test("Chrome が既定なら案内を出さない", async () => {
+    init(undefined, "com.google.chrome");
+    await openSiteLink(KAKUYOMU);
+    expect(guides).toEqual([]);
+    expect(env.opened).toEqual([KAKUYOMU]);
+  });
 });
 
 describe("Chrome でないと分かったとき", () => {

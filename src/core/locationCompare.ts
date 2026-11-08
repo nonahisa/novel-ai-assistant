@@ -1,4 +1,4 @@
-import { isWindowsHost } from "./runtime";
+import { isCaseInsensitiveFileNameHost } from "./runtime";
 
 /**
  * 場所どうしの比べ方（設計書5.7.5）。
@@ -18,7 +18,7 @@ import { isWindowsHost } from "./runtime";
  * 区切りの円記号を `/` に直し、末尾の `/` を落とす。
  * 正規表現の中の円記号は読みにくいので符号（u005C）で書く。
  *
- * **Windowsでは大文字小文字を同じものとして見る。** 同じフォルダーを
+ * **Windows・Mac では大文字小文字を同じものとして見る**（runtime.isCaseInsensitiveFileNameHost）。同じフォルダーを
  * `C:\Novels\...` とも `c:\novels\...` とも書けるためである。
  * ブラウザ版には `process` が無く、有ってもWindowsか判定できる保証は
  * 無いので、無ければ区別する側へ倒す（`paths.normalizeForComparison`
@@ -26,10 +26,10 @@ import { isWindowsHost } from "./runtime";
  */
 function normalize(value: string): string {
   const unified = value.replace(/[\u005C]/g, "/").replace(/[/]+$/, "");
-  return isWindowsHost() ? unified.toLowerCase() : unified;
+  return isCaseInsensitiveFileNameHost() ? unified.toLowerCase() : unified;
 }
 
-/** 同じ場所を指しているか。Windowsでは大文字小文字を同じものとして見る */
+/** 同じ場所を指しているか。Windows・Mac では大文字小文字を同じものとして見る */
 export function isSameLocation(left: string, right: string): boolean {
   return normalize(left) === normalize(right);
 }

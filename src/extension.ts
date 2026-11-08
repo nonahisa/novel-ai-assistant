@@ -265,6 +265,7 @@ import {
 } from "./core/lmAvailability";
 import { probeVsCodeLm } from "./ai/vscodeLmProvider";
 import { installEditorLockGuard } from "./features/editorLockGuard";
+import { installShiftJisSaveGuard } from "./features/shiftJisSave";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
 import { isSyncBusyCommand } from "./core/autoResendPlan";
@@ -676,6 +677,7 @@ import { setTuningStoreRoot } from "./core/modelTuningStore";
 import { formatDayTime } from "./core/timestampedFileName";
 import { notifyDone, whenNoticePicked } from "./views/notify";
 import { initBackupPickFolder } from "./features/backupPickFolder";
+import { keysForHost } from "./core/keyLabels";
 
 /**
  * **この束を読み終えた時刻**（設計書6.107）。
@@ -1488,6 +1490,10 @@ export async function activate(
   context.subscriptions.push(
     installEditorLockGuard(registry, { readonlyRescues: verifiedState(context.workspaceState) })
   );
+
+  // 作者が VS Code で打って保存する道でも、Shift_JIS の話の「〜」などを黙って置き換える
+  // （0.148.1。設計書5.4.2。VS Code は符号の無い字を「?」にして書くため）
+  context.subscriptions.push(installShiftJisSaveGuard(registry));
 
   // 投稿状態の台帳に、この版が知らない値（連載の状態など）があったら一度だけ知らせる
   // （作者の判断 2026-11-01。台帳ごと止めず、その欄だけ読まずに持ち回る）
@@ -4615,7 +4621,7 @@ export async function activate(
   const frameOf = (node: unknown): OwnWorkFrameNode | undefined => {
     if (node instanceof OwnWorkFrameNode) return node;
     void vscode.window.showInformationMessage(
-      "作品一覧の「未登録の自分の作品」の枠を右クリックしてお使いください。"
+      keysForHost("作品一覧の「未登録の自分の作品」の枠を右クリックしてお使いください。")
     );
     return undefined;
   };
@@ -8450,7 +8456,7 @@ export async function activate(
     registerCommand("novelai.exportVoiceAudio", async (node?: EpisodeNode) => {
       if (!node || !("episode" in node)) {
         void vscode.window.showInformationMessage(
-          "作品一覧の話を右クリックして「人物の声で音声に書き出す」を選んでください。原稿エディターでは読み上げの列の［音声に書き出す］からも書き出せます。"
+          keysForHost("作品一覧の話を右クリックして「人物の声で音声に書き出す」を選んでください。原稿エディターでは読み上げの列の［音声に書き出す］からも書き出せます。")
         );
         return;
       }

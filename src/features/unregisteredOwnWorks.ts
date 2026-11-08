@@ -103,7 +103,7 @@ export interface HeldStatsOutcome {
 /** 控えた読者の反応を取り込んだときの知らせの頭 */
 export const HELD_STATS_LEAD = "登録した作品へ、登録の前に控えておいた読者の反応を移しました。";
 
-/** 設定の名前（`novelai.` の下）。空なら Windows の「ダウンロード」 */
+/** 設定の名前（`novelai.` の下）。空ならホームの「ダウンロード」（Downloads） */
 export const DOWNLOAD_FOLDER_SETTING = "ownWorks.downloadFolder";
 
 /** 届いたときの問いのボタン */
@@ -130,7 +130,7 @@ export interface UnregisteredOwnWorksDeps {
   openLink?(url: string): Promise<void>;
   /** ダウンロードのフォルダーを見られるか（既定は `canRunProcesses()`） */
   canWatch?(): boolean;
-  /** 見る場所（既定は設定、空なら Windows の「ダウンロード」） */
+  /** 見る場所（既定は設定、空ならホームの「ダウンロード」） */
   downloadFolder?(): Promise<string>;
   /** その場所を見る口（既定は `core/downloadFolderNode.ts` を動的 import） */
   lister?(folder: string): Promise<DownloadFolderLister>;

@@ -103,7 +103,10 @@ describe("実行ファイルの探索", () => {
   test("macOSではHomebrewとアプリ内の場所を候補に含める", () => {
     const candidates = executableCandidates("darwin", {}, "/Users/test");
 
+    // Homebrew で入れた Mac には Ollama.app が無く、/opt/homebrew/bin/ollama（Intel の Mac は
+    // /usr/local/bin/ollama）だけがある（2026-11-08、Mac のセッションの機械）。3つとも探す
     expect(candidates).toContain("/opt/homebrew/bin/ollama");
+    expect(candidates).toContain("/usr/local/bin/ollama");
     expect(candidates).toContain(
       "/Applications/Ollama.app/Contents/Resources/ollama"
     );
@@ -708,15 +711,29 @@ describe("失敗理由の説明", () => {
   test("ポートを掴んだままのOllamaには、終わらせ方まで案内する", () => {
     // 作者はプログラマではない。「ポートが使われています」だけでは
     // 何をすればよいか分からないので、終わらせ方を2通り示す
-    const message = describeStartFailure({
-      ok: false,
-      reason: "port_in_use_stale",
-    });
+    const message = describeStartFailure(
+      {
+        ok: false,
+        reason: "port_in_use_stale",
+      },
+      "win32"
+    );
 
     expect(message).toContain("タスクトレイ");
     expect(message).toContain("ollama.exe");
     // 失敗の文が無ければ、Ollamaの既定のポートを言う
     expect(message).toContain("11434");
+  });
+
+  test("Mac では、メニューバーとアクティビティモニタで終わらせ方を案内する（ollama.exe と書かない）", () => {
+    const message = describeStartFailure({ ok: false, reason: "port_in_use_stale" }, "darwin");
+    expect(message).toContain("メニューバーのOllamaアイコンから終了");
+    expect(message).toContain("アクティビティモニタで ollama を終了");
+    expect(message).not.toContain("ollama.exe");
+    expect(message).not.toContain("タスクトレイ");
+    // 設定の名前（novelai.ollama.executablePath）にも「ollama.exe」の字が並ぶので、場所の言い方で見る
+    expect(describeStartFailure({ ok: false, reason: "not_installed" }, "darwin")).toContain(" ollama の場所");
+    expect(describeStartFailure({ ok: false, reason: "not_installed" }, "win32")).toContain("ollama.exe の場所");
   });
 
   test("接続先を変えている場合は、実際に握られていたポートを案内する", () => {

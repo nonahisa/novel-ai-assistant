@@ -24,6 +24,7 @@ import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * 本文中の用語を色分けし、ホバーで設定を表示する。
@@ -464,7 +465,7 @@ export function buildHover(
   }
 
   md.appendMarkdown(`${escapeMarkdown(introOf(record))}\n\n`);
-  md.appendMarkdown(`_右クリック →「設定情報を表示」で詳しく見られます_\n`);
+  md.appendMarkdown(keysForHost(`_右クリック →「設定情報を表示」で詳しく見られます_\n`));
 
   return md;
 }

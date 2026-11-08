@@ -12,6 +12,7 @@ import { episodePathFor } from "../core/bookStore";
 import { askText } from "../views/dialogs";
 import { logFailure, useLogFile } from "../core/logger";
 import { notifyDone } from "../views/notify";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * 章立ての手動の管理（設計書6.66.2）。
@@ -125,7 +126,7 @@ export async function removeChapter(
       modal: true,
       detail:
         "話は削除されません。この章に入っていた話は、章なしに戻ります。" +
-        "章を付け直すときは、開始にしたい話の右クリックから「ここから章を始める」を選んでください。",
+        keysForHost("章を付け直すときは、開始にしたい話の右クリックから「ここから章を始める」を選んでください。"),
     },
     "章を外す"
   );

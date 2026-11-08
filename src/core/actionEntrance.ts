@@ -1,6 +1,7 @@
 import type { ActionItem } from "./actionTree";
 import { STEP_REFERENCED_COMMANDS } from "./stepDefs";
 import { activeModeForGuide, type WorkMode } from "./editorMode";
+import { keysForHost } from "./keyLabels";
 
 /**
  * 詳細メニューに**出さない**操作（`hiddenFromActionList`）の、実際の入口
@@ -28,7 +29,7 @@ export interface ActionEntrance {
 }
 
 /** 原稿エディターの中にある操作のまとまり（目次の見出し） */
-const IN_MANUSCRIPT_EDITOR = "原稿エディター（上の列・下の欄・右クリック）";
+const IN_MANUSCRIPT_EDITOR = keysForHost("原稿エディター（上の列・下の欄・右クリック）");
 
 /**
  * 導き方では当てられない入口（作者の指定、2026-09-03）。
@@ -60,11 +61,11 @@ const SPECIAL_ENTRANCES: Readonly<Record<string, ActionEntrance>> = {
   */
   "novelai.openSceneMemos": {
     place: IN_MANUSCRIPT_EDITOR,
-    text: "原稿エディターの右クリックから。簡単ステップメニューにもあります",
+    text: keysForHost("原稿エディターの右クリックから。簡単ステップメニューにもあります"),
   },
   "novelai.openVertical": {
     place: IN_MANUSCRIPT_EDITOR,
-    text: "原稿エディターの上の列の［表示］→［縦書きにする］か、本文の右クリックから",
+    text: keysForHost("原稿エディターの上の列の［表示］→［縦書きにする］か、本文の右クリックから"),
   },
   "novelai.readManuscriptAloud": {
     place: IN_MANUSCRIPT_EDITOR,
@@ -76,16 +77,16 @@ const SPECIAL_ENTRANCES: Readonly<Record<string, ActionEntrance>> = {
   },
   "novelai.addRuby": {
     place: IN_MANUSCRIPT_EDITOR,
-    text: "原稿エディターの上の列の［補助］→［ルビ］か、右クリックから",
+    text: keysForHost("原稿エディターの上の列の［補助］→［ルビ］か、右クリックから"),
   },
   "novelai.addEmphasis": {
     place: IN_MANUSCRIPT_EDITOR,
-    text: "原稿エディターの上の列の［補助］→［傍点］か、右クリックから",
+    text: keysForHost("原稿エディターの上の列の［補助］→［傍点］か、右クリックから"),
   },
   "novelai.copyForPosting": {
     place: IN_MANUSCRIPT_EDITOR,
     text:
-      "原稿エディターの上の列の［出力］→［投稿］→「コピー（投稿サイト用）」か、右クリックから。" +
+      keysForHost("原稿エディターの上の列の［出力］→［投稿］→「コピー（投稿サイト用）」か、右クリックから。") +
       "簡単ステップメニューにもあります",
   },
   "novelai.setAdvicePolicy": {

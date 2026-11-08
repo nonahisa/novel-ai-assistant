@@ -593,3 +593,19 @@ describe("辞書に入れる語を選ぶ一覧", () => {
     ).toBe(false);
   });
 });
+
+describe("取り込み手順を OS に合わせる（Mac には Windows の IME の右クリックが無い）", () => {
+  test("Windows では今までの手順、Mac では Mac の手順（無ければ今までの手順）", async () => {
+    const { DICTIONARY_FORMATS, dictionaryHowTo, MAC_BUILTIN_IME_HOW_TO } = await import(
+      "../../../src/core/imeDictionary"
+    );
+    expect(dictionaryHowTo(DICTIONARY_FORMATS.msime, false)).toContain("IMEを右クリック");
+    expect(dictionaryHowTo(DICTIONARY_FORMATS.msime, true)).toContain("Mac では使えません");
+    expect(dictionaryHowTo(DICTIONARY_FORMATS.google, true)).toContain("メニューバー");
+    expect(dictionaryHowTo(DICTIONARY_FORMATS.google, true)).not.toContain("右クリック");
+    expect(dictionaryHowTo(DICTIONARY_FORMATS.atok, true)).toBe(DICTIONARY_FORMATS.atok.howTo);
+    // Mac に元からある日本語入力は、ファイルを読めないことと、1語ずつの登録の場所を書く
+    expect(MAC_BUILTIN_IME_HOW_TO).toContain("読み込めません");
+    expect(MAC_BUILTIN_IME_HOW_TO).toContain("「キーボード」");
+  });
+});
