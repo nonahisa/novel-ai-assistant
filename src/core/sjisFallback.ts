@@ -157,7 +157,9 @@ export function findUnencodableShiftJis(text: string): UnencodableChar[] {
   for (let index = 0; index < lines.length && found.length < UNENCODABLE_LIMIT; index += 1) {
     const chars = Array.from(lines[index]);
     for (let at = 0; at < chars.length && found.length < UNENCODABLE_LIMIT; at += 1) {
-      if (encodesInShiftJis(chars[at])) continue;
+      // 元の本文の読めないバイトは U+FFFD に読まれ、元のバイトのまま置くので書ける。
+      // 数えると3件の枠を先に埋め、作者が入れた字が知らせから落ちる
+      if (chars[at] === "�" || encodesInShiftJis(chars[at])) continue;
       found.push({
         char: chars[at],
         line: index + 1,

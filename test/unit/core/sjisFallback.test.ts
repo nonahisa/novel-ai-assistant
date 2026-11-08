@@ -62,6 +62,13 @@ describe("Shift_JIS へ書くときの置き換えの表", () => {
     ]);
   });
 
+  test("元の本文の読めないバイト（U+FFFD）は場所に数えない。作者が入れた字の行だけを出す", () => {
+    // 元のバイトのまま置くので書けるのに、数えると3件の枠を埋めて本当の字が知らせから落ちる
+    const found = findUnencodableShiftJis("���\n二行目に♡");
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ char: "♡", line: 2 });
+  });
+
   test("書けない字の場所は、行と前後の数文字で出す（サロゲートの字も1字に数える）", () => {
     const found = findUnencodableShiftJis("一\n\u{20b9f}あいうえおかきくけ♡さしすせそたちつてと");
     expect(found).toHaveLength(2);
