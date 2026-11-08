@@ -2,6 +2,12 @@ import iconv = require("iconv-lite");
 import { diffArrays } from "diff";
 import type { Encoding, TextFileContent } from "./textDecode";
 import type { Eol } from "../models/types";
+import {
+  findUnencodableShiftJis,
+  substituteForShiftJis,
+  type SjisSubstitution,
+  type UnencodableChar,
+} from "./sjisFallback";
 
 /**
  * 本文を書き戻すときの**バイト列の作り方**（設計書5.4.2）。`vscode` に触らない。
@@ -19,20 +25,31 @@ export interface EncodePreservingOptions {
 }
 
 /**
+ * バイト列の作り方の結果。
+ *
+ * - `substitutions`：Shift_JIS に符号の無い字を、表（`sjisFallback.ts`）で置き換えた数。
+ *   **作者には知らせず、呼ぶ側がログに残す**（作者の決定 2026-11-08「黙って」）
+ * - `unencodable`：置き換えても書けない字（♡・絵文字など）。行と前後の数文字つき
+ */
+export type EncodePreservingResult =
+  | { ok: true; bytes: Uint8Array; substitutions: SjisSubstitution[] }
+  | { ok: false; unencodable: UnencodableChar[] };
+
+/**
  * いまのバイト列 `currentBytes` を元に、`newText` を同じ形式のバイト列にする。
  *
  * - 末尾改行の有無は `original` に合わせる
  * - 変わらなかった文字は元のバイトをそのまま置く（CP932 の別符号・改行のバイトを保つ）
+ * - Shift_JIS の原稿では、符号の無い字を表の字へ置き換えてから比べる（5.4.2）
  *
- * @returns 表せない文字（Shift_JIS に無い字）があれば `undefined`。
- *   代替文字に置き換えて「書けた」ことにすると本文が壊れる
+ * 表せない字が残れば `ok: false`。代替文字（`?`）に置き換えて「書けた」ことにすると本文が壊れる
  */
 export function encodePreservingFormat(
   currentBytes: Uint8Array,
   newText: string,
   original: Pick<TextFileContent, "encoding" | "eol" | "hasTrailingNewline">,
   options: EncodePreservingOptions = {}
-): Uint8Array | undefined {
+): EncodePreservingResult {
   let out = newText.replace(/\r\n?/g, "\n");
 
   // 末尾改行の有無を元に合わせる
@@ -42,13 +59,28 @@ export function encodePreservingFormat(
     out = out.replace(/\n+$/, "");
   }
 
-  return encodePreservingUnchangedBytes(
+  /*
+   * 置き換えは**全文に、比べる前に1回だけ**かける。表の元の字は Shift_JIS のどのバイト列を
+   * 復号しても出てこない（`sjisFallback.test.ts`）ので、元の本文には含まれず、置き換えは
+   * 必ず新しく入った字にだけ当たる——変わらなかった所の元バイトは1つも動かない。
+   * 断片ごとでなく全文にかけるのは、止めるときの「何行目のどこ」が全文の位置でしか出せないため
+   */
+  let substitutions: SjisSubstitution[] = [];
+  if (original.encoding === "shift_jis") {
+    const substituted = substituteForShiftJis(out);
+    out = substituted.text;
+    substitutions = substituted.substitutions;
+  }
+
+  const bytes = encodePreservingUnchangedBytes(
     currentBytes,
     out,
     original.encoding,
     original.eol,
     options.rewriteEol === true
   );
+  if (!bytes) return { ok: false, unencodable: findUnencodableShiftJis(out) };
+  return { ok: true, bytes, substitutions };
 }
 
 interface EncodedToken {
@@ -177,7 +209,8 @@ function utf8CharacterLength(first: number): number {
 /**
  * 文字列の一部を、その文字コードのバイト列にする。
  * **Shift_JIS で表せない字があれば `undefined`**（代替文字への置換を許すと、
- * 保存成功に見えて本文を壊してしまう）。
+ * 保存成功に見えて本文を壊してしまう）。表の置き換え（`sjisFallback.ts`）は呼ぶ側が先に済ませる。
+ * ここの往復の確かめは、表の漏れを最後に止める網として残す
  */
 export function encodeTextFragment(
   text: string,

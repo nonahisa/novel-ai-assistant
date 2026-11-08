@@ -3,6 +3,7 @@ import * as nodePath from "node:path";
 import { hashBytes } from "../../core/hash";
 import { decodeBytes, hasConflictMarkers, type TextFileContent } from "../../core/textDecode";
 import { encodePreservingFormat } from "../../core/textEncodePreserving";
+import { describeSubstitutions, describeUnencodable } from "../../core/sjisFallback";
 import { pruneRecoveries, recoveryPathFor } from "./recoveryFile";
 
 /**
@@ -60,8 +61,23 @@ export function writeBodyPreservingFormat(
     return { ok: false, reason: "modified_externally" };
   }
 
-  const bytes = encodePreservingFormat(current, newText, original);
-  if (!bytes) return { ok: false, reason: "encoding_error" };
+  const encoded = encodePreservingFormat(current, newText, original);
+  if (!encoded.ok) {
+    return {
+      ok: false,
+      reason: "encoding_error",
+      detail: encoded.unencodable.length > 0
+        ? `Shift_JIS で書けない字：${describeUnencodable(encoded.unencodable)}`
+        : undefined,
+    };
+  }
+  const bytes = encoded.bytes;
+  if (encoded.substitutions.length > 0) {
+    // 作者には知らせず、記録にだけ残す（製品の textFile.ts と同じ。MCP の記録は標準エラー）
+    process.stderr.write(
+      `Shift_JIS の原稿へ書くため、字を置き換えました（${nodePath.basename(absolutePath)}）：${describeSubstitutions(encoded.substitutions)}\n`
+    );
+  }
 
   const recoveryPath = recoveryPathFor(absolutePath);
   try {
@@ -117,7 +133,7 @@ export function describeBodyWriteFailure(result: Extract<BodyWriteResult, { ok: 
     case "conflict_markers":
       return "Gitの競合マーカーが残っているため、書きませんでした。先に解消してください。";
     case "encoding_error":
-      return "この文字コード（Shift_JIS）で表せない文字が含まれているため、書きませんでした。";
+      return `この文字コード（Shift_JIS）で表せない文字が含まれているため、書きませんでした。${result.detail ?? ""}`;
     case "path_conflict":
       return `書き込めませんでした。${result.detail ?? ""}`.trim();
   }

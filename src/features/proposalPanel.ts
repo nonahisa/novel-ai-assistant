@@ -4583,7 +4583,7 @@ function describeWriteFailure(
     case "unsaved_changes":
       return "エディターに未保存の変更があります。保存してから適用してください。";
     case "encoding_error":
-      return "この文字コードで表現できない文字が含まれているため、適用できません。";
+      return `この文字コードで表現できない文字が含まれているため、適用できません。${result.detail ?? ""}`;
     case "path_conflict":
       return (
         "保存先が競合しました。" + (result.detail ? `（${result.detail}）` : "")

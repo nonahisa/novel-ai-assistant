@@ -1,4 +1,5 @@
 import { keysForHost } from "./keyLabels";
+import { isWindowsHost } from "./runtime";
 import {
   describeBlocked,
   EDITOR_BLOCKED_HINT,
@@ -350,7 +351,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "この作品のためのメモを1つ作る\n\n" +
           "・置き場は `設定/メモ/題名.md`\n\n" +
           "・作品一覧の「メモ」の枝から開ける\n\n" +
-          "・創作メモ集からは右クリックの「このメモを作品へ移管」で移せる\n\n" +
+          keysForHost("・創作メモ集からは右クリックの「このメモを作品へ移管」で移せる\n\n") +
           "話数・文字数・あらすじ・投稿・校正のどれにも入らない。",
       },
       /*
@@ -624,7 +625,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・作者が直そうとすると、誰がいつから見ているかが出る\n\n" +
               "・ファイル単位。他の話は今までどおり書ける\n\n" +
               "・終わったらもう一度押して外す\n\n" +
-              "修正は、検知の［適用］か、本文を選んで右クリックの「修正を提案する」で提案として置く。",
+              keysForHost("修正は、検知の［適用］か、本文を選んで右クリックの「修正を提案する」で提案として置く。"),
           },
           // 校閲中に、編集部が自分の言葉で直しと意見を置く（作者の決定 2026-11-01）。
           // 右クリックにしか無いと見つからないので、札を掛ける操作の隣にも出す。
@@ -640,7 +641,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "本文で選んだ所に、修正案と理由を提案として置く\n\n" +
               "・先に本文で修正したい所を選んでから押す\n\n" +
               "・修正案を空にすると、意見だけを送れる\n\n" +
-              "・右クリックからも出せる\n\n" +
+              keysForHost("・右クリックからも出せる\n\n") +
               "編集者モードで使う。本文は書き換わらない。",
           },
           {
@@ -1175,7 +1176,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "左の「AIに相談」パネルを開く\n\n" +
               "・開いている本文について、横で相談する\n\n" +
-              "・範囲を選んでから本文の右クリックでも開ける\n\n" +
+              keysForHost("・範囲を選んでから本文の右クリックでも開ける\n\n") +
               "・本文の領域に大きく開くのはパネルの「メインに表示」\n\n" +
               "原稿は書き換えない。",
           },
@@ -1210,7 +1211,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・誤字脱字の検知、資料の抽出もその場から\n\n" +
               "・会話はMarkdownのメモに保存\n\n" +
               "・プロット／紹介文／各話あらすじは、確認して押すと書き込み\n\n" +
-              "・横の小さいパネルは本文の右クリックから\n\n" +
+              keysForHost("・横の小さいパネルは本文の右クリックから\n\n") +
               "原稿は書き換えない。",
           },
         ],
@@ -1381,7 +1382,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "開いている本文を原稿エディター（縦書き・横書き）で開き直す\n\n" +
               "・ルビと傍点が振り仮名・圏点として出る\n\n" +
-              "・用語が色分けされ、右クリックから設定資料へ\n\n" +
+              keysForHost("・用語が色分けされ、右クリックから設定資料へ\n\n") +
               "・横書きへの切り替えと投稿サイト用のコピーも同じ画面",
           },
           // **耳で聞くと、目では気づかないものが見つかる**（設計書6.42）。
@@ -1429,7 +1430,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・対象は選んだところ（原稿エディターなら上の列の［入力］→［口述］→［整える］）\n\n" +
               keysForHost("・Ctrl+Z で元に戻せる\n\n") +
               "・声を文字にするのはOSの音声入力\n\n" +
-              "・Windows：Win+H／macOS：fnキー2回\n\n" +
+              "・Windows：Win+H／Mac：音声入力のキー（初めは fnキーを2回。システム設定で変えられる）\n\n" +
               "言葉は足さない・削らない・言い換えない。",
           },
           // **手で書いた分を、写真から下書きにする**（設計書6.117）。口述の隣に
@@ -2590,7 +2591,8 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "folder-opened",
             requiresWork: false,
             detail:
-              "ollama.exe の場所の指定\n\n" +
+              // Mac・Linux の実行ファイルに .exe は付かない
+              `${isWindowsHost() ? "ollama.exe" : "ollama"} の場所の指定\n\n` +
               "・Ollamaを自動で見つけられないときに使う",
           },
           // 流し受信の入切は、0.43.x で配布版の設定

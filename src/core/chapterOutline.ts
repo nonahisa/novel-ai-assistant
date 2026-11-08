@@ -5,6 +5,7 @@ import {
   type CollectedSectionStart,
 } from "./collectedSections";
 import { parseEpisodeMetadata } from "./metadataParser";
+import { keysForHost } from "./keyLabels";
 
 /**
  * バックアップ（や投稿サイトの作品管理の画面）に書かれた章立てを、作品の章立てへ
@@ -591,7 +592,7 @@ export function describeChapterImportPlan(plan: ChapterImportPlan, sourceName = 
       return [
         `手元の合本の途中から始まる章が${plan.inside}個あります。` +
           "章はファイルの頭からしか始められないため、取り込みません。",
-        "先に作品一覧で合本を右クリックして「話ごとのファイルに分ける」を選んでください（分けるときに章も立ちます）。",
+        keysForHost("先に作品一覧で合本を右クリックして「話ごとのファイルに分ける」を選んでください（分けるときに章も立ちます）。"),
       ];
     case "create":
       return [

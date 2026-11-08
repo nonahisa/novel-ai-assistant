@@ -13,7 +13,8 @@ import type {
  * **新しい依存は足さない。** .docx は「決まった名前の XML を ZIP に詰めた
  * もの」なので、EPUB と同じ fflate（`epubPackage.ts`）で組める。入れる部品は
  * 最小の5つ——`[Content_Types].xml`・`_rels/.rels`・`word/document.xml`・
- * `word/styles.xml`・`word/_rels/document.xml.rels`。
+ * `word/styles.xml`・`word/_rels/document.xml.rels`。これに、Mac で書体を見つけるための
+ * 書体の表（`word/fontTable.xml`。0.148.0）を足す。
  *
  * **中身は Markdown 版と同じ `ExportDocument` から描く**（判断はここに無い）。
  *
@@ -101,6 +102,7 @@ export function buildExportDocx(document: ExportDocument): Uint8Array {
     "word/document.xml": strToU8(documentXml(document)),
     "word/styles.xml": strToU8(STYLES),
     "word/_rels/document.xml.rels": strToU8(DOCUMENT_RELS),
+    "word/fontTable.xml": strToU8(FONT_TABLE),
   };
   return zipSync(files);
 }
@@ -198,6 +200,7 @@ const CONTENT_TYPES =
   '<Default Extension="xml" ContentType="application/xml"/>' +
   '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
   '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+  '<Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/>' +
   "</Types>";
 
 const ROOT_RELS =
@@ -210,7 +213,27 @@ const DOCUMENT_RELS =
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
   '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+  '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" Target="fontTable.xml"/>' +
   "</Relationships>";
+
+/**
+ * 書体の表（`word/fontTable.xml`）。**Mac の Word が游明朝・游ゴシックを見つけられるように、
+ * Mac での名前を代わりの名（`w:altName`）として持たせる**（2026-11-08、Mac の実機）。
+ *
+ * Mac に入っている游明朝は「游明朝体」「YuMincho」、游ゴシックは「游ゴシック体」「YuGothic」と
+ * 名乗り、Windows の名前（「游明朝」「Yu Mincho」）では見つからない。`w:altName` は1つの書体に
+ * 1つしか持てないので、英語の名（YuMincho・YuGothic）を選んだ。本文の書体の指定（`w:rFonts`）は
+ * 変えない——Windows の Word は今までと同じ名前で引く。
+ *
+ * `w:charset` 80 は日本語（SHIFTJIS_CHARSET）。`w:family` は明朝が roman、ゴシックが swiss。
+ * Word for Mac が altName で読み替えるかは、Mac の実機で確かめる（実機確認リスト）
+ */
+const FONT_TABLE =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+  `<w:fonts xmlns:w="${W_NS}">` +
+  '<w:font w:name="游明朝"><w:altName w:val="YuMincho"/><w:charset w:val="80"/><w:family w:val="roman"/><w:pitch w:val="variable"/></w:font>' +
+  '<w:font w:name="游ゴシック"><w:altName w:val="YuGothic"/><w:charset w:val="80"/><w:family w:val="swiss"/><w:pitch w:val="variable"/></w:font>' +
+  "</w:fonts>";
 
 /** 見出し1つ分の書式。大きさは半ポイント単位（32＝16pt） */
 function headingStyle(level: number, size: number): string {

@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   cast: undefined as CastFile | undefined,
   savedCast: [] as Array<{ file: CastFile; hash: string | undefined }>,
   assignment: { version: 1, characters: {} } as VoiceAssignmentFile,
+  savedAssignments: [] as VoiceAssignmentFile[],
   chunkCache: new Map<string, unknown>(),
   warnings: [] as string[],
   done: [] as string[],
@@ -104,11 +105,16 @@ vi.mock("../../../src/core/voiceCastStore", () => ({
     return "h2";
   },
   loadVoiceAssignment: async () => ({ file: state.assignment, hash: undefined }),
-  saveVoiceAssignment: async () => "h3",
+  saveVoiceAssignment: async (_w: unknown, file: VoiceAssignmentFile) => {
+    state.savedAssignments.push(file);
+    return "h3";
+  },
 }));
 
 const { VoiceReadingService, runVoiceCast, assignVoices } = await import("../../../src/features/voiceReading");
 const { buildReadingPlan } = await import("../../../src/core/readAloud");
+const { VOICE_ENGINE_LABEL } = await import("../../../src/core/voiceEngine");
+const { unresolvedVoiceNotice } = await import("../../../src/core/voiceCast");
 type Registry = import("../../../src/ai/registry").AIRegistry;
 
 const work = { id: "w1", title: "鉛の海", folderPath: "/w" } as WorkEntry;
@@ -132,6 +138,7 @@ beforeEach(() => {
   state.confirmRun.mockClear();
   state.cast = undefined;
   state.savedCast.length = 0;
+  state.savedAssignments.length = 0;
   state.chunkCache.clear();
   state.warnings.length = 0;
   state.done.length = 0;
@@ -307,6 +314,111 @@ describe("偽のエンジンで朗読の音を作る", () => {
     }
     expect(modal).toBe(0);
     expect(state.warnings.join("\n")).toContain("受け付けませんでした");
+  });
+});
+
+/*
+  ［声］でエンジンを選び分ける（0.146.0。設計書6.42.3。実機確認リスト 0.146.0 の「VOICEVOX で読む・割り当てる」
+  「エンジンを戻したときに代わりの声で読み、一言が出るか」のうち、機械で見られる所）。
+  偽のエンジンを2つ立て、エンジンごとの接続先へ頼みが分かれて届くかを、受けた頼みで見る。
+  声が自然か・読み分けて聞こえるかは耳の仕事なので、ここでは見ない。
+  一言が「1回の読み上げで1回」なのは原稿エディターの受け口（読み始めのときだけ出す）の仕事で、
+  ここでは計画が一言を返すところまで（画面は test/e2e/voiceEngineChoiceFlow.test.ts）
+*/
+describe("エンジンを選んだ声の割り当てと、戻したときの代わりの声（0.146.0）", () => {
+  const engines: FakeEngine[] = [];
+  afterEach(async () => {
+    await Promise.all(engines.map((engine) => engine.close()));
+    engines.length = 0;
+  });
+
+  /** AivisSpeech と VOICEVOX のふりをする偽のエンジンを1つずつ立て、エンジンごとに接続先を引く係を作る */
+  async function twoEngines() {
+    const aivis = await startFakeVoiceEngine();
+    const voicevox = await startFakeVoiceEngine();
+    engines.push(aivis, voicevox);
+    const service = new VoiceReadingService((engine) => (engine === "voicevox" ? voicevox.url : aivis.url));
+    return { aivis, voicevox, service };
+  }
+
+  /** 選ぶ画面の代役。出た題と並びを控え、`answers` を順に選ぶ（尽きたら閉じる） */
+  function scriptQuickPick(answers: Array<(items: readonly unknown[]) => unknown>) {
+    const shown: Array<{ title: string | undefined; items: Array<{ label: string; description?: string }> }> = [];
+    const original = window.showQuickPick;
+    window.showQuickPick = (async (items: readonly unknown[], options?: { title?: string }) => {
+      shown.push({
+        title: options?.title,
+        items: (items as Array<{ label: string; description?: string }>).map((item) => ({
+          label: item.label,
+          description: item.description,
+        })),
+      });
+      const answer = answers.shift();
+      return answer ? answer(items) : undefined;
+    }) as typeof window.showQuickPick;
+    return { shown, restore: () => (window.showQuickPick = original) };
+  }
+
+  const labelled = (label: string) => (items: readonly unknown[]) =>
+    (items as Array<{ label: string }>).find((item) => item.label === label);
+
+  test("VOICEVOX を選んで［声の割り当て］を開くと、一覧と声の一覧の題に「VOICEVOX」が入り、VOICEVOX の接続先の話者から選んで、印つきで残す", async () => {
+    const { aivis, voicevox, service } = await twoEngines();
+    const pick = scriptQuickPick([labelled("灯"), labelled("まい／上機嫌")]);
+    try {
+      await assignVoices(work, service, "voicevox");
+    } finally {
+      pick.restore();
+    }
+    expect(pick.shown[0].title).toBe(`声の割り当て（この作品の声。選ぶと ${VOICE_ENGINE_LABEL.voicevox} の声から選べます）`);
+    expect(pick.shown[1].title).toBe(`灯の声（${VOICE_ENGINE_LABEL.voicevox}）`);
+    // 話者の一覧は VOICEVOX の接続先から引く（AivisSpeech の口には1つも行かない）
+    expect(voicevox.requests.filter((r) => r.path === "/speakers").length).toBeGreaterThan(0);
+    expect(aivis.requests).toHaveLength(0);
+    expect(state.savedAssignments).toHaveLength(1);
+    expect(state.savedAssignments[0].characters["c-akari"]).toMatchObject({
+      speakerUuid: "uuid-mai",
+      styleName: "上機嫌",
+      styleId: 888753761,
+      engine: "voicevox",
+      characterName: "灯",
+    });
+  });
+
+  test("［声］を AivisSpeech に戻して［声の割り当て］を開くと、VOICEVOX で選んだ人物にエンジンの名前が添えてある", async () => {
+    const { service } = await twoEngines();
+    state.assignment.characters["c-akari"] = { ...state.assignment.characters["c-akari"], engine: "voicevox" };
+    const pick = scriptQuickPick([]);
+    try {
+      await assignVoices(work, service, "aivisspeech");
+    } finally {
+      pick.restore();
+    }
+    const row = pick.shown[0].items.find((item) => item.label === "灯");
+    expect(row?.description).toBe(`まい／ノーマル（${VOICE_ENGINE_LABEL.voicevox}の声）`);
+    // 同じエンジンの印が無い前の版の声（蓮）は、前の版の声として添える
+    expect(pick.shown[0].items.find((item) => item.label === "蓮")?.description).toBe("花音／ノーマル（前の版で選んだ声）");
+  });
+
+  test("［声］を AivisSpeech に戻して読むと、VOICEVOX で選んだ人物の台詞は代わりの声で読み、［声の割り当て］へ案内する一言を1つ返す", async () => {
+    const { aivis, voicevox, service } = await twoEngines();
+    state.assignment.characters["c-akari"] = { ...state.assignment.characters["c-akari"], engine: "voicevox" };
+    state.cast = {
+      version: 1,
+      episode: "01.txt",
+      entries: [castEntry("「やった！」", { speakerId: "c-akari", speakerName: "灯" })],
+    };
+    const sentences = buildReadingPlan(TEXT, "curly", [], { splitDialogue: true });
+    const planned = await service.plan(work, "/w/01.txt", TEXT, sentences, "aivisspeech", { start: true });
+    if (!("units" in planned)) throw new Error(planned.problem);
+    // 灯の台詞は、台詞の既定（割り当てなし）を経て語り手（花音／ノーマル）の声へ落ちる。名札は灯のまま
+    expect(planned.units[0]).toMatchObject({ speech: "「やった！」", who: "灯", styleId: 1325133120, engine: "aivisspeech" });
+    expect(planned.notice).toBe(unresolvedVoiceNotice(["灯"], VOICE_ENGINE_LABEL.aivisspeech));
+    expect(planned.notice).toContain(`割り当てた声のうち 灯 の声が ${VOICE_ENGINE_LABEL.aivisspeech} に見つからないので`);
+    expect(planned.notice).toContain(`［声の割り当て］で ${VOICE_ENGINE_LABEL.aivisspeech} の声を選び直してください。`);
+    // 読むのは AivisSpeech の接続先だけ
+    expect(aivis.requests.some((r) => r.path === "/speakers")).toBe(true);
+    expect(voicevox.requests).toHaveLength(0);
   });
 });
 
@@ -778,5 +890,81 @@ describe("前の区切りの話者の流れを1段目に添える（P-54 版1.4�
     expect(stages.filter((s) => s === "感情")).toHaveLength(2);
     expect(state.savedCast).toHaveLength(0);
     expect(state.warnings[0]).toContain("書き換えていません");
+  });
+});
+
+describe("遅い PC で、声づくりの時間切れを届かないと取り違えない（0.147.1。ノートPCの実機確認）", () => {
+  /**
+   * 1つずつ作る偽のエンジン。`synthesisMs` が undefined なら、声づくりの答えを返さない（止まったまま）。
+   * 話者の一覧はすぐ返す
+   */
+  function serialFetch(synthesisMs: number | undefined) {
+    let busyUntil = 0;
+    const impl = (input: string, init?: RequestInit): Promise<Response> =>
+      new Promise<Response>((resolve, reject) => {
+        const path = new URL(input).pathname;
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("This operation was aborted", "AbortError"))
+        );
+        if (path === "/speakers") {
+          resolve(
+            new Response(
+              JSON.stringify([
+                { name: "まい", speaker_uuid: "u", styles: [{ name: "ノーマル", id: 1, type: "talk" }] },
+              ])
+            )
+          );
+          return;
+        }
+        if (path === "/synthesis" && synthesisMs === undefined) return;
+        const took = path === "/synthesis" ? (synthesisMs ?? 0) : 300;
+        const startAt = Math.max(Date.now(), busyUntil);
+        busyUntil = startAt + took;
+        setTimeout(() => {
+          resolve(
+            path === "/synthesis"
+              ? new Response(new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]))
+              : new Response(JSON.stringify({ speedScale: 1 }))
+          );
+        }, busyUntil - Date.now());
+      });
+    return impl;
+  }
+  const TEXT4 = "一つ目の文。二つ目の文。三つ目の文。四つ目の文。";
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("1文25秒かかるエンジンでも、先読みを並べた後ろの文まで音ができる（時間切れで止まらない）", async () => {
+    const service = new VoiceReadingService(() => "http://127.0.0.1:10101", serialFetch(25_000));
+    const sentences = buildReadingPlan(TEXT4, "curly", [], { splitDialogue: true });
+    const planned = await service.plan(undefined, "/x.txt", TEXT4, sentences, "aivisspeech");
+    if (!("units" in planned)) throw new Error(planned.problem);
+    expect(planned.units).toHaveLength(4);
+    const results = planned.units.map((_unit, index) => service.audio(planned.units, index, 1));
+    await vi.advanceTimersByTimeAsync(4 * 26_000);
+    for (const result of await Promise.all(results)) {
+      expect(result).not.toHaveProperty("engineDown");
+      expect(result).not.toHaveProperty("engineSlow");
+      expect("wav" in result).toBe(true);
+    }
+  });
+
+  test("止まったままのエンジンは時間切れの印（engineSlow）で返し、届かない印（engineDown）は立てない", async () => {
+    const service = new VoiceReadingService(() => "http://127.0.0.1:10101", serialFetch(undefined));
+    const planned = await service.plan(undefined, "/x.txt", "文。", buildReadingPlan("文。", "curly"), "aivisspeech");
+    if (!("units" in planned)) throw new Error(planned.problem);
+    const pending = service.audio(planned.units, 0, 1);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    const answer = await pending;
+    expect(answer).toMatchObject({ engineSlow: true });
+    expect(answer).not.toHaveProperty("engineDown");
+    const problem = "problem" in answer ? answer.problem : "";
+    expect(problem).toContain("［音声に書き出す］");
+    expect(problem).not.toContain("繋がりませんでした");
   });
 });

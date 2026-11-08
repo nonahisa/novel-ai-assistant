@@ -828,7 +828,7 @@ function describeWriteFailure(result: WriteTextFileResult): string {
     case "conflict_markers":
       return "プロット（plot.md）に競合の印（<<<<<<<）が残っているため、入れるのを止めました。";
     case "encoding_error":
-      return "プロット（plot.md）を元の文字コードで書き出せないため、入れるのを止めました。";
+      return `プロット（plot.md）を元の文字コードで書き出せないため、入れるのを止めました。${result.detail ?? ""}`;
     default:
       return `プロット（plot.md）に書き込めませんでした。${result.detail ?? ""}`;
   }

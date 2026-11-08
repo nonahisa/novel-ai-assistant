@@ -400,8 +400,35 @@ describe("本文形式を保持した保存", () => {
     ["出力の競合マーカー", "conflict_markers"],
     ["Shift_JIS不能文字", "encoding_error"],
   ])("%sでは元ファイルへ書かない", async (label, reason) => {
-    expect(await runGuardCase(label)).toEqual({ ok: false, reason });
+    expect(await runGuardCase(label)).toMatchObject({ ok: false, reason });
     expect(rename).not.toHaveBeenCalled();
+  });
+
+  test("Shift_JIS の原稿へ「〜」（Mac の日本語入力）を書き戻せる。～（81 60）で書き、ほかのバイトは元のまま", async () => {
+    const originalBytes = shiftJis("灯\r\n澪\r\n");
+    const original = decodeBytes(originalBytes);
+    files.set(fileKey(path), originalBytes);
+
+    const result = await writeTextFilePreservingFormat(path, "灯〜\n澪\n", original, original.hash);
+
+    expectSaved(result);
+    expect(Array.from(savedBytes ?? [])).toEqual(Array.from(shiftJis("灯～\r\n澪\r\n")));
+  });
+
+  test("Shift_JIS で書けない字（絵文字）で止めるときは、行と前後を detail に入れる", async () => {
+    const original = decodeBytes(shiftJis("灯\n澪\n"));
+    files.set(fileKey(path), shiftJis("灯\n澪\n"));
+
+    const result = await writeTextFilePreservingFormat(path, "灯\n澪と\u{1f600}\n", original, original.hash);
+
+    expect(result).toMatchObject({ ok: false, reason: "encoding_error" });
+    expect(result.ok ? "" : result.detail).toContain("2行目「澪と\u{1f600}」");
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  test("新しく作る Shift_JIS のファイルも、同じ表で置き換える", () => {
+    const bytes = encodeForNewFile("灯〜—", { encoding: "shift_jis", eol: "\r\n", hasTrailingNewline: true });
+    expect(Array.from(bytes ?? [])).toEqual(Array.from(shiftJis("灯～―\r\n")));
   });
 
   test("ハッシュなしの保存要求では元ファイルへ書かない", async () => {
@@ -707,8 +734,9 @@ describe("別ファイルへ書き出すときの符号化", () => {
 
   test("Shift_JISで表せない文字があれば書き出さない", () => {
     // 代替文字に置き換えて「保存できた」ことにすると本文が壊れる。
-    // 𠮟（サロゲートペア）はShift_JISに無い
-    const bytes = encodeForNewFile("𠮟る\n", original({ encoding: "shift_jis" }));
+    // 𩸽（サロゲートペア）はShift_JISに無く、似た字の表（sjisFallback.ts）にも無い
+    // （𠮟は 0.148.0 から叱へ置き換えて書く）
+    const bytes = encodeForNewFile("\u{29e3d}る\n", original({ encoding: "shift_jis" }));
 
     expect(bytes).toBeUndefined();
   });

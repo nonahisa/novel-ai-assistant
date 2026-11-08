@@ -62,7 +62,53 @@ export interface Requirement {
      * `note` を Linux 向けに書いた項目で、Mac に「Linuxでは」と出さないため
      */
     macNote?: string;
+    /** Mac（Homebrew が無いとき）に打つ1行。無ければ `command` を使う */
+    macCommand?: string;
   };
+}
+
+/** 自分で入れてもらう案内の1行を、OS に合わせて選ぶ（`manualInstallNote` と同じく OS は呼び出し側から） */
+export function manualInstallCommand(
+  steps: NonNullable<Requirement["manualSteps"]>,
+  platform: string | undefined
+): string | undefined {
+  if (platform === "darwin" && steps.macCommand) return steps.macCommand;
+  return steps.command;
+}
+
+/** 入れ方の案内（Git が見つからないときの窓に出す） */
+export interface InstallGuide {
+  /** 何をすれば入るかの文（コマンドの前に出す） */
+  lead: string;
+  /** コピーできる1行。無ければ配布ページだけを示す */
+  command?: string;
+}
+
+/**
+ * 導入の手引きと同じ表（`REQUIREMENTS`）から、その OS での入れ方の案内を作る。
+ * 画面ごとに「Windows なら winget」と書くと、Mac の案内が片方にしか入らない（0.148.0 で
+ * Git の窓が Windows の1行しか持っていなかった）
+ */
+export function installGuideFor(id: RequirementId, platform: string | undefined): InstallGuide {
+  const requirement = REQUIREMENTS.find((entry) => entry.id === id);
+  const steps = requirement?.manualSteps;
+  if (platform === "win32" && requirement?.wingetId) {
+    return {
+      lead: "Windowsなら、ターミナルで次を実行すると入ります。",
+      command: `winget install --id ${requirement.wingetId} -e`,
+    };
+  }
+  if (platform === "darwin") {
+    const command = steps ? manualInstallCommand(steps, platform) : undefined;
+    const brew = requirement?.brewFormula
+      ? `Homebrew を使っているなら、ターミナルで brew install ${requirement.brewFormula} でも入ります。`
+      : "";
+    return {
+      lead: [steps ? manualInstallNote(steps, platform) : "", brew].filter(Boolean).join("\n"),
+      command,
+    };
+  }
+  return { lead: steps ? manualInstallNote(steps, platform ?? "") : "", command: steps?.command };
 }
 
 /**
@@ -211,6 +257,7 @@ export const REQUIREMENTS: Requirement[] = [
       macNote:
         "Macでは、ターミナルで xcode-select --install を実行すると、" +
         "Apple のコマンドラインツールと一緒に入ります。",
+      macCommand: "xcode-select --install",
     },
   },
   {

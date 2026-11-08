@@ -38,6 +38,7 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
 import { confirmRun, confirmRunOrChoose, notifyDone } from "../views/notify";
 import { withProgress } from "../views/progress";
 import { showBackupOpenDialog } from "./backupPickFolder";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * バックアップから章立てだけを取り込む（残課題 B7。設計書6.66.6）。
@@ -92,7 +93,7 @@ export async function importChaptersFromBackup(work: WorkEntry): Promise<boolean
         description: "カクヨム",
         detail:
           "カクヨムのバックアップには章が入っていません。作品管理の画面で、" +
-          "統合小説執筆環境ヘルパーの右クリック「章立てを統合小説執筆環境へ渡す」を押してから選んでください（クリップボードから読みます）。",
+          keysForHost("統合小説執筆環境ヘルパーの右クリック「章立てを統合小説執筆環境へ渡す」を押してから選んでください（クリップボードから読みます）。"),
         value: "clipboard" as const,
       },
       cancelItem("取りやめる"),
@@ -208,7 +209,7 @@ export async function placeImportedChapters(
         created: 0,
         note:
           `章の見出しが${plan.count}個あります。全話が1つのファイルに入っているため、章立てはまだ立てていません。` +
-          "作品一覧でそのファイルを右クリックして「話ごとのファイルに分ける」を選ぶと、分けるときに章も立ちます。",
+          keysForHost("作品一覧でそのファイルを右クリックして「話ごとのファイルに分ける」を選ぶと、分けるときに章も立ちます。"),
       };
     }
     // 題だけが違う話（titleByNumber）も、ここでは訊けないので立てない。
@@ -217,7 +218,7 @@ export async function placeImportedChapters(
       created: 0,
       note:
         "バックアップに章の見出しはありますが、章立ては立てませんでした。" +
-        "作品を右クリックして「章立て取込（バックアップから）」を選ぶと、理由を確かめられます。",
+        keysForHost("作品を右クリックして「章立て取込（バックアップから）」を選ぶと、理由を確かめられます。"),
     };
   } catch (error) {
     // **章が立たなくても、取り込みそのものは成り立っている**（下書きと同じ扱い）
@@ -348,7 +349,7 @@ async function readChaptersClipboard(
       (trigger === "uri"
         ? "クリップボードに章立てがありませんでした。"
         : "クリップボードに、ヘルパーで読んだ章立てがありませんでした。") +
-        "カクヨムの作品管理の画面を開き、統合小説執筆環境ヘルパーの右クリック「章立てを統合小説執筆環境へ渡す」を押してから、もう一度お試しください。"
+        keysForHost("カクヨムの作品管理の画面を開き、統合小説執筆環境ヘルパーの右クリック「章立てを統合小説執筆環境へ渡す」を押してから、もう一度お試しください。")
     );
     return undefined;
   }
@@ -569,7 +570,7 @@ async function chooseChapters(
   switch (plan.kind) {
     case "none":
       void vscode.window.showInformationMessage(
-        "章の見出しが見つかりませんでした。章は作品一覧の右クリック「ここから章を始める」で付けられます。"
+        keysForHost("章の見出しが見つかりませんでした。章は作品一覧の右クリック「ここから章を始める」で付けられます。")
       );
       return undefined;
     case "same":

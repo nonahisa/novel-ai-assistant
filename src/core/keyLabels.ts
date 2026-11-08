@@ -142,15 +142,43 @@ function macTextToken(modifiers: string, key: string): string {
 }
 
 /**
+ * 「右クリック」に添える Mac の押し方（作者の問い 2026-11-08「右クリックはMacではどう操作しますか？」）。
+ *
+ * 画面の文は、どこから読まれるか分からないので、**文（1行）ごとに最初の1回だけ**添える。
+ * 同じ文の2回目以降には添えない（くり返すと読みにくい）。トラックパッドの2本指で押す道もあるが、
+ * 画面の文は短く保ち、マウスでも効く control＋クリックだけを書く（説明書の類は2本指も添える）
+ */
+export const RIGHT_CLICK_MAC_NOTE = "（Mac は control＋クリック）";
+
+/** 添え書きの付いた「右クリック」（ソースの見張りと WebView の台本が同じ字を見る） */
+const RIGHT_CLICK_WITH_NOTE = `右クリック${RIGHT_CLICK_MAC_NOTE}`;
+
+/**
+ * 行ごとに、最初の「右クリック」へ添える。マニュアルや使い方の説明は1つの長い文字列で、
+ * 読み手は行（箇条の1つ）ずつ拾い読みするので、行を「1つの文」として数える
+ */
+function addRightClickNote(text: string): string {
+  return text
+    .split("\n")
+    .map((line) =>
+      // もう添えてある行には足さない（WebView の見張りは同じ要素に何度も走るので、足し続けると増える）
+      line.includes(RIGHT_CLICK_WITH_NOTE) ? line : line.replace("右クリック", RIGHT_CLICK_WITH_NOTE)
+    )
+    .join("\n");
+}
+
+/**
  * 文の中のキーの書き方を OS に合わせる。Windows・Linux では文をそのまま返す
  * （文は Windows の書き方で書いておく）。Mac では「Ctrl+Shift+P」→「⇧⌘P」、
- * 「Ctrl+A → Ctrl+C」→「⌘A → ⌘C」、「Alt+↑」→「⌥↑」、「Ctrl+ホイール」→「⌘+ホイール」
+ * 「Ctrl+A → Ctrl+C」→「⌘A → ⌘C」、「Alt+↑」→「⌥↑」、「Ctrl+ホイール」→「⌘+ホイール」。
+ * 「右クリック」には、文ごとに最初の1回だけ「（Mac は control＋クリック）」を添える
  */
 export function keysInText(text: string, os: KeyOs): string {
   if (os !== "mac") return text;
-  return text.replace(new RegExp(KEY_TOKEN_SOURCE, "g"), (_whole, modifiers: string, key: string) =>
+  const keys = text.replace(new RegExp(KEY_TOKEN_SOURCE, "g"), (_whole, modifiers: string, key: string) =>
     macTextToken(modifiers, key)
   );
+  return addRightClickNote(keys);
 }
 
 /** `keysInText` を、いま動いている所の OS で（知らせ・確認の窓・マニュアルの文に使う） */
@@ -183,9 +211,18 @@ export const KEY_LABEL_SCRIPT = [
   "})();",
   `var NOVELAI_KEY_TOKEN = ${JSON.stringify(KEY_TOKEN_SOURCE)};`,
   `var NOVELAI_KEY_WORD = new RegExp(${JSON.stringify(WORD_KEY_SOURCE)});`,
+  `var NOVELAI_RIGHT_CLICK = ${JSON.stringify(RIGHT_CLICK_WITH_NOTE)};`,
   "function novelaiKeys(text) {",
   "  var source = String(text);",
   "  if (!NOVELAI_KEY_MAC) return source;",
+  "  var lines = novelaiKeyTokens(source).split('\\n');",
+  // 「右クリック」の添え書き（keysInText と同じ：行ごとに最初の1回、もう添えてあれば足さない）
+  "  for (var i = 0; i < lines.length; i++) {",
+  "    if (lines[i].indexOf(NOVELAI_RIGHT_CLICK) < 0) lines[i] = lines[i].replace('右クリック', NOVELAI_RIGHT_CLICK);",
+  "  }",
+  "  return lines.join('\\n');",
+  "}",
+  "function novelaiKeyTokens(source) {",
   "  return source.replace(new RegExp(NOVELAI_KEY_TOKEN, 'g'), function (whole, modifiers, key) {",
   "    var shift = false;",
   "    var alt = false;",

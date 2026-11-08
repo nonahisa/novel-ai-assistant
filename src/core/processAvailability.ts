@@ -20,6 +20,7 @@
  */
 
 import { canRunProcesses } from "./runtime";
+import { keysForHost } from "./keyLabels";
 
 /**
  * 外部プロセスが要る、**操作メニューに載っている**コマンド。
@@ -166,7 +167,7 @@ export function describeProcessesBlocked(command: string): string {
     return (
       "ブラウザ版では、バックアップが届くのを待てません" +
       "（このパソコンのダウンロードのフォルダーを見られないためです）。" +
-      "サイトから落としたバックアップを、枠の右クリックの［ファイルから取り込む］で選んでください。"
+      keysForHost("サイトから落としたバックアップを、枠の右クリックの［ファイルから取り込む］で選んでください。")
     );
   }
   if (command === "novelai.connectClaudeCode") {

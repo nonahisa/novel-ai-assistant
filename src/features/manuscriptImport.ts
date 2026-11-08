@@ -689,6 +689,7 @@ function describeWriteFailure(
       return (
         head +
         "この話の文字コードでは書けない文字が、取り込む文に入っています。" +
+        (result.detail ? `${result.detail}。` : "") +
         "取り込む文からその文字を除くか、この話を UTF-8 で保存し直してからお試しください。"
       );
     case "editor_locked":

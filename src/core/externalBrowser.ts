@@ -14,11 +14,12 @@ import { POSTING_SITES } from "../models/posting";
  *
  * 1. VS Code の設定 `workbench.externalBrowser` が入っていれば、それが開く
  *    （名前〈`chrome`・`edge`・`firefox`〉か、実行ファイルのパス）
- * 2. 空なら OS の既定。Windows では登録簿の ProgId（`ChromeHTML` など）で見る
+ * 2. 空なら OS の既定。Windows では登録簿の ProgId（`ChromeHTML` など）で、
+ *    Mac では LaunchServices の https の受け手（`com.google.chrome` など。0.148.0）で見る
  * 3. **読めなければ「分からない」**——推し量って案内を出さない
  *
- * ここは VS Code にも Node にも依存しない（登録簿を読むのは
- * `externalBrowserWindows.ts`。動的 import で呼ぶ）。
+ * ここは VS Code にも Node にも依存しない（登録簿を読むのは `externalBrowserWindows.ts`、
+ * Mac の記録を読むのは `externalBrowserMac.ts`。どちらも動的 import で呼ぶ）。
  */
 
 /** 開くブラウザについて分かったこと */
@@ -83,6 +84,113 @@ export function parseRegProgId(stdout: string): string | undefined {
 }
 
 /**
+ * Mac の既定のブラウザのアプリの名札（bundle id）から（作者の決定 2026-11-08「Mac でも調べる」）。
+ * 名札は大文字小文字が揃わない（`com.google.Chrome` と書く Mac もある）ので、小文字で見る。
+ * Chrome のベータ・開発版・Canary は `com.google.chrome.beta` などになる
+ */
+export function browserFromBundleId(bundleId: string | undefined): BrowserGuess | undefined {
+  const id = (bundleId ?? "").trim().toLowerCase();
+  if (!id) return undefined;
+  if (id === "com.google.chrome" || id.startsWith("com.google.chrome.")) {
+    return { chrome: true, name: "Google Chrome" };
+  }
+  if (id === "com.apple.safari" || id === "com.apple.safaritechnologypreview") {
+    return { chrome: false, name: "Safari" };
+  }
+  if (id.startsWith("com.microsoft.edgemac")) return { chrome: false, name: "Microsoft Edge" };
+  if (id.startsWith("org.mozilla.firefox")) return { chrome: false, name: "Firefox" };
+  if (id.startsWith("com.brave.browser")) return { chrome: false, name: "Brave" };
+  if (id.startsWith("com.operasoftware.opera")) return { chrome: false, name: "Opera" };
+  return { chrome: false };
+}
+
+/**
+ * Mac の LaunchServices の記録（`com.apple.launchservices.secure.plist`）から、https を開くアプリの
+ * 名札を拾う。`LSHandlers` のうち `LSHandlerURLScheme` が `https` の行の `LSHandlerRoleAll`。
+ *
+ * 中身は `plutil -convert json`（読めなければ `-convert xml1`）で文字にしたもの。どちらの形でも読む。
+ * **拾えなければ undefined**（Safari のまま一度も既定を変えていない Mac には、https の行が無いことがある）
+ */
+export function parseLaunchServicesHttpsHandler(text: string): string | undefined {
+  const root = text.trimStart().startsWith("<") ? parsePlistXml(text) : parseJson(text);
+  if (!isRecord(root) || !Array.isArray(root.LSHandlers)) return undefined;
+  for (const handler of root.LSHandlers) {
+    if (!isRecord(handler)) continue;
+    const scheme = handler.LSHandlerURLScheme;
+    const role = handler.LSHandlerRoleAll;
+    if (typeof scheme === "string" && scheme.toLowerCase() === "https" && typeof role === "string" && role.trim()) {
+      return role.trim();
+    }
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * plist の XML を、要る分だけ読む（dict・array・key・string。数・日付・真偽・data は値を読まずに
+ * 置き場だけ埋める）。plutil が整えて出すものだけを相手にするので、属性や CDATA は見ない
+ */
+function parsePlistXml(text: string): unknown {
+  const tokens = text.match(/<\/?(?:dict|array)\s*>|<(?:dict|array)\s*\/>|<key>[^<]*<\/key>|<string>[^<]*<\/string>|<string\s*\/>|<(?:real|integer|date|data)>[^<]*<\/(?:real|integer|date|data)>|<(?:true|false)\s*\/>/g);
+  if (!tokens) return undefined;
+  const stack: Array<{ value: Record<string, unknown> | unknown[]; key?: string }> = [];
+  let root: unknown;
+  const put = (value: unknown): void => {
+    const top = stack[stack.length - 1];
+    if (!top) {
+      root ??= value;
+      return;
+    }
+    if (Array.isArray(top.value)) top.value.push(value);
+    else if (top.key !== undefined) {
+      top.value[top.key] = value;
+      top.key = undefined;
+    }
+  };
+  for (const token of tokens) {
+    if (/^<(dict|array)\s*\/>$/.test(token)) {
+      put(token.startsWith("<dict") ? {} : []);
+    } else if (/^<(dict|array)\s*>$/.test(token)) {
+      const value: Record<string, unknown> | unknown[] = token.startsWith("<dict") ? {} : [];
+      put(value);
+      stack.push({ value });
+    } else if (/^<\/(dict|array)/.test(token)) {
+      stack.pop();
+    } else if (token.startsWith("<key>")) {
+      const top = stack[stack.length - 1];
+      if (top && !Array.isArray(top.value)) top.key = decodeXmlText(token.slice(5, -6));
+    } else if (token.startsWith("<string>")) {
+      put(decodeXmlText(token.slice(8, -9)));
+    } else if (token.startsWith("<string")) {
+      put("");
+    } else {
+      put(null);
+    }
+  }
+  return root;
+}
+
+function decodeXmlText(text: string): string {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+/**
  * ヘルパーが働くサイトのリンクか（案内を出す対象）。
  *
  * 投稿サイト4つ（`POSTING_SITES` のドメインとその下）と、なろうの数を読む分析サイト
@@ -106,16 +214,21 @@ export function isHelperSiteUrl(url: string): boolean {
  * 案内を出すか。出すなら、開くブラウザの名前。
  *
  * @param input.setting `workbench.externalBrowser` の値
- * @param input.progId 既定のブラウザの ProgId（設定が空のときだけ要る。読めなければ undefined）
+ * @param input.progId Windows の既定のブラウザの ProgId（設定が空のときだけ要る。読めなければ undefined）
+ * @param input.bundleId Mac の既定のブラウザのアプリの名札（同じく。読めなければ undefined）
  * @param input.shown もう一度出したか
  */
 export function decideSiteLinkGuide(input: {
   setting: unknown;
   progId?: string;
+  bundleId?: string;
   shown: boolean;
 }): { readonly show: false } | { readonly show: true; readonly browserName: string } {
   if (input.shown) return { show: false };
-  const guess = browserFromSetting(input.setting) ?? browserFromProgId(input.progId);
+  const guess =
+    browserFromSetting(input.setting) ??
+    browserFromProgId(input.progId) ??
+    browserFromBundleId(input.bundleId);
   // 読めなければ出さない（推し量らない）。Chrome なら出す理由が無い
   if (!guess || guess.chrome) return { show: false };
   return { show: true, browserName: guess.name ?? DEFAULT_BROWSER_LABEL };

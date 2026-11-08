@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { currentMode } from "../core/actorContext";
 import { syncEditorModeContext } from "../core/editorModeContext";
 import { editorAllowedCommands, type WorkMode } from "../core/editorMode";
+import { keysForHost } from "../core/keyLabels";
 
 /**
  * 作者モードと編集者モードを切り替える（設計書5.6.1）。
@@ -98,7 +99,7 @@ export function describeModeChange(next: WorkMode): string {
     "",
     "本文は書き換わりません。「適用」を押しても、作者への提案として",
     "置かれます。採るかどうかは作者が決めます。",
-    "自分で気づいた修正は、本文を選んで右クリックの「修正を提案する」で",
+    keysForHost("自分で気づいた修正は、本文を選んで右クリックの「修正を提案する」で"),
     "書けます（意見だけでも置けます）。",
     "",
     // 編集者メニュー（作者の指示 2026-11-05 夜。設計書5.6.6）。どこから始めればよいかを先に言う

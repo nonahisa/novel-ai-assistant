@@ -604,7 +604,9 @@ export async function checkSelectedExecutable(
     return {
       verdict: "suspicious",
       reason:
-        "これはトレイ常駐アプリです。サーバーを起動するには ollama.exe を選んでください。",
+        platform === "win32"
+          ? "これはトレイ常駐アプリです。サーバーを起動するには ollama.exe を選んでください。"
+          : "これは常駐するアプリです。サーバーを起動するには ollama を選んでください。",
     };
   }
 
@@ -631,14 +633,17 @@ export function openDialogFilters(
 }
 
 /** 起動に失敗した理由を、作者が次に取れる操作つきで説明する */
-export function describeStartFailure(outcome: StartOutcome): string {
+export function describeStartFailure(
+  outcome: StartOutcome,
+  platform: NodeJS.Platform = process.platform
+): string {
   if (outcome.ok) return "";
   switch (outcome.reason) {
     case "not_installed":
       return (
         "Ollamaの実行ファイルが見つかりませんでした。" +
         "インストール済みの場合は、設定 novelai.ollama.executablePath に " +
-        "ollama の場所を指定してください。"
+        `${platform === "win32" ? "ollama.exe" : "ollama"} の場所を指定してください。`
       );
     case "spawn_failed":
       return (
@@ -655,11 +660,17 @@ export function describeStartFailure(outcome: StartOutcome): string {
       // 決め打ちにすると、接続先を既定から変えている作者に
       // 見当違いの番号を探させることになる。読めなければ既定を言う
       const port = portFromBindError(outcome.detail ?? "") ?? "11434";
+      // 終わらせ方は OS で違う（Mac はメニューバーとアクティビティモニタ。Linux も Mac の言い方に寄せず、
+      // 常駐の印が無いことが多いので「ollama の処理を終了」とだけ書く）
+      const howToStop =
+        platform === "win32"
+          ? "タスクトレイのOllamaアイコンから終了（無ければタスクマネージャーで ollama.exe を終了）"
+          : platform === "darwin"
+            ? "メニューバーのOllamaアイコンから終了（無ければアクティビティモニタで ollama を終了）"
+            : "動いている ollama の処理を終了";
       return (
         `別のOllamaがポート${port}を使ったまま、応答していません。` +
-        "タスクトレイのOllamaアイコンから終了" +
-        "（無ければタスクマネージャーで ollama.exe を終了）してから、" +
-        "もう一度お試しください。"
+        `${howToStop}してから、もう一度お試しください。`
       );
     }
     case "timeout":

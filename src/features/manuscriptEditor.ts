@@ -131,6 +131,7 @@ import {
   bytesToBase64,
   isVoiceEngineId,
   voiceEngineDownPrompt,
+  voiceEngineSlowPrompt,
   type RunningOtherEngine,
   type VoiceEngineId,
 } from "../core/voiceEngine";
@@ -1927,7 +1928,9 @@ export interface VoiceReadingDeps {
     engine: VoiceEngineId,
     /** `start`：［▶ 読む］で読み始めたときの計画か（声づくりの速さの見張りを始め直す） */
     options?: { start?: boolean }
-  ): Promise<{ units: VoicePlanUnit[]; notice?: string } | { problem: string; engineDown?: true }>;
+  ): Promise<
+    { units: VoicePlanUnit[]; notice?: string } | { problem: string; engineDown?: true; engineSlow?: true }
+  >;
   /**
    * 文の音（WAV）を作る。先の数文も並べて作っておく（先読み）。声づくりが読む速さに追いつかない
    * 状態が続いたら、1回の読み上げで1回だけ `slowNotice` を添える
@@ -1936,7 +1939,9 @@ export interface VoiceReadingDeps {
     units: readonly VoicePlanUnit[],
     index: number,
     rate: number
-  ): Promise<{ wav: Uint8Array; slowNotice?: string } | { problem: string; engineDown?: true }>;
+  ): Promise<
+    { wav: Uint8Array; slowNotice?: string } | { problem: string; engineDown?: true; engineSlow?: true }
+  >;
   /** 列の一言（推定した台詞の数・声の割り当て） */
   status(filePath: string, text: string): Promise<string>;
   runCast(filePath: string, text: string): Promise<void>;
@@ -2609,6 +2614,25 @@ export class ManuscriptEditorProvider
         .catch(() => undefined)
         .finally(() => {
           engineDownAsking = false;
+        });
+    };
+    /*
+      **待てる時間のうちに答えが来なかったら、届かないときとは別の窓**（0.147.1。ノートPCの実機確認：
+      遅い PC で声づくりが30秒を超え、動いているエンジンに「繋がりませんでした」と出て止まった）。
+      もう片方のエンジンへの問い合わせも［OSの声で読む］も付けない——エンジンは届いている見込みが
+      あり、そちらを勧めるのは筋違い。窓は1つずつ（先読みの失敗が重なっても重ねない）。答えは待たない
+    */
+    let engineSlowAsking = false;
+    const tellEngineSlow = (engine: VoiceEngineId): void => {
+      if (engineSlowAsking) return;
+      engineSlowAsking = true;
+      const prompt = voiceEngineSlowPrompt("read", engine);
+      void Promise.resolve(
+        vscode.window.showWarningMessage(prompt.message, { modal: true, detail: prompt.detail })
+      )
+        .catch(() => undefined)
+        .finally(() => {
+          engineSlowAsking = false;
         });
     };
     let voicePlanSeq = 0;
@@ -3635,6 +3659,7 @@ export class ManuscriptEditorProvider
                 voiceProblem: planned.problem,
               });
               if ("engineDown" in planned && planned.engineDown && engine) askUseOsVoice(engine);
+              else if ("engineSlow" in planned && planned.engineSlow && engine) tellEngineSlow(engine);
               break;
             }
             voicePlan = { id: voicePlanSeq, units: planned.units };
@@ -3704,6 +3729,8 @@ export class ManuscriptEditorProvider
           });
           if ("engineDown" in result && result.engineDown) {
             askUseOsVoice(plan.units[message.index].engine);
+          } else if ("engineSlow" in result && result.engineSlow) {
+            tellEngineSlow(plan.units[message.index].engine);
           }
           /*
             声づくりが読む速さに追いつかない（0.146.0。ノートPCの実機確認）。1回の読み上げで1回だけ

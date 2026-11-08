@@ -266,8 +266,14 @@ export interface DictionaryFormat {
   dialect: ImeDialect;
   label: string;
   fileName: string;
-  /** 取り込み手順。書き出したあと画面に出す */
+  /** 取り込み手順。書き出したあと画面に出す（Windows の操作。Mac は `macHowTo`） */
   howTo: string;
+  /**
+   * Mac での取り込み手順（無ければ `howTo`）。`howTo` は Windows のタスクバーの IME を
+   * 右クリックする操作で、Mac には無い（Mac の入力の印はメニューバーにある）。
+   * 画面へ出すときは `dictionaryHowTo` を通す
+   */
+  macHowTo?: string;
   /**
    * 文字コード。Microsoft IMEのテキスト取り込みはUTF-16を前提とし、
    * ATOKは伝統的にShift_JISのため、プロバイダーごとに変える必要がある。
@@ -297,6 +303,7 @@ export const DICTIONARY_FORMATS: Record<ImeDialect, DictionaryFormat> = {
     howTo:
       "IMEを右クリック →「単語の追加」→「ユーザー辞書ツール」→" +
       "「ツール」→「テキストファイルからの登録」で取り込めます。",
+    macHowTo: "Microsoft IME は Windows の日本語入力です。Mac では使えません。",
     encoding: "utf16le",
     defaultPicked: true,
   },
@@ -306,6 +313,10 @@ export const DICTIONARY_FORMATS: Record<ImeDialect, DictionaryFormat> = {
     fileName: "ime辞書_Google.txt",
     howTo:
       "IMEを右クリック →「辞書ツール」→「管理」→" +
+      "「新規辞書にインポート」で取り込めます。",
+    // Mac 版の Google 日本語入力は、メニューバーの入力メニューに「辞書ツール」を持つ（実機では未確認）
+    macHowTo:
+      "メニューバーの入力メニュー（「あ」や「A」の印）→「辞書ツール」→「管理」→" +
       "「新規辞書にインポート」で取り込めます。",
     encoding: "utf8",
     defaultPicked: true,
@@ -336,6 +347,25 @@ export const DICTIONARY_FORMATS: Record<ImeDialect, DictionaryFormat> = {
       "取り込めたか・エラーが出たかを教えていただけると直せます。",
   },
 };
+
+/** その OS での取り込み手順（Mac は `macHowTo`、無ければ `howTo`） */
+export function dictionaryHowTo(format: DictionaryFormat, mac: boolean): string {
+  return mac && format.macHowTo ? format.macHowTo : format.howTo;
+}
+
+/**
+ * Mac に元からある日本語入力（「日本語入力プログラム」）での単語の登録（作者の Mac はこれ。2026-11-08）。
+ *
+ * **この書き出しのファイルは、Mac の日本語入力には読み込めない**（形式を確かめていない。
+ * Mac の「ユーザ辞書」の一覧は、書き出した .plist をドラッグで戻す道しか持たず、
+ * そちらの形はこの PC で確かめられないので作らない）。手で1語ずつ登録する手順だけを出す。
+ * 操作の場所は macOS の版で名前が変わる（「ユーザ辞書」「テキストの置換」）ので、両方を書く
+ */
+export const MAC_BUILTIN_IME_HOW_TO =
+  "Mac に元からある日本語入力は、書き出したファイルを読み込めません。" +
+  "1語ずつ登録します：アップルメニュー →「システム設定」→「キーボード」→" +
+  "「テキスト入力」の「ユーザ辞書…」（macOS の版によっては「テキストの置換…」）→［＋］を押し、" +
+  "「入力」に読み、「変換」に語を入れます。";
 
 /**
  * 辞書ファイルの中身を組み立てる。
