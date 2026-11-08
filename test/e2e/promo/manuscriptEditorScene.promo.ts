@@ -38,7 +38,7 @@ test("原稿エディターの広報素材を撮る", async () => {
         "縦書きになる",
         10_000
       );
-      await caption("ボタン1つで縦書きに。ルビも傍点も組んだまま");
+      await caption("［表示］→［縦書きにする］で縦書きに。ルビも傍点も組んだまま");
       await page.waitForTimeout(3_500);
       await placeCaretAfter(frame, "揺れている。");
       await page.keyboard.press("End");
