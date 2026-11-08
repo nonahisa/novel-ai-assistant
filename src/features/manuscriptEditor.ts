@@ -1818,6 +1818,11 @@ type Incoming =
    * `action` は画面から届く値なので、繋ぎの側が表（`MANUSCRIPT_POSTING_ACTIONS`）で確かめる
    */
   | { type: "runPosting"; action?: unknown }
+  /**
+   * ［入力］→「テキストファイルから」「Word から」（作者の決定 2026-11-08。設計書6.25.13）。
+   * `source` は画面から届く値なので、ここで "text" か "word" かを確かめる
+   */
+  | { type: "importEpisode"; source?: unknown }
   /** 執筆再開の資料を開く（設計書6.36。右クリックから。0.76.7） */
   | { type: "resumeWriting" }
   /**
@@ -2101,6 +2106,19 @@ export interface ManuscriptEditorDeps {
    * **繋ぐのは `extension.ts` だけ**——投稿の命令はあちらにしか無い。
    */
   runPosting?: (filePath: string, action: unknown) => Promise<void>;
+  /**
+   * ［入力］→「テキストファイルから」「Word から」（作者の決定 2026-11-08。設計書6.25.13）。
+   * 選んだファイルを開いている話へ取り込む（空ならその話へ、入っていれば次の話・
+   * 最後に加える・上書きを訊く）。
+   *
+   * **繋ぐのは `extension.ts` だけ。** 取り込みは話の番号をずらすので `core/git.ts`
+   * （`node:child_process`）に届く——ここから静的に読むと、ブラウザ版が起動時に落ちる。
+   * 新しい話を作ったら、その場所を返す（いまの見た目のまま開くのはこちら）
+   */
+  importEpisode?: (
+    document: vscode.TextDocument,
+    source: "text" | "word"
+  ) => Promise<{ newFilePath?: string } | undefined>;
   /**
    * この話の単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23
    * 「エディターから単話プロット参照したいです」）。
@@ -3522,6 +3540,17 @@ export class ManuscriptEditorProvider
         case "runPosting":
           await this.deps.runPosting?.(fromUri(document.uri), message.action);
           break;
+
+        case "importEpisode": {
+          // 画面から届く値を信用しない（知らない入口は捨てる）
+          if (message.source !== "text" && message.source !== "word") break;
+          const imported = await this.deps.importEpisode?.(document, message.source);
+          // 新しい話を作ったら、**いま見ている見た目のまま開く**（「次の話」と同じ。設計書6.25.5）
+          if (imported?.newFilePath) {
+            await this.openAsManuscript(imported.newFilePath, document);
+          }
+          break;
+        }
 
         case "openEpisodePlot":
           await this.deps.openEpisodePlot?.(

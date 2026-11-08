@@ -1036,9 +1036,9 @@ body.clipped #cheer { white-space: normal; }
 </div>
 
 <div id="rowInput" class="tray" data-tray="input">
-  <button id="importText" class="soon" title="テキストファイルを1話として取り込みます（この機能は次の版で入ります）">テキストファイルから</button>
+  <button id="importText" title="テキストファイル（.txt・.md）を選んで、この話へ取り込みます。この話に本文が入っていれば、次の話として足すか・最後に加えるか・上書きするかを訊きます">テキストファイルから</button>
   <button id="importBackup" class="soon" title="投稿サイトのバックアップから、開いている作品へ話を足します（この機能は次の版で入ります）">バックアップから</button>
-  <button id="importWord" class="soon" title="Word の文書を1話として取り込みます（この機能は次の版で入ります）">Word から</button>
+  <button id="importWord" title="Word の文書（.docx）を選んで、この話へ取り込みます。ルビと傍点は残ります。この話に本文が入っていれば、次の話として足すか・最後に加えるか・上書きするかを訊きます">Word から</button>
   <div class="sep"></div>
   <button id="dictate" title="OSの音声入力で書き取った文を、あとからAIに整えてもらいます。押してから音声入力を始めてください">口述</button>
   <button id="dictateClean" class="dictate-on" title="口述を始めたところから、いまのカーソルまでをAIに整えてもらいます">整える</button>
@@ -1884,7 +1884,26 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   /* trays:end */
 
   /*
-    次の版で作る入口（テキストファイル・バックアップ・Word・PDF。作者の決定 2026-11-08）。
+    ［入力］の取り込み（テキストファイル・Word。作者の決定 2026-11-08。設計書6.25.13）。
+    ファイルを選ぶ窓も、空か・何を訊くかも拡張機能の側が持つ。ここは入口を送るだけ。
+    **打ちかけの字を先に送る**（keyHandOver）——本文が空かを、作者が画面で見ている
+    中身で決めるため（［投稿］の品書きと同じ）
+  */
+  /* importButtons:start */
+  for (const id of ["importText", "importWord"]) {
+    const importButton = document.getElementById(id);
+    importButton.addEventListener("click", function () {
+      keyHandOver();
+      vscode.postMessage({
+        type: "importEpisode",
+        source: id === "importWord" ? "word" : "text",
+      });
+    });
+  }
+  /* importButtons:end */
+
+  /*
+    次の版で作る入口（バックアップ・PDF。作者の決定 2026-11-08）。
     **押しても拡張機能へは何も送らない**——似た名前の今ある命令（作品の登録・作品全体の
     PDF）を代わりに呼ぶと、作者が思ったのと違うことが起きる。下の欄に一言だけ出す
   */

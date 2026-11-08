@@ -64,7 +64,7 @@ export interface EpisodeNotAdded {
  */
 export function nameNewEpisodes(
   files: readonly MissingEpisodeFile[],
-  scan: WorkScan,
+  scan: Pick<WorkScan, "episodes">,
   existing: readonly string[],
   options: { extension?: string } = {}
 ): { named: NamedEpisodeFile[]; skipped: EpisodeNotAdded[] } {
@@ -109,7 +109,7 @@ export function nameNewEpisodes(
  */
 export async function writeNewEpisodes(
   work: WorkEntry,
-  scan: WorkScan,
+  scan: Pick<WorkScan, "episodes" | "manuscriptDir">,
   files: readonly NamedEpisodeFile[]
 ): Promise<{
   added: { file: MissingEpisodeFile; path: string }[];

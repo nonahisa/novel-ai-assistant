@@ -2482,6 +2482,39 @@ export async function activate(
       if (node === STOP_MANUSCRIPT_COMMAND) return;
       await vscode.commands.executeCommand(command, node);
     },
+    /*
+      ［入力］→「テキストファイルから」「Word から」（作者の決定 2026-11-08。設計書6.25.13）。
+      **実体は動的 import**——話の番号をずらす道が `core/git.ts`（`node:child_process`）に
+      届くため（「この話の前に挿入」と同じ約束。設計書5.8.5）。Word の読み（fflate）と
+      本文の書き戻しはブラウザ版でも動くので、ボタンは隠さない。
+      **編集者モードでは取り込まない**（編集部は本文を書き換えず、提案として置く。設計書5.6）
+    */
+    importEpisode: async (document, source) => {
+      if (isEditorMode()) {
+        void vscode.window.showInformationMessage(
+          "編集者モードでは本文へ取り込めません（編集部は本文を書き換えず、提案として置きます）。"
+        );
+        return undefined;
+      }
+      const filePath = fromUri(document.uri);
+      const work = workOfPath(registry, filePath);
+      if (!work) {
+        void vscode.window.showWarningMessage(
+          "この原稿の作品が分かりませんでした。作品として登録されているかご確認ください。"
+        );
+        return undefined;
+      }
+      const { importIntoEpisode } = await import("./features/manuscriptImport.js");
+      const scan = await scanWork(work);
+      const result = await importIntoEpisode({ work, filePath, source, scan, document });
+      if (result.changed) {
+        // 取り込んだ文は今日書いた字ではない。基準を置き直して、次の保存で
+        // 「今日 +N字」に数えないようにする（新しく作った話も同じ。設計書6.3.2）
+        await progress.rebaseline(work);
+        treeProvider.refresh(work.id);
+      }
+      return { newFilePath: result.newFilePath };
+    },
     // 単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23）。
     // **繋ぐのはここだけ**（シーンメモと同じ理由）。作品は開いている原稿のもの、
     // 走査は一覧の結果を借りる（`workEpisodes` と同じ）
