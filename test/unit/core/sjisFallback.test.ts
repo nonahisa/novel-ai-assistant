@@ -2,8 +2,10 @@ import iconv from "iconv-lite";
 import { describe, expect, test } from "vitest";
 import {
   SJIS_FALLBACK_PAIRS,
+  SJIS_UNENCODABLE_MARK,
   describeUnencodable,
   findUnencodableShiftJis,
+  planShiftJisSave,
   substituteForShiftJis,
 } from "../../../src/core/sjisFallback";
 
@@ -64,7 +66,7 @@ describe("Shift_JIS へ書くときの置き換えの表", () => {
 
   test("元の本文の読めないバイト（U+FFFD）は場所に数えない。作者が入れた字の行だけを出す", () => {
     // 元のバイトのまま置くので書けるのに、数えると3件の枠を埋めて本当の字が知らせから落ちる
-    const found = findUnencodableShiftJis("���\n二行目に♡");
+    const found = findUnencodableShiftJis("\ufffd\ufffd\ufffd\n二行目に♡");
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({ char: "♡", line: 2 });
   });
@@ -77,5 +79,84 @@ describe("Shift_JIS へ書くときの置き換えの表", () => {
     expect(found[1].context).toBe("かきくけ♡さしすせ");
     expect(describeUnencodable(found)).toContain("2行目");
     expect(describeUnencodable(found)).toContain("「♡」");
+  });
+});
+
+/**
+ * 作者が VS Code で打って保存する道の、置き換え先の無い字の扱い（設計書5.4.2、0.148.3。
+ * 作者の答え 2026-11-09「目印に置き換えた上で、メモ校正パネルに説明を残して、ポップアップもあげてください」）。
+ * 表に無く書けない字は、目印の「〓」（U+3013。CP932 で 81 AC）にする。
+ */
+describe("保存の直前の置き換えの計画（表の字と目印の「〓」）", () => {
+  test("目印の「〓」は Shift_JIS で往復でき、81 AC になる", () => {
+    expect(SJIS_UNENCODABLE_MARK).toBe("〓");
+    expect(Array.from(iconv.encode(SJIS_UNENCODABLE_MARK, "shift_jis"))).toEqual([0x81, 0xac]);
+    expect(roundTrips(SJIS_UNENCODABLE_MARK)).toBe(true);
+    expect(roundTripsInBrowser(SJIS_UNENCODABLE_MARK)).toBe(true);
+  });
+
+  test("表の字は表のとおり、表に無く書けない字（♡）は「〓」に。位置は元の本文の単位で取る", () => {
+    const plan = planShiftJisSave("あ〜\n\u{20b9f}かきくけ♡さしすせ");
+    expect(plan.spans).toEqual([
+      { index: 1, length: 1, to: "～" },
+      // 𠮟 はサロゲートの2単位
+      { index: 3, length: 2, to: "叱" },
+      { index: 9, length: 1, to: "〓" },
+    ]);
+    expect(plan.text).toBe("あ～\n叱かきくけ〓さしすせ");
+    expect(plan.substitutions).toEqual([
+      { from: "〜", to: "～", count: 1 },
+      { from: "\u{20b9f}", to: "叱", count: 1 },
+    ]);
+    // 前後は置き換えたあとの本文で取る（指摘の原文として、保存したあとの本文から探し直すため）
+    expect(plan.marks).toEqual([{ char: "♡", line: 2, context: "かきくけ〓さしすせ" }]);
+  });
+
+  test("CP932 にあって往復できる字は「〓」にしない（①・Ⅰ・髙・﨑・…・‥・―・〝〟・＂＇）", () => {
+    const text = "①Ⅰ髙﨑…‥―〝〟＂＇";
+    for (const char of Array.from(text)) expect(roundTrips(char), char).toBe(true);
+    const plan = planShiftJisSave(text);
+    expect(plan.spans).toEqual([]);
+    expect(plan.marks).toEqual([]);
+    expect(plan.text).toBe(text);
+  });
+
+  test("書けない字を全部拾う（知らせの3件の枠で切らない）", () => {
+    const plan = planShiftJisSave("♡一\n♡二\n♡三\n♡四\n♡五");
+    expect(plan.marks.map(({ line }) => line)).toEqual([1, 2, 3, 4, 5]);
+    expect(plan.text).toBe("〓一\n〓二\n〓三\n〓四\n〓五");
+  });
+
+  test("1つの字に見える並び（❤\ufe0f・👍🏻・家族の絵文字）は「〓」1つにする", () => {
+    const family = "\u{1f468}\u200d\u{1f469}\u200d\u{1f467}";
+    const plan = planShiftJisSave(`a❤\ufe0fb\u{1f44d}\u{1f3fb}c${family}d`);
+    expect(plan.text).toBe("a〓b〓c〓d");
+    expect(plan.marks.map(({ char }) => char)).toEqual(["❤\ufe0f", "\u{1f44d}\u{1f3fb}", family]);
+  });
+
+  test("書ける字に付いた結合の記号は、記号だけを「〓」にする（元の字を消さない）", () => {
+    const plan = planShiftJisSave("か\u309aき");
+    expect(plan.text).toBe("か〓き");
+  });
+
+  test("元の本文の読めないバイト（U+FFFD）は「〓」にしない", () => {
+    const plan = planShiftJisSave("\ufffd\n♡");
+    expect(plan.text).toBe("\ufffd\n〓");
+    expect(plan.marks).toEqual([{ char: "♡", line: 2, context: "〓" }]);
+  });
+
+  test("CRLF・CR の改行でも、行は正しく数え、位置は元の本文の単位で取る", () => {
+    const plan = planShiftJisSave("一\r\n二\r三♡");
+    expect(plan.spans).toEqual([{ index: 6, length: 1, to: "〓" }]);
+    expect(plan.marks).toEqual([{ char: "♡", line: 3, context: "三〓" }]);
+  });
+
+  test("全部書ける本文では何も返さない", () => {
+    expect(planShiftJisSave("終電を逃した駅のホーム。")).toEqual({
+      spans: [],
+      substitutions: [],
+      marks: [],
+      text: "終電を逃した駅のホーム。",
+    });
   });
 });

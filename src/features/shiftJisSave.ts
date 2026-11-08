@@ -2,13 +2,12 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { decodeBytes } from "../core/textDecode";
 import {
+  SJIS_UNENCODABLE_MARK,
   describeSubstitutions,
-  describeUnencodable,
-  findShiftJisSubstitutions,
-  findUnencodableShiftJis,
-  substituteForShiftJis,
-  type UnencodableChar,
+  planShiftJisSave,
+  type SjisMark,
 } from "../core/sjisFallback";
+import { buildSjisMarkFindings } from "../core/sjisMarkFinding";
 import { isEpisodeBodyRelPath } from "../core/episodeRenameDrift";
 import {
   atomicWriteFile,
@@ -17,9 +16,12 @@ import {
 } from "../core/atomicWrite";
 import { workLog } from "../core/logger";
 import type { WorkEntry } from "../models/types";
+import type { Finding, FindingDecision, FindingView } from "../models/finding";
+import { FindingStore } from "./findingStore";
+import { refreshSceneMemoFindings } from "./sceneMemoPanel";
 
 /**
- * **作者が VS Code で打って保存する道**の、Shift_JIS の字の置き換え（設計書5.4.2、0.148.1）。
+ * **作者が VS Code で打って保存する道**の、Shift_JIS の字の置き換え（設計書5.4.2、0.148.1・0.148.3）。
  *
  * 0.148.0 の置き換え（`core/textEncodePreserving.ts`）は、拡張機能が書き戻す道
  * （`writeTextFilePreservingFormat`）にしか効かない。素のエディター・原稿エディターで打って
@@ -32,19 +34,23 @@ import type { WorkEntry } from "../models/types";
  * 自動保存（`files.autoSave`）でも同じ受け口が鳴る（`TextDocumentSaveReason.AfterDelay`）。
  *
  * **この受け口では保存を止められない**（API の決まり。待たせられるのは全体で1.5秒まで、
- * 遅れたり投げたりを3回すると以後呼ばれなくなる）。置き換え先の無い字（♡ など）が残る保存は
- * 「?」になって書かれてしまうので、**保存の前に元の本文を控えに残し、保存のあとに知らせる**
- * （作者が選ぶまでの間の、原稿が壊れない側の作り。2026-11-09 母艦の指示）。
+ * 遅れたり投げたりを3回すると以後呼ばれなくなる）。置き換え先の無い字（♡ など）は、何もしなければ
+ * 「?」になって書かれる。作者の答え（2026-11-09「目印に置き換えた上で、メモ校正パネルに説明を残して、
+ * ポップアップもあげてください」）で、**目印の「〓」に字ごとに置き換えて**保存する。順番は
+ * 「控えを残す → 〓に置き換えて保存 → 校正・メモパネルへ場所を残す → 真ん中の窓で知らせる」。
  */
 
-/** 何が「?」になる見込みか（知らせの係へ渡す） */
+/** 〓にした字のある保存（知らせの係へ渡す） */
 export interface UnencodableSave {
   document: vscode.TextDocument;
   filePath: string;
   workFolder: string;
   /** 保存の直前の本文（作者が打ったまま。置き換える前）。控えに残す */
   text: string;
-  found: UnencodableChar[];
+  /** 置き換えたあとの本文（保存されるもの）。校正・メモパネルの行の場所はここから決める */
+  savedText: string;
+  /** 〓にした字の全部 */
+  marks: SjisMark[];
 }
 
 /** 外とのつなぎ。単体テストで差し替える */
@@ -56,9 +62,12 @@ export interface ShiftJisSaveDeps {
   /** 設定 `files.encoding`（その文書に効く値） */
   configuredEncoding(uri: vscode.Uri): string | undefined;
   log(workFolder: string, message: string): void;
-  onUnencodable(report: UnencodableSave): void;
+  /** 〓にする字がある。返す約束は**控えを残し終えたら**済む（〓への置き換えはそれを待つ） */
+  onUnencodable(report: UnencodableSave): Promise<void>;
   /** 書けない字の無い保存だった（知らせの係が「出した」を忘れる） */
   onClean(document: vscode.TextDocument): void;
+  /** 控えを待つ上限（ミリ秒）。単体テストで縮める */
+  keepWaitMs?: number;
 }
 
 /** `onWillSaveTextDocument` の知らせのうち、使う所だけ */
@@ -69,6 +78,14 @@ export interface WillSaveEvent {
 
 /** VS Code の文字コードの名前（`TextDocument.encoding`・`files.encoding`）での Shift_JIS */
 const VSCODE_SHIFT_JIS = "shiftjis";
+
+/**
+ * 控えを待つ上限。受け口の持ち時間は全体で1.5秒（文字コードの判定でファイルも読む）。
+ * 超えると VS Code は書き換えを捨てて「?」で書くうえ、遅れが3回で受け口ごと止まる。
+ * 控えは小さなファイル1つなので普段は数十ミリ秒で済む。遅いときは待たずに〓にする
+ * （待っても待たなくても字はファイルから消える。エディターの取り消しでは戻せる）
+ */
+const KEEP_WAIT_MS = 700;
 
 /**
  * 保存の直前の受け口の本体。
@@ -93,7 +110,7 @@ export function handleWillSave(event: WillSaveEvent, deps: ShiftJisSaveDeps): vo
     (async (): Promise<vscode.TextEdit[]> => {
       try {
         if (declared === undefined && !(await isShiftJisOn190(document, deps))) return [];
-        return planEdits(document, filePath, workFolder, text, deps);
+        return await planEdits(document, filePath, workFolder, text, deps);
       } catch (error) {
         deps.log(
           workFolder,
@@ -126,13 +143,13 @@ async function isShiftJisOn190(document: vscode.TextDocument, deps: ShiftJisSave
   return deps.configuredEncoding(document.uri) === VSCODE_SHIFT_JIS;
 }
 
-function planEdits(
+async function planEdits(
   document: vscode.TextDocument,
   filePath: string,
   workFolder: string,
   text: string,
   deps: ShiftJisSaveDeps
-): vscode.TextEdit[] {
+): Promise<vscode.TextEdit[]> {
   const name = path.basename(filePath);
   /*
     **字ごとに小さく書き換える**（全文の置き換えにしない）。全文を替えると、取り消しの履歴が
@@ -140,28 +157,41 @@ function planEdits(
     置き換え先は1単位。置き換えたあとの本文から数えるとずれる）。`getText()` の改行は文書の
     ままなので、LF に揃えずに数える
   */
-  const { spans, substitutions } = findShiftJisSubstitutions(text);
-  const edits = spans.map((span) =>
+  const plan = planShiftJisSave(text);
+  const edits = plan.spans.map((span) =>
     vscode.TextEdit.replace(
       new vscode.Range(document.positionAt(span.index), document.positionAt(span.index + span.length)),
       span.to
     )
   );
-  if (substitutions.length > 0) {
+  if (plan.substitutions.length > 0) {
     // 作者には知らせない（作者の決定 2026-11-08「黙って」）。ログには何を何に何個かだけ（本文の前後は書かない）
-    deps.log(workFolder, `保存の前に、Shift_JIS に無い字を置き換えました（${name}）：${describeSubstitutions(substitutions)}`);
+    deps.log(workFolder, `保存の前に、Shift_JIS に無い字を置き換えました（${name}）：${describeSubstitutions(plan.substitutions)}`);
   }
 
-  const found = findUnencodableShiftJis(substituteForShiftJis(text).text);
-  if (found.length > 0) {
-    // ログには字と行だけ（前後の本文は原稿なので書かない）
-    deps.log(
-      workFolder,
-      `保存すると「?」になる字があります（${name}）：${found.map(({ char, line }) => `${line}行目の「${char}」`).join("、")}`
-    );
-    deps.onUnencodable({ document, filePath, workFolder, text, found });
-  } else {
+  if (plan.marks.length === 0) {
     deps.onClean(document);
+    return edits;
+  }
+  // ログには字と行だけ（前後の本文は原稿なので書かない）
+  deps.log(
+    workFolder,
+    `保存の前に、Shift_JIS に無い字を「${SJIS_UNENCODABLE_MARK}」にしました（${name}）：${plan.marks.map(({ char, line }) => `${line}行目の「${char}」`).join("、")}`
+  );
+  /*
+    **控えを残し終えてから〓にする**（実装ルール1。置き換えたあとは、元の字はファイルに無い）。
+    ただし持ち時間を超えて待つと VS Code が書き換えを捨てて「?」で書くので、上限で切る
+  */
+  const keeping = deps
+    .onUnencodable({ document, filePath, workFolder, text, savedText: plan.text, marks: plan.marks })
+    .then(() => true)
+    .catch(() => true);
+  const kept = await Promise.race([
+    keeping,
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), deps.keepWaitMs ?? KEEP_WAIT_MS)),
+  ]);
+  if (!kept) {
+    deps.log(workFolder, `控えを残し終える前に、保存の持ち時間が来ました（${name}）。控えは続けて残します`);
   }
   return edits;
 }
@@ -172,25 +202,34 @@ export interface UnencodableWarnerDeps {
   keep(filePath: string, text: string): Promise<string | undefined>;
   /** その文書の保存が済むまで待つ */
   whenSaved(document: vscode.TextDocument): Promise<void>;
+  /** 校正・メモパネルの置き場へ〓の場所を残す。残せた行があれば true */
+  record(report: UnencodableSave, recoveryPath: string | undefined): Promise<boolean>;
   /** 真ん中の窓で知らせ、押されたボタンを返す */
   warn(message: string, detail: string, buttons: readonly string[]): Thenable<string | undefined>;
   openKeep(recoveryPath: string): void;
+  openPanel(workFolder: string): void;
   log(workFolder: string, message: string): void;
 }
 
+const OPEN_PANEL = "校正・メモパネルを開く";
 const OPEN_KEEP = "控えを開く";
+/** 窓の詳しい欄に並べる場所の数（長い原稿で何百も並べない） */
+const PLACES_LIMIT = 3;
 
 /**
- * 置き換え先の無い字が「?」になる保存の知らせ。
+ * 〓にした字の知らせ。
  *
- * - **控えは保存の前に取りはじめる**（本文は受け口が呼ばれた瞬間のもの。保存を待たせない）
- * - 窓は**保存が済んでから**出す。先に出すと「? になりました」がまだ本当でない
- * - **同じ文書・同じ字の組では1度だけ**。自動保存（`afterDelay`）では打つたびに保存が鳴り、
+ * - **控えは保存の前に取りはじめる**（本文は受け口が呼ばれた瞬間のもの）。返す約束は控えが
+ *   済んだら済む——受け口が〓への置き換えをそれまで待つ
+ * - 校正・メモパネルへ残すのも、窓も、**保存が済んでから**。先に出すと「〓にして保存しました」が
+ *   まだ本当でない
+ * - **控えとパネルの行は毎回**残す（保存のたびに本文の字が〓になるので、どの回も元の字が要る）
+ * - **窓は、同じ文書・同じ字の組では1度だけ**。自動保存（`afterDelay`）では打つたびに保存が鳴り、
  *   そのたびに窓が出ると書けなくなる。書けない字が無くなったら（`forget`）忘れ、また打てば知らせ直す
- * - 窓のボタンの答えは待たない形で受ける（押されたら控えを開くだけ。処理中の旗は立てない）
+ * - 窓のボタンの答えは待たない形で受ける（押されたら開くだけ。処理中の旗は立てない）
  */
 export function createUnencodableWarner(deps: UnencodableWarnerDeps): {
-  report(report: UnencodableSave): void;
+  report(report: UnencodableSave): Promise<void>;
   forget(document: vscode.TextDocument): void;
 } {
   /** 文書ごとの、最後に知らせた字の組 */
@@ -198,35 +237,95 @@ export function createUnencodableWarner(deps: UnencodableWarnerDeps): {
   return {
     report(report) {
       const key = report.document.uri.toString();
-      const signature = [...new Set(report.found.map(({ char }) => char))].sort().join("");
-      if (warned.get(key) === signature) return;
+      const signature = [...new Set(report.marks.map(({ char }) => char))].sort().join("");
+      const shouldWarn = warned.get(key) !== signature;
       warned.set(key, signature);
+      const name = path.basename(report.filePath);
+      const saved = deps.whenSaved(report.document);
+      const keeping = deps.keep(report.filePath, report.text).catch((error: unknown) => {
+        deps.log(report.workFolder, `元の字を含む本文の控えを残せませんでした（${name}）：${messageOf(error)}`);
+        return undefined;
+      });
       void (async () => {
-        const saved = deps.whenSaved(report.document);
-        const recoveryPath = await deps.keep(report.filePath, report.text).catch(() => undefined);
+        const recoveryPath = await keeping;
         await saved;
-        const chars = [...new Set(report.found.map(({ char }) => `「${char}」`))].join("");
-        const message = `${chars}は Shift_JIS に無い字のため、保存したファイルでは「?」になりました（${path.basename(report.filePath)}）。`;
+        const recorded = await deps.record(report, recoveryPath).catch((error: unknown) => {
+          deps.log(report.workFolder, `「〓」にした場所を校正・メモパネルへ残せませんでした（${name}）：${messageOf(error)}`);
+          return false;
+        });
+        if (!shouldWarn) return;
+        const [first] = report.marks;
+        const count = report.marks.length;
+        const message =
+          `Shift_JIS に無い字が${count}字あったので、「${SJIS_UNENCODABLE_MARK}」にして保存しました` +
+          `（「${first.char}」${first.line}行目${count > 1 ? " ほか" : ""}）。` +
+          (recorded ? "校正・メモパネルに場所を残しました。" : "校正・メモパネルには場所を残せませんでした。");
+        const places = report.marks
+          .slice(0, PLACES_LIMIT)
+          .map(({ char, line }) => `${line}行目の「${char}」`)
+          .join("、");
         const detail = [
-          `場所：${describeUnencodable(report.found)}`,
-          "エディターの中にはまだ元の字があります。字を直してから、もう一度保存してください。",
+          `ファイル：${name}`,
+          `場所：${places}${count > PLACES_LIMIT ? ` ほか${count - PLACES_LIMIT}字` : ""}`,
           recoveryPath
             ? `元の字を含む本文は控えに残しました：${recoveryPath}`
-            : "元の字を含む本文の控えを残せませんでした。エディターを閉じる前に字を直してください。",
+            : "元の字を含む本文の控えを残せませんでした。エディターの「元に戻す」で元の字に戻せます（戻したまま保存すると、また「〓」になります）。",
         ].join("\n\n");
-        const picked = await deps.warn(message, detail, recoveryPath ? [OPEN_KEEP] : []);
+        const buttons = [...(recorded ? [OPEN_PANEL] : []), ...(recoveryPath ? [OPEN_KEEP] : [])];
+        const picked = await deps.warn(message, detail, buttons);
+        if (picked === OPEN_PANEL) deps.openPanel(report.workFolder);
         if (picked === OPEN_KEEP && recoveryPath) deps.openKeep(recoveryPath);
       })().catch((error: unknown) => {
-        deps.log(
-          report.workFolder,
-          `「?」になる字の知らせを出せませんでした（${path.basename(report.filePath)}）：${error instanceof Error ? error.message : String(error)}`
-        );
+        deps.log(report.workFolder, `「〓」にした字の知らせを出せませんでした（${name}）：${messageOf(error)}`);
       });
+      return keeping.then(() => undefined);
     },
     forget(document) {
       warned.delete(document.uri.toString());
     },
   };
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** 指摘の置き場のうち、ここで使う所（単体テストで差し替える） */
+export interface MarkFindingStore {
+  load(): Promise<FindingView[]>;
+  record(findings: readonly Finding[]): Promise<void>;
+  decide(decisions: readonly FindingDecision[]): Promise<void>;
+}
+
+/**
+ * 〓の行を置き場へ足す。足した行の数を返す。
+ *
+ * **前に見送った同じ番号の行は、未決へ戻す。** 番号は場所の前後の字から決まるので、作者が
+ * 〓を見送ったあとで同じ場所にまた書けない字を打つと、同じ番号になる。判断は後から来たものが
+ * 勝つ作りなので、そのままでは新しく置いた〓の行が「見送り済み」として出てこない
+ */
+export async function recordMarkFindings(
+  store: MarkFindingStore,
+  findings: readonly Finding[],
+  time: string
+): Promise<number> {
+  if (findings.length === 0) return 0;
+  const decided = new Set(
+    (await store.load()).filter((view) => view.status !== "pending").map((view) => view.id)
+  );
+  await store.record(findings);
+  const reopen = findings.filter((finding) => decided.has(finding.id));
+  if (reopen.length > 0) {
+    await store.decide(
+      reopen.map((finding) => ({
+        findingId: finding.id,
+        time,
+        status: "pending" as const,
+        note: "同じ場所の字を、保存のときにまた「〓」にした",
+      }))
+    );
+  }
+  return findings.length;
 }
 
 /** UTF-8 の BOM。控えを VS Code で開いたとき、`files.encoding` が Shift_JIS でも UTF-8 と読まれるように付ける */
@@ -264,29 +363,53 @@ function nextSaveOf(document: vscode.TextDocument): Promise<void> {
 }
 
 /** 作品の話の本文か（作品フォルダーの中の .txt/.md で、設定や控えの置き場でない） */
-function workFolderOfEpisode(registry: { list(): readonly WorkEntry[] }, filePath: string): string | undefined {
+function workOfEpisode(registry: { list(): readonly WorkEntry[] }, filePath: string): WorkEntry | undefined {
   const work = [...registry.list()]
     .sort((a, b) => b.folderPath.length - a.folderPath.length)
     .find((entry) => path.isPathInside(entry.folderPath, filePath));
   if (!work) return undefined;
-  return isEpisodeBodyRelPath(path.relative(work.folderPath, filePath)) ? work.folderPath : undefined;
+  return isEpisodeBodyRelPath(path.relative(work.folderPath, filePath)) ? work : undefined;
 }
 
 /** 拡張機能の起動時に差し込む */
 export function installShiftJisSaveGuard(registry: { list(): readonly WorkEntry[] }): vscode.Disposable {
   const log = (workFolder: string, message: string): void => workLog(workFolder).line(message);
+  const workAt = (workFolder: string): WorkEntry | undefined =>
+    registry.list().find((entry) => path.pathKeyForComparison(entry.folderPath) === path.pathKeyForComparison(workFolder));
   const warner = createUnencodableWarner({
     keep: keepUnencodable,
     whenSaved: nextSaveOf,
+    record: async (report, recoveryPath) => {
+      const work = workAt(report.workFolder);
+      if (!work) return false;
+      const time = new Date().toISOString();
+      const findings = buildSjisMarkFindings(
+        work.folderPath,
+        report.filePath,
+        report.savedText,
+        report.marks,
+        recoveryPath,
+        time
+      );
+      const count = await recordMarkFindings(new FindingStore(work), findings, time);
+      // 本文の保存で開いているパネルは読み直したが、行を足したのはそのあとなので、もう一度読ませる
+      if (count > 0) await refreshSceneMemoFindings(work.id);
+      return count > 0;
+    },
     warn: (message, detail, buttons) =>
       vscode.window.showWarningMessage(message, { modal: true, detail }, ...buttons),
     openKeep: (recoveryPath) => {
       void vscode.window.showTextDocument(path.toUri(recoveryPath), { preview: true });
     },
+    openPanel: (workFolder) => {
+      const work = workAt(workFolder);
+      // 作品一覧の右クリックと同じ形で作品を渡す（どの作品かを訊き直させない）
+      if (work) void vscode.commands.executeCommand("novelai.openSceneMemos", { type: "work", work });
+    },
     log,
   });
   const deps: ShiftJisSaveDeps = {
-    workFolderOf: (filePath) => workFolderOfEpisode(registry, filePath),
+    workFolderOf: (filePath) => workOfEpisode(registry, filePath)?.folderPath,
     readBytes: async (uri) => vscode.workspace.fs.readFile(uri),
     configuredEncoding: (uri) => vscode.workspace.getConfiguration("files", uri).get<string>("encoding"),
     log,

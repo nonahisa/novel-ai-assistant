@@ -11,8 +11,10 @@
  * 3. 原稿エディターで「〜」を打ち Ctrl+S → 同じく 81 60（原稿エディターの保存も同じ受け口を通る）
  * 4. 自動保存（`files.autoSave: afterDelay`）の原稿エディターで「〜」を打つ → 押さずに 81 60 になり、
  *    画面の本文も「～」に替わる
- * 5. 置き換え先の無い字「♡」を打って保存 → 保存は止められないので、ファイルは「?」になるが、
- *    真ん中の窓で「♡」と場所が知らされ、元の字を含む控え（UTF-8、BOM 付き）が `.novelai-recovery` に残る
+ * 5. 置き換え先の無い字「♡」を打って保存 → 保存は止められないので、保存の直前に目印の「〓」（81 AC）へ
+ *    置き換えて書く（0.148.3。作者の答え 2026-11-09「目印に置き換えた上で、メモ校正パネルに説明を残して、
+ *    ポップアップもあげてください」）。「?」にはならない。真ん中の窓で「♡」と場所が知らされ、校正・メモパネルの
+ *    置き場（`.aiwriter/findings.jsonl`）に説明が、元の字を含む控え（UTF-8、BOM 付き）が `.novelai-recovery` に残る
  *
  * 文書を Shift_JIS で開くのは設定 `files.encoding: shiftjis`（使い捨ての settings.json）。
  * 落ちたときは読んだバイト列を16進で添える（離れた機械で落ちても原因が読めるように）。
@@ -35,6 +37,8 @@ const CONTROL = "対照.txt";
 /** 「～」（全角チルダ）の Shift_JIS（CP932）のバイト */
 const FULLWIDTH_TILDE = [0x81, 0x60];
 const QUESTION = 0x3f;
+/** 目印の「〓」（U+3013）の Shift_JIS（CP932）のバイト */
+const GETA_MARK = [0x81, 0xac];
 
 /** 作品の話も対照も、Shift_JIS のバイトで置き直す（見本はいったん UTF-8 で書かれる） */
 function sjisLaunch(settings: Record<string, unknown> = {}): LaunchOptions {
@@ -167,18 +171,19 @@ test("自動保存の原稿エディターで「〜」を打つと、押さず�
   }, sjisLaunch({ "files.autoSave": "afterDelay", "files.autoSaveDelay": 500 }));
 });
 
-test("置き換え先の無い「♡」を打って保存すると、真ん中の窓で字と場所が知らされ、元の字を含む控えが残る", async () => {
+test("置き換え先の無い「♡」を打って保存すると、ファイルは「〓」（81 AC）になり、窓で知らされ、校正・メモパネルの置き場と控えが残る", async () => {
   await withVsCode("Shift_JIS 書けない字", [{ name: EPISODE, text: BODY }], async (session) => {
-    const { page, manuscriptFolder } = session;
+    const { page, manuscriptFolder, workFolder } = session;
     await quickOpen(page, EPISODE);
     await typeAtEndAndSave(page, "♡");
-    // 保存は止められない（VS Code の決まり）ので、ファイルは「?」になる
+    // 保存は止められない（VS Code の決まり）。保存の直前に「〓」へ置き換えるので、「?」にはならない
     const bytes = await waitForSavedBytes(
       path.join(manuscriptFolder, EPISODE),
       "書けない字を含む保存が書かれる",
       (now) => now.length > originalLength
     );
-    expect(bytes.includes(QUESTION), `ファイル：${hex(bytes)}`).toBe(true);
+    expect(includesSequence(bytes, GETA_MARK), `ファイル：${hex(bytes)}`).toBe(true);
+    expect(bytes.includes(QUESTION), `ファイル：${hex(bytes)}`).toBe(false);
 
     let shown: string | undefined;
     await waitUntil(
@@ -186,13 +191,27 @@ test("置き換え先の無い「♡」を打って保存すると、真ん中�
         shown = await dialogText(page);
         return shown !== undefined && shown.includes("♡");
       },
-      "「♡」が「?」になったことを知らせる窓が出る",
+      "「♡」を「〓」にしたことを知らせる窓が出る",
       15_000
     ).catch((error: unknown) => {
       throw new Error(`${String(error)}（いまの窓：${JSON.stringify(shown)}）`);
     });
-    expect(shown).toContain("?");
+    expect(shown).toContain("〓");
+    expect(shown).toContain("校正・メモパネル");
     expect(shown).toContain("控え");
+
+    // 校正・メモパネルの置き場（指摘の置き場。本文の外）に、〓の場所の説明が残る
+    const findingsFile = path.join(workFolder, ".aiwriter", "findings.jsonl");
+    let findings = "";
+    await waitUntil(
+      async () => {
+        findings = await readFile(findingsFile, "utf8").catch(() => "");
+        return findings.includes("Shift_JIS に無い字") && findings.includes("♡");
+      },
+      "校正・メモパネルの置き場に〓の説明が残る"
+    ).catch((error: unknown) => {
+      throw new Error(`${String(error)}（置き場：${JSON.stringify(findings)}）`);
+    });
 
     // 控えの置き場は話の隣（`core/atomicWrite.ts` の recoveryDirectoryFor）
     const recoveryFolder = path.join(manuscriptFolder, ".novelai-recovery");

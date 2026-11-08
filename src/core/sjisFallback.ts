@@ -203,6 +203,143 @@ export function findUnencodableShiftJis(text: string): UnencodableChar[] {
   return found;
 }
 
+/**
+ * 置き換え先の無い字の代わりに置く目印（U+3013 ゲタ記号。CP932 で 81 AC）。
+ *
+ * **作者が VS Code で打って保存する道だけ**で使う（作者の答え 2026-11-09「目印に置き換えた上で、
+ * メモ校正パネルに説明を残して、ポップアップもあげてください」）。その道は保存を止められず、
+ * 何もしなければ VS Code が黙って「?」にする。「?」は本文にも普通に出る字で、あとから
+ * 探せない。〓は小説の本文にまず出ない字で、印刷でも「字が無い」の印として使われてきた。
+ *
+ * 拡張機能が書き戻す道（`writeTextFilePreservingFormat`）は今までどおり止める。
+ */
+export const SJIS_UNENCODABLE_MARK = "〓";
+
+/** 読めないバイトの印（U+FFFD）。元のバイトのまま置く道があるので「〓」にしない */
+const REPLACEMENT_CHAR = String.fromCharCode(0xfffd);
+
+/** 目印にした字が1つ、どこにあるか */
+export interface SjisMark {
+  /** 元の字（❤️ のように、1字に見える並びはまとめて1つ） */
+  char: string;
+  /** 1から数える行 */
+  line: number;
+  /**
+   * 置き換えた**あと**の本文での、その行の前後の数文字（〓を含む）。
+   * 校正・メモパネルの行が、保存したあとの本文から場所を探し直す鍵になる
+   */
+  context: string;
+}
+
+/** 保存の直前の置き換えの計画（`features/shiftJisSave.ts` が字ごとの書き換えにする） */
+export interface ShiftJisSavePlan {
+  /** 元の本文の位置での置き換え（表の字と目印の両方。前から順） */
+  spans: SjisSubstitutionSpan[];
+  /** 表の字を何に何個（ログ用） */
+  substitutions: SjisSubstitution[];
+  /** 目印にした字の全部（知らせの3件の枠で切らない） */
+  marks: SjisMark[];
+  /** 置き換えたあとの本文（保存されるもの） */
+  text: string;
+}
+
+/**
+ * 保存の直前に、表の字は表のとおりに、表に無く書けない字は目印の「〓」に置き換える計画を立てる。
+ *
+ * - 位置は**元の本文の単位**で取る（𠮟 は2単位で置き換え先は1単位。置き換えたあとから数えるとずれる）
+ * - **1字に見える並びは〓1つ**にする（❤️ は ❤ と異体字セレクタの2つ、家族の絵文字は5つの符号から
+ *   なる。符号ごとに置くと〓〓〓〓〓になり、作者には何が1字だったか分からない）。ただし並びの中に
+ *   書ける字があるとき（か＋結合の半濁点）は、書けない符号だけを〓にする——作者の「か」を消さない
+ * - 受け口の持ち時間は1.5秒しかないので、全文が書ければ1回で済ませ、書けない行だけを字ごとに見る
+ */
+export function planShiftJisSave(text: string): ShiftJisSavePlan {
+  const table = findShiftJisSubstitutions(text);
+  const tableText = substituteForShiftJis(text).text;
+  if (encodesWhole(tableText)) {
+    return { spans: table.spans, substitutions: table.substitutions, marks: [], text: tableText };
+  }
+
+  const markSpans: Array<SjisSubstitutionSpan & { char: string }> = [];
+  const encodable = new Map<string, boolean>();
+  const markable = (char: string): boolean => {
+    if (char === REPLACEMENT_CHAR || FALLBACK.has(char)) return false;
+    let known = encodable.get(char);
+    if (known === undefined) {
+      known = encodesInShiftJis(char);
+      encodable.set(char, known);
+    }
+    return !known;
+  };
+  const segmenter = new Intl.Segmenter("ja", { granularity: "grapheme" });
+  for (const { start, content } of linesWithOffsets(text)) {
+    if (encodesWhole(substituteForShiftJis(content).text)) continue;
+    for (const { segment, index } of segmenter.segment(content)) {
+      const chars = Array.from(segment);
+      if (chars.every(markable)) {
+        markSpans.push({ index: start + index, length: segment.length, to: SJIS_UNENCODABLE_MARK, char: segment });
+        continue;
+      }
+      let at = start + index;
+      for (const char of chars) {
+        if (markable(char)) markSpans.push({ index: at, length: char.length, to: SJIS_UNENCODABLE_MARK, char });
+        at += char.length;
+      }
+    }
+  }
+
+  const spans = [...table.spans, ...markSpans.map(({ index, length, to }) => ({ index, length, to }))].sort(
+    (a, b) => a.index - b.index
+  );
+  // 置き換えたあとの本文と、目印の置き換えたあとでの位置を、前から順に組む
+  let replaced = "";
+  let cursor = 0;
+  const markIndices = new Set(markSpans.map(({ index }) => index));
+  const markedAt = new Map<number, number>();
+  for (const span of spans) {
+    replaced += text.slice(cursor, span.index);
+    if (markIndices.has(span.index)) markedAt.set(span.index, replaced.length);
+    replaced += span.to;
+    cursor = span.index + span.length;
+  }
+  replaced += text.slice(cursor);
+
+  const marks = markSpans.map((span) => {
+    const position = markedAt.get(span.index) ?? 0;
+    return { char: span.char, ...lineAndContext(replaced, position) };
+  });
+  return { spans, substitutions: table.substitutions, marks, text: replaced };
+}
+
+function encodesWhole(text: string): boolean {
+  return iconv.decode(iconv.encode(text, "shift_jis"), "shift_jis") === text;
+}
+
+/** 行の中身と、その行の頭の位置（改行は CRLF・CR・LF のどれでも1つに数える） */
+function linesWithOffsets(text: string): Array<{ start: number; content: string }> {
+  const lines: Array<{ start: number; content: string }> = [];
+  const breaks = /\r\n|\r|\n/g;
+  let start = 0;
+  for (const match of text.matchAll(breaks)) {
+    const at = match.index ?? 0;
+    lines.push({ start, content: text.slice(start, at) });
+    start = at + match[0].length;
+  }
+  lines.push({ start, content: text.slice(start) });
+  return lines;
+}
+
+/** 置き換えたあとの本文の位置から、行（1始まり）と前後の数文字（〓を含む）を取る */
+function lineAndContext(text: string, position: number): { line: number; context: string } {
+  const head = text.slice(0, position);
+  const line = (head.match(/\r\n|\r|\n/g) ?? []).length + 1;
+  const lineStart = Math.max(head.lastIndexOf("\n"), head.lastIndexOf("\r")) + 1;
+  const rest = text.slice(position + SJIS_UNENCODABLE_MARK.length);
+  const lineEnd = rest.search(/\r|\n/);
+  const before = Array.from(text.slice(lineStart, position)).slice(-CONTEXT_CHARS).join("");
+  const after = Array.from(lineEnd < 0 ? rest : rest.slice(0, lineEnd)).slice(0, CONTEXT_CHARS).join("");
+  return { line, context: `${before}${SJIS_UNENCODABLE_MARK}${after}` };
+}
+
 /** 止めたときの知らせに添える文（「2行目「かきくけ♡さしすせ」の「♡」」） */
 export function describeUnencodable(found: readonly UnencodableChar[]): string {
   return found.map(({ char, line, context }) => `${line}行目「${context}」の「${char}」`).join("、");
