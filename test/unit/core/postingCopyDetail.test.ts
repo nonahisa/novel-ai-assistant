@@ -70,12 +70,14 @@ describe("コピー（投稿サイト用）の説明", () => {
     expect(palette.find((entry) => entry.command === "novelai.copyForPosting")).toBeUndefined();
   });
 
-  test("上のバーのボタン・入口の案内・手順の札も「コピー（投稿サイト用）」", () => {
+  test("上の列の品書き・入口の案内・手順の札も「コピー（投稿サイト用）」", () => {
     const editor = readFileSync("src/views/manuscriptEditorHtml.ts", "utf8");
     // 上の列の［コピー］ボタンは［出力］→［投稿］の品書きの項目になった（作者の決定 2026-11-08）
     expect(editor).toContain('add("コピー（投稿サイト用）"');
     const entrance = readFileSync("src/core/actionEntrance.ts", "utf8");
-    expect(entrance).toContain("上のバー「出力」→「投稿」→「コピー（投稿サイト用）」");
+    // 押す順を全部書く（0.146.1）。1段目・2段目は［］、品書きの項目は「」
+    expect(entrance).toContain("上の列の［出力］→［投稿］→「コピー（投稿サイト用）」");
+    expect(entrance).not.toContain("上のバー");
     const style = readFileSync("src/core/writerStyle.ts", "utf8");
     expect(style).toMatch(/command: "novelai\.copyForPosting",\s*label: "コピー（投稿サイト用）"/);
     for (const text of [editor, entrance, style]) {

@@ -6,7 +6,7 @@
  * 次の3つの道から開いても、その列のタブが前に出るだけで2枚目ができないことを見る：
  *
  * - 原稿エディターの［次の話 →］
- * - 原稿エディターの［最新話を書く］（最新話が白紙なら、それを開く。作らない）
+ * - 原稿エディターの［最新話］（最新話が白紙なら、それを開く。作らない）
  * - 執筆統計の「話ごとの文字数」の行
  * - 最後に逆向き：右の縦書きの最新話の［← 前の話］で、左の列（前は執筆統計）の第1話が前に出る
  */
@@ -78,12 +78,12 @@ async function writingStatsFrame(page: Page): Promise<Frame | undefined> {
   return undefined;
 }
 
-test("移る先の話が別の列・別の向きで開いているとき、［次の話］［最新話を書く］執筆統計の行［前の話］から開いても2枚目ができず、その列が前に出る", async () => {
+test("移る先の話が別の列・別の向きで開いているとき、［次の話］［最新話］執筆統計の行［前の話］から開いても2枚目ができず、その列が前に出る", async () => {
   await withVsCode(
     "ほかの道から開く",
     [
       { name: FIRST, text: "第1話の本文。\n二行目。\n" },
-      // 最新話は白紙（［最新話を書く］が新しい話を作らず、これを開く）
+      // 最新話は白紙（［最新話］が新しい話を作らず、これを開く）
       { name: LATEST, text: "" },
     ],
     async (session) => {
@@ -135,13 +135,13 @@ test("移る先の話が別の列・別の向きで開いているとき、［�
       await waitUntil(async () => (await activeGroupIndex(page)) === 1, "［次の話 →］で右の列が前に出る", 10_000);
       await staysSingle(page, "［次の話 →］のあとも最新話のタブが1枚");
 
-      // ── ［最新話を書く］──
+      // ── ［最新話］──
       first = await firstFrame(page);
       await placeCaretAfter(first, "二行");
       await waitUntil(async () => (await activeGroupIndex(page)) === 0, "左の列に焦点が戻る", 5_000);
       await first.locator("#latest").click();
-      await waitUntil(async () => (await activeGroupIndex(page)) === 1, "［最新話を書く］で右の列が前に出る", 10_000);
-      await staysSingle(page, "［最新話を書く］のあとも最新話のタブが1枚");
+      await waitUntil(async () => (await activeGroupIndex(page)) === 1, "［最新話］で右の列が前に出る", 10_000);
+      await staysSingle(page, "［最新話］のあとも最新話のタブが1枚");
       // 白紙の最新話を開いただけで、新しい話は作っていない
       expect((await readdir(session.manuscriptFolder)).filter((name) => name.endsWith(".txt")).sort()).toEqual([
         FIRST,

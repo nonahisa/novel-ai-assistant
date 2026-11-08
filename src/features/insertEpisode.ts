@@ -7,6 +7,7 @@ import {
   episodeNumberOf,
   insertedEpisodeFileName,
   planInsertion,
+  type RenumberOutcome,
   type RenumberPlan,
 } from "../core/episodeRenumber";
 import { followEpisodeLedgers } from "./episodeLedgers";
@@ -73,56 +74,17 @@ export async function insertEpisodeBefore(
 
   // **同じフォルダーの話だけを動かす**（設計書6.67.4）。番外編や下書きは
   // 独自の番号で並んでいるので、巻き込むと作者が触っていない番号がずれる
-  const plan = planInsertion(episodes, pivot, path.dirname(episode.filePath));
-
-  const conflicted = findConflictedEpisodes(episodes, plan.renames);
-  if (conflicted.length > 0) {
-    void vscode.window.showErrorMessage(
-      `競合マーカーの残る話（${conflicted
-        .map((e) => e.fileName)
-        .join("、")}）が付け替えの範囲に含まれるため、挿入を取りやめました。` +
-        "先に競合を解決してください。"
-    );
+  const prepared = await prepareInsertion(
+    work,
+    episodes,
+    pivot,
+    path.dirname(episode.filePath)
+  );
+  if (!prepared.ok) {
+    void vscode.window.showErrorMessage(prepared.message);
     return { changed: false };
   }
-  if (plan.collisions.length > 0) {
-    void vscode.window.showErrorMessage(
-      "付け替え先の名前がぶつかるため、挿入を取りやめました：" +
-        plan.collisions.map((c) => c.toFileName).join("、")
-    );
-    return { changed: false };
-  }
-
-  /*
-    **未保存のまま開かれている話があれば、始めない**（設計書6.67.2）。
-    名前を変えたあとにその編集が保存されると、VS Codeは**元の名前**へ
-    書き出す。同じ内容の話が2つに増え、どちらが本物か分からなくなる。
-  */
-  const unsaved = findUnsavedEpisodes(plan.renames.map((r) => r.fromPath));
-  if (unsaved.length > 0) {
-    void vscode.window.showErrorMessage(
-      `未保存の変更がある話（${unsaved.join("、")}）が付け替えの範囲に含まれます。` +
-        "保存してからやり直してください。"
-    );
-    return { changed: false };
-  }
-
-  /*
-    単話プロットも一緒にずらす（作者の裁定、2026-09-23）。**未保存で開いて
-    いれば始めない**——名前を変えたあとに保存されると、元の話数の名前で
-    作り直され、同じ話のプロットが2つになる（本文と同じ理由）。
-  */
-  const plotPreview = await previewPlotShift(work, episodes, plan, pivot);
-  const unsavedPlots = plotPreview
-    ? findUnsavedEpisodes(plotPreview.touchedPaths)
-    : [];
-  if (unsavedPlots.length > 0) {
-    void vscode.window.showErrorMessage(
-      `未保存の変更がある単話プロット（${unsavedPlots.join("、")}）の話数も付け替えることになります。` +
-        "保存してからやり直してください。"
-    );
-    return { changed: false };
-  }
+  const { plan, plotPreview } = prepared;
 
   const fileName = await askNewEpisodeFileName(pivot, episode.fileName);
   if (!fileName) return { changed: false };
@@ -140,7 +102,118 @@ export async function insertEpisodeBefore(
   );
   if (answer !== "付け替える") return { changed: false };
 
+  return runInsertion(work, episodes, prepared, {
+    filePath: path.join(path.dirname(episode.filePath), fileName),
+    bytes: new TextEncoder().encode(""),
+    commitMessage: `第${pivot}話を挿入したため、第${pivot}話以降の話数を調整`,
+  });
+}
+
+/** 付け替えを始めてよいと確かめた計画（`prepareInsertion` の答え） */
+export interface PreparedInsertion {
+  readonly ok: true;
+  readonly pivot: number;
+  readonly plan: RenumberPlan;
+  readonly plotPreview: EpisodePlotShiftPreview | undefined;
+}
+
+/**
+ * 1話ぶん割り込ませる計画を立て、**始めてよいか**を確かめる（設計書6.67.4）。
+ *
+ * 訊く窓は呼ぶ側が持つ（「この話の前に挿入」はサブタイトルと付け替えの確認、
+ * 原稿エディターの取り込みは3つの選び方の窓。設計書6.25.13）。確かめることは
+ * 2つの道で同じなので、ここに1つだけ置く。**まだ何も動かさない。**
+ *
+ * @returns 断るときは、作者に見せる理由
+ */
+export async function prepareInsertion(
+  work: WorkEntry,
+  episodes: readonly EpisodeFile[],
+  pivot: number,
+  folder: string
+): Promise<PreparedInsertion | { readonly ok: false; readonly message: string }> {
+  const plan = planInsertion(episodes, pivot, folder);
+
+  const conflicted = findConflictedEpisodes(episodes, plan.renames);
+  if (conflicted.length > 0) {
+    return {
+      ok: false,
+      message:
+        `競合マーカーの残る話（${conflicted
+          .map((e) => e.fileName)
+          .join("、")}）が付け替えの範囲に含まれるため、挿入を取りやめました。` +
+        "先に競合を解決してください。",
+    };
+  }
+  if (plan.collisions.length > 0) {
+    return {
+      ok: false,
+      message:
+        "付け替え先の名前がぶつかるため、挿入を取りやめました：" +
+        plan.collisions.map((c) => c.toFileName).join("、"),
+    };
+  }
+
+  /*
+    **未保存のまま開かれている話があれば、始めない**（設計書6.67.2）。
+    名前を変えたあとにその編集が保存されると、VS Codeは**元の名前**へ
+    書き出す。同じ内容の話が2つに増え、どちらが本物か分からなくなる。
+  */
+  const unsaved = findUnsavedEpisodes(plan.renames.map((r) => r.fromPath));
+  if (unsaved.length > 0) {
+    return {
+      ok: false,
+      message:
+        `未保存の変更がある話（${unsaved.join("、")}）が付け替えの範囲に含まれます。` +
+        "保存してからやり直してください。",
+    };
+  }
+
+  /*
+    単話プロットも一緒にずらす（作者の裁定、2026-09-23）。**未保存で開いて
+    いれば始めない**——名前を変えたあとに保存されると、元の話数の名前で
+    作り直され、同じ話のプロットが2つになる（本文と同じ理由）。
+  */
+  const plotPreview = await previewPlotShift(work, episodes, plan, pivot);
+  const unsavedPlots = plotPreview
+    ? findUnsavedEpisodes(plotPreview.touchedPaths)
+    : [];
+  if (unsavedPlots.length > 0) {
+    return {
+      ok: false,
+      message:
+        `未保存の変更がある単話プロット（${unsavedPlots.join("、")}）の話数も付け替えることになります。` +
+        "保存してからやり直してください。",
+    };
+  }
+  return { ok: true, pivot, plan, plotPreview };
+}
+
+/**
+ * 確かめた計画どおりに付け替え、空いた番号へ新しい話を作る。
+ *
+ * **途中で止まったら新しい話は作らない**（どこまで済んだかは
+ * `reportRenumberOutcome` が出す）。中止（`isCancelled`）も同じ止まり方に乗せる
+ * ——次の1件を動かす前に見て、そこで止める。済んだ分は戻さない（本文は
+ * 1文字も失われず、番号が1つ飛ぶだけ。6.67.2）。
+ */
+export async function runInsertion(
+  work: WorkEntry,
+  episodes: readonly EpisodeFile[],
+  prepared: PreparedInsertion,
+  newEpisode: {
+    /** 作る話の場所（付け替えで空いた番号の名前） */
+    readonly filePath: string;
+    /** 中身。「この話の前に挿入」は空、取り込みは取り込んだ文 */
+    readonly bytes: Uint8Array;
+    /** 名前だけの独立コミットの言葉 */
+    readonly commitMessage: string;
+  },
+  options: { readonly isCancelled?: () => boolean } = {}
+): Promise<InsertEpisodeResult & { stoppedAt?: RenumberOutcome["stoppedAt"] }> {
+  const { plan, pivot } = prepared;
   const outcome = await applyRenumberPlan(plan, async (from, to) => {
+    if (options.isCancelled?.()) throw new Error("中止しました");
     await vscode.workspace.fs.rename(path.toUri(from), path.toUri(to), {
       overwrite: false,
     });
@@ -174,22 +247,20 @@ export async function insertEpisodeBefore(
     // **途中で止まったら新しい話は作らない。** 目当ての番号の場所が
     // まだ空いているとは限らず（止まった箇所より手前は動いていない）、
     // 中途半端な状態に新規作成まで重ねると余計に分かりにくくなる
-    return { changed: outcome.done.length > 0 };
+    return { changed: outcome.done.length > 0, stoppedAt: outcome.stoppedAt };
   }
 
-  const newFilePath = path.join(path.dirname(episode.filePath), fileName);
-  const created = await createEmptyEpisode(newFilePath);
+  const created = await createEpisodeFile(newEpisode.filePath, newEpisode.bytes);
 
   // **挿入した新しい話のファイルは、名前だけのコミットに入れない**（設計書6.67.1）。
   // `outcome.done` には付け替え（旧→新パス）しか入っておらず、新規作成した
   // ファイルは含まれないので、そのまま渡してよい
-  await offerIndependentRenameCommit(
-    work,
-    outcome.done,
-    `第${pivot}話を挿入したため、第${pivot}話以降の話数を調整`
-  );
+  await offerIndependentRenameCommit(work, outcome.done, newEpisode.commitMessage);
 
-  return { changed: true, newFilePath: created ? newFilePath : undefined };
+  return {
+    changed: true,
+    newFilePath: created ? newEpisode.filePath : undefined,
+  };
 }
 
 /**
@@ -265,15 +336,16 @@ async function askNewEpisodeFileName(
 }
 
 /**
- * 空の話を1つ作る。**既にあれば作らない**（上書きしない）。
+ * 新しい話を1つ作る（「この話の前に挿入」は空、取り込みは取り込んだ文）。
+ * **既にあれば作らない**（上書きしない）。
  *
  * `atomicWriteFile` の `mode: "create"` を通すのは、存在の確認と作成の
  * あいだに割り込まれても既存のファイルを潰さないためである
  * （CLAUDE.mdの実装ルール2の②）。
  */
-async function createEmptyEpisode(filePath: string): Promise<boolean> {
+async function createEpisodeFile(filePath: string, bytes: Uint8Array): Promise<boolean> {
   try {
-    await atomicWriteFile(filePath, new TextEncoder().encode(""), {
+    await atomicWriteFile(filePath, bytes, {
       mode: "create",
     });
     return true;

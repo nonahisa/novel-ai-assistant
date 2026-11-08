@@ -69,6 +69,21 @@ async function openProofMenu(frame: Frame): Promise<void> {
   await waitUntil(() => menuOpen(frame), "［校正］の品書きが開く", 5_000);
 }
 
+/**
+ * 本文（#compose）のうち、開いた品書き（#menu）に覆われていない点（#compose の左上からの位置）。
+ * 品書きの右へ 40px ずらし、本文の幅に収まらなければ品書きの下を使う
+ */
+async function composePointBesideMenu(frame: Frame): Promise<{ x: number; y: number }> {
+  const compose = await frame.locator("#compose").boundingBox();
+  const menu = await frame.locator("#menu").boundingBox();
+  if (!compose || !menu) throw new Error(`本文か品書きの位置が読めません（本文：${JSON.stringify(compose)}／品書き：${JSON.stringify(menu)}）`);
+  const right = menu.x + menu.width + 40 - compose.x;
+  if (right < compose.width - 10) return { x: right, y: 20 };
+  const below = menu.y + menu.height + 40 - compose.y;
+  if (below < compose.height - 10) return { x: 20, y: below };
+  throw new Error(`品書きが本文を覆っていて、外を押せる所がありません（本文：${JSON.stringify(compose)}／品書き：${JSON.stringify(menu)}）`);
+}
+
 /** ［校正］の品書きの項目を押す */
 async function pickProofItem(frame: Frame, label: string): Promise<void> {
   await openProofMenu(frame);
@@ -131,7 +146,12 @@ test("［校正］の品書きは4つの校正と区切りの下の「校正・�
       await waitUntil(async () => !(await menuOpen(frame)), "Esc で品書きが閉じる", 5_000);
       // 外（本文）を押すと閉じる
       await openProofMenu(frame);
-      await frame.locator("#compose").click({ position: { x: 40, y: 40 } });
+      /*
+        0.145.0 の多段で［校正］が2段目へ下がり、品書きが本文の左上に重なるようになった。
+        重なった所を押すのは「品書きの項目を押す」ことで、作者の画面でも同じ（製品の不具合ではない）。
+        「外を押す」を確かめるので、品書きの右側の本文を押す
+      */
+      await frame.locator("#compose").click({ position: await composePointBesideMenu(frame) });
       await waitUntil(async () => !(await menuOpen(frame)), "外（本文）を押すと品書きが閉じる", 5_000);
 
       /* ── 2. 打ちかけのまま「誤字脱字（この話）」→ 作品Aで保存の1行つきの確認。Esc で保存しない ── */

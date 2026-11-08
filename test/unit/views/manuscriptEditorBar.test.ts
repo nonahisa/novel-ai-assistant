@@ -8,8 +8,8 @@ import { MANUSCRIPT_POSTING_ACTIONS, postingActionCommand } from "../../../src/c
  * 1段目は［入力］［出力］［補助］［表示］の4つだけ。押すと、読み上げの段と同じく
  * 下に2段目が開く。開くのは1つずつで、同じ言葉を押し直すと閉じ、ほかの言葉を
  * 押すと切り替わる。**今ある機能は並べ替えるだけ**（ボタンの id も動きも変えない）。
- * 次の版で作るもの（テキストファイル・Word・バックアップ・PDF）は入口だけで、
- * 押しても拡張機能へは何も送らない。
+ * 次の版で作るもの（バックアップ・PDF）は入口だけで、押しても拡張機能へは何も送らない。
+ * テキストファイルと Word は 0.147.0 から動く（押すと拡張機能へ入口を送る）。
  *
  * 画面へ渡る本物の HTML とスクリプトを切り出して確かめる
  * （manuscriptEditorProofMenu.test.ts と同じやり方）。
@@ -238,7 +238,7 @@ describe("次の版で入る入口", () => {
       const document = {
         querySelectorAll(selector) {
           if (selector !== "button.soon") return [];
-          return ["importText", "importBackup", "importWord", "exportPagePdf"].map((id) => ({
+          return ["importBackup", "exportPagePdf"].map((id) => ({
             id,
             textContent: id,
             addEventListener(type, fn) { if (type === "click") env.clicks[id] = fn; },
@@ -251,9 +251,9 @@ describe("次の版で入る入口", () => {
     return env;
   }
 
-  it("テキストファイル・バックアップ・Word・PDF は、押すと「次の版で入ります」と出すだけで何も呼ばない", () => {
+  it("バックアップ・PDF は、押すと「次の版で入ります」と出すだけで何も呼ばない", () => {
     const env = soonHarness();
-    for (const id of ["importText", "importBackup", "importWord", "exportPagePdf"]) {
+    for (const id of ["importBackup", "exportPagePdf"]) {
       env.note.textContent = "";
       env.clicks[id]?.();
       expect(env.note.textContent, id).toContain("この機能は次の版で入ります");
@@ -261,11 +261,55 @@ describe("次の版で入る入口", () => {
     expect(env.posted).toEqual([]);
   });
 
-  it("4つとも入口の印（soon）が付き、押す前に次の版で入ることが分かる", () => {
-    for (const id of ["importText", "importBackup", "importWord", "exportPagePdf"]) {
+  it("2つとも入口の印（soon）が付き、押す前に次の版で入ることが分かる", () => {
+    for (const id of ["importBackup", "exportPagePdf"]) {
       const tag = new RegExp(`<button id="${id}"[^>]*>`).exec(markup)?.[0] ?? "";
       expect(tag, id).toContain('class="soon"');
       expect(tag, id).toContain("次の版で入ります");
+    }
+  });
+});
+
+describe("［入力］の取り込み（テキストファイル・Word。0.147.0）", () => {
+  function importHarness() {
+    const env = {
+      posted: [] as unknown[],
+      clicks: {} as Record<string, () => void>,
+    };
+    new Function(
+      "env",
+      `
+      const vscode = { postMessage(message) { env.posted.push(message); } };
+      function keyHandOver() { env.posted.push("handOver"); }
+      const document = {
+        getElementById(id) {
+          return { addEventListener(type, fn) { if (type === "click") env.clicks[id] = fn; } };
+        },
+      };
+      ${markedBlock("importButtons")}
+      `
+    )(env);
+    return env;
+  }
+
+  it("押すと、打ちかけの字を送ってから入口（text／word）を拡張機能へ送る", () => {
+    const env = importHarness();
+    env.clicks.importText?.();
+    env.clicks.importWord?.();
+    expect(env.posted).toEqual([
+      "handOver",
+      { type: "importEpisode", source: "text" },
+      "handOver",
+      { type: "importEpisode", source: "word" },
+    ]);
+  });
+
+  it("入口の印（soon）は外れ、何が起きるかを説明に書く", () => {
+    for (const id of ["importText", "importWord"]) {
+      const tag = new RegExp(`<button id="${id}"[^>]*>`).exec(markup)?.[0] ?? "";
+      expect(tag, id).not.toContain('class="soon"');
+      expect(tag, id).not.toContain("次の版で入ります");
+      expect(tag, id).toContain("最後に加える");
     }
   });
 });

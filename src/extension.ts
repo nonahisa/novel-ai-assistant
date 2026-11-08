@@ -543,6 +543,8 @@ import {
   onDidChangeManuscriptStatus,
   watchManuscriptTabs,
   watchDisconnectedManuscripts,
+  carryAppearanceToRenamed,
+  closeRenamedManuscript,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
 // 「すべて同期」の記録の前の保存（設計書5.5.19）。VS Code の文書の保存を呼ぶだけで、Node 専用の部品は引かない
@@ -2481,6 +2483,52 @@ export async function activate(
       const node = await manuscriptNodeFor(command, filePath);
       if (node === STOP_MANUSCRIPT_COMMAND) return;
       await vscode.commands.executeCommand(command, node);
+    },
+    /*
+      ［入力］→「テキストファイルから」「Word から」（作者の決定 2026-11-08。設計書6.25.13）。
+      **実体は動的 import**——話の番号をずらす道が `core/git.ts`（`node:child_process`）に
+      届くため（「この話の前に挿入」と同じ約束。設計書5.8.5）。Word の読み（fflate）と
+      本文の書き戻しはブラウザ版でも動くので、ボタンは隠さない（ブラウザ版では
+      ［次の話として足す］だけを並べない。番号ずらしの道は中でさらに動的 import する）。
+      **編集者モードでは取り込まない**（編集部は本文を書き換えず、提案として置く。設計書5.6）
+    */
+    importEpisode: async (document, source) => {
+      if (isEditorMode()) {
+        void vscode.window.showInformationMessage(
+          "編集者モードでは本文へ取り込めません（編集部は本文を書き換えず、提案として置きます）。"
+        );
+        return undefined;
+      }
+      const filePath = fromUri(document.uri);
+      const work = workOfPath(registry, filePath);
+      if (!work) {
+        void vscode.window.showWarningMessage(
+          "この原稿の作品が分かりませんでした。作品として登録されているかご確認ください。"
+        );
+        return undefined;
+      }
+      const { importIntoEpisode } = await import("./features/manuscriptImport.js");
+      const scan = await scanWork(work);
+      const result = await importIntoEpisode({
+        work,
+        filePath,
+        source,
+        scan,
+        document,
+        // 1行目を題にしてファイル名に付けるときは、サブタイトルの案と同じ手当て
+        // （見た目を新しい名前へ持って行き、古い面を閉じる。設計書6.25.5）
+        renameHooks: {
+          beforeRename: carryAppearanceToRenamed,
+          afterRename: closeRenamedManuscript,
+        },
+      });
+      if (result.changed) {
+        // 取り込んだ文は今日書いた字ではない。基準を置き直して、次の保存で
+        // 「今日 +N字」に数えないようにする（新しく作った話も同じ。設計書6.3.2）
+        await progress.rebaseline(work);
+        treeProvider.refresh(work.id);
+      }
+      return { newFilePath: result.newFilePath };
     },
     // 単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23）。
     // **繋ぐのはここだけ**（シーンメモと同じ理由）。作品は開いている原稿のもの、
@@ -8348,7 +8396,7 @@ export async function activate(
       if (editor.selection.isEmpty) {
         void vscode.window.showInformationMessage(
           "口述で入れたところを選んでから実行してください。" +
-            "（原稿エディタなら、下段の「口述」→「整える」で範囲を選ばずに使えます）"
+            "（原稿エディターなら、上の列の［入力］→［口述］→［整える］で範囲を選ばずに使えます）"
         );
         return;
       }
