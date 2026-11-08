@@ -83,7 +83,7 @@ const VSCODE_SHIFT_JIS = "shiftjis";
  * 控えを待つ上限。受け口の持ち時間は全体で1.5秒（文字コードの判定でファイルも読む）。
  * 超えると VS Code は書き換えを捨てて「?」で書くうえ、遅れが3回で受け口ごと止まる。
  * 控えは小さなファイル1つなので普段は数十ミリ秒で済む。遅いときは待たずに〓にする
- * （待っても待たなくても字はファイルから消える。エディターの取り消しでは戻せる）
+ * （待っても待たなくても字はファイルから消えるので、控えを続けて残すほうに倒す）
  */
 const KEEP_WAIT_MS = 700;
 
@@ -269,7 +269,7 @@ export function createUnencodableWarner(deps: UnencodableWarnerDeps): {
           `場所：${places}${count > PLACES_LIMIT ? ` ほか${count - PLACES_LIMIT}字` : ""}`,
           recoveryPath
             ? `元の字を含む本文は控えに残しました：${recoveryPath}`
-            : "元の字を含む本文の控えを残せませんでした。エディターの「元に戻す」で元の字に戻せます（戻したまま保存すると、また「〓」になります）。",
+            : "元の字を含む本文の控えを残せませんでした。「〓」の場所を確かめて、字を直してください。",
         ].join("\n\n");
         const buttons = [...(recorded ? [OPEN_PANEL] : []), ...(recoveryPath ? [OPEN_KEEP] : [])];
         const picked = await deps.warn(message, detail, buttons);
