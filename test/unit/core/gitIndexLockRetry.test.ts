@@ -27,7 +27,9 @@ import {
 let base: string | undefined;
 
 afterEach(() => {
-  if (base) fs.rmSync(base, { recursive: true, force: true });
+  // 消すのは少し待ってやり直す。Windows の混んだ機械では、終わったはずの git の子が
+  // フォルダーをまだ掴んでいて EPERM で落ちた（ノートPCの package:vsix、2026-11-08）
+  if (base) fs.rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   base = undefined;
 });
 

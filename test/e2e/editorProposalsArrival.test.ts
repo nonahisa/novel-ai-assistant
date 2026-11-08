@@ -11,8 +11,12 @@
  *    （「画面テストの作品」）。」と［提案を見る］の知らせが出る。**提案パネルは勝手には開かない**
  * 2. ［提案を見る］を押すと、校正・メモパネルにその作品の提案2件が並ぶ（作者の指示 2026-11-08「編集からの
  *    提案も校正メモにうつしてください」。それまでは提案パネル）
- * 3. VS Code を閉じて開き直し、提案パネルを開くと、左上の作品の選び欄には作品Bの「（1件）」だけが出て、
- *    編集者の提案だけの作品（画面テストの作品）は出ない（作者モードの編集者の提案は提案パネルに並べない）
+ * 3. VS Code を閉じて開き直し、提案パネルを開くと、作品Bの指摘だけが並び、編集者の提案だけの作品（画面テストの
+ *    作品）は選び欄にも一覧にも出ない（作者モードの編集者の提案は提案パネルに並べない）。**指摘のある作品が
+ *    作品Bの1つだけになるので、選び欄そのものが出ない**（`views/proposalPanelHtml.ts` の `renderWorks` は
+ *    2作品以上のときだけ出す）。0.143 までは編集者の提案の作品も数えて2作品になり、選び欄が出ていた
+ * 4. 開き直したあとも、画面テストの作品の話を開いて校正・メモパネルを開くと、未決の提案2件が並ぶ
+ *    （開き直しで消えない。台帳から読み直す）
  *
  * 引き金を「保存・同期」にしたのは、開いたときの点検（窓の読み込み直し）の知らせが、起こし直しの部品
  * （`restartVsCode`）が最後に知らせを閉じるのと競るため。同期のあとの取り込み（`editingAutomation.ts` の
@@ -32,7 +36,8 @@ import { expect, test } from "vitest";
 import { HAND_EDIT_CATEGORY, HAND_MEMO_CATEGORY, proposalId } from "../../src/models/proposal";
 import { addLocalRemote, git, initRepoWithFirstCommit } from "./support/gitFixture";
 import { runCommand } from "./support/quickInput";
-import { memoPanelFrame } from "./support/manuscriptFrame";
+import { OPEN_SCENE_MEMOS_PRESS } from "./support/keys";
+import { memoPanelFrame, openEpisode } from "./support/manuscriptFrame";
 import { OPEN_PROPOSALS_LAUNCH, OPEN_PROPOSALS_PRESS, proposalPanelFrame, writeSampleFinding, type SampleFinding } from "./support/sampleFinding";
 import { E2E_WORK_TITLE, restartVsCode, withVsCode, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -231,20 +236,32 @@ test("同期で編集者の提案が届くと［提案を見る］付きの知�
       // 提案パネルには並べない（2つに割れて見えないように）
       expect(await proposalPanelFrame(page), "［提案を見る］で提案パネルが開いています").toBeUndefined();
 
-      /* ── 3. 開き直して提案パネルを開く → 選び欄に編集者の提案だけの作品は出ない ── */
+      /* ── 3. 開き直して提案パネルを開く → 作品Bの指摘だけが並び、編集者の提案だけの作品は出ない ── */
       await restartVsCode(session);
       const reopenedPage = session.page;
       await pressWorkbenchKey(reopenedPage, OPEN_PROPOSALS_PRESS);
       const reopened = await waitPanel(
         reopenedPage,
-        (view) => view.options.some((option) => option.startsWith(OTHER_TITLE)),
-        "開き直した提案パネルの選び欄に作品Bが並ぶ"
+        (view) => view.reasons.some((reason) => reason.includes(SAMPLE_B.message)),
+        "開き直した提案パネルに作品Bの指摘が並ぶ"
       );
-      expect(reopened.view.options, `選び欄：${JSON.stringify(reopened.view)}`).toContain(`${OTHER_TITLE}（1件）`);
-      expect(
-        reopened.view.options.some((option) => option.startsWith(E2E_WORK_TITLE)),
-        `編集者の提案だけの作品が提案パネルの選び欄に出ています：${JSON.stringify(reopened.view)}`
-      ).toBe(false);
+      // 指摘のある作品は作品Bだけなので、選び欄は出ない（出ていれば、編集者の提案の作品も数えている）
+      expect(reopened.view.options, `提案パネルに作品の選び欄が出ています：${JSON.stringify(reopened.view)}`).toEqual([]);
+      expect(reopened.view.reasons, `提案パネルの一覧：${JSON.stringify(reopened.view)}`).toHaveLength(1);
+      for (const entry of RETURNED) {
+        expect(
+          reopened.view.reasons.some((reason) => reason.includes(entry.reason)),
+          `編集者の提案が提案パネルに並んでいます：${JSON.stringify(reopened.view)}`
+        ).toBe(false);
+      }
+
+      /* ── 4. 開き直しても、画面テストの作品の校正・メモパネルには未決の提案2件が並ぶ ── */
+      await openEpisode(reopenedPage, EPISODE, "雨の音");
+      await reopenedPage.keyboard.press(OPEN_SCENE_MEMOS_PRESS);
+      const kept = await waitMemoProposals(reopenedPage, RETURNED.length, "開き直したあとの校正・メモパネルに、届いた提案2件が並ぶ");
+      for (const entry of RETURNED) {
+        expect(kept.some((text) => text.includes(entry.reason)), `並んだ行：${JSON.stringify(kept)}`).toBe(true);
+      }
     },
     launchOptions()
   );
