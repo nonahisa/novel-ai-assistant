@@ -39,6 +39,7 @@ import { expect, test } from "vitest";
 import { characterFileName, emptyCharacter, type Character } from "../../src/models/character";
 import { DEFAULT_SETTINGS_DIR } from "../../src/models/types";
 import {
+  clickToolButton,
   caretPosition,
   classOpen,
   dropEditsToHost,
@@ -576,10 +577,10 @@ test("第1話と第2話を横書きで開いたまま VS Code を開き直し、
       // 第1話を前に出し、縦書きにして字を大きくする
       await activateTab(page, EP1);
       const ep1 = await frontFrameShowing(page, "一の本文", "開き直したあと、第1話の面が前に出て本文を描く", 60_000);
-      await ep1.locator("#dir").click();
+      await clickToolButton(ep1, "dir");
       await waitUntil(async () => (await faceLook(ep1)).vertical, "［縦書きにする］で第1話が縦書きになる", 10_000);
-      await ep1.locator("#bigger").click();
-      await ep1.locator("#bigger").click();
+      await clickToolButton(ep1, "bigger");
+      await clickToolButton(ep1, "bigger");
       await waitUntil(async () => (await faceLook(ep1)).size > original.size, "［＋］で字が大きくなる", 10_000);
       const changed = await faceLook(ep1);
       // 見た目の知らせ（appearance）が拡張機能へ届くのを少し待つ（次の話へ持って行く値はそれで決まる）

@@ -140,6 +140,32 @@ export function proofCheckCommand(check: unknown): string | undefined {
 }
 
 /**
+ * 原稿エディターの［出力］→［投稿］の品書き（作者の決定 2026-11-08。設計書6.25）。
+ *
+ * **作品一覧の右クリックと同じ命令を呼ぶ**。作品と話は押した原稿のものを
+ * 繋ぎの側（`extension.ts` の `manuscriptNodeFor`）が引く（訊き直さない）。
+ * 「コピー（投稿サイト用）」はここに無い——今までの［コピー］ボタンと同じ便
+ * （`copyForPosting`）でカーソルの行を添えて送る（合本の話を位置で決めるため）。
+ *
+ * 画面から届く値なので、ここに無い名前は受け取らない（`postingActionCommand`）。
+ */
+export const MANUSCRIPT_POSTING_ACTIONS = {
+  helper: "novelai.postThisEpisode",
+  settings: "novelai.configurePostingSites",
+  readers: "novelai.postingAndReaders",
+} as const;
+
+export type ManuscriptPostingAction = keyof typeof MANUSCRIPT_POSTING_ACTIONS;
+
+/** 画面から届いた名前を命令へ。知らない名前なら undefined（推し量らない） */
+export function postingActionCommand(action: unknown): string | undefined {
+  return typeof action === "string" &&
+    Object.prototype.hasOwnProperty.call(MANUSCRIPT_POSTING_ACTIONS, action)
+    ? MANUSCRIPT_POSTING_ACTIONS[action as ManuscriptPostingAction]
+    : undefined;
+}
+
+/**
  * その原稿がどの作品のものか。**入れ子の作品では、いちばん深い作品を選ぶ。**
  *
  * 書庫（1つのフォルダーに複数作品）では、書庫そのものと中の作品の両方が

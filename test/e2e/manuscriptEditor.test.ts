@@ -12,6 +12,7 @@ import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { findAction } from "../../src/core/actionTree";
 import {
+  clickToolButton,
   caretPosition,
   composeText,
   footText,
@@ -125,7 +126,7 @@ test("下の欄に「表示倍率 100%」が出て、上の帯の［＋］で 10
   await withVsCode("表示倍率", [{ name: EPISODE, text: "本文の一行。\n" }], async (session) => {
     const frame = await openEpisode(session.page, EPISODE, "本文の一行");
     await waitUntil(async () => (await footText(frame, "counts")).includes("表示倍率 100%"), "「表示倍率 100%」が出る");
-    await frame.locator("#bigger").click();
+    await clickToolButton(frame, "bigger");
     await waitUntil(async () => (await footText(frame, "counts")).includes("表示倍率 106%"), "［＋］で「表示倍率 106%」になる");
   });
 });

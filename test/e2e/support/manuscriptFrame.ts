@@ -268,6 +268,37 @@ export async function classOpen(frame: Frame, id: string): Promise<boolean> {
     .catch(() => false);
 }
 
+/**
+ * 上の列の段（作者の決定 2026-11-08。設計書6.25）。1段目の［入力］［出力］［補助］［表示］を
+ * 押すと、下にその段が開く。**段の中のボタンは、段を開くまで見えない**（Playwright の
+ * `locator.click()` は見えないボタンを押せず、待ったまま時間切れになる）
+ */
+export type ToolTray = "input" | "output" | "assist" | "view";
+
+/** その段を開く（もう開いていれば何もしない。押し直すと閉じてしまうため） */
+export async function openToolTray(frame: Frame, tray: ToolTray): Promise<void> {
+  const opened = await frame.evaluate(
+    (name) => document.querySelector(".tray.open")?.getAttribute("data-tray") === name,
+    tray
+  );
+  if (!opened) await frame.locator(`#bar .tray-toggle[data-tray="${tray}"]`).click();
+  await frame.locator(`.tray[data-tray="${tray}"]`).waitFor({ state: "visible", timeout: 5_000 });
+}
+
+/**
+ * 段の中のボタン `id` を、その段を開いてから押す。どの段にあるかは画面の HTML から引く
+ * （並べ替えのたびにテストの側を直さなくて済むように）
+ */
+export async function clickToolButton(frame: Frame, id: string): Promise<void> {
+  const tray = await frame.evaluate(
+    (elementId) => document.getElementById(elementId)?.closest(".tray")?.getAttribute("data-tray") ?? "",
+    id
+  );
+  if (!tray) throw new Error(`上の列の段に #${id} が見つかりません`);
+  await openToolTray(frame, tray as ToolTray);
+  await frame.locator(`#${id}`).click();
+}
+
 /** 控えの帯（「前回、原稿に入らなかった字があります」）の文 */
 export async function rescueBarText(frame: Frame): Promise<string> {
   return frame.evaluate(() => document.getElementById("rescueText")?.textContent ?? "").catch(() => "");

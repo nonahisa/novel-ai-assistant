@@ -6,7 +6,7 @@
  */
 import type { Frame } from "playwright-core";
 import { test } from "vitest";
-import { composeText, openEpisode, placeCaretAfter } from "../support/manuscriptFrame";
+import { clickToolButton, composeText, openEpisode, placeCaretAfter } from "../support/manuscriptFrame";
 import { waitUntil } from "../support/wait";
 import { recordFeature } from "./support/featureScene";
 
@@ -57,7 +57,7 @@ test("読み上げの広報素材を撮る", async () => {
     open: async ({ page }) => {
       frame = await openEpisode(page, EPISODE, "手を振っていた");
       await installFakeVoice(frame);
-      await frame.locator("#aloudToggle").click();
+      await clickToolButton(frame, "aloudToggle");
       await waitUntil(async () => !(await frame.locator("#aloudPlay").isDisabled()), "［▶ 読む］が押せる", 15_000);
       await placeCaretAfter(frame, "終電を逃した");
       await page.mouse.move(640, 690);

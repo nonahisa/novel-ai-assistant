@@ -31,7 +31,7 @@ import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { EPISODE_DELETE_CHOICES } from "../../src/core/episodeDeleteChoice";
 import { readListedJson } from "./support/fileSettle";
-import { openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { clickToolButton, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { answerInput, waitForQuickInput } from "./support/quickInput";
 import { SIDEBAR_LAUNCH, collapseSidebarPane, expandTreeRow, showSidebar, treeContextMenu, treeRowLabels, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -279,7 +279,7 @@ async function aloudDictNote(frame: Frame): Promise<string> {
 async function readAloudFrom(page: Page, fileName: string, marker: string, caretAfter: string): Promise<{ note: string; firstSpoken: string; frame: Frame }> {
   const frame = await openEpisode(page, fileName, marker);
   await installFakeVoice(frame);
-  await frame.locator("#aloudToggle").click();
+  await clickToolButton(frame, "aloudToggle");
   await waitUntil(async () => !(await frame.locator("#aloudPlay").isDisabled()), "［▶ 読む］が押せる（偽の日本語の声が見つかる）", 15_000).catch(
     async (error: unknown) => {
       throw new Error(`${String(error)}（列の注：${JSON.stringify(await frame.locator("#aloudNote").innerText().catch(() => ""))}）`);

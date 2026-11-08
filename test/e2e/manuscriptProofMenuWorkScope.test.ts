@@ -18,7 +18,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { openEpisode } from "./support/manuscriptFrame";
+import { clickToolButton, openEpisode, openToolTray } from "./support/manuscriptFrame";
 import { SIDEBAR_LAUNCH } from "./support/sidebar";
 import { VERTICAL_LAUNCH, turnVertical } from "./support/verticalFace";
 import { E2E_WORK_TITLE, resizeWindows, withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -40,7 +40,7 @@ async function menuOpen(frame: Frame): Promise<boolean> {
 }
 
 async function openProofMenu(frame: Frame): Promise<void> {
-  await frame.locator("#proof").click();
+  await clickToolButton(frame, "proof");
   await waitUntil(() => menuOpen(frame), "［校正］の品書きが開く", 5_000);
 }
 
@@ -151,8 +151,10 @@ async function visibleRightOf(page: Page, frame: Frame): Promise<number> {
 async function measureBar(page: Page, frame: Frame): Promise<BarMeasure> {
   const visibleRight = await visibleRightOf(page, frame);
   const inside = await frame.evaluate((visible) => {
-    const bar = document.getElementById("bar") as HTMLElement;
-    const buttons = Array.from(bar.querySelectorAll("button")).filter((button) => (button as HTMLElement).offsetParent !== null) as HTMLElement[];
+    // 上の列は1段目（#bar）と、いま開いている2段目（.tray.open）の両方を測る（作者の決定 2026-11-08）
+    const buttons = Array.from(document.querySelectorAll("#bar button, .tray.open button")).filter(
+      (button) => (button as HTMLElement).offsetParent !== null
+    ) as HTMLElement[];
     const overflowButtons: string[] = [];
     const tops = new Set<number>();
     for (const button of buttons) {
@@ -214,6 +216,12 @@ async function expectFitsNarrow(page: Page, frame: Frame, label: string): Promis
   // 窓を狭めたあと、面が描き直されて幅が落ち着くまで待つ
   await waitUntil(async () => (await measureBar(page, frame)).visibleRight > 0, `${label}：面の見えている幅が測れる`, 10_000);
   await page.waitForTimeout(500);
+  // 2段目は4つとも開いて測る。［校正］のある補助の段を最後に開いたままにする
+  for (const tray of ["input", "output", "view", "assist"] as const) {
+    await openToolTray(frame, tray);
+    const row = await measureBar(page, frame);
+    expect(row.overflowButtons, `${label}：${tray} の段のボタンが見えている幅の外へはみ出しています（${JSON.stringify(row)}）`).toEqual([]);
+  }
   const bar = await measureBar(page, frame);
   const detail = JSON.stringify(bar);
   expect(bar.overflowButtons, `${label}：上の列のボタンが見えている幅の外へはみ出しています（${detail}）`).toEqual([]);

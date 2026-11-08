@@ -20,7 +20,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
-import { composeText, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { clickToolButton, composeText, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 
@@ -80,7 +80,7 @@ async function scenario(secondPressAfterResume: boolean): Promise<void> {
     await installFakeVoice(frame);
 
     // 読み上げの列を開き、2行目にカーソルを置いて［読む］
-    await frame.locator("#aloudToggle").click();
+    await clickToolButton(frame, "aloudToggle");
     await waitUntil(async () => !(await frame.locator("#aloudPlay").isDisabled()), "［▶ 読む］が押せる（偽の日本語の声が見つかる）", 15_000).catch(
       async (error: unknown) => {
         throw new Error(`${String(error)}（列の注：${JSON.stringify(await frame.locator("#aloudNote").innerText().catch(() => ""))}）`);

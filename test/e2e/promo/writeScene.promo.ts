@@ -522,6 +522,9 @@ test("場面3「書く」を撮る", async () => {
       /* ── 1. 縦書きにする（以後、縦書きのまま） ── */
       await showCaption(page, CAPTIONS.direction, CAPTION_SOLO);
       await hold(page, 1_000);
+      // ［縦書きにする］は上の列の［表示］の段の中にある（作者の決定 2026-11-08）。段を開いてから押す
+      await clickWithCursor(page, frame.locator("#trayView"), "［表示］");
+      await frame.locator("#rowView").waitFor({ state: "visible", timeout: 5_000 });
       await clickWithCursor(page, dir, "［縦書きにする］");
       mark("［縦書きにする］を押した");
       await waitUntil(async () => await isVertical(frame), "1段目：縦書きになる", 10_000);
