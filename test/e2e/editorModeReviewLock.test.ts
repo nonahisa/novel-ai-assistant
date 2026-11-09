@@ -227,7 +227,9 @@ test("編集者が押さえているファイルを作者が［適用］で直�
       const warning = await waitDialog(session, "は編集者が校閲中のため、適用できません。", "［適用］で「〜は編集者が校閲中のため、適用できません」の窓が出る");
       const oneLine = warning.replace(/\s+/g, " ");
       expect(oneLine, `窓にファイルの名前がありません：${oneLine}`).toContain(EPISODE);
-      expect(oneLine, `窓に誰が見ているかがありません：${oneLine}`).toContain(`${HOLDER} が校閲中です`);
+      // 0.148.4 から、台帳の Git の名前（HOLDER）は出さず、GitHub のユーザー名（editing.json の editorLogin）で出す
+      expect(oneLine, `窓に誰が見ているかがありません：${oneLine}`).toContain("編集者 yamada-editor が校閲中です");
+      expect(oneLine, `窓に Git の名前が出ています：${oneLine}`).not.toContain(HOLDER);
       expect(oneLine, `窓に何をしているかがありません：${oneLine}`).toContain("（校閲中）");
       expect(oneLine, `窓にいつからかがありません：${oneLine}`).toContain("2時間ほど前から");
       // 窓の中で外す道は無く、解くのは［連携を解除…］だけ
