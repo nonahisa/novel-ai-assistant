@@ -104,6 +104,14 @@ export async function startFakeOllama(
      */
     beforeEmbed?: (inputs: readonly string[]) => void | Promise<void>;
     /**
+     * 一覧（`/api/tags`）に答える**前に**呼ぶ門。約束を返せば、解けるまで答えを止める。
+     *
+     * 製品は実行の確認の前に接続を確かめる（`features/aiConnectivity.ts` の
+     * `confirmProviderReachable` が一覧を引く）。遅い機械では、範囲の窓を閉じてから
+     * 確認の窓が出るまでが延びる——その間合いを作るのに使う
+     */
+    beforeTags?: () => void | Promise<void>;
+    /**
      * `/api/show` が申告する読める長さ（トークン）。既定は 32,768。
      *
      * 申告より短いところで頭打ちになるモデル（実機確認リスト 309、J3）を作るときに、
@@ -140,6 +148,7 @@ export async function startFakeOllama(
         response.end(JSON.stringify(value));
       };
       if (url.startsWith("/api/tags")) {
+        await options.beforeTags?.();
         sendJson({
           models: (options.listedModels ?? [FAKE_OLLAMA_MODEL, ...(options.extraModels ?? [])]).map((name) => ({
             name,

@@ -12,6 +12,7 @@ import {
 } from "../core/confirmMemoryStore";
 import { layoutConfirm } from "../core/confirmPickRows";
 import { cancelItem, isCancelItem } from "./dialogs";
+import { whilePickerOpen } from "./pickerFocus";
 
 /**
  * 知らせの出し方をそろえる入口（作者の裁定 2026-09-06）。
@@ -421,7 +422,8 @@ async function askInTopPicker(params: {
   let expanded = false;
 
   for (let round = 0; round < CONFIRM_REASK_LIMIT; round++) {
-    const picked = await vscode.window.showQuickPick<ConfirmPickItem>(
+    // 窓が出た直後に WebView（原稿エディター）が焦点を取り返したら、窓へ戻す（`pickerFocus.ts`）
+    const picked = await whilePickerOpen(() => vscode.window.showQuickPick<ConfirmPickItem>(
       [
         ...actions,
         cancelItem("取りやめる"),
@@ -437,7 +439,7 @@ async function askInTopPicker(params: {
         matchOnDescription: false,
         matchOnDetail: false,
       }
-    );
+    ));
     if (!picked || isCancelItem(picked)) return undefined;
     if (picked.button !== undefined) return picked.button;
     if (picked.more !== undefined) expanded = true;

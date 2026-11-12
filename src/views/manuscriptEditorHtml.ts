@@ -2855,6 +2855,37 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   window.addEventListener("blur", function () {
     flushUnsent("焦点が画面の外へ出た");
   });
+
+  /*
+    **押さずに焦点を受けたら、拡張機能へ知らせる**（2026-11-13）。
+    窓（範囲の窓）が閉じると、VS Code 本体が焦点をこの画面へ戻す。戻す便の
+    処理が遅れると（遅い機械の縦書きの組み直し）、続けて出た実行の確認の窓から
+    焦点を取ってしまい、Enter が窓へ届かない。窓が出ていれば、拡張機能が窓へ
+    戻す（views/pickerFocus.ts）。**作者が押して移した焦点は知らせない**——
+    押している間（pointerdown から pointerup まで）に受けた焦点は作者のもの
+  */
+  let pointerPressing = false;
+  window.addEventListener(
+    "pointerdown",
+    function () {
+      pointerPressing = true;
+    },
+    true
+  );
+  window.addEventListener(
+    "pointerup",
+    function () {
+      // 押し終わりの直後に届く焦点（クリックで受けるもの）も作者のものにする
+      setTimeout(function () {
+        pointerPressing = false;
+      }, 0);
+    },
+    true
+  );
+  window.addEventListener("focus", function (event) {
+    if (event.target !== window || pointerPressing) return;
+    vscode.postMessage({ type: "focusWithoutPointer" });
+  });
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") {
       flushUnsent("画面が隠れた");

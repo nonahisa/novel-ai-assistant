@@ -155,6 +155,7 @@ import {
 import { auditEol, describeEolMismatch } from "../core/eolAudit";
 import { countSiteNotation } from "../core/ruby";
 import { notifyDone, suggestAction } from "../views/notify";
+import { reclaimPickerFocus } from "../views/pickerFocus";
 import {
   buildManuscriptEditorsCard,
   manuscriptLocation,
@@ -1911,7 +1912,12 @@ type Incoming =
    * 0.25.2で一度やめている（打つたびに千の段落を組んでいた）。
    * SNS記事は短いとはいえ、閉じている面のために組む理由は無い。
    */
-  | { type: "notePreview"; on: boolean };
+  | { type: "notePreview"; on: boolean }
+  /**
+   * 作者が押さずに、画面が焦点を受けた（VS Code 本体が戻した）。確認の窓が出ていれば
+   * 窓へ焦点を戻す（`views/pickerFocus.ts`。2026-11-13）
+   */
+  | { type: "focusWithoutPointer" };
 
 /**
  * 人物の声で朗読する口（設計書6.42.3）。実体は `features/voiceReading.ts`。
@@ -3893,6 +3899,10 @@ export class ManuscriptEditorProvider
 
         case "readingVoice":
           await this.deps.saveReadAloudVoice?.(message.name);
+          break;
+
+        case "focusWithoutPointer":
+          reclaimPickerFocus("原稿エディター");
           break;
 
         case "notePreview":
