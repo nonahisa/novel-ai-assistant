@@ -220,8 +220,33 @@ async function convertAll(
 ): Promise<void> {
   const done: Converted[] = [];
   const failed: Failed[] = [];
-  let cancelled = false;
+  /*
+    **書く前から、文書の中身が変わった知らせを聞いておく。** VS Code がディスクの変化を拾って
+    読み直したかは、1.90 ではこの知らせでしか分からない。読み直す前の文書の本文は変える前の
+    本文そのものなので、本文を比べるだけでは「読み直されて正しい」と見分けられない
+  */
+  const changed = new Set<string>();
+  const listening = vscode.workspace.onDidChangeTextDocument((event) => {
+    changed.add(path.pathKeyForComparison(path.fromUri(event.document.uri)));
+  });
+  try {
+    const cancelled = await convertEach(work, targets, done, failed);
+    const stale = await reloadOpenDocuments(done, changed);
+    report(work, done, failed, plan, cancelled ? targets.length - done.length - failed.length : 0);
+    if (stale.length > 0) warnStale(work, stale);
+  } finally {
+    listening.dispose();
+  }
+}
 
+/** 1話ずつ変える。中止されたら true */
+async function convertEach(
+  work: WorkEntry,
+  targets: readonly Utf8ConvertTarget[],
+  done: Converted[],
+  failed: Failed[]
+): Promise<boolean> {
+  let cancelled = false;
   await withCancellableProgress("原稿を UTF-8 に変換しています…", async (progress, token) => {
     let index = 0;
     for (const target of targets) {
@@ -264,10 +289,7 @@ async function convertAll(
       });
     }
   });
-
-  const stale = await reloadOpenDocuments(done);
-  report(work, done, failed, plan, cancelled ? targets.length - done.length - failed.length : 0);
-  if (stale.length > 0) warnStale(work, stale);
+  return cancelled;
 }
 
 /**
@@ -283,7 +305,10 @@ async function convertAll(
  * **化けたまま打って保存すると、化けた字が原稿になる**ので、確かめて知らせる。
  * 原稿エディターも同じ文書を読んでいるので、文書が読み直されれば画面も追う。
  */
-async function reloadOpenDocuments(done: readonly Converted[]): Promise<string[]> {
+async function reloadOpenDocuments(
+  done: readonly Converted[],
+  changed: ReadonlySet<string>
+): Promise<string[]> {
   const open = done
     .map((entry) => ({
       entry,
@@ -309,14 +334,33 @@ async function reloadOpenDocuments(done: readonly Converted[]): Promise<string[]
 
   const matches = (document: vscode.TextDocument, text: string): boolean =>
     document.getText().replace(/\r\n?/g, "\n") === text;
+  /*
+    **本文が同じでも、すぐには「済んだ」としない**（読み直す前の文書も同じ本文のため）。
+    読み直しが済んだとみなすのは、文字コードの欄がある版では欄が UTF-8 になったとき、
+    無い版（1.90）では中身が変わった知らせが来たとき。どちらも来なければ待ち時間いっぱいまで
+    待ってから比べる（正しく読み直されると本文が変わらず、知らせが来ないことがある）。
+    1.90 では、待ち時間のあとに読み直されて化けることまでは確かめられない
+  */
+  const settled = ({ entry, document }: { entry: Converted; document: vscode.TextDocument }): boolean =>
+    hasEncodingApi(document)
+      ? isUtf8Encoding(document)
+      : changed.has(path.pathKeyForComparison(entry.target.filePath));
   const deadline = Date.now() + REOPEN_WAIT_MS;
-  for (;;) {
-    const stale = open.filter(({ entry, document }) => !matches(document, entry.text));
-    if (stale.length === 0 || Date.now() >= deadline) {
-      return stale.map(({ entry }) => entry.target.filePath);
-    }
+  while (!open.every(settled) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, REOPEN_POLL_MS));
   }
+  return open
+    .filter(
+      ({ entry, document }) =>
+        !matches(document, entry.text) || (hasEncodingApi(document) && !isUtf8Encoding(document))
+    )
+    .map(({ entry }) => entry.target.filePath);
+}
+
+/** 文書の文字コードが UTF-8 か（VS Code の名前で utf8・utf8bom） */
+function isUtf8Encoding(document: vscode.TextDocument): boolean {
+  const encoding = (document as { encoding?: unknown }).encoding;
+  return encoding === "utf8" || encoding === "utf8bom";
 }
 
 /** 文書が文字コードの欄を持つか（VS Code 1.90 には無い。型は新しい版のもの） */

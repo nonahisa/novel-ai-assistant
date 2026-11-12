@@ -21,6 +21,8 @@ import { decodeBytes, type Encoding } from "./textDecode";
  * - ブラウザの読み方（`TextDecoder("shift_jis", { fatal: true })`）で読めない
  * - 読んだ本文に U+FFFD がある
  * - VS Code 自身の読み方（iconv-lite。VS Code が Shift_JIS の文書を開くときの系統）と読み方が割れる
+ *   （全符号で数えると、割れるのは制御の3バイト 0x1A・0x1C・0x7F と外字の領域だけ。Node の
+ *   TextDecoder は古い DOS のファイルの終わりの 0x1A を U+001C と読む。2026-11-12）
  *
  * バイトの往復（UTF-8 にした本文を Shift_JIS へ戻して元と比べる）では確かめない。CP932 には
  * 同じ字の符号が2つある字（NEC 選定 IBM 拡張と IBM 拡張）があり、正しい原稿まで飛ばすため。

@@ -155,6 +155,41 @@ describe("原稿 UTF-8 変換", () => {
     expect(decodeBytes(disk.get(two) ?? new Uint8Array()).encoding).toBe("utf8");
   });
 
+  test("開いている話が化けたまま（Shift_JIS で読んだまま）なら、待ってから知らせる", async () => {
+    const one = episode("第1話.txt", sjis("灯\n"));
+    // VS Code 1.90 の形（文字コードの欄が無い）。読み直しで化けた本文を返し続ける
+    workspace.textDocuments = [{ uri: { fsPath: one }, isDirty: false, getText: () => "轟ｯ\n" }];
+    await convertToUtf8({ work });
+    expect(notices.some((notice) => notice.startsWith("開いている1話が、まだ Shift_JIS のまま表示されています"))).toBe(true);
+  });
+
+  test("読み直す前の文書（本文が同じ）を、すぐ「済んだ」としない：文字コードの欄が UTF-8 になるまで待つ", async () => {
+    const one = episode("第1話.txt", sjis("灯\n"));
+    // 新しい VS Code の形。開き直しの口を呼ぶまでは shiftjis のまま
+    const document = { uri: Uri.file(one), isDirty: false, getText: () => "灯\n", encoding: "shiftjis" };
+    workspace.textDocuments = [document as unknown as (typeof workspace.textDocuments)[number]];
+    const opened: unknown[] = [];
+    (workspace as unknown as { openTextDocument: (uri: unknown, options: unknown) => Promise<unknown> }).openTextDocument =
+      async (_uri, options) => {
+        opened.push(options);
+        document.encoding = "utf8";
+        return document;
+      };
+    await convertToUtf8({ work });
+    expect(opened).toEqual([{ encoding: "utf8" }]);
+    expect(notices.some((notice) => notice.includes("まだ Shift_JIS のまま"))).toBe(false);
+  });
+
+  test("本文が同じでも、文書がまだ shiftjis のままなら知らせる（読み直す前の本文で「済んだ」としない）", async () => {
+    const one = episode("第1話.txt", sjis("灯\n"));
+    const document = { uri: Uri.file(one), isDirty: false, getText: () => "灯\n", encoding: "shiftjis" };
+    workspace.textDocuments = [document as unknown as (typeof workspace.textDocuments)[number]];
+    // 開き直しの口が効かなかった（文字コードが変わらない）
+    (workspace as unknown as { openTextDocument: () => Promise<unknown> }).openTextDocument = async () => document;
+    await convertToUtf8({ work });
+    expect(notices.some((notice) => notice.startsWith("開いている1話が、まだ Shift_JIS のまま表示されています"))).toBe(true);
+  });
+
   test("Shift_JIS の話が無ければ、そう知らせて何もしない", async () => {
     const one = episode("第1話.txt", utf8("灯\n"));
     await convertToUtf8({ work, focusPath: one });

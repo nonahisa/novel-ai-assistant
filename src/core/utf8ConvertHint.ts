@@ -1,5 +1,3 @@
-import { keysForHost } from "./keyLabels";
-
 /**
  * 「原稿を UTF-8 に変換する」へ案内する文とボタン（設計書5.4.2、0.149.0）。
  *
@@ -16,9 +14,12 @@ export const UTF8_CONVERT_HINT = "この原稿を UTF-8 に変換すれば、こ
 
 /**
  * ボタンを置けない所（校正・メモパネルの行・パネルの状態欄・MCP の答え）に添える、命令の場所。
- * 作品一覧の話の右クリックは、どの画面で開いていても同じ所にある
+ * 作品一覧の話のメニューは、どの画面で開いていても同じ所にある。
+ *
+ * **OS で変わる言い方（右クリック）を入れない。** 校正・メモパネルの行の説明は同期される置き場
+ * （`.aiwriter/findings.jsonl`）に残り、書いた OS の言い方がほかの OS の画面に出るため
  */
-export const UTF8_CONVERT_WHERE = keysForHost("（作品一覧でこの話を右クリック →「原稿 UTF-8 変換」）");
+export const UTF8_CONVERT_WHERE = "（作品一覧のこの話のメニュー →「原稿 UTF-8 変換」）";
 
 /** 失敗の詳しい文（`encoding_error` の `detail`。句点が無い）を、案内の前に置ける1文にする */
 export function asSentence(detail: string | undefined): string {
