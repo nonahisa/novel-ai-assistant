@@ -2686,7 +2686,8 @@ export async function activate(
           return;
         }
         const { assignVoices, voiceReadingService } = await loadVoiceReading();
-        await assignVoices(work, voiceReadingService(), engine);
+        // よく使う声は端末の globalState に数える（確かめて書く口を通す。設計書5.7.8）
+        await assignVoices(work, voiceReadingService(), engine, verifiedState(context.globalState));
       },
       // 音声に書き出す（設計書6.42.4）。画面が持っている本文と、［声］で選んだエンジンで書き出す（右クリックと同じ道）
       exportAudio: (filePath, text, engine) => runVoiceExport(filePath, text, engine),

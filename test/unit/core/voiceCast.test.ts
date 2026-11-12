@@ -188,6 +188,25 @@ describe("推定の結果のファイル", () => {
       parseVoiceAssignment(JSON.stringify({ version: 1, emotionStyles: { 喜び: ["あまあま"] } })).emotionStyles
     ).toEqual({ 喜び: ["あまあま"] });
   });
+
+  test("声の調整（adjust）と区切りの直し（speakerGroups）は、壊れた値を捨てて読む。古いファイル（欄が無い）は調整なし", () => {
+    const voice = { speakerUuid: "u", speakerName: "まい", styleName: "ノーマル", styleId: 1 };
+    const file = parseVoiceAssignment(
+      JSON.stringify({
+        version: 1,
+        narrator: { ...voice, adjust: { pitch: -0.06, speed: 0.85, intonation: 0.8 } },
+        dialogueDefault: { ...voice, adjust: { pitch: 1, speed: "速く" } },
+        characters: { a: { ...voice, characterName: "灯", adjust: { speed: 1.1, intonation: 3 } }, b: { ...voice, characterName: "蓮" } },
+        speakerGroups: { u1: "女性", u2: "宇宙人", u3: 5 },
+      })
+    );
+    expect(file.narrator?.adjust).toEqual({ pitch: -0.06, speed: 0.85, intonation: 0.8 });
+    expect(file.dialogueDefault).not.toHaveProperty("adjust");
+    expect(file.characters.a.adjust).toEqual({ speed: 1.1 });
+    expect(file.characters.b).not.toHaveProperty("adjust");
+    expect(file.speakerGroups).toEqual({ u1: "女性" });
+    expect(parseVoiceAssignment(JSON.stringify({ version: 1, speakerGroups: "女性" }))).not.toHaveProperty("speakerGroups");
+  });
 });
 
 describe("文ごとの声", () => {
@@ -300,11 +319,53 @@ describe("文ごとの声", () => {
         engine: "voicevox",
       })?.units.map((u) => u.styleId);
     };
+    // 調整は文ごとの声に運ぶ（下の別の件でも見る）
+    expect(
+      voicePlanUnits({
+        sentences: buildReadingPlan("地の文。", "curly", [], { splitDialogue: true }),
+        dialogues: [],
+        cast: [],
+        assignment: { version: 1, narrator: { ...ryusei("ノーマル", 13), adjust: { speed: 0.9 } }, characters: {} },
+        speakers: list,
+        engine: "voicevox",
+      })?.units[0].adjust
+    ).toEqual({ speed: 0.9 });
     // 再現：しっとり（声の形）を選んでも、0.151.1 ではノーマル（13）に替わっていた
     expect(run(ryusei("しっとり", 84))).toEqual([84]);
     expect(run(ryusei("喜び", 83))).toEqual([13]);
     expect(run(ryusei("かなしみ", 85))).toEqual([13]);
     expect(run({ speakerUuid: "uuid-goki", speakerName: "後鬼", styleName: "人間ver.", styleId: 27, engine: "voicevox" })).toEqual([27]);
+  });
+
+  test("人物の調整はその人物の台詞だけに運ぶ。人物の声が引けず代わりの声に落ちたら、落ちた先の枠の調整になる", () => {
+    const text = "「やった」と灯は言った。";
+    const sentences = buildReadingPlan(text, "curly", [], { splitDialogue: true });
+    const aged = { pitch: -0.06, speed: 0.85, intonation: 0.8 };
+    const plan = (akari: VoiceAssignmentFile["characters"][string]) =>
+      voicePlanUnits({
+        sentences,
+        dialogues: castDialogues(text),
+        cast: [entry("「やった」", 0, "author")],
+        assignment: {
+          version: 1,
+          narrator: kanon,
+          dialogueDefault: { ...kanon, adjust: { speed: 1.1 } },
+          characters: { "c-akari": akari },
+        },
+        speakers,
+        engine: "aivisspeech",
+      })?.units.map((u) => [u.who, u.adjust]);
+    expect(plan({ ...mai, adjust: aged, characterName: "灯" })).toEqual([
+      ["灯", aged],
+      ["語り", undefined],
+    ]);
+    // 人物の声が一覧に無い → 台詞の既定の声と、その枠の調整
+    expect(
+      plan({ ...mai, speakerUuid: "x", styleName: "x", styleId: 5, engine: "aivisspeech", adjust: aged, characterName: "灯" })
+    ).toEqual([
+      ["灯", { speed: 1.1 }],
+      ["語り", undefined],
+    ]);
   });
 
   test("割り当てが無ければエンジンの最初の声。話者が1人もいなければ読めない", () => {

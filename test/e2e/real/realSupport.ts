@@ -22,7 +22,7 @@ import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { readingDictionaryFileName } from "../../../src/core/readingDictionary";
 import { castDialogues, type CastEntry } from "../../../src/core/voiceCast";
-import { parseSpeakers, type VoiceEngineId, type VoiceSpeaker } from "../../../src/core/voiceEngine";
+import { parseSpeakers, type VoiceAdjust, type VoiceEngineId, type VoiceSpeaker } from "../../../src/core/voiceEngine";
 import { characterFileName, emptyCharacter, type Character } from "../../../src/models/character";
 import { clickToolButton, openEpisode } from "../support/manuscriptFrame";
 import { recordedNotices } from "../support/noticeRecord";
@@ -276,11 +276,20 @@ export interface RealVoice {
   engine: VoiceEngineId;
   speaker: VoiceSpeaker;
   styleIndex?: number;
+  /** 声の調整（高さ・速さ・抑揚。作者の頼み 2026-11-13）。無ければ標準 */
+  adjust?: VoiceAdjust;
 }
 
 function voiceRef(voice: RealVoice): Record<string, unknown> {
   const style = voice.speaker.styles[voice.styleIndex ?? 0];
-  return { speakerUuid: voice.speaker.uuid, speakerName: voice.speaker.name, styleName: style.name, styleId: style.id, engine: voice.engine };
+  return {
+    speakerUuid: voice.speaker.uuid,
+    speakerName: voice.speaker.name,
+    styleName: style.name,
+    styleId: style.id,
+    engine: voice.engine,
+    ...(voice.adjust ? { adjust: voice.adjust } : {}),
+  };
 }
 
 /** `.aiwriter/voices.json`（声の割り当て。作者が［声の割り当て］で選んだのと同じ形） */

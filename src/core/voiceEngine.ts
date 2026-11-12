@@ -499,26 +499,115 @@ const INTENSITY_FACTOR: Record<VoiceIntensity, number> = { 弱: 0.5, 中: 1, 強
 export const VOICE_PRE_PHONEME = 0.05;
 export const VOICE_POST_PHONEME = 0.05;
 
+/*
+  ── 人物ごとの声の調整（作者の頼み 2026-11-13） ─────────────────────────────
+*/
+
+/**
+ * 人物ごと（語り手・台詞の既定も）の声の調整。`voices.json` の声に任意の欄 `adjust` として残す。
+ * 欄の無い声（前の版）は 高さ0・速さ1・抑揚1 と読む。どの欄も任意で、無い欄は標準
+ */
+export interface VoiceAdjust {
+  /** 高さ（pitchScale に足す） */
+  pitch?: number;
+  /** 速さ（speedScale に掛ける） */
+  speed?: number;
+  /** 抑揚（intonationScale に掛ける） */
+  intonation?: number;
+}
+
+/**
+ * 選べる段（打ち込まずに選ぶ）。幅は「声の感じを少し変える」ところまで——広げると、
+ * 感情の寄せと重なったときに聞き取れない声になる。**読むときもこの幅の外は捨てる**（手で書いた値も）
+ */
+export const VOICE_ADJUST_STEPS = {
+  pitch: [-0.06, -0.03, 0, 0.03, 0.06],
+  speed: [0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15],
+  intonation: [0.8, 0.9, 1, 1.1, 1.2],
+} as const satisfies Record<keyof VoiceAdjust, readonly number[]>;
+
+/** 欄ごとの受ける幅（段の両端） */
+export const VOICE_ADJUST_RANGE: Record<keyof VoiceAdjust, { min: number; max: number }> = {
+  pitch: { min: -0.06, max: 0.06 },
+  speed: { min: 0.85, max: 1.15 },
+  intonation: { min: 0.8, max: 1.2 },
+};
+
+/** 見本の組み合わせ（1回で選べる形）。値は耳で決めるもので、作者の実機で詰める最初の見当 */
+export const VOICE_ADJUST_PRESETS: ReadonlyArray<{ name: string; adjust: Required<VoiceAdjust> }> = [
+  { name: "老けた声", adjust: { pitch: -0.06, speed: 0.85, intonation: 0.8 } },
+];
+
+/**
+ * 調整の欄を読む。**壊れた値（数でない・幅の外）はその欄だけ捨てる**（止めない——調整が無くても
+ * 声は読める。止めると声の割り当て全体が使えなくなる）。標準の値（0・1）の欄は持たない。
+ * 何も残らなければ `undefined`
+ */
+export function parseVoiceAdjust(raw: unknown): VoiceAdjust | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const out: VoiceAdjust = {};
+  for (const field of ["pitch", "speed", "intonation"] as const) {
+    const value = record[field];
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    const { min, max } = VOICE_ADJUST_RANGE[field];
+    // 段の値（0.03 など）は小数の誤差を持つので、端だけわずかに緩める
+    if (value < min - 1e-9 || value > max + 1e-9) continue;
+    if (value === (field === "pitch" ? 0 : 1)) continue;
+    out[field] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** 調整を欄のそろった形にする（無い欄は標準）。壊れた値は標準として扱う */
+export function normalizeVoiceAdjust(adjust: VoiceAdjust | undefined): Required<VoiceAdjust> {
+  const valid = parseVoiceAdjust(adjust) ?? {};
+  return { pitch: valid.pitch ?? 0, speed: valid.speed ?? 1, intonation: valid.intonation ?? 1 };
+}
+
+/** 段の数字の書き方（高さは符号つき。「−0.06」「+0.03」「0」） */
+export function formatAdjustValue(field: keyof VoiceAdjust, value: number): string {
+  const text = String(round(value));
+  if (field !== "pitch" || value === 0) return text;
+  return value > 0 ? `+${text}` : `−${String(round(-value))}`;
+}
+
+/** 一覧の枠に添える調整の説明（「高さ −0.06・速さ 0.85・抑揚 0.8」）。調整が無ければ空 */
+export function describeVoiceAdjust(adjust: VoiceAdjust | undefined): string {
+  const valid = parseVoiceAdjust(adjust);
+  if (!valid) return "";
+  const parts: string[] = [];
+  if (valid.pitch !== undefined) parts.push(`高さ ${formatAdjustValue("pitch", valid.pitch)}`);
+  if (valid.speed !== undefined) parts.push(`速さ ${formatAdjustValue("speed", valid.speed)}`);
+  if (valid.intonation !== undefined) parts.push(`抑揚 ${formatAdjustValue("intonation", valid.intonation)}`);
+  return parts.join("・");
+}
+
 /**
  * 感情と強さから調子を作る。
  *
  * @param styled 感情に近いスタイルが見つかって、それで読むか。**スタイルが
  *   感情を持っているので、調子の寄せは半分にする**（両方で寄せると大げさになる）
  * @param rate 列の速さ（`readAloudRate`。0.5〜2）。speedScale に掛ける
+ * @param adjust 人物ごとの声の調整（作者の頼み 2026-11-13）。高さは足し、速さと抑揚は掛ける。
+ *   合わせたあとも同じ幅（speed 0.5〜2・pitch ±0.15・intonation 0〜2）に収める。
+ *   **朗読と書き出しの両方がここを通る**ので、どちらの道でも同じ値になり、控えの鍵も揃う
  */
 export function voiceParamsFor(
   emotion: VoiceEmotion,
   intensity: VoiceIntensity,
   styled: boolean,
-  rate: number
+  rate: number,
+  adjust?: VoiceAdjust
 ): VoiceParams {
   const shift = EMOTION_SHIFT[emotion];
   const k = INTENSITY_FACTOR[intensity] * (styled ? 0.5 : 1);
   const safeRate = Number.isFinite(rate) ? clamp(rate, 0.5, 2) : 1;
+  const own = normalizeVoiceAdjust(adjust);
   return {
-    speedScale: round(clamp((1 + shift.speed * k) * safeRate, 0.5, 2)),
-    pitchScale: round(clamp(shift.pitch * k, -0.15, 0.15)),
-    intonationScale: round(clamp(1 + shift.intonation * k, 0, 2)),
+    speedScale: round(clamp((1 + shift.speed * k) * safeRate * own.speed, 0.5, 2)),
+    pitchScale: round(clamp(shift.pitch * k + own.pitch, -0.15, 0.15)),
+    intonationScale: round(clamp((1 + shift.intonation * k) * own.intonation, 0, 2)),
     /*
       **音量は上げない。上限は1**（2026-11-07 作者の答え A。実機確認リスト 19行）。エンジン（AivisSpeech）は
       音の山を上限いっぱい（32767）で返すので、上げると波形が振り切れて割れる（測定：1.15倍で65点・

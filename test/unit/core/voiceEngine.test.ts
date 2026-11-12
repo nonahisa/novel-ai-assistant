@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   applyVoiceParams,
   bytesToBase64,
+  describeVoiceAdjust,
   engineHostOutsideThisPc,
+  parseVoiceAdjust,
+  VOICE_ADJUST_PRESETS,
+  VOICE_ADJUST_STEPS,
   isNormalStyleName,
   normalizeEngineUrl,
   parseSpeakers,
@@ -537,5 +541,68 @@ describe("［声の割り当て］の声の行は「話者 × 声の形」だけ
     expect(voiceChoiceName("青山龍星", "ノーマル")).toBe("青山龍星");
     expect(voiceChoiceName("青山龍星", "しっとり")).toBe("青山龍星／しっとり");
     expect(voiceChoiceName("後鬼", "人間ver.")).toBe("後鬼／人間ver.");
+  });
+});
+
+describe("人物ごとの声の調整（作者の頼み 2026-11-13）", () => {
+  test("読む：幅の外・数でない値はその欄だけ捨てる。標準の値の欄は持たない。何も残らなければ無し", () => {
+    expect(parseVoiceAdjust({ pitch: -0.06, speed: 0.85, intonation: 0.8 })).toEqual({ pitch: -0.06, speed: 0.85, intonation: 0.8 });
+    expect(parseVoiceAdjust({ pitch: 0.5, speed: "1.1", intonation: Number.NaN })).toBeUndefined();
+    expect(parseVoiceAdjust({ pitch: 0.5, speed: 1.1 })).toEqual({ speed: 1.1 });
+    expect(parseVoiceAdjust({ pitch: 0, speed: 1, intonation: 1 })).toBeUndefined();
+    expect(parseVoiceAdjust("老けた声")).toBeUndefined();
+    expect(parseVoiceAdjust(undefined)).toBeUndefined();
+    expect(parseVoiceAdjust([0.1])).toBeUndefined();
+  });
+
+  test("段の値はどれも読める（幅の端を含む）", () => {
+    for (const field of ["pitch", "speed", "intonation"] as const) {
+      for (const value of VOICE_ADJUST_STEPS[field]) {
+        const parsed = parseVoiceAdjust({ [field]: value });
+        if (value === (field === "pitch" ? 0 : 1)) expect(parsed).toBeUndefined();
+        else expect(parsed).toEqual({ [field]: value });
+      }
+    }
+  });
+
+  test("見本「老けた声」は 高さ −0.06・速さ 0.85・抑揚 0.8", () => {
+    const aged = VOICE_ADJUST_PRESETS.find((preset) => preset.name === "老けた声");
+    expect(aged?.adjust).toEqual({ pitch: -0.06, speed: 0.85, intonation: 0.8 });
+    expect(describeVoiceAdjust(aged?.adjust)).toBe("高さ −0.06・速さ 0.85・抑揚 0.8");
+    expect(describeVoiceAdjust(undefined)).toBe("");
+    expect(describeVoiceAdjust({ pitch: 0.03 })).toBe("高さ +0.03");
+  });
+
+  test("足し方：高さは足し、速さと抑揚は掛ける。感情の寄せと列の速さと合わせる", () => {
+    const plain = voiceParamsFor("平静", "中", false, 1);
+    const aged = voiceParamsFor("平静", "中", false, 1, { pitch: -0.06, speed: 0.85, intonation: 0.8 });
+    expect(aged).toMatchObject({ speedScale: 0.85, pitchScale: -0.06, intonationScale: 0.8, volumeScale: plain.volumeScale });
+    // 喜び（中）の寄せ：速さ 1.04・高さ +0.03・抑揚 1.15 に、列の速さ 1.2 と調整を合わせる
+    const joy = voiceParamsFor("喜び", "中", false, 1.2, { pitch: -0.06, speed: 0.85, intonation: 0.8 });
+    expect(joy.speedScale).toBeCloseTo(1.04 * 1.2 * 0.85, 3);
+    expect(joy.pitchScale).toBeCloseTo(0.03 - 0.06, 3);
+    expect(joy.intonationScale).toBeCloseTo(1.15 * 0.8, 3);
+  });
+
+  test("合わせたあとも幅（speed 0.5〜2・pitch ±0.15・intonation 0〜2）に収める", () => {
+    const loud = voiceParamsFor("叫び", "強", false, 2, { pitch: 0.06, speed: 1.15, intonation: 1.2 });
+    expect(loud.speedScale).toBeLessThanOrEqual(2);
+    expect(loud.pitchScale).toBeLessThanOrEqual(0.15);
+    expect(loud.intonationScale).toBeLessThanOrEqual(2);
+    const low = voiceParamsFor("悲しみ", "強", false, 0.5, { pitch: -0.06, speed: 0.85, intonation: 0.8 });
+    expect(low.speedScale).toBeGreaterThanOrEqual(0.5);
+    expect(low.pitchScale).toBeGreaterThanOrEqual(-0.15);
+    // 驚き（強）の高さ +0.09 に +0.06 を足すと 0.15 で止まる
+    expect(voiceParamsFor("驚き", "強", false, 1, { pitch: 0.06 }).pitchScale).toBe(0.15);
+    // 壊れた調整は標準として扱う
+    expect(voiceParamsFor("平静", "中", false, 1, { pitch: 9 } as never)).toEqual(voiceParamsFor("平静", "中", false, 1));
+  });
+
+  test("合成の控えの鍵：調整が違えば別の音", () => {
+    const plain = voiceParamsFor("平静", "中", false, 1);
+    const aged = voiceParamsFor("平静", "中", false, 1, { pitch: -0.06 });
+    const slow = voiceParamsFor("平静", "中", false, 1, { speed: 0.85 });
+    const keys = [plain, aged, slow].map((params) => synthesisKey("http://a", 1, "文", params));
+    expect(new Set(keys).size).toBe(3);
   });
 });

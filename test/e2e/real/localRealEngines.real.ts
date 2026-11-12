@@ -25,6 +25,9 @@ import {
   pickNormalStyle,
   pickStyleForEmotion,
   styleEmotionOf,
+  voiceParamsFor,
+  VOICE_ADJUST_PRESETS,
+  type VoiceAdjust,
   type VoiceEmotion,
   type VoiceSpeaker,
 } from "../../../src/core/voiceEngine";
@@ -332,6 +335,97 @@ test.skipIf(!GATE_AIVIS)(
   },
   40 * 60_000
 );
+
+/* ───────────────────────── 人物ごとの声の調整（作者の頼み 2026-11-13） ───────────────────────── */
+
+/**
+ * 見本の文（作者の作品の本文は使わない）。同じ台詞を4人に言わせ、調整だけを変える。
+ * 地の文で「何番目が何か」を読み上げるので、1つの MP3 を頭から聞けば比べられる
+ */
+const ADJUST_VARIANTS: Array<{ id: string; name: string; label: string; adjust?: VoiceAdjust }> = [
+  { id: "char_101", name: "一郎", label: "調整なし" },
+  { id: "char_102", name: "二郎", label: "老けた声", adjust: VOICE_ADJUST_PRESETS.find((preset) => preset.name === "老けた声")?.adjust },
+  { id: "char_103", name: "三郎", label: "高さだけマイナス0.06", adjust: { pitch: -0.06 } },
+  { id: "char_104", name: "四郎", label: "速さだけ0.85", adjust: { speed: 0.85 } },
+];
+const ADJUST_QUOTE = "「今日はいい天気ですね。少し歩きましょうか」";
+
+for (const engine of ["aivisspeech", "voicevox"] as const) {
+  const gate = engine === "aivisspeech" ? GATE_AIVIS : GATE_VOICEVOX;
+  const engineName = engine === "aivisspeech" ? "AivisSpeech" : "VOICEVOX";
+  test.skipIf(!gate)(
+    `声の調整：本物の ${engineName} で、調整なし・老けた声・高さだけ −0.06・速さだけ 0.85 の4通りを1つの MP3 に書き出す（作者が耳で数字を決める材料）`,
+    async () => {
+      const proxy = await startRecordingProxy(engine);
+      const speakers = await realSpeakers(engine);
+      // ノーマルを持つ最初の話者（平静の台詞はノーマルで読むので、4人とも同じ声の形で比べられる）
+      const speaker = speakers.find((s) => s.styles.some((style) => isNormalStyleName(style.name))) ?? speakers[0];
+      const normalIndex = Math.max(0, speaker.styles.findIndex((style) => isNormalStyleName(style.name)));
+      const people = ADJUST_VARIANTS.map((variant) => realCharacter(variant.id, variant.name));
+      const text =
+        ADJUST_VARIANTS.map((variant, index) => `　${index + 1}つ目は、${variant.label}。\n${ADJUST_QUOTE}と${variant.name}は言った。`).join("\n") + "\n";
+      const ep = { name: "episode_0001_声の調整.md", text };
+      const stem = ep.name.replace(/\.md$/, "");
+      const keepAs = `${engineName}声の調整`;
+      const result: Record<string, unknown> = {
+        engine,
+        speaker: speaker.name,
+        style: speaker.styles[normalIndex]?.name,
+        // 製品が頼む値（平静・中・列の速さ1）。耳で決めるときの手がかり
+        params: ADJUST_VARIANTS.map((variant) => ({ label: variant.label, ...voiceParamsFor("平静", "中", false, 1, variant.adjust) })),
+      };
+      try {
+        await withVsCode(
+          `声の調整（${engineName}）`,
+          [ep],
+          async (session) => {
+            const frame = await openRow(session, ep.name, "1つ目は", engine);
+            result.export = await exportEpisode(session, frame, stem, keepAs, 30 * 60_000);
+          },
+          {
+            settings: engineSettings(engine === "aivisspeech" ? { aivisspeech: proxy.url } : { voicevox: proxy.url }),
+            prepareWork: async (folders) => {
+              await writeCharacters(folders.workFolder, people);
+              await writeVoices(folders.workFolder, {
+                narrator: { engine, speaker, styleIndex: normalIndex },
+                characters: ADJUST_VARIANTS.map((variant) => ({
+                  id: variant.id,
+                  name: variant.name,
+                  voice: { engine, speaker, styleIndex: normalIndex, ...(variant.adjust ? { adjust: variant.adjust } : {}) },
+                })),
+              });
+              // 台詞の話者は作者が直した形で置く（同じ字の台詞の何番目か）。AI は呼ばない
+              await writeCast(
+                folders,
+                ep.name,
+                ADJUST_VARIANTS.map((variant, index) => ({
+                  quote: ADJUST_QUOTE,
+                  nth: index,
+                  speakerId: variant.id,
+                  speakerName: variant.name,
+                  emotion: "平静" as const,
+                  intensity: "中" as const,
+                }))
+              );
+            },
+          }
+        );
+      } finally {
+        await writeResult(keepAs, result);
+        await proxy.close();
+      }
+      const exported = result.export as Awaited<ReturnType<typeof exportEpisode>>;
+      expect(exported.dialogs, "書き出しの途中で真ん中の窓が出た").toEqual([]);
+      expect(exported.files.some((file) => file.endsWith(".mp3")), `できたファイル：${JSON.stringify(exported.files)}`).toBe(true);
+      await noteListening(
+        `${keepAs}/${stem}.mp3`,
+        "声の調整",
+        `${speaker.name}の同じ声で、同じ台詞を4回：1つ目＝調整なし、2つ目＝老けた声（高さ −0.06・速さ 0.85・抑揚 0.8）、3つ目＝高さだけ −0.06、4つ目＝速さだけ 0.85。違いが聞き取れるか、「老けた声」らしく聞こえるか、変えすぎて不自然でないか（数字は結果.json）`
+      );
+    },
+    40 * 60_000
+  );
+}
 
 /* ───────────────────────── 104：速い PC で遅さの知らせが出ない ───────────────────────── */
 

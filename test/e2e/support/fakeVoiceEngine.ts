@@ -63,6 +63,8 @@ export interface FakeVoiceEngineOptions {
   listenHost?: string;
   /** 1文を作るのにかかる時間（ミリ秒）。付けると合成を1つずつ順に返す（頭のコメント） */
   synthesisDelayMs?: number;
+  /** 話者の一覧（省けば `FAKE_SPEAKERS`）。声を選ぶ窓の区切りを分けて見せる件が、uuid の違う話者を並べる */
+  speakers?: unknown[];
 }
 
 /** 偽のエンジンを立てる */
@@ -108,7 +110,7 @@ export async function startFakeVoiceEngine(options: FakeVoiceEngineOptions = {})
         response.writeHead(status, { "Content-Type": "application/json" });
         response.end(JSON.stringify(body));
       };
-      if (url.pathname === "/speakers") return json(FAKE_SPEAKERS);
+      if (url.pathname === "/speakers") return json(options.speakers ?? FAKE_SPEAKERS);
       if (url.pathname === "/engine_manifest") {
         return json({ manifest_version: "0.13.1", name: `${brand} Engine`, brand_name: brand });
       }

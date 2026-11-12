@@ -71,6 +71,13 @@ import {
   voiceChoiceName,
   voiceChoiceRows,
   voiceParamsFor,
+  describeVoiceAdjust,
+  formatAdjustValue,
+  normalizeVoiceAdjust,
+  parseVoiceAdjust,
+  VOICE_ADJUST_PRESETS,
+  VOICE_ADJUST_STEPS,
+  type VoiceAdjust,
   type VoiceEngineDownRoute,
   type FetchLike,
   type VoiceEmotion,
@@ -90,6 +97,16 @@ import {
   type VoiceCastStageRequest,
 } from "../prompts/voiceCast";
 import { readEngineUrlSettings } from "./voiceEngineSettings";
+import {
+  aivisDescriptionsOf,
+  arrangeVoiceRows,
+  countVoicePick,
+  frequentVoiceKeys,
+  usedVoiceKey,
+  voiceGroupOf,
+  VOICE_PICK_COUNTS_KEY,
+  type GroupableVoiceRow,
+} from "../core/voiceGroups";
 import { slowPaceNotice, SynthesisPaceWatch, wavSeconds } from "../core/voicePace";
 
 /**
@@ -291,7 +308,7 @@ export class VoiceReadingService {
     options: { outputSamplingRate?: number } = {}
   ): Promise<Uint8Array> {
     const client = this.client(unit.engine);
-    const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate);
+    const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate, unit.adjust);
     if (options.outputSamplingRate === undefined) {
       const cached = this.cache.get(synthesisKey(client.baseUrl, unit.styleId, unit.speech, params));
       if (cached) return Promise.resolve(cached);
@@ -472,7 +489,7 @@ export class VoiceReadingService {
   /** 1文の音。控え → 作っている途中 → 新しく作る の順に見る */
   synthesize(unit: VoicePlanUnit, rate: number): Promise<Uint8Array> {
     const client = this.client(unit.engine);
-    const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate);
+    const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate, unit.adjust);
     // 鍵には接続先が入る（エンジンが違えば別の音として控える）
     const key = synthesisKey(client.baseUrl, unit.styleId, unit.speech, params);
     const cached = this.cache.get(key);
@@ -1348,7 +1365,9 @@ export async function manageVoiceCast(target: VoiceCastTarget): Promise<void> {
 export async function assignVoices(
   work: WorkEntry,
   service: VoiceReadingService,
-  engine: VoiceEngineId
+  engine: VoiceEngineId,
+  /** よく使う声を数える保管庫（端末の globalState を verifiedState で包んだもの）。無ければ数えない */
+  memory?: VoicePickMemory
 ): Promise<void> {
   const other: VoiceEngineId = engine === "aivisspeech" ? "voicevox" : "aivisspeech";
   const fetchList = async (which: VoiceEngineId): Promise<VoiceSpeaker[]> => {
@@ -1408,6 +1427,24 @@ export async function assignVoices(
   const placeHolder = notes.length > 0 ? notes.join("") : undefined;
   if (placeHolder) logStep(`人物の声：声の割り当て：${placeHolder}`);
   const shownLabels = available.map((a) => VOICE_ENGINE_LABEL[a.engine]).join("・");
+  // AivisSpeech の声を区切るための説明（`/aivm_models`。本文は運ばない）。短く待ち、取れなくても窓は開く
+  // （その声は「その他」に並ぶ）。VOICEVOX は同梱の表で引くので問い合わせない
+  const aivisDescriptions = available.some((a) => a.engine === "aivisspeech")
+    ? await (async (): Promise<Map<string, string>> => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), OTHER_ENGINE_SPEAKERS_MS);
+        try {
+          return aivisDescriptionsOf(await service.engineClient("aivisspeech").aivmModels(controller.signal));
+        } catch (error) {
+          logStep(
+            `人物の声：声の割り当て：AivisSpeech のモデルの説明が取れず、声の区切りは「その他」に並べます：${error instanceof Error ? error.message : String(error)}`
+          );
+          return new Map();
+        } finally {
+          clearTimeout(timer);
+        }
+      })()
+    : new Map<string, string>();
 
   let people: Character[];
   try {
@@ -1430,9 +1467,12 @@ export async function assignVoices(
       // 感情のスタイルは台詞ごとに自動で選ぶので、選んだのが感情のスタイルかノーマルなら話者名だけ
       // （前の版で選んだ「青山龍星／喜び」も同じ。作者の答え 2026-11-13）
       const name = voiceChoiceName(ref.speakerName, ref.styleName, file.emotionStyles);
+      // 調整があれば添える（作者の頼み 2026-11-13「人物ごとに高さ・速さ・抑揚」）
+      const tuned = describeVoiceAdjust(ref.adjust);
+      const tail = tuned === "" ? "" : `（${tuned}）`;
       // 混ぜて読めるので、エンジンの名前として添える（注意ではない）。印の無い声は［声］のエンジンで探す
-      if (ref.engine === undefined) return `${name}（感情に合わせて自動・前の版で選んだ声）`;
-      return `${name}（感情に合わせて自動・${VOICE_ENGINE_LABEL[ref.engine]}）`;
+      if (ref.engine === undefined) return `${name}（感情に合わせて自動・前の版で選んだ声）${tail}`;
+      return `${name}（感情に合わせて自動・${VOICE_ENGINE_LABEL[ref.engine]}）${tail}`;
     };
     const targets: Array<vscode.QuickPickItem & { slot: "narrator" | "dialogueDefault" | Character }> = [
       { label: "語り手（地の文）", description: label(file.narrator), slot: "narrator" },
@@ -1453,23 +1493,60 @@ export async function assignVoices(
       ...(placeHolder ? { placeHolder } : {}),
     });
     if (!picked || isCancelItem(picked) || !("slot" in picked)) return;
+    const slot = picked.slot;
+    const current = slotRef(file, slot);
 
-    const voice = await vscode.window.showQuickPick(
+    // 行は「話者 × 声の形」だけ。感情のスタイルは台詞ごとに自動で選ぶので並べない（作者の答え 2026-11-13）
+    type VoiceRow = GroupableVoiceRow & { ref: VoiceRef };
+    const rows: VoiceRow[] = available.flatMap(({ engine: which, list }) =>
+      voiceChoiceRows(list, file.emotionStyles).map(({ speaker, style, label: rowLabel }) => ({
+        engine: which,
+        speakerUuid: speaker.uuid,
+        speakerName: speaker.name,
+        label: rowLabel,
+        ref: {
+          speakerUuid: speaker.uuid,
+          speakerName: speaker.name,
+          styleName: style.name,
+          styleId: style.id,
+          engine: which,
+        } satisfies VoiceRef,
+      }))
+    );
+    // 区切りで並べる（作者の頼み 2026-11-13「選択肢が長すぎるので、分類して」）
+    const used = new Set(
+      [file.narrator, file.dialogueDefault, ...Object.values(file.characters)].flatMap((ref) =>
+        ref
+          ? [usedVoiceKey(ref.engine ?? engine, ref.speakerUuid, voiceChoiceName(ref.speakerName, ref.styleName, file.emotionStyles))]
+          : []
+      )
+    );
+    const sections = arrangeVoiceRows(rows, {
+      used,
+      frequent: frequentVoiceKeys(memory?.get<unknown>(VOICE_PICK_COUNTS_KEY, {})),
+      groupOf: (row) =>
+        voiceGroupOf(row.engine, row.speakerUuid, row.speakerName, {
+          overrides: file.speakerGroups,
+          descriptions: aivisDescriptions,
+        }),
+    });
+    const adjustItem = {
+      label: "この声の高さ・速さ・抑揚を変える",
+      description: describeVoiceAdjust(current?.adjust) || "いまは標準",
+      openAdjust: true as const,
+    };
+    const voice = await vscode.window.showQuickPick<vscode.QuickPickItem & { ref?: VoiceRef; openAdjust?: true }>(
       [
-        // 行は「話者 × 声の形」だけ。感情のスタイルは台詞ごとに自動で選ぶので並べない（作者の答え 2026-11-13）
-        ...available.flatMap(({ engine: which, list }) =>
-          voiceChoiceRows(list, file.emotionStyles).map(({ speaker, style, label: rowLabel }) => ({
-            label: rowLabel,
-            description: `${VOICE_ENGINE_LABEL[which]}・スタイルは感情に合わせて自動`,
-            ref: {
-              speakerUuid: speaker.uuid,
-              speakerName: speaker.name,
-              styleName: style.name,
-              styleId: style.id,
-              engine: which,
-            } satisfies VoiceRef,
-          }))
-        ),
+        // 調整は選びたいときだけ入る行（声を選ぶだけなら段は増えない）。声が決まっている枠だけ
+        ...(current ? [adjustItem] : []),
+        ...sections.flatMap((section) => [
+          { label: section.heading, kind: vscode.QuickPickItemKind.Separator },
+          ...section.rows.map((row) => ({
+            label: row.label,
+            description: `${VOICE_ENGINE_LABEL[row.engine]}・スタイルは感情に合わせて自動`,
+            ref: row.ref,
+          })),
+        ]),
         cancelItem("戻る"),
       ],
       {
@@ -1478,16 +1555,125 @@ export async function assignVoices(
         ...(placeHolder ? { placeHolder } : {}),
       }
     );
-    if (!voice || isCancelItem(voice) || !("ref" in voice)) continue;
-    const next: VoiceAssignmentFile = { ...file, characters: { ...file.characters } };
-    if (picked.slot === "narrator") next.narrator = voice.ref;
-    else if (picked.slot === "dialogueDefault") next.dialogueDefault = voice.ref;
-    else next.characters[picked.slot.id] = { ...voice.ref, characterName: picked.slot.name };
+    if (!voice || isCancelItem(voice)) continue;
+    if (voice.openAdjust) {
+      const stop = await adjustVoiceOf(work, slot, picked.label);
+      if (stop) return;
+      continue;
+    }
+    if (!voice.ref) continue;
+    // 声を選び直しても、その枠の調整は残す（作者がその人物のために決めた高さや速さ）
+    const chosenRef: VoiceRef = { ...voice.ref, ...(current?.adjust ? { adjust: current.adjust } : {}) };
     try {
-      await saveVoiceAssignment(work, next, loaded.hash);
+      await saveVoiceAssignment(work, withSlotRef(file, slot, chosenRef), loaded.hash);
     } catch (error) {
       void warnWithLog(error instanceof Error ? error.message : String(error));
       return;
+    }
+    // よく使う声を数える（端末だけ。数えられなくても割り当ては済んでいるので止めない）
+    if (memory) {
+      try {
+        await memory.update(
+          VOICE_PICK_COUNTS_KEY,
+          countVoicePick(memory.get<unknown>(VOICE_PICK_COUNTS_KEY, {}), voice.ref.engine ?? engine, voice.ref.speakerUuid)
+        );
+      } catch (error) {
+        logStep(`人物の声：よく使う声を数えられませんでした：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+}
+
+/** 声の割り当ての枠（語り手・台詞の既定・人物） */
+type VoiceSlot = "narrator" | "dialogueDefault" | Character;
+
+function slotRef(file: VoiceAssignmentFile, slot: VoiceSlot): VoiceRef | undefined {
+  if (slot === "narrator") return file.narrator;
+  if (slot === "dialogueDefault") return file.dialogueDefault;
+  return file.characters[slot.id];
+}
+
+/** 枠の声を差し替えた写し（ほかの欄〔emotionStyles・speakerGroups〕はそのまま残す） */
+function withSlotRef(file: VoiceAssignmentFile, slot: VoiceSlot, ref: VoiceRef): VoiceAssignmentFile {
+  const next: VoiceAssignmentFile = { ...file, characters: { ...file.characters } };
+  if (slot === "narrator") next.narrator = ref;
+  else if (slot === "dialogueDefault") next.dialogueDefault = ref;
+  else next.characters[slot.id] = { ...ref, characterName: slot.name };
+  return next;
+}
+
+/** よく使う声を数える保管庫（`verifiedState(globalState)`。読み書きの形だけ） */
+export interface VoicePickMemory {
+  get<T>(key: string, defaultValue: T): T;
+  update(key: string, value: unknown): Thenable<void> | Promise<void>;
+}
+
+const ADJUST_FIELD_LABEL: Record<keyof VoiceAdjust, string> = { pitch: "高さ", speed: "速さ", intonation: "抑揚" };
+
+/**
+ * 枠の声の高さ・速さ・抑揚を選ぶ（作者の頼み 2026-11-13）。打ち込まずに段から選ぶ。
+ * 変えるたびに保存する（書く直前のハッシュ照合は今までどおり）。
+ *
+ * @returns 割り当ての窓ごと閉じるとき true（保存に失敗したとき）
+ */
+async function adjustVoiceOf(work: WorkEntry, slot: VoiceSlot, slotLabel: string): Promise<boolean> {
+  for (;;) {
+    let loaded;
+    try {
+      loaded = await loadVoiceAssignment(work);
+    } catch (error) {
+      void warnWithLog(error instanceof Error ? error.message : String(error));
+      return true;
+    }
+    const ref = slotRef(loaded.file, slot);
+    if (!ref) return false;
+    const now = normalizeVoiceAdjust(ref.adjust);
+    type Item = vscode.QuickPickItem & { apply?: VoiceAdjust | null; field?: keyof VoiceAdjust };
+    const items: Item[] = [
+      ...VOICE_ADJUST_PRESETS.map((preset) => ({
+        label: `見本：${preset.name}`,
+        description: describeVoiceAdjust(preset.adjust),
+        apply: preset.adjust as VoiceAdjust,
+      })),
+      ...(["pitch", "speed", "intonation"] as const).map((field) => ({
+        label: ADJUST_FIELD_LABEL[field],
+        description: `いま ${formatAdjustValue(field, now[field])}`,
+        field,
+      })),
+      ...(ref.adjust ? [{ label: "調整を外す（標準に戻す）", apply: null }] : []),
+    ];
+    const chosen = await vscode.window.showQuickPick<Item>([...items, cancelItem("戻る")], {
+      title: `${slotLabel}の声の調整（${describeVoiceAdjust(ref.adjust) || "いまは標準"}）`,
+    });
+    if (!chosen || isCancelItem(chosen)) return false;
+    let nextAdjust: VoiceAdjust | null | undefined = chosen.apply;
+    if (chosen.field) {
+      const field = chosen.field;
+      const step = await vscode.window.showQuickPick<vscode.QuickPickItem & { value?: number }>(
+        [
+          ...VOICE_ADJUST_STEPS[field].map((value) => ({
+            label: formatAdjustValue(field, value),
+            ...(value === now[field] ? { description: "いま" } : {}),
+            value,
+          })),
+          cancelItem("戻る"),
+        ],
+        { title: `${slotLabel}の声の${ADJUST_FIELD_LABEL[field]}` }
+      );
+      if (!step || isCancelItem(step) || step.value === undefined) continue;
+      nextAdjust = { ...now, [field]: step.value };
+    }
+    if (nextAdjust === undefined) continue;
+    // 標準の値の欄は持たない（parseVoiceAdjust が落とす）。何も残らなければ欄ごと外す
+    const kept = nextAdjust === null ? undefined : parseVoiceAdjust(nextAdjust);
+    const nextRef: VoiceRef = { ...ref };
+    delete nextRef.adjust;
+    if (kept) nextRef.adjust = kept;
+    try {
+      await saveVoiceAssignment(work, withSlotRef(loaded.file, slot, nextRef), loaded.hash);
+    } catch (error) {
+      void warnWithLog(error instanceof Error ? error.message : String(error));
+      return true;
     }
   }
 }

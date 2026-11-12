@@ -8,14 +8,17 @@ import {
   isVoiceIntensity,
   pickNormalStyle,
   pickStyleForEmotion,
+  parseVoiceAdjust,
   styleEmotionOf,
   VOICE_EMOTIONS,
   VOICE_ENGINE_LABEL,
+  type VoiceAdjust,
   type VoiceEmotion,
   type VoiceEngineId,
   type VoiceIntensity,
   type VoiceSpeaker,
 } from "./voiceEngine";
+import { isVoiceGroup, type VoiceGroup } from "./voiceGroups";
 
 /**
  * 人物の声で朗読する——台詞ごとの話者と感情、声の割り当て（設計書6.42.3）。
@@ -1025,6 +1028,8 @@ export interface VoiceRef {
   styleId: number;
   /** 選んだときのエンジン。前の版の声には無い */
   engine?: VoiceEngineId;
+  /** 声の調整（高さ・速さ・抑揚。作者の頼み 2026-11-13）。無ければ標準 */
+  adjust?: VoiceAdjust;
 }
 
 /**
@@ -1048,6 +1053,11 @@ export interface VoiceAssignmentFile {
    * 例えば `"喜び": ["あまあま"]`）。表（`EMOTION_STYLE_CANDIDATES`）より先に見る
    */
   emotionStyles?: Partial<Record<VoiceEmotion, string[]>>;
+  /**
+   * 声を選ぶ窓の区切りの直し（作者が手で書く。話者の uuid → 区切り。作者の頼み 2026-11-13）。
+   * 同梱の表と説明の推し量りより先に見る。知らない区切りの値は読むときに捨てる
+   */
+  speakerGroups?: Record<string, VoiceGroup>;
 }
 
 export function emptyVoiceAssignment(): VoiceAssignmentFile {
@@ -1070,12 +1080,15 @@ function parseVoiceRef(raw: unknown, where: string): VoiceRef {
   if (r.engine !== undefined && !isVoiceEngineId(r.engine)) {
     throw new Error(`${where}.engine は "aivisspeech" か "voicevox" にしてください`);
   }
+  // 調整は壊れた値を捨てて読む（止めない。調整が無くても声は読める）
+  const adjust = parseVoiceAdjust(r.adjust);
   return {
     speakerUuid: r.speakerUuid,
     speakerName: r.speakerName,
     styleName: r.styleName,
     styleId: r.styleId,
     ...(isVoiceEngineId(r.engine) ? { engine: r.engine } : {}),
+    ...(adjust ? { adjust } : {}),
   };
 }
 
@@ -1116,6 +1129,14 @@ export function parseVoiceAssignment(text: string): VoiceAssignmentFile {
       styles[emotion] = names as string[];
     }
     out.emotionStyles = styles;
+  }
+  // 区切りの直しは窓の並べ方にしか使わないので、壊れた値は捨てて読む（止めない）
+  if (typeof record.speakerGroups === "object" && record.speakerGroups !== null && !Array.isArray(record.speakerGroups)) {
+    const groups: Record<string, VoiceGroup> = {};
+    for (const [uuid, group] of Object.entries(record.speakerGroups)) {
+      if (isVoiceGroup(group)) groups[uuid] = group;
+    }
+    if (Object.keys(groups).length > 0) out.speakerGroups = groups;
   }
   return out;
 }
@@ -1178,6 +1199,11 @@ export interface VoicePlanUnit {
   gapMs: number;
   /** 画面に出す短い名札（「語り」「灯」「台詞」） */
   who: string;
+  /**
+   * その声の枠の調整（人物ごと。作者の頼み 2026-11-13）。朗読も書き出しもこの値を `voiceParamsFor` へ渡す。
+   * 画面からは受け取らない（計画は拡張機能が持つ）
+   */
+  adjust?: VoiceAdjust;
 }
 
 /** エンジンごとの、引けなかった枠（「語り手」「台詞の既定」・人物の名前） */
@@ -1243,7 +1269,9 @@ export function voicePlanUnits(input: {
     if (!entry.slots.includes(slot)) entry.slots.push(slot);
   };
   /** 声は「エンジンとスタイルの番号」の組で持つ（番号はエンジンごとに振られるため） */
-  type Voice = { engine: VoiceEngineId; styleId: number };
+  // 調整（`adjust`）は引けた声の枠のもの。代わりの声に落ちたら、落ちた先の枠の調整になる
+  // （ほかの声へ、その人物のための高さや速さを当てない）
+  type Voice = { engine: VoiceEngineId; styleId: number; adjust?: VoiceAdjust };
   /** 割り当てがあるのに引けなかった枠を覚える（割り当てていない枠は数えない） */
   const resolve = (ref: VoiceRef | undefined, slot: string): Voice | undefined => {
     if (!ref) return undefined;
@@ -1259,7 +1287,7 @@ export function voicePlanUnits(input: {
       note(missing, list ? engine : input.engine, slot);
       return undefined;
     }
-    return { engine, styleId: id };
+    return { engine, styleId: id, ...(ref.adjust ? { adjust: ref.adjust } : {}) };
   };
   const narrator = resolve(input.assignment.narrator, "語り手") ?? { engine: input.engine, styleId: firstId };
   const lookup = castLookup(input.cast, input.dialogues);
@@ -1313,6 +1341,7 @@ export function voicePlanUnits(input: {
       styled: picked.styled,
       gapMs: gapBefore(previous, sentence),
       who,
+      ...(voice.adjust ? { adjust: voice.adjust } : {}),
     });
     previous = sentence;
   }

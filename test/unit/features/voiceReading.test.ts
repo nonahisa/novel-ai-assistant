@@ -120,6 +120,21 @@ type Registry = import("../../../src/ai/registry").AIRegistry;
 const work = { id: "w1", title: "鉛の海", folderPath: "/w" } as WorkEntry;
 const TEXT = "「やった！」と灯は笑った。\n「静かにしろ」と蓮は囁いた。";
 
+/**
+ * 声を選ぶ窓の行のうち、声の行だけ（区切りの見出し・調整の行・戻るを除く）。
+ * 同じ声は上の区切りと下の区切りの両方に出るので、初めて出た所だけを残す
+ */
+function voiceRowsOf<T extends { label: string; description?: string }>(items: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (!item.description?.endsWith("スタイルは感情に合わせて自動")) return false;
+    const key = `${item.label}|${item.description}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function castEntry(quote: string, patch: Partial<CastEntry>): CastEntry {
   return {
     quote,
@@ -376,16 +391,19 @@ describe("エンジンを選んだ声の割り当てと、戻したときの代�
     );
     expect(pick.shown[1].title).toBe(`灯の声（${VOICE_ENGINE_LABEL.voicevox}・${VOICE_ENGINE_LABEL.aivisspeech}）`);
     // 行は話者だけ（ノーマル）。スタイルは感情に合わせて自動で選ぶ（作者の答え 2026-11-13）
-    expect(pick.shown[1].items[0]).toEqual({
+    // 先頭は調整の行（声の決まっている枠だけ）、そのあとに区切りの見出しと声の行
+    const voiceRows = voiceRowsOf(pick.shown[1].items);
+    expect(voiceRows[0]).toEqual({
       label: "まい",
       description: `${VOICE_ENGINE_LABEL.voicevox}・スタイルは感情に合わせて自動`,
     });
     // 感情のスタイル（上機嫌・怒り・悲しみ・ささやき）の行は出さない
-    const labels = pick.shown[1].items.map((item) => item.label);
+    const labels = voiceRows.map((item) => item.label);
     expect(labels.filter((label) => label.includes("／"))).toEqual([]);
     expect(voicevox.requests.filter((r) => r.path === "/speakers").length).toBeGreaterThan(0);
-    // もう片方は話者の一覧だけ（本文を運ぶ頼みは無い）
-    expect(aivis.requests.map((r) => r.path)).toEqual(["/speakers"]);
+    // もう片方は話者の一覧と、区切りに使うモデルの説明だけ（本文を運ぶ頼みは無い）
+    expect(aivis.requests.map((r) => r.path)).toEqual(["/speakers", "/aivm_models"]);
+    expect(aivis.requests.filter((r) => r.path === "/audio_query" || r.path === "/synthesis")).toEqual([]);
     expect(state.savedAssignments).toHaveLength(1);
     expect(state.savedAssignments[0].characters["c-akari"]).toMatchObject({
       speakerUuid: "uuid-kanon",
@@ -481,6 +499,179 @@ describe("エンジンを選んだ声の割り当てと、戻したときの代�
   VOICEVOX の話者）立て、1回の読み上げで2つのエンジンへ頼みが分かれて届くか・片方が閉じていたら代わりの声で
   読むか・［声の割り当て］に両方の声が並ぶかを、受けた頼みで見る
 */
+describe("声を選ぶ窓の区切りと、人物ごとの声の調整（作者の頼み 2026-11-13）", () => {
+  const engines: FakeEngine[] = [];
+  afterEach(async () => {
+    await Promise.all(engines.map((engine) => engine.close()));
+    engines.length = 0;
+  });
+
+  async function oneEngine() {
+    const aivis = await startFakeVoiceEngine();
+    engines.push(aivis);
+    // VOICEVOX 役は立てない（繋がらない口）。両方へ同じ偽を向けると同じ声が2つずつ並ぶ
+    return { aivis, service: new VoiceReadingService((engine) => (engine === "voicevox" ? "http://127.0.0.1:9" : aivis.url)) };
+  }
+
+  /** 選ぶ画面の代役（区切りの見出しも控える）。`answers` を順に選ぶ（尽きたら閉じる） */
+  function scriptQuickPick(answers: Array<(items: readonly unknown[]) => unknown>) {
+    const shown: Array<{ title: string | undefined; items: Array<{ label: string; description?: string; separator: boolean }> }> = [];
+    const original = window.showQuickPick;
+    window.showQuickPick = (async (items: readonly unknown[], options?: { title?: string }) => {
+      shown.push({
+        title: options?.title,
+        items: (items as Array<{ label: string; description?: string; kind?: number }>).map((item) => ({
+          label: item.label,
+          description: item.description,
+          separator: item.kind === -1,
+        })),
+      });
+      const answer = answers.shift();
+      return answer ? answer(items) : undefined;
+    }) as typeof window.showQuickPick;
+    return { shown, restore: () => (window.showQuickPick = original) };
+  }
+  const labelled = (label: string) => (items: readonly unknown[]) =>
+    (items as Array<{ label: string; kind?: number }>).find((item) => item.label === label && item.kind !== -1);
+
+  /** globalState の代役（verifiedState と同じ読み書きの形） */
+  function memory(initial: Record<string, unknown> = {}) {
+    const values = new Map<string, unknown>(Object.entries(initial));
+    return {
+      values,
+      get<T>(key: string, defaultValue: T): T {
+        return (values.has(key) ? values.get(key) : defaultValue) as T;
+      },
+      async update(key: string, value: unknown): Promise<void> {
+        values.set(key, value);
+      },
+    };
+  }
+
+  test("区切りは「この作品で使っている声」→「よく使う声」→ 声の印象の順。speakerGroups の直しが効き、選ぶとよく使う声を数える", async () => {
+    const { service } = await oneEngine();
+    state.assignment = { ...state.assignment, speakerGroups: { "uuid-mai": "女性" } };
+    // 蓮だけが花音を使っている作品にする（灯は割り当てを外す）
+    delete state.assignment.characters["c-akari"];
+    state.assignment.narrator = undefined;
+    const store = memory({ "novelai.voiceAssign.pickCounts": { "aivisspeech|uuid-mai": 3 } });
+    const pick = scriptQuickPick([labelled("灯"), labelled("まい")]);
+    try {
+      await assignVoices(work, service, "aivisspeech", store);
+    } finally {
+      pick.restore();
+    }
+    const voices = pick.shown[1].items;
+    expect(voices.filter((item) => item.separator).map((item) => item.label)).toEqual([
+      "この作品で使っている声",
+      "よく使う声",
+      "女性",
+      "その他",
+    ]);
+    // 区切りの中の声：使っている＝花音、よく使う＝まい、女性＝まい（直し）、その他＝花音
+    const sectionOf = (heading: string) => {
+      const start = voices.findIndex((item) => item.separator && item.label === heading);
+      const next = voices.findIndex((item, index) => index > start && item.separator);
+      return voices.slice(start + 1, next === -1 ? undefined : next).filter((item) => !item.label.includes("戻る")).map((item) => item.label);
+    };
+    expect(sectionOf("この作品で使っている声")).toEqual(["花音"]);
+    expect(sectionOf("よく使う声")).toEqual(["まい"]);
+    expect(sectionOf("女性")).toEqual(["まい"]);
+    expect(sectionOf("その他")[0]).toBe("花音");
+    // 声の決まっていない枠（灯）には調整の行を出さない
+    expect(voices.some((item) => item.label === "この声の高さ・速さ・抑揚を変える")).toBe(false);
+    expect(store.values.get("novelai.voiceAssign.pickCounts")).toEqual({ "aivisspeech|uuid-mai": 4 });
+  });
+
+  test("調整の行から見本「老けた声」を1回で選べ、声を選び直しても調整と区切りの直しは残る", async () => {
+    const { service } = await oneEngine();
+    state.assignment = { ...state.assignment, speakerGroups: { "uuid-mai": "女性" } };
+    const pick = scriptQuickPick([
+      labelled("灯"),
+      labelled("この声の高さ・速さ・抑揚を変える"),
+      labelled("見本：老けた声"),
+    ]);
+    try {
+      await assignVoices(work, service, "aivisspeech");
+    } finally {
+      pick.restore();
+    }
+    expect(pick.shown[2].title).toBe("灯の声の調整（いまは標準）");
+    expect(pick.shown[2].items.find((item) => item.label === "見本：老けた声")?.description).toBe("高さ −0.06・速さ 0.85・抑揚 0.8");
+    expect(state.savedAssignments[0].characters["c-akari"].adjust).toEqual({ pitch: -0.06, speed: 0.85, intonation: 0.8 });
+    expect(state.savedAssignments[0].speakerGroups).toEqual({ "uuid-mai": "女性" });
+
+    // 調整のある声を選び直す：調整は残り、一覧の枠に添えてある
+    state.savedAssignments.length = 0;
+    state.assignment.characters["c-akari"] = { ...state.assignment.characters["c-akari"], adjust: { pitch: -0.06, speed: 0.85, intonation: 0.8 } };
+    const again = scriptQuickPick([labelled("灯"), labelled("花音")]);
+    try {
+      await assignVoices(work, service, "aivisspeech");
+    } finally {
+      again.restore();
+    }
+    expect(again.shown[0].items.find((item) => item.label === "灯")?.description).toBe(
+      "まい（感情に合わせて自動・前の版で選んだ声）（高さ −0.06・速さ 0.85・抑揚 0.8）"
+    );
+    expect(state.savedAssignments[0].characters["c-akari"]).toMatchObject({
+      speakerUuid: "uuid-kanon",
+      adjust: { pitch: -0.06, speed: 0.85, intonation: 0.8 },
+      characterName: "灯",
+    });
+    expect(state.savedAssignments[0].speakerGroups).toEqual({ "uuid-mai": "女性" });
+  });
+
+  test("高さだけを段から選ぶと、その欄だけを残す。［調整を外す］で欄ごと外す", async () => {
+    const { service } = await oneEngine();
+    const pick = scriptQuickPick([labelled("灯"), labelled("この声の高さ・速さ・抑揚を変える"), labelled("高さ"), labelled("+0.03")]);
+    try {
+      await assignVoices(work, service, "aivisspeech");
+    } finally {
+      pick.restore();
+    }
+    expect(pick.shown[3].items.map((item) => item.label)).toEqual(["−0.06", "−0.03", "0", "+0.03", "+0.06", expect.stringContaining("戻る")]);
+    expect(state.savedAssignments[0].characters["c-akari"].adjust).toEqual({ pitch: 0.03 });
+
+    state.savedAssignments.length = 0;
+    state.assignment.characters["c-akari"] = { ...state.assignment.characters["c-akari"], adjust: { pitch: 0.03 } };
+    const off = scriptQuickPick([labelled("灯"), labelled("この声の高さ・速さ・抑揚を変える"), labelled("調整を外す（標準に戻す）")]);
+    try {
+      await assignVoices(work, service, "aivisspeech");
+    } finally {
+      off.restore();
+    }
+    expect(state.savedAssignments[0].characters["c-akari"]).not.toHaveProperty("adjust");
+  });
+
+  test("人物の調整は、朗読と書き出しの両方の道で、エンジンへの頼みの値に効く", async () => {
+    const { aivis, service } = await oneEngine();
+    const aged = { pitch: -0.06, speed: 0.85, intonation: 0.8 };
+    state.assignment.characters["c-akari"] = { ...state.assignment.characters["c-akari"], adjust: aged };
+    state.cast = {
+      version: 1,
+      episode: "01.txt",
+      entries: [castEntry("「やった！」", { speakerId: "c-akari", speakerName: "灯", emotion: "平静", intensity: "中" })],
+    };
+    const sentences = buildReadingPlan(TEXT, "curly", [], { splitDialogue: true });
+    const planned = await service.plan(work, "/w/01.txt", TEXT, sentences, "aivisspeech");
+    if (!("units" in planned)) throw new Error(planned.problem);
+    const akari = planned.units[0];
+    expect(akari.adjust).toEqual(aged);
+    // 語り（花音）には灯の調整を当てない
+    expect(planned.units[1].adjust).toBeUndefined();
+
+    await service.synthesize(akari, 1);
+    await service.synthesizeForExport(akari, 1, new AbortController().signal, { outputSamplingRate: 24000 });
+    const bodies = aivis.requests
+      .filter((r) => r.path === "/synthesis" && r.query.speaker === "888753760")
+      .map((r) => r.body as Record<string, number>);
+    expect(bodies).toHaveLength(2);
+    for (const body of bodies) {
+      expect(body).toMatchObject({ speedScale: 0.85, pitchScale: -0.06, intonationScale: 0.8 });
+    }
+  });
+});
+
 describe("人物ごとにエンジンを混ぜる（2段目。0.151.0）", () => {
   const engines: FakeEngine[] = [];
   afterEach(async () => {
@@ -659,7 +850,7 @@ describe("人物ごとにエンジンを混ぜる（2段目。0.151.0）", () =>
     } finally {
       window.showQuickPick = original;
     }
-    const voices = shown[1].items;
+    const voices = voiceRowsOf(shown[1].items);
     const auto = "・スタイルは感情に合わせて自動";
     expect(voices.find((i) => i.label === "まい")?.description).toBe(`${VOICE_ENGINE_LABEL.aivisspeech}${auto}`);
     expect(voices.find((i) => i.label === "ずんだもん")?.description).toBe(`${VOICE_ENGINE_LABEL.voicevox}${auto}`);
