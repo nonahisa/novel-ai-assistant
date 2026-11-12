@@ -44,6 +44,27 @@ export const FAKE_SPEAKERS = [
   },
 ];
 
+/**
+ * VOICEVOX の形に似せた話者の一覧（0.151.0。AivisSpeech のふりの `FAKE_SPEAKERS` と並べて、
+ * 人物ごとにエンジンを混ぜる試験に使う）。番号は VOICEVOX の小さな番号で、`FAKE_SPEAKERS` と重ならない
+ */
+export const FAKE_VOICEVOX_SPEAKERS = [
+  {
+    name: "ずんだもん",
+    speaker_uuid: "uuid-zunda",
+    styles: [
+      { name: "ノーマル", id: 3, type: "talk" },
+      { name: "あまあま", id: 1, type: "talk" },
+      { name: "ささやき", id: 22, type: "talk" },
+    ],
+  },
+  {
+    name: "四国めたん",
+    speaker_uuid: "uuid-metan",
+    styles: [{ name: "ノーマル", id: 2, type: "talk" }],
+  },
+];
+
 /** 合成の答えにする小さな WAV（頭は RIFF） */
 export function fakeWav(tag: string): Buffer {
   const header = Buffer.from("RIFF0000WAVEfmt ", "latin1");
@@ -140,9 +161,31 @@ export async function startFakeVoiceEngine(
     terms?: FakeEngineTerms;
     /** 合成の答えを返す前に待つ（中止の試験のため） */
     synthesisDelayMs?: number;
+    /**
+     * 話者の一覧（省けば `FAKE_SPEAKERS`）。2つのエンジンを立てて混ぜる試験で、
+     * エンジンごとに違う話者を並べるため（0.151.0）
+     */
+    speakers?: unknown[];
+    /**
+     * `pcm` の音の標本化の速さ（省けば 24000）。audio_query の答えの `outputSamplingRate` にも出し、
+     * 合成の頼みの本文に `outputSamplingRate` があればその速さで作る（本物のエンジンと同じ）。
+     * 本物の既定は AivisSpeech が 44100、VOICEVOX が 24000 で、混ぜて書き出すと速さが揃わない
+     */
+    sampleRate?: number;
+    /** `pcm` の音の長さ（ミリ秒。省けば 200） */
+    pcmMs?: number;
+    /**
+     * 合成を**1つずつ順に**作る（本物のエンジンと同じ）。`synthesisDelayMs` は1文を作る時間になり、
+     * 並べて頼んだ後ろの頼みは前の音ができるまで待つ（速さの見張りの試験のため）
+     */
+    serialSynthesis?: boolean;
   } = {}
 ): Promise<FakeEngine> {
   const requests: FakeEngineRequest[] = [];
+  const speakerList = options.speakers ?? FAKE_SPEAKERS;
+  const nativeRate = options.sampleRate ?? 24000;
+  /** 1つずつ作るときの、前の頼みが終わる約束 */
+  let serialTail: Promise<void> = Promise.resolve();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const chunks: Buffer[] = [];
@@ -165,7 +208,7 @@ export async function startFakeVoiceEngine(
       });
       if (url.pathname === "/speakers" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(FAKE_SPEAKERS));
+        res.end(JSON.stringify(speakerList));
         return;
       }
       if (url.pathname === "/audio_query" && req.method === "POST") {
@@ -180,7 +223,7 @@ export async function startFakeVoiceEngine(
             volumeScale: 1,
             prePhonemeLength: 0.1,
             postPhonemeLength: 0.1,
-            outputSamplingRate: 44100,
+            outputSamplingRate: nativeRate,
             outputStereo: false,
             kana: "テスト",
           })
@@ -193,10 +236,34 @@ export async function startFakeVoiceEngine(
           res.end(JSON.stringify({ detail: "合成できません（偽のエンジン）" }));
           return;
         }
+        // 頼みの本文の outputSamplingRate を守る（本物のエンジンと同じく、指定の速さで作り直す）
+        const asked =
+          typeof body === "object" && body !== null
+            ? (body as Record<string, unknown>).outputSamplingRate
+            : undefined;
+        const rate = typeof asked === "number" && asked > 0 ? asked : nativeRate;
         const answer = (): void => {
           res.writeHead(200, { "Content-Type": "audio/wav" });
-          res.end(options.pcm ? pcmWav() : fakeWav(`${url.searchParams.get("speaker")}`));
+          res.end(
+            options.pcm
+              ? pcmWav({ sampleRate: rate, ...(options.pcmMs !== undefined ? { ms: options.pcmMs } : {}) })
+              : fakeWav(`${url.searchParams.get("speaker")}`)
+          );
         };
+        if (options.serialSynthesis) {
+          const delay = options.synthesisDelayMs ?? 0;
+          const turn = serialTail.then(
+            () =>
+              new Promise<void>((resolve) =>
+                setTimeout(() => {
+                  answer();
+                  resolve();
+                }, delay)
+              )
+          );
+          serialTail = turn;
+          return;
+        }
         if (options.synthesisDelayMs) setTimeout(answer, options.synthesisDelayMs);
         else answer();
         return;

@@ -700,10 +700,22 @@ export class VoiceEngineClient {
     text: string,
     styleId: number,
     params: VoiceParams,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /**
+     * 音の標本化の速さをエンジンに揃えさせる（Hz。0.151.0）。2つのエンジンの音を1つの MP3 に
+     * つなぐときだけ渡す——既定の速さはエンジンごとに違い（AivisSpeech 44100・VOICEVOX 24000）、
+     * つなぐ側は合わせ直す計算を持たない。省けばエンジンの既定のまま
+     */
+    outputSamplingRate?: number
   ): Promise<Uint8Array> {
     const query = await this.audioQuery(text, styleId, signal);
-    return this.synthesis(applyVoiceParams(query, params), styleId, signal, text.length);
+    const applied = applyVoiceParams(query, params);
+    return this.synthesis(
+      outputSamplingRate === undefined ? applied : { ...applied, outputSamplingRate },
+      styleId,
+      signal,
+      text.length
+    );
   }
 
   private async request(

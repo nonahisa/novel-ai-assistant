@@ -8,6 +8,7 @@ import { memoryFs } from "../support/memoryDisk";
 import {
   FAKE_ACML_NC_TEXT,
   FAKE_ACML_TEXT,
+  FAKE_VOICEVOX_SPEAKERS,
   fakeAivmModels,
   startFakeVoiceEngine,
   type FakeEngine,
@@ -495,5 +496,99 @@ describe("エンジンに届かないときは、画面の真ん中の窓（2026
     expect(outcome.kind).toBe("stopped");
     expect(shown).toHaveLength(0);
     expect(state.warnings.join("\n")).toContain("受け付けませんでした");
+  });
+});
+
+/*
+  人物ごとにエンジンを混ぜて書き出す（2段目。0.151.0）。語りは AivisSpeech の花音、灯は VOICEVOX のずんだもん。
+  **本物の既定の標本化の速さは AivisSpeech が 44100、VOICEVOX が 24000** で、文ごとの WAV の速さが揃わないと
+  つなげない（`joinClips` は合わせ直す計算を持たない）。偽のエンジンも2つを違う速さで立てる
+*/
+describe("人物ごとにエンジンを混ぜて書き出す（0.151.0）", () => {
+  const engines: FakeEngine[] = [];
+  afterEach(async () => {
+    await Promise.all(engines.map((engine) => engine.close()));
+    engines.length = 0;
+  });
+
+  async function mixedRun(options: { voicevoxBrand?: string } = {}) {
+    const aivis = await startFakeVoiceEngine({ pcm: true, sampleRate: 44100, terms: ACML_BOTH });
+    const voicevox = await startFakeVoiceEngine({
+      pcm: true,
+      sampleRate: 24000,
+      speakers: FAKE_VOICEVOX_SPEAKERS,
+      terms: {
+        brand: options.voicevoxBrand ?? "VOICEVOX",
+        policies: { "uuid-zunda": "ずんだもんの利用規約（VOICEVOX）" },
+      },
+    });
+    engines.push(aivis, voicevox);
+    state.assignment = {
+      version: 1,
+      narrator: {
+        speakerUuid: "uuid-kanon",
+        speakerName: "花音",
+        styleName: "ノーマル",
+        styleId: 1325133120,
+        engine: "aivisspeech",
+      },
+      characters: {
+        "c-akari": {
+          speakerUuid: "uuid-zunda",
+          speakerName: "ずんだもん",
+          styleName: "ノーマル",
+          styleId: 3,
+          engine: "voicevox",
+          characterName: "灯",
+        },
+      },
+    };
+    const service = new VoiceReadingService(
+      (engine) => (engine === "voicevox" ? voicevox.url : aivis.url),
+      undefined,
+      async () => true
+    );
+    const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
+    const outcome = await exportVoiceAudio(
+      { work, episodePath: EPISODE, text: TEXT, sentences, engine: "aivisspeech" },
+      service,
+      lame
+    );
+    return { outcome, aivis, voicevox };
+  }
+
+  test("2つのエンジンの音を1つの MP3 にし、クレジットと利用条件はエンジンごとに並べる", async () => {
+    const { outcome, aivis, voicevox } = await mixedRun();
+    expect(state.warnings).toEqual([]);
+    expect(outcome.kind).toBe("written");
+    // 灯の台詞は VOICEVOX、語りと蓮（割り当てなし→語り）は AivisSpeech
+    const said = (engine: FakeEngine) =>
+      engine.requests.filter((r) => r.path === "/audio_query").map((r) => r.query.text);
+    expect(said(voicevox)).toEqual(["「やった！」"]);
+    expect(said(aivis)).toHaveLength(3);
+    // 速さを揃えて頼む（混ぜるときだけ。どちらのエンジンにも同じ速さ）
+    for (const engine of [aivis, voicevox]) {
+      for (const request of engine.requests.filter((r) => r.path === "/synthesis")) {
+        expect((request.body as Record<string, unknown>).outputSamplingRate).toBe(44100);
+      }
+    }
+    const notice = fileNamed("クレジットと利用条件.txt")!;
+    expect(notice).toContain("音声合成：AivisSpeech・VOICEVOX");
+    expect(notice).toContain("VOICEVOX:ずんだもん");
+    expect(notice).toContain("花音");
+    expect(fileNamed("ライセンス/ずんだもん.txt")).toContain("ずんだもんの利用規約（VOICEVOX）");
+    expect(fileNamed("ライセンス/花音モデル.txt")).toContain("Aivis Common Model License");
+    // 確認の窓の「使う声」にも両方
+    expect(state.confirms[0].message).toContain("ずんだもん");
+    expect(state.confirms[0].message).toContain("花音");
+  });
+
+  test("［声］で選んでいない側のエンジンの名乗りが違えば、その声の割り当てを名指しして止める", async () => {
+    const { outcome } = await mixedRun({ voicevoxBrand: "AivisSpeech" });
+    expect(outcome.kind).toBe("stopped");
+    if (outcome.kind !== "stopped") return;
+    expect(outcome.reason).toContain("VOICEVOX の声を割り当てていますが、接続先のエンジンは AivisSpeech と名乗りました");
+    expect(outcome.reason).toContain("novelai.readAloud.voicevoxUrl");
+    expect(exported().size).toBe(0);
   });
 });

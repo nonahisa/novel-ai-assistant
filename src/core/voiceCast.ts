@@ -6,6 +6,7 @@ import {
   isVoiceIntensity,
   pickStyleForEmotion,
   VOICE_EMOTIONS,
+  VOICE_ENGINE_LABEL,
   type VoiceEmotion,
   type VoiceEngineId,
   type VoiceIntensity,
@@ -1160,8 +1161,8 @@ export const VOICE_GAP_CONTINUE_MS = 30;
 export interface VoicePlanUnit {
   speech: string;
   /**
-   * どのエンジンで作る音か。**音を作る口はこの印で選ぶ**（0.146.0）——いまは1回の読み上げで
-   * 1つのエンジンだが、人物ごとに混ぜる形（2段目）では文ごとに違ってよい
+   * どのエンジンで作る音か。**音を作る口はこの印で選ぶ**（0.146.0）。人物ごとにエンジンを
+   * 混ぜる形（2段目。0.151.0）では、文ごとにその文の声のエンジンになる
    */
   engine: VoiceEngineId;
   styleId: number;
@@ -1175,20 +1176,36 @@ export interface VoicePlanUnit {
   who: string;
 }
 
+/** エンジンごとの、引けなかった枠（「語り手」「台詞の既定」・人物の名前） */
+export interface VoicePlanSlots {
+  engine: VoiceEngineId;
+  slots: string[];
+}
+
 /**
  * 計画の文ごとに声を決める。
  *
- * 声の順：人物の声 → 台詞の既定の声 → 語り手の声 → エンジンの最初の声。
+ * 声の順：人物の声 → 台詞の既定の声 → 語り手の声 → ［声］のエンジンの最初の声。
  * 推定が無い台詞は「台詞の既定の声・平静」で読む（推定しなくても朗読はできる）。
  * 一覧が空なら undefined（読めない）。
  *
- * 割り当てた声がこのエンジンで引けなければ（違うエンジンの声・入れ直して消えた声）、上の順で
- * 次の声へ落とし、その枠の名前を `unresolved` に返す（「語り手」「台詞の既定」・人物の名前。
- * 人物はこの話で台詞を言う人だけ）。**知らせは呼ぶ側が1回の読み上げで1回出す**（文ごとに出さない）
+ * **割り当てた声は、どの枠でもその声の印のエンジンで読む**（2段目。0.151.0。作者の決定 2026-11-08
+ * 「人物ごとにエンジンを混ぜられる」）。`voices.json` は作者が選んだ声なので、［声］で選んだエンジンに
+ * 合わせて黙って差し替えない。［声］のエンジン（`engine`）が決めるのは、印の無い声（0.145 までに選んだ声）と、
+ * 何も割り当てていないときの最後の声。
+ *
+ * 引けなかった声は上の順で次の声へ落とし、その枠を返す：
+ * - `missing`：エンジンには届いたが、一覧にその声が無い（入れ直して消えた・前の版の声）
+ * - `down`：そのエンジンに届かない（`downEngines`）。届かないエンジンの声だけを代わりの声で読み、止めない
+ *
+ * 人物はこの話で台詞を言う人だけ数える。**知らせは呼ぶ側が1回の読み上げで1回出す**（文ごとに出さない）
  */
 export interface VoicePlan {
   units: VoicePlanUnit[];
+  /** `missing` の枠の名前を並べたもの（0.146.0 からの形。エンジンを問わない） */
   unresolved: string[];
+  missing: VoicePlanSlots[];
+  down: VoicePlanSlots[];
 }
 
 export function voicePlanUnits(input: {
@@ -1196,22 +1213,51 @@ export function voicePlanUnits(input: {
   dialogues: readonly CastDialogue[];
   cast: readonly CastEntry[];
   assignment: VoiceAssignmentFile;
+  /** ［声］のエンジン（`engine`）の話者の一覧 */
   speakers: readonly VoiceSpeaker[];
-  /** 話者の一覧を引いたエンジン（割り当ての印と照らす） */
+  /** ［声］で選んだエンジン。印の無い声と、最後の声のエンジン */
   engine: VoiceEngineId;
+  /**
+   * ほかのエンジンの話者の一覧（2段目）。割り当てに印のある声のエンジンだけ渡す。
+   * 渡さないエンジンの印の声は、0.146.0 と同じく「見つからない」として代わりの声で読む
+   */
+  others?: ReadonlyMap<VoiceEngineId, readonly VoiceSpeaker[]>;
+  /** 届かなかったエンジン。その印の声は代わりの声で読み、`down` に返す */
+  downEngines?: ReadonlySet<VoiceEngineId>;
   /** 人物の id → 名前（名札に使う。推定の名前より新しい） */
   names?: ReadonlyMap<string, string>;
 }): VoicePlan | undefined {
-  const first = input.speakers[0]?.styles[0]?.id;
-  if (first === undefined) return undefined;
-  const unresolved: string[] = [];
-  /** 割り当てがあるのに引けなかった枠を覚える（割り当てていない枠は数えない） */
-  const resolve = (ref: VoiceRef | undefined, slot: string): number | undefined => {
-    const id = resolveVoiceRef(ref, input.speakers, input.engine);
-    if (ref && id === undefined && !unresolved.includes(slot)) unresolved.push(slot);
-    return id;
+  const firstId = input.speakers[0]?.styles[0]?.id;
+  if (firstId === undefined) return undefined;
+  const listOf = (engine: VoiceEngineId): readonly VoiceSpeaker[] | undefined =>
+    engine === input.engine ? input.speakers : input.others?.get(engine);
+  const missing: VoicePlanSlots[] = [];
+  const down: VoicePlanSlots[] = [];
+  const note = (into: VoicePlanSlots[], engine: VoiceEngineId, slot: string): void => {
+    const entry = into.find((e) => e.engine === engine) ?? { engine, slots: [] };
+    if (!into.includes(entry)) into.push(entry);
+    if (!entry.slots.includes(slot)) entry.slots.push(slot);
   };
-  const narrator = resolve(input.assignment.narrator, "語り手") ?? first;
+  /** 声は「エンジンとスタイルの番号」の組で持つ（番号はエンジンごとに振られるため） */
+  type Voice = { engine: VoiceEngineId; styleId: number };
+  /** 割り当てがあるのに引けなかった枠を覚える（割り当てていない枠は数えない） */
+  const resolve = (ref: VoiceRef | undefined, slot: string): Voice | undefined => {
+    if (!ref) return undefined;
+    const engine = ref.engine ?? input.engine;
+    if (engine !== input.engine && input.downEngines?.has(engine)) {
+      note(down, engine, slot);
+      return undefined;
+    }
+    const list = listOf(engine);
+    const id = list ? resolveVoiceRef(ref, list, engine) : undefined;
+    if (id === undefined) {
+      // 一覧を渡されていないエンジンの声は、0.146.0 と同じく［声］のエンジンに見つからない声として返す
+      note(missing, list ? engine : input.engine, slot);
+      return undefined;
+    }
+    return { engine, styleId: id };
+  };
+  const narrator = resolve(input.assignment.narrator, "語り手") ?? { engine: input.engine, styleId: firstId };
   const lookup = castLookup(input.cast, input.dialogues);
   // 台詞の既定は、台詞が1つも無い話では使わない（使わない声の知らせを出さない）
   const hasDialogue = input.sentences.some((sentence) => sentence.kind === "dialogue");
@@ -1221,12 +1267,12 @@ export function voicePlanUnits(input: {
   const units: VoicePlanUnit[] = [];
   let previous: ReadingSentence | undefined;
   for (const sentence of input.sentences) {
-    let styleId = narrator;
+    let voice = narrator;
     let emotion: VoiceEmotion = "平静";
     let intensity: VoiceIntensity = "中";
     let who = "語り";
     if (sentence.kind === "dialogue") {
-      styleId = dialogueDefault;
+      voice = dialogueDefault;
       who = "台詞";
       const entry = sentence.dialogue === undefined ? undefined : lookup.get(sentence.dialogue);
       if (entry) {
@@ -1236,19 +1282,20 @@ export function voicePlanUnits(input: {
           who = input.names?.get(entry.speakerId) ?? entry.speakerName ?? "台詞";
           const ref = input.assignment.characters[entry.speakerId];
           const own = resolve(ref, input.names?.get(entry.speakerId) ?? ref?.characterName ?? who);
-          if (own !== undefined) styleId = own;
+          if (own !== undefined) voice = own;
         }
       }
     }
+    // 感情のスタイルは、その声のエンジンの一覧から選ぶ（同じ番号が別のエンジンでは別人）
     const picked = pickStyleForEmotion(
-      input.speakers,
-      styleId,
+      listOf(voice.engine) ?? [],
+      voice.styleId,
       emotion,
       input.assignment.emotionStyles
     );
     units.push({
       speech: sentence.speech,
-      engine: input.engine,
+      engine: voice.engine,
       styleId: picked.styleId,
       emotion,
       intensity,
@@ -1258,7 +1305,23 @@ export function voicePlanUnits(input: {
     });
     previous = sentence;
   }
-  return { units, unresolved };
+  return { units, unresolved: missing.flatMap((entry) => entry.slots), missing, down };
+}
+
+/**
+ * 割り当てに印のある、［声］とは別のエンジン（2段目。0.151.0）。**この話者の一覧だけを引く**——
+ * 割り当てに無いエンジンへは問い合わせない（前もって問い合わせない決まり。作者の答え 2026-11-08）
+ */
+export function assignedOtherEngines(
+  assignment: VoiceAssignmentFile,
+  engine: VoiceEngineId
+): VoiceEngineId[] {
+  const refs = [assignment.narrator, assignment.dialogueDefault, ...Object.values(assignment.characters)];
+  const out: VoiceEngineId[] = [];
+  for (const ref of refs) {
+    if (ref?.engine !== undefined && ref.engine !== engine && !out.includes(ref.engine)) out.push(ref.engine);
+  }
+  return out;
 }
 
 /**
@@ -1269,8 +1332,42 @@ export function unresolvedVoiceNotice(unresolved: readonly string[], engineLabel
   if (unresolved.length === 0) return undefined;
   return (
     `割り当てた声のうち ${unresolved.join("・")} の声が ${engineLabel} に見つからないので、代わりの声（台詞の既定か語りの声）で読みます` +
-    `（ほかのエンジンで選んだ声か、入れ直して消えた声です）。［声の割り当て］で ${engineLabel} の声を選び直してください。`
+    `（入れ直して消えた声か、前の版で選んだ声です）。［声の割り当て］で ${engineLabel} の声を選び直してください。`
   );
+}
+
+/**
+ * 届かなかったエンジンの種類（一言の書き分けに使う）。届かない（unreachable）とそれ以外
+ * （時間切れ・受け付けなかった・答えが読めない）で、作者にする話が違う
+ */
+export type VoicePlanDownKind = "unreachable" | "timeout" | "http" | "badResponse" | "aborted";
+
+/**
+ * 計画の一言（0.151.0）。見つからない声（`missing`）と届かないエンジン（`down`）を、エンジンの名前で
+ * 分けて書く。**届かないことを先に書く**（作者が最初の1文で、何が足りないかを読めるように）
+ */
+export function voicePlanNotice(
+  plan: Pick<VoicePlan, "missing" | "down">,
+  downKinds: ReadonlyMap<VoiceEngineId, VoicePlanDownKind> = new Map()
+): string | undefined {
+  const parts: string[] = [];
+  for (const { engine, slots } of plan.down) {
+    const name = VOICE_ENGINE_LABEL[engine];
+    // 原因は決め打ちしない（実装ルール5）。届かないときだけ「起動して」と言う
+    const unreachable = (downKinds.get(engine) ?? "unreachable") === "unreachable";
+    parts.push(
+      (unreachable ? `${name} に繋がらないので` : `${name} から話者の一覧を受け取れなかったので`) +
+        `、${slots.join("・")} の声は代わりの声（台詞の既定か語りの声）で読みます。` +
+        (unreachable
+          ? `${name} を起動してからもう一度押すと、割り当てた声で読みます。`
+          : `${name} が動いているかを確かめてからもう一度押すと、割り当てた声で読みます（詳しくはログにあります）。`)
+    );
+  }
+  for (const { engine, slots } of plan.missing) {
+    const text = unresolvedVoiceNotice(slots, VOICE_ENGINE_LABEL[engine]);
+    if (text) parts.push(text);
+  }
+  return parts.length > 0 ? parts.join("") : undefined;
 }
 
 function gapBefore(previous: ReadingSentence | undefined, sentence: ReadingSentence): number {
