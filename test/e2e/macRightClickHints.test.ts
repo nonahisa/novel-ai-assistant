@@ -29,6 +29,7 @@ import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { RIGHT_CLICK_MAC_NOTE } from "../../src/core/keyLabels";
+import { addLocalRemote, initRepoWithFirstCommit } from "./support/gitFixture";
 import { runCommand } from "./support/quickInput";
 import { SHOW_SIDEBAR_KEY, expandTreeRow, showSidebar, treeRow } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -175,6 +176,10 @@ test.skipIf(!isMac)("Mac：作品一覧のメモの行・使い方（マニュ�
         await mkdir(folder, { recursive: true });
         await writeFile(path.join(folder, "見本のメモ.md"), "# 見本のメモ\n", "utf8");
       },
+      // **左の列を出すキーを割り当てる。** 割り当てが無いと、押してもエクスプローラーのまま
+      // 作品一覧が出ず、「メモ」の枝を20秒待って落ちた（Mac。2026-11-13）。
+      // 吹き出しを読む件なので、`SIDEBAR_LAUNCH.settings`（吹き出しを出さない設定）は足さない
+      keybindings: [{ key: SHOW_SIDEBAR_KEY, command: "workbench.view.extension.novelai" }],
     }
   );
 }, 300_000);
@@ -210,6 +215,21 @@ test.skipIf(!isMac)("Mac：編集者メニューの「修正を提案する」�
       // 編集者モード（設定 `novelai.mode`）で起こす。簡単ステップメニューは作者モードだけに出る
       settings: { "novelai.mode": "editor" },
       keybindings: [{ key: SHOW_SIDEBAR_KEY, command: "workbench.view.extension.novelai" }],
+      // **参加済みの作品（編集用の写し）にする。** 参加していないと、手順の行の説明が
+      // 「参加のリンクを貼ると使えます」になり、「修正を提案する」の説明（右クリックの文）が出ない。
+      // 作り方は `editorMenuFlow.test.ts` と同じ：写しの印と、作者の環境で整えられた .gitignore と、
+      // 手元の git の置き場（GitHub は呼ばない）
+      prepareWork: async ({ workFolder }) => {
+        await mkdir(path.join(workFolder, ".aiwriter"), { recursive: true });
+        await writeFile(path.join(workFolder, ".aiwriter", "editor-share-manifest.json"), "{}\n", "utf8");
+        await writeFile(
+          path.join(workFolder, ".gitignore"),
+          [".aiwriter/cache/", ".aiwriter/logs/", ".aiwriter/exports/", ".aiwriter/generated/", ".aiwriter/reports/", ".novelai-recovery/", "exports/", ""].join("\n"),
+          "utf8"
+        );
+        await initRepoWithFirstCommit(workFolder);
+        await addLocalRemote(workFolder, path.join(path.dirname(path.dirname(workFolder)), "editing-remote.git"));
+      },
     }
   );
 }, 300_000);

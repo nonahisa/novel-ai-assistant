@@ -41,7 +41,7 @@ import { dialogText, pickQuickPickRow, pressWorkbenchKey, quickPickTitle, status
 
 const LONG = process.env.NOVELAI_E2E_LONG === "1";
 /** 撮った写真の置き場（既定は失敗の写真と同じ所。リーダーの依頼ではスクラッチパッドを渡す） */
-const SHOT_DIR = process.env.NOVELAI_E2E_SHOTS || path.join(tmpdir(), "novelai-e2e-screenshots");
+const SHOT_DIR = process.env.NOVELAI_E2E_SHOTS || process.env.NOVELAI_E2E_PHOTOS || path.join(tmpdir(), "novelai-e2e-screenshots");
 
 const MODEL = "gemini-e2e-slow";
 const API_KEY = "e2e-fake-gemini-key-0123456789abcdef";

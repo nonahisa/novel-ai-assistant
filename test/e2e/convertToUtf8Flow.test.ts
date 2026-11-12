@@ -267,7 +267,9 @@ test("原稿エディターと素のエディターで開いたまま、作品�
 /** 本体の「Change File Encoding → Reopen with Encoding → Shift JIS」（作者の手順） */
 async function reopenWithShiftJis(page: Page): Promise<void> {
   await runCommand(page, "Change File Encoding");
-  await waitUntil(async () => (await quickPickTitle(page)) !== undefined, "文字コードの選ぶ画面が出る", 15_000);
+  // **選ぶ画面の題（`quickPickTitle`）では待たない。** この画面（Select Action）は題を持たず、
+  // 見出しは入力欄の薄い字にしか出ない。題で待つと、行は出ているのに15秒待って落ちた（Mac。2026-11-13）。
+  // 表示の言葉（英語）でなく、行の名前は VS Code の英語の名前で探す（テスト用 VS Code は英語表示）
   const action = page.locator(".quick-input-widget .quick-input-list .monaco-list-row", { hasText: /Reopen with Encoding/i }).first();
   await waitUntil(async () => (await action.count()) > 0, "「Reopen with Encoding」の行が出る", 10_000).catch(async (error: unknown) => {
     throw new Error(`${String(error)}（並び：${JSON.stringify((await quickPickRows(page)).map((row) => row.label))}）`);

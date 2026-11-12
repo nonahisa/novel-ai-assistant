@@ -696,8 +696,12 @@ async function registerWork(session: E2ESession, workTitle: string, outsideWorks
   await clearNotifications(page);
 }
 
-/** 写真を残す場所。一時フォルダーの根は片づけで消すので、別に取る */
-const SCREENSHOT_DIR = path.join(tmpdir(), "novelai-e2e-screenshots");
+/**
+ * 写真を残す場所。一時フォルダーの根は片づけで消すので、別に取る。
+ * 環境変数 `NOVELAI_E2E_PHOTOS` があればそこへ置く（Mac のセッションが写真を決まった所で見る。
+ * 前は読まずに、指定しても一時フォルダーの `novelai-e2e-screenshots` へ出ていた）
+ */
+const SCREENSHOT_DIR = process.env.NOVELAI_E2E_PHOTOS || path.join(tmpdir(), "novelai-e2e-screenshots");
 
 /** 画面の写真を残して道を返す。撮れなければ undefined（失敗の報告そのものは止めない） */
 async function saveScreenshot(page: Page, name: string): Promise<string | undefined> {

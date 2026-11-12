@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as path from "node:path";
+import * as fsSync from "node:fs";
+import { EventEmitter } from "node:events";
 
 /**
  * `spawn` を差し替える。
@@ -426,15 +428,16 @@ describe("起動処理（つづき）", () => {
   });
 
   /**
-   * **Windows以外では標準エラーを受け取らない。**
+   * **Windows以外では、パイプでなくファイルへ標準エラーを受ける**
+   * （Mac の実機で見つかった不具合）。
    *
-   * こちらは起動直後の1秒を見たら読み手を閉じるが、Goのランタイムは
-   * fd 2 への書き込みが壊れたパイプに当たると SIGPIPE で終了する。
-   * POSIXでは、閉じた直後の最初のログ1行で `ollama serve` 本体が
-   * 落ちうる——**起動を助けるはずの処理が、起動を壊す。**
+   * パイプは、閉じた直後の書き込みで Go の serve が SIGPIPE で落ちうるので使えない。
+   * 以前は "ignore" にして読むのを諦めていたため、Mac では「ポートを握られた」を
+   * 見分けられず、Mac 向けでない一般の失敗文になっていた。
+   * 通常のファイルは壊れたパイプにならないので、serve を殺さずに先頭だけ読める。
    */
   test.each(["darwin", "linux"] as const)(
-    "%s では標準エラーを受け取らない（serveを殺さない）",
+    "%s では標準エラーをファイルへ受ける（パイプにしない＝serveを殺さない）",
     async (platform) => {
       await startOllama({
         endpoint: "http://localhost:11434",
@@ -447,10 +450,67 @@ describe("起動処理（つづき）", () => {
       });
 
       const stdio = spawnMock.mock.calls[0][2].stdio;
-      // まとめて "ignore" でも、3つ並べた形でも、標準エラーは閉じている
-      expect(Array.isArray(stdio) ? stdio[2] : stdio).toBe("ignore");
+      const stderrSlot = Array.isArray(stdio) ? stdio[2] : stdio;
+      expect(stderrSlot).not.toBe("pipe");
+      expect(typeof stderrSlot).toBe("number");
     }
   );
+
+  test.each(["darwin", "linux"] as const)(
+    "%s で、ポートを握られて serve が落ちると、標準エラーを読んで『握られた』と見分ける",
+    async (platform) => {
+      // 本物の serve を真似る：渡された標準エラーの fd へ書き、コード1で終わる
+      spawnMock.mockImplementation((_exe, _args, options) => {
+        const child = new EventEmitter() as EventEmitter & { unref: () => void };
+        child.unref = () => {};
+        const fd = (options.stdio as unknown[])[2];
+        if (typeof fd === "number") fsSync.writeSync(fd, BIND_ERROR);
+        setImmediate(() => child.emit("exit", 1));
+        return child;
+      });
+
+      const outcome = await startOllama({
+        endpoint: "http://localhost:11434",
+        waitForExistingMs: 0,
+        executablePath: process.execPath,
+        timeoutMs: 30000,
+        spawnWatchMs: 3000,
+        platform,
+        probe: async () => false,
+      });
+
+      expect(outcome.ok).toBe(false);
+      if (outcome.ok) return;
+      expect(outcome.reason).toBe("port_in_use_stale");
+      expect(describeStartFailure(outcome, "darwin")).toContain(
+        "メニューバーのOllamaアイコンから終了"
+      );
+    }
+  );
+
+  test("標準エラーが大きくても読むのは先頭の数KBだけ", async () => {
+    spawnMock.mockImplementation((_exe, _args, options) => {
+      const child = new EventEmitter() as EventEmitter & { unref: () => void };
+      child.unref = () => {};
+      const fd = (options.stdio as unknown[])[2];
+      if (typeof fd === "number") fsSync.writeSync(fd, BIND_ERROR + "x".repeat(200000));
+      setImmediate(() => child.emit("exit", 1));
+      return child;
+    });
+    const outcome = await startOllama({
+      endpoint: "http://localhost:11434",
+      waitForExistingMs: 0,
+      executablePath: process.execPath,
+      timeoutMs: 30000,
+      spawnWatchMs: 3000,
+      platform: "darwin",
+      probe: async () => false,
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe("port_in_use_stale");
+    expect((outcome.detail ?? "").length).toBeLessThanOrEqual(2048);
+  });
 
   test("ポートを掴まれて落ちても、既にOllamaが応答するなら起動済みとして扱う", async () => {
     // LM Studio と同じ扱い：「すでに動いている」と断じる前に1回確かめる

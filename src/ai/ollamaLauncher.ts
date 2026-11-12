@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -215,8 +216,8 @@ const STDERR_LIMIT = 2048;
  * **この2つだけを対象にする**——別の原因まで拾うと、直しようのない
  * 「Ollamaを終了してください」を作者に渡すことになる。
  *
- * なお**この文を読めるのはWindowsだけ**である（`defaultSpawner` を参照）。
- * それ以外のOSでは標準エラーを受け取らないので、ここは常に false になり、
+ * Mac・Linux でも読めるよう、標準エラーはファイルへ受ける（`defaultSpawner`）。
+ * 受けられなかったとき（一時ファイルを作れない等）は、ここは false になり、
  * 「即終了したが疎通はある／無い」という粗い見分けだけが働く。
  */
 export function isPortInUseError(text: string): boolean {
@@ -363,8 +364,8 @@ export async function startOllama(
     }
 
     if (!detail) {
-      // **理由が読めないまま即終了した。** Windows以外は標準エラーを
-      // 受け取らないので（`defaultSpawner`）、常にここへ来る。
+      // **理由が読めないまま即終了した。** 標準エラーを受けられなかった
+      // とき（`defaultSpawner`）や、文が空のときにここへ来る。
       // 落ちた理由は名指しできないが、**いちばん多い原因（既に動いている）
       // かどうかは疎通で分かる**ので、1回だけ確かめてから決める
       logStep(
@@ -431,13 +432,13 @@ export async function startOllama(
 }
 
 /**
- * `ollama serve` を起こす。**標準エラーを受け取るのはWindowsだけ。**
+ * `ollama serve` を起こす。標準エラーは、Windowsではパイプで、それ以外ではファイルで受ける。
  *
  * 受け取りたい理由：前は `stdio: "ignore"` だったため、bind に失敗して
  * 即終了したことも、その理由（`Error: listen tcp 127.0.0.1:11434: bind: …`）
  * も見えず、30秒待った末に「応答しませんでした」としか言えなかった。
  *
- * **Windows以外で受け取らない理由：serve を殺しかねないから。** こちらは
+ * **Windows以外でパイプを使わない理由：serve を殺しかねないから。** こちらは
  * 起動直後の1秒を見たら読み手を閉じる（`releaseStderr`）が、Goのランタイムは
  * **fd 2 への書き込みが壊れたパイプに当たると SIGPIPE で終了する**
  * （他のfdならEPIPEが返るだけ、という区別が `os/signal` の説明にある）。
@@ -445,24 +446,118 @@ export async function startOllama(
  * 落ちうる——起動を助けるはずの処理が、起動を壊す。Windowsには SIGPIPE が
  * 無く、書き込みがエラーを返すだけ（Ollamaはそれを捨てる）なので安全である。
  *
- * 受け取れなくても、**即終了したこと自体は `exit` で分かる**。理由を
- * 名指しできないだけで、「落ちたが疎通はあるか」までは同じように見分ける。
+ * **だから Mac・Linux では、一時ファイルへ受ける。** 通常のファイルは壊れた
+ * パイプにならないので serve は死なない。かつて「受け取らない」にしたせいで、
+ * Mac では「ポートを握られた」が見分けられず、Mac 向けの案内が出なかった
+ * （Mac の画面テストで見つかった。0.151系）。読むのは先頭の数KBだけ
+ * （`STDERR_LIMIT`）。ファイルは起こした直後に名前を消す（開いたままの
+ * 子は書き続けられ、こちらも自分の記述子で読める）ので、後に残らない。
  */
 function defaultSpawner(
   exe: string,
   args: string[],
   platform: NodeJS.Platform
 ): LaunchedProcess {
-  return spawn(exe, args, {
+  const base = {
     detached: true,
-    // 標準入力・標準出力はどちらのOSでも使わないので閉じたままにする
-    stdio: platform === "win32" ? ["ignore", "ignore", "pipe"] : "ignore",
     windowsHide: true,
     // 拡張機能ホストの環境をそのまま継がせない（`childProcessEnv.ts`）。
     // Ollamaは Electron ではないので今のところ害は無いが、
     // **同じ穴を2か所に残さない**——LM Studioでは60秒の時間切れになった
     env: childProcessEnv(),
-  });
+  };
+  // 標準入力・標準出力はどちらのOSでも使わないので閉じたままにする
+  if (platform === "win32") {
+    return spawn(exe, args, { ...base, stdio: ["ignore", "ignore", "pipe"] });
+  }
+
+  let fd: number | undefined;
+  try {
+    const file = path.join(
+      os.tmpdir(),
+      `novelai-ollama-serve-${process.pid}-${Date.now()}.log`
+    );
+    fd = fsSync.openSync(file, "w+");
+    try {
+      fsSync.unlinkSync(file);
+    } catch {
+      // 消せなくても読める。後始末の失敗で起動を止めない
+    }
+  } catch {
+    // 一時ファイルを作れない環境では、従来どおり標準エラーを受けずに起こす
+    return spawn(exe, args, { ...base, stdio: "ignore" });
+  }
+
+  let child: LaunchedProcess;
+  try {
+    child = spawn(exe, args, { ...base, stdio: ["ignore", "ignore", fd] });
+  } catch (e) {
+    fsSync.closeSync(fd);
+    throw e;
+  }
+  return fileStderrOf(child, fd);
+}
+
+/**
+ * 標準エラーを受けたファイルを、パイプと同じ「`data` を出す口」に見せる。
+ *
+ * 子が終わった瞬間（`exit`）に先頭だけ読んで `data` として流し、そのあとで
+ * `exit` の聞き手を呼ぶ——`watchStartup` は先に `data` を聞いておいて
+ * `exit` で結論を出すので、この順でなければ文が空のまま判定される。
+ * 走り続ける子では何も流さず、`unref()`（判定が済んだ合図）で記述子を閉じる。
+ */
+function fileStderrOf(child: LaunchedProcess, fd: number): LaunchedProcess {
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    try {
+      fsSync.closeSync(fd);
+    } catch {
+      // すでに閉じている
+    }
+  };
+  const listeners: Array<(chunk: Buffer | string) => void> = [];
+  const stderr: LaunchedStderr = {
+    on: (_event, listener) => {
+      listeners.push(listener);
+    },
+    removeAllListeners: () => {
+      listeners.length = 0;
+    },
+  };
+  const readHead = (): string => {
+    if (closed) return "";
+    try {
+      const buf = Buffer.alloc(STDERR_LIMIT);
+      const n = fsSync.readSync(fd, buf, 0, STDERR_LIMIT, 0);
+      return buf.subarray(0, n).toString("utf8");
+    } catch {
+      return "";
+    }
+  };
+  return {
+    stderr,
+    once(event: "error" | "exit", listener: never) {
+      if (event === "exit") {
+        child.once("exit", (code: number | null) => {
+          const text = readHead();
+          if (text) for (const l of listeners) l(text);
+          close();
+          (listener as (code: number | null) => void)(code);
+        });
+      } else {
+        child.once("error", (error: Error) => {
+          close();
+          (listener as (error: Error) => void)(error);
+        });
+      }
+    },
+    unref() {
+      close();
+      child.unref();
+    },
+  };
 }
 
 /**

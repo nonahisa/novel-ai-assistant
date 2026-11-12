@@ -74,7 +74,7 @@ const GPU_WARNING = "手元のAIへ送る前に確かめてください";
 const SINGLE_LABEL = "こちらは「AIへの単発の問い合わせ」";
 const WAITING = "の完了を待っています";
 
-const SHOT_DIR = path.join(tmpdir(), "novelai-e2e-screenshots");
+const SHOT_DIR = process.env.NOVELAI_E2E_PHOTOS || path.join(tmpdir(), "novelai-e2e-screenshots");
 
 function isTypoRequest(request: FakeOllamaRequest): boolean {
   return request.system.includes(TYPO_CHECK_SYSTEM_PROMPT.split("\n")[0]);
