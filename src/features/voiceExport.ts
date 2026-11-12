@@ -377,7 +377,10 @@ export async function exportVoiceAudio(
     ),
   });
 
-  const planned = await service.plan(work, episodePath, target.text, target.sentences, target.engine);
+  // 届かなかったエンジンの覚え（読み上げの間のもの）は使わず、押したときに問い合わせ直す（0.151.0）
+  const planned = await service.plan(work, episodePath, target.text, target.sentences, target.engine, {
+    recheckEngines: true,
+  });
   if ("problem" in planned) {
     if (planned.engineDown) return stopEngineDown();
     if (planned.engineSlow) return stopEngineSlow();

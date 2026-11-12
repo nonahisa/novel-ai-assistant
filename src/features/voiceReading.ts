@@ -352,9 +352,15 @@ export class VoiceReadingService {
     text: string,
     sentences: readonly ReadingSentence[],
     engine: VoiceEngineId,
-    /** `start`：［▶ 読む］で読み始めたときの計画か（声づくりの速さの見張りを始め直す） */
-    options: { start?: boolean } = {}
+    /**
+     * `start`：［▶ 読む］で読み始めたときの計画か（声づくりの速さの見張りを始め直す）。
+     * `recheckEngines`：届かなかったエンジンの覚えを使わず問い合わせ直す（書き出し。0.151.0）——
+     * 読み上げの間に作者がエンジンを起動していても、覚えのまま代わりの声で MP3 を作ってしまうため。
+     * 速さの見張りは読んでいる最中のものなので、`start` と分けて始め直さない
+     */
+    options: { start?: boolean; recheckEngines?: boolean } = {}
   ): Promise<{ units: VoicePlanUnit[]; notice?: string } | VoiceProblem> {
+    if (options.recheckEngines) this.downEngines.clear();
     if (options.start) {
       // 1回の読み上げで1回だけ知らせる。覚えずに、読み始めるたびに見直す（作者の決定 2026-11-08）
       for (const lane of this.lanes.values()) lane.pace.reset();
@@ -1330,10 +1336,8 @@ export async function manageVoiceCast(target: VoiceCastTarget): Promise<void> {
  * 混ぜられる」）。［声］で選んだエンジン（`engine`）の声を先に、もう片方の声を後ろに並べ、説明の欄に
  * エンジンの名前を出す。**選んだ声には、その声のエンジンの印を付けて書く**（0.146.0 と同じ）。
  *
- * 両方の話者の一覧を引くのは、作者が［声の割り当て］を押したとき（割り当てる操作）だけ。前もって
- * 問い合わせない決まり（作者の答え 2026-11-08）は、読み上げを始める前や画面を開いたときに
- * 問い合わせないことで、作者が選ぶ操作をしたときに選べる声を出すのはこの決まりの外と読んだ。
- * 本文は運ばない（話者の一覧だけ）。
+ * 両方の話者の一覧を引くのは、作者が［声の割り当て］を押したとき（割り当てる操作）だけ。読み上げを
+ * 始める前や画面を開いたときには問い合わせない（作者の答え 2026-11-08）。本文は運ばない（話者の一覧だけ）。
  *
  * - 片方だけ届かない … 届いた側の声だけ並べ、上の一言（`placeHolder`）で届かない側を知らせる
  * - ［声］の側も、もう片方も届かない … 今までどおり［声］の側の窓・知らせ（0.143.1）

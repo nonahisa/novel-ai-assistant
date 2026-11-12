@@ -583,6 +583,43 @@ describe("人物ごとにエンジンを混ぜて書き出す（0.151.0）", () 
     expect(state.confirms[0].message).toContain("花音");
   });
 
+  test("読み上げで閉じていた VOICEVOX を起動してから書き出すと、問い合わせ直して VOICEVOX の声で書き出す（届かなかった覚えを使わない）", async () => {
+    const aivis = await startFakeVoiceEngine({ pcm: true, sampleRate: 44100, terms: ACML_BOTH });
+    const voicevox = await startFakeVoiceEngine({
+      pcm: true,
+      speakers: FAKE_VOICEVOX_SPEAKERS,
+      terms: { brand: "VOICEVOX", policies: { "uuid-zunda": "ずんだもんの利用規約（VOICEVOX）" } },
+    });
+    engines.push(aivis, voicevox);
+    const closed = await startFakeVoiceEngine();
+    const closedUrl = closed.url;
+    await closed.close();
+    let voicevoxUrl = closedUrl;
+    state.assignment = {
+      version: 1,
+      narrator: { speakerUuid: "uuid-kanon", speakerName: "花音", styleName: "ノーマル", styleId: 1325133120, engine: "aivisspeech" },
+      characters: {
+        "c-akari": { speakerUuid: "uuid-zunda", speakerName: "ずんだもん", styleName: "ノーマル", styleId: 3, engine: "voicevox", characterName: "灯" },
+      },
+    };
+    const service = new VoiceReadingService((engine) => (engine === "voicevox" ? voicevoxUrl : aivis.url), undefined, async () => true);
+    const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
+    // 読み上げ：VOICEVOX が閉じていたので、灯は代わりの声（覚えは次の読み始めまで）
+    const read = await service.plan(work, EPISODE, TEXT, sentences, "aivisspeech", { start: true });
+    if (!("units" in read)) throw new Error(read.problem);
+    expect(read.notice).toContain("VOICEVOX に繋がらないので");
+    // 作者が VOICEVOX を起動した（接続先へ繋がるようになった）
+    voicevoxUrl = voicevox.url;
+    const outcome = await exportVoiceAudio(
+      { work, episodePath: EPISODE, text: TEXT, sentences, engine: "aivisspeech" },
+      service,
+      lame
+    );
+    expect(outcome.kind).toBe("written");
+    expect(state.confirms[0].message).not.toContain("繋がらない");
+    expect(voicevox.requests.filter((r) => r.path === "/audio_query").map((r) => r.query.text)).toEqual(["「やった！」"]);
+  });
+
   test("［声］で選んでいない側のエンジンの名乗りが違えば、その声の割り当てを名指しして止める", async () => {
     const { outcome } = await mixedRun({ voicevoxBrand: "AivisSpeech" });
     expect(outcome.kind).toBe("stopped");
