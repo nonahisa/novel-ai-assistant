@@ -223,13 +223,16 @@ test("［次の話として足す］を選ぶと、後ろの話の番号が足�
       expect(tabNamesInclude(await activeTabNames(page), "004_転生前夜.txt"), "前に出ているタブが 004_転生前夜.txt").toBe(true);
 
       // 単話プロット：旧 4・5 話は 7・8 話へ。見出しの話数も直る。3話は動かない
+      let plots: string[] = [];
       await waitWithContext(
         session,
-        async () => (await readdir(plotFolder).catch(() => [] as string[])).sort().join("|") === ["第3話.md", "第7話.md", "第8話.md"].join("|"),
+        async () => (plots = (await readdir(plotFolder).catch(() => [] as string[])).sort()).join("|") === ["第3話.md", "第7話.md", "第8話.md"].join("|"),
         "単話プロットが 第3話・第7話・第8話 になる",
         30_000,
         since
-      );
+      ).catch((error: unknown) => {
+        throw new Error(`${String(error)}（単話プロットの置き場：${JSON.stringify(plots)}）`);
+      });
       expect((await readFile(path.join(plotFolder, "第7話.md"), "utf8")).split("\n")[0]).toBe("# 第7話の単話プロット");
       expect((await readFile(path.join(plotFolder, "第8話.md"), "utf8")).split("\n")[0]).toBe("# 第8話の単話プロット");
       expect(await readFile(path.join(plotFolder, "第3話.md"), "utf8")).toBe(plot(3));

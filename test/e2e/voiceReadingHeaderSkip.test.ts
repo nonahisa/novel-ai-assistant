@@ -75,9 +75,10 @@ test("カクヨム形式の .md で、カーソルを【公開状態】の行に
         await stopReading(frame);
 
         const sent = textCarrying(engine).map((request) => request.text);
-        // 最初に頼む文は題
-        expect(sent[0], `最初の頼み：${JSON.stringify(sent.slice(0, 4))}`).toContain("第一話");
-        expect(sent[0], `最初の頼み：${JSON.stringify(sent.slice(0, 4))}`).toContain("はじまり");
+        // 題から読む。先読みで2文を並べて頼むので、届く順は前後しうる——はじめの2つの頼みに題があればよい
+        // （2026-11-13 画面テストで「朝が来た。」が先に届いた）
+        const firstTwo = sent.slice(0, 2);
+        expect(firstTwo.some((text) => text.includes("第一話") && text.includes("はじまり")), `はじめの頼み：${JSON.stringify(sent.slice(0, 4))}`).toBe(true);
         // 頭の欄・前書き・後書きの字はどの頼みにも入らない
         const all = sent.join("\n");
         for (const word of ["公開状態", "下書き", "作成日時", "公開日時", "更新日時", "2026", "文字数", "5,529", "ありがとう", "お楽しみ"]) {

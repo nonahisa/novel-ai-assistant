@@ -3725,6 +3725,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     }
     const absoluteTargetIndex = applied.at;
 
+    // 書き戻しの記録（Shift_JIS の字の置き換えなど）を作品の actions.log へ向ける。命令の入口で
+    // 書き先が外れたあとに［適用］が押されると、保管庫のログへ行っていた（2026-11-13 画面テストで見つけた）
+    if (this.work) useLogFile(this.work.folderPath);
     const result = await writeTextFilePreservingFormat(
       item.filePath,
       applied.text,
