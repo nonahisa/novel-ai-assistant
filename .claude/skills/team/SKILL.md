@@ -28,14 +28,14 @@ description: この作品の役割分担。まとまった実装・レビュー�
 
 | セッション | 受け持つもの | 作業場 |
 |---|---|---|
-| **母艦**（版ごとに替わる） | 作者への判断の依頼・ノートPCとの連絡・製品のあいだの食い違いの点検・**配布**（GitHub Release・Marketplace・Open VSX。［Approve］の依頼も母艦から）・進捗パネル | novel-ai-assistant |
+| **母艦**（版ごとに替わる） | 作者への判断の依頼・ノートPCとの連絡・製品のあいだの食い違いの点検・**配布**（GitHub Release・Marketplace・Open VSX）・進捗パネル | novel-ai-assistant |
 | 製品：統合小説執筆環境 | 本体の実装・テスト・実機確認・設計書 | novel-ai-assistant |
 | 製品：投稿ヘルパー | ヘルパーの実装・Chrome ウェブストア | novel-post-helper（リポジトリは nonahisa/novel-ai-helper） |
 | 製品：Discord | ボットとコミュニティ（製品リポジトリは直さない） | novel-ai-community-bot |
 | 製品：モバイル版 | Android・iOS（novel-ai-mobile） | novel-ai-android |
 | 製品：オリジナルIME | 設計書・段階0aの測定・専用リポジトリ | nonahisa/novel-ime（非公開。手元は C:\Users\nonah\Documents\novel-ime） |
 
-2026-11-04 朝に、この5つを新しく立てて母艦の下から切り離した（start_session のあと detach_session。作者の指示「セッションは改名ではなく新しく立ててください」）。サイドバーのまとまり「統合小説執筆環境」に母艦と並べてある。次の母艦は作らずに、このまとまりへ入るだけでよい
+製品のセッションはサイドバーのまとまり「統合小説執筆環境」に母艦と並べてある。次の母艦はそのまとまりへ入るだけでよい
 
 **作り方（母艦が替わっても続くように）**
 - **製品のセッションは母艦の下にぶら下げない。** `start_session` で始めると始めた母艦の下に入り、あとから付け替えられない（2026-11-03 に確かめた。サイドバーの move_sessions は「親ごと動かせ」と断る）。作者にサイドバーの［＋］から新しいセッションとして作ってもらうか、`start_session` のあと作者に「切り離す（detach）」を頼む

@@ -71,44 +71,20 @@ gh workflow run publish-marketplace.yml -f version=<版> -f reason=<理由>
 - 終わったら手順8（`node scripts/checkMarketplace.mjs`）で反映を確かめる
 - vsce は 4.0.2 以降が要る（devDependencies と手順のファイルの `npx @vscode/vsce@<版>` をそろえる）
 - **Open VSX へも同じ手順の中で上げる**（作者の裁定 2026-10-31「進める」。設計書5.9）。Marketplace の段のあとに `npx ovsx@<版> publish <同じ VSIX>` の段がある（トークンは ovsx が環境変数 `OVSX_PAT` から自分で読む）。Environment は Marketplace と共通。落ちたら手順は赤になる（`continue-on-error` は付けない。気づけるように）
-  - **初回だけ、作者の手で準備が要る**（こちらは作らない。名前空間が無いと最初の公開が失敗するので省けない）：
-    1. Eclipse のアカウントを作る（https://accounts.eclipse.org/user/register 。プロフィールの GitHub ユーザー名に `nonahisa`）
-    2. https://open-vsx.org に GitHub でログイン → Settings で Eclipse アカウントを連携 → 発行者の同意書（Publisher Agreement）に署名
-    3. Settings → Access Tokens でトークンを発行（画面を閉じると二度と見られない）
-    4. 作者の PowerShell で1回だけ `npx ovsx@<版> create-namespace nonahisa -p <トークン>`
-    5. GitHub のリポジトリの Settings → Secrets and variables → Actions → New repository secret で `OVSX_PAT` にトークンを入れる
-  - シークレット `OVSX_PAT`（GitHub のリポジトリの Settings → Secrets and variables → Actions）が無ければ、**その段だけ飛ばして**「上げません」の notice を出す。Marketplace の公開は止めない
-  - トークンが切れたら、作者に 3 と 5 をやり直してもらう
+  - Open VSX の名前空間とトークン（`OVSX_PAT`）は準備済み（2026-10-31）。トークンが切れたら、作者に open-vsx.org の Settings → Access Tokens で発行し直してもらい、GitHub のリポジトリの Settings → Secrets and variables → Actions の `OVSX_PAT` を入れ替えてもらう
+  - シークレット `OVSX_PAT` が無ければ、**その段だけ飛ばして**「上げません」の notice を出す。Marketplace の公開は止めない
   - Open VSX の段が落ちても Marketplace は済んでいる。直したら、同じ版で手順を動かし直さず、作者の手元の PowerShell で `npx ovsx@<版> publish <VSIX> -p <トークン>` を打ってもらい Open VSX だけ上げる（トークンはこちらが持たない）（Marketplace は同じ版を二度上げられない）
   - 反映は https://open-vsx.org/extension/nonahisa/novel-ai-assistant で見る
 
 #### B. 作者の Chrome から管理画面へ上げる（A が使えないときの代わり）
 
-> **目をつぶって座標を押さない。** メニューは **Update / Unpublish / Remove** の順で、**Update の 20px 下が Unpublish**。
-> **タブの描画が応答しなくなることがある**（`screenshot` が30秒で切れる）。そうなったら押すのをやめて、作者に Chrome の上げ直しを頼む。`zoom`（`region` 指定）は応答しないタブでも動くことがあるので、**押す前に必ず位置を測る。**
+Claude in Chrome（`mcp__claude-in-chrome__*`）を使う。管理画面は Microsoft アカウントのログインが要り、内蔵ブラウザは作者の Chrome と別の入れ物なので届かない。ログアウトしていたら止める（パスワードも二要素のコードも入力しない）。
 
-**vsce の PAT は要らない。作者の Chrome から、管理画面へ VSIX を上げる。**
-
-**内蔵ブラウザでは届かない。** 管理画面は Microsoft アカウントのログインが要る。内蔵のペインは作者の Chrome と別の入れ物なのでログインしていない。**Claude in Chrome（`mcp__claude-in-chrome__*`）を使う**——作者のログイン済みのセッションをそのまま借りる。
-
-**ログアウトしていたらそこで止める。** パスワードも二要素認証のコードも**こちらからは入力しない**（迂回もしない）。作者に入ってもらってから再開する。
-
-1. `navigate` で `https://marketplace.visualstudio.com/manage/publishers/nonahisa` を開く
-2. `find`「拡張機能の行にある『…』メニュー、または Update / New version のボタン」→ `computer` の `left_click`（`ref` で押す。座標で押さない）
-3. アップロードの画面が出る。「Click here to upload a package」は**押さない**——OSのファイル選択が開き、そこから先は操作できなくなる
-4. `find`「ファイルを選ぶための input 要素（type=file）」→ **`file_upload` でその `ref` へ道を直接渡す**
-
-```
-mcp__claude-in-chrome__file_upload
-  ref: <type=file の ref>
-  paths: ["<リポジトリ>\\release\\novel-ai-assistant-<版>.vsix"]   ← Windows の道。JSON なので \ は2つ重ねる
-```
-
-5. **`file_upload` は入力欄を埋めるだけで、送信しない。** そのあと **Upload ボタンを押す**（押し忘れて「上げたつもり」になったことがある）
-6. **押す直前に、作者へもう一度確認する。** 上げるもの・バイト数・SHA-256・実機確認の済み具合を並べて出す。**公開は取り消せない**（版を非公開にはできるが、その間に入れた方には届く）
-7. **Upload を押したあと、行の版の欄が「Verifying 0.x.y」か「just now」になったかを必ず確かめる**（`get_page_text` で読む。`screenshot` より確か）。**アップロードの窓は一度閉じることがある**（2026-10-12）ので、なっていなければ窓を開き直して入れ直す（手順2から）。検証は**数分から十数分**かかるが、マイクロソフト側で進むので画面（タブ）は閉じてよい。画像認証が出たら押さずに作者へ。**「503: エラー」が出ても受け付けられていることがある**（2026-10-25。入れ直すと「既に存在するため、変更できません」と返り、約7分後に反映された）。表に Verifying が出なくても、入れ直す前に手順8の口で版を確かめる
-8. **反映は `node scripts/checkMarketplace.mjs` で確かめる。** 画面の表示ではなく、手順0と同じ口で読む
-9. **上げ終わったら、開いたタブを必ず閉じる**（`mcp__claude-in-chrome__tabs_close_mcp`）。タブは作者の Chrome に残り、別のセッションからは一覧にも出ず閉じられない（痕跡がいくつも残っていた）
+1. `https://marketplace.visualstudio.com/manage/publishers/nonahisa` を開き、拡張機能の行の「…」メニューから Update を **ref で**押す（メニューは Update・Unpublish・Remove の順で Update の 20px 下が Unpublish なので、座標で押さない）
+2. 「Click here to upload」は押さない（OS のファイル選択が開いて操作できなくなる）。type=file の input を `find` で探し、`file_upload` でその ref へ VSIX の道（`<リポジトリ>\\release\\novel-ai-assistant-<版>.vsix`。JSON なので `\` は2つ）を渡す
+3. `file_upload` は送信しない。そのあと **Upload を押す**（押し忘れた実績がある）。押す直前に、上げるもの・バイト数・SHA-256・実機確認の済み具合を作者へ出して確認する（公開は取り消せない）
+4. 行の版の欄が「Verifying 0.x.y」か「just now」になったかを `get_page_text` で確かめる。窓が閉じていたら開き直して入れ直す。「503」が出ても受け付けられていることがあるので、入れ直す前に `node scripts/checkMarketplace.mjs` で版を見る（検証は数分〜十数分、タブは閉じてよい。画像認証が出たら押さず作者へ）
+5. 反映は `node scripts/checkMarketplace.mjs` で確かめる。終わったら開いたタブを `tabs_close_mcp` で閉じる
 
 ## push のあとは CI を見る
 

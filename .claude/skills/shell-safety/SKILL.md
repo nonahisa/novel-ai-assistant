@@ -12,10 +12,10 @@ description: node -e・printf・sed・perl・heredoc・Edit/Write で文字列�
 | したいこと | やり方 |
 |---|---|
 | 日本語や記号を含むスクリプトを走らせる | **`Write` でファイルに書いてから `node <file>`**。`node -e "..."` に日本語・バッククォート・`%` を入れない |
-| 複数行の文章をファイルへ書く | `Write` か、`cat > file <<'EOF'`（**クォートした heredoc**）。`$` や `\` は展開されないが、**`node -e "..."` の中に heredoc の文字列を渡す**のはだめ |
+| 複数行の文章をファイルへ書く | `Write`。**Windows のパスや `\` を含む内容は必ず `Write` で書く**（2026-09-19、`<<'EOF'` でも `\\` が `\` になった）。**`node -e "..."` の中に heredoc の文字列を渡す**のもだめ |
 | 既存ファイルの一部を置き換える | `Edit`（Read してから）。日本語ファイルに `sed -i`・`perl -0pi` を使わない。**Python・node の置換台本も避ける**（2026-11-06、製品のセッション4つが揃って報告：ヒアドキュメントで `"\n"` が本当の改行になる・テンプレート文字列の `\d` が `d` になる・円記号やパスが崩れる・`\n` を含む文が合わず二度手間）。どうしても台本にするなら、台本をファイルに書いて走らせる |
 | 制御文字が要る | `String.fromCharCode(0)` のように**コードで作る**。`\u0000` を書くと生の NUL が入る |
-| PowerShell でファイルを書く | `Set-Content`／`Add-Content` は既定が ANSI。**`-Encoding utf8` を付ける** |
+| PowerShell でファイルを書く | PowerShell 5.1 の `Set-Content -Encoding utf8` は BOM が付く（付けないと既定が ANSI）。**文書は `Write` か node で書く**（`WriteAllText` は末尾の節） |
 
 ## 壊した記録
 
