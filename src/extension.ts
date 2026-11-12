@@ -4303,6 +4303,40 @@ export async function activate(
   updateStatusBar();
 
   /**
+   * 話を開いたときの字数を、その日のその話の数え始めに置く（作者の答え、2026-11-12）。
+   *
+   * **「開いた」は VS Code が文書を読み込んだとき**（`onDidOpenTextDocument`）で捉える。
+   * 原稿エディターもふつうのエディターも同じ文書を開くので、1か所で両方に効き、
+   * 起動時に復元された文書は下の「いま開いている分」の走査で拾う。
+   * 保存の受け口で起点を置くと、Ctrl+S が本体の保存と原稿エディターの［保存］の
+   * 両方を走らせる順番しだいで起点が1字ずれた（0.151.1）。
+   * 作品の外のファイル・話でないファイルには置かない（`recordWritingProgress` と同じ条件）。
+   */
+  const noteDocumentOpened = (document: vscode.TextDocument): void => {
+    if (["git", "gitfs", "output", "untitled"].includes(document.uri.scheme)) return;
+    const filePath = fromUri(document.uri);
+    const ext = path.extname(filePath).toLowerCase();
+    if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) return;
+    const work = findWorkForPath(registry, filePath);
+    if (!work) return;
+    void progress.noteOpened(work, filePath);
+  };
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(noteDocumentOpened)
+  );
+  for (const document of vscode.workspace.textDocuments) noteDocumentOpened(document);
+  // 開いたまま日付をまたいだら、日付が変わったときの字数を新しい日の起点にする。
+  // 日付の境目は執筆統計と同じ決まり（`boundaryHour`）。1分ごとに見れば足りる
+  let lastDayKey = statsDayKey(new Date(), boundaryHour());
+  const dayWatch = setInterval(() => {
+    const day = statsDayKey(new Date(), boundaryHour());
+    if (day === lastDayKey) return;
+    lastDayKey = day;
+    for (const document of vscode.workspace.textDocuments) noteDocumentOpened(document);
+  }, 60_000);
+  context.subscriptions.push({ dispose: () => clearInterval(dayWatch) });
+
+  /**
    * 保存された本文の作品で、前回からの増減をその日の執筆量として記録する。
    *
    * 記録し終えてからステータスバーを出し直す。保存した直後に
