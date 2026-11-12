@@ -105,6 +105,36 @@ npm run typecheck:tests                            # 型（test/e2e/tsconfig.jso
 4. VS Code の版を上げたあとにだけ落ちるなら、まず `workbenchDom.ts`（本体の DOM の名前が変わる。1.141.0 ではタブの名前から拡張子が `.label-suffix` へ分かれた）
 5. ノートPCで `backupDropFromExplorer` の Shift ありが「外へ出る動きを終えた」のあと40秒の上限で落ちるのは既知（Shift を押したあと合成のマウスの動きが引きずりに届かない、テストの道具の限界）。ノートPCで全件を回すときは `$env:NOVELAI_E2E_SLOW_DRAG = "1"` を付けて飛ばす。母艦では付けない（2026-11-04）
 
+## 本物の AivisSpeech で流す（`test/e2e/real/*.real.ts`。2026-11-12）
+
+実機確認リスト 48・49・74・80（読み上げ10文以上・遅さの知らせ1回・長い話の MP3 書き出し・本物のライセンスで止まらない）を、本物のエンジンで確かめる。**`test:e2e` の全件・`check`・CI・配布の検査には入らない**（名前が `*.real.ts`、設定が `vitest.real.config.mts`。環境変数 `NOVELAI_REAL_AIVIS=1` が無ければ飛ぶ）。本文は見本の話をテストの中で作る（作者の作品は読まない）。所要は CPU の機械で 48・74 が約4分半、49・80 が約32分。
+
+- 先に AivisSpeech を起動しておく（127.0.0.1:10101）。`npm run test:e2e:real` が先にビルドする
+- `ELECTRON_RUN_AS_NODE` を外す。`NOVELAI_REAL_AIVIS=1`。控えの置き場は `NOVELAI_REAL_OUT`
+- 長いので機械を眠らせない。ノートPCは Modern Standby で本体が止まるため、**流す PowerShell と同じ窓で**先に指定する（呼んだスレッドの指定なので、別の窓では効かない。窓を閉じると外れる）：
+
+```powershell
+# Windows（PowerShell）
+Add-Type -Namespace W -Name P -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);'
+[W.P]::SetThreadExecutionState(0x80000003) | Out-Null   # 0x80000000 継続 + 0x1 眠らせない + 0x2 画面も消さない
+Set-Location <リポジトリ>
+$env:ELECTRON_RUN_AS_NODE = $null
+$env:NOVELAI_REAL_AIVIS = "1"
+$env:NOVELAI_REAL_OUT = "$HOME\novelai-real-out"
+npm run test:e2e:real
+```
+
+```zsh
+# Mac（zsh）：caffeinate が、流している間だけ眠りを止める
+cd <リポジトリ>
+unset ELECTRON_RUN_AS_NODE
+export NOVELAI_REAL_AIVIS=1
+export NOVELAI_REAL_OUT="$HOME/novelai-real-out"
+caffeinate -dis npm run test:e2e:real
+```
+
+- 走らせたあと `novelai-e2e-` を引数に含む `Code.exe` が残っていないことを確かめる（上の「守ること」）。控えの JSON には作者の話の題名が入ることがあるので、リポジトリへ入れない
+
 ## 広報の動画
 
 同じ土台で撮る（`npm run promo:record`。ffmpeg が要る。台本は `test/e2e/promo/*.promo.ts`）。押す絵は `clickWithCursor`——**矢印が目標の上にあることを機械で確かめてから押す**（`assertCursorOn`。外れたら撮影を失敗にする）。詳細は設計書 6.114。
