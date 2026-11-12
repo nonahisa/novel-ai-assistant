@@ -20,7 +20,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "vitest";
 import { castDialogues } from "../../../src/core/voiceCast";
-import { pickStyleForEmotion, type VoiceEmotion, type VoiceSpeaker } from "../../../src/core/voiceEngine";
+import {
+  isNormalStyleName,
+  pickNormalStyle,
+  pickStyleForEmotion,
+  styleEmotionOf,
+  type VoiceEmotion,
+  type VoiceSpeaker,
+} from "../../../src/core/voiceEngine";
 import { withVsCode } from "../support/vscodeApp";
 import { describeNotices } from "../support/noticeRecord";
 import {
@@ -239,7 +246,7 @@ const EMOTION_LINES: Array<{ emotion: VoiceEmotion; quote: string; key: string }
   { emotion: "悲しみ", quote: "「もう会えないなんて、かなしい」", key: "もう会え" },
   { emotion: "ささやき", quote: "「しずかに、だれかがくる」", key: "しずか" },
   { emotion: "叫び", quote: "「たすけてえええ！」", key: "たすけ" },
-  // 比べる元（平静）。選んだスタイルのまま読むはず
+  // 比べる元（平静）。選んだのが感情のスタイルかノーマルなら同じ話者のノーマル、声の形なら選んだまま（作者の答え 2026-11-13）
   { emotion: "平静", quote: "「そろそろ帰りましょう」", key: "そろそろ" },
 ];
 
@@ -292,7 +299,12 @@ test.skipIf(!GATE_AIVIS)(
       const styleName = (id: string | undefined): string => speaker.styles.find((style) => String(style.id) === id)?.name ?? "（この話者に無い番号）";
       result.perEmotion = EMOTION_LINES.map((line) => {
         const requested = [...new Set(queriesWith(aivis.log, line.key).map((entry) => entry.speaker))];
-        const expected = pickStyleForEmotion([speaker], base.id, line.emotion);
+        // 平静の台詞は製品（voicePlanUnits）と同じ決まり：声の形は選んだまま、それ以外は同じ話者のノーマル
+        const keepShape = !isNormalStyleName(base.name) && styleEmotionOf(base.name) === undefined;
+        const expected =
+          line.emotion === "平静"
+            ? { styleId: keepShape ? base.id : pickNormalStyle([speaker], base.id), styled: false }
+            : pickStyleForEmotion([speaker], base.id, line.emotion);
         return {
           emotion: line.emotion,
           requestedStyleIds: requested,

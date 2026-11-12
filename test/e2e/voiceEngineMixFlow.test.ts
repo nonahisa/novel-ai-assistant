@@ -57,6 +57,11 @@ const AKARI: Character = { ...emptyCharacter("char_001", "灯"), appearedChapter
 const NARRATOR_STYLE_ID = 888753761;
 /** 灯に割り当てる声（VOICEVOX の 花音／ささやき） */
 const AKARI_STYLE_ID = 1325133121;
+/**
+ * 灯の平静の台詞で頼む声（花音／ノーマル）。ささやきは感情のスタイルなので、平静の台詞は同じ話者の
+ * ノーマルで読む（0.151.1・作者の答え 2026-11-13「スタイルは感情に合わせて自動」）
+ */
+const AKARI_PLAIN_STYLE_ID = 1325133120;
 /** 割り当ての声が引けないときの代わりの声（エンジンの最初の声） */
 const FALLBACK_STYLE_ID = 888753760;
 
@@ -131,9 +136,9 @@ test("両方のエンジンが動いているとき、灯の台詞の頼みだ�
 
         const toVoicevox = textCarrying(voicevox);
         const toAivis = textCarrying(aivis);
-        // 本文を運ぶ頼みは、灯の台詞だけが VOICEVOX 役へ。声の番号は割り当てた花音／ささやき
+        // 本文を運ぶ頼みは、灯の台詞だけが VOICEVOX 役へ。平静の台詞なので、割り当てた花音の話者のノーマル
         expect(toVoicevox.every((request) => request.text.includes("やった")), `VOICEVOX 役への頼み：${describeVoiceRequests(voicevox)}`).toBe(true);
-        expect(toVoicevox.every((request) => request.speaker === String(AKARI_STYLE_ID)), `VOICEVOX 役への頼み：${describeVoiceRequests(voicevox)}`).toBe(true);
+        expect(toVoicevox.every((request) => request.speaker === String(AKARI_PLAIN_STYLE_ID)), `VOICEVOX 役への頼み：${describeVoiceRequests(voicevox)}`).toBe(true);
         // ほかの文は AivisSpeech 役へ。灯の台詞は届かず、声の番号は割り当てたまい／上機嫌
         expect(toAivis.some((request) => request.text.includes("朝の駅は静かだった")), `AivisSpeech 役への頼み：${describeVoiceRequests(aivis)}`).toBe(true);
         expect(toAivis.some((request) => request.text.includes("やった")), `AivisSpeech 役へ灯の台詞が届きました：${describeVoiceRequests(aivis)}`).toBe(false);

@@ -261,6 +261,52 @@ describe("文ごとの声", () => {
     ]);
   });
 
+  test("平静の台詞：声の形（しっとり・人間ver.）を選んだ人物は選んだまま、感情のスタイルを選んだ人物はノーマル、ノーマルの無い話者は選んだまま（作者の答え 2026-11-13）", () => {
+    const list = parseSpeakers([
+      {
+        name: "青山龍星",
+        speaker_uuid: "uuid-ryusei",
+        styles: [
+          { name: "ノーマル", id: 13 },
+          { name: "喜び", id: 83 },
+          { name: "しっとり", id: 84 },
+          { name: "かなしみ", id: 85 },
+        ],
+      },
+      {
+        name: "後鬼",
+        speaker_uuid: "uuid-goki",
+        styles: [
+          { name: "人間ver.", id: 27 },
+          { name: "ぬいぐるみver.", id: 28 },
+        ],
+      },
+    ]);
+    const ryusei = (styleName: string, styleId: number) => ({
+      speakerUuid: "uuid-ryusei",
+      speakerName: "青山龍星",
+      styleName,
+      styleId,
+      engine: "voicevox" as const,
+    });
+    const run = (dialogueDefault: VoiceAssignmentFile["dialogueDefault"]) => {
+      const text = "「おはよう」";
+      return voicePlanUnits({
+        sentences: buildReadingPlan(text, "curly", [], { splitDialogue: true }),
+        dialogues: castDialogues(text),
+        cast: [],
+        assignment: { version: 1, narrator: ryusei("ノーマル", 13), dialogueDefault, characters: {} },
+        speakers: list,
+        engine: "voicevox",
+      })?.units.map((u) => u.styleId);
+    };
+    // 再現：しっとり（声の形）を選んでも、0.151.1 ではノーマル（13）に替わっていた
+    expect(run(ryusei("しっとり", 84))).toEqual([84]);
+    expect(run(ryusei("喜び", 83))).toEqual([13]);
+    expect(run(ryusei("かなしみ", 85))).toEqual([13]);
+    expect(run({ speakerUuid: "uuid-goki", speakerName: "後鬼", styleName: "人間ver.", styleId: 27, engine: "voicevox" })).toEqual([27]);
+  });
+
   test("割り当てが無ければエンジンの最初の声。話者が1人もいなければ読めない", () => {
     const sentences = buildReadingPlan("地の文。", "curly", [], { splitDialogue: true });
     const units = voicePlanUnits({

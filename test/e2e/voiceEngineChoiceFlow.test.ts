@@ -251,27 +251,29 @@ test("［声］で VOICEVOX を選ぶと本文は VOICEVOX の接続先へ届き
         expect(rows.map((row) => row.label), `一覧：${JSON.stringify(rows)}`).toContain("語り手（地の文）");
         await page.locator(".quick-input-widget .quick-input-list .monaco-list-row").nth(rows.findIndex((row) => row.label === "語り手（地の文）")).click();
         const voices = await waitForQuickPick(page, `語り手（地の文）の声（${VOICE_ENGINE_LABEL.voicevox}・${VOICE_ENGINE_LABEL.aivisspeech}）`, 20_000);
-        const index = voices.findIndex((row) => row.label === "まい／上機嫌");
+        // 行は話者だけ（スタイルは感情に合わせて自動。作者の答え 2026-11-13）。最初の声（まい／ノーマル）と違う番号の花音を選ぶ
+        const index = voices.findIndex((row) => row.label === "花音");
         expect(index, `声の一覧：${JSON.stringify(voices)}`).toBeGreaterThanOrEqual(0);
+        expect(voices.some((row) => row.label.includes("上機嫌")), `感情のスタイルの行が並んでいます：${JSON.stringify(voices)}`).toBe(false);
         await page.locator(".quick-input-widget .quick-input-list .monaco-list-row").nth(index).click();
         // 選ぶと一覧へ戻り、語り手の欄に選んだ声が出る
         await waitUntil(
-          async () => (await quickPickTitle(page)) === listTitle && (await quickPickRows(page)).some((row) => row.label === "語り手（地の文）" && row.description.includes("まい／上機嫌")),
-          "一覧へ戻り、語り手の欄に「まい／上機嫌」が出る",
+          async () => (await quickPickTitle(page)) === listTitle && (await quickPickRows(page)).some((row) => row.label === "語り手（地の文）" && row.description.includes("花音（感情に合わせて自動")),
+          "一覧へ戻り、語り手の欄に「花音（感情に合わせて自動…）」が出る",
           20_000
         ).catch(async (error: unknown) => {
           throw new Error(`${String(error)}${await quickInputWaitContext(page)}`);
         });
         let saved: Record<string, unknown> | undefined;
         await waitUntil(async () => (saved = await readVoices(session)) !== undefined, "voices.json ができる", 15_000);
-        expect(saved?.narrator, `voices.json：${JSON.stringify(saved)}`).toMatchObject({ speakerUuid: "uuid-mai", styleName: "上機嫌", styleId: 888753761, engine: "voicevox" });
+        expect(saved?.narrator, `voices.json：${JSON.stringify(saved)}`).toMatchObject({ speakerUuid: "uuid-kanon", styleName: "ノーマル", styleId: 1325133120, engine: "voicevox" });
         await page.keyboard.press("Escape");
         await waitUntil(async () => (await quickPickTitle(page)) === undefined, "一覧が閉じる", 10_000);
 
         /* ── 次に読むと、選んだ声の番号で VOICEVOX へ頼む ── */
         const before = voicevox.requests.length;
         await frame.locator("#aloudPlay").click();
-        await waitUntil(async () => textCarrying(voicevox, before).some((request) => request.path === "/synthesis" && request.speaker === "888753761"), "選んだ声（888753761）で VOICEVOX へ頼む", 20_000).catch(
+        await waitUntil(async () => textCarrying(voicevox, before).some((request) => request.path === "/synthesis" && request.speaker === "1325133120"), "選んだ声（1325133120）で VOICEVOX へ頼む", 20_000).catch(
           (error: unknown) => {
             throw new Error(`${String(error)}（VOICEVOX：${describeVoiceRequests(voicevox, before)}）`);
           }
@@ -335,7 +337,7 @@ test("VOICEVOX で選んだ声の人物がいる作品を、VOICEVOX を閉じ�
         await clickAloudButton(frame, "aloudVoiceAssign");
         const rows = await waitForQuickPick(page, `声の割り当て（この作品の声。選ぶと ${VOICE_ENGINE_LABEL.aivisspeech} の声から選べます）`, 20_000);
         const akari = rows.find((row) => row.label === "灯");
-        expect(akari?.description, `一覧：${JSON.stringify(rows)}`).toBe(`花音／ささやき（${VOICE_ENGINE_LABEL.voicevox}）`);
+        expect(akari?.description, `一覧：${JSON.stringify(rows)}`).toBe(`花音（感情に合わせて自動・${VOICE_ENGINE_LABEL.voicevox}）`);
         await page.keyboard.press("Escape");
       },
       {

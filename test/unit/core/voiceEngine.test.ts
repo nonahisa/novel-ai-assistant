@@ -3,12 +3,16 @@ import {
   applyVoiceParams,
   bytesToBase64,
   engineHostOutsideThisPc,
+  isNormalStyleName,
   normalizeEngineUrl,
   parseSpeakers,
   pickNormalStyle,
   pickStyleForEmotion,
+  styleEmotionOf,
   SynthesisCache,
   synthesisKey,
+  voiceChoiceName,
+  voiceChoiceRows,
   VoiceEngineClient,
   VoiceEngineError,
   voiceEngineNextStep,
@@ -422,5 +426,116 @@ describe("作者のエンジンのスタイル名に当たる（0.151.1）", () 
     expect(pickNormalStyle(speakers, 62)).toBe(62);
     // 一覧に無い番号はそのまま
     expect(pickNormalStyle(speakers, 99999)).toBe(99999);
+  });
+});
+
+/*
+ * スタイルは感情に合わせて自動で選ぶ（作者の答え 2026-11-13「スタイルは自動で割り振ってください」）。
+ * 名前から感情を推し量るのはコードだけ（AI は使わない）。当てられない名前は「声の形」として扱う。
+ */
+describe("スタイルの名前から感情を推し量る（作者の答え 2026-11-13）", () => {
+  test("表の名前に当たる（今の pickStyleForEmotion と同じ当て方）", () => {
+    expect(styleEmotionOf("上機嫌")).toBe("喜び");
+    expect(styleEmotionOf("かなしみ")).toBe("悲しみ");
+    expect(styleEmotionOf("怒り・悲しみ")).toBe("怒り");
+    expect(styleEmotionOf("ささやき")).toBe("ささやき");
+    expect(styleEmotionOf("Happy")).toBe("喜び");
+  });
+
+  test("表に無くても、感情を表す漢字1字で当てる", () => {
+    expect(styleEmotionOf("涙声")).toBe("悲しみ");
+    expect(styleEmotionOf("哀愁")).toBe("悲しみ");
+    expect(styleEmotionOf("憤慨")).toBe("怒り");
+    expect(styleEmotionOf("笑顔")).toBe("喜び");
+    expect(styleEmotionOf("嬉々")).toBe("喜び");
+    expect(styleEmotionOf("驚愕")).toBe("驚き");
+    expect(styleEmotionOf("怖々")).toBe("恐れ");
+    expect(styleEmotionOf("恥じらい")).toBe("照れ");
+    expect(styleEmotionOf("囁")).toBe("ささやき");
+    expect(styleEmotionOf("大叫")).toBe("叫び");
+  });
+
+  test("声の形・ふだんの声の名前は、どの感情にも当てない", () => {
+    for (const name of ["人間ver.", "ぬいぐるみver.", "しっとり", "アナウンス", "読み聞かせ", "おちつき", "Calm", "ノーマル", "ふつう", "Normal"]) {
+      expect(styleEmotionOf(name), name).toBeUndefined();
+    }
+  });
+
+  test("作者の上書き（emotionStyles）に書いた名前は、その感情に結びつく", () => {
+    expect(styleEmotionOf("しっとり", { 悲しみ: ["しっとり"] })).toBe("悲しみ");
+  });
+
+  test("ふだんの声の名前（全体で一致したものだけ。英語は大文字小文字を問わない）", () => {
+    expect(isNormalStyleName("ノーマル")).toBe(true);
+    expect(isNormalStyleName("ふつー")).toBe(true);
+    expect(isNormalStyleName("NORMAL")).toBe(true);
+    expect(isNormalStyleName(" ふつう ")).toBe(true);
+    expect(isNormalStyleName("ノーマル（低め）")).toBe(false);
+    expect(isNormalStyleName("しっとり")).toBe(false);
+  });
+
+  test("感情のスタイルを探すときも、表の名前の最後に漢字1字で当てる", () => {
+    const list = parseSpeakers([
+      {
+        name: "漢字の話者",
+        speaker_uuid: "uuid-kanji",
+        styles: [
+          { name: "ノーマル", id: 900 },
+          { name: "涙声", id: 901 },
+          { name: "憤慨", id: 902 },
+        ],
+      },
+    ]);
+    expect(pickStyleForEmotion(list, 900, "悲しみ")).toEqual({ styleId: 901, styled: true });
+    expect(pickStyleForEmotion(list, 900, "怒り")).toEqual({ styleId: 902, styled: true });
+    expect(pickStyleForEmotion(list, 900, "照れ")).toEqual({ styleId: 900, styled: false });
+  });
+});
+
+describe("［声の割り当て］の声の行は「話者 × 声の形」だけ（作者の答え 2026-11-13）", () => {
+  const list = parseSpeakers([
+    {
+      name: "青山龍星",
+      speaker_uuid: "uuid-ryusei",
+      styles: [
+        { name: "喜び", id: 83 },
+        { name: "ノーマル", id: 13 },
+        { name: "しっとり", id: 84 },
+        { name: "かなしみ", id: 85 },
+      ],
+    },
+    {
+      name: "後鬼",
+      speaker_uuid: "uuid-goki",
+      styles: [
+        { name: "人間ver.", id: 27 },
+        { name: "ぬいぐるみver.", id: 28 },
+      ],
+    },
+    {
+      name: "感情だけの話者",
+      speaker_uuid: "uuid-emo",
+      styles: [
+        { name: "上機嫌", id: 41 },
+        { name: "怒り", id: 42 },
+      ],
+    },
+  ]);
+
+  test("ノーマルは話者名だけ、声の形は話者名／スタイル名。感情のスタイルの行は出さない", () => {
+    expect(voiceChoiceRows(list).map((row) => [row.label, row.style.id])).toEqual([
+      ["青山龍星", 13],
+      ["青山龍星／しっとり", 84],
+      ["後鬼／人間ver.", 27],
+      ["後鬼／ぬいぐるみver.", 28],
+      ["感情だけの話者", 41],
+    ]);
+  });
+
+  test("選んだ声の名前：感情のスタイル・ノーマルは話者名だけ、声の形は話者名／スタイル名（前の版の「喜び」も自動の表示）", () => {
+    expect(voiceChoiceName("青山龍星", "喜び")).toBe("青山龍星");
+    expect(voiceChoiceName("青山龍星", "ノーマル")).toBe("青山龍星");
+    expect(voiceChoiceName("青山龍星", "しっとり")).toBe("青山龍星／しっとり");
+    expect(voiceChoiceName("後鬼", "人間ver.")).toBe("後鬼／人間ver.");
   });
 });

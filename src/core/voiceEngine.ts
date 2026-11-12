@@ -361,9 +361,98 @@ export const NORMAL_STYLE_NAMES: readonly string[] = ["ノーマル", "ふつう
 export function pickNormalStyle(speakers: readonly VoiceSpeaker[], baseStyleId: number): number {
   const found = findStyle(speakers, baseStyleId);
   if (!found) return baseStyleId;
-  const wanted = NORMAL_STYLE_NAMES.map((name) => name.toLowerCase());
-  const normal = found.speaker.styles.find((s) => wanted.includes(s.name.trim().toLowerCase()));
+  const normal = found.speaker.styles.find((s) => isNormalStyleName(s.name));
   return normal ? normal.id : baseStyleId;
+}
+
+/** ふだんの声の名前か（`NORMAL_STYLE_NAMES` と全体で一致。前後の空白と英語の大文字小文字は問わない） */
+export function isNormalStyleName(name: string): boolean {
+  const own = name.trim().toLowerCase();
+  return NORMAL_STYLE_NAMES.some((normal) => normal.toLowerCase() === own);
+}
+
+/**
+ * 感情を表す漢字1字（作者の答え 2026-11-13「スタイルは自動で割り振ってください」）。
+ * `EMOTION_STYLE_CANDIDATES` に無い名前でも、名前にこの字があればその感情のスタイルと見る
+ * （「涙声」「憤慨」のように、表を作ったあとに出てくる名前を拾うため）。表の名前の**あと**に見る。
+ * 名前の推し量りはコードだけで行い、AI には振らせない（結果を確かめる手間に見合わない）
+ */
+export const EMOTION_STYLE_KANJI: Record<VoiceEmotion, readonly string[]> = {
+  平静: [],
+  喜び: ["喜", "嬉", "楽", "笑"],
+  怒り: ["怒", "憤"],
+  悲しみ: ["悲", "哀", "泣", "涙"],
+  驚き: ["驚"],
+  恐れ: ["怖", "恐", "怯"],
+  照れ: ["照", "恥"],
+  ささやき: ["囁"],
+  叫び: ["叫", "絶叫"],
+};
+
+/** 名前に候補のどれかが含まれるか（英語は大文字と小文字を区別しない） */
+function nameHasAny(name: string, candidates: readonly string[]): boolean {
+  const own = name.toLowerCase();
+  return candidates.some((candidate) => candidate !== "" && own.includes(candidate.toLowerCase()));
+}
+
+/**
+ * スタイルの名前が結びつく感情（作者の答え 2026-11-13）。当てる順は、作者の上書き→表の名前→漢字1字。
+ * 感情ごとに `VOICE_EMOTIONS` の順に見るので、「怒り・悲しみ」は怒り、「テンション高め」は喜びになる。
+ * **当たらない名前（人間ver.・しっとり・アナウンス など）は `undefined`**＝感情でなく「声の形」として扱い、
+ * 平静の台詞でもノーマルへ替えない。ふだんの声（ノーマル）も `undefined`
+ */
+export function styleEmotionOf(
+  name: string,
+  overrides: Partial<Record<VoiceEmotion, readonly string[]>> = {}
+): VoiceEmotion | undefined {
+  if (isNormalStyleName(name)) return undefined;
+  const feeling = VOICE_EMOTIONS.filter((emotion) => emotion !== "平静");
+  for (const pool of [
+    (emotion: VoiceEmotion) => overrides[emotion] ?? [],
+    (emotion: VoiceEmotion) => EMOTION_STYLE_CANDIDATES[emotion],
+    (emotion: VoiceEmotion) => EMOTION_STYLE_KANJI[emotion],
+  ]) {
+    const hit = feeling.find((emotion) => nameHasAny(name, pool(emotion)));
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * ［声の割り当て］で選ぶ声の名前（作者の答え 2026-11-13）。作者が選ぶのは話者（と声の形）だけで、
+ * 感情のスタイルは台詞ごとに自動で選ぶ。なので感情のスタイル・ノーマルは話者名だけ、声の形は
+ * 「話者名／スタイル名」。前の版で選んだ「青山龍星／喜び」も話者名だけで出す（ファイルは書き換えない）
+ */
+export function voiceChoiceName(
+  speakerName: string,
+  styleName: string,
+  overrides: Partial<Record<VoiceEmotion, readonly string[]>> = {}
+): string {
+  return isNormalStyleName(styleName) || styleEmotionOf(styleName, overrides) !== undefined
+    ? speakerName
+    : `${speakerName}／${styleName}`;
+}
+
+/**
+ * ［声の割り当て］の声の行（作者の答え 2026-11-13）。「話者 × 声の形」だけを並べ、感情のスタイルの行は出さない。
+ * ノーマルがあれば話者名だけの行（ノーマルのスタイル）、声の形は「話者名／スタイル名」の行。
+ * ノーマルも声の形も無い話者（感情のスタイルだけ）は、最初のスタイルを基にした話者名だけの1行
+ */
+export function voiceChoiceRows(
+  speakers: readonly VoiceSpeaker[],
+  overrides: Partial<Record<VoiceEmotion, readonly string[]>> = {}
+): Array<{ speaker: VoiceSpeaker; style: VoiceStyle; label: string }> {
+  return speakers.flatMap((speaker) => {
+    const normal = speaker.styles.find((s) => isNormalStyleName(s.name));
+    const shapes = speaker.styles.filter(
+      (s) => !isNormalStyleName(s.name) && styleEmotionOf(s.name, overrides) === undefined
+    );
+    const base = normal ?? (shapes.length === 0 ? speaker.styles[0] : undefined);
+    return [
+      ...(base ? [{ speaker, style: base, label: speaker.name }] : []),
+      ...shapes.map((style) => ({ speaker, style, label: `${speaker.name}／${style.name}` })),
+    ];
+  });
 }
 
 /** 声の調子（audio_query の6つの欄へ当てる値） */
@@ -457,7 +546,12 @@ export function pickStyleForEmotion(
   if (emotion === "平静") return { styleId: baseStyleId, styled: false };
   const found = findStyle(speakers, baseStyleId);
   if (!found) return { styleId: baseStyleId, styled: false };
-  const candidates = [...(overrides[emotion] ?? []), ...EMOTION_STYLE_CANDIDATES[emotion]];
+  // 漢字1字の当ては候補の最後（表の名前を持つ話者では、今までどおりそちらが選ばれる）
+  const candidates = [
+    ...(overrides[emotion] ?? []),
+    ...EMOTION_STYLE_CANDIDATES[emotion],
+    ...EMOTION_STYLE_KANJI[emotion],
+  ];
   for (const candidate of candidates) {
     if (candidate === "") continue;
     // 英語の名前は大文字と小文字を区別しない（「Shout」「SHOUT」「shout」を同じに見る）

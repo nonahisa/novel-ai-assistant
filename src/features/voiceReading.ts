@@ -68,6 +68,8 @@ import {
   voiceEngineDownPrompt,
   voiceEngineNextStep,
   voiceEngineSlowPrompt,
+  voiceChoiceName,
+  voiceChoiceRows,
   voiceParamsFor,
   type VoiceEngineDownRoute,
   type FetchLike,
@@ -1425,10 +1427,12 @@ export async function assignVoices(
     const file = loaded.file;
     const label = (ref: VoiceRef | undefined): string => {
       if (!ref) return "未選択";
-      const name = `${ref.speakerName}／${ref.styleName}`;
+      // 感情のスタイルは台詞ごとに自動で選ぶので、選んだのが感情のスタイルかノーマルなら話者名だけ
+      // （前の版で選んだ「青山龍星／喜び」も同じ。作者の答え 2026-11-13）
+      const name = voiceChoiceName(ref.speakerName, ref.styleName, file.emotionStyles);
       // 混ぜて読めるので、エンジンの名前として添える（注意ではない）。印の無い声は［声］のエンジンで探す
-      if (ref.engine === undefined) return `${name}（前の版で選んだ声）`;
-      return `${name}（${VOICE_ENGINE_LABEL[ref.engine]}）`;
+      if (ref.engine === undefined) return `${name}（感情に合わせて自動・前の版で選んだ声）`;
+      return `${name}（感情に合わせて自動・${VOICE_ENGINE_LABEL[ref.engine]}）`;
     };
     const targets: Array<vscode.QuickPickItem & { slot: "narrator" | "dialogueDefault" | Character }> = [
       { label: "語り手（地の文）", description: label(file.narrator), slot: "narrator" },
@@ -1452,20 +1456,19 @@ export async function assignVoices(
 
     const voice = await vscode.window.showQuickPick(
       [
+        // 行は「話者 × 声の形」だけ。感情のスタイルは台詞ごとに自動で選ぶので並べない（作者の答え 2026-11-13）
         ...available.flatMap(({ engine: which, list }) =>
-          list.flatMap((speaker) =>
-            speaker.styles.map((style) => ({
-              label: `${speaker.name}／${style.name}`,
-              description: VOICE_ENGINE_LABEL[which],
-              ref: {
-                speakerUuid: speaker.uuid,
-                speakerName: speaker.name,
-                styleName: style.name,
-                styleId: style.id,
-                engine: which,
-              } satisfies VoiceRef,
-            }))
-          )
+          voiceChoiceRows(list, file.emotionStyles).map(({ speaker, style, label: rowLabel }) => ({
+            label: rowLabel,
+            description: `${VOICE_ENGINE_LABEL[which]}・スタイルは感情に合わせて自動`,
+            ref: {
+              speakerUuid: speaker.uuid,
+              speakerName: speaker.name,
+              styleName: style.name,
+              styleId: style.id,
+              engine: which,
+            } satisfies VoiceRef,
+          }))
         ),
         cancelItem("戻る"),
       ],

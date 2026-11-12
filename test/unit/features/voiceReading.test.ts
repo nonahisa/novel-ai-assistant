@@ -364,7 +364,7 @@ describe("エンジンを選んだ声の割り当てと、戻したときの代�
 
   test("VOICEVOX を選んで［声の割り当て］を開くと、［声］の VOICEVOX の声を先に並べ、選んだ声に VOICEVOX の印を付けて残す", async () => {
     const { aivis, voicevox, service } = await twoEngines();
-    const pick = scriptQuickPick([labelled("灯"), labelled("まい／上機嫌")]);
+    const pick = scriptQuickPick([labelled("灯"), labelled("花音")]);
     try {
       await assignVoices(work, service, "voicevox");
     } finally {
@@ -375,18 +375,45 @@ describe("エンジンを選んだ声の割り当てと、戻したときの代�
       `声の割り当て（この作品の声。選ぶと ${VOICE_ENGINE_LABEL.voicevox}・${VOICE_ENGINE_LABEL.aivisspeech} の声から選べます）`
     );
     expect(pick.shown[1].title).toBe(`灯の声（${VOICE_ENGINE_LABEL.voicevox}・${VOICE_ENGINE_LABEL.aivisspeech}）`);
-    expect(pick.shown[1].items[0]).toEqual({ label: "まい／ノーマル", description: VOICE_ENGINE_LABEL.voicevox });
+    // 行は話者だけ（ノーマル）。スタイルは感情に合わせて自動で選ぶ（作者の答え 2026-11-13）
+    expect(pick.shown[1].items[0]).toEqual({
+      label: "まい",
+      description: `${VOICE_ENGINE_LABEL.voicevox}・スタイルは感情に合わせて自動`,
+    });
+    // 感情のスタイル（上機嫌・怒り・悲しみ・ささやき）の行は出さない
+    const labels = pick.shown[1].items.map((item) => item.label);
+    expect(labels.filter((label) => label.includes("／"))).toEqual([]);
     expect(voicevox.requests.filter((r) => r.path === "/speakers").length).toBeGreaterThan(0);
     // もう片方は話者の一覧だけ（本文を運ぶ頼みは無い）
     expect(aivis.requests.map((r) => r.path)).toEqual(["/speakers"]);
     expect(state.savedAssignments).toHaveLength(1);
     expect(state.savedAssignments[0].characters["c-akari"]).toMatchObject({
-      speakerUuid: "uuid-mai",
-      styleName: "上機嫌",
-      styleId: 888753761,
+      speakerUuid: "uuid-kanon",
+      styleName: "ノーマル",
+      styleId: 1325133120,
       engine: "voicevox",
       characterName: "灯",
     });
+  });
+
+  test("［声の割り当て］の一覧で、前の版で選んだ感情のスタイル（まい／上機嫌）は「感情に合わせて自動」で出る（ファイルは書き換えない）", async () => {
+    const { service } = await twoEngines();
+    state.assignment.characters["c-akari"] = {
+      ...state.assignment.characters["c-akari"],
+      styleName: "上機嫌",
+      styleId: 888753761,
+      engine: "voicevox",
+    };
+    const pick = scriptQuickPick([]);
+    try {
+      await assignVoices(work, service, "aivisspeech");
+    } finally {
+      pick.restore();
+    }
+    expect(pick.shown[0].items.find((item) => item.label === "灯")?.description).toBe(
+      `まい（感情に合わせて自動・${VOICE_ENGINE_LABEL.voicevox}）`
+    );
+    expect(state.savedAssignments).toHaveLength(0);
   });
 
   test("［声の割り当て］の一覧で、人物の声にエンジンの名前が添えてある", async () => {
@@ -400,9 +427,11 @@ describe("エンジンを選んだ声の割り当てと、戻したときの代�
     }
     const row = pick.shown[0].items.find((item) => item.label === "灯");
     // 混ぜて読めるので、注意ではなくエンジンの名前として添える（0.151.0）
-    expect(row?.description).toBe(`まい／ノーマル（${VOICE_ENGINE_LABEL.voicevox}）`);
+    expect(row?.description).toBe(`まい（感情に合わせて自動・${VOICE_ENGINE_LABEL.voicevox}）`);
     // 同じエンジンの印が無い前の版の声（蓮）は、前の版の声として添える
-    expect(pick.shown[0].items.find((item) => item.label === "蓮")?.description).toBe("花音／ノーマル（前の版で選んだ声）");
+    expect(pick.shown[0].items.find((item) => item.label === "蓮")?.description).toBe(
+      "花音（感情に合わせて自動・前の版で選んだ声）"
+    );
   });
 
   test("［声］を AivisSpeech にしていても、VOICEVOX で選んだ人物の台詞は VOICEVOX で読む（2段目。0.151.0）", async () => {
@@ -612,7 +641,7 @@ describe("人物ごとにエンジンを混ぜる（2段目。0.151.0）", () =>
       (items: readonly unknown[]) => (items as Array<{ label: string }>).find((i) => i.label === "蓮"),
       (items: readonly unknown[]) =>
         (items as Array<{ label: string; description?: string }>).find(
-          (i) => i.label === "四国めたん／ノーマル" && i.description === VOICE_ENGINE_LABEL.voicevox
+          (i) => i.label === "四国めたん" && i.description?.startsWith(VOICE_ENGINE_LABEL.voicevox)
         ),
     ];
     window.showQuickPick = (async (items: readonly unknown[], options?: { title?: string }) => {
@@ -631,12 +660,13 @@ describe("人物ごとにエンジンを混ぜる（2段目。0.151.0）", () =>
       window.showQuickPick = original;
     }
     const voices = shown[1].items;
-    expect(voices.find((i) => i.label === "まい／ノーマル")?.description).toBe(VOICE_ENGINE_LABEL.aivisspeech);
-    expect(voices.find((i) => i.label === "ずんだもん／ノーマル")?.description).toBe(VOICE_ENGINE_LABEL.voicevox);
+    const auto = "・スタイルは感情に合わせて自動";
+    expect(voices.find((i) => i.label === "まい")?.description).toBe(`${VOICE_ENGINE_LABEL.aivisspeech}${auto}`);
+    expect(voices.find((i) => i.label === "ずんだもん")?.description).toBe(`${VOICE_ENGINE_LABEL.voicevox}${auto}`);
     // ［声］の AivisSpeech の声が先
-    expect(voices[0].description).toBe(VOICE_ENGINE_LABEL.aivisspeech);
+    expect(voices[0].description).toBe(`${VOICE_ENGINE_LABEL.aivisspeech}${auto}`);
     expect(shown[0].items.find((i) => i.label === "灯")?.description).toBe(
-      `ずんだもん／ノーマル（${VOICE_ENGINE_LABEL.voicevox}）`
+      `ずんだもん（感情に合わせて自動・${VOICE_ENGINE_LABEL.voicevox}）`
     );
     expect(state.savedAssignments[0].characters["c-ren"]).toMatchObject({
       speakerUuid: "uuid-metan",
