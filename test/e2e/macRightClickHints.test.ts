@@ -36,6 +36,7 @@ import { waitUntil } from "./support/wait";
 import {
   clearNotifications,
   pickQuickPickRow,
+  pressWorkbenchKey,
   quickPickTitle,
 } from "./support/workbenchDom";
 
@@ -113,6 +114,10 @@ test.skipIf(!isMac)("Mac：使い方（マニュアル）・EPUBエディター�
       await takePhoto(page, "使い方");
 
       /* ── 4. EPUBエディターの右の並びの下の文 ── */
+      // 使い方のタブを閉じてから開く。開いたままだと、Mac ではタブの並びがパレットの行に重なり、
+      // 行を押せずに30秒で落ちた（2026-11-13 Mac）
+      await pressWorkbenchKey(page, "ControlOrMeta+KeyW");
+      await page.waitForTimeout(300);
       await runCommand(page, "EPUBエディター（試作）");
       await page.waitForTimeout(500);
       if ((await quickPickTitle(page)) !== undefined) await pickQuickPickRow(page, E2E_WORK_TITLE);
