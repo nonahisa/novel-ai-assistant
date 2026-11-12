@@ -62,6 +62,8 @@ const AKARI_STYLE_ID = 1325133121;
  * ノーマルで読む（0.151.1・作者の答え 2026-11-13「スタイルは感情に合わせて自動」）
  */
 const AKARI_PLAIN_STYLE_ID = 1325133120;
+/** 語りの地の文で頼む声（まい／ノーマル）。上機嫌は感情のスタイルなので、平静の語りは同じ話者のノーマルで読む（0.152.0） */
+const NARRATOR_PLAIN_STYLE_ID = 888753760;
 /** 割り当ての声が引けないときの代わりの声（エンジンの最初の声） */
 const FALLBACK_STYLE_ID = 888753760;
 
@@ -139,10 +141,10 @@ test("両方のエンジンが動いているとき、灯の台詞の頼みだ�
         // 本文を運ぶ頼みは、灯の台詞だけが VOICEVOX 役へ。平静の台詞なので、割り当てた花音の話者のノーマル
         expect(toVoicevox.every((request) => request.text.includes("やった")), `VOICEVOX 役への頼み：${describeVoiceRequests(voicevox)}`).toBe(true);
         expect(toVoicevox.every((request) => request.speaker === String(AKARI_PLAIN_STYLE_ID)), `VOICEVOX 役への頼み：${describeVoiceRequests(voicevox)}`).toBe(true);
-        // ほかの文は AivisSpeech 役へ。灯の台詞は届かず、声の番号は割り当てたまい／上機嫌
+        // ほかの文は AivisSpeech 役へ。灯の台詞は届かず、地の文は割り当てたまいの話者のノーマル（0.152.0）
         expect(toAivis.some((request) => request.text.includes("朝の駅は静かだった")), `AivisSpeech 役への頼み：${describeVoiceRequests(aivis)}`).toBe(true);
         expect(toAivis.some((request) => request.text.includes("やった")), `AivisSpeech 役へ灯の台詞が届きました：${describeVoiceRequests(aivis)}`).toBe(false);
-        expect(toAivis.every((request) => request.speaker === String(NARRATOR_STYLE_ID)), `AivisSpeech 役への頼み：${describeVoiceRequests(aivis)}`).toBe(true);
+        expect(toAivis.every((request) => request.speaker === String(NARRATOR_PLAIN_STYLE_ID)), `AivisSpeech 役への頼み：${describeVoiceRequests(aivis)}`).toBe(true);
 
         // エンジンが替わる所の間の長さ（記録だけ。良し悪しは見ない。鳴り始めの時刻は画面から取れないので、頼みの時刻を残す）
         const synthesisLog = [

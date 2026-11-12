@@ -222,11 +222,11 @@ test("［次の話として足す］を選ぶと、後ろの話の番号が足�
       await frontFrameShowing(page, "夜が更けていく", "足した最初の話（004_転生前夜.txt）が前に出た面に描かれる", 30_000);
       expect(tabNamesInclude(await activeTabNames(page), "004_転生前夜.txt"), "前に出ているタブが 004_転生前夜.txt").toBe(true);
 
-      // 単話プロット：旧 4・5 話は 7・8 話へ。見出しの話数も直る。3話は動かない
+      // 単話プロット：旧 4・5 話は 7・8 話へ。見出しの話数も直る。3話は動かない（付け替えの控え .novelai-recovery は数えない）
       let plots: string[] = [];
       await waitWithContext(
         session,
-        async () => (plots = (await readdir(plotFolder).catch(() => [] as string[])).sort()).join("|") === ["第3話.md", "第7話.md", "第8話.md"].join("|"),
+        async () => (plots = (await readdir(plotFolder).catch(() => [] as string[])).filter((name) => !name.startsWith(".")).sort()).join("|") === ["第3話.md", "第7話.md", "第8話.md"].join("|"),
         "単話プロットが 第3話・第7話・第8話 になる",
         30_000,
         since

@@ -101,7 +101,12 @@ export async function startFakeVoiceEngine(options: FakeVoiceEngineOptions = {})
       requests.push({
         method: request.method ?? "",
         path: url.pathname,
-        text: url.searchParams.get("text") ?? "",
+        // 合成（/synthesis）は本文を受け取らないので、audio_query の答えの kana に入れて返した本文を読む
+        // （2026-11-13。これが無いと /synthesis の頼みの text が空で、「灯の台詞が VOICEVOX へ」を見られなかった）
+        text:
+          url.pathname === "/synthesis"
+            ? String((body as { kana?: unknown } | undefined)?.kana ?? "")
+            : url.searchParams.get("text") ?? "",
         speaker: url.searchParams.get("speaker") ?? "",
         at: Date.now(),
         ...(body === undefined ? {} : { body }),
@@ -125,7 +130,7 @@ export async function startFakeVoiceEngine(options: FakeVoiceEngineOptions = {})
           postPhonemeLength: 0.1,
           outputSamplingRate: 24000,
           outputStereo: false,
-          kana: "テスト",
+          kana: url.searchParams.get("text") ?? "テスト",
         });
       }
       if (url.pathname === "/synthesis") {

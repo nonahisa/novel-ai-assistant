@@ -1320,7 +1320,8 @@ export function voicePlanUnits(input: {
     }
     // 感情のスタイルは、その声のエンジンの一覧から選ぶ（同じ番号が別のエンジンでは別人）
     const list = listOf(voice.engine) ?? [];
-    // 平静の台詞は、同じ話者のふだんの声で読む（0.151.1。作者の答え 2026-11-13）。語りは選んだ声のまま。
+    // 平静の文は、同じ話者のふだんの声で読む（台詞は 0.151.1、語りは 0.152.0。作者の答え 2026-11-13）。語りも、
+    // 前の版で「上機嫌」など感情のスタイルを選んでいた語り手は、窓の表示（話者だけ）と合うようノーマルで読む。
     // ただし選んだのが「声の形」（しっとり・人間ver. など感情に結びつかない名前）なら選んだまま——
     // 作者が選ぶのは話者と声の形で、感情のスタイルだけを自動で替える（作者の答え 2026-11-13）
     const baseName = findStyle(list, voice.styleId)?.style.name;
@@ -1329,7 +1330,7 @@ export function voicePlanUnits(input: {
       !isNormalStyleName(baseName) &&
       styleEmotionOf(baseName, input.assignment.emotionStyles) === undefined;
     const picked =
-      sentence.kind === "dialogue" && emotion === "平静"
+      emotion === "平静"
         ? { styleId: keepShape ? voice.styleId : pickNormalStyle(list, voice.styleId), styled: false }
         : pickStyleForEmotion(list, voice.styleId, emotion, input.assignment.emotionStyles);
     units.push({
