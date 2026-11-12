@@ -18,6 +18,7 @@
  * 編集者モードは起こす前の設定（`novelai.mode: "editor"`）で入れる（切り替えの確認の窓は
  * `editorModeReviewLock` が見ている）。**AI は呼ばない。**
  */
+import { keysInTextFor } from "./support/keys";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -44,7 +45,8 @@ const EDITED = "　終電を逃した駅のホームに、雨の音だけが残�
  * テストからは呼べず、文をここへ写す。文を直したらここも直す）
  */
 const STOPPED_HEAD = "本文に未記録の変更があるため、送らずに止めました";
-const UNDO_HINT = "戻す話を右クリックして「変更を破棄」を選ぶと元に戻せます。";
+// Mac では製品が「右クリック（Mac は control＋クリック）」と添える（keysForHost）。期待も同じ規則で組む（2026-11-13 Mac の全件で落ちた）
+const UNDO_HINT = keysInTextFor("戻す話を右クリックして「変更を破棄」を選ぶと元に戻せます。");
 const OPEN_SCM = "ソース管理を開く";
 
 const LAUNCH: LaunchOptions = {

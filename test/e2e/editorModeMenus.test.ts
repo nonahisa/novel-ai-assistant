@@ -46,9 +46,10 @@ import {
   pressWorkbenchKey,
   quickInputWaitContext,
   quickOpen,
+  statusBarTexts,
   textEditorVisibleText,
 } from "./support/workbenchDom";
-import { EDITOR_TOP_PRESS } from "./support/keys";
+import { EDITOR_TOP_PRESS, keysInTextFor } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", ""].join("\n");
@@ -288,11 +289,12 @@ test("作者モードのメニューは作者の操作だけで、編集者モ�
       const propose = await scrollTreeUntilRow(page, "執筆データ", "修正を提案する");
       await propose.click();
       await waitUntil(
-        async () => (await notificationTexts(page)).some((text) => text.includes("修正したい所を本文で選んでから押してください（右クリックからも出せます）。")),
+        // Mac では製品が「右クリック（Mac は control＋クリック）」と添える（keysForHost。2026-11-13 Mac の全件で落ちた）
+        async () => (await notificationTexts(page)).some((text) => text.includes(keysInTextFor("修正したい所を本文で選んでから押してください（右クリックからも出せます）。"))),
         "選ばずに押すと、本文で選んでから押す案内が出る",
         15_000
       ).catch(async (error: unknown) => {
-        throw new Error(`${String(error)}（知らせ：${JSON.stringify(await notificationTexts(page))}）${await quickInputWaitContext(page)}`);
+        throw new Error(`${String(error)}（知らせ：${JSON.stringify(await notificationTexts(page))}／ステータスバー：${JSON.stringify(await statusBarTexts(page))}／窓：${JSON.stringify(await dialogText(page))}）${await quickInputWaitContext(page)}`);
       });
       await clearNotifications(page);
 
