@@ -1363,6 +1363,21 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・押したときだけ変える。保存や同期では揃えない\n\n" +
               "本文は1文字も変えない（文字コードも末尾の改行もそのまま）。",
           },
+          // **文字コードも、入れ物の形を揃える操作**（設計書5.4.2、0.149.0）。改行の統一の隣に置く
+          {
+            kind: "action",
+            command: "novelai.convertToUtf8",
+            label: "原稿 UTF-8 変換",
+            description: NO_AI_DESCRIPTION,
+            icon: "file-binary",
+            requiresWork: true,
+            detail:
+              "Shift_JIS の原稿を UTF-8 にする\n\n" +
+              "・♡や絵文字など、Shift_JIS に無い字もそのまま書けるようになる\n\n" +
+              "・この話だけか、作品の Shift_JIS の話すべてかを選べる\n\n" +
+              "・押したときだけ変える。保存や同期では変えない\n\n" +
+              "本文の字と改行はそのまま。変える前の原稿は控えが残る。",
+          },
           // **VS Code の Markdown 編集画面では、こちらの機能が効かない**
           // （設計書6.25）。用語の色分けもルビの表示も出ないので、
           // 読み書きする面そのものを用意した

@@ -73,6 +73,7 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
 
   // 本文をまとめて書き換える系。同じファイルを2本が同時に書きに行く
   { id: "novelai.unifyEol", label: "改行コード統一" },
+  { id: "novelai.convertToUtf8", label: "原稿 UTF-8 変換" },
   { id: "novelai.applyPendingUpdates", label: "設定資料更新分反映" },
   { id: "novelai.unifyCharacters", label: "人物重複統合" },
 

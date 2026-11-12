@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { UTF8_CONVERT_HINT, asSentence } from "../core/utf8ConvertHint";
+import { offerUtf8Conversion } from "./utf8ConvertOffer";
 import * as paths from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
@@ -479,7 +481,12 @@ export async function applyPlotNames(
         理由: written.reason,
         詳細: written.detail ?? "",
       });
-      void vscode.window.showWarningMessage(describeWriteFailure(written));
+      if (written.reason === "encoding_error") {
+        // 文字コード変換の案内に［UTF-8 に変換する］を添える（作者の指示 2026-11-09）
+        offerUtf8Conversion(describeWriteFailure(written), session.plotFile, { workFolder: work.folderPath });
+      } else {
+        void vscode.window.showWarningMessage(describeWriteFailure(written));
+      }
       return false;
     }
   }
@@ -828,7 +835,7 @@ function describeWriteFailure(result: WriteTextFileResult): string {
     case "conflict_markers":
       return "プロット（plot.md）に競合の印（<<<<<<<）が残っているため、入れるのを止めました。";
     case "encoding_error":
-      return `プロット（plot.md）を元の文字コードで書き出せないため、入れるのを止めました。${result.detail ?? ""}`;
+      return `プロット（plot.md）を元の文字コードで書き出せないため、入れるのを止めました。${asSentence(result.detail)}${UTF8_CONVERT_HINT}`;
     default:
       return `プロット（plot.md）に書き込めませんでした。${result.detail ?? ""}`;
   }

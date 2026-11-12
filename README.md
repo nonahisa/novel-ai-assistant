@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**0.148.5**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.148.2**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.149.0**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.148.2**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 
@@ -276,6 +276,10 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 ### テキストをMarkdownにする
 
 「作品執筆 → 原稿整備 → 本文 .md 化」を選ぶか、話数を右クリックします。ファイル名を変え、投稿サイト記法のルビ・傍点だけをこの拡張機能の書き方へ直します。字そのもの・文字コード・改行はそのままです。直す前の本文は控えが残ります。
+
+### Shift_JIS の原稿を UTF-8 にする
+
+「作品執筆 → 原稿整備 → 原稿 UTF-8 変換」を選ぶか、話数を右クリックします。「この話だけ」か「作品の Shift_JIS の話すべて」かを選び、変える話の名前の一覧を確かめてから変換します。UTF-8 にすると、♡や絵文字など Shift_JIS に無い字も書けます。字と改行は変わらず、変える前の本文は控えに残ります。
 
 ---
 

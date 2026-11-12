@@ -23,6 +23,7 @@ import {
   substituteForShiftJis,
   type UnencodableChar,
 } from "./sjisFallback";
+import { planUtf8Conversion } from "./sjisToUtf8";
 
 // バイト列の読み方（文字コード・改行・ハッシュ）は `textDecode.ts` にある
 // ——`vscode` の要らない部分なので、外から呼ぶ束（設計書6.87.8）が
@@ -108,8 +109,6 @@ export async function writeTextFilePreservingFormat(
   expectedHash: string,
   options: WriteTextFileOptions = {}
 ): Promise<WriteTextFileResult> {
-  const uri = path.toUri(filePath);
-
   // 編集部が校閲中の話は書かない（理由を返す。どの道で断ったかは関所がログへ残す）
   if (bodyWriteGuard) {
     const refusal = await bodyWriteGuard(filePath);
@@ -124,6 +123,84 @@ export async function writeTextFilePreservingFormat(
     return { ok: false, reason: "conflict_markers" };
   }
 
+  return replaceBodyBytes(filePath, expectedHash, (current) => {
+    // バイト列の作り方は `textEncodePreserving.ts`（MCP の取り込みも同じものを通る。6.115）
+    const encoded = encodePreservingFormat(current, newText, original, {
+      rewriteEol: options.rewriteEol === true,
+    });
+    if (!encoded.ok) {
+      // どの字がどこにあるかを、知らせの文に添えられるように返す（作者が直す場所を探さずに済む）
+      return {
+        ok: false,
+        reason: "encoding_error",
+        detail: unencodableDetail(encoded.unencodable),
+      };
+    }
+    if (encoded.substitutions.length > 0) {
+      // 置き換えは作者に知らせない（作者の決定 2026-11-08）。ログには、何を何に何個かだけ残す（本文の前後は書かない）
+      logLine(
+        `Shift_JIS の原稿へ書くため、字を置き換えました（${path.basename(filePath)}）：${describeSubstitutions(encoded.substitutions)}`
+      );
+    }
+    return { ok: true, bytes: encoded.bytes };
+  });
+}
+
+/**
+ * Shift_JIS の原稿を UTF-8 にして書き直す（設計書5.4.2、0.149.0。「原稿 UTF-8 変換」）。
+ *
+ * **文字コードを変えるので、`writeTextFilePreservingFormat` の「変わった所だけ置き換える」は
+ * 使えない**（全部の字の符号が変わる）。バイト列は `sjisToUtf8.ts` が生のバイトから作り、
+ * 本文の字と改行のバイトは1つも変えない。書き込みの手順と関所（校閲中・未保存・競合の印・
+ * ハッシュの2回の照合・控え→削除→作り直し・控えの世代）は、本文の書き戻しと同じものを通る
+ * （写しを作ると、片方だけ直る日が来る）。
+ *
+ * Shift_JIS でない・読めないバイトがある話は `encoding_error` で断る（呼ぶ側は先に
+ * `planUtf8Conversion` で見分けているので、ここへ来るのは照合のあとに変わったときだけ）。
+ */
+export async function convertTextFileToUtf8(
+  filePath: string,
+  expectedHash: string,
+  options: { bom: boolean }
+): Promise<WriteTextFileResult> {
+  if (bodyWriteGuard) {
+    const refusal = await bodyWriteGuard(filePath);
+    if (refusal) return { ok: false, reason: "editor_locked", detail: refusal };
+  }
+  if (hasUnsavedChanges(filePath)) {
+    return { ok: false, reason: "unsaved_changes" };
+  }
+  return replaceBodyBytes(filePath, expectedHash, (current) => {
+    const plan = planUtf8Conversion(current, options);
+    if (plan.kind === "convert") return { ok: true, bytes: plan.bytes };
+    if (plan.reason === "conflict_markers") return { ok: false, reason: "conflict_markers" };
+    return {
+      ok: false,
+      reason: "encoding_error",
+      detail:
+        plan.reason === "undecodable"
+          ? "Shift_JIS として読めないバイトがあります"
+          : "Shift_JIS の原稿ではありません",
+    };
+  });
+}
+
+type BytesBuildResult =
+  | { ok: true; bytes: Uint8Array }
+  | Extract<WriteTextFileResult, { ok: false }>;
+
+/**
+ * 本文のファイルを、作ったバイト列へ置き換える（本文の書き込みの共通の後半）。
+ *
+ * 読み直し → 競合の印 → ハッシュの照合 → バイト列を作る → 控えへ写す → 消す → 作り直す。
+ * `build` には照合を通った**いまのディスクのバイト**を渡す。
+ */
+async function replaceBodyBytes(
+  filePath: string,
+  expectedHash: string,
+  build: (current: Uint8Array) => BytesBuildResult
+): Promise<WriteTextFileResult> {
+  const uri = path.toUri(filePath);
   let current: Uint8Array;
   try {
     current = await vscode.workspace.fs.readFile(uri);
@@ -140,25 +217,9 @@ export async function writeTextFilePreservingFormat(
     return { ok: false, reason: "modified_externally" };
   }
 
-  // バイト列の作り方は `textEncodePreserving.ts`（MCP の取り込みも同じものを通る。6.115）
-  const encoded = encodePreservingFormat(current, newText, original, {
-    rewriteEol: options.rewriteEol === true,
-  });
-  if (!encoded.ok) {
-    // どの字がどこにあるかを、知らせの文に添えられるように返す（作者が直す場所を探さずに済む）
-    return {
-      ok: false,
-      reason: "encoding_error",
-      detail: unencodableDetail(encoded.unencodable),
-    };
-  }
-  const bytes = encoded.bytes;
-  if (encoded.substitutions.length > 0) {
-    // 置き換えは作者に知らせない（作者の決定 2026-11-08）。ログには、何を何に何個かだけ残す（本文の前後は書かない）
-    logLine(
-      `Shift_JIS の原稿へ書くため、字を置き換えました（${path.basename(filePath)}）：${describeSubstitutions(encoded.substitutions)}`
-    );
-  }
+  const built = build(current);
+  if (!built.ok) return built;
+  const bytes = built.bytes;
 
   /**
    * 公開FS APIには「期待した版なら置換」を一命令で行う原子的CASが無い

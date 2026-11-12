@@ -1226,6 +1226,8 @@ describe("原稿整備と投稿・出力", () => {
       "novelai.importChaptersFromBackup",
       "novelai.convertToMarkdown",
       "novelai.unifyEol",
+      // Shift_JIS の原稿を UTF-8 に（設計書5.4.2、0.149.0）。改行の統一の仲間
+      "novelai.convertToUtf8",
       // 手書きの写真から下書きを起こす（設計書6.117）
       "novelai.transcribePhotos",
     ]);

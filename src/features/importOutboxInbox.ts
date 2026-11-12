@@ -5,6 +5,7 @@ import { reviewLockEditorLogin } from "./manuscriptReviewLock";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { atomicWriteFile } from "../core/atomicWrite";
+import { UTF8_CONVERT_HINT, UTF8_CONVERT_WHERE, asSentence } from "../core/utf8ConvertHint";
 import {
   hasUnsavedChanges,
   writeTextFilePreservingFormat,
@@ -103,7 +104,8 @@ function describeWriteFailure(reason: WriteTextFailureReason, detail?: string): 
     case "conflict_markers":
       return "Gitの競合マーカーが残っているため、書きませんでした。先に解消してください。";
     case "encoding_error":
-      return `この文字コード（Shift_JIS）で表せない文字が含まれているため、書きませんでした。${detail ?? ""}`;
+      // 文字コード変換の案内を添える（作者の指示 2026-11-09）
+      return `この文字コード（Shift_JIS）で表せない文字が含まれているため、書きませんでした。${asSentence(detail)}${UTF8_CONVERT_HINT}${UTF8_CONVERT_WHERE}`;
     case "path_conflict":
       return `書き込めませんでした。${detail ?? ""}`.trim();
     case "editor_locked":

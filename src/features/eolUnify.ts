@@ -22,6 +22,7 @@ import { manualActor, recordEdit } from "../core/actorContext";
 import { editHistoryFile } from "../core/editHistoryFormat";
 import { withCancellableProgress } from "../views/progress";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+import { UTF8_CONVERT_HINT, UTF8_CONVERT_WHERE } from "../core/utf8ConvertHint";
 
 /**
  * 作品の改行コードを揃える（設計書5.4.2）。
@@ -271,7 +272,12 @@ function describeWriteFailure(result: WriteTextFileResult): string {
     case "modified_externally":
       return "読み込んだあとに、他の場所から変更されました";
     case "encoding_error":
-      return result.detail ? `元の文字コードで書き出せませんでした（${result.detail}）` : "元の文字コードで書き出せませんでした";
+      // 文字コード変換の案内を添える（作者の指示 2026-11-09）
+      return (
+        (result.detail ? `元の文字コードで書き出せませんでした（${result.detail}）。` : "元の文字コードで書き出せませんでした。") +
+        UTF8_CONVERT_HINT +
+        UTF8_CONVERT_WHERE
+      );
     default:
       return result.detail ?? "書き込めませんでした";
   }

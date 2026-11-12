@@ -8,6 +8,12 @@ import {
   type SjisMark,
 } from "../core/sjisFallback";
 import { buildSjisMarkFindings } from "../core/sjisMarkFinding";
+import {
+  CONVERT_TO_UTF8_COMMAND,
+  UTF8_CONVERT_BUTTON,
+  UTF8_CONVERT_HINT,
+  utf8ConvertFileArg,
+} from "../core/utf8ConvertHint";
 import { isEpisodeBodyRelPath } from "../core/episodeRenameDrift";
 import {
   atomicWriteFile,
@@ -208,6 +214,8 @@ export interface UnencodableWarnerDeps {
   warn(message: string, detail: string, buttons: readonly string[]): Thenable<string | undefined>;
   openKeep(recoveryPath: string): void;
   openPanel(workFolder: string): void;
+  /** この原稿を UTF-8 に変換する命令を呼ぶ（0.149.0） */
+  convert(filePath: string): void;
   log(workFolder: string, message: string): void;
 }
 
@@ -259,7 +267,9 @@ export function createUnencodableWarner(deps: UnencodableWarnerDeps): {
         const message =
           `Shift_JIS に無い字が${count}字あったので、「${SJIS_UNENCODABLE_MARK}」にして保存しました` +
           `（「${first.char}」${first.line}行目${count > 1 ? " ほか" : ""}）。` +
-          (recorded ? "校正・メモパネルに場所を残しました。" : "校正・メモパネルには場所を残せませんでした。");
+          (recorded ? "校正・メモパネルに場所を残しました。" : "校正・メモパネルには場所を残せませんでした。") +
+          // 原稿の文字コード変換を案内する（作者の指示 2026-11-09「知らせる時は、原稿の文字コード変換を案内してください」）
+          UTF8_CONVERT_HINT;
         const places = report.marks
           .slice(0, PLACES_LIMIT)
           .map(({ char, line }) => `${line}行目の「${char}」`)
@@ -270,11 +280,18 @@ export function createUnencodableWarner(deps: UnencodableWarnerDeps): {
           recoveryPath
             ? `元の字を含む本文は控えに残しました：${recoveryPath}`
             : "元の字を含む本文の控えを残せませんでした。「〓」の場所を確かめて、字を直してください。",
+          // 変換しても、もう〓になった字は戻らない。変換のあとで直す字だと分かるように書く
+          "［UTF-8 に変換する］を押すと、この話を UTF-8 にします。「〓」は変換しても元の字に戻らないので、変換したあとで直してください。",
         ].join("\n\n");
-        const buttons = [...(recorded ? [OPEN_PANEL] : []), ...(recoveryPath ? [OPEN_KEEP] : [])];
+        const buttons = [
+          ...(recorded ? [OPEN_PANEL] : []),
+          ...(recoveryPath ? [OPEN_KEEP] : []),
+          UTF8_CONVERT_BUTTON,
+        ];
         const picked = await deps.warn(message, detail, buttons);
         if (picked === OPEN_PANEL) deps.openPanel(report.workFolder);
         if (picked === OPEN_KEEP && recoveryPath) deps.openKeep(recoveryPath);
+        if (picked === UTF8_CONVERT_BUTTON) deps.convert(report.filePath);
       })().catch((error: unknown) => {
         deps.log(report.workFolder, `「〓」にした字の知らせを出せませんでした（${name}）：${messageOf(error)}`);
       });
@@ -405,6 +422,10 @@ export function installShiftJisSaveGuard(registry: { list(): readonly WorkEntry[
       const work = workAt(workFolder);
       // 作品一覧の右クリックと同じ形で作品を渡す（どの作品かを訊き直させない）
       if (work) void vscode.commands.executeCommand("novelai.openSceneMemos", { type: "work", work });
+    },
+    convert: (filePath) => {
+      // 窓の答えはもう受け取ったあと（保存の受け口の外）なので、命令の終わりは待たない
+      void vscode.commands.executeCommand(CONVERT_TO_UTF8_COMMAND, utf8ConvertFileArg(filePath));
     },
     log,
   });

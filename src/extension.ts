@@ -553,9 +553,11 @@ import { createSyncPresave } from "./features/presaveBeforeSync";
 // 「本文が見つからない」ときの文言は1か所に置く（`features/ruby.ts` と共用）
 import {
   activeForeignManuscriptTabUri,
+  activeTabFileUri,
   openManuscriptFile,
   warnManuscriptNotOpen,
 } from "./features/manuscriptTab";
+import { isUtf8ConvertFileArg } from "./core/utf8ConvertHint";
 import {
   isManuscriptKeyArgs,
   proofCheckCommand,
@@ -8472,6 +8474,41 @@ export async function activate(
       if (!work) return;
       const { unifyEol } = await import("./features/eolUnify.js");
       await unifyEol(work);
+    })
+  );
+
+  /*
+    **原稿の文字コードも、作者が押したときだけ変える**（設計書5.4.2、0.149.0）。
+    「この原稿」は、作品一覧の話の右クリック・知らせのボタン（`utf8File`）・前に出ているタブの順に
+    決める。どれも無ければ作品を訊いて、作品の Shift_JIS の話すべてを候補にする
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.convertToUtf8", async (arg?: unknown) => {
+      let focusPath: string | undefined;
+      let work: WorkEntry | undefined;
+      if (arg instanceof EpisodeNode) {
+        work = arg.work;
+        focusPath = arg.episode.filePath;
+      } else if (isUtf8ConvertFileArg(arg)) {
+        focusPath = arg.filePath;
+        work = findWorkForPath(registry, arg.filePath);
+      } else if (isWorkRefArg(arg)) {
+        work = arg.work;
+      } else {
+        const active = activeTabFileUri();
+        const activePath = active ? fromUri(active) : undefined;
+        const activeWork = activePath ? findWorkForPath(registry, activePath) : undefined;
+        if (activeWork && activePath) {
+          work = activeWork;
+          focusPath = activePath;
+        }
+      }
+      // 原稿のバイトを書き換えるので、直前の作品を黙って使わない（改行の統一と同じ）
+      work ??= await resolveWork(undefined, registry, { preferLast: false });
+      if (!work) return;
+      useLogFile(work.folderPath);
+      const { convertToUtf8 } = await import("./features/convertToUtf8.js");
+      await convertToUtf8({ work, focusPath });
     })
   );
 

@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。※現在テスト中です。",
-  "version": "0.148.5",
+  "version": "0.149.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1177,6 +1177,12 @@
         "icon": "$(list-selection)"
       },
       {
+        "command": "novelai.convertToUtf8",
+        "title": "原稿 UTF-8 変換",
+        "category": "統合小説執筆環境",
+        "icon": "$(file-binary)"
+      },
+      {
         "command": "novelai.convertDocxToMarkdown",
         "title": "Word 原稿変換（docx をまとめて変換）",
         "category": "統合小説執筆環境",
@@ -1756,6 +1762,11 @@
         },
         {
           "command": "novelai.convertToMarkdown",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
+          "group": "1_actions@3"
+        },
+        {
+          "command": "novelai.convertToUtf8",
           "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "1_actions@3"
         },

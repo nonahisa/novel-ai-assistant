@@ -5,6 +5,7 @@
 import * as path from "./pathText";
 import { buildFinding } from "./findingSource";
 import type { Finding } from "../models/finding";
+import { UTF8_CONVERT_HINT, UTF8_CONVERT_WHERE } from "./utf8ConvertHint";
 
 /**
  * 保存の直前に「〓」にした字の説明を、校正・メモパネルの行にする（設計書5.4.2、0.148.3。
@@ -75,7 +76,8 @@ export function buildSjisMarkFindings(
         original: group.context,
         target: "〓",
         suggestion: "",
-        message: `${chars}は Shift_JIS に無い字なので「〓」にしました。${where}`,
+        // 原稿の文字コード変換を案内する（作者の指示 2026-11-09）。パネルの行から命令は呼べないので、呼ぶ場所を書く
+        message: `${chars}は Shift_JIS に無い字なので「〓」にしました。${where}${UTF8_CONVERT_HINT}${UTF8_CONVERT_WHERE}`,
         category: "other",
         label: SJIS_MARK_FINDING_LABEL,
       },

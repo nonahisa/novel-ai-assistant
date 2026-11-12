@@ -89,6 +89,8 @@ import {
   type RecheckOutcome,
 } from "./recheckProposal";
 import { logFailure, logLine, logStep, useLogFile, workLog } from "../core/logger";
+import { UTF8_CONVERT_HINT, asSentence } from "../core/utf8ConvertHint";
+import { offerUtf8Conversion } from "./utf8ConvertOffer";
 import {
   batchVerbFromLabel,
   describeRecordUpdateBatchLog,
@@ -3731,6 +3733,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     if (!result.ok) {
       this.markStatus(id, "failed", describeWriteFailure(result));
+      offerUtf8ConversionOnEncodingError(result, item.filePath, this.work?.folderPath);
       return;
     }
 
@@ -3848,6 +3851,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     if (!result.ok) {
       this.markStatus(item.id, stay, describeWriteFailure(result));
+      offerUtf8ConversionOnEncodingError(result, item.filePath, this.work?.folderPath);
       return;
     }
 
@@ -4080,6 +4084,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     if (!result.ok) {
       this.markStatus(id, "applied", describeWriteFailure(result));
+      offerUtf8ConversionOnEncodingError(result, item.filePath, this.work?.folderPath);
       return;
     }
 
@@ -4572,6 +4577,19 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 }
 
+/**
+ * 書けない字で止めたときは、パネルの状態欄の文に加えて、［UTF-8 に変換する］の知らせを出す
+ * （作者の指示 2026-11-09「知らせる時は、原稿の文字コード変換を案内してください」。状態欄にはボタンを置けない）
+ */
+function offerUtf8ConversionOnEncodingError(
+  result: Extract<WriteTextFileResult, { ok: false }>,
+  filePath: string,
+  workFolder: string | undefined
+): void {
+  if (result.reason !== "encoding_error") return;
+  offerUtf8Conversion(describeWriteFailure(result), filePath, { workFolder });
+}
+
 function describeWriteFailure(
   result: Extract<WriteTextFileResult, { ok: false }>
 ): string {
@@ -4583,7 +4601,8 @@ function describeWriteFailure(
     case "unsaved_changes":
       return "エディターに未保存の変更があります。保存してから適用してください。";
     case "encoding_error":
-      return `この文字コードで表現できない文字が含まれているため、適用できません。${result.detail ?? ""}`;
+      // 文字コード変換の案内を添える（作者の指示 2026-11-09）。ボタンは失敗を受けた所が別の知らせで出す
+      return `この文字コードで表現できない文字が含まれているため、適用できません。${asSentence(result.detail)}${UTF8_CONVERT_HINT}`;
     case "path_conflict":
       return (
         "保存先が競合しました。" + (result.detail ? `（${result.detail}）` : "")

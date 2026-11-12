@@ -4,6 +4,7 @@ import { hashBytes } from "../../core/hash";
 import { decodeBytes, hasConflictMarkers, type TextFileContent } from "../../core/textDecode";
 import { encodePreservingFormat } from "../../core/textEncodePreserving";
 import { describeSubstitutions, describeUnencodable } from "../../core/sjisFallback";
+import { UTF8_CONVERT_HINT, UTF8_CONVERT_WHERE, asSentence } from "../../core/utf8ConvertHint";
 import { pruneRecoveries, recoveryPathFor } from "./recoveryFile";
 
 /**
@@ -133,7 +134,8 @@ export function describeBodyWriteFailure(result: Extract<BodyWriteResult, { ok: 
     case "conflict_markers":
       return "Gitの競合マーカーが残っているため、書きませんでした。先に解消してください。";
     case "encoding_error":
-      return `この文字コード（Shift_JIS）で表せない文字が含まれているため、書きませんでした。${result.detail ?? ""}`;
+      // 文字コード変換の案内を添える（作者の指示 2026-11-09）。押す口は作者の画面の命令だけ
+      return `この文字コード（Shift_JIS）で表せない文字が含まれているため、書きませんでした。${asSentence(result.detail)}${UTF8_CONVERT_HINT}${UTF8_CONVERT_WHERE}`;
     case "path_conflict":
       return `書き込めませんでした。${result.detail ?? ""}`.trim();
   }

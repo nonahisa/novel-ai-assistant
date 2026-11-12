@@ -299,6 +299,7 @@ describe("〓にした字の知らせ（控え → 保存 → 校正・メモパ
       },
       openKeep: (recoveryPath) => opened.push(`控え:${recoveryPath}`),
       openPanel: (workFolder) => opened.push(`パネル:${workFolder}`),
+      convert: (filePath) => opened.push(`変換:${filePath}`),
       log: () => undefined,
       ...overrides,
     };
@@ -330,12 +331,13 @@ describe("〓にした字の知らせ（控え → 保存 → 校正・メモパ
     expect(h.recorded).toEqual([`${WORK}\\本文\\.novelai-recovery\\001.txt.bak`]);
     const [{ message, detail, buttons }] = h.warned;
     expect(message).toBe(
-      "Shift_JIS に無い字が2字あったので、「〓」にして保存しました（「♡」1行目 ほか）。校正・メモパネルに場所を残しました。"
+      "Shift_JIS に無い字が2字あったので、「〓」にして保存しました（「♡」1行目 ほか）。校正・メモパネルに場所を残しました。" +
+        "この原稿を UTF-8 に変換すれば、この字もそのまま書けます。"
     );
     expect(message).not.toContain("?");
     expect(detail).toContain("001.txt");
     expect(detail).toContain("控え");
-    expect(buttons).toEqual(["校正・メモパネルを開く", "控えを開く"]);
+    expect(buttons).toEqual(["校正・メモパネルを開く", "控えを開く", "UTF-8 に変換する"]);
   });
 
   it("1字だけなら「ほか」を付けない", async () => {
@@ -357,6 +359,14 @@ describe("〓にした字の知らせ（控え → 保存 → 校正・メモパ
     await createUnencodableWarner(keep.deps).report(report("♡", ["♡"]));
     keep.save();
     await vi.waitFor(() => expect(keep.opened).toEqual([`控え:${WORK}\\本文\\.novelai-recovery\\001.txt.bak`]));
+  });
+
+  it("［UTF-8 に変換する］を押すと、この原稿を UTF-8 に変換する命令を呼ぶ（作者の指示 2026-11-09）", async () => {
+    const h = warnerHarness({}, "UTF-8 に変換する");
+    const saved = report("♡", ["♡"]);
+    await createUnencodableWarner(h.deps).report(saved);
+    h.save();
+    await vi.waitFor(() => expect(h.opened).toEqual([`変換:${saved.filePath}`]));
   });
 
   it("同じ字の組の窓は2度出さない。ただし控えとパネルの行は毎回残す（本文の字は毎回〓になるため）", async () => {
@@ -387,7 +397,7 @@ describe("〓にした字の知らせ（控え → 保存 → 校正・メモパ
     h.save();
     await vi.waitFor(() => expect(h.warned).toHaveLength(1));
     expect(h.warned[0].detail).toContain("控えを残せませんでした");
-    expect(h.warned[0].buttons).toEqual(["校正・メモパネルを開く"]);
+    expect(h.warned[0].buttons).toEqual(["校正・メモパネルを開く", "UTF-8 に変換する"]);
     expect(h.recorded).toEqual([undefined]);
   });
 
@@ -401,7 +411,7 @@ describe("〓にした字の知らせ（控え → 保存 → 校正・メモパ
     h.save();
     await vi.waitFor(() => expect(h.warned).toHaveLength(1));
     expect(h.warned[0].message).toContain("校正・メモパネルには場所を残せませんでした");
-    expect(h.warned[0].buttons).toEqual(["控えを開く"]);
+    expect(h.warned[0].buttons).toEqual(["控えを開く", "UTF-8 に変換する"]);
   });
 });
 

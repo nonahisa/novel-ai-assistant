@@ -5,6 +5,7 @@ import { hashBytes } from "./hash";
 import { hasConflictMarkers, type TextFileContent } from "./textDecode";
 import { writeTextFilePreservingFormat, type WriteTextFailureReason } from "./textFile";
 import { forgetOwnPlotSave, isPlotFilePath, noteOwnPlotSave } from "./ownPlotSave";
+import { UTF8_CONVERT_HINT, asSentence } from "./utf8ConvertHint";
 
 /**
  * **エディターで開いている文書へ、変わった所だけを当てる**（作者の裁定「両方直す」、2026-10-16）。
@@ -212,7 +213,8 @@ export function describePreferOpenDocumentFailure(
     case "path_conflict":
       return `${label}の置き場に同じ名前の別のものがあるため、書くのを止めました。`;
     case "encoding_error":
-      return `${label}の文字コードで書けない文字があるため、書くのを止めました。${result.detail ?? ""}`;
+      // 文字コード変換の案内を添える（作者の指示 2026-11-09）。プロットなど話でないファイルもあるので、場所は書かない
+      return `${label}の文字コードで書けない文字があるため、書くのを止めました。${asSentence(result.detail)}${UTF8_CONVERT_HINT}`;
     case "editor_locked":
       return `${label}は編集者が校閲中のため、書くのを止めました。`;
   }

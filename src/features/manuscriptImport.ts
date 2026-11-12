@@ -54,6 +54,8 @@ import { nameNewEpisodes, writeNewEpisodes } from "./addEpisodeFiles";
 import { followEpisodeFileRenames, renameFollowNotice } from "./episodeLedgers";
 import { registeredPostingSites } from "./postingCopyRegistered";
 import { reloadOpenDocumentAfterWrite } from "./reloadAfterWrite";
+import { UTF8_CONVERT_HINT, asSentence } from "../core/utf8ConvertHint";
+import { offerUtf8Conversion } from "./utf8ConvertOffer";
 
 /**
  * 原稿エディターの［入力］→「テキストファイルから」「Word から」（作者の決定 2026-11-08。
@@ -611,7 +613,14 @@ async function writeIntoCurrent(input: {
         result.detail ? `：${result.detail}` : ""
       }）`
     );
-    void vscode.window.showErrorMessage(describeWriteFailure(result, current.fileName));
+    if (result.reason === "encoding_error") {
+      offerUtf8Conversion(describeWriteFailure(result, current.fileName), current.filePath, {
+        severity: "error",
+        workFolder: work.folderPath,
+      });
+    } else {
+      void vscode.window.showErrorMessage(describeWriteFailure(result, current.fileName));
+    }
     return { changed: false };
   }
 
@@ -689,8 +698,10 @@ function describeWriteFailure(
       return (
         head +
         "この話の文字コードでは書けない文字が、取り込む文に入っています。" +
-        (result.detail ? `${result.detail}。` : "") +
-        "取り込む文からその文字を除くか、この話を UTF-8 で保存し直してからお試しください。"
+        asSentence(result.detail) +
+        // 文字コード変換の案内（作者の指示 2026-11-09）。ボタンは知らせを出す側が添える
+        UTF8_CONVERT_HINT +
+        "取り込む文からその文字を除くか、この話を UTF-8 に変換してからお試しください。"
       );
     case "editor_locked":
       return head + (result.detail ?? "編集部が校閲中の話です。");

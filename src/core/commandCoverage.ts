@@ -205,6 +205,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.renameWithSubtitle": { class: "C4", label: "ファイル名にサブタイトルを付ける", reason: "原稿" },
   "novelai.convertToMarkdown": { class: "C4", label: "本文 .md 化", reason: "原稿" },
   "novelai.unifyEol": { class: "C4", label: "改行コード統一", reason: "原稿" },
+  "novelai.convertToUtf8": { class: "C4", label: "原稿 UTF-8 変換", reason: "原稿" },
   "novelai.convertDocxToMarkdown": { class: "C1", label: "Word 原稿変換" },
   "novelai.openVertical": { class: "C3", label: "原稿エディターで開く" },
   "novelai.openEpisode": { class: "C3", label: "話を開く" },

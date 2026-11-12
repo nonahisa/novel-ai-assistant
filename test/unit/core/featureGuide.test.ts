@@ -31,7 +31,7 @@ const index = buildFeatureIndex();
  * **1つにしておく**——作品の質問へ渡すものは目次そのものなので、同じ上限で見る。
  * 2か所に数字を書いていたら、目次だけ 2,700 へ上げて片方が 2,600 のまま残った。
  */
-const INDEX_CHAR_LIMIT = 2900;
+const INDEX_CHAR_LIMIT = 3000;
 
 function allActions() {
   return ACTION_TREE.flatMap((group) =>
@@ -375,6 +375,9 @@ describe("相談へ渡す目次", () => {
       **名前だけ**を足した（設計書6.118。約190字で 2,879字）。作者モードの目次は
       変わっていない。上限を1つにしておく決まり（`INDEX_CHAR_LIMIT` の説明）に従い、
       モードで分けずに上げた。
+
+      2,900→3,000：原稿を UTF-8 に変換（設計書5.4.2、0.149.0）で操作が1つ増え、
+      編集者モードの目次が 2,913字になった（**名前だけ**。説明は混ざっていない）。
     */
     expect(index.length).toBeLessThan(INDEX_CHAR_LIMIT);
   });
