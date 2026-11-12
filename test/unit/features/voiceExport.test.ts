@@ -245,6 +245,22 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     expect(infoMessages[0].message).toContain("非公式");
   });
 
+  test("人物の声の調整（老けた声）は、書き出しの道でもエンジンへの頼みの値に効く。語りには当てない（作者の頼み 2026-11-13）", async () => {
+    state.assignment.characters["c-akari"] = {
+      ...state.assignment.characters["c-akari"],
+      adjust: { pitch: -0.06, speed: 0.85, intonation: 0.8 },
+    };
+    const outcome = await run(ACML_BOTH);
+    expect(outcome.kind).toBe("written");
+    const synth = engine!.requests.filter((r) => r.path === "/synthesis");
+    const akari = synth.filter((r) => r.query.speaker === "888753760").map((r) => r.body as Record<string, number>);
+    const narration = synth.filter((r) => r.query.speaker === "1325133120").map((r) => r.body as Record<string, number>);
+    expect(akari.length).toBeGreaterThan(0);
+    for (const body of akari) expect(body).toMatchObject({ speedScale: 0.85, pitchScale: -0.06, intonationScale: 0.8 });
+    expect(narration.length).toBeGreaterThan(0);
+    for (const body of narration) expect(body).toMatchObject({ speedScale: 1, pitchScale: 0, intonationScale: 1 });
+  });
+
   test("注意書きに、声ごとの要点・非公式の一文・全文のファイルがある", async () => {
     await run(ACML_BOTH);
     const notice = fileNamed("クレジットと利用条件.txt")!;
