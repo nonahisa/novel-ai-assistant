@@ -35,6 +35,7 @@ import {
   pressDialogButton,
   pressWorkbenchKey,
   quickOpen,
+  readTabState,
   statusBarTexts,
 } from "./support/workbenchDom";
 import { postingTextHash, postingTitleHash } from "../../src/core/postingBodyHash";
@@ -177,6 +178,22 @@ async function openRenamedEpisode(page: Page, fileName: string, head: string): P
   }
 }
 
+/**
+ * どのタブにも未保存の印（●）が無いのを、続けて 2 秒見届ける（開いた直後に遅れて付く印を拾う）。
+ * 落ちるときは、タブの様子・窓・知らせを添える
+ */
+async function waitTabsClean(page: Page): Promise<void> {
+  const dirtyTabs = async () => (await readTabState(page)).flatMap((group) => group.tabs.filter((tab) => tab.dirty).map((tab) => tab.name));
+  try {
+    await waitUntil(async () => (await dirtyTabs()).length === 0, "未保存の印のあるタブが無くなる", 15_000);
+    await holdsFor(async () => (await dirtyTabs()).length === 0, "未保存の印が付かないまま", 2_000);
+  } catch (error) {
+    throw new Error(
+      `${String(error)}（タブ：${JSON.stringify(await readTabState(page))}／窓：${(await dialogText(page)) ?? "なし"}／知らせ：${JSON.stringify(await noticeLines(page))}）`
+    );
+  }
+}
+
 /** 作品の行を開いて、話の行が並ぶまで待つ */
 async function expandWork(page: Page, firstEpisodeHead: string): Promise<void> {
   await showSidebar(page, E2E_WORK_TITLE);
@@ -220,6 +237,9 @@ test("エクスプローラー（本物の F2）で投稿済みの話の名前�
     async (session) => {
       const { page } = session;
       await openRenamedEpisode(page, "第1話_はじまり.txt", "第1話");
+      // 改名の前に、開いた原稿に未保存の変更が残っていないのを待つ。残ったまま改名すると VS Code の
+      // 保存の窓（Do you want to save the changes…）が出て落ちた（ノートPC、2026-11-13）。このテストは打たない
+      await waitTabsClean(page);
       await runCommand(page, "Reveal Active File in Explorer View");
       // エクスプローラーで当該ファイルの行が選ばれて焦点を持つまで待つ
       const row = page.locator(".explorer-viewlet .monaco-list-row.focused, .explorer-viewlet .monaco-list-row.selected", { hasText: "第1話_はじまり" }).first();

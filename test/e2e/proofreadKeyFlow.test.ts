@@ -39,7 +39,9 @@ import { turnVertical, VERTICAL_LAUNCH } from "./support/verticalFace";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import {
+  activeElementSummary,
   clearNotifications,
+  focusInside,
   pressWorkbenchKey,
   quickPickRows,
   quickPickTitle,
@@ -157,6 +159,28 @@ async function waitRunConfirm(session: E2ESession, label: string, from: number):
   return found as { text: string; first: string };
 }
 
+/**
+ * 確認の窓の［実行］へ Enter を送る。**窓が前に出て、焦点が窓の中にあり、先頭の［実行］の行が
+ * 選ばれているのを待ってから押す。** 遅い機械（ノートPC）では、窓の字が出たすぐあとに Enter を送ると、
+ * 行の選びが済む前で［実行］に届かず、本文に字が入らなかった（2026-11-13）。
+ * 落ちるときは、その時の窓・焦点・選ばれた行を添える
+ */
+async function pressEnterOnRun(session: E2ESession, label: string, from: number): Promise<void> {
+  const { page } = session;
+  const focusedRow = () => page.locator(".quick-input-widget .quick-input-list .monaco-list-row.focused").first().innerText().catch(() => "");
+  await waitUntil(
+    async () => (await focusInside(page, ".quick-input-widget")) && (await focusedRow()).includes("実行"),
+    `${label}：確認の窓に焦点があり、［実行］の行が選ばれる`,
+    10_000
+  ).catch(async (error: unknown) => {
+    throw new Error(
+      `${String(error)}（焦点：${await activeElementSummary(page)}／選ばれた行：${JSON.stringify(await focusedRow())}／窓：「${(await quickPickTitle(page)) ?? "なし"}」）
+${await describeState(session, from)}`
+    );
+  });
+  await page.keyboard.press("Enter");
+}
+
 async function pickerGone(page: Page): Promise<boolean> {
   return (await quickPickTitle(page)) === undefined;
 }
@@ -255,7 +279,7 @@ async function runFlow(session: E2ESession, frame: Frame, label: string): Promis
   await pressAndPassScope(frame, page, label, true);
   const again = await waitRunConfirm(session, label, from);
   expect(again.text, `${label}：2回目の保存つきの確認に保存の1行が出ていない`).toContain(PRESAVE_LINE);
-  await page.keyboard.press("Enter");
+  await pressEnterOnRun(session, label, from);
   await waitUntil(async () => (await readEpisode(session)).includes(mark), `${label}：確認の［実行］で本文のファイルに打った字が入る`).catch(
     async (error: unknown) => {
       throw new Error(`${String(error)}\n${await describeState(session, from)}`);
