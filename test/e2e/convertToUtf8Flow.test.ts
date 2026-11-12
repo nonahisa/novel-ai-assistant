@@ -21,6 +21,10 @@
  * **VS Code の版**：この件は既定の 1.141.0 で書いた。1.90.0 は `.vscode-test/` にあるが、画面の自動テストの
  * 部品（`workbenchDom.ts` のタブ・選ぶ画面の読み取り）は 1.138/1.141 で確かめたもので、1.90 では走らせていない。
  *
+ * 4. （49行）Shift_JIS の話へ ♡ を打って保存 →「〓」にした窓に案内の文と［UTF-8 に変換する］→ 押すと範囲を選ぶ窓
+ *    （話が2つ）か確かめの窓（話が1つ）→ 校正・メモパネルの置き場の〓の行に案内の文と命令の場所。
+ *    作りは `shiftJisSaveBytes.test.ts` の「♡」の件（素のエディターで打って保存）を写した
+ *
  * 文書を Shift_JIS で読ませる道：1 は `files.autoGuessEncoding`（中身から当てる）、2 は本体の
  * 「Change File Encoding → Reopen with Encoding」（作者の手順どおり）、3 は設定 `files.encoding`。
  * **AI は呼ばない。**
@@ -53,7 +57,7 @@ import {
   textEditorVisibleText,
   waitForQuickPick,
 } from "./support/workbenchDom";
-import { CLOSE_ACTIVE_EDITOR_PRESS } from "./support/keys";
+import { CLOSE_ACTIVE_EDITOR_PRESS, EDITOR_BOTTOM_PRESS } from "./support/keys";
 
 const FIRST = "第1話_駅.txt";
 const SECOND = "第2話_雨.txt";
@@ -389,5 +393,95 @@ test("設定 files.encoding が shiftjis の作品で変換すると、窓に BO
       settings: { "files.encoding": "shiftjis" },
       prepareWork: sjisWork([{ name: FIRST, body: FIRST_BODY }]),
     }
+  );
+}, 300_000);
+
+/** 素のエディターで末尾へ行って「♡」を打ち、Ctrl+S（保存の直前に「〓」へ置き換わる。0.148.3） */
+async function typeHeartAndSave(page: Page, name: string): Promise<void> {
+  await quickOpen(page, name);
+  await waitUntil(async () => (await textEditorVisibleText(page)).trim().length > 0, "素のエディターで話が開く", 20_000);
+  await focusTextEditor(page);
+  await page.keyboard.press(EDITOR_BOTTOM_PRESS);
+  await page.keyboard.insertText("♡");
+  await page.keyboard.press("ControlOrMeta+KeyS");
+}
+
+/** 「〓」にした窓（真ん中の窓）が出るまで待ち、案内の文とボタンを確かめる */
+async function waitGetaDialog(page: Page): Promise<void> {
+  const shown = await waitConfirmDialog(page, "♡");
+  expect(shown).toContain("〓");
+  expect(shown, "窓に案内の文が出る").toContain("この原稿を UTF-8 に変換すれば、この字もそのまま書けます。");
+  const visible = await page.locator(".monaco-dialog-box .monaco-button", { hasText: CONVERT_BUTTON }).first().isVisible();
+  expect(visible, "窓に［UTF-8 に変換する］が出る").toBe(true);
+}
+
+/** 校正・メモパネルの置き場（`.aiwriter/findings.jsonl`）の〓の行の説明 */
+async function waitGetaFindingMessage(session: E2ESession): Promise<string> {
+  const file = path.join(session.workFolder, ".aiwriter", "findings.jsonl");
+  let raw = "";
+  await waitUntil(
+    async () => {
+      raw = await readFile(file, "utf8").catch(() => "");
+      return raw.includes("Shift_JIS に無い字") && raw.includes("♡");
+    },
+    "校正・メモパネルの置き場に〓の行が残る",
+    20_000
+  ).catch((error: unknown) => {
+    throw new Error(`${String(error)}（置き場：${JSON.stringify(raw)}）`);
+  });
+  const lines = raw.split("\n").filter((line) => line.includes("Shift_JIS に無い字") && line.includes("♡"));
+  return String((JSON.parse(lines[0]) as { message?: unknown }).message ?? "");
+}
+
+const PLAIN_SJIS_SETTINGS = {
+  "files.encoding": "shiftjis",
+  "workbench.editorAssociations": { "*.txt": "default", "*.md": "default" },
+};
+
+test("49行：Shift_JIS の話に ♡ を打って保存すると、「〓」にした窓に案内の文と［UTF-8 に変換する］が出て、押すと「この話だけ」「作品の Shift_JIS の話すべて」を選ぶ窓へ進み、〓の行にも変換の案内が出る", async () => {
+  await withVsCode(
+    "UTF-8 案内 話が2つ",
+    SJIS_FILES.map(({ name, body }) => ({ name, text: body })),
+    async (session) => {
+      const { page } = session;
+      await clearNotifications(page);
+      await typeHeartAndSave(page, FIRST);
+      await waitGetaDialog(page);
+      await pressDialogButton(page, CONVERT_BUTTON);
+      // Shift_JIS の話が2つあるので、範囲を訊かれる
+      const rows = await waitForQuickPick(page, "原稿 UTF-8 変換");
+      expect(rows.map((row) => row.label)).toEqual(expect.arrayContaining(["この話だけ", "作品の Shift_JIS の話すべて"]));
+      // 校正・メモパネルの〓の行の説明（案内の文と、命令の場所）
+      const message = await waitGetaFindingMessage(session);
+      expect(message).toContain(
+        "この原稿を UTF-8 に変換すれば、この字もそのまま書けます。（作品一覧のこの話のメニュー →「原稿 UTF-8 変換」）"
+      );
+      // 取りやめる（何も変換しない）。第2話は Shift_JIS のまま
+      await page.keyboard.press("Escape");
+      expect(hex(await readBytes(session, SECOND), 4), "第2話は触っていない").toBe(hex(iconv.encode(SECOND_BODY, "shift_jis"), 4));
+    },
+    { settings: PLAIN_SJIS_SETTINGS, prepareWork: sjisWork(SJIS_FILES) }
+  );
+}, 300_000);
+
+test("49行：Shift_JIS の話が1つだけのとき、♡ の窓の［UTF-8 に変換する］は範囲を訊かず、確かめの窓へ進む", async () => {
+  await withVsCode(
+    "UTF-8 案内 話が1つ",
+    [{ name: FIRST, text: FIRST_BODY }],
+    async (session) => {
+      const { page } = session;
+      await clearNotifications(page);
+      await typeHeartAndSave(page, FIRST);
+      await waitGetaDialog(page);
+      await pressDialogButton(page, CONVERT_BUTTON);
+      const confirm = await waitConfirmDialog(page, "1話を Shift_JIS から UTF-8 に変換します");
+      expect(confirm).toContain(FIRST);
+      expect(await quickPickTitle(page), "範囲の選ぶ画面は出ない").toBeUndefined();
+      const message = await waitGetaFindingMessage(session);
+      expect(message).toContain("（作品一覧のこの話のメニュー →「原稿 UTF-8 変換」）");
+      // 取りやめる（変換しない）
+      await page.keyboard.press("Escape");
+    },
+    { settings: PLAIN_SJIS_SETTINGS, prepareWork: sjisWork([{ name: FIRST, body: FIRST_BODY }]) }
   );
 }, 300_000);
