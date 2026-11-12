@@ -11,9 +11,10 @@
  * 2. ［声］で VOICEVOX を選んで［▶ 読む］と、本文は VOICEVOX の接続先だけへ届く。［声の割り当て］の一覧の題と
  *    声の一覧の題に「VOICEVOX」が入り、選んだ声が `.aiwriter/voices.json` に VOICEVOX の印つきで残り、次に読むと
  *    その声の番号で頼む
- * 3. VOICEVOX で選んだ声の人物がいる作品を AivisSpeech で読むと、その人物の台詞は代わりの声の番号で AivisSpeech へ
- *    頼まれ、右下の一言「割り当てた声のうち 灯 の声が AivisSpeech に見つからないので…」が**1回だけ**出る
- *    （読んでいる途中に打っても出し直さない）。［声の割り当て］の一覧で、その人物に「（VOICEVOXの声）」が添えてある
+ * 3. VOICEVOX で選んだ声の人物がいる作品を、VOICEVOX を閉じたまま AivisSpeech で読むと、その人物の台詞は代わりの声の
+ *    番号で AivisSpeech へ頼まれ、右下の一言「VOICEVOX に繋がらないので、灯 の声は代わりの声…」が**1回だけ**出る
+ *    （読んでいる途中に打っても出し直さない）。［声の割り当て］の一覧で、その人物に「（VOICEVOX）」が添えてある
+ *    （0.151.0 から人物ごとにエンジンを混ぜて読む。VOICEVOX が動いていれば、その台詞は VOICEVOX で読む）
  * 4. VOICEVOX が閉じていて AivisSpeech が動いているとき、［▶ 読む］で真ん中の窓に「…（VOICEVOX）に繋がりませんでした。」
  *    「AivisSpeech（127.0.0.1:<口>）が動いています。こちらで読みますか。」が出て、［AivisSpeech で読む］で［声］が
  *    AivisSpeech に変わり、本文が AivisSpeech へ届く。両方とも閉じているときは［OSの声で読む］だけで、押すと
@@ -38,7 +39,7 @@ import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { VOICE_ENGINE_LABEL, voiceEngineDownPrompt, type VoiceEngineId } from "../../src/core/voiceEngine";
-import { unresolvedVoiceNotice } from "../../src/core/voiceCast";
+import { voicePlanNotice } from "../../src/core/voiceCast";
 import { readingDictionaryFileName } from "../../src/core/readingDictionary";
 import { emptyCharacter, type Character } from "../../src/models/character";
 import {
@@ -243,12 +244,13 @@ test("［声］で VOICEVOX を選ぶと本文は VOICEVOX の接続先へ届き
         await stopReading(frame);
 
         /* ── ［声の割り当て］ ── */
-        const listTitle = `声の割り当て（この作品の声。選ぶと ${VOICE_ENGINE_LABEL.voicevox} の声から選べます）`;
+        // 両方のエンジンが動いているので両方の声が並ぶ（2段目。0.151.0）。［声］の VOICEVOX が先
+        const listTitle = `声の割り当て（この作品の声。選ぶと ${VOICE_ENGINE_LABEL.voicevox}・${VOICE_ENGINE_LABEL.aivisspeech} の声から選べます）`;
         await clickAloudButton(frame, "aloudVoiceAssign");
         const rows = await waitForQuickPick(page, listTitle, 20_000);
         expect(rows.map((row) => row.label), `一覧：${JSON.stringify(rows)}`).toContain("語り手（地の文）");
         await page.locator(".quick-input-widget .quick-input-list .monaco-list-row").nth(rows.findIndex((row) => row.label === "語り手（地の文）")).click();
-        const voices = await waitForQuickPick(page, `語り手（地の文）の声（${VOICE_ENGINE_LABEL.voicevox}）`, 20_000);
+        const voices = await waitForQuickPick(page, `語り手（地の文）の声（${VOICE_ENGINE_LABEL.voicevox}・${VOICE_ENGINE_LABEL.aivisspeech}）`, 20_000);
         const index = voices.findIndex((row) => row.label === "まい／上機嫌");
         expect(index, `声の一覧：${JSON.stringify(voices)}`).toBeGreaterThanOrEqual(0);
         await page.locator(".quick-input-widget .quick-input-list .monaco-list-row").nth(index).click();
@@ -285,16 +287,17 @@ test("［声］で VOICEVOX を選ぶと本文は VOICEVOX の接続先へ届き
   }
 }, 240_000);
 
-test("VOICEVOX で選んだ声の人物がいる作品を AivisSpeech で読むと、その台詞は代わりの声で頼み、一言は1回の読み上げで1回だけ（途中で打っても出し直さない）。［声の割り当て］にはエンジンの名前が添えてある", async () => {
+test("VOICEVOX で選んだ声の人物がいる作品を、VOICEVOX を閉じたまま AivisSpeech で読むと、その台詞は代わりの声で頼み、一言は1回の読み上げで1回だけ（途中で打っても出し直さない）。［声の割り当て］にはエンジンの名前が添えてある", async () => {
   const aivis = await startFakeVoiceEngine({ brand: "AivisSpeech", wavMs: 1_500 });
   const voicevoxClosed = await closedEngineUrl();
   // 1文1.5秒の音を10文ほど。打つまでのあいだ読み続けているように長めにする。
   // 回数は漢数字で書く——半角数字は組んで書く面で縦中横の印（span.tcy）に包まれ、
   // 「9」と「度目の角」が別の字の節点に分かれて placeCaretAfter が見つけられない（0.148.1 の e2e で落ちた）
   const text = ["「やった！」と灯は笑った。", ...Array.from({ length: 9 }, (_, i) => `　雨は${"一二三四五六七八九"[i]}度目の角を曲がった。`)].join("\n") + "\n";
-  const notice = unresolvedVoiceNotice(["灯"], VOICE_ENGINE_LABEL.aivisspeech);
+  // 灯の声は VOICEVOX の声。VOICEVOX が閉じているので、その声だけ代わりの声で読む（2段目。0.151.0）
+  const notice = voicePlanNotice({ missing: [], down: [{ engine: "voicevox", slots: ["灯"] }] }, new Map([["voicevox", "unreachable"]]));
   if (!notice) throw new Error("一言の文が作れません");
-  const needle = `割り当てた声のうち 灯 の声が ${VOICE_ENGINE_LABEL.aivisspeech} に見つからないので`;
+  const needle = `${VOICE_ENGINE_LABEL.voicevox} に繋がらないので、灯 の声は代わりの声`;
   try {
     await withVsCode(
       "エンジンを戻したときの代わりの声",
@@ -305,7 +308,7 @@ test("VOICEVOX で選んだ声の人物がいる作品を AivisSpeech で読む�
         await chooseEngine(frame, "aivisspeech");
         const since = Date.now();
         await frame.locator("#aloudPlay").click();
-        await waitNoticeRecorded(session, needle, since, "右下に「割り当てた声のうち 灯 の声が AivisSpeech に見つからないので…」が出る");
+        await waitNoticeRecorded(session, needle, since, "右下に「VOICEVOX に繋がらないので、灯 の声は代わりの声…」が出る");
         const recorded = (await recordedNotices(session)).filter((entry) => entry.message.includes(needle));
         expect(recorded[0]?.message, "一言の文").toBe(notice);
         // 灯の台詞は、割り当てた VOICEVOX の声（1325133121）でなく、代わりの声（エンジンの最初の声 888753760）で AivisSpeech へ
@@ -332,7 +335,7 @@ test("VOICEVOX で選んだ声の人物がいる作品を AivisSpeech で読む�
         await clickAloudButton(frame, "aloudVoiceAssign");
         const rows = await waitForQuickPick(page, `声の割り当て（この作品の声。選ぶと ${VOICE_ENGINE_LABEL.aivisspeech} の声から選べます）`, 20_000);
         const akari = rows.find((row) => row.label === "灯");
-        expect(akari?.description, `一覧：${JSON.stringify(rows)}`).toBe(`花音／ささやき（${VOICE_ENGINE_LABEL.voicevox}の声）`);
+        expect(akari?.description, `一覧：${JSON.stringify(rows)}`).toBe(`花音／ささやき（${VOICE_ENGINE_LABEL.voicevox}）`);
         await page.keyboard.press("Escape");
       },
       {

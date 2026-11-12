@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**0.150.0**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.148.2**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.151.0**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.148.2**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 
@@ -257,7 +257,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 
 原稿エディターの上の列の［出力］→［読み上げ］を押し、開いた読み上げの段の［▶ 読む］を押すと、OSの音声で読み上げ、読んでいる文が光ります。AIも通信も使いません。「⚑ 引っかかった」を押すと、その文の前にメモを残して一時停止します。
 
-読み上げの段の［声］で「人物の声（AivisSpeech）」か「人物の声（VOICEVOX）」を選ぶと、手元のそのエンジンで人物ごとに声を変えて読みます。「音声に書き出す」を押すと、1話を音声ファイル（MP3）にでき、クレジットと利用条件の注意書きも同じフォルダーに作ります。試作・テスト中です。
+読み上げの段の［声］で「人物の声（AivisSpeech）」か「人物の声（VOICEVOX）」を選ぶと、手元のそのエンジンで人物ごとに声を変えて読みます。［声の割り当て］では AivisSpeech と VOICEVOX の両方の声から選べるので、人物ごとにエンジンを混ぜて読めます。「音声に書き出す」を押すと、1話を音声ファイル（MP3）にでき、クレジットと利用条件の注意書きも同じフォルダーに作ります。試作・テスト中です。
 
 #### メモと校正・メモパネル
 

@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
-import { pcmWav } from "../support/fakeVoiceEngine";
+import { FAKE_VOICEVOX_SPEAKERS, pcmWav, startFakeVoiceEngine } from "../support/fakeVoiceEngine";
 import type { VoiceEngineId } from "../../../src/core/voiceEngine";
+import type { VoicePlanUnit } from "../../../src/core/voiceCast";
 
 const { VoiceReadingService } = await import("../../../src/features/voiceReading");
 const { buildReadingPlan } = await import("../../../src/core/readAloud");
@@ -156,4 +157,47 @@ describe("声づくりが読む速さに追いつかないときの知らせ", (
   test("はじめの2文と続けて3文に届かないあいだは知らせない（4文の話では出ない）", async () => {
     expect(await readAll(slowService(2), true, 4)).toEqual([]);
   });
+});
+
+/*
+  人物ごとにエンジンを混ぜたとき（2段目。0.151.0）、速さの見張りはエンジンごとに分ける。
+  1つの見張りのままだと、遅いエンジンの文の間に速いエンジンの文が挟まるたびに「続けて遅かった数」が
+  切れて、遅いほうの知らせが出ない。並べた待ちの差し引き（前の音ができた時刻）もエンジンごとに持つ
+*/
+describe("エンジンを混ぜて読むときの速さの見張り（0.151.0）", () => {
+  test("遅い AivisSpeech と速い VOICEVOX を交互に読むと、遅い AivisSpeech の名前で1回だけ知らせる", async () => {
+    // 0.2秒の音を、AivisSpeech は1文0.3秒で1つずつ、VOICEVOX は1文0.005秒で作る
+    const slow = await startFakeVoiceEngine({ pcm: true, pcmMs: 200, serialSynthesis: true, synthesisDelayMs: 300 });
+    const fast = await startFakeVoiceEngine({
+      pcm: true,
+      pcmMs: 200,
+      serialSynthesis: true,
+      synthesisDelayMs: 5,
+      speakers: FAKE_VOICEVOX_SPEAKERS,
+    });
+    try {
+      const service = new VoiceReadingService((engine) => (engine === "voicevox" ? fast.url : slow.url));
+      const units: VoicePlanUnit[] = Array.from({ length: 12 }, (_, i) => ({
+        speech: `混ぜた文${i + 1}。`,
+        engine: i % 2 === 0 ? "aivisspeech" : "voicevox",
+        styleId: i % 2 === 0 ? 888753760 : 3,
+        emotion: "平静",
+        intensity: "中",
+        styled: false,
+        gapMs: 0,
+        who: "語り",
+      }));
+      const notices: string[] = [];
+      for (let i = 0; i < units.length; i++) {
+        const result = await service.audio(units, i, 1);
+        if (!("wav" in result)) throw new Error(result.problem);
+        if (result.slowNotice) notices.push(result.slowNotice);
+      }
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain("この PC では、AivisSpeech の声づくりが読む速さに追いついていません");
+    } finally {
+      await slow.close();
+      await fast.close();
+    }
+  }, 20_000);
 });

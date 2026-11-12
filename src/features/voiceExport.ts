@@ -8,6 +8,7 @@ import { workPaths } from "../core/workRegistry";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import {
   findStyle,
+  VOICE_ENGINE_IDS,
   VOICE_ENGINE_LABEL,
   VoiceEngineError,
   voiceEngineNextStep,
@@ -71,6 +72,12 @@ export const LICENSE_DIR_NAME = "ライセンス";
  * 書き出した音に残すものではない（声の調子は感情の分だけ寄せる）
  */
 export const VOICE_EXPORT_RATE = 1;
+
+/**
+ * 2つのエンジンを混ぜて書き出すときに揃える標本化の速さ（Hz。0.151.0）。AivisSpeech の既定の速さに
+ * 合わせる（VOICEVOX の 24000 を上げる側。下げると AivisSpeech の音の高い所が削れる）
+ */
+export const VOICE_EXPORT_MIXED_SAMPLE_RATE = 44100;
 
 /**
  * 確認の窓に出す「おおよその長さ」の見当。1秒に読む字の数（標準の速さの朗読で
@@ -137,8 +144,8 @@ interface UsedVoice {
 
 /**
  * 使った声を、**エンジンごと**に話者でまとめる（0.146.0）。スタイルの番号はエンジンごとに
- * 振られるので、引くのはその文のエンジンの一覧から。いまは1つのエンジンだが、人物ごとに
- * 混ぜる形（2段目）では、エンジンごとにライセンス・規約を引き分ける
+ * 振られるので、引くのはその文のエンジンの一覧から。人物ごとに混ぜる形（2段目。0.151.0）では、
+ * エンジンごとにライセンス・規約を引き分ける
  */
 function usedVoices(
   units: readonly VoicePlanUnit[],
@@ -370,7 +377,10 @@ export async function exportVoiceAudio(
     ),
   });
 
-  const planned = await service.plan(work, episodePath, target.text, target.sentences, target.engine);
+  // 届かなかったエンジンの覚え（読み上げの間のもの）は使わず、押したときに問い合わせ直す（0.151.0）
+  const planned = await service.plan(work, episodePath, target.text, target.sentences, target.engine, {
+    recheckEngines: true,
+  });
   if ("problem" in planned) {
     if (planned.engineDown) return stopEngineDown();
     if (planned.engineSlow) return stopEngineSlow();
@@ -380,11 +390,12 @@ export async function exportVoiceAudio(
   if (units.length === 0) return stop("この話には、読み上げる文がありません。");
 
   /*
-    使うエンジンごとに、話者の一覧と名乗り（brand_name）を引く。いまは［声］で選んだ1つだけだが、
-    人物ごとに混ぜる形（2段目）では文の印から2つになる。**名乗りが選んだ側と違えば止める**——
+    使うエンジンごとに、話者の一覧と名乗り（brand_name）を引く。人物ごとに混ぜる形（2段目。0.151.0）
+    では文の印から2つになる。**名乗りがそのエンジンと違えば止める**——
     接続先の設定が別のエンジンを指していると、ライセンスを別のエンジンの決まりで確かめてしまう
   */
-  const engines = [...new Set(units.map((unit) => unit.engine))];
+  // 並びは決まった順（AivisSpeech・VOICEVOX）。最初の文の声で注意書きのエンジンの並びが変わらないように
+  const engines = VOICE_ENGINE_IDS.filter((engine) => units.some((unit) => unit.engine === engine));
   const speakersOf = new Map<VoiceEngineId, VoiceSpeaker[]>();
   const brands = new Map<VoiceEngineId, { brand: EngineBrand; name: string }>();
   for (const engine of engines) {
@@ -406,10 +417,19 @@ export async function exportVoiceAudio(
       );
     }
     if (ENGINE_OF_BRAND[brand.brand] !== engine) {
+      // ［声］で選んでいない側（人物に割り当てた声のエンジン。2段目）なら、［声］を変えても直らない
+      const why =
+        engine === target.engine
+          ? `［声］で ${VOICE_ENGINE_LABEL[engine]} を選んでいますが`
+          : `人物の声に ${VOICE_ENGINE_LABEL[engine]} の声を割り当てていますが`;
+      const fix =
+        engine === target.engine
+          ? `［声］で ${brand.name} を選ぶか、設定 ${engineUrlSettingLabel(engine)} を ${VOICE_ENGINE_LABEL[engine]} の接続先にしてください。`
+          : `設定 ${engineUrlSettingLabel(engine)} を ${VOICE_ENGINE_LABEL[engine]} の接続先にするか、［声の割り当て］で選び直してください。`;
       return stop(
-        `［声］で ${VOICE_ENGINE_LABEL[engine]} を選んでいますが、接続先のエンジンは ${brand.name} と名乗りました。` +
+        `${why}、接続先のエンジンは ${brand.name} と名乗りました。` +
           `声のライセンス・規約を確かめられないので、書き出しませんでした（ファイルは作っていません）。` +
-          `［声］で ${brand.name} を選ぶか、設定 ${engineUrlSettingLabel(engine)} を ${VOICE_ENGINE_LABEL[engine]} の接続先にしてください。`
+          fix
       );
     }
     brands.set(engine, brand);
@@ -479,6 +499,14 @@ export async function exportVoiceAudio(
       terms.map(describeVoice).join("、")
   );
 
+  /*
+    **2つのエンジンを混ぜるときは、標本化の速さを揃えて作らせる**（0.151.0）。既定の速さはエンジンごとに
+    違い（AivisSpeech 44100・VOICEVOX 24000）、文ごとの WAV をつなぐ側（joinClips）は合わせ直す計算を
+    持たない。揃えるのはエンジン自身（audio_query の outputSamplingRate）。1つのエンジンのときは今までどおり
+    既定の速さのまま（朗読の控えも使える）
+  */
+  const mixedRate = engines.length > 1 ? { outputSamplingRate: VOICE_EXPORT_MIXED_SAMPLE_RATE } : {};
+
   type Made =
     | { mp3: Uint8Array; clip: PcmClip }
     | { failed: string }
@@ -492,16 +520,24 @@ export async function exportVoiceAudio(
       const wavs: Uint8Array[] = new Array(units.length);
       let next = 0;
       let done = 0;
-      // 2つずつ頼む（エンジンは1つずつ作るが、送り返しと次の下ごしらえが重なる）
+      /*
+        2つずつ頼む（エンジンは1つずつ作るが、送り返しと次の下ごしらえが重なる）。2つのエンジンを
+        混ぜるときは、頼み手もエンジンの数だけ増やす（枠はエンジンごとなので、2つのエンジンが並んで作れる）
+      */
       const worker = async (): Promise<void> => {
         while (next < units.length) {
           const index = next++;
-          wavs[index] = await service.synthesizeForExport(units[index], VOICE_EXPORT_RATE, controller.signal);
+          wavs[index] = await service.synthesizeForExport(
+            units[index],
+            VOICE_EXPORT_RATE,
+            controller.signal,
+            mixedRate
+          );
           done++;
           progress.report({ message: `文 ${done}/${units.length}`, increment: 90 / units.length });
         }
       };
-      await Promise.all([worker(), worker()]);
+      await Promise.all(Array.from({ length: 2 * engines.length }, () => worker()));
       if (controller.signal.aborted) return "cancelled";
       const clip = joinClips(units.map((unit, i) => ({ clip: parseWav(wavs[i]), gapMs: unit.gapMs })));
       progress.report({ message: "MP3 に変換しています" });

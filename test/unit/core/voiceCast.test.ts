@@ -12,6 +12,7 @@ import {
   parseVoiceAssignment,
   resolveVoiceRef,
   validateCastItems,
+  voicePlanNotice,
   voicePlanUnits,
   VOICE_GAP_SWITCH_MS,
   type CastEntry,
@@ -19,7 +20,7 @@ import {
   type VoiceAssignmentFile,
 } from "../../../src/core/voiceCast";
 import { parseSpeakers } from "../../../src/core/voiceEngine";
-import { FAKE_SPEAKERS } from "../support/fakeVoiceEngine";
+import { FAKE_SPEAKERS, FAKE_VOICEVOX_SPEAKERS } from "../support/fakeVoiceEngine";
 
 /**
  * 台詞ごとの話者と感情・声の割り当て（設計書6.42.3）の純粋な部分。
@@ -379,5 +380,130 @@ describe("声の割り当てのエンジンの印（0.146.0）", () => {
       [1325133120, "aivisspeech"],
     ]);
     expect(plan?.unresolved).toEqual(["灯"]);
+  });
+});
+
+describe("人物ごとにエンジンを混ぜる（2段目。0.151.0）", () => {
+  const aivis = parseSpeakers(FAKE_SPEAKERS);
+  const voicevox = parseSpeakers(FAKE_VOICEVOX_SPEAKERS);
+  const kanon = {
+    speakerUuid: "uuid-kanon",
+    speakerName: "花音",
+    styleName: "ノーマル",
+    styleId: 1325133120,
+    engine: "aivisspeech" as const,
+  };
+  const zunda = {
+    speakerUuid: "uuid-zunda",
+    speakerName: "ずんだもん",
+    styleName: "ノーマル",
+    styleId: 3,
+    engine: "voicevox" as const,
+  };
+  const text = "「やった」と灯は言った。\n「誰だ」";
+  const sentences = buildReadingPlan(text, "curly", [], { splitDialogue: true });
+  const assignment: VoiceAssignmentFile = {
+    version: 1,
+    narrator: kanon,
+    characters: { "c-akari": { ...zunda, characterName: "灯" } },
+  };
+
+  test("人物に割り当てた声は、その声の印のエンジンで読む（語りは AivisSpeech・灯は VOICEVOX）。感情のスタイルもその声のエンジンの一覧から選ぶ", () => {
+    const plan = voicePlanUnits({
+      sentences,
+      dialogues: castDialogues(text),
+      cast: [entry("「やった」", 0, "ai")],
+      assignment,
+      speakers: aivis,
+      engine: "aivisspeech",
+      others: new Map([["voicevox", voicevox]]),
+      names: new Map([["c-akari", "灯"]]),
+    });
+    expect(plan?.units.map((u) => [u.speech, u.engine, u.styleId, u.styled, u.who])).toEqual([
+      // 喜び → ずんだもんの「あまあま」（VOICEVOX の番号 1）
+      ["「やった」", "voicevox", 1, true, "灯"],
+      ["と灯は言った。", "aivisspeech", 1325133120, false, "語り"],
+      // 台詞の既定が無いので語りの声（AivisSpeech）
+      ["「誰だ」", "aivisspeech", 1325133120, false, "台詞"],
+    ]);
+    expect(plan?.unresolved).toEqual([]);
+    expect(plan?.down).toEqual([]);
+  });
+
+  test("語り手も、選んだ声の印のエンジンで読む（［声］が AivisSpeech でも VOICEVOX の語り手は VOICEVOX）", () => {
+    const plan = voicePlanUnits({
+      sentences: buildReadingPlan("地の文。", "curly", [], { splitDialogue: true }),
+      dialogues: [],
+      cast: [],
+      assignment: { version: 1, narrator: zunda, characters: {} },
+      speakers: aivis,
+      engine: "aivisspeech",
+      others: new Map([["voicevox", voicevox]]),
+    });
+    expect(plan?.units.map((u) => [u.engine, u.styleId])).toEqual([["voicevox", 3]]);
+  });
+
+  test("印の無い前の版の声と、割り当てていない枠は［声］のエンジンで読む", () => {
+    const plan = voicePlanUnits({
+      sentences: buildReadingPlan("地の文。\n「誰だ」", "curly", [], { splitDialogue: true }),
+      dialogues: castDialogues("地の文。\n「誰だ」"),
+      cast: [],
+      assignment: {
+        version: 1,
+        dialogueDefault: { speakerUuid: "uuid-zunda", speakerName: "ずんだもん", styleName: "ノーマル", styleId: 3 },
+        characters: {},
+      },
+      speakers: voicevox,
+      engine: "voicevox",
+      others: new Map([["aivisspeech", aivis]]),
+    });
+    expect(plan?.units.map((u) => [u.engine, u.styleId])).toEqual([
+      ["voicevox", 3],
+      ["voicevox", 3],
+    ]);
+  });
+
+  test("届かないエンジンの声は、代わりの声（台詞の既定か語り）で読み、届かないエンジンと枠を返す", () => {
+    const plan = voicePlanUnits({
+      sentences,
+      dialogues: castDialogues(text),
+      cast: [entry("「やった」", 0, "ai")],
+      assignment,
+      speakers: aivis,
+      engine: "aivisspeech",
+      downEngines: new Set(["voicevox"]),
+      names: new Map([["c-akari", "灯"]]),
+    });
+    expect(plan?.units.map((u) => [u.engine, u.who])).toEqual([
+      ["aivisspeech", "灯"],
+      ["aivisspeech", "語り"],
+      ["aivisspeech", "台詞"],
+    ]);
+    // 灯の台詞は語りの声（花音）の「喜び」に近いスタイルが無いので花音／ノーマルのまま
+    expect(plan?.units[0].styleId).toBe(1325133120);
+    expect(plan?.down).toEqual([{ engine: "voicevox", slots: ["灯"] }]);
+    expect(plan?.unresolved).toEqual([]);
+    const notice = voicePlanNotice(plan!, new Map([["voicevox", "unreachable"]]));
+    expect(notice).toBe(
+      "VOICEVOX に繋がらないので、灯 の声は代わりの声（台詞の既定か語りの声）で読みます。" +
+        "VOICEVOX を起動してからもう一度押すと、割り当てた声で読みます。"
+    );
+  });
+
+  test("エンジンには届いたが一覧に無い声は「見つからない」として、そのエンジンの名前で返す", () => {
+    const gone = { ...zunda, speakerUuid: "uuid-gone", styleName: "消えた", styleId: 999 };
+    const plan = voicePlanUnits({
+      sentences,
+      dialogues: castDialogues(text),
+      cast: [entry("「やった」", 0, "ai")],
+      assignment: { ...assignment, characters: { "c-akari": { ...gone, characterName: "灯" } } },
+      speakers: aivis,
+      engine: "aivisspeech",
+      others: new Map([["voicevox", voicevox]]),
+      names: new Map([["c-akari", "灯"]]),
+    });
+    expect(plan?.missing).toEqual([{ engine: "voicevox", slots: ["灯"] }]);
+    expect(plan?.unresolved).toEqual(["灯"]);
+    expect(voicePlanNotice(plan!)).toContain("割り当てた声のうち 灯 の声が VOICEVOX に見つからないので");
   });
 });

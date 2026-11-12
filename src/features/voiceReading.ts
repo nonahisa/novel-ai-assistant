@@ -22,6 +22,7 @@ import { describeVoiceHost } from "../core/voiceHostName";
 import { logFailure, logStep, responseExcerptForLog, useLogFile } from "../core/logger";
 import type { ReadingSentence } from "../core/readAloud";
 import {
+  assignedOtherEngines,
   castChunkSpeakerSequence,
   castChunksOf,
   castDialogues,
@@ -33,13 +34,14 @@ import {
   editCastEntry,
   mergeCastEntries,
   parseCastResult,
-  unresolvedVoiceNotice,
   validateCastSpeakers,
+  voicePlanNotice,
   voicePlanUnits,
   type CastChunk,
   type CastEntry,
   type CastPerson,
   type VoiceAssignmentFile,
+  type VoicePlanDownKind,
   type VoicePlanUnit,
   type VoiceRef,
 } from "../core/voiceCast";
@@ -112,8 +114,27 @@ export function engineUrlSettingLabel(engine: VoiceEngineId): string {
 
 /** 先に作っておく文の数（いま頼まれた文を含めない） */
 const PREFETCH_AHEAD = 3;
-/** 同時にエンジンへ頼む数。エンジンは1つずつ作るので、並べすぎても早くならない */
+/**
+ * 同時にエンジンへ頼む数（**エンジンごと**）。エンジンは1つずつ作るので、並べすぎても早くならない。
+ * 人物ごとにエンジンを混ぜたとき（2段目。0.151.0）は、2つのエンジンが別々に作れるので枠も別にする
+ * （1つの枠だと、遅いエンジンの頼みが枠を埋め、速いエンジンの文まで待たされる）
+ */
 const SYNTH_CONCURRENCY = 2;
+/**
+ * ［声の割り当て］で、［声］で選んでいない側のエンジンの話者の一覧を待つ長さ（0.151.0）。
+ * 動いていなければ手元ではすぐ断られるが、外のホストで返事が無いと30秒待たせることになる
+ */
+export const OTHER_ENGINE_SPEAKERS_MS = 5_000;
+
+/** エンジンごとの頼みの枠と、声づくりの速さの見張り（2段目。0.151.0） */
+interface EngineLane {
+  running: number;
+  waiting: Array<() => void>;
+  /** 声づくりが読む速さに追いついているかの見張り（1回の読み上げごとに始め直す。0.146.0） */
+  pace: SynthesisPaceWatch;
+  /** このエンジンでいちばん最後に音ができた時刻（ミリ秒。並べて頼んだときの待ちを数えないため） */
+  lastSynthEndAt: number;
+}
 /** 話者の一覧を引き直すまでの間。作者が話者を足したら、少し待てば並ぶ */
 const SPEAKERS_TTL_MS = 30_000;
 /** 届かなかったときに、もう片方のエンジンへ問い合わせて待つ長さ（窓が出るのを待たせすぎない） */
@@ -125,8 +146,8 @@ export const OTHER_ENGINE_PROBE_MS = 1_500;
  *
  * **エンジンを鍵に持つ**（0.146.0）。接続先・話者の一覧の控えはエンジンごと、音を作る口は
  * 文の印（`VoicePlanUnit.engine`）で選ぶ。合成の控えの鍵（`synthesisKey`）には前から接続先が
- * 入っているので、エンジンが違えば別の控えになる。いまは1回の読み上げで1つのエンジンだが、
- * 人物ごとに混ぜる形（2段目）でも、この係はそのまま2つのエンジンを同時に扱える。
+ * 入っているので、エンジンが違えば別の控えになる。人物ごとに混ぜる形（2段目。0.151.0）では、
+ * 1回の読み上げで2つのエンジンを同時に扱う（頼みの枠と速さの見張りもエンジンごと）。
  */
 export class VoiceReadingService {
   private readonly cache = new SynthesisCache();
@@ -135,19 +156,27 @@ export class VoiceReadingService {
     VoiceEngineId,
     { url: string; at: number; list: VoiceSpeaker[] }
   >();
-  private running = 0;
-  private readonly waiting: Array<() => void> = [];
+  /**
+   * エンジンごとの枠と速さの見張り（2段目。0.151.0）。**見張りもエンジンごと**——1つの見張りだと、
+   * 遅いエンジンの文の間に速いエンジンの文が挟まるたびに「続けて遅かった数」が切れ、
+   * 並べた待ちの差し引き（前の音ができた時刻）も、速いほうの時刻で遅いほうの時間を削ってしまう
+   */
+  private readonly lanes = new Map<VoiceEngineId, EngineLane>();
 
   /** 本文を送ってよいと作者が答えた外のホスト（この起動の間だけ。設定や端末には残さない） */
   private readonly allowedRemoteHosts = new Set<string>();
   private readonly askingRemoteHosts = new Map<string, Promise<boolean>>();
 
-  /** 声づくりが読む速さに追いついているかの見張り（1回の読み上げごとに始め直す。0.146.0） */
-  private readonly pace = new SynthesisPaceWatch();
   /** 見張りが出した知らせ。次の音の答えに添えて1回だけ渡す */
   private slowNotice: string | undefined;
-  /** いちばん最後に音ができた時刻（ミリ秒。並べて頼んだときの待ちを数えないため） */
-  private lastSynthEndAt = 0;
+  /** この読み上げで知らせを出したか（エンジンが2つでも、1回の読み上げで1回） */
+  private slowTold = false;
+  /**
+   * 読み始めのときに届かなかった、［声］で選んでいない側のエンジン（2段目。0.151.0）。
+   * **次に読み始める（`start`）まで問い合わせ直さない**——読んでいる途中に打つと計画を取り直すので、
+   * そのたびに届かないエンジンを待つことになる。値は届かなかった種類（一言の書き分けに使う）
+   */
+  private readonly downEngines = new Map<VoiceEngineId, VoicePlanDownKind>();
 
   constructor(
     private readonly engineUrl: (engine: VoiceEngineId) => string | undefined = readEngineUrl,
@@ -179,6 +208,17 @@ export class VoiceReadingService {
     if (!(await asking)) return { ok: false, host };
     this.allowedRemoteHosts.add(host);
     return { ok: true };
+  }
+
+  /**
+   * いま、確認の窓を出さずにそのエンジンへ本文を送ってよいか（この PC か、許可済みのホスト）。
+   * **先読みはこれで見る**（2段目。0.151.0）——後ろの文が別のエンジン（外のホスト）の声だと、
+   * 確認より先に先読みで本文が出てしまう。許可がまだなら先読みせず、その文を頼まれたときに訊く
+   */
+  private carryAllowedNow(engine: VoiceEngineId): boolean {
+    const url = this.engineUrl(engine);
+    const host = url ? engineHostOutsideThisPc(url) : undefined;
+    return host === undefined || this.allowedRemoteHosts.has(host);
   }
 
   /**
@@ -236,16 +276,27 @@ export class VoiceReadingService {
    * 書き出し用に1文の音を作る。**中止を通す**（長い話は数分かかるため）。
    * 控えにあればそれを使い、新しく作った音は控えへ入れない——1話ぶんの音で
    * 朗読の控え（64MB）を押し流すと、画面の［▶ 読む］がまた作り直しになる。
-   * 同時に頼む数は朗読と同じ枠（`limited`）で絞る
+   * 同時に頼む数は朗読と同じ枠（`limited`。エンジンごと）で絞る。
+   *
+   * `outputSamplingRate` を渡すと、その標本化の速さで作らせる（2つのエンジンを混ぜて1つの MP3 に
+   * するとき。0.151.0）。そのときは**朗読の控えを使わない**——控えの音はエンジンの既定の速さで、
+   * 混ぜると速さが揃わずつなげない
    */
-  synthesizeForExport(unit: VoicePlanUnit, rate: number, signal: AbortSignal): Promise<Uint8Array> {
+  synthesizeForExport(
+    unit: VoicePlanUnit,
+    rate: number,
+    signal: AbortSignal,
+    options: { outputSamplingRate?: number } = {}
+  ): Promise<Uint8Array> {
     const client = this.client(unit.engine);
     const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate);
-    const cached = this.cache.get(synthesisKey(client.baseUrl, unit.styleId, unit.speech, params));
-    if (cached) return Promise.resolve(cached);
-    return this.limited(() => {
+    if (options.outputSamplingRate === undefined) {
+      const cached = this.cache.get(synthesisKey(client.baseUrl, unit.styleId, unit.speech, params));
+      if (cached) return Promise.resolve(cached);
+    }
+    return this.limited(unit.engine, () => {
       if (signal.aborted) throw new VoiceEngineError("aborted", "中止しました", undefined, unit.engine);
-      return client.speak(unit.speech, unit.styleId, params, signal);
+      return client.speak(unit.speech, unit.styleId, params, signal, options.outputSamplingRate);
     });
   }
 
@@ -262,8 +313,11 @@ export class VoiceReadingService {
     return new VoiceEngineClient(url, this.fetchImpl, engine);
   }
 
-  /** そのエンジンの話者の一覧（少しのあいだ控える。控えはエンジンごと） */
-  async speakers(engine: VoiceEngineId, force = false): Promise<VoiceSpeaker[]> {
+  /**
+   * そのエンジンの話者の一覧（少しのあいだ控える。控えはエンジンごと）。`signal` で打ち切れる
+   * （［声の割り当て］で、［声］で選んでいない側を短く待つため）
+   */
+  async speakers(engine: VoiceEngineId, force = false, signal?: AbortSignal): Promise<VoiceSpeaker[]> {
     const client = this.client(engine);
     const cached = this.speakersCache.get(engine);
     if (
@@ -274,7 +328,7 @@ export class VoiceReadingService {
     ) {
       return cached.list;
     }
-    const list = await client.speakers();
+    const list = await client.speakers(signal);
     this.speakersCache.set(engine, { url: client.baseUrl, at: Date.now(), list });
     return list;
   }
@@ -282,8 +336,15 @@ export class VoiceReadingService {
   /**
    * 文ごとの声を決める。**失敗は作者向けの文で返す**（投げない）。
    *
-   * 割り当てた声がこのエンジンで引けなければ、代わりの声で読み、`notice` に一言を添えて
-   * 返す（0.146.0。出すのは呼ぶ側で、1回の読み上げで1回）
+   * 割り当てた声は、その声の印のエンジンで読む（2段目。0.151.0）。［声］で選んでいない側の
+   * エンジンは、割り当てにその印の声があるときだけ話者の一覧を引く（前もって問い合わせない決まり）。
+   *
+   * - ［声］のエンジンに届かない … 今までどおり読まない（`engineDown` で窓。［〇〇で読む］がある）
+   * - もう片方のエンジンに届かない … **止めない**。そのエンジンの声だけ代わりの声で読み、一言を返す。
+   *   止めると、窓の［〇〇で読む］で［声］を切り替えても、届かないエンジンの声が残る限り読めない
+   * - 引けない声（入れ直して消えた・前の版の声）… 代わりの声で読み、一言を返す（0.146.0）
+   *
+   * 一言（`notice`）を出すのは呼ぶ側で、1回の読み上げで1回
    */
   async plan(
     work: WorkEntry | undefined,
@@ -291,13 +352,22 @@ export class VoiceReadingService {
     text: string,
     sentences: readonly ReadingSentence[],
     engine: VoiceEngineId,
-    /** `start`：［▶ 読む］で読み始めたときの計画か（声づくりの速さの見張りを始め直す） */
-    options: { start?: boolean } = {}
+    /**
+     * `start`：［▶ 読む］で読み始めたときの計画か（声づくりの速さの見張りを始め直す）。
+     * `recheckEngines`：届かなかったエンジンの覚えを使わず問い合わせ直す（書き出し。0.151.0）——
+     * 読み上げの間に作者がエンジンを起動していても、覚えのまま代わりの声で MP3 を作ってしまうため。
+     * 速さの見張りは読んでいる最中のものなので、`start` と分けて始め直さない
+     */
+    options: { start?: boolean; recheckEngines?: boolean } = {}
   ): Promise<{ units: VoicePlanUnit[]; notice?: string } | VoiceProblem> {
+    if (options.recheckEngines) this.downEngines.clear();
     if (options.start) {
       // 1回の読み上げで1回だけ知らせる。覚えずに、読み始めるたびに見直す（作者の決定 2026-11-08）
-      this.pace.reset();
+      for (const lane of this.lanes.values()) lane.pace.reset();
       this.slowNotice = undefined;
+      this.slowTold = false;
+      // 届かなかったエンジンも、読み始めるたびに問い合わせ直す（起動していれば、その声で読む）
+      this.downEngines.clear();
     }
     let speakers: VoiceSpeaker[];
     try {
@@ -318,6 +388,17 @@ export class VoiceReadingService {
         return { problem: error instanceof Error ? error.message : String(error) };
       }
     }
+    const others = new Map<VoiceEngineId, VoiceSpeaker[]>();
+    for (const other of assignedOtherEngines(assignment, engine)) {
+      if (this.downEngines.has(other)) continue;
+      try {
+        others.set(other, await this.speakers(other));
+      } catch (error) {
+        // ログは残す（実装ルール5）。届かない種類は、一言の書き分けにだけ使う（原因を当てない）
+        describeEngineFailure(error, work);
+        this.downEngines.set(other, error instanceof VoiceEngineError ? error.kind : "badResponse");
+      }
+    }
     const planned = voicePlanUnits({
       sentences,
       dialogues: castDialogues(text),
@@ -325,6 +406,8 @@ export class VoiceReadingService {
       assignment,
       speakers,
       engine,
+      others,
+      downEngines: new Set(this.downEngines.keys()),
       names,
     });
     if (!planned) {
@@ -332,7 +415,7 @@ export class VoiceReadingService {
         problem: `音声合成のエンジン（${VOICE_ENGINE_LABEL[engine]}）に話者が1人も見つかりませんでした。${VOICE_ENGINE_LABEL[engine]}で話者（音声合成モデル）を入れてから、もう一度押してください。`,
       };
     }
-    const notice = unresolvedVoiceNotice(planned.unresolved, VOICE_ENGINE_LABEL[engine]);
+    const notice = voicePlanNotice(planned, this.downEngines);
     if (notice) logStep(`人物の声：${notice}`);
     return notice ? { units: planned.units, notice } : { units: planned.units };
   }
@@ -364,6 +447,8 @@ export class VoiceReadingService {
     for (let ahead = 1; ahead <= PREFETCH_AHEAD; ahead++) {
       const next = units[index + ahead];
       if (!next) break;
+      // 確認の窓をまだ通っていないエンジン（外のホスト）の文は先読みしない。頼まれたときに訊く
+      if (!this.carryAllowedNow(next.engine)) continue;
       // 先読みの失敗は、その文を頼まれたときに改めて出す（ここでは黙る）
       try {
         this.synthesize(next, rate).catch(() => undefined);
@@ -392,7 +477,8 @@ export class VoiceReadingService {
     if (cached) return Promise.resolve(cached);
     const pending = this.inFlight.get(key);
     if (pending) return pending;
-    const job = this.limited(async () => {
+    const lane = this.lane(unit.engine);
+    const job = this.limited(unit.engine, async () => {
       /*
         作るのにかかった時間を測る（0.146.0）。測り始めは**枠が空いて頼んだとき**——枠を待った
         時間まで数えると、先読みを並べただけで遅く見える。控えから出した音は数えない
@@ -408,9 +494,12 @@ export class VoiceReadingService {
         **時間切れ（timeout）で止まった文は、遅さの数に入れない**（0.147.1）。音が無いので
         「何秒の音に何秒」が測れず、当て推量の値で知らせることになる。数えずに飛ばすだけで、
         続けて遅かった数（streak）も切らない——遅い PC では、前後の文の値で知らせが出る
+
+        **前の音ができた時刻は、同じエンジンのものだけ見る**（2段目。0.151.0）。2つのエンジンは
+        別々に作るので、もう片方の音ができた時刻を引くと、遅いほうの時間が削られて見える
       */
-      const busyFrom = Math.max(startedAt, this.lastSynthEndAt);
-      this.lastSynthEndAt = Math.max(this.lastSynthEndAt, endedAt);
+      const busyFrom = Math.max(startedAt, lane.lastSynthEndAt);
+      lane.lastSynthEndAt = Math.max(lane.lastSynthEndAt, endedAt);
       this.notePace(unit.engine, (endedAt - busyFrom) / 1000, wav);
       return wav;
     })
@@ -426,8 +515,21 @@ export class VoiceReadingService {
   /** 1文の速さを見張りへ。追いつかない状態が続いたら、知らせを1回ぶん貯める */
   private notePace(engine: VoiceEngineId, elapsedSeconds: number, wav: Uint8Array): void {
     const audioSeconds = wavSeconds(wav);
-    const slow = this.pace.record(elapsedSeconds, audioSeconds);
+    // 見張りはエンジンごと。知らせの文には、追いつかないほうのエンジンの名前が入る
+    const slow = this.lane(engine).pace.record(elapsedSeconds, audioSeconds);
     if (!slow) return;
+    /*
+      2つのエンジンがどちらも遅くても、**知らせは1回の読み上げで1回**（作者の決定 2026-11-08）。
+      先に追いつかなくなったほうを名指しする。もう片方はログにだけ残す
+    */
+    if (this.slowTold) {
+      logStep(
+        `人物の声：${VOICE_ENGINE_LABEL[engine]} の声づくりも読む速さに追いついていません（知らせは1回だけ。` +
+          `1文あたり ${slow.audioSeconds.toFixed(2)}秒の音に ${slow.elapsedSeconds.toFixed(2)}秒）`
+      );
+      return;
+    }
+    this.slowTold = true;
     this.slowNotice = slowPaceNotice(VOICE_ENGINE_LABEL[engine], slow);
     logStep(
       `人物の声：声づくりが読む速さに追いついていません（${VOICE_ENGINE_LABEL[engine]}・` +
@@ -435,17 +537,28 @@ export class VoiceReadingService {
     );
   }
 
-  /** 同時に頼む数を絞る */
-  private async limited<T>(task: () => Promise<T>): Promise<T> {
-    while (this.running >= SYNTH_CONCURRENCY) {
-      await new Promise<void>((resolve) => this.waiting.push(resolve));
+  /** エンジンごとの枠と見張り（初めて使うときに作る） */
+  private lane(engine: VoiceEngineId): EngineLane {
+    let lane = this.lanes.get(engine);
+    if (!lane) {
+      lane = { running: 0, waiting: [], pace: new SynthesisPaceWatch(), lastSynthEndAt: 0 };
+      this.lanes.set(engine, lane);
     }
-    this.running++;
+    return lane;
+  }
+
+  /** 同時に頼む数を絞る（エンジンごと） */
+  private async limited<T>(engine: VoiceEngineId, task: () => Promise<T>): Promise<T> {
+    const lane = this.lane(engine);
+    while (lane.running >= SYNTH_CONCURRENCY) {
+      await new Promise<void>((resolve) => lane.waiting.push(resolve));
+    }
+    lane.running++;
     try {
       return await task();
     } finally {
-      this.running--;
-      this.waiting.shift()?.();
+      lane.running--;
+      lane.waiting.shift()?.();
     }
   }
 }
@@ -1219,33 +1332,81 @@ export async function manageVoiceCast(target: VoiceCastTarget): Promise<void> {
 /**
  * 声の割り当て（語り手・台詞の既定・人物ごと）。QuickPick で選ぶ。
  *
- * 選べるのは［声］で選んだエンジン（`engine`）の話者。**選んだ声にはそのエンジンの印を付けて
- * 書く**（0.146.0）。ほかのエンジンで選んだ声は、一覧に「〇〇の声」と添えて見せる（消さない。
- * 人物ごとにエンジンを混ぜる形〔2段目〕では、そのまま使う声になる）
+ * **両方のエンジンの話者を並べる**（2段目。0.151.0。作者の決定 2026-11-08「人物ごとにエンジンを
+ * 混ぜられる」）。［声］で選んだエンジン（`engine`）の声を先に、もう片方の声を後ろに並べ、説明の欄に
+ * エンジンの名前を出す。**選んだ声には、その声のエンジンの印を付けて書く**（0.146.0 と同じ）。
+ *
+ * 両方の話者の一覧を引くのは、作者が［声の割り当て］を押したとき（割り当てる操作）だけ。読み上げを
+ * 始める前や画面を開いたときには問い合わせない（作者の答え 2026-11-08）。本文は運ばない（話者の一覧だけ）。
+ *
+ * - 片方だけ届かない … 届いた側の声だけ並べ、上の一言（`placeHolder`）で届かない側を知らせる
+ * - ［声］の側も、もう片方も届かない … 今までどおり［声］の側の窓・知らせ（0.143.1）
+ * - もう片方は短く待つ（`OTHER_ENGINE_SPEAKERS_MS`）。外のホストで返事が無いときに待たせない
  */
 export async function assignVoices(
   work: WorkEntry,
   service: VoiceReadingService,
   engine: VoiceEngineId
 ): Promise<void> {
-  const engineLabel = VOICE_ENGINE_LABEL[engine];
-  let speakers: VoiceSpeaker[];
-  try {
-    speakers = await service.speakers(engine, true);
-  } catch (error) {
+  const other: VoiceEngineId = engine === "aivisspeech" ? "voicevox" : "aivisspeech";
+  const fetchList = async (which: VoiceEngineId): Promise<VoiceSpeaker[]> => {
+    if (which === engine) return service.speakers(which, true);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OTHER_ENGINE_SPEAKERS_MS);
+    try {
+      return await service.speakers(which, true, controller.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  type Fetched = { engine: VoiceEngineId; list: VoiceSpeaker[] } | { engine: VoiceEngineId; error: unknown };
+  const results = await Promise.all(
+    [engine, other].map(async (which): Promise<Fetched> => {
+      try {
+        return { engine: which, list: await fetchList(which) };
+      } catch (error) {
+        return { engine: which, error };
+      }
+    })
+  );
+  const available = results.flatMap((r) => ("list" in r && r.list.length > 0 ? [{ engine: r.engine, list: r.list }] : []));
+  const chosen = results[0];
+  if ("error" in chosen && available.length === 0) {
     // ログは窓のときも残す（describeEngineFailure が書く。実装ルール5）
-    const problem = describeEngineFailure(error, work);
-    if (isEngineUnreachable(error)) showVoiceEngineDown("assign", engine);
-    else if (isEngineTimeout(error)) showVoiceEngineSlow("assign", engine);
+    const problem = describeEngineFailure(chosen.error, work);
+    const otherResult = results[1];
+    if ("error" in otherResult) describeEngineFailure(otherResult.error, work);
+    if (isEngineUnreachable(chosen.error)) showVoiceEngineDown("assign", engine);
+    else if (isEngineTimeout(chosen.error)) showVoiceEngineSlow("assign", engine);
     else void warnWithLog(problem);
     return;
   }
-  if (speakers.length === 0) {
+  if (available.length === 0) {
+    const engineLabel = VOICE_ENGINE_LABEL[engine];
     void warnWithLog(
       `音声合成のエンジン（${engineLabel}）に話者が1人も見つかりませんでした。${engineLabel}で話者を入れてから、もう一度押してください。`
     );
     return;
   }
+  /** 届かなかった・話者のいなかった側の一言（届いた側の声は選べるので、止めずに上に出す） */
+  const notes: string[] = [];
+  for (const result of results) {
+    const name = VOICE_ENGINE_LABEL[result.engine];
+    if ("error" in result) {
+      describeEngineFailure(result.error, work);
+      notes.push(
+        isEngineUnreachable(result.error)
+          ? `${name} に繋がらないので、${name} の声は並んでいません（${name} を起動してから開き直すと並びます）。`
+          : `${name} から話者の一覧を受け取れなかったので、${name} の声は並んでいません（詳しくはログにあります）。`
+      );
+    } else if (result.list.length === 0) {
+      notes.push(`${name} に話者が1人も見つからないので、${name} の声は並んでいません。`);
+    }
+  }
+  const placeHolder = notes.length > 0 ? notes.join("") : undefined;
+  if (placeHolder) logStep(`人物の声：声の割り当て：${placeHolder}`);
+  const shownLabels = available.map((a) => VOICE_ENGINE_LABEL[a.engine]).join("・");
+
   let people: Character[];
   try {
     people = await loadPeople(work);
@@ -1265,9 +1426,9 @@ export async function assignVoices(
     const label = (ref: VoiceRef | undefined): string => {
       if (!ref) return "未選択";
       const name = `${ref.speakerName}／${ref.styleName}`;
-      // ほかのエンジンの声・前の版で選んだ声（印が無い）は、いまのエンジンでは読めないことがある
+      // 混ぜて読めるので、エンジンの名前として添える（注意ではない）。印の無い声は［声］のエンジンで探す
       if (ref.engine === undefined) return `${name}（前の版で選んだ声）`;
-      return ref.engine === engine ? name : `${name}（${VOICE_ENGINE_LABEL[ref.engine]}の声）`;
+      return `${name}（${VOICE_ENGINE_LABEL[ref.engine]}）`;
     };
     const targets: Array<vscode.QuickPickItem & { slot: "narrator" | "dialogueDefault" | Character }> = [
       { label: "語り手（地の文）", description: label(file.narrator), slot: "narrator" },
@@ -1283,28 +1444,36 @@ export async function assignVoices(
       })),
     ];
     const picked = await vscode.window.showQuickPick([...targets, cancelItem("閉じる")], {
-      title: `声の割り当て（この作品の声。選ぶと ${engineLabel} の声から選べます）`,
+      title: `声の割り当て（この作品の声。選ぶと ${shownLabels} の声から選べます）`,
       matchOnDescription: true,
+      ...(placeHolder ? { placeHolder } : {}),
     });
     if (!picked || isCancelItem(picked) || !("slot" in picked)) return;
 
     const voice = await vscode.window.showQuickPick(
       [
-        ...speakers.flatMap((speaker) =>
-          speaker.styles.map((style) => ({
-            label: `${speaker.name}／${style.name}`,
-            ref: {
-              speakerUuid: speaker.uuid,
-              speakerName: speaker.name,
-              styleName: style.name,
-              styleId: style.id,
-              engine,
-            } satisfies VoiceRef,
-          }))
+        ...available.flatMap(({ engine: which, list }) =>
+          list.flatMap((speaker) =>
+            speaker.styles.map((style) => ({
+              label: `${speaker.name}／${style.name}`,
+              description: VOICE_ENGINE_LABEL[which],
+              ref: {
+                speakerUuid: speaker.uuid,
+                speakerName: speaker.name,
+                styleName: style.name,
+                styleId: style.id,
+                engine: which,
+              } satisfies VoiceRef,
+            }))
+          )
         ),
         cancelItem("戻る"),
       ],
-      { title: `${picked.label}の声（${engineLabel}）`, matchOnDescription: true }
+      {
+        title: `${picked.label}の声（${shownLabels}）`,
+        matchOnDescription: true,
+        ...(placeHolder ? { placeHolder } : {}),
+      }
     );
     if (!voice || isCancelItem(voice) || !("ref" in voice)) continue;
     const next: VoiceAssignmentFile = { ...file, characters: { ...file.characters } };
