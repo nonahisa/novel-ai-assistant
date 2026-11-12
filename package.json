@@ -2761,6 +2761,7 @@
     "test:integration:latest": "npm run build && npm run compile:integration && node scripts/runIntegrationTests.mjs --vscode=stable",
     "test:web": "npm run build && node scripts/buildWebTests.mjs && node scripts/runWebTests.mjs",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts",
+    "test:e2e:real": "npm run build && vitest run --config vitest.real.config.mts",
     "promo:record": "npm run build && vitest run --config vitest.promo.config.mts",
     "manual:shots": "npm run build && vitest run --config vitest.manual.config.mts",
     "check:env": "node scripts/checkEnv.mjs",
