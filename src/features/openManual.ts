@@ -8,6 +8,7 @@ import { STEP_MENU } from "../views/stepMenu";
 import { canRunProcesses } from "../core/runtime";
 import { extraGuideForHost } from "../core/featureGuide";
 import { entranceOf } from "../core/actionEntrance";
+import { keysForHost } from "../core/keyLabels";
 import { openGeneratedMarkdown } from "../views/openDocument";
 
 /**
@@ -167,7 +168,9 @@ function actionLine(action: ActionItem, noteLocation = true): string {
   // から出す。手で書くと、足したときにマニュアルだけが古いままになる
   const needs = prerequisiteNoteOf(action);
   const tail = needs ? ` ${needs}` : "";
-  return `- ${action.label}${note}${mark}${noteLocation ? whereToFind(action) : ""}: ${plain(action.detail)}${tail}`;
+  // 入口と説明は、それぞれ「右クリック」に添え書きを付けてから1行につなぐので、つないだあとで1回整える
+  // （1行に1つだけ。2026-11-13 Mac の画面テスト）
+  return keysForHost(`- ${action.label}${note}${mark}${noteLocation ? whereToFind(action) : ""}: ${plain(action.detail)}${tail}`);
 }
 
 /**

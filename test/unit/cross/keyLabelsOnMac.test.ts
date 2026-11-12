@@ -70,6 +70,12 @@ describe("Mac として組み立てた画面の文に「Ctrl+」が残らない"
       .flatMap((text) => text.split("\n"))
       .filter((line) => !firstRightClickHasNote(line));
     expect(left).toEqual([]);
+    // 同じ行の2回目には添えない（再現：入口の文と説明の文がそれぞれ添えてから1行につながり、
+    // 1行に2つ付いた。2026-11-13 Mac の画面テスト macRightClickHints で見つかった）
+    const twice = texts
+      .flatMap((text) => text.split("\n"))
+      .filter((line) => line.split("（Mac は control＋クリック）").length - 1 > 1);
+    expect(twice).toEqual([]);
     expect(buildUserManual()).toContain(RIGHT_CLICK_NOTE);
   });
 

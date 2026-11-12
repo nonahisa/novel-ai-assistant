@@ -160,10 +160,16 @@ const RIGHT_CLICK_WITH_NOTE = `右クリック${RIGHT_CLICK_MAC_NOTE}`;
 function addRightClickNote(text: string): string {
   return text
     .split("\n")
-    .map((line) =>
+    .map((line) => {
       // もう添えてある行には足さない（WebView の見張りは同じ要素に何度も走るので、足し続けると増える）
-      line.includes(RIGHT_CLICK_WITH_NOTE) ? line : line.replace("右クリック", RIGHT_CLICK_WITH_NOTE)
-    )
+      const noted = line.includes(RIGHT_CLICK_WITH_NOTE) ? line : line.replace("右クリック", RIGHT_CLICK_WITH_NOTE);
+      // 添えてから1行につないだ文（マニュアルの入口と説明など）は、2つ目からの添え書きを外す
+      // （2026-11-13 Mac の画面テストで、1行に2つ付いた）
+      const first = noted.indexOf(RIGHT_CLICK_WITH_NOTE);
+      if (first < 0) return noted;
+      const head = noted.slice(0, first + RIGHT_CLICK_WITH_NOTE.length);
+      return head + noted.slice(head.length).split(RIGHT_CLICK_WITH_NOTE).join("右クリック");
+    })
     .join("\n");
 }
 
