@@ -14,10 +14,13 @@
  * 1回にする（件ごとに起こすので、件ごとに戻しても次の件でまた書き換わるだけ）。
  */
 import { restoreProtocolHandler, snapshotProtocolHandler } from "../../../scripts/protocolHandlerGuard.mjs";
+import { holdPull } from "../../../scripts/holdPull.mjs";
 import { claimRunOwnership, sweepLaunches } from "./cleanup";
 
 export default async function setup(): Promise<() => Promise<void>> {
   claimRunOwnership();
+  // 流している間は、会話のフックの自動の git pull を止める（scripts/holdPull.mjs）
+  const releasePull = holdPull();
   const protocolSnapshot = snapshotProtocolHandler();
   await sweepLaunches();
   return async () => {
@@ -26,6 +29,7 @@ export default async function setup(): Promise<() => Promise<void>> {
     } finally {
       // VS Code を止めてから戻す（動いている試験版が書き直さないように）
       restoreProtocolHandler(protocolSnapshot);
+      releasePull();
     }
   };
 }

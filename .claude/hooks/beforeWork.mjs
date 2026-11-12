@@ -25,6 +25,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { pullHeld } from "../../scripts/holdPull.mjs";
 
 /** これだけ空いたら取りに行く */
 const QUIET_MS = 30 * 60 * 1000;
@@ -45,6 +46,10 @@ const gitDir = git("rev-parse", "--git-dir");
 if (!gitDir) process.exit(0);
 
 const stamp = path.join(gitDir, "novelai-last-pull");
+
+// 長いテスト・配布の検査を裏で流している間は取りに行かない（scripts/holdPull.mjs。2026-11-13 ノートPCで、
+// 裏で流している間に pull が入り、ビルドより新しいテストで流して取り違えた）
+if (pullHeld(path.resolve(gitDir))) process.exit(0);
 
 let last = 0;
 try {
