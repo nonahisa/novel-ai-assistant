@@ -103,8 +103,11 @@ export interface ImportScan {
   readonly manuscriptDir: string;
 }
 
-/** 読んで、入れる前の形にした取り込む文 */
-interface ImportedText {
+/**
+ * 読んで、入れる前の形にした取り込む文。
+ * 「バックアップから」（`manuscriptBackupImport.ts`）も同じ形で1話ぶんを渡す
+ */
+export interface ImportedText {
   /** 改行を LF にそろえた文（書き方はまだ寄せていない） */
   readonly text: string;
   readonly notation: "markdown" | "plain";
@@ -398,8 +401,10 @@ async function readImported(
  * その番号の話が無い（番号が飛んでいる）ときは、開いている話の書き方で番号だけを
  * 変える。**サブタイトルは、作者が「1行目を題にする」を選んだときだけ付ける**
  * （区切りは挿入と同じ `insertedEpisodeFileName` の決め方）。
+ *
+ * 「バックアップから」も同じ決め方で、足す話の数だけ番号を1つずつ進めて呼ぶ。
  */
-function nextEpisodeName(
+export function nextEpisodeName(
   episodes: readonly EpisodeFile[],
   current: EpisodeFile,
   folder: string,
@@ -482,7 +487,7 @@ function charsOf(text: string, notation: "markdown" | "plain"): number {
 }
 
 /** 開いている話の題の置き場 */
-type TitlePlace = "header" | "rename";
+export type TitlePlace = "header" | "rename";
 
 /**
  * 開いている話（空の話・上書き）で、題をどこに置けるか。
@@ -492,7 +497,7 @@ type TitlePlace = "header" | "rename";
  *   （サブタイトルの案と同じ `renameEpisodeFile`。名前がぶつかるなら置けない）
  * - どちらでもない（もうサブタイトルがある・合本）→ 置けない（null）。題は本文に残す
  */
-async function titlePlaceOf(
+export async function titlePlaceOf(
   current: EpisodeFile,
   lfText: string,
   title: string,
@@ -529,7 +534,7 @@ async function askTitle(title: string): Promise<boolean | undefined> {
 }
 
 /** 話を新しく作るときの名前の決まり（`novelai.addEpisode`・「最新話」と同じ設定） */
-function episodeNaming(): { digits: number; extension: string } {
+export function episodeNaming(): { digits: number; extension: string } {
   const config = vscode.workspace.getConfiguration("novelai");
   return {
     digits: config.get<number>("episodeNumberDigits", 3),
@@ -554,7 +559,7 @@ async function askImportChoice(
   return answer?.choice;
 }
 
-function cancelledBeforeWriting(): ManuscriptImportResult {
+export function cancelledBeforeWriting(): ManuscriptImportResult {
   void vscode.window.showInformationMessage("取り込みを中止しました（何も書いていません）。");
   return { changed: false };
 }
@@ -565,8 +570,10 @@ function cancelledBeforeWriting(): ManuscriptImportResult {
  * **ハッシュは窓を出す前に読んだもので照らす**——作者が「N字が消える」と見て決めた
  * 中身と、書き換える中身が同じであることを確かめるため。そのあいだに外で書き換えられて
  * いれば、書かずに止まる。
+ *
+ * 「バックアップから」で1話を選んだときも、ここを通す（空の話・［上書きする］）。
  */
-async function writeIntoCurrent(input: {
+export async function writeIntoCurrent(input: {
   readonly work: WorkEntry;
   readonly current: EpisodeFile;
   readonly disk: TextFileContent;
@@ -740,8 +747,7 @@ async function addAsNext(input: {
     episodes,
     prepared,
     {
-      filePath: newFilePath,
-      bytes,
+      files: [{ filePath: newFilePath, bytes }],
       commitMessage: `第${pivot}話を取り込んで差し込んだため、第${pivot}話以降の話数を調整`,
     },
     { isCancelled: input.cancelled }

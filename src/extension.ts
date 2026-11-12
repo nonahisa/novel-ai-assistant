@@ -133,7 +133,7 @@ import {
 import { importOutboxInbox } from "./features/importOutboxInbox";
 import { renameWork } from "./features/renameWork";
 import { exportImeDictionary } from "./features/exportImeDictionary";
-import { exportPdf } from "./features/exportPdf";
+import { exportEpisodePdf, exportPdf } from "./features/exportPdf";
 import { exportEpub } from "./features/exportEpub";
 import { openEpubEditorPanel } from "./features/epubEditorPanel";
 import { manageCustomFields } from "./features/manageCustomFields";
@@ -2513,21 +2513,22 @@ export async function activate(
         );
         return undefined;
       }
-      const { importIntoEpisode } = await import("./features/manuscriptImport.js");
       const scan = await scanWork(work);
-      const result = await importIntoEpisode({
-        work,
-        filePath,
-        source,
-        scan,
-        document,
-        // 1行目を題にしてファイル名に付けるときは、サブタイトルの案と同じ手当て
-        // （見た目を新しい名前へ持って行き、古い面を閉じる。設計書6.25.5）
-        renameHooks: {
-          beforeRename: carryAppearanceToRenamed,
-          afterRename: closeRenamedManuscript,
-        },
-      });
+      // 1行目（バックアップでは話の題）を題にしてファイル名に付けるときは、サブタイトルの
+      // 案と同じ手当て（見た目を新しい名前へ持って行き、古い面を閉じる。設計書6.25.5）
+      const renameHooks = {
+        beforeRename: carryAppearanceToRenamed,
+        afterRename: closeRenamedManuscript,
+      };
+      // 「バックアップから」（0.150.0）は同じ入口・同じ決まりで、話を何話も足せる道
+      const result =
+        source === "backup"
+          ? await (
+              await import("./features/manuscriptBackupImport.js")
+            ).importBackupIntoWork({ work, filePath, scan, document, renameHooks })
+          : await (
+              await import("./features/manuscriptImport.js")
+            ).importIntoEpisode({ work, filePath, source, scan, document, renameHooks });
       if (result.changed) {
         // 取り込んだ文は今日書いた字ではない。基準を置き直して、次の保存で
         // 「今日 +N字」に数えないようにする（新しく作った話も同じ。設計書6.3.2）
@@ -2535,6 +2536,49 @@ export async function activate(
         treeProvider.refresh(work.id);
       }
       return { newFilePath: result.newFilePath };
+    },
+    /*
+      ［出力］→「PDF（この話）」（0.150.0。設計書6.25.13）。作品の［PDF出力］と同じ組み方で
+      開いている話だけを刷る。**ブラウザ版では止める**（ボタンは隠してあるが、ほかの道から
+      届いたら理由を出す。［PDF出力］と同じ文言）。**編集者モードでも止める**（書き出しは
+      編集者モードで開いていない。［PDF出力］と同じ）
+    */
+    exportEpisodePdf: async (document, line) => {
+      if (!canRunProcesses()) {
+        void vscode.window.showWarningMessage(describeProcessesBlocked("novelai.exportPdf"));
+        return;
+      }
+      if (isEditorMode()) {
+        void vscode.window.showWarningMessage(describeBlocked("novelai.exportPdf"));
+        return;
+      }
+      const filePath = fromUri(document.uri);
+      const work = workOfPath(registry, filePath);
+      if (!work) {
+        void vscode.window.showWarningMessage(
+          "この原稿の作品が分かりませんでした。作品として登録されているかご確認ください。"
+        );
+        return;
+      }
+      // 紙は保存されている中身から組む。画面で打った最後の字まで出るよう、先に保存する
+      if (document.isDirty) {
+        const saved = await document.save();
+        if (!saved || document.isDirty) {
+          void vscode.window.showWarningMessage(
+            "開いている話を保存できなかったため、PDF にするのをやめました。保存してからもう一度お試しください。"
+          );
+          return;
+        }
+      }
+      const scan = await scanWork(work);
+      const episode = scan.episodes.find((entry) => path.isSamePath(entry.filePath, filePath));
+      if (!episode) {
+        void vscode.window.showWarningMessage(
+          "この原稿は作品の話として認識できないため、PDF にできません。作品の本文フォルダーにある話を開いてください。"
+        );
+        return;
+      }
+      await exportEpisodePdf(work, episode, line);
     },
     // 単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23）。
     // **繋ぐのはここだけ**（シーンメモと同じ理由）。作品は開いている原稿のもの、

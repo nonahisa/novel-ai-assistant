@@ -8,8 +8,8 @@ import { MANUSCRIPT_POSTING_ACTIONS, postingActionCommand } from "../../../src/c
  * 1段目は［入力］［出力］［補助］［表示］の4つだけ。押すと、読み上げの段と同じく
  * 下に2段目が開く。開くのは1つずつで、同じ言葉を押し直すと閉じ、ほかの言葉を
  * 押すと切り替わる。**今ある機能は並べ替えるだけ**（ボタンの id も動きも変えない）。
- * 次の版で作るもの（バックアップ・PDF）は入口だけで、押しても拡張機能へは何も送らない。
- * テキストファイルと Word は 0.147.0 から動く（押すと拡張機能へ入口を送る）。
+ * テキストファイルと Word は 0.147.0 から、バックアップと PDF（この話）は 0.150.0 から動く
+ * （押すと拡張機能へ入口を送る）。次の版で作る入口（button.soon）は、いまは1つも無い。
  *
  * 画面へ渡る本物の HTML とスクリプトを切り出して確かめる
  * （manuscriptEditorProofMenu.test.ts と同じやり方）。
@@ -223,50 +223,50 @@ describe("段の出し入れ", () => {
   });
 });
 
-describe("次の版で入る入口", () => {
-  function soonHarness() {
-    const env = {
-      posted: [] as unknown[],
-      note: { textContent: "" },
-      clicks: {} as Record<string, () => void>,
-    };
+describe("バックアップから・PDF（この話）（0.150.0）", () => {
+  it("2つとも入口の印（soon）が外れ、何が起きるかを説明に書く", () => {
+    for (const id of ["importBackup", "exportPagePdf"]) {
+      const tag = new RegExp(`<button id="${id}"[^>]*>`).exec(markup)?.[0] ?? "";
+      expect(tag, id).not.toContain('class="soon"');
+      expect(tag, id).not.toContain("次の版で入ります");
+    }
+    expect(new RegExp('<button id="importBackup"[^>]*>').exec(markup)?.[0]).toContain("最後に加える");
+    expect(new RegExp('<button id="exportPagePdf"[^>]*>').exec(markup)?.[0]).toContain("PDFに保存");
+    // 次の版で作る入口は、いまは1つも無い
+    expect(markup).not.toContain('class="soon"');
+  });
+
+  it("「PDF（この話）」は、打ちかけの字を送ってからカーソルの行を添えて送る（合本ではどの話かを行で知る）", () => {
+    const env = { posted: [] as unknown[], clicks: {} as Record<string, () => void> };
     new Function(
       "env",
       `
       const vscode = { postMessage(message) { env.posted.push(message); } };
-      const note = env.note;
+      function keyHandOver() { env.posted.push("handOver"); }
+      function caretLine() { return 12; }
       const document = {
-        querySelectorAll(selector) {
-          if (selector !== "button.soon") return [];
-          return ["importBackup", "exportPagePdf"].map((id) => ({
-            id,
-            textContent: id,
-            addEventListener(type, fn) { if (type === "click") env.clicks[id] = fn; },
-          }));
+        getElementById(id) {
+          return { addEventListener(type, fn) { if (type === "click") env.clicks[id] = fn; } };
         },
       };
-      ${markedBlock("soonButtons")}
+      ${markedBlock("pdfButton")}
       `
     )(env);
-    return env;
-  }
-
-  it("バックアップ・PDF は、押すと「次の版で入ります」と出すだけで何も呼ばない", () => {
-    const env = soonHarness();
-    for (const id of ["importBackup", "exportPagePdf"]) {
-      env.note.textContent = "";
-      env.clicks[id]?.();
-      expect(env.note.textContent, id).toContain("この機能は次の版で入ります");
-    }
-    expect(env.posted).toEqual([]);
+    env.clicks.exportPagePdf?.();
+    expect(env.posted).toEqual(["handOver", { type: "exportEpisodePdf", line: 12 }]);
   });
 
-  it("2つとも入口の印（soon）が付き、押す前に次の版で入ることが分かる", () => {
-    for (const id of ["importBackup", "exportPagePdf"]) {
-      const tag = new RegExp(`<button id="${id}"[^>]*>`).exec(markup)?.[0] ?? "";
-      expect(tag, id).toContain('class="soon"');
-      expect(tag, id).toContain("次の版で入ります");
-    }
+  it("ブラウザ版（外部プロセスを起動できない）では「PDF（この話）」を隠す。手元では HTML が変わらない", () => {
+    const browser = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", undefined, {
+      canRunProcesses: false,
+    });
+    expect(new RegExp('<button id="exportPagePdf"[^>]*>').exec(browser)?.[0]).toContain(" hidden ");
+    // バックアップからはブラウザ版でも使える（番号ずらしだけを中で並べない。0.147.0 と同じ）
+    expect(new RegExp('<button id="importBackup"[^>]*>').exec(browser)?.[0]).not.toContain("hidden");
+    const desktop = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", undefined, {
+      canRunProcesses: true,
+    });
+    expect(desktop).toBe(html);
   });
 });
 
@@ -292,15 +292,18 @@ describe("［入力］の取り込み（テキストファイル・Word。0.147.
     return env;
   }
 
-  it("押すと、打ちかけの字を送ってから入口（text／word）を拡張機能へ送る", () => {
+  it("押すと、打ちかけの字を送ってから入口（text／word／backup）を拡張機能へ送る", () => {
     const env = importHarness();
     env.clicks.importText?.();
     env.clicks.importWord?.();
+    env.clicks.importBackup?.();
     expect(env.posted).toEqual([
       "handOver",
       { type: "importEpisode", source: "text" },
       "handOver",
       { type: "importEpisode", source: "word" },
+      "handOver",
+      { type: "importEpisode", source: "backup" },
     ]);
   });
 

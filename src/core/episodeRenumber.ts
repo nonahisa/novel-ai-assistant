@@ -61,8 +61,11 @@ export interface EpisodeRename {
 export interface RenumberPlan {
   /** 付け替えの基準になる話数（挿入する位置／削除する話の話数） */
   pivot: number;
-  /** ずらす向き。+1 が挿入、−1 が削除 */
-  delta: 1 | -1;
+  /**
+   * ずらす幅。正の数が挿入（足す話の数。ふつうは +1）、−1 が削除。
+   * 何話ぶんかの挿入は原稿エディターの「バックアップから」（0.150.0）
+   */
+  delta: number;
   /**
    * 対象のフォルダー。**基準の話と同じフォルダーの話しか動かさない**。
    *
@@ -334,15 +337,19 @@ export function episodeNumberOf(fileName: string): number | null {
  *
  * @param position 挿入する位置の話数。**この話数以降が後ろへずれる**
  * @param folder 対象のフォルダー。**基準の話と同じフォルダーの話だけ**を動かす
+ * @param count 割り込ませる話の数（原稿エディターの「バックアップから」は何話も
+ *   まとめて足す。0.150.0）。後ろの話は**この数だけ一度に**ずらす——1話ずつ N 回
+ *   ずらすと、同じ話の名前が N 回変わり、途中で止まったときの姿も分かりにくくなる
  */
 export function planInsertion(
   episodes: readonly RenumberEpisode[],
   position: number,
-  folder: string
+  folder: string,
+  count: number = 1
 ): RenumberPlan {
   return buildPlan(episodes, {
     pivot: position,
-    delta: 1,
+    delta: Math.max(1, Math.floor(count)),
     folder,
     affects: (n) => n >= position,
   });
@@ -397,7 +404,7 @@ function buildPlan(
   allEpisodes: readonly RenumberEpisode[],
   spec: {
     pivot: number;
-    delta: 1 | -1;
+    delta: number;
     folder: string;
     affects: (n: number) => boolean;
   }

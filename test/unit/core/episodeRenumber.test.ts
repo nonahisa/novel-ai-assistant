@@ -198,6 +198,17 @@ describe("挿入の計画", () => {
     expect(planInsertion(numbered, 6, DIR).renames).toHaveLength(0);
   });
 
+  test("何話ぶんかをまとめて差し込む：後ろは足す話の数だけずれ、実行は降順（バックアップから。0.150.0）", () => {
+    const plan = planInsertion(numbered, 3, DIR, 2);
+    expect(plan.delta).toBe(2);
+    expect(plan.renames.map((r) => [r.fromFileName, r.toFileName])).toEqual([
+      ["005.txt", "007.txt"],
+      ["004.txt", "006.txt"],
+      ["003.txt", "005.txt"],
+    ]);
+    expect(plan.collisions).toEqual([]);
+  });
+
   test("話が1つでも通る", () => {
     const plan = planInsertion([ep("001.txt")], 1, DIR);
     expect(plan.renames.map((r) => r.toFileName)).toEqual(["002.txt"]);

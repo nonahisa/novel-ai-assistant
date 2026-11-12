@@ -7,7 +7,7 @@ import {
   type ReaderStatsMetrics,
   type ReaderStatsRecord,
 } from "../models/posting";
-import { parseCollectedFile } from "./collectedFile";
+import { parseCollectedFile, parseEpisodeTitle } from "./collectedFile";
 import {
   collectedSectionStarts,
   type CollectedSectionStart,
@@ -66,6 +66,12 @@ export interface BackupEpisode {
   /** 直前の章の見出し（【第N章】の値）。無ければ null */
   readonly part: string | null;
   readonly body: string;
+  /**
+   * 話数を除いた題（「3話　再会」→「再会」）。読めなければ null。
+   * 原稿エディターの［入力］→「バックアップから」が、新しく作る話のファイル名の
+   * サブタイトルに使う（0.150.0。読み方は合本の分割と同じ `parseEpisodeTitle`）
+   */
+  readonly title: string | null;
   /**
    * 話ごとのファイルのとき、本文フォルダーからの名前（`episode_0001.txt`）。
    * **手元の同じ名前のファイルと照らす**のに使う。合本の話は null
@@ -217,6 +223,7 @@ export function backupEpisodesOf(inspection: WorkZipInspection): BackupEpisode[]
           label: labelOf(episode.chapter, episode.title, episode.order),
           part: episode.part,
           body: episode.body,
+          title: episode.title,
           fileName: null,
         });
       }
@@ -229,6 +236,7 @@ export function backupEpisodesOf(inspection: WorkZipInspection): BackupEpisode[]
       label: metadata.title ?? file.name,
       part: null,
       body: metadata.hasMetadata ? metadata.body : text,
+      title: parseEpisodeTitle(metadata.title).title,
       fileName: file.name,
     });
   }

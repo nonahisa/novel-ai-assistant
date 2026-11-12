@@ -102,8 +102,12 @@ export async function insertEpisodeBefore(
   if (answer !== "付け替える") return { changed: false };
 
   return runInsertion(work, episodes, prepared, {
-    filePath: path.join(path.dirname(episode.filePath), fileName),
-    bytes: new TextEncoder().encode(""),
+    files: [
+      {
+        filePath: path.join(path.dirname(episode.filePath), fileName),
+        bytes: new TextEncoder().encode(""),
+      },
+    ],
     commitMessage: `第${pivot}話を挿入したため、第${pivot}話以降の話数を調整`,
   });
 }
@@ -112,6 +116,8 @@ export async function insertEpisodeBefore(
 export interface PreparedInsertion {
   readonly ok: true;
   readonly pivot: number;
+  /** 割り込ませる話の数（後ろの話はこの数だけずれる） */
+  readonly count: number;
   readonly plan: RenumberPlan;
   readonly plotPreview: EpisodePlotShiftPreview | undefined;
 }
@@ -123,15 +129,18 @@ export interface PreparedInsertion {
  * 原稿エディターの取り込みは3つの選び方の窓。設計書6.25.13）。確かめることは
  * 2つの道で同じなので、ここに1つだけ置く。**まだ何も動かさない。**
  *
+ * @param count 割り込ませる話の数（原稿エディターの「バックアップから」は何話もまとめて
+ *   足す。0.150.0）。後ろの話は一度にこの数だけずらす
  * @returns 断るときは、作者に見せる理由
  */
 export async function prepareInsertion(
   work: WorkEntry,
   episodes: readonly EpisodeFile[],
   pivot: number,
-  folder: string
+  folder: string,
+  count: number = 1
 ): Promise<PreparedInsertion | { readonly ok: false; readonly message: string }> {
-  const plan = planInsertion(episodes, pivot, folder);
+  const plan = planInsertion(episodes, pivot, folder, count);
 
   const conflicted = findConflictedEpisodes(episodes, plan.renames);
   if (conflicted.length > 0) {
@@ -173,7 +182,7 @@ export async function prepareInsertion(
     いれば始めない**——名前を変えたあとに保存されると、元の話数の名前で
     作り直され、同じ話のプロットが2つになる（本文と同じ理由）。
   */
-  const plotPreview = await previewPlotShift(work, episodes, plan, pivot);
+  const plotPreview = await previewPlotShift(work, episodes, plan, pivot, plan.delta);
   const unsavedPlots = plotPreview
     ? findUnsavedEpisodes(plotPreview.touchedPaths)
     : [];
@@ -185,7 +194,7 @@ export async function prepareInsertion(
         "保存してからやり直してください。",
     };
   }
-  return { ok: true, pivot, plan, plotPreview };
+  return { ok: true, pivot, count: plan.delta, plan, plotPreview };
 }
 
 /**
@@ -194,22 +203,36 @@ export async function prepareInsertion(
  * **途中で止まったら新しい話は作らない**（どこまで済んだかは
  * `reportRenumberOutcome` が出す）。中止（`isCancelled`）も同じ止まり方に乗せる
  * ——次の1件を動かす前に見て、そこで止める。済んだ分は戻さない（本文は
- * 1文字も失われず、番号が1つ飛ぶだけ。6.67.2）。
+ * 1文字も失われず、番号が飛ぶだけ。6.67.2）。
+ *
+ * 何話ぶんかを足すとき（「バックアップから」。0.150.0）は、付け替えが最後まで
+ * 済んでから、空いた番号へ順に作る。**作り始めたら中止を見ない**——番号はもう
+ * 空けてあるので、途中でやめると空いた番号が残るだけになる。
  */
 export async function runInsertion(
   work: WorkEntry,
   episodes: readonly EpisodeFile[],
   prepared: PreparedInsertion,
-  newEpisode: {
-    /** 作る話の場所（付け替えで空いた番号の名前） */
-    readonly filePath: string;
-    /** 中身。「この話の前に挿入」は空、取り込みは取り込んだ文 */
-    readonly bytes: Uint8Array;
+  newEpisodes: {
+    /**
+     * 作る話（付け替えで空いた番号の名前と中身）。「この話の前に挿入」は空の1話、
+     * 取り込みは取り込んだ文。**並びは番号の順**
+     */
+    readonly files: readonly {
+      readonly filePath: string;
+      readonly bytes: Uint8Array;
+    }[];
     /** 名前だけの独立コミットの言葉 */
     readonly commitMessage: string;
   },
   options: { readonly isCancelled?: () => boolean } = {}
-): Promise<InsertEpisodeResult & { stoppedAt?: RenumberOutcome["stoppedAt"] }> {
+): Promise<
+  InsertEpisodeResult & {
+    stoppedAt?: RenumberOutcome["stoppedAt"];
+    /** 作れた話の場所（番号の順）。作れなかった話は入らない */
+    createdPaths?: string[];
+  }
+> {
   const { plan, pivot } = prepared;
   const outcome = await applyRenumberPlan(plan, async (from, to) => {
     if (options.isCancelled?.()) throw new Error("中止しました");
@@ -224,7 +247,7 @@ export async function runInsertion(
   const plots = await followEpisodePlots(work, {
     episodes,
     moved: episodeNumberMoves(outcome.done),
-    delta: 1,
+    delta: plan.delta,
     pivot,
     completed: !outcome.stoppedAt,
   });
@@ -249,16 +272,20 @@ export async function runInsertion(
     return { changed: outcome.done.length > 0, stoppedAt: outcome.stoppedAt };
   }
 
-  const created = await createEpisodeFile(newEpisode.filePath, newEpisode.bytes);
+  const createdPaths: string[] = [];
+  for (const file of newEpisodes.files) {
+    if (await createEpisodeFile(file.filePath, file.bytes)) createdPaths.push(file.filePath);
+  }
 
   // **挿入した新しい話のファイルは、名前だけのコミットに入れない**（設計書6.67.1）。
   // `outcome.done` には付け替え（旧→新パス）しか入っておらず、新規作成した
   // ファイルは含まれないので、そのまま渡してよい
-  await offerIndependentRenameCommit(work, outcome.done, newEpisode.commitMessage);
+  await offerIndependentRenameCommit(work, outcome.done, newEpisodes.commitMessage);
 
   return {
     changed: true,
-    newFilePath: created ? newEpisode.filePath : undefined,
+    newFilePath: createdPaths[0],
+    createdPaths,
   };
 }
 
@@ -272,13 +299,14 @@ async function previewPlotShift(
   work: WorkEntry,
   episodes: readonly EpisodeFile[],
   plan: RenumberPlan,
-  pivot: number
+  pivot: number,
+  delta: number
 ): Promise<EpisodePlotShiftPreview | undefined> {
   try {
     return await previewEpisodePlotShift(work, {
       episodes,
       moved: new Map(plan.renames.map((r) => [r.oldNumber, r.newNumber])),
-      delta: 1,
+      delta,
       pivot,
     });
   } catch {

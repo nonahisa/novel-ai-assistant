@@ -7,6 +7,8 @@ import type { EpisodeFile, WorkEntry, WorkPdfExportConfig } from "../models/type
 import { scanWork } from "../core/scanner";
 import { readTextFile, type TextFileContent } from "../core/textFile";
 import { bookChaptersOf } from "../core/bookChapters";
+import { collectedEpisodeAt } from "../core/episodeCopy";
+import { sanitizeFileName } from "../core/episodeParser";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths, writeWorkConfig } from "../core/workRegistry";
 import {
@@ -135,10 +137,6 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   // 書き出しが、この紙・向き・範囲を使う。覚えられなくても書き出しは済んでいる
   await rememberPdfExport(work, paper, scope.all ? undefined : selected, headerFooter);
 
-  // `.html` は既定のブラウザに関連づいている。VS Code の中で開くと
-  // 印刷（Ctrl+P）が使えないので、外のブラウザへ渡す
-  const opened = await openInDefaultApp(target);
-
   const droppedNote =
     gridNote +
     (conflicted.length > 0
@@ -146,6 +144,20 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
           "、"
         )}）。`
       : "") + emptyNote(empty);
+  await openPrintFile(work, target, droppedNote);
+}
+
+/**
+ * 組んだ印刷用のファイルをブラウザへ渡し、PDF にする手順を知らせる。
+ * 作品の［PDF出力］と原稿エディターの「PDF（この話）」が同じものを出す。
+ *
+ * @param note 知らせの末尾に添える一言（先頭に改行）
+ */
+async function openPrintFile(work: WorkEntry, target: string, note: string): Promise<void> {
+  const droppedNote = note;
+  // `.html` は既定のブラウザに関連づいている。VS Code の中で開くと
+  // 印刷（Ctrl+P）が使えないので、外のブラウザへ渡す
+  const opened = await openInDefaultApp(target);
 
   // **開けたかどうかで案内を変える。** 以前は戻り値を見ずに
   // 「ブラウザで開きました」と告げており、VS Codeがエラーダイアログを
@@ -174,6 +186,88 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   if (action === "フォルダーを開く") await revealFolder(target);
 }
 
+/**
+ * 原稿エディターの［出力］→「PDF（この話）」（0.150.0。設計書6.25.13）。開いている話
+ * だけを、作品の［PDF出力］と**同じ組み方**（`composePdfExport`＝`printHtml`）で印刷用の
+ * ファイルにし、ブラウザで開く。
+ *
+ * - **紙・向き・余白に刷るものは訊かない。** 作品の前回の［PDF出力］の設定を使う
+ *   （記録が無ければ文庫サイズ・縦書き・その紙の既定の余白。外部AIの依頼と同じ
+ *   `planPdfExportForRequest`）。1つのボタンで1話を刷る道なので、毎回4つの窓を
+ *   並べない。変えたいときは作品の［PDF出力］で一度書き出せば、次からその設定になる
+ * - 作者名を刷る置き方なら、名前だけは訊く（どこにも保存しない。［PDF出力］と同じ）
+ * - **合本はカーソルのある話だけ**（ボタンの名前が「この話」。単話プロット・投稿用の
+ *   コピーと同じ `collectedEpisodeAt` で決める）
+ * - **設定は覚え直さない。** 1話だけで覚えると、外部AIの依頼の範囲がその1話に変わる
+ * - 置き場は［PDF出力］と同じ `.aiwriter/exports/`。名前は「印刷用_〈話のファイル名〉 日付 時刻.html」
+ *   （同じ決まりで頭に話の名前を足す。全体の紙と見分けるため）
+ *
+ * **原稿は読むだけ。** 未保存の変更は呼ぶ側が先に保存する。
+ */
+export async function exportEpisodePdf(
+  work: WorkEntry,
+  episode: EpisodeFile,
+  /** カーソルの行（1始まり。読めなければ0＝1話目） */
+  caretLine: number
+): Promise<void> {
+  const plan = await planPdfExportForRequest(work);
+  if (!plan.ok) {
+    void vscode.window.showWarningMessage(plan.reason);
+    return;
+  }
+
+  let insideOrder: number | undefined;
+  let partLabel = "";
+  if ((episode.collectedCount ?? 0) > 1) {
+    let file: TextFileContent;
+    try {
+      file = await readTextFile(episode.filePath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      useLogFile(work.folderPath);
+      logFailure("この話のPDF：原稿を読めなかった", { ファイル: episode.fileName, 内容: message });
+      await vscode.window.showErrorMessage(`${episode.fileName} を読めませんでした。${message}`);
+      return;
+    }
+    const inner = collectedEpisodeAt(file.text, caretLine);
+    if (inner) {
+      insideOrder = inner.order;
+      partLabel = `_${inner.order}`;
+    }
+  }
+
+  let author: string | undefined;
+  if (headerFooterUses(plan.headerFooter, "author")) {
+    author = await askAuthorName(work);
+    if (author === undefined) return;
+  }
+
+  const stem = path.basename(episode.fileName, path.extname(episode.fileName));
+  const composed = await composePdfExport(work, {
+    episodes: [episode],
+    format: await readWorkFormat(work),
+    kind: await readWorkKind(work),
+    paper: plan.paper,
+    headerFooter: plan.headerFooter,
+    author,
+    insideOrder,
+    namePrefix: `印刷用_${sanitizeFileName(stem)}${partLabel}`,
+  });
+  if (!composed.ok) {
+    if (composed.kind === "nothing") {
+      void vscode.window.showWarningMessage(composed.message);
+    } else {
+      await vscode.window.showErrorMessage(composed.message);
+    }
+    return;
+  }
+  const { lines } = plan;
+  const paperNote =
+    `\n紙は${lines.paper}・${lines.direction}で組みました（${lines.source}）。` +
+    "紙や余白を変えるときは、作品の［PDF出力］で一度書き出すと、次からその設定になります。";
+  await openPrintFile(work, composed.target, composed.gridNote + paperNote);
+}
+
 /** 組む材料（画面で選んだもの。外からの依頼では既定で埋める） */
 interface PdfExportInput {
   episodes: readonly EpisodeFile[];
@@ -182,6 +276,14 @@ interface PdfExportInput {
   paper: PaperChoice;
   headerFooter: HeaderFooter;
   author: string | undefined;
+  /**
+   * 合本（1ファイルに何話も）から1話だけを組むときの、その話の区切りの番号
+   * （`BookChapterSplit.insideOrder`）。原稿エディターの「PDF（この話）」が使う。
+   * 省けば、これまでどおりファイルの中の全話
+   */
+  insideOrder?: number;
+  /** 書き出すファイルの名前の頭。省けば「印刷用」 */
+  namePrefix?: string;
 }
 
 type PdfExportOutcome =
@@ -245,7 +347,14 @@ async function composePdfExport(
     // （設計書6.65.15。切り分けは `core/bookChapters.ts` が1か所で持ち、
     // EPUBと同じものを通す——別々に切ると、同じ原稿から出た本と紙で
     // 話の切れ目が違うことになる）
-    const parts = bookChaptersOf(episode, file.text, format);
+    const allParts = bookChaptersOf(episode, file.text, format);
+    // 合本から1話だけ（「PDF（この話）」）。割り方は全体の PDF と同じものから選ぶ
+    // 割れずに1章へ倒した合本（`insideOrder` が null）は、絞らずにそのまま組む
+    // ——絞ると0章になり、本文があるのに「出せる本文が無い」と言ってしまう
+    const parts =
+      input.insideOrder === undefined || allParts.every((part) => part.insideOrder === null)
+        ? allParts
+        : allParts.filter((part) => part.insideOrder === input.insideOrder);
     if (parts.length === 0) {
       empty.push(episode.fileName);
       continue;
@@ -315,7 +424,7 @@ async function composePdfExport(
   const bytes = new TextEncoder().encode(html);
   let target: string;
   try {
-    target = await writeExport(work, bytes);
+    target = await writeExport(work, bytes, input.namePrefix);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     useLogFile(work.folderPath);
@@ -987,12 +1096,16 @@ function emptyNote(empty: readonly string[]): string {
 }
 
 /** 書き出し先。**新規作成だけ**を使い、名前がぶつかったら別名にする */
-async function writeExport(work: WorkEntry, html: Uint8Array): Promise<string> {
+async function writeExport(
+  work: WorkEntry,
+  html: Uint8Array,
+  namePrefix: string = "印刷用"
+): Promise<string> {
   const config = await readWorkConfig(work);
   const directory = path.join(workPaths(work, config).aiwriter, EXPORT_DIR);
   await vscode.workspace.fs.createDirectory(path.toUri(directory));
 
-  const target = await freshExportPath(directory, new Date());
+  const target = await freshExportPath(directory, new Date(), namePrefix);
   await atomicWriteFile(target, html, {
     mode: "create",
   });
@@ -1009,9 +1122,10 @@ const EXPORT_DIR = "exports";
  */
 async function freshExportPath(
   directory: string,
-  at: Date
+  at: Date,
+  namePrefix: string
 ): Promise<string> {
-  for (const name of timestampedFileNameCandidates("印刷用", at, ".html")) {
+  for (const name of timestampedFileNameCandidates(namePrefix, at, ".html")) {
     const target = path.join(directory, name);
     try {
       await vscode.workspace.fs.stat(path.toUri(target));

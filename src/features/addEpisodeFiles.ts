@@ -105,15 +105,21 @@ export function nameNewEpisodes(
  * いちばん新しい話を手本にする）。手本が読めなければ UTF-8・LF。バイト列の話
  * （カクヨムの話ごとのファイル）はそのまま（6.99 の新規取り込みと同じ）。
  *
- * @returns 足せた話と、足せなかった話（理由つき）
+ * @param options.isCancelled 中止を見る（原稿エディターの「バックアップから」は何百話も
+ *   足すことがある。0.150.0）。**次の1話を書く前に見る**——書いた話は戻さない
+ *   （新しいファイルを足しただけなので、途中でやめても半端にはならない）
+ * @returns 足せた話と、足せなかった話（理由つき）。中止したら `cancelled` が true で、
+ *   まだ書いていない話は `skipped` に入れない（足せなかったのではなく、足していない）
  */
 export async function writeNewEpisodes(
   work: WorkEntry,
   scan: Pick<WorkScan, "episodes" | "manuscriptDir">,
-  files: readonly NamedEpisodeFile[]
+  files: readonly NamedEpisodeFile[],
+  options: { readonly isCancelled?: () => boolean } = {}
 ): Promise<{
   added: { file: MissingEpisodeFile; path: string }[];
   skipped: EpisodeNotAdded[];
+  cancelled?: boolean;
 }> {
   const added: { file: MissingEpisodeFile; path: string }[] = [];
   const skipped: EpisodeNotAdded[] = [];
@@ -130,6 +136,7 @@ export async function writeNewEpisodes(
   }
 
   for (const { file, name } of files) {
+    if (options.isCancelled?.()) return { added, skipped, cancelled: true };
     const target = path.join(scan.manuscriptDir, name);
     const bytes =
       file.content.kind === "bytes"
