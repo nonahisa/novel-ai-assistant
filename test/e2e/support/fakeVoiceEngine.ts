@@ -30,6 +30,13 @@ export interface FakeVoiceRequest {
   text: string;
   /** `speaker` の番号（無ければ空） */
   speaker: string;
+  /** 受けた時刻（`Date.now()`。エンジンが替わる所の間の長さを記録するのに使う） */
+  at: number;
+  /**
+   * 頼みの本文（JSON なら読んだもの。`/synthesis` は audio_query の答えに製品が手を入れたもので、
+   * `outputSamplingRate`（標本化の速さ）が入る。無ければ undefined）
+   */
+  body?: unknown;
 }
 
 export interface FakeVoiceEngine {
@@ -49,6 +56,11 @@ export interface FakeVoiceEngineOptions {
   terms?: Omit<FakeEngineTerms, "brand">;
   /** 1文の音の長さ（ミリ秒。既定 200） */
   wavMs?: number;
+  /**
+   * 待ち受ける番地（既定 127.0.0.1）。この PC の外のホストに見せたい件（端末名の窓）だけが、この機械自身の
+   * LAN の番地を渡す。**Windows では LAN の番地で待ち受けると防火壁の窓が出ることがある**ので、渡す側が気をつける
+   */
+  listenHost?: string;
   /** 1文を作るのにかかる時間（ミリ秒）。付けると合成を1つずつ順に返す（頭のコメント） */
   synthesisDelayMs?: number;
 }
@@ -57,20 +69,40 @@ export interface FakeVoiceEngineOptions {
 export async function startFakeVoiceEngine(options: FakeVoiceEngineOptions = {}): Promise<FakeVoiceEngine> {
   const requests: FakeVoiceRequest[] = [];
   const brand = options.brand ?? "AivisSpeech";
-  const wav = pcmWav({ ms: options.wavMs ?? 200 });
+  /** 標本化の速さごとの音（頼みの `outputSamplingRate` に従う。無ければ既定の 24000） */
+  const wavs = new Map<number, Buffer>();
+  const wavFor = (rate: number): Buffer => {
+    let made = wavs.get(rate);
+    if (!made) {
+      made = pcmWav({ ms: options.wavMs ?? 200, sampleRate: rate });
+      wavs.set(rate, made);
+    }
+    return made;
+  };
   /** 合成の順番待ち（前の音ができてから次を作り始める） */
   let synthesisQueue: Promise<void> = Promise.resolve();
 
   const server: Server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     // 本文は送られた分だけ控える（中身を外へは出さない。一時のこの試験の中だけ）
-    request.resume();
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
+      let body: unknown;
+      if (chunks.length > 0) {
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        } catch {
+          body = undefined;
+        }
+      }
       requests.push({
         method: request.method ?? "",
         path: url.pathname,
         text: url.searchParams.get("text") ?? "",
         speaker: url.searchParams.get("speaker") ?? "",
+        at: Date.now(),
+        ...(body === undefined ? {} : { body }),
       });
       const json = (body: unknown, status = 200): void => {
         response.writeHead(status, { "Content-Type": "application/json" });
@@ -97,7 +129,8 @@ export async function startFakeVoiceEngine(options: FakeVoiceEngineOptions = {})
       if (url.pathname === "/synthesis") {
         const answer = (): void => {
           response.writeHead(200, { "Content-Type": "audio/wav" });
-          response.end(wav);
+          const asked = (body as { outputSamplingRate?: unknown } | undefined)?.outputSamplingRate;
+          response.end(wavFor(typeof asked === "number" && asked > 0 ? asked : 24000));
         };
         const delay = options.synthesisDelayMs;
         if (!delay) return answer();
@@ -123,13 +156,22 @@ export async function startFakeVoiceEngine(options: FakeVoiceEngineOptions = {})
       response.end("not found");
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const listenHost = options.listenHost ?? "127.0.0.1";
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, listenHost, resolve);
+  });
   const { port } = server.address() as AddressInfo;
   return {
-    url: `http://127.0.0.1:${port}`,
-    host: `127.0.0.1:${port}`,
+    url: `http://${listenHost}:${port}`,
+    host: `${listenHost}:${port}`,
     requests,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    // 読んでいる途中で止めるとき（繋ぎっぱなしの接続が残ると、閉じたあとも答えてしまう）
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      }),
   };
 }
 
