@@ -130,7 +130,8 @@ export async function previewEpisodePlotShift(
   input: {
     episodes: readonly EpisodeChapterSpan[];
     moved: ReadonlyMap<number, number>;
-    delta: 1 | -1;
+    /** 正の数が差し込み（足す話の数）、−1 が削除（`planEpisodePlotShift` と同じ） */
+    delta: number;
     pivot: number;
   }
 ): Promise<EpisodePlotShiftPreview> {
@@ -209,7 +210,8 @@ export async function followEpisodePlots(
   input: {
     episodes: readonly EpisodeChapterSpan[];
     moved: ReadonlyMap<number, number>;
-    delta: 1 | -1;
+    /** 正の数が差し込み（足す話の数）、−1 が削除 */
+    delta: number;
     pivot: number;
     completed: boolean;
   },

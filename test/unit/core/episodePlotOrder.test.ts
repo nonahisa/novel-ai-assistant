@@ -334,6 +334,22 @@ describe("planEpisodePlotShift", () => {
     expect(plan.retire).toBeUndefined();
   });
 
+  test("何話ぶんかの差し込み：予定の話も足す話の数だけ後ろへ（バックアップから。0.150.0）", () => {
+    const plan = planEpisodePlotShift({
+      episodes: written(1, 2, 3, 4, 5),
+      plotChapters: [3, 7],
+      moved: moves([5, 8], [4, 7], [3, 6]),
+      delta: 3,
+      pivot: 3,
+      completed: true,
+    });
+    expect(plan.renames).toEqual([
+      { from: 3, to: 6 },
+      { from: 7, to: 10 },
+    ]);
+    expect(plan.collisions).toEqual([]);
+  });
+
   test("削除：消した話は退け、後ろ（予定の話を含む）を詰める", () => {
     const plan = planEpisodePlotShift({
       episodes: written(1, 2, 3, 4, 5),

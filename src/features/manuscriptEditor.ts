@@ -21,6 +21,7 @@ import {
   findLatestEpisode,
 } from "../core/latestEpisode";
 import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
+import { canRunProcesses } from "../core/runtime";
 import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
@@ -1821,9 +1822,11 @@ type Incoming =
   | { type: "runPosting"; action?: unknown }
   /**
    * ［入力］→「テキストファイルから」「Word から」（作者の決定 2026-11-08。設計書6.25.13）。
-   * `source` は画面から届く値なので、ここで "text" か "word" かを確かめる
+   * `source` は画面から届く値なので、ここで "text"・"word"・"backup"（0.150.0）かを確かめる
    */
   | { type: "importEpisode"; source?: unknown }
+  /** ［出力］→「PDF（この話）」（0.150.0）。合本ではどの話かを行で知る（1始まり） */
+  | { type: "exportEpisodePdf"; line?: unknown }
   /** 執筆再開の資料を開く（設計書6.36。右クリックから。0.76.7） */
   | { type: "resumeWriting" }
   /**
@@ -2118,12 +2121,22 @@ export interface ManuscriptEditorDeps {
    *
    * **繋ぐのは `extension.ts` だけ。** 取り込みは話の番号をずらすので `core/git.ts`
    * （`node:child_process`）に届く——ここから静的に読むと、ブラウザ版が起動時に落ちる。
-   * 新しい話を作ったら、その場所を返す（いまの見た目のまま開くのはこちら）
+   * 新しい話を作ったら、その場所を返す（いまの見た目のまま開くのはこちら）。
+   *
+   * `backup` は［入力］→「バックアップから」（0.150.0）。バックアップの中の話を選んで
+   * 開いている作品へ足す（何話も足せる。足す先の決まりは同じ）
    */
   importEpisode?: (
     document: vscode.TextDocument,
-    source: "text" | "word"
+    source: "text" | "word" | "backup"
   ) => Promise<{ newFilePath?: string } | undefined>;
+  /**
+   * ［出力］→「PDF（この話）」（0.150.0。設計書6.25.13）。開いている話だけを、作品の
+   * ［PDF出力］と同じ組み方で印刷用のファイルにしてブラウザで開く。合本ならカーソルの
+   * 行の話だけ（`line` は1始まり）。**繋ぐのは `extension.ts` だけ**（作品の引き方と
+   * ブラウザ版の断り方があちらにある）
+   */
+  exportEpisodePdf?: (document: vscode.TextDocument, line: number) => Promise<void>;
   /**
    * この話の単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23
    * 「エディターから単話プロット参照したいです」）。
@@ -2368,7 +2381,9 @@ export class ManuscriptEditorProvider
     panel.webview.html = buildManuscriptEditorHtml(
       createNonce(),
       panel.webview.cspSource,
-      kind
+      kind,
+      // ブラウザ版では「PDF（この話）」を隠す（作品の［PDF出力］と同じ。設計書5.8.16）
+      { canRunProcesses: canRunProcesses() }
     );
     /*
       **下段の目安を測る種類は、あとから読み直せるように別に持つ**
@@ -3567,12 +3582,28 @@ export class ManuscriptEditorProvider
 
         case "importEpisode": {
           // 画面から届く値を信用しない（知らない入口は捨てる）
-          if (message.source !== "text" && message.source !== "word") break;
+          if (
+            message.source !== "text" &&
+            message.source !== "word" &&
+            message.source !== "backup"
+          ) {
+            break;
+          }
           const imported = await this.deps.importEpisode?.(document, message.source);
           // 新しい話を作ったら、**いま見ている見た目のまま開く**（「次の話」と同じ。設計書6.25.5）
           if (imported?.newFilePath) {
             await this.openAsManuscript(imported.newFilePath, document);
           }
+          break;
+        }
+
+        case "exportEpisodePdf": {
+          // 画面から届く行を信用しない（数でなければ1話目＝0 として扱う）
+          const line =
+            typeof message.line === "number" && Number.isFinite(message.line)
+              ? Math.max(0, Math.floor(message.line))
+              : 0;
+          await this.deps.exportEpisodePdf?.(document, line);
           break;
         }
 

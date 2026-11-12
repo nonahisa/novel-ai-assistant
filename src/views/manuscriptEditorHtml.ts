@@ -83,8 +83,16 @@ export function buildManuscriptEditorHtml(
    * そのときはこれまでどおりの画面になる。**小説では、出来上がる
    * HTMLが1バイトも変わらない**（test/unit/cross/composeFace.test.ts が見張る）。
    */
-  kind?: WorkKindKey
+  kind?: WorkKindKey,
+  /**
+   * いまの環境でできること（設計書5.8.16）。**外部プロセスを起動できない（ブラウザ版）
+   * ときは「PDF（この話）」を隠す**——作品の［PDF出力］を隠しているのと同じ理由
+   * （印刷用のファイルをブラウザへ渡せない）。省けば手元の VS Code（隠さない）で、
+   * そのときの HTML は以前と1バイトも変わらない
+   */
+  options: { readonly canRunProcesses?: boolean } = {}
 ): string {
+  const pdfHidden = options.canRunProcesses === false ? " hidden" : "";
   /**
    * 種類ごとの組み方。**値は `core/kindLines.ts` の1か所**から借りる
    * （PDF・EPUBも同じ文字列を埋め込む。写しを置かない）。
@@ -1037,7 +1045,7 @@ body.clipped #cheer { white-space: normal; }
 
 <div id="rowInput" class="tray" data-tray="input">
   <button id="importText" title="テキストファイル（.txt・.md）を選んで、この話へ取り込みます。この話に本文が入っていれば、次の話として足すか・最後に加えるか・上書きするかを訊きます">テキストファイルから</button>
-  <button id="importBackup" class="soon" title="投稿サイトのバックアップから、開いている作品へ話を足します（この機能は次の版で入ります）">バックアップから</button>
+  <button id="importBackup" title="投稿サイトのバックアップ（ZIP・テキスト）を選び、中の話を選んで、開いている作品へ足します。開いている話のすぐ次に差し込むか、最後に加えるかを訊きます">バックアップから</button>
   <button id="importWord" title="Word の文書（.docx）を選んで、この話へ取り込みます。ルビと傍点は残ります。この話に本文が入っていれば、次の話として足すか・最後に加えるか・上書きするかを訊きます">Word から</button>
   <div class="sep"></div>
   <button id="dictate" title="OSの音声入力で書き取った文を、あとからAIに整えてもらいます。押してから音声入力を始めてください">口述</button>
@@ -1048,7 +1056,7 @@ body.clipped #cheer { white-space: normal; }
 <div id="rowOutput" class="tray" data-tray="output">
   <button id="posting" aria-haspopup="menu" title="投稿ヘルパーへ渡す・投稿サイト用のコピー・投稿サイト設定を選びます">投稿</button>
   <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
-  <button id="exportPagePdf" class="soon" title="開いている話を PDF にします（この機能は次の版で入ります）">PDF（この話）</button>
+  <button id="exportPagePdf"${pdfHidden} title="開いている話だけを、作品の［PDF出力］と同じ組み方で印刷用のファイルにし、ブラウザで開きます（紙・余白は前回の［PDF出力］の設定）。ブラウザの印刷で「PDFに保存」を選ぶと PDF になります。合本ではカーソルのある話だけです">PDF（この話）</button>
 </div>
 
 <div id="rowAssist" class="tray" data-tray="assist">
@@ -1890,20 +1898,34 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     中身で決めるため（［投稿］の品書きと同じ）
   */
   /* importButtons:start */
-  for (const id of ["importText", "importWord"]) {
+  // 「バックアップから」（0.150.0）も同じ入口で送る（足す先の決まりが同じ）
+  for (const id of ["importText", "importWord", "importBackup"]) {
     const importButton = document.getElementById(id);
     importButton.addEventListener("click", function () {
       keyHandOver();
       vscode.postMessage({
         type: "importEpisode",
-        source: id === "importWord" ? "word" : "text",
+        source: id === "importWord" ? "word" : id === "importBackup" ? "backup" : "text",
       });
     });
   }
   /* importButtons:end */
 
   /*
-    次の版で作る入口（バックアップ・PDF。作者の決定 2026-11-08）。
+    ［出力］→「PDF（この話）」（0.150.0）。**カーソルの行を添える**——合本ではどの話かが
+    位置でしか分からない（単話プロット・投稿用コピーと同じ）。打ちかけの字は先に渡す
+    （保存してから組むので、渡しておかないと最後の数文字が紙に出ない）
+  */
+  /* pdfButton:start */
+  document.getElementById("exportPagePdf").addEventListener("click", function () {
+    keyHandOver();
+    vscode.postMessage({ type: "exportEpisodePdf", line: caretLine() });
+  });
+  /* pdfButton:end */
+
+  /*
+    次の版で作る入口（作者の決定 2026-11-08。いまは1つも無い——バックアップと PDF は
+    0.150.0 で動くようにした。仕組みは次の予定のために残す）。
     **押しても拡張機能へは何も送らない**——似た名前の今ある命令（作品の登録・作品全体の
     PDF）を代わりに呼ぶと、作者が思ったのと違うことが起きる。下の欄に一言だけ出す
   */

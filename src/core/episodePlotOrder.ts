@@ -366,8 +366,8 @@ export function planEpisodePlotShift(input: {
   plotChapters: Iterable<number>;
   /** 本文で実際に動いた話数（旧 → 新） */
   moved: ReadonlyMap<number, number>;
-  /** +1 が差し込み、−1 が削除 */
-  delta: 1 | -1;
+  /** 正の数が差し込み（足す話の数。何話ぶんかは「バックアップから」。0.150.0）、−1 が削除 */
+  delta: number;
   /** 差し込む位置の話数／削除した話の話数 */
   pivot: number;
   /** 本文の付け替えが最後まで済んだか */
