@@ -21,6 +21,7 @@ import {
 import { WritingStatsStore } from "../core/writingStatsStore";
 import { describeWrittenAmount } from "../core/writingAmountText";
 import { formatCount } from "../core/charCount";
+import { OpenDayGate } from "../core/writingOpenGate";
 
 /**
  * 執筆量の記録係（設計書6.3）。
@@ -90,10 +91,57 @@ export class WritingProgressTracker {
   /** 作品ごとの直近の集計。ステータスバーが毎回ファイルを読まないために持つ */
   private readonly cache = new Map<string, WritingSummary>();
 
+  /** 記録・基準の置き直し・開いたときの起点を、1列に並べて走らせる尾 */
+  private tail: Promise<unknown> = Promise.resolve();
+  /** その日にもう起点を置いた話（開き直しで置き直さない） */
+  private readonly openGate = new OpenDayGate();
+
   constructor(
     private readonly deviceId: string,
     private readonly statsFor: (work: WorkEntry) => Promise<WorkScan>
   ) {}
+
+  /**
+   * 同じ記録ファイルを読んで書く処理を、1つずつ走らせる。
+   *
+   * 話を開いた直後に保存が来ると、起点を置く処理と記録の処理が同じファイルを
+   * 同時に読み書きして、片方の結果が消える。届いた順に並べれば、
+   * 「開いたとき→保存」の順がそのまま守られる。
+   */
+  private serial<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.tail.then(task, task);
+    this.tail = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * 話を開いたとき（VS Code が文書を開いたとき・日付が変わったとき）に呼ぶ。
+   * その日にその話の起点がまだ無ければ、いまの字数を起点に置く
+   * （作者の答え、2026-11-12）。置いても書いた量には数えない。
+   *
+   * 失敗しても執筆は止めない（ログにだけ残し、次に開いたとき置き直す）。
+   */
+  async noteOpened(work: WorkEntry, filePath: string): Promise<void> {
+    if (!this.enabled()) return;
+    const day = statsDayKey(new Date(), boundaryHour());
+    const key = fileCountKeyFor(work, filePath);
+    const gateKey = `${work.id}\u0000${key}`;
+    if (!this.openGate.claim(gateKey, day)) return;
+    await this.serial(async () => {
+      try {
+        const scan = await this.statsFor(work);
+        await this.store(work).placeOpenBaseline(toMeasurement(work, scan), key);
+        this.cache.delete(work.id);
+      } catch (error) {
+        this.openGate.release(gateKey);
+        useLogFile(work.folderPath);
+        logFailure("執筆量の起点を置けなかった", {
+          作品: work.title,
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+  }
 
   /** 設定で記録そのものを止められる。書いた量を残したくない作者もいる */
   private enabled(): boolean {
@@ -110,6 +158,10 @@ export class WritingProgressTracker {
    */
   async record(work: WorkEntry): Promise<RecordOutcome | undefined> {
     if (!this.enabled()) return undefined;
+    return this.serial(() => this.recordNow(work));
+  }
+
+  private async recordNow(work: WorkEntry): Promise<RecordOutcome | undefined> {
     try {
       const scan = await this.statsFor(work);
       const result = await this.store(work).record(toMeasurement(work, scan), {
@@ -142,6 +194,10 @@ export class WritingProgressTracker {
    */
   async rebaseline(work: WorkEntry): Promise<void> {
     if (!this.enabled()) return;
+    await this.serial(() => this.rebaselineNow(work));
+  }
+
+  private async rebaselineNow(work: WorkEntry): Promise<void> {
     try {
       const scan = await this.statsFor(work);
       await this.store(work).rebaseline(toMeasurement(work, scan));
