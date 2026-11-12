@@ -522,10 +522,22 @@ export class VoiceReadingService {
       this.notePace(unit.engine, (endedAt - busyFrom) / 1000, wav);
       return wav;
     })
-      .then((wav) => {
-        this.cache.set(key, wav);
-        return wav;
-      })
+      .then(
+        (wav) => {
+          this.cache.set(key, wav);
+          return wav;
+        },
+        (error: unknown) => {
+          /*
+            **届かなかったら、そのエンジンの話者の控えを捨てる**（2026-11-13。画面の自動テストで再現）。
+            読み始めに控えた一覧が残ると、［〇〇で読む］で［声］を替えて計画し直したときに、
+            閉じたエンジンを「届く」と読み、その声の人物をまた閉じたエンジンへ頼んで止まる。
+            時間切れ（timeout）は届いている見込みがあるので捨てない
+          */
+          if (isEngineUnreachable(error)) this.speakersCache.delete(unit.engine);
+          throw error;
+        }
+      )
       .finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, job);
     return job;

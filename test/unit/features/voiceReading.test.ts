@@ -750,6 +750,28 @@ describe("人物ごとにエンジンを混ぜる（2段目。0.151.0）", () =>
     expect(aivis.requests.some((r) => r.path === "/audio_query" && r.query.text === "「やった！」")).toBe(true);
   });
 
+  test("［声］の VOICEVOX が読んでいる途中に閉じ、AivisSpeech へ切り替えて読み直すと、灯の台詞は代わりの声で AivisSpeech へ頼み、一言を返す（話者の控えで届くと見なさない）", async () => {
+    // 画面の自動テスト voiceEngineMixFlow の「VOICEVOX を読んでいる途中に止める」の再現（2026-11-13）。
+    // 読み始めに VOICEVOX の話者の一覧を控えるので、閉じたあとの計画で控えから「届く」と読んでいた
+    const { aivis, voicevox, service } = await mixed();
+    const sentences = buildReadingPlan(TEXT, "curly", [], { splitDialogue: true });
+    const first = await service.plan(work, "/w/01.txt", TEXT, sentences, "voicevox", { start: true });
+    if (!("units" in first)) throw new Error(first.problem);
+    expect(first.units[0]).toMatchObject({ engine: "voicevox", who: "灯" });
+    await voicevox.close();
+    engines.splice(engines.indexOf(voicevox), 1);
+    const failed = await service.audio(first.units, 0, 1);
+    expect(failed).toMatchObject({ engineDown: true });
+
+    const again = await service.plan(work, "/w/01.txt", TEXT, sentences, "aivisspeech", { start: true });
+    if (!("units" in again)) throw new Error(again.problem);
+    expect(again.units.every((u) => u.engine === "aivisspeech")).toBe(true);
+    expect(again.units[0]).toMatchObject({ who: "灯", styleId: 1325133120 });
+    expect(again.notice).toContain("VOICEVOX に繋がらないので、灯 の声は代わりの声");
+    expect("wav" in (await service.audio(again.units, 0, 1))).toBe(true);
+    expect(aivis.requests.some((r) => r.path === "/audio_query" && r.query.text === "「やった！」")).toBe(true);
+  });
+
   test("閉じていたエンジンには、次に読み始めるまで問い合わせ直さない（読んでいる途中の取り直しで毎回待たせない）", async () => {
     const closed = await startFakeVoiceEngine();
     const url = closed.url;
