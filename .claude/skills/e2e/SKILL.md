@@ -133,6 +133,8 @@ export NOVELAI_REAL_OUT="$HOME/novelai-real-out"
 caffeinate -dis npm run test:e2e:real
 ```
 
+- **VOICEVOX の門と件を足した（2026-11-12。`localRealEngines.real.ts`、共通の部品は `realSupport.ts`）**。門：`NOVELAI_REAL_AIVIS=1`（127.0.0.1:10101）・`NOVELAI_REAL_VOICEVOX=1`（127.0.0.1:50021）。混ぜる件は両方が要る。`NOVELAI_REAL_FAST_PC=1`（＋AIVIS）は速い PC でだけ見る件（遅さの知らせが出ないこと。遅い機械で付けると落ちる）。件：26・28（混ぜた声。窓0回・VOICEVOX へ頼まれた・MP3 が 44100Hz・注意書きに両方）、99・113（VOICEVOX で2人を別の声にして読み・書き出す）、123（台詞の控えで感情を決め、感情ごとに頼んだスタイルの番号を記録）、104（速い PC で遅さの知らせが出ない）。111 は上の 49・80 の件が MP3 と注意書きを置き場へ写す
+- **置き場**：`NOVELAI_REAL_OUT` の下の `v<版>_<日付>/` に、MP3・「クレジットと利用条件.txt」・「ライセンス/」・件ごとの `結果.json`・**`聞くところ.md`**（ファイルごとに「どの項目の何を聞くか」を1行）が並ぶ。作者へはセッションがこのフォルダーのファイルを送る。流すコマンドは上と同じで、環境変数を足すだけ（Mac は `export NOVELAI_REAL_VOICEVOX=1`、PowerShell は `$env:NOVELAI_REAL_VOICEVOX = "1"`）
 - 走らせたあと `novelai-e2e-` を引数に含む `Code.exe` が残っていないことを確かめる（上の「守ること」）。控えの JSON には作者の話の題名が入ることがあるので、リポジトリへ入れない
 
 ## 広報の動画

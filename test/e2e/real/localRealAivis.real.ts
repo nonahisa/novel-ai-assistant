@@ -46,6 +46,7 @@ import { clickToolButton, openEpisode } from "../support/manuscriptFrame";
 import { describeNotices, recordedNotices } from "../support/noticeRecord";
 import { withVsCode, type E2ESession, type FixtureEpisode } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
+import { copyTree, noteListening, outDir } from "./realSupport";
 import { dialogText, notificationTexts, quickInputWaitContext, quickPickRows, quickPickTitle } from "../support/workbenchDom";
 
 const ENABLED = process.env.NOVELAI_REAL_AIVIS === "1";
@@ -309,6 +310,8 @@ test.skipIf(!ENABLED)("49・80：本物の AivisSpeech（CPU）で、長い話�
         result.notices = await describeNotices(session, since);
         result.synthesis = synthDone(proxy.log, since).length;
         result.failedRequests = proxy.log.filter((entry) => entry.start >= since && entry.status !== 200).map((entry) => ({ path: entry.path, status: entry.status }));
+        // 実機確認リスト 111：できた MP3・注意書き・ライセンスの全文を、版と日付の置き場へも写す（作者へ渡す材料）
+        await copyTree(folder, path.join(await outDir(), "AivisSpeech書き出し"));
         const keep = path.join(OUT, "export_49_80");
         await mkdir(keep, { recursive: true });
         for (const file of files) {
@@ -325,6 +328,11 @@ test.skipIf(!ENABLED)("49・80：本物の AivisSpeech（CPU）で、長い話�
     await proxy.close();
   }
   expect(result.dialogs, "書き出しの途中で真ん中の窓が出た").toEqual([]);
+  const mp3 = (result.files as string[]).find((file) => file.endsWith(".mp3"));
+  if (mp3) {
+    await noteListening(`AivisSpeech書き出し/${mp3}`, "111行", "本物の AivisSpeech で書き出した声が自然に聞こえるか（約3,000字の長い話。最初の1〜2分でよい）");
+    await noteListening("AivisSpeech書き出し/クレジットと利用条件.txt", "111行", "注意書きの要点が、本物のモデルのライセンス全文（同じフォルダーの ライセンス/）と合っているか（読み比べはセッションが行う。作者の耳は不要）");
+  }
   expect((result.files as string[]).some((file) => file.endsWith(".mp3")), `できたファイル：${JSON.stringify(result.files)}`).toBe(true);
   // 80：本物のライセンスで止まらず、クレジットと利用条件・ライセンスの全文の控えまでできている
   expect(result.files as string[], "クレジットと利用条件").toContain("クレジットと利用条件.txt");
