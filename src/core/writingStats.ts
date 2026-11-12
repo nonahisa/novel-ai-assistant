@@ -330,6 +330,53 @@ export function rebaseline(
 }
 
 /**
+ * 話を開いたときの字数を、その話の数え始め（起点）に置く（作者の答え、2026-11-12）。
+ *
+ * **保存の順番で今日の字数が揺れないようにするため。** これまでの起点は最初の保存で
+ * 置いていたので、Ctrl+S が本体の保存と原稿エディターの［保存］の両方を走らせると、
+ * 打った最後の字が文書へ届く前に本体の保存が先に走った回だけ、起点が1字手前に置かれ、
+ * 今日の字数が1字多く出た。開いたときに置いておけば、保存がどちらの順で来ても
+ * 同じ起点からの差になる。
+ *
+ * - 起点がまだ無ければ、作品全体の起点を置く（初回と同じ）
+ * - 起点があれば、**開いた話の分だけ**置き直す（作品の合計はその差だけずらす）。
+ *   ほかの話の保存前の差には触らない
+ * - ファイル数・競合数が変わっていたら作品全体を置き直す（`recordMeasurement` の
+ *   「数えない回」と同じ理由。取り込みや新しい話は書いた量ではない）
+ * - 起点か現在の内訳にその話が無いとき（名前の変更・競合中）は何も変えない
+ *
+ * 記録（`days`）には一切触れない。置くだけで、書いた量には数えない。
+ */
+export function placeOpenBaseline(
+  stats: DeviceWritingStats,
+  measurement: WritingMeasurement,
+  fileKey: string,
+  at: Date = new Date()
+): DeviceWritingStats {
+  const baseline = stats.baseline;
+  if (!baseline) return { ...stats, baseline: toBaseline(measurement, at) };
+  if (
+    baseline.fileCount !== measurement.fileCount ||
+    baseline.conflictedCount !== measurement.conflictedCount
+  ) {
+    return { ...stats, baseline: toBaseline(measurement, at) };
+  }
+  const before = fileCountsOf(baseline.files, fileKey);
+  const now = fileCountsOf(measurement.files, fileKey);
+  if (!before || !now || !baseline.files) return stats;
+  return {
+    ...stats,
+    baseline: {
+      ...baseline,
+      net: baseline.net + (now.net - before.net),
+      gross: baseline.gross + (now.gross - before.gross),
+      at: at.toISOString(),
+      files: { ...baseline.files, [fileKey]: { net: now.net, gross: now.gross } },
+    },
+  };
+}
+
+/**
  * 基準が実質同じか（**測った時刻は見ない**）。
  *
  * **同期のたびにファイルが変わるのを止めるため**（作者の実機報告、

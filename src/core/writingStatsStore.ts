@@ -9,6 +9,7 @@ import { atomicWriteFile } from "./atomicWrite";
 import { workPaths } from "./workRegistry";
 import {
   emptyDeviceStats,
+  placeOpenBaseline,
   recordMeasurement,
   rebaseline,
   sameBaseline,
@@ -125,6 +126,22 @@ export class WritingStatsStore {
       `record` の側は前から `shouldPersist` で同じ守りをしている。
       こちらにだけ無かった。
     */
+    if (sameBaseline(current.baseline, next.baseline)) return;
+    await this.save(next);
+  }
+
+  /**
+   * 話を開いたときの字数を、その話の起点に置く（`placeOpenBaseline`）。
+   * 中身が変わらないなら書かない（`rebaseline` と同じ理由。開くたびに
+   * ファイルが変わると、書いていないのに同期の差分が出る）。
+   */
+  async placeOpenBaseline(
+    measurement: WritingMeasurement,
+    fileKey: string,
+    at: Date = new Date()
+  ): Promise<void> {
+    const current = await this.loadOwn();
+    const next = placeOpenBaseline(current, measurement, fileKey, at);
     if (sameBaseline(current.baseline, next.baseline)) return;
     await this.save(next);
   }
