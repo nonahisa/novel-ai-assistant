@@ -46,7 +46,10 @@ import {
   writeIntoCurrent,
   type ImportScan,
   type ManuscriptImportResult,
+  type TitlePlace,
 } from "./manuscriptImport";
+import { episodeTitleSlot } from "../core/metadataParser";
+import { renamedFileName } from "../core/episodeRename";
 import { registeredPostingSites } from "./postingCopyRegistered";
 
 /**
@@ -175,21 +178,36 @@ export async function importBackupIntoWork(input: {
     scan.episodes.map((episode) => parseEpisodeFileName(episode.fileName))
   );
 
+  /*
+    1話を開いている話へ入れるとき（空の話・上書き）の題の扱いは、**窓を出す前に決めて窓に書く**。
+    0.147.0 は「題にしますか」と訊いてから題の欄を書き換えるが、ここは訊かずに通るので、
+    **作者が題の欄に書いた題は書き換えない**（欄が空のときだけ入れる）。ファイル名に付けるときは
+    新しい名前を窓に出す
+  */
+  const single = count === 1 ? await singleTitlePlan(picked[0], current, disk.text, collected) : null;
+
   let choice: ImportChoice | "fill";
   if (plan.kind === "fill") {
     // 訊かずに入れる道でも、何をどこへ入れるかは先に確かめる（作者の原稿へ書くため）
-    const ok = await confirmFill(picked[0], sourceName, current.fileName);
+    const ok = await confirmFill(picked[0], sourceName, current.fileName, single?.line);
     if (!ok) return none;
     choice = "fill";
   } else {
-    const answer = await askChoice(plan.choices, count, {
-      sourceName,
-      entries: picked,
-      nextFrom: pivot ?? undefined,
-      shiftCount: shiftPlan?.renames.length ?? 0,
-      lastFrom: lastNumber,
-      erasedChars: erasedCharCount(disk.text, current.ext),
-    });
+    const answer = await askChoice(
+      plan.choices,
+      count,
+      {
+        sourceName,
+        entries: picked,
+        nextFrom: pivot ?? undefined,
+        shiftCount: shiftPlan?.renames.length ?? 0,
+        lastFrom: lastNumber,
+        erasedChars: erasedCharCount(disk.text, current.ext),
+      },
+      plan.choices.includes("overwrite") && single?.line
+        ? `［${IMPORT_CHOICE_LABELS.overwrite}］のとき：${single.line}`
+        : undefined
+    );
     if (!answer) return none;
     choice = answer;
   }
@@ -205,13 +223,9 @@ export async function importBackupIntoWork(input: {
       case "fill":
       case "overwrite": {
         const entry = picked[0];
-        const place = entry.title ? await titlePlaceOf(current, disk.text, entry.title, collected) : null;
+        const place = single?.place ?? null;
         const notes = [...emptyNote];
-        if (entry.title && place === null) {
-          notes.push(
-            `題「${entry.title}」は、この話に題の置き場（冒頭の題の欄・サブタイトルの無いファイル名）が無いため付けていません。`
-          );
-        }
+        if (single?.notice) notes.push(single.notice);
         return writeIntoCurrent({
           work,
           current,
@@ -322,11 +336,50 @@ async function pickEntries(
   return chosen.map((item) => item.entry).sort((a, b) => a.order - b.order);
 }
 
+/**
+ * 1話を開いている話へ入れるときの、題の置き場と窓・知らせの一言。
+ *
+ * - 冒頭の題の欄が**空**ならそこへ入れる（欄に題が入っていれば触らない。作者が書いた題だから）
+ * - 題の欄が無く、ファイル名にサブタイトルが無ければ名前に付ける（新しい名前を窓に出す）
+ * - どちらでもなければ付けない（知らせに書く）
+ */
+async function singleTitlePlan(
+  entry: BackupImportEntry,
+  current: ImportScan["episodes"][number],
+  lfText: string,
+  collected: boolean
+): Promise<{ place: TitlePlace | null; line?: string; notice?: string }> {
+  if (!entry.title) return { place: null };
+  const place = await titlePlaceOf(current, lfText, entry.title, collected);
+  if (place === "header") {
+    if (episodeTitleSlot(lfText)?.empty) {
+      return { place, line: `題「${entry.title}」を冒頭の題の欄に入れます。` };
+    }
+    return {
+      place: null,
+      line: "冒頭の題の欄にはもう題が入っているので、題は変えません。",
+      notice: `題「${entry.title}」は付けていません（冒頭の題の欄にもう題が入っているため）。`,
+    };
+  }
+  if (place === "rename") {
+    return {
+      place,
+      line: `ファイル名を「${renamedFileName(current, entry.title)}」に変えます（題「${entry.title}」をサブタイトルにします）。`,
+    };
+  }
+  return {
+    place: null,
+    notice: `題「${entry.title}」は、この話に題の置き場（冒頭の題の欄・サブタイトルの無いファイル名）が無いため付けていません。`,
+  };
+}
+
 /** 空の話へ1話を入れる前の確かめ */
 async function confirmFill(
   entry: BackupImportEntry,
   sourceName: string,
-  fileName: string
+  fileName: string,
+  /** 題をどうするかの一言（`singleTitlePlan`） */
+  titleLine?: string
 ): Promise<boolean> {
   const answer = await vscode.window.showWarningMessage(
     `「${entry.label}」を、この話（${fileName}）へ入れます。`,
@@ -334,8 +387,9 @@ async function confirmFill(
       modal: true,
       detail:
         `取り込む元：${sourceName}（${entry.chars}字）\n` +
-        "この話の本文は空なので、本文の欄へ入れます（題・冒頭の欄はそのまま）。" +
-        "前書き・後書き・リアクションなど、本文の外の欄は入りません。",
+        "この話の本文は空なので、本文の欄へ入れます（冒頭の欄のほかの項目はそのまま）。" +
+        "前書き・後書き・リアクションなど、本文の外の欄は入りません。" +
+        (titleLine ? `\n${titleLine}` : ""),
     },
     { title: "入れる" },
     { title: IMPORT_CANCEL_LABEL, isCloseAffordance: true }
@@ -347,7 +401,9 @@ async function confirmFill(
 async function askChoice(
   choices: readonly ImportChoice[],
   count: number,
-  detail: Omit<Parameters<typeof describeBackupImportChoices>[0], "choices">
+  detail: Omit<Parameters<typeof describeBackupImportChoices>[0], "choices">,
+  /** 窓の説明の末尾に足す一言（上書きのときの題の扱い） */
+  extraLine?: string
 ): Promise<ImportChoice | undefined> {
   const items: (vscode.MessageItem & { choice?: ImportChoice })[] = [
     ...choices.map((choice) => ({ title: IMPORT_CHOICE_LABELS[choice], choice })),
@@ -357,7 +413,12 @@ async function askChoice(
     count > 1
       ? `${count}話を足します。どこへ足しますか？`
       : "この話には本文が入っています。取り込む話をどうしますか？",
-    { modal: true, detail: describeBackupImportChoices({ choices, ...detail }).join("\n") },
+    {
+      modal: true,
+      detail: [...describeBackupImportChoices({ choices, ...detail }), ...(extraLine ? [extraLine] : [])].join(
+        "\n"
+      ),
+    },
     ...items
   );
   return answer?.choice;
@@ -430,7 +491,7 @@ async function addAllAsNext(input: {
     */
     void vscode.window.showWarningMessage(
       `「${sourceName}」の話はまだどこにも入れていません。話の番号を後ろへずらす途中で止まりました` +
-        `（「${result.stoppedAt.rename.fromFileName}」の手前まで）。ずらし終えた話とまだの話のあいだで番号が空いています。` +
+        `（「${result.stoppedAt.rename.fromFileName}」の付け替えで止まりました）。ずらし終えた話とまだの話のあいだで番号が空いています。` +
         "本文は1文字も失われていません。" +
         "作品一覧で並びを確かめ、止まった理由を取り除いてから、ずらした話の名前を戻してください（どの話を動かしたかは、付け替えの知らせのとおりです）。"
     );

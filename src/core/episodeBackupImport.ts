@@ -140,7 +140,7 @@ export function describeBackupImportChoices(input: {
     } else {
       lines.push(
         `［${IMPORT_CHOICE_LABELS.overwrite}］いまの本文 ${input.erasedChars}字が消え、取り込む話の本文に置き換わります` +
-          "（題・冒頭の欄・後書きはそのまま。書き換える前の本文は控え〈.novelai-recovery〉に残します）。"
+          "（冒頭の欄・後書きはそのまま。題の扱いは下に書きます。書き換える前の本文は控え〈.novelai-recovery〉に残します）。"
       );
     }
   }

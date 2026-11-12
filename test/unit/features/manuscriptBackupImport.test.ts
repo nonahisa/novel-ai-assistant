@@ -294,6 +294,52 @@ describe("原稿エディターのバックアップからの取り込み", () =
     expect(read("005_朝.txt")).toBe("　朝が来た。｜漢字《かんじ》\n");
   });
 
+  test("空の話の冒頭の題の欄に作者の題が入っていれば、題は書き換えない（本文だけ入れ、知らせに書く）", async () => {
+    disk.set(diskPath("005.txt"), encoder.encode("【タイトル】\n第五話　雪の朝\n\n【本文】\n"));
+    unpick = ["第1話　転生前夜", "第3話　昼"];
+    press = "入れる";
+
+    const result = await importInto("005.txt");
+
+    expect(result).toEqual({ changed: true });
+    expect(read("005.txt")).toBe("【タイトル】\n第五話　雪の朝\n\n【本文】\n　朝が来た。｜漢字《かんじ》\n");
+    expect(infos.join("\n")).toContain("題「朝」は付けていません");
+  });
+
+  test("空の話の冒頭の題の欄が空なら、そこへ題を入れ、確かめの窓にそう書く", async () => {
+    disk.set(diskPath("005.txt"), encoder.encode("【タイトル】\n\n【本文】\n"));
+    unpick = ["第1話　転生前夜", "第3話　昼"];
+    press = "入れる";
+
+    await importInto("005.txt");
+
+    expect(asked[0].detail).toContain("題「朝」を冒頭の題の欄に入れます");
+    expect(read("005.txt")).toBe("【タイトル】\n朝\n\n【本文】\n　朝が来た。｜漢字《かんじ》\n");
+  });
+
+  test("題の欄の無い話の名前が変わるときは、確かめの窓に新しい名前を書く", async () => {
+    disk.set(diskPath("005.txt"), encoder.encode(""));
+    unpick = ["第1話　転生前夜", "第3話　昼"];
+    press = "入れる";
+
+    await importInto("005.txt");
+
+    expect(asked[0].detail).toContain("ファイル名を「005_朝.txt」に変えます");
+  });
+
+  test("［上書きする］でも、題の欄に入っている作者の題は書き換えない", async () => {
+    disk.set(
+      diskPath("003.txt"),
+      encoder.encode("【タイトル】\n第三話　港\n\n【本文】\n　前の本文。\n")
+    );
+    unpick = ["第1話　転生前夜", "第3話　昼"];
+    press = "上書きする";
+
+    await importInto("003.txt");
+
+    expect(read("003.txt")).toBe("【タイトル】\n第三話　港\n\n【本文】\n　朝が来た。｜漢字《かんじ》\n");
+  });
+
   test("何話も選んだら、開いている話が空でもその話へは入れない", async () => {
     disk.set(diskPath("005.txt"), encoder.encode(""));
 
@@ -331,7 +377,7 @@ describe("原稿エディターのバックアップからの取り込み", () =
     expect(manuscriptNames().some((name) => name.includes("転生前夜"))).toBe(false);
     expect(warnings.join("\n")).toContain("まだどこにも入れていません");
     // 何話ぶんもずらすときは空く番号が止まった所で変わるので、範囲を言い切らない
-    expect(warnings.join("\n")).toContain("「004.txt」の手前まで");
+    expect(warnings.join("\n")).toContain("「004.txt」の付け替えで止まりました");
     expect(warnings.join("\n")).toContain("番号が空いています");
     expect(warnings.join("\n")).not.toContain("第4〜6話の番号");
   });
