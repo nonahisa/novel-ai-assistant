@@ -234,15 +234,15 @@ const scenes: Record<string, { bundle: string; start: () => PostingLedger; site:
 /* ────────────── 固定の期待値（ヘルパーが無くても走る） ────────────── */
 
 describe("手で計算した数と同じになる（受け手の側）", () => {
-  test("8画面：率は第1話のPV（アクセス数の数）で割る。基準は更新から72時間たった最後の話（第318話）", () => {
+  test("8画面：率は第1話のPV（アクセス数の数）で割る。基準は更新から72時間たった最後の話（第217話）", () => {
     const scene = scenes["カクヨム：作品管理1＋アクセス数7ページ（8画面）"];
     const received = receive(scene.bundle, scene.start(), scene.site);
     const rates = computeReaderRates(received.records);
 
     const first = kakuyomuAccessPv(1); // 3995
-    const base = kakuyomuAccessPv(KAKUYOMU_EPISODES - 2); // 第318話
+    const base = kakuyomuAccessPv(KAKUYOMU_EPISODES - 2); // 第217話
     expect(first).toBe(3995);
-    expect(rates.base?.episode).toBe(318);
+    expect(rates.base?.episode).toBe(217);
     expect(rates.dropout.operands.map((operand) => operand.value)).toEqual([base, first]);
     expect(rates.dropout.value).toBeCloseTo(1 - base / first, 10);
     // ブックマーク率 = 820 ÷ 3,995、評価率 = 60 ÷ 3,995（作品管理の作品全体の数）

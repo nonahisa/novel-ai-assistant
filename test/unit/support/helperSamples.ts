@@ -104,8 +104,8 @@ export function narouFunHelperEnvelope(
 export const KAKUYOMU_WORK_ID = "16816927861924296900";
 /** 作品管理を読んだ時刻（日本時間） */
 export const KAKUYOMU_MANAGEMENT_READ_AT = "2026-10-31T10:00:00+09:00";
-/** 見本の話数（アクセス数は50話ずつなので、7ページ目は20話） */
-export const KAKUYOMU_EPISODES = 320;
+/** 見本の話数（作者の作品と同じ219話。アクセス数は50話ずつなので、5ページ目は201〜219話の19話） */
+export const KAKUYOMU_EPISODES = 219;
 export const KAKUYOMU_ACCESS_PAGE_SIZE = 50;
 export const KAKUYOMU_ACCESS_PAGES = Math.ceil(KAKUYOMU_EPISODES / KAKUYOMU_ACCESS_PAGE_SIZE);
 
@@ -213,10 +213,14 @@ export function entryCount(items: readonly Record<string, unknown>[]): number {
 
 /**
  * 実機で見つかった「8画面が作品1つにまとまった形」の見本。内訳は記録に残っていないので、
- * 作品管理 1画面＋アクセス数 7ページ（320話。50話ずつ）とした（溜めた順＝読んだ順）
+ * ありうる形として、作品管理 1画面＋アクセス数 5ページ（219話。50話ずつ）＋開き直しで戻ったタブが
+ * 読み直した1・2ページ目の2画面とした（溜めた順＝読んだ順。2026-10-31 の実機の記録「開き直しで戻ったタブが
+ * 読み込まれて」。同じ日の前半は作品管理＋アクセス数1・2・5ページ目の4画面だった。ヘルパーの指摘 2026-11-12）
  */
 export function eightScreenItems(): Record<string, unknown>[] {
   const items: Record<string, unknown>[] = [kakuyomuManagementEnvelope()];
   for (let page = 1; page <= KAKUYOMU_ACCESS_PAGES; page++) items.push(kakuyomuAccessEnvelope(page));
+  const reread = jstIso(Date.parse(KAKUYOMU_MANAGEMENT_READ_AT) + 30 * 60 * 1000);
+  for (const page of [1, 2]) items.push(kakuyomuAccessEnvelope(page, { readAt: reread }));
   return items;
 }

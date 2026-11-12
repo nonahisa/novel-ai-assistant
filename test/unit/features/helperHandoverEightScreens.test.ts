@@ -20,7 +20,7 @@ import {
 import { onKakuyomu, setupHandoverHarness, workEntry } from "../support/helperHandoverHarness";
 
 /**
- * ヘルパーが「まとめて渡す」で渡した、同じ作品の8画面の束（カクヨムの作品管理 1画面＋アクセス数 7ページ）を
+ * ヘルパーが「まとめて渡す」で渡した、同じ作品の8画面の束（カクヨムの作品管理 1画面＋アクセス数 5ページ＋読み直した1・2ページ目）を
  * 受け口から取り込んだとき、受け手の記録に**全部**入るか。あわせて、アクセス数の2ページ目以降を足しても
  * 積み上がりが二重にならないか（ヘルパーの実機確認リスト「0.9.0：まとめて渡す」「アクセス数の画面を押して…」の、
  * 受け手の側）。
@@ -51,7 +51,7 @@ function sortedJson(value: unknown): string {
 }
 
 describe("8画面の束が、受け手の記録に全部入る", () => {
-  test("束の中の行（作品全体・日ごと30・月ごと・話ごと320 と、アクセス数の話ごと320）が1行も欠けずに入る", async () => {
+  test("束の中の行（作品全体・日ごと30・月ごと・話ごと219 と、アクセス数の話ごと219＋読み直した100）が1行も欠けずに入る", async () => {
     register();
     const items = eightScreenItems();
     expect(items).toHaveLength(8);
@@ -91,7 +91,7 @@ describe("8画面の束が、受け手の記録に全部入る", () => {
     expect(harness.refreshed).toEqual(["w_kakuyomu"]);
   });
 
-  test("受け手が数を読むところで、320話が1話ずつ・アクセス数のあとの数で出る（話ごとのグラフも320本）", async () => {
+  test("受け手が数を読むところで、219話が1話ずつ・アクセス数のあとの数で出る（話ごとのグラフも219本）", async () => {
     register();
     await harness.handOver(helperBundle(eightScreenItems(), { ownedVia: "owner-page" }));
 
@@ -170,7 +170,7 @@ describe("アクセス数の2ページ目以降の積み上がり", () => {
 
     const rows = harness.rowsOf(work);
     const latest = latestEpisodeValues(rows);
-    // 作品管理が全話ぶん（320話）を持っているので、話の数は320のまま
+    // 作品管理が全話ぶん（219話）を持っているので、話の数は219のまま
     expect(latest.pv.size).toBe(KAKUYOMU_EPISODES);
     expect(latest.pv.get(1)?.value).toBe(kakuyomuAccessPv(1));
     expect(latest.pv.get(51)?.value).toBe(kakuyomuAccessPv(51));
@@ -201,6 +201,6 @@ describe("アクセス数の2ページ目以降の積み上がり", () => {
     // 日ごとのPV（作品管理にだけある）は、1日1行のまま
     const days = rows.filter((row) => row.scope === "work" && row.period === "day");
     expect(days).toHaveLength(30);
-    expect(KAKUYOMU_ACCESS_PAGES).toBe(7);
+    expect(KAKUYOMU_ACCESS_PAGES).toBe(5);
   });
 });
