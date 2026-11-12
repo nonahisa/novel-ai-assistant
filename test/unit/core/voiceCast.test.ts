@@ -236,6 +236,31 @@ describe("文ごとの声", () => {
     expect(units?.[1].gapMs).toBe(VOICE_GAP_SWITCH_MS);
   });
 
+  test("平静の台詞は、選んだのが感情のあるスタイルでも同じ話者のノーマルで読む。語りと感情のある台詞は今までどおり（0.151.1）", () => {
+    const text = "「おはよう」と灯は言った。\n「やった」";
+    const sentences = buildReadingPlan(text, "curly", [], { splitDialogue: true });
+    const joyful = { ...mai, styleName: "上機嫌", styleId: 888753761 };
+    const assignment: VoiceAssignmentFile = {
+      version: 1,
+      narrator: joyful,
+      dialogueDefault: joyful,
+      characters: {},
+    };
+    const units = voicePlanUnits({
+      sentences,
+      dialogues: castDialogues(text),
+      cast: [entry("「やった」", 0, "ai")],
+      assignment,
+      speakers,
+      engine: "aivisspeech",
+    })?.units;
+    expect(units?.map((u) => [u.speech, u.styleId, u.emotion, u.styled])).toEqual([
+      ["「おはよう」", 888753760, "平静", false],
+      ["と灯は言った。", 888753761, "平静", false],
+      ["「やった」", 888753761, "喜び", false],
+    ]);
+  });
+
   test("割り当てが無ければエンジンの最初の声。話者が1人もいなければ読めない", () => {
     const sentences = buildReadingPlan("地の文。", "curly", [], { splitDialogue: true });
     const units = voicePlanUnits({

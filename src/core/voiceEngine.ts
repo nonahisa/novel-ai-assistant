@@ -309,17 +309,62 @@ export function isVoiceIntensity(value: unknown): value is VoiceIntensity {
  * 「せつなめ」に当てるため。日本語の候補の最後に置く——「悲しみ」の名のスタイルを持つ話者では、
  * 今までどおりそちらが選ばれる。
  */
+/*
+ * 0.151.1（作者の答え 2026-11-13「スタイル名を足す」）：作者の VOICEVOX 0.26.1 と AivisSpeech 1.1.0-dev の
+ * スタイル名73を感情ごとに振り分け、当たらなかった名前を各感情の日本語の候補の最後に足した
+ * （作者の実機で、青山龍星の「かなしみ」に悲しみの台詞が当たらず「喜び」の声のまま読んでいた）。
+ * 足した名前：喜び＝わーい・たのしい・うきうき・楽々・明るい・元気・甘々／怒り＝おこ・ツンギレ／
+ * 悲しみ＝かなしみ・なみだめ・びえーん・絶望／驚き＝おどろき／恐れ＝びくびく・こわがり・おどおど／
+ * 照れ＝人見知り／叫び＝熱血。
+ * どの感情にも振らずに残した名前と理由（設計書6.42.3）：
+ *   - 声の形・役柄で、感情ではない：人間ver.・ぬいぐるみver.・鬼ver.・クイーン・第二形態・ロリ・ボーイ・
+ *     ツクモちゃん・つぼみ・ぶりっ子・セクシー・セクシー／あん子
+ *   - 話し方の型：アナウンス・読み聞かせ・実況風
+ *   - 落ち着き・だるさの調子（平静に近いが、ノーマルの代わりにはしない）：しっとり・おちつき・のんびり・
+ *     シリアス・けだるげ・低血圧・ねむたい・ヘロヘロ・へろへろ
+ *   - 感情の種類（9つ）に当てはまるものが無い：つよつよ・覚醒・よわよわ・からかい・呆れ
+ *   - 声の距離・重さ（阿井田 茂）：Calm・Far・Heavy・Mid
+ *   - ふだんの声（平静の台詞で使う。`NORMAL_STYLE_NAMES`）：ノーマル・ふつう・ふつー
+ */
 export const EMOTION_STYLE_CANDIDATES: Record<VoiceEmotion, readonly string[]> = {
   平静: [],
-  喜び: ["上機嫌", "喜び", "楽しい", "嬉しい", "あまあま", "テンション高め", "Happy", "Joy", "Fun", "Cheerful"],
-  怒り: ["怒り", "ツンツン", "不機嫌", "怒", "Angry", "Anger", "Mad"],
-  悲しみ: ["悲しみ", "哀しみ", "かなしい", "泣き", "落ち込み", "せつな", "切な", "Sad", "Sorrow", "Cry"],
-  驚き: ["驚き", "びっくり", "テンション高め", "Surprise", "Surprised", "Amazed"],
-  恐れ: ["怯え", "恐怖", "不安", "おびえ", "ヒソヒソ", "Fear", "Scared", "Afraid"],
-  照れ: ["照れ", "恥ずかしい", "あまあま", "Shy", "Embarrassed"],
+  喜び: [
+    "上機嫌", "喜び", "楽しい", "嬉しい", "あまあま", "テンション高め",
+    "わーい", "たのしい", "うきうき", "楽々", "明るい", "元気", "甘々",
+    "Happy", "Joy", "Fun", "Cheerful",
+  ],
+  怒り: ["怒り", "ツンツン", "不機嫌", "怒", "おこ", "ツンギレ", "Angry", "Anger", "Mad"],
+  悲しみ: [
+    "悲しみ", "哀しみ", "かなしい", "泣き", "落ち込み", "せつな", "切な",
+    "かなしみ", "なみだめ", "びえーん", "絶望",
+    "Sad", "Sorrow", "Cry",
+  ],
+  驚き: ["驚き", "びっくり", "テンション高め", "おどろき", "Surprise", "Surprised", "Amazed"],
+  恐れ: ["怯え", "恐怖", "不安", "おびえ", "ヒソヒソ", "びくびく", "こわがり", "おどおど", "Fear", "Scared", "Afraid"],
+  照れ: ["照れ", "恥ずかしい", "あまあま", "人見知り", "Shy", "Embarrassed"],
   ささやき: ["ささやき", "囁き", "ヒソヒソ", "内緒話", "Whisper", "Murmur"],
-  叫び: ["叫び", "絶叫", "テンション高め", "怒り", "Shout", "Scream", "Yell"],
+  叫び: ["叫び", "絶叫", "テンション高め", "怒り", "熱血", "Shout", "Scream", "Yell"],
 };
+
+/**
+ * ふだんの声のスタイルの名前（0.151.1。作者の答え 2026-11-13「平静の台詞は同じ話者の『ノーマル』で読む」）。
+ * 作者が台詞の声に「喜び」など感情のあるスタイルを選んでいても、平静の台詞はこの名前のスタイルで読む。
+ * **名前は全体で一致したものだけ**（含むで当てると「ノーマル（低め）」のような別の声を拾う）。英語は大文字と小文字を区別しない
+ */
+export const NORMAL_STYLE_NAMES: readonly string[] = ["ノーマル", "ふつう", "ふつー", "Normal"];
+
+/**
+ * 平静の台詞の声を選ぶ。選んだスタイル（`baseStyleId`）の話者に、ふだんの声（`NORMAL_STYLE_NAMES`）が
+ * あればその番号、**無ければ選んだスタイルのまま**（話者ごとに声の形が違う後鬼の「人間ver.」のように、
+ * ノーマルを持たない話者がいる）。語りの声には使わない（作者が選んだ語りの声を替えない）
+ */
+export function pickNormalStyle(speakers: readonly VoiceSpeaker[], baseStyleId: number): number {
+  const found = findStyle(speakers, baseStyleId);
+  if (!found) return baseStyleId;
+  const wanted = NORMAL_STYLE_NAMES.map((name) => name.toLowerCase());
+  const normal = found.speaker.styles.find((s) => wanted.includes(s.name.trim().toLowerCase()));
+  return normal ? normal.id : baseStyleId;
+}
 
 /** 声の調子（audio_query の6つの欄へ当てる値） */
 export interface VoiceParams {

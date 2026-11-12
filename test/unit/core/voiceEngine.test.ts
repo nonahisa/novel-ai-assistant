@@ -5,6 +5,7 @@ import {
   engineHostOutsideThisPc,
   normalizeEngineUrl,
   parseSpeakers,
+  pickNormalStyle,
   pickStyleForEmotion,
   SynthesisCache,
   synthesisKey,
@@ -319,5 +320,107 @@ describe("VOICEVOX 0.26 の話者の一覧（2026-11-08 作者の実機）", () 
 
   test("設定の接続先の前後の空白は取り除く", () => {
     expect(normalizeEngineUrl("http://127.0.0.1:50021 ")).toBe("http://127.0.0.1:50021");
+  });
+});
+
+/**
+ * 作者の VOICEVOX 0.26.1・AivisSpeech 1.1.0-dev のスタイル名（0.151.1。作者の答え 2026-11-13「スタイル名を足す」
+ * 「平静の台詞は同じ話者の『ノーマル』で読む」）。再現：青山龍星の「かなしみ」に悲しみの台詞が当たらず、
+ * 作者が選んだ「喜び」の声のまま読んでいた（作品の記録と VOICEVOX の /speakers で確かめた）。
+ */
+describe("作者のエンジンのスタイル名に当たる（0.151.1）", () => {
+  const speakers = parseSpeakers([
+    {
+      name: "青山龍星",
+      speaker_uuid: "uuid-ryusei",
+      styles: [
+        { name: "ノーマル", id: 13 },
+        { name: "熱血", id: 81 },
+        { name: "不機嫌", id: 82 },
+        { name: "喜び", id: 83 },
+        { name: "しっとり", id: 84 },
+        { name: "かなしみ", id: 85 },
+        { name: "囁き", id: 86 },
+      ],
+    },
+    {
+      name: "白上虎太郎",
+      speaker_uuid: "uuid-kotaro",
+      styles: [
+        { name: "ふつう", id: 12 },
+        { name: "わーい", id: 32 },
+        { name: "びくびく", id: 33 },
+        { name: "おこ", id: 34 },
+        { name: "びえーん", id: 35 },
+      ],
+    },
+    {
+      name: "中国うさぎ",
+      speaker_uuid: "uuid-usagi",
+      styles: [
+        { name: "ノーマル（低め）", id: 61 },
+        { name: "おどろき", id: 62 },
+        { name: "こわがり", id: 63 },
+      ],
+    },
+    {
+      name: "後鬼",
+      speaker_uuid: "uuid-goki",
+      styles: [
+        { name: "人間ver.", id: 27 },
+        { name: "ぬいぐるみver.", id: 28 },
+        { name: "鬼ver.", id: 88 },
+      ],
+    },
+    {
+      name: "まお",
+      speaker_uuid: "uuid-mao",
+      styles: [
+        { name: "おちつき", id: 501 },
+        { name: "ふつー", id: 502 },
+      ],
+    },
+    {
+      name: "英語の話者",
+      speaker_uuid: "uuid-en",
+      styles: [
+        { name: "Calm", id: 701 },
+        { name: "NORMAL", id: 702 },
+      ],
+    },
+  ]);
+
+  test("再現：「喜び」を選んだ青山龍星の悲しみの台詞は「かなしみ」へ切り替わる", () => {
+    expect(pickStyleForEmotion(speakers, 83, "悲しみ")).toEqual({ styleId: 85, styled: true });
+  });
+
+  test("ひらがな・言い換えの名前に当たる（怒り＝おこ・喜び＝わーい・恐れ＝びくびく・悲しみ＝びえーん・驚き＝おどろき・叫び＝熱血）", () => {
+    expect(pickStyleForEmotion(speakers, 12, "怒り").styleId).toBe(34);
+    expect(pickStyleForEmotion(speakers, 12, "喜び").styleId).toBe(32);
+    expect(pickStyleForEmotion(speakers, 12, "恐れ").styleId).toBe(33);
+    expect(pickStyleForEmotion(speakers, 12, "悲しみ").styleId).toBe(35);
+    expect(pickStyleForEmotion(speakers, 61, "驚き").styleId).toBe(62);
+    expect(pickStyleForEmotion(speakers, 61, "恐れ").styleId).toBe(63);
+    expect(pickStyleForEmotion(speakers, 13, "叫び").styleId).toBe(81);
+    expect(pickStyleForEmotion(speakers, 13, "怒り").styleId).toBe(82);
+  });
+
+  test("声の形の名前（人間ver. など）は、どの感情にも当てない（選んだスタイルのまま）", () => {
+    for (const emotion of VOICE_EMOTIONS) {
+      expect(pickStyleForEmotion(speakers, 27, emotion)).toEqual({ styleId: 27, styled: false });
+    }
+  });
+
+  test("平静の声：同じ話者のノーマル・ふつう・ふつー（英語は大文字小文字を問わない）。無ければ選んだスタイルのまま", () => {
+    expect(pickNormalStyle(speakers, 83)).toBe(13);
+    expect(pickNormalStyle(speakers, 32)).toBe(12);
+    expect(pickNormalStyle(speakers, 501)).toBe(502);
+    expect(pickNormalStyle(speakers, 701)).toBe(702);
+    expect(pickNormalStyle(speakers, 13)).toBe(13);
+    // ノーマルを持たない話者・名前の一部だけ同じ（「ノーマル（低め）」）は選んだまま
+    expect(pickNormalStyle(speakers, 28)).toBe(28);
+    expect(pickNormalStyle(speakers, 62)).toBe(62);
+    // 一覧に無い番号はそのまま
+    expect(pickNormalStyle(speakers, 99999)).toBe(99999);
   });
 });

@@ -4,6 +4,7 @@ import {
   isVoiceEmotion,
   isVoiceEngineId,
   isVoiceIntensity,
+  pickNormalStyle,
   pickStyleForEmotion,
   VOICE_EMOTIONS,
   VOICE_ENGINE_LABEL,
@@ -1287,12 +1288,12 @@ export function voicePlanUnits(input: {
       }
     }
     // 感情のスタイルは、その声のエンジンの一覧から選ぶ（同じ番号が別のエンジンでは別人）
-    const picked = pickStyleForEmotion(
-      listOf(voice.engine) ?? [],
-      voice.styleId,
-      emotion,
-      input.assignment.emotionStyles
-    );
+    const list = listOf(voice.engine) ?? [];
+    // 平静の台詞は、同じ話者のふだんの声で読む（0.151.1。作者の答え 2026-11-13）。語りは選んだ声のまま
+    const picked =
+      sentence.kind === "dialogue" && emotion === "平静"
+        ? { styleId: pickNormalStyle(list, voice.styleId), styled: false }
+        : pickStyleForEmotion(list, voice.styleId, emotion, input.assignment.emotionStyles);
     units.push({
       speech: sentence.speech,
       engine: voice.engine,
