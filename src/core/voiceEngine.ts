@@ -699,9 +699,16 @@ export function missingEmotionStyleNotice(
 ): string | undefined {
   if (missing.length === 0) return undefined;
   const head = `この声（${speakerName}）には${missing.join("・")}の声（スタイル）がありません。`;
-  return engine === "aivisspeech"
-    ? `${head}その感情は声を替えず、速さと緩急だけで寄せるので、平静に近く聞こえることがあります。`
-    : `${head}その感情は平静に近く聞こえます。`;
+  const body =
+    engine === "aivisspeech"
+      ? "その感情は声を替えず、速さと緩急だけで寄せるので、平静に近く聞こえることがあります。"
+      : "その感情は平静に近く聞こえます。";
+  /*
+    叫びだけは一言足す（作者の決定 2026-11-13 夜）。速さ・緩急・高さをどう強めても、ノーマルの声では
+    叫びに聞こえなかった（AivisSpeech のまおで4通り聞き比べた）。叫びの声は、スタイルを持つ声を選ぶほかない
+  */
+  const shout = missing.includes("叫び") ? "叫びが要る人物には、叫びのスタイルがある声を選んでください。" : "";
+  return `${head}${body}${shout}`;
 }
 
 /**
