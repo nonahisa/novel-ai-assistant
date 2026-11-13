@@ -4,6 +4,8 @@ import type { GitCommandRunner } from "../../../src/core/git";
 import type { WorkEntry } from "../../../src/models/types";
 import { FileType, workspace } from "../support/vscodeStub";
 import { GitSyncMonitor } from "../../../src/features/gitSync";
+import { recordChanges } from "../../../src/features/gitOnboarding";
+import { buildSyncTarget } from "../../../src/core/syncTarget";
 
 /**
  * 作品1つの同期でも、同じ置き場（書庫）にフォルダーが無い作品があれば記録しない
@@ -119,6 +121,17 @@ describe("作品1つの同期で、同じ置き場にフォルダーが無い作
       }
     });
   }
+
+  test("作品ごとの一覧の「記録」（recordChanges）も、記録せずに知らせる", async () => {
+    const ok = await recordChanges(buildSyncTarget(library, [present, moved]), run);
+    expect(ok).toBe(false);
+    expect(calls.filter((args) => ["add", "commit"].includes(args[0]))).toEqual([]);
+    const notice = warned.find((one) => one.message.includes("作品のフォルダーが見つからない"));
+    expect(notice?.message).toContain(
+      "作品のフォルダーが見つからないので、この置き場は同期を止めました：たゆたう鉛。"
+    );
+    expect(notice?.buttons).toEqual(["「たゆたう鉛」の登録を解除"]);
+  });
 
   test("作品が全部そろっていれば、取り込みの前の記録は今までどおり進む", async () => {
     folders.add(norm(moved.folderPath));

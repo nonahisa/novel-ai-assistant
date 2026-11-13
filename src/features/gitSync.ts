@@ -41,8 +41,8 @@ import {
   useLogFile,
 } from "../core/logger";
 import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
-import { describeMissingWorks, unregisterMissingWorkLabel } from "../core/syncAllPlan";
 import { findMissingWorks } from "../core/workFolderPresence";
+import { noticeMissingWorks } from "./missingWorksNotice";
 import { rescueEditorGitignore } from "./editorGitignoreRescue";
 import { withProgress } from "../views/progress";
 import { isEditorMode } from "../core/actorContext";
@@ -1475,22 +1475,7 @@ ${reason}` : ""}`,
     const gone = await findMissingWorks(buildSyncTarget(root, this.registry.list()).works);
     if (gone.length === 0) return false;
     useLogFile(work.folderPath);
-    logFailure("作品のフォルダーが見つからないので、記録を止めた", {
-      作品: work.title,
-      見つからない作品: gone.map((one) => one.folderPath).join("、"),
-    });
-    const unregister = unregisterMissingWorkLabel(gone[0]);
-    whenNoticePicked(
-      vscode.window.showWarningMessage(describeMissingWorks(gone, "after"), unregister),
-      async (action) => {
-        if (action !== unregister) return;
-        await vscode.commands.executeCommand("novelai.removeWork", {
-          type: "work",
-          work: gone[0],
-        });
-      },
-      { label: "作品のフォルダーが無いときの案内", workFolder: work.folderPath }
-    );
+    noticeMissingWorks(work.folderPath, gone);
     return true;
   }
 

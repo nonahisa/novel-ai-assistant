@@ -32,6 +32,8 @@ import {
 } from "../core/gitSetup";
 import { logFailure, logStep } from "../core/logger";
 import { useSyncLog } from "./syncLog";
+import { noticeMissingWorks } from "./missingWorksNotice";
+import { findMissingWorks } from "../core/workFolderPresence";
 import { redactUrlCredentials } from "../core/redactUrl";
 import { withProgress } from "../views/progress";
 import { askText , cancelItem } from "../views/dialogs";
@@ -122,6 +124,15 @@ export async function recordChanges(
   run: GitCommandRunner = runGit
 ): Promise<boolean> {
   await useTargetLog(target);
+  // **置き場に、フォルダーが無い作品があれば記録しない**（2026-11-14。「すべて同期」と同じ決まり。
+  // `git add -A` が置き場ぜんぶを入れ、移した・外れたドライブの作品の削除まで記録される）
+  const gone = await findMissingWorks(target.works);
+  if (gone.length > 0) {
+    // 知らせの失敗の書き先は、在る作品のフォルダー（書庫の直下へは書かない。`useSyncLog`）
+    const present = target.works.find((work) => !gone.includes(work));
+    noticeMissingWorks(present?.folderPath, gone);
+    return false;
+  }
   const count = await countTrackableFiles(target.folderPath, run);
   if (count === 0) {
     vscode.window.showInformationMessage(

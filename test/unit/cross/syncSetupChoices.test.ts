@@ -226,9 +226,10 @@ describe("変更を記録する", () => {
   };
 
   test("置き場の名前で言い、記録の説明は日付と件数で作る（実機確認リスト「まとめて1つの置き場にする」の代わり）", async () => {
-    const target = buildSyncTarget(nodePath.join("C:", "書庫"), [
-      { id: "a", title: "いじめられっ子", folderPath: nodePath.join("C:", "書庫", "a") },
-      { id: "b", title: "ハイエルフ未亡人", folderPath: nodePath.join("C:", "書庫", "b") },
+    // 作品のフォルダーは本物を使う（無い作品がある置き場は記録しない。2026-11-14）
+    const target = buildSyncTarget(library, [
+      { id: "a", title: "いじめられっ子", folderPath: nodePath.join(library, "いじめられっ子") },
+      { id: "b", title: "ハイエルフ未亡人", folderPath: nodePath.join(library, "ハイエルフ未亡人") },
     ] as WorkEntry[]);
 
     const shown: string[] = [];
@@ -252,9 +253,10 @@ describe("変更を記録する", () => {
   });
 
   test("記録するものが無いときも、置き場の名前で言う（実機確認リスト「まとめて1つの置き場にする」の代わり）", async () => {
-    const target = buildSyncTarget(nodePath.join("C:", "書庫"), [
-      { id: "a", title: "いじめられっ子", folderPath: nodePath.join("C:", "書庫", "a") },
-      { id: "b", title: "ハイエルフ未亡人", folderPath: nodePath.join("C:", "書庫", "b") },
+    // 作品のフォルダーは本物を使う（無い作品がある置き場は記録しない。2026-11-14）
+    const target = buildSyncTarget(library, [
+      { id: "a", title: "いじめられっ子", folderPath: nodePath.join(library, "いじめられっ子") },
+      { id: "b", title: "ハイエルフ未亡人", folderPath: nodePath.join(library, "ハイエルフ未亡人") },
     ] as WorkEntry[]);
 
     const shown: string[] = [];
