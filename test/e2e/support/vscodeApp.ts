@@ -97,6 +97,12 @@ export interface E2ESession {
  * （広報の動画を撮る台本 `test/e2e/promo/` が使う。設計書6.114）。
  */
 export interface LaunchOptions {
+  /**
+   * 起こす VS Code の環境変数へ足す（同じ名前は上書き。名前の大小は区別しない）。
+   * **走らせる側（vitest）の環境は替えない**——片づけが PATH から探す道具を使うため。
+   * 例：PATH を空のフォルダーにして、製品が OS の「開く」コマンドを起こせない形にする
+   */
+  env?: Record<string, string>;
   /** 使い捨ての settings.json へ足す（同じ名前は上書き） */
   settings?: Record<string, unknown>;
   /** 使い捨ての keybindings.json へ足す行 */
@@ -368,7 +374,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
   const app = await _electron.launch({
     executablePath,
     args,
-    env: cleanEnv(),
+    env: cleanEnv(options.env),
     timeout: 60_000,
     ...(options.recordVideo ? { recordVideo: options.recordVideo } : {}),
   }).catch(async (error: unknown) => {
@@ -583,11 +589,18 @@ export async function resizeWindows(app: ElectronApplication, size: { width: num
  * 即終了する（統合テスト・ブラウザ版テストと同じ罠。実際に踏んでいる）。
  * 他の `VSCODE_*` も、親のウィンドウへ繋ぎに行かせないために落とす。
  */
-function cleanEnv(): Record<string, string> {
+function cleanEnv(extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
     if (name === "ELECTRON_RUN_AS_NODE" || name.startsWith("VSCODE_")) continue;
+    env[name] = value;
+  }
+  for (const [name, value] of Object.entries(extra)) {
+    // Windows の環境変数は名前の大小を区別しない（Path と PATH が並ぶと、どちらが効くか決まらない）
+    for (const existing of Object.keys(env)) {
+      if (existing.toLowerCase() === name.toLowerCase()) delete env[existing];
+    }
     env[name] = value;
   }
   return env;
