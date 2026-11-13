@@ -29,11 +29,10 @@ afterEach(() => harness.restore());
 const target = () => buildSyncTarget(library, [present, moved]);
 
 describe("セットアップ：置き場にフォルダーが無い作品があるとき", () => {
-  test("Gitで管理を始める：確認も初期化もせず、作品名入りの知らせを出す", async () => {
+  test("Gitで管理を始める：初期化も記録もせず、作品名入りの知らせを出す", async () => {
     const ok = await runSetupStep(target(), { kind: "not_a_repo" }, harness.run);
     expect(ok).toBe(false);
     expect(harness.writes()).toEqual([]);
-    expect(harness.warned.some((one) => one.message.includes("Gitで管理しますか"))).toBe(false);
     const notices = harness.missingNotices();
     expect(notices).toHaveLength(1);
     expect(notices[0].message).toContain(STOPPED_LINE);

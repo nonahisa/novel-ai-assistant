@@ -333,7 +333,12 @@ async function skipIfWorksMissing(
     `開いたときの点検：作品のフォルダーが見つからないので、この置き場は取り込み・送信をしなかった` +
       `（${target.label}／見つからない作品：${gone.map((one) => one.title).join("、")}）`
   );
-  noticeMissingWorksOnce(target.works[0]?.folderPath, gone);
+  // 知らせの失敗の書き先は在る作品のフォルダー（無い作品へ書くと親フォルダーごと作り直す）
+  const goneIds = new Set(gone.map((one) => one.id));
+  noticeMissingWorksOnce(
+    target.works.find((one) => !goneIds.has(one.id))?.folderPath,
+    gone
+  );
   return true;
 }
 

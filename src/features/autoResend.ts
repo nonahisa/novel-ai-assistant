@@ -334,7 +334,12 @@ export class AutoResender implements vscode.Disposable {
           `（${label}／見つからない作品：${gone.map((one) => one.title).join("、")}` +
           `／きっかけ ${trigger}。送れていない分は手元に残っています）`
       );
-      noticeMissingWorksOnce(target.works[0]?.folderPath, gone);
+      // 知らせの失敗の書き先は在る作品のフォルダー（控えが古いと `target.works` に無い作品が混じりうる）
+      const goneIds = new Set(gone.map((one) => one.id));
+      noticeMissingWorksOnce(
+        target.works.find((one) => !goneIds.has(one.id))?.folderPath,
+        gone
+      );
       return;
     }
 
