@@ -111,7 +111,7 @@ vi.mock("../../../src/core/voiceCastStore", () => ({
   },
 }));
 
-const { VoiceReadingService, runVoiceCast, assignVoices } = await import("../../../src/features/voiceReading");
+const { VoiceReadingService, runVoiceCast, assignVoices, AIVIS_AGED_NOTE_LABEL } = await import("../../../src/features/voiceReading");
 const { buildReadingPlan } = await import("../../../src/core/readAloud");
 const { VOICE_ENGINE_LABEL } = await import("../../../src/core/voiceEngine");
 const { unresolvedVoiceNotice, voicePlanNotice } = await import("../../../src/core/voiceCast");
@@ -515,14 +515,18 @@ describe("声を選ぶ窓の区切りと、人物ごとの声の調整（作者�
 
   /** 選ぶ画面の代役（区切りの見出しも控える）。`answers` を順に選ぶ（尽きたら閉じる） */
   function scriptQuickPick(answers: Array<(items: readonly unknown[]) => unknown>) {
-    const shown: Array<{ title: string | undefined; items: Array<{ label: string; description?: string; separator: boolean }> }> = [];
+    const shown: Array<{
+      title: string | undefined;
+      items: Array<{ label: string; description?: string; detail?: string; separator: boolean }>;
+    }> = [];
     const original = window.showQuickPick;
     window.showQuickPick = (async (items: readonly unknown[], options?: { title?: string }) => {
       shown.push({
         title: options?.title,
-        items: (items as Array<{ label: string; description?: string; kind?: number }>).map((item) => ({
+        items: (items as Array<{ label: string; description?: string; detail?: string; kind?: number }>).map((item) => ({
           label: item.label,
           description: item.description,
+          detail: item.detail,
           separator: item.kind === -1,
         })),
       });
@@ -604,9 +608,12 @@ describe("声を選ぶ窓の区切りと、人物ごとの声の調整（作者�
     ]);
   });
 
-  test("調整の行から見本「老けた声」を1回で選べ、声を選び直しても調整と区切りの直しは残る", async () => {
+  test("VOICEVOX の声：調整の行から見本「老けた声」を1回で選べ、声を選び直しても調整と区切りの直しは残る", async () => {
     const { service } = await oneEngine();
     state.assignment = { ...state.assignment, speakerGroups: { "uuid-mai": "女性" } };
+    // 見本は VOICEVOX の声にだけ出す（作者の決定 2026-11-13 夕）。灯の声を VOICEVOX で選んだことにする
+    const beforeMark = state.assignment.characters["c-akari"];
+    state.assignment.characters["c-akari"] = { ...beforeMark, engine: "voicevox" };
     const pick = scriptQuickPick([
       labelled("灯"),
       labelled("この声の高さ・速さ・抑揚を変える"),
@@ -618,13 +625,15 @@ describe("声を選ぶ窓の区切りと、人物ごとの声の調整（作者�
       pick.restore();
     }
     expect(pick.shown[2].title).toBe("灯の声の調整（いまは標準）");
-    expect(pick.shown[2].items.find((item) => item.label === "見本：老けた声")?.description).toBe("高さ −0.06・速さ 0.85・抑揚 0.8");
-    expect(state.savedAssignments[0].characters["c-akari"].adjust).toEqual({ pitch: -0.06, speed: 0.85, intonation: 0.8 });
+    expect(pick.shown[2].items.find((item) => item.label === "見本：老けた声")?.description).toBe("高さ −0.12・速さ 0.8・抑揚 0.7");
+    // VOICEVOX の声には AivisSpeech の知らせを出さない
+    expect(pick.shown[2].items.some((item) => item.label.includes("AivisSpeech"))).toBe(false);
+    expect(state.savedAssignments[0].characters["c-akari"].adjust).toEqual({ pitch: -0.12, speed: 0.8, intonation: 0.7 });
     expect(state.savedAssignments[0].speakerGroups).toEqual({ "uuid-mai": "女性" });
 
-    // 調整のある声を選び直す：調整は残り、一覧の枠に添えてある
+    // 調整のある声を選び直す：調整は残り、一覧の枠に添えてある（前の版の値 −0.06 などもそのまま読む）
     state.savedAssignments.length = 0;
-    state.assignment.characters["c-akari"] = { ...state.assignment.characters["c-akari"], adjust: { pitch: -0.06, speed: 0.85, intonation: 0.8 } };
+    state.assignment.characters["c-akari"] = { ...beforeMark, adjust: { pitch: -0.06, speed: 0.85, intonation: 0.8 } };
     const again = scriptQuickPick([labelled("灯"), labelled("花音")]);
     try {
       await assignVoices(work, service, "aivisspeech");
@@ -650,7 +659,18 @@ describe("声を選ぶ窓の区切りと、人物ごとの声の調整（作者�
     } finally {
       pick.restore();
     }
-    expect(pick.shown[3].items.map((item) => item.label)).toEqual(["−0.06", "−0.03", "0", "+0.03", "+0.06", expect.stringContaining("戻る")]);
+    expect(pick.shown[3].items.map((item) => item.label)).toEqual([
+      "−0.12",
+      "−0.09",
+      "−0.06",
+      "−0.03",
+      "0",
+      "+0.03",
+      "+0.06",
+      "+0.09",
+      "+0.12",
+      expect.stringContaining("戻る"),
+    ]);
     expect(state.savedAssignments[0].characters["c-akari"].adjust).toEqual({ pitch: 0.03 });
 
     state.savedAssignments.length = 0;
@@ -662,6 +682,52 @@ describe("声を選ぶ窓の区切りと、人物ごとの声の調整（作者�
       off.restore();
     }
     expect(state.savedAssignments[0].characters["c-akari"]).not.toHaveProperty("adjust");
+  });
+
+  test("AivisSpeech の声：見本「老けた声」を出さず、年配の声のモデルを選ぶよう窓の中で知らせる。1つずつ選ぶ道は残す（作者の決定 2026-11-13 夕）", async () => {
+    const { service } = await oneEngine();
+    const infos: string[] = [];
+    const originalInfo = window.showInformationMessage;
+    window.showInformationMessage = (async (message: string) => {
+      infos.push(message);
+      return undefined;
+    }) as typeof window.showInformationMessage;
+    // 灯の声は AivisSpeech の印つき・印なし（［声］が AivisSpeech）の両方で見る
+    const marked = { ...state.assignment.characters["c-akari"], engine: "aivisspeech" as const };
+    const unmarked = state.assignment.characters["c-akari"];
+    const windows: Array<{ title: string | undefined; items: Array<{ label: string; description?: string; detail?: string; separator: boolean }> }> = [];
+    try {
+      for (const ref of [marked, unmarked]) {
+        state.assignment.characters["c-akari"] = ref;
+        // 知らせの行を選んでも何も保存せず、窓を開き直す（そのあと閉じる）
+        const pick = scriptQuickPick([
+          labelled("灯"),
+          labelled("この声の高さ・速さ・抑揚を変える"),
+          labelled(AIVIS_AGED_NOTE_LABEL),
+        ]);
+        try {
+          await assignVoices(work, service, "aivisspeech");
+        } finally {
+          pick.restore();
+        }
+        windows.push(pick.shown[2]);
+        expect(pick.shown[3]?.title).toBe("灯の声の調整（いまは標準）");
+      }
+    } finally {
+      window.showInformationMessage = originalInfo;
+    }
+    for (const shown of windows) {
+      const labels = shown.items.map((item) => item.label);
+      expect(labels.some((label) => label.startsWith("見本："))).toBe(false);
+      expect(labels).toEqual(expect.arrayContaining(["高さ", "速さ", "抑揚"]));
+      const note = shown.items.find((item) => item.label === AIVIS_AGED_NOTE_LABEL);
+      expect(`${note?.label}${note?.detail}`).toBe(
+        "AivisSpeech では、調整では老けた声に聞こえにくいです。年配の声のモデル（例：ろてじん）を選んでください。"
+      );
+    }
+    // 窓の中の行で知らせる（開くたびに右下の知らせを出さない）
+    expect(infos).toEqual([]);
+    expect(state.savedAssignments).toEqual([]);
   });
 
   test("人物の調整は、朗読と書き出しの両方の道で、エンジンへの頼みの値に効く", async () => {

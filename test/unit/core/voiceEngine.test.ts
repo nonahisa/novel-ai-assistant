@@ -6,6 +6,7 @@ import {
   engineHostOutsideThisPc,
   parseVoiceAdjust,
   VOICE_ADJUST_PRESETS,
+  presetsForEngine,
   VOICE_ADJUST_STEPS,
   isNormalStyleName,
   missingEmotionStyleNotice,
@@ -567,10 +568,30 @@ describe("人物ごとの声の調整（作者の頼み 2026-11-13）", () => {
     }
   });
 
-  test("見本「老けた声」は 高さ −0.06・速さ 0.85・抑揚 0.8", () => {
+  test("幅は 高さ ±0.12・速さ 0.8〜1.2・抑揚 0.7〜1.3（作者の決定 2026-11-13 夕）。端は読め、外は捨てる", () => {
+    for (const value of [-0.12, 0.12]) expect(parseVoiceAdjust({ pitch: value })).toEqual({ pitch: value });
+    for (const value of [0.8, 1.2]) expect(parseVoiceAdjust({ speed: value })).toEqual({ speed: value });
+    for (const value of [0.7, 1.3]) expect(parseVoiceAdjust({ intonation: value })).toEqual({ intonation: value });
+    for (const value of [-0.13, 0.13]) expect(parseVoiceAdjust({ pitch: value })).toBeUndefined();
+    for (const value of [0.75, 1.25]) expect(parseVoiceAdjust({ speed: value })).toBeUndefined();
+    for (const value of [0.65, 1.35]) expect(parseVoiceAdjust({ intonation: value })).toBeUndefined();
+    // 前の版の見本の値（幅の中）はそのまま読める
+    expect(parseVoiceAdjust({ pitch: -0.06, speed: 0.85, intonation: 0.8 })).toEqual({ pitch: -0.06, speed: 0.85, intonation: 0.8 });
+  });
+
+  test("段の並び：高さ −0.12〜+0.12 を0.03刻み、速さ 0.8〜1.2 を0.05刻み、抑揚 0.7〜1.3 を0.1刻み", () => {
+    expect(VOICE_ADJUST_STEPS.pitch).toEqual([-0.12, -0.09, -0.06, -0.03, 0, 0.03, 0.06, 0.09, 0.12]);
+    expect(VOICE_ADJUST_STEPS.speed).toEqual([0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2]);
+    expect(VOICE_ADJUST_STEPS.intonation).toEqual([0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3]);
+  });
+
+  test("見本「老けた声」は 高さ −0.12・速さ 0.8・抑揚 0.7（作者の決定 2026-11-13 夕。VOICEVOX の四国めたんで老人に聞こえた値）", () => {
     const aged = VOICE_ADJUST_PRESETS.find((preset) => preset.name === "老けた声");
-    expect(aged?.adjust).toEqual({ pitch: -0.06, speed: 0.85, intonation: 0.8 });
-    expect(describeVoiceAdjust(aged?.adjust)).toBe("高さ −0.06・速さ 0.85・抑揚 0.8");
+    expect(aged?.adjust).toEqual({ pitch: -0.12, speed: 0.8, intonation: 0.7 });
+    expect(describeVoiceAdjust(aged?.adjust)).toBe("高さ −0.12・速さ 0.8・抑揚 0.7");
+    // 見本は VOICEVOX の声にだけ出す。AivisSpeech は年配の声のモデルを選ぶほうが近い
+    expect(presetsForEngine("voicevox").map((preset) => preset.name)).toEqual(["老けた声"]);
+    expect(presetsForEngine("aivisspeech")).toEqual([]);
     expect(describeVoiceAdjust(undefined)).toBe("");
     expect(describeVoiceAdjust({ pitch: 0.03 })).toBe("高さ +0.03");
   });
@@ -587,11 +608,11 @@ describe("人物ごとの声の調整（作者の頼み 2026-11-13）", () => {
   });
 
   test("合わせたあとも幅（speed 0.5〜2・pitch ±0.15・intonation 0〜2）に収める", () => {
-    const loud = voiceParamsFor("叫び", "強", false, 2, { pitch: 0.06, speed: 1.15, intonation: 1.2 });
+    const loud = voiceParamsFor("叫び", "強", false, 2, { pitch: 0.12, speed: 1.2, intonation: 1.3 });
     expect(loud.speedScale).toBeLessThanOrEqual(2);
     expect(loud.pitchScale).toBeLessThanOrEqual(0.15);
     expect(loud.intonationScale).toBeLessThanOrEqual(2);
-    const low = voiceParamsFor("悲しみ", "強", false, 0.5, { pitch: -0.06, speed: 0.85, intonation: 0.8 });
+    const low = voiceParamsFor("悲しみ", "強", false, 0.5, { pitch: -0.12, speed: 0.8, intonation: 0.7 });
     expect(low.speedScale).toBeGreaterThanOrEqual(0.5);
     expect(low.pitchScale).toBeGreaterThanOrEqual(-0.15);
     // 驚き（強）の高さ +0.09 に +0.06 を足すと 0.15 で止まる

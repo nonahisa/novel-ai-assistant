@@ -31,6 +31,7 @@ import {
   type VoiceEmotion,
   type VoiceSpeaker,
 } from "../../../src/core/voiceEngine";
+import { VOICEVOX_SPEAKER_GROUPS } from "../../../src/core/voiceGroups";
 import { withVsCode } from "../support/vscodeApp";
 import { describeNotices } from "../support/noticeRecord";
 import {
@@ -163,13 +164,37 @@ test.skipIf(!GATE_MIX)(
 
 /* ───────────────────────── 99・113：VOICEVOX ───────────────────────── */
 
+/**
+ * 語り・灯・蛍を、声の印象の区切り（`VOICEVOX_SPEAKER_GROUPS`）の違う話者から選ぶ。一覧の先頭3人
+ * （四国めたん・ずんだもん・春日部つむぎ）では、語りと蛍が似た声に聞こえた（作者の耳 2026-11-13）。
+ * 区切りの違う話者が3人に満たなければ、足りない分は一覧の先頭から（前の選び方）埋める
+ */
+function pickDistinctGroupVoices(speakers: VoiceSpeaker[]): [VoiceSpeaker, VoiceSpeaker, VoiceSpeaker] {
+  const picked: VoiceSpeaker[] = [];
+  const groups = new Set<string>();
+  for (const speaker of speakers) {
+    const group = VOICEVOX_SPEAKER_GROUPS[speaker.uuid];
+    // 「その他」は確かめきれない話者の置き場で、印象が分からないので区切りとして数えない
+    if (!group || group === "その他" || groups.has(group)) continue;
+    groups.add(group);
+    picked.push(speaker);
+    if (picked.length === 3) break;
+  }
+  for (const speaker of speakers) {
+    if (picked.length === 3) break;
+    if (!picked.includes(speaker)) picked.push(speaker);
+  }
+  // 話者が2人しかいなければ、蛍は語りと同じ声（前の選び方と同じ）
+  return [picked[0], picked[1], picked[2] ?? picked[0]];
+}
+
 test.skipIf(!GATE_VOICEVOX)(
   "99・113：VOICEVOX で人物2人を別の声にして読み、1話を書き出すと、規約が取れて止まらずに MP3 とライセンスができる",
   async () => {
     const voicevox = await startRecordingProxy("voicevox");
     const speakers = await realSpeakers("voicevox");
     if (speakers.length < 2) throw new Error("VOICEVOX の話者が2人未満です（別の声にする人物が選べません）");
-    const [narratorVoice, akariVoice, hotaruVoice] = [speakers[0], speakers[1], speakers[2] ?? speakers[0]];
+    const [narratorVoice, akariVoice, hotaruVoice] = pickDistinctGroupVoices(speakers);
     const akari = realCharacter("char_001", "灯");
     const hotaru = realCharacter("char_002", "蛍");
     const text = [
@@ -339,22 +364,32 @@ test.skipIf(!GATE_AIVIS)(
 /* ───────────────────────── 人物ごとの声の調整（作者の頼み 2026-11-13） ───────────────────────── */
 
 /**
- * 見本の文（作者の作品の本文は使わない）。同じ台詞を4人に言わせ、調整だけを変える。
- * 地の文で「何番目が何か」を読み上げるので、1つの MP3 を頭から聞けば比べられる
+ * 見本の文（作者の作品の本文は使わない）。同じ台詞を人物ごとに言わせ、調整だけを変える。
+ * 地の文で「何番目が何か」を読み上げるので、1つの MP3 を頭から聞けば比べられる。
+ * 値は見本「老けた声」（高さ −0.12・速さ 0.8・抑揚 0.7。作者の決定 2026-11-13 夕）と、その高さ・速さを1つずつ。
+ *
+ * **AivisSpeech の回では「老けた声」を外す**（製品も AivisSpeech の声には見本を出さない。作者の決定 2026-11-13 夕）。
+ * AivisSpeech は高さを0から動かすと音質が落ち、抑揚の欄はノーマルでは使われないため、この値でも老けて聞こえなかった。
+ * 高さ・速さを1つずつ変える回は、製品で AivisSpeech でも選べるので残す
  */
-const ADJUST_VARIANTS: Array<{ id: string; name: string; label: string; adjust?: VoiceAdjust }> = [
-  { id: "char_101", name: "一郎", label: "調整なし" },
-  { id: "char_102", name: "二郎", label: "老けた声", adjust: VOICE_ADJUST_PRESETS.find((preset) => preset.name === "老けた声")?.adjust },
-  { id: "char_103", name: "三郎", label: "高さだけマイナス0.06", adjust: { pitch: -0.06 } },
-  { id: "char_104", name: "四郎", label: "速さだけ0.85", adjust: { speed: 0.85 } },
+const AGED_PRESET = VOICE_ADJUST_PRESETS.find((preset) => preset.name === "老けた声")?.adjust;
+const ALL_ADJUST_VARIANTS: Array<{ id: string; name: string; label: string; spoken: string; adjust?: VoiceAdjust }> = [
+  { id: "char_101", name: "一郎", label: "調整なし", spoken: "調整なし" },
+  { id: "char_102", name: "二郎", label: "老けた声（高さ −0.12・速さ 0.8・抑揚 0.7）", spoken: "老けた声", adjust: AGED_PRESET },
+  { id: "char_103", name: "三郎", label: "高さだけ −0.12", spoken: "高さだけマイナス0.12", adjust: { pitch: -0.12 } },
+  { id: "char_104", name: "四郎", label: "速さだけ 0.8", spoken: "速さだけ0.8", adjust: { speed: 0.8 } },
 ];
+function adjustVariantsFor(engine: "aivisspeech" | "voicevox") {
+  return engine === "aivisspeech" ? ALL_ADJUST_VARIANTS.filter((variant) => variant.id !== "char_102") : ALL_ADJUST_VARIANTS;
+}
 const ADJUST_QUOTE = "「今日はいい天気ですね。少し歩きましょうか」";
 
 for (const engine of ["aivisspeech", "voicevox"] as const) {
   const gate = engine === "aivisspeech" ? GATE_AIVIS : GATE_VOICEVOX;
   const engineName = engine === "aivisspeech" ? "AivisSpeech" : "VOICEVOX";
+  const ADJUST_VARIANTS = adjustVariantsFor(engine);
   test.skipIf(!gate)(
-    `声の調整：本物の ${engineName} で、調整なし・老けた声・高さだけ −0.06・速さだけ 0.85 の4通りを1つの MP3 に書き出す（作者が耳で数字を決める材料）`,
+    `声の調整：本物の ${engineName} で、${ADJUST_VARIANTS.map((variant) => variant.label).join("・")} の${ADJUST_VARIANTS.length}通りを1つの MP3 に書き出す（作者が耳で数字を決める材料）`,
     async () => {
       const proxy = await startRecordingProxy(engine);
       const speakers = await realSpeakers(engine);
@@ -363,7 +398,7 @@ for (const engine of ["aivisspeech", "voicevox"] as const) {
       const normalIndex = Math.max(0, speaker.styles.findIndex((style) => isNormalStyleName(style.name)));
       const people = ADJUST_VARIANTS.map((variant) => realCharacter(variant.id, variant.name));
       const text =
-        ADJUST_VARIANTS.map((variant, index) => `　${index + 1}つ目は、${variant.label}。\n${ADJUST_QUOTE}と${variant.name}は言った。`).join("\n") + "\n";
+        ADJUST_VARIANTS.map((variant, index) => `　${index + 1}つ目は、${variant.spoken}。\n${ADJUST_QUOTE}と${variant.name}は言った。`).join("\n") + "\n";
       const ep = { name: "episode_0001_声の調整.md", text };
       const stem = ep.name.replace(/\.md$/, "");
       const keepAs = `${engineName}声の調整`;
@@ -420,7 +455,7 @@ for (const engine of ["aivisspeech", "voicevox"] as const) {
       await noteListening(
         `${keepAs}/${stem}.mp3`,
         "声の調整",
-        `${speaker.name}の同じ声で、同じ台詞を4回：1つ目＝調整なし、2つ目＝老けた声（高さ −0.06・速さ 0.85・抑揚 0.8）、3つ目＝高さだけ −0.06、4つ目＝速さだけ 0.85。違いが聞き取れるか、「老けた声」らしく聞こえるか、変えすぎて不自然でないか（数字は結果.json）`
+        `${speaker.name}の同じ声で、同じ台詞を${ADJUST_VARIANTS.length}回：${ADJUST_VARIANTS.map((variant, index) => `${index + 1}つ目＝${variant.label}`).join("、")}。違いが聞き取れるか、${engine === "voicevox" ? "「老けた声」らしく聞こえるか、" : ""}変えすぎて不自然でないか（数字は結果.json）`
       );
     },
     40 * 60_000

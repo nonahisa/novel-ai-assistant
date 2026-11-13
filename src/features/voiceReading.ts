@@ -77,7 +77,7 @@ import {
   formatAdjustValue,
   normalizeVoiceAdjust,
   parseVoiceAdjust,
-  VOICE_ADJUST_PRESETS,
+  presetsForEngine,
   VOICE_ADJUST_STEPS,
   type VoiceAdjust,
   type VoiceEngineDownRoute,
@@ -1571,7 +1571,7 @@ export async function assignVoices(
     );
     if (!voice || isCancelItem(voice)) continue;
     if (voice.openAdjust) {
-      const stop = await adjustVoiceOf(work, slot, picked.label);
+      const stop = await adjustVoiceOf(work, slot, picked.label, engine);
       if (stop) return;
       continue;
     }
@@ -1638,12 +1638,26 @@ export interface VoicePickMemory {
 const ADJUST_FIELD_LABEL: Record<keyof VoiceAdjust, string> = { pitch: "高さ", speed: "速さ", intonation: "抑揚" };
 
 /**
+ * AivisSpeech の声の調整の窓に置く知らせの行（作者の決定 2026-11-13 夕）。見本「老けた声」の代わり。
+ * 右下の知らせにしないのは、変えるたびに窓を開き直すので毎回出てうるさいため。窓の中の行なら、見たいときだけ読める。
+ * 長いので2行に分ける（label と detail。続けて読むと1つの文になる）
+ */
+export const AIVIS_AGED_NOTE_LABEL = "AivisSpeech では、調整では老けた声に聞こえにくいです。";
+const AIVIS_AGED_NOTE_DETAIL = "年配の声のモデル（例：ろてじん）を選んでください。";
+
+/**
  * 枠の声の高さ・速さ・抑揚を選ぶ（作者の頼み 2026-11-13）。打ち込まずに段から選ぶ。
  * 変えるたびに保存する（書く直前のハッシュ照合は今までどおり）。
  *
  * @returns 割り当ての窓ごと閉じるとき true（保存に失敗したとき）
  */
-async function adjustVoiceOf(work: WorkEntry, slot: VoiceSlot, slotLabel: string): Promise<boolean> {
+async function adjustVoiceOf(
+  work: WorkEntry,
+  slot: VoiceSlot,
+  slotLabel: string,
+  /** ［声］のエンジン。印の無い声（前の版）はこのエンジンの声として扱う（ほかの所と同じ） */
+  engine: VoiceEngineId
+): Promise<boolean> {
   for (;;) {
     let loaded;
     try {
@@ -1656,8 +1670,11 @@ async function adjustVoiceOf(work: WorkEntry, slot: VoiceSlot, slotLabel: string
     if (!ref) return false;
     const now = normalizeVoiceAdjust(ref.adjust);
     type Item = vscode.QuickPickItem & { apply?: VoiceAdjust | null; field?: keyof VoiceAdjust };
+    const refEngine = ref.engine ?? engine;
     const items: Item[] = [
-      ...VOICE_ADJUST_PRESETS.map((preset) => ({
+      // 選んでも何も変えない行（選ぶと窓を開き直す）
+      ...(refEngine === "aivisspeech" ? [{ label: AIVIS_AGED_NOTE_LABEL, detail: AIVIS_AGED_NOTE_DETAIL }] : []),
+      ...presetsForEngine(refEngine).map((preset) => ({
         label: `見本：${preset.name}`,
         description: describeVoiceAdjust(preset.adjust),
         apply: preset.adjust as VoiceAdjust,

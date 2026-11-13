@@ -546,26 +546,41 @@ export interface VoiceAdjust {
 }
 
 /**
- * 選べる段（打ち込まずに選ぶ）。幅は「声の感じを少し変える」ところまで——広げると、
- * 感情の寄せと重なったときに聞き取れない声になる。**読むときもこの幅の外は捨てる**（手で書いた値も）
+ * 選べる段（打ち込まずに選ぶ）。幅は、見本「老けた声」（高さ −0.12・速さ 0.8・抑揚 0.7）が入るところまで
+ * （作者の決定 2026-11-13 夕。VOICEVOX の四国めたんで、前の幅の端 −0.06・0.85・0.8 では老けて聞こえなかった）。
+ * これより広げると、感情の寄せと重なったときに聞き取れない声になる。**読むときもこの幅の外は捨てる**（手で書いた値も）。
+ * 段は計算で作らず字で並べる（0.8 + 0.05 × 3 は 0.95 にならず、「いま」の印が付かなくなる）
  */
 export const VOICE_ADJUST_STEPS = {
-  pitch: [-0.06, -0.03, 0, 0.03, 0.06],
-  speed: [0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15],
-  intonation: [0.8, 0.9, 1, 1.1, 1.2],
+  pitch: [-0.12, -0.09, -0.06, -0.03, 0, 0.03, 0.06, 0.09, 0.12],
+  speed: [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2],
+  intonation: [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3],
 } as const satisfies Record<keyof VoiceAdjust, readonly number[]>;
 
 /** 欄ごとの受ける幅（段の両端） */
 export const VOICE_ADJUST_RANGE: Record<keyof VoiceAdjust, { min: number; max: number }> = {
-  pitch: { min: -0.06, max: 0.06 },
-  speed: { min: 0.85, max: 1.15 },
-  intonation: { min: 0.8, max: 1.2 },
+  pitch: { min: -0.12, max: 0.12 },
+  speed: { min: 0.8, max: 1.2 },
+  intonation: { min: 0.7, max: 1.3 },
 };
 
-/** 見本の組み合わせ（1回で選べる形）。値は耳で決めるもので、作者の実機で詰める最初の見当 */
+/**
+ * 見本の組み合わせ（1回で選べる形）。値は作者が聞き比べて決めた（2026-11-13 夕、VOICEVOX の四国めたんで老人に
+ * 聞こえた値）。**AivisSpeech の声には出さない**（`presetsForEngine`）
+ */
 export const VOICE_ADJUST_PRESETS: ReadonlyArray<{ name: string; adjust: Required<VoiceAdjust> }> = [
-  { name: "老けた声", adjust: { pitch: -0.06, speed: 0.85, intonation: 0.8 } },
+  { name: "老けた声", adjust: { pitch: -0.12, speed: 0.8, intonation: 0.7 } },
 ];
+
+/**
+ * そのエンジンの声に出す見本。AivisSpeech では出さない（作者の決定 2026-11-13 夕）——AivisSpeech は高さを
+ * 0 から動かすと音質が落ち（エンジンの説明）、抑揚の欄はノーマルのスタイルでは使われないため、−0.12・0.8 でも
+ * 老けて聞こえなかった。年配の声のモデルを選ぶほうが近い。エンジンが分からない声（前の版）は呼ぶ側が
+ * ［声］のエンジンで決める
+ */
+export function presetsForEngine(engine: VoiceEngineId): ReadonlyArray<{ name: string; adjust: Required<VoiceAdjust> }> {
+  return engine === "aivisspeech" ? [] : VOICE_ADJUST_PRESETS;
+}
 
 /**
  * 調整の欄を読む。**壊れた値（数でない・幅の外）はその欄だけ捨てる**（止めない——調整が無くても
