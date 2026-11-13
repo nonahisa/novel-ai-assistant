@@ -8803,7 +8803,7 @@ export async function activate(
         const { finishReviewAndReturn } = await import(
           "./features/finishReview.js"
         );
-        await finishReviewAndReturn(work);
+        await finishReviewAndReturn(work, { works: registry.list() });
         /*
           返したあとの同期の状態（送っていない記録が0）を読み直す。返す処理は見張りを通さずに
           git を直に呼ぶので、読み直さないと編集者メニューの「6」がしばらく「まだ返していません」のまま

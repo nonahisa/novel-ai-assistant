@@ -51,6 +51,56 @@ export function noticeMissingWorks(
 }
 
 /**
+ * 編集者モードで、編集者の写し（作品のフォルダー）が見つからず「校閲を終えて返す」を止めたときの文
+ * （2026-11-14。設計書5.5.14）。
+ *
+ * 作者モードの文（「この置き場は同期を止めました」「作品の一覧から外してから同期」）は使わない。
+ * 編集者モードの同期は受け取るだけで、作品を一覧から外す操作は「この作品の編集を終える」と呼ぶ
+ * （設計書5.6.6）。返していない提案は写しの中にあるので、まず元の場所へ戻すよう先に言う。
+ */
+export function describeMissingWorksForEditor(missing: readonly WorkEntry[]): string {
+  const names = missing.map((work) => work.title).join("、");
+  return (
+    `作品のフォルダーが見つからないので、作者へ返していません：${names}。` +
+    "フォルダーを移したなら、元の場所へ戻してからもう一度押してください。" +
+    "使わなくなった写しなら、「この作品の編集を終える」で一覧から外せます。"
+  );
+}
+
+/** 編集者モードで、見つからない写しを一覧から外すボタンの字（押すと「編集を終える」の確認が出る） */
+export function endEditingMissingWorkLabel(work: WorkEntry): string {
+  return `「${work.title}」の編集を終える`;
+}
+
+/**
+ * 編集者モードの「校閲を終えて返す」で、写しが見つからず止めたときの知らせ。
+ *
+ * ボタンは作者モードと同じ `novelai.removeWork` へ渡す（編集者モードでも押せる。確認は
+ * 「〈作品〉の編集を終えますか？」になる）。**答えは待たない**（`whenNoticePicked`）
+ */
+export function noticeMissingWorksForEditor(
+  pressed: string | undefined,
+  gone: readonly WorkEntry[]
+): void {
+  if (gone.length === 0) return;
+  logFailure("作品のフォルダーが見つからないので、校閲を終えて返すのを止めた", {
+    見つからない作品: gone.map((one) => one.folderPath).join("、"),
+  });
+  const end = endEditingMissingWorkLabel(gone[0]);
+  whenNoticePicked(
+    vscode.window.showWarningMessage(describeMissingWorksForEditor(gone), end),
+    async (action) => {
+      if (action !== end) return;
+      await vscode.commands.executeCommand("novelai.removeWork", {
+        type: "work",
+        work: gone[0],
+      });
+    },
+    { label: "作品のフォルダーが無いときの案内", ...(pressed ? { workFolder: pressed } : {}) }
+  );
+}
+
+/**
  * 見つからない作品の組（登録の道を並べたもの）のうち、この起動で知らせを出したもの。
  *
  * 自動の道（開いたときの点検・自動の送り直し）は、起動のたび・送り直しのたびに同じ置き場で

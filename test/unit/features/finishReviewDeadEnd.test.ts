@@ -1,4 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// 編集者の写しは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
+// `finishReviewMissingWork.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
 import { commands, window, workspace } from "../support/vscodeStub";
 import type { GitCommandRunner, GitSyncStatus } from "../../../src/core/git";
 import type { WorkEntry } from "../../../src/models/types";

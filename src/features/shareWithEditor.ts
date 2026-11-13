@@ -67,6 +67,8 @@ import {
 import { defaultParentForNewFolder, pickNewFolderParent } from "./pickFolder";
 import { RECOVERY_DIRECTORY_NAME } from "../core/atomicWrite";
 import { logFailure, logStep, useLogFile } from "../core/logger";
+import { isWorkFolderPresent } from "../core/workFolderPresence";
+import { findMissingWorksAt, noticeMissingWorks } from "./missingWorksNotice";
 import { withProgress } from "../views/progress";
 import { whenNoticePicked } from "../views/notify";
 import { askText } from "../views/dialogs";
@@ -257,7 +259,8 @@ export async function hasOrigin(
  */
 export async function shareWithEditor(
   work: WorkEntry,
-  works: readonly WorkEntry[] = [work]
+  works: readonly WorkEntry[] = [work],
+  deps: { run?: GitCommandRunner } = {}
 ): Promise<void> {
   if (isEditorMode()) {
     void vscode.window.showWarningMessage(
@@ -266,7 +269,22 @@ export async function shareWithEditor(
     return;
   }
 
-  const run = runGit;
+  const run = deps.run ?? runGit;
+
+  /*
+    **作品（または同じ置き場の登録済みの作品）のフォルダーが見つからなければ、写す前に止める**
+    （2026-11-14。設計書5.5.14）。写しは編集用フォルダーの本文と設定を**まるごと置き換える**ので、
+    写すものが無いまま進むと、編集用リポジトリでは原稿を全部消した記録になり、編集者の側へ
+    原稿が消えた形で届く。置き場を決める・名前を訊く・確認する前に止める（編集用フォルダーには
+    何も書かない）
+  */
+  const gone = await findMissingWorksAt(work.folderPath, works, run);
+  if (gone.length > 0) {
+    const present = works.find((one) => !gone.some((missing) => missing.id === one.id));
+    noticeMissingWorks(present?.folderPath, gone);
+    return;
+  }
+
   rememberRegisteredWorks(works);
 
   const pointer = await readPointer(work);
@@ -780,6 +798,17 @@ export async function sendToEditor(
   ctx: SendContext
 ): Promise<PushOutcome> {
   const run = ctx.run;
+
+  // **写す作品のフォルダーが無ければ、写さない**（2026-11-14。設計書5.5.14）。写しはまるごと
+  // 置き換えるので、無いまま写すと原稿を全部消した記録を編集者へ送る。作者が押した「渡す」は
+  // 手前（`shareWithEditor`）で知らせて止めている。ここは採否の自動の送り返し（知らせは出さない）の守り
+  if (!(await isWorkFolderPresent(work.folderPath))) {
+    return {
+      ok: false,
+      detail: `作品のフォルダーが見つからないので、編集者へ写していません（${work.title}）。`,
+    };
+  }
+
   const config = await readWorkConfig(work);
   const paths = workPaths(work, config ?? undefined);
 

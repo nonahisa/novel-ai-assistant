@@ -29,6 +29,7 @@ import { findAction } from "../core/actionTree";
 import { CHOOSE_TEXT_TO_KEEP } from "../core/gitSyncMenuText";
 import { globalFetchTroubleMemory } from "./fetchTroubleMemory";
 import { keysForHost } from "../core/keyLabels";
+import { findMissingWorksAt, noticeMissingWorksForEditor } from "./missingWorksNotice";
 
 /**
  * 校閲を終えて、作者へ返す（編集者モード専用。作者の裁定、2026-10-28）。
@@ -45,6 +46,8 @@ import { keysForHost } from "../core/keyLabels";
  */
 export interface FinishReviewDeps {
   run?: GitCommandRunner;
+  /** 登録済みの作品すべて（同じ置き場に、フォルダーが無い作品が無いかを見る） */
+  works?: readonly WorkEntry[];
   /** 送る前の確認。`true` で進む */
   confirm?: (summary: { locks: number; proposals: number }) => Promise<boolean>;
   /** 誰の名前で鍵を押さえていたか */
@@ -62,6 +65,8 @@ export type FinishReviewResult =
   | { kind: "done"; released: number; proposals: number }
   | { kind: "notEditor" }
   | { kind: "notTracked" }
+  /** 写し（または同じ置き場の登録済みの作品）のフォルダーが見つからない（題名） */
+  | { kind: "missing"; works: string[] }
   | { kind: "unmerged" }
   | { kind: "bodyChanged"; files: string[] }
   | { kind: "cancelled" }
@@ -94,6 +99,22 @@ export async function finishReviewAndReturn(
       "「校閲を終えて返す」は、編集者モードで使う操作です。"
     );
     return { kind: "notEditor" };
+  }
+
+  /*
+    **写し（作品のフォルダー）が見つからなければ、git を呼ぶ前に止める**（2026-11-14。
+    設計書5.5.14）。無いフォルダーでは git が起動せず「まだ GitHub とつながっていません」と
+    事実と違う案内になり、記録の書き先を写しへ向けると写しのフォルダーを作り直すおそれがある
+    （記録係は 0.152.7 から無い作品へ書かないが、ここでも向けない）。同じ置き場の登録済みの
+    作品が無いときも止める（台帳の記録は `.aiwriter` だけだが、送る置き場は同じ）
+  */
+  const gone = await findMissingWorksAt(work.folderPath, deps.works ?? [work], run);
+  if (gone.length > 0) {
+    const present = (deps.works ?? []).find(
+      (one) => !gone.some((missing) => missing.id === one.id)
+    );
+    noticeMissingWorksForEditor(present?.folderPath, gone);
+    return { kind: "missing", works: gone.map((one) => one.title) };
   }
 
   const status = await readSyncStatus(work.folderPath, run);
