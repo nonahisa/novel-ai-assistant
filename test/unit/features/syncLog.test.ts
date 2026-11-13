@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { workspace } from "../support/vscodeStub";
+import { FileType, workspace } from "../support/vscodeStub";
 import { useSyncLog } from "../../../src/features/syncLog";
 import {
   logLine,
@@ -26,6 +26,8 @@ const works: WorkEntry[] = [
 
 /** 書き込まれたファイル（区切りと大小を揃えた鍵）→ 中身 */
 let disk: Map<string, string>;
+/** フォルダーが見つからない作品のフォルダー（区切りと大小を揃えた鍵） */
+let gone: Set<string>;
 
 const norm = (key: string) => key.replace(/\\/g, "/").toLowerCase();
 const logOf = (folder: string) =>
@@ -35,10 +37,16 @@ const logOf = (folder: string) =>
 
 beforeEach(() => {
   disk = new Map();
+  gone = new Set();
   setFallbackLogRoot("");
   useLogFile(undefined);
   Object.assign(workspace, {
     fs: {
+      // 作品のフォルダーが在るか（`isWorkFolderPresent`）。既定は在る
+      stat: async (uri: { fsPath: string }) => {
+        if (gone.has(norm(uri.fsPath))) throw Object.assign(new Error("無い"), { code: "FileNotFound" });
+        return { type: FileType.Directory, size: 0, mtime: 0, ctime: 0 };
+      },
       createDirectory: async () => undefined,
       readFile: async (uri: { fsPath: string }) => {
         const found = disk.get(norm(uri.fsPath));
@@ -102,5 +110,42 @@ describe("書庫の同期の記録の書き先", () => {
 
     expect(logOf(works[0].folderPath)).toContain("同期した");
     expect(logOf(works[1].folderPath)).toBeUndefined();
+  });
+});
+
+/**
+ * フォルダーが見つからない作品のログへは向けない（2026-11-14 の作者の実データ）。
+ * ログを書くと親フォルダーごと作り直し、起動の整備がそこを「在る作品」と読んで
+ * `.gitignore` を書き、次の同期でそれが記録・送信された。
+ */
+describe("フォルダーが無い作品へは同期の記録を書かない", () => {
+  test("関わった作品のうち、無い作品は外して在る作品にだけ書く", async () => {
+    gone.add(norm(works[1].folderPath));
+    await useSyncLog("C:/書庫", works, works);
+    logLine("同期した");
+    await settleLogWrites();
+
+    expect(logOf(works[0].folderPath)).toContain("同期した");
+    expect([...disk.keys()].filter((key) => key.startsWith(norm(works[1].folderPath)))).toEqual([]);
+  });
+
+  test("書ける作品が1つも無ければ、作品のフォルダーには書かない", async () => {
+    gone.add(norm(works[0].folderPath));
+    gone.add(norm(works[1].folderPath));
+    await useSyncLog("C:/書庫", works, works);
+    logLine("同期した");
+    await settleLogWrites();
+
+    const underLibrary = [...disk.keys()].filter((key) => key.startsWith(norm("C:/書庫")));
+    expect(underLibrary).toEqual([]);
+  });
+
+  test("作品ごとに分けたリポジトリの作品が無ければ、そこへは書かない", async () => {
+    gone.add(norm(works[0].folderPath));
+    await useSyncLog("C:/書庫/いじめられっ子", [works[0]]);
+    logLine("同期した");
+    await settleLogWrites();
+
+    expect(logOf(works[0].folderPath)).toBeUndefined();
   });
 });

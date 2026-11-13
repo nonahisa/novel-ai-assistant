@@ -19,6 +19,7 @@ import {
   rewritesLineEndings,
   push,
   createSyncStatusBatch,
+  readRepoRoot,
   readSyncStatus,
   runGit,
   type DivergenceConflicts,
@@ -40,6 +41,8 @@ import {
   useLogFile,
 } from "../core/logger";
 import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
+import { describeMissingWorks, unregisterMissingWorkLabel } from "../core/syncAllPlan";
+import { findMissingWorks } from "../core/workFolderPresence";
 import { rescueEditorGitignore } from "./editorGitignoreRescue";
 import { withProgress } from "../views/progress";
 import { isEditorMode } from "../core/actorContext";
@@ -1455,6 +1458,43 @@ ${reason}` : ""}`,
   }
 
   /**
+   * 同じ置き場（書庫）に、フォルダーが見つからない登録済みの作品があれば、知らせて止める
+   * （2026-11-14 の作者の実データ。「すべて同期」の `work_missing` と同じ決まり。設計書5.5.14）。
+   *
+   * 記録は `git add -A` で置き場ぜんぶを入れるので、押した作品が在っても、移した・外れた
+   * ドライブの作品の削除まで記録される。知らせのボタンは既存の「作品の登録を解除」へ渡す。
+   * **ボタンの答えは待たない**（ここは取り込みの旗の中。`whenNoticePicked`）
+   *
+   * @returns 止めたか
+   */
+  private async stopIfWorksMissing(
+    work: WorkEntry,
+    run: GitCommandRunner
+  ): Promise<boolean> {
+    const root = (await readRepoRoot(work.folderPath, run)) ?? work.folderPath;
+    const gone = await findMissingWorks(buildSyncTarget(root, this.registry.list()).works);
+    if (gone.length === 0) return false;
+    useLogFile(work.folderPath);
+    logFailure("作品のフォルダーが見つからないので、記録を止めた", {
+      作品: work.title,
+      見つからない作品: gone.map((one) => one.folderPath).join("、"),
+    });
+    const unregister = unregisterMissingWorkLabel(gone[0]);
+    whenNoticePicked(
+      vscode.window.showWarningMessage(describeMissingWorks(gone, "after"), unregister),
+      async (action) => {
+        if (action !== unregister) return;
+        await vscode.commands.executeCommand("novelai.removeWork", {
+          type: "work",
+          work: gone[0],
+        });
+      },
+      { label: "作品のフォルダーが無いときの案内", workFolder: work.folderPath }
+    );
+    return true;
+  }
+
+  /**
    * 取り込む前に、いまの状態を手元の履歴へ残す（設計書5.5.18）。
    *
    * **手順は `resolveDivergence.ts` の `foldDivergence` と同じ**にする。
@@ -1472,6 +1512,9 @@ ${reason}` : ""}`,
   private async recordBeforePull(work: WorkEntry): Promise<boolean> {
     const run = this.options.run ?? runGit;
     const root = work.folderPath;
+
+    // **同じ置き場に、フォルダーが無い作品があれば記録しない**（2026-11-14。「すべて同期」と同じ決まり）
+    if (await this.stopIfWorksMissing(work, run)) return false;
 
     // **編集者へ渡した写しでは、拡張機能が足した `.gitignore` の行を先に戻す**
     // （`editorGitignoreRescue.ts`）。戻さずに記録すると作者へ送られ、作者の側が
@@ -1647,6 +1690,8 @@ ${reason}` : ""}`,
    * 戻せるように退避の枝は今までどおり作る。
    */
   private async foldDiverged(work: WorkEntry): Promise<boolean> {
+    // 合わせる本体（`foldDivergence`）は、合わせる前に未記録の変更を記録する（`git add -A`）
+    if (await this.stopIfWorksMissing(work, this.options.run ?? runGit)) return false;
     const status = await readSyncStatus(work.folderPath, this.options.run);
     if (status.kind !== "tracked") return false;
     const label = buildSyncTarget(status.root, this.registry.list()).label;

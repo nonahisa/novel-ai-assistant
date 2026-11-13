@@ -18,6 +18,13 @@ import type { WorkEntry } from "../../../src/models/types";
 import { logFailure, logStep, useLogFile, useLogFiles } from "../../../src/core/logger";
 import { statusBarMessages, window, workspace } from "../support/vscodeStub";
 
+// 作品のフォルダーは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
+// `syncAllWorksMissingWork.test.ts`・`syncLog.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
+
 /**
  * 回線が戻ったら、記録済みで送れていない分を送り直す（設計書6.15.1）。
  *

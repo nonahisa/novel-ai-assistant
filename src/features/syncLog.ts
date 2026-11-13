@@ -1,6 +1,8 @@
 import type { WorkEntry } from "../models/types";
 import { syncLogPlace } from "../core/syncTarget";
 import { useLogFiles } from "../core/logger";
+import { isSameFolder } from "../core/pathText";
+import { findMissingWorks } from "../core/workFolderPresence";
 
 /**
  * 同期の記録の書き先を決める（設計書5.7.9「書庫のログ」）。
@@ -29,10 +31,21 @@ export async function useSyncLog(
 ): Promise<void> {
   const place = syncLogPlace(root, works);
   if (!place) return;
-  if (!place.library) {
-    useLogFiles([place.folder]);
-    return;
-  }
-  const targets = involved && involved.length > 0 ? involved : works;
-  useLogFiles(targets.map((work) => work.folderPath));
+  const targets = !place.library
+    ? works.filter((work) => isSameFolder(work.folderPath, place.folder))
+    : involved && involved.length > 0
+      ? involved
+      : works;
+  /*
+    **フォルダーが無い作品のログへは向けない**（2026-11-14 の作者の実データ）。
+    ログを書くと親フォルダーごと作り直すので、移した作品の元の場所に空のフォルダーが
+    でき、起動の整備がそこを「在る作品」と読んで `.gitignore` を書き、次の同期で
+    それが記録・送信された。判断は起動の整備と同じもの（`isWorkFolderPresent`）。
+    書ける作品が1つも無ければ、作品の決まらない処理と同じ置き場（`useLogFiles([])`）へ。
+    早く戻ると、向け先が前の置き場のまま残って別の作品のログへ紛れる
+  */
+  const missing = new Set((await findMissingWorks(targets)).map((work) => work.id));
+  useLogFiles(
+    targets.filter((work) => !missing.has(work.id)).map((work) => work.folderPath)
+  );
 }

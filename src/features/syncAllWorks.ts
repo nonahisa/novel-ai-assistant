@@ -27,11 +27,13 @@ import {
   afterCommit,
   describeOutcomes,
   describeSyncConfirm,
+  describeMissingWorks,
   describeSyncSkips,
   describeTargetWorks,
   planSyncAll,
   syncChoiceOf,
   syncCommitMessage,
+  unregisterMissingWorkLabel,
   worksTouchedByPaths,
   type FoldSummary,
   type SyncTargetOutcome,
@@ -44,6 +46,7 @@ import {
   showLog,
 } from "../core/logger";
 import { useSyncLog } from "./syncLog";
+import { findMissingWorks } from "../core/workFolderPresence";
 import { withCancellableProgress } from "../views/progress";
 import { whenNoticePicked } from "../views/notify";
 import { CHOOSE_TEXT_TO_KEEP } from "../core/gitSyncMenuText";
@@ -168,9 +171,14 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
     // 「競合が残っています」「送り先が未設定です」と言うだけでは、押す所が
     // メニューから消えた今は行き止まりになる。ボタンの答えは待たない
     const next = nextSteps(rest, []);
+    // **止めた置き場があるなら、「同期するものはありませんでした」で始めない**
+    // （届いていないことを先に書く。2026-11-03 の決まり。2026-11-14 の作品のフォルダーが無い件）
+    const skips = describeSyncSkips(rest, "after");
     whenNoticePicked(
       vscode.window.showInformationMessage(
-        `同期するものはありませんでした。${describeSyncSkips(rest, "after")}`,
+        hasMissingWorks(rest)
+          ? skips.replace(/^\n+/, "")
+          : `同期するものはありませんでした。${skips}`,
         ...next.map((step) => step.label)
       ),
       (picked) => runNextStep(next, picked),
@@ -334,7 +342,7 @@ export const STATE_READ_CONCURRENCY = 4;
 /** 置き場ごとの状態を集める */
 async function collectStates(
   deps: SyncAllDeps,
-  works: readonly WorkEntry[],
+  allWorks: readonly WorkEntry[],
   progress: { report(value: { message?: string }): void },
   token: vscode.CancellationToken
 ): Promise<SyncTargetState[]> {
@@ -352,6 +360,15 @@ async function collectStates(
   // 確認の窓まで git 73回・1.3秒）。根が分かれば、同じ置き場の2作品目
   // からは状態を読まずに済む
   if (token.isCancellationRequested) return states;
+  /*
+    **フォルダーが無い作品は、git に読ませない**（2026-11-14 の作者の実データ）。
+    無いフォルダーを cwd にした git は起動できず、その作品だけが「gitが見つかりません」の
+    置き場として報告に出ていた。無い作品は、根の中に入る置き場の `missingWorks` として
+    あとで付け、その置き場の同期を止める（`planSyncTarget` の `work_missing`）
+  */
+  const missing = await findMissingWorks(allWorks);
+  const missingIds = new Set(missing.map((work) => work.id));
+  const works = allWorks.filter((work) => !missingIds.has(work.id));
   const roots = await Promise.all(
     works.map((work) => readRepoRoot(work.folderPath, deps.run))
   );
@@ -526,7 +543,42 @@ async function collectStates(
     }
   );
   for (const state of built) if (state) states.push(state);
+  attachMissingWorks(states, missing);
   return states;
+}
+
+/**
+ * フォルダーが無い作品を、それが入る置き場へ付ける（`SyncTargetState.missingWorks`）。
+ *
+ * 置き場の作品（`target.works`）は登録簿から道で決めているので、無い作品も入っている。
+ * どの置き場にも入らない作品（作品ごとに分けたリポジトリが丸ごと無い）は、その作品だけの
+ * 項目にして同じ理由で知らせる——黙って落とすと、作者は同期されたと読む
+ */
+function attachMissingWorks(
+  states: SyncTargetState[],
+  missing: readonly WorkEntry[]
+): void {
+  if (missing.length === 0) return;
+  const placed = new Set<string>();
+  for (const state of states) {
+    const inside = state.works.filter((work) =>
+      missing.some((gone) => gone.id === work.id)
+    );
+    if (inside.length === 0) continue;
+    state.missingWorks = inside;
+    for (const work of inside) placed.add(work.id);
+  }
+  for (const work of missing) {
+    if (placed.has(work.id)) continue;
+    states.push({
+      folderPath: work.folderPath,
+      label: work.title,
+      works: [work],
+      status: { kind: "failed", detail: "作品のフォルダーが見つかりません" },
+      trackable: 0,
+      missingWorks: [work],
+    });
+  }
 }
 
 /**
@@ -607,6 +659,16 @@ async function runPlan(
   const cwd = plan.target.folderPath;
   const run = deps.run ?? runGit;
   const name = describeTargetWorks(plan.target);
+  /*
+    **動かす直前にも、作品のフォルダーがそろっているかを確かめ直す**（2026-11-14）。
+    調べてから確認の窓で押されるまでの間に、外付けドライブが外れる・クラウドが
+    取り寄せ中に戻ることがある。無ければこの置き場は何もしない（ログも向けない）
+  */
+  const gone = await findMissingWorks(plan.target.works);
+  if (gone.length > 0) {
+    outcome.error = describeMissingWorks(gone, "after");
+    return outcome;
+  }
   /*
     **記録は、その置き場のログファイルへ残す**（0.45.0）。向けないと
     出力チャンネル止まりで、VS Code を閉じると消える。
@@ -839,7 +901,13 @@ async function report(
   autoResend: boolean
 ): Promise<void> {
   const failed = outcomes.filter((one) => one.error);
-  const summary = describeOutcomes(outcomes, { autoResend }) + describeSyncSkips(plans, "after");
+  // 作品のフォルダーが無くて止めた置き場は、済んだことより先に書く（届いていないことを先に。
+  // 2026-11-03 の決まり）。ほかの飛ばした理由は今までどおり末尾に添える
+  const done = describeOutcomes(outcomes, { autoResend });
+  const skips = describeSyncSkips(plans, "after");
+  const summary = hasMissingWorks(plans)
+    ? `${skips.replace(/^\n+/, "")}\n\n${done}`
+    : done + skips;
   const next = nextSteps(plans, outcomes);
 
   if (failed.length === 0) {
@@ -950,7 +1018,24 @@ function nextSteps(
       work: workOf(unsent),
     });
   }
+
+  // 作品のフォルダーが無くて止めた置き場は、既存の「作品の登録を解除」へ（確認の窓が出る。
+  // フォルダーとファイルは消さない）。ボタンは先頭の1作品ぶん。2作品目からは文のとおり
+  // 作品一覧の右クリックで外す（知らせのボタンを作品の数だけ並べると読めなくなる）
+  const gone = plans.find((plan) => plan.skip === "work_missing")?.target.missingWorks?.[0];
+  if (gone) {
+    steps.push({
+      label: unregisterMissingWorkLabel(gone),
+      command: "novelai.removeWork",
+      work: gone,
+    });
+  }
   return steps;
+}
+
+/** 作品のフォルダーが無くて止めた置き場があるか */
+function hasMissingWorks(plans: readonly SyncTargetPlan[]): boolean {
+  return plans.some((plan) => plan.skip === "work_missing");
 }
 
 async function runNextStep(

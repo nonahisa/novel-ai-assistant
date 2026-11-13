@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { runStartupHandoff } from "../../../src/features/handoffSync";
 import {
   logLine,
@@ -9,6 +9,13 @@ import {
 } from "../../../src/core/logger";
 import type { GitCommandRunner, GitSyncStatus } from "../../../src/core/git";
 import { window, workspace } from "../support/vscodeStub";
+
+// 作品のフォルダーは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
+// `syncAllWorksMissingWork.test.ts`・`syncLog.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
 
 /**
  * 開いたときの点検が、記録のファイルを何回読み書きするか（2026-11-05）。

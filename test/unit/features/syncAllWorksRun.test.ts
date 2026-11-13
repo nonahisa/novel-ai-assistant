@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { syncAllWorks } from "../../../src/features/syncAllWorks";
 import type { GitCommandRunner } from "../../../src/core/git";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
@@ -7,6 +7,13 @@ import type { SyncPresave } from "../../../src/features/presaveBeforeSync";
 import type { WorkEntry } from "../../../src/models/types";
 import { window } from "../support/vscodeStub";
 import { cancelRunningTask } from "../../../src/views/progress";
+
+// 作品のフォルダーは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
+// `syncAllWorksMissingWork.test.ts`・`syncLog.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
 
 /**
  * 「作品をすべて同期」を、作り物の git で一通り走らせる（設計書5.5.14）。

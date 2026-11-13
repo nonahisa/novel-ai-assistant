@@ -1,10 +1,17 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { syncAllWorks } from "../../../src/features/syncAllWorks";
 import type { GitCommandRunner } from "../../../src/core/git";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
 import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
 import type { WorkEntry } from "../../../src/models/types";
 import { window } from "../support/vscodeStub";
+
+// 作品のフォルダーは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
+// `syncAllWorksMissingWork.test.ts`・`syncLog.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
 
 /**
  * 確認の窓が出るまでに、置き場1つあたりで git を何回起こすか（2026-11-05）。

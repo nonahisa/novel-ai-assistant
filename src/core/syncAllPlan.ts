@@ -77,6 +77,15 @@ export interface SyncTargetState {
    * `offline`＝通信そのものが失敗した。分からなければ付けない（今までの `fetch_failed` の文）
    */
   fetchTrouble?: "revoked" | "offline";
+  /**
+   * この置き場に入っている登録済みの作品のうち、フォルダーが見つからないもの
+   * （2026-11-14 の事故。設計書5.5.14）。1つでもあれば、この置き場は記録も取り込みも
+   * 送信もしない（`work_missing`）。
+   *
+   * 消した・移した作品と、OneDrive の移動・外れた外付けドライブ・取り寄せ中のクラウドは
+   * 見分けられない。記録すると作品の削除が履歴に入り、送ると GitHub でも作品が消えた形になる
+   */
+  missingWorks?: WorkEntry[];
 }
 
 /** その置き場でやること */
@@ -141,6 +150,8 @@ export type SkipReason =
   | "fetch_revoked"
   /** 取りに行けず、通信そのものが失敗した（`fetchTrouble: "offline"`） */
   | "fetch_offline"
+  /** 登録済みの作品のフォルダーが見つからない（`SyncTargetState.missingWorks`） */
+  | "work_missing"
   /** やることが無い（同期は取れている） */
   | "nothing";
 
@@ -179,9 +190,38 @@ export function skipReasonText(reason: SkipReason): string {
       return "置き場に届きませんでした（作者が連携を解除したか、置き場が無くなった見込みです）";
     case "fetch_offline":
       return "ネットにつながっていないようです（つながってから、もう一度押してください）";
+    case "work_missing":
+      // 作品名を入れた文は `describeMissingWorks`（理由だけでは名前が分からない）
+      return "作品のフォルダーが見つかりません";
     case "nothing":
       return "同期は取れています";
   }
+}
+
+/**
+ * フォルダーが見つからない作品があって、置き場の同期を止めたときの文（2026-11-14）。
+ *
+ * 前の確認の窓では「同期しません」、あとの報告では「同期を止めました」と場面で分ける
+ * （`describeSyncSkips` の `when` と同じ考え）。単独の同期（`gitSync.ts`）も同じ文を使う。
+ */
+export function describeMissingWorks(
+  missing: readonly WorkEntry[],
+  when: "before" | "after"
+): string {
+  const names = missing.map((work) => work.title).join("、");
+  const stop = when === "before" ? "この置き場は同期しません" : "この置き場は同期を止めました";
+  return (
+    `作品のフォルダーが見つからないので、${stop}：${names}。` +
+    "消したり移したりした作品なら、作品の一覧から外してから同期してください。"
+  );
+}
+
+/**
+ * フォルダーが見つからない作品を、作品の一覧から外すボタンの字。
+ * 押すと既存の「作品の登録を解除」（`novelai.removeWork`。確認の窓が出る）へ渡す
+ */
+export function unregisterMissingWorkLabel(work: WorkEntry): string {
+  return `「${work.title}」の登録を解除`;
 }
 
 /**
@@ -194,6 +234,21 @@ export function planSyncTarget(
   target: SyncTargetState,
   mode: SyncPlanMode = {}
 ): SyncTargetPlan {
+  /*
+    **フォルダーが無い作品がある置き場は、何もしない**（2026-11-14 の事故。編集者モードも同じ）。
+    `git add -A` は作品の削除ごと記録し、送れば GitHub でも作品が消えた形になる。取り込みも
+    しない——無いフォルダーへ書き戻すと、作者が移した先と元の場所に作品が2つできる
+  */
+  if (target.missingWorks && target.missingWorks.length > 0) {
+    return {
+      target,
+      commit: false,
+      pull: false,
+      push: false,
+      skip: "work_missing",
+      ...(mode.editor ? { receiveOnly: true } : {}),
+    };
+  }
   if (mode.editor) return planReceiveOnly(target);
   const base = { target, commit: false, pull: false, push: false };
   const status = target.status;
@@ -470,7 +525,9 @@ export function describeSyncSkips(
     .map(
       (plan) =>
         `・${describeTargetWorks(plan.target)}：${
-          skipReasonText(plan.skip ?? "nothing")
+          plan.skip === "work_missing" && plan.target.missingWorks
+            ? describeMissingWorks(plan.target.missingWorks, when)
+            : skipReasonText(plan.skip ?? "nothing")
         }`
     )
     .join("\n");

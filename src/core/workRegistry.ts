@@ -21,6 +21,7 @@ import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
 import { parsePdfExportConfig } from "./pdfExportConfig";
 import { fileReader, isNotFound } from "./fileRead";
+import { isWorkFolderPresent } from "./workFolderPresence";
 import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
 import { logFailure } from "./logger";
 import {
@@ -951,26 +952,6 @@ export function lastCacheDirective(
     else if (line === CACHE_UNIGNORE_RULE) found = CACHE_UNIGNORE_RULE;
   }
   return found;
-}
-
-/**
- * 作品のフォルダーが今そこに在るか（`fileSystem.ts` の `isDirectory` と同じ判断）。
- *
- * **読むだけなので、手元では Node の `fs` で訊く**（`core/fileRead.ts`、設計書6.107）。
- * 起動直後の `vscode.workspace.fs` は要求が列に並び、**16作品ぶんで
- * 1番目が13.6秒**かかっていた（Node なら16件で合計13ms）。ここは
- * 起動の道のいちばん手前なので、後ろの全部がその列に付き合わされる。
- *
- * 見つからない・読めないは、これまでどおり「無い」に倒す。繋がっていない
- * ドライブや取り寄せ中のクラウドと、消えた作品は見分けられない。
- */
-async function isWorkFolderPresent(folderPath: string): Promise<boolean> {
-  try {
-    const reader = await fileReader();
-    return (await reader.stat(folderPath)).type === "directory";
-  } catch {
-    return false;
-  }
 }
 
 /**
