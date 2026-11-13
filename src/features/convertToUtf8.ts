@@ -406,7 +406,10 @@ function warnStale(work: WorkEntry, filePaths: readonly string[]): void {
   const names = filePaths.map((filePath) => path.basename(filePath));
   const message =
     `開いている${names.length}話が、まだ Shift_JIS のまま表示されています（字が化けて見えます）。` +
-    "打たずにタブを閉じて、開き直してください。原稿のファイルは UTF-8 になっています。\n" +
+    "打たずにタブを閉じて、開き直してください。原稿のファイルは UTF-8 になっています。" +
+    // 古い VS Code（1.90）は、タブを閉じても文字コードを覚えていて化けたまま開くことがある。対応の下限の版なので、
+    // 別の道で開き直す作りは持たず、VS Code ごと開き直す案内に留める（作者の答え 2026-11-13「知らせで案内」）
+    "開き直しても字が化けて見えるときは、VS Code を一度閉じて開き直してください。\n" +
     listNames(names);
   whenNoticePicked(
     vscode.window.showWarningMessage(message, REOPEN_BUTTON),

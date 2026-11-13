@@ -11,8 +11,9 @@ concurrency:
 jobs:
   quality:
     runs-on: windows-latest
-    # テストが増えて14〜15分かかり、15分では打ち切られるようになった（2026-10-18）
-    timeout-minutes: 30
+    # テストが増えて14〜15分かかり、15分では打ち切られるようになった（2026-10-18）。
+    # 2026-11-13、17〜29分になり、統合テストを1件足した所で30分を越えて取り消された。45分に上げる
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

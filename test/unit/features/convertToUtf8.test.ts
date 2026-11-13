@@ -161,6 +161,8 @@ describe("原稿 UTF-8 変換", () => {
     workspace.textDocuments = [{ uri: { fsPath: one }, isDirty: false, getText: () => "轟ｯ\n" }];
     await convertToUtf8({ work });
     expect(notices.some((notice) => notice.startsWith("開いている1話が、まだ Shift_JIS のまま表示されています"))).toBe(true);
+    // 開き直しても化けたままのときは、VS Code ごと開き直す案内（作者の答え 2026-11-13「知らせで案内」）
+    expect(notices.some((notice) => notice.includes("開き直しても字が化けて見えるときは、VS Code を一度閉じて開き直してください。"))).toBe(true);
   });
 
   test("読み直す前の文書（本文が同じ）を、すぐ「済んだ」としない：文字コードの欄が UTF-8 になるまで待つ", async () => {
