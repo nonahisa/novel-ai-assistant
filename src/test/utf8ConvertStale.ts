@@ -61,6 +61,16 @@ async function checkStaleNoticeAndReopen(): Promise<void> {
     // `openTextDocument` で開くと、拡張機能の側が文書を数分つかんだままにし、タブを閉じても文書が残る
     // （作者がタブで開いた状況と違ってしまう）。タブで開く道（showTextDocument に場所を渡す）で開く
     const opened = (await vscode.window.showTextDocument(uri, { preview: false })).document;
+    /*
+      **文書に encoding の欄がある版（1.91 から）では見ない。** 知らせは欄の無い 1.90 だけの道で、欄のある版は
+      VS Code が自分で読み直す（画面の自動テスト convertToUtf8Flow が 1.141 で見ている）。欄のある 1.138 では
+      「エンコード付きで再度開く」の選ぶ画面の並びが違い、Shift JIS の行に当たらずに落ちた（2026-11-13 の配布の検査）
+    */
+    if (typeof (opened as { encoding?: unknown }).encoding === "string") {
+      console.log(`INFO VS Code ${vscode.version} は文書に encoding の欄があるので、1.90 だけの知らせは見ない`);
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+      return;
+    }
     assert.ok(!opened.getText().includes(MARK), "設定なしなのに最初から読めています（前提が違います）");
     const found = await reopenWithShiftJis(opened);
     console.log(`INFO Shift JIS は「次へ」${found}回目の行`);
