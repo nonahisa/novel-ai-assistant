@@ -463,6 +463,11 @@ export interface VoiceParams {
   volumeScale: number;
   prePhonemeLength: number;
   postPhonemeLength: number;
+  /**
+   * 緩急（AivisSpeech だけの欄。0〜2・既定1・大きいほど早口で生っぽい抑揚）。**寄せるときだけ持つ**——
+   * 持たないときは audio_query の答えの値（エンジンの既定）をそのまま送る。VOICEVOX には送らない（無い欄）
+   */
+  tempoDynamicsScale?: number;
 }
 
 /**
@@ -491,6 +496,30 @@ const EMOTION_SHIFT: Record<
 };
 
 const INTENSITY_FACTOR: Record<VoiceIntensity, number> = { 弱: 0.5, 中: 1, 強: 1.5 };
+
+/**
+ * AivisSpeech で、話者に感情の専用スタイルが無いときの寄せ方（「中」の強さのとき。作者の決定 2026-11-13）。
+ *
+ * AivisSpeech の intonationScale は「スタイルの感情の強さ」で、**ノーマルのスタイルでは無視される**
+ * （エンジンの /openapi.json の説明）。pitchScale は0から動かすと音質が落ち、音量は割れるので上限1。
+ * 抑揚・高さ・音量で寄せても怒りや叫びに聞こえなかったため、速さと緩急で寄せる。
+ *
+ * - `speed` は**倍率の差**で、`EMOTION_SHIFT` の速さの**代わりに**使う（足さない）
+ * - `tempo` は緩急の倍率。強さは `1 + (tempo − 1) × INTENSITY_FACTOR` で掛ける
+ *
+ * 値は最初の見当で、作者の実機で耳で詰める。
+ */
+const AIVIS_UNSTYLED_SHIFT: Record<VoiceEmotion, { speed: number; tempo: number }> = {
+  平静: { speed: 0, tempo: 1 },
+  喜び: { speed: 0.06, tempo: 1.2 },
+  怒り: { speed: 0.12, tempo: 1.35 },
+  悲しみ: { speed: -0.12, tempo: 0.7 },
+  驚き: { speed: 0.1, tempo: 1.3 },
+  恐れ: { speed: 0.08, tempo: 1.2 },
+  照れ: { speed: -0.05, tempo: 0.9 },
+  ささやき: { speed: -0.08, tempo: 0.8 },
+  叫び: { speed: 0.12, tempo: 1.45 },
+};
 
 /**
  * 文の前後の無音（秒）。エンジンの既定（0.1 前後）より短くする——文と文の
@@ -592,20 +621,25 @@ export function describeVoiceAdjust(adjust: VoiceAdjust | undefined): string {
  * @param adjust 人物ごとの声の調整（作者の頼み 2026-11-13）。高さは足し、速さと抑揚は掛ける。
  *   合わせたあとも同じ幅（speed 0.5〜2・pitch ±0.15・intonation 0〜2）に収める。
  *   **朗読と書き出しの両方がここを通る**ので、どちらの道でも同じ値になり、控えの鍵も揃う
+ * @param engine その文を読むエンジン。AivisSpeech で専用のスタイルが無い感情（`styled` が false・平静でない）は、
+ *   速さと緩急で寄せる（`AIVIS_UNSTYLED_SHIFT`。作者の決定 2026-11-13）。省けば今までどおり
  */
 export function voiceParamsFor(
   emotion: VoiceEmotion,
   intensity: VoiceIntensity,
   styled: boolean,
   rate: number,
-  adjust?: VoiceAdjust
+  adjust?: VoiceAdjust,
+  engine?: VoiceEngineId
 ): VoiceParams {
   const shift = EMOTION_SHIFT[emotion];
   const k = INTENSITY_FACTOR[intensity] * (styled ? 0.5 : 1);
   const safeRate = Number.isFinite(rate) ? clamp(rate, 0.5, 2) : 1;
   const own = normalizeVoiceAdjust(adjust);
+  const aivisUnstyled = engine === "aivisspeech" && !styled && emotion !== "平静";
+  const speedShift = aivisUnstyled ? AIVIS_UNSTYLED_SHIFT[emotion].speed : shift.speed;
   return {
-    speedScale: round(clamp((1 + shift.speed * k) * safeRate * own.speed, 0.5, 2)),
+    speedScale: round(clamp((1 + speedShift * k) * safeRate * own.speed, 0.5, 2)),
     pitchScale: round(clamp(shift.pitch * k + own.pitch, -0.15, 0.15)),
     intonationScale: round(clamp((1 + shift.intonation * k) * own.intonation, 0, 2)),
     /*
@@ -616,7 +650,35 @@ export function voiceParamsFor(
     volumeScale: round(clamp(1 + shift.volume * k, 0, 1)),
     prePhonemeLength: VOICE_PRE_PHONEME,
     postPhonemeLength: round(clamp(VOICE_POST_PHONEME + shift.post * k, 0, 1.5)),
+    // 寄せないときは欄ごと持たない（undefined を入れると audio_query の答えの既定値を消して送る）
+    ...(aivisUnstyled
+      ? { tempoDynamicsScale: round(clamp(1 + (AIVIS_UNSTYLED_SHIFT[emotion].tempo - 1) * k, 0, 2)) }
+      : {}),
   };
+}
+
+/**
+ * 選んだ声の話者に専用のスタイルが無い感情（平静は数えない。作者の決定 2026-11-13）。
+ * 判定は朗読と同じ `pickStyleForEmotion`（作者の上書き `emotionStyles` も含む）——写しを作ると、
+ * 知らせと実際に読む声が食い違う
+ */
+export function missingEmotionStyles(
+  speakers: readonly VoiceSpeaker[],
+  baseStyleId: number,
+  overrides: Partial<Record<VoiceEmotion, readonly string[]>> = {}
+): VoiceEmotion[] {
+  return VOICE_EMOTIONS.filter(
+    (emotion) => emotion !== "平静" && !pickStyleForEmotion(speakers, baseStyleId, emotion, overrides).styled
+  );
+}
+
+/** 声を選んだときの知らせ（無い感情が無ければ `undefined`＝何も出さない） */
+export function missingEmotionStyleNotice(
+  speakerName: string,
+  missing: readonly VoiceEmotion[]
+): string | undefined {
+  if (missing.length === 0) return undefined;
+  return `この声（${speakerName}）には${missing.join("・")}の声（スタイル）がありません。その感情は平静に近く聞こえます。`;
 }
 
 /**
@@ -685,6 +747,8 @@ export function synthesisKey(
       params.volumeScale,
       params.prePhonemeLength,
       params.postPhonemeLength,
+      // 緩急も音を変える（入れないと、寄せ方を変えても前の音が返る）
+      params.tempoDynamicsScale ?? null,
     ])
   );
 }

@@ -8,6 +8,8 @@ import {
   VOICE_ADJUST_PRESETS,
   VOICE_ADJUST_STEPS,
   isNormalStyleName,
+  missingEmotionStyleNotice,
+  missingEmotionStyles,
   normalizeEngineUrl,
   parseSpeakers,
   pickNormalStyle,
@@ -604,5 +606,93 @@ describe("人物ごとの声の調整（作者の頼み 2026-11-13）", () => {
     const slow = voiceParamsFor("平静", "中", false, 1, { speed: 0.85 });
     const keys = [plain, aged, slow].map((params) => synthesisKey("http://a", 1, "文", params));
     expect(new Set(keys).size).toBe(3);
+  });
+});
+
+/*
+  専用のスタイルが無い感情（作者の決定 2026-11-13、案C）。AivisSpeech は intonationScale をノーマルのスタイルで
+  無視するので、速さと緩急（tempoDynamicsScale）で寄せる。声を選んだときに、無い感情を知らせる
+*/
+describe("専用のスタイルが無い感情の寄せ方と知らせ（作者の決定 2026-11-13）", () => {
+  const speakers = parseSpeakers(FAKE_SPEAKERS);
+
+  test("AivisSpeech・スタイル無し・怒り：緩急は1より大きく、速さは今の寄せより大きい", () => {
+    const before = voiceParamsFor("怒り", "中", false, 1);
+    const aivis = voiceParamsFor("怒り", "中", false, 1, undefined, "aivisspeech");
+    expect(aivis.tempoDynamicsScale).toBeGreaterThan(1);
+    expect(aivis.speedScale).toBeGreaterThan(before.speedScale);
+    // 高さ・抑揚・音量・後ろの無音は今のまま（AivisSpeech の pitch は別に訊く）
+    expect(aivis.pitchScale).toBe(before.pitchScale);
+    expect(aivis.intonationScale).toBe(before.intonationScale);
+    expect(aivis.volumeScale).toBe(before.volumeScale);
+    expect(aivis.postPhonemeLength).toBe(before.postPhonemeLength);
+  });
+
+  test("強さは今の係数（弱0.5・中1・強1.5）で、緩急は 1＋(値−1)×係数。列の速さと人物の調整も今までどおり掛ける", () => {
+    expect(voiceParamsFor("叫び", "中", false, 1, undefined, "aivisspeech").tempoDynamicsScale).toBeCloseTo(1.45, 3);
+    expect(voiceParamsFor("叫び", "強", false, 1, undefined, "aivisspeech").tempoDynamicsScale).toBeCloseTo(1.675, 3);
+    expect(voiceParamsFor("悲しみ", "弱", false, 1, undefined, "aivisspeech").tempoDynamicsScale).toBeCloseTo(0.85, 3);
+    expect(voiceParamsFor("怒り", "中", false, 1, undefined, "aivisspeech").speedScale).toBeCloseTo(1.12, 3);
+    expect(voiceParamsFor("悲しみ", "中", false, 1, undefined, "aivisspeech").speedScale).toBeCloseTo(0.88, 3);
+    expect(voiceParamsFor("怒り", "中", false, 1.5, { speed: 0.9 }, "aivisspeech").speedScale).toBeCloseTo(1.12 * 1.5 * 0.9, 3);
+    // 幅（speed 0.5〜2・緩急 0〜2）に収める
+    expect(voiceParamsFor("叫び", "強", false, 2, { speed: 1.15 }, "aivisspeech").speedScale).toBe(2);
+  });
+
+  test("VOICEVOX・スタイルが見つかったとき・エンジンを渡さないときは緩急の欄を持たず、値も今のまま", () => {
+    const voicevox = voiceParamsFor("怒り", "強", false, 1, undefined, "voicevox");
+    expect(voicevox).not.toHaveProperty("tempoDynamicsScale");
+    expect(voicevox).toEqual(voiceParamsFor("怒り", "強", false, 1));
+    const styled = voiceParamsFor("怒り", "強", true, 1, undefined, "aivisspeech");
+    expect(styled).not.toHaveProperty("tempoDynamicsScale");
+    expect(styled).toEqual(voiceParamsFor("怒り", "強", true, 1));
+    // 欄が無ければ audio_query の答えの既定値を消さない
+    expect(applyVoiceParams({ tempoDynamicsScale: 1 }, styled).tempoDynamicsScale).toBe(1);
+  });
+
+  test("平静は AivisSpeech でも変わらない", () => {
+    const calm = voiceParamsFor("平静", "中", false, 1, undefined, "aivisspeech");
+    expect(calm).not.toHaveProperty("tempoDynamicsScale");
+    expect(calm).toEqual(voiceParamsFor("平静", "中", false, 1));
+  });
+
+  test("緩急は audio_query へ送られ、合成の控えの鍵も緩急で変わる", () => {
+    const aivis = voiceParamsFor("怒り", "中", false, 1, undefined, "aivisspeech");
+    expect(applyVoiceParams({ tempoDynamicsScale: 1 }, aivis).tempoDynamicsScale).toBe(aivis.tempoDynamicsScale);
+    const base = voiceParamsFor("平静", "中", false, 1);
+    const keys = [base, { ...base, tempoDynamicsScale: 1.3 }, { ...base, tempoDynamicsScale: 1.2 }].map((params) =>
+      synthesisKey("http://a", 1, "文", params)
+    );
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  test("無い感情の一覧は pickStyleForEmotion と同じ判定（平静は数えない・作者の上書きも見る）", () => {
+    // まい：上機嫌（喜び）・怒り・悲しみ（怒り・悲しみ・叫び）
+    expect(missingEmotionStyles(speakers, 888753760)).toEqual(["驚き", "恐れ", "照れ", "ささやき"]);
+    expect(missingEmotionStyles(speakers, 888753760, { 驚き: ["上機嫌"] })).toEqual(["恐れ", "照れ", "ささやき"]);
+    const kanon = missingEmotionStyles(speakers, 1325133120);
+    expect(kanon).not.toContain("平静");
+    expect(kanon).not.toContain("ささやき");
+    for (const emotion of kanon) {
+      expect(pickStyleForEmotion(speakers, 1325133120, emotion).styled).toBe(false);
+    }
+  });
+
+  test("知らせの文：無い感情の名前を並べ、全部あれば出さない", () => {
+    expect(missingEmotionStyleNotice("まい", ["怒り", "叫び"])).toBe(
+      "この声（まい）には怒り・叫びの声（スタイル）がありません。その感情は平静に近く聞こえます。"
+    );
+    expect(missingEmotionStyleNotice("まい", [])).toBeUndefined();
+    const full = [
+      {
+        name: "全部",
+        uuid: "uuid-full",
+        styles: [
+          { name: "ノーマル", id: 1 },
+          ...VOICE_EMOTIONS.filter((emotion) => emotion !== "平静").map((emotion, index) => ({ name: emotion, id: 10 + index })),
+        ],
+      },
+    ];
+    expect(missingEmotionStyles(full, 1)).toEqual([]);
   });
 });

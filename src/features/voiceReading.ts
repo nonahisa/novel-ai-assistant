@@ -71,6 +71,8 @@ import {
   voiceChoiceName,
   voiceChoiceRows,
   voiceParamsFor,
+  missingEmotionStyleNotice,
+  missingEmotionStyles,
   describeVoiceAdjust,
   formatAdjustValue,
   normalizeVoiceAdjust,
@@ -308,7 +310,7 @@ export class VoiceReadingService {
     options: { outputSamplingRate?: number } = {}
   ): Promise<Uint8Array> {
     const client = this.client(unit.engine);
-    const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate, unit.adjust);
+    const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate, unit.adjust, unit.engine);
     if (options.outputSamplingRate === undefined) {
       const cached = this.cache.get(synthesisKey(client.baseUrl, unit.styleId, unit.speech, params));
       if (cached) return Promise.resolve(cached);
@@ -489,7 +491,7 @@ export class VoiceReadingService {
   /** 1文の音。控え → 作っている途中 → 新しく作る の順に見る */
   synthesize(unit: VoicePlanUnit, rate: number): Promise<Uint8Array> {
     const client = this.client(unit.engine);
-    const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate, unit.adjust);
+    const params = voiceParamsFor(unit.emotion, unit.intensity, unit.styled, rate, unit.adjust, unit.engine);
     // 鍵には接続先が入る（エンジンが違えば別の音として控える）
     const key = synthesisKey(client.baseUrl, unit.styleId, unit.speech, params);
     const cached = this.cache.get(key);
@@ -1581,6 +1583,18 @@ export async function assignVoices(
     } catch (error) {
       void warnWithLog(error instanceof Error ? error.message : String(error));
       return;
+    }
+    // 専用のスタイルが無い感情を1回知らせる（作者の決定 2026-11-13）。判定は朗読と同じ pickStyleForEmotion。
+    // 答えを待たない（ボタンは無く、次の枠を選ぶ窓をすぐ出す）
+    const chosenEngine = voice.ref.engine ?? engine;
+    const chosenList = available.find((a) => a.engine === chosenEngine)?.list ?? [];
+    const missingNotice = missingEmotionStyleNotice(
+      voiceChoiceName(voice.ref.speakerName, voice.ref.styleName, file.emotionStyles),
+      missingEmotionStyles(chosenList, voice.ref.styleId, file.emotionStyles)
+    );
+    if (missingNotice) {
+      logStep(`人物の声：声の割り当て：${picked.label}：${missingNotice}`);
+      void vscode.window.showInformationMessage(missingNotice);
     }
     // よく使う声を数える（端末だけ。数えられなくても割り当ては済んでいるので止めない）
     if (memory) {

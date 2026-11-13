@@ -583,6 +583,27 @@ describe("声を選ぶ窓の区切りと、人物ごとの声の調整（作者�
     expect(store.values.get("novelai.voiceAssign.pickCounts")).toEqual({ "aivisspeech|uuid-mai": 4 });
   });
 
+  test("声を選んだ直後に、専用のスタイルが無い感情を1回知らせる（作者の決定 2026-11-13）", async () => {
+    const { service } = await oneEngine();
+    const infos: string[] = [];
+    const originalInfo = window.showInformationMessage;
+    window.showInformationMessage = (async (message: string) => {
+      infos.push(message);
+      return undefined;
+    }) as typeof window.showInformationMessage;
+    const pick = scriptQuickPick([labelled("灯"), labelled("まい")]);
+    try {
+      await assignVoices(work, service, "aivisspeech");
+    } finally {
+      pick.restore();
+      window.showInformationMessage = originalInfo;
+    }
+    // まい（ノーマル・上機嫌・怒り・悲しみ）：喜び・怒り・悲しみ・叫びはあり、ほかが無い
+    expect(infos).toEqual([
+      "この声（まい）には驚き・恐れ・照れ・ささやきの声（スタイル）がありません。その感情は平静に近く聞こえます。",
+    ]);
+  });
+
   test("調整の行から見本「老けた声」を1回で選べ、声を選び直しても調整と区切りの直しは残る", async () => {
     const { service } = await oneEngine();
     state.assignment = { ...state.assignment, speakerGroups: { "uuid-mai": "女性" } };
@@ -669,6 +690,29 @@ describe("声を選ぶ窓の区切りと、人物ごとの声の調整（作者�
     for (const body of bodies) {
       expect(body).toMatchObject({ speedScale: 0.85, pitchScale: -0.06, intonationScale: 0.8 });
     }
+  });
+
+  test("AivisSpeech で専用のスタイルが無い感情は、朗読と書き出しの両方で同じ緩急と速さを送る（作者の決定 2026-11-13）", async () => {
+    const { aivis, service } = await oneEngine();
+    // 灯＝まい。まいに驚きのスタイルは無い
+    state.cast = {
+      version: 1,
+      episode: "01.txt",
+      entries: [castEntry("「やった！」", { speakerId: "c-akari", speakerName: "灯", emotion: "驚き", intensity: "中" })],
+    };
+    const sentences = buildReadingPlan(TEXT, "curly", [], { splitDialogue: true });
+    const planned = await service.plan(work, "/w/01.txt", TEXT, sentences, "aivisspeech");
+    if (!("units" in planned)) throw new Error(planned.problem);
+    const akari = planned.units[0];
+    expect(akari).toMatchObject({ styleId: 888753760, styled: false, engine: "aivisspeech" });
+
+    await service.synthesize(akari, 1);
+    await service.synthesizeForExport(akari, 1, new AbortController().signal, { outputSamplingRate: 24000 });
+    const bodies = aivis.requests
+      .filter((r) => r.path === "/synthesis" && r.query.speaker === "888753760")
+      .map((r) => r.body as Record<string, number>);
+    expect(bodies).toHaveLength(2);
+    for (const body of bodies) expect(body).toMatchObject({ speedScale: 1.1, tempoDynamicsScale: 1.3 });
   });
 });
 
