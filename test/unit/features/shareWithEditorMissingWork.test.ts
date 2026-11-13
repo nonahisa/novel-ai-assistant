@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { sendToEditor, shareWithEditor } from "../../../src/features/shareWithEditor";
 import {
-  STOPPED_LINE,
   UNREGISTER_BUTTON,
   moved,
   present,
@@ -50,10 +49,19 @@ afterEach(() => {
 function expectStopped(): void {
   expect(harness.writes()).toEqual([]);
   expect(asked).toBe(0);
-  expect(harness.warned.some((one) => one.message.includes("編集者へ"))).toBe(false);
+  // 渡す確認の窓（「編集者へ…」）は出さない。見つからない知らせ自身は除いて見る
+  expect(
+    harness.warned.some(
+      (one) => one.message.includes("編集者へ") && !one.message.includes("作品のフォルダーが見つからない")
+    )
+  ).toBe(false);
   const notices = harness.missingNotices();
   expect(notices).toHaveLength(1);
-  expect(notices[0].message).toContain(STOPPED_LINE);
+  // 渡す操作なので「同期を止めました」とは言わない（2026-11-14。担当の気づき）
+  expect(notices[0].message).toContain(
+    "作品のフォルダーが見つからないので、編集者へ渡していません：たゆたう鉛。消したり移したりした作品なら、作品の一覧から外してから渡してください。"
+  );
+  expect(notices[0].message).not.toContain("同期");
   expect(notices[0].buttons).toEqual([UNREGISTER_BUTTON]);
 }
 

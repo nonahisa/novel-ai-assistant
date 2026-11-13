@@ -41,13 +41,18 @@ export async function findMissingWorksAt(
  */
 export function noticeMissingWorks(
   pressed: string | undefined,
-  gone: readonly WorkEntry[]
+  gone: readonly WorkEntry[],
+  /** 止めた操作。「編集者へ渡す」は同期ではないので言い方を変える */
+  action: "sync" | "share" = "sync"
 ): void {
   if (gone.length === 0) return;
-  logFailure("作品のフォルダーが見つからないので、同期を止めた", {
-    見つからない作品: gone.map((one) => one.folderPath).join("、"),
-  });
-  showMissingWorksNotice(pressed, gone);
+  logFailure(
+    action === "share"
+      ? "作品のフォルダーが見つからないので、編集者へ渡さなかった"
+      : "作品のフォルダーが見つからないので、同期を止めた",
+    { 見つからない作品: gone.map((one) => one.folderPath).join("、") }
+  );
+  showMissingWorksNotice(pressed, gone, action === "share" ? "share" : "after");
 }
 
 /**
@@ -139,11 +144,12 @@ export function forgetMissingWorksNotices(): void {
 
 function showMissingWorksNotice(
   pressed: string | undefined,
-  gone: readonly WorkEntry[]
+  gone: readonly WorkEntry[],
+  when: "after" | "share" = "after"
 ): void {
   const unregister = unregisterMissingWorkLabel(gone[0]);
   whenNoticePicked(
-    vscode.window.showWarningMessage(describeMissingWorks(gone, "after"), unregister),
+    vscode.window.showWarningMessage(describeMissingWorks(gone, when), unregister),
     async (action) => {
       if (action !== unregister) return;
       await vscode.commands.executeCommand("novelai.removeWork", {

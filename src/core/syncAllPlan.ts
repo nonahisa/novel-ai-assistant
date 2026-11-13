@@ -206,9 +206,16 @@ export function skipReasonText(reason: SkipReason): string {
  */
 export function describeMissingWorks(
   missing: readonly WorkEntry[],
-  when: "before" | "after"
+  when: "before" | "after" | "share"
 ): string {
   const names = missing.map((work) => work.title).join("、");
+  // 「編集者へ渡す」は同期ではないので、同期の言葉を使わない（2026-11-14）
+  if (when === "share") {
+    return (
+      `作品のフォルダーが見つからないので、編集者へ渡していません：${names}。` +
+      "消したり移したりした作品なら、作品の一覧から外してから渡してください。"
+    );
+  }
   const stop = when === "before" ? "この置き場は同期しません" : "この置き場は同期を止めました";
   return (
     `作品のフォルダーが見つからないので、${stop}：${names}。` +

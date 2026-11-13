@@ -281,7 +281,7 @@ export async function shareWithEditor(
   const gone = await findMissingWorksAt(work.folderPath, works, run);
   if (gone.length > 0) {
     const present = works.find((one) => !gone.some((missing) => missing.id === one.id));
-    noticeMissingWorks(present?.folderPath, gone);
+    noticeMissingWorks(present?.folderPath, gone, "share");
     return;
   }
 
