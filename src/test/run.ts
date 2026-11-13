@@ -41,6 +41,7 @@ import { CHARACTER_EXTRACT_VERSION } from "../prompts/characterExtract";
 import { assertFetchPatch, describeFetchPatch, probeFetchPatch } from "./fetchPatch";
 import { runFieldListChecks } from "./fieldListChecks";
 import { runManuscriptTypingChecks } from "./manuscriptTyping";
+import { runUtf8ConvertStaleChecks } from "./utf8ConvertStale";
 import { runRequest, runResult } from "../mcp/tools/runRequest";
 import { handleRunRequest } from "../features/runRequestHandler";
 import { createRunRequestDeps } from "../features/runRequestRunners";
@@ -93,6 +94,9 @@ export async function run(): Promise<void> {
       assert.ok(registered.includes(command), `${command} が登録されていません`);
     }
   });
+
+  // 他の試験の開きっぱなしの文書が混ざらないよう、拡張機能の起動の直後に流す
+  await runUtf8ConvertStaleChecks((name, test) => runCase(name, failures, test));
 
   await runCase("出した知らせと登録簿の写しを保管庫へ書く（MCP の notices.recent・works.list）", failures, async () => {
     // **本物の拡張機能ホストで `vscode.window` を包めるか**は、単体テストの
