@@ -28,11 +28,11 @@ export async function findMissingWorksAt(
 }
 
 /**
- * 作品1つの同期で、同じ置き場にフォルダーが見つからない作品があって記録を止めたときの知らせ
+ * 作者が押した操作で、同じ置き場にフォルダーが見つからない作品があって止めたときの知らせ
  * （2026-11-14 の作者の実データ。「すべて同期」の `work_missing` と同じ文。設計書5.5.14）。
  *
- * 作者が押した操作（取り込みの前の記録・作品ごとの一覧の「記録」・分岐合流・復元・
- * GitHub のセットアップ）から呼ぶ。知らせを何か所にも写すと片方だけ直して食い違うため。
+ * 作者が押した操作（取り込みの前の記録・作品ごとの一覧の「記録」・作品1つの取り込み・
+ * 受け取り・送信・分岐合流・復元・GitHub のセットアップ）から呼ぶ。知らせを何か所にも写すと片方だけ直して食い違うため。
  *
  * ボタンは既存の「作品の登録を解除」（`novelai.removeWork`。確認の窓が出る）へ渡す。
  * **ボタンの答えは待たない**（取り込みの旗の中からも呼ばれる。`whenNoticePicked`）
@@ -44,7 +44,7 @@ export function noticeMissingWorks(
   gone: readonly WorkEntry[]
 ): void {
   if (gone.length === 0) return;
-  logFailure("作品のフォルダーが見つからないので、記録を止めた", {
+  logFailure("作品のフォルダーが見つからないので、同期を止めた", {
     見つからない作品: gone.map((one) => one.folderPath).join("、"),
   });
   showMissingWorksNotice(pressed, gone);

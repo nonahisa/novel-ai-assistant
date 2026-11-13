@@ -127,6 +127,12 @@ export class AutoResender implements vscode.Disposable {
    * 理由が変わったときだけ書き、試せたとき・送るものが無くなったときに忘れる。
    */
   private readonly holdNoted = new Map<string, string>();
+  /**
+   * 置き場ごとの、フォルダーが見つからない作品の組（道を並べたもの）と、続けて見送った回数
+   * （2026-11-14。設計書5.5.14）。**同じ組では続けて書かない**（`failures` と同じ考え）。
+   * ドライブが外れている間じゅう5分おきに1行ずつ積もると、ログを開いた作者が他の記録を探せない
+   */
+  private readonly missingNoted = new Map<string, { group: string; count: number }>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -322,18 +328,31 @@ export class AutoResender implements vscode.Disposable {
       同じ決まり。設計書5.5.14）。送るのは記録済みの分だけだが、その記録に移した作品の削除が
       入っていれば、送った時点で GitHub でも作品が消えた形になる。無い作品は根を読めないので
       控えの置き場（`target.works`）に入っていない。登録の全部から拾い直して確かめる。
-      **黙って飛ばさない**：ログには試すたびに1行、知らせは同じ組につき1回の起動で1回まで
+      **黙って飛ばさない**：ログは失敗と同じく**同じ組では続けて書かない**（`missingNoted`）。
+      組が変わったときと、そろって再び送れたときに1行。知らせは同じ組につき1回の起動で1回まで
       （開いたときの点検と共有）。git は呼ばない
     */
     const gone = await findMissingWorks(buildSyncTarget(target.root, works).works);
+    const rootKey = normalizeForComparison(target.root);
     if (gone.length > 0) {
       outcome.skipped.push({ label, reason: "作品のフォルダーが見つからない" });
-      await useSyncLog(target.root, target.works);
-      logStep(
-        `自動の送り直し：作品のフォルダーが見つからないので、この置き場へは送らなかった` +
-          `（${label}／見つからない作品：${gone.map((one) => one.title).join("、")}` +
-          `／きっかけ ${trigger}。送れていない分は手元に残っています）`
-      );
+      const group = gone
+        .map((one) => normalizeForComparison(one.folderPath))
+        .sort()
+        .join("\n");
+      const previous = this.missingNoted.get(rootKey);
+      this.missingNoted.set(rootKey, {
+        group,
+        count: previous?.group === group ? previous.count + 1 : 1,
+      });
+      if (previous?.group !== group) {
+        await useSyncLog(target.root, target.works);
+        logStep(
+          `自動の送り直し：作品のフォルダーが見つからないので、この置き場へは送らなかった` +
+            `（${label}／見つからない作品：${gone.map((one) => one.title).join("、")}` +
+            `／きっかけ ${trigger}。そろうまで送りません。送れていない分は手元に残っています）`
+        );
+      }
       // 知らせの失敗の書き先は在る作品のフォルダー（控えが古いと `target.works` に無い作品が混じりうる）
       const goneIds = new Set(gone.map((one) => one.id));
       noticeMissingWorksOnce(
@@ -342,6 +361,9 @@ export class AutoResender implements vscode.Disposable {
       );
       return;
     }
+    // そろった。見送った回数は、再び送れたときの1行に添える（送るものが無ければ添える行は無い）
+    const missingBefore = this.missingNoted.get(rootKey)?.count ?? 0;
+    this.missingNoted.delete(rootKey);
 
     // **控えは古いことがある**（端末で送った・別の道で取り込んだ）。
     // 送る前に手元の git に聞き直す。ネットワークには出ない
@@ -389,6 +411,9 @@ export class AutoResender implements vscode.Disposable {
     logStep(
       `自動の送り直し：送った（${label}／${decision.ahead}件／きっかけ ${trigger}` +
         (failedBefore > 0 ? `／それまでに ${failedBefore}回失敗` : "") +
+        (missingBefore > 0
+          ? `／作品のフォルダーがそろうまで ${missingBefore}回見送った`
+          : "") +
         "）"
     );
     // 一覧とステータスバーを作り直す。見張りの変化の合図で、

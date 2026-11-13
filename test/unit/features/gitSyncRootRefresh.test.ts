@@ -2,6 +2,13 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { GitSyncStatus } from "../../../src/core/git";
 import type { WorkEntry } from "../../../src/models/types";
 
+// 作品のフォルダーは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
+// `gitSyncPullPushMissingWork.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
+
 /**
  * 同じ置き場の作品の控えが、古い数のまま残らないか（設計書6.15.1）。
  *

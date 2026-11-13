@@ -1235,6 +1235,15 @@ export class GitSyncMonitor implements vscode.Disposable {
         };
       }
 
+      // **同じ置き場に、フォルダーが無い作品があれば受け取らない**（2026-11-14。設計書5.5.14。
+      // 取り込みと同じ理由）。受け取るものがあるときだけ見る——無ければ git は書かない
+      if (await this.stopIfWorksMissing(work, run)) {
+        return {
+          kind: "skipped",
+          reason: "同じ置き場に、フォルダーが見つからない作品があるため、GitHub からは受け取りませんでした。",
+        };
+      }
+
       let result: PreRecordPull | undefined;
       await this.countedPull(work, async () => {
         const resume = this.settingsPause?.(work);
@@ -1370,6 +1379,10 @@ export class GitSyncMonitor implements vscode.Disposable {
     work: WorkEntry,
     afterRecording: boolean
   ): Promise<boolean> {
+    // **同じ置き場に、フォルダーが無い作品があれば取り込まない**（2026-11-14。設計書5.5.14）。
+    // 取り込むと、見えない作品のフォルダーへ git が書き戻して作り直すことがある
+    if (await this.stopIfWorksMissing(work, this.options.run ?? runGit)) return false;
+
     // **取り込みで改行が書き換わりうることを、先に伝える**（設計書5.5.1）
     await this.warnAutoCrlfOnce(work);
 
@@ -1758,6 +1771,10 @@ ${reason}` : ""}`,
       this.statuses.get(work.id) ??
       (await this.refresh(work, { fetch: false, notify: false }));
     if (status.kind !== "tracked") return false;
+
+    // **同じ置き場に、フォルダーが無い作品があれば送らない**（2026-11-14。設計書5.5.14）。
+    // 送ると、止めた置き場の古い記録（移した作品の削除を含みうる）が GitHub に載る。確認の前に止める
+    if (await this.stopIfWorksMissing(work, this.options.run ?? runGit)) return false;
 
     // 送信は外部（GitHub）へ出る操作なので、件数を見せてから確認する。
     // **同じ置き場の他の作品も一緒に出ていく**（設計書5.7.9）。作品名が
