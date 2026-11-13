@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "./paths";
 import { redactUrlCredentials } from "./redactUrl";
 import { concatBytes } from "./concatBytes";
+import { isWorkFolderPresent } from "./workFolderPresence";
 
 /**
  * 診断用のログ。
@@ -199,8 +200,10 @@ function appendToFile(text: string, targets: readonly string[]): void {
   writeQueue = writeQueue
     .then(async () => {
       flushQueued = false;
-      const batch = pendingLines;
+      const taken = pendingLines;
       pendingLines = new Map();
+      // 先に取り分けてから訊く（訊いている間に届いた行は、次のまとめに入る）
+      const batch = await divertMissingWorks(taken);
       for (const [target, lines] of batch) {
         try {
           await appendOne(lines.join("\n"), target);
@@ -210,6 +213,50 @@ function appendToFile(text: string, targets: readonly string[]): void {
       }
     })
     .catch(() => undefined);
+}
+
+/**
+ * **フォルダーが見つからない作品へは書かない。その行は保管庫のログへ回す**（2026-11-14。設計書5.5.14）。
+ *
+ * 書く前の `createDirectory` は親を全部作るので、無い作品の `<作品>/.aiwriter/logs/` へ書くと
+ * 作品のフォルダーごと作り直す。作り直された作品は「在る」と読まれ、次の同期で守り
+ * （`findMissingWorks`）が効かなくなる——移した作品の削除を記録・送信した 11-14 の件と同じ形になる。
+ * 書き先を決める側（`useLogFile` を呼ぶ所）は何十か所もあるので、書く所の1か所で止める。
+ *
+ * - 判定は同期と同じ `isWorkFolderPresent`（写しを作らない）。**まとめた1回の書き込みごとに
+ *   書き先1つにつき1回**だけ訊く（1行ごとには訊かない）
+ * - 作品のフォルダーが在って `.aiwriter/logs` が無いだけなら、今までどおり作って書く
+ * - 保管庫の置き場は、今までどおり作ってよい（拡張機能の持ち物）
+ * - 保管庫が決まっていなければ、その行はファイルには残らない（出力パネルには出ている）
+ */
+async function divertMissingWorks(
+  batch: Map<string, string[]>
+): Promise<Map<string, string[]>> {
+  const fallback = resolveLogFilePath(undefined);
+  const result = new Map<string, string[]>();
+  const add = (target: string, lines: readonly string[]): void => {
+    const found = result.get(target);
+    if (found) found.push(...lines);
+    else result.set(target, [...lines]);
+  };
+  for (const [target, lines] of batch) {
+    if (target === fallback) {
+      add(target, lines);
+      continue;
+    }
+    // 書き先は `<作品>/.aiwriter/logs/actions.log`（`resolveLogFilePath`）
+    const workFolder = path.dirname(path.dirname(path.dirname(target)));
+    if (await isWorkFolderPresent(workFolder)) {
+      add(target, lines);
+      continue;
+    }
+    if (!fallback) continue;
+    add(fallback, [
+      `（作品のフォルダーが見つからないので、${workFolder} のログの代わりにここへ書きます）`,
+      ...lines,
+    ]);
+  }
+  return result;
 }
 
 async function appendOne(text: string, target: string): Promise<void> {

@@ -40,6 +40,25 @@ export async function restoreFromHistory(
   } = {}
 ): Promise<void> {
   const run = deps.run ?? runGit;
+
+  /*
+    **同じ置き場に、フォルダーが無い作品があれば戻さない**（2026-11-14。「すべて同期」と
+    同じ決まり。設計書5.5.14）。復元の前の自動保存と戻したことの記録は `git add -A` で
+    置き場ぜんぶを入れるので、移した作品の削除まで記録される。版を選んでもらう前に止める。
+    **状態を読むより先に見る**——押した作品そのもののフォルダーが無いと git が起動せず、
+    状態が「Git が入っていない」と読まれて、事実と違う案内が出る
+  */
+  const gone = await findMissingWorksAt(work.folderPath, deps.works ?? [work], run);
+  if (gone.length > 0) {
+    const present = (deps.works ?? []).find(
+      (one) => !gone.some((missing) => missing.id === one.id)
+    );
+    // 押した作品が無ければ、記録係が保管庫のログへ回す（無い作品のフォルダーは作らない）
+    useLogFile(present?.folderPath ?? work.folderPath);
+    noticeMissingWorks(present?.folderPath, gone);
+    return;
+  }
+
   const status = await readSyncStatus(work.folderPath, run);
   if (status.kind === "git_missing") {
     vscode.window.showInformationMessage(
@@ -57,18 +76,6 @@ export async function restoreFromHistory(
   }
   if (status.kind === "failed") {
     vscode.window.showErrorMessage(`履歴を読めませんでした: ${status.detail}`);
-    return;
-  }
-
-  /*
-    **同じ置き場に、フォルダーが無い作品があれば戻さない**（2026-11-14。「すべて同期」と
-    同じ決まり。設計書5.5.14）。復元の前の自動保存と戻したことの記録は `git add -A` で
-    置き場ぜんぶを入れるので、移した作品の削除まで記録される。版を選んでもらう前に止める
-  */
-  const gone = await findMissingWorksAt(work.folderPath, deps.works ?? [work], run);
-  if (gone.length > 0) {
-    useLogFile(work.folderPath);
-    noticeMissingWorks(work.folderPath, gone);
     return;
   }
 

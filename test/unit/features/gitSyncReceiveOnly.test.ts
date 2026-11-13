@@ -1,4 +1,11 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+
+// 作品のフォルダーは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
+// `pressedWorkMissing.test.ts`・`gitSyncPullPushMissingWork.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
 import * as vscode from "vscode";
 import type { GitCommandRunner, GitSyncStatus } from "../../../src/core/git";
 import type { WorkEntry } from "../../../src/models/types";

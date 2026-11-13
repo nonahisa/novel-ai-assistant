@@ -19,6 +19,7 @@ import {
   rewritesLineEndings,
   push,
   createSyncStatusBatch,
+  readRepoRoot,
   readSyncStatus,
   runGit,
   type DivergenceConflicts,
@@ -41,6 +42,11 @@ import {
 } from "../core/logger";
 import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
 import { findMissingWorksAt, noticeMissingWorks } from "./missingWorksNotice";
+import { isWorkFolderPresent } from "../core/workFolderPresence";
+
+/** 作品のフォルダーが見つからず、受け取らなかったときの答え（受け取りの呼び出し側が出す） */
+const MISSING_WORKS_RECEIVE_SKIP =
+  "同じ置き場に、フォルダーが見つからない作品があるため、GitHub からは受け取りませんでした。";
 import { rescueEditorGitignore } from "./editorGitignoreRescue";
 import { withProgress } from "../views/progress";
 import { isEditorMode } from "../core/actorContext";
@@ -1181,6 +1187,14 @@ export class GitSyncMonitor implements vscode.Disposable {
     const run = this.options.run ?? runGit;
     this.quietInbox += 1;
     try {
+      // **押した作品そのもののフォルダーが無ければ、先に止める**（2026-11-14。設計書5.5.14）。
+      // 無いフォルダーでは git が起動せず、状態が「Git が入っていない」と読まれて事実と違う
+      // 理由を返していた。同じ置き場のほかの作品が無いだけなら、受け取るものがあるときに下で見る
+      if (!(await isWorkFolderPresent(work.folderPath))) {
+        await this.stopIfWorksMissing(work, run);
+        return { kind: "skipped", reason: MISSING_WORKS_RECEIVE_SKIP };
+      }
+
       // 先に手元だけで読み、取りに行ける作品かを確かめる（同期していない作品で
       // 取りに行くと、直しようのない失敗がログに並ぶ。`runRefresh` の冒頭と同じ理由）
       const local = await this.refresh(work, { fetch: false, notify: false });
@@ -1238,10 +1252,7 @@ export class GitSyncMonitor implements vscode.Disposable {
       // **同じ置き場に、フォルダーが無い作品があれば受け取らない**（2026-11-14。設計書5.5.14。
       // 取り込みと同じ理由）。受け取るものがあるときだけ見る——無ければ git は書かない
       if (await this.stopIfWorksMissing(work, run)) {
-        return {
-          kind: "skipped",
-          reason: "同じ置き場に、フォルダーが見つからない作品があるため、GitHub からは受け取りませんでした。",
-        };
+        return { kind: "skipped", reason: MISSING_WORKS_RECEIVE_SKIP };
       }
 
       let result: PreRecordPull | undefined;
@@ -1482,10 +1493,17 @@ ${reason}` : ""}`,
     work: WorkEntry,
     run: GitCommandRunner
   ): Promise<boolean> {
-    const gone = await findMissingWorksAt(work.folderPath, this.registry.list(), run);
+    const works = this.registry.list();
+    const gone = await findMissingWorksAt(work.folderPath, works, run);
     if (gone.length === 0) return false;
+    // 押した作品そのものが無ければ、記録係が保管庫のログへ回す（無い作品のフォルダーは作らない）。
+    // 知らせの失敗の書き先は、同じ置き場の在る作品
     useLogFile(work.folderPath);
-    noticeMissingWorks(work.folderPath, gone);
+    const present = buildSyncTarget(
+      (await readRepoRoot(work.folderPath, run)) ?? work.folderPath,
+      works
+    ).works.find((one) => !gone.some((missing) => missing.id === one.id));
+    noticeMissingWorks(present?.folderPath, gone);
     return true;
   }
 
@@ -1767,14 +1785,15 @@ ${reason}` : ""}`,
   }
 
   private async runPush(work: WorkEntry): Promise<boolean> {
+    // **同じ置き場に、フォルダーが無い作品があれば送らない**（2026-11-14。設計書5.5.14）。
+    // 送ると、止めた置き場の古い記録（移した作品の削除を含みうる）が GitHub に載る。確認の前に止める。
+    // 状態を読むより先に見る——押した作品そのものが無いと状態が読めず、何も言わずに終わっていた
+    if (await this.stopIfWorksMissing(work, this.options.run ?? runGit)) return false;
+
     const status =
       this.statuses.get(work.id) ??
       (await this.refresh(work, { fetch: false, notify: false }));
     if (status.kind !== "tracked") return false;
-
-    // **同じ置き場に、フォルダーが無い作品があれば送らない**（2026-11-14。設計書5.5.14）。
-    // 送ると、止めた置き場の古い記録（移した作品の削除を含みうる）が GitHub に載る。確認の前に止める
-    if (await this.stopIfWorksMissing(work, this.options.run ?? runGit)) return false;
 
     // 送信は外部（GitHub）へ出る操作なので、件数を見せてから確認する。
     // **同じ置き場の他の作品も一緒に出ていく**（設計書5.7.9）。作品名が

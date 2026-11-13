@@ -1,5 +1,12 @@
 import * as path from "path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// ログの書き先の作品は在るものとして扱う（作り物の道はディスクに無い）。無い作品へ書かない決まりは
+// `core/logMissingWork.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 import { PostingStore } from "../../../src/core/postingStore";
