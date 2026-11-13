@@ -672,13 +672,21 @@ export function missingEmotionStyles(
   );
 }
 
-/** 声を選んだときの知らせ（無い感情が無ければ `undefined`＝何も出さない） */
+/**
+ * 声を選んだときの知らせ（無い感情が無ければ `undefined`＝何も出さない）。
+ * **AivisSpeech は速さと緩急で寄せる**（`AIVIS_UNSTYLED_SHIFT`）ので、「平静に近く聞こえます」と言い切らない
+ * ——言い切ると、寄せた音を聞いた作者に「知らせと違う」と映る（担当の報告で気づいた、2026-11-13）
+ */
 export function missingEmotionStyleNotice(
   speakerName: string,
-  missing: readonly VoiceEmotion[]
+  missing: readonly VoiceEmotion[],
+  engine?: VoiceEngineId
 ): string | undefined {
   if (missing.length === 0) return undefined;
-  return `この声（${speakerName}）には${missing.join("・")}の声（スタイル）がありません。その感情は平静に近く聞こえます。`;
+  const head = `この声（${speakerName}）には${missing.join("・")}の声（スタイル）がありません。`;
+  return engine === "aivisspeech"
+    ? `${head}その感情は声を替えず、速さと緩急だけで寄せるので、平静に近く聞こえることがあります。`
+    : `${head}その感情は平静に近く聞こえます。`;
 }
 
 /**

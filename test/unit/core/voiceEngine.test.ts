@@ -682,6 +682,9 @@ describe("専用のスタイルが無い感情の寄せ方と知らせ（作者�
     expect(missingEmotionStyleNotice("まい", ["怒り", "叫び"])).toBe(
       "この声（まい）には怒り・叫びの声（スタイル）がありません。その感情は平静に近く聞こえます。"
     );
+    expect(missingEmotionStyleNotice("まい", ["怒り"], "aivisspeech")).toBe(
+      "この声（まい）には怒りの声（スタイル）がありません。その感情は声を替えず、速さと緩急だけで寄せるので、平静に近く聞こえることがあります。"
+    );
     expect(missingEmotionStyleNotice("まい", [])).toBeUndefined();
     const full = [
       {

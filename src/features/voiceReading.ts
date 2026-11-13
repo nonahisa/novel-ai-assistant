@@ -1590,7 +1590,8 @@ export async function assignVoices(
     const chosenList = available.find((a) => a.engine === chosenEngine)?.list ?? [];
     const missingNotice = missingEmotionStyleNotice(
       voiceChoiceName(voice.ref.speakerName, voice.ref.styleName, file.emotionStyles),
-      missingEmotionStyles(chosenList, voice.ref.styleId, file.emotionStyles)
+      missingEmotionStyles(chosenList, voice.ref.styleId, file.emotionStyles),
+      chosenEngine
     );
     if (missingNotice) {
       logStep(`人物の声：声の割り当て：${picked.label}：${missingNotice}`);
