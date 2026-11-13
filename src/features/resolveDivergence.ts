@@ -48,6 +48,8 @@ import {
 } from "../core/logger";
 import { withCancellableProgress } from "../views/progress";
 import type { WalkConflictsResult } from "./resolveConflicts";
+import { noticeMissingWorks } from "./missingWorksNotice";
+import { findMissingWorks } from "../core/workFolderPresence";
 import { readAutoResendSettings } from "./autoResend";
 import { isEditorMode } from "../core/actorContext";
 import {
@@ -252,6 +254,19 @@ export async function resolveDivergence(
 
   const { root, label } = target;
   useRootLog(deps, root);
+
+  /*
+    **同じ置き場に、フォルダーが無い作品があれば合わせない**（2026-11-14。「すべて同期」と
+    同じ決まり。設計書5.5.14）。合わせる前の自動保存（`foldDivergence`）が `git add -A` で
+    移した作品の削除まで記録し、合流も作業木へ書き戻す。取りに行く前に止める（窓を待たせない）。
+    作品1つの同期から合わせる道（`gitSync.ts` の `foldDiverged`）は、あちらで先に止めている
+  */
+  const inside = worksInside(deps.registry.list(), root);
+  const gone = await findMissingWorks(inside);
+  if (gone.length > 0) {
+    noticeMissingWorks(inside.find((one) => !gone.includes(one))?.folderPath, gone);
+    return;
+  }
 
   const outcome = await withCancellableProgress(
     "2台の原稿を調べています…",

@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+// 作品のフォルダーは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
+// `gitOnboardingMissingWork.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
+
 /*
   GitHub 送信の準備（VS Code のアカウントで新しくリポジトリを作る道）で、認証情報を git 側へ覚えられたか
   （`rememberGithubCredential` の結果）によって、**作ったあとの知らせと操作ログが分かれる**ところを見る。

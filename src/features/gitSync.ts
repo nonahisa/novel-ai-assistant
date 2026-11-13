@@ -19,7 +19,6 @@ import {
   rewritesLineEndings,
   push,
   createSyncStatusBatch,
-  readRepoRoot,
   readSyncStatus,
   runGit,
   type DivergenceConflicts,
@@ -41,8 +40,7 @@ import {
   useLogFile,
 } from "../core/logger";
 import { buildSyncTarget, describeCompanions } from "../core/syncTarget";
-import { findMissingWorks } from "../core/workFolderPresence";
-import { noticeMissingWorks } from "./missingWorksNotice";
+import { findMissingWorksAt, noticeMissingWorks } from "./missingWorksNotice";
 import { rescueEditorGitignore } from "./editorGitignoreRescue";
 import { withProgress } from "../views/progress";
 import { isEditorMode } from "../core/actorContext";
@@ -1471,8 +1469,7 @@ ${reason}` : ""}`,
     work: WorkEntry,
     run: GitCommandRunner
   ): Promise<boolean> {
-    const root = (await readRepoRoot(work.folderPath, run)) ?? work.folderPath;
-    const gone = await findMissingWorks(buildSyncTarget(root, this.registry.list()).works);
+    const gone = await findMissingWorksAt(work.folderPath, this.registry.list(), run);
     if (gone.length === 0) return false;
     useLogFile(work.folderPath);
     noticeMissingWorks(work.folderPath, gone);

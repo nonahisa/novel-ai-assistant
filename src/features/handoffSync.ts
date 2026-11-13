@@ -33,6 +33,8 @@ import { buildSyncTarget } from "../core/syncTarget";
 import { rescueEditorGitignore } from "./editorGitignoreRescue";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { useSyncLog } from "./syncLog";
+import { noticeMissingWorksOnce } from "./missingWorksNotice";
+import { findMissingWorks } from "../core/workFolderPresence";
 import { readMachineName } from "./windowCard";
 import { whenNoticePicked } from "../views/notify";
 import { isEditorMode } from "../core/actorContext";
@@ -139,6 +141,7 @@ export async function runStartupHandoff(deps: HandoffDeps): Promise<void> {
   const outcomes: HandoffOutcome[] = [];
   for (const target of checked) {
     try {
+      if (await skipIfWorksMissing(deps, target)) continue;
       outcomes.push(await handleTarget(deps, target));
     } catch (error) {
       // **1つ落ちても、残りは点検する**（この作品の一括処理と同じ考え方）
@@ -302,6 +305,36 @@ async function collectTargets(deps: HandoffDeps): Promise<HandoffTarget[]> {
   // 置き場の点検（`handleTarget`）は**順に**回す（呼び出し側）。同時にすると、
   // ログの書き先を大域で切り替える `useSyncLog` が置き場どうしで混ざる
   return [...byRoot.values()];
+}
+
+/**
+ * **同じ置き場に、フォルダーが無い作品があれば、その置き場は取りに行かず・取り込まず・
+ * 送らない**（2026-11-14。「すべて同期」と同じ決まり。設計書5.5.14）。飛ばしたら true。
+ *
+ * 点検は記録しないが、黙って取り込む・送る。取り込むと、見えない作品のフォルダーへ git が
+ * 書き戻して作り直すことがあり（作者が移した先と元の場所に作品が2つできる）、送ると
+ * 移した作品の削除を記録した分が GitHub に載りうる。
+ *
+ * 無い作品は根を読めないので、集めた置き場（`target.works`）には入っていない。登録の
+ * 全部から、その置き場の中にある作品を拾い直して確かめる。
+ *
+ * **黙って飛ばさない**：ログには点検のたびに1行、知らせは同じ組につき1回の起動で1回まで
+ * （`noticeMissingWorksOnce`。自動の送り直しと共有する）。点検の結果の知らせには載せない
+ * （載せると同じことが2つの窓に出る。こちらの窓は［登録を解除］のボタンを持つ）
+ */
+async function skipIfWorksMissing(
+  deps: HandoffDeps,
+  target: HandoffTarget
+): Promise<boolean> {
+  const gone = await findMissingWorks(buildSyncTarget(target.root, deps.registry.list()).works);
+  if (gone.length === 0) return false;
+  await useSyncLog(target.root, target.works);
+  logStep(
+    `開いたときの点検：作品のフォルダーが見つからないので、この置き場は取り込み・送信をしなかった` +
+      `（${target.label}／見つからない作品：${gone.map((one) => one.title).join("、")}）`
+  );
+  noticeMissingWorksOnce(target.works[0]?.folderPath, gone);
+  return true;
 }
 
 /** 置き場1つを点検して、決まったとおりに動かす */

@@ -124,15 +124,7 @@ export async function recordChanges(
   run: GitCommandRunner = runGit
 ): Promise<boolean> {
   await useTargetLog(target);
-  // **置き場に、フォルダーが無い作品があれば記録しない**（2026-11-14。「すべて同期」と同じ決まり。
-  // `git add -A` が置き場ぜんぶを入れ、移した・外れたドライブの作品の削除まで記録される）
-  const gone = await findMissingWorks(target.works);
-  if (gone.length > 0) {
-    // 知らせの失敗の書き先は、在る作品のフォルダー（書庫の直下へは書かない。`useSyncLog`）
-    const present = target.works.find((work) => !gone.includes(work));
-    noticeMissingWorks(present?.folderPath, gone);
-    return false;
-  }
+  if (await stopIfWorksMissing(target)) return false;
   const count = await countTrackableFiles(target.folderPath, run);
   if (count === 0) {
     vscode.window.showInformationMessage(
@@ -187,6 +179,23 @@ export async function recordChanges(
  */
 async function useTargetLog(target: SyncTarget): Promise<void> {
   await useSyncLog(target.folderPath, target.works);
+}
+
+/**
+ * **置き場に、フォルダーが無い作品があれば、記録も送信もしない**（2026-11-14。「すべて同期」と
+ * 同じ決まり。設計書5.5.14）。知らせて止めたら true。
+ *
+ * `git add -A` は置き場ぜんぶを入れるので、移した・外れたドライブの作品の削除まで記録される。
+ * 最初の記録なら、その作品が入っていない1つ目の記録ができる。「記録」（`recordChanges`）と
+ * セットアップの最初の記録（`commitFirstRecord`）の入口が使う。
+ */
+async function stopIfWorksMissing(target: SyncTarget): Promise<boolean> {
+  const gone = await findMissingWorks(target.works);
+  if (gone.length === 0) return false;
+  // 知らせの失敗の書き先は、在る作品のフォルダー（書庫の直下へは書かない。`useSyncLog`）
+  const present = target.works.find((work) => !gone.includes(work));
+  noticeMissingWorks(present?.folderPath, gone);
+  return true;
 }
 
 /** 続けて進める段の上限（管理を始める・送り先・送信の3段に、余裕を1つ） */
@@ -289,6 +298,10 @@ async function startTracking(
   target: SyncTarget,
   run: GitCommandRunner
 ): Promise<boolean> {
+  // 作品が見えないまま始めると、確認と `git init` のあとで最初の記録が止まり、
+  // 中身の無い履歴の箱だけが残る。訊く前に止める（`commitFirstRecord` も見る）
+  if (await stopIfWorksMissing(target)) return false;
+
   // **何が1つの置き場になるのかを、名前で言う**（設計書5.7.9）。
   // 複数の作品が入る形が既定なので、「作品フォルダーに」とだけ書くと
   // 作品ごとに分かれると読めてしまう
@@ -345,6 +358,10 @@ async function commitFirstRecord(
   target: SyncTarget,
   run: GitCommandRunner
 ): Promise<number | undefined> {
+  // 呼び出し側（`startTracking`・`ensureFirstRecord`）は訊く前に見ているが、訊いている間に
+  // ドライブが外れることもある。記録の直前にも見る
+  if (await stopIfWorksMissing(target)) return undefined;
+
   // 名前とメールが無いとコミットが失敗する。初めての人はここで必ず詰まる
   if (!(await hasCommitIdentity(target.folderPath, run))) {
     if (!(await askCommitIdentity(target, run))) return undefined;
@@ -388,6 +405,9 @@ async function ensureFirstRecord(
   target: SyncTarget,
   run: GitCommandRunner
 ): Promise<boolean> {
+  // **記録があっても、作品が見えない置き場からは送らない**（はじめての送信・作って送るは、
+  // どちらもここを最初に通る）。送ると、見えない作品を消した記録が GitHub に載りうる
+  if (await stopIfWorksMissing(target)) return false;
   if (await hasCommits(target.folderPath, run)) return true;
   const confirmed = await confirmRun(
     `${describeSyncTarget(target)} には、まだ最初の記録がありません。いまの原稿を最初の記録として残しますか？\n` +

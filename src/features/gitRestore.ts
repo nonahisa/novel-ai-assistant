@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
-import { readSyncStatus, runGit } from "../core/git";
+import { readSyncStatus, runGit, type GitCommandRunner } from "../core/git";
 import { commitAll } from "../core/gitSetup";
+import { findMissingWorksAt, noticeMissingWorks } from "./missingWorksNotice";
 import {
   HISTORY_LIMIT,
   isEmptyPlan,
@@ -29,8 +30,17 @@ import { whenNoticePicked } from "../views/notify";
  *
  * `reset --hard` のような、過去を書き換える方法は使わない。
  */
-export async function restoreFromHistory(work: WorkEntry): Promise<void> {
-  const status = await readSyncStatus(work.folderPath);
+export async function restoreFromHistory(
+  work: WorkEntry,
+  deps: {
+    /** 登録済みの作品すべて（同じ置き場に、フォルダーが無い作品が無いかを見る） */
+    works?: readonly WorkEntry[];
+    /** 試験で git を差し替える */
+    run?: GitCommandRunner;
+  } = {}
+): Promise<void> {
+  const run = deps.run ?? runGit;
+  const status = await readSyncStatus(work.folderPath, run);
   if (status.kind === "git_missing") {
     vscode.window.showInformationMessage(
       "Gitが見つからないため、過去の版を扱えません。" +
@@ -50,8 +60,20 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
     return;
   }
 
+  /*
+    **同じ置き場に、フォルダーが無い作品があれば戻さない**（2026-11-14。「すべて同期」と
+    同じ決まり。設計書5.5.14）。復元の前の自動保存と戻したことの記録は `git add -A` で
+    置き場ぜんぶを入れるので、移した作品の削除まで記録される。版を選んでもらう前に止める
+  */
+  const gone = await findMissingWorksAt(work.folderPath, deps.works ?? [work], run);
+  if (gone.length > 0) {
+    useLogFile(work.folderPath);
+    noticeMissingWorks(work.folderPath, gone);
+    return;
+  }
+
   const commits = await withProgress("過去の版を読んでいます…", () =>
-    listCommits(work.folderPath)
+    listCommits(work.folderPath, undefined, run)
   );
   if (commits.length === 0) {
     vscode.window.showInformationMessage(
@@ -70,7 +92,7 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
   if (!picked) return;
 
   const plan = await withProgress("戻すと何が変わるかを調べています…", () =>
-    planRestore(work.folderPath, picked.id)
+    planRestore(work.folderPath, picked.id, run)
   );
   if (isEmptyPlan(plan)) {
     vscode.window.showInformationMessage(
@@ -91,7 +113,7 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
       commitAll(
         work.folderPath,
         `復元の前に自動保存（${new Date().toLocaleString("ja-JP")}）`,
-        runGit
+        run
       )
     );
     if (!saved.ok) {
@@ -123,7 +145,7 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
 
   // 2. 選んだ版の中身を書き戻す
   const restored = await withProgress("原稿を戻しています…", () =>
-    restoreToCommit(work.folderPath, picked.id, plan)
+    restoreToCommit(work.folderPath, picked.id, plan, run)
   );
   if (!restored.ok) {
     useLogFile(work.folderPath);
@@ -143,7 +165,7 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
   const recorded = await commitAll(
     work.folderPath,
     `${picked.date} の版に戻した（${picked.shortId}）`,
-    runGit
+    run
   );
   if (!recorded.ok) {
     useLogFile(work.folderPath);

@@ -5072,7 +5072,7 @@ export async function activate(
         const { restoreFromHistory } = await import(
           "./features/gitRestore.js"
         );
-        await restoreFromHistory(work);
+        await restoreFromHistory(work, { works: registry.list() });
         // 原稿が入れ替わったので、文字数もハイライトも作り直す
         treeProvider.refresh(work.id);
         highlighter.invalidate();

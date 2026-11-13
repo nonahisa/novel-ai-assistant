@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+// 作品のフォルダーは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
+// `gitOnboardingMissingWork.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
+
 /*
   「GitHub初期設定」（`novelai.setupGithub`）を1回押したときに、作者へ出る問いの数と順を固定する。
 

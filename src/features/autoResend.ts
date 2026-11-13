@@ -24,6 +24,8 @@ import { describePlaceWorks } from "../core/syncAllPlan";
 import { normalizeForComparison } from "../core/paths";
 import { logFailure, logStep } from "../core/logger";
 import { useSyncLog } from "./syncLog";
+import { noticeMissingWorksOnce } from "./missingWorksNotice";
+import { findMissingWorks } from "../core/workFolderPresence";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 
 /**
@@ -314,6 +316,27 @@ export class AutoResender implements vscode.Disposable {
     outcome: ResendAttempt
   ): Promise<void> {
     const label = this.placeLabel(target.root, works);
+
+    /*
+      **同じ置き場に、フォルダーが無い作品があれば送らない**（2026-11-14。「すべて同期」と
+      同じ決まり。設計書5.5.14）。送るのは記録済みの分だけだが、その記録に移した作品の削除が
+      入っていれば、送った時点で GitHub でも作品が消えた形になる。無い作品は根を読めないので
+      控えの置き場（`target.works`）に入っていない。登録の全部から拾い直して確かめる。
+      **黙って飛ばさない**：ログには試すたびに1行、知らせは同じ組につき1回の起動で1回まで
+      （開いたときの点検と共有）。git は呼ばない
+    */
+    const gone = await findMissingWorks(buildSyncTarget(target.root, works).works);
+    if (gone.length > 0) {
+      outcome.skipped.push({ label, reason: "作品のフォルダーが見つからない" });
+      await useSyncLog(target.root, target.works);
+      logStep(
+        `自動の送り直し：作品のフォルダーが見つからないので、この置き場へは送らなかった` +
+          `（${label}／見つからない作品：${gone.map((one) => one.title).join("、")}` +
+          `／きっかけ ${trigger}。送れていない分は手元に残っています）`
+      );
+      noticeMissingWorksOnce(target.works[0]?.folderPath, gone);
+      return;
+    }
 
     // **控えは古いことがある**（端末で送った・別の道で取り込んだ）。
     // 送る前に手元の git に聞き直す。ネットワークには出ない

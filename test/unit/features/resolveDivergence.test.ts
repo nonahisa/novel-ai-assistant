@@ -1,4 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// 作品のフォルダーは在るものとして扱う（差し替えた vscode のままでは有無の判断が「無い」に倒れる）。
+// 無いときの決まりは `resolveDivergenceMissingWork.test.ts` が見る（2026-11-14）
+vi.mock("../../../src/core/workFolderPresence", () => ({
+  isWorkFolderPresent: async () => true,
+  findMissingWorks: async () => [],
+}));
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { git } from "../support/gitTemplate";
