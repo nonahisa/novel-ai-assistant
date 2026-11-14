@@ -18,7 +18,7 @@ import {
 import { VoiceEngineClient } from "../../src/core/voiceEngine";
 
 /**
- * 読み間違いの見込み（設計書6.42.6）を、本物の AivisSpeech と実データの作品で測る台本。
+ * 読み間違いの見込み（設計書6.42.5）を、本物の AivisSpeech と実データの作品で測る台本。
  * **検査ではない**（`npm run check` に入らない）。製品と同じ判定の関数（`core/readingMisread.ts`）を通し、
  * 見込みを1行ずつ書き出す。見逃し（読み違えているのに出ない）と誤検出（読めているのに出る）は、
  * 書き出した表を作者・担当が聞いて／読んで数える（正解はこの台本の外で作る）。

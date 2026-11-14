@@ -103,7 +103,7 @@ export interface VoiceExportTarget {
   /** ［声］で選んだエンジン（0.146.0） */
   engine: VoiceEngineId;
   /**
-   * 確認の窓を出す直前に1回呼ぶ（読み間違いの見込み。設計書6.42.6）。返した文を窓に1行添える。
+   * 確認の窓を出す直前に1回呼ぶ（読み間違いの見込み。設計書6.42.5）。返した文を窓に1行添える。
    * ここまで来たのはエンジンに届いたあと（話者の一覧と名乗りが引けた）なので、起きているときだけ調べる形になる。
    * **書き出しは止めない**——失敗しても投げずに undefined を返すこと
    */
@@ -492,7 +492,7 @@ export async function exportVoiceAudio(
   try {
     misreadNote = await target.beforeConfirm?.();
   } catch (error) {
-    // 書き出しは止めない（設計書6.42.6）。理由はログへ
+    // 書き出しは止めない（設計書6.42.5）。理由はログへ
     logStep(`音声に書き出す：読み間違いの見込みを調べられませんでした（${error instanceof Error ? error.message : String(error)}）`);
   }
   const ok = await confirmRun(

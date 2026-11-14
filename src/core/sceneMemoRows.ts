@@ -370,7 +370,7 @@ export const FINDING_TONES = {
   // 編集者の提案（2026-11-08 から校正・メモパネルに並ぶ）。AIの指摘と見分けるため、
   // グラフの色のうち指摘が使っていない黄色を当てる
   editorProposal: "var(--vscode-charts-yellow, #cca700)",
-  // 読み間違いの見込み（設計書6.42.6）。グラフの色は使い切ったので、端末の色（テーマが必ず持つ）を借りる
+  // 読み間違いの見込み（設計書6.42.5）。グラフの色は使い切ったので、端末の色（テーマが必ず持つ）を借りる
   misread: "var(--vscode-terminal-ansiCyan, #11a8cd)",
   // 知らない種類（外から置かれた指摘・これから足す検知）。勝手に強調しない
   other: "var(--vscode-charts-foreground, #cccccc)",
@@ -465,7 +465,7 @@ export function tagTonesOf(
  * 「どうする指摘なのか」が一目で分かる側を先に置く。
  */
 export function findingHeadline(finding: Finding): string {
-  // 読み間違いの見込み（設計書6.42.6）は、修正案（振るルビの記法）より「エンジンがどう読むか」が主文
+  // 読み間違いの見込み（設計書6.42.5）は、修正案（振るルビの記法）より「エンジンがどう読むか」が主文
   if (isMisreadFinding(finding) && finding.message) return finding.message;
   if (finding.suggestion && finding.target) {
     return `「${finding.target}」→「${finding.suggestion}」`;

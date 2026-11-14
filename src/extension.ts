@@ -791,7 +791,7 @@ const VOICE_EXPORT_BROWSER_REASON =
 const VOICE_EXPORT_EDITOR_REASON =
   "人物の声で音声に書き出すのは作者の機能です。編集者モードでは使えません。";
 
-/** ブラウザ版で読み間違いを調べられない理由（人物の声のエンジンに届かない。設計書6.42.6） */
+/** ブラウザ版で読み間違いを調べられない理由（人物の声のエンジンに届かない。設計書6.42.5） */
 const MISREAD_CHECK_BROWSER_REASON =
   "ブラウザ版の VS Code からは、この PC で動く音声合成のエンジン（AivisSpeech・VOICEVOX）に届かないので、読み間違いを調べられません。手元の VS Code で開くと使えます。";
 
@@ -2048,7 +2048,7 @@ export async function activate(
 
   /**
    * 人物の声で読むときに、声へ渡す写しで差し替える読みの範囲（読みの辞書が先、設定資料の名前の読みが後）。
-   * 書き出しの計画と、読み間違いの見込み（設計書6.42.6）が同じものを使う——違うと、送らない文を調べる
+   * 書き出しの計画と、読み間違いの見込み（設計書6.42.5）が同じものを使う——違うと、送らない文を調べる
    */
   const voiceReadingsFor = async (
     work: WorkEntry,
@@ -2144,7 +2144,7 @@ export async function activate(
           sentences,
           engine,
           /*
-            確認の窓の手前で、その話の読み間違いの見込みを1回だけ調べる（設計書6.42.6。作者の決定 2026-11-14 夜）。
+            確認の窓の手前で、その話の読み間違いの見込みを1回だけ調べる（設計書6.42.5。作者の決定 2026-11-14 夜）。
             件数だけを窓に添え、**書き出しは止めない**。外のホストの確認の窓はここでは出さない（窓の順が変わる）
           */
           beforeConfirm: async () => {
@@ -2172,7 +2172,7 @@ export async function activate(
   };
 
   /**
-   * その話の読み間違いの見込みを調べる（設計書6.42.6）。命令と［音声に書き出す］の手前が同じ道を通す。
+   * その話の読み間違いの見込みを調べる（設計書6.42.5）。命令と［音声に書き出す］の手前が同じ道を通す。
    * `askRemote` は外のホストへ本文を送る前の確認の窓を出してよいか（命令だけ true）
    */
   const checkMisreadsFor = async (
@@ -2202,7 +2202,7 @@ export async function activate(
   };
 
   /**
-   * 命令「読み間違いを調べる」（設計書6.42.6）。開いている話、または作品一覧の話の右クリックから。
+   * 命令「読み間違いを調べる」（設計書6.42.5）。開いている話、または作品一覧の話の右クリックから。
    * **ほかの道から呼ばれても理由を出す**（ブラウザ版・編集者モードでは画面にも右クリックにも出していない。実装ルール7）
    */
   const runMisreadCheck = async (filePath: string | undefined): Promise<void> => {
@@ -3702,7 +3702,7 @@ export async function activate(
     // シーンメモで見送ったものを、提案の一覧からも下げる（6.96.5）
     noteFindingDismissed: (work, findingId) =>
       proposalPanel.noteFindingDismissed(work, findingId),
-    // 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.6）。押したときだけ辞書へ足す
+    // 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.5）。押したときだけ辞書へ足す
     addMisreadToDictionary: async (work, finding) =>
       (await import("./features/readingMisread.js")).addMisreadToDictionary(work, finding),
     /*
@@ -8759,7 +8759,7 @@ export async function activate(
     })
   );
 
-  // 読み間違いを調べる（設計書6.42.6）。作品一覧の話の右クリック、または開いている話（パレット）
+  // 読み間違いを調べる（設計書6.42.5）。作品一覧の話の右クリック、または開いている話（パレット）
   context.subscriptions.push(
     registerCommand("novelai.checkVoiceMisreadings", async (node?: EpisodeNode) => {
       const fromTree = node && "episode" in node ? node.episode.filePath : undefined;

@@ -67,7 +67,7 @@ export interface FakeVoiceEngineOptions {
   speakers?: unknown[];
   /**
    * 語 → カタカナ（単体テストの偽のエンジンの `fakeAccentPhrases` と同じ）。渡すと audio_query が
-   * モーラを返す（表に無い漢字は読めない）。読み間違いの見込み（設計書6.42.6）の件だけが使う
+   * モーラを返す（表に無い漢字は読めない）。読み間違いの見込み（設計書6.42.5）の件だけが使う
    */
   readings?: Record<string, string>;
 }
@@ -126,7 +126,7 @@ export async function startFakeVoiceEngine(options: FakeVoiceEngineOptions = {})
       }
       if (url.pathname === "/audio_query") {
         return json({
-          // 語ごとの読み（読み間違いの見込みの件。設計書6.42.6）。渡さなければ今までどおり空
+          // 語ごとの読み（読み間違いの見込みの件。設計書6.42.5）。渡さなければ今までどおり空
           accent_phrases: options.readings
             ? fakeAccentPhrases(url.searchParams.get("text") ?? "", options.readings)
             : [],

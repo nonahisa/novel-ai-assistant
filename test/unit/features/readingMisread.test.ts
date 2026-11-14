@@ -5,7 +5,7 @@ import { memoryFs } from "../support/memoryDisk";
 import { startFakeVoiceEngine, type FakeEngine } from "../support/fakeVoiceEngine";
 
 /**
- * 読み間違いの見込みを調べて行を置く道と、［読みの辞書へ足す］（設計書6.42.6）。
+ * 読み間違いの見込みを調べて行を置く道と、［読みの辞書へ足す］（設計書6.42.5）。
  * 偽のエンジンは語ごとの読みを返す。本文と辞書と置き場はメモリの上
  */
 

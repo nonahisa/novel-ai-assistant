@@ -454,7 +454,7 @@ el.list.addEventListener("click", function (event) {
     return;
   }
   if (act === "addReading") {
-    // 読み間違いの見込みの行（設計書6.42.6）。足すのは拡張機能の側。この画面は頼むだけ
+    // 読み間違いの見込みの行（設計書6.42.5）。足すのは拡張機能の側。この画面は頼むだけ
     post("addReading", { findingId: row.findingId });
     return;
   }
@@ -540,7 +540,7 @@ function renderActions(row) {
     // 修正案があれば［直す］（1手で本文へ当てる）、無ければ［本文へ］。
     // ［本文へ］の data-act="reveal" は、下の受け口で行の場所を押したときと
     // 同じ「reveal」へ落ちる（飛ぶ道を1本にする。設計書6.25.11）
-    // 読み間違いの見込み（設計書6.42.6）。辞書へ足す（本文は変えない）か、その場所にルビを振るか。
+    // 読み間違いの見込み（設計書6.42.5）。辞書へ足す（本文は変えない）か、その場所にルビを振るか。
     // ［ここにルビを振る］は［直す］と同じ道（提案パネルの［適用］と同じ当て方。上の［戻す］で戻せる）
     if (row.misread && row.canAddReading) {
       buttons.push(

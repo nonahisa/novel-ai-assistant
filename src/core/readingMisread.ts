@@ -21,7 +21,7 @@ import { MISREAD_FINDING_LABEL } from "./readingMisreadLabel";
 import type { Finding } from "../models/finding";
 
 /**
- * 読み上げの読み間違いを、声を作る前に見つける（設計書6.42.6。作者の決定 2026-11-14 夜）。
+ * 読み上げの読み間違いを、声を作る前に見つける（設計書6.42.5。作者の決定 2026-11-14 夜）。
  *
  * 人物の声（AivisSpeech・VOICEVOX）は、送った文の漢字の読みをエンジンが自分で選ぶ。
  * 作品の中で読みが分かっている語（ルビ・読みの辞書・設定資料の読み）でも、**送る文に

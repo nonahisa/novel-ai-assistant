@@ -154,7 +154,7 @@ export function fakeAivmModels(licenses: { mai?: string | null; kanon?: string |
 }
 
 /**
- * 偽のエンジンの「読み」（読み間違いの見込みの試験。設計書6.42.6）。
+ * 偽のエンジンの「読み」（読み間違いの見込みの試験。設計書6.42.5）。
  *
  * 語 → カタカナの表を渡すと、`audio_query` の答えに本物と同じ形の `accent_phrases[].moras[].text` を
  * 入れて返す。表の語は表の読みで、ひらがな・カタカナはそのまま読み、**表に無い漢字は読めない**

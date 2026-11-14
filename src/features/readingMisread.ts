@@ -27,7 +27,7 @@ import { FindingStore, findingsRetentionDays, visibleFindings } from "./findingS
 import { engineFailure, type VoiceReadingService } from "./voiceReading";
 
 /**
- * 読み上げの読み間違いを、声を作る前に見つける（設計書6.42.6）——エンジンへ問い、行を置く側。
+ * 読み上げの読み間違いを、声を作る前に見つける（設計書6.42.5）——エンジンへ問い、行を置く側。
  *
  * 判定は `core/readingMisread.ts`。ここは作品の話と読みの辞書を読み、エンジンへ
  * `audio_query` だけを頼み（音声は作らない）、見込みを校正・メモパネルの行として置く。
@@ -185,7 +185,7 @@ export async function checkReadingMisreads(
       return { kind: "skipped", reason: `${engineName}の接続先がこの PC の外なので、読み間違いは調べませんでした。` };
     }
 
-    // 話者は作品の地の文の声で1つに決める（読みは話者で変わらない前提。設計書6.42.6）
+    // 話者は作品の地の文の声で1つに決める（読みは話者で変わらない前提。設計書6.42.5）
     const planned = await service.plan(work, episodePath, target.text, sentences, engine);
     if ("problem" in planned) {
       return { kind: "stopped", reason: planned.problem, ...(planned.engineDown ? { engineDown: true } : {}) };

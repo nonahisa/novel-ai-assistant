@@ -141,7 +141,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.exportEpub": { class: "B", label: "EPUB出力（試作）", via: "run.request feature: exportEpub" },
   // 声のライセンスを作者が確かめて書き出すもの（非商用の確認の窓がある）。外のAIからは呼ばせない
   "novelai.exportVoiceAudio": { class: "C4", label: "人物の声で音声に書き出す", reason: "作者の判断" },
-  // 手元の声のエンジンへ問い、見込みを校正・メモパネルに置くもの（設計書6.42.6）。外のAIの代わりにする理由が無い
+  // 手元の声のエンジンへ問い、見込みを校正・メモパネルに置くもの（設計書6.42.5）。外のAIの代わりにする理由が無い
   "novelai.checkVoiceMisreadings": { class: "C4", label: "読み間違いを調べる", reason: "作者の判断" },
   "novelai.openEpubEditor": { class: "C3", label: "EPUBエディター（試作）" },
   "novelai.exportImeDictionary": { class: "C2", label: "IME辞書出力" },

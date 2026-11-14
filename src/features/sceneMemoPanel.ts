@@ -219,7 +219,7 @@ export interface SceneMemoDeps {
    */
   noteFindingDismissed?: (work: WorkEntry, findingId: string) => void;
   /**
-   * 読み間違いの見込みの行（設計書6.42.6）の［読みの辞書へ足す］——その行の語・句・読みを、
+   * 読み間違いの見込みの行（設計書6.42.5）の［読みの辞書へ足す］——その行の語・句・読みを、
    * その話の読みの辞書へ作者の項目として足す口（`features/readingMisread.ts`）。
    *
    * **押したときだけ足す**（実装ルール2）。本文は変えない。足したら置き場に「採った」が足され、
@@ -851,7 +851,7 @@ type PanelMessage =
   | { type: "undoFix" }
   /** AIの指摘を退ける。**追記で残す**だけで、指摘の行は書き換えない */
   | { type: "dismissFinding"; findingId: string }
-  /** 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.6） */
+  /** 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.5） */
   | { type: "addReading"; findingId: string }
   /**
    * 編集者の提案を決める（［採る］［読んだ］は accept、［見送る］は reject）。
@@ -1604,7 +1604,7 @@ class SceneMemoPanel {
   }
 
   /**
-   * 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.6）。足す中身は
+   * 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.5）。足す中身は
    * `deps.addMisreadToDictionary`（読みの辞書の道）。足せなければ理由を出し、行は残す
    */
   private async addReading(findingId: string): Promise<void> {
@@ -1879,7 +1879,7 @@ class SceneMemoPanel {
       };
     }
     if (!this.deps.undoFindingFix) return null;
-    // 読み間違いの見込みの主文は「エンジンがどう読むか」の文なので、振ったルビを書く（設計書6.42.6）
+    // 読み間違いの見込みの主文は「エンジンがどう読むか」の文なので、振ったルビを書く（設計書6.42.5）
     const what = isMisreadFinding(step.finding)
       ? `「${step.finding.target}」にルビ「${step.finding.suggestion}」を振りました`
       : `${findingHeadline(step.finding)}に直しました`;
@@ -1995,7 +1995,7 @@ class SceneMemoPanel {
       // 修正案があれば［直す］（1手で当てる）、無ければ［本文へ］（6.96.5）。
       // 見送りはこの画面だけで完結するので、常に出る
       fixAction: this.fixActionOf(finding),
-      // 読み間違いの見込み（設計書6.42.6）。［直す］を［ここにルビを振る］と呼び、［読みの辞書へ足す］を添える
+      // 読み間違いの見込み（設計書6.42.5）。［直す］を［ここにルビを振る］と呼び、［読みの辞書へ足す］を添える
       misread: isMisreadFinding(finding),
       canAddReading: isMisreadFinding(finding) && this.deps.addMisreadToDictionary !== undefined,
       // 修正案の無い推敲の指摘には［AIに相談］も出す（作者の要望 2026-10-04）。
