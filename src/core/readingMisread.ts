@@ -318,12 +318,23 @@ export function normalizeKana(kana: string): { raw: string[]; norm: string[] } {
  * (a) と (b) のかなを比べる。同じなら `same: true`。違えば、前後の共通部分を外した
  * 真ん中の (a) 側（＝エンジンの読み。ならす前の字）を返す
  */
-export function compareKana(sent: string, corrected: string): { same: boolean; engineReading: string } {
+export function compareKana(
+  sent: string,
+  corrected: string,
+  expected?: string
+): { same: boolean; engineReading: string } {
   const a = normalizeKana(sent);
   const b = normalizeKana(corrected);
   if (a.norm.join("") === b.norm.join("")) return { same: true, engineReading: "" };
+  /*
+    正しい読みを差し込んだ位置（(b) の中）。分かれば、外す共通部分は語の手前と後ろまでにする。
+    共通部分だけで切ると、語の頭や尾が正しい読みと同じとき、語の途中で切れる
+    （近衛騎士：コノエキシ／コンエイキシ → 「ノ」。2026-11-15 の実データの測定）
+  */
+  const word = expected === undefined ? undefined : wordSpanIn(b.norm, normalizeKana(expected).norm);
   let head = 0;
   while (head < a.norm.length && head < b.norm.length && a.norm[head] === b.norm[head]) head++;
+  if (word) head = Math.min(head, word.before);
   // 小書きの字の手前で切らない（キ｜ョ にしない）
   while (head > 0 && (SMALL_KANA.has(a.raw[head] ?? "") || SMALL_KANA.has(b.raw[head] ?? ""))) head--;
   let tail = 0;
@@ -334,9 +345,22 @@ export function compareKana(sent: string, corrected: string): { same: boolean; e
   ) {
     tail++;
   }
+  if (word) tail = Math.min(tail, word.after);
   // 共通の後ろの頭が小書きの字なら、その字を真ん中へ戻す
   while (tail > 0 && SMALL_KANA.has(a.raw[a.raw.length - tail] ?? "")) tail--;
   return { same: false, engineReading: a.raw.slice(head, a.raw.length - tail).join("") };
+}
+
+/** ならしたかなの列 `whole` の中で、`part` が始まる前の字数と、終わったあとの字数（見つからなければ undefined） */
+function wordSpanIn(whole: readonly string[], part: readonly string[]): { before: number; after: number } | undefined {
+  if (part.length === 0) return undefined;
+  outer: for (let at = 0; at + part.length <= whole.length; at++) {
+    for (let index = 0; index < part.length; index++) {
+      if (whole[at + index] !== part[index]) continue outer;
+    }
+    return { before: at, after: whole.length - at - part.length };
+  }
+  return undefined;
 }
 
 /* ── 判定 ─────────────────────────────────────────── */
@@ -390,8 +414,9 @@ export async function judgeMisreads(
     const sent = await kanaOf(candidate.speech);
     let first: { same: boolean; engineReading: string } | undefined;
     let readable = false;
-    for (const corrected of candidate.corrected) {
-      const compared = compareKana(sent, await kanaOf(corrected));
+    for (const [index, corrected] of candidate.corrected.entries()) {
+      // corrected は readings と同じ順（findMisreadCandidates）。正しい読みで語の範囲を決める
+      const compared = compareKana(sent, await kanaOf(corrected), candidate.readings[index]?.reading);
       first ??= compared;
       if (compared.same) {
         readable = true;
