@@ -135,7 +135,8 @@ export async function runProofreadingSuite(
   const items: CheckPick[] = PROOFREADING_CHECKS.map((check) => ({
     id: check.id,
     label: check.label,
-    detail: check.detail,
+    // 説明の行は置かない（設計書6.82.1）。AIを使う（クラウドなら課金）ものだけ印を付ける
+    description: check.usesAI ? "AI" : undefined,
     picked: previous.includes(check.id),
   }));
 

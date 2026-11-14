@@ -295,7 +295,6 @@ export async function chooseScope(
 function currentPick(filePath: string): MemorablePick<ScopeKind> {
   return {
     label: `$(file) この話だけ（${path.basename(filePath)}）`,
-    detail: "原稿エディターで開いている話だけを見ます。",
     value: "current",
     // **覚えない。** 覚えると、メニューから押したときも開いている話だけに
     // なりうる（メニューには「この話」が並ばないので、選び直せない）
@@ -312,8 +311,6 @@ function scopePick(
   if (kind === "changed") {
     return {
       label: `$(diff) 前回から書いた分だけ（${changed}話）`,
-      detail:
-        "前回の検知のあとに書いた話だけを見ます。一覧が短くなり、待ち時間も減ります。",
       // `kind` は QuickPickItem が区切り線に使う予約名。別名にする
       value: "changed",
     };
@@ -321,9 +318,6 @@ function scopePick(
   if (kind === "first") {
     return {
       label: `$(beaker) はじめの${TRIAL_EPISODE_COUNT}話だけ（試す）`,
-      detail:
-        "設定やモデルを変えたときに、まともな指摘が出るかを短時間で確かめます。" +
-        "残りの話は対象になりません。",
       value: "first",
       // **試すための選択肢は覚えない。** 覚えると、以後すべての実行が
       // 黙って10話だけになり、見ていない話が「指摘なし」として通る
@@ -332,8 +326,6 @@ function scopePick(
   }
   return {
     label: `$(book) 作品全体（${total}話）`,
-    detail:
-      "すべての話を見ます。AIは呼び直しません（変わっていない話は前の結果を使います）。",
     value: "all",
   };
 }

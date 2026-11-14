@@ -5637,17 +5637,22 @@ async function pickFont(installed?: string[]): Promise<void> {
   const current = config.get<string>("manuscriptEditor.fontFamily", "").trim();
   const available = installed ? new Set(installed) : undefined;
 
-  const choices = listChoices(current, available).map((font) => ({
+  const all = listChoices(current, available);
+  const toItem = (font: (typeof all)[number]) => ({
     label: (font.selected ? "$(check) " : "") + font.label,
     description: font.kind,
-    detail: font.installed
-      ? undefined
-      : "この端末には入っていません（選ぶと、近い書体で表示されます）",
     value: font.value,
-  }));
+  });
+  const choices = all.filter((font) => font.installed).map(toItem);
+  const missing = all.filter((font) => !font.installed).map(toItem);
+  // 入っていない書体は後ろにまとめ、区切りの見出しで1回だけ言う（行ごとの説明は置かない。設計書6.82.1）
+  const separator: vscode.QuickPickItem = {
+    label: "この端末に無い書体（選ぶと、近い書体で表示されます）",
+    kind: vscode.QuickPickItemKind.Separator,
+  };
 
   const picked = await vscode.window.showQuickPick(
-    [...choices, cancelItem()],
+    [...choices, ...(missing.length > 0 ? [separator, ...missing] : []), cancelItem()],
     {
       title: `原稿の書体（いま: ${describeCurrentFont(current)}）`,
       placeHolder: "本文に使う書体を選んでください",

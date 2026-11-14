@@ -95,7 +95,8 @@ describe("選択画面の「取りやめる」", () => {
     const item = cancelItem();
 
     expect(item.label).toContain("取りやめる");
-    expect(item.detail).toContain("何もせずに閉じます");
+    // 「取りやめる」と×の印で出口と読める。説明は置かない（設計書6.82.1）
+    expect(item.detail).toBeUndefined();
   });
 
   test("名前を変えられる", () => {

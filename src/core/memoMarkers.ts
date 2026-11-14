@@ -27,8 +27,11 @@ export interface MemoMarkerDef {
   id: MemoMarkerId;
   /** 選ぶ窓の見出し */
   label: string;
-  /** 選ぶ窓の説明 */
-  detail: string;
+  /**
+   * 選ぶ窓の説明。**例外のあるものだけ**に置く（名前に印そのものが書いてあり、
+   * 「行の頭に」は全部に共通なので窓の題へ1回だけ書く。設計書6.82.1）
+   */
+  detail?: string;
   /** 行の頭（空白のあと）がこれで始まればメモ。囲みは空（判定は別） */
   prefixes: readonly string[];
   /** 「ここにメモを足す」で挿す字（前と後ろ）。中身は作者が打つ */
@@ -45,30 +48,26 @@ export const MEMO_MARKER_DEFS: readonly MemoMarkerDef[] = [
   {
     id: "slash",
     label: "// と ／／",
-    detail: "行の頭に // か ／／（全角）。これまでの印",
     prefixes: ["//", "／／"],
     insert: { prefix: "// ", suffix: "" },
   },
   {
     id: "backslash",
     label: "\\\\ と ＼＼・￥￥",
-    detail:
-      "行の頭に \\\\（半角のバックスラッシュ2つ。日本語の字体では ¥¥ に見える）か、全角の ＼＼・￥￥",
+    detail: "半角のバックスラッシュ2つ。日本語の字体では ¥¥ に見える",
     prefixes: ["\\\\", "＼＼", "￥￥"],
     insert: { prefix: "\\\\ ", suffix: "" },
   },
   {
     id: "percent",
     label: "%% と ％％",
-    detail: "行の頭に %% か ％％（全角）",
     prefixes: ["%%", "％％"],
     insert: { prefix: "%% ", suffix: "" },
   },
   {
     id: "comment",
     label: "<!-- ～ -->",
-    detail:
-      "行の頭の <!-- から --> を含む行まで（複数行でもよい）。閉じていない <!-- は本文のまま",
+    detail: "複数行でもよい。閉じていない <!-- は本文のまま",
     prefixes: [],
     insert: { prefix: "<!-- ", suffix: " -->" },
   },

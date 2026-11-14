@@ -142,7 +142,6 @@ ${colorRules}
 </head>
 <body>
 <h1>編集履歴</h1>
-<p class="subtitle">誰が何を直したかの記録です。<strong>この画面から履歴は変えられません。</strong></p>
 
 <div class="legend">${legend}</div>
 
@@ -159,7 +158,6 @@ ${ACTOR_KINDS.map(
 <h2>外部AIが読んだ記録</h2>
 <p class="permission" id="permission"></p>
 <p class="usage-note hidden" id="usage-note"></p>
-<p class="subtitle">MCPサーバー経由で、外部のAIがこの作品を読んだ記録です。<strong>外部AIは原稿を書き換えません。</strong>いちばん大事なのは、本文がこの機械の外へ出たかどうかです。</p>
 <div id="external-list"></div>
 </div>
 

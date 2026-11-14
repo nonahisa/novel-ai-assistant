@@ -13,7 +13,7 @@
  *    選ぶ画面が出て、「組織」で organizations.md だけが書き出される（人物がいても characters.md は作らない）
  * 4. 372：素のエディターの本文の右クリックに「AIに相談」と「原稿エディターで開く」があり、「縦書き表示」は無い。
  *    詳細メニュー「資料抽出」に「能力抽出」があり「スキル抽出」は無い。簡単ステップメニューの「AIに相談」は
- *    薄字が「大きく開く」（詳細メニューの「AIに相談」〈横に開く〉は menuNoticeFollowUps が見ている）
+ *    名前が「AIに相談（大きく開く）」（詳細メニューの「AIに相談」〈横に開く〉は menuNoticeFollowUps が見ている）
  *
  * **AI は呼ばない。** 設定画面（Ctrl+,）の見出し「統合小説執筆環境」は package.json の設定の題として
  * 単体テストの側で見ている（ここでは見ない）。
@@ -286,7 +286,7 @@ test("素のエディターの本文の右クリックに「AIに相談」と「
       /* ── 左の列 ── */
       await showSidebar(page, E2E_WORK_TITLE);
       await collapseSidebarPane(page, "AIに相談");
-      // 簡単ステップメニューの「AIに相談」（薄字「大きく開く」）は、どこかの段の中にある。段を開いて探す
+      // 簡単ステップメニューの「AIに相談（大きく開く）」は、どこかの段の中にある。段を開いて探す
       const stepPane = page.locator(".pane", { has: page.locator(".pane-header", { hasText: "簡単ステップメニュー" }) }).first();
       const stepChat = stepPane.locator('.monaco-list-row[aria-label^="AIに相談"]').first();
       const stepGroups = stepPane.locator('.monaco-list-row[aria-expanded="false"]');

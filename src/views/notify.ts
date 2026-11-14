@@ -415,8 +415,8 @@ async function askInTopPicker(params: {
         ]
       : [];
   const moreItem: ConfirmPickItem = {
-    label: `$(info) ${CONFIRM_MORE_LABEL}`,
-    description: "使うモデル・料金の細かい断り",
+    // 副ラベルは置かず、名前に入れる（設計書6.82.1）。料金の断りを見分ける目印にもなる
+    label: `$(info) ${CONFIRM_MORE_LABEL}（モデル・料金）`,
     more: moreLines,
   };
   let expanded = false;

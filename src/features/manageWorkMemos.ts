@@ -67,12 +67,8 @@ export async function removeWorkMemo(
 ): Promise<boolean> {
   const answer = await vscode.window.showWarningMessage(
     `メモ「${memo.title}」を削除しますか？`,
-    {
-      modal: true,
-      detail:
-        "ごみ箱に移動します。元に戻すことができます。" +
-        "本文とほかのメモには触れません。",
-    },
+    // ごみ箱から戻せるので、安心の言葉は添えない（設計書6.82.1）
+    { modal: true },
     "削除する"
   );
   if (answer !== "削除する") return false;
@@ -136,8 +132,7 @@ export async function transferMemo(
     {
       modal: true,
       detail: [
-        `${from.title} の本文から外し、${to.title} の 設定/メモ/ へ移します。` +
-          "中身は書き換えません。",
+        `${from.title} の本文から外し、${to.title} の 設定/メモ/ へ移します。`,
         ...notes,
       ].join("\n"),
     },

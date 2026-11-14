@@ -51,7 +51,7 @@ export async function setMemoMarkers(work: WorkEntry): Promise<MemoMarkers | und
     {
       canPickMany: true,
       title: `「${work.title}」のメモの印`,
-      placeHolder: "メモ（付箋）にする行の印を選びます（複数選べます。本文は書き換えません）",
+      placeHolder: "行の頭に書くと、その行がメモ（付箋）になる印を選びます（複数選べます。本文は書き換えません）",
       ignoreFocusOut: true,
     }
   );

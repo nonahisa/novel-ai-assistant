@@ -57,31 +57,22 @@ import { hostPlatform } from "../core/runtime";
 /** 状態に応じて「次の一手」を返す。何もすることが無ければ undefined */
 export function nextSetupStep(
   status: GitSyncStatus
-): { label: string; description: string; detail: string } | undefined {
+): { label: string; description?: string; detail?: string } | undefined {
+  // 説明の行は、外へ送る注意があるものだけに置く（設計書6.82.1）。
+  // 名前と順番（導入 → 管理開始 → つなぐ → 送信）が手順を表す
   switch (status.kind) {
     case "git_missing":
       return {
         label: "$(question) Gitを導入するには",
-        description: "同期を使わないなら不要",
-        detail:
-          "履歴と同期にはGitが要ります。導入の方法を案内します。" +
-          "執筆・文字数・設定資料・あらすじは、Gitが無くてもすべて使えます。",
       };
     case "not_a_repo":
       return {
         label: "$(repo) Gitで管理を始める",
-        description: "履歴を残せるようにする",
-        detail:
-          "作品フォルダーで git init を行い、今ある原稿を1つ目の履歴として記録します。" +
-          "この時点ではまだ外部へ何も送りません。",
       };
     case "no_remote":
       return {
         label: "$(github) GitHubのリポジトリとつなぐ",
-        description: "送り先を決める",
-        detail:
-          "新しいリポジトリを作るか、既にあるリポジトリのURLを指定します。" +
-          "新しく作る場合は必ず非公開（private）にします。",
+        detail: "新しく作る場合は必ず非公開（private）にします。",
       };
     case "no_upstream":
       return {
@@ -486,36 +477,22 @@ async function connectRemote(
 
   items.push({
     label: "$(github) VS Codeのアカウントで新しく作る",
-    description: "非公開（private）・追加インストール不要",
-    detail:
-      "VS Codeにサインインしている（していなければこれからサインインする）" +
-      "GitHubアカウントで新しいリポジトリを作り、送り先として登録します。",
+    description: "非公開（private）",
     action: "vscodeAuth",
   });
   if (canUseGh) {
     items.push({
       label: "$(add) GitHub CLIで新しく作る",
       description: "非公開（private）",
-      detail:
-        "GitHub CLI で新しいリポジトリを作り、送り先として登録します。" +
-        "公開したくなったら、あとでGitHubの画面から変えられます。",
       action: "gh",
     });
   }
   items.push({
     label: "$(link) 既にあるリポジトリのURLを指定する",
-    description: "",
-    detail:
-      "GitHubで作ったリポジトリのURL（https://github.com/… ）を貼り付けます。",
     action: "url",
   });
   items.push({
     label: "$(device-desktop) このままこの端末だけで使う",
-    description: "GitHubのアカウントは要りません",
-    detail:
-      "送り先を決めずに、この端末の中だけで履歴を残します。" +
-      "書き直す前の原稿へ戻せるので、これだけでも役に立ちます。" +
-      "あとからGitHubへつなぐこともできます。",
     action: "local",
   });
 

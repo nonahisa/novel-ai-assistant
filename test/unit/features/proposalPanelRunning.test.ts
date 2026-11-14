@@ -281,7 +281,8 @@ describe("画面の出し分け", () => {
     ]) {
       expect(line, name).not.toContain(name);
     }
-    expect(line).toContain("この分類の検知");
+    // 案内は「指摘はありません」の1行だけ（設計書6.82.1。検知を勧める2文目は置かない）
+    expect(line).toContain("指摘はありません");
   });
 
   /** 一覧が空のときは中央、出ているときは見出しの横（読む場所を奪わない） */

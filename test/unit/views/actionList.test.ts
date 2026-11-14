@@ -736,13 +736,13 @@ describe("分類のツールチップ", () => {
  */
 describe("メニュー名は短く、補足はツールチップへ", () => {
   /*
-    **例外は1つだけ：「コピー（投稿サイト用）」**（作者の裁定、2026-10-03）。
+    **例外は2つ：「コピー（投稿サイト用）」**（作者の裁定、2026-10-03）**と「AIに相談（大きく開く）」**（2026-11-14。副ラベルをやめ、名前で横に開くほうと分けた。`package.json` の title と同じ）。
     作品一覧の話の右クリック・原稿エディターの右クリック・コマンドと名前を
     揃えるための名前で、括弧は補足ではなく名前の一部（原稿エディターの
     右クリックの「コピー（記法のまま）」と対になる）。詳細メニューには
     出さない操作（`hiddenFromActionList`）なので、狭いビューで切れる心配も無い。
   */
-  const PAREN_IN_NAME = new Set(["novelai.copyForPosting"]);
+  const PAREN_IN_NAME = new Set(["novelai.copyForPosting", "novelai.openChatPanel"]);
 
   test("操作の名前に括弧の補足を入れない", () => {
     const withParen = allActions().filter(
@@ -1389,12 +1389,11 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     const action = chatPanelAction();
 
     expect(action, "木から消すと簡単ステップメニューが壊れる").toBeTruthy();
-    // 補足（「大きく開く」）は note へ移した（2026-09-06）。
-    // 名前は 2026-09-23 に「AIに相談」から「AI相談」へ、2026-11-02 に「AIに相談」へ戻した
-    // （作者の判断。入口の名前をそろえ、開き方は説明欄で言う）
-    expect(action?.label).toBe("AIに相談");
-    expect(action?.note).toBe("大きく開く");
-    expect(action?.description).toBe("大きく開く");
+    // 開き方は名前へ入れた（2026-11-14。2026-11-02 に同じ名前へそろえて副ラベルで分けたのを、
+    // 副ラベルを置かない決まりに合わせて直した）。`package.json` の title と同じ
+    expect(action?.label).toBe("AIに相談（大きく開く）");
+    expect(action?.note).toBeUndefined();
+    expect(action?.description).toBeUndefined();
     // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
     expect(isItemVisibleInRuntime(action!, true)).toBe(true);
   });
@@ -1444,9 +1443,9 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     );
     const last = visible[visible.length - 1];
     expect(last?.kind === "action" ? last.command : undefined).toBe("novelai.openChat");
-    // 名前は「相談パネルを開く」から「AIに相談」へ（作者の判断 2026-11-02）。開き方は説明欄
+    // 名前は「相談パネルを開く」から「AIに相談」へ（作者の判断 2026-11-02）。大きく開くほうは名前で分けた（2026-11-14）
     expect(last?.kind === "action" ? last.label : undefined).toBe("AIに相談");
-    expect(last?.kind === "action" ? last.description : undefined).toBe("横に開く");
+    expect(last?.kind === "action" ? last.description : undefined).toBeUndefined();
     // 最上位には、もう単独の行として出ない
     const provider = new ActionListProvider(fakeRegistry(), memoryStore());
     const top = provider.getChildren();

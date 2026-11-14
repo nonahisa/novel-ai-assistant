@@ -316,19 +316,19 @@ select#tag option { color: var(--note-color, var(--vscode-dropdown-foreground));
   <h1 id="title">校正・メモパネル</h1>
   <div id="counts"></div>
   <div class="row-controls">
-    <button id="prev" title="ひとつ前のメモへ飛びます（話をまたぎます）">← 戻る</button>
-    <button id="next" title="次のメモへ飛びます（話をまたぎます）">次へ →</button>
-    <button id="onlyCurrent" title="いま開いている話のメモだけを出します">この話だけ</button>
-    <select id="tag" title="付箋のタグやAIの指摘の種類で絞り込みます"></select>
+    <button id="prev">← 戻る</button>
+    <button id="next">次へ →</button>
+    <button id="onlyCurrent">この話だけ</button>
+    <select id="tag"></select>
     <input type="search" id="query" placeholder="文字で探す">
-    <button id="export" title="いま出ているメモをMarkdownで書き出します">書き出す</button>
+    <button id="export">Markdownで書き出す</button>
     <button id="openProposals" hidden title="提案パネルを開きます（矛盾の再チェック・伏線として登録・まとめて適用など、提案パネルにしか無い操作はこちら）">提案パネル</button>
   </div>
 </header>
 <div id="notice"></div>
 <div id="mergeNotice" hidden>
   <span id="mergeNoticeText"></span>
-  <button id="openMergeCandidates" title="設定資料パネルの登場人物タブで、候補を1組ずつまとめるか別人にするか決められます">設定資料パネルで見る</button>
+  <button id="openMergeCandidates">設定資料パネルで見る</button>
 </div>
 <div id="fixed" hidden>
   <span id="fixedText"></span>

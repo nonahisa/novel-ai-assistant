@@ -308,19 +308,17 @@ export type ContradictionReadMode = "chunked" | "whole";
 export const CONTRADICTION_READ_MODE_CHOICES: ReadonlyArray<{
   readonly mode: ContradictionReadMode;
   readonly label: string;
-  readonly detail: string;
+  /** 名前で足りないこと（外へ送る注意）があるものだけ。説明の行は置かない（設計書6.82.1） */
+  readonly detail?: string;
 }> = [
   {
     mode: "chunked",
     label: "分けて読む（これまでどおり）",
-    detail: "話ごと・チャンクごとに、設定資料と突き合わせます。",
   },
   {
     mode: "whole",
     label: "まるごと読む",
-    detail:
-      "作品を文脈長と出力の上限まで詰めて、話をまたいで読ませます。" +
-      "長い作品は区切ります。クラウドのAIでは本文がまるごと外へ出るので、毎回確かめます。",
+    detail: "クラウドのAIでは本文がまるごと外へ出るので、毎回確かめます。",
   },
 ];
 
@@ -369,24 +367,20 @@ export type ContradictionRoute = "both" | "settings" | "facts";
 export const CONTRADICTION_ROUTE_CHOICES: ReadonlyArray<{
   readonly route: ContradictionRoute;
   readonly label: string;
-  readonly detail: string;
 }> = [
+  // 説明の行は置かない（設計書6.82.1）。「両方」を先頭に、1つずつをその下に並べる。
+  // 両方は走る前の確認が2回出て、料金はそこで見える
   {
     route: "both",
     label: "両方（設定との照合 → 話どうしの照合）",
-    detail:
-      "AIを2回に分けて呼びます。時間と料金は2つの足し算で、それぞれ走る前に処理量の確認が出ます。",
   },
   {
     route: "settings",
     label: "設定との照合だけ",
-    detail: "設定資料と本文を突き合わせ、「設定ではこう／本文ではこう」を並べます。",
   },
   {
     route: "facts",
     label: "話どうしの照合だけ",
-    detail:
-      "本文から取り出した事実どうしを機械で突き合わせ、候補だけをAIが確かめます。設定資料は使いません。",
   },
 ];
 
@@ -398,7 +392,6 @@ export async function pickContradictionRoute(): Promise<
     [
       ...CONTRADICTION_ROUTE_CHOICES.map((choice) => ({
         label: choice.label,
-        detail: choice.detail,
         route: choice.route,
       })),
       cancelItem("取りやめる"),
