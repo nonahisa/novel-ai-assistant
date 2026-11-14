@@ -189,9 +189,14 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
 
   async function run(
     terms: FakeEngineTerms,
-    options: { synthesisDelayMs?: number; engine?: VoiceEngineId; paceRatio?: number } = {}
+    options: {
+      synthesisDelayMs?: number;
+      engine?: VoiceEngineId;
+      paceRatio?: number;
+      beforeConfirm?: () => Promise<string | undefined>;
+    } = {}
   ) {
-    const { engine: chosen, paceRatio, ...rest } = options;
+    const { engine: chosen, paceRatio, beforeConfirm, ...rest } = options;
     engine = await startFakeVoiceEngine({ pcm: true, terms, ...rest });
     const url = engine.url;
     const service = new VoiceReadingService(() => url, undefined, async () => true);
@@ -200,8 +205,36 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
     // ［声］で選んだエンジン。偽のエンジンの名乗りに合わせる（違えば止まるのは別の試験）
     const picked = chosen ?? (terms.brand === "VOICEVOX" ? "voicevox" : "aivisspeech");
-    return exportVoiceAudio({ work, episodePath: EPISODE, text: TEXT, sentences, engine: picked }, service, lame);
+    return exportVoiceAudio(
+      { work, episodePath: EPISODE, text: TEXT, sentences, engine: picked, ...(beforeConfirm ? { beforeConfirm } : {}) },
+      service,
+      lame
+    );
   }
+
+  test("確認の窓の手前で読み間違いの見込みを1回調べ、件数を窓に添える。調べが失敗しても書き出しは止めない（設計書6.42.6）", async () => {
+    const calls: string[] = [];
+    const noted = await run(ACML_BOTH, {
+      beforeConfirm: async () => {
+        calls.push("調べた");
+        return "読み間違いの見込み 2件（校正・メモパネル）";
+      },
+    });
+    expect(noted.kind).toBe("written");
+    expect(calls).toEqual(["調べた"]);
+    expect(state.confirms[0].message).toContain("読み間違いの見込み 2件（校正・メモパネル）");
+
+    await engine?.close();
+    engine = undefined;
+    state.confirms.length = 0;
+    const failed = await run(ACML_BOTH, {
+      beforeConfirm: async () => {
+        throw new Error("調べの失敗");
+      },
+    });
+    expect(failed.kind).toBe("written");
+    expect(state.confirms[0].message).not.toContain("読み間違い");
+  });
 
   test("［声］で選んだエンジンと名乗りが違えば、ライセンスを確かめずに止める（何も作らない）", async () => {
     const outcome = await run(ACML_BOTH, { engine: "voicevox" });
