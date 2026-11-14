@@ -244,6 +244,23 @@ describe("見送った行と、前の版の番号の行", () => {
     expect(rows.map((row) => row.findingId)).toEqual([recorded[1].id]);
   });
 
+  test("新しい行を見送ってその〓を直し、古い未決の行の〓の前後を両方書き直しても、見送った行は古い行の〓を取らない", async () => {
+    const first = await saveWithMarks("一つ目の♡です。\n二\n三つ目の愛です。", new Date(Date.now() - 60_000).toISOString());
+    const second = await saveWithMarks(first.saved.replace("愛", "♡"), new Date().toISOString());
+    await store().decide([{ findingId: second.recorded[0].id, time: new Date().toISOString(), status: "dismissed", note: "" }]);
+    // 見送った3行目の〓は直し、1行目の〓は残したまま前後を書き直した
+    currentText = second.saved.replace("三つ目の〓です。", "三つ目のハートです。").replace("一つ目の〓です。", "まるで別〓の言葉だ");
+    const rows = await openPanel();
+    expect(rows.map((row) => row.findingId)).toEqual([first.recorded[0].id]);
+    expect(rows[0].line).toBe(1);
+  });
+
+  test("〓を直して解決した行は、同じ話の行の無い〓（作者が自分で置いた〓）へ付き直さない", async () => {
+    const { saved } = await saveWithMarks("かきくけ♡さしすせ\n間の行。\n終わりの行。", new Date().toISOString());
+    currentText = saved.replace("〓", "愛").replace("終わりの行。", "〓は作者の印。");
+    expect(await openPanel()).toEqual([]);
+  });
+
   test("同じ場所にまた書けない字を打って〓にしたら、新しい行が出る（見送った古い行は戻さない）", async () => {
     const first = await saveWithMarks("かきくけ♡さしすせ", new Date(Date.now() - 60_000).toISOString());
     await store().decide([{ findingId: first.recorded[0].id, time: new Date().toISOString(), status: "dismissed", note: "" }]);

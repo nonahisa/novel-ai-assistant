@@ -73,7 +73,7 @@ export interface SjisMarkOccurrence {
  *
  * **全文を1回だけ前から読む**（〓ごとに頭から数え直さない）。保存の直前の受け口
  * （持ち時間1.5秒）でも呼ぶ。300万字の合本に〓が200あると、〓ごとに頭から改行を数える形では
- * それだけで約100ミリ秒かかった（2026-11-14 の測定）
+ * それだけで約100ミリ秒かかった（2026-11-14 の測定の差からの推定）
  */
 export function sjisMarkPlaces(text: string): SjisMarkOccurrence[] {
   const found: SjisMarkOccurrence[] = [];
@@ -164,10 +164,14 @@ export function buildSjisMarkFindings(
  * 割り当ての順（新しい行から。同じ場所に、見送った古い行と新しい行があれば、新しい行が〓を取る）：
  * 1. 前後の字がそのまま合う〓（行の近いほう）
  * 2. 前か後ろの片方が合う〓（〓の隣の字を直した。空の側は手がかりにしない）
- * 3. 残った〓のうち行の近いもの（前後を両方書き直した）
+ * 3. 記録したときの前の行か後ろの行が、いまも〓の行の前後にある〓（〓の前後を両方書き直した）
  *
- * 割り当てる〓が無かった行は出さない（〓が本文から無くなった＝解決）。行の無い〓（作者が自分で
- * 打った〓など）に行は作らない。
+ * **手がかりが何も合わない〓は取らない。** 「残った〓のうち近いもの」まで許すと、〓を直して解決した
+ * 行（日付で消さないので置き場に残り続ける）が、行の無い〓（作者が自分で打った〓、前の版で1行に
+ * 畳まれた2つ目の〓）へ付き直し、直したはずの行が別の字の説明のまま出てくる。そのかわり、〓の前後の
+ * 字も前後の行も全部書き直すと、〓が残っていても行は出なくなる（区別する手がかりが無い）。
+ *
+ * 割り当てる〓が無かった行は出さない（〓が本文から無くなった＝解決）。行の無い〓に行は作らない。
  *
  * @param texts ファイル（`Finding.file` と同じ表記）→ その全文。無いファイルの行は返さない（まだ見ていない）
  */
@@ -192,10 +196,11 @@ export function placeSjisMarkFindings<T extends FindingView>(
     const ordered = [...list].sort(
       (a, b) => compareTimeDesc(a.row.time, b.row.time) || a.row.hintLine - b.row.hintLine || a.order - b.order
     );
+    const neighbors = neighborLinesOf(texts.get(file) ?? "");
     const passes: Array<(row: T, occurrence: SjisMarkOccurrence) => boolean> = [
       (row, occurrence) => row.original === occurrence.context,
       (row, occurrence) => sharesOneSide(row.original, occurrence),
-      () => true,
+      (row, occurrence) => sharesNeighborLine(row, neighbors(occurrence.line)),
     ];
     for (const matches of passes) {
       for (const { row, order } of ordered) {
@@ -237,6 +242,27 @@ function sharesOneSide(original: string, occurrence: SjisMarkOccurrence): boolea
     if (after.length > 0 && after === occurrence.after) return true;
   }
   return false;
+}
+
+/**
+ * 行の前・後ろの、中身のある1行を引く関数（`findingSource.ts` の `neighborOf` と同じ決め方。
+ * 記録した `before`・`after` はあちらで作られる）。本文は1回だけ行に割る
+ */
+function neighborLinesOf(text: string): (line: number) => { before: string; after: string } {
+  let lines: string[] | undefined;
+  const nearest = (from: number, step: -1 | 1): string => {
+    lines ??= text.split(/\r\n|\r|\n/u);
+    for (let at = from - 1 + step; at >= 0 && at < lines.length; at += step) {
+      if (lines[at].trim().length > 0) return lines[at];
+    }
+    return "";
+  };
+  return (line) => ({ before: nearest(line, -1), after: nearest(line, 1) });
+}
+
+/** 記録したときの前後の行（`before`・`after`）の片方が、いまの〓の行の前後の行と同じか。空の行は手がかりにしない */
+function sharesNeighborLine(row: Pick<Finding, "before" | "after">, now: { before: string; after: string }): boolean {
+  return (row.before.trim().length > 0 && row.before === now.before) || (row.after.trim().length > 0 && row.after === now.after);
 }
 
 /** まだ取られていない〓のうち、条件に合い、行がいちばん近いもの（同じ距離なら前） */
