@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**0.152.9**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.152.8**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.152.10**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **0.152.8**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 

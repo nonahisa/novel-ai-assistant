@@ -23,7 +23,7 @@ import path from "node:path";
 import iconv = require("iconv-lite");
 import type { CDPSession, Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { caretPosition, composeText, openEpisode, startComposeTrace, composeTrace } from "./support/manuscriptFrame";
+import { caretPosition, composeText, openEpisode } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 
@@ -94,7 +94,13 @@ for (const { label, sjis, fromOutside } of cases) {
         // 一度、最後の行を押して焦点とカーソルを面に置いておく（前の回の「最後の行」に当たる）
         await frame.locator("#compose").click({ position: await pointBefore(frame, "終わり") });
         if (fromOutside) await focusExplorer(page);
-        await startComposeTrace(frame);
+        // 変換の合図を記録する（組んで書く面で受けたもの）
+        await frame.evaluate(() => {
+          const holder = window as unknown as { __imeEvents?: string[] };
+          const events: string[] = (holder.__imeEvents = []);
+          const compose = document.getElementById("compose");
+          for (const name of ["compositionstart", "compositionend"]) compose?.addEventListener(name, () => events.push(name), true);
+        });
         await frame.locator("#compose").click({ position: await pointBefore(frame, "若") });
         await new Promise((resolve) => setTimeout(resolve, 300));
         const caret = await caretPosition(frame);
@@ -112,9 +118,14 @@ for (const { label, sjis, fromOutside } of cases) {
           10_000
         ).catch(async (error: unknown) => {
           throw new Error(
-            `${String(error)}（画面：${JSON.stringify(await composeText(frame))}／合図：${JSON.stringify(await composeTrace(frame))}）`
+            `${String(error)}（画面：${JSON.stringify(await composeText(frame))}）`
           );
         });
+
+        // 変換の合図を本当に通ったか（確定した形で入っただけなら、このテストは何も見ていない）
+        const trace = await frame.evaluate(() => (window as unknown as { __imeEvents?: string[] }).__imeEvents ?? []);
+        expect(trace.filter((line) => line.startsWith("compositionstart")).length, `合図：${JSON.stringify(trace)}`).toBe(TIMES);
+        expect(trace.filter((line) => line.startsWith("compositionend")).length, `合図：${JSON.stringify(trace)}`).toBe(TIMES);
 
         await page.keyboard.press("ControlOrMeta+KeyS");
         let last = "";
