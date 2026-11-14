@@ -631,6 +631,49 @@ function withReadings(
   return out;
 }
 
+/**
+ * 本文の各字が、ルビ・傍点の記法の内側か（全文ぶん。`notationMask` を行ごとに当てたもの）。
+ *
+ * 読み間違いの見込み（設計書6.42.6）が「送る文に漢字のまま残る語」を拾うときに使う。
+ * 記法の内側は作者が読ませ方を決めた所なので、拾わない（辞書の読みを当てないのと同じ決まり）。
+ * 決まりを写さないために、ここから出す
+ */
+export function notationCoverage(text: string, notation: NotationMode): boolean[] {
+  const mask = new Array<boolean>(text.length).fill(false);
+  let lineStart = 0;
+  for (const line of text.split("\n")) {
+    const inLine = notationMask(line, notation);
+    for (let i = 0; i < inLine.length; i++) if (inLine[i]) mask[lineStart + i] = true;
+    lineStart += line.length + 1;
+  }
+  return mask;
+}
+
+/**
+ * 計画の1文の、声へ渡す写しを、読みの範囲を変えて作り直す（設計書6.42.6）。
+ *
+ * **`buildReadingPlan` と同じ組み立て**（行の中の範囲だけ・記法に掛かる範囲は使わない・
+ * 後ろから差し替える）を通す。読み間違いの見込みは「送る文のまま」と「その語を正しい読みに
+ * 置き換えた文」をエンジンに比べさせるので、2つが別の作り方だと、語の外の違いまで
+ * 読み違いに見える
+ */
+export function sentenceSpeechWith(
+  text: string,
+  sentence: { start: number; end: number },
+  notation: NotationMode,
+  readings: readonly ReadingSpan[]
+): string {
+  const lineStart = text.lastIndexOf("\n", sentence.start - 1) + 1;
+  const nextBreak = text.indexOf("\n", sentence.start);
+  const lineEnd = nextBreak < 0 ? text.length : nextBreak;
+  const line = text.slice(lineStart, lineEnd);
+  const lineSpans = spansInLine(readings, lineStart, lineEnd, notationMask(line, notation));
+  return toSpeech(
+    withReadings(text.slice(sentence.start, sentence.end), sentence.start, lineSpans),
+    notation
+  );
+}
+
 function isEdgeSpace(char: string): boolean {
   return char === " " || char === "\t" || char === "　";
 }
