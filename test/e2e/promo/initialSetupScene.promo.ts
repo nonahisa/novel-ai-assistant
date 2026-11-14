@@ -38,9 +38,13 @@ import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { waitForManuscriptFrame } from "../support/manuscriptFrame";
 import { startFakeOllama } from "../support/fakeOllama";
-import { BACKUP_DIALOG_TITLE } from "../support/importFlow";
+/**
+ * バックアップから新しく作品を作るときの、ファイルを選ぶ窓の題（`features/importWorkFromZip.ts`）。
+ * `support/importFlow.ts` の `BACKUP_DIALOG_TITLE` は、登録済みの作品へ話を足すときの別の窓の題
+ */
+const BACKUP_DIALOG_TITLE = "取り込むバックアップを選ぶ（ZIP／テキスト）";
 import { fillInput, waitForQuickInput } from "../support/quickInput";
-import { SIDEBAR_LAUNCH, expandTreeRow, showSidebar, treeRow, treeRowLabels } from "../support/sidebar";
+import { SIDEBAR_LAUNCH, collapseSidebarPane, expandTreeRow, showSidebar, treeRow, treeRowLabels } from "../support/sidebar";
 import { withVsCode, type FixtureEpisode } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
 import { clearNotifications, dialogText, dismissWorkbenchHover, notificationTexts, pressWorkbenchKey, quickInputWaitContext, quickPickRows, quickPickTitle } from "../support/workbenchDom";
@@ -245,6 +249,13 @@ test("はじめての設定の広報素材を撮る", async () => {
     await waitUntil(async () => (await importButton.count()) > 0, "作品一覧の案内に［バックアップ取込］が出る", 20_000).catch(async (error: unknown) => {
       throw new Error(`${String(error)}（行：${(await treeRowLabels(page)).join(" / ")}）`);
     });
+    /*
+      作品一覧の区画は低く、案内のボタンが下の区画（簡単ステップメニュー）の見出しに隠れる
+      （2026-11-14 の試し撮りで、カーソルの先が見出しに当たって落ちた）。下の区画を畳んで、
+      作品一覧に高さを渡してから押す。畳むのは画面に写るが、カーソルは出さない
+    */
+    for (const pane of ["AIに相談", "簡単ステップメニュー", "詳細メニュー"]) await collapseSidebarPane(page, pane).catch(() => undefined);
+    await importButton.scrollIntoViewIfNeeded();
     await page.waitForTimeout(2_000);
     await clickWithCursor(page, importButton, "作品一覧の［バックアップ取込］");
 
@@ -262,13 +273,17 @@ test("はじめての設定の広報素材を撮る", async () => {
       await waitUntil(async () => !((await quickPickTitle(page)) ?? "").includes(BACKUP_DIALOG_TITLE), "ファイルを選ぶ窓が閉じる", 3_000).catch(() => undefined);
     }
 
-    // 4-2. 取り込む中身の確かめ（確認の窓。話数と文字数が出る）
-    await waitUntil(async () => ((await dialogText(page)) ?? "").includes("取り込む話"), "取り込む中身の確認の窓が出る", 30_000).catch(async (error: unknown) => {
-      throw new Error(`${String(error)}（窓：${JSON.stringify((await dialogText(page)) ?? null)}／知らせ：${JSON.stringify(await notificationTexts(page))}）`);
+    // 4-2. 取り込む中身の確かめ（上の選ぶ窓「この内容で作品を作りますか？」。話数と文字数が並ぶ）
+    await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes("この内容で作品を作りますか"), "取り込む中身の確かめの窓が出る", 30_000).catch(async (error: unknown) => {
+      throw new Error(`${String(error)}（選ぶ窓：${JSON.stringify((await quickPickTitle(page)) ?? null)}／真ん中の窓：${JSON.stringify((await dialogText(page)) ?? null)}／知らせ：${JSON.stringify(await notificationTexts(page))}）`);
     });
     await showCaption(page, "話数と文字数を確かめて、取り込む", CAPTION);
     await page.waitForTimeout(3_000);
-    await clickWithCursor(page, page.locator(".monaco-dialog-box .monaco-button", { hasText: "取り込む" }).first(), "確認の窓の［取り込む］");
+    await clickWithCursor(
+      page,
+      page.locator(".quick-input-widget .monaco-list-row", { hasText: "取り込む" }).filter({ hasNotText: "取り込む元" }).first(),
+      "確かめの窓の［取り込む］"
+    );
 
     // 4-3. 作品を置く場所（作品が1つも無いので訊かれる。開いたままの場所をそのまま受ける）
     await waitForQuickInput(page, "作品を置く場所を選択", 30_000);
@@ -339,6 +354,8 @@ test("はじめての設定の広報素材を撮る", async () => {
         recordVideo: { dir: videoDir, size: SIZE },
         windowSize: SIZE,
         workTitle: WORK_TITLE,
+        // 作品は撮影の中でバックアップから作る。見本の作品まで登録すると2件になる
+        skipRegister: true,
         prepareWork: async (folders) => {
           workFolder = folders.workFolder;
           downloadFolder = path.join(path.dirname(path.dirname(folders.workFolder)), DOWNLOAD_FOLDER_NAME);

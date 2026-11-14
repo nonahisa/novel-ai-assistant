@@ -155,6 +155,11 @@ export interface LaunchOptions {
    */
   beforeRegister?: (page: Page) => Promise<void>;
   /**
+   * 見本の作品を登録しない（2026-11-14）。`beforeRegister` の中で作者と同じ道で作品を作る広報の台本
+   * （はじめての設定：バックアップから作品を作る）で使う。登録すると、作った作品と合わせて2件になる
+   */
+  skipRegister?: boolean;
+  /**
    * この拡張機能のほかに、**開発中の形で読み込ませる拡張機能**のフォルダーを返す
    * （`--extensionDevelopmentPath` を足す）。起こす前に一時フォルダーの根を受け取るので、
    * 見本の拡張機能はその下に作る（片づけで一緒に消える）。
@@ -403,7 +408,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
     const windowSize = options.windowSize ?? windowSizeFromEnv();
     if (windowSize) await resizeWindows(app, windowSize);
     if (options.beforeRegister) await options.beforeRegister(page);
-    await registerWork(session(), workTitle, options.outsideWorkspace === true);
+    if (!options.skipRegister) await registerWork(session(), workTitle, options.outsideWorkspace === true);
   } catch (error) {
     // 呼び手（withVsCode）の片づけはまだ始まっていないので、ここで写真を残して閉じる
     const shot = page ? await saveScreenshot(page, "起動と作品の登録") : undefined;
