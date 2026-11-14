@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { canRunProcesses } from "../core/runtime";
 import { conflictFixHint } from "../core/syncEntryNames";
@@ -15,11 +16,15 @@ import {
 import { logFailure, logLine, useLogFile, workLog } from "../core/logger";
 import {
   countMemosByTag,
-  MEMO_HINT,
+  DEFAULT_MEMO_MARKERS,
   memoColorVars,
   memoTagClass,
   nearestMemo,
   parseMemos,
+  unclosedCommentMemo,
+  unclosedMemoCommentLine,
+  memoHint,
+  type MemoMarkers,
   memoLineRemoval,
   removeMemoLine,
   restoreMemoLine,
@@ -557,7 +562,7 @@ export async function jumpSceneMemo(
   if (rows.length === 0) {
     void vscode.window.showInformationMessage(
       `「${work.title}」の本文にメモはありません。` +
-        `${MEMO_HINT}。`
+        `${memoHint(collected.memoMarkers)}。`
     );
     return;
   }
@@ -603,6 +608,8 @@ interface CollectedMemos {
    * ファイル単位の見出しで足りるので、抱えない——合本は70万字ある。
    */
   collectedTexts: Map<string, string>;
+  /** その作品のメモの印（設計書6.40.8）。［済み］で消すときも同じ組で照らす */
+  memoMarkers: MemoMarkers;
 }
 
 /**
@@ -638,6 +645,8 @@ async function collectMemos(
   );
 
   const scan = await scanWork(work);
+  // 作品のメモの印（設計書6.40.8）。壊れた設定では投げる（パネルが理由を出す）
+  const memoMarkers = await readMemoMarkers(work);
   const memos: SceneMemo[] = [];
   const notices: string[] = [];
   const order: string[] = [];
@@ -658,7 +667,10 @@ async function collectMemos(
     }
     try {
       const content = await readTextFile(episode.filePath);
-      memos.push(...parseMemos(content.text, episode.filePath));
+      memos.push(...parseMemos(content.text, episode.filePath, memoMarkers));
+      // 閉じていない囲みは、付箋の代わりに「閉じていない」の行を出す（設計書6.40.8）
+      const unclosed = unclosedMemoCommentLine(content.text, memoMarkers);
+      if (unclosed !== null) memos.push(unclosedCommentMemo(episode.filePath, unclosed));
       if (isCollectedFile(episode.collectedCount)) {
         collectedTexts.set(
           paths.pathKeyForComparison(episode.filePath),
@@ -708,6 +720,7 @@ async function collectMemos(
     order,
     notices,
     collectedTexts,
+    memoMarkers,
   };
 }
 
@@ -875,6 +888,8 @@ class SceneMemoPanel {
   private readonly panel: vscode.WebviewPanel;
 
   private memos: SceneMemo[] = [];
+  /** 最後に読んだ作品のメモの印（設計書6.40.8）。［済み］・［戻す］・案内に使う */
+  private memoMarkers: MemoMarkers = DEFAULT_MEMO_MARKERS;
   /** いまの本文の位置まで決まったAIの指摘（設計書6.96.5） */
   private findings: PlacedFinding[] = [];
   /** 作者モードの、台帳の未決の編集者の提案（2026-11-08） */
@@ -1050,6 +1065,7 @@ class SceneMemoPanel {
     try {
       const collected = await collectMemos(this.work, this.deps);
       this.memos = collected.memos;
+      this.memoMarkers = collected.memoMarkers;
       this.findings = collected.findings;
       this.proposals = collected.proposals;
       this.files = collected.files;
@@ -1279,6 +1295,7 @@ class SceneMemoPanel {
 
     // 1. 原稿エディタで開いていれば、その文書を書き換える
     const inEditor = await removeMemoLineInOpenManuscript(filePath, line, raw);
+    // 開いている原稿の印の覚えはその原稿を開いたときのもの。ディスクを書く道はパネルの印で照らす
     if (inEditor.kind === "removed") {
       this.lastUndoable = {
         kind: "done",
@@ -1301,8 +1318,8 @@ class SceneMemoPanel {
     // 2. 開いていなければ、ディスクを書き換える。
     //    **ハッシュ照合つきの経路だけを通る**（規則1）
     const content = await readTextFile(filePath);
-    const next = removeMemoLine(content.text, line, raw);
-    const removed = memoLineRemoval(content.text, line, raw);
+    const next = removeMemoLine(content.text, line, raw, this.memoMarkers);
+    const removed = memoLineRemoval(content.text, line, raw, this.memoMarkers);
     if (next === null || removed === null) {
       void vscode.window.showWarningMessage(
         "本文が変わっているため、このメモを消しませんでした。" +
@@ -1793,7 +1810,7 @@ class SceneMemoPanel {
         fixed: this.undoBanner(),
         emptyMessage:
           total === 0
-            ? `この作品にメモはありません。${MEMO_HINT}（読者向けの出力とAIには渡りません）。`
+            ? `この作品にメモはありません。${memoHint(this.memoMarkers)}（読者向けの出力とAIには渡りません）。`
             : "絞り込みに当てはまるものがありません。",
         // 付箋の色（明暗を選ぶ）と、指摘の種類の色（テーマの色そのもの）
         colors: { ...colorsFor(), ...findingToneVars() },
@@ -1882,6 +1899,8 @@ class SceneMemoPanel {
         text: memo.text,
         note: "",
         raw: memo.raw,
+        // 閉じていない囲みの知らせの行（設計書6.40.8）。［済み］を出さず［本文へ］だけ
+        unclosed: memo.unclosed === true,
         chapterLabel: where.label,
         title: where.title,
         section,

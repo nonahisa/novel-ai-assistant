@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
@@ -199,7 +200,8 @@ export async function runReadingDictionary(
   const { work } = target;
   useLogFile(work.folderPath);
 
-  const chunks = readingChunksOf(target.text, READING_DICTIONARY_CHUNK_CHARS);
+  // 作品のメモの印（設計書6.40.8）。メモの行は読みを確かめる本文に入れない
+  const chunks = readingChunksOf(target.text, READING_DICTIONARY_CHUNK_CHARS, await readMemoMarkers(work));
   if (chunks.length === 0) {
     notifyDone("読みを確かめる本文がありません");
     return;

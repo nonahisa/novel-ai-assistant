@@ -75,6 +75,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.openPlotMode": { class: "C3", label: "プロットモード" },
   "novelai.setPlotBasics": { class: "C4", label: "形式・ジャンル", reason: "作者の判断" },
   "novelai.setWorkKind": { class: "C4", label: "作品の種類（小説・台本など）", reason: "作者の判断" },
+  "novelai.setMemoMarkers": { class: "C4", label: "メモの印（//・%% など）", reason: "作者の判断" },
   "novelai.generatePlot": { class: "A", label: "プロット逆算" },
   "novelai.plotInterview": { class: "C2", label: "対話式プロット作成" },
   "novelai.createEpisodePlot": { class: "C1", label: "単話プロット作成" },

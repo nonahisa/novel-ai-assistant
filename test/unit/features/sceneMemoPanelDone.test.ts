@@ -18,6 +18,8 @@ const posted: Array<{ type: string; data?: Record<string, unknown> }> = [];
 let receive: ((message: unknown) => void) | undefined;
 const warnings: string[] = [];
 
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
+
 vi.mock("vscode", () => {
   const noop = () => undefined;
   return {

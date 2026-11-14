@@ -153,3 +153,49 @@ export function memoMarkerLabels(markers: MemoMarkers): string {
     .map((def) => def.label)
     .join("・");
 }
+
+/**
+ * 作品の設定ファイルの中身（`.aiwriter/config.json` の文字列）から印を作る。
+ * 無ければ（undefined）既定。JSON として読めない・欄が壊れていれば投げる（直さずに止める）。
+ *
+ * `vscode` も `fs` も使わずに読みたい所（出先の取り込み `outboxImport.ts` は読み口を
+ * 受け取って動く）のための口。読み方は `resolveMemoMarkers` と同じ。
+ */
+export function memoMarkersOfConfigText(text: string | undefined): MemoMarkers {
+  if (text === undefined) return DEFAULT_MEMO_MARKERS;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text.replace(/^﻿/, ""));
+  } catch (error) {
+    throw new MemoMarkersConfigError(
+      `JSON として読めません（${error instanceof Error ? error.message : String(error)}）`
+    );
+  }
+  const value = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).memoMarkers : undefined;
+  return resolveMemoMarkers(value);
+}
+
+/**
+ * 閉じていない `<!--` を保存のときに知らせるかの覚え（設計書6.40.8）。
+ *
+ * **同じ話・同じ場所では1回だけ。** 書いている最中は保存のたびに同じ閉じ忘れが残るので、
+ * 毎回出すと作者の手が止まる。閉じたら覚えを捨てる——あとでまた閉じ忘れたら、また知らせる。
+ * 場所は「話の場所（比べるための形）＋行」で覚える。
+ */
+export class UnclosedMemoNoticeMemory {
+  private readonly told = new Map<string, number>();
+
+  /**
+   * その話のいまの閉じ忘れの行（1始まり。無ければ null）を渡す。知らせるべきなら true
+   * （呼んだ側が知らせる）。
+   */
+  shouldNotify(fileKey: string, line: number | null): boolean {
+    if (line === null) {
+      this.told.delete(fileKey);
+      return false;
+    }
+    if (this.told.get(fileKey) === line) return false;
+    this.told.set(fileKey, line);
+    return true;
+  }
+}

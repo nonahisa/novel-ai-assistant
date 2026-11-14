@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const files = new Map<string, Uint8Array>();
 const posted: Array<{ type: string; data?: Record<string, unknown> }> = [];
 
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
+
 vi.mock("vscode", () => {
   const noop = () => undefined;
   return {

@@ -36,6 +36,8 @@ const DEFAULT_PEOPLE = [
   { id: "c-ren", name: "蓮", aliases: [], speechStyle: null },
 ];
 
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
+
 vi.mock("../../../src/ai/registry", () => ({
   AIRegistry: class {},
   ensureConfigured: vi.fn(async (_registry: unknown, feature: string) => {

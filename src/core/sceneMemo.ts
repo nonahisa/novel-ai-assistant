@@ -50,6 +50,34 @@ export interface SceneMemo {
   raw: string;
   /** 終わりの行（1始まり）。1行の付箋なら `line` と同じ */
   endLine?: number;
+  /**
+   * 閉じていない `<!--` の知らせの行（設計書6.40.8）。本文の付箋ではないので、
+   * ［済み］（本文から消す）は出さず、［本文へ］で飛ぶだけにする
+   */
+  unclosed?: true;
+}
+
+/** 閉じていない囲みの行の札 */
+export const UNCLOSED_MEMO_TAG = "閉じていない囲み";
+
+/**
+ * 閉じていない `<!--` を、校正・メモパネルに並べる行にする（設計書6.40.8）。
+ *
+ * **置き場は持たない。** 本文から毎回数え直すので、作者が `-->` を書いて閉じれば
+ * 行は消える（〓の行〔`core/sjisMarkFinding.ts`〕は本文の外の記録だが、こちらは
+ * 本文そのものから決まる）。
+ */
+export function unclosedCommentMemo(filePath: string, line: number): SceneMemo {
+  return {
+    filePath,
+    line,
+    tag: UNCLOSED_MEMO_TAG,
+    text:
+      `閉じていないメモの囲み（${line}行目）。--> を書いて閉じるまで、` +
+      "この行からあとはメモにせず、本文として数え、投稿にも出します",
+    raw: "",
+    unclosed: true,
+  };
 }
 
 /** 本文の中の位置（次へ・戻るの起点） */

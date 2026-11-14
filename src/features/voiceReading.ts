@@ -1,3 +1,5 @@
+import { DEFAULT_MEMO_MARKERS } from "../core/memoMarkers";
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
@@ -488,7 +490,8 @@ export class VoiceReadingService {
     }
     const planned = voicePlanUnits({
       sentences,
-      dialogues: castDialogues(text),
+      // 作品のメモの印（設計書6.40.8）。計画（buildReadingPlan）と同じ組で台詞を数える
+      dialogues: castDialogues(text, work ? await readMemoMarkers(work) : DEFAULT_MEMO_MARKERS),
       cast,
       assignment,
       speakers,
@@ -959,8 +962,10 @@ export async function runVoiceCast(
   const { work } = target;
   const useFlow = options?.flow ?? VOICE_CAST_FLOW_ENABLED;
   useLogFile(work.folderPath);
+  // 作品のメモの印（設計書6.40.8）。台詞の番号は読み上げの計画と同じ組で数える
+  const memoMarkers = await readMemoMarkers(work);
 
-  if (castDialogues(target.text).length === 0) {
+  if (castDialogues(target.text, memoMarkers).length === 0) {
     notifyDone("この話には、話者を推定する台詞（「」）がありません。");
     return;
   }
@@ -979,8 +984,9 @@ export async function runVoiceCast(
   const chunks = castChunksOf(
     target.text,
     VOICE_CAST_CHUNK_CHARS,
-    castSpeakersFromText(target.text, people),
-    { before: VOICE_CAST_CONTEXT_BEFORE_CHARS, after: VOICE_CAST_CONTEXT_AFTER_CHARS }
+    castSpeakersFromText(target.text, people, memoMarkers),
+    { before: VOICE_CAST_CONTEXT_BEFORE_CHARS, after: VOICE_CAST_CONTEXT_AFTER_CHARS },
+    memoMarkers
   );
   const totalDialogues = chunks.reduce((sum, c) => sum + c.dialogues.length, 0);
 
@@ -1003,7 +1009,7 @@ export async function runVoiceCast(
   const authorSpeakers = new Map<number, string | null>();
   for (const [index, entry] of castLookup(
     loaded.file.entries.filter((entry) => entry.source === "author"),
-    castDialogues(target.text)
+    castDialogues(target.text, memoMarkers)
   )) {
     authorSpeakers.set(index, entry.speakerId);
   }
@@ -1329,7 +1335,7 @@ export async function runVoiceCast(
 /** 列の一言 */
 export async function voiceCastStatus(target: VoiceCastTarget): Promise<string> {
   try {
-    const dialogues = castDialogues(target.text);
+    const dialogues = castDialogues(target.text, await readMemoMarkers(target.work));
     const cast = (await loadVoiceCast(target.work, target.episodePath)).file.entries;
     const assignment = (await loadVoiceAssignment(target.work)).file;
     const found = castLookup(cast, dialogues).size;

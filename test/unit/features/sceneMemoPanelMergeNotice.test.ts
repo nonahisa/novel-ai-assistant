@@ -12,6 +12,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const posted: Array<{ type: string; data?: Record<string, unknown> }> = [];
 let receive: ((message: unknown) => void) | undefined;
 
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
+
 vi.mock("vscode", () => {
   const noop = () => undefined;
   return {

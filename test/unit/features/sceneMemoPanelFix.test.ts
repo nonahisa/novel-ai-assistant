@@ -24,6 +24,8 @@ const posted: Array<{ type: string; data?: Record<string, unknown> }> = [];
 /** 画面からの用件を受ける耳（パネルが付ける） */
 let receive: ((message: unknown) => void) | undefined;
 
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
+
 vi.mock("vscode", () => {
   const noop = () => undefined;
   return {

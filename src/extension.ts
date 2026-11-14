@@ -321,11 +321,14 @@ import { ChatterService } from "./features/chatterService";
 import { requestChatterComment } from "./features/chatterComment";
 import { setPlotBasics } from "./features/setPlotBasics";
 import { setWorkKind } from "./features/setWorkKind";
+import { setMemoMarkers } from "./features/setMemoMarkers";
+import { noticeUnclosedMemoComment } from "./features/memoCommentNotice";
 import {
   invalidateWorkFormat,
   readWorkFormat,
 } from "./core/workFormatStore";
 import { invalidateWorkKind, readWorkKind } from "./core/workKindStore";
+import { cachedMemoMarkersForPath, readMemoMarkers } from "./core/memoMarkerStore";
 import {
   isCommandVisibleForKind,
   kindFeatureOfCommand,
@@ -541,6 +544,7 @@ import {
   refreshAllManuscriptTerms,
   refreshManuscriptCounts,
   refreshManuscriptKinds,
+  refreshManuscriptMemoMarkers,
   collectManuscriptEditorsCard,
   onDidChangeManuscriptStatus,
   watchManuscriptTabs,
@@ -2045,6 +2049,8 @@ export async function activate(
     }
     return buildReadingPlan(text, notationModeFor(filePath), mergeReadingSpans(dictionary.spans, names), {
       splitDialogue: true,
+      // 作品のメモの印（設計書6.40.8）。メモの行は声にしない
+      memoMarkers: await readMemoMarkers(work),
     });
   };
 
@@ -4319,10 +4325,18 @@ export async function activate(
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       updateStatusBar();
+      // 閉じていないメモの囲み（<!-- だけで --> が無い）を、同じ場所では1回だけ知らせる（設計書6.40.8）
+      void noticeUnclosedMemoComment(registry.list(), document).catch((error: unknown) =>
+        logFailure("保存：メモの囲みの確かめ", {
+          詳細: error instanceof Error ? error.message : String(error),
+        })
+      );
       // 作品の設定（.aiwriter/config.json）を手で直したら、種類を読み直す
       // （設計書6.109。覚えているのは設定ファイルに書かれた分だけ）
       if (path.basename(document.fileName).toLowerCase() === "config.json") {
         invalidateWorkKind();
+        // メモの印も読み直し、開いている原稿の付箋の色と字数を出し直す（設計書6.40.8）
+        void refreshManuscriptMemoMarkers();
         // ステップの種類の絞り込みも読み直す（設計書6.109.7）
         stepProvider.invalidateFormats();
       }
@@ -4965,6 +4979,26 @@ export async function activate(
         invalidateWorkFormat(work.id);
         treeProvider.refresh(work.id);
         stepProvider.invalidateFormats(work.id);
+        return CHECK_COMPLETED;
+      }
+    ),
+    registerCommand(
+      "novelai.setMemoMarkers",
+      async (node?: WorkNode) => {
+        // 作品の右クリックからなら、その作品（訊かない）。ほかの道からは作品を選ぶ
+        const work = await resolveWork(node, registry);
+        if (!work) return CHECK_CANCELLED;
+        /*
+          **メモの印を作品ごとに選ぶ入口**（設計書6.40.8）。本文は書き換えない。
+          変わるのはどの行をメモと読むかなので、字数（一覧・状態バー）と開いている原稿の
+          付箋の色をその場で出し直す
+        */
+        const changed = await setMemoMarkers(work);
+        if (!changed) return CHECK_CANCELLED;
+        treeProvider.refresh(work.id);
+        updateStatusBar();
+        await refreshManuscriptMemoMarkers();
+        await refreshWritingStatsPanel(work, deviceId);
         return CHECK_COMPLETED;
       }
     ),
@@ -9498,7 +9532,13 @@ export async function activate(
   // プレビュー（Ctrl+Shift+V）でそのまま見えるほうが良いため
   return {
     extendMarkdownIt<T extends MarkdownItLike>(md: T): T {
-      return extendMarkdownItWithRuby(md);
+      // プレビューしている文書の作品のメモの印（設計書6.40.8）。同期で組むので覚えを引く
+      return extendMarkdownItWithRuby(md, {
+        memoMarkersFor: (env) => {
+          const document = (env as { currentDocument?: vscode.Uri } | undefined)?.currentDocument;
+          return document ? cachedMemoMarkersForPath(path.fromUri(document)) : undefined;
+        },
+      });
     },
   };
 }

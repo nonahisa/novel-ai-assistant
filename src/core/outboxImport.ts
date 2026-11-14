@@ -1,4 +1,4 @@
-import { AIWRITER_DIR } from "../models/types";
+import { AIWRITER_DIR, CONFIG_FILE } from "../models/types";
 import {
   FINDINGS_FILE_NAME,
   OUTBOX_DECISION_NOTES,
@@ -26,7 +26,7 @@ import {
 } from "./findingPanelState";
 import { findingAppliesDirectly, findingRestoreOf } from "./findingSource";
 import { applyFindingToText } from "./findingApply";
-import { MEMO_LINE_PREFIX } from "./sceneMemo";
+import { memoInsertOf, memoMarkersOfConfigText, type MemoMarkers } from "./memoMarkers";
 import {
   VERDICT_FILE_NAME,
   VERDICT_HISTORY_DIRECTORY,
@@ -308,6 +308,11 @@ interface Context {
   io: OutboxImportIo;
   /** 入れた body 記録の鍵 → 書いたあとの blob SHA（前の回の分と、この回の分） */
   bodyShas: Map<string, string>;
+  /**
+   * 作品のメモの印（設計書6.40.8）。メモを本文へ入れる行の頭に使う。設定が読めなければ
+   * その理由（メモだけを断り、本文の取り込みは続ける）
+   */
+  memoMarkers: MemoMarkers | Error;
   /** 校閲中の理由に出す「誰が」（「編集者 kmizu」か「編集者」。git の名前は出さない） */
   lockWho: string;
 }
@@ -394,6 +399,10 @@ export async function importOutboxRecords(
     io,
     bodyShas,
     lockWho: reviewLockWho(options.editorLogin),
+    memoMarkers: await io
+      .readText(`${AIWRITER_DIR}/${CONFIG_FILE}`)
+      .then(memoMarkersOfConfigText)
+      .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error)))),
   };
 
   const results = new Map<string, OutboxImportItem>();
@@ -685,8 +694,17 @@ async function importMemo(record: OutboxRecord, context: Context): Promise<Outco
     return { ok: false, reason: BODY_CHANGED_REASON };
   }
 
+  if (context.memoMarkers instanceof Error) return { ok: false, reason: context.memoMarkers.message };
+  /*
+    **作品の印で入れる**（設計書6.40.8）。`//` を外した作品では、オンの印のうち最初のもので書く。
+    囲み（`<!-- … -->`）で入れるとき、中身に `-->` があると囲みがそこで閉じ、残りが本文へ出る
+  */
+  const insert = memoInsertOf(context.memoMarkers);
+  if (insert.suffix && text.includes("-->")) {
+    return { ok: false, reason: "メモに --> が含まれているため、この作品の印（<!-- ～ -->）では入れられません。" };
+  }
   const memoLine =
-    MEMO_LINE_PREFIX + (context.isOwner(record.writer) ? "" : EDITORIAL_PREFIX) + text;
+    insert.prefix + (context.isOwner(record.writer) ? "" : EDITORIAL_PREFIX) + text + insert.suffix;
   const lines = state.content.text.split("\n");
   let where = "話の末尾";
   let at: number;

@@ -434,6 +434,12 @@
         "icon": "$(symbol-class)"
       },
       {
+        "command": "novelai.setMemoMarkers",
+        "title": "メモの印（//・%% など）",
+        "category": "統合小説執筆環境",
+        "icon": "$(note)"
+      },
+      {
         "command": "novelai.generatePlot",
         "title": "プロット逆算",
         "category": "統合小説執筆環境",

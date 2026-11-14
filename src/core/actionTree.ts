@@ -774,6 +774,24 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・台本は400字詰めの枚数と分数の目安が出て、縦書きで開く\n\n" +
               "本文は書き換えない。",
           },
+          /*
+            **メモ（付箋）の印**（設計書6.40.8。作者の決定 2026-11-14 夜）。作品ごとの決めごと
+            なので、種類の隣に置く。VS Code の設定画面では作品を選べないため、ここが入口になる
+          */
+          {
+            kind: "action",
+            command: "novelai.setMemoMarkers",
+            label: "メモの印",
+            note: "//・%% など",
+            icon: "note",
+            requiresWork: true,
+            detail:
+              "行の頭に書くとメモ（付箋）になる印を、作品ごとに選ぶ\n\n" +
+              "・// と ／／（既定）・\\\\ と ＼＼・￥￥・%% と ％％・<!-- ～ -->\n\n" +
+              "・複数を同時に選べる\n\n" +
+              "・新しくオンにする印で始まる行があれば、件数と場所を見せてから切り替える\n\n" +
+              "本文は書き換えない。",
+          },
           {
             kind: "action",
             command: "novelai.manageCustomFields",

@@ -559,6 +559,11 @@ function renderActions(row) {
     );
     return '<span class="acts">' + buttons.join("") + "</span>";
   }
+  // 閉じていないメモの囲みの知らせ（設計書6.40.8）。本文の付箋ではないので消す口は出さない
+  if (row.unclosed) {
+    return '<button class="done" data-act="reveal" data-key="' + key +
+      '" title="閉じていない &lt;!-- の行へ飛びます（--&gt; を書いて閉じると、この行は消えます）">本文へ</button>';
+  }
   return '<button class="done" data-act="done" data-key="' + key +
     '" title="この行を本文から消します">済み</button>';
 }

@@ -255,6 +255,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.setPlotBasics": "allTypes",
   // 種類（設計書6.109）も、消えると間違えた種類から戻れない。必ず全タイプ
   "novelai.setWorkKind": "allTypes",
+  "novelai.setMemoMarkers": "allTypes",
   "novelai.setWorkGoals": "allTypes",
   // 応募先の提案（設計書6.3.6.5）。隠し機能でステップ・右クリックには出さないが、
   // 表の漏れを見張る試験のために載せる。応募先は作品目標設定と同じく全タイプ
