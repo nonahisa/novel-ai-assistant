@@ -5,6 +5,7 @@ import { workPaths } from "../core/workRegistry";
 import { EDITING_SITE_FILE } from "../core/editingRepo";
 import { logFailure, useLogFile } from "../core/logger";
 import { ProposerLoginStore } from "../core/proposerLogins";
+import { EDITING_SITE_KEYS, parseEditingSite, type EditingSite } from "../core/editingSiteText";
 
 /**
  * 編集者の送り先と相手（**同期される**。`.aiwriter/editing.json`、cache の外）。
@@ -16,21 +17,13 @@ import { ProposerLoginStore } from "../core/proposerLogins";
  * **ブラウザ版の束からも読む**（採否の記録に編集者の名前を書き写すため。`reviewProposals.ts`）。
  * `shareWithEditor.ts` は git を使うので静的 import できず、読み書きだけをここへ分けた
  * （実装ルール7。`shareWithEditor.ts` からも同じものを出している）。
+ *
+ * **中身の読み方は `core/editingSiteText.ts`**（MCP サーバーも同じものを通す。実装の残り 118行）。
  */
-export interface EditingSite {
-  /** 編集用リポジトリの取り寄せ用URL（`https://github.com/owner/repo.git`） */
-  remoteUrl?: string;
-  /** 招待が通った編集者の GitHub 名 */
-  editorLogin?: string;
-  /**
-   * 前の編集者の GitHub 名（0.138.0。作者の答え 2026-11-07）。解除で `editorLogin` を
-   * 消すときに写す。次に「編集者へ渡す」で名前を訊くとき、初めの値に入れる（招待は送り直す）
-   */
-  formerEditorLogin?: string;
-}
+export type { EditingSite };
 
 /** `EditingSite` の項目。書くときはこれだけを入れ替え、ほかの項目は残す */
-const SITE_KEYS = ["remoteUrl", "editorLogin", "formerEditorLogin"] as const;
+const SITE_KEYS = EDITING_SITE_KEYS;
 
 const SITE_RELATIVE = path.join(".aiwriter", EDITING_SITE_FILE);
 
@@ -48,21 +41,7 @@ async function readTextIfAny(target: string): Promise<string> {
 }
 
 export async function readSite(work: WorkEntry): Promise<EditingSite> {
-  const text = await readTextIfAny(sitePath(work));
-  if (text.trim().length === 0) return {};
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed !== "object" || parsed === null) return {};
-    const record = parsed as Record<string, unknown>;
-    const site: EditingSite = {};
-    for (const key of SITE_KEYS) {
-      const value = record[key];
-      if (typeof value === "string" && value.length > 0) site[key] = value;
-    }
-    return site;
-  } catch {
-    return {};
-  }
+  return parseEditingSite(await readTextIfAny(sitePath(work)));
 }
 
 /** 生の中身を読む。無ければ `{}`、読めない・形が違えば `undefined`（直さない） */

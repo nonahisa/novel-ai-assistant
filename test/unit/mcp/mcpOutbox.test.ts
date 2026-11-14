@@ -1082,3 +1082,54 @@ describe("ページの雛形——前後の文と範囲の直し", () => {
     expect(page).toContain("if (!multi && /[\\r\\n]/.test(text))");
   });
 });
+
+/**
+ * 校閲中で断るときの「誰が」（実装の残り 118行。0.148.4 の担当の気づき）。
+ * 製品の受け取り箱と同じく、`.aiwriter/editing.json` の GitHub 名を出す。
+ * 読めなければ今までどおり「編集者」とだけ
+ */
+describe("outbox.import——校閲中の理由に出す編集者の名前", () => {
+  function lockBody(): void {
+    writeBody(`一行目\n${PROOF.original}\n`);
+    placeFindings([PROOF]);
+    fs.mkdirSync(nodePath.join(root, ".aiwriter", "locks"), { recursive: true });
+    fs.writeFileSync(
+      nodePath.join(root, ".aiwriter", "locks", "locks.jsonl"),
+      JSON.stringify({ kind: "acquire", file: FILE, holder: "編集部の田中", holderKind: "editor", time: new Date().toISOString(), note: "" }) + "\n"
+    );
+  }
+
+  function writeSite(content: string): void {
+    fs.writeFileSync(nodePath.join(root, ".aiwriter", "editing.json"), content);
+  }
+
+  it("editing.json の editorLogin を出す（git の名前は出さない）", async () => {
+    lockBody();
+    writeSite(JSON.stringify({ remoteUrl: "https://example.invalid/r.git", editorLogin: "kmizu" }));
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    expect(result.results[0].status).toBe("refused");
+    expect(result.results[0].reason).toContain("編集者 kmizu");
+    expect(result.results[0].reason).not.toContain("編集部の田中");
+  });
+
+  it("解除したあとは前の編集者の名前（formerEditorLogin）を出す", async () => {
+    lockBody();
+    writeSite(JSON.stringify({ formerEditorLogin: "kmizu-old" }));
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    expect(result.results[0].reason).toContain("編集者 kmizu-old");
+  });
+
+  it("editing.json が無い・壊れているときは「編集者」とだけ出し、ファイルは直さない", async () => {
+    lockBody();
+    const none = await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    expect(none.results[0].status).toBe("refused");
+    // 名前が無いときの文は「編集者 が校閲中です」（`describeLock` の形のまま）
+    expect(none.results[0].reason).toMatch(/^編集者 が校閲中/);
+
+    writeSite("{ 壊れた");
+    const broken = await outboxImport({ folder: root, ownerId: OWNER, records: [edit({ id: "e2" })] });
+    expect(broken.results[0].status).toBe("refused");
+    expect(broken.results[0].reason).toMatch(/^編集者 が校閲中/);
+    expect(fs.readFileSync(nodePath.join(root, ".aiwriter", "editing.json"), "utf8")).toBe("{ 壊れた");
+  });
+});

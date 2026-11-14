@@ -21,6 +21,9 @@ import {
   type OutboxRecord,
 } from "../../core/outboxImport";
 import { OUTBOX_CONTEXT_CHARS, outboxContextOf, type OutboxContext } from "../../core/outboxContext";
+import { EDITING_SITE_FILE } from "../../core/editingRepo";
+import { parseEditingSite, reviewLockLoginOf } from "../../core/editingSiteText";
+import { AIWRITER_DIR } from "../../models/types";
 import { findingList, readFindingViews } from "./findingList";
 import { describeBodyWriteFailure, writeBodyPreservingFormat } from "./bodyWrite";
 import {
@@ -386,6 +389,7 @@ export async function outboxImport(input: OutboxImportInput): Promise<OutboxImpo
     isOwner: (writer) => writer === input.ownerId,
     records: input.records,
     retentionDays: input.retentionDays,
+    editorLogin: editorLoginOf(root),
   });
   return {
     ...outcome,
@@ -401,6 +405,21 @@ export async function outboxImport(input: OutboxImportInput): Promise<OutboxImpo
 }
 
 /* ── 小さな部品 ──────────────────────────────────────── */
+
+/**
+ * 校閲中の理由に出す編集者の GitHub 名（`.aiwriter/editing.json`。製品の受け取り箱の
+ * `reviewLockEditorLogin` と同じ読み方）。無い・読めない・壊れているときは undefined
+ * （「編集者」とだけ出る）。**直さない**——読むだけ
+ */
+function editorLoginOf(root: string): string | undefined {
+  let text: string;
+  try {
+    text = fs.readFileSync(nodePath.join(root, AIWRITER_DIR, EDITING_SITE_FILE), "utf8");
+  } catch {
+    return undefined;
+  }
+  return reviewLockLoginOf(parseEditingSite(text));
+}
 
 function toSlash(file: string): string {
   return file.split("\\").join("/");

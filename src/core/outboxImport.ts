@@ -147,7 +147,8 @@ export interface OutboxImportOptions {
   /**
    * 校閲中の理由に出す、編集者の GitHub のユーザー名（`.aiwriter/editing.json` の
    * `editorLogin`）。**鍵の holder（git の名前）は出さない**（5.7.5.9。2026-11-09）。
-   * 分からなければ（MCP など）「編集者」とだけ出る
+   * 分からなければ「編集者」とだけ出る。受け取り箱も MCP も、同じ読み方
+   * （`core/editingSiteText.ts`）で editing.json から渡す
    */
   editorLogin?: string;
 }

@@ -4,6 +4,7 @@ import { editorLockOf, onLockLedgerWritten } from "../core/fileLockStore";
 import { reviewLockBannerText, reviewLockDetail } from "../core/reviewLockMessages";
 import type { FileLock } from "../models/fileLock";
 import { readSite } from "./editingSite";
+import { reviewLockLoginOf } from "../core/editingSiteText";
 
 /**
  * 原稿エディターの画面へ「校閲中か」を知らせる（設計書6.25.12。作者の裁定 2026-11-07）。
@@ -56,8 +57,7 @@ export async function reviewLockMessageFor(
  */
 export async function reviewLockEditorLogin(work: WorkEntry): Promise<string | undefined> {
   try {
-    const site = await readSite(work);
-    return site.editorLogin ?? site.formerEditorLogin;
+    return reviewLockLoginOf(await readSite(work));
   } catch {
     return undefined;
   }
