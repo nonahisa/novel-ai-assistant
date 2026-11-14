@@ -53,28 +53,41 @@ interface Harness {
   logs: string[];
   unencodable: UnencodableSave[];
   clean: string[];
+  /** 書き先の作品（undefined＝保管庫）。logs と同じ順 */
+  logTargets: Array<string | undefined>;
+  /** 登録していない原稿の置き換えの知らせ */
+  notices: Array<{ key: string; signature: string; message: string }>;
 }
 
 function harness(overrides: Partial<ShiftJisSaveDeps> = {}): Harness {
   const logs: string[] = [];
+  const logTargets: Array<string | undefined> = [];
   const unencodable: UnencodableSave[] = [];
   const clean: string[] = [];
+  const notices: Array<{ key: string; signature: string; message: string }> = [];
   const deps: ShiftJisSaveDeps = {
     // 作り物の Uri.file はドライブ名を小文字にするので、大文字小文字を無視して比べる
     workFolderOf: (filePath) =>
       filePath.toLowerCase().startsWith(`${WORK}\\本文\\`.toLowerCase()) ? WORK : undefined,
+    isUnregisteredManuscript: (filePath) =>
+      !filePath.toLowerCase().startsWith(WORK.toLowerCase()) && /\.(txt|md)$/i.test(filePath),
     readBytes: async () => {
       throw new Error("この件ではファイルを読まない");
     },
     configuredEncoding: () => undefined,
-    log: (_work, message) => logs.push(message),
+    log: (work, message) => {
+      logTargets.push(work);
+      logs.push(message);
+    },
+    notifyUnregistered: (document, signature, message) =>
+      notices.push({ key: document.uri.toString(), signature, message }),
     onUnencodable: async (report) => {
       unencodable.push(report);
     },
     onClean: (document) => clean.push(document.uri.toString()),
     ...overrides,
   };
-  return { deps, logs, unencodable, clean };
+  return { deps, logs, logTargets, unencodable, clean, notices };
 }
 
 /** 受け口を鳴らし、`waitUntil` に渡された約束を返す（呼ばれなければ undefined） */
@@ -130,13 +143,64 @@ describe("保存の直前の Shift_JIS の置き換え（onWillSaveTextDocument�
     expect(h.unencodable).toEqual([]);
   });
 
-  it("作品の外のファイルは、Shift_JIS でも触らない", async () => {
+  it("作品の中の、話でないファイルは、Shift_JIS でも触らない", async () => {
     const h = harness();
     const edits = await fire(
-      fakeDocument({ text: "あ〜", encoding: "shiftjis", filePath: "C:\\よそ\\メモ.txt" }),
+      fakeDocument({ text: "あ〜", encoding: "shiftjis", filePath: `${WORK}\\設定\\メモ.txt` }),
       h.deps
     );
     expect(edits).toBeUndefined();
+    expect(h.notices).toEqual([]);
+  });
+
+  /*
+    再現（2026-11-14 夕 Mac の実機確認）：作品一覧に登録していない Shift_JIS のファイルを原稿エディターで
+    保存すると、「〜」が「?」（0x3f）で書かれ、知らせも記録も出なかった（workFolderOf が無く素通り）
+  */
+  it("登録していない原稿（.txt・.md）でも置き換え、ログは保管庫へ書き、知らせを出す", async () => {
+    const h = harness();
+    const edits = await fire(
+      fakeDocument({ text: "あ〜い〜", encoding: "shiftjis", filePath: "C:\\よそ\\004_シフトJISの話.txt" }),
+      h.deps
+    );
+    expect(edits?.map((edit) => [rangeOf(edit), edit.newText])).toEqual([
+      ["0:1-0:2", "～"],
+      ["0:3-0:4", "～"],
+    ]);
+    expect(h.logTargets).toEqual([undefined]);
+    expect(h.logs[0]).toContain("〜→～ 2個");
+    expect(h.notices).toHaveLength(1);
+    expect(h.notices[0].message).toContain("004_シフトJISの話.txt");
+    expect(h.notices[0].message).toContain("〜→～ 2個");
+    expect(h.notices[0].message).toContain("作品一覧に登録していない");
+  });
+
+  it("登録していない原稿の〓も、作品を持たないまま知らせの係へ渡す", async () => {
+    const h = harness();
+    const edits = await fire(
+      fakeDocument({ text: "あ♡", encoding: "shiftjis", filePath: "C:\\よそ\\メモ.md" }),
+      h.deps
+    );
+    expect(edits?.map((edit) => edit.newText)).toEqual(["〓"]);
+    expect(h.unencodable).toHaveLength(1);
+    expect(h.unencodable[0].workFolder).toBeUndefined();
+    expect(h.logTargets.every((target) => target === undefined)).toBe(true);
+  });
+
+  it("作品の外の原稿でないファイル（.txt・.md でない）は、Shift_JIS でも触らない", async () => {
+    const h = harness();
+    const edits = await fire(
+      fakeDocument({ text: "あ〜", encoding: "shiftjis", filePath: "C:\\よそ\\main.c" }),
+      h.deps
+    );
+    expect(edits).toBeUndefined();
+  });
+
+  it("登録した作品の話では、置き換えても知らせない（作者の決定 2026-11-08「黙って」）", async () => {
+    const h = harness();
+    await fire(fakeDocument({ text: "あ〜", encoding: "shiftjis" }), h.deps);
+    expect(h.notices).toEqual([]);
+    expect(h.logTargets).toEqual([WORK]);
   });
 
   it("CRLF の話でも、行と桁は文書の位置で取る（改行を LF に揃えて数えない）", async () => {
@@ -411,6 +475,15 @@ describe("〓にした字の知らせ（控え → 保存 → 校正・メモパ
     h.save();
     await vi.waitFor(() => expect(h.warned).toHaveLength(1));
     expect(h.warned[0].message).toContain("校正・メモパネルには場所を残せませんでした");
+    expect(h.warned[0].buttons).toEqual(["控えを開く", "UTF-8 に変換する"]);
+  });
+
+  it("登録していない原稿では、登録していないのでパネルに残していないと書き、パネルのボタンを出さない（0.152.10）", async () => {
+    const h = warnerHarness({ record: async () => false });
+    await createUnencodableWarner(h.deps).report({ ...report("♡", ["♡"]), workFolder: undefined });
+    h.save();
+    await vi.waitFor(() => expect(h.warned).toHaveLength(1));
+    expect(h.warned[0].message).toContain("作品一覧に登録していないので、校正・メモパネルには場所を残していません");
     expect(h.warned[0].buttons).toEqual(["控えを開く", "UTF-8 に変換する"]);
   });
 });

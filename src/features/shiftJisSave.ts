@@ -50,7 +50,8 @@ import { refreshSceneMemoFindings } from "./sceneMemoPanel";
 export interface UnencodableSave {
   document: vscode.TextDocument;
   filePath: string;
-  workFolder: string;
+  /** 作品フォルダー。作品一覧に登録していない原稿では undefined（ログは保管庫へ。パネルへは残せない） */
+  workFolder: string | undefined;
   /** 保存の直前の本文（作者が打ったまま。置き換える前）。控えに残す */
   text: string;
   /** 置き換えたあとの本文（保存されるもの）。校正・メモパネルの行の場所はここから決める */
@@ -63,11 +64,23 @@ export interface UnencodableSave {
 export interface ShiftJisSaveDeps {
   /** 作品の話の本文なら、その作品フォルダー。話でなければ undefined */
   workFolderOf(filePath: string): string | undefined;
+  /**
+   * 作品一覧に登録したどの作品の中にも無い原稿（.txt・.md）か（0.152.10）。
+   * 登録していない原稿でも、VS Code は「〜」を黙って「?」で書くので置き換える
+   */
+  isUnregisteredManuscript(filePath: string): boolean;
   /** ディスク上の今のバイト列（VS Code 1.90 で文字コードを決めるため） */
   readBytes(uri: vscode.Uri): Promise<Uint8Array>;
   /** 設定 `files.encoding`（その文書に効く値） */
   configuredEncoding(uri: vscode.Uri): string | undefined;
-  log(workFolder: string, message: string): void;
+  /** 書き先の作品。undefined は保管庫のログ（作品が無いので。0.152.7 の記録係と同じ） */
+  log(workFolder: string | undefined, message: string): void;
+  /**
+   * 登録していない原稿で字を置き換えた知らせ（0.152.10）。登録した作品の話は黙って置き換える
+   * （作者の決定 2026-11-08）が、登録していない原稿は作品のログが無く、黙ると跡がどこにも見えない。
+   * signature は置き換えた字の組（同じ文書・同じ組では1度だけ出すため）
+   */
+  notifyUnregistered(document: vscode.TextDocument, signature: string, message: string): void;
   /** 〓にする字がある。返す約束は**控えを残し終えたら**済む（〓への置き換えはそれを待つ） */
   onUnencodable(report: UnencodableSave): Promise<void>;
   /** 書けない字の無い保存だった（知らせの係が「出した」を忘れる） */
@@ -96,7 +109,8 @@ const KEEP_WAIT_MS = 700;
 /**
  * 保存の直前の受け口の本体。
  *
- * - **作品の話でなければ何もしない**（`waitUntil` も呼ばない＝保存を待たせない）
+ * - **作品の話でも、登録していない原稿（.txt・.md）でもなければ何もしない**（`waitUntil` も呼ばない＝保存を待たせない）。
+ *   作品の中の話でないファイル（設定など）は今までどおり触らない
  * - 文書の文字コードが分かり、Shift_JIS でなければ何もしない
  * - `waitUntil` は**この呼び出しの中で**呼ぶ（あとからは呼べない決まり）。渡す約束は**決して
  *   失敗させない**——失敗が3回続くと、この受け口ごと以後呼ばれなくなり、置き換えが黙って止まる
@@ -105,7 +119,7 @@ export function handleWillSave(event: WillSaveEvent, deps: ShiftJisSaveDeps): vo
   const document = event.document;
   const filePath = path.fromUri(document.uri);
   const workFolder = deps.workFolderOf(filePath);
-  if (!workFolder) return;
+  if (!workFolder && !deps.isUnregisteredManuscript(filePath)) return;
 
   const declared = declaredEncoding(document);
   if (declared !== undefined && declared !== VSCODE_SHIFT_JIS) return;
@@ -152,7 +166,7 @@ async function isShiftJisOn190(document: vscode.TextDocument, deps: ShiftJisSave
 async function planEdits(
   document: vscode.TextDocument,
   filePath: string,
-  workFolder: string,
+  workFolder: string | undefined,
   text: string,
   deps: ShiftJisSaveDeps
 ): Promise<vscode.TextEdit[]> {
@@ -172,7 +186,16 @@ async function planEdits(
   );
   if (plan.substitutions.length > 0) {
     // 作者には知らせない（作者の決定 2026-11-08「黙って」）。ログには何を何に何個かだけ（本文の前後は書かない）
-    deps.log(workFolder, `保存の前に、Shift_JIS に無い字を置き換えました（${name}）：${describeSubstitutions(plan.substitutions)}`);
+    const described = describeSubstitutions(plan.substitutions);
+    deps.log(workFolder, `保存の前に、Shift_JIS に無い字を置き換えました（${name}）：${described}`);
+    if (workFolder === undefined) {
+      const signature = [...new Set(plan.substitutions.map(({ from }) => from))].sort().join("");
+      deps.notifyUnregistered(
+        document,
+        signature,
+        `Shift_JIS に無い字を置き換えて保存しました（${name}：${described}）。この原稿は作品一覧に登録していないので、記録は拡張機能のログに残しました。`
+      );
+    }
   }
 
   if (plan.marks.length === 0) {
@@ -216,7 +239,7 @@ export interface UnencodableWarnerDeps {
   openPanel(workFolder: string): void;
   /** この原稿を UTF-8 に変換する命令を呼ぶ（0.149.0） */
   convert(filePath: string): void;
-  log(workFolder: string, message: string): void;
+  log(workFolder: string | undefined, message: string): void;
 }
 
 const OPEN_PANEL = "校正・メモパネルを開く";
@@ -267,7 +290,11 @@ export function createUnencodableWarner(deps: UnencodableWarnerDeps): {
         const message =
           `Shift_JIS に無い字が${count}字あったので、「${SJIS_UNENCODABLE_MARK}」にして保存しました` +
           `（「${first.char}」${first.line}行目${count > 1 ? " ほか" : ""}）。` +
-          (recorded ? "校正・メモパネルに場所を残しました。" : "校正・メモパネルには場所を残せませんでした。") +
+          (recorded
+            ? "校正・メモパネルに場所を残しました。"
+            : report.workFolder === undefined
+              ? "この原稿は作品一覧に登録していないので、校正・メモパネルには場所を残していません。"
+              : "校正・メモパネルには場所を残せませんでした。") +
           // 原稿の文字コード変換を案内する（作者の指示 2026-11-09「知らせる時は、原稿の文字コード変換を案内してください」）
           UTF8_CONVERT_HINT;
         const places = report.marks
@@ -289,7 +316,7 @@ export function createUnencodableWarner(deps: UnencodableWarnerDeps): {
           UTF8_CONVERT_BUTTON,
         ];
         const picked = await deps.warn(message, detail, buttons);
-        if (picked === OPEN_PANEL) deps.openPanel(report.workFolder);
+        if (picked === OPEN_PANEL && report.workFolder) deps.openPanel(report.workFolder);
         if (picked === OPEN_KEEP && recoveryPath) deps.openKeep(recoveryPath);
         if (picked === UTF8_CONVERT_BUTTON) deps.convert(report.filePath);
       })().catch((error: unknown) => {
@@ -379,6 +406,12 @@ function nextSaveOf(document: vscode.TextDocument): Promise<void> {
   });
 }
 
+/** 作品一覧に登録したどの作品の中にも無い原稿（.txt・.md）か */
+function isUnregisteredManuscript(registry: { list(): readonly WorkEntry[] }, filePath: string): boolean {
+  if (!/.(txt|md)$/i.test(filePath)) return false;
+  return !registry.list().some((entry) => path.isPathInside(entry.folderPath, filePath));
+}
+
 /** 作品の話の本文か（作品フォルダーの中の .txt/.md で、設定や控えの置き場でない） */
 function workOfEpisode(registry: { list(): readonly WorkEntry[] }, filePath: string): WorkEntry | undefined {
   const work = [...registry.list()]
@@ -390,9 +423,9 @@ function workOfEpisode(registry: { list(): readonly WorkEntry[] }, filePath: str
 
 /** 拡張機能の起動時に差し込む */
 export function installShiftJisSaveGuard(registry: { list(): readonly WorkEntry[] }): vscode.Disposable {
-  const log = (workFolder: string, message: string): void => workLog(workFolder).line(message);
-  const workAt = (workFolder: string): WorkEntry | undefined =>
-    registry.list().find((entry) => path.pathKeyForComparison(entry.folderPath) === path.pathKeyForComparison(workFolder));
+  const log = (workFolder: string | undefined, message: string): void => workLog(workFolder).line(message);
+  const workAt = (workFolder: string | undefined): WorkEntry | undefined =>
+    workFolder === undefined ? undefined : registry.list().find((entry) => path.pathKeyForComparison(entry.folderPath) === path.pathKeyForComparison(workFolder));
   const warner = createUnencodableWarner({
     keep: keepUnencodable,
     whenSaved: nextSaveOf,
@@ -429,11 +462,21 @@ export function installShiftJisSaveGuard(registry: { list(): readonly WorkEntry[
     },
     log,
   });
+  /** 登録していない原稿ごとの、最後に知らせた置き換えの字の組 */
+  const notifiedUnregistered = new Map<string, string>();
   const deps: ShiftJisSaveDeps = {
     workFolderOf: (filePath) => workOfEpisode(registry, filePath)?.folderPath,
+    isUnregisteredManuscript: (filePath) => isUnregisteredManuscript(registry, filePath),
     readBytes: async (uri) => vscode.workspace.fs.readFile(uri),
     configuredEncoding: (uri) => vscode.workspace.getConfiguration("files", uri).get<string>("encoding"),
     log,
+    notifyUnregistered: (document, signature, message) => {
+      // 自動保存では打つたびに保存が鳴る。同じ文書・同じ字の組では1度だけ出す
+      const key = document.uri.toString();
+      if (notifiedUnregistered.get(key) === signature) return;
+      notifiedUnregistered.set(key, signature);
+      void vscode.window.showInformationMessage(message);
+    },
     onUnencodable: (report) => warner.report(report),
     onClean: (document) => warner.forget(document),
   };
