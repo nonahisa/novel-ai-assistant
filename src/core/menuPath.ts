@@ -51,7 +51,7 @@ import type { MenuEntry } from "./menuMentions";
 
 /** 最初の一押し。左の端（アクティビティバー）にある、この拡張機能のアイコン */
 export const MENU_PATH_START =
-  "左の端の統合小説執筆環境のアイコン（キーボードと万年筆）";
+  "左の端の統合小説執筆環境のアイコン（キーボードと、芽の出た万年筆）";
 
 /** 区画（横の枠に並ぶビュー）の名前。`package.json` の `views` の `name` と同じ字 */
 export const MENU_SECTION_NAMES = {

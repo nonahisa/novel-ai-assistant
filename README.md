@@ -47,7 +47,7 @@ VS Codeの拡張機能ビュー（`Ctrl + Shift + X`、Mac は `Cmd + Shift + X`
 code --install-extension nonahisa.novel-ai-assistant
 ```
 
-再読み込みすると、左端のアクティビティバーにキーボードと万年筆のアイコンが追加されます。
+再読み込みすると、左端のアクティビティバーに、キーボードと芽の出た万年筆のアイコンが追加されます。
 
 <details>
 <summary>VSIXファイルから入れる（配布前の版を試す場合）</summary>
