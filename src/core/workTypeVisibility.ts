@@ -419,6 +419,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.exportEpub": "story",
   // 人物の声の朗読の書き出し（設計書6.42.4）。読み上げと同じく作品のタイプを問わない
   "novelai.exportVoiceAudio": "allTypes",
+  // 読み間違いの見込み（設計書6.42.6）。人物の声の書き出しと同じく作品のタイプを問わない
+  "novelai.checkVoiceMisreadings": "allTypes",
   "novelai.openEpubEditor": "story",
 
   // ── 編集部とのやり取り ──

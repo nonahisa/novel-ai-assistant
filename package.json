@@ -1177,6 +1177,11 @@
         "category": "統合小説執筆環境"
       },
       {
+        "command": "novelai.checkVoiceMisreadings",
+        "title": "読み間違いを調べる",
+        "category": "統合小説執筆環境"
+      },
+      {
         "command": "novelai.convertToMarkdown",
         "title": "本文 .md 化",
         "category": "統合小説執筆環境",
@@ -1793,6 +1798,11 @@
           "group": "1_actions@5"
         },
         {
+          "command": "novelai.checkVoiceMisreadings",
+          "when": "view == novelai.works && viewItem =~ /^episode-/ && !novelai.editorMode && !novelai.processesBlocked",
+          "group": "1_actions@6"
+        },
+        {
           "command": "novelai.copySubtitle",
           "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "2_copy@1"
@@ -1916,6 +1926,10 @@
         {
           "command": "novelai.exportVoiceAudio",
           "when": "false"
+        },
+        {
+          "command": "novelai.checkVoiceMisreadings",
+          "when": "!novelai.editorMode && !novelai.processesBlocked"
         },
         {
           "command": "novelai.proposeEditByHand",

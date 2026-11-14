@@ -102,6 +102,12 @@ export interface VoiceExportTarget {
   sentences: readonly ReadingSentence[];
   /** ［声］で選んだエンジン（0.146.0） */
   engine: VoiceEngineId;
+  /**
+   * 確認の窓を出す直前に1回呼ぶ（読み間違いの見込み。設計書6.42.6）。返した文を窓に1行添える。
+   * ここまで来たのはエンジンに届いたあと（話者の一覧と名乗りが引けた）なので、起きているときだけ調べる形になる。
+   * **書き出しは止めない**——失敗しても投げずに undefined を返すこと
+   */
+  beforeConfirm?: () => Promise<string | undefined>;
 }
 
 /** 名乗り（brand_name）の見分けを、声の割り当ての印へ */
@@ -482,6 +488,13 @@ export async function exportVoiceAudio(
     確認は処理量を示してから（実装スタイル）。文の数・おおよその長さ・置き場。
     **非商用の声が混じれば、いちばん上に書いて警告の顔で訊く**（作者の答え5）
   */
+  let misreadNote: string | undefined;
+  try {
+    misreadNote = await target.beforeConfirm?.();
+  } catch (error) {
+    // 書き出しは止めない（設計書6.42.6）。理由はログへ
+    logStep(`音声に書き出す：読み間違いの見込みを調べられませんでした（${error instanceof Error ? error.message : String(error)}）`);
+  }
   const ok = await confirmRun(
     [
       ...(nonCommercial.length > 0
@@ -495,6 +508,7 @@ export async function exportVoiceAudio(
       `使う声：${terms.map(describeVoice).join("、")}`,
       // 割り当てた声が引けず代わりの声で読むなら、書き出す前に分かるようにする（0.146.0）
       ...(planned.notice ? [planned.notice] : []),
+      ...(misreadNote ? [misreadNote] : []),
       "本文は書き換えません。長い話は数分かかります（途中で中止できます）。",
     ].join("\n"),
     "書き出す",

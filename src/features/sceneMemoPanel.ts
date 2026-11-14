@@ -59,6 +59,7 @@ import {
 } from "../core/sceneMemoRows";
 import { locateFindings } from "../core/findingLocation";
 import { isSjisMarkFinding, placeSjisMarkFindings } from "../core/sjisMarkFinding";
+import { isMisreadFinding } from "../core/readingMisreadLabel";
 import { findingAppliesDirectly, findingFileKey } from "../core/findingSource";
 import { CharacterStore } from "../core/characterStore";
 import { findMergeCandidates } from "../core/characterMerge";
@@ -217,6 +218,17 @@ export interface SceneMemoDeps {
    * 見送りそのものは効く。
    */
   noteFindingDismissed?: (work: WorkEntry, findingId: string) => void;
+  /**
+   * 読み間違いの見込みの行（設計書6.42.6）の［読みの辞書へ足す］——その行の語・句・読みを、
+   * その話の読みの辞書へ作者の項目として足す口（`features/readingMisread.ts`）。
+   *
+   * **押したときだけ足す**（実装ルール2）。本文は変えない。足したら置き場に「採った」が足され、
+   * 一覧から外れる。**渡されなければ出さない**（押しても何も起きない口を作らない）
+   */
+  addMisreadToDictionary?: (
+    work: WorkEntry,
+    finding: PlacedFinding
+  ) => Promise<{ ok: true; detail: string } | { ok: false; reason: string }>;
   /**
    * 人物の重複の候補を、設定資料パネルの登場人物タブの候補の欄で開く口
    * （画面のボタンは［設定資料パネルで見る］。作者の裁定 2026-10-19 夜。設計書6.40.4）。
@@ -839,6 +851,8 @@ type PanelMessage =
   | { type: "undoFix" }
   /** AIの指摘を退ける。**追記で残す**だけで、指摘の行は書き換えない */
   | { type: "dismissFinding"; findingId: string }
+  /** 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.6） */
+  | { type: "addReading"; findingId: string }
   /**
    * 編集者の提案を決める（［採る］［読んだ］は accept、［見送る］は reject）。
    * 決める中身は拡張機能の側（`deps.decideEditorProposal`）にある
@@ -1209,6 +1223,9 @@ class SceneMemoPanel {
           return;
         case "dismissFinding":
           await this.dismissFinding(message.findingId);
+          return;
+        case "addReading":
+          await this.addReading(message.findingId);
           return;
         case "decideProposal":
           await this.decideProposal(message.proposalId, message.decision);
@@ -1587,6 +1604,25 @@ class SceneMemoPanel {
   }
 
   /**
+   * 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.6）。足す中身は
+   * `deps.addMisreadToDictionary`（読みの辞書の道）。足せなければ理由を出し、行は残す
+   */
+  private async addReading(findingId: string): Promise<void> {
+    const finding = this.findings.find((item) => item.id === findingId);
+    const add = this.deps.addMisreadToDictionary;
+    if (!finding || !add) return;
+    const outcome = await add(this.work, finding);
+    if (outcome.ok) {
+      void vscode.window.showInformationMessage(outcome.detail);
+      // 向こう（提案パネル）にも同じ行が並んでいれば下げる（見送りと同じ知らせの口）
+      this.deps.noteFindingDismissed?.(this.work, findingId);
+    } else {
+      void vscode.window.showWarningMessage(`読みの辞書へ足せませんでした。${outcome.reason}`);
+    }
+    await this.load();
+  }
+
+  /**
    * 編集者の提案を決める（作者の指示 2026-11-08。設計書6.96.5）。
    *
    * **決める処理はここに書かない**（`deps.decideEditorProposal`。提案パネルの
@@ -1843,8 +1879,12 @@ class SceneMemoPanel {
       };
     }
     if (!this.deps.undoFindingFix) return null;
+    // 読み間違いの見込みの主文は「エンジンがどう読むか」の文なので、振ったルビを書く（設計書6.42.6）
+    const what = isMisreadFinding(step.finding)
+      ? `「${step.finding.target}」にルビ「${step.finding.suggestion}」を振りました`
+      : `${findingHeadline(step.finding)}に直しました`;
     return {
-      text: `${findingHeadline(step.finding)}に直しました（${
+      text: `${what}（${
         this.labelAt(step.finding.filePath).label
       }　${step.finding.line}行目）`,
       undoTitle: "直す前の本文へ戻します（指摘はまた一覧に並びます）",
@@ -1955,6 +1995,9 @@ class SceneMemoPanel {
       // 修正案があれば［直す］（1手で当てる）、無ければ［本文へ］（6.96.5）。
       // 見送りはこの画面だけで完結するので、常に出る
       fixAction: this.fixActionOf(finding),
+      // 読み間違いの見込み（設計書6.42.6）。［直す］を［ここにルビを振る］と呼び、［読みの辞書へ足す］を添える
+      misread: isMisreadFinding(finding),
+      canAddReading: isMisreadFinding(finding) && this.deps.addMisreadToDictionary !== undefined,
       // 修正案の無い推敲の指摘には［AIに相談］も出す（作者の要望 2026-10-04）。
       // **口が無ければ出さない**（押しても何も起きない口を作らない）
       canConsult: this.canConsult(finding),

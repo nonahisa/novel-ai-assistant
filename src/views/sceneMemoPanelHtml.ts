@@ -453,6 +453,11 @@ el.list.addEventListener("click", function (event) {
     post("dismissFinding", { findingId: row.findingId });
     return;
   }
+  if (act === "addReading") {
+    // 読み間違いの見込みの行（設計書6.42.6）。足すのは拡張機能の側。この画面は頼むだけ
+    post("addReading", { findingId: row.findingId });
+    return;
+  }
   if (act === "proposalAccept" || act === "proposalReject") {
     // 編集者の提案（2026-11-08）。採る・読んだ・見送るを決めるのは拡張機能の側で、
     // 提案パネルのころと同じ道を通る。この画面は頼むだけ
@@ -535,7 +540,20 @@ function renderActions(row) {
     // 修正案があれば［直す］（1手で本文へ当てる）、無ければ［本文へ］。
     // ［本文へ］の data-act="reveal" は、下の受け口で行の場所を押したときと
     // 同じ「reveal」へ落ちる（飛ぶ道を1本にする。設計書6.25.11）
-    if (row.fixAction === "apply") {
+    // 読み間違いの見込み（設計書6.42.6）。辞書へ足す（本文は変えない）か、その場所にルビを振るか。
+    // ［ここにルビを振る］は［直す］と同じ道（提案パネルの［適用］と同じ当て方。上の［戻す］で戻せる）
+    if (row.misread && row.canAddReading) {
+      buttons.push(
+        '<button class="done" data-act="addReading" data-key="' + key +
+          '" title="この語をこの場所の読みとして、この話の読みの辞書へ足します（本文は変わりません）">読みの辞書へ足す</button>'
+      );
+    }
+    if (row.misread && row.fixAction === "apply") {
+      buttons.push(
+        '<button class="done" data-act="fix" data-key="' + key +
+          '" title="この場所の語にルビを振ります（本文が変わります。上に出る［戻す］で元に戻せます）">ここにルビを振る</button>'
+      );
+    } else if (row.fixAction === "apply") {
       buttons.push(
         '<button class="done" data-act="fix" data-key="' + key +
           '" title="修正案を本文へ当てます（上に出る［戻す］で元に戻せます）">直す</button>'
