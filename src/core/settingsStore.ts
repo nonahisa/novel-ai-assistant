@@ -358,8 +358,31 @@ export class SettingsStore<T extends StorableRecord> {
    */
   private async assertSaveAllowed(record: T): Promise<JsonFileFormat> {
     const snapshot = this.snapshots.get(record.id);
-    // 新規レコードは競合しようがない
-    if (!snapshot) return NEW_JSON_FILE_FORMAT;
+    if (!snapshot) {
+      // 控えが無い＝新規、とは限らない。読み込んだ瞬間に無かったファイル（ほかの書き手の
+      // 置き換えの最中・あとから同期で届いた・壊れていて読み飛ばした）も控えを持たない。
+      // 書き込みは上書きの道なので、そこに既にあれば作者の中身を黙って消してしまう（2026-11-15）
+      const target = path.join(await this.dir(), this.options.fileName(record));
+      let existing = false;
+      try {
+        await vscode.workspace.fs.readFile(path.toUri(target));
+        existing = true;
+      } catch (error) {
+        if (
+          !(error instanceof vscode.FileSystemError && error.code === "FileNotFound")
+        ) {
+          throw error;
+        }
+      }
+      if (existing) {
+        throw new SettingsStoreError(
+          `「${this.options.displayName(record)}」は読み込んだあとに作られました（または読めませんでした）。作者の記録を守るため保存しませんでした。`,
+          "modified_externally",
+          [target]
+        );
+      }
+      return NEW_JSON_FILE_FORMAT;
+    }
 
     let current: Uint8Array;
     try {

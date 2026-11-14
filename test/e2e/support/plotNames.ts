@@ -371,8 +371,10 @@ export async function pendingCharacterFiles(session: E2ESession): Promise<Map<st
   for (const name of (await readdir(folder).catch(() => [] as string[])).filter((entry) => entry.endsWith(".json"))) {
     // 拾ったあとに片付いた案は飛ばす。**在るのに読めない案を空として数えない**——空は
     // どの語も含まないので、「承認待ちから消えた」の確かめが偽の成功になる。
-    // 承認待ちは一時ファイルからの rename で入れ替わる（隙間が無い）ので、無ければ待たない
-    const body = await readListedFile(path.join(folder, name), 0);
+    // 承認待ちは一時ファイルからの rename で入れ替わる。手元ではふつう隙間が無いが、読み手が
+    // 開いていて置き換えを断られ続けると、製品は本体の移動（消してから名前を変える）へ譲る
+    // （断られて繰り返すのは500ミリ秒まで。fileSettle.ts の表）。そこで1秒だけ待つ
+    const body = await readListedFile(path.join(folder, name), 1_000);
     if (body !== undefined) files.set(name, body);
   }
   return files;

@@ -269,6 +269,23 @@ describe("能力・場所の保存", () => {
     expect(after.records.map((record) => record.name)).toEqual(["fire"]);
   });
 
+  test("読み込みに載らなかった既存のファイルを、新しい記録として上書きしない", async () => {
+    // 読み込んだ瞬間に無かった（ほかの書き手の置き換えの最中・あとから同期で届いた）ファイルは控えを持たない。
+    // 控えが無いのを「新規」とみなして上書きすると、作者が書いた中身が黙って消える
+    const existing = { ...fixedAbility("abil_001", "灯火"), authorNotes: "作者が書いたメモ" };
+    const file = path.join(abilityDir, abilityFileName(existing));
+    const store = createAbilityStore(work);
+    const loaded = await store.loadAll();
+    expect(loaded.records).toHaveLength(0);
+    disk.set(file, bytesFor(existing));
+
+    await expect(
+      store.saveAll([{ ...fixedAbility("abil_001", "灯火"), description: "AIの説明" }])
+    ).rejects.toMatchObject({ kind: "modified_externally" });
+
+    expect(new TextDecoder().decode(disk.get(file))).toContain("作者が書いたメモ");
+  });
+
   test("ディレクトリが無くても空として読み込める", async () => {
     directories.delete(abilityDir);
 

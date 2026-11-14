@@ -80,8 +80,9 @@ export async function readJsonWhenPresent<T>(file: string, timeoutMs = PRESENT_T
  *   製品の書き戻し（退避 → 削除 → 作り直し）の隙間に当たったときは、待てば読める
  * - それ以外の失敗：待たずにそのまま投げる（黙らない）
  *
- * `timeoutMs` は書き込み口で決める。一時ファイルからの rename で入れ替わる置き場
- * （承認待ちなど）は隙間が無いので、無ければ本当に消えている——0 を渡して待たない
+ * `timeoutMs` は書き込み口で決める。新規作成でしか置かない置き場は隙間が無いので、無ければ
+ * 本当に消えている——0 を渡して待たない。一時ファイルからの rename で入れ替わる置き場
+ * （承認待ちなど）は、製品が本体の移動へ譲った回だけ一瞬無いので、1秒ほど待つ（上の表）
  */
 export async function readListedFile(file: string, timeoutMs = PRESENT_TIMEOUT_MS): Promise<string | undefined> {
   try {

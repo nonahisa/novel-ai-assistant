@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { atomicWriteFile, setOneStepReplaceForTests } from "../../../src/core/atomicWrite";
 import { FileSystemError, workspace } from "../support/vscodeStub";
@@ -16,11 +16,18 @@ import { FileSystemError, workspace } from "../support/vscodeStub";
  * 2手の間は、同期・相談・MCP・投稿の記録など、どの読み手から見ても保存先が無い。
  *
  * 試験では `workspace.fs.rename` を本体と同じ2手で写し、`writeFile`・`readFile` を
- * 本物のディスクへつなぐ。読み手は回し続け、**ENOENT の数と、書いた中身が最後に
- * 届いているか**の両方を見る（片方だけだと「読めるが書けない」作りが通る）。
+ * 本物のディスクへつなぐ。
+ *
+ * **読み手はフォルダーの一覧（`readdir`）で「名前が載っているか」を見る。** ファイルを
+ * 開くと Windows が置き換えを断り、製品が今までの道へ譲るかどうかが読み手の間隔と
+ * 機械の混み具合で揺れる（全件の走りで1回落ちた）。一覧は開かないので揺れない。
+ * あわせて「書いた中身が最後に届いているか」も見る（片方だけだと「読めるが書けない」作りが通る）。
  */
 
 let dir = "";
+/** 本体の移動を写した `rename` が呼ばれた回数と、消したあとに保存先が無かった回数 */
+let vscodeRenames = 0;
+let missingBetweenSteps = 0;
 
 /** VS Code 本体の上書きの移動を写したもの。保存先を消す → 一拍おく → 名前を変える */
 function useVscodeLikeFs(): void {
@@ -39,12 +46,16 @@ function useVscodeLikeFs(): void {
       }
     },
     rename: async (from: { fsPath: string }, to: { fsPath: string }, options?: { overwrite?: boolean }) => {
+      vscodeRenames += 1;
       const exists = await stat(fsPathOf(to)).then(() => true, () => false);
       if (exists && !options?.overwrite) throw new FileSystemError("exists", "FileExists");
       if (exists) {
         await unlink(fsPathOf(to));
-        // 本体はこの間に親フォルダーを確かめ（mkdirp）、別の IPC で名前を変える
-        await new Promise((resolve) => setTimeout(resolve, 1));
+        // 本体はこの間に親フォルダーを確かめ（mkdirp）、別の IPC で名前を変える。
+        // その間に読み手が来たら何が見えるかを、ここで1回確かめる
+        if (!(await readdir(dirname(fsPathOf(to)))).includes(basename(fsPathOf(to)))) {
+          missingBetweenSteps += 1;
+        }
       }
       await rename(fsPathOf(from), fsPathOf(to));
     },
@@ -54,44 +65,34 @@ function useVscodeLikeFs(): void {
   };
 }
 
-/** 書いている間じゅう読み続け、読めなかった回数を種類ごとに数える */
-async function writeWhileReading(target: string, writes: number, readerCount: number, pauseMs: number): Promise<{
-  missing: number;
-  otherErrors: string[];
-  reads: number;
-}> {
+/** 書いている間じゅうフォルダーの一覧を見続け、保存先の名前が載っていなかった回数を数える */
+async function writeWhileListing(target: string, writes: number): Promise<{ missing: number; looks: number }> {
   let stop = false;
   let missing = 0;
-  let reads = 0;
-  const otherErrors: string[] = [];
-  const reader = async () => {
+  let looks = 0;
+  const watcher = (async () => {
     while (!stop) {
-      try {
-        await readFile(target);
-        reads += 1;
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code ?? String(error);
-        if (code === "ENOENT") missing += 1;
-        else otherErrors.push(code);
-      }
-      await new Promise((resolve) => setTimeout(resolve, pauseMs));
+      if (!(await readdir(dirname(target))).includes(basename(target))) missing += 1;
+      looks += 1;
+      await new Promise((resolve) => setImmediate(resolve));
     }
-  };
-  const readers = Array.from({ length: readerCount }, () => reader());
+  })();
   try {
     for (let index = 0; index < writes; index += 1) {
       await atomicWriteFile(target, new TextEncoder().encode(`{"n":${index}}\n`));
     }
   } finally {
     stop = true;
-    await Promise.all(readers);
+    await watcher;
   }
-  return { missing, otherErrors, reads };
+  return { missing, looks };
 }
 
 describe("置き換えの最中の読み手（本物のディスク）", () => {
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "atomW_"));
+    vscodeRenames = 0;
+    missingBetweenSteps = 0;
     useVscodeLikeFs();
   });
 
@@ -100,32 +101,31 @@ describe("置き換えの最中の読み手（本物のディスク）", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  test("本体の上書きの移動だけで置き換えると、読み手が「無い」に当たる（直す前の形）", async () => {
+  test("本体の上書きの移動だけで置き換えると、2手の間は保存先が無い（直す前の形）", async () => {
     const target = join(dir, "投稿状態.json");
     await writeFile(target, "{}\n");
     setOneStepReplaceForTests(false);
 
-    // 隙間に当てたいだけなので、読み手は詰めて回す
-    const result = await writeWhileReading(target, 60, 2, 2);
+    for (let index = 0; index < 5; index += 1) {
+      await atomicWriteFile(target, new TextEncoder().encode(`{"n":${index}}\n`));
+    }
 
-    expect(result.missing).toBeGreaterThan(0);
+    expect(vscodeRenames).toBe(5);
+    expect(missingBetweenSteps).toBe(5);
   });
 
-  test("手元では1回の名前の変更で置き換え、読み手は一度も「無い」に当たらない", async () => {
+  test("手元では1回の名前の変更で置き換え、見ている間に保存先が消えない", async () => {
     const target = join(dir, "投稿状態.json");
     await writeFile(target, "{}\n");
     // 製品の道（Node の rename）へ戻す
     setOneStepReplaceForTests(undefined);
 
-    // 読み手は実際に近い間隔で回す（画面テストは100ミリ秒おき、MCP や同期はもっと疎ら）。
-    // 開いている間は Windows が置き換えを断るので、詰めすぎると製品は今までの道へ譲る
-    // ——探りでは2本が2ミリ秒おきに開くと、500ミリ秒繰り返しても通らない回が60回中2回あった。
-    // 譲った回は隙間が出るので、ここでは譲らずに済む間隔にする
-    const result = await writeWhileReading(target, 60, 1, 20);
+    const result = await writeWhileListing(target, 60);
 
     expect(result.missing).toBe(0);
-    expect(result.otherErrors).toEqual([]);
-    expect(result.reads).toBeGreaterThan(0);
+    expect(result.looks).toBeGreaterThan(0);
+    // 本体の移動（消してから名前を変える道）を一度も通っていない
+    expect(vscodeRenames).toBe(0);
     // 書いた中身が最後まで届いている（置き換えを諦めて黙っていない）
     expect(await readFile(target, "utf8")).toBe(`{"n":59}\n`);
     // 一時ファイルが残っていない
@@ -139,5 +139,6 @@ describe("置き換えの最中の読み手（本物のディスク）", () => {
     await atomicWriteFile(target, new TextEncoder().encode("{}\n"));
 
     expect(await readFile(target, "utf8")).toBe("{}\n");
+    expect(vscodeRenames).toBe(0);
   });
 });
