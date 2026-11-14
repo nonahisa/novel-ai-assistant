@@ -122,7 +122,6 @@ li { margin: 0 0 6px; }
 </head>
 <body>
 <h1>${escapeHtml(heading)}</h1>
-<p class="subtitle">行を押すと、本文のその場所を開きます。このパネルは閉じません。</p>
 <ul id="rows">
 ${items}
 </ul>

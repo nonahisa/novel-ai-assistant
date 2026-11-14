@@ -279,10 +279,12 @@ test("詳細メニューの見出しの「…」の「他のメニューを閉�
       await open.scrollIntoViewIfNeeded();
       /*
         「AIに相談」は2つある（横に開く・大きく開く）。詳細メニューに出るのは横に開くほうだけで
-        （大きく開くほうは `hiddenFromActionList`）、取り違えると別のパネルが開く。説明欄で確かめる
+        （大きく開くほうは `hiddenFromActionList`）、取り違えると別のパネルが開く。
+        名前で分けた（大きく開くほうは「AIに相談（大きく開く）」。2026-11-14）ので、名前に
+        「大きく開く」が付いていないことで確かめる
       */
       const openLabel = (await open.getAttribute("aria-label")) ?? "";
-      expect(openLabel, `押す行の名前：${openLabel}`).toContain("横に開く");
+      expect(openLabel, `押す行の名前：${openLabel}`).not.toContain("大きく開く");
       await open.click();
 
       await waitUntil(

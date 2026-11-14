@@ -310,6 +310,15 @@ export class VoiceReadingService {
   }
 
   /**
+   * 確認の窓を出さずに、そのエンジンへ本文を送ってよいか（この PC か、許可済みのホスト）。
+   * ［音声に書き出す］の手前の読み間違いの見込み（設計書6.42.5）は確認の窓より前に走るので、
+   * 窓を出さずに済むときだけ調べる（未許可の外のホストなら調べない）
+   */
+  carryAllowedWithoutAsking(engine: VoiceEngineId): boolean {
+    return this.carryAllowedNow(engine);
+  }
+
+  /**
    * 選んだエンジンに届かなかったとき、**もう片方のエンジンが動いているかを1回だけ短く問い合わせる**
    * （0.146.0。ノートPCの実機確認：設定は VOICEVOX を指していたが起動しておらず、AivisSpeech は
    * 動いていたのに読まなかった）。前もっては問い合わせない決まりはそのまま——呼ぶのは読み始めて
@@ -751,7 +760,11 @@ export type VoiceProblem = {
   engineSlow?: true;
 };
 
-function engineFailure(error: unknown, work: WorkEntry | undefined): VoiceProblem {
+/**
+ * エンジンの失敗を、作者向けの文と印にする（ログも残す）。読み間違いの見込み（設計書6.42.5）が
+ * audio_query の失敗を同じ言い方で出すために公開する（原因を当てない言い方を写さない）
+ */
+export function engineFailure(error: unknown, work: WorkEntry | undefined): VoiceProblem {
   const problem = describeEngineFailure(error, work);
   if (isEngineUnreachable(error)) return { problem, engineDown: true };
   if (isEngineTimeout(error)) return { problem, engineSlow: true };

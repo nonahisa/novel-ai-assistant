@@ -5,6 +5,7 @@ import type { WorkRegistry } from "../core/workRegistry";
 import {
   changedFilesEachSide,
   fetchRemote,
+  headCommit,
   pullFastForward,
   push,
   readRepoRoot,
@@ -38,6 +39,8 @@ import { findMissingWorks } from "../core/workFolderPresence";
 import { readMachineName } from "./windowCard";
 import { whenNoticePicked } from "../views/notify";
 import { isEditorMode } from "../core/actorContext";
+import { describeTooLargeToSend, findLargeFilesToSend } from "../core/gitLargeFiles";
+import { globalPushRejections } from "./pushRejectionMemory";
 import {
   FINISH_REVIEW_COMMAND,
   finishReviewLabel,
@@ -488,6 +491,8 @@ async function sendLocal(
   // **確認は挟まない**（作者の裁定「開いたときに気づき、送る」）。
   // 出ていくのは**既にコミット済みのもの**だけで、作者が「記録」を押した
   // 時点で手は離れている。書きかけ（未記録）は1文字も外へ出ない
+  const blocked = await blockedBeforePush(deps, target);
+  if (blocked) return { label: target.label, action, done: false, detail: blocked, target };
   const result = await push(target.root, deps.run);
   if (result.ok) {
     logStep(`開いたときに送信した（${target.label}／${action.ahead}件）`);
@@ -498,6 +503,34 @@ async function sendLocal(
     詳細: result.detail ?? "（詳細なし）",
   });
   return { label: target.label, action, done: false, detail: "送信できませんでした", target };
+}
+
+/**
+ * 開いたときの送信の前に、送っても通らないと分かっている置き場を止める（設計書5.5.21）。
+ *
+ * - 送る記録に GitHub に送れない大きさ（100MB超）のファイルがある。開くたびに1GB 近くを
+ *   送ろうとして時間切れになるのを防ぐ
+ * - 同じ記録（HEAD）が前に GitHub に断られた（自動の送り直しと同じ覚え）
+ *
+ * 止めたときは報告に出す文を返す。止めないなら undefined
+ */
+async function blockedBeforePush(
+  deps: HandoffDeps,
+  target: HandoffTarget
+): Promise<string | undefined> {
+  const run = deps.run ?? runGit;
+  const head = await headCommit(target.root, run);
+  const remembered = globalPushRejections.rejectedReason(target.root, head);
+  if (remembered) return remembered;
+  const unsendable = await findLargeFilesToSend(target.root, "@{u}", run);
+  if (unsendable.length === 0) return undefined;
+  const text = describeTooLargeToSend(unsendable);
+  globalPushRejections.remember(target.root, head, text);
+  logFailure("開いたとき：送る記録に GitHub に送れない大きさのファイルがあるので送らなかった", {
+    置き場: target.label,
+    ファイル: unsendable.map((one) => `${one.path}（${one.size}バイト）`).join("、"),
+  });
+  return text;
 }
 
 /** 両方に動きがあり、ファイルが重ならない。**黙って揃える**（作者の裁定） */
@@ -560,6 +593,16 @@ async function foldBoth(
   }
 
   // 合わせただけでは手元に溜まったまま。**揃えるとは、送るところまでである**
+  const blocked = await blockedBeforePush(deps, target);
+  if (blocked) {
+    return {
+      label: target.label,
+      action,
+      done: false,
+      detail: `合わせましたが送りませんでした。${blocked}`,
+      target,
+    };
+  }
   const sent = await push(target.root, deps.run);
   if (!sent.ok) {
     logFailure("合わせたあとの送信に失敗", {

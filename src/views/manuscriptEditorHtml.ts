@@ -1037,35 +1037,35 @@ body.clipped #cheer { white-space: normal; }
 </head>
 <body class="vertical">
 <div id="bar">
-  <button id="trayInput" class="tray-toggle" data-tray="input" aria-expanded="false" aria-controls="rowInput" title="取り込み（テキストファイル・バックアップ・Word）と口述の段を出し入れします">入力</button>
-  <button id="trayOutput" class="tray-toggle" data-tray="output" aria-expanded="false" aria-controls="rowOutput" title="投稿・読み上げ・PDF の段を出し入れします">出力</button>
-  <button id="trayAssist" class="tray-toggle" data-tray="assist" aria-expanded="false" aria-controls="rowAssist" title="校正・単話プロット・ルビ・傍点の段を出し入れします">補助</button>
-  <button id="trayView" class="tray-toggle" data-tray="view" aria-expanded="false" aria-controls="rowView" title="縦書き／横書き・書体・文字の大きさの段を出し入れします">表示</button>
+  <button id="trayInput" class="tray-toggle" data-tray="input" aria-expanded="false" aria-controls="rowInput">入力</button>
+  <button id="trayOutput" class="tray-toggle" data-tray="output" aria-expanded="false" aria-controls="rowOutput">出力</button>
+  <button id="trayAssist" class="tray-toggle" data-tray="assist" aria-expanded="false" aria-controls="rowAssist">補助</button>
+  <button id="trayView" class="tray-toggle" data-tray="view" aria-expanded="false" aria-controls="rowView">表示</button>
 </div>
 
 <div id="rowInput" class="tray" data-tray="input">
-  <button id="importText" title="テキストファイル（.txt・.md）を選んで、この話へ取り込みます。この話に本文が入っていれば、次の話として足すか・最後に加えるか・上書きするかを訊きます">テキストファイルから</button>
-  <button id="importBackup" title="投稿サイトのバックアップ（ZIP・テキスト）を選び、中の話を選んで、開いている作品へ足します。開いている話のすぐ次に差し込むか、最後に加えるかを訊きます">バックアップから</button>
-  <button id="importWord" title="Word の文書（.docx）を選んで、この話へ取り込みます。ルビと傍点は残ります。この話に本文が入っていれば、次の話として足すか・最後に加えるか・上書きするかを訊きます">Word から</button>
+  <button id="importText">テキストファイルから</button>
+  <button id="importBackup">バックアップから</button>
+  <button id="importWord">Word から</button>
   <div class="sep"></div>
-  <button id="dictate" title="OSの音声入力で書き取った文を、あとからAIに整えてもらいます。押してから音声入力を始めてください">口述</button>
-  <button id="dictateClean" class="dictate-on" title="口述を始めたところから、いまのカーソルまでをAIに整えてもらいます">整える</button>
-  <button id="dictateCancel" class="dictate-on" title="整えずに口述モードを抜けます。書き取った本文はそのまま残ります">やめる</button>
+  <button id="dictate">口述</button>
+  <button id="dictateClean" class="dictate-on">整える</button>
+  <button id="dictateCancel" class="dictate-on">やめる</button>
 </div>
 
 <div id="rowOutput" class="tray" data-tray="output">
-  <button id="posting" aria-haspopup="menu" title="投稿ヘルパーへ渡す・投稿サイト用のコピー・投稿サイト設定を選びます">投稿</button>
-  <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
-  <button id="exportPagePdf"${pdfHidden} title="開いている話だけを、作品の［PDF出力］と同じ組み方で印刷用のファイルにし、ブラウザで開きます（紙・余白は前回の［PDF出力］の設定）。ブラウザの印刷で「PDFに保存」を選ぶと PDF になります。合本ではカーソルのある話だけです">PDF（この話）</button>
-  <button id="exportVoice"${pdfHidden} title="（試作・テスト中）この話を人物の声で読み、MP3 の音声ファイルに書き出します。読み上げの段の［声］で人物の声（AivisSpeech か VOICEVOX）を選んでおいてください。声のライセンスと注意書きも一緒に置きます。置き場は作品の .aiwriter/exports/音声/ です。本文は書き換えません">音声に書き出す</button>
+  <button id="posting" aria-haspopup="menu">投稿</button>
+  <button id="aloudToggle">読み上げ</button>
+  <button id="exportPagePdf"${pdfHidden}>PDF（この話）</button>
+  <button id="exportVoice"${pdfHidden} title="本文は書き換えません">音声に書き出す</button>
 </div>
 
 <div id="rowAssist" class="tray" data-tray="assist">
-  <button id="proof" aria-haspopup="menu" title="この話の校正（誤字脱字・推敲・表記ゆれ・まとめて校正）を選んで走らせます。校正・メモパネルもここから開けます">校正</button>
-  <button id="episodePlot" title="この話の単話プロットを右の列に開きます。無ければ作るかを訊きます。前後の話へ移ると、右の単話プロットもその話のものに切り替わります">単話プロット</button>
+  <button id="proof" aria-haspopup="menu">校正</button>
+  <button id="episodePlot">単話プロット</button>
   <div class="sep"></div>
   <button id="ruby" title="選んだ文字にルビを振ります">ルビ</button>
-  <button id="emph" title="選んだ文字に傍点を付けます（傍点の付いた所なら外します）">傍点</button>
+  <button id="emph">傍点</button>
 </div>
 
 <div id="rowView" class="tray" data-tray="view">
@@ -1075,13 +1075,13 @@ body.clipped #cheer { white-space: normal; }
   <button id="smaller" title="文字を小さく">ー</button>
   <button id="bigger" title="文字を大きく">＋</button>
   <div class="sep note-only"></div>
-  <button id="noteStyle" class="note-only" title="noteの読み味に近い組版（幅・行間・書体）で表示します。もう一度押すと、いつもの表示に戻ります">note風</button>
-  <button id="notePv" class="note-only" title="noteに貼ったときの見た目を出します。noteに無い記法には印が付きます">貼り付け後</button>
+  <button id="noteStyle" class="note-only">note風</button>
+  <button id="notePv" class="note-only">貼り付け後</button>
 </div>
 
 <div id="aloud">
-  <button id="aloudPlay" title="カーソルのある文から読み上げます。読んでいる最中に押すと一時停止します">▶ 読む</button>
-  <button id="aloudStop" title="読み上げを終えます">■ 終える</button>
+  <button id="aloudPlay">▶ 読む</button>
+  <button id="aloudStop">■ 終える</button>
   <label class="pick">速さ
     <select id="aloudRate" title="読み上げの速さ。変えると次の文から効きます（設定には残しません）">
       <option value="0.5">0.5</option>
@@ -1095,7 +1095,7 @@ body.clipped #cheer { white-space: normal; }
     </select>
   </label>
   <label class="pick">声
-    <select id="aloudEngine" title="OSの声で読むか、手元の音声合成のエンジン（AivisSpeech か VOICEVOX）で人物ごとに声を変えて読むかを選びます。人物の声は試作で、テスト中の機能です">
+    <select id="aloudEngine" title="OSの声で読むか、手元の音声合成のエンジン（AivisSpeech か VOICEVOX）で人物ごとに声を変えて読むかを選びます">
       <option value="os">OSの声</option>
       <option value="aivisspeech">人物の声（AivisSpeech）【試作・テスト中】</option>
       <option value="voicevox">人物の声（VOICEVOX）【試作・テスト中】</option>
@@ -1104,14 +1104,14 @@ body.clipped #cheer { white-space: normal; }
   <label class="pick os-only">
     <select id="aloudVoice" title="読み上げに使う声。この端末に入っている日本語の声だけが並びます"></select>
   </label>
-  <button id="aloudVoiceAssign" class="engine-only" title="（試作・テスト中）語り手（地の文）・台詞の既定・人物ごとの声を、エンジンの話者から選びます。作品ごとに覚えます">声の割り当て</button>
-  <button id="aloudCastRun" class="engine-only" title="（試作・テスト中）この話の台詞ごとに、誰が言ったかと気持ち（喜び・怒りなど）をAIが推定します。本文は書き換えません">台詞の話者と感情（AI）</button>
-  <button id="aloudCastOpen" class="engine-only" title="（試作・テスト中）台詞ごとの話者と感情の一覧を開きます。直した行は、推定し直しても残ります">台詞の一覧</button>
-  <button id="aloudVoiceExport" class="engine-only" title="（試作・テスト中）この話を人物の声で読み、MP3 の音声ファイルに書き出します。声のライセンスと注意書きも一緒に置きます。置き場は作品の .aiwriter/exports/音声/ です。本文は書き換えません">音声に書き出す</button>
+  <button id="aloudVoiceAssign" class="engine-only">声の割り当て</button>
+  <button id="aloudCastRun" class="engine-only" title="本文は書き換えません">台詞の話者と感情（AI）</button>
+  <button id="aloudCastOpen" class="engine-only">台詞の一覧</button>
+  <button id="aloudVoiceExport" class="engine-only" title="本文は書き換えません">音声に書き出す</button>
   <span id="aloudCast" class="engine-only"></span>
-  <button id="aloudMark" title="いま読んでいる文の上にメモの印を置いて、一時停止します">⚑ 引っかかった</button>
-  <button id="aloudDictRun" title="この話の中で、読みが2通りある語（十分・音・一日など）をAIが確かめ、読み上げの読みを直します。本文は書き換えません">読みを確かめる（AI）</button>
-  <button id="aloudDictOpen" title="読みの辞書の一覧を開きます。読みを直したり、項目を消したりできます">読みの一覧</button>
+  <button id="aloudMark">⚑ 引っかかった</button>
+  <button id="aloudDictRun" title="本文は書き換えません">読みを確かめる（AI）</button>
+  <button id="aloudDictOpen">読みの一覧</button>
   <span id="aloudDict"></span>
   <span id="aloudNote"></span>
 </div>
@@ -1149,7 +1149,7 @@ body.clipped #cheer { white-space: normal; }
   <button id="next" title="次の話を開きます。最終話に本文があれば、次の話を作って開きます">次の話 →</button>
   <div class="sep"></div>
   <button id="latest" title="いちばん新しい話を開きます。白紙でなければ、次の話を作って開きます">最新話</button>
-  <button id="saveCheck" data-keys title="打った字を原稿へ送ってから保存し、保存できたかを確かめます（Ctrl+S と違い、保存できなかったときに知らせます）">保存</button>
+  <button id="saveCheck" data-keys>保存</button>
 </div>
 
 <div id="foot">

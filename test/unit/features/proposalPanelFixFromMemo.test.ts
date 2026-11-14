@@ -312,6 +312,38 @@ describe("修正案のある指摘は、［直す］1回で本文へ当たる", 
   });
 });
 
+describe("読み間違いの見込み（設計書6.42.5）の［ここにルビを振る］", () => {
+  test("［適用］と同じ道で、その場所の語にルビが入る（親文字には当たらない）", async () => {
+    text = "　｜彼《かれ》と彼が走つた。\n";
+    const row: Finding & { line: number; filePath: string } = {
+      id: findingId(FILE, "と彼が走つた。", "彼", "｜彼《かれ》", "other", "読み間違いの見込み"),
+      time: new Date().toISOString(),
+      file: FILE,
+      hintLine: 1,
+      original: "と彼が走つた。",
+      target: "彼",
+      suggestion: "｜彼《かれ》",
+      before: "",
+      after: "",
+      message: "「彼」を、声のエンジンは「ヒ」と読みそうです。正しい読みは「かれ」（第1話のルビ）。",
+      category: "other",
+      label: "読み間違いの見込み",
+      line: 1,
+      filePath: FILE_PATH,
+    };
+    const { line: _line, filePath: _filePath, ...stored } = row;
+    await new FindingStore(work).record([stored]);
+
+    const outcome = await applyFindingFromMemo(work, newPanel(), row);
+
+    expect(outcome).toEqual({ ok: true });
+    expect(text).toBe("　｜彼《かれ》と｜彼《かれ》が走つた。\n");
+    expect(writes.count).toBe(1);
+    const decided = (await new FindingStore(work).load()).find((item) => item.id === row.id);
+    expect(decided?.status).toBe("accepted");
+  });
+});
+
 describe("［戻す］で元へ戻ると、両方の画面にまた並ぶ", () => {
   test("校正・メモパネルの［戻す］で、本文も置き場も戻る", async () => {
     const panel = newPanel();

@@ -105,7 +105,7 @@ async function runNotationCheck(page: Page, frame: Frame): Promise<number> {
   expect(row.label).toContain("たくさん");
   await toggleQuickPickRow(page, row.label);
   await acceptQuickPick(page);
-  // 1組だけなので「1組ずつ選ぶ」の画面になる
+  // 1組だけなので「1組ずつ決める」の画面になる
   await waitForQuickPick(page, `${row.label} — どちらに揃えますか`);
   await pickQuickPickRow(page, "「たくさん」に揃える");
   return focusedGroup;

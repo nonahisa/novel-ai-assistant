@@ -304,7 +304,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   <div id="syncActions"></div>
   <div id="advice" hidden>
     <h2>AIと相談しながら組み立てる</h2>
-    <div class="note">考えていることを書いて送ると、AIが編集者として問いを返します（AIを使う）。プロットへの書き込み案が出たときは、［この案をプロットに書く］を押したときだけ書きます。会話はこの画面を閉じると消えます。</div>
+    <div class="note">会話はこの画面を閉じると消えます。</div>
     <div id="adviceLog"></div>
     <div id="adviceStatus"></div>
     <div id="adviceForm">

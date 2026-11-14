@@ -19,7 +19,7 @@
  */
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { FAKE_SPEAKERS, pcmWav, type FakeEngineTerms } from "../../unit/support/fakeVoiceEngine";
+import { FAKE_SPEAKERS, fakeAccentPhrases, pcmWav, type FakeEngineTerms } from "../../unit/support/fakeVoiceEngine";
 
 export { FAKE_ACML_TEXT, FAKE_SPEAKERS, fakeAivmModels } from "../../unit/support/fakeVoiceEngine";
 
@@ -65,6 +65,11 @@ export interface FakeVoiceEngineOptions {
   synthesisDelayMs?: number;
   /** 話者の一覧（省けば `FAKE_SPEAKERS`）。声を選ぶ窓の区切りを分けて見せる件が、uuid の違う話者を並べる */
   speakers?: unknown[];
+  /**
+   * 語 → カタカナ（単体テストの偽のエンジンの `fakeAccentPhrases` と同じ）。渡すと audio_query が
+   * モーラを返す（表に無い漢字は読めない）。読み間違いの見込み（設計書6.42.5）の件だけが使う
+   */
+  readings?: Record<string, string>;
 }
 
 /** 偽のエンジンを立てる */
@@ -121,7 +126,10 @@ export async function startFakeVoiceEngine(options: FakeVoiceEngineOptions = {})
       }
       if (url.pathname === "/audio_query") {
         return json({
-          accent_phrases: [],
+          // 語ごとの読み（読み間違いの見込みの件。設計書6.42.5）。渡さなければ今までどおり空
+          accent_phrases: options.readings
+            ? fakeAccentPhrases(url.searchParams.get("text") ?? "", options.readings)
+            : [],
           speedScale: 1,
           pitchScale: 0,
           intonationScale: 1,

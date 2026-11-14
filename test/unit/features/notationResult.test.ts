@@ -164,13 +164,13 @@ describe("0件のとき、理由を言い分ける", () => {
     expect(text).toContain("もう一度");
   });
 
-  it("すべて「この組は揃えない」を選んだ", () => {
+  it("すべて「どちらも直さない」を選んだ", () => {
     const text = describeNotationResult(
       result({ selectedCount: 5, unifiedCount: 0 }),
       shown()
     );
     expect(text).toContain("5組");
-    expect(text).toContain("揃えない");
+    expect(text).toContain("直さない");
   });
 
   /*

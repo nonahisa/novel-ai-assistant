@@ -201,19 +201,6 @@ export interface ActionGroup {
  * 「AIを使う」ものには usesAI を立てる。文言ではなく印で示すのは、
  * 一覧を眺めたときに料金の発生する操作だけが浮き上がるようにするため。
  */
-/**
- * AIを呼ばない操作の、名前の右に出す薄字（`description`）。**1か所で持つ**。
- *
- * 狭いサイドバー（約240px）では、9字の名前の右に残る幅が全角3字ぶんほどしか無く、
- * 薄字は右から省略される（実機確認リスト 608、2026-10-09）。
- *
- * **薄字の付く操作の名前は短くしておく。** 作業メニューは VS Code 本体が描く木で、
- * 拡張機能から折り返しを指定できない。9字の「執筆再開用資料生成」「章見出しから
- * 章立て」は 240px で薄字が枠をはみ出したので、「再開用資料」「章見出し反映」へ
- * 縮めた（作者の裁定、2026-10-11。E2E `actionListNoAiNarrow` が見張る）。
- */
-export const NO_AI_DESCRIPTION = "AI不要";
-
 export const ACTION_TREE: readonly ActionGroup[] = [
   {
     kind: "group",
@@ -456,7 +443,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             command: "novelai.convertDocxToMarkdown",
             label: "Word 原稿変換",
             note: "docx をまとめて変換",
-            description: NO_AI_DESCRIPTION,
             icon: "file-code",
             // 作品の外にある .docx も変換できる（登録前の原稿がふつう）
             requiresWork: false,
@@ -958,7 +944,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         kind: "action",
         command: "novelai.openPlotMode",
         label: "プロットモード",
-        description: NO_AI_DESCRIPTION,
         icon: "book",
         requiresWork: true,
         detail:
@@ -1004,7 +989,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         kind: "action",
         command: "novelai.createEpisodePlot",
         label: "単話プロット作成",
-        description: NO_AI_DESCRIPTION,
         icon: "checklist",
         requiresWork: true,
         detail:
@@ -1182,9 +1166,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.openChat",
-            // 名前は「AIに相談」にそろえ、開き方は説明欄で（作者の判断 2026-11-02）
+            // 名前は「AIに相談」（本文の右クリックと同じ）。大きく開くほうは名前で分ける
+            // （作者の判断 2026-11-14。副ラベルでは見分けない）
             label: "AIに相談",
-            description: "横に開く",
             icon: "comment-discussion",
             // 開くだけで作品は要らない（作品を選ぶのは相談の中）
             requiresWork: false,
@@ -1208,11 +1192,10 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             // 「AIに相談する」とだけ書いてあったので、押すと本文の領域に
             // 大きく開くことが読めなかった——`package.json` のコマンド名は
             // はじめから「AIに相談する（大きく開く）」で、こちらだけがずれていた。
-            // **名前は「AIに相談」にそろえ、開き方は説明欄で言う**（作者の判断
-            // 2026-11-02。横に開く入口・原稿の右クリックと同じ名前にする）
-            label: "AIに相談",
-            note: "大きく開く",
-            description: "大きく開く",
+            // **開き方は名前で言う**（作者の判断 2026-11-14。2026-11-02 に同じ名前へ
+            // そろえて副ラベルで分けたが、副ラベルは置かない決まりになった）。
+            // `package.json` の title「AIに相談（大きく開く）」と同じ
+            label: "AIに相談（大きく開く）",
             icon: "comment-discussion",
             // **詳細メニューには出さない**（作者の指定、2026-09-03。
             // 横のパネルの「メインに表示」ボタンが入口。簡単ステップメニューには残る）。
@@ -1266,7 +1249,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.resumeWriting",
             label: "再開用資料",
-            description: NO_AI_DESCRIPTION,
             icon: "debug-continue",
             requiresWork: true,
             detail:
@@ -1297,7 +1279,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.chaptersFromHeadings",
             label: "章見出し反映",
-            description: NO_AI_DESCRIPTION,
             icon: "list-tree",
             requiresWork: true,
             detail:
@@ -1315,7 +1296,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             // 「取込」は外から持ち込む操作の言い方（バックアップ取込・編集部提案取込）
             label: "章立て取込",
             note: "バックアップから",
-            description: NO_AI_DESCRIPTION,
             icon: "list-tree",
             requiresWork: true,
             detail:
@@ -1334,7 +1314,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             // 「シーンメモ一覧」、2026-09-23 問13 B）。付箋だけでなく校正の
             // 指摘（6.96）も位置順に並べる画面になったので、中身に名前を合わせた
             label: "校正・メモパネルを開く",
-            description: NO_AI_DESCRIPTION,
             icon: "note",
             // **詳細メニューには出さない**（作者の裁定、2026-09-23 問5 A）。
             // 原稿エディターの右クリックと、簡単ステップメニューの
@@ -1372,7 +1351,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.unifyEol",
             label: "改行コード統一",
-            description: NO_AI_DESCRIPTION,
             icon: "list-selection",
             requiresWork: true,
             detail:
@@ -1386,7 +1364,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.convertToUtf8",
             label: "原稿 UTF-8 変換",
-            description: NO_AI_DESCRIPTION,
             icon: "file-binary",
             requiresWork: true,
             detail:
@@ -1426,7 +1403,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             command: "novelai.readManuscriptAloud",
             label: "原稿読み上げ",
             note: "音読推敲",
-            description: NO_AI_DESCRIPTION,
             icon: "unmute",
             // **詳細メニューには出さない**（作者の裁定、2026-09-23 問5 A）。
             // 原稿エディターの上の列の［出力］→［読み上げ］が同じ入口。コマンドパレット
@@ -1814,7 +1790,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.importOutboxInbox",
             label: "原稿箱を取り込む",
-            description: NO_AI_DESCRIPTION,
             icon: "inbox",
             requiresWork: true,
             detail:
@@ -1835,7 +1810,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.pruneFindings",
             label: "期限切れ指摘消去",
-            description: NO_AI_DESCRIPTION,
             icon: "trash",
             requiresWork: true,
             detail:
@@ -2088,7 +2062,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.postNewEpisode",
             label: "新話投稿",
-            description: NO_AI_DESCRIPTION,
             icon: "rocket",
             requiresWork: true,
             detail:
@@ -2103,7 +2076,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.configurePostingSites",
             label: "投稿サイト設定",
-            description: NO_AI_DESCRIPTION,
             icon: "settings-gear",
             requiresWork: true,
             detail:
@@ -2119,7 +2091,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.recordRanking",
             label: "ランキング記録",
-            description: NO_AI_DESCRIPTION,
             icon: "graph",
             requiresWork: true,
             detail:
@@ -2134,7 +2105,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.importReaderStats",
             label: "読者反応自動取込",
-            description: NO_AI_DESCRIPTION,
             icon: "clippy",
             requiresWork: true,
             // 「〜ない」で終わる断りは、相談へ渡す束にも残る（`featureGuide` の
@@ -2149,7 +2119,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.recordReaderStats",
             label: "読者反応手動入力",
-            description: NO_AI_DESCRIPTION,
             icon: "heart",
             requiresWork: true,
             detail:
@@ -2175,7 +2144,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.generateSettingsDocs",
             label: "設定資料集出力",
-            description: NO_AI_DESCRIPTION,
             icon: "export",
             requiresWork: true,
             detail:
@@ -2188,7 +2156,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.exportSettingsForAudience",
             label: "提供先別出力",
-            description: NO_AI_DESCRIPTION,
             icon: "mail",
             requiresWork: true,
             detail:
@@ -2203,7 +2170,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             kind: "action",
             command: "novelai.exportImeDictionary",
             label: "IME辞書出力",
-            description: NO_AI_DESCRIPTION,
             icon: "symbol-keyword",
             requiresWork: true,
             // 書き出したあと取り込むのは作者の手作業で、自動化する手段が
@@ -2234,7 +2200,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         command: "novelai.exportPdf",
         label: "PDF出力",
         note: "印刷用",
-        description: NO_AI_DESCRIPTION,
         icon: "file-pdf",
         requiresWork: true,
         detail:
@@ -2251,7 +2216,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         command: "novelai.openEpubEditor",
         label: "EPUBエディター",
         note: "試作",
-        description: NO_AI_DESCRIPTION,
         icon: "book",
         requiresWork: true,
         detail:
@@ -2268,7 +2232,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
         command: "novelai.exportEpub",
         label: "EPUB出力",
         note: "試作",
-        description: NO_AI_DESCRIPTION,
         icon: "book",
         requiresWork: true,
         // **エディター内の書き出しボタンに一本化**（作者の指定、
@@ -2413,7 +2376,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             // 2026-09-23 問11 B）。場所・組織などへ広げるのは別の作業で、
             // それまでは説明に「いまは人物だけ」と書いて名前と中身のずれを隠さない
             label: "設定資料更新分反映",
-            description: "承認制",
             icon: "check-all",
             requiresWork: true,
             counter: "pendingUpdates",

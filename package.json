@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1177,6 +1177,11 @@
         "category": "統合小説執筆環境"
       },
       {
+        "command": "novelai.checkVoiceMisreadings",
+        "title": "読み間違いを調べる",
+        "category": "統合小説執筆環境"
+      },
+      {
         "command": "novelai.convertToMarkdown",
         "title": "本文 .md 化",
         "category": "統合小説執筆環境",
@@ -1793,6 +1798,11 @@
           "group": "1_actions@5"
         },
         {
+          "command": "novelai.checkVoiceMisreadings",
+          "when": "view == novelai.works && viewItem =~ /^episode-/ && !novelai.editorMode && !novelai.processesBlocked",
+          "group": "1_actions@6"
+        },
+        {
           "command": "novelai.copySubtitle",
           "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "2_copy@1"
@@ -1916,6 +1926,10 @@
         {
           "command": "novelai.exportVoiceAudio",
           "when": "false"
+        },
+        {
+          "command": "novelai.checkVoiceMisreadings",
+          "when": "!novelai.editorMode && !novelai.processesBlocked"
         },
         {
           "command": "novelai.proposeEditByHand",

@@ -502,13 +502,12 @@ async function pickDecisionMode(
   return pickWithMemory<DecisionMode>({
     items: [
       {
-        label: "$(check-all) 多い方の表記に揃える",
-        detail: `${count}組すべてを、本文に多く出ているほうへ揃えます。1回で決まります`,
+        // 説明の行は置かない（設計書6.82.1）。名前で言い切る
+        label: "$(check-all) 多いほうへまとめて揃える",
         value: "majority",
       },
       {
-        label: "$(list-ordered) 1組ずつ選ぶ",
-        detail: `${count}回聞かれます。少ないほうへ揃えたい組があるときはこちら`,
+        label: "$(list-ordered) 1組ずつ決める",
         value: "each",
       },
       cancelItem(),
@@ -574,19 +573,19 @@ async function pickTargetForm(
     0
   );
 
-  const items: Array<{ label: string; description: string; keep: string | null }> =
+  const items: Array<{ label: string; description?: string; keep: string | null }> =
     group.kind === "digit_width"
       ? digitWidthItems(group)
       : group.forms.map((form) => ({
           label: `「${form.surface}」に揃える`,
-          description: `${form.surface} は ${form.occurrences.length}回。他の ${
+          // 数だけ置く。「書き換える候補として出します」は全行同じなので言わない
+          description: `${form.occurrences.length}回（他に${
             total - form.occurrences.length
-          }箇所を書き換える候補として出します`,
+          }箇所）`,
           keep: form.surface,
         }));
   items.push({
-    label: "$(close) この組は揃えない",
-    description: "意図して使い分けている場合",
+    label: "$(close) どちらも直さない",
     keep: null,
   });
 
@@ -595,7 +594,7 @@ async function pickTargetForm(
     placeHolder: "選んだ表記に合わせる指摘を作ります（自動では書き換えません）",
     ignoreFocusOut: true,
   });
-  // 取りやめ（undefined）は「残りも見ない」。「この組は揃えない」（null）とは別
+  // 取りやめ（undefined）は「残りも見ない」。「どちらも直さない」（null）とは別
   if (!picked || !("keep" in picked)) return undefined;
   return picked.keep;
 }
@@ -608,20 +607,17 @@ async function pickTargetForm(
  */
 function digitWidthItems(
   group: NotationVariantGroup
-): Array<{ label: string; description: string; keep: string | null }> {
+): Array<{ label: string; description?: string; keep: string | null }> {
   const { half, full } = digitWidthCounts(group);
   return [
     {
       label: "$(arrow-right) 全角に揃える（１２３…）",
-      description: `半角の ${half}箇所を、それぞれの全角へ書き換える候補として出します（縦書きで寝ません）`,
+      description: `半角 ${half}箇所`,
       keep: DIGIT_WIDTH_FULL,
     },
     {
       label: "$(arrow-left) 半角に揃える（123…）",
-      description:
-        full > 0
-          ? `全角の ${full}箇所を、それぞれの半角へ書き換える候補として出します`
-          : "全角の箇所がないので、書き換える候補は出ません",
+      description: `全角 ${full}箇所`,
       keep: DIGIT_WIDTH_HALF,
     },
   ];
@@ -776,7 +772,7 @@ export function describeNotationResult(
   }
   if (result.unifiedCount === 0) {
     return (
-      `選んだ${result.selectedCount ?? 0}組は、すべて「この組は揃えない」になりました。` +
+      `選んだ${result.selectedCount ?? 0}組は、すべて「どちらも直さない」になりました。` +
       "指摘は作られていません。"
     );
   }

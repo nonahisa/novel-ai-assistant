@@ -189,7 +189,7 @@ describe("［詳しく］で外した行を開く", () => {
     });
     const labels = calls[0].items.map((item) => item.label);
     const cancel = labels.findIndex((label) => label.includes("取りやめる"));
-    expect(labels[cancel + 1]).toBe("$(info) 詳しく");
+    expect(labels[cancel + 1]).toBe("$(info) 詳しく（モデル・料金）");
     expect(labels.some((label) => label.includes("使うモデル"))).toBe(false);
 
     const plain = picking(() => undefined);
@@ -218,13 +218,13 @@ describe("［詳しく］で外した行を開く", () => {
     expect(heading).toBeGreaterThan(labels.indexOf("Claude（有料）で送ります"));
     expect(labels).toContain("使うモデル：claude-sonnet-5-5");
     // 開いたあとは［詳しく］の項目を外す（押しても何も変わらない項目を残さない）
-    expect(labels).not.toContain("$(info) 詳しく");
+    expect(labels).not.toContain("$(info) 詳しく（モデル・料金）");
   });
 
   test("［詳しく］は押せる項目ではない（覚え書きにも残らない）", async () => {
     const calls = picking(() => undefined);
     await confirmRun("プロットの相談を実行しますか", "実行", { more });
-    const item = calls[0].items.find((entry) => entry.label === "$(info) 詳しく");
+    const item = calls[0].items.find((entry) => entry.label === "$(info) 詳しく（モデル・料金）");
     expect(item?.button).toBeUndefined();
   });
 });

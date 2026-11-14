@@ -390,6 +390,16 @@ describe("済んだあとの報告", () => {
     expect(text).toContain("1か所は最後まで通りませんでした");
   });
 
+  /** 止まったことを先に書く（2026-11-03 の決まり。2026-11-14 の作者の実機で読み飛ばされた） */
+  test("止まった所があれば、済んだことより先に書く", () => {
+    const text = describeOutcomes([
+      { plan, committed: true, pulled: true, pushed: true },
+      { plan, committed: false, pulled: false, pushed: false, error: "大きすぎる" },
+    ]);
+    expect(text.startsWith("1か所は最後まで通りませんでした。")).toBe(true);
+    expect(text).toContain("記録 1か所・取り込み 1か所・送信 1か所を済ませました。");
+  });
+
   test("何も無ければ、そう書く", () => {
     expect(describeOutcomes([])).toBe("同期するものはありませんでした。");
   });
@@ -542,8 +552,9 @@ describe("記録の結果を、次の手順へ翻訳する", () => {
   });
 
   test("理由が分からなくても、黙って止まらない", () => {
+    // 空の理由は出さず、ログの在りかを言う（設計書5.5.21）
     expect(afterCommit({ ok: false })).toMatchObject({
-      error: "記録できませんでした: （詳細なし）",
+      error: "記録できませんでした: git が理由を出さずに止まりました（詳しくはログにあります）",
     });
   });
 });

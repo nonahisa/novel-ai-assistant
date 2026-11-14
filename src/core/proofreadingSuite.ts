@@ -35,8 +35,6 @@ export interface ProofreadingCheck {
   readonly label: string;
   /** 実際に走らせるコマンド。処理はここでは持たない */
   readonly command: string;
-  /** 選択画面に添える1行の説明 */
-  readonly detail: string;
   /**
    * AIへ本文を送るか。
    *
@@ -84,7 +82,6 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     id: "notation",
     label: "表記ゆれ",
     command: "novelai.checkNotation",
-    detail: "同じ語が2通りで書かれている箇所を探します（AIを使いません）。",
     inSuite: true,
     usesAI: false,
     category: "表記ゆれ",
@@ -93,7 +90,6 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     id: "typos",
     label: "誤字脱字",
     command: "novelai.checkTypos",
-    detail: "誤変換・脱字など、明らかな入力ミスをAIで探します。",
     inSuite: true,
     usesAI: true,
     category: "誤字脱字",
@@ -102,7 +98,6 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     id: "proofread",
     label: "推敲",
     command: "novelai.checkProofread",
-    detail: "読みにくい箇所だけをAIで指摘します。",
     inSuite: true,
     usesAI: true,
     category: "推敲",
@@ -112,7 +107,6 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     id: "opening",
     label: "冒頭診断",
     command: "novelai.checkOpening",
-    detail: "第1話の冒頭だけを見て、伝わり方と引きを診断します。",
     inSuite: false,
     usesAI: true,
   },
@@ -120,7 +114,6 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     id: "deviations",
     label: "プロット逸脱",
     command: "novelai.checkDeviations",
-    detail: "プロットと本文を照らし、外れた展開や停滞を探します。",
     inSuite: true,
     usesAI: true,
     category: "プロット逸脱",
@@ -129,7 +122,6 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     id: "contradictions",
     label: "矛盾",
     command: "novelai.checkContradictions",
-    detail: "設定資料と本文の食い違いを探します。",
     inSuite: true,
     usesAI: true,
     category: "矛盾",
@@ -138,7 +130,6 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     id: "foreshadows",
     label: "伏線の検知",
     command: "novelai.checkForeshadows",
-    detail: "後の展開を示唆している記述を探し、登録の候補にします。",
     inSuite: false,
     usesAI: true,
     category: "伏線の候補",

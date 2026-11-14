@@ -147,8 +147,9 @@ describe("開いたときの点検：結果は変えずに git の本数を数�
     expect(shown.join("\n")).toContain("送信 1か所");
     expect([...refreshed].sort()).toEqual(["w0", "w1"]);
     expect(calls.filter((c) => c === "push")).toHaveLength(1);
-    // 直す前は 18 本（根の確かめの重ね＋fetch のあとの丸ごと読み直し）
-    expect(calls).toHaveLength(13);
+    // 直す前は 18 本（根の確かめの重ね＋fetch のあとの丸ごと読み直し）。送る前の
+    // 大きさの検査（HEAD と送る記録の道。設計書5.5.21）の2本が、送る置き場にだけ足される
+    expect(calls).toHaveLength(15);
   });
 
   test("取り込むものがある：取り込んで、全作品を作り直す", async () => {

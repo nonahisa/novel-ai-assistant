@@ -37,11 +37,8 @@ describe("矛盾検知の入口", () => {
       "settings",
       "facts",
     ]);
-    // 両方は、AIを2回呼ぶことと、確認が2回出ることを先に言う
-    const both = CONTRADICTION_ROUTE_CHOICES[0];
-    expect(both.detail).toContain("2回");
-    expect(both.detail).toContain("足し算");
-    expect(both.detail).toContain("確認");
+    // 説明の行は置かない（設計書6.82.1）。「両方」が先頭で、並びが足し算を表す
+    expect(CONTRADICTION_ROUTE_CHOICES[0].label).toContain("両方");
   });
 
   test("選んだ道を返し、閉じたら何も返さない", async () => {

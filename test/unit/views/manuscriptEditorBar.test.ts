@@ -62,7 +62,8 @@ describe("上の列（1段目）", () => {
       const tag = new RegExp(`<button id="${id}"[^>]*>`).exec(block("bar"))?.[0] ?? "";
       expect(tag, id).toContain(`data-tray="${tray}"`);
       expect(tag, id).toContain('aria-expanded="false"');
-      expect(tag, id).toContain("title=");
+      // 段の中身の一覧は、開けばボタンが並ぶので title では言わない（設計書6.82.1）
+      expect(tag, id).not.toContain("title=");
     }
   });
 });
@@ -231,8 +232,9 @@ describe("バックアップから・PDF（この話）（0.150.0）", () => {
       expect(tag, id).not.toContain('class="soon"');
       expect(tag, id).not.toContain("次の版で入ります");
     }
-    expect(new RegExp('<button id="importBackup"[^>]*>').exec(markup)?.[0]).toContain("最後に加える");
-    expect(new RegExp('<button id="exportPagePdf"[^>]*>').exec(markup)?.[0]).toContain("PDFに保存");
+    // 何が起きるかは、押したあとの窓で言う。ボタンの title は置かない（設計書6.82.1）
+    expect(new RegExp('<button id="importBackup"[^>]*>').exec(markup)?.[0]).not.toContain("title=");
+    expect(new RegExp('<button id="exportPagePdf"[^>]*>').exec(markup)?.[0]).not.toContain("title=");
     // 次の版で作る入口は、いまは1つも無い
     expect(markup).not.toContain('class="soon"');
   });
@@ -261,9 +263,9 @@ describe("バックアップから・PDF（この話）（0.150.0）", () => {
     const browser = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", undefined, {
       canRunProcesses: false,
     });
-    expect(new RegExp('<button id="exportPagePdf"[^>]*>').exec(browser)?.[0]).toContain(" hidden ");
+    expect(new RegExp('<button id="exportPagePdf"[^>]*>').exec(browser)?.[0]).toMatch(/ hidden\b/);
     // 人物の声は手元のエンジンへ繋ぐので、［出力］の［音声に書き出す］もブラウザ版では隠す（実装ルール7）
-    expect(new RegExp('<button id="exportVoice"[^>]*>').exec(browser)?.[0]).toContain(" hidden ");
+    expect(new RegExp('<button id="exportVoice"[^>]*>').exec(browser)?.[0]).toMatch(/ hidden\b/);
     expect(new RegExp('<button id="exportVoice"[^>]*>').exec(html)?.[0]).not.toContain("hidden");
     // バックアップからはブラウザ版でも使える（番号ずらしだけを中で並べない。0.147.0 と同じ）
     expect(new RegExp('<button id="importBackup"[^>]*>').exec(browser)?.[0]).not.toContain("hidden");
@@ -316,7 +318,8 @@ describe("［入力］の取り込み（テキストファイル・Word。0.147.
       const tag = new RegExp(`<button id="${id}"[^>]*>`).exec(markup)?.[0] ?? "";
       expect(tag, id).not.toContain('class="soon"');
       expect(tag, id).not.toContain("次の版で入ります");
-      expect(tag, id).toContain("最後に加える");
+      // 上書きの確認は押したあとの窓で訊く。ボタンの title は置かない（設計書6.82.1）
+      expect(tag, id).not.toContain("title=");
     }
   });
 });

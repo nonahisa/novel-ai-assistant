@@ -394,8 +394,8 @@ body.show-low .issue.low { display: flex; }
 <div id="toolbar">
   <span class="title" id="category">誤字脱字</span>
   <span class="count" id="count">0件</span>
-  <button class="secondary" id="applyAll" title="確信度が「高」「中」で、修正案のあるものだけが対象です">まとめて適用</button>
-  <button class="secondary" id="approveExternal" title="外部AI（Claude Code など）から届いた設定資料の提案だけを、中身を見てからまとめて承認します">外部AIの提案をまとめて確かめる</button>
+  <button class="secondary" id="applyAll">まとめて適用</button>
+  <button class="secondary" id="approveExternal">外部AIの提案をまとめて確かめる</button>
   <span class="running" id="running"></span>
   <label><input type="checkbox" id="showLow"> 確信度が低いものも表示</label>
   <button class="secondary" id="clear" title="この分類の一覧を空にします（本文は書き換わりません）">一覧を空にする</button>
@@ -407,7 +407,7 @@ body.show-low .issue.low { display: flex; }
   「別の機能を実行してください」と言っているように読めた（実機確認 2026-09-05）。
   分類ごとの対応表を持つと、分類が増えるたびに更新漏れが起きるので持たない。
 -->
-<div id="empty">まだ検知結果がありません。この分類の検知を実行すると、ここに指摘が並びます。</div>
+<div id="empty">指摘はありません</div>
 <div id="list"></div>
 <!--
   当てたもの（作者の裁定 2026-10-04）。出先で当てた分も、パソコンで当てた分も、
@@ -1045,7 +1045,7 @@ function renderContradiction(item) {
         // 矛盾検知は「意図した違和感」も食い違いとして拾うので、
         // そこから伏線の台帳へ移せるようにする。プロット逸脱には出ない
         (item.canRegisterForeshadow
-          ? '<button class="secondary" data-action="registerForeshadow" data-id="' + item.id + '" title="この食い違いは矛盾ではなく、意図して置いた伏線だった場合に登録します"' + disabled + '>伏線として登録</button>'
+          ? '<button class="secondary" data-action="registerForeshadow" data-id="' + item.id + '"' + disabled + '>伏線として登録</button>'
           : '') +
         // **本文を直したあと、食い違いが残っているかを確かめる**（作者の依頼、
         // 2026-08-27）。矛盾には修正案が無いので、直したかどうかは
@@ -1056,7 +1056,7 @@ function renderContradiction(item) {
           // 本文だけを見るため）。できないことを謳うと、直したのに
           // 直っていないと言われた形になる。設定側の解決を見るには
           // 再チェックへ現在の設定を添える改修（P-23の変更）が要る
-          ? '<button class="secondary" data-action="recheck" data-id="' + item.id + '" title="本文を書き直したあと、この食い違いが解消したかを確かめます"' + disabled + '>' +
+          ? '<button class="secondary" data-action="recheck" data-id="' + item.id + '"' + disabled + '>' +
             (item.busy ? '再チェック中…' : '再チェック') + '</button>'
           : '') +
         '</div>'
@@ -1200,7 +1200,7 @@ function renderItem(item) {
         // 修正案の有無を問わず出す——誤字脱字でも「そうじゃない」直し方を
         // することがあり、そのときも解消したかどうかは知りたい
         (item.canRecheck
-          ? '<button class="secondary" data-action="recheck" data-id="' + item.id + '" title="本文を書き直したあと、この指摘が解消したかを確かめます"' + disabled + '>' +
+          ? '<button class="secondary" data-action="recheck" data-id="' + item.id + '"' + disabled + '>' +
             (item.busy ? '再チェック中…' : '再チェック') + '</button>'
           : '') +
         '</div>'
@@ -1210,7 +1210,7 @@ function renderItem(item) {
     // 意見だけの提案は本文を変えていないので、戻すものが無い
     (item.status === 'applied' && !opinion
       ? '<div class="actions">' +
-        '<button class="secondary" data-action="undo" data-id="' + item.id + '" title="本文をこの指摘の前へ戻します">戻す</button>' +
+        '<button class="secondary" data-action="undo" data-id="' + item.id + '">戻す</button>' +
         '</div>'
       : '') +
     '</div>'

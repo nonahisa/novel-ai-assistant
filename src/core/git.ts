@@ -6,6 +6,7 @@ import { isSameLocation } from "./locationCompare";
 // 一巡の使い回し（`SyncStatusBatch`）の鍵。見張り側（`rootKey`）と同じ正規化で
 // そろえ、区切りや大小文字の違いで同じ置き場を割らない
 import { folderKeyForComparison } from "./pathText";
+import { isPushRejected, pickGitFailureReason } from "./gitFailureReason";
 
 /**
  * gitコマンドの薄い層。
@@ -1108,14 +1109,35 @@ function splitNulPaths(stdout: string): string[] {
   return stdout.split("\0").filter((name) => name !== "");
 }
 
+/** 送信の結果 */
+export interface PushResult {
+  ok: boolean;
+  /** git の文の全文。**ログ用**で、画面にはそのまま出さない */
+  detail?: string;
+  /**
+   * 送り先が受け取ったうえで断った（`! [remote rejected]`・`! [rejected]`。設計書5.5.21）。
+   * 回線が無くて届かなかったときは立たない（`isPushRejected`）
+   */
+  rejected?: boolean;
+  /** 画面に出す理由の行（warning・hint を外し、エラーの行を前に出したもの） */
+  reason?: string;
+}
+
 /** 送信する。**必ず作者の操作を起点に呼ぶこと。** */
 export async function push(
   cwd: string,
   run: GitCommandRunner = runGit
-): Promise<{ ok: boolean; detail?: string }> {
+): Promise<PushResult> {
   const result = await run(["push"], cwd, FETCH_TIMEOUT_MS);
   if (result.code === 0) return { ok: true };
-  return { ok: false, detail: describeFailure(result) };
+  const text = `${result.stderr}\n${result.stdout}`;
+  const reason = pickGitFailureReason(text);
+  return {
+    ok: false,
+    detail: describeFailure(result),
+    ...(isPushRejected(text) ? { rejected: true } : {}),
+    ...(reason ? { reason } : {}),
+  };
 }
 
 /**

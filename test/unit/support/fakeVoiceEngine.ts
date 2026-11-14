@@ -153,6 +153,48 @@ export function fakeAivmModels(licenses: { mai?: string | null; kanon?: string |
   };
 }
 
+/**
+ * 偽のエンジンの「読み」（読み間違いの見込みの試験。設計書6.42.5）。
+ *
+ * 語 → カタカナの表を渡すと、`audio_query` の答えに本物と同じ形の `accent_phrases[].moras[].text` を
+ * 入れて返す。表の語は表の読みで、ひらがな・カタカナはそのまま読み、**表に無い漢字は読めない**
+ * （モーラにしない＝読みが抜ける）。読点・句点・感嘆符は休止（`pause_mora`）にして句を区切る。
+ * 小書きの字（ャュョ…）は前の字と1つのモーラにする（本物の「キョ」と同じ）。
+ *
+ * **表を渡さなければ答えの形は今までのまま**（`accent_phrases: [{ text }]`）——ほかの試験を変えない
+ */
+export function fakeAccentPhrases(text: string, readings: Readonly<Record<string, string>>): unknown[] {
+  const words = Object.keys(readings).sort((a, b) => b.length - a.length);
+  const phrases: Array<{ moras: Array<{ text: string }>; pause_mora: { text: string } | null }> = [];
+  let moras: Array<{ text: string }> = [];
+  const pushKana = (kana: string): void => {
+    for (const char of kana) {
+      if ("ァィゥェォャュョヮ".includes(char) && moras.length > 0) moras[moras.length - 1].text += char;
+      else moras.push({ text: char });
+    }
+  };
+  for (let at = 0; at < text.length; ) {
+    const word = words.find((candidate) => text.startsWith(candidate, at));
+    if (word) {
+      pushKana(readings[word]);
+      at += word.length;
+      continue;
+    }
+    const char = text[at];
+    if ("、。！？!?".includes(char)) {
+      phrases.push({ moras, pause_mora: { text: "、" } });
+      moras = [];
+    } else if (/[ぁ-ゖ]/.test(char)) {
+      pushKana(String.fromCharCode(char.charCodeAt(0) + 0x60));
+    } else if (/[ァ-ヶー]/.test(char)) {
+      pushKana(char);
+    }
+    at++;
+  }
+  if (moras.length > 0) phrases.push({ moras, pause_mora: null });
+  return phrases;
+}
+
 export async function startFakeVoiceEngine(
   options: {
     failSynthesis?: boolean;
@@ -179,6 +221,10 @@ export async function startFakeVoiceEngine(
      * 並べて頼んだ後ろの頼みは前の音ができるまで待つ（速さの見張りの試験のため）
      */
     serialSynthesis?: boolean;
+    /** 語 → カタカナ（`fakeAccentPhrases`）。渡すと audio_query がモーラを返す */
+    readings?: Record<string, string>;
+    /** audio_query の答えを、モーラの並びの無い形にする（答えがおかしいときの試験） */
+    brokenAudioQuery?: boolean;
   } = {}
 ): Promise<FakeEngine> {
   const requests: FakeEngineRequest[] = [];
@@ -216,7 +262,11 @@ export async function startFakeVoiceEngine(
         // 本物の答えに似せる（調子の欄と、こちらが触らない欄）
         res.end(
           JSON.stringify({
-            accent_phrases: [{ text: url.searchParams.get("text") }],
+            accent_phrases: options.brokenAudioQuery
+              ? "壊れた答え"
+              : options.readings
+                ? fakeAccentPhrases(url.searchParams.get("text") ?? "", options.readings)
+                : [{ text: url.searchParams.get("text") }],
             speedScale: 1,
             pitchScale: 0,
             intonationScale: 1,

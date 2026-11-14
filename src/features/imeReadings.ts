@@ -17,6 +17,7 @@ import {
   recordImeReadingEntry,
   type CompositionPair,
   type ImeCapture,
+  type NameReading,
 } from "../core/imeReading";
 import { loadImeReadings, updateImeReadings } from "../core/imeReadingStore";
 import { captureImeWords, recordImeWordEntries } from "../core/imeWordReading";
@@ -487,6 +488,14 @@ export async function loadImePrimaryReadings(
       problem: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/**
+ * 設定資料の名前・別名の読み（IMEの控えは混ぜない）。読み間違いの見込み（設計書6.42.5）が
+ * 「正しい読み」の出どころの1つに使う——作者が設定資料に書いた読みだけを「設定資料の読み」と呼ぶ
+ */
+export async function settingsNameReadings(work: WorkEntry): Promise<NameReading[]> {
+  return nameReadingsFrom(await loadNameRecords(work), new Map());
 }
 
 /**

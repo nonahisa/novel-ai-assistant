@@ -62,8 +62,7 @@ export function cancelItem(label = "取りやめる"): vscode.QuickPickItem & {
 } {
   return {
     label: `$(close) ${label}`,
-    // 一覧の並びから浮かせて、選択肢と読み違えないようにする
-    detail: "何もせずに閉じます",
+    // 「取りやめる」と×の印で出口と読める。説明の行は置かない（設計書6.82.1）
     __cancel: true,
   };
 }

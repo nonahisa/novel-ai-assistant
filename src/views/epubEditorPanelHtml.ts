@@ -669,7 +669,6 @@ ${pane("cover", [
   coverSection("front", "coverImagePath", "bakeFront", "表紙を焼く", "unbakeFront"),
 ])}
 ${pane("backCover", [
-  '    <p class="note">本の最終面（奥付の後ろ）です。画像が無ければ、並びに置いてあっても面は出ません。</p>',
   coverSection(
     "back",
     "backCoverImagePath",
@@ -679,7 +678,6 @@ ${pane("backCover", [
   ),
 ])}
 ${pane("halfTitle", [
-  '    <p class="note">題名と作者名だけの面です。中身は「本の設定」の画面の書誌情報から組みます。</p>',
   ornamentRow("titlePageOrnament"),
   '    <label><span>飾りの位置</span><select id="titlePageOrnamentPlace">',
   '      <option value="above">題名の上</option>',
@@ -702,7 +700,6 @@ ${pane("toc", [
   "    </select></label>",
   ornamentRow("tocOrnament"),
   pageLayoutRow("toc"),
-  keysForHost('    <p class="note">この面を本から外すときは、右の並びでこの面を右クリックして「削除」を選んでください。</p>'),
 ])}
 ${pane("characters", [
   '    <label class="check"><input id="characterPageIcons" type="checkbox"><span>人物イラストを添える</span></label>',
@@ -713,7 +710,6 @@ ${pane("characters", [
   '      <option value="kanjiOnly">漢字を含む名前だけに付ける</option>',
   '      <option value="none">付けない</option>',
   "    </select></label>",
-  '    <p class="note">載るのは「登場済み・モブでない・公開」の人物の、名前と紹介文だけです。並びは設定資料の順になります。</p>',
   '    <p class="note" id="characterNotice"></p>',
   pageLayoutRow("characters"),
 ])}
@@ -721,16 +717,16 @@ ${pane("image", [
   '    <label><span>画像の場所（作品フォルダからの相対パス）</span><input id="blockImagePath" type="text"></label>',
   imagePickRow("block"),
   '    <label><span>解説文（省略できます）</span><input id="blockCaption" type="text"></label>',
-  '    <p class="note">1枚で1つの面になります（本文の組み方には入りません）。扉絵は何枚でも、好きな位置に挿せます。</p>',
 ])}
 ${pane("body", [
-  keysForHost('    <p class="note">話と章の一覧です。章の行は章立ての記録から出しています——章の追加・名前の変更・取り外しは、作品一覧の右クリックから行ってください。</p>'),
+  // 章の行は押せない理由と直し方の道なので残す（押せない理由は残す説明。設計書6.82.1）
+  keysForHost('    <p class="note">章の行は章立ての記録から出しています——章の追加・名前の変更・取り外しは、作品一覧の右クリックから行ってください。</p>'),
   '    <div id="episodeList"></div>',
   '    <p class="note" id="placementNotice"></p>',
   '    <div id="paragraphList"></div>',
 ])}
 ${pane("afterword", [
-  '    <p class="note">本文の後ろに1面として入ります。原稿は 設定/書籍/あとがき.md に書きます（まだ無ければ作ります）。書いていなければ、並びに置いてあっても面は出ません。</p>',
+  '    <p class="note">原稿は 設定/書籍/あとがき.md に書きます（まだ無ければ作ります）。</p>',
   '    <div class="cover-actions"><button id="openAfterword">あとがきを書く</button></div>',
   pageLayoutRow("afterword"),
 ])}

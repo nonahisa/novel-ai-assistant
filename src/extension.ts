@@ -204,8 +204,10 @@ import { searchScenes } from "./features/sceneSearch";
 import { findSimilarScenes } from "./features/similarScenes";
 import {
   registerProgressCancelCommand,
+  withCancellableProgress,
   withProgress,
 } from "./views/progress";
+import type { ReadingSpan } from "./core/readingDictionary";
 import { pathExists } from "./core/fileSystem";
 import { resolveManuscriptDir } from "./core/manuscriptFolder";
 import { describeTuningScope } from "./core/tuningScope";
@@ -788,6 +790,14 @@ const VOICE_EXPORT_BROWSER_REASON =
 /** 編集者モードで呼ばれたときの理由（作者の機能。画面と右クリックでは出していない） */
 const VOICE_EXPORT_EDITOR_REASON =
   "人物の声で音声に書き出すのは作者の機能です。編集者モードでは使えません。";
+
+/** ブラウザ版で読み間違いを調べられない理由（人物の声のエンジンに届かない。設計書6.42.5） */
+const MISREAD_CHECK_BROWSER_REASON =
+  "ブラウザ版の VS Code からは、この PC で動く音声合成のエンジン（AivisSpeech・VOICEVOX）に届かないので、読み間違いを調べられません。手元の VS Code で開くと使えます。";
+
+/** 編集者モードで呼ばれたときの理由（人物の声は作者の機能） */
+const MISREAD_CHECK_EDITOR_REASON =
+  "読み間違いを調べるのは、人物の声で読む作者の機能です。編集者モードでは使えません。";
 
 /**
  * MP3 の変換の部品を読む（設計書6.42.4）。**拡張機能の束に入れず、`dist/lame.js` を
@@ -2026,8 +2036,25 @@ export async function activate(
   const voiceSentencesFor = async (
     work: WorkEntry,
     filePath: string,
+    text: string,
+    /** 先に求めた読みの範囲（無ければここで求める） */
+    readings?: readonly ReadingSpan[]
+  ): Promise<ReadingSentence[]> =>
+    buildReadingPlan(text, notationModeFor(filePath), readings ?? (await voiceReadingsFor(work, filePath, text)), {
+      splitDialogue: true,
+      // 作品のメモの印（設計書6.40.8）。メモの行は声にしない
+      memoMarkers: await readMemoMarkers(work),
+    });
+
+  /**
+   * 人物の声で読むときに、声へ渡す写しで差し替える読みの範囲（読みの辞書が先、設定資料の名前の読みが後）。
+   * 書き出しの計画と、読み間違いの見込み（設計書6.42.5）が同じものを使う——違うと、送らない文を調べる
+   */
+  const voiceReadingsFor = async (
+    work: WorkEntry,
+    filePath: string,
     text: string
-  ): Promise<ReadingSentence[]> => {
+  ): Promise<ReadingSpan[]> => {
     const { readingDictionarySummary } = await import("./features/readingDictionary.js");
     const dictionary = await readingDictionarySummary({ work, episodePath: filePath, text });
     // 名前の読みが取れなくても止めない（朗読と同じ扱い。記録だけ残す）
@@ -2047,11 +2074,7 @@ export async function activate(
         `音声に書き出す：設定資料の名前の読みを使えませんでした（${error instanceof Error ? error.message : String(error)}）`
       );
     }
-    return buildReadingPlan(text, notationModeFor(filePath), mergeReadingSpans(dictionary.spans, names), {
-      splitDialogue: true,
-      // 作品のメモの印（設計書6.40.8）。メモの行は声にしない
-      memoMarkers: await readMemoMarkers(work),
-    });
+    return mergeReadingSpans(dictionary.spans, names);
   };
 
   /**
@@ -2098,7 +2121,8 @@ export async function activate(
       }
     }
     try {
-      const sentences = await voiceSentencesFor(work, filePath, body);
+      const readings = await voiceReadingsFor(work, filePath, body);
+      const sentences = await voiceSentencesFor(work, filePath, body, readings);
       const [{ exportVoiceAudio }, { voiceReadingService }] = await Promise.all([
         loadVoiceExport(),
         loadVoiceReading(),
@@ -2110,9 +2134,31 @@ export async function activate(
       const remembered = readAloudEngineChoiceOf(context.globalState.get<unknown>(READ_ALOUD_ENGINE_KEY));
       const engine =
         chosenEngine ?? (remembered === "os" ? legacyVoiceEngine(readEngineUrlSettings()) : remembered);
+      const service = voiceReadingService();
+      const text = body;
       await exportVoiceAudio(
-        { work, episodePath: filePath, text: body, sentences, engine },
-        voiceReadingService(),
+        {
+          work,
+          episodePath: filePath,
+          text,
+          sentences,
+          engine,
+          /*
+            確認の窓の手前で、その話の読み間違いの見込みを1回だけ調べる（設計書6.42.5。作者の決定 2026-11-14 夜）。
+            件数だけを窓に添え、**書き出しは止めない**。外のホストの確認の窓はここでは出さない（窓の順が変わる）
+          */
+          beforeConfirm: async () => {
+            const outcome = await checkMisreadsFor(work, filePath, text, readings, engine, false);
+            if (outcome.kind !== "checked") {
+              logLine(`音声に書き出す：読み間違いの見込みは調べませんでした（${outcome.reason}）`);
+              return undefined;
+            }
+            if (outcome.shown === 0) return undefined;
+            void refreshSceneMemoFindings(work.id);
+            return `読み間違いの見込み ${outcome.shown}件（校正・メモパネル）`;
+          },
+        },
+        service,
         { mp3Encoder: mp3EncoderLoader(context.extensionPath) }
       );
     } catch (error) {
@@ -2121,6 +2167,118 @@ export async function activate(
       logLine(`音声に書き出す：止まりました（${error instanceof Error ? error.message : String(error)}）`);
       void vscode.window.showWarningMessage(
         `音声に書き出せませんでした（${error instanceof Error ? error.message : String(error)}）。`
+      );
+    }
+  };
+
+  /**
+   * その話の読み間違いの見込みを調べる（設計書6.42.5）。命令と［音声に書き出す］の手前が同じ道を通す。
+   * `askRemote` は外のホストへ本文を送る前の確認の窓を出してよいか（命令だけ true）
+   */
+  const checkMisreadsFor = async (
+    work: WorkEntry,
+    filePath: string,
+    text: string,
+    readings: readonly ReadingSpan[],
+    engine: VoiceEngineId,
+    askRemote: boolean,
+    signal?: AbortSignal
+  ) => {
+    const [{ checkReadingMisreads }, { voiceReadingService }, { settingsNameReadings }] = await Promise.all([
+      import("./features/readingMisread.js"),
+      loadVoiceReading(),
+      import("./features/imeReadings.js"),
+    ]);
+    return checkReadingMisreads(
+      { work, episodePath: filePath, text, readings, engine },
+      voiceReadingService(),
+      {
+        episodes: () => treeProvider.getEpisodes(work),
+        names: () => settingsNameReadings(work),
+        askRemote,
+        ...(signal ? { signal } : {}),
+      }
+    );
+  };
+
+  /**
+   * 命令「読み間違いを調べる」（設計書6.42.5）。開いている話、または作品一覧の話の右クリックから。
+   * **ほかの道から呼ばれても理由を出す**（ブラウザ版・編集者モードでは画面にも右クリックにも出していない。実装ルール7）
+   */
+  const runMisreadCheck = async (filePath: string | undefined): Promise<void> => {
+    if (!canRunProcesses()) {
+      void vscode.window.showInformationMessage(MISREAD_CHECK_BROWSER_REASON);
+      return;
+    }
+    if (isEditorMode()) {
+      void vscode.window.showInformationMessage(MISREAD_CHECK_EDITOR_REASON);
+      return;
+    }
+    if (!filePath) {
+      void vscode.window.showInformationMessage(
+        keysForHost("読み間違いを調べる話を原稿エディターで開くか、作品一覧の話を右クリックして「読み間違いを調べる」を選んでください。")
+      );
+      return;
+    }
+    const work = workOfPath(registry, filePath);
+    if (!work) {
+      void vscode.window.showInformationMessage("読み間違いを調べるのは、作品に登録した原稿で使えます。");
+      return;
+    }
+    let text: string;
+    try {
+      const open = hasUnsavedChanges(filePath) ? getOpenDocumentText(filePath) : undefined;
+      const read = open === undefined ? await readTextFile(filePath) : undefined;
+      if (read?.hasConflictMarkers) {
+        void vscode.window.showWarningMessage(
+          "この話には Git の競合の印（<<<<<<<）が残っているので、読み間違いを調べませんでした。競合を解いてから、もう一度押してください。"
+        );
+        return;
+      }
+      text = (open ?? read?.text ?? "").replace(/\r\n?/g, "\n");
+    } catch (error) {
+      void vscode.window.showWarningMessage(
+        `話のファイルを読めませんでした（${error instanceof Error ? error.message : String(error)}）。`
+      );
+      return;
+    }
+    // ［声］で選んだエンジン（書き出しの右クリックと同じ決め方。OSの声なら、古い接続先の設定が指す側）
+    const remembered = readAloudEngineChoiceOf(context.globalState.get<unknown>(READ_ALOUD_ENGINE_KEY));
+    const engine = remembered === "os" ? legacyVoiceEngine(readEngineUrlSettings()) : remembered;
+    try {
+      const readings = await voiceReadingsFor(work, filePath, text);
+      const outcome = await withCancellableProgress("読み間違いを調べています", async (_progress, token) => {
+        const controller = new AbortController();
+        token.onCancellationRequested(() => controller.abort());
+        return checkMisreadsFor(work, filePath, text, readings, engine, true, controller.signal);
+      });
+      if (outcome.kind === "stopped") {
+        void vscode.window.showWarningMessage(outcome.reason);
+        return;
+      }
+      if (outcome.kind === "skipped") {
+        void vscode.window.showInformationMessage(outcome.reason);
+        return;
+      }
+      if (outcome.shown === 0) {
+        void vscode.window.showInformationMessage(
+          outcome.found === 0
+            ? "読み間違いの見込みは見つかりませんでした。"
+            : `読み間違いの見込みは ${outcome.found}件ありましたが、どれも見送るか直してあります。`
+        );
+        return;
+      }
+      void vscode.window.showInformationMessage(
+        `読み間違いの見込みが ${outcome.shown}件あります。校正・メモパネルに並べました。`
+      );
+      await showSceneMemos(work, filePath, true);
+      await refreshSceneMemoFindings(work.id);
+    } catch (error) {
+      // 読みの辞書が壊れているなど。**直さずに止めて理由を出す**（実装ルール2）
+      useLogFile(work.folderPath);
+      logLine(`読み間違いを調べる：止まりました（${error instanceof Error ? error.message : String(error)}）`);
+      void vscode.window.showWarningMessage(
+        `読み間違いを調べられませんでした（${error instanceof Error ? error.message : String(error)}）。`
       );
     }
   };
@@ -3544,6 +3702,9 @@ export async function activate(
     // シーンメモで見送ったものを、提案の一覧からも下げる（6.96.5）
     noteFindingDismissed: (work, findingId) =>
       proposalPanel.noteFindingDismissed(work, findingId),
+    // 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.5）。押したときだけ辞書へ足す
+    addMisreadToDictionary: async (work, finding) =>
+      (await import("./features/readingMisread.js")).addMisreadToDictionary(work, finding),
     /*
       人物の重複の候補の知らせの［設定資料パネルで見る］（作者の裁定 2026-10-19 夜。
       設計書6.40.4・6.5.4）。設定資料パネルの登場人物タブの候補の欄で開く。
@@ -8595,6 +8756,15 @@ export async function activate(
         return;
       }
       await runVoiceExport(node.episode.filePath);
+    })
+  );
+
+  // 読み間違いを調べる（設計書6.42.5）。作品一覧の話の右クリック、または開いている話（パレット）
+  context.subscriptions.push(
+    registerCommand("novelai.checkVoiceMisreadings", async (node?: EpisodeNode) => {
+      const fromTree = node && "episode" in node ? node.episode.filePath : undefined;
+      const open = activeManuscriptUri();
+      await runMisreadCheck(fromTree ?? (open ? fromUri(open) : undefined));
     })
   );
 

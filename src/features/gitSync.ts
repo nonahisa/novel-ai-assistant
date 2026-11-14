@@ -52,6 +52,15 @@ import { rescueEditorGitignore } from "./editorGitignoreRescue";
 import { withProgress } from "../views/progress";
 import { isEditorMode } from "../core/actorContext";
 import { globalFetchTroubleMemory } from "./fetchTroubleMemory";
+import { globalPushRejections } from "./pushRejectionMemory";
+import {
+  describeTooLargeToRecord,
+  describeTooLargeToSend,
+  findLargeFilesToRecord,
+  findLargeFilesToSend,
+} from "../core/gitLargeFiles";
+import { noReasonText } from "../core/gitFailureReason";
+import { IGNORE_LARGE_FILES_LABEL, ignoreLargeFiles } from "./largeFilesIgnore";
 
 // ツリーのバッジ用は core/gitSyncStatusText.ts へ切り出した。
 // このファイルは静的importするだけでNode専用（node:child_process）を
@@ -1547,6 +1556,31 @@ ${reason}` : ""}`,
       return false;
     }
 
+    // **GitHub に送れない大きさのファイルがあれば記録しない**（設計書5.5.21。「すべて同期」と同じ）
+    const large = await findLargeFilesToRecord(root, run);
+    if (large.files.length > 0) {
+      useLogFile(work.folderPath);
+      logFailure("取り込む前の記録：GitHub に送れない大きさのファイルがあるので記録しなかった", {
+        作品: work.title,
+        ファイル: large.files.map((one) => `${one.path}（${one.size}バイト）`).join("、"),
+      });
+      const untracked = large.files.filter((one) => one.untracked);
+      whenNoticePicked(
+        vscode.window.showWarningMessage(
+          `「${work.title}」：${describeTooLargeToRecord(large.files)}`,
+          ...(untracked.length > 0 ? [IGNORE_LARGE_FILES_LABEL] : []),
+          "ログを表示"
+        ),
+        async (action) => {
+          if (action === IGNORE_LARGE_FILES_LABEL) {
+            await ignoreLargeFiles(large.root, untracked, [work]);
+          }
+          if (action === "ログを表示") showLog();
+        },
+        { label: "大きすぎるファイルの案内", workFolder: work.folderPath }
+      );
+      return false;
+    }
     const pending = await countTrackableFiles(root, run);
     const committed = await withProgress("未記録の変更を記録しています…", () =>
       commitAll(root, `取り込む前の自動保存（${pending}件）`, run)
@@ -1812,10 +1846,18 @@ ${reason}` : ""}`,
     );
     if (!confirmed) return false;
 
-    const result = await withProgress("この環境の変更を送信しています…", () =>
-      push(work.folderPath, this.options.run)
-    );
+    // 送る記録に GitHub に送れない大きさのファイルがあれば送らない（設計書5.5.21。「すべて同期」と同じ）
+    const sendRun = this.options.run ?? runGit;
+    const unsendable = await findLargeFilesToSend(status.root, "@{u}", sendRun);
+    const rejectedText =
+      unsendable.length > 0 ? describeTooLargeToSend(unsendable) : undefined;
+    const result = rejectedText
+      ? { ok: false as const, rejected: true, detail: rejectedText, reason: rejectedText }
+      : await withProgress("この環境の変更を送信しています…", () =>
+          push(work.folderPath, this.options.run)
+        );
     if (result.ok) {
+      globalPushRejections.forget(status.root);
       await this.refreshRoot(work, { fetch: false, notify: false });
       vscode.window.showInformationMessage(
         `「${work.title}」の変更を送信しました。`
@@ -1828,12 +1870,23 @@ ${reason}` : ""}`,
       作品: work.title,
       詳細: result.detail ?? "（詳細なし）",
     });
+    // **断られたなら、断りの文をそのまま見せる**（設計書5.5.21。原因は当てない）。
+    // 自動の送り直しが同じ記録で試し直さないよう覚える
+    const refused = result.rejected
+      ? rejectedText ??
+        `GitHub に送るのを断られました。\n${result.reason ?? noReasonText(undefined)}`
+      : undefined;
+    if (refused) {
+      globalPushRejections.remember(status.root, await headCommit(status.root, sendRun), refused);
+    }
     const reason = describeNetworkFailure(result.detail);
     // **ボタンを待たない**（2026-10-11）。待つと、作者が閉じるまで
     // 「送信中」と数えたままになり、回線が戻っても自動の送り直しが控え続ける
     whenNoticePicked(
       vscode.window.showErrorMessage(
-        `「${work.title}」の送信に失敗しました。` +
+        refused
+          ? `「${work.title}」：${refused}`
+          : `「${work.title}」の送信に失敗しました。` +
           (reason
             ? `
 ${reason}`
