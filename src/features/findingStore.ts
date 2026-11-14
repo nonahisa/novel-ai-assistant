@@ -7,6 +7,7 @@ import {
   DEFAULT_FINDINGS_RETENTION_DAYS,
   visibleFindings,
 } from "../core/findingPanelState";
+import { isSjisMarkFinding } from "../core/sjisMarkFinding";
 import {
   FINDINGS_FILE_NAME,
   expiredFindingIds,
@@ -131,7 +132,7 @@ export class FindingStore {
    */
   async prune(retentionDays: number, now: Date = new Date()): Promise<number> {
     const lines = await this.loadLines();
-    const doomed = expiredFindingIds(lines, retentionDays, now);
+    const doomed = expiredIdsOf(lines, retentionDays, now);
     const kept = lines.filter((line) =>
       line.kind === "finding"
         ? !doomed.has(line.id)
@@ -151,7 +152,7 @@ export class FindingStore {
     retentionDays: number,
     now: Date = new Date()
   ): Promise<number> {
-    return expiredFindingIds(await this.loadLines(), retentionDays, now).size;
+    return expiredIdsOf(await this.loadLines(), retentionDays, now).size;
   }
 
   /** 生の行をそのまま読む（畳む前）。**片づけだけが要る** */
@@ -206,6 +207,19 @@ export class FindingStore {
     // 採否の行が増えたら、タイムラインの欄をすぐ読み直させる（保存の知らせは来ない）
     notifyWorkRecordWritten(target);
   }
+}
+
+/**
+ * 片づけで消す番号。**「Shift_JIS に無い字」の行は日付では消さない**（設計書5.4.2）。
+ * あの行は〓が本文に残る限り校正・メモパネルに出る（`placeSjisMarkFindings`）ので、日付で数えると、
+ * 出ている行が「期限切れ」として数えられ、押すと消える。〓を直せば行は出なくなる（置き場の行は残る）
+ */
+function expiredIdsOf(lines: readonly FindingLine[], retentionDays: number, now: Date): Set<string> {
+  const doomed = expiredFindingIds(lines, retentionDays, now);
+  for (const line of lines) {
+    if (line.kind === "finding" && isSjisMarkFinding(line)) doomed.delete(line.id);
+  }
+  return doomed;
 }
 
 /*

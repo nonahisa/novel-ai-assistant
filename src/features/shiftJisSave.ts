@@ -5,6 +5,7 @@ import {
   SJIS_UNENCODABLE_MARK,
   describeSubstitutions,
   planShiftJisSave,
+  roundTripsInShiftJis,
   type SjisMark,
 } from "../core/sjisFallback";
 import { buildSjisMarkFindings } from "../core/sjisMarkFinding";
@@ -22,7 +23,7 @@ import {
 } from "../core/atomicWrite";
 import { workLog } from "../core/logger";
 import type { WorkEntry } from "../models/types";
-import type { Finding, FindingDecision, FindingView } from "../models/finding";
+import type { Finding } from "../models/finding";
 import { FindingStore } from "./findingStore";
 import { refreshSceneMemoFindings } from "./sceneMemoPanel";
 
@@ -107,6 +108,12 @@ const VSCODE_SHIFT_JIS = "shiftjis";
 const KEEP_WAIT_MS = 700;
 
 /**
+ * 受け口が使ってよい時間（ミリ秒）。VS Code の持ち時間は1.5秒で、書き換えを当てる時間と、
+ * ほかの拡張機能の受け口もその枠に入るので、少し残す
+ */
+const SAVE_BUDGET_MS = 1200;
+
+/**
  * 保存の直前の受け口の本体。
  *
  * - **作品の話でも、登録していない原稿（.txt・.md）でもなければ何もしない**（`waitUntil` も呼ばない＝保存を待たせない）。
@@ -126,11 +133,22 @@ export function handleWillSave(event: WillSaveEvent, deps: ShiftJisSaveDeps): vo
 
   // 本文は呼ばれた瞬間のものを使う。待つあいだに打たれたら、VS Code が書き換えを捨てる（API の決まり）
   const text = document.getText();
+  const startedAt = Date.now();
   event.waitUntil(
     (async (): Promise<vscode.TextEdit[]> => {
       try {
+        /*
+          **全部の字が Shift_JIS で往復できるなら、置き換える字は無い**ので、ファイルを読む前に抜ける。
+          1.90 の道では文字コードを決めるためにファイルを全部読んで判定するので、300万字の合本で
+          それだけで200ミリ秒あまりかかった（2026-11-14 の測定）。ほとんどの保存はこちらで済む。
+          書けない字がある保存は、今までどおり読んで決める（速さのために置き換えを飛ばさない）
+        */
+        if (roundTripsInShiftJis(text)) {
+          deps.onClean(document);
+          return [];
+        }
         if (declared === undefined && !(await isShiftJisOn190(document, deps))) return [];
-        return await planEdits(document, filePath, workFolder, text, deps);
+        return await planEdits(document, filePath, workFolder, text, deps, startedAt);
       } catch (error) {
         deps.log(
           workFolder,
@@ -168,7 +186,8 @@ async function planEdits(
   filePath: string,
   workFolder: string | undefined,
   text: string,
-  deps: ShiftJisSaveDeps
+  deps: ShiftJisSaveDeps,
+  startedAt: number
 ): Promise<vscode.TextEdit[]> {
   const name = path.basename(filePath);
   /*
@@ -215,9 +234,14 @@ async function planEdits(
     .onUnencodable({ document, filePath, workFolder, text, savedText: plan.text, marks: plan.marks })
     .then(() => true)
     .catch(() => true);
+  /*
+    待つのは、持ち時間の残りまで。大きな合本では読み・判定・計画で数百ミリ秒を使うので、そのうえ
+    700ミリ秒待つと1.5秒を超え、VS Code が書き換えを捨てて「?」で書く（字が控えにしか残らない）
+  */
+  const waitMs = Math.min(deps.keepWaitMs ?? KEEP_WAIT_MS, Math.max(0, SAVE_BUDGET_MS - (Date.now() - startedAt)));
   const kept = await Promise.race([
     keeping,
-    new Promise<false>((resolve) => setTimeout(() => resolve(false), deps.keepWaitMs ?? KEEP_WAIT_MS)),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), waitMs)),
   ]);
   if (!kept) {
     deps.log(workFolder, `控えを残し終える前に、保存の持ち時間が来ました（${name}）。控えは続けて残します`);
@@ -336,39 +360,19 @@ function messageOf(error: unknown): string {
 
 /** 指摘の置き場のうち、ここで使う所（単体テストで差し替える） */
 export interface MarkFindingStore {
-  load(): Promise<FindingView[]>;
   record(findings: readonly Finding[]): Promise<void>;
-  decide(decisions: readonly FindingDecision[]): Promise<void>;
 }
 
 /**
  * 〓の行を置き場へ足す。足した行の数を返す。
  *
- * **前に見送った同じ番号の行は、未決へ戻す。** 番号は場所の前後の字から決まるので、作者が
- * 〓を見送ったあとで同じ場所にまた書けない字を打つと、同じ番号になる。判断は後から来たものが
- * 勝つ作りなので、そのままでは新しく置いた〓の行が「見送り済み」として出てこない
+ * **判断は足さない**（作者が見送った行を未決へ戻さない。実装ルール2）。0.148.3 では番号が前後の字から
+ * 決まり、同じ場所にまた〓を置くと見送った行と同じ番号になるので、未決へ戻していた。いまは番号が
+ * 保存ごと・〓ごとに別（`buildSjisMarkFindings`）なので、新しい〓は新しい行になり、見送った行は見送ったまま
  */
-export async function recordMarkFindings(
-  store: MarkFindingStore,
-  findings: readonly Finding[],
-  time: string
-): Promise<number> {
+export async function recordMarkFindings(store: MarkFindingStore, findings: readonly Finding[]): Promise<number> {
   if (findings.length === 0) return 0;
-  const decided = new Set(
-    (await store.load()).filter((view) => view.status !== "pending").map((view) => view.id)
-  );
   await store.record(findings);
-  const reopen = findings.filter((finding) => decided.has(finding.id));
-  if (reopen.length > 0) {
-    await store.decide(
-      reopen.map((finding) => ({
-        findingId: finding.id,
-        time,
-        status: "pending" as const,
-        note: "同じ場所の字を、保存のときにまた「〓」にした",
-      }))
-    );
-  }
   return findings.length;
 }
 
@@ -441,7 +445,7 @@ export function installShiftJisSaveGuard(registry: { list(): readonly WorkEntry[
         recoveryPath,
         time
       );
-      const count = await recordMarkFindings(new FindingStore(work), findings, time);
+      const count = await recordMarkFindings(new FindingStore(work), findings);
       // 本文の保存で開いているパネルは読み直したが、行を足したのはそのあとなので、もう一度読ませる
       if (count > 0) await refreshSceneMemoFindings(work.id);
       return count > 0;

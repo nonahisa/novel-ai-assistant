@@ -145,6 +145,29 @@ describe("保存の直前の置き換えの計画（表の字と目印の「〓�
     expect(plan.marks).toEqual([{ char: "♡", line: 2, context: "〓" }]);
   });
 
+  test("行をまとめて確かめても、まとまりの境の行・CRLF・前からある〓・𠮟の後ろでも、拾う字と行と前後は1行ずつ見たときと同じ", () => {
+    // 約6万字ずつまとめて確かめる（大きな合本で持ち時間に収めるため。2026-11-14）。1行約260字なので、
+    // まとまりの境は250行目あたり。境の前後の行すべてと、最初と最後の行に置く
+    const lines = Array.from({ length: 600 }, (_, index) => `第${index + 1}行。${"あ".repeat(250)}`);
+    lines[0] = "〓は前からある目印。♡";
+    const near = Array.from({ length: 21 }, (_, offset) => 240 + offset);
+    for (const index of near) lines[index] = `\u{20b9f}${"あ".repeat(250)}${index % 2 === 0 ? "♡" : "😀"}`;
+    lines[599] = "最後の行♡";
+    const text = lines.join("\r\n");
+    expect(text.length).toBeGreaterThan(65536 * 2);
+    const plan = planShiftJisSave(text);
+    expect(plan.marks).toEqual([
+      { char: "♡", line: 1, context: "る目印。〓" },
+      ...near.map((index) => ({ char: index % 2 === 0 ? "♡" : "😀", line: index + 1, context: "ああああ〓" })),
+      { char: "♡", line: 600, context: "最後の行〓" },
+    ]);
+    // 前からある〓（作者が置いたもの）は置き換えの対象にしない
+    expect(plan.spans.filter(({ to }) => to === "〓")).toHaveLength(near.length + 2);
+    expect(plan.text.split("\r\n")[0]).toBe("〓は前からある目印。〓");
+    // 𠮟 は境の前後でも表のとおり置き換える
+    expect(plan.substitutions).toEqual([{ from: "\u{20b9f}", to: "叱", count: near.length }]);
+  });
+
   test("CRLF・CR の改行でも、行は正しく数え、位置は元の本文の単位で取る", () => {
     const plan = planShiftJisSave("一\r\n二\r三♡");
     expect(plan.spans).toEqual([{ index: 6, length: 1, to: "〓" }]);

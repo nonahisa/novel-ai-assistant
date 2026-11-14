@@ -1,4 +1,5 @@
 import iconv = require("iconv-lite");
+import { sjisMarkPlaces } from "./sjisMarkFinding";
 
 /**
  * Shift_JIS（CP932）の原稿へ書くときに、符号の無い字を置き換える表（設計書5.4.2。
@@ -258,6 +259,7 @@ export function planShiftJisSave(text: string): ShiftJisSavePlan {
   if (encodesWhole(tableText)) {
     return { spans: table.spans, substitutions: table.substitutions, marks: [], text: tableText };
   }
+  const needing = linesNeedingMarks(text);
 
   const markSpans: Array<SjisSubstitutionSpan & { char: string }> = [];
   const encodable = new Map<string, boolean>();
@@ -271,8 +273,7 @@ export function planShiftJisSave(text: string): ShiftJisSavePlan {
     return !known;
   };
   const segmenter = new Intl.Segmenter("ja", { granularity: "grapheme" });
-  for (const { start, content } of linesWithOffsets(text)) {
-    if (encodesWhole(substituteForShiftJis(content).text)) continue;
+  for (const { start, content } of needing) {
     for (const { segment, index } of segmenter.segment(content)) {
       const chars = Array.from(segment);
       if (chars.every(markable)) {
@@ -303,15 +304,61 @@ export function planShiftJisSave(text: string): ShiftJisSavePlan {
   }
   replaced += text.slice(cursor);
 
+  /*
+    行と前後の字は、置き換えたあとの本文の〓を前から1回で拾って引く（校正・メモパネルが〓を探し直す
+    `sjisMarkPlaces` と同じ決め方。写すと、記録した前後とパネルが探す前後が食い違う）。
+    〓ごとに頭から数え直す形は、300万字に〓が200あるとそれだけで数百ミリ秒かかった
+  */
+  const places = new Map(sjisMarkPlaces(replaced).map((place) => [place.index, place]));
   const marks = markSpans.map((span) => {
-    const position = markedAt.get(span.index) ?? 0;
-    return { char: span.char, ...lineAndContext(replaced, position) };
+    const place = places.get(markedAt.get(span.index) ?? 0);
+    return { char: span.char, line: place?.line ?? 1, context: place?.context ?? SJIS_UNENCODABLE_MARK };
   });
   return { spans, substitutions: table.substitutions, marks, text: replaced };
 }
 
+/**
+ * 全文が Shift_JIS で往復できるか。**できれば、保存の直前に置き換える字は1つも無い**——表の字も
+ * 〓にする字も、往復できない字だけだから（表の決まり。`sjisFallback.test.ts` が全行を見張る）。
+ * 保存の直前の受け口が、ファイルを読んで文字コードを確かめる前に早く抜けるために使う
+ */
+export function roundTripsInShiftJis(text: string): boolean {
+  return encodesWhole(text);
+}
+
 function encodesWhole(text: string): boolean {
   return iconv.decode(iconv.encode(text, "shift_jis"), "shift_jis") === text;
+}
+
+/** 書けない字を探すとき、まとめて確かめる長さ（字。行の途中では切らず、次の LF のあとで切る） */
+const CHUNK_UNITS = 65536;
+
+/**
+ * 表の字を置き換えてもなお書けない字のある行だけを返す（前から順）。
+ *
+ * **本文を約6万字ずつまとめて確かめ、書けない字のあるまとまりだけを1行ずつ見る。** iconv の往復は
+ * 字ごとに決まる（前後の字に左右されない）ので、まとめて往復できればその中のどの行も往復できる。
+ * 切れ目は LF のすぐあとにするので、行（CRLF も）がまとまりをまたがない（LF の無い CR だけの本文は
+ * 1つのまとまりになるだけで、拾うものは変わらない）。
+ * 1行ずつ往復させる形は、300万字（約8万行）で書けない字が1つあるだけで100ミリ秒あまりかかった
+ * （2026-11-14 の測定。受け口の持ち時間は1.5秒）
+ */
+function linesNeedingMarks(text: string): Array<{ start: number; content: string }> {
+  const needing: Array<{ start: number; content: string }> = [];
+  for (let start = 0; start < text.length; ) {
+    const newline = start + CHUNK_UNITS < text.length ? text.indexOf("\n", start + CHUNK_UNITS) : -1;
+    const end = newline < 0 ? text.length : newline + 1;
+    const chunk = text.slice(start, end);
+    if (!encodesWhole(substituteForShiftJis(chunk).text)) {
+      for (const line of linesWithOffsets(chunk)) {
+        if (!encodesWhole(substituteForShiftJis(line.content).text)) {
+          needing.push({ start: start + line.start, content: line.content });
+        }
+      }
+    }
+    start = end;
+  }
+  return needing;
 }
 
 /** 行の中身と、その行の頭の位置（改行は CRLF・CR・LF のどれでも1つに数える） */
@@ -326,18 +373,6 @@ function linesWithOffsets(text: string): Array<{ start: number; content: string 
   }
   lines.push({ start, content: text.slice(start) });
   return lines;
-}
-
-/** 置き換えたあとの本文の位置から、行（1始まり）と前後の数文字（〓を含む）を取る */
-function lineAndContext(text: string, position: number): { line: number; context: string } {
-  const head = text.slice(0, position);
-  const line = (head.match(/\r\n|\r|\n/g) ?? []).length + 1;
-  const lineStart = Math.max(head.lastIndexOf("\n"), head.lastIndexOf("\r")) + 1;
-  const rest = text.slice(position + SJIS_UNENCODABLE_MARK.length);
-  const lineEnd = rest.search(/\r|\n/);
-  const before = Array.from(text.slice(lineStart, position)).slice(-CONTEXT_CHARS).join("");
-  const after = Array.from(lineEnd < 0 ? rest : rest.slice(0, lineEnd)).slice(0, CONTEXT_CHARS).join("");
-  return { line, context: `${before}${SJIS_UNENCODABLE_MARK}${after}` };
 }
 
 /** 止めたときの知らせに添える文（「2行目「かきくけ♡さしすせ」の「♡」」） */

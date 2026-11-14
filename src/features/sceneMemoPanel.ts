@@ -53,6 +53,7 @@ import {
   type PlacedProposal,
 } from "../core/sceneMemoRows";
 import { locateFindings } from "../core/findingLocation";
+import { isSjisMarkFinding, placeSjisMarkFindings } from "../core/sjisMarkFinding";
 import { findingAppliesDirectly, findingFileKey } from "../core/findingSource";
 import { CharacterStore } from "../core/characterStore";
 import { findMergeCandidates } from "../core/characterMerge";
@@ -630,8 +631,10 @@ async function collectMemos(
   deps: SceneMemoDeps
 ): Promise<CollectedMemos> {
   // **先に指摘を読む。** どのファイルの全文が要るかは、指摘が決める
-  const stored = await loadVisibleFindings(work);
-  const wanted = new Set(stored.map((finding) => fileKeyOf(work, finding.file)));
+  const { stored, marks } = await loadVisibleFindings(work);
+  const wanted = new Set(
+    [...stored, ...marks.filter((mark) => mark.status === "pending")].map((finding) => fileKeyOf(work, finding.file))
+  );
 
   const scan = await scanWork(work);
   const memos: SceneMemo[] = [];
@@ -672,11 +675,18 @@ async function collectMemos(
     }
   }
 
-  const located = locateFindings(
-    // 鍵の表記を揃えてから渡す（`fileKeyOf` の言い分）
-    stored.map((finding) => ({ ...finding, file: fileKeyOf(work, finding.file) })),
-    findingTexts
-  );
+  const located = [
+    ...locateFindings(
+      // 鍵の表記を揃えてから渡す（`fileKeyOf` の言い分）
+      stored.map((finding) => ({ ...finding, file: fileKeyOf(work, finding.file) })),
+      findingTexts
+    ),
+    // 〓の行は〓そのものと1対1で突き合わせる（前後の字を直しても、〓が残れば出る。設計書5.4.2）
+    ...placeSjisMarkFindings(
+      marks.map((finding) => ({ ...finding, file: fileKeyOf(work, finding.file) })),
+      findingTexts
+    ),
+  ].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
   findingTexts.clear();
 
   const findings: PlacedFinding[] = [];
@@ -741,10 +751,20 @@ async function collectEditorProposals(
  *
  * 期限切れと、判断の済んだものは `visibleFindings` が落とす。
  * **ファイルからは消さない**——消えるのは作者が明示の操作をしたときだけ。
+ *
+ * **「Shift_JIS に無い字」の行（`marks`）は別に、判断も日付も見ずに全部返す**（設計書5.4.2）。
+ * 〓が本文に残る限り出す行なので日付で隠さず、見送った行も自分の〓を取っておくために突き合わせへ
+ * 入れる（`placeSjisMarkFindings` が未決のものだけを並べる）
  */
 async function loadVisibleFindings(work: WorkEntry) {
-  const store = new FindingStore(work);
-  return visibleFindings(await store.load(), findingsRetentionDays());
+  const all = await new FindingStore(work).load();
+  return {
+    stored: visibleFindings(
+      all.filter((finding) => !isSjisMarkFinding(finding)),
+      findingsRetentionDays()
+    ),
+    marks: all.filter(isSjisMarkFinding),
+  };
 }
 
 /**

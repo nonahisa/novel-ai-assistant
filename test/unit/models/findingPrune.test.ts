@@ -201,4 +201,20 @@ describe("期限切れ指摘消去", () => {
     // **数えただけでは消えない**（確認を取る前に消してはいけない）
     expect(await store.load()).toHaveLength(3);
   });
+
+  /**
+   * 「Shift_JIS に無い字」の行（設計書5.4.2）は、〓が本文に残る限り校正・メモパネルに出る。
+   * 日付で消すと、パネルに出ている行が「期限切れ」として数えられ、押すと消える
+   */
+  test("「Shift_JIS に無い字」の行は、日付では数えず、消さない", async () => {
+    await seed([
+      finding({ id: "mark", time: daysAgo(10), label: "Shift_JIS に無い字", category: "other", suggestion: "", original: "あい〓うえ", target: "〓" }),
+      finding({ id: "old", time: daysAgo(5) }),
+    ]);
+
+    const store = new FindingStore(work);
+    expect(await store.countExpired(3, NOW)).toBe(1);
+    expect(await store.prune(3, NOW)).toBe(1);
+    expect((await store.load()).map((entry) => entry.id)).toEqual(["mark"]);
+  });
 });

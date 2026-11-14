@@ -3,7 +3,13 @@ import { locateFindings } from "../../../src/core/findingLocation";
 import { findingAppliesDirectly, findingRestoreOf } from "../../../src/core/findingSource";
 import { findingHeadline, findingToneClass, isKnownFindingLabel } from "../../../src/core/sceneMemoRows";
 import { planShiftJisSave } from "../../../src/core/sjisFallback";
-import { SJIS_MARK_FINDING_LABEL, buildSjisMarkFindings } from "../../../src/core/sjisMarkFinding";
+import {
+  SJIS_MARK_FINDING_LABEL,
+  buildSjisMarkFindings,
+  placeSjisMarkFindings,
+  sjisMarkPlaces,
+} from "../../../src/core/sjisMarkFinding";
+import type { FindingView } from "../../../src/models/finding";
 
 /**
  * 保存の直前に「〓」にした字の説明を、校正・メモパネルの行にする（設計書5.4.2、0.148.3。
@@ -60,15 +66,69 @@ describe("〓にした字の説明の行", () => {
     expect(findingToneClass(SJIS_MARK_FINDING_LABEL)).toBe("finding-other");
   });
 
-  it("行の違う〓は別の行に、前後の同じ〓（♡♡）は1行にまとめる", () => {
-    const { findings } = marksOf("一つ目の♡です。\n二つ目の😀です。\nあい♡♡うえ");
-    expect(findings.map(({ hintLine }) => hintLine)).toEqual([1, 2, 3]);
+  it("〓1つにつき1行。前後の同じ〓（♡♡・同じ文の2か所）も番号を分ける", () => {
+    const { findings } = marksOf("一つ目の♡です。\n二つ目の😀です。\nあい♡♡うえ\nあい♡♡うえ");
+    expect(findings.map(({ hintLine }) => hintLine)).toEqual([1, 2, 3, 3, 4, 4]);
+    expect(new Set(findings.map(({ id }) => id)).size).toBe(6);
     expect(findings[2].message.startsWith("「♡」は")).toBe(true);
+  });
+
+  it("番号は保存ごとに別（同じ場所にあとでまた〓を置いても、前の行と同じ番号にならない）", () => {
+    const plan = planShiftJisSave("かきくけ♡さしすせ");
+    const [first] = buildSjisMarkFindings(WORK, EPISODE, plan.text, plan.marks, RECOVERY, TIME);
+    const [second] = buildSjisMarkFindings(WORK, EPISODE, plan.text, plan.marks, RECOVERY, "2026-11-10T01:00:00.000Z");
+    expect(first.id).not.toBe(second.id);
   });
 
   it("控えを残せなかったときは、そう書く", () => {
     const plan = planShiftJisSave("♡");
     const [finding] = buildSjisMarkFindings(WORK, EPISODE, plan.text, plan.marks, undefined, TIME);
     expect(finding.message).toContain("控えは残せませんでした");
+  });
+});
+
+describe("本文の〓と行の突き合わせ（placeSjisMarkFindings）", () => {
+  const FILE = "本文/001.txt";
+  function pending(text: string, time = TIME): FindingView[] {
+    const plan = planShiftJisSave(text);
+    return buildSjisMarkFindings(WORK, EPISODE, plan.text, plan.marks, RECOVERY, time).map((finding) => ({
+      ...finding,
+      status: "pending" as const,
+    }));
+  }
+  const place = (rows: readonly FindingView[], text: string) =>
+    placeSjisMarkFindings(rows, new Map([[FILE, text]])).map(({ id, line }) => ({ id, line }));
+
+  it("〓の前後の字の拾い方は、保存の計画と同じ（CRLF・CR・行の頭と終わり・サロゲート）", () => {
+    expect(sjisMarkPlaces("一\r\n二\r〓三\n😀😀😀😀😀〓あいうえお")).toEqual([
+      { index: 5, line: 3, before: "", after: "三", context: "〓三" },
+      { index: 18, line: 4, before: "😀😀😀😀", after: "あいうえ", context: "😀😀😀😀〓あいうえ" },
+    ]);
+  });
+
+  it("〓が本文に無いファイルの行は出さない。本文を渡していないファイルの行も出さない", () => {
+    const rows = pending("かきくけ♡さしすせ");
+    expect(place(rows, "かきくけ♥さしすせ")).toEqual([]);
+    expect(placeSjisMarkFindings(rows, new Map())).toEqual([]);
+  });
+
+  it("前後の片方だけ合う〓を、前後のまったく合わない近くの〓より先に取る", () => {
+    const rows = pending("一行目の♡です。\n二\n三\n四行目の😀です。");
+    // 1行目の〓の左隣を直し、4行目の〓は前後を両方書き直した。どちらも残っている
+    const text = "一行目に〓です。\n二\n三\nまるで別の〓文だ";
+    expect(place(rows, text)).toEqual([
+      { id: rows[0].id, line: 1 },
+      { id: rows[1].id, line: 4 },
+    ]);
+  });
+
+  it("〓の行の無い〓（作者が自分で置いた〓）に行は作らない", () => {
+    const rows = pending("かきくけ♡さしすせ");
+    expect(place(rows, "〓は作者の印。\nかきくけ〓さしすせ")).toEqual([{ id: rows[0].id, line: 2 }]);
+  });
+
+  it("ほかの種類の指摘は突き合わせに入れない", () => {
+    const [row] = pending("かきくけ♡さしすせ");
+    expect(place([{ ...row, label: "誤字脱字" }], "かきくけ〓さしすせ")).toEqual([]);
   });
 });

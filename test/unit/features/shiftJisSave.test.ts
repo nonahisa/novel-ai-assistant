@@ -9,7 +9,7 @@ import {
   type UnencodableSave,
   type UnencodableWarnerDeps,
 } from "../../../src/features/shiftJisSave";
-import type { Finding, FindingDecision, FindingView } from "../../../src/models/finding";
+import type { Finding, FindingDecision } from "../../../src/models/finding";
 
 /**
  * 作者が VS Code で打って保存する道の、Shift_JIS の字の置き換え（設計書5.4.2、0.148.1・0.148.3）。
@@ -258,6 +258,22 @@ describe("保存の直前の Shift_JIS の置き換え（onWillSaveTextDocument�
     expect(h.logs.join("\n")).toContain("控え");
   });
 
+  it("控えを待つのは持ち時間の残りまで（読み・判定・計画で使った分を引く。合本で1.5秒を超えないため）", async () => {
+    // 計画までに1.3秒使ったことにする（大きな合本）。控え待ちの上限は長くしてあっても、残りが無いので待たない
+    const clock = vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(1300);
+    try {
+      const h = harness({ onUnencodable: () => new Promise<void>(() => undefined), keepWaitMs: 60_000 });
+      const edits = await Promise.race([
+        fire(fakeDocument({ text: "♡", encoding: "shiftjis" }), h.deps),
+        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 2000)),
+      ]);
+      expect(edits === "timeout" ? edits : edits?.map((edit) => edit.newText)).toEqual(["〓"]);
+      expect(h.logs.join("\n")).toContain("控えを残し終える前に");
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("CP932 にある字（①・髙・﨑・〝〟・＂＇）は〓にしない", async () => {
     const h = harness();
     const edits = await fire(fakeDocument({ text: "①髙﨑〝〟＂＇", encoding: "shiftjis" }), h.deps);
@@ -282,6 +298,16 @@ describe("保存の直前の Shift_JIS の置き換え（onWillSaveTextDocument�
       const h = harness({ readBytes: async () => new TextEncoder().encode("既にある本文。") });
       const edits = await fire(fakeDocument({ text: "既にある本文。〜" }), h.deps);
       expect(edits).toEqual([]);
+    });
+
+    it("全部の字が Shift_JIS で書ける保存では、ファイルを読まずに抜ける（大きな合本で持ち時間を使わない）", async () => {
+      const readBytes = vi.fn(async () => iconv.encode("既にある本文。", "shift_jis"));
+      const h = harness({ readBytes });
+      // 〓（作者が前に置いた目印）や CP932 の字も書けるので、置き換える字は無い
+      const edits = await fire(fakeDocument({ text: "既にある本文。〓①髙" }), h.deps);
+      expect(edits).toEqual([]);
+      expect(readBytes).not.toHaveBeenCalled();
+      expect(h.unencodable).toEqual([]);
     });
 
     it("バイトが英数字だけで決まらないときは、設定 files.encoding に従う", async () => {
@@ -506,13 +532,12 @@ describe("〓にした字の行を、校正・メモパネルの置き場へ足�
     };
   }
 
-  function store(existing: FindingView[]) {
+  function store() {
     const recorded: Finding[] = [];
     const decided: FindingDecision[] = [];
     return {
       recorded,
       decided,
-      load: async () => existing,
       record: async (findings: readonly Finding[]) => {
         recorded.push(...findings);
       },
@@ -522,21 +547,17 @@ describe("〓にした字の行を、校正・メモパネルの置き場へ足�
     };
   }
 
-  it("足す。前に見送った同じ番号の行は、未決へ戻す（同じ場所にまた〓を置いたので）", async () => {
-    const dismissed: FindingView = { ...finding("f1"), status: "dismissed" };
-    const fake = store([dismissed]);
-    const count = await recordMarkFindings(fake, [finding("f1"), finding("f2")], "2026-11-09T01:00:00.000Z");
+  it("足すだけで、判断は足さない（作者が見送った行を未決へ戻さない。番号は〓ごと・保存ごとに別）", async () => {
+    const fake = store();
+    const count = await recordMarkFindings(fake, [finding("f1"), finding("f2")]);
     expect(count).toBe(2);
     expect(fake.recorded.map(({ id }) => id)).toEqual(["f1", "f2"]);
-    expect(fake.decided).toEqual([
-      { findingId: "f1", time: "2026-11-09T01:00:00.000Z", status: "pending", note: expect.stringContaining("〓") },
-    ]);
+    expect(fake.decided).toEqual([]);
   });
 
   it("足すものが無ければ置き場に触らない", async () => {
-    const fake = store([]);
-    expect(await recordMarkFindings(fake, [], "2026-11-09T01:00:00.000Z")).toBe(0);
+    const fake = store();
+    expect(await recordMarkFindings(fake, [])).toBe(0);
     expect(fake.recorded).toEqual([]);
-    expect(fake.decided).toEqual([]);
   });
 });
