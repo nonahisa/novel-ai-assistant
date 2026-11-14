@@ -5,7 +5,7 @@ import {
   tokenizeLine,
   type NotationMode,
 } from "./manuscriptRender";
-import { stripMemoLines } from "./sceneMemo";
+import { stripMemoLines, type MemoMarkers } from "./sceneMemo";
 import { TCY_RUN_PATTERN } from "./tateChuYoko";
 
 /**
@@ -154,6 +154,8 @@ export interface EpubIllustrationPlacement {
 export interface EpubBodyOptions {
   /** 続いた空行を1つ減らすか（下の `renderBody` の説明を参照） */
   collapseBlankLines: boolean;
+  /** その作品のメモの印（設計書6.40.8）。省くと既定（`//` と `／／`） */
+  memoMarkers?: MemoMarkers;
   /** 本文へ挟む挿絵。無ければ、いままでと同じ本文が出る */
   illustrations?: readonly EpubIllustrationPlacement[];
   /** 改ページの位置（第M段落のあと）。次の段落にクラスが付く */
@@ -485,11 +487,11 @@ export function buildXhtmlDocument(input: EpubDocumentInput): string {
  * シーンメモの行は本へ入らない（`stripMemoLines`）ので、**数にも入れない**。
  * ここと本文の組み立てで数え方が違うと、指定した段落と入る場所がずれる。
  */
-export function splitParagraphs(body: string): string[] {
+export function splitParagraphs(body: string, markers?: MemoMarkers): string[] {
   const paragraphs: string[] = [];
   let current: string[] = [];
 
-  for (const line of normalizedLines(body)) {
+  for (const line of normalizedLines(body, markers)) {
     if (line.trim() === "") {
       if (current.length > 0) paragraphs.push(current.join("\n"));
       current = [];
@@ -503,16 +505,16 @@ export function splitParagraphs(body: string): string[] {
 }
 
 /** その話の段落数。位置が本文より後ろかを見るのに使う */
-export function countParagraphs(body: string): number {
-  return splitParagraphs(body).length;
+export function countParagraphs(body: string, markers?: MemoMarkers): number {
+  return splitParagraphs(body, markers).length;
 }
 
 /** シーンメモを落とし、改行コードを揃えた行 */
-function normalizedLines(body: string): string[] {
+function normalizedLines(body: string, markers?: MemoMarkers): string[] {
   // **シーンメモは本へ入れない**（設計書6.40.2）。作者の付箋であって
   // 読者へ渡す文章ではない。行ごと落とす——空行にすると、そこに
   // 段落の空きが生まれて場面が切れたように読める
-  return stripMemoLines(body).replace(/\r\n?/g, "\n").split("\n");
+  return stripMemoLines(body, markers).replace(/\r\n?/g, "\n").split("\n");
 }
 
 /**
@@ -550,7 +552,7 @@ function renderBody(
   options: EpubBodyOptions
 ): { lines: string[]; paragraphCount: number; overflow: EpubPlacementOverflow[] } {
   const vertical = options.vertical ?? false;
-  const lines = normalizedLines(body);
+  const lines = normalizedLines(body, options.memoMarkers);
   // 位置は1以上の整数（`models/book.ts` が保証する）。それでも念のため
   // 揃えておく——0や小数が届いても、挿絵を黙って落とさないため
   const illustrations = (options.illustrations ?? []).map((item) => ({

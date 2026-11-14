@@ -1,5 +1,5 @@
 import { hashText } from "./hash";
-import { blankMemoLines } from "./sceneMemo";
+import { blankMemoLines, type MemoMarkers } from "./sceneMemo";
 import {
   TOKENS_PER_CHAR,
   resolveCharsPerToken,
@@ -126,6 +126,12 @@ export interface ChunkOptions {
   maxChars: number;
   /** 前チャンクの末尾を何文字重ねるか（文脈の連続性のため） */
   overlapChars: number;
+  /**
+   * その作品のメモの印（設計書6.40.8）。省くと既定（`//` と `／／`）。
+   * **チャンクの鍵（内容ハッシュ）には入らない**——空行にしたあとの本文で鍵を取るので、
+   * 印を切り替えて本文から外れる行が変われば、鍵も変わる
+   */
+  memoMarkers?: MemoMarkers;
 }
 
 /**
@@ -546,7 +552,7 @@ export function splitIntoChunks(
   if (!Number.isInteger(opts.maxChars) || opts.maxChars < 1) {
     throw new Error("maxChars は1以上の整数にしてください。");
   }
-  const normalized = blankMemoLines(text.replace(/\r\n?/g, "\n"));
+  const normalized = blankMemoLines(text.replace(/\r\n?/g, "\n"), opts.memoMarkers);
   // **空白しか残らなかったら、1つも返さない。** 中身の無いチャンクは
   // AIへ送っても何も返らないうえ、まとめたときに位置の対応を壊す
   if (!normalized.trim()) return [];

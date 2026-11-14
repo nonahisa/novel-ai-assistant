@@ -10,7 +10,7 @@
  * `@types/markdown-it` を足すと、配布物とは関係のない依存が増える。
  */
 import { rubyToHtml } from "./ruby";
-import { isMemoLine } from "./sceneMemo";
+import { memoLineMask, type MemoMarkers } from "./sceneMemo";
 
 /** 触る部分だけの形。`any` を使わずに済ませるための最小の定義 */
 export interface MarkdownItLike {
@@ -37,7 +37,7 @@ export interface MarkdownItLike {
       before(
         beforeName: string,
         ruleName: string,
-        rule: (state: { src: string }) => void
+        rule: (state: { src: string; env?: unknown }) => void
       ): void;
     };
   };
@@ -55,9 +55,10 @@ export interface MarkdownItLike {
  * 小説の原稿では字下げのコードブロックを使わないので、字下げしたメモが
  * 本文に混ざる害のほうを取った（作者の裁定、2026-09-08）。
  */
-export function hideMemoLinesInMarkdown(src: string): string {
+export function hideMemoLinesInMarkdown(src: string, markers?: MemoMarkers): string {
   const lines = src.split("\n");
-  const out: string[] = [];
+  /** コードの囲みの中の行（開きと閉じの行を含む） */
+  const inFence: boolean[] = [];
   /** いま囲みの中なら、その囲みの記号（``` か ~~~） */
   let fence: string | null = null;
 
@@ -65,19 +66,26 @@ export function hideMemoLinesInMarkdown(src: string): string {
     // 囲みの開始・終了は、行頭から3つまでの空きを許すのがMarkdownの決まり
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
     if (fence !== null) {
-      out.push(line);
+      inFence.push(true);
       if (marker && marker[1][0] === fence) fence = null;
       continue;
     }
     if (marker) {
       fence = marker[1][0];
-      out.push(line);
+      inFence.push(true);
       continue;
     }
-    if (isMemoLine(line)) continue;
-    out.push(line);
+    inFence.push(false);
   }
-  return out.join("\n");
+  /*
+    **メモの行は本文全体で決める**（囲み `<!-- ～ -->` は前後の行で決まる）。
+    コードの中の行は空にしてから見る——中の `//` も `<!--` も付箋ではない
+  */
+  const memo = memoLineMask(
+    lines.map((line, index) => (inFence[index] ? "" : line)),
+    markers
+  );
+  return lines.filter((_, index) => !memo[index]).join("\n");
 }
 
 /**
@@ -90,7 +98,16 @@ export function hideMemoLinesInMarkdown(src: string): string {
  * メモのほうは**解析より前**に落とす。行の切れ目が要るので、
  * 段落へ畳まれたあとでは元がどの行だったのか分からない。
  */
-export function extendMarkdownItWithRuby<T extends MarkdownItLike>(md: T): T {
+export function extendMarkdownItWithRuby<T extends MarkdownItLike>(
+  md: T,
+  options: {
+    /**
+     * プレビューしている文書の作品のメモの印（設計書6.40.8）。プレビューは同期で組むので、
+     * 覚えてある印を引く（`memoMarkerStore.ts` の `cachedMemoMarkersForPath`）。引けなければ既定
+     */
+    memoMarkersFor?: (env: unknown) => MemoMarkers | undefined;
+  } = {}
+): T {
   const renderText = md.renderer.rules.text;
   md.renderer.rules.text = (tokens, index, options, env, self) => {
     const rendered = renderText
@@ -101,7 +118,7 @@ export function extendMarkdownItWithRuby<T extends MarkdownItLike>(md: T): T {
 
   try {
     md.core?.ruler.before("normalize", "novelaiSceneMemo", (state) => {
-      state.src = hideMemoLinesInMarkdown(state.src);
+      state.src = hideMemoLinesInMarkdown(state.src, options.memoMarkersFor?.(state.env));
     });
   } catch {
     /*

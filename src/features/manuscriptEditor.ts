@@ -54,6 +54,7 @@ import { isNoteStyleTarget } from "../core/noteStyle";
 import { renderNotePreview } from "../core/notePreview";
 import { readWorkFormat } from "../core/workFormatStore";
 import { readWorkKind } from "../core/workKindStore";
+import { cachedMemoMarkersForPath, readMemoMarkers } from "../core/memoMarkerStore";
 import type { WorkKindKey } from "../core/workKind";
 import { measureKindText } from "../core/kindMeasure";
 import { TERM_COLORS } from "../core/termColors";
@@ -113,10 +114,12 @@ import { showPostingCopyNotice } from "./postingCopyNotice";
 // 開く列の決め方は素のエディタと1本にする（`editorColumn.ts`）
 import { columnForLocation } from "./editorColumn";
 import {
-  MEMO_LINE_PREFIX,
+  DEFAULT_MEMO_MARKERS,
+  memoInsertOf,
   memoColorVars,
   memoLineRemoval,
   memoLineRestorePoint,
+  type MemoMarkers,
   type RemovedMemoLine,
 } from "../core/sceneMemo";
 import {
@@ -298,6 +301,11 @@ interface OpenManuscript {
    * 種類を変えたときの知らせもそう案内している。
    */
   refreshKind(): Promise<void>;
+  /**
+   * 作品のメモの印を読み直し、本文と字数を送り直す（設計書6.40.8）。
+   * 印を切り替えたら、開いている画面の付箋の色と字数がその場で変わる
+   */
+  refreshMemoMarkers(): Promise<void>;
   /**
    * 用語の位置と持ち主（色・吹き出し・右クリックの当たり）を送り直す
    * （設計書6.5.8。2026-10-11）。
@@ -870,6 +878,16 @@ export async function refreshManuscriptKinds(): Promise<void> {
 }
 
 /**
+ * 開いている原稿すべてに、作品のメモの印を読み直させる（設計書6.40.8）。
+ * 印を切り替えたあとと、作品の設定（config.json）を手で直して保存したあとに呼ぶ
+ */
+export async function refreshManuscriptMemoMarkers(): Promise<void> {
+  await Promise.all(
+    [...openManuscripts.values()].map((open) => open.refreshMemoMarkers())
+  );
+}
+
+/**
  * 名前が変わる原稿の見た目を、**新しい名前のほうへ持って行く**
  * （0.51.5。0.47.9 の積み残し⑦。設計書6.25.5）。
  *
@@ -987,18 +1005,31 @@ export function planNeighborStep(input: {
  *   `reveal` を false にすると、挿した行へ**飛ばない**——読み上げ中の
  *   「引っかかった」（設計書6.42）は、聞いている最中に画面が動くと困る
  */
+/**
+ * その原稿の作品のメモの印（設計書6.40.8）。原稿を開いたときに読んだもの
+ * （`memoMarkerStore.ts` の覚え。切り替えると書いた側が上書きする）。引けなければ既定
+ */
+export function memoMarkersOf(document: vscode.TextDocument): MemoMarkers {
+  return cachedMemoMarkersForPath(fromUri(document.uri)) ?? DEFAULT_MEMO_MARKERS;
+}
+
 export async function insertMemoLineAbove(
   document: vscode.TextDocument,
   line: number,
   options: { body?: string; reveal?: boolean } = {}
 ): Promise<boolean> {
   const index = memoInsertIndex(document, line);
+  /*
+    **作品の印で挿す**（設計書6.40.8）。`//` を外した作品では、オンの印のうち最初のもの
+    （囲みだけなら `<!-- … -->`）。既定の `// ` で挿すと、その作品では本文の行になってしまう
+  */
+  const insert = memoInsertOf(memoMarkersOf(document));
 
   const change = new vscode.WorkspaceEdit();
   change.insert(
     document.uri,
     new vscode.Position(index, 0),
-    `${MEMO_LINE_PREFIX}${options.body ?? ""}\n`
+    `${insert.prefix}${options.body ?? ""}${insert.suffix}\n`
   );
   if (!(await vscode.workspace.applyEdit(change))) {
     // **黙って終わらない。** 押しても何も起きないときの手がかりを残す
@@ -1049,7 +1080,7 @@ export async function insertReadingMemo(
   line: number
 ): Promise<"inserted" | "already" | "failed"> {
   const index = memoInsertIndex(document, line);
-  if (index > 0 && isReadingMemoLine(document.lineAt(index - 1).text)) {
+  if (index > 0 && isReadingMemoLine(document.lineAt(index - 1).text, memoMarkersOf(document))) {
     return "already";
   }
   // **飛ばない**（`reveal: false`）。聞いている最中に画面が動くと、
@@ -1376,15 +1407,23 @@ export async function removeMemoLineInOpenManuscript(
   const document = open.document;
   const index = line - 1;
   if (index < 0 || index >= document.lineCount) return { kind: "changed" };
-  if (document.lineAt(index).text !== expectedRaw) return { kind: "changed" };
-  // 戻すための控えは、**消す前の文書の字**から作る（改行も文書のものになる）
-  const removed = memoLineRemoval(document.getText(), line, expectedRaw);
+  // 戻すための控えは、**消す前の文書の字**から作る（改行も文書のものになる）。
+  // 中身の照合もここで済む（囲み〔<!-- ～ -->〕なら囲み全体を、作品の印で照らす）
+  const removed = memoLineRemoval(document.getText(), line, expectedRaw, memoMarkersOf(document));
   if (!removed) return { kind: "changed" };
+  const last = index + removed.lineCount - 1;
+  if (last >= document.lineCount) return { kind: "changed" };
 
   const change = new vscode.WorkspaceEdit();
   // **行まるごと（改行を含めて）消す。** 本文だけを消すと空行が残り、
-  // 段落の切れ目が増えてしまう
-  change.delete(document.uri, document.lineAt(index).rangeIncludingLineBreak);
+  // 段落の切れ目が増えてしまう。囲みは囲みの行を全部消す
+  change.delete(
+    document.uri,
+    new vscode.Range(
+      document.lineAt(index).range.start,
+      document.lineAt(last).rangeIncludingLineBreak.end
+    )
+  );
   if (!(await vscode.workspace.applyEdit(change))) {
     logForFile(
       filePath,
@@ -1509,9 +1548,9 @@ const eolNoticeChecked = new Set<string>();
  * @param ext 開いているファイルの拡張子（`.md` / `.txt`）。**設定だけで
  *   決めない**——ルビの読みを外すのは Markdown のときだけである
  */
-export function countForDisplay(text: string, ext: string): number {
+export function countForDisplay(text: string, ext: string, memoMarkers?: MemoMarkers): number {
   return pickCount(
-    countEpisodeChars(text, { ext, excludeRuby: excludeRubyFromCount() }),
+    countEpisodeChars(text, { ext, excludeRuby: excludeRubyFromCount(), memoMarkers }),
     currentCountMode()
   );
 }
@@ -2366,6 +2405,27 @@ export class ManuscriptEditorProvider
     }
   }
 
+  /**
+   * 開いた本文の作品のメモの印を読み、覚えに入れる（設計書6.40.8）。
+   *
+   * **設定が壊れていても原稿は開ける**（画面の色分けと字数の表示だけの話）。そのときは
+   * 既定の印で見せ、理由はログに残す。投稿・書き出し・AI の入口は、それぞれが読み直して
+   * 止まる（ここで黙って既定にしても、外へ出るものには効かない）
+   */
+  private async loadMemoMarkers(document: vscode.TextDocument): Promise<void> {
+    try {
+      const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
+      if (found) await readMemoMarkers(found.work);
+    } catch (error) {
+      logForFile(
+        fromUri(document.uri),
+        `原稿エディタ：メモの印を読めませんでした（既定の // で表示します）：${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     panel: vscode.WebviewPanel,
@@ -2384,6 +2444,8 @@ export class ManuscriptEditorProvider
       ——開いている間に種類を変えても、組み方と目安が別々の種類を指さない。
     */
     const kind = await this.kindOfDocument(document);
+    // 作品のメモの印を読んでおく（以後は `memoMarkersOf` が覚えを引く。設計書6.40.8）
+    await this.loadMemoMarkers(document);
     panel.webview.html = buildManuscriptEditorHtml(
       createNonce(),
       panel.webview.cspSource,
@@ -2519,7 +2581,7 @@ export class ManuscriptEditorProvider
           （閉じている面のために本文ぜんたいを組む理由が無い）。
         */
         ...(noteLike && notePreviewWanted
-          ? { notePreview: renderNotePreview(text) }
+          ? { notePreview: renderNotePreview(text, memoMarkersOf(document)) }
           : {}),
         // **組んで書く面も、この記法で組む**（画面側に写しを持たせない）
         notation,
@@ -2535,7 +2597,9 @@ export class ManuscriptEditorProvider
         // **打つ面に重ねる用語の色**（設計書6.25.6）。
         // 打つ面は textarea なので、中の一部だけを飾れない。
         // 同じ本文を重ねて、用語のところだけ色を付ける（それ以外は透明）
-        marks: renderTermMarks(text, index),
+        marks: renderTermMarks(text, index, memoMarkersOf(document)),
+        // その作品のメモの印（設計書6.40.8）。組んで書く面が付箋の行を見分けるのに使う
+        memoMarkers: memoMarkersOf(document),
         // 右クリックで「どの用語の上か」を知るために使う。
         // textarea の中に要素は無いので、当たり判定を要素で取れない
         terms: collectTermSpans(text, index),
@@ -2711,6 +2775,14 @@ export class ManuscriptEditorProvider
       },
       refreshCounts: (): void => {
         void this.sendFootCounts(panel, document);
+      },
+      refreshMemoMarkers: async (): Promise<void> => {
+        await this.loadMemoMarkers(document);
+        // 画面が動き出す前なら送らない（`ready` で最初の便と一緒に届く）
+        if (!webviewReady) return;
+        // 本文と一緒に新しい印を送る（組んで書く面の付箋の色と、打つ面の蛍光ペン）
+        await send();
+        await this.sendCount(panel, toLf(document.getText()), document, measureKind);
       },
       refreshKind: async (): Promise<void> => {
         measureKind = await this.kindOfDocument(document);
@@ -3669,6 +3741,7 @@ export class ManuscriptEditorProvider
               理由を添えて返す（画面は止めて理由を出す。OSの声の道は残る）
             */
             const sentences = buildReadingPlan(message.text, notation, readings, {
+              memoMarkers: memoMarkersOf(document),
               splitDialogue: true,
             });
             const usable = voiceReading.usable();
@@ -3727,7 +3800,7 @@ export class ManuscriptEditorProvider
           }
           await panel.webview.postMessage({
             type: "readingPlan",
-            sentences: buildReadingPlan(message.text, notation, readings),
+            sentences: buildReadingPlan(message.text, notation, readings, { memoMarkers: memoMarkersOf(document) }),
             readable,
             // 画面が「自分が送った本文の計画か」を確かめるための目印
             textLength: message.text.length,
@@ -4489,7 +4562,7 @@ export class ManuscriptEditorProvider
       isDirty: () => document.isDirty,
       save: () => Promise.resolve(document.save()),
       // 下の欄の「このファイル」と同じ数え方（画面に出す数と食い違わせない）
-      chars: () => countForDisplay(toLf(document.getText()), extensionOf(document)),
+      chars: () => countForDisplay(toLf(document.getText()), extensionOf(document), memoMarkersOf(document)),
       /*
         未保存でないのに、当てた字が一度も保存されていない＝読み取り専用の原稿
         （2026-10-15）。ふつうの原稿は当てれば未保存になり、保存すれば下りる
@@ -4559,7 +4632,8 @@ export class ManuscriptEditorProvider
     kind?: WorkKindKey
   ): Promise<void> {
     const ext = extensionOf(document);
-    const value = countForDisplay(text, ext);
+    const memoMarkers = memoMarkersOf(document);
+    const value = countForDisplay(text, ext, memoMarkers);
     /*
       種類ごとの目安（台本の分数・漫画のページ数など）。**字数と同じ数え方の
       本文**（頭書きを外し、ルビは .md のときだけ外す）から測る——字数と
@@ -4569,7 +4643,8 @@ export class ManuscriptEditorProvider
       ? measureKindText(
           kind,
           text,
-          countEpisodeChars(text, { ext, excludeRuby: excludeRubyFromCount() })
+          countEpisodeChars(text, { ext, excludeRuby: excludeRubyFromCount(), memoMarkers }),
+          memoMarkers
         )?.short
       : undefined;
     await panel.webview.postMessage({

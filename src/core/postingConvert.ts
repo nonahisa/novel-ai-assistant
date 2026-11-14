@@ -1,7 +1,7 @@
 import { toNoteMarkdown, type NoteMarkdownResult } from "./noteMarkdown";
 import type { PostingCopyTarget } from "./postingCopyTargets";
 import { toSiteNotation } from "./ruby";
-import { stripMemoLines } from "./sceneMemo";
+import { stripMemoLines, type MemoMarkers } from "./sceneMemo";
 
 /**
  * 「コピー（投稿サイト用）」の変換（設計書6.84）。
@@ -35,6 +35,8 @@ export interface PostingConversionOptions {
    * 選択の一部であり、選んだものと貼られるものが食い違うほうが困る。
    */
   trimEdges?: boolean;
+  /** その作品のメモの印（設計書6.40.8）。省くと既定（`//` と `／／`） */
+  memoMarkers?: MemoMarkers;
 }
 
 export interface PostingConversion {
@@ -67,12 +69,12 @@ export function convertForPosting(
     // **メモを先に落とさない。** コードの中の `//` は付箋ではないので、
     // コードを読み分けられる `toNoteMarkdown` に任せる
     // （`toNoteMarkdown` は本文欄へ貼る形なので、前後の空行は元から無い）
-    const note = toNoteMarkdown(source);
+    const note = toNoteMarkdown(source, { memoMarkers: options.memoMarkers });
     return { text: note.body, note };
   }
 
   const text = toSiteNotation(
-    stripMemoLines(source),
+    stripMemoLines(source, options.memoMarkers),
     target.style,
     target.emphasis
   );

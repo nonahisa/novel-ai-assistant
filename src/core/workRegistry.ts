@@ -20,6 +20,7 @@ import { parseNameOrigin } from "./nameOriginFit";
 import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
 import { parsePdfExportConfig } from "./pdfExportConfig";
+import { resolveMemoMarkers } from "./memoMarkers";
 import { fileReader, isNotFound } from "./fileRead";
 import { isWorkFolderPresent } from "./workFolderPresence";
 import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
@@ -1220,6 +1221,13 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
   // ［PDF出力］の前回の設定（作者の裁定 2026-10-16 夜の3）。`announce` と同じく、
   // 壊れていれば欄ごと無かったことにする（投げない）
   const pdfExport = parsePdfExportConfig(value.pdfExport);
+  /*
+    メモの印（設計書6.40.8）。**ほかの欄と違い、壊れていれば投げる**（直さずに止める。
+    実装ルール2）。黙って無かったことにすると既定（`//`）へ戻り、作者が選んだ印の行
+    （`%%` など）が字数と投稿用のコピーに出てしまう
+  */
+  if (value.memoMarkers !== undefined) resolveMemoMarkers(value.memoMarkers);
+  const memoMarkers = value.memoMarkers as string[] | undefined;
 
   return {
     schemaVersion: (value.schemaVersion as string).trim(),
@@ -1234,6 +1242,7 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
     ...(kind ? { kind } : {}),
     ...(nameOrigin ? { nameOrigin } : {}),
     ...(pdfExport ? { pdfExport } : {}),
+    ...(memoMarkers ? { memoMarkers: [...memoMarkers] } : {}),
   };
 }
 

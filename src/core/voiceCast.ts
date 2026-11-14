@@ -1,4 +1,4 @@
-import { isMemoLine } from "./sceneMemo";
+import { memoLineMask, type MemoMarkers } from "./sceneMemo";
 import { voiceDialogueSpans, type ReadingSentence } from "./readAloud";
 import {
   findStyle,
@@ -46,9 +46,9 @@ export interface CastDialogue {
 }
 
 /** その話の台詞を並べる（計画の `dialogue` と同じ番号になる） */
-export function castDialogues(text: string): CastDialogue[] {
+export function castDialogues(text: string, markers?: MemoMarkers): CastDialogue[] {
   const seen = new Map<string, number>();
-  return voiceDialogueSpans(text).map((span, index) => {
+  return voiceDialogueSpans(text, markers).map((span, index) => {
     const quote = text.slice(span.start, span.end);
     const nth = seen.get(quote) ?? 0;
     seen.set(quote, nth + 1);
@@ -102,9 +102,10 @@ export function castChunksOf(
   text: string,
   maxChars: number,
   decided?: ReadonlyMap<number, string>,
-  context?: CastChunkContext
+  context?: CastChunkContext,
+  markers?: MemoMarkers
 ): CastChunk[] {
-  const dialogues = castDialogues(text);
+  const dialogues = castDialogues(text, markers);
   const chunks: CastChunk[] = [];
   const lines = text.split("\n");
   let lineStart = 0;
@@ -133,9 +134,11 @@ export function castChunksOf(
     bufferFirstLine = plainLines.length;
   };
 
-  for (const line of lines) {
+  // 囲み（`<!-- ～ -->`）は前後の行で決まるので、メモの行は本文全体で先に決める
+  const memo = memoLineMask(lines, markers);
+  for (const [lineIndex, line] of lines.entries()) {
     const lineEnd = lineStart + line.length;
-    if (!isMemoLine(line)) {
+    if (!memo[lineIndex]) {
       if (bufferChars > 0 && bufferChars + line.length > maxChars) flush();
       // この行に頭がある台詞へ、区切りの中の番号を差し込む（後ろから）
       const here: CastDialogue[] = [];
@@ -382,12 +385,24 @@ function verdictAfter(
  */
 export function castSpeakersFromText(
   text: string,
-  people: readonly CastPerson[]
+  people: readonly CastPerson[],
+  markers?: MemoMarkers
 ): Map<number, string> {
   const table = castNameTable(people);
   const out = new Map<number, string>();
   if (table.length === 0) return out;
-  const dialogues = castDialogues(text);
+  const dialogues = castDialogues(text, markers);
+  // メモの行の頭の位置（囲みの中の行も含む）。直前の行をさかのぼるときに飛ばす
+  const memoStarts = new Set<number>();
+  {
+    const split = text.split("\n");
+    const memo = memoLineMask(split, markers);
+    let at = 0;
+    split.forEach((line, index) => {
+      if (memo[index]) memoStarts.add(at);
+      at += line.length + 1;
+    });
+  }
   const lineStartOf = (at: number): number => text.lastIndexOf("\n", at - 1) + 1;
   const lineEndOf = (at: number): number => {
     const end = text.indexOf("\n", at);
@@ -411,7 +426,7 @@ export function castSpeakersFromText(
         while (cursor > 0) {
           const start = lineStartOf(cursor);
           const line = text.slice(start, cursor);
-          if (line.trim() === "" || isMemoLine(line)) {
+          if (line.trim() === "" || memoStarts.has(start)) {
             cursor = start - 1;
             continue;
           }

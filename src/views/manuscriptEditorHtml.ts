@@ -32,7 +32,7 @@
 import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
 import { MANUSCRIPT_SIZE_DEFAULT } from "../core/manuscriptAppearance";
 import { NOTATION_RULES } from "../core/manuscriptRender";
-import { MEMO_LINE_PATTERN, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
+import { DEFAULT_MEMO_MARKERS, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
 import { TCY_RUN_PATTERN } from "../core/tateChuYoko";
 import {
   kindLayoutCss,
@@ -5794,6 +5794,15 @@ ${RESUME_WRITING_LABEL ? `
       }
       current = message.text;
       /*
+        **作品のメモの印も、組み立てるより先に受け取る**（設計書6.40.8）。切り替えたあとは
+        本文が同じでも送られてくるので、組んである行の印だけを付け直す
+      */
+      if (message.memoMarkers) {
+        const changedMarkers = JSON.stringify(message.memoMarkers) !== JSON.stringify(MEMO_MARKERS);
+        MEMO_MARKERS = message.memoMarkers;
+        if (changedMarkers && composeOn) composeRepaintMemos();
+      }
+      /*
         **記法は、組み立てるより先に受け取る**（設計書6.12）。
         .txt は投稿サイトの記法（｜漢字《かんじ》）で書かれているので、
         取り違えると記法が生のまま出るか、平文が記法として畳まれる。
@@ -6127,7 +6136,12 @@ ${RESUME_WRITING_LABEL ? `
    * ここへはその文字列がそのまま埋め込まれる（写しを置くと、
    * 拡張機能側と画面側で「どれがメモか」が食い違う日が来る）。
    */
-  const MEMO_LINE_RE = new RegExp(${JSON.stringify(MEMO_LINE_PATTERN)});
+  /*
+    **どの印をメモと読むかは作品ごとに違う**（設計書6.40.8）。拡張機能が作品の印の組
+    （core/memoMarkers.ts の MemoMarkers。字の並びと真偽だけ）を、本文と一緒に
+    update で送ってくる。届くまでは既定（// と ／／）
+  */
+  let MEMO_MARKERS = ${JSON.stringify(DEFAULT_MEMO_MARKERS)};
   const MEMO_TAG_CLASSES = ${JSON.stringify(MEMO_TAG_CLASS_MAP)};
 
   /**
@@ -6174,9 +6188,10 @@ ${RESUME_WRITING_LABEL ? `
    * 同じものを使う。** 別々に組み立てると、打った瞬間に片方の印だけが
    * 消える（付箋を打ったら脚本の印が落ちる、という形で必ず出る）。
    */
-  function composeLineClass(line, element) {
+  function composeLineClass(line, element, memoClass) {
     let names = "line";
-    const memo = memoClassFor(line);
+    // 囲み（<!-- ～ -->）の中の行は1行だけでは分からないので、全行から決めた印を受け取る
+    const memo = memoClass === undefined ? memoClassFor(line) : memoClass;
     if (memo) names += " " + memo;
     const script = scriptLineClass(line);
     if (script) names += " " + script;
@@ -6226,9 +6241,87 @@ ${RESUME_WRITING_LABEL ? `
     return out;
   }
 
-  /** その行が付箋か。**行の先頭だけを見る**（途中の // はURL・会話文） */
+  /*
+    ── 付箋の行の判定（core/sceneMemo.ts の scanMemoLines・stripMemoMark の写し） ──
+    画面のスクリプトは import できないので写してある。**同じ見本で同じ答えになることは
+    test/unit/cross/composeFace.test.ts が見張る**（新しい印・囲みの1行と複数行・閉じ忘れ・
+    // を外した組）。決まりを変えたら、core と出先のページ（media/outbox/editor.html）も直す
+  */
+  function memoLeadLength(line) {
+    const m = /^[ \\t\\u3000]*/.exec(line);
+    return m ? m[0].length : 0;
+  }
+
+  function memoCommentEnd(lines, start, from) {
+    for (let k = start; k < lines.length; k++) {
+      const text = k === start ? lines[k].slice(from) : lines[k];
+      const at = text.indexOf("-->");
+      if (at < 0) continue;
+      return /^[ \\t\\u3000]*$/.test(text.slice(at + 3)) ? k : null;
+    }
+    return null;
+  }
+
+  /** 行の並びの、行ごとのメモの印と、メモ1件ずつの範囲（囲みは囲み全体で1件） */
+  function memoScanLines(lines, markers) {
+    const memo = lines.map(function () { return false; });
+    const blocks = [];
+    let unclosedLine = null;
+    let commentOn = !!markers.comment;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const lead = memoLeadLength(line);
+      const rest = line.slice(lead);
+      if (commentOn && rest.startsWith("<!--")) {
+        const end = memoCommentEnd(lines, i, lead + 4);
+        if (end === null) {
+          unclosedLine = i;
+          commentOn = false;
+          continue;
+        }
+        for (let k = i; k <= end; k++) memo[k] = true;
+        blocks.push({ start: i, end: end, comment: true });
+        i = end;
+        continue;
+      }
+      if (markers.prefixes.some(function (prefix) { return rest.startsWith(prefix); })) {
+        memo[i] = true;
+        blocks.push({ start: i, end: i, comment: false });
+      }
+    }
+    return { memo: memo, blocks: blocks, unclosedLine: unclosedLine };
+  }
+
+  /** 付箋の行から印を外した中身（囲みの最初の行なら <!-- と、1行で閉じていれば --> も） */
+  function memoStripMark(line, markers) {
+    const rest = line.slice(memoLeadLength(line));
+    if (markers.comment && rest.startsWith("<!--")) {
+      const inner = rest.slice(4);
+      const close = inner.indexOf("-->");
+      return close >= 0 ? inner.slice(0, close) : inner;
+    }
+    const prefix = markers.prefixes.find(function (candidate) { return rest.startsWith(candidate); });
+    return prefix ? rest.slice(prefix.length) : rest;
+  }
+
+  /** その1行だけで付箋か。**行の先頭だけを見る**（途中の // はURL・会話文） */
   function memoIsLine(line) {
-    return MEMO_LINE_RE.test(line);
+    return memoScanLines([line], MEMO_MARKERS).memo[0];
+  }
+
+  /**
+   * 行ごとの付箋の class（付箋でない行は空文字）。**囲みの中の行は、囲みの最初の行の
+   * タグで塗る**（1件の付箋は1つの色）
+   */
+  function memoClassesOf(lines) {
+    const classes = lines.map(function () { return ""; });
+    const scan = memoScanLines(lines, MEMO_MARKERS);
+    for (const block of scan.blocks) {
+      const extra = MEMO_TAG_CLASSES[memoPartsOf(lines[block.start]).tag];
+      const name = extra ? "memo " + extra : "memo";
+      for (let k = block.start; k <= block.end; k++) classes[k] = name;
+    }
+    return classes;
   }
 
   /**
@@ -6243,7 +6336,7 @@ ${RESUME_WRITING_LABEL ? `
     /* 変数を body と名付けない——消したはずの「並べる」面のCSS class
        （body に続けて split と書く形）と同じ並びになり、
        それが残っていないかを見張る試験に当たってしまう */
-    const rest = line.replace(MEMO_LINE_RE, "").replace(/^[\\s　]+/, "");
+    const rest = memoStripMark(line, MEMO_MARKERS).replace(/^[\\s　]+/, "").replace(/[\\s　]+$/, "");
     const words = rest.split(/[\\s　]+/).filter(function (word) {
       return word.length > 0;
     });
@@ -6589,11 +6682,11 @@ ${RESUME_WRITING_LABEL ? `
    * doc を引数で受けるのは、**画面の外から試せるようにする**ためである
    * （test/unit/cross/composeFace.test.ts が偽の document を渡して往復を確かめる）。
    */
-  function composeBuildLine(line, doc, mode) {
+  function composeBuildLine(line, doc, mode, memoClass) {
     const p = doc.createElement("p");
     // 付箋の行（設計書6.40.3）と脚本の行（設計書6.70）は、**見た目だけ**を
     // 変える。**かたまりにはしない**——中身は普通に打てて、印を消せば本文へ戻る
-    p.setAttribute("class", composeLineClass(line));
+    p.setAttribute("class", composeLineClass(line, undefined, memoClass));
     const parts = composeParts(line, mode);
     if (parts.length === 0) {
       // 空行。高さを保つための詰め物（読む面の br と同じ役目）
@@ -6622,7 +6715,7 @@ ${RESUME_WRITING_LABEL ? `
       }
     }
     // 中身を組んでから付け直す（台詞のぶら下げの幅は、見えている字で数えるため）
-    p.setAttribute("class", composeLineClass(line, p));
+    p.setAttribute("class", composeLineClass(line, p, memoClass));
     return p;
   }
 
@@ -6630,9 +6723,10 @@ ${RESUME_WRITING_LABEL ? `
   function composeBuildFragment(text, doc, mode) {
     const fragment = doc.createDocumentFragment();
     const lines = text.split("\\n");
-    for (const line of lines) {
-      fragment.appendChild(composeBuildLine(line, doc, mode));
-    }
+    const memoClasses = memoClassesOf(lines);
+    lines.forEach(function (line, index) {
+      fragment.appendChild(composeBuildLine(line, doc, mode, memoClasses[index]));
+    });
     return fragment;
   }
 
@@ -7873,12 +7967,18 @@ ${RESUME_WRITING_LABEL ? `
    * 行の属性を書き換えると、変換そのものに障ることがある。
    */
   function composeRepaintMemos() {
-    const lines = compose.querySelectorAll("p, div");
-    for (const element of lines) {
+    const rows = [];
+    for (const element of compose.querySelectorAll("p, div")) {
       // 行の入れ物だけを見る（ルビの中の要素は行ではない）
       if (element.parentNode !== compose) continue;
-      element.setAttribute("class", composeLineClass(element.textContent || "", element));
+      rows.push(element);
     }
+    // 囲み（<!-- ～ -->）は前後の行で決まるので、全行から一度に決める
+    const texts = rows.map(function (element) { return element.textContent || ""; });
+    const memoClasses = memoClassesOf(texts);
+    rows.forEach(function (element, index) {
+      element.setAttribute("class", composeLineClass(texts[index], element, memoClasses[index]));
+    });
   }
 
   /*

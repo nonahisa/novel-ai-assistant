@@ -1,5 +1,6 @@
 import type { CharCounts } from "../models/types";
 import { countChars } from "./charCount";
+import type { MemoMarkers } from "./memoMarkers";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { parseEpisodeMetadata } from "./metadataParser";
 
@@ -27,6 +28,8 @@ export interface EpisodeCountOptions {
   ext: string;
   /** 設定「ルビを文字数から外す」（`countSettings.excludeRubyFromCount`） */
   excludeRuby: boolean;
+  /** その作品のメモの印（設計書6.40.8）。省くと既定（`//` と `／／`） */
+  memoMarkers?: MemoMarkers;
 }
 
 /**
@@ -67,6 +70,7 @@ export function countEpisodeChars(
 ): CharCounts {
   return countChars(
     episodeBodyForCount(rawText, parsed),
-    options.ext === ".md" ? options.excludeRuby : false
+    options.ext === ".md" ? options.excludeRuby : false,
+    options.memoMarkers
   );
 }

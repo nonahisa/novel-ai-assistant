@@ -1,4 +1,4 @@
-import { isMemoLine } from "./sceneMemo";
+import { memoLineMask, type MemoMarkers } from "./sceneMemo";
 
 /**
  * 読みの辞書（読み上げの読み違いを、話ごと・場所ごとに直す。設計書6.42.1）。
@@ -387,7 +387,7 @@ export interface ReadingChunk {
  * 1行が上限を超えるときは、その行だけで1区切りにする（行の途中で切ると
  * 句が割れる）。
  */
-export function readingChunksOf(text: string, maxChars: number): ReadingChunk[] {
+export function readingChunksOf(text: string, maxChars: number, markers?: MemoMarkers): ReadingChunk[] {
   const chunks: ReadingChunk[] = [];
   let current: string[] = [];
   let size = 0;
@@ -397,8 +397,11 @@ export function readingChunksOf(text: string, maxChars: number): ReadingChunk[] 
     current = [];
     size = 0;
   };
-  for (const line of text.split("\n")) {
-    if (isMemoLine(line)) continue;
+  const lines = text.split("\n");
+  // 囲み（`<!-- ～ -->`）は前後の行で決まるので、メモの行は本文全体で先に決める
+  const memo = memoLineMask(lines, markers);
+  for (const [index, line] of lines.entries()) {
+    if (memo[index]) continue;
     if (size > 0 && size + line.length + 1 > maxChars) flush();
     current.push(line);
     size += line.length + 1;

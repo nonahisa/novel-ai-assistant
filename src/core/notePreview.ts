@@ -7,6 +7,7 @@ import {
   parseNoteBlocks,
   type NoteBlock,
 } from "./noteMarkdown";
+import type { MemoMarkers } from "./memoMarkers";
 
 /**
  * 「noteに貼ったときの見た目」を組む（設計書6.69）。
@@ -37,8 +38,8 @@ import {
 /** 文言の定義は `noteMarkdown.ts` に置く（貼るときの知らせと同じ言葉を使う） */
 export { NOTE_UNSUPPORTED } from "./noteMarkdown";
 
-export function renderNotePreview(text: string): string {
-  return parseNoteBlocks(text).map(renderBlock).join("");
+export function renderNotePreview(text: string, markers?: MemoMarkers): string {
+  return parseNoteBlocks(text, markers).map(renderBlock).join("");
 }
 
 function renderBlock(block: NoteBlock): string {

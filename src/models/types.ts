@@ -222,6 +222,15 @@ export interface WorkConfig {
    * 読み方と確かめ方は `core/pdfExportConfig.ts`
    */
   pdfExport?: WorkPdfExportConfig;
+  /**
+   * メモ（付箋）の印（設計書6.40.8。作者の決定 2026-11-14 夜）。**省くと `//` と `／／` だけ**
+   * （これまでの振る舞い）。名前の並び（`slash`・`backslash`・`percent`・`comment`）で書く。
+   *
+   * 型は文字列の並びにしてある——印の一覧は `core/memoMarkers.ts` が持ち、`models` は
+   * そちらを引けない。**知らない名前も書かれたまま持つ**（新しい版で増えた印を、古い版が
+   * 書き戻すときに消さない）。読み方と確かめ方は `core/memoMarkers.ts` の `resolveMemoMarkers`
+   */
+  memoMarkers?: string[];
 }
 
 /**

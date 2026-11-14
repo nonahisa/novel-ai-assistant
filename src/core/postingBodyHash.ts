@@ -4,7 +4,7 @@ import { isCollectedFile } from "./episodeLabel";
 import { hashText } from "./hash";
 import { toLf } from "./eolSpace";
 import { fromSiteNotation, toSiteNotation } from "./ruby";
-import { stripMemoLines } from "./sceneMemo";
+import { stripMemoLines, type MemoMarkers } from "./sceneMemo";
 import {
   NOTATION_TEXT_HASH_PREFIX,
   TITLED_TEXT_HASH_PREFIX,
@@ -47,8 +47,8 @@ import {
  *
  * VS Code API に依存しない（ブラウザ版でも同じ値になる。`hash.ts` は自前の SHA-256）。
  */
-export function normalizePostingBody(body: string): string {
-  return stripMemoLines(toLf(body).replace(/^\uFEFF/, ""))
+export function normalizePostingBody(body: string, markers?: MemoMarkers): string {
+  return stripMemoLines(toLf(body).replace(/^\uFEFF/, ""), markers)
     .split("\n")
     .map((line) => line.replace(/[ \t\u3000]+$/, ""))
     .join("\n")
@@ -62,8 +62,8 @@ export function normalizePostingBody(body: string): string {
  * **0.124.0 の記録に残っている取り方。** いま記録に残すのは題も含めた `postingTextHash` で、
  * こちらは古い記録と比べるときだけ使う（`models/posting.ts` の `revisionNeed`）。
  */
-export function postingBodyHash(body: string): string {
-  return hashText(normalizePostingBody(body));
+export function postingBodyHash(body: string, markers?: MemoMarkers): string {
+  return hashText(normalizePostingBody(body, markers));
 }
 
 /**
@@ -81,10 +81,10 @@ function normalizePostingSubtitle(subtitle: string | null | undefined): string {
  * （題にも本文にも現れない字）を挟み、「題の末尾を本文の頭へ移した」直しも別の印にする。
  * 頭に `v2:`（`TITLED_TEXT_HASH_PREFIX`）を付け、0.124.0 の本文だけの印と見分ける。
  */
-export function postingTextHash(subtitle: string | null | undefined, body: string): string {
+export function postingTextHash(subtitle: string | null | undefined, body: string, markers?: MemoMarkers): string {
   return (
     TITLED_TEXT_HASH_PREFIX +
-    hashText(`${normalizePostingSubtitle(subtitle)}\u0000${normalizePostingBody(body)}`)
+    hashText(`${normalizePostingSubtitle(subtitle)}\u0000${normalizePostingBody(body, markers)}`)
   );
 }
 
@@ -130,10 +130,11 @@ export function canonicalPostingNotation(text: string): string {
  */
 export function postingNotationTextHash(
   subtitle: string | null | undefined,
-  body: string
+  body: string,
+  markers?: MemoMarkers
 ): string {
   const title = normalizePostingSubtitle(canonicalPostingNotation(subtitle ?? ""));
-  const text = canonicalPostingNotation(normalizePostingBody(body));
+  const text = canonicalPostingNotation(normalizePostingBody(body, markers));
   return NOTATION_TEXT_HASH_PREFIX + hashText(`${title}\u0000${text}`);
 }
 
@@ -174,22 +175,23 @@ export function postingTitleHashCandidates(subtitle: string | null | undefined):
 /** 今の話の印を、古い記録とも比べられる形で作る（`revisionNeed` へ渡す） */
 export function postingTextHashes(
   subtitle: string | null | undefined,
-  body: string
+  body: string,
+  markers?: MemoMarkers
 ): PostingTextHashes {
-  const titled = postingTextHash(subtitle, body);
-  const bodyOnly = postingBodyHash(body);
+  const titled = postingTextHash(subtitle, body, markers);
+  const bodyOnly = postingBodyHash(body, markers);
   const subtitleCopies = siteNotationCopies(subtitle ?? "");
   const bodyCopies = siteNotationCopies(body);
   return {
-    notation: postingNotationTextHash(subtitle, body),
+    notation: postingNotationTextHash(subtitle, body, markers),
     titled,
     bodyOnly,
     titledCopies: distinctExcept(
-      bodyCopies.map((copy, index) => postingTextHash(subtitleCopies[index], copy)),
+      bodyCopies.map((copy, index) => postingTextHash(subtitleCopies[index], copy, markers)),
       titled
     ),
     bodyOnlyCopies: distinctExcept(
-      bodyCopies.map((copy) => postingBodyHash(copy)),
+      bodyCopies.map((copy) => postingBodyHash(copy, markers)),
       bodyOnly
     ),
   };

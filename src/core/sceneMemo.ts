@@ -2,6 +2,14 @@
 // `paths` ごと取り込むと `vscode` が付いてくるので、純粋な側を直に指す
 // （設計書6.87.3）
 import * as paths from "./pathText";
+import {
+  DEFAULT_MEMO_MARKERS,
+  MEMO_MARKER_DEFS,
+  memoInsertOf,
+  type MemoMarkers,
+} from "./memoMarkers";
+
+export { DEFAULT_MEMO_MARKERS, memoInsertOf, type MemoMarkers } from "./memoMarkers";
 
 /**
  * シーンメモ——本文の中に置く付箋（設計書6.40）。
@@ -35,8 +43,13 @@ export interface SceneMemo {
   tag: string;
   /** タグを除いた本文 */
   text: string;
-  /** 行そのもの（`//` を含む）。本文から消すときの照合に使う */
+  /**
+   * 行そのもの（`//` を含む）。本文から消すときの照合に使う。
+   * 囲み（`<!-- ～ -->`）が複数行なら、その行々を本文の改行のままつないだもの
+   */
   raw: string;
+  /** 終わりの行（1始まり）。1行の付箋なら `line` と同じ */
+  endLine?: number;
 }
 
 /** 本文の中の位置（次へ・戻るの起点） */
@@ -46,36 +59,31 @@ export interface MemoPosition {
   line: number;
 }
 
-/**
- * 付箋の印。**行の先頭が半角2つ `//` か全角2つ `／／`。**
- *
- * **先頭の空白は許さない。** 日本語の小説は段落の頭を全角空白で
- * 字下げするので、字下げを許すと本文と見分けが付かなくなる。
- *
- * 正規表現ではなく**文字列**で置いてあるのは、組んで書く面（設計書6.34）の
- * 画面側JSへそのまま渡すためである。あちらは webview のテンプレート文字列の
- * 中にあって `import` が効かないので、写しを置くと**片方だけが直る日が来る**
- * （`NOTATION_PATTERN` と同じ事情）。
- */
-/**
- * **字下げしていてもメモ**（作者の裁定、2026-09-08）。小説では段落の頭に
- * 全角空白を置くのが普通なので、同じ調子で「　// ここは書き直す」と
- * 書くと、0.40.5 までは本文扱いになって字数と投稿用コピーに混ざった。
- * 行頭の空白（半角・タブ・全角）を許す。この文字列は画面（WebView）へも
- * そのまま渡すので、正規表現の文法だけで書く。
- */
-export const MEMO_LINE_PATTERN = "^[ \t\u3000]*(?:\/\/|／／)";
+/*
+  付箋の印（設計書6.40.1・6.40.8）。**どの印を使うかは作品ごとに選べる**
+  （`core/memoMarkers.ts`。既定は `//` と `／／`）。ここの関数はどれも印の組を
+  引数で受け取り、省くと既定になる（移植のコードと、作品を知らない呼び元が今のまま動く）。
+
+  **字下げしていてもメモ**（作者の裁定、2026-09-08）。小説では段落の頭に
+  全角空白を置くのが普通なので、同じ調子で「　// ここは書き直す」と
+  書くと、0.40.5 までは本文扱いになって字数と投稿用コピーに混ざった。
+  行頭の空白（半角・タブ・全角）を許す。
+
+  **囲み（`<!-- ～ -->`）は1行では決まらない**（前後の行で決まる）。そのため判定の本体は
+  本文全体を見る `scanMemoLines` の1つにし、ほかの関数はどれもそれを使う。
+*/
 
 /** タグが書かれていない付箋の呼び名 */
 export const DEFAULT_MEMO_TAG = "メモ";
 
 /**
- * 「ここにメモを足す」で挿す行（設計書6.40.3）。
+ * 「ここにメモを足す」で挿す行の頭（設計書6.40.3）。既定の組の字。
  *
  * **半角の `//` と空白まで。** 中身は作者が打つ。タグの雛形を入れておくと、
  * 消して打ち直す手間になる（付箋はタグ無しでも使える）。
+ * `//` を外した作品では、オンの印のうち最初のもので挿す（`memoInsertOf`）。
  */
-export const MEMO_LINE_PREFIX = "// ";
+export const MEMO_LINE_PREFIX = memoInsertOf(DEFAULT_MEMO_MARKERS).prefix;
 
 /**
  * 1件も無いときに出す、書き方の案内。
@@ -84,7 +92,20 @@ export const MEMO_LINE_PREFIX = "// ";
  * 書き写すと片方だけ古くなる（「…と書くと行頭になります」という、
  * 意味の通らない文が残っていた。2026-09-06、作者の指摘）。
  */
-export const MEMO_HINT = "本文の行頭に // と書くとメモになります（字下げしていても構いません）";
+export function memoHint(markers: MemoMarkers = DEFAULT_MEMO_MARKERS): string {
+  const lead = MEMO_MARKER_DEFS.filter((def) => markers.ids.includes(def.id) && def.prefixes.length > 0).map(
+    (def) => def.prefixes[0]
+  );
+  const parts: string[] = [];
+  if (lead.length > 0) {
+    parts.push(`本文の行頭に ${lead.join(" か ")} と書くとメモになります（字下げしていても構いません）`);
+  }
+  if (markers.comment) parts.push("<!-- と --> で囲んだ行もメモになります");
+  return parts.join("。");
+}
+
+/** 既定の組の案内（作品を知らない所で使う） */
+export const MEMO_HINT = memoHint(DEFAULT_MEMO_MARKERS);
 
 /**
  * 校正・メモパネルを開くコマンド（Ctrl+Alt+M と同じもの）。
@@ -218,11 +239,145 @@ export const MEMO_TAG_CLASS_MAP: Record<string, string> = (() => {
   return map;
 })();
 
-const MEMO_LINE_RE = new RegExp(MEMO_LINE_PATTERN);
+/** 行の頭の空白（半角・タブ・全角） */
+const LEAD_RE = /^[ \t　]*/;
+const COMMENT_OPEN = "<!--";
+const COMMENT_CLOSE = "-->";
+/** 閉じの印のあとに許すもの（空白だけ） */
+const TRAIL_BLANK_RE = /^[ \t　]*$/;
 
-/** その1行が付箋か。**行の先頭だけを見る**（途中の `//` はURL・会話文） */
-export function isMemoLine(line: string): boolean {
-  return MEMO_LINE_RE.test(line);
+function leadLength(line: string): number {
+  return LEAD_RE.exec(line)?.[0].length ?? 0;
+}
+
+/** 本文の中のメモ1件の範囲（行は0始まり、両端を含む） */
+export interface MemoBlock {
+  start: number;
+  end: number;
+  /** 囲み（`<!-- ～ -->`）か */
+  comment: boolean;
+}
+
+/** `scanMemoLines` の答え */
+export interface MemoLineScan {
+  /** 行ごとに、メモの行か */
+  memo: boolean[];
+  /** メモ1件ずつ（1行の印は1行で1件、囲みは囲み全体で1件） */
+  blocks: MemoBlock[];
+  /**
+   * 閉じていない `<!--` の行（0始まり）。無ければ null。
+   * **そこからあとの囲みはメモにしない**（本文のまま数え、投稿にも出す）
+   */
+  unclosedLine: number | null;
+}
+
+/**
+ * 本文の行から、どの行がメモかを決める。**判定の本体はこれ1つ。**
+ *
+ * - 1行の印：行の頭（空白のあと）が印で始まれば、その行がメモ
+ * - 囲み：行の頭（空白のあと）の `<!--` から、`-->` を含む行まで。1行で閉じてもよい。
+ *   `-->` のあとに空白以外の字があれば**閉じ忘れと同じ扱い**（どこまでがメモか決められない）
+ * - 閉じていない `<!--` からあとの囲みは、**メモにしない。** 黙って本文を消さないことを
+ *   優先する（作者の決定 2026-11-14 夜）。1行の印は、そのあとも今までどおり効く
+ *
+ * 画面（原稿エディターの組んで書く面・出先のページ）にも同じ決まりの写しがある。
+ * 同じ見本で同じ答えになることは `composeFace.test.ts`・`editorPageLogic.test.ts` が見張る。
+ */
+export function scanMemoLines(
+  lines: readonly string[],
+  markers: MemoMarkers = DEFAULT_MEMO_MARKERS
+): MemoLineScan {
+  const memo = new Array<boolean>(lines.length).fill(false);
+  const blocks: MemoBlock[] = [];
+  let unclosedLine: number | null = null;
+  let commentOn = markers.comment;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lead = leadLength(line);
+    const rest = line.slice(lead);
+    if (commentOn && rest.startsWith(COMMENT_OPEN)) {
+      const end = commentEnd(lines, i, lead + COMMENT_OPEN.length);
+      if (end === null) {
+        unclosedLine = i;
+        commentOn = false;
+        continue;
+      }
+      for (let k = i; k <= end; k++) memo[k] = true;
+      blocks.push({ start: i, end, comment: true });
+      i = end;
+      continue;
+    }
+    if (markers.prefixes.some((prefix) => rest.startsWith(prefix))) {
+      memo[i] = true;
+      blocks.push({ start: i, end: i, comment: false });
+    }
+  }
+  return { memo, blocks, unclosedLine };
+}
+
+/** 囲みの終わりの行。閉じていない・閉じのあとに字があるなら null */
+function commentEnd(lines: readonly string[], start: number, from: number): number | null {
+  for (let k = start; k < lines.length; k++) {
+    const text = k === start ? lines[k].slice(from) : lines[k];
+    const at = text.indexOf(COMMENT_CLOSE);
+    if (at < 0) continue;
+    return TRAIL_BLANK_RE.test(text.slice(at + COMMENT_CLOSE.length)) ? k : null;
+  }
+  return null;
+}
+
+/**
+ * その1行だけで付箋か。**行の先頭だけを見る**（途中の `//` はURL・会話文）。
+ *
+ * 1行で閉じた囲み（`<!-- … -->`）は当たるが、**複数行の囲みの中の行は、この関数では分からない。**
+ * 本文を行ごとに見る所は `memoLineMask` を使う。
+ */
+export function isMemoLine(line: string, markers: MemoMarkers = DEFAULT_MEMO_MARKERS): boolean {
+  return scanMemoLines([line], markers).memo[0];
+}
+
+/** 行の並びの、行ごとのメモの印（囲みの中の行も true） */
+export function memoLineMask(
+  lines: readonly string[],
+  markers: MemoMarkers = DEFAULT_MEMO_MARKERS
+): boolean[] {
+  return scanMemoLines(lines, markers).memo;
+}
+
+/** 閉じていない `<!--` の行（1始まり）。無ければ null。囲みがオフの組では必ず null */
+export function unclosedMemoCommentLine(
+  text: string,
+  markers: MemoMarkers = DEFAULT_MEMO_MARKERS
+): number | null {
+  if (!markers.comment) return null;
+  const line = scanMemoLines(lineBodies(text), markers).unclosedLine;
+  return line === null ? null : line + 1;
+}
+
+/**
+ * 付箋の行から印を外した中身（タグと本文に分ける前）。
+ *
+ * 囲みの最初の行なら `<!--` を、1行で閉じていれば `-->` も外す。
+ */
+export function stripMemoMark(line: string, markers: MemoMarkers = DEFAULT_MEMO_MARKERS): string {
+  const rest = line.slice(leadLength(line));
+  if (markers.comment && rest.startsWith(COMMENT_OPEN)) {
+    const inner = rest.slice(COMMENT_OPEN.length);
+    const close = inner.indexOf(COMMENT_CLOSE);
+    return close >= 0 ? inner.slice(0, close) : inner;
+  }
+  const prefix = markers.prefixes.find((candidate) => rest.startsWith(candidate));
+  return prefix ? rest.slice(prefix.length) : rest;
+}
+
+/** 囲みの2行目からあとの中身（閉じの `-->` を外す） */
+function commentContinuation(line: string): string {
+  const close = line.indexOf(COMMENT_CLOSE);
+  return close >= 0 ? line.slice(0, close) : line;
+}
+
+function lineBodies(text: string): string[] {
+  return splitLines(text).map((line) => line.body);
 }
 
 /** 改行を保ったまま行へ割る（末尾の改行は最後の空行として残る） */
@@ -260,28 +415,49 @@ function splitLines(text: string): RawLine[] {
  *
  * @param filePath 飛び先に使うので、パネルからは必ず渡す
  */
-export function parseMemos(text: string, filePath = ""): SceneMemo[] {
+export function parseMemos(
+  text: string,
+  filePath = "",
+  markers: MemoMarkers = DEFAULT_MEMO_MARKERS
+): SceneMemo[] {
   const memos: SceneMemo[] = [];
   const lines = splitLines(text);
-  for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i].body;
-    if (!isMemoLine(raw)) continue;
-    const parsed = parseMemoBody(raw);
+  const scan = scanMemoLines(lines.map((line) => line.body), markers);
+  for (const block of scan.blocks) {
+    const first = lines[block.start].body;
+    /*
+      **囲みは1件を1つの付箋にする。** タグは最初の行から読み、中身は2行目からあとも
+      空白でつないで添える（パネルの1行に収まるように）
+    */
+    let content = stripMemoMark(first, markers);
+    for (let k = block.start + 1; k <= block.end; k++) {
+      const more = commentContinuation(lines[k].body).trim();
+      if (more) content += ` ${more}`;
+    }
+    const parsed = parseMemoBody(content);
     memos.push({
       filePath,
-      line: i + 1,
+      line: block.start + 1,
       tag: parsed.tag,
       text: parsed.text,
-      raw,
+      raw: blockRaw(lines, block.start, block.end),
+      ...(block.end > block.start ? { endLine: block.end + 1 } : {}),
     });
   }
   return memos;
 }
 
-/** `// TODO 潮の匂いを足す` を、タグと本文に分ける */
-function parseMemoBody(raw: string): { tag: string; text: string } {
+/** 行 start〜end を、本文の改行のままつないだもの（最後の行の改行は含めない） */
+function blockRaw(lines: readonly RawLine[], start: number, end: number): string {
+  let raw = "";
+  for (let k = start; k <= end; k++) raw += lines[k].body + (k < end ? lines[k].eol : "");
+  return raw;
+}
+
+/** `// TODO 潮の匂いを足す` の印を外した残りを、タグと本文に分ける */
+function parseMemoBody(content: string): { tag: string; text: string } {
   // 印のあとの空白は落とす（半角も全角も）
-  const body = raw.replace(MEMO_LINE_RE, "").replace(/^[\s　]+/, "");
+  const body = content.replace(/^[\s　]+/, "").replace(/[\s　]+$/, "");
   const words = body.split(/[\s　]+/).filter((word) => word.length > 0);
 
   if (words.length === 0) return { tag: DEFAULT_MEMO_TAG, text: "" };
@@ -308,11 +484,13 @@ function parseMemoBody(raw: string): { tag: string; text: string } {
  * AIへ渡す本文はこちらを通す。行が減ると、AIが返す行番号が本文とずれ、
  * **別の行を書き換える**ことになる。
  */
-export function blankMemoLines(text: string): string {
+export function blankMemoLines(text: string, markers: MemoMarkers = DEFAULT_MEMO_MARKERS): string {
+  const lines = splitLines(text);
+  const memo = memoLineMask(lines.map((line) => line.body), markers);
   let out = "";
-  for (const line of splitLines(text)) {
-    out += (isMemoLine(line.body) ? "" : line.body) + line.eol;
-  }
+  lines.forEach((line, index) => {
+    out += (memo[index] ? "" : line.body) + line.eol;
+  });
   return out;
 }
 
@@ -321,32 +499,34 @@ export function blankMemoLines(text: string): string {
  *
  * 改行コードは残る行のものをそのまま使う（勝手にLFへ揃えない）。
  */
-export function stripMemoLines(text: string): string {
+export function stripMemoLines(text: string, markers: MemoMarkers = DEFAULT_MEMO_MARKERS): string {
+  const lines = splitLines(text);
+  const memo = memoLineMask(lines.map((line) => line.body), markers);
   let out = "";
-  for (const line of splitLines(text)) {
-    if (isMemoLine(line.body)) continue;
+  lines.forEach((line, index) => {
+    if (memo[index]) return;
     out += line.body + line.eol;
-  }
+  });
   return out;
 }
 
 /** 本文にメモがあるか（無ければ何も掛けずに済ませたいときに使う） */
-export function hasMemoLines(text: string): boolean {
-  for (const line of splitLines(text)) {
-    if (isMemoLine(line.body)) return true;
-  }
-  return false;
+export function hasMemoLines(text: string, markers: MemoMarkers = DEFAULT_MEMO_MARKERS): boolean {
+  return memoLineMask(lineBodies(text), markers).some(Boolean);
 }
 
 /** メモ行の範囲（改行は含まない）。原稿エディタの目印を塗るために使う */
 export function memoLineRanges(
-  text: string
+  text: string,
+  markers: MemoMarkers = DEFAULT_MEMO_MARKERS
 ): Array<{ start: number; end: number }> {
+  const lines = splitLines(text);
+  const memo = memoLineMask(lines.map((line) => line.body), markers);
   const ranges: Array<{ start: number; end: number }> = [];
-  for (const line of splitLines(text)) {
-    if (!isMemoLine(line.body)) continue;
+  lines.forEach((line, index) => {
+    if (!memo[index]) return;
     ranges.push({ start: line.start, end: line.start + line.body.length });
-  }
+  });
   return ranges;
 }
 
@@ -504,19 +684,39 @@ export function nearestMemo(
 export function removeMemoLine(
   text: string,
   line: number,
-  expectedRaw: string
+  expectedRaw: string,
+  markers: MemoMarkers = DEFAULT_MEMO_MARKERS
 ): string | null {
   const lines = splitLines(text);
-  const target = lines[line - 1];
-  if (!target || target.body !== expectedRaw) return null;
-  if (!isMemoLine(target.body)) return null;
+  const block = memoBlockAt(lines, line, expectedRaw, markers);
+  if (!block) return null;
 
   let out = "";
   for (let i = 0; i < lines.length; i++) {
-    if (i === line - 1) continue;
+    if (i >= block.start && i <= block.end) continue;
     out += lines[i].body + lines[i].eol;
   }
   return out;
+}
+
+/**
+ * その行から始まるメモ1件（囲みなら囲み全体）。読み込んだときの中身と違う・
+ * メモでないなら null（`removeMemoLine` と `memoLineRemoval` が同じ条件で断る）
+ */
+function memoBlockAt(
+  lines: readonly RawLine[],
+  line: number,
+  expectedRaw: string,
+  markers: MemoMarkers
+): MemoBlock | null {
+  const index = line - 1;
+  if (index < 0 || index >= lines.length) return null;
+  const block = scanMemoLines(lines.map((entry) => entry.body), markers).blocks.find(
+    (candidate) => candidate.start === index
+  );
+  if (!block) return null;
+  if (blockRaw(lines, block.start, block.end) !== expectedRaw) return null;
+  return block;
 }
 
 /**
@@ -530,8 +730,10 @@ export function removeMemoLine(
 export interface RemovedMemoLine {
   /** 消した行（1始まり） */
   line: number;
-  /** 消した行の中身（改行を除く） */
+  /** 消した行の中身（改行を除く。囲みなら行々を本文の改行のままつないだもの） */
   raw: string;
+  /** 消した行の数（1行の付箋は1、囲みは囲みの行数） */
+  lineCount: number;
   /** 消した行の改行。最終行で改行が無かったなら空文字 */
   eol: string;
   /** 上の行の中身。先頭の行だったなら null */
@@ -551,20 +753,20 @@ export interface RemovedMemoLine {
 export function memoLineRemoval(
   text: string,
   line: number,
-  expectedRaw: string
+  expectedRaw: string,
+  markers: MemoMarkers = DEFAULT_MEMO_MARKERS
 ): RemovedMemoLine | null {
   const lines = splitLines(text);
-  const index = line - 1;
-  const target = lines[index];
-  if (!target || target.body !== expectedRaw) return null;
-  if (!isMemoLine(target.body)) return null;
+  const block = memoBlockAt(lines, line, expectedRaw, markers);
+  if (!block) return null;
   return {
     line,
-    raw: target.body,
-    eol: target.eol,
-    before: index > 0 ? lines[index - 1].body : null,
+    raw: expectedRaw,
+    lineCount: block.end - block.start + 1,
+    eol: lines[block.end].eol,
+    before: block.start > 0 ? lines[block.start - 1].body : null,
     // 改行の無い最終行は、下に行が無い（`splitLines` の最後の要素そのもの）
-    after: index + 1 < lines.length ? lines[index + 1].body : null,
+    after: block.end + 1 < lines.length ? lines[block.end + 1].body : null,
   };
 }
 
@@ -615,4 +817,24 @@ export function restoreMemoLine(
   const point = memoLineRestorePoint(text, removed);
   if (!point) return null;
   return text.slice(0, point.offset) + point.insert + text.slice(point.offset);
+}
+
+/**
+ * 新しくオンにする印で始まる行（1始まり）。切り替える前の確かめに使う（設計書6.40.8）。
+ *
+ * **囲みは `<!--` で始まる行だけを数える**（閉じているかは問わない）。数えたいのは
+ * 「切り替えると本文から外れるかもしれない行」で、作者が見て判断するための材料である。
+ */
+export function linesStartingWithMarkers(text: string, added: MemoMarkers): number[] {
+  const found: number[] = [];
+  lineBodies(text).forEach((line, index) => {
+    const rest = line.slice(leadLength(line));
+    if (
+      (added.comment && rest.startsWith(COMMENT_OPEN)) ||
+      added.prefixes.some((prefix) => rest.startsWith(prefix))
+    ) {
+      found.push(index + 1);
+    }
+  });
+  return found;
 }

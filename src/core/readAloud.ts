@@ -3,7 +3,7 @@ import {
   tokenizeLine,
   type NotationMode,
 } from "./manuscriptRender";
-import { MEMO_LINE_PATTERN, isMemoLine } from "./sceneMemo";
+import { memoLineMask, stripMemoMark, isMemoLine, type MemoMarkers } from "./sceneMemo";
 import type { ReadingSpan } from "./readingDictionary";
 import { quotedSpans } from "./quotedSpans";
 import { episodeReadableRanges, type TextRange } from "./metadataParser";
@@ -70,6 +70,8 @@ export interface ReadingPlanOptions {
    * 作って続けて鳴らすので、割っても途切れない
    */
   splitDialogue?: boolean;
+  /** その作品のメモの印（設計書6.40.8）。省くと既定（`//` と `／／`） */
+  memoMarkers?: MemoMarkers;
 }
 
 /**
@@ -137,14 +139,15 @@ export function buildReadingPlan(
 ): ReadingSentence[] {
   const plan: ReadingSentence[] = [];
   const lines = text.split("\n");
-  const dialogues = voiceDialogueSpans(text);
+  const dialogues = voiceDialogueSpans(text, options.memoMarkers);
+  const memo = memoLineMask(lines, options.memoMarkers);
   let lineStart = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // **シーンメモは読まない**（設計書6.40.2）。作者の覚え書きであって
     // 本文ではないので、声に出すと原稿の流れが切れる
-    if (!isMemoLine(line)) {
+    if (!memo[i]) {
       const inNotation = notationMask(line, notation);
       const lineSpans = spansInLine(
         readings,
@@ -374,10 +377,11 @@ export interface DialogueSpan {
  *   語り手の声のほうがまだ聞ける）
  * - シーンメモの行の中の括弧は数えない（読まない行である）
  */
-export function voiceDialogueSpans(text: string): DialogueSpan[] {
-  const masked = text
-    .split("\n")
-    .map((line) => (isMemoLine(line) ? " ".repeat(line.length) : line))
+export function voiceDialogueSpans(text: string, markers?: MemoMarkers): DialogueSpan[] {
+  const split = text.split("\n");
+  const memo = memoLineMask(split, markers);
+  const masked = split
+    .map((line, index) => (memo[index] ? " ".repeat(line.length) : line))
     .join("\n");
   // **行頭の連なりだけを台詞にする**（作者の裁定、2026-11-05）。地の文の途中で
   // 語に付けた括弧（`空気を指す「風」は…`）まで台詞にすると、語りの途中で声が
@@ -663,7 +667,7 @@ function toSpeech(source: string, notation: NotationMode): string {
  */
 export const READ_ALOUD_MEMO_TEXT = "音読：ここで引っかかった";
 
-const MEMO_MARK_RE = new RegExp(MEMO_LINE_PATTERN);
+
 
 /**
  * その1行が「引っかかった」で置いたメモか（設計書6.42）。
@@ -676,8 +680,8 @@ const MEMO_MARK_RE = new RegExp(MEMO_LINE_PATTERN);
  * （`core/sceneMemo.ts`）にそろえる。作者が手で直した行でも同じ印と読むため。
  * **中身が違えば別の付箋**——作者が書いたメモの上へは、これまでどおり挿す。
  */
-export function isReadingMemoLine(line: string): boolean {
-  if (!isMemoLine(line)) return false;
-  const body = line.replace(MEMO_MARK_RE, "").replace(/^[\s　]+|[\s　]+$/g, "");
+export function isReadingMemoLine(line: string, markers?: MemoMarkers): boolean {
+  if (!isMemoLine(line, markers)) return false;
+  const body = stripMemoMark(line, markers).replace(/^[\s　]+|[\s　]+$/g, "");
   return body === READ_ALOUD_MEMO_TEXT;
 }

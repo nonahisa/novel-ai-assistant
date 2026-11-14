@@ -3,7 +3,7 @@ import {
   tokenizeLine,
   type NotationMode,
 } from "./manuscriptRender";
-import { stripMemoLines } from "./sceneMemo";
+import { stripMemoLines, type MemoMarkers } from "./sceneMemo";
 import { hostKeyOs, keysInText, type KeyOs } from "./keyLabels";
 import { kindLayoutCss, kindLineClass, kindLineCss, kindUsesScriptLayout } from "./kindLines";
 import type { WorkKindKey } from "./workKind";
@@ -294,6 +294,8 @@ export interface PrintHtmlInput {
    * 省略・小説なら、これまでどおりの組み方になる（1バイトも変わらない）。
    */
   kind?: WorkKindKey;
+  /** その作品のメモの印（設計書6.40.8）。省くと既定（`//` と `／／`） */
+  memoMarkers?: MemoMarkers;
   /**
    * 上下の余白に刷るもの（設計書6.33.5 の2）。省略なら紙の既定
    * （`PrintPresetInfo.headerFooter`）。
@@ -347,7 +349,7 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
       preset.vertical
     )}</h1></section>`,
     ...input.episodes.map((episode) =>
-      renderEpisode(episode, input.kind, preset.vertical)
+      renderEpisode(episode, input.kind, preset.vertical, input.memoMarkers)
     ),
     "</div>",
     // 本文のあとに置く。先に置くと、割る相手がまだ読み込まれていない
@@ -539,7 +541,8 @@ export { PRINT_DASH_CHARS };
 function renderEpisode(
   episode: PrintEpisode,
   kind: WorkKindKey | undefined,
-  vertical: boolean
+  vertical: boolean,
+  memoMarkers: MemoMarkers | undefined
 ): string {
   // 見出しの「第1話」の数字も、縦書きなら立てる（公募の升目と揃える）。
   // 面の頭と足に刷る話の見出しは、スクリプトが textContent で拾うので札は混ざらない
@@ -547,7 +550,7 @@ function renderEpisode(
   return [
     '<section class="episode">',
     ...(heading ? [`<h2 class="episode-heading">${heading}</h2>`] : []),
-    ...renderBody(episode.body, episode.notation, kind, vertical),
+    ...renderBody(episode.body, episode.notation, kind, vertical, memoMarkers),
     "</section>",
   ].join("\n");
 }
@@ -570,7 +573,8 @@ function renderBody(
   body: string,
   notation: NotationMode,
   kind: WorkKindKey | undefined,
-  vertical: boolean
+  vertical: boolean,
+  memoMarkers: MemoMarkers | undefined
 ): string[] {
   const paragraphs: string[] = [];
   let afterBlank = false;
@@ -578,7 +582,7 @@ function renderBody(
   // **シーンメモは紙に出さない**（設計書6.40.2）。作者の付箋であって
   // 読者へ渡す文章ではない。**行ごと落とす**——空行にすると、そこで
   // 段落の空きが入って場面が切れたように読める
-  for (const line of stripMemoLines(body).replace(/\r\n?/g, "\n").split("\n")) {
+  for (const line of stripMemoLines(body, memoMarkers).replace(/\r\n?/g, "\n").split("\n")) {
     if (line.trim() === "") {
       afterBlank = true;
       continue;

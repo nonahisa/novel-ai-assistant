@@ -1,5 +1,5 @@
 import { tokenizeLine, type NotationMode } from "./manuscriptRender";
-import { stripMemoLines } from "./sceneMemo";
+import { stripMemoLines, type MemoMarkers } from "./sceneMemo";
 import { tcyRuns } from "./tateChuYoko";
 import { isHangable, isNoLineEnd, isNoLineStart } from "./kinsoku";
 import { kindLineClass, kindUsesScriptLayout, MANGA_LINE_CLASSES } from "./kindLines";
@@ -50,6 +50,8 @@ export interface GridOptions {
   hanging: boolean;
   /** 縦書きか（半角の組み方が変わる） */
   vertical: boolean;
+  /** その作品のメモの印（設計書6.40.8）。省くと既定（`//` と `／／`） */
+  memoMarkers?: MemoMarkers;
 }
 
 /** マスの部品 */
@@ -328,7 +330,7 @@ export function layoutGrid(
       lines.push({ units: [] });
     }
 
-    const source = stripMemoLines(episode.body).replace(/\r\n?/g, "\n").split("\n");
+    const source = stripMemoLines(episode.body, options.memoMarkers).replace(/\r\n?/g, "\n").split("\n");
     let first = 0;
     let last = source.length - 1;
     while (first <= last && source[first].trim() === "") first += 1;

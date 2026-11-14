@@ -1,5 +1,5 @@
 import type { CharCounts } from "../models/types";
-import { stripMemoLines } from "./sceneMemo";
+import { stripMemoLines, type MemoMarkers } from "./sceneMemo";
 // **記法の定義は `core/ruby.ts` の1つだけにする**（設計書6.2）。
 // ここに同じ名前の写しがあり、そちらは傍点 `{{強調}}` を知らなかったため、
 // 印の4字（`{{` と `}}`）が本文として数えられていた（2026-09-08に実機で判明。
@@ -18,10 +18,10 @@ export { stripRuby };
  * サロゲートペア（𠮟 など）を1文字として数えるため、
  * String.length ではなく Intl.Segmenter / コードポイント単位で数える。
  */
-export function countChars(rawText: string, excludeRuby = true): CharCounts {
+export function countChars(rawText: string, excludeRuby = true, markers?: MemoMarkers): CharCounts {
   // **シーンメモは執筆量ではない**（設計書6.40.2）。作者の付箋であって
   // 読者へ出す文章ではないので、行ごと落としてから数える
-  const withoutMemo = stripMemoLines(rawText);
+  const withoutMemo = stripMemoLines(rawText, markers);
   const text = excludeRuby ? stripRuby(withoutMemo) : withoutMemo;
 
   // 改行コードを LF に統一
@@ -47,7 +47,7 @@ export function countChars(rawText: string, excludeRuby = true): CharCounts {
     net,
     lines: lines.length,
     paragraphs,
-    manuscriptLines: countManuscriptLines(normalized, false),
+    manuscriptLines: countManuscriptLines(normalized, false, markers),
   };
 }
 
@@ -110,11 +110,11 @@ export const MANUSCRIPT_ROWS = 20;
  * 数え違える。行の数え方の約束（空行も1行・メモは数えない・ルビの扱い）は
  * 今までのまま。縦書きにするのは、原稿用紙が縦書きの紙だから。
  */
-export function countManuscriptLines(rawText: string, excludeRuby = true): number {
+export function countManuscriptLines(rawText: string, excludeRuby = true, markers?: MemoMarkers): number {
   // メモの行は原稿用紙のマスを取らない（設計書6.40.2）。
   // `countChars` から呼ばれるときは既に落ちているが、**外から直に
   // 呼ばれる道がある**ので、ここでも落とす（掛け直しても結果は変わらない）
-  const withoutMemo = stripMemoLines(rawText);
+  const withoutMemo = stripMemoLines(rawText, markers);
   const text = excludeRuby ? stripRuby(withoutMemo) : withoutMemo;
   const normalized = text.replace(/\r\n?/g, "\n");
 

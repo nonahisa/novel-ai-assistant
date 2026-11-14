@@ -7,7 +7,7 @@ import {
 // esbuild が「使われない import」を外出しと数えて止まった（0.126.0。朗読の試作が
 // 束の入口から readAloud → ここまで届くようになった）
 import type { TermIndex, TermKind, TermMatch } from "./termIndex";
-import { memoLineRanges } from "./sceneMemo";
+import { memoLineRanges, type MemoMarkers } from "./sceneMemo";
 import { escapeHtml } from "./htmlEscape";
 
 // 外から `manuscriptRender` 経由で読んでいる所（notePreview・printGridHtml）を壊さないための再公開
@@ -237,9 +237,9 @@ export const TERM_LABELS: Record<TermKind, string> = {
  * 打つ面の上に載るので、不透明に塗ると打っている字が隠れる。
  * 用語の色と重なっても、片方は文字色・片方は背景なので潰し合わない。
  */
-export function renderTermMarks(text: string, index?: TermIndex): string {
+export function renderTermMarks(text: string, index?: TermIndex, markers?: MemoMarkers): string {
   const matches = index ? index.find(text) : [];
-  const memos = memoLineRanges(text);
+  const memos = memoLineRanges(text, markers);
   if (matches.length === 0 && memos.length === 0) return escapeHtml(text);
 
   let html = "";

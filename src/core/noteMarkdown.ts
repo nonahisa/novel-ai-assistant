@@ -3,7 +3,7 @@
 // `paths` が再輸出しているものと同じ関数である
 import * as path from "./pathText";
 import { hasEmphasis, toSiteNotation } from "./ruby";
-import { isMemoLine } from "./sceneMemo";
+import { memoLineMask, type MemoMarkers } from "./sceneMemo";
 
 /**
  * note へ貼るための整え（設計書6.84）。
@@ -134,6 +134,8 @@ export interface NoteMarkdownOptions {
    * 記事の途中だけを選んでコピーするときのために、切れるようにしてある。
    */
   extractTitle?: boolean;
+  /** その作品のメモの印（設計書6.40.8）。省くと既定（`//` と `／／`） */
+  memoMarkers?: MemoMarkers;
 }
 
 /**
@@ -156,7 +158,7 @@ export function toNoteMarkdown(
   text: string,
   options: NoteMarkdownOptions = {}
 ): NoteMarkdownResult {
-  const blocks = parseNoteBlocks(text);
+  const blocks = parseNoteBlocks(text, options.memoMarkers);
   const warn = new Set<string>();
   const images: NoteImageRef[] = [];
   const embeds: string[] = [];
@@ -296,9 +298,39 @@ export function toNoteMarkdown(
  * シーンメモの行はここで落とす（設計書6.40.2）。**コードの中は落とさない**
  * ——`// 説明` はコードであって作者の付箋ではない。
  */
-export function parseNoteBlocks(text: string): NoteBlock[] {
+/** コードの囲み（開きと閉じの行を含む）を空の行にした写し。囲みの見分け方は `parseNoteBlocks` と同じ */
+function maskCodeFences(lines: readonly string[]): string[] {
+  const out = [...lines];
+  let at = 0;
+  while (at < lines.length) {
+    const fence = FENCE.exec(lines[at]);
+    if (!fence) {
+      at += 1;
+      continue;
+    }
+    const marker = fence[1];
+    out[at] = "";
+    let cursor = at + 1;
+    while (cursor < lines.length) {
+      const close = FENCE.exec(lines[cursor]);
+      out[cursor] = "";
+      cursor += 1;
+      if (close && close[1][0] === marker[0] && close[1].length >= marker.length) break;
+    }
+    at = cursor;
+  }
+  return out;
+}
+
+export function parseNoteBlocks(text: string, markers?: MemoMarkers): NoteBlock[] {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const blocks: NoteBlock[] = [];
+  /*
+    **メモの行は本文全体で先に決める**（囲み `<!-- ～ -->` は前後の行で決まるため）。
+    コードの囲みの中の行は空にしてから見る——中の `//` も `<!--` も付箋ではなく、
+    コードの外の囲みを閉じることもない
+  */
+  const memo = memoLineMask(maskCodeFences(lines), markers);
 
   let at = 0;
   while (at < lines.length) {
@@ -330,7 +362,7 @@ export function parseNoteBlocks(text: string): NoteBlock[] {
       continue;
     }
 
-    if (isMemoLine(line)) {
+    if (memo[at]) {
       at += 1;
       continue;
     }

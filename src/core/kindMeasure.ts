@@ -1,6 +1,6 @@
 import type { CharCounts } from "../models/types";
 import { formatCount, toManuscriptPages } from "./charCount";
-import { stripMemoLines } from "./sceneMemo";
+import { stripMemoLines, type MemoMarkers } from "./sceneMemo";
 import type { WorkKindKey } from "./workKind";
 
 /**
@@ -50,7 +50,8 @@ const LYRICS_LABEL_LINE = /^\s*【[^【】]*】\s*$/;
  */
 export function measureKindCounts(
   kind: WorkKindKey | undefined,
-  counts: CharCounts
+  counts: CharCounts,
+  markers?: MemoMarkers
 ): KindMeasure | undefined {
   if (kind === "script") {
     const pages = toManuscriptPages(counts.manuscriptLines);
@@ -81,10 +82,11 @@ export function measureKindCounts(
 export function measureKindText(
   kind: WorkKindKey | undefined,
   text: string,
-  counts: CharCounts
+  counts: CharCounts,
+  markers?: MemoMarkers
 ): KindMeasure | undefined {
   if (kind === "manga") {
-    const { pages, panels } = countMangaUnits(text);
+    const { pages, panels } = countMangaUnits(text, markers);
     return {
       short: `${formatCount(pages)}ページ・${formatCount(panels)}コマ`,
       detail:
@@ -93,7 +95,7 @@ export function measureKindText(
     };
   }
   if (kind === "lyrics") {
-    const { stanzas, lines } = countLyricsUnits(text);
+    const { stanzas, lines } = countLyricsUnits(text, markers);
     return {
       short: `${formatCount(stanzas)}連・${formatCount(lines)}行`,
       detail:
@@ -105,25 +107,25 @@ export function measureKindText(
 }
 
 /** 本文の行（付箋＝シーンメモは落とす。読者へ出す文章ではない） */
-function bodyLines(text: string): string[] {
-  return stripMemoLines(text).replace(/\r\n?/g, "\n").split("\n");
+function bodyLines(text: string, markers?: MemoMarkers): string[] {
+  return stripMemoLines(text, markers).replace(/\r\n?/g, "\n").split("\n");
 }
 
-export function countMangaUnits(text: string): { pages: number; panels: number } {
+export function countMangaUnits(text: string, markers?: MemoMarkers): { pages: number; panels: number } {
   let pages = 0;
   let panels = 0;
-  for (const line of bodyLines(text)) {
+  for (const line of bodyLines(text, markers)) {
     if (MANGA_PAGE_LINE.test(line)) pages++;
     else if (MANGA_PANEL_LINE.test(line)) panels++;
   }
   return { pages, panels };
 }
 
-export function countLyricsUnits(text: string): { stanzas: number; lines: number } {
+export function countLyricsUnits(text: string, markers?: MemoMarkers): { stanzas: number; lines: number } {
   let stanzas = 0;
   let lines = 0;
   let inStanza = false;
-  for (const line of bodyLines(text)) {
+  for (const line of bodyLines(text, markers)) {
     // 空行と札は、どちらも連の切れ目
     if (line.trim() === "" || LYRICS_LABEL_LINE.test(line)) {
       inStanza = false;

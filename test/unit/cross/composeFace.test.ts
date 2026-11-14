@@ -12,8 +12,12 @@ import { TermIndex, type TermEntry } from "../../../src/core/termIndex";
 // 面が送る位置が、拡張機能側の判定に当たるかを同じ本文で確かめる
 import { findRubyAt } from "../../../src/core/ruby";
 import { SCRIPT_LAYOUT_CSS } from "../../../src/core/scriptLines";
+import { memoMarkersOf, type MemoMarkers } from "../../../src/core/memoMarkers";
+import { MEMO_MARKER_SAMPLES } from "../support/memoMarkerSamples";
 import {
-  MEMO_LINE_PATTERN,
+  DEFAULT_MEMO_MARKERS,
+  scanMemoLines,
+  stripMemoMark,
   MEMO_TAG_CLASS_MAP,
   memoTagClass,
   parseMemos,
@@ -208,6 +212,9 @@ interface ComposeApi {
   memoIsLine(line: string): boolean;
   memoPartsOf(line: string): { tag: string; text: string };
   memoClassFor(line: string): string;
+  memoScanLines(lines: string[], markers: MemoMarkers): { memo: boolean[]; blocks: unknown[]; unclosedLine: number | null };
+  memoStripMark(line: string, markers: MemoMarkers): string;
+  setMemoMarkers(markers: MemoMarkers): void;
   /** 字を揃えるための印が、規則から外れたか（作者の実機報告、2026-09-21） */
   composeMarkIsStale(name: string, value: string): boolean;
   /** 印が占める範囲（作者の実機報告、2026-09-22。設計書6.34.5） */
@@ -252,7 +259,8 @@ const api = new Function(
     " composeChunkBaseRange, composeChunkCovering, composeSpanPoints," +
     " composeTermForOffset, pickMenuTerm," +
     " composeCopyPayloads, composePastePick, COMPOSE_NOTATION_FLAVOR," +
-    " memoIsLine, memoPartsOf, memoClassFor, composeMarkIsStale," +
+    " memoIsLine, memoPartsOf, memoClassFor, memoScanLines, memoStripMark, composeMarkIsStale," +
+    " setMemoMarkers: function (m) { MEMO_MARKERS = m; }," +
     " composeMarkRangeOf, composeEscapeAfterArrow," +
     " composeShownPlainText, composePlainMismatch };"
 )() as ComposeApi;
@@ -293,7 +301,7 @@ describe("切り出し", () => {
    * 「どれがメモか」が食い違う日が来る。
    */
   it("シーンメモの記法とタグの表も、写しではなく埋め込まれている", () => {
-    expect(source).toContain(JSON.stringify(MEMO_LINE_PATTERN));
+    expect(source).toContain(JSON.stringify(DEFAULT_MEMO_MARKERS));
     expect(source).toContain(JSON.stringify(MEMO_TAG_CLASS_MAP));
   });
 });
@@ -2027,8 +2035,36 @@ describe("シーンメモの付箋", () => {
   it("行の途中の // は付箋にしない。字下げした // は付箋にする", () => {
     expect(api.memoIsLine("　彼は https://example.com を開いた。")).toBe(false);
     // 字下げしていてもメモ（作者の裁定、2026-09-08。判定は core の
-    // MEMO_LINE_PATTERN 1本で、画面もそれをそのまま使う）
+    // 既定の印の組で、画面もそれを受け取って使う）
     expect(api.memoIsLine("　// 字下げのある行")).toBe(true);
+  });
+
+  /**
+   * 作品ごとの印（設計書6.40.8）。画面の判定は core の写しなので、**同じ見本で同じ答え**に
+   * なることを見張る（新しい印・囲みの1行と複数行・閉じ忘れ・// を外した組）。
+   */
+  it("作品ごとの印の判定は、core/sceneMemo.ts と同じ答えになる", () => {
+    for (const sample of MEMO_MARKER_SAMPLES) {
+      const expected = scanMemoLines(sample.lines, sample.markers);
+      const actual = api.memoScanLines(sample.lines, sample.markers);
+      expect(actual, sample.name).toEqual(expected);
+      for (const line of sample.lines) {
+        expect(api.memoStripMark(line, sample.markers), `${sample.name}：${line}`).toBe(
+          stripMemoMark(line, sample.markers)
+        );
+      }
+    }
+  });
+
+  it("`%%` をオンにした作品では、`%%` の行と囲みが付箋の色で組まれる", () => {
+    try {
+      api.setMemoMarkers(memoMarkersOf(["percent", "comment"]));
+      const root = build("%% TODO 足す\n本文\n<!-- 伏線 一\n二 -->\n// 本文の斜線");
+      const classes = root.childNodes.map((node) => node.getAttribute?.("class"));
+      expect(classes).toEqual(["line memo memo-todo", "line", "line memo memo-foreshadow", "line memo memo-foreshadow", "line"]);
+    } finally {
+      api.setMemoMarkers(DEFAULT_MEMO_MARKERS);
+    }
   });
 
   /**
@@ -2171,7 +2207,7 @@ describe("脚本の行（組んで書く面）", () => {
     );
     expect(repaint.slice(0, 600)).toContain("composeLineClass(");
     // 当て直しでも、見えている字で数えるため行の入れ物を渡す（読み仮名を数えない）
-    expect(repaint.slice(0, 600)).toContain('composeLineClass(element.textContent || "", element)');
+    expect(repaint.slice(0, 800)).toContain("composeLineClass(texts[index], element, memoClasses[index])");
   });
 
   /** 脚本でない作品の画面は、これまでと変わらない */
