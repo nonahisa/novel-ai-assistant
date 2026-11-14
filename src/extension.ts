@@ -753,9 +753,20 @@ const READ_ALOUD_VOICE_KEY = "novelai.readAloud.voice";
 const READ_ALOUD_ENGINE_KEY = "novelai.readAloud.engine";
 
 /** 人物の声の実体（使うときに初めて読む。起動を重くしない） */
+/** 測った声づくりの速さを残す先（activate で入れる。globalState を verifiedState で包んだもの） */
+let voicePaceStore: import("./features/voiceReading.js").VoicePickMemory | undefined;
+
 function loadVoiceReading(): Promise<typeof import("./features/voiceReading.js")> {
-  return import("./features/voiceReading.js");
+  return import("./features/voiceReading.js").then((loaded) => {
+    // 読み戻しと保存先の指定は、係ごとに1回でよい（同じ値を入れ直しても害はないが、読み戻しは最初だけ）
+    if (voicePaceStore && !voicePaceStoreUsed) {
+      voicePaceStoreUsed = true;
+      loaded.voiceReadingService().usePaceStore(voicePaceStore);
+    }
+    return loaded;
+  });
 }
+let voicePaceStoreUsed = false;
 
 /**
  * 人物の声で音声に書き出す（設計書6.42.4）の実体。朗読と同じく使うときに読む。
@@ -897,6 +908,7 @@ function manuscriptKeyFileOf(node: unknown): string | undefined {
 export async function activate(
   context: vscode.ExtensionContext
 ): Promise<{ extendMarkdownIt<T extends MarkdownItLike>(md: T): T }> {
+  voicePaceStore = verifiedState(context.globalState);
   /**
    * 起動の所要時間（設計書6.107）。
    *

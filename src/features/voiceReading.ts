@@ -109,7 +109,7 @@ import {
   VOICE_PICK_COUNTS_KEY,
   type GroupableVoiceRow,
 } from "../core/voiceGroups";
-import { PaceMemory, slowPaceNotice, SynthesisPaceWatch, wavSeconds } from "../core/voicePace";
+import { PaceMemory, slowPaceNotice, SynthesisPaceWatch, VOICE_PACE_STORED_KEY, wavSeconds } from "../core/voicePace";
 
 /**
  * 人物の声で朗読する（AivisSpeech／VOICEVOX。設計書6.42.3）。
@@ -160,6 +160,8 @@ interface EngineLane {
 const SPEAKERS_TTL_MS = 30_000;
 /** 届かなかったときに、もう片方のエンジンへ問い合わせて待つ長さ（窓が出るのを待たせすぎない） */
 export const OTHER_ENGINE_PROBE_MS = 1_500;
+/** 測った速さを端末へ書くまでのまとめの待ち（ミリ秒） */
+export const PACE_SAVE_DELAY_MS = 3_000;
 
 /**
  * 音を作る係（拡張機能に1つ）。合成の控え・話者の一覧の控え・作っている途中の
@@ -186,9 +188,57 @@ export class VoiceReadingService {
   /** 測った速さの比（エンジンごと。この起動の間だけ）。書き出しの確認の窓の「かかる見込み」に使う */
   private readonly paceMemory = new PaceMemory<VoiceEngineId>();
 
+  /** 端末へ要約を残す先（globalState を `verifiedState` で包んだもの）。無ければ残さない */
+  private paceStore: VoicePickMemory | undefined;
+  private paceSaveTimer: ReturnType<typeof setTimeout> | undefined;
+
   /** そのエンジンの、音1秒を作るのにかかる秒（測れていなければ undefined） */
   paceRatio(engine: VoiceEngineId): number | undefined {
     return this.paceMemory.ratio(engine);
+  }
+
+  /**
+   * 前の起動までに測った比を端末から読み戻し、これからの測りの保存先にする（再起動のあとの
+   * 最初の書き出しでも見込みを出すため）。**壊れた値は使わずに捨て、ログに1行残す**（実装ルール2）
+   */
+  usePaceStore(store: VoicePickMemory): void {
+    this.paceStore = store;
+    let raw: unknown;
+    try {
+      raw = store.get<unknown>(VOICE_PACE_STORED_KEY, undefined);
+    } catch (error) {
+      logStep(`人物の声：前に測った速さを読めませんでした：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (!this.paceMemory.restore(raw)) {
+      logStep("人物の声：前に測った速さの記録が壊れていたので、壊れた分は使いません");
+    }
+  }
+
+  /** 新しく測った文があれば、要約を端末へ書く（書く口はここ1か所。失敗しても読み上げ・書き出しは止めない） */
+  async savePace(): Promise<void> {
+    if (this.paceSaveTimer !== undefined) {
+      clearTimeout(this.paceSaveTimer);
+      this.paceSaveTimer = undefined;
+    }
+    const store = this.paceStore;
+    if (!store || !this.paceMemory.takeDirty()) return;
+    try {
+      await store.update(VOICE_PACE_STORED_KEY, this.paceMemory.snapshot());
+    } catch (error) {
+      logStep(`人物の声：測った速さを残せませんでした：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** 測るたびに書かず、少しまとめて書く（1文ごとに端末へ書かない） */
+  private schedulePaceSave(): void {
+    if (!this.paceStore || this.paceSaveTimer !== undefined) return;
+    this.paceSaveTimer = setTimeout(() => {
+      this.paceSaveTimer = undefined;
+      void this.savePace();
+    }, PACE_SAVE_DELAY_MS);
+    // 終了を待たせない（拡張機能の終了で残るタイマーにしない）
+    (this.paceSaveTimer as { unref?: () => void }).unref?.();
   }
 
   /** 本文を送ってよいと作者が答えた外のホスト（この起動の間だけ。設定や端末には残さない） */
@@ -332,6 +382,7 @@ export class VoiceReadingService {
       const busyFrom = Math.max(startedAt, lane.lastSynthEndAt);
       lane.lastSynthEndAt = Math.max(lane.lastSynthEndAt, endedAt);
       this.paceMemory.record(unit.engine, (endedAt - busyFrom) / 1000, wavSeconds(wav));
+      this.schedulePaceSave();
       return wav;
     });
   }
@@ -564,6 +615,7 @@ export class VoiceReadingService {
   private notePace(engine: VoiceEngineId, elapsedSeconds: number, wav: Uint8Array): void {
     const audioSeconds = wavSeconds(wav);
     this.paceMemory.record(engine, elapsedSeconds, audioSeconds);
+    this.schedulePaceSave();
     // 見張りはエンジンごと。知らせの文には、追いつかないほうのエンジンの名前が入る
     const slow = this.lane(engine).pace.record(elapsedSeconds, audioSeconds);
     if (!slow) return;

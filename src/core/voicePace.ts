@@ -107,8 +107,10 @@ export function slowPaceNotice(engineLabel: string, pace: SlowPace): string {
  * ノートPC（AivisSpeech を CPU）の実測：第16話 3,069字で、音の長さ 507秒に 1,893秒（約3.7倍）。
  * 音の長さの見積もりだけでは、遅い PC で待つ時間を実際の数分の一に思わせてしまう。
  *
- * **覚えるのは、この拡張機能が起きている間だけ**（ディスクへは書かない。PC の速さは負荷や
- * 設定で変わるので、古い値を黙って使い続けない）。読み上げ・書き出しで新しく作った文だけを数える
+ * **端末へは要約だけ残す**（エンジンごとに 直近の比・数えた文の数・測った日時。本文や文は書かない）。
+ * 再起動のあとの最初の書き出しでも見込みを出すため。PC の速さは負荷や設定で変わるので、
+ * `PACE_STORED_MAX_AGE_DAYS` 日より前の比は使わない。壊れた値は使わず捨てる。
+ * 今回の起動で十分に測れたら、そちらを優先する。読み上げ・書き出しで新しく作った文だけを数える
  * （控えから出した音は数えない）。**はじめの数文は数えない**（モデルの読み込みで遅く出る。
  * 見張りと同じ理由）。`PACE_MEMORY_MIN` 文に満たないうちは比を返さない（推測の数字を出さない）。
  * 古い文は捨て、直近の `PACE_MEMORY_WINDOW` 文だけで出す。
@@ -116,11 +118,85 @@ export function slowPaceNotice(engineLabel: string, pace: SlowPace): string {
 export const PACE_MEMORY_MIN = 3;
 export const PACE_MEMORY_WINDOW = 40;
 
+/** 端末に残した比を使ってよい日数（これより前に測った比は使わない） */
+export const PACE_STORED_MAX_AGE_DAYS = 90;
+
+/** 端末に残す1エンジンぶんの要約 */
+export interface PaceSummary {
+  /** 音1秒を作るのにかかる秒 */
+  ratio: number;
+  /** その比を出した文の数 */
+  count: number;
+  /** 測った日時（ISO 8601） */
+  at: string;
+}
+
+/** 端末に残す形の鍵（`novelai.voicePace.ratios`）。書く口は `features/voiceReading.ts` の1か所 */
+export const VOICE_PACE_STORED_KEY = "novelai.voicePace.ratios";
+
 export class PaceMemory<K extends string = string> {
   private readonly counted = new Map<K, number>();
   private readonly samples = new Map<K, Array<{ elapsed: number; audio: number }>>();
+  /** 前の起動までに端末へ残した要約（読み戻したもの） */
+  private readonly restored = new Map<K, PaceSummary>();
+  /** 前に保存してから、新しく測った文があるか */
+  private dirty = false;
 
-  constructor(private readonly warmup = PACE_WARMUP_SENTENCES) {}
+  constructor(
+    private readonly warmup = PACE_WARMUP_SENTENCES,
+    /** 時刻（ミリ秒）。古さの判定と測った日時に使う。テストで差し替える */
+    private readonly nowMs: () => number = () => Date.now()
+  ) {}
+
+  /** 保存の要るものがあれば true を返して印を下ろす */
+  takeDirty(): boolean {
+    const was = this.dirty;
+    this.dirty = false;
+    return was;
+  }
+
+  /**
+   * 端末に残した要約を読み戻す。**壊れた値は使わず捨てる**（形が違う・数でない・0以下・日時が読めない・
+   * 数えた文が `PACE_MEMORY_MIN` 未満）。壊れたものがあれば false を返す（呼び手がログに1行残す）。
+   * 古い・未来の日時のものは壊れではないが、使わない（`ratio` が見る）
+   */
+  restore(raw: unknown): boolean {
+    if (raw === undefined || raw === null) return true;
+    if (typeof raw !== "object" || Array.isArray(raw)) return false;
+    let intact = true;
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      const one = value as Partial<Record<keyof PaceSummary, unknown>> | null;
+      if (
+        typeof one !== "object" ||
+        one === null ||
+        typeof one.ratio !== "number" ||
+        !Number.isFinite(one.ratio) ||
+        !(one.ratio > 0) ||
+        typeof one.count !== "number" ||
+        !Number.isInteger(one.count) ||
+        typeof one.at !== "string" ||
+        !Number.isFinite(Date.parse(one.at))
+      ) {
+        intact = false;
+        continue;
+      }
+      if (one.count < PACE_MEMORY_MIN) continue;
+      this.restored.set(key as K, { ratio: one.ratio, count: one.count, at: one.at });
+    }
+    return intact;
+  }
+
+  /** 端末へ残す要約。今回十分に測れたエンジンは今の値、そうでなければ読み戻した値をそのまま残す */
+  snapshot(): Record<string, PaceSummary> {
+    const out: Record<string, PaceSummary> = {};
+    for (const [key, summary] of this.restored) out[key] = summary;
+    for (const [key, list] of this.samples) {
+      const ratio = this.liveRatio(key);
+      if (ratio === undefined) continue;
+      out[key] = { ratio, count: list.length, at: new Date(this.nowMs()).toISOString() };
+    }
+    return out;
+  }
 
   record(key: K, elapsedSeconds: number, audioSeconds: number | undefined): void {
     if (audioSeconds === undefined || !(audioSeconds > 0) || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
@@ -133,10 +209,20 @@ export class PaceMemory<K extends string = string> {
     list.push({ elapsed: elapsedSeconds, audio: audioSeconds });
     if (list.length > PACE_MEMORY_WINDOW) list.shift();
     this.samples.set(key, list);
+    this.dirty = true;
   }
 
-  /** 音1秒を作るのにかかる秒。測れていなければ undefined */
+  /** 音1秒を作るのにかかる秒。測れていなければ undefined（今回の起動で十分に測れなければ、端末に残した新しい比） */
   ratio(key: K): number | undefined {
+    const live = this.liveRatio(key);
+    if (live !== undefined) return live;
+    const stored = this.restored.get(key);
+    if (!stored) return undefined;
+    const age = this.nowMs() - Date.parse(stored.at);
+    return age >= 0 && age <= PACE_STORED_MAX_AGE_DAYS * 24 * 3600 * 1000 ? stored.ratio : undefined;
+  }
+
+  private liveRatio(key: K): number | undefined {
     const list = this.samples.get(key);
     if (!list || list.length < PACE_MEMORY_MIN) return undefined;
     const total = list.reduce(

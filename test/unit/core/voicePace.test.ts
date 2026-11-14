@@ -5,6 +5,7 @@ import {
   expectedWorkSeconds,
   PACE_MEMORY_MIN,
   PACE_MEMORY_WINDOW,
+  PACE_STORED_MAX_AGE_DAYS,
   PaceMemory,
   slowPaceNotice,
   SynthesisPaceWatch,
@@ -123,6 +124,63 @@ describe("測った速さの比を覚える（書き出しの見込み。2026-11
     for (let i = 0; i < PACE_MEMORY_WINDOW; i++) memory.record("a", 100, 1);
     for (let i = 0; i < PACE_MEMORY_WINDOW; i++) memory.record("a", 2, 1);
     expect(memory.ratio("a")).toBeCloseTo(2, 5);
+  });
+
+  test("保存して読み戻すと同じ比になる（再起動のあとの最初の書き出しでも使える）", () => {
+    const day = 24 * 3600 * 1000;
+    let now = Date.parse("2026-11-14T00:00:00Z");
+    const first = new PaceMemory<string>(0, () => now);
+    for (let i = 0; i < 5; i++) first.record("aivisspeech", 37, 10);
+    const saved = JSON.parse(JSON.stringify(first.snapshot()));
+    expect(saved.aivisspeech).toEqual({ ratio: expect.closeTo(3.7, 5), count: 5, at: "2026-11-14T00:00:00.000Z" });
+    // 再起動：新しい覚えは空。読み戻すと同じ比（要約だけ。本文や文は入っていない）
+    now += 3 * day;
+    const second = new PaceMemory<string>(0, () => now);
+    expect(second.ratio("aivisspeech")).toBeUndefined();
+    expect(second.restore(saved)).toBe(true);
+    expect(second.ratio("aivisspeech")).toBeCloseTo(3.7, 5);
+    // 読み戻した比も、次の保存にそのまま残る（まだ測り直していないエンジンの比を消さない）
+    expect(second.snapshot().aivisspeech?.ratio).toBeCloseTo(3.7, 5);
+    // 今回の起動で十分に測れたら、そちらを使う
+    for (let i = 0; i < 3; i++) second.record("aivisspeech", 10, 10);
+    expect(second.ratio("aivisspeech")).toBeCloseTo(1, 5);
+  });
+
+  test("壊れた値（形が違う・数でない・0以下・日時が読めない）は使わず捨てる。壊れていたかを返す", () => {
+    const memory = new PaceMemory<string>(0, () => Date.parse("2026-11-14T00:00:00Z"));
+    const at = "2026-11-13T00:00:00.000Z";
+    expect(memory.restore("壊れた")).toBe(false);
+    expect(memory.restore(null)).toBe(true);
+    expect(memory.restore(undefined)).toBe(true);
+    expect(
+      memory.restore({
+        aivisspeech: { ratio: "3.7", count: 5, at },
+        voicevox: { ratio: 0, count: 5, at },
+        other: { ratio: 2, count: 5, at: "いつか" },
+        broken: 7,
+      })
+    ).toBe(false);
+    for (const key of ["aivisspeech", "voicevox", "other", "broken"]) expect(memory.ratio(key)).toBeUndefined();
+    // 壊れていないものだけは使う
+    expect(memory.restore({ ok: { ratio: 2, count: 5, at }, bad: { ratio: Number.NaN, count: 5, at } })).toBe(false);
+    expect(memory.ratio("ok")).toBe(2);
+    expect(memory.ratio("bad")).toBeUndefined();
+  });
+
+  test("古い比（90日より前）は使わない。数えた文が少なすぎるものも使わない", () => {
+    expect(PACE_STORED_MAX_AGE_DAYS).toBe(90);
+    const now = Date.parse("2026-11-14T00:00:00Z");
+    const memory = new PaceMemory<string>(0, () => now);
+    memory.restore({
+      fresh: { ratio: 3, count: 10, at: "2026-08-17T00:00:00.000Z" }, // ちょうど89日前
+      old: { ratio: 3, count: 10, at: "2026-08-10T00:00:00.000Z" }, // 96日前
+      few: { ratio: 3, count: 1, at: "2026-11-13T00:00:00.000Z" },
+      future: { ratio: 3, count: 10, at: "2026-12-14T00:00:00.000Z" },
+    });
+    expect(memory.ratio("fresh")).toBe(3);
+    expect(memory.ratio("old")).toBeUndefined();
+    expect(memory.ratio("few")).toBeUndefined();
+    expect(memory.ratio("future")).toBeUndefined();
   });
 
   test("書き出しの見込み：音の長さ×比。1つでも比が無ければ出さない", () => {

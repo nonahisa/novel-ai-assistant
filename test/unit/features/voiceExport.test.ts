@@ -295,6 +295,53 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     expect(service.paceRatio("voicevox")).toBeUndefined();
   });
 
+  test("測った速さは端末へ要約だけ残り、再起動のあとの新しい係が読み戻して見込みに使う。壊れた値は使わない", async () => {
+    engine = await startFakeVoiceEngine({ pcm: true, terms: ACML_BOTH });
+    const url = engine.url;
+    const kept = new Map<string, unknown>();
+    const store = {
+      get: <T,>(key: string, fallback: T): T => (kept.has(key) ? (kept.get(key) as T) : fallback),
+      update: async (key: string, value: unknown) => void kept.set(key, value),
+    };
+    let clock = 0;
+    let call = 0;
+    const first = new VoiceReadingService(
+      () => url,
+      undefined,
+      async () => true,
+      () => (call++ % 2 === 0 ? clock : (clock += 400))
+    );
+    first.usePaceStore(store);
+    const unit = {
+      engine: "aivisspeech" as const,
+      speech: "あ",
+      styleId: 1325133120,
+      gapMs: 0,
+      emotion: "平静",
+      intensity: "中",
+      styled: false,
+    } as unknown as Parameters<InstanceType<typeof VoiceReadingService>["synthesizeForExport"]>[0];
+    const signal = new AbortController().signal;
+    for (let i = 0; i < 6; i++) await first.synthesizeForExport({ ...unit, speech: `あ${i}` }, 1, signal);
+    await first.savePace();
+    const saved = kept.get("novelai.voicePace.ratios") as Record<string, { ratio: number; count: number; at: string }>;
+    expect(Object.keys(saved)).toEqual(["aivisspeech"]);
+    expect(Object.keys(saved.aivisspeech).sort()).toEqual(["at", "count", "ratio"]);
+    expect(saved.aivisspeech.ratio).toBeCloseTo(2, 1);
+
+    // 再起動（新しい係）：読み戻すと同じ比
+    const second = new VoiceReadingService(() => url, undefined, async () => true);
+    expect(second.paceRatio("aivisspeech")).toBeUndefined();
+    second.usePaceStore(store);
+    expect(second.paceRatio("aivisspeech")).toBeCloseTo(saved.aivisspeech.ratio, 5);
+
+    // 壊れた値は使わない
+    kept.set("novelai.voicePace.ratios", { aivisspeech: { ratio: "遅い", count: 9, at: "いつか" } });
+    const third = new VoiceReadingService(() => url, undefined, async () => true);
+    third.usePaceStore(store);
+    expect(third.paceRatio("aivisspeech")).toBeUndefined();
+  });
+
   test("人物の声の調整（老けた声）は、書き出しの道でもエンジンへの頼みの値に効く。語りには当てない（作者の頼み 2026-11-13）", async () => {
     state.assignment.characters["c-akari"] = {
       ...state.assignment.characters["c-akari"],
