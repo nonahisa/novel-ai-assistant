@@ -211,7 +211,22 @@ el.edit.addEventListener("click", function () { post("edit"); });
 el.character.addEventListener("change", sendFilter);
 
 /** いま画面に出ている絞り込みを、そのまま拡張機能へ返す */
+/*
+  2本のつまみが追い越していたら、送る前に画面の側でも入れ替える。
+  放したばかりのつまみには焦点が残っていて、拡張機能が返した値を
+  書き戻せない。そのままだと次に人物や種類を触ったとき、追い越した
+  ままの2本を送り、範囲が勝手に狭まる
+*/
+function orderRangeSliders(from, to) {
+  if (Number(from.value) > Number(to.value)) {
+    const low = to.value;
+    to.value = from.value;
+    from.value = low;
+  }
+}
+
 function sendFilter() {
+  orderRangeSliders(el.fromChapter, el.toChapter);
   const kinds = [];
   const boxes = el.kinds.querySelectorAll("input[type=checkbox]");
   for (const box of boxes) {

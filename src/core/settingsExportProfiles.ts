@@ -642,6 +642,8 @@ export interface ExportHeader {
 export interface ExportDocument {
   audience: ExportAudience;
   chapter: number | null;
+  /** 第M話から（第M〜N話で絞ったとき）。第1話からなら null */
+  fromChapter: number | null;
   header: ExportHeader;
   sections: ExportSection[];
 }
@@ -726,6 +728,7 @@ export function buildExportDocument(
   return {
     audience,
     chapter,
+    fromChapter,
     header: buildHeader(profile, data, options, undatedText),
     sections,
   };

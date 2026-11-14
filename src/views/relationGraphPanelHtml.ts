@@ -369,7 +369,22 @@ function post(type, payload) {
 }
 
 /** いま画面に出ている絞り込みを、そのまま拡張機能へ返す */
+/*
+  2本のつまみが追い越していたら、送る前に画面の側でも入れ替える。
+  拡張機能は入れ替えた範囲を返すが、放したばかりのつまみには焦点が残って
+  いて値を書き戻せない。そのままだと次にほかの絞りを触ったとき、追い越した
+  ままの2本（例：8と8）を送り、範囲が勝手に狭まる
+*/
+function orderRangeSliders(from, to) {
+  if (Number(from.value) > Number(to.value)) {
+    const low = to.value;
+    to.value = from.value;
+    from.value = low;
+  }
+}
+
 function sendFilter() {
+  orderRangeSliders(el.fromChapter, el.upToChapter);
   const kinds = [];
   if (el.kindRelation.checked) kinds.push("relation");
   if (el.kindAddress.checked) kinds.push("address");

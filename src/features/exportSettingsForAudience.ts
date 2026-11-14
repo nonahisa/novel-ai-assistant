@@ -87,7 +87,9 @@ export function exportFileBaseName(
       ? "全話"
       : typeof chapter === "number"
         ? `第${chapter}話まで`
-        : `第${chapter.from}〜${chapter.to}話`;
+        : chapter.from === chapter.to
+          ? `第${chapter.from}話`
+          : `第${chapter.from}〜${chapter.to}話`;
   return `設定資料（${AUDIENCE_PROFILES[audience].fileLabel}・${scope}）`;
 }
 

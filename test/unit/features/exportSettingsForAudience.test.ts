@@ -48,6 +48,9 @@ describe("書き出すファイルの名前", () => {
     expect(exportFileBaseName("illustration", { from: 3, to: 8 })).toBe(
       "設定資料（イラスト発注用・第3〜8話）"
     );
+    expect(exportFileBaseName("editorial", { from: 5, to: 5 })).toBe(
+      "設定資料（編集部用・第5話）"
+    );
   });
 
   test("いちばん先に試すのは、時刻の付かない名前", () => {

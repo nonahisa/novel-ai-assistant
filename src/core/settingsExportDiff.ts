@@ -57,6 +57,11 @@ export interface ExportSnapshot {
   version: number;
   audience: ExportAudience;
   chapter: number | null;
+  /**
+   * 第M話から（第M〜N話で書き出したとき。2026-11-10）。省略・null は第1話から。
+   * 古い控えには無いので、無ければ第1話からと読む（形の版は上げない）
+   */
+  fromChapter?: number | null;
   /** ISO 8601 */
   exportedAt: string;
   sections: SnapshotSection[];
@@ -68,6 +73,8 @@ export function snapshotOf(document: ExportDocument, at: Date): ExportSnapshot {
     version: SNAPSHOT_VERSION,
     audience: document.audience,
     chapter: document.chapter,
+    // 第1話からのときは書かない（今までの控えと同じ形のまま）
+    ...(document.fromChapter ? { fromChapter: document.fromChapter } : {}),
     exportedAt: at.toISOString(),
     sections: document.sections.map((section) => {
       const seen = new Map<string, number>();
@@ -131,6 +138,13 @@ export function parseSnapshot(text: string): ExportSnapshot | null {
   if (value.version !== SNAPSHOT_VERSION) return null;
   if (!EXPORT_AUDIENCES.includes(value.audience as ExportAudience)) return null;
   if (value.chapter !== null && typeof value.chapter !== "number") return null;
+  if (
+    value.fromChapter !== undefined &&
+    value.fromChapter !== null &&
+    typeof value.fromChapter !== "number"
+  ) {
+    return null;
+  }
   if (typeof value.exportedAt !== "string") return null;
   if (!Array.isArray(value.sections)) return null;
   for (const section of value.sections) {
@@ -364,8 +378,14 @@ export function buildExportDiffMarkdown(
 function describeMoment(snapshot: ExportSnapshot): string {
   const at = new Date(snapshot.exportedAt);
   const when = Number.isNaN(at.getTime()) ? "日時不明" : formatDayTime(at);
+  // 範囲で書き出した控えは範囲で言う。範囲が違う2つを比べると、範囲の外
+  // だっただけの人物が「増えた」「消えた」に出るので、どちらの範囲かを読めるようにする
   const scope =
-    snapshot.chapter === null ? "全話ぶん" : `第${snapshot.chapter}話まで`;
+    snapshot.chapter === null
+      ? "全話ぶん"
+      : snapshot.fromChapter
+        ? `第${snapshot.fromChapter}話〜第${snapshot.chapter}話`
+        : `第${snapshot.chapter}話まで`;
   return `${when}（${scope}）`;
 }
 

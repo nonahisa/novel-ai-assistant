@@ -228,4 +228,30 @@ describe("控え", () => {
     broken.sections[0].records[0].values = [["読み"]];
     expect(parseSnapshot(JSON.stringify(broken))).toBeNull();
   });
+
+  test("第M〜N話で書き出した控えは下端を持ち、差分の見出しに範囲が出る", () => {
+    const ranged = snapshotOf(
+      buildExportDocument("editorial", fixtureData(), {
+        ...FIXTURE_OPTIONS,
+        chapter: 3,
+        fromChapter: 2,
+      }),
+      LATER
+    );
+    expect(ranged.fromChapter).toBe(2);
+    expect(parseSnapshot(JSON.stringify(ranged))).toEqual(ranged);
+
+    const text = buildExportDiffMarkdown(snapshot(fixtureData(), 3), ranged, {
+      workTitle: "灯の塔",
+    });
+    expect(text).toContain("（第3話まで）");
+    expect(text).toContain("（第2話〜第3話）");
+  });
+
+  test("第1話からの控えには下端を書かない（今までの控えと同じ形）", () => {
+    const saved = snapshot(fixtureData(), 3);
+    expect("fromChapter" in saved).toBe(false);
+    const broken = { ...saved, fromChapter: "2" };
+    expect(parseSnapshot(JSON.stringify(broken))).toBeNull();
+  });
 });
