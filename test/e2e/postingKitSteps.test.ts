@@ -18,8 +18,9 @@
  * - ［投稿しました］：投稿の記録が1件入り、**告知の質問「投稿おつかれさまでした」**が出る。先頭の答えは
  *   「告知は作らずに終わる」（既定は作らない）。それを選ぶと何も作らず終わる
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { runCommand } from "./support/quickInput";
@@ -57,9 +58,10 @@ async function openedUrls(session: E2ESession): Promise<string[]> {
   return session.app.evaluate(() => (globalThis as unknown as { __e2eOpened?: string[] }).__e2eOpened ?? []);
 }
 
+/** 製品が書き戻している最中は一瞬ファイルが無いことがあるので、無ければ少し待って読み直す（fileSettle.ts） */
 async function ledgerPosts(session: E2ESession): Promise<unknown[]> {
-  const text = await readFile(path.join(session.workFolder, "設定", "投稿状態.json"), "utf8");
-  return (JSON.parse(text) as { posts?: unknown[] }).posts ?? [];
+  const ledger = await readJsonWhenPresent<{ posts?: unknown[] }>(path.join(session.workFolder, "設定", "投稿状態.json"));
+  return ledger.posts ?? [];
 }
 
 async function clipboardText(session: E2ESession): Promise<string> {

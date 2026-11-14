@@ -9,8 +9,9 @@
  * - 画面の読み取りは `schedulePanelHtml.ts` の DOM（`.bar`・`.dot`・`.milestone`・`#detail`）に頼る。
  *   そこを直したらここも直す
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readJsonWhenPresent } from "./fileSettle";
 import type { Frame, Page } from "playwright-core";
 import { DEFAULT_SETTINGS_DIR } from "../../../src/models/types";
 import type { Schedule, ScheduleFile, ScheduleStep, SerialRule, StepKey, StepStatus } from "../../../src/models/schedule";
@@ -106,7 +107,8 @@ export async function writeScheduleFile(workFolder: string, schedules: readonly 
 
 /** 製品が書いた `スケジュール.json` を読む（登録のあとなので、置き場は作品の設定の置き場） */
 export async function readScheduleFile(workFolder: string): Promise<ScheduleFile> {
-  return JSON.parse(await readFile(scheduleFilePath(workFolder), "utf8")) as ScheduleFile;
+  // 製品の書き戻しの最中は一瞬ファイルが無いことがあるので、読めるまで待つ（fileSettle.ts）
+  return readJsonWhenPresent<ScheduleFile>(scheduleFilePath(workFolder));
 }
 
 /** スケジュール画面の面（日付の目盛りの親 `#grid` を持つ） */

@@ -23,8 +23,9 @@
  * **外のブラウザは開かせない**（`postingKitRevision.test.ts` と同じく本体側の `shell.openExternal` を替える）。
  * AI は呼ばない（1段目の各話あらすじは押さない）。クリップボードは本物の OS のものを通るので、走らせたあと戻す。
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { SIDEBAR_LAUNCH, showSidebar } from "./support/sidebar";
@@ -103,9 +104,9 @@ interface LedgerShape {
   revisions?: Array<Record<string, unknown>>;
 }
 
+/** 製品が書き戻している最中は一瞬ファイルが無いことがあるので、無ければ少し待って読み直す（fileSettle.ts） */
 async function ledger(session: E2ESession): Promise<LedgerShape> {
-  const text = await readFile(path.join(session.workFolder, "設定", "投稿状態.json"), "utf8");
-  return JSON.parse(text) as LedgerShape;
+  return readJsonWhenPresent<LedgerShape>(path.join(session.workFolder, "設定", "投稿状態.json"));
 }
 
 /** 選ぶ画面の題が `needle` を含むまで待つ。VS Code 自身の「外のサイトを開きますか」は［Open］で進める */

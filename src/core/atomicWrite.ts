@@ -1,6 +1,6 @@
 import { sha256Bytes, sha256Text } from "./hash";
 import { fromUri } from "./paths";
-import { hostTag, randomUuid } from "./runtime";
+import { canRunProcesses, hostTag, randomUuid } from "./runtime";
 import * as path from "./paths";
 import * as vscode from "vscode";
 
@@ -66,8 +66,25 @@ export async function atomicWriteFile(
 
   if (!options) {
     try {
+      if (await replaceInOneStep(fromUri(temporary), fromUri(destination))) return;
       await vscode.workspace.fs.rename(temporary, destination, { overwrite: true });
     } catch (error) {
+      // 本体の上書きの移動は「保存先を消す → 名前を変える」の2手なので、2手目で投げると
+      // 保存先はもう無い。そこで一時ファイルまで消すと、古い中身も新しい中身も失う。
+      // 保存先が無い（または確かめられない）ときは一時ファイルを残し、場所を知らせる
+      let destinationRemains = false;
+      try {
+        destinationRemains = (await readFileIfExists(destination)) !== undefined;
+      } catch {
+        destinationRemains = false;
+      }
+      if (!destinationRemains) {
+        throw manualRecoveryError(
+          `保存先「${fromUri(destination)}」を置き換えられませんでした（${errorMessage(error)}）。新しい内容は一時ファイルに残っています。`,
+          [fromUri(destination), fromUri(temporary)],
+          "not_saved"
+        );
+      }
       await deleteStagedFileBestEffort(temporary, stagedHash);
       throw error;
     }
@@ -85,6 +102,65 @@ export async function atomicWriteFile(
     stagedHash,
     options.expectedHash
   );
+}
+
+/**
+ * 一時ファイルを保存先へ**1回の名前の変更で**入れ替える（指定なしの道）。入れ替えたら true。
+ *
+ * **なぜ `vscode.workspace.fs.rename` に任せないのか**（2026-11-14、遅いノートPCの画面テスト）。
+ * 本体の上書きの移動（`FileService.doMoveCopy`）は、**保存先を消してから**親フォルダーを確かめ、
+ * 別の手で名前を変える（1.90 と 1.145 の束で確かめた）。その間は、同期・相談・MCP・投稿の記録の
+ * 読み手から見て保存先が「無い」。Node の `rename` は Windows でも既存を置き換える1手
+ * （MoveFileEx の置き換え）なので、この隙間ができない。
+ *
+ * **手元の OS のパスで、Node が居るときだけ**使う。ブラウザ版（実装ルール7）と URI の場所では
+ * false を返し、呼び手が今までの道を通る。`node:fs/promises` は動的 import に限る。
+ *
+ * 読み手がちょうど開いている間は、Windows が置き換えを断る（EPERM・EACCES・EBUSY）。
+ * そのときは短く間をおいて繰り返し、`ONE_STEP_RETRY_MS` を過ぎたら false で今までの道へ譲る
+ * ——隙間はあっても、書き込みそのものを失敗にはしない（今までと同じ振る舞いに戻るだけ）。
+ * それ以外の失敗はそのまま投げる。
+ */
+async function replaceInOneStep(temporaryPath: string, destinationPath: string): Promise<boolean> {
+  if (oneStepOverride === false) return false;
+  if (!canRunProcesses()) return false;
+  if (path.isUriString(temporaryPath) || path.isUriString(destinationPath)) return false;
+  let renameOnDisk: (from: string, to: string) => Promise<void>;
+  try {
+    ({ rename: renameOnDisk } = await import("node:fs/promises"));
+  } catch {
+    return false;
+  }
+  const deadline = Date.now() + ONE_STEP_RETRY_MS;
+  let pause = 2;
+  for (;;) {
+    try {
+      await renameOnDisk(temporaryPath, destinationPath);
+      return true;
+    } catch (error) {
+      const code = (error as { code?: unknown } | null | undefined)?.code;
+      if (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") throw error;
+      if (Date.now() + pause > deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, pause));
+      pause = Math.min(pause * 2, 25);
+    }
+  }
+}
+
+/** 置き換えを断られたときに繰り返す長さ。読み手の1回の読みは数ミリ秒で終わる */
+const ONE_STEP_RETRY_MS = 500;
+
+/**
+ * 試験から1手の置き換えを止める（`false`）／製品の選び方へ戻す（`undefined`）。
+ *
+ * 単体テストの多くは `workspace.fs` を記憶の中の作り物にしているので、本物のディスクを
+ * 触る Node の道を通すと一時ファイルが見えない。`test/unit/support/setup.ts` が全試験の前に
+ * `false` を差し込み、`atomicWriteReplaceGap.test.ts` が `undefined` に戻して本物で確かめる。
+ */
+let oneStepOverride: false | undefined;
+
+export function setOneStepReplaceForTests(value: false | undefined): void {
+  oneStepOverride = value;
 }
 
 async function placeNewFile(

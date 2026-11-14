@@ -24,8 +24,9 @@
  * **外のブラウザは開かせない**（`postingKitSteps.test.ts` と同じく本体側の `shell.openExternal` を替える）。
  * 本物のサイトへは何も送らない。AI は呼ばない。クリップボードは本物の OS のものを通るので、走らせたあと前の中身へ戻す。
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { POSTED_IMPORT_URI_PATH } from "../../src/core/readerStatsHelperLink";
@@ -83,22 +84,9 @@ interface LedgerPost {
 }
 
 async function ledgerPosts(session: E2ESession): Promise<LedgerPost[]> {
-  // 製品は台帳を「退避 → 新規作成」で書くので、一瞬ファイルが無いことがある。読めるまで待つ
-  let text = "";
-  await waitUntil(
-    async () => {
-      try {
-        text = await readFile(path.join(session.workFolder, "設定", "投稿状態.json"), "utf8");
-        JSON.parse(text);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    "台帳（設定\\投稿状態.json）が読める",
-    10_000
-  );
-  return ((JSON.parse(text) as { posts?: LedgerPost[] }).posts ?? []);
+  // 製品の書き戻しの最中は一瞬ファイルが無いことがある。読めるまで待つ（fileSettle.ts）
+  const ledger = await readJsonWhenPresent<{ posts?: LedgerPost[] }>(path.join(session.workFolder, "設定", "投稿状態.json"), 10_000);
+  return ledger.posts ?? [];
 }
 
 /** 案内の選ぶ画面の題（`… を カクヨム へ`）が出るまで待つ。VS Code 自身の「外のサイトを開きますか」は［Open］で進める */

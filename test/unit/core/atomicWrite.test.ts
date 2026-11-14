@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
-import { atomicWriteFile } from "../../../src/core/atomicWrite";
+import { AtomicWriteFileError, atomicWriteFile } from "../../../src/core/atomicWrite";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 const path = "C:\\novels\\001.txt";
@@ -109,6 +109,29 @@ describe("原稿の原子的な保存", () => {
     expect(deletedPaths[0]).not.toBe(destinationPath);
     expect(deletedPaths[0]).toMatch(/^c:\\novels\\001\.txt\.novelai-\d+-.+\.tmp$/);
     expect(files.get(destinationPath)).toEqual(original);
+  });
+
+  test("置換が保存先を消したあとで失敗しても、新しい中身の一時ファイルは消さずに場所を知らせる", async () => {
+    // VS Code 本体の上書きの移動は「保存先を消す → 名前を変える」の2手（設計書の atomicWrite の節）。
+    // 2手目で投げると保存先はもう無い。そこで一時ファイルまで消すと、古い中身も新しい中身も残らない
+    files.set(destinationPath, new Uint8Array([0x8b, 0x8c]));
+    const replacement = new Uint8Array([0x93, 0x94]);
+    workspace.fs.rename = vi.fn(async (_from: { fsPath: string }, to: { fsPath: string }) => {
+      files.delete(to.fsPath);
+      throw new Error("名前を変えられません");
+    });
+
+    const failure = await atomicWriteFile(path, replacement).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+
+    expect(failure).toBeInstanceOf(AtomicWriteFileError);
+    const temporary = [...files.keys()].find((name) => name.endsWith(".tmp"));
+    expect(temporary).toBeDefined();
+    expect(files.get(temporary!)).toEqual(replacement);
+    expect((failure as AtomicWriteFileError).recoveryPaths).toContain(temporary);
+    expect(deletedPaths).toHaveLength(0);
   });
 
   test("一時ファイル書き込み中の同一パス外部編集を上書きしない", async () => {

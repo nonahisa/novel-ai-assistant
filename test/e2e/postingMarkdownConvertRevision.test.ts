@@ -17,6 +17,7 @@
  */
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { runCommand } from "./support/quickInput";
@@ -70,23 +71,9 @@ interface Ledger {
   revisions?: unknown[];
 }
 
-/** 台帳を読む。書き換えの最中（退避 → 新規作成）は一瞬無いので、読めるまで待つ */
+/** 台帳を読む。書き戻しの最中は一瞬無いことがあるので、読めるまで待つ（fileSettle.ts） */
 async function ledger(session: E2ESession): Promise<Ledger> {
-  let text = "";
-  await waitUntil(
-    async () => {
-      try {
-        text = await readFile(path.join(session.workFolder, "設定", "投稿状態.json"), "utf8");
-        JSON.parse(text);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    "台帳（設定\\投稿状態.json）が読める",
-    10_000
-  );
-  return JSON.parse(text) as Ledger;
+  return readJsonWhenPresent<Ledger>(path.join(session.workFolder, "設定", "投稿状態.json"), 10_000);
 }
 
 /** 選ぶ画面の題が `accept` に合うまで待つ。VS Code 自身の「外のサイトを開きますか」は［Open］で進める */

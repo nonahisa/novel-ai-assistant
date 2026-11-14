@@ -27,6 +27,24 @@ beforeEach(async () => {
   setFileReaderForTests(vscodeFileReaderForTests());
 
   /*
+    **書き込みの1手の置き換え（Node の rename）を止める**（`core/atomicWrite.ts`）。
+    読み口と同じ理由で、そのままだと本物のディスクで名前を変えにいき、記憶の中の
+    一時ファイルが見えずに落ちる。本物の道は `atomicWriteReplaceGap.test.ts` が見る。
+    `atomicWrite` を `vi.mock` で丸ごと差し替える試験では口が無く、引くだけで vitest が投げる。
+    差し替えた試験は本物の書き込みを通らないので、そのときは何もしない
+  */
+  const atomicWrite: { setOneStepReplaceForTests?: unknown } = await import("../../../src/core/atomicWrite");
+  let setOneStep: unknown;
+  try {
+    setOneStep = atomicWrite.setOneStepReplaceForTests;
+  } catch {
+    setOneStep = undefined;
+  }
+  if (typeof setOneStep === "function") {
+    (setOneStep as (value: false | undefined) => void)(false);
+  }
+
+  /*
     **手元のAI（Ollama・LM Studio）の口を `globalThis.fetch` へ回す**
     （`ai/fetchTimeouts.ts` の `localFetch`。2026-09-23）。
 

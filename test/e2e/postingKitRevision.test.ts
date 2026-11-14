@@ -17,8 +17,9 @@
  * **外のブラウザは開かせない**（`postingKitSteps.test.ts` と同じく本体側の `shell.openExternal` を替える）。
  * AI は呼ばない。クリップボードは本物の OS のものを通るので、走らせたあと前の中身へ戻す。
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { SIDEBAR_LAUNCH, collapseSidebarPane, expandTreeRow, showSidebar, treeContextMenu, waitTreeSettled } from "./support/sidebar";
@@ -89,23 +90,12 @@ async function ledger(session: E2ESession): Promise<{ posts?: unknown[]; revisio
   /*
     **台帳が読めるようになるのを待ってから読む。** 製品は台帳の書き換えを「退避 → 新規作成」で行うので、
     書き換えの最中は一瞬ファイルが無い（遅い機械の1回目だけ ENOENT で落ちた）。固定の待ちは足さず、
-    読めた時点で進む
+    読めた時点で進む（fileSettle.ts）
   */
-  let text = "";
-  await waitUntil(
-    async () => {
-      try {
-        text = await readFile(path.join(session.workFolder, "設定", "投稿状態.json"), "utf8");
-        JSON.parse(text);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    "台帳（設定\\投稿状態.json）が読める",
+  return readJsonWhenPresent<{ posts?: unknown[]; revisions?: Array<Record<string, unknown>> }>(
+    path.join(session.workFolder, "設定", "投稿状態.json"),
     10_000
   );
-  return JSON.parse(text) as { posts?: unknown[]; revisions?: Array<Record<string, unknown>> };
 }
 
 /** 選ぶ画面の題が `needle` を含むまで待つ。VS Code 自身の「外のサイトを開きますか」は［Open］で進める */

@@ -20,6 +20,7 @@
  */
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import type { Locator, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { composeText, frontFrameShowing, placeCaretAfter } from "./support/manuscriptFrame";
@@ -71,8 +72,8 @@ function launchWith(episodePath: string, title: string) {
 }
 
 async function postedPaths(session: E2ESession): Promise<string[]> {
-  const text = await readFile(path.join(session.workFolder, "設定", "投稿状態.json"), "utf8");
-  const ledger = JSON.parse(text) as { posts?: Array<{ episodePath: string }> };
+  // 製品の書き戻しの最中は一瞬ファイルが無いことがあるので、読めるまで待つ（fileSettle.ts）
+  const ledger = await readJsonWhenPresent<{ posts?: Array<{ episodePath: string }> }>(path.join(session.workFolder, "設定", "投稿状態.json"));
   return (ledger.posts ?? []).map((post) => post.episodePath);
 }
 
