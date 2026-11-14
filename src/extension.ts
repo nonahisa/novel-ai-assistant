@@ -6078,6 +6078,12 @@ export async function activate(
   // 障害報告用の記録の書き出し（設計書8.5）。作品は迷いようが無いときだけ決め、
   // 決まらなければ書き出す側で選ばせる（「作品を選ばない」も選べる）
   context.subscriptions.push(
+    // コミュニティ（Discord）を開く（1.0.0。リンクは core/community.ts の1か所）
+    registerCommand("novelai.openCommunity", async () => {
+      const { COMMUNITY_DISCORD_URL } = await import("./core/community.js");
+      const { openSiteLink } = await import("./features/openSiteLink.js");
+      await openSiteLink(COMMUNITY_DISCORD_URL);
+    }),
     registerCommand("novelai.exportIssueReport", async (node?: WorkNode) => {
       const fromNode = node ? await resolveWork(node, registry) : undefined;
       if (node && !fromNode) return;

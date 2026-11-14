@@ -693,6 +693,12 @@
         "icon": "$(report)"
       },
       {
+        "command": "novelai.openCommunity",
+        "title": "コミュニティ（Discord）",
+        "category": "統合小説執筆環境",
+        "icon": "$(organization)"
+      },
+      {
         "command": "novelai.openProposals",
         "title": "提案パネルを開く",
         "category": "統合小説執筆環境",

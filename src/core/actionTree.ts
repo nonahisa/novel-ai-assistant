@@ -2868,6 +2868,19 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "・書き出す前に、入れるものと伏せるものを確かめられる\n\n" +
           "外へは送らない。貼るのは作者。",
       },
+      // 障害報告の隣に置く（1.0.0）。記録を貼る先の /不具合を報告 もこのサーバーにある
+      {
+        kind: "action",
+        command: "novelai.openCommunity",
+        label: "コミュニティ",
+        note: "Discord",
+        icon: "organization",
+        requiresWork: false,
+        detail:
+          "使う人どうしの Discord のサーバーを、ブラウザで開く\n\n" +
+          "・使い方の質問・不具合の報告（/不具合を報告）・機能の提案ができる\n\n" +
+          "開くだけで、作品や原稿は送らない。",
+      },
       {
         kind: "action",
         command: "novelai.openChatLog",

@@ -472,6 +472,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.openSceneGuide": "allTypes",
   "novelai.showLog": "allTypes",
   "novelai.exportIssueReport": "allTypes",
+  "novelai.openCommunity": "allTypes",
   "novelai.openProposals": "allTypes",
   "novelai.openChatLog": "allTypes",
   "novelai.diagnoseWeb": "allTypes",

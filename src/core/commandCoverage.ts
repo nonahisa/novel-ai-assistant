@@ -133,6 +133,8 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.showLog": { class: "A", label: "ログ表示", via: "novel.read kind: log（名指しの鍵。\"*\" では読めない）" },
   // 何を外へ出すかを作者が確認の画面で決める（設計書8.5）。外部AIに代わりに押させない
   "novelai.exportIssueReport": { class: "C4", label: "障害報告用の記録を書き出す", reason: "作者の判断" },
+  // ブラウザで外のページを開くだけ（1.0.0）。外部AIに代わりに開かせる理由が無い
+  "novelai.openCommunity": { class: "C4", label: "コミュニティ（Discord）", reason: "作者の判断" },
   // ── 書き出し
   "novelai.exportPdf": { class: "B", label: "PDF出力（印刷用）", via: "run.request feature: exportPdf" },
   "novelai.exportEpub": { class: "B", label: "EPUB出力（試作）", via: "run.request feature: exportEpub" },

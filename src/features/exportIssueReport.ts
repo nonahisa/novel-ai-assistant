@@ -19,6 +19,8 @@ import { isLocalProviderId } from "../core/localProviders";
 import { redactSecrets, workLog } from "../core/logger";
 import { environmentVariable, hostPlatform, isWebRuntime } from "../core/runtime";
 import { revealFolder } from "../views/openDocument";
+import { COMMUNITY_DISCORD_URL, OPEN_COMMUNITY_LABEL } from "../core/community";
+import { openSiteLink } from "./openSiteLink";
 import { confirmRunOrChoose, notifyDone } from "../views/notify";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
@@ -311,7 +313,8 @@ async function writeReport(
 }
 
 /**
- * 書き出したあとの案内。ボタンは2つ（［要約をコピー］［ファイルの場所を開く］）。
+ * 書き出したあとの案内。ボタンは3つ（［要約をコピー］［ファイルの場所を開く］［Discord を開く］。
+ * Discord は 1.0.0 で足した。貼る先の /不具合を報告 はそのサーバーにある）。
  *
  * **答えを await して止まらない**（モーダルでない知らせを待つと、作者が押さずに
  * 置いたときに処理が終わらない）。押されたら後から動き、もう一方のボタンも
@@ -323,13 +326,16 @@ function showDone(filePath: string, report: IssueReport): void {
   const message =
     `障害報告用の記録を書き出しました（${report.reportId}）。` +
     "Discord の /不具合を報告 に貼ってください（詳細はファイルを添付）。";
-  void vscode.window.showInformationMessage(message, copy, reveal).then(async (picked) => {
+  void vscode.window.showInformationMessage(message, copy, reveal, OPEN_COMMUNITY_LABEL).then(async (picked) => {
     if (picked === copy) {
       await vscode.env.clipboard.writeText(report.summary);
       notifyDone("要約をコピーしました。入力窓の欄ごとに貼ってください。");
       showDone(filePath, report);
     } else if (picked === reveal) {
       await revealFolder(filePath);
+      showDone(filePath, report);
+    } else if (picked === OPEN_COMMUNITY_LABEL) {
+      await openSiteLink(COMMUNITY_DISCORD_URL);
       showDone(filePath, report);
     }
   });
