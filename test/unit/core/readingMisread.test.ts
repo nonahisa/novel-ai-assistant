@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { VoiceEngineClient, VoiceEngineError } from "../../../src/core/voiceEngine";
 import { buildReadingPlan, sentenceSpeechWith } from "../../../src/core/readAloud";
+import { applyFindingToText } from "../../../src/core/findingApply";
 import {
+  buildMisreadFindings,
   collectKnownReadings,
   compareKana,
   findMisreadCandidates,
@@ -187,6 +189,45 @@ describe("送る文の写しを作り直す", () => {
     for (const sentence of plan) {
       expect(sentenceSpeechWith(text, sentence, "curly", spans)).toBe(sentence.speech);
     }
+  });
+});
+
+describe("［ここにルビを振る］で本文に当てる（提案パネルの［適用］と同じ当て方）", () => {
+  const time = "2026-11-14T00:00:00.000Z";
+  const folder = "C:/works/akari";
+
+  async function rowsFor(text: string, file: string, readings: Record<string, string>) {
+    const notation = file.endsWith(".md") ? "curly" : "site";
+    const known = collectKnownReadings([{ label: "第1話", text, notation, dictionary: [] }], []);
+    const { candidates } = findMisreadCandidates(text, notation, [], known);
+    const found = await judgeMisreads(candidates, await queryWith(readings));
+    return buildMisreadFindings(folder, `${folder}/${file}`, text, notation, found, time);
+  }
+
+  it(".md は {灯|あかり}、ルビの親文字には当たらない", async () => {
+    const text = "　{灯|あかり}と灯が来た。";
+    const rows = await rowsFor(text, "01.md", { 灯: "ヒ" });
+    expect(rows).toHaveLength(1);
+    const applied = applyFindingToText(text, { ...rows[0], line: rows[0].hintLine });
+    expect(applied.kind === "applied" && applied.text).toBe("　{灯|あかり}と{灯|あかり}が来た。");
+  });
+
+  it(".txt は ｜灯《あかり》、当て読みのカタカナはそのまま振る", async () => {
+    const text = "　｜本気《マジ》で行く。\n　本気だった。";
+    const rows = await rowsFor(text, "01.txt", { 本気: "ホンキ" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].suggestion).toBe("｜本気《マジ》");
+    const applied = applyFindingToText(text, { ...rows[0], line: rows[0].hintLine });
+    expect(applied.kind === "applied" && applied.text).toBe("　｜本気《マジ》で行く。\n　｜本気《マジ》だった。");
+  });
+
+  it("同じ窓が前の行にもあるとき、行の手がかりで指した行に当たる", async () => {
+    const text = "　{灯|あかり}だ。\n「灯！」\n「灯！」";
+    const rows = await rowsFor(text, "01.md", { 灯: "ヒ" });
+    // 同じ窓は1つの番号に畳まれる（1つ目に当て、調べ直すと2つ目がまた並ぶ。features の試験）
+    expect(rows).toHaveLength(1);
+    const applied = applyFindingToText(text, { ...rows[0], line: rows[0].hintLine });
+    expect(applied.kind === "applied" && applied.text).toBe("　{灯|あかり}だ。\n「{灯|あかり}！」\n「灯！」");
   });
 });
 

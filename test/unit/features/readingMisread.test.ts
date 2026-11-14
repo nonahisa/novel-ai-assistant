@@ -138,6 +138,39 @@ describe("読み間違いを調べる", () => {
   });
 });
 
+describe("同じ窓の出現が2つある話", () => {
+  it("1つ目にルビを振った（採った）あとで2つ目が見つかれば、また並ぶ。見送った行は並べない", async () => {
+    const text = "「灯！」\n「灯！」";
+    put(EP2, text);
+    const service = await serviceWith({ 灯: "ヒ" });
+    const here = { ...target, text };
+    expect(await checkReadingMisreads(here, service, { episodes, askRemote: true })).toEqual({
+      kind: "checked",
+      found: 1,
+      shown: 1,
+    });
+    const [row] = await new FindingStore(work).load();
+    // ［ここにルビを振る］で1つ目へ当てた（置き場に「採った」が足される）
+    await new FindingStore(work).decide([
+      { findingId: row.id, time: new Date(Date.now() - 1000).toISOString(), status: "accepted", note: "" },
+    ]);
+    const after = "「{灯|あかり}！」\n「灯！」";
+    expect(
+      await checkReadingMisreads({ ...here, text: after }, service, { episodes, askRemote: true })
+    ).toEqual({ kind: "checked", found: 1, shown: 1 });
+    const rows = await new FindingStore(work).load();
+    expect(rows.find((item) => item.id === row.id)?.status).toBe("pending");
+
+    // 見送ったら、調べ直しても並べない
+    await new FindingStore(work).decide([
+      { findingId: row.id, time: new Date(Date.now() + 1000).toISOString(), status: "dismissed", note: "" },
+    ]);
+    expect(
+      await checkReadingMisreads({ ...here, text: after }, service, { episodes, askRemote: true })
+    ).toEqual({ kind: "checked", found: 1, shown: 0 });
+  });
+});
+
 describe("［読みの辞書へ足す］", () => {
   it("押すと、その話の辞書に作者の項目が入り、次の計画ではその漢字が写しから消える。行は一覧から外れる", async () => {
     const service = await serviceWith({ 灯: "ヒ", 走: "ハシ" });

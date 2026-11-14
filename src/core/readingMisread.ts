@@ -52,8 +52,13 @@ export type KnownReadingSource =
 export interface KnownReading {
   /** 語（漢字を含む） */
   word: string;
-  /** 読み（ひらがなと長音） */
+  /** 読み（ひらがなと長音。比べるための形） */
   reading: string;
+  /**
+   * 作者が書いたとおりの読み（ルビの `《マジ》` ならカタカナのまま）。［ここにルビを振る］で振る読みに使う
+   * ——ひらがなへ直した読みで振ると、作者の書き方（当て読みのカタカナ）と変わる
+   */
+  written: string;
   source: KnownReadingSource;
 }
 
@@ -102,13 +107,14 @@ export function collectKnownReadings(
   const known = new Map<string, KnownReading[]>();
   const add = (word: string, rawReading: string, source: KnownReadingSource): void => {
     const surface = word.trim();
-    const reading = toHiragana(rawReading.replace(/[\s　]+/g, ""));
+    const written = rawReading.replace(/[\s　]+/g, "");
+    const reading = toHiragana(written);
     if (surface === "" || !KANJI.test(surface) || !HIRAGANA_ONLY.test(reading)) return;
     // 読みが字面と同じ（仮名の語）は、エンジンが読み違えない
     if (reading === toHiragana(surface)) return;
     const list = known.get(surface) ?? [];
     if (list.some((item) => item.reading === reading)) return;
-    list.push({ word: surface, reading, source });
+    list.push({ word: surface, reading, written, source });
     known.set(surface, list);
   };
   for (const episode of episodes) {
@@ -472,7 +478,7 @@ export function buildMisreadFindings(
         line: candidate.line,
         original,
         target: candidate.word,
-        suggestion: rubyEditReplacement(candidate.word, expected.reading, rubyNotationFor(filePath)),
+        suggestion: rubyEditReplacement(candidate.word, expected.written, rubyNotationFor(filePath)),
         message: misreadMessage(candidate.word, item.engineReading, expected),
         category: "other",
         label: MISREAD_FINDING_LABEL,
@@ -490,7 +496,7 @@ export function buildMisreadFindings(
 /** 行の主文（場所の札の横に出る1文） */
 export function misreadMessage(word: string, engineReading: string, expected: KnownReading): string {
   const heard = engineReading === "" ? "読み飛ばしそうです" : `「${engineReading}」と読みそうです`;
-  return `「${word}」を、声のエンジンは${heard}。正しい読みは「${expected.reading}」（${describeReadingSource(expected.source)}）。`;
+  return `「${word}」を、声のエンジンは${heard}。正しい読みは「${expected.written}」（${describeReadingSource(expected.source)}）。`;
 }
 
 /**

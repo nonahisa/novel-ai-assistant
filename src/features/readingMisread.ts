@@ -241,18 +241,34 @@ export async function checkReadingMisreads(
  * 新しい見込みだけを置き場へ足す。返すのは、校正・メモパネルに並ぶ数。
  *
  * - **まだ並んでいる同じ行は足し直さない**（書き出しのたびに置き場を太らせない）
- * - **見送った・直した行も足し直さない**（足しても判断の行が効いて出ないが、置き場が太る）
+ * - **見送った行は足し直さない**（作者が「このままでよい」と決めた所）
+ * - **採った（直した）のにまた見つかった行は、判断を「戻した」にして並べ直す。** 番号は前後の字から
+ *   作るので、同じ窓の出現が2つある話（「灯！」が2行）は1つの番号になり、1つ目にルビを振ると
+ *   2つ目が「直した」扱いのまま隠れて、エンジンは読み間違えたままになるため。辞書へ足した所は、
+ *   次の調べでは辞書の読みで置き換わるので、また見つかることは無い
  * - 期限で隠れた行は足し直す（また出てきた見込みなので、また並べる）
  */
 async function recordNew(work: WorkEntry, findings: readonly Finding[]): Promise<number> {
   if (findings.length === 0) return 0;
   const store = new FindingStore(work);
   const all = await store.load();
-  const visible = new Set(visibleFindings(all, findingsRetentionDays()).map((item) => item.id));
-  const decided = new Set(all.filter((item) => item.status !== "pending").map((item) => item.id));
-  const fresh = findings.filter((item) => !visible.has(item.id) && !decided.has(item.id));
+  const visible = new Set(
+    visibleFindings(all, findingsRetentionDays())
+      .filter((item) => item.status === "pending")
+      .map((item) => item.id)
+  );
+  const statusOf = new Map(all.map((item) => [item.id, item.status] as const));
+  const shown = findings.filter((item) => statusOf.get(item.id) !== "dismissed");
+  const fresh = shown.filter((item) => !visible.has(item.id));
   if (fresh.length > 0) await store.record(fresh);
-  return findings.filter((item) => !decided.has(item.id)).length;
+  const reopened = shown.filter((item) => statusOf.get(item.id) === "accepted");
+  if (reopened.length > 0) {
+    const time = new Date().toISOString();
+    await store.decide(
+      reopened.map((item) => ({ findingId: item.id, time, status: "pending" as const, note: "調べ直してまた見つかった" }))
+    );
+  }
+  return shown.length;
 }
 
 /**
