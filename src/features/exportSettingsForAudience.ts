@@ -1,5 +1,6 @@
 import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import { atomicWriteFile } from "../core/atomicWrite";
 import {
@@ -492,7 +493,7 @@ async function askFormat(): Promise<ExportFormat | undefined> {
     detail: choice.blockedReason ?? choice.detail,
     choice,
   }));
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...items, cancelItem()],
     {
       title: "どの形式で書き出しますか",
@@ -587,7 +588,7 @@ async function askAudience(): Promise<ExportAudience | undefined> {
     detail: AUDIENCE_PROFILES[id].description,
     id,
   }));
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...items, cancelItem()],
     {
       title: "誰に渡す資料ですか",
@@ -613,7 +614,7 @@ async function askChapter(
     label: "第N話までの情報だけ",
     detail: "先の話で分かったことを外します（ネタバレを避けたいとき）",
   };
-  const picked = await vscode.window.showQuickPick([all, upTo, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([all, upTo, cancelItem()], {
     title: "どこまでの情報を入れますか",
     ignoreFocusOut: true,
   });

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer, showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { WorkEntry } from "../models/types";
 import {
   isCharacterTextField,
@@ -657,6 +658,8 @@ export class SettingsPanel {
     context.subscriptions.push(this.panel);
 
     this.panel.onDidDispose(() => openPanels.delete(work.id));
+    // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+    listenForFocusWithoutPointer(this.panel.webview, "設定資料");
     this.panel.webview.onDidReceiveMessage((message: unknown) => {
       void this.handleMessage(message as PanelMessage);
     });
@@ -1760,7 +1763,7 @@ export class SettingsPanel {
       return;
     }
 
-    const chosen = await vscode.window.showQuickPick(picks, {
+    const chosen = await showQuickPickKeepingFocus(picks, {
       // **まとめて選ばせる。** 1度の取り違えが同じ話に何件も残るので
       // （実データでは第1話に3項目）、1件ずつ確認を繰り返させない
       canPickMany: true,
@@ -1868,7 +1871,7 @@ export class SettingsPanel {
       return;
     }
 
-    const before = await vscode.window.showQuickPick(
+    const before = await showQuickPickKeepingFocus(
       [...personalityFacetPicks(active), cancelItem()],
       {
         title: "性格：作中で変わる前の面を選ぶ（1/2）",
@@ -1878,7 +1881,7 @@ export class SettingsPanel {
     );
     // 「取りやめる」や Esc なら何もしない
     if (!before || !("value" in before)) return;
-    const after = await vscode.window.showQuickPick(
+    const after = await showQuickPickKeepingFocus(
       [
         ...personalityFacetPicks(
           active.filter((facet) => facet.value !== before.value)
@@ -1932,7 +1935,7 @@ export class SettingsPanel {
       await this.reloadAfterSave("character", id, "過去の性格の面はありません。");
       return;
     }
-    const chosen = await vscode.window.showQuickPick(
+    const chosen = await showQuickPickKeepingFocus(
       [...personalityFacetPicks(past), cancelItem()],
       {
         title: "性格：いまも成り立つ面へ戻す",

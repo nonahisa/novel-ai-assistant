@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { describeRemembered, withoutAll, withoutRemembered } from "../core/confirmMemory";
 import {
   readConfirmMemory,
@@ -30,7 +31,7 @@ export async function manageConfirmSkips(): Promise<void> {
   }
 
   const ALL = "__all__";
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "$(clear-all) すべて忘れる",

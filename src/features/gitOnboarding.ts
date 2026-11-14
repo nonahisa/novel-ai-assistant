@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { SyncTarget } from "../core/syncTarget";
 import { describeIncludedWorks, describeSyncTarget } from "../core/syncTarget";
 import { syncCommitMessage } from "../core/syncAllPlan";
@@ -518,7 +519,7 @@ async function connectRemote(
     action: "local",
   });
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: `${target.label} の送り先`,
     placeHolder: "GitHubへ送るか、この端末だけで使うかを決めます",
     ignoreFocusOut: true,

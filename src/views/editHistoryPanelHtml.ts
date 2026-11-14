@@ -1,4 +1,5 @@
 import { ACTOR_MARKS, ACTOR_STYLES, ACTOR_KINDS } from "../models/actor";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 import {
   EXTERNAL_EXPOSURE_LABELS,
   EXTERNAL_EXPOSURE_MARKS,
@@ -164,6 +165,7 @@ ${ACTOR_KINDS.map(
 
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 const listEl = document.getElementById('list');
 const MARKS = ${JSON.stringify(ACTOR_MARKS)};
 const LABELS = ${JSON.stringify(

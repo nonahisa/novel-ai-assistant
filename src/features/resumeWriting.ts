@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
@@ -278,7 +279,7 @@ async function pickEpisodeChapter(
     return;
   }
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...numbered.map((entry, index) => ({
         label: labelOf(entry.episode, format),

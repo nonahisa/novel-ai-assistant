@@ -1,5 +1,6 @@
 import * as path from "../core/paths";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { encodeForNewFile, readTextFile } from "../core/textFile";
@@ -245,7 +246,7 @@ export async function resolveWorkConflicts(
     return;
   }
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...files.map((file) => ({
         label: `$(warning) ${path.basename(file.relativePath)}`,
@@ -387,7 +388,7 @@ async function reviewConflict(
   // （2026-10-11、作者の実機確認で、選ぶ前に一覧が消えて最初へ戻った）
   const pickAction = async (): Promise<(typeof items)[number] | undefined> => {
     for (;;) {
-      const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+      const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
         title: `${fileName}：どちらの文を残しますか`,
         placeHolder: describeChoicePlaceholder(file.parsed),
         ignoreFocusOut: true,

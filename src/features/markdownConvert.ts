@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import { fromUri } from "../core/paths";
 import {
@@ -362,7 +363,7 @@ export async function convertToMarkdown(work: WorkEntry): Promise<boolean> {
     return false;
   }
 
-  const picked = await vscode.window.showQuickPick<
+  const picked = await showQuickPickKeepingFocus<
     vscode.QuickPickItem & { choice?: "folder" | "one" }
   >([...items, cancelItem()], {
     title: "本文を .md にする",

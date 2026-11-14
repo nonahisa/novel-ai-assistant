@@ -1,5 +1,6 @@
 // ログの書き先：作品ごと（`useLogFile(work.folderPath)`）
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import type { AIRegistry } from "../ai/registry";
 import {
@@ -314,7 +315,7 @@ async function choosePlan(
 
   // **閉じる道は、呼ぶところで渡す**（`quickPickCancel.test.ts` が呼び出しの
   // 本体を読んで見張るため）
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...items, cancelItem("取りやめる")],
     {
       title: `${TARGET_READER_TITLE}：${work.title}`,
@@ -346,7 +347,7 @@ async function askAim(
   for (;;) {
     // 複数選択は VS Code が「OK」を出すので、閉じる項目は足さない
     // （`quickPickCancel.test.ts` の例外）
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       READER_TYPE_IDS.map((type) => ({
         label: READER_TYPES[type].label,
         detail: READER_TYPES[type].summary,
@@ -403,7 +404,7 @@ async function chooseFitReader(
   const aims = readAimTypes(authorBlock);
   if (aims.length === 1) return { type: aims[0], basis: "aim" };
   if (aims.length > 1) {
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...aims.map((type) => ({
           label: READER_TYPES[type].label,

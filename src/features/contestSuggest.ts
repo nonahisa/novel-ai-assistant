@@ -1,5 +1,6 @@
 // ログの書き先：作品ごと（`useLogFile(work.folderPath)`）
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError } from "../ai/types";
@@ -212,7 +213,7 @@ export async function suggestContestsByAI(
   }
 
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate.entry]));
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...suggestionItems(validated.suggestions, byId), cancelItem()],
     {
       title: `「${work.title}」の応募先の提案（${forecastTitle(plan)}）`,

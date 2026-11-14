@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkAnnounceConfig, WorkEntry } from "../models/types";
 import {
   CONFIG_SCHEMA_VERSION,
@@ -388,7 +389,7 @@ async function resolveWorkListUrl(
   if (candidates.length === 1) return candidates[0].url;
 
   if (candidates.length > 1) {
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...candidates.map((candidate) => ({
           label: postingSiteInfo(candidate.site).label,
@@ -611,7 +612,7 @@ async function pickEpisode(
   const format = await readWorkFormat(work);
   const ordered = orderAnnounceEpisodes(loaded.bodies);
 
-  const answer = await vscode.window.showQuickPick(
+  const answer = await showQuickPickKeepingFocus(
     [
       ...ordered.map((episode) => ({
         label: announceEpisodeLabel(episode, format),

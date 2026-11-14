@@ -1,4 +1,5 @@
 import { PHOTO_EXAMPLE_CHARS, UNREADABLE_MARK } from "../prompts/photoTranscribe";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 import { PHOTO_REQUEST_MAX_CHARS } from "../core/photoTranscribeRequest";
 import { INLINE_REPEAT_STOP_NOTE } from "../core/photoTranscribeValidation";
 import { SPREAD_ASPECT } from "../core/photoOrientValidation";
@@ -148,6 +149,7 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
 <script nonce="${nonce}">
 (function () {
   var vscode = acquireVsCodeApi();
+  ${reportFocusWithoutPointerScript("vscode")}
   var MARK = ${JSON.stringify(UNREADABLE_MARK)};
   var REPEAT_NOTE = ${JSON.stringify(INLINE_REPEAT_STOP_NOTE)};
   var MAX_EDGE = ${PHOTO_MAX_EDGE};

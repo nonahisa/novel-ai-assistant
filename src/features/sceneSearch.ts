@@ -1,5 +1,6 @@
 // ログの書き先：入口で作品のログへ向ける（useLogFile）
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { describeRetrievedItem, type RetrievalItem } from "../core/retrievalCorpus";
 import { dropNeighbors, type RetrievalCandidate } from "../core/retrieval";
@@ -117,7 +118,7 @@ export async function searchScenes(
       setupCommand,
     } satisfies SetupItem);
   }
-  const picked = await vscode.window.showQuickPick([...items, cancelItem("閉じる")], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem("閉じる")], {
     title: `場面検索：「${query}」`,
     placeHolder: hint
       ? "語句一致で探しました。開く場面を選んでください"

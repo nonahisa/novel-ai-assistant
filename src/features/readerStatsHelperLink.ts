@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { postingSiteInfo, type PostingLedger } from "../models/posting";
 import { PostingStore } from "../core/postingStore";
@@ -560,7 +561,7 @@ async function askWork(
   siteLabel: string,
   works: readonly WorkEntry[]
 ): Promise<WorkEntry | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...works.map((work) => ({
         label: work.title,

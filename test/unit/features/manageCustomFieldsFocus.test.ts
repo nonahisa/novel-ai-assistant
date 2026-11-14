@@ -19,7 +19,8 @@ describe("設定資料項目追加の選択画面", () => {
     resolve(__dirname, "../../../src/features/manageCustomFields.ts"),
     "utf8"
   );
-  const calls = source.split("vscode.window.showQuickPick(").slice(1);
+  // 2026-11-14 から、選ぶ窓は焦点を取り返す口（`views/pickerFocus.ts`）を通して出す
+  const calls = source.split("showQuickPickKeepingFocus(").slice(1);
 
   // 「戻す項目」は 2026-10-24 夜に足した（外した項目を戻す）
   test("選択画面が5つある（種類・操作・長さ・戻す項目・外す項目）", () => {

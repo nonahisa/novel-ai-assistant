@@ -1,5 +1,6 @@
 import { revealFolder } from "../views/openDocument";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import { CharacterStore } from "../core/characterStore";
@@ -56,7 +57,7 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   // 1件へ潰すので、first と second が同じレコードになり、
   // 「同じ人物どうしはまとめられません」で必ず失敗していた（0.22.9で修正）
   const byId = new Map(loaded.characters.map((c) => [c.id, c]));
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       // 同名の組（「お母さん ＋ お母さん」）は名前だけでは見分けが付かない。
       // idを添えて、どのレコードの組かが分かるようにする
@@ -90,7 +91,7 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
     return;
   }
 
-  const keepPick = await vscode.window.showQuickPick(
+  const keepPick = await showQuickPickKeepingFocus(
     [
       { label: first.name, description: describe(first), keep: first, absorb: second },
       { label: second.name, description: describe(second), keep: second, absorb: first },

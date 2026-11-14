@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import {
@@ -72,6 +73,8 @@ export async function showAuthorDecisionsPanel(
   panel.onDidDispose(() => {
     if (openPanels.get(work.id) === entry) openPanels.delete(work.id);
   });
+  // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+  listenForFocusWithoutPointer(panel.webview, "作者の判断の画面");
   panel.webview.onDidReceiveMessage(async (message: unknown) => {
     if (!isOpenMessage(message)) return;
     const row = entry.rows[message.index];

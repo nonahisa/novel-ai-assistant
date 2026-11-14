@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import {
   postingSiteInfo,
@@ -365,7 +366,7 @@ async function pickWork(
           },
         ]),
   ];
-  return vscode.window.showQuickPick<RegisterPickItem>(
+  return showQuickPickKeepingFocus<RegisterPickItem>(
     [
       /*
         **先頭は作品でないものにする。** 一覧を出したまま Enter を押すと先頭が選ばれる

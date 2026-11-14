@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { WORK_KINDS, workKindDef, type WorkKindKey } from "../core/workKind";
 import {
@@ -22,7 +23,7 @@ export async function setWorkKind(
 ): Promise<WorkKindKey | undefined> {
   const current = await readWorkKind(work);
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...WORK_KINDS.map((kind) => ({
         label: kind.label,

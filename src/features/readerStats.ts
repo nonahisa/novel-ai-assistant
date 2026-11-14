@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import {
   knownPostingSites,
@@ -720,7 +721,7 @@ async function askAdminPage(
   work: WorkEntry,
   page: AdminPage
 ): Promise<"open" | "clipboard" | "helper" | "cancel"> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: `$(link-external) ${openAdminLabel(page)}`,
@@ -899,7 +900,7 @@ async function askSite(
   ledger: PostingLedger,
   sites: readonly PostingSiteId[]
 ): Promise<PostingSiteId | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...sites.map((site) => {
         const info = postingSiteInfo(site);
@@ -929,7 +930,7 @@ async function askSite(
 async function askScope(
   siteLabel: string
 ): Promise<ReaderStatsScope | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "作品全体",
@@ -969,7 +970,7 @@ const PERIOD_LABELS: Record<Exclude<ReaderStatsPeriod, "total">, string> = {
 async function askPeriod(
   siteLabel: string
 ): Promise<Exclude<ReaderStatsPeriod, "total"> | null | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "その時点の値",

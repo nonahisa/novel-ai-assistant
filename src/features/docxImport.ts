@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import { AtomicWriteFileError, atomicWriteFile } from "../core/atomicWrite";
 import {
@@ -162,7 +163,7 @@ async function chooseFolder(work?: WorkEntry): Promise<string | undefined> {
   // フォルダー選択の窓へ飛ばすと、作者は何が起きたのか分からない
   const count = (await listWordFiles(home)).docx.length;
 
-  const picked = await vscode.window.showQuickPick<
+  const picked = await showQuickPickKeepingFocus<
     vscode.QuickPickItem & { choice?: "work" | "other" }
   >(
     [

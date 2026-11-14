@@ -1,4 +1,5 @@
 import { TERM_COLORS } from "../core/termColors";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 import { ZOOM_LIMITS } from "../core/relationGraphViewport";
 import { KEY_LABEL_SCRIPT } from "../core/keyLabels";
 
@@ -291,6 +292,7 @@ ${KEY_LABEL_SCRIPT}
 // HTML に書いたキーの案内（data-keys の付いた所）を、Mac なら ⌘ の書き方へ（core/keyLabels.ts）
 novelaiApplyKeyLabels(document);
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** 拡張機能から届いた図。画面はこれを描くだけで、作り替えはしない */

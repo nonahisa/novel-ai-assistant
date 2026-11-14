@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer } from "../views/pickerFocus";
 import { wideViewColumn } from "./editorColumn";
 import { openSiteLink } from "./openSiteLink";
 // ブラウザ版でも同じ場所を指すため、`node:path` ではなくこちらを使う
@@ -191,6 +192,8 @@ export async function openWritingStatsPanel(
     }
   );
 
+  // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+  listenForFocusWithoutPointer(panel.webview, "執筆量の画面");
   panel.webview.onDidReceiveMessage(async (message: unknown) => {
     const parsed = message as {
       type?: string;

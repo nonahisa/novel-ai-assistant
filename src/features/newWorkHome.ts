@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import {
   DEFAULT_LIBRARY_NAME,
@@ -65,7 +66,7 @@ export async function resolveNewWorkHome(
 async function chooseLibrary(
   candidates: readonly LibraryCandidate[]
 ): Promise<string | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...candidates.map((candidate) => ({
         label: `$(library) ${path.basename(candidate.folderPath)}`,

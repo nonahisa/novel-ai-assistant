@@ -1,5 +1,6 @@
 // ログの書き先：作品ごと（`useLogFile(work.folderPath)`）
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError } from "../ai/types";
@@ -236,7 +237,7 @@ async function chooseStep(
   // **閉じる道は、呼ぶところで渡す。** 配列を先に組んで渡すと
   // `quickPickCancel.test.ts` が閉じる道を見つけられない（見張りが
   // 呼び出しの本体を読むため）。見張りに合わせておくほうが安い
-  const picked = await vscode.window.showQuickPick([...items, cancelItem("取りやめる")], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem("取りやめる")], {
     title: `ターゲット読者診断：${work.title}`,
     placeHolder: `${declared}／${actual}`,
     ignoreFocusOut: true,
@@ -270,7 +271,7 @@ export async function askReaderQuestions(
 
   for (const [index, question] of READER_QUESTIONS.entries()) {
     const before = previous?.[index];
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...question.choices.map((choice, choiceIndex) => ({
           label: choice.label,

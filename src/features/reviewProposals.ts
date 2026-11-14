@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
@@ -664,7 +665,7 @@ async function pickEpisode(
     ? shortcutPickItem(items[activeIndex], shortcutNote)
     : undefined;
   const entries: vscode.QuickPickItem[] = [...(shortcut ? [shortcut] : []), ...items];
-  const picked = await vscode.window.showQuickPick([...entries, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...entries, cancelItem()], {
     title,
     matchOnDescription: true,
     ignoreFocusOut: true,
@@ -675,7 +676,7 @@ async function pickEpisode(
 }
 
 async function pickNote(): Promise<string | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       { label: "校閲中", note: "校閲中" },
       { label: "誤字脱字を見ています", note: "誤字脱字を見ています" },

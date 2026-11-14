@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { EXAMPLE_REPO } from "../core/exampleNames";
 import {
   describeRepoRef,
@@ -77,7 +78,7 @@ async function canRead(location: string): Promise<boolean> {
  */
 async function offerAlternatives(ref: GithubRepoRef): Promise<void> {
   const name = describeRepoRef(ref);
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "$(link-external) 新しいタブで開く",

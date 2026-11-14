@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { UTF8_CONVERT_HINT, asSentence } from "../core/utf8ConvertHint";
 import { offerUtf8Conversion } from "./utf8ConvertOffer";
 import * as paths from "../core/paths";
@@ -744,7 +745,7 @@ async function pickTargets(
     picked: true,
     target,
   }));
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await showQuickPickKeepingFocus(items, {
     title: "名前の候補を出す人物（外す人物はチェックを外してください）",
     placeHolder: "役名だけで書かれている人物です。名前のある人物は並びません",
     canPickMany: true,

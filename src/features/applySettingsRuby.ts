@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import { fromUri } from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -113,7 +114,7 @@ async function pickScope(
     choice: "pick",
   });
 
-  const picked = await vscode.window.showQuickPick<
+  const picked = await showQuickPickKeepingFocus<
     vscode.QuickPickItem & { choice?: "all" | "open" | "pick" }
   >([...items, cancelItem()], {
     title: "どこにルビを振りますか",
@@ -137,7 +138,7 @@ async function pickScope(
     };
   }
 
-  const chosen = await vscode.window.showQuickPick(
+  const chosen = await showQuickPickKeepingFocus(
     rubyable.map((episode) => {
       const chapter = formatChapterLabel(episode);
       const title = episodeTitle(episode, chapter);
@@ -214,7 +215,7 @@ async function confirm(
 
 /** どこまで振るかを先に訊く */
 async function pickRubyScope(): Promise<RubyScope | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "$(list-ordered) 各話の最初の1回だけ",
@@ -302,7 +303,7 @@ export async function pickRubyRecordKinds(
     picked: group.kind === "character",
     recordKind: group.kind,
   }));
-  const chosen = await vscode.window.showQuickPick<KindItem>(items, {
+  const chosen = await showQuickPickKeepingFocus<KindItem>(items, {
     canPickMany: true,
     title: "どの資料の読み仮名を振りますか",
     placeHolder: "複数選べます。人物だけが既定です",
@@ -406,7 +407,7 @@ async function pickExcludedTerms(
     picked: true,
     termText: entry.term.text,
   }));
-  const chosen = await vscode.window.showQuickPick<TermItem>(items, {
+  const chosen = await showQuickPickKeepingFocus<TermItem>(items, {
     canPickMany: true,
     title: "ルビを振る語を選んでください",
     placeHolder:

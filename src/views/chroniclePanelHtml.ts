@@ -13,6 +13,8 @@
  * 時期と系統を作るのは選択画面の流れ（`features/chronicleEdit.ts`）で、
  * ここにあるのは、そちらを呼び出すボタンだけである。
  */
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
+
 export function buildChroniclePanelHtml(
   nonce: string,
   cspSource: string
@@ -159,6 +161,7 @@ details p { margin: 4px 0 0; white-space: pre-wrap; }
 </div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 
 /** 拡張機能から届いた年表。画面はこれを描くだけで、作り替えはしない */
 let data = null;

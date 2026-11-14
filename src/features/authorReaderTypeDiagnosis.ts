@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import type { AuthorReaderTypeStore } from "../core/authorReaderTypeStore";
 import {
@@ -115,7 +116,7 @@ async function chooseAction(
       ? `いまは相談でのお話から「${type.label}」と推し量っています（まだお答えいただいていません）`
       : `いまは「${authorReaderTypeDisplay(profile)}」としてお預かりしています`;
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: estimated ? "$(refresh) 9問に答える" : "$(refresh) 答え直す",
@@ -175,7 +176,7 @@ export async function askAuthorReaderQuestions(
   for (const [index, question] of AUTHOR_READER_QUESTIONS.entries()) {
     const before = previous?.[index];
     const sharedChoice = shared?.index === index ? shared.choice : undefined;
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...orderWithShared(question.choices.length, sharedChoice).map(
           (choiceIndex) => ({

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 // 場所の比べ方は `paths` の1か所に任せる（2026-09-23。以前はこのファイルの
 // 末尾に同じ正規化の写しがあり、`process.platform` を素で読んでいた）
@@ -1980,7 +1981,7 @@ async function pickWork(
   const items: Array<vscode.QuickPickItem & { work: WorkEntry }> = works.map(
     (work) => ({ label: work.title, work })
   );
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...items, cancelItem()],
     { title: "設定資料を抽出する作品", placeHolder: "作品を選んでください" }
   );
@@ -2075,7 +2076,7 @@ export async function showGitSyncActions(
     })
   );
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: gitSyncMenuTitle(work.title),
     placeHolder: describeSyncMenuStatus(status),
     // **ほかの窓へ移っても閉じない**（実機確認リスト「0.102.7 の画面の見直し」の

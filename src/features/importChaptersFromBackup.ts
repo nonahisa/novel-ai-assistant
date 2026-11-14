@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { Chapter, ChapterSet } from "../models/chapter";
@@ -80,7 +81,7 @@ export interface ChapterImportDeps {
  * @returns 章立てを書き換えたか
  */
 export async function importChaptersFromBackup(work: WorkEntry): Promise<boolean> {
-  const source = await vscode.window.showQuickPick(
+  const source = await showQuickPickKeepingFocus(
     [
       {
         label: "バックアップのファイルから",
@@ -702,7 +703,7 @@ async function workByKakuyomuId(
 }
 
 async function askWork(works: readonly WorkEntry[]): Promise<WorkEntry | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...works.map((work) => ({ label: work.title, description: work.folderPath, work })),
       cancelItem("取り込まずに終わる"),

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import {
@@ -329,7 +330,7 @@ export const CONTRADICTION_READ_MODE_CHOICES: ReadonlyArray<{
 export async function pickContradictionReadMode(): Promise<
   ContradictionReadMode | undefined
 > {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...CONTRADICTION_READ_MODE_CHOICES.map((choice) => ({
         label: choice.label,
@@ -393,7 +394,7 @@ export const CONTRADICTION_ROUTE_CHOICES: ReadonlyArray<{
 export async function pickContradictionRoute(): Promise<
   ContradictionRoute | undefined
 > {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...CONTRADICTION_ROUTE_CHOICES.map((choice) => ({
         label: choice.label,

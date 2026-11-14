@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "./views/pickerFocus";
 import { pickExistingWorkFolder } from "./features/pickFolder";
 import { fromUri, storageRootFrom } from "./core/paths";
 import * as path from "./core/paths";
@@ -5259,7 +5260,7 @@ export async function activate(
       const works = await editorMenuProvider.editorWorks();
       const current = editorMenuProvider.selectedWork();
       const addLabel = "作品を足す（参加のリンクを貼る）";
-      const picked = await vscode.window.showQuickPick(
+      const picked = await showQuickPickKeepingFocus(
         [
           ...works.map((work) => ({
             label: abbreviateTitle(work.title),
@@ -5304,7 +5305,7 @@ export async function activate(
         vscode.window.showInformationMessage("作品が登録されていません。");
         return;
       }
-      const picked = await vscode.window.showQuickPick(
+      const picked = await showQuickPickKeepingFocus(
         [
           ...works.map((work) => ({
             // 長い作品名は省略し、全文は2行目（detail）に出す（2026-09-06）
@@ -6575,7 +6576,7 @@ export async function activate(
           種類ごとの「一覧を生成」4つをここへまとめ、組織も選べるようにした。
           先頭の「すべて」は Enter だけで今までどおり全部を書き出す
         */
-        const picked = await vscode.window.showQuickPick(
+        const picked = await showQuickPickKeepingFocus(
           [
             ...SETTINGS_DOC_CHOICES.map((choice) => ({
               label: choice.label,
@@ -8389,7 +8390,7 @@ export async function activate(
           hasBlurb ? "" : "作品紹介文",
           hasEpisodes ? "" : "各話あらすじ",
         ].filter(Boolean);
-        const picked = await vscode.window.showQuickPick(
+        const picked = await showQuickPickKeepingFocus(
           [...items, cancelItem()],
           {
             title: `${work.title} の紹介文・あらすじ`,
@@ -8976,7 +8977,7 @@ export async function activate(
       // 直前の作品を先頭にしない（Enter だけで別の作品の投稿へ進まないため）
       const work = await resolveWork(node, registry, { preferLast: false });
       if (!work) return;
-      const picked = await vscode.window.showQuickPick(
+      const picked = await showQuickPickKeepingFocus(
         [
           ...POSTING_MENU_ENTRIES.map((entry) => ({
             label: entry.label,
@@ -10312,7 +10313,7 @@ async function resolveWorkUnrouted(
       : (options.preferLast ?? true)
         ? orderByLastWork(works, lastWorkMemory?.get())
         : { ordered: works, lastFirst: false };
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...ordered.map((w, index) => {
           const reason = likely?.[index]?.reason;
@@ -10356,7 +10357,7 @@ async function resolveWorkUnrouted(
     }))
   );
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...items, cancelItem()],
     { title, ignoreFocusOut: options.ignoreFocusOut }
   );

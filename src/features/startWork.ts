@@ -1,5 +1,6 @@
 import * as path from "../core/paths";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { pathExists } from "../core/fileSystem";
 import { resolveManuscriptDir } from "../core/manuscriptFolder";
@@ -60,7 +61,7 @@ export function skipsStartModeQuestion(format?: WorkFormatKey): boolean {
 export async function chooseWorkType(
   title: string
 ): Promise<WorkFormatDef | "unset" | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       // 「脚本」は種類（台本）で選ぶので、ここには並べない（設計書6.109）
       ...selectableWorkFormats().map((format) => ({
@@ -102,7 +103,7 @@ export async function chooseWorkType(
 export async function chooseWorkKind(
   title: string
 ): Promise<WorkKindKey | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...WORK_KINDS.map((kind) => ({
         label: kind.label,
@@ -133,7 +134,7 @@ export async function chooseWorkKind(
 export async function chooseWorkStartMode(
   title: string
 ): Promise<WorkStartMode | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "$(list-tree) プロットから始める",

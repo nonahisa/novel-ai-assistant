@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import {
@@ -456,7 +457,7 @@ export async function manageReadingDictionary(
       return changed;
     }
 
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         // 提案を先頭に置く（採るまで読み上げに使わないので、目に入る所へ）
         ...proposals.map((proposal) => ({
@@ -511,7 +512,7 @@ export async function manageReadingDictionary(
     if (!("entry" in picked)) return changed;
 
     const entry = picked.entry;
-    const action = await vscode.window.showQuickPick(
+    const action = await showQuickPickKeepingFocus(
       [
         { label: "読みを直す", action: "edit" as const },
         { label: "この項目を消す", description: "AIで作り直しても戻りません", action: "remove" as const },
@@ -569,7 +570,7 @@ async function decideImeProposal(
   loaded: LoadedReadingDictionary,
   proposal: ImeWordProposal
 ): Promise<"adopted" | "dismissed" | "kept" | "failed"> {
-  const action = await vscode.window.showQuickPick(
+  const action = await showQuickPickKeepingFocus(
     [
       {
         label: "採る",

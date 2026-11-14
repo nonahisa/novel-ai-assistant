@@ -1,4 +1,5 @@
 import { escapeHtml } from "../core/htmlEscape";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 
 /**
  * 編集者モードの「作者の採否」パネル（作者の答え 2026-11-07「閉じないパネルにする」。設計書5.7.5.9）。
@@ -128,6 +129,7 @@ ${items}
 <script nonce="${nonce}">
 (function () {
   const vscode = acquireVsCodeApi();
+  ${reportFocusWithoutPointerScript("vscode")}
   const list = document.getElementById("rows");
   list.addEventListener("click", function (event) {
     const target = event.target;

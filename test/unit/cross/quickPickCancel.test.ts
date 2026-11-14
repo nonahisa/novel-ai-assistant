@@ -79,10 +79,15 @@ function isCommentLine(line: string): boolean {
 function collectSites(): Site[] {
   const sites: Site[] = [];
   for (const file of sources("src")) {
+    // 焦点を取り返す口（`showQuickPickKeepingFocus`）の定義は呼び出しではない。
+    // 呼び出し側は名前に showQuickPick を含むので、ここで拾われる
+    if (file.endsWith("src/views/pickerFocus.ts")) continue;
     const lines = readFileSync(file, "utf-8").split("\n");
     lines.forEach((line, index) => {
       if (!line.includes("showQuickPick")) return;
       if (isCommentLine(line)) return;
+      // 取り込みの行（import）は呼び出しではない
+      if (/^\s*import\s/.test(line)) return;
       const body = callText(lines, index);
       sites.push({
         file,

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import {
   AIProvider,
   ApiKeyProvider,
@@ -526,7 +527,7 @@ export async function pickProviderAndModel(
     "vscode-lm": "VS Code に繋いであるAIを借りる。枠は契約による",
   };
 
-  const providerPick = await vscode.window.showQuickPick(
+  const providerPick = await showQuickPickKeepingFocus(
     [
       ...providers.map((p) => {
         const support = needsImage ? imageSupportFor(p.id) : undefined;
@@ -675,7 +676,7 @@ export async function pickProviderAndModel(
   const tuningTable = allModelTuning();
   const manualPrompt = manualModelEntryPrompt(providerPick.providerId);
 
-  const modelPick = await vscode.window.showQuickPick(
+  const modelPick = await showQuickPickKeepingFocus(
     [
       ...models.map((m) => ({
         label: m.displayName,
@@ -861,7 +862,7 @@ async function ensureApiKey(provider: ApiKeyProvider): Promise<boolean> {
   const existing = await provider.getApiKey();
 
   if (existing) {
-    const answer = await vscode.window.showQuickPick(
+    const answer = await showQuickPickKeepingFocus(
       [
         { label: "登録済みのキーを使う", action: "keep" as const },
         { label: "キーを入力し直す", action: "replace" as const },

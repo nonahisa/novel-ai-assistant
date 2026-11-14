@@ -11,6 +11,8 @@
  * **この画面は何も書き換えない。** 押せるのは「候補を出す」「付け替える」
  * 「登場箇所へ飛ぶ」の3つで、どれも本体側の確認を通ってから動く。
  */
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
+
 export function buildNameCheckPanelHtml(
   nonce: string,
   cspSource: string
@@ -141,6 +143,7 @@ button.primary {
 </main>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 let state = null;
 /** 展開している人物のid。更新しても開いたままにするため覚えておく */
 const openPlaces = new Set();

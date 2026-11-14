@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ASSIGNABLE_FEATURES, ASSIGNABLE_FEATURE_LABELS, type AIRegistry } from "../ai/registry";
@@ -98,7 +99,7 @@ async function chooseWork(
       value: NO_WORK,
     },
   ];
-  const picked = await vscode.window.showQuickPick<Item>([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus<Item>([...items, cancelItem()], {
     title: "障害報告用の記録：どの作品の記録を書き出すか",
     placeHolder: "不具合が起きた作品を選んでください",
   });
@@ -113,7 +114,7 @@ async function chooseRange(): Promise<{ hours: number; label: string } | undefin
     description: index === 0 ? "既定" : undefined,
     value: range,
   }));
-  const picked = await vscode.window.showQuickPick<Item>([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus<Item>([...items, cancelItem()], {
     title: "障害報告用の記録：どこまでさかのぼるか",
     placeHolder: "不具合が起きた時刻を含む範囲を選んでください",
   });

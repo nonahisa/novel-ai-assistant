@@ -1,6 +1,7 @@
 // ログの書き先：作品が定まらない
 // （使用開始時に、作品を1つも登録していない状態でも通る画面である）
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import {
   buildWriterStyle,
   describeWriterStyle,
@@ -243,7 +244,7 @@ async function choosePart(
   const total =
     WRITER_QUESTIONS.length + ADVICE_QUESTIONS.length + AUTHOR_READER_QUESTIONS.length;
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: `$(edit) 書き方（${WRITER_QUESTIONS.length}問）`,
@@ -428,7 +429,7 @@ async function runReaderAnswers(
 async function askAdvicePart(deps: WriterDiagnosisDeps): Promise<boolean> {
   const GO = `続けて答える（${ADVICE_QUESTIONS.length}問）`;
   const SKIP = "ここで終える";
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: `$(comment-discussion) ${GO}`,
@@ -473,7 +474,7 @@ async function askStyle(
 
   for (const [index, question] of WRITER_QUESTIONS.entries()) {
     const before = previous?.[question.key];
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...question.choices.map((choice) => ({
           label: choice.label,
@@ -629,7 +630,7 @@ async function askGoalPick(
   // 1つしか無いときは選ばせない（選択肢が1つの画面は、ただの確認になる）
   if (goals.length === 1) return goals[0];
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...goals.map((goal) => ({
         label: goal.label,

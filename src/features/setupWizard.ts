@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { OllamaProvider } from "../ai/ollamaProvider";
 import { OllamaEmbeddingProvider } from "../ai/ollamaEmbedding";
 import {
@@ -241,7 +242,7 @@ async function showPlan(
       ? `AIを使うには あと${required.length}件 必要です`
       : "必須のものは揃っています（任意のものがまだです）";
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: "統合小説執筆環境のセットアップ",
     placeHolder: summary,
     ignoreFocusOut: true,

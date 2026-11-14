@@ -1,4 +1,5 @@
 import { TERM_COLORS } from "../core/termColors";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 
 /**
  * 設定資料パネルの中身（HTML / CSS / スクリプト）。
@@ -572,6 +573,7 @@ button.danger:hover {
 <script nonce="${nonce}">
 (function () {
   const vscode = acquireVsCodeApi();
+  ${reportFocusWithoutPointerScript("vscode")}
   // 組織は場所の手前に置く。人物の所属から辿る流れに合わせる。
   // 世界観は末尾。個々の設定を見たあとに読むもので、探し物としては開かれにくい
   const KINDS = ["character", "ability", "organization", "location", "world"];

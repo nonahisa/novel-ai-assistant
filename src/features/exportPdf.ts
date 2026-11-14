@@ -1,5 +1,6 @@
 import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { canRunProcesses } from "../core/runtime";
 import { conflictFixHint } from "../core/syncEntryNames";
 import * as path from "../core/paths";
@@ -647,7 +648,7 @@ async function pickEpisodes(
   noun: string,
   format: WorkFormatKey | undefined
 ): Promise<{ episodes: EpisodeFile[]; all: boolean } | undefined> {
-  const scope = await vscode.window.showQuickPick(
+  const scope = await showQuickPickKeepingFocus(
     [
       {
         label: `すべての${noun}（全${episodes.length}${noun}）`,
@@ -671,7 +672,7 @@ async function pickEpisodes(
 
   // **複数選択に「取りやめる」を足さない。** VS Code が自分で
   // 「OK」「キャンセル」を出すので、項目として並べるとかえって紛らわしい
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     episodes.map((episode) => ({
       // 選ぶ画面の見出しは、紙に出る単話の見出しと同じ部品で作る
       // （合本は1行で1ファイルを指すので、割る前の見出しでよい）
@@ -694,7 +695,7 @@ type PaperChoice =
   | { kind: "grid"; paper: GridPaper; grid: GridOptions; marginMm: number };
 
 async function pickPaper(): Promise<PaperChoice | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...PRINT_PRESETS.map((preset) => ({
         label: preset.label,
@@ -727,7 +728,7 @@ async function pickPaper(): Promise<PaperChoice | undefined> {
  * 1回で選べる。要項ごとに違う（42字×34行など）ので、自分で決める道も置く。
  */
 async function pickGrid(): Promise<PaperChoice | undefined> {
-  const size = await vscode.window.showQuickPick(
+  const size = await showQuickPickKeepingFocus(
     [
       { label: "40字×40行", detail: "A4に縦書きで組む公募でよく使われます", columns: 40, rows: 40 },
       { label: "40字×30行", detail: "行間を広めにとる公募で使われます", columns: 40, rows: 30 },
@@ -761,7 +762,7 @@ async function pickGrid(): Promise<PaperChoice | undefined> {
     rows = typedRows;
   }
 
-  const layout = await vscode.window.showQuickPick(
+  const layout = await showQuickPickKeepingFocus(
     [
       {
         label: "縦書き・A4横置き",
@@ -787,7 +788,7 @@ async function pickGrid(): Promise<PaperChoice | undefined> {
   );
   if (!layout || isCancelItem(layout) || !("paper" in layout)) return undefined;
 
-  const hang = await vscode.window.showQuickPick(
+  const hang = await showQuickPickKeepingFocus(
     [
       {
         label: "句読点をぶら下げる",
@@ -829,7 +830,7 @@ async function pickGridMargin(
   if (!narrow || !gridMarginClear(paper, grid, narrow.mm)) return GRID_MARGIN_MM;
 
   const points = (mm: number) => `約${gridFontSizePt(paper, grid, mm).toFixed(1)}pt`;
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...GRID_MARGINS.map((margin) => ({
         label: `${margin.label}（${margin.mm}mm）`,
@@ -943,7 +944,7 @@ async function pickHeaderFooter(
   defaults: HeaderFooter,
   last: HeaderFooter | undefined
 ): Promise<HeaderFooter | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...(last
         ? [
@@ -985,7 +986,7 @@ async function chooseHeaderFooter(start: HeaderFooter): Promise<HeaderFooter | u
   const current = start;
   const contents = MARGIN_CONTENTS.filter((item) => item.id !== "none");
   for (;;) {
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         {
           label: "これで決める",
@@ -1028,7 +1029,7 @@ async function pickPlace(
     ),
     "none",
   ];
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...places.map((place) => {
         const occupant = place === "none" ? "none" : page[place.row][place.column];

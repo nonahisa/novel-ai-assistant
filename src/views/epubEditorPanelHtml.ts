@@ -40,6 +40,7 @@
  * （題名の引用符で画面が壊れるのを防ぐ。ほかのパネルと同じ）。
  */
 
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 import {
   PAGE_ALIGN_UNSET_LABEL,
   PAGE_LAYOUT_BLOCK_TYPES,
@@ -780,6 +781,7 @@ ${pane("colophon", [ornamentRow("colophonOrnament"), pageLayoutRow("colophon")])
 <div id="blockMenu" class="menu" hidden></div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 let sending = null;
 
 function post(type, payload) {

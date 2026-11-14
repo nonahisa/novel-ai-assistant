@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
@@ -193,7 +194,7 @@ async function pickScope(
       scope: sjis,
     },
   ];
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: "原稿 UTF-8 変換",
     placeHolder: "どの話を UTF-8 にしますか",
     ignoreFocusOut: true,

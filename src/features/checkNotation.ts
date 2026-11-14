@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
@@ -430,7 +431,7 @@ async function pickGroups(
     group,
   }));
 
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await showQuickPickKeepingFocus(items, {
     // **拾える範囲を、選ぶ前に見せる**（作者の実機報告、2026-09-06）。
     // 「これで全部だ」と思われると、拾えていない揺れを見落とす
     title: `表記ゆれが ${groups.length} 組見つかりました — ${NOTATION_SCOPE_NOTE}`,
@@ -589,7 +590,7 @@ async function pickTargetForm(
     keep: null,
   });
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: `${group.label} — どちらに揃えますか`,
     placeHolder: "選んだ表記に合わせる指摘を作ります（自動では書き換えません）",
     ignoreFocusOut: true,

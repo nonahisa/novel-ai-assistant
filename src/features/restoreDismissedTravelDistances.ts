@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import type { Location } from "../models/location";
 import { createLocationStore } from "../core/abilityStore";
@@ -41,7 +42,7 @@ export async function restoreDismissedTravelDistances(
     return [{ label: `${a} ↔ ${b}`, description: parsed.value, key }];
   });
 
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await showQuickPickKeepingFocus(items, {
     title: "見送った距離の提案を戻す",
     placeHolder: "戻す距離を選んでください（次の矛盾検知〈事実の照合〉で、本文にあればまた提案されます）",
     canPickMany: true,

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { EXAMPLE_OTHER, EXAMPLE_PERSON } from "../core/exampleNames";
 import type { WorkEntry } from "../models/types";
 import {
@@ -139,7 +140,7 @@ async function pickAction(
     });
   }
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: "時期・系統の編集",
     placeHolder: "何をしますか？",
     ignoreFocusOut: true,
@@ -228,7 +229,7 @@ async function pickLineId(
 ): Promise<string | undefined> {
   if (timeline.lines.length < 2) return "";
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...timeline.lines.map((line) => ({
         label: line.label,
@@ -314,7 +315,7 @@ async function pickTimepoint(
     }));
   items.push({ label: "$(add) 新しい時期を作る…" });
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title,
     placeHolder:
       candidates.length > 0
@@ -405,7 +406,7 @@ async function pickLineKind(): Promise<TimelineLineKind | undefined> {
     },
   ];
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       // `kind` は `QuickPickItem` が区切り線のために使う名前なので、
       // 種別は別の名前で載せる
@@ -445,7 +446,7 @@ async function pickBranchOrigin(
     return null;
   }
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...timeline.timepoints.map((point) => ({
         label: point.label,
@@ -482,7 +483,7 @@ async function runMoveEpisodeToLine(context: EditContext): Promise<void> {
   );
   if (!episode) return;
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...context.timeline.lines.map((line) => ({
         label: line.label,
@@ -538,7 +539,7 @@ async function runMoveEpisodeToLine(context: EditContext): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function runMoveTimepoint(context: EditContext): Promise<void> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...context.timeline.timepoints.map((point, index) => ({
         label: point.label,
@@ -557,7 +558,7 @@ async function runMoveTimepoint(context: EditContext): Promise<void> {
   if (!picked || isCancelItem(picked)) return;
   if (!("timepointId" in picked)) return;
 
-  const direction = await vscode.window.showQuickPick(
+  const direction = await showQuickPickKeepingFocus(
     [
       { label: "$(arrow-up) 1つ前へ", direction: "up" as const },
       { label: "$(arrow-down) 1つ後ろへ", direction: "down" as const },
@@ -638,7 +639,7 @@ async function pickEpisode(
     };
   });
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title,
     placeHolder: "話を選んでください",
     ignoreFocusOut: true,

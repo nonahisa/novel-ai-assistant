@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
@@ -336,7 +337,7 @@ async function applyPlot(
 
   let replaced: PlotSectionKey[] = [];
   if (conflicts.length > 0) {
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       conflicts.map((key) => ({
         label: plotSectionLabel(key),
         description: "既に書かれています",

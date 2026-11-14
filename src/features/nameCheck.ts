@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer, showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -122,6 +123,8 @@ export async function openNameCheckPanel(
   const nonce = createNonce();
   panel.webview.html = buildNameCheckPanelHtml(nonce, panel.webview.cspSource);
 
+  // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+  listenForFocusWithoutPointer(panel.webview, "名前の点検");
   panel.webview.onDidReceiveMessage(async (message: unknown) => {
     const parsed = message as {
       type?: string;
@@ -659,7 +662,7 @@ export async function pickOrigin(
     })),
   ];
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title,
     placeHolder: "系統は混ぜません。1つだけ選んでください",
     ignoreFocusOut: true,

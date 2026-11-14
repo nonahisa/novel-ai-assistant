@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import {
   AIRegistry,
   ASSIGNABLE_FEATURES,
@@ -139,7 +140,7 @@ async function pickFeature(
 ): Promise<AssignableFeature | undefined> {
   const assignments = registry.assignments();
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...ASSIGNABLE_FEATURES.map((feature) => {
         const assigned = assignments[feature];
@@ -185,7 +186,7 @@ async function pickTarget(
 ): Promise<"default" | ProviderAndModelPick | undefined> {
   const assigned = registry.assignments()[feature];
 
-  const choice = await vscode.window.showQuickPick(
+  const choice = await showQuickPickKeepingFocus(
     [
       {
         label: "既定のAIを使う（割当を外す）",

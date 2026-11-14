@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer } from "../views/pickerFocus";
 import { wideViewColumn } from "./editorColumn";
 import type { WorkRegistry } from "../core/workRegistry";
 import { toManuscriptPages } from "../core/charCount";
@@ -102,6 +103,8 @@ export async function openAllWorksWritingStatsPanel(
     initialTab: rememberedWritingStatsTab(verifiedState(context.globalState), ALL_WORKS_TAB_KEY),
   });
 
+  // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+  listenForFocusWithoutPointer(created.webview, "執筆量の画面");
   created.webview.onDidReceiveMessage(async (message: unknown) => {
     if (await acceptCelebrated(message)) return;
     const parsed = message as { type?: string; tab?: string };

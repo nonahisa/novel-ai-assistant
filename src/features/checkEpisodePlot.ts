@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
@@ -177,7 +178,7 @@ export async function pickEpisodePlotTarget(
   const available = await availableChecks(work, chapter);
   if (available.length === 1) return { chapter, check: available[0] };
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...available.map((check) => ({
         label: EPISODE_PLOT_CHECK_LABELS[check].label,
@@ -261,7 +262,7 @@ async function pickChapter(work: WorkEntry): Promise<number | undefined> {
   }
   if (chapters.length === 1) return chapters[0];
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...chapters.map((chapter, index) => ({
         label: `第${chapter}話`,

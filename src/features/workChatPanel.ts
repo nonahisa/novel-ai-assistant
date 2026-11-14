@@ -76,6 +76,7 @@ import {
   PLOT_SUMMARY_VERSION,
 } from "../prompts/plotSummary";
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer, showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
@@ -1564,6 +1565,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       panel.webview.cspSource,
       { large: true }
     );
+    // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+    listenForFocusWithoutPointer(panel.webview, "相談");
     panel.webview.onDidReceiveMessage((message: unknown) => {
       void this.handle(message as Incoming, panel.webview);
     });
@@ -1612,6 +1615,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       createNonce(),
       webviewView.webview.cspSource
     );
+    listenForFocusWithoutPointer(webviewView.webview, "相談");
     webviewView.webview.onDidReceiveMessage((message: unknown) => {
       void this.handle(message as Incoming, webviewView.webview);
     });
@@ -3635,7 +3639,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       vscode.window.showInformationMessage("作品が登録されていません。");
       return;
     }
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...works.map((work) => ({ label: work.title, work })),
         cancelItem(),

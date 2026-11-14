@@ -1,6 +1,7 @@
 // ログの書き先：作品が定まらない——まだ登録していない作品を探す操作なので、
 // 向ける先の作品フォルダーが無い
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { isEditorMode } from "../core/actorContext";
@@ -141,7 +142,7 @@ export async function collectUnregisteredWorks(
 async function pickWorks(
   found: readonly FoundWork[]
 ): Promise<FoundWork[] | undefined> {
-  const chosen = await vscode.window.showQuickPick(
+  const chosen = await showQuickPickKeepingFocus(
     found.map((work) => ({
       label: work.title,
       description: describeAmount(work),

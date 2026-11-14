@@ -1,5 +1,6 @@
 // ログの書き先：入口で作品のログへ向ける（useLogFile）
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { buildRetrievalCorpus, type RetrievalItem } from "../core/retrievalCorpus";
 import { findSimilarPairs, type SimilarPair } from "../core/semanticRank";
@@ -131,7 +132,7 @@ export async function findSimilarScenes(
   }
 
   const byId = new Map(items.map((item) => [item.id, item]));
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...pairs.flatMap((pair) => toPickItem(pair, byId)), cancelItem("閉じる")],
     {
       title: `似た場面：${work.title}（${pairs.length}組${cancelled ? "・途中まで" : ""}）`,
@@ -241,7 +242,7 @@ async function offerSetup(reason: VectorUnavailable): Promise<void> {
     detail: hint,
     setupCommand: vectorSetupCommand(reason),
   };
-  const picked = await vscode.window.showQuickPick([go, cancelItem("閉じる")], {
+  const picked = await showQuickPickKeepingFocus([go, cancelItem("閉じる")], {
     title: "似た場面の検出にはベクトル検索が要ります",
     placeHolder: hint,
     ignoreFocusOut: true,

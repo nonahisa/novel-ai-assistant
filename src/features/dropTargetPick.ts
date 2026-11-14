@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
@@ -34,7 +35,7 @@ export async function pickDropTarget(
     { label: `$(add) ${newLabel}`, isNew: true },
   ];
   // 閉じる道は呼び出しの中で足す（`quickPickCancel.test.ts` が呼び出しごとに見る）
-  const picked = await vscode.window.showQuickPick<Item>([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus<Item>([...items, cancelItem()], {
     title,
     placeHolder: "取り込み先の作品を選んでください",
     matchOnDetail: true,

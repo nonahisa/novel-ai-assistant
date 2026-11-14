@@ -1,4 +1,5 @@
 import { OBSERVE_VISIBLE_WIDTH_SOURCE } from "./visibleWidthScript";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 
 /**
  * 提案パネル（誤字脱字など）の中身。既定はエディターの右の列に開き、
@@ -419,6 +420,7 @@ body.show-low .issue.low { display: flex; }
 </details>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 const listEl = document.getElementById('list');
 const emptyEl = document.getElementById('empty');
 const countEl = document.getElementById('count');

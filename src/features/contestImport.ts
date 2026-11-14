@@ -1,5 +1,6 @@
 import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { isDateKey, type ContestGoal, type WorkGoals } from "../models/workGoals";
 import { readWorkGoals, writeWorkGoals } from "../core/workGoalsStore";
@@ -330,7 +331,7 @@ async function offerChanges(
     break;
   }
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     changes.map((change, index) => ({
       label: lines[index],
       picked: true,
@@ -461,7 +462,7 @@ export async function chooseContestForWork(
       ranked: entry,
     });
   }
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: `「${work.title}」の応募先を選ぶ（いま ${written.toLocaleString("ja-JP")}字）`,
     placeHolder: "公募の名前・主催で絞り込めます",
     matchOnDescription: true,
@@ -654,7 +655,7 @@ async function saveGoals(work: WorkEntry, goals: WorkGoals): Promise<boolean> {
 }
 
 async function askWork(works: readonly WorkEntry[]): Promise<WorkEntry | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...works.map((entry) => ({ label: entry.title, description: entry.folderPath, work: entry })),
       cancelItem("あとで選ぶ（作品目標設定から選べます）"),

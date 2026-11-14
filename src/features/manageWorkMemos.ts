@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import {
   createWorkMemo,
@@ -112,7 +113,7 @@ export async function transferMemo(
     return undefined;
   }
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...others.map((work) => ({
         label: work.title,

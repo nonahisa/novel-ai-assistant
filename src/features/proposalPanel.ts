@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import {
@@ -1102,6 +1103,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       nonce,
       webviewView.webview.cspSource
     );
+    // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+    listenForFocusWithoutPointer(webviewView.webview, "提案パネル");
     webviewView.webview.onDidReceiveMessage((message: unknown) => {
       void this.receive(message as IncomingMessage);
     });
@@ -2050,6 +2053,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     this.editorPanel = panel;
     panel.webview.html = buildProposalPanelHtml(createNonce(), panel.webview.cspSource);
+    listenForFocusWithoutPointer(panel.webview, "提案パネル");
     panel.webview.onDidReceiveMessage((message: unknown) => {
       void this.receive(message as IncomingMessage);
     });

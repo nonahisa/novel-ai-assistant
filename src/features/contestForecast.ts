@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import type { DeviceWritingStats } from "../models/writingStats";
 import { readWorkGoals } from "../core/workGoalsStore";
@@ -250,7 +251,7 @@ export async function chooseContestByForecast(
 
   let scores: Map<StoredContest, number> | undefined;
   for (;;) {
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [...forecastItems(plan, scores), cancelItem()],
       {
         title: `「${work.title}」${forecastTitle(plan)}`,

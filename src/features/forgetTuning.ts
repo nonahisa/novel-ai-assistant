@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { AIRegistry } from "../ai/registry";
 import { parseModelTuning } from "../core/modelTuning";
 import {
@@ -62,7 +63,7 @@ export async function forgetTuning(registry: AIRegistry): Promise<void> {
     registry.listProviders().map((provider) => [provider.id, provider.displayName])
   );
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     keys.map((key) => {
       const { providerId, model } = splitTuningKey(key);
       const measuredAt = parsed.get(key)?.measuredAt;

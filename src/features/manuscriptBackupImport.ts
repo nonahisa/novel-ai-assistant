@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import { fromUri } from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -325,7 +326,7 @@ async function pickEntries(
     picked: true,
     entry,
   }));
-  const chosen = await vscode.window.showQuickPick(items, {
+  const chosen = await showQuickPickKeepingFocus(items, {
     title: `「${sourceName}」から足す話を選んでください（${entries.length}話）`,
     placeHolder: "足さない話のチェックを外してから OK を押してください",
     canPickMany: true,

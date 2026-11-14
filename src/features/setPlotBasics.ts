@@ -1,5 +1,6 @@
 import { openInDefaultEditor } from "../views/openDocument";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { parsePlotMarkdown, type PlotSections } from "../core/plotDoc";
@@ -109,7 +110,7 @@ async function pickFormat(
     : undefined;
   const written = sections.format.trim();
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     // 「脚本」は種類（台本）で選ぶので、ここには並べない（設計書6.109）
     selectableWorkFormats().map((format) => ({
       label: format.label,
@@ -145,7 +146,7 @@ async function pickGenres(): Promise<GenreChoice[] | undefined> {
   const chosen: GenreChoice[] = [];
 
   for (;;) {
-    const site = await vscode.window.showQuickPick(
+    const site = await showQuickPickKeepingFocus(
       [
         ...GENRE_SITES.map((site) => ({
           label: site.label,
@@ -174,7 +175,7 @@ async function pickGenres(): Promise<GenreChoice[] | undefined> {
     if (!site || isCancelItem(site)) return undefined;
     if (!site.site) return chosen;
 
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       listGenres(site.site).map((choice) => ({
         // 大ジャンルを持つ体系では、どちらの「異世界」かが分からないと選べない
         label: choice.group ? `${choice.group} > ${choice.genre}` : choice.genre,

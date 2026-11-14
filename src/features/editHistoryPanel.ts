@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer } from "../views/pickerFocus";
 import { wideViewColumn } from "./editorColumn";
 import type { WorkEntry } from "../models/types";
 import { EditHistory, historyDisplayName, type EditHistoryEntry } from "../core/editHistory";
@@ -45,6 +46,8 @@ export async function showEditHistory(
     panel.webview.cspSource
   );
 
+  // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+  listenForFocusWithoutPointer(panel.webview, "書き換えの履歴");
   panel.webview.onDidReceiveMessage(async (message: unknown) => {
     // HTMLを流し込んだ直後は受け手がまだ居ない。
     // WebView側から準備完了を知らせてもらってから送る

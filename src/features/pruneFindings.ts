@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { logFailure, logLine, useLogFile } from "../core/logger";
 import { abbreviateTitle, isAbbreviated } from "../core/abbreviateTitle";
@@ -138,7 +139,7 @@ export async function chooseFindingsTarget(
       target: work as WorkEntry | "all",
     }));
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "$(layers) すべての作品",

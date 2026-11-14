@@ -1,5 +1,6 @@
 import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { AIRegistry } from "../ai/registry";
 import { ASSIGNABLE_FEATURE_LABELS, ensureConfigured } from "../ai/registry";
@@ -179,6 +180,8 @@ export async function openPhotoTranscribe(
   const selection = registry.onDidChangeSelection(() => void postAi());
   panel.onDidDispose(() => selection.dispose());
 
+  // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+  listenForFocusWithoutPointer(panel.webview, "写真の書き起こし");
   panel.webview.onDidReceiveMessage(async (raw: unknown) => {
     const message = raw as { type?: string } & Record<string, unknown>;
     switch (message.type) {

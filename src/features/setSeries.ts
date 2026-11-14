@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { SeriesConfig, WorkConfig, WorkEntry } from "../models/types";
 import { readWorkConfig, writeWorkConfig } from "../core/workRegistry";
@@ -52,7 +53,7 @@ export async function setSeries(work: WorkEntry): Promise<boolean> {
   }
 
   const already = new Set(config.series?.related ?? []);
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     neighbors.map((name) => ({
       label: name,
       picked: already.has(name),

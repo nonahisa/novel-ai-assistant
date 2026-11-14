@@ -1,4 +1,5 @@
 import { STEP_ACTOR_LABELS } from "../models/schedule";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 
 /**
  * スケジュールの画面（設計書6.111.7）。**縦が時間、横が作品。**
@@ -185,6 +186,7 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
 <script nonce="${nonce}">
 (function () {
   var vscode = acquireVsCodeApi();
+  ${reportFocusWithoutPointerScript("vscode")}
   var saved = vscode.getState() || {};
   var state = { scale: saved.scale || "month", showFinished: !!saved.showFinished };
   var PX = { week: 24, month: 8, year: 3 };

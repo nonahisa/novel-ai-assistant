@@ -1,5 +1,6 @@
 import * as path from "../core/paths";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { logFailure, useLogFile } from "../core/logger";
 import type { WorkRegistry } from "../core/workRegistry";
@@ -114,7 +115,7 @@ export async function tryRegisterAsCollection(
 
   // **黙って全部登録しない。** 書庫には、作者が作品として扱っていない
   // フォルダー（下書き置き場など）が混じることがある
-  const chosen = await vscode.window.showQuickPick(
+  const chosen = await showQuickPickKeepingFocus(
     fresh.map((work) => ({
       label: work.title,
       description: work.hasConfig ? undefined : "設定ファイルなし",
@@ -153,7 +154,7 @@ async function askWhichToRegister(
   childCount: number
 ): Promise<"children" | "self" | "cancel"> {
   const name = path.basename(root);
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: `$(library) 中の${childCount}件の作品を登録する`,

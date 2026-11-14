@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer, showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { canRunProcesses } from "../core/runtime";
 import { keysForHost } from "../core/keyLabels";
 import { conflictFixHint } from "../core/syncEntryNames";
@@ -477,6 +478,8 @@ export async function openEpubEditorPanel(
     panel.webview.cspSource
   );
 
+  // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+  listenForFocusWithoutPointer(panel.webview, "EPUBの設計図");
   panel.webview.onDidReceiveMessage(async (message: unknown) => {
     const parsed = message as {
       type?: string;
@@ -1205,7 +1208,7 @@ async function chooseWorkImage(state: PanelState): Promise<string | null> {
     relativePath: choice.relativePath,
   }));
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...items, cancelItem("取りやめる")],
     {
       title:
@@ -1306,7 +1309,7 @@ async function addChapter(state: PanelState): Promise<void> {
     description: episode.fileName,
     episode,
   }));
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...items, cancelItem()],
     {
       title: "章区切りを入れる",

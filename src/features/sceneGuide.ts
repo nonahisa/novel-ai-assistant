@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { startTour } from "../core/guidedTour";
 import { TOUR_PROCEDURES, type Procedure } from "../core/procedures";
 import { findAction, REQUIRES_WORK_HINT } from "../views/actionList";
@@ -125,7 +126,7 @@ export function sceneQuickPickItems(
  */
 export async function pickScene(hasWork: boolean): Promise<string | undefined> {
   const choices = sceneChoices();
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...sceneQuickPickItems(choices, hasWork), cancelItem()],
     {
       title: SCENE_GUIDE_LABEL,

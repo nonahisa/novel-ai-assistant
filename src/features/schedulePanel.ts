@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer, showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as paths from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import {
@@ -85,6 +86,8 @@ export async function openSchedulePanel(
     panel = undefined;
   });
   created.webview.html = buildSchedulePanelHtml(createNonce(), created.webview.cspSource);
+  // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+  listenForFocusWithoutPointer(created.webview, "スケジュール");
   created.webview.onDidReceiveMessage(async (raw: unknown) => {
     const message = parseScheduleMessage(raw);
     if (!message) return;
@@ -290,7 +293,7 @@ async function addScheduleFlow(deps: SchedulePanelDeps, workId: string | null): 
   const works = deps.registry.list();
   let work = workId ? deps.registry.get(workId) : undefined;
   if (!work) {
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...works.map((entry) => ({ label: entry.title, description: paths.basename(entry.folderPath), work: entry })),
         { ...cancelItem(), work: undefined },
@@ -325,7 +328,7 @@ async function addScheduleFlow(deps: SchedulePanelDeps, workId: string | null): 
       scheduleKind: kind,
     })),
   ];
-  const kindPick = await vscode.window.showQuickPick<KindPick>([...kindItems, cancelItem()], {
+  const kindPick = await showQuickPickKeepingFocus<KindPick>([...kindItems, cancelItem()], {
     title: `「${work.title}」に足すスケジュールの種類`,
     ignoreFocusOut: true,
   });

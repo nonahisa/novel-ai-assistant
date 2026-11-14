@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { OllamaEmbeddingProvider, DEFAULT_EMBEDDING_MODEL } from "../ai/ollamaEmbedding";
 import { embeddingModelName, isVectorSearchEnabled } from "./vectorSearch";
 import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
@@ -138,7 +139,7 @@ export async function setupVectorSearch(): Promise<void> {
     },
   });
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...steps.map((step) => ({
         label: step.label,

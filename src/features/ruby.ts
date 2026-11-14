@@ -1,5 +1,6 @@
 import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { isPlainTextManuscript } from "../core/markdownConversion";
@@ -386,7 +387,7 @@ export async function copyForPosting(
 export async function pickPostingTarget(
   registered: readonly PostingSiteId[]
 ): Promise<PostingCopyTarget | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...postingCopyTargets(registered).map((target) => ({
         label: target.label,

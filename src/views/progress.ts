@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "./pickerFocus";
 import { cancelItem, isCancelItem } from "./dialogs";
 import { describeDuration, estimateRemainingMs } from "../core/etaEstimate";
 
@@ -64,7 +65,7 @@ export async function cancelRunningTask(): Promise<void> {
     task,
   }));
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     // 出口を目に見える形で置く（設計書6.17.2）。ここでは「どれも止めない」
     [...picks, cancelItem("どれも中止しない")],
     {

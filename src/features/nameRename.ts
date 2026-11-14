@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
@@ -216,7 +217,7 @@ async function pickCharacter(
     character,
   }));
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: "名前を付け替える人物",
     placeHolder: "選んでも、まだ何も書き換わりません",
     ignoreFocusOut: true,
@@ -263,7 +264,7 @@ async function confirmMapping(
     entry,
   }));
 
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await showQuickPickKeepingFocus(items, {
     title: "この対応で付け替えます",
     placeHolder:
       "外すものは四角を押して解除してください（自動では書き換えません）",

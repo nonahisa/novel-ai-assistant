@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { readSyncStatus, runGit, type GitCommandRunner } from "../core/git";
 import { commitAll } from "../core/gitSetup";
@@ -210,7 +211,7 @@ async function pickCommit(
 ): Promise<CommitEntry | undefined> {
   // 先頭は「今の状態」そのものなので、戻し先には出さない
   const candidates = commits.slice(1);
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...candidates.map((commit) => ({
         label: `$(history) ${commit.date}`,

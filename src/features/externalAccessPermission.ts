@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ExternalAccessPermissionStore } from "../core/externalAccessPermissionStore";
@@ -270,7 +271,7 @@ export async function toggleExternalAccessPermission(
     return;
   }
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...permission.clients.map((client) => ({
         label: client.name,
@@ -385,7 +386,7 @@ async function editClient(
   );
   actions.push("この接続元を取り消す");
 
-  const answer = await vscode.window.showQuickPick(
+  const answer = await showQuickPickKeepingFocus(
     [...actions.map((label) => ({ label })), cancelItem()],
     {
       title: `${client.name}（${describeScope(client)}）`,
@@ -400,7 +401,7 @@ async function editClient(
   }
 
   if (answer.label === "道具を1つ取り消す") {
-    const tool = await vscode.window.showQuickPick(
+    const tool = await showQuickPickKeepingFocus(
       [
         // **取り消す値は印に書かれているものそのまま。** 見出しだけ日本語にする
         ...[...client.tools]
@@ -475,7 +476,7 @@ async function chooseSeparateKeys(
   store: ExternalAccessPermissionStore,
   client: ExternalClientPermission
 ): Promise<void> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     Object.entries(SEPARATE_READ_KEYS).map(([key, label]) => ({
       label,
       description: key,

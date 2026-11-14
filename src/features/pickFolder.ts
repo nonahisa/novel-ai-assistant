@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { fromUri, toUri } from "../core/paths";
 import { canRunProcesses } from "../core/runtime";
 import { pathExists } from "../core/fileSystem";
@@ -194,7 +195,7 @@ async function pickFromWorkspaceFolders(
     })
   );
 
-  const picked = await vscode.window.showQuickPick<
+  const picked = await showQuickPickKeepingFocus<
     vscode.QuickPickItem & { folderPath?: string; readable?: boolean }
   >([...items, cancelItem()], {
     title: purpose,

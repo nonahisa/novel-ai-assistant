@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { listenForFocusWithoutPointer } from "../views/pickerFocus";
 import { wideViewColumn } from "./editorColumn";
 import type { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
@@ -128,6 +129,8 @@ class ChroniclePanel {
       createNonce(),
       this.panel.webview.cspSource
     );
+    // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）
+    listenForFocusWithoutPointer(this.panel.webview, "年表");
     this.panel.webview.onDidReceiveMessage((message: unknown) => {
       void this.handleMessage(message as PanelMessage);
     });

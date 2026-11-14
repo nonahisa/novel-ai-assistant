@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import { openSiteLink } from "./openSiteLink";
 import {
@@ -580,7 +581,7 @@ async function walkSite(input: {
   }
 
   for (;;) {
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         revise
           ? {
@@ -768,7 +769,7 @@ async function askPostingMode(
       mode: "revise",
     },
   ];
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: `${label} の出し方`,
     placeHolder: `${postingSiteLabels(posted)}へは投稿済みです。どう出しますか`,
     ignoreFocusOut: true,
@@ -902,7 +903,7 @@ async function askRevisionSites(input: {
   const dateOf = (iso: string | undefined): string | undefined =>
     iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : undefined;
   const edited = new Set(input.edited);
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     input.candidates.map((site) => {
       const post = postRecordFor(ledger, target, site);
       const revision = revisionFor(ledger, target, site);
@@ -1064,7 +1065,7 @@ async function offerRevisionOfEditedEpisodes(input: {
       skip: true as const,
     },
   ];
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: "投稿のあとに直した話があります",
     placeHolder: `${names}は投稿後に直しています。出し直しますか`,
     ignoreFocusOut: true,
@@ -1100,7 +1101,7 @@ async function offerRevisionOfEditedEpisodes(input: {
   ) {
     return { kind: "revised", changed: result.changed };
   }
-  const next = await vscode.window.showQuickPick(
+  const next = await showQuickPickKeepingFocus(
     [
       {
         label: "$(rocket) 続けて新しい話を投稿する",
@@ -1235,7 +1236,7 @@ export async function configurePostingSites(
     const redoing = withNewSites.posts.length > 0;
     let goAhead = !redoing;
     if (redoing) {
-      const picked = await vscode.window.showQuickPick(
+      const picked = await showQuickPickKeepingFocus(
         [
           cancelItem("引き直さずに終わる"),
           {
@@ -1283,7 +1284,7 @@ async function askSites(
   ledger: PostingLedger
 ): Promise<PostingSiteEntry[] | undefined> {
   const current = ledger.sites;
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     POSTING_SITES.map((site) => ({
       label: site.label,
       description: current.some((entry) => entry.site === site.id)
@@ -1359,7 +1360,7 @@ async function askSiteProfiles(
   ledger: PostingLedger,
   entries: readonly PostingSiteEntry[]
 ): Promise<PostingLedger> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       // **入れないほうを先頭に置く**（更新告知の誘いと同じ形）。ここまでで
       // 投稿はできる状態になっており、作品情報は「あると便利」なだけである
@@ -1643,7 +1644,7 @@ export async function setWorkCompletion(work: WorkEntry): Promise<PostingKitResu
     choices.push({ label: "決めない（印を外す）", description: "", value: null });
   }
 
-  const picked = await vscode.window.showQuickPick([...choices, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...choices, cancelItem()], {
     title: `${work.title} の連載の状態`,
     placeHolder:
       (current !== undefined
@@ -1674,7 +1675,7 @@ async function askRankingSite(
   work: WorkEntry,
   ledger: PostingLedger
 ): Promise<PostingSiteId | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...ledger.sites.map((entry) => {
         const info = postingSiteInfo(entry.site);
@@ -1720,7 +1721,7 @@ async function askRankingBoard(
         .filter((entry) => entry.site === site)
         .map((entry) => entry.board)
     );
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...boards.map((board) => ({
           label: board,
@@ -1779,7 +1780,7 @@ async function applyBaseline(
 ): Promise<PostingLedger | undefined> {
   if (episodes.length === 0) return undefined;
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       // **新しい話を上に置く**（たいてい「最新話まで出した」が答えになる）
       ...[...episodes].reverse().map((episode, index) => ({
@@ -1899,7 +1900,7 @@ async function offerAnnouncement(
   work: WorkEntry,
   registry: AIRegistry
 ): Promise<void> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       // **作らないほうを先頭に置く。** 既定の答えは「作らない」である
       cancelItem("告知は作らずに終わる"),

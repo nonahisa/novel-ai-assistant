@@ -1,5 +1,6 @@
 // ログの書き先：作品ごと（`useLogFile(work.folderPath)`）
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { ReaderProfile } from "../models/readerProfile";
@@ -117,7 +118,7 @@ export async function makeTargetSheetAdvice(
       promptVersion: TARGET_SHEET_ADVICE_VERSION,
     })
   ) {
-    const choice = await vscode.window.showQuickPick(
+    const choice = await showQuickPickKeepingFocus(
       [
         {
           label: "前回の助言のまま開く",

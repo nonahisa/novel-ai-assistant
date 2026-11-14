@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import {
   addForeshadow,
@@ -171,7 +172,7 @@ export async function setForeshadowStatus(work: WorkEntry): Promise<void> {
     return;
   }
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...sortForPicking(loaded.records).map((record) => ({
         label: record.label,
@@ -188,7 +189,7 @@ export async function setForeshadowStatus(work: WorkEntry): Promise<void> {
 
   // **いまの状態を、選ぶ画面に出す**（作者の指摘、2026-09-06）。
   // 並びといまの印は `core/foreshadowStatusChoice.ts` が決める
-  const statusPick = await vscode.window.showQuickPick(
+  const statusPick = await showQuickPickKeepingFocus(
     [
       ...foreshadowStatusChoices(target.status).map((choice) => ({
         label: choice.label,

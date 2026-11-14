@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import {
   findChapterStartingAt,
@@ -577,7 +578,7 @@ export async function suggestChapterName(
     return false;
   }
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...names.map((name) => ({
         label: name,

@@ -1,5 +1,6 @@
 import { openGeneratedMarkdown, revealFolder } from "../views/openDocument";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
@@ -110,7 +111,7 @@ export async function exportImeDictionary(
         }
   );
 
-  const pickedWords = await vscode.window.showQuickPick(wordItems, {
+  const pickedWords = await showQuickPickKeepingFocus(wordItems, {
     title: `${work.title}の辞書に入れる語（${built.entries.length}件）`,
     placeHolder: "外したい語のチェックを外してください",
     canPickMany: true,
@@ -151,7 +152,7 @@ export async function exportImeDictionary(
     await state.update(imeExcludedKey(work.id), nextExcluded);
   }
 
-  const pickedFormats = await vscode.window.showQuickPick(
+  const pickedFormats = await showQuickPickKeepingFocus(
     Object.values(DICTIONARY_FORMATS).map((format) => ({
       label: format.label,
       description: format.fileName,

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import {
   CustomFieldStore,
@@ -156,7 +157,7 @@ type KindChoice = (typeof KIND_CHOICES)[number];
  * 覚えていなくても選べるようにする。
  */
 async function pickKind(set: CustomFieldSet): Promise<KindChoice | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...KIND_CHOICES.map((choice) => {
         const fields = fieldsFor(set, choice.kind);
@@ -216,7 +217,7 @@ async function pickAction(
     });
   }
 
-  const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+  const picked = await showQuickPickKeepingFocus([...items, cancelItem()], {
     title: `${choice.label}の項目　現在: ${current}`,
     placeHolder: "何をしますか？",
     ignoreFocusOut: true,
@@ -335,7 +336,7 @@ async function askFieldDetails(
   });
   if (hint === undefined) return undefined;
 
-  const length = await vscode.window.showQuickPick(
+  const length = await showQuickPickKeepingFocus(
     [
       {
         label: "短い（1行）",
@@ -409,7 +410,7 @@ async function pickFieldToRestore(
     });
   }
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...keys.map((key, index) => {
         const found = values.get(key) ?? [];
@@ -452,7 +453,7 @@ function shortenForPick(value: string): string {
 async function pickFieldToRemove(
   fields: CustomFieldDefinition[]
 ): Promise<string | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...fields.map((field) => ({
         label: field.label,

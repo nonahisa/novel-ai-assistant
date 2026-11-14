@@ -1,4 +1,5 @@
 import { READER_STATS_VISIBLE_ROWS, type ReaderSiteTab } from "../core/postingSiteRecords";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 import { POSTING_SITES } from "../models/posting";
 
 /** HTMLへ埋める字を逃がす（画面の中の escapeHtml と同じ4つ） */
@@ -448,6 +449,7 @@ a:hover, .link:hover { text-decoration: underline; }
 </main>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 let state = null;
 let granularity = 'daily';
 /**

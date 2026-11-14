@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import {
   parseCollectedFile,
   type CollectedEpisode,
@@ -54,7 +54,7 @@ export async function pickCollectedEpisode(
   // （`isCollectedFile`。全ファイルに「合本」の印が付いた失敗がある）
   if (!episodes || !isCollectedFile(episodes.length)) return null;
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...episodes.map((episode) => ({
         label: collectedEpisodeLabel(episode, format),

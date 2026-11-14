@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { ProposalStore } from "../core/proposalStore";
@@ -153,7 +154,7 @@ export async function showEditorProposalList(
     mode === "decided"
       ? `作者の採否（${describeDecisionCounts(counts)}）`
       : `置いた提案 ${rows.length}件（作者の返事待ち ${counts.pending}）`;
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [...rows.map((row) => ({ ...row })), cancelItem()],
     {
       title: `${work.title}：${title}`,

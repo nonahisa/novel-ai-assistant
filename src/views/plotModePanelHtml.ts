@@ -27,6 +27,7 @@
  * 入力欄は複数行の欄にしない（`textarea` は「本文を書き換える欄」と紛れる）。
  */
 import { IME_ENTER_GUARD_SOURCE } from "./imeEnterGuardScript";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 
 export function buildPlotModePanelHtml(
   nonce: string,
@@ -325,6 +326,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 </div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 
 /** 拡張機能から届いた目録。画面はこれを描くだけで、作り替えはしない */
 let data = null;

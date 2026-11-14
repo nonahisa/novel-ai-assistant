@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { readSyncStatus, runGit, type GitCommandRunner } from "../core/git";
@@ -97,7 +97,7 @@ async function askHowToGroup(
   const parentName = path.basename(parent);
   const total = neighbours + 1;
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: `$(repo) 「${parentName}」をまとめて1つの置き場にする`,

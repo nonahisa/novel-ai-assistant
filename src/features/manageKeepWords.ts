@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { KeepWordStore } from "../core/keepWordStore";
 import { validateKeepWord, type KeepWord } from "../models/keepWord";
@@ -25,7 +26,7 @@ export async function manageKeepWords(work: WorkEntry): Promise<void> {
       return;
     }
 
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         {
           label: "$(add) 語を足す",

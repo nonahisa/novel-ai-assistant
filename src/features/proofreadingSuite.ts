@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { withAiTurn } from "./aiTurn";
 import type { WorkEntry } from "../models/types";
 import { withProgress } from "../views/progress";
@@ -139,7 +140,7 @@ export async function runProofreadingSuite(
   }));
 
   // 複数選択なので「取りやめる」は足さない。VS Code が自分でボタンを出す
-  const picked = await vscode.window.showQuickPick(items, {
+  const picked = await showQuickPickKeepingFocus(items, {
     canPickMany: true,
     title: `校正をまとめて実行：${work.title}`,
     placeHolder: "走らせるものを選んでください（上から順に実行します）",

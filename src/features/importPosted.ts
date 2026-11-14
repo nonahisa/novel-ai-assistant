@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import {
   postingEpisodeKey,
@@ -572,7 +573,7 @@ async function pickWork(
 ): Promise<LoadedWork | undefined> {
   if (candidates.length === 0) return undefined;
   if (candidates.length === 1) return candidates[0];
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...candidates.map((entry) => ({ label: entry.work.title, description: entry.work.folderPath, entry })),
       cancelItem("記録せずに終わる"),
@@ -588,7 +589,7 @@ async function askWorkAlways(
   candidates: readonly LoadedWork[],
   novelNo: string
 ): Promise<LoadedWork | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...candidates.map((entry) => ({ label: entry.work.title, description: entry.work.folderPath, entry })),
       cancelItem("記録せずに終わる"),
@@ -625,7 +626,7 @@ async function askEpisode(
     ...candidates.filter((candidate) => hitKeys.has(postingEpisodeKey(candidate.target))),
     ...candidates.filter((candidate) => !hitKeys.has(postingEpisodeKey(candidate.target))),
   ];
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...ordered.map((candidate) => ({
         label: candidate.label,

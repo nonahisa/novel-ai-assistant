@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import {
   AIRegistry,
   ensureConfigured,
@@ -475,7 +476,7 @@ const ERROR_EXCERPT_CHARS = 200;
 export async function askTuningScope(
   subject?: string
 ): Promise<TuningScope | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       ...TUNING_SCOPE_CHOICES.map((choice) => ({
         label: choice.label,

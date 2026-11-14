@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import { sha256Bytes } from "../core/hash";
 import type { WorkRegistry } from "../core/workRegistry";
@@ -145,7 +146,7 @@ async function chooseWorks(
   library: string
 ): Promise<MergePlan[] | undefined> {
   const blocked = all.filter((plan) => plan.blocked);
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     movable.map((plan) => ({
       label: plan.work.title,
       description: `→ ${plan.folderName}`,

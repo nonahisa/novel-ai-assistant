@@ -1,4 +1,5 @@
 import { TERM_COLORS } from "../core/termColors";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 
 /**
  * 場所の略図の画面（設計書6.93.10）。
@@ -199,6 +200,7 @@ svg#sketch.panning { cursor: grabbing; }
 <footer id="notice"></footer>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 const SVG_NS = "http://www.w3.org/2000/svg";
 /** 棚を図の下にどれだけ離して置くか・棚の点の間 */
 const SHELF_GAP = 90;

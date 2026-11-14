@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { WorkEntry } from "../models/types";
 import {
   keepAuthorOnlyMarks,
@@ -902,7 +903,7 @@ export async function applyPendingCharacterUpdates(
   if (choice === "すべて反映") {
     chosen = targets;
   } else if (choice === "選んで反映") {
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       targets.map((target) => ({
         label: target.name,
         description: target.change,

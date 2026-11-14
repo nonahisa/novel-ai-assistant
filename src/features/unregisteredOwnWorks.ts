@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import {
   BACKUP_POLL_INTERVAL_MS,
@@ -452,7 +453,7 @@ export class UnregisteredOwnWorks implements vscode.Disposable {
       void vscode.window.showInformationMessage("出さないにした作品はありません。");
       return;
     }
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       hidden.map((entry) => ({
         label: ownWorkLabel(entry),
         description: `${postingSiteInfo(entry.site).label} 作品ID ${entry.workId}`,

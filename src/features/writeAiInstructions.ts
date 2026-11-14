@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 import { fromUri } from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -188,7 +189,7 @@ async function readTemplate(
 
 /** どの相手へ置くかを選ぶ（複数可） */
 async function pickTargets(): Promise<AiInstructionTarget[] | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     AI_INSTRUCTION_TARGETS.map((target) => ({
       label: target.label,
       description: target.instructionPath,
@@ -213,7 +214,7 @@ async function pickTargets(): Promise<AiInstructionTarget[] | undefined> {
  * 作者に伝わらない——**原稿が黙って読まれるかどうか**の言葉で書く。
  */
 async function pickUsage(): Promise<AiInstructionUsage | undefined> {
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "作品フォルダーを開いて使う",

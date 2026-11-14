@@ -33,6 +33,7 @@ import {
   DROP_FILE_EXTENSIONS,
 } from "../core/backupFileKinds";
 import { IME_ENTER_GUARD_SOURCE } from "./imeEnterGuardScript";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 import { KEY_LABEL_SCRIPT } from "../core/keyLabels";
 
 /**
@@ -541,6 +542,7 @@ ${KEY_LABEL_SCRIPT}
 // HTML に書いたキーの案内（data-keys の付いた所）を、Mac なら ⌘ の書き方へ（core/keyLabels.ts）
 novelaiApplyKeyLabels(document);
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 const logEl = document.getElementById('log');
 const emptyEl = document.getElementById('empty');
 const inputEl = document.getElementById('input');

@@ -1,5 +1,6 @@
 import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { isDateKey, type ContestGoal, type WorkGoals } from "../models/workGoals";
 import { readWorkGoalsOrEmpty, writeWorkGoals } from "../core/workGoalsStore";
@@ -70,7 +71,7 @@ export async function setWorkGoals(
     goals.contest?.url && isOpenableWorkUrl(goals.contest.url) ? goals.contest.url : null;
   const common = currentCommonGoals();
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "$(edit) 1記事あたりの目標文字数",
@@ -261,7 +262,7 @@ async function editContest(
 ): Promise<ContestGoal | undefined> {
   if (!current) {
     // 初めて入れるときだけ、どこで探すかを案内する
-    const guide = await vscode.window.showQuickPick(
+    const guide = await showQuickPickKeepingFocus(
       [
         { label: "$(edit) 入力する", action: "input" as const },
         ...CONTEST_DIRECTORIES.map((site) => ({

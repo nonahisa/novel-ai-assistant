@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import type { AdvicePolicyStore } from "../core/advicePolicyStore";
 import {
@@ -89,7 +90,7 @@ async function chooseAction(
 ): Promise<PolicyAction | undefined> {
   const type = ADVICE_TYPES[resolveAdviceType(profile.scores)];
 
-  const picked = await vscode.window.showQuickPick(
+  const picked = await showQuickPickKeepingFocus(
     [
       {
         label: "$(refresh) 全部やり直す",
@@ -147,7 +148,7 @@ export async function askAdviceQuestions(
   for (const [index, question] of ADVICE_QUESTIONS.entries()) {
     const before = previous?.[index];
     const sharedChoice = shared?.index === index ? shared.choice : undefined;
-    const picked = await vscode.window.showQuickPick(
+    const picked = await showQuickPickKeepingFocus(
       [
         ...orderWithShared(question.choices.length, sharedChoice).map(
           (choiceIndex) => ({

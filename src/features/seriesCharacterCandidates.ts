@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { Character } from "../models/character";
 import type { WorkEntry } from "../models/types";
 import { CharacterStore } from "../core/characterStore";
@@ -105,7 +106,7 @@ export async function offerSeriesCharacterMatches(
     pair,
   }));
 
-  const chosen = await vscode.window.showQuickPick<PairItem>(items, {
+  const chosen = await showQuickPickKeepingFocus<PairItem>(items, {
     title: "シリーズの作品にも同じ名前があります",
     placeHolder:
       "同じ人物だと思うものだけ選んでください。選ばなければ別人のままです",
