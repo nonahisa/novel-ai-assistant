@@ -1,3 +1,4 @@
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import * as nodePath from "node:path";
 import {
   MAX_ISSUES_PER_1000_CHARS,
@@ -98,7 +99,7 @@ export interface WorkStyle {
  */
 export function collectStyle(folder: string): WorkStyle {
   const bodies = readWorkSources(folder).map((source) =>
-    blankMemoLines(source.body)
+    blankMemoLines(source.body, memoMarkersOfFolder(folder))
   );
 
   const plot = readPlotMarkdown(folder);
@@ -167,7 +168,7 @@ export function workNarratorContextFor(
 ): WorkNarratorContext | null {
   return workNarratorContextOf(
     readWorkSources(folder)
-      .map((source) => blankMemoLines(source.body))
+      .map((source) => blankMemoLines(source.body, memoMarkersOfFolder(folder)))
       .join("\n"),
     people
   );
@@ -217,7 +218,7 @@ export function viewpointNarratorFor(folder: string): ViewpointNarrator | null {
   if (people.unreadable > 0) return null;
   const narrator = resolveWorkNarrator(
     readWorkSources(folder)
-      .map((source) => blankMemoLines(source.body))
+      .map((source) => blankMemoLines(source.body, memoMarkersOfFolder(folder)))
       .join("\n"),
     people.records
   );
@@ -251,7 +252,7 @@ export function scanNarratorSlips(
   }
   const sources = readWorkSources(folder);
   const narrator = resolveWorkNarrator(
-    sources.map((source) => blankMemoLines(source.body)).join("\n"),
+    sources.map((source) => blankMemoLines(source.body, memoMarkersOfFolder(folder))).join("\n"),
     people.records
   );
   if (!narrator) {
@@ -273,6 +274,7 @@ export function scanNarratorSlips(
       text: source.body,
       narrator,
       people: people.records,
+      memoMarkers: memoMarkersOfFolder(folder),
     });
     if (found.skipped) {
       const relative = source.filePath.replace(/\\/g, "/");

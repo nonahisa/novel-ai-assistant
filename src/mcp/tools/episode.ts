@@ -1,3 +1,4 @@
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import fs from "node:fs";
 import * as nodePath from "node:path";
 import {
@@ -342,7 +343,7 @@ function deviationForSmallModelOf(choice: string | undefined): boolean {
 /** 検算と同じ本文。**プロンプトと検算で別々に作らない**（照らす相手がずれる） */
 function deviationEpisodeOf(input: EpisodePromptInput) {
   const episode = readEpisode(input.folder, input.filePath, input.chapter);
-  return { ...episode, body: deviationBodyOf(episode.body) };
+  return { ...episode, body: deviationBodyOf(episode.body, memoMarkersOfFolder(input.folder)) };
 }
 
 export function deviationPrompt(input: DeviationPromptInput) {
@@ -589,7 +590,7 @@ export interface EpisodePlotContrastPromptInput extends EpisodePlotPromptInput {
  * 字数は返り値の `bodyChars` で知らせる。
  */
 function contrastBodyOf(folder: string, filePath: string): string {
-  return blankMemoLines(readBody(folder, filePath));
+  return blankMemoLines(readBody(folder, filePath), memoMarkersOfFolder(folder));
 }
 
 /** 見出し。指定が無ければ、ファイル名の話数から「第N話」（製品の既定と同じ形） */

@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkAnnounceConfig, WorkEntry } from "../models/types";
@@ -595,7 +596,7 @@ async function pickEpisode(
 
   // 合本（1ファイルに複数話）も話ごとに分かれて返る経路を通す。
   // シーンメモ（設計書6.40）はここで既に落ちている
-  const loaded = await loadEpisodeBodies(scan.episodes);
+  const loaded = await loadEpisodeBodies(scan.episodes, await readMemoMarkers(work));
   if (loaded.bodies.length === 0) {
     vscode.window.showWarningMessage(
       loaded.conflicted.length > 0

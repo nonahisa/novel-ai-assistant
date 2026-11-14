@@ -1,3 +1,5 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
+import { DEFAULT_MEMO_MARKERS, memoInsertOf, type MemoMarkers } from "../core/memoMarkers";
 import * as vscode from "vscode";
 import { listenForFocusWithoutPointer, showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { canRunProcesses } from "../core/runtime";
@@ -229,6 +231,8 @@ interface PreviewSource {
   episodeFiles: EpisodeFile[];
   /** 話数の言い方を決める作品の形式（章の範囲「第1話〜第5話」に使う） */
   format: WorkFormatKey | undefined;
+  /** その作品のメモの印（設計書6.40.8）。プレビューの段落から落とす行 */
+  memoMarkers: MemoMarkers;
   /**
    * 作品の種類（設計書6.109）。本文の行の組み方（台本の柱・ト書き・台詞など）を
    * **書き出しと同じに**画面へ当てるために持つ
@@ -2398,7 +2402,7 @@ async function sendParagraphs(
     return;
   }
 
-  const items = splitParagraphs(body).map((paragraph) =>
+  const items = splitParagraphs(body, state.source.memoMarkers).map((paragraph) =>
     paragraphPreview(paragraph, episode.notation)
   );
   state.paragraphs.set(episodePath, items.length);
@@ -2484,7 +2488,7 @@ async function countPlacedEpisodes(
   for (const episode of source.episodes) {
     if (!wanted.has(episode.path) || counts.has(episode.path)) continue;
     const body = await readEpisodeBody(episode);
-    if (body !== null) counts.set(episode.path, countParagraphs(body));
+    if (body !== null) counts.set(episode.path, countParagraphs(body, source.memoMarkers));
   }
 
   return counts;
@@ -2891,13 +2895,14 @@ function bodyPage(state: PanelState, vertical: boolean): PreviewPage | null {
   // プレビューが読んでいるのは1話目の冒頭だけなので、その先の指定まで
   // 当てはめると「本文より後ろだから末尾へ」が働いて、実際の本と違う
   // 場所に挿絵が出る
-  const shown = countParagraphs(source.firstChapter.body);
+  const shown = countParagraphs(source.firstChapter.body, source.memoMarkers);
   const placed = placementsFor(state, source.firstChapterPath, shown);
 
   return {
     label: "本文の冒頭",
     html: buildChapterFragment(source.firstChapter, {
       collapseBlankLines: state.current.collapseBlankLines,
+      memoMarkers: state.source.memoMarkers,
       illustrations: placed.illustrations,
       pageBreaks: placed.pageBreaks,
       // 画面は1枚の面なので実際には割れない。印だけ置く（6.65.10）
@@ -2931,6 +2936,7 @@ function afterwordPage(
     label: AFTERWORD_HEADING,
     html: buildAfterwordFragment(afterword, {
       collapseBlankLines: state.current.collapseBlankLines,
+      memoMarkers: state.source.memoMarkers,
       vertical,
       pageLayouts: state.current.pageLayouts,
     }),
@@ -3110,12 +3116,16 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
   const format = await readWorkFormat(work);
   const kind = await readWorkKind(work);
   const ornaments = await collectOrnaments(work);
+  // 作品のメモの印（設計書6.40.8）。プレビューだけなので、読めなければ既定で見せる
+  // （書き出しの側は読み直して止まる）
+  const memoMarkers = await readMemoMarkers(work).catch(() => DEFAULT_MEMO_MARKERS);
 
   if (scan.episodes.length === 0) {
     return {
       episodes: [],
       episodeFiles: [],
       format,
+      memoMarkers,
       kind,
       outline: [],
       firstChapter: null,
@@ -3162,6 +3172,7 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
     episodes,
     episodeFiles: [...scan.episodes],
     format,
+    memoMarkers,
     kind,
     // 章立ては台帳から写す（下で組む。段Cの一覧に章の行が挟まる）
     outline: [],
@@ -3288,7 +3299,7 @@ async function collectAfterword(
     const file = await readTextFile(target);
     // 未解決の競合を含む原稿は本にも入らない（本文と同じ扱い）
     if (file.hasConflictMarkers) return null;
-    if (countParagraphs(file.text) === 0) return null;
+    if (countParagraphs(file.text, await readMemoMarkers(work).catch(() => DEFAULT_MEMO_MARKERS)) === 0) return null;
     return { text: file.text, notation: notationModeFor(AFTERWORD_FILE) };
   } catch {
     // まだ書いていないのが普通の状態である（通知も記録もしない）
@@ -3323,7 +3334,7 @@ async function openAfterword(state: PanelState): Promise<void> {
       );
       await atomicWriteFile(
         target,
-        new TextEncoder().encode(AFTERWORD_TEMPLATE),
+        new TextEncoder().encode(afterwordTemplate(await readMemoMarkers(work))),
         { mode: "create" }
       );
     } catch (error) {
@@ -3344,13 +3355,20 @@ async function openAfterword(state: PanelState): Promise<void> {
  *
  * **見出しは書かない**（本の側で「あとがき」を立てる）。行頭の `//` は
  * シーンメモの印（設計書6.40）で、本にも字数にも入らない。
+ *
+ * **印は作品の印で書く**（設計書6.40.8）。`//` を外した作品で `//` の雛形を置くと、
+ * 案内の行が本に入ってしまう。挿す印は付箋を足すときと同じ（`memoInsertOf`）
  */
-const AFTERWORD_TEMPLATE = [
-  "// ここにあとがきを書いてください。この行（先頭が「//」）は本に入りません。",
-  "// 見出しの「あとがき」は本の側で付くので、書かなくてかまいません。",
-  "",
-  "",
-].join("\n");
+function afterwordTemplate(markers: MemoMarkers): string {
+  const insert = memoInsertOf(markers);
+  const mark = insert.prefix.trim();
+  return [
+    `${insert.prefix}ここにあとがきを書いてください。この行（先頭が「${mark}」）は本に入りません。${insert.suffix}`,
+    `${insert.prefix}見出しの「あとがき」は本の側で付くので、書かなくてかまいません。${insert.suffix}`,
+    "",
+    "",
+  ].join("\n");
+}
 
 async function reportAfterwordFailure(
   work: WorkEntry,

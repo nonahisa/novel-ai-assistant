@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
@@ -527,7 +528,7 @@ export async function contrastEpisodePlot(
     ひとつながりで見ないと判断できない（P-11が話単位で見るのと同じ）。
     入り切らない長い話は後ろを落とし、**落としたことを作者へ伝える。**
   */
-  const whole = blankMemoLines(episode.text);
+  const whole = blankMemoLines(episode.text, await readMemoMarkers(work));
   const body = whole.slice(0, chunkSettings.chunk.chars);
   const droppedChars = whole.length - body.length;
 

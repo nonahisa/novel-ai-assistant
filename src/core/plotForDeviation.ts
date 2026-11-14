@@ -12,7 +12,7 @@
  * （`scripts/coreEntries.mjs`。`test/unit/cross/mcpReach.test.ts` が見張る）。
  */
 
-import { blankMemoLines } from "./sceneMemo";
+import { blankMemoLines, type MemoMarkers } from "./sceneMemo";
 
 /**
  * プロットにまわしてよい字数の頭打ち。
@@ -100,8 +100,8 @@ export const DEVIATION_MAX_CHAPTER_CHARS = 12_000;
  * 読んだ本文をそのまま送るので、ここで伏せる。**行ごと落とさない**のは、
  * 指摘の行番号が元の本文とずれないようにするため。
  */
-export function deviationBodyOf(body: string): string {
-  return blankMemoLines(body).slice(0, DEVIATION_MAX_CHAPTER_CHARS);
+export function deviationBodyOf(body: string, markers?: MemoMarkers): string {
+  return blankMemoLines(body, markers).slice(0, DEVIATION_MAX_CHAPTER_CHARS);
 }
 
 /**

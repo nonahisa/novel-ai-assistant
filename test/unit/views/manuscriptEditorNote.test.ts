@@ -180,7 +180,7 @@ describe("拡張機能側の繋ぎ", () => {
   /** 閉じている面のために、本文ぜんたいを組まない（0.25.2で一度やめた道） */
   it("プレビューは、開いているあいだだけ組む", () => {
     expect(feature).toContain("noteLike && notePreviewWanted");
-    expect(feature).toContain("renderNotePreview(text)");
+    expect(feature).toContain("renderNotePreview(text, memoMarkersOf(document))");
     expect(feature).toContain("notePreviewWanted = message.on");
   });
 });

@@ -2,6 +2,8 @@ import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { fromUri } from "../core/paths";
+import { cachedMemoMarkersForPath, readMemoMarkers } from "../core/memoMarkerStore";
+import { DEFAULT_MEMO_MARKERS } from "../core/memoMarkers";
 import * as path from "../core/paths";
 import { isPlainTextManuscript } from "../core/markdownConversion";
 import { notationModeFor } from "../core/manuscriptRender";
@@ -353,7 +355,12 @@ export async function copyForPosting(
     「なぜ今日は2回訊かれるのか」が分からない。貼り付け先を1度だけ
     訊き、記法はそこから引く。
   */
-  const conversion = convertForPosting(source, target);
+  // 作品のメモの印（設計書6.40.8）。作品が引けなければ、開いたときに読んだ印（無ければ既定）
+  const conversion = convertForPosting(source, target, {
+    memoMarkers: work
+      ? await readMemoMarkers(work)
+      : cachedMemoMarkersForPath(fromUri(editor.document.uri)) ?? DEFAULT_MEMO_MARKERS,
+  });
 
   await vscode.env.clipboard.writeText(conversion.text);
   // **何をコピーしたかを出す**（設計書6.12.1）。合本は取り違えに

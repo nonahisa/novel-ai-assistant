@@ -59,6 +59,8 @@ const state = vi.hoisted(() => ({
   sources: {} as Record<string, string>,
 }));
 
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
+
 vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async (_registry: unknown, feature: string) => {
     state.features.push(feature);

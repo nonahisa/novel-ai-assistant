@@ -1,3 +1,5 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
+import type { MemoMarkers } from "../core/memoMarkers";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { EpisodeFile, WorkEntry } from "../models/types";
@@ -292,7 +294,8 @@ async function postNewEpisodeInSession(
     記録に残すのはルビ・傍点の書き方を寄せた印（`v3:`。0.127.0）——.md にしただけの話を
     「投稿のあとに直した」と言わないため
   */
-  const hashes = postingTextHashes(parts.subtitle, parts.body);
+  const memoMarkers = await readMemoMarkers(work);
+  const hashes = postingTextHashes(parts.subtitle, parts.body, memoMarkers);
   const bodyHash = hashes.notation;
 
   const sites = unpostedSites(ledger, postTarget);
@@ -360,6 +363,7 @@ async function postNewEpisodeInSession(
     let postRefCopied = false;
     const answer = await walkSite({
       ledger,
+      memoMarkers,
       site,
       label,
       subtitle: parts.subtitle,
@@ -493,6 +497,8 @@ function pickOldestUnposted(
  */
 async function walkSite(input: {
   ledger: PostingLedger;
+  /** その作品のメモの印（設計書6.40.8）。コピーする本文から落とす行を決める */
+  memoMarkers: MemoMarkers;
   site: PostingSiteId;
   label: string;
   subtitle: string | null;
@@ -531,6 +537,7 @@ async function walkSite(input: {
   // 1話まるごとを渡すので、前後の空行は落とす（`trimEdges`）
   const body = convertForPosting(input.body, postingCopyTargetFor(input.site), {
     trimEdges: true,
+    memoMarkers: input.memoMarkers,
   }).text;
   await vscode.env.clipboard.writeText(body);
 
@@ -835,6 +842,7 @@ async function reviseEpisode(input: {
   for (const site of sites) {
     const answer = await walkSite({
       ledger,
+      memoMarkers: await readMemoMarkers(input.work),
       site,
       label: input.label,
       subtitle: input.parts.subtitle,
@@ -961,6 +969,7 @@ interface EditedEpisode {
  */
 async function findEditedEpisodes(input: {
   ledger: PostingLedger;
+  memoMarkers: MemoMarkers;
   episodes: readonly EpisodeFile[];
   relativePathOf: (file: EpisodeFile) => string;
   format: WorkFormatKey | undefined;
@@ -990,7 +999,7 @@ async function findEditedEpisodes(input: {
           ? { chapter: unit.collected.chapter, order: unit.collected.order }
           : {}),
       };
-      const hashes = postingTextHashes(unit.subtitle, unit.body);
+      const hashes = postingTextHashes(unit.subtitle, unit.body, input.memoMarkers);
       const sites = sitesNeedingRevision(input.ledger, postTarget, hashes);
       if (sites.length === 0) continue;
       found.push({
@@ -1042,7 +1051,7 @@ async function offerRevisionOfEditedEpisodes(input: {
   | { kind: "cancel" }
   | { kind: "revised"; changed: boolean }
 > {
-  const edited = await findEditedEpisodes(input);
+  const edited = await findEditedEpisodes({ ...input, memoMarkers: await readMemoMarkers(input.work) });
   if (edited.length === 0) return { kind: "continue" };
 
   // 促しの文は短く保つ（並べるのは3話まで。残りは数だけ）

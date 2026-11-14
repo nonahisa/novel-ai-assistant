@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
@@ -334,7 +335,7 @@ export async function collectOpening(
     return { ok: false, reason: "本文ファイルが見つかりません。" };
   }
 
-  const loaded = await loadEpisodeBodies(scan.episodes);
+  const loaded = await loadEpisodeBodies(scan.episodes, await readMemoMarkers(work));
   const first = loaded.bodies[0];
   if (!first) {
     return {

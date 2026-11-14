@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
@@ -273,7 +274,7 @@ async function collectMaterial(
     return undefined;
   }
 
-  const bodies = (await loadEpisodeBodies(scan.episodes)).bodies;
+  const bodies = (await loadEpisodeBodies(scan.episodes, await readMemoMarkers(work))).bodies;
   let openingExcerpt = "";
   for (const episode of bodies) {
     if (openingExcerpt.length >= PLOT_OPENING_EXCERPT_CHARS) break;

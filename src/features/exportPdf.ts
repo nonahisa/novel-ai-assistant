@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
@@ -390,13 +391,15 @@ async function composePdfExport(
   // ト書きを3字下げ、台詞を人物名の欄に入れる**（作者の裁定、2026-10-09・10-17）。
   // 字下げは空のマスで取るので、1行の字数は指定どおりのまま。ほかの種類は本文を
   // そのまま升目に置く
+  // 作品のメモの印（設計書6.40.8）。紙へ出さない行を決める。壊れた設定では投げる
+  const memoMarkers = await readMemoMarkers(work);
   const html =
     paper.kind === "grid"
       ? buildGridPrintHtml({
           workTitle: work.title,
           episodes: chapters,
           paper: paper.paper,
-          grid: paper.grid,
+          grid: { ...paper.grid, memoMarkers },
           headerFooter,
           author,
           marginMm: paper.marginMm,
@@ -410,6 +413,7 @@ async function composePdfExport(
           // 上で読んだものをそのまま渡す——ここで読み直すと、選んでいる間に
           // 設定が書き換わったときに、見出しと組み方で別の種類を指す
           kind,
+          memoMarkers,
           headerFooter,
           author,
         });
@@ -418,7 +422,7 @@ async function composePdfExport(
     paper.kind === "grid"
       ? `\n${paper.grid.columns}字×${paper.grid.rows}行で本文${
           // 紙と同じ種類を渡す（台本の字下げで行が増える。枚数の知らせと紙がずれない）
-          layoutGrid(chapters, paper.grid, kind).length
+          layoutGrid(chapters, { ...paper.grid, memoMarkers }, kind).length
         }枚（扉を除く）です。`
       : "";
 

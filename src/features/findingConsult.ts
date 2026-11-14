@@ -1,6 +1,7 @@
 import type * as vscode from "vscode";
 import * as path from "../core/paths";
-import { isMemoLine } from "../core/sceneMemo";
+import { memoLineMask, DEFAULT_MEMO_MARKERS } from "../core/sceneMemo";
+import { cachedMemoMarkersForPath } from "../core/memoMarkerStore";
 import type { PlacedFinding } from "../core/sceneMemoRows";
 import type { WorkEntry } from "../models/types";
 import { buildFindingAdviceQuestion } from "../prompts/workChat";
@@ -127,11 +128,18 @@ function neighborParagraph(
   lineIndex: number,
   step: -1 | 1
 ): string | undefined {
+  // 囲み（<!-- ～ -->）は前後の行で決まるので、メモの行は本文全体で決める（設計書6.40.8）
+  const lines: string[] = [];
+  for (let at = 0; at < document.lineCount; at++) lines.push(document.lineAt(at).text);
+  const memo = memoLineMask(
+    lines,
+    cachedMemoMarkersForPath(path.fromUri(document.uri)) ?? DEFAULT_MEMO_MARKERS
+  );
   for (let offset = 1; offset <= NEIGHBOR_SEARCH_LINES; offset++) {
     const index = lineIndex + step * offset;
     if (index < 0 || index >= document.lineCount) return undefined;
-    const text = document.lineAt(index).text;
-    if (!text.trim() || isMemoLine(text)) continue;
+    const text = lines[index];
+    if (!text.trim() || memo[index]) continue;
     return text;
   }
   return undefined;

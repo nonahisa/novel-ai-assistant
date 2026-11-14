@@ -1,4 +1,5 @@
 // ログの書き先：作品ごと（呼び出し側の `openTargetSheet` が `useLogFile(work.folderPath)` 済み）
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -197,6 +198,7 @@ async function collectStyle(
 }> {
   const bodies: string[] = [];
   let unreadable = 0;
+  const memoMarkers = await readMemoMarkers(work);
 
   for (const episode of episodes) {
     // 競合の跡が残ったままのファイルは触らない（両方の版が混ざった
@@ -209,7 +211,7 @@ async function collectStyle(
         content.text,
         episode
       )) {
-        bodies.push(blankMemoLines(source.body));
+        bodies.push(blankMemoLines(source.body, memoMarkers));
       }
     } catch {
       unreadable += 1;

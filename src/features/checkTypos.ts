@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
@@ -280,6 +281,7 @@ export async function checkTypos(
   // （`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
 
   const scan = await scanWork(work);
+  const memoMarkers = await readMemoMarkers(work);
   if (scan.episodes.length === 0) {
     vscode.window.showWarningMessage("本文ファイルが見つかりません。");
     return undefined;
@@ -365,7 +367,7 @@ export async function checkTypos(
     // 全話を繋いで見る。1話だけでは一人称も文語かも決められない。
     // **シーンメモは落とす**（`splitIntoChunks` が本文から消すのと同じ）。
     // 作者の覚え書きを地の文と読むと、人称の判定を誤る
-    bodyText: sources.map((source) => blankMemoLines(source.body)).join("\n"),
+    bodyText: sources.map((source) => blankMemoLines(source.body, memoMarkers)).join("\n"),
     narrativePerson: await readNarrativePerson(work),
     keepWords: keepWords.map((entry) => entry.word),
   });
@@ -409,6 +411,7 @@ export async function checkTypos(
   // 合本の中の話は `chunksOfSources` が詰め直す。ファイルをまたぐまとめは
   // ここで行う（二重に詰めない）
   const perSource = chunksOfSources(sources, {
+    memoMarkers,
     maxChars: chunkChars,
     mergeChars,
   });

@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
@@ -386,7 +387,7 @@ async function loadStyleNote(
     return buildStyleNote(
       collectWorkStyle({
         // シーンメモ（行頭が `//`）は本文ではないので落とす
-        bodyText: blankMemoLines(bodyText),
+        bodyText: blankMemoLines(bodyText, await readMemoMarkers(work)),
         narrativePerson: await readNarrativePerson(work),
         keepWords: keepWords.map((entry) => entry.word),
       })

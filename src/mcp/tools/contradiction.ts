@@ -1,3 +1,4 @@
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import {
   CONTRADICTION_CATEGORIES,
   CONTRADICTION_CHECK_SCHEMA,
@@ -304,7 +305,7 @@ export function pastSceneSourcesOf(folder: string): ExcerptSource[] {
     return left.file.fileName.localeCompare(right.file.fileName, "ja");
   });
   return episodes.flatMap(({ file, episode }) =>
-    excerptSourcesOfEpisode(episode, file.text)
+    excerptSourcesOfEpisode(episode, file.text, memoMarkersOfFolder(folder))
   );
 }
 

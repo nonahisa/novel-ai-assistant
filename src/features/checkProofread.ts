@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -40,7 +41,7 @@ import {
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
 } from "../ai/outputLimit";
-import { blankMemoLines } from "../core/sceneMemo";
+import { blankMemoLines, type MemoMarkers } from "../core/sceneMemo";
 import type { KeepWord } from "../models/keepWord";
 import {
   buildProofreadPrompt,
@@ -703,6 +704,7 @@ async function collectChunks(
   | undefined
 > {
   const scan = await scanWork(work);
+  const memoMarkers = await readMemoMarkers(work);
   const isTarget = (filePath: string): boolean =>
     !options.filePaths ||
     options.filePaths.some(
@@ -733,12 +735,12 @@ async function collectChunks(
     // **合本は話ごとに分ける**（`core/episodeChunks.ts`）。丸ごと1つに
     // すると、全チャンクの話数が先頭の話数になる
     const parts = episodeBodySources(episode.filePath, text, episode);
-    narrationBodies.push(...parts.map((part) => blankMemoLines(part.body)));
+    narrationBodies.push(...parts.map((part) => blankMemoLines(part.body, memoMarkers)));
     if (isTarget(episode.filePath)) sources.push(...parts);
   }
 
   const { issues: narratorSlips, viewpointNarrator } =
-    await findNarratorSlipsInSources(work, sources, narrationBodies.join("\n"));
+    await findNarratorSlipsInSources(work, sources, narrationBodies.join("\n"), memoMarkers);
 
   const narrativeStyle = await readNarrativePerson(work);
   // 作者が「直さない」と決めた語。推敲は原文まるごとを置き換えるので、
@@ -750,7 +752,7 @@ async function collectChunks(
   const workStyle = collectWorkStyle({
     // 全話を繋いで見る。1話だけでは一人称も文語かも決められない。
     // **シーンメモは落とす**（`splitIntoChunks` が本文から消すのと同じ）
-    bodyText: sources.map((source) => blankMemoLines(source.body)).join("\n"),
+    bodyText: sources.map((source) => blankMemoLines(source.body, memoMarkers)).join("\n"),
     narrativePerson: narrativeStyle,
     keepWords: keepWords.map((entry) => entry.word),
   });
@@ -786,6 +788,7 @@ async function collectChunks(
 
   // 合本の中の話だけは、ここで元の大きさまで詰め直す（写しは作らない）
   const chunks: Chunk[] = chunksOfSources(sources, {
+    memoMarkers,
     maxChars,
     mergeChars: chunkSettings.mergeChars,
   });
@@ -827,7 +830,8 @@ async function collectChunks(
 async function findNarratorSlipsInSources(
   work: WorkEntry,
   sources: readonly EpisodeBodySource[],
-  workBodyText: string
+  workBodyText: string,
+  memoMarkers: MemoMarkers
 ): Promise<{ issues: ProofreadIssue[]; viewpointNarrator: ViewpointNarrator | null }> {
   const none = { issues: [], viewpointNarrator: null };
   if (sources.length === 0) return none;
@@ -857,7 +861,7 @@ async function findNarratorSlipsInSources(
   const issues: ProofreadIssue[] = [];
   const skipped: string[] = [];
   for (const source of sources) {
-    const found = findNarratorNameSlips({ text: source.body, narrator, people });
+    const found = findNarratorNameSlips({ text: source.body, narrator, people, memoMarkers });
     if (found.skipped) skipped.push(found.skipped);
     for (const slip of found.slips) {
       issues.push({

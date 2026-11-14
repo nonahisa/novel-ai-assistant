@@ -1,7 +1,7 @@
 import type { EpisodeFile } from "../models/types";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
-import { blankMemoLines } from "./sceneMemo";
+import { blankMemoLines, type MemoMarkers } from "./sceneMemo";
 import type { ExcerptSource } from "./mentionExcerpts";
 import { episodeLabel } from "./episodeLabel";
 
@@ -28,7 +28,8 @@ export type ExcerptEpisode = Pick<
 
 export function excerptSourcesOfEpisode(
   episode: ExcerptEpisode,
-  rawText: string
+  rawText: string,
+  markers?: MemoMarkers
 ): ExcerptSource[] {
   // 合本は話ごとの出典にする。1つの塊にすると
   // 「どの話に書いてあったか」を示せない
@@ -36,7 +37,7 @@ export function excerptSourcesOfEpisode(
   if (collected) {
     const sources: ExcerptSource[] = [];
     for (const inner of collected) {
-      const body = blankMemoLines(inner.body);
+      const body = blankMemoLines(inner.body, markers);
       if (!body.trim()) continue;
       sources.push({
         label: collectedEpisodeLabel(episode, inner),
@@ -48,7 +49,7 @@ export function excerptSourcesOfEpisode(
     return sources;
   }
 
-  const body = blankMemoLines(parseEpisodeMetadata(rawText).body);
+  const body = blankMemoLines(parseEpisodeMetadata(rawText).body, markers);
   if (!body.trim()) return [];
   return [
     {

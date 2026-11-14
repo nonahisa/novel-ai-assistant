@@ -1,3 +1,4 @@
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import type { EpisodeFile } from "../../models/types";
@@ -40,6 +41,7 @@ export function readEpisodeFiles(folder: string): McpEpisodeFiles {
   const episodes: EpisodeFile[] = [];
   const texts = new Map<string, string>();
   const unreadable: string[] = [];
+  const memoMarkers = memoMarkersOfFolder(folder);
 
   for (const relative of listBodyFiles(folder)) {
     const filePath = resolveInsideFolder(folder, relative);
@@ -84,7 +86,7 @@ export function readEpisodeFiles(folder: string): McpEpisodeFiles {
       // **競合の跡が残るものは数えない**（製品と同じ。両方の版が混ざった字数を進捗に見せない）
       counts: hasConflictMarkers
         ? emptyCounts()
-        : countEpisodeChars(text, { ext, excludeRuby: true }, { collected, metaBody: meta.body }),
+        : countEpisodeChars(text, { ext, excludeRuby: true, memoMarkers }, { collected, metaBody: meta.body }),
       hasMetadata: meta.hasMetadata,
       metaTitle: meta.title,
       declaredCharCount: meta.declaredCharCount,

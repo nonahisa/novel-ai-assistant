@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { AIWRITER_DIR, type WorkEntry } from "../models/types";
@@ -180,6 +181,7 @@ export async function runSettingsExtraction(
 
   // 切る。**競合マーカーのあるファイルはAIに掛けない**（規則1）
   const scan = await scanWork(work);
+  const memoMarkers = await readMemoMarkers(work);
   const episodes =
     filePaths.length > 0
       ? scan.episodes.filter((episode) =>
@@ -195,7 +197,7 @@ export async function runSettingsExtraction(
       continue;
     }
     const relative = path.relative(work.folderPath, episode.filePath);
-    for (const item of externalChunksOfText(relative, file.text, maxChars)) {
+    for (const item of externalChunksOfText(relative, file.text, maxChars, memoMarkers)) {
       items.push({ ...item, relative });
     }
   }
@@ -227,7 +229,7 @@ export async function runSettingsExtraction(
   const settings = new SettingsExtractionCollector(initialAbilityTermOf(abilitySystem));
   // 作品の語り手は全話を繋いだ本文で1回だけ決める（製品と同じ。設計書6.5.12）
   const workNarrator = workNarratorContextOf(
-    items.map((item) => blankMemoLines(item.chunk.text)).join("\n"),
+    items.map((item) => blankMemoLines(item.chunk.text, memoMarkers)).join("\n"),
     loaded.characters
   );
   const replay = new ExtractionReplay(

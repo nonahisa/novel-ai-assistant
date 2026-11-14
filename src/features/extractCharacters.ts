@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import type { FeatureRunResult } from "../core/proofreadingSuite";
 import * as path from "../core/paths";
@@ -432,6 +433,7 @@ export async function extractCharacters(
   // （`contextSizeForPrompt`）へ揃え、出力の見込みだけを渡す。
 
   const scan = await scanWork(work);
+  const memoMarkers = await readMemoMarkers(work);
   if (scan.episodes.length === 0) {
     vscode.window.showWarningMessage("本文ファイルが見つかりません。");
     return "failed";
@@ -474,6 +476,7 @@ export async function extractCharacters(
     // 「まとめない」（0）を選んでいるときは、まとめないまま送る
     rawChunks.push(
       ...chunksOfEpisodeFile(ep.filePath, file.text, ep, {
+        memoMarkers,
         maxChars: chunkChars,
         mergeChars,
       })
@@ -747,7 +750,7 @@ export async function extractCharacters(
     推敲と同じ（`detectNarrator`）。決まらない作品では今までと何も変わらない
   */
   const workNarrator = workNarratorContextOf(
-    chunks.map((chunk) => blankMemoLines(chunk.text)).join("\n"),
+    chunks.map((chunk) => blankMemoLines(chunk.text, memoMarkers)).join("\n"),
     loaded.characters
   );
   const replay = new ExtractionReplay(
@@ -1291,10 +1294,11 @@ export async function extractCharacters(
       const { sources } = await loadExcerptSources(work);
       const sentences = describeSharedFirstPersonNotices(
         findSharedFirstPersonNotices({
-          workBodyText: sources.map((source) => blankMemoLines(source.text)).join("\n"),
+          workBodyText: sources.map((source) => blankMemoLines(source.text, memoMarkers)).join("\n"),
           people: merged.characters,
           landed,
           episodes: sources,
+          memoMarkers,
         })
       );
       for (const sentence of sentences) {

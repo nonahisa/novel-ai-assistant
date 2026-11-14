@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
@@ -101,6 +102,8 @@ export async function copyBodyForPosting(
   // 投稿欄の1行目が空いた状態で公開される
   const conversion = convertForPosting(body, target, {
     trimEdges: true,
+    // 作品のメモの印（設計書6.40.8）。壊れた設定では投げる——黙って既定にすると選んだ印の行が出る
+    memoMarkers: await readMemoMarkers(work),
   });
   if (!conversion.text) {
     void vscode.window.showWarningMessage(

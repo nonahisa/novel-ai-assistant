@@ -1,3 +1,4 @@
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { AIWRITER_DIR } from "../../models/types";
@@ -148,7 +149,7 @@ export function stageNarratorMovesFs(
   if (sources.length === 0) return result;
   // 語り手の決め方は製品の抽出・「AIで再読込」と同じ（全話を繋いだ本文）
   const context = workNarratorContextOf(
-    sources.map((source) => blankMemoLines(source.text)).join("\n"),
+    sources.map((source) => blankMemoLines(source.text, memoMarkersOfFolder(folder))).join("\n"),
     ledger.records
   );
   if (!context) return result;

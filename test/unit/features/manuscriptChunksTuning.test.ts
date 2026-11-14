@@ -22,6 +22,8 @@ function episodeText(chapter: number): string {
   return Array.from({ length: CHARS_PER_EPISODE / 100 }, () => paragraph).join("\n");
 }
 
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
+
 vi.mock("../../../src/core/scanner", () => ({
   scanWork: vi.fn(async () => ({
     episodes: Array.from({ length: EPISODES }, (_, index) => ({

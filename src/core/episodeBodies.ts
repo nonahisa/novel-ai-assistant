@@ -1,6 +1,7 @@
 import type { EpisodeFile } from "../models/types";
 import { readTextFile } from "./textFile";
 import { splitEpisodeBodyParts } from "./episodeBodyParts";
+import type { MemoMarkers } from "./memoMarkers";
 
 /**
  * 話ごとの本文を取り出す。
@@ -43,7 +44,8 @@ export interface EpisodeBodiesResult {
 }
 
 export async function loadEpisodeBodies(
-  episodes: EpisodeFile[]
+  episodes: EpisodeFile[],
+  memoMarkers?: MemoMarkers
 ): Promise<EpisodeBodiesResult> {
   const bodies: EpisodeBody[] = [];
   const conflicted: string[] = [];
@@ -61,7 +63,7 @@ export async function loadEpisodeBodies(
     for (const part of splitEpisodeBodyParts(content.text, {
       chapter: file.chapterStart,
       title: file.subtitle ?? file.metaTitle,
-    })) {
+    }, memoMarkers)) {
       bodies.push({ file, ...part });
     }
   }

@@ -1,3 +1,5 @@
+import type { MemoMarkers } from "../../core/memoMarkers";
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { z } from "zod";
@@ -647,7 +649,7 @@ function readResume(folder: string): NovelReadResult {
       format
     ),
     openForeshadows: openForeshadowsForResume(foreshadows.records),
-    openMemos: memosOf(episodes, texts, format),
+    openMemos: memosOf(episodes, texts, format, memoMarkersOfFolder(folder)),
     episodePlot: episodePlotOf(folder, chapter, notices),
     todayGoal: null,
     notices,
@@ -700,14 +702,15 @@ function tailOf(
 function memosOf(
   episodes: readonly EpisodeFile[],
   texts: ReadonlyMap<string, string>,
-  format: WorkFormatKey | undefined
+  format: WorkFormatKey | undefined,
+  memoMarkers: MemoMarkers
 ): ResumeMemo[] {
   const memos: ResumeMemo[] = [];
   for (const episode of episodes) {
     const text = texts.get(episode.filePath);
     if (text === undefined) continue;
     const labels = collectedLabelIndex(text, labelOf(episode, format), format);
-    for (const memo of parseMemos(text, episode.filePath)) {
+    for (const memo of parseMemos(text, episode.filePath, memoMarkers)) {
       memos.push({ label: labels.labelAt(memo.line), line: memo.line, tag: memo.tag, text: memo.text });
     }
   }
@@ -1322,7 +1325,7 @@ function readPosting(folder: string, input: NovelReadInput): PostingReadResult {
     throw new McpToolError(`${shown} に本文が見つかりませんでした。`);
   }
 
-  const converted = convertForPosting(body, postingCopyTargetFor(site), { trimEdges: true });
+  const converted = convertForPosting(body, postingCopyTargetFor(site), { trimEdges: true, memoMarkers: memoMarkersOfFolder(folder) });
   const lines = converted.text.split("\n");
   const offset = input.offset ?? 0;
   // note は貼り付けでは入らないものがある。製品の知らせ（`noteCopyMessage`）と同じことを言う

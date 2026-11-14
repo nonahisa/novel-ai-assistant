@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "./memoMarkerStore";
 import { WorkEntry } from "../models/types";
 import { scanWork } from "./scanner";
 import { readTextFile } from "./textFile";
@@ -23,6 +24,8 @@ export async function loadExcerptSources(
   work: WorkEntry
 ): Promise<{ sources: ExcerptSource[]; conflicted: string[] }> {
   const scan = await scanWork(work);
+  // 作品のメモの印（設計書6.40.8）。壊れた設定では投げる（直さずに止める）
+  const memoMarkers = await readMemoMarkers(work);
   const sources: ExcerptSource[] = [];
   const conflicted: string[] = [];
 
@@ -32,7 +35,7 @@ export async function loadExcerptSources(
       conflicted.push(episode.fileName);
       continue;
     }
-    sources.push(...excerptSourcesOfEpisode(episode, file.text));
+    sources.push(...excerptSourcesOfEpisode(episode, file.text, memoMarkers));
   }
 
   return { sources, conflicted };

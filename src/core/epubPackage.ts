@@ -1,3 +1,4 @@
+import type { MemoMarkers } from "./memoMarkers";
 import { kindLineCss } from "./kindLines";
 import type { WorkKindKey } from "./workKind";
 import { zipSync, type Zippable } from "fflate";
@@ -235,6 +236,8 @@ export interface EpubAfterwordBlock {
 
 export interface EpubBook {
   config: BookConfig;
+  /** その作品のメモの印（設計書6.40.8）。本へ入れない行を決める。省くと既定（`//` と `／／`） */
+  memoMarkers?: MemoMarkers;
   chapters: readonly EpubChapter[];
   /** 表紙画像。無ければ題名と作者名の扉になる */
   cover: EpubCover | null;
@@ -422,7 +425,7 @@ export function buildEpub(book: EpubBook): Uint8Array {
     plates: plates.faces,
     plateImages: plates.images,
     // **中身の無いあとがきは面ごと出さない**（設計書6.65.15）
-    afterword: afterwordOf(blocks),
+    afterword: afterwordOf(blocks, book.memoMarkers),
     ornaments,
   };
   const files: Zippable = {
@@ -519,6 +522,7 @@ export function buildEpub(book: EpubBook): Uint8Array {
         pageClass: pageLayoutClassFor("afterword", config.pageLayouts),
         body: buildAfterwordFragment(packaged.afterword, {
           collapseBlankLines: config.collapseBlankLines,
+          memoMarkers: book.memoMarkers,
           vertical: afterwordVertical,
           pageLayouts: config.pageLayouts,
         }),
@@ -554,6 +558,7 @@ export function buildEpub(book: EpubBook): Uint8Array {
     files[`${ROOT}/${chapter.fileName}`] = encode(
       buildChapterXhtml(chapter, {
         collapseBlankLines: config.collapseBlankLines,
+        memoMarkers: book.memoMarkers,
         cssHref: CSS_NAME,
         vertical,
         // 本の中では、挿絵は機械名で指す（`packIllustrations` を参照）
@@ -598,13 +603,14 @@ function defaultBlocksOf(config: BookConfig): EpubBlock[] {
  * 「まだ書いていない」と読む——見出しだけの空の面を1つ挟むほうが害が大きい。
  */
 function afterwordOf(
-  blocks: readonly EpubBlock[]
+  blocks: readonly EpubBlock[],
+  memoMarkers: MemoMarkers | undefined
 ): EpubAfterwordBlock | null {
   const found = blocks.find(
     (block): block is EpubAfterwordBlock => block.type === "afterword"
   );
   if (!found) return null;
-  return countParagraphs(found.text) > 0 ? found : null;
+  return countParagraphs(found.text, memoMarkers) > 0 ? found : null;
 }
 
 /**
@@ -1493,6 +1499,7 @@ export function buildAfterwordFragment(
   afterword: { text: string; notation: NotationMode },
   options: {
     collapseBlankLines: boolean;
+    memoMarkers?: MemoMarkers;
     vertical: boolean;
     /** 面ごとの文字の体裁（作者の依頼、2026-09-13）。あとがきのぶんを見る */
     pageLayouts?: BookPageLayouts;
@@ -1506,6 +1513,7 @@ export function buildAfterwordFragment(
     },
     {
       collapseBlankLines: options.collapseBlankLines,
+      memoMarkers: options.memoMarkers,
       vertical: options.vertical,
       // **本文の話には付かない印**。あとがきの面だけに体裁を当てる
       // （選んでいなければ空文字＝いままでと同じ `<section class="chapter">`）

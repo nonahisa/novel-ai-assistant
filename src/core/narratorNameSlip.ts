@@ -7,7 +7,7 @@ import {
 } from "./proofreadValidation";
 import { maskQuoted } from "./quotedSpans";
 import { sceneRanges, type SceneRange } from "./sceneBreaks";
-import { blankMemoLines } from "./sceneMemo";
+import { blankMemoLines, type MemoMarkers } from "./sceneMemo";
 import { countNarrationFirstPersons } from "./workStyleFacts";
 import { hasUnnamedNarratorName } from "./unnamedNarrator";
 
@@ -166,10 +166,12 @@ export function findNarratorNameSlips(options: {
   text: string;
   narrator: NarratorHint;
   people: readonly Character[];
+  /** その作品のメモの印（設計書6.40.8）。省くと既定 */
+  memoMarkers?: MemoMarkers;
 }): { slips: NarratorNameSlip[]; skipped?: NarratorSlipSkip } {
   const { narrator } = options;
   // シーンメモは本文ではない。**行は消さずに空にする**（行番号を保つ）
-  const body = blankMemoLines(options.text);
+  const body = blankMemoLines(options.text, options.memoMarkers);
   const rawLines = body.split("\n");
 
   const forms = narratorNameForms(narrator, options.people);

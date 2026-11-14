@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
@@ -107,7 +108,7 @@ export async function generateSynopses(
     return "failed";
   }
 
-  const loaded = await loadEpisodeBodies(scan.episodes);
+  const loaded = await loadEpisodeBodies(scan.episodes, await readMemoMarkers(work));
   if (loaded.bodies.length === 0) {
     vscode.window.showWarningMessage("あらすじを作れる本文がありません。");
     return "failed";

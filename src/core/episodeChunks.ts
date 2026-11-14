@@ -1,3 +1,4 @@
+import type { MemoMarkers } from "./memoMarkers";
 import { parseCollectedFile } from "./collectedFile";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { mergeAdjacentChunks, splitIntoChunks, type Chunk } from "./chunker";
@@ -53,6 +54,8 @@ export interface EpisodeBodySource {
 export interface EpisodeChunkOptions {
   /** 1チャンクの目安文字数 */
   maxChars: number;
+  /** その作品のメモの印（設計書6.40.8） */
+  memoMarkers: MemoMarkers | undefined;
   /**
    * 合本の中の話を、何字までまとめ直すか。0・未指定ならまとめない。
    *
@@ -151,7 +154,7 @@ export function chunksOfSources(
         source.body,
         source.chapterStart,
         source.chapterEnd,
-        { maxChars: options.maxChars }
+        { maxChars: options.maxChars, memoMarkers: options.memoMarkers }
       ),
       source.lineOffset
     );

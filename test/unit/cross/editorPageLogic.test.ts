@@ -3,7 +3,9 @@ import fs from "node:fs";
 import nodePath from "node:path";
 import vm from "node:vm";
 import { NOTATION_RULES, notationModeFor, tokenizeLine } from "../../../src/core/manuscriptRender";
-import { MEMO_LINE_PATTERN } from "../../../src/core/sceneMemo";
+import { DEFAULT_MEMO_MARKERS, scanMemoLines, stripMemoMark } from "../../../src/core/sceneMemo";
+import { memoMarkersOf, resolveMemoMarkers, type MemoMarkers } from "../../../src/core/memoMarkers";
+import { MEMO_MARKER_SAMPLES } from "../support/memoMarkerSamples";
 import { countChars } from "../../../src/core/charCount";
 import {
   buildInboxResult,
@@ -48,13 +50,17 @@ interface Token {
 
 interface EditorLogicShape {
   NOTATION_RULES: unknown;
-  MEMO_LINE_PATTERN: string;
+  DEFAULT_MEMO_MARKERS: MemoMarkers;
+  memoMarkersOf(ids: string[]): MemoMarkers;
+  memoMarkersFromConfig(value: unknown): MemoMarkers | null;
+  memoScanLines(lines: string[], markers: MemoMarkers): unknown;
+  memoStripMark(line: string, markers: MemoMarkers): string;
   INBOX_VERSION: number;
   EDITOR_SUFFIX: string;
   notationModeFor(file: string): string;
   tokenizeLine(line: string, mode: string): Token[];
-  isMemoLine(line: string): boolean;
-  countChars(text: string, file: string): { gross: number; net: number };
+  isMemoLine(line: string, markers?: MemoMarkers): boolean;
+  countChars(text: string, file: string, markers?: MemoMarkers): { gross: number; net: number };
   isEditorBoxName(name: string): boolean;
   buildBodyBox(record: Record<string, unknown>, meta: { sentAt: string; device: string; writer: string }): unknown;
   parseBox(text: string): unknown;
@@ -159,10 +165,40 @@ describe("記法の組み方は、パソコンの原稿エディターと同じ"
 
 describe("作者の付箋と字数", () => {
   it("付箋の行の決まりが core と同じ", () => {
-    expect(logic.MEMO_LINE_PATTERN).toBe(MEMO_LINE_PATTERN);
+    expect(logic.DEFAULT_MEMO_MARKERS).toEqual(DEFAULT_MEMO_MARKERS);
     expect(logic.isMemoLine("// メモ")).toBe(true);
     expect(logic.isMemoLine("　／／全角")).toBe(true);
     expect(logic.isMemoLine("URL は http://example")).toBe(false);
+  });
+
+  /** 作品ごとの印（設計書6.40.8）。ページの判定は core の写しなので、同じ見本で同じ答えになるか */
+  it("作品ごとの印の判定と字数が core と同じ", () => {
+    for (const sample of MEMO_MARKER_SAMPLES) {
+      expect(logic.memoScanLines(sample.lines, sample.markers), sample.name).toEqual(
+        scanMemoLines(sample.lines, sample.markers)
+      );
+      for (const line of sample.lines) {
+        expect(logic.memoStripMark(line, sample.markers)).toBe(stripMemoMark(line, sample.markers));
+      }
+      const text = sample.lines.join("\n");
+      for (const file of ["本文/001.md", "本文/001.txt"]) {
+        const expected = countChars(text, file.endsWith(".md"), sample.markers);
+        const actual = logic.countChars(text, file, sample.markers);
+        expect(actual, `${sample.name}：${file}`).toEqual({ gross: expected.gross, net: expected.net });
+      }
+    }
+  });
+
+  it("設定の欄から作る印の組が core と同じ。読めない欄は既定にせず null", () => {
+    for (const ids of [["slash"], ["percent", "comment"], ["backslash", "future"]]) {
+      expect(logic.memoMarkersFromConfig(ids)).toEqual(resolveMemoMarkers(ids));
+      expect(logic.memoMarkersOf(ids)).toEqual(memoMarkersOf(ids));
+    }
+    expect(logic.memoMarkersFromConfig(undefined)).toEqual(resolveMemoMarkers(undefined));
+    for (const broken of ["percent", [1], [], ["unknown"], null]) {
+      expect(logic.memoMarkersFromConfig(broken)).toBeNull();
+      expect(() => resolveMemoMarkers(broken)).toThrow();
+    }
   });
 
   const texts = [

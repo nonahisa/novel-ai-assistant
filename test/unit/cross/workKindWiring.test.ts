@@ -80,7 +80,7 @@ describe("出力", () => {
     // 公募の升目も（台本のト書きの字下げ。作者の裁定、2026-10-09）。
     // 枚数の知らせの組み直しにも同じ種類を渡す（紙と枚数がずれない）
     expect(body(pdf, "buildGridPrintHtml({", 600)).toContain("kind,");
-    expect(pdf).toContain("layoutGrid(chapters, paper.grid, kind)");
+    expect(pdf).toContain("layoutGrid(chapters, { ...paper.grid, memoMarkers }, kind)");
   });
 
   test("EPUBは書き出しも画面も種類を渡す", () => {

@@ -137,6 +137,6 @@ describe("投稿サイト用のコピー", () => {
     // 選んだところ（LF空間の位置を、文書の位置へ直してから切る）
     expect(call?.[0]).toContain("picked");
     expect(source).toContain("fromLfOffset(whole, selection.start)");
-    expect(source).toContain("convertForPosting(source, target)");
+    expect(source).toContain("convertForPosting(source, target, {");
   });
 });

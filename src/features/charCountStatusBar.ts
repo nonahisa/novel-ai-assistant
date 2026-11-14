@@ -1,3 +1,4 @@
+import { cachedMemoMarkersForPath } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
@@ -117,7 +118,9 @@ export class CharCountStatusBar implements vscode.Disposable {
 
     // 目安（設計書6.109.7）も同じ本文から測るので、1回だけ取り出す
     const text = editor.document.getText();
-    const counts = countChars(text, ext === ".md" ? excludeRuby : false);
+    // 作品のメモの印（設計書6.40.8）。表示だけなので、最後に読んだ印を使う（無ければ既定）
+    const memoMarkers = cachedMemoMarkersForPath(location);
+    const counts = countChars(text, ext === ".md" ? excludeRuby : false, memoMarkers);
     const value = pickCount(counts, mode);
     const label = countModeLabel(mode);
 
@@ -127,7 +130,8 @@ export class CharCountStatusBar implements vscode.Disposable {
     if (!sel.isEmpty) {
       const selCounts = countChars(
         editor.document.getText(sel),
-        ext === ".md" ? excludeRuby : false
+        ext === ".md" ? excludeRuby : false,
+        memoMarkers
       );
       const selValue = pickCount(selCounts, mode);
       selectionPart = ` (選択 ${formatCount(selValue)})`;
@@ -186,7 +190,7 @@ export class CharCountStatusBar implements vscode.Disposable {
       .then(([summary, kind]) => {
         if (generation !== this.generation) return;
         // 小説では目安が undefined——これまでどおり何も足さない
-        const measure = kind ? measureKindText(kind, text, counts) : undefined;
+        const measure = kind ? measureKindText(kind, text, counts, memoMarkers) : undefined;
         if (!summary && !measure) return;
         const fileText = fileTextWith(measure);
         const fileTooltip = fileTooltipWith(measure);

@@ -1,3 +1,4 @@
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import {
@@ -107,7 +108,7 @@ function readAnnounceEpisode(folder: string, filePath: string, chapter?: number)
   const parts = splitEpisodeBodyParts(text, {
     chapter: file.chapterStart,
     title: file.subtitle ?? file.metaTitle,
-  });
+  }, memoMarkersOfFolder(folder));
   if (parts.length === 0) {
     throw new McpToolError(`${filePath} に本文が見つかりませんでした。`);
   }

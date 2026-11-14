@@ -1,3 +1,5 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
+import type { MemoMarkers } from "../core/memoMarkers";
 import * as vscode from "vscode";
 import { conflictFixHint } from "../core/syncEntryNames";
 import * as path from "../core/paths";
@@ -191,6 +193,8 @@ type EpubExportOutcome =
  */
 async function composeEpubExport(work: WorkEntry): Promise<EpubExportOutcome> {
   const scan = await scanWork(work);
+  // 作品のメモの印（設計書6.40.8）。本へ入れない行を決める。壊れた設定では投げる
+  const memoMarkers = await readMemoMarkers(work);
   if (scan.episodes.length === 0) {
     return {
       ok: false,
@@ -325,6 +329,7 @@ async function composeEpubExport(work: WorkEntry): Promise<EpubExportOutcome> {
         index === 0
           ? await collectPlacements({
               work,
+              memoMarkers,
               config,
               episodePath,
               heading: part.heading,
@@ -428,6 +433,7 @@ async function composeEpubExport(work: WorkEntry): Promise<EpubExportOutcome> {
   try {
     epub = buildEpub({
       config,
+      memoMarkers,
       chapters,
       cover,
       backCover,
@@ -517,9 +523,10 @@ async function collectPlacements(input: {
   body: string;
   images: Map<string, Uint8Array | null>;
   notes: string[];
+  memoMarkers: MemoMarkers;
 }): Promise<{ illustrations: EpubIllustration[]; pageBreaks: number[] }> {
   // 段落の数え方は `epubXhtml.ts` が1か所で持つ（詰める前の段落番号）
-  const paragraphs = countParagraphs(input.body);
+  const paragraphs = countParagraphs(input.body, input.memoMarkers);
   const illustrations: EpubIllustration[] = [];
 
   for (const item of placementsIn(
@@ -674,7 +681,7 @@ async function readAfterword(
     return null;
   }
 
-  if (countParagraphs(file.text) === 0) {
+  if (countParagraphs(file.text, await readMemoMarkers(work)) === 0) {
     notices.push(
       `${where} にまだ本文がないので、あとがきの面は入れていません。`
     );

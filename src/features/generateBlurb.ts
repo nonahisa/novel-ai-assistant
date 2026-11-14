@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
@@ -509,7 +510,7 @@ async function collectMaterial(
     return undefined;
   }
 
-  const bodies = (await loadEpisodeBodies(scan.episodes)).bodies;
+  const bodies = (await loadEpisodeBodies(scan.episodes, await readMemoMarkers(work))).bodies;
   if (bodies.length === 0) {
     vscode.window.showWarningMessage("読める本文がありません。");
     return undefined;

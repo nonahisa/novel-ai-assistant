@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { listenForFocusWithoutPointer, showQuickPickKeepingFocus } from "../views/pickerFocus";
 import { WorkEntry } from "../models/types";
@@ -2347,8 +2348,9 @@ export class SettingsPanel {
   } | null> {
     try {
       const sources = await this.loadedExcerptSources();
+      const memoMarkers = await readMemoMarkers(this.work);
       const context = workNarratorContextOf(
-        sources.map((source) => blankMemoLines(source.text)).join("\n"),
+        sources.map((source) => blankMemoLines(source.text, memoMarkers)).join("\n"),
         this.characters
       );
       return context ? { context, sources } : null;

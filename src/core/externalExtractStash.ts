@@ -1,3 +1,4 @@
+import type { MemoMarkers } from "./memoMarkers";
 import type { Chunk } from "./chunker";
 import { chunksOfSources, episodeBodySources } from "./episodeChunks";
 import { parseEpisodeFileName } from "./episodeParser";
@@ -122,7 +123,8 @@ export function externalChunkIdOf(relative: string, chunk: Chunk, maxChars: numb
 export function externalChunksOfText(
   relative: string,
   text: string,
-  maxChars: number
+  maxChars: number,
+  memoMarkers?: MemoMarkers
 ): Array<{ chunkId: string; chunk: Chunk }> {
   const fileName = relative.split(/[\\/]/u).pop() ?? relative;
   const parsed = parseEpisodeFileName(fileName);
@@ -130,7 +132,7 @@ export function externalChunksOfText(
     chapterStart: parsed.chapterStart,
     chapterEnd: parsed.chapterEnd,
   });
-  return chunksOfSources(sources, { maxChars }).map((chunk) => ({
+  return chunksOfSources(sources, { maxChars, memoMarkers }).map((chunk) => ({
     chunkId: externalChunkIdOf(relative, chunk, maxChars),
     chunk,
   }));

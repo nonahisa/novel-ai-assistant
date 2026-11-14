@@ -483,8 +483,8 @@ var GitHubWorks = (function () {
       var config = await r.readOptional(repoPath({ path: dir }, ".aiwriter/config.json"));
       if (!config) return null;
       var parsed = {};
-      try { parsed = JSON.parse(toLfText(config.text)) || {}; } catch (error) { parsed = {}; }
-      return { path: dir, title: str(parsed.workTitle) || dir || repo.name, manuscriptDir: str(parsed.manuscriptDir) || "本文", lastCommitAt: "" };
+      try { parsed = JSON.parse(toLfText(config.text)) || {}; } catch (error) { parsed = { memoMarkers: null }; }
+      return { path: dir, title: str(parsed.workTitle) || dir || repo.name, manuscriptDir: str(parsed.manuscriptDir) || "本文", memoMarkers: parsed.memoMarkers, lastCommitAt: "" };
     });
     var works = found.filter(Boolean);
     // 最後のコミットの時刻（作品のフォルダーで絞る）。最近更新のあった作品から開く

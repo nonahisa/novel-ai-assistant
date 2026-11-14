@@ -5,7 +5,7 @@ import { narratorNameSubjectPattern } from "./narratorNamePattern";
 import { narratorNameForms } from "./narratorNameSlip";
 import { maskQuoted } from "./quotedSpans";
 import { sceneRanges } from "./sceneBreaks";
-import { blankMemoLines } from "./sceneMemo";
+import { blankMemoLines, type MemoMarkers } from "./sceneMemo";
 import { FOREIGN_SCENE_MIN_FIRST_PERSON } from "./sceneNarrators";
 import { detectFirstPerson, narrationFirstPersonOf } from "./workStyleFacts";
 
@@ -68,6 +68,8 @@ export function findSharedFirstPersonNotices(input: {
   landed: MergeResult["landed"];
   /** 作品の話ごとの本文（条件2の手がかりを探す） */
   episodes: readonly NoticeEpisode[];
+  /** その作品のメモの印（設計書6.40.8）。省くと既定 */
+  memoMarkers?: MemoMarkers;
 }): SharedFirstPersonNotice[] {
   if (input.landed.length === 0) return [];
   // 語り手の一人称の数え方は `detectNarrator` と同じ（10回未満・6割未満なら決めない）
@@ -96,7 +98,7 @@ export function findSharedFirstPersonNotices(input: {
   for (const episode of input.episodes) {
     const chapter = episode.chapter;
     if (typeof chapter !== "number" || !Number.isSafeInteger(chapter)) continue;
-    const look = lookAtEpisode(episode.text, firstPerson, pattern);
+    const look = lookAtEpisode(episode.text, firstPerson, pattern, input.memoMarkers);
     const before = byChapter.get(chapter);
     byChapter.set(chapter, {
       narrated: (before?.narrated ?? false) || look.narrated,
@@ -130,9 +132,9 @@ interface ChapterLook {
  * 主語として出るかを見る。**場面で見る**——三人称の場面に主人公の名前が
  * 出るのは当たり前なので、そこは数えない。
  */
-function lookAtEpisode(text: string, firstPerson: string, pattern: RegExp): ChapterLook {
+function lookAtEpisode(text: string, firstPerson: string, pattern: RegExp, markers?: MemoMarkers): ChapterLook {
   // シーンメモは本文ではない。行は消さずに空にする（場面の区切りの位置を保つ）
-  const body = blankMemoLines(text);
+  const body = blankMemoLines(text, markers);
   const lines = body.split("\n");
   // 台詞は入れ子を数えて伏せる（人称のよじれと同じ。`quotedSpans.ts`）
   const masked = maskQuoted(body, "　").split("\n");

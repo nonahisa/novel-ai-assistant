@@ -17,6 +17,7 @@ import {
 import { readWorkFormat } from "./workFormatStore";
 import type { WorkFormatKey } from "./workFormat";
 import { readWorkConfig, workPaths } from "./workRegistry";
+import { resolveMemoMarkers } from "./memoMarkers";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { isWorkInfoFile } from "./workInfoFile";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
@@ -138,6 +139,8 @@ export async function scanWork(work: WorkEntry): Promise<{
 
   const config = await readWorkConfig(work);
   const p = workPaths(work, config);
+  // 作品のメモの印（設計書6.40.8）。字数と付箋の印をこの組で数える（壊れた欄は読み込みで止まっている）
+  const memoMarkers = resolveMemoMarkers(config?.memoMarkers);
 
   /*
     **ここだけ読み口を切り替える**（設計書6.107）。走査は576ファイルを
@@ -341,10 +344,10 @@ export async function scanWork(work: WorkEntry): Promise<{
         const body = episodeBodyForCount(text, parsed);
         // ルビ記法はMarkdownのみ対象。
         // **文字数にメモは入らない**（数える側が落とす。設計書6.40.2）
-        counts = countEpisodeChars(text, { ext, excludeRuby }, parsed);
+        counts = countEpisodeChars(text, { ext, excludeRuby, memoMarkers }, parsed);
         // **ここで数えるのは、既に読んだ本文をもう一度読まないため**である。
         // 一覧の印のためだけに、全話をもう一巡することになる
-        memoBadge = memoBadgeText(parseMemos(body));
+        memoBadge = memoBadgeText(parseMemos(body, "", memoMarkers));
         // **シーンメモの印も「数え」に入れる**（設計書6.107）。同じ本文を
         // 一度で済ませるために、ここへ並べて置いてあるものである
         countMs += performance.now() - countStartedAt;

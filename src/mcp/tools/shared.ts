@@ -36,6 +36,7 @@ import { decideChunkSize, type Chunk } from "../../core/chunker";
 import { matchWorkFormat, type WorkFormatKey } from "../../core/workFormat";
 import { parsePlotMarkdown } from "../../core/plotDoc";
 import { externalChunkIdOf, externalChunksOfText } from "../../core/externalExtractStash";
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 
 /**
  * ツールの土台（設計書6.87.8）。
@@ -529,7 +530,7 @@ export function chunksOfWorkFile(
   });
   const maxChars = decideChunkSize(numCtx);
   return {
-    chunks: chunksOfSources(sources, { maxChars }),
+    chunks: chunksOfSources(sources, { maxChars, memoMarkers: memoMarkersOfFolder(folder) }),
     maxChars,
     sources,
   };
@@ -631,7 +632,7 @@ export function chunkFromId(folder: string, chunkId: string): Chunk {
   const parsed = parseChunkId(chunkId);
   const text = readBody(folder, parsed.filePath);
   // **切り方は拡張機能の `run.request`（settings）と同じ関数**（貯めた答えを照合するため）
-  const chunks = externalChunksOfText(parsed.filePath, text, parsed.maxChars).map(
+  const chunks = externalChunksOfText(parsed.filePath, text, parsed.maxChars, memoMarkersOfFolder(folder)).map(
     (item) => item.chunk
   );
   // **話数まで見て引く。** `index` だけで引くと、合本では最初の話の

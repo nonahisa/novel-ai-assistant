@@ -1,3 +1,4 @@
+import { DEFAULT_MEMO_MARKERS } from "../../../src/core/memoMarkers";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { commands, window, workspace, type StubMessage } from "../support/vscodeStub";
 import type { AIRegistry } from "../../../src/ai/registry";
@@ -68,6 +69,8 @@ const state = vi.hoisted(() => ({
     readonly recoveryPaths: string[];
   },
 }));
+
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
 
 vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () =>
@@ -1813,7 +1816,7 @@ describe("人物抽出フロー", () => {
       "灯が歩いた。",
       1,
       1,
-      { maxChars: 321 }
+      { maxChars: 321, memoMarkers: DEFAULT_MEMO_MARKERS }
     );
   });
 
@@ -1853,7 +1856,7 @@ describe("人物抽出フロー", () => {
       "灯が歩いた。",
       1,
       1,
-      { maxChars: 1000 }
+      { maxChars: 1000, memoMarkers: DEFAULT_MEMO_MARKERS }
     );
   });
 

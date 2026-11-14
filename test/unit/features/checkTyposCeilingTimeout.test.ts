@@ -32,6 +32,8 @@ const state = vi.hoisted(() => ({
 /** 正しく読める「指摘なし」の応答（`parseTypoCheckResult` が受ける形） */
 const EMPTY_RESULT = JSON.stringify({ issues: [] });
 
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
+
 vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () => ({
     provider: {

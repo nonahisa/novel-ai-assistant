@@ -1,3 +1,4 @@
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { AIWRITER_DIR } from "../../models/types";
@@ -216,7 +217,7 @@ export function resolveEpisodeForSynopsis(
   const parts = splitEpisodeBodyParts(text, {
     chapter: parsed.chapterStart,
     title: parsed.subtitle ?? parseEpisodeMetadata(text).title,
-  });
+  }, memoMarkersOfFolder(folder));
   if (parts.length === 0) {
     throw new McpToolError(`その本文から話を取り出せませんでした: ${filePath}`);
   }

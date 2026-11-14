@@ -5579,7 +5579,10 @@ export class ManuscriptEditorProvider
       そのまま解釈するので記法の置き換えだけでは足りず、3つの入口が
       別々に分岐を持つと、貼ったときの形が入口によって違うことになる。
     */
-    const conversion = convertForPosting(source, target);
+    // 作品のメモの印（設計書6.40.8）。作品の外の原稿なら既定。壊れた設定では投げる
+    const conversion = convertForPosting(source, target, {
+      memoMarkers: work ? await readMemoMarkers(work) : DEFAULT_MEMO_MARKERS,
+    });
 
     await vscode.env.clipboard.writeText(conversion.text);
     /*

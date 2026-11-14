@@ -1,3 +1,5 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
+import { DEFAULT_MEMO_MARKERS } from "../core/memoMarkers";
 import * as vscode from "vscode";
 import * as paths from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -529,6 +531,9 @@ async function hashConfirmedPairs(
   const confirmed = new Set<string>();
   const ambiguous = list.filter((item) => item.candidates.length > 1);
   if (ambiguous.length === 0) return confirmed;
+  // 投稿の印は作品のメモの印で取る（設計書6.40.8）。ここは名前の付け替えの照合だけなので、
+  // 設定が読めなければ既定で比べる（外れても「同じ話と決めない」側へ倒れるだけ）
+  const memoMarkers = await readMemoMarkers(work).catch(() => DEFAULT_MEMO_MARKERS);
   let ledger;
   try {
     ledger = await new PostingStore(work).load();
@@ -557,7 +562,7 @@ async function hashConfirmedPairs(
         const hit = [oldSubtitle, newSubtitle].some((subtitle) => {
           const { units, collected } = postingUnitsOf(text, subtitle);
           if (collected) return false;
-          const hashes = postingTextHashes(units[0].subtitle, units[0].body);
+          const hashes = postingTextHashes(units[0].subtitle, units[0].body, memoMarkers);
           return (
             sent.has(hashes.notation) || sent.has(hashes.titled) || sent.has(hashes.bodyOnly)
           );

@@ -557,8 +557,8 @@ var GitHubWorks = (function () {
       var config = await r.readOptional(repoPath({ path: dir }, ".aiwriter/config.json"));
       if (!config) return null;
       var parsed = {};
-      try { parsed = JSON.parse(toLfText(config.text)) || {}; } catch (error) { parsed = {}; }
-      return { path: dir, title: str(parsed.workTitle) || dir || repo.name, manuscriptDir: str(parsed.manuscriptDir) || "本文", lastCommitAt: "" };
+      try { parsed = JSON.parse(toLfText(config.text)) || {}; } catch (error) { parsed = { memoMarkers: null }; }
+      return { path: dir, title: str(parsed.workTitle) || dir || repo.name, manuscriptDir: str(parsed.manuscriptDir) || "本文", memoMarkers: parsed.memoMarkers, lastCommitAt: "" };
     });
     var works = found.filter(Boolean);
     // 最後のコミットの時刻（作品のフォルダーで絞る）。最近更新のあった作品から開く
@@ -657,7 +657,7 @@ var GitHubWorks = (function () {
 
   **写した元**（どれも拡張機能の src/ にある。形を変えたら、ここも直す）
   - NOTATION_RULES・notationModeFor・tokenizeLine … core/manuscriptRender.ts（記法の本体は core/ruby.ts）
-  - MEMO_LINE_PATTERN … core/sceneMemo.ts
+  - メモの印の組と付箋の行の判定（memoMarkersOf・memoScanLines・memoStripMark） … core/memoMarkers.ts・core/sceneMemo.ts（scanMemoLines）
   - countChars の総・純（メモの行を落とす・.md だけルビの読みを外す） … core/charCount.ts・core/episodeCharCount.ts
   - 受け取り箱の形（版2・kind: "body"） … core/outboxInbox.ts の parseInboxFile
 
@@ -720,17 +720,82 @@ var EditorLogic = (function () {
   }
 
   /* ── core/sceneMemo.ts（作者の付箋の行） ── */
-  var MEMO_LINE_PATTERN = "^[ \t　]*(?:\/\/|／／)";
-  var MEMO_LINE_RE = new RegExp(MEMO_LINE_PATTERN);
-  function isMemoLine(line) { return MEMO_LINE_RE.test(line); }
+  /*
+    どの印をメモと読むかは作品ごとに違う（設計書6.40.8）。作品の設定（.aiwriter/config.json の memoMarkers）を
+    読んで印の組を作る。組の形と判定は core/memoMarkers.ts・core/sceneMemo.ts（scanMemoLines）の写し
+  */
+  var MEMO_MARKER_PREFIXES = { slash: ["//", "／／"], backslash: ["\\\\", "＼＼", "￥￥"], percent: ["%%", "％％"], comment: [] };
+  var MEMO_MARKER_IDS = ["slash", "backslash", "percent", "comment"];
+  function memoMarkersOf(ids) {
+    var on = MEMO_MARKER_IDS.filter(function (id) { return Array.isArray(ids) && ids.indexOf(id) >= 0; });
+    var prefixes = [];
+    on.forEach(function (id) { prefixes = prefixes.concat(MEMO_MARKER_PREFIXES[id]); });
+    return { ids: on, prefixes: prefixes, comment: on.indexOf("comment") >= 0 };
+  }
+  var DEFAULT_MEMO_MARKERS = memoMarkersOf(["slash"]);
+  // 設定の欄から組を作る。欄が無い・読めない形なら null（呼ぶ側が「読めない」と出す。黙って既定にしない）
+  function memoMarkersFromConfig(value) {
+    if (value === undefined) return DEFAULT_MEMO_MARKERS;
+    if (!Array.isArray(value) || value.some(function (v) { return typeof v !== "string"; })) return null;
+    var markers = memoMarkersOf(value);
+    return markers.ids.length > 0 ? markers : null;
+  }
+  function memoLeadLength(line) { var m = /^[ \t　]*/.exec(line); return m ? m[0].length : 0; }
+  function memoCommentEnd(lines, start, from) {
+    for (var k = start; k < lines.length; k++) {
+      var text = k === start ? lines[k].slice(from) : lines[k];
+      var at = text.indexOf("-->");
+      if (at < 0) continue;
+      return /^[ \t　]*$/.test(text.slice(at + 3)) ? k : null;
+    }
+    return null;
+  }
+  // 行の並びの、行ごとのメモの印と、メモ1件ずつの範囲。閉じていない <!-- からあとの囲みはメモにしない
+  function memoScanLines(lines, markers) {
+    var memo = lines.map(function () { return false; });
+    var blocks = [];
+    var unclosedLine = null;
+    var commentOn = !!markers.comment;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var lead = memoLeadLength(line);
+      var rest = line.slice(lead);
+      if (commentOn && rest.indexOf("<!--") === 0) {
+        var end = memoCommentEnd(lines, i, lead + 4);
+        if (end === null) { unclosedLine = i; commentOn = false; continue; }
+        for (var k = i; k <= end; k++) memo[k] = true;
+        blocks.push({ start: i, end: end, comment: true });
+        i = end;
+        continue;
+      }
+      if (markers.prefixes.some(function (prefix) { return rest.indexOf(prefix) === 0; })) {
+        memo[i] = true;
+        blocks.push({ start: i, end: i, comment: false });
+      }
+    }
+    return { memo: memo, blocks: blocks, unclosedLine: unclosedLine };
+  }
+  function memoStripMark(line, markers) {
+    var rest = line.slice(memoLeadLength(line));
+    if (markers.comment && rest.indexOf("<!--") === 0) {
+      var inner = rest.slice(4);
+      var close = inner.indexOf("-->");
+      return close >= 0 ? inner.slice(0, close) : inner;
+    }
+    var prefix = markers.prefixes.filter(function (candidate) { return rest.indexOf(candidate) === 0; })[0];
+    return prefix ? rest.slice(prefix.length) : rest;
+  }
+  function isMemoLine(line, markers) { return memoScanLines([line], markers || DEFAULT_MEMO_MARKERS).memo[0]; }
 
   /* ── core/charCount.ts（字数。総＝改行を除く、純＝空白も除く） ── */
   var RUBY_INTERNAL = /\{([^{}|\r\n]+)\|([^{}|\r\n]*)\}/g;
   var EMPHASIS_INTERNAL = /\{\{([^{}\r\n]+)\}\}/g;
   function countCodePoints(s) { return Array.from(s).length; }
   // .md はルビの読みと傍点の印を外して数える（拡張機能の既定「ルビを文字数から外す」）。.txt は記法も数える
-  function countChars(text, fileName) {
-    var lines = String(text || "").replace(/\r\n?/g, "\n").split("\n").filter(function (line) { return !isMemoLine(line); });
+  function countChars(text, fileName, markers) {
+    var all = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+    var memo = memoScanLines(all, markers || DEFAULT_MEMO_MARKERS).memo;
+    var lines = all.filter(function (line, index) { return !memo[index]; });
     var body = lines.join("\n");
     if (notationModeFor(fileName) === "curly") body = body.replace(EMPHASIS_INTERNAL, "$1").replace(RUBY_INTERNAL, "$1");
     var withoutNewline = body.replace(/\n/g, "");
@@ -938,7 +1003,11 @@ var EditorLogic = (function () {
 
   return {
     NOTATION_RULES: NOTATION_RULES,
-    MEMO_LINE_PATTERN: MEMO_LINE_PATTERN,
+    DEFAULT_MEMO_MARKERS: DEFAULT_MEMO_MARKERS,
+    memoMarkersOf: memoMarkersOf,
+    memoMarkersFromConfig: memoMarkersFromConfig,
+    memoScanLines: memoScanLines,
+    memoStripMark: memoStripMark,
     INBOX_VERSION: INBOX_VERSION,
     EDITOR_SUFFIX: EDITOR_SUFFIX,
     notationModeFor: notationModeFor,
@@ -1515,10 +1584,19 @@ var EditorLogic = (function () {
     diffPanelEl.hidden = false;
   }
 
+  /*
+    その作品のメモの印（設計書6.40.8。作品の設定の memoMarkers）。読めない形なら既定の // で見せる
+    ——このページは字数と見た目に使うだけで、送る本文から行を落とさない（落とすのはパソコンの側）
+  */
+  function workMemoMarkers() {
+    var markers = state.work ? EditorLogic.memoMarkersFromConfig(state.work.memoMarkers) : null;
+    return markers || EditorLogic.DEFAULT_MEMO_MARKERS;
+  }
+
   /* ── 画面を描く ── */
   function paint() {
     var dirty = isDirty();
-    var counts = EditorLogic.countChars(textEl.value, state.file);
+    var counts = EditorLogic.countChars(textEl.value, state.file, workMemoMarkers());
     countEl.textContent = state.file ? counts.net.toLocaleString("ja-JP") + "字（空白・改行を除く）" : "";
     if (state.mode === "read") paintView();
     updateBand();
@@ -1572,8 +1650,11 @@ var EditorLogic = (function () {
   function paintView() {
     viewEl.textContent = "";
     var mode = EditorLogic.notationModeFor(state.file);
-    textEl.value.split("\n").forEach(function (line) {
-      if (EditorLogic.isMemoLine(line)) { viewEl.appendChild(el("p", "memo-line", line)); return; }
+    var lines = textEl.value.split("\n");
+    // 囲み（<!-- ～ -->）は前後の行で決まるので、作品の印で全行から一度に決める
+    var memo = EditorLogic.memoScanLines(lines, workMemoMarkers()).memo;
+    lines.forEach(function (line, index) {
+      if (memo[index]) { viewEl.appendChild(el("p", "memo-line", line)); return; }
       var p = el("p", "");
       EditorLogic.tokenizeLine(line, mode).forEach(function (t) {
         if (t.kind === "emphasis") p.appendChild(el("span", "dots", t.text));

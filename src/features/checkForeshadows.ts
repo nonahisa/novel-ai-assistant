@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import { targetsFor, toBrief } from "../core/foreshadowTargets";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
@@ -1352,6 +1353,7 @@ async function collectChunks(
   options: { merge?: boolean; filePaths?: string[] } = {}
 ): Promise<CollectedChunks> {
   const scan = await scanWork(work);
+  const memoMarkers = await readMemoMarkers(work);
   const format = await readWorkFormat(work);
   const chunks: Chunk[] = [];
   const chapterLabelByFile = new Map<string, string>();
@@ -1393,6 +1395,7 @@ async function collectChunks(
       episode,
       {
         maxChars: chunkSettings.chunk.chars,
+        memoMarkers,
         mergeChars: options.merge === false ? 0 : chunkSettings.mergeChars,
       }
     )) {

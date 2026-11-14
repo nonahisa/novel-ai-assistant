@@ -1,3 +1,4 @@
+import type { MemoMarkers } from "./memoMarkers";
 import type { CharCounts, EpisodeFile } from "../models/types";
 import { emptyCounts, toManuscriptPages } from "./charCount";
 import {
@@ -140,6 +141,8 @@ export function buildEpisodeCountTable(
      * 台本・エッセイでは渡さなくてよい
      */
     texts?: ReadonlyMap<string, string>;
+    /** その作品のメモの印（設計書6.40.8）。ページ・コマ・連を数えるときに落とす行 */
+    memoMarkers?: MemoMarkers;
     /**
      * 数え方（J1、作者の裁定 2026-09-26）。**作品一覧・下の帯と同じ設定を渡す。**
      * 平均比・長短の印・最長最短も、この数え方で比べる——表の数字と印の
@@ -218,13 +221,13 @@ export function buildEpisodeCountTable(
       conflicted: episode.hasConflictMarkers,
       measure: episode.hasConflictMarkers
         ? null
-        : (measureEpisode(kind, episode.counts, texts?.get(episode.filePath))
+        : (measureEpisode(kind, episode.counts, texts?.get(episode.filePath), options.memoMarkers)
             ?.short ?? null),
     };
   });
 
   const countedRows = rows.filter((row) => !row.conflicted);
-  const totalMeasure = measureTotal(kind, counted, texts);
+  const totalMeasure = measureTotal(kind, counted, texts, options.memoMarkers);
   // 中央値と「いちばん長い／短い話」も、平均と同じ母集団から出す。
   // 73万字の合本を「いちばん長い話」と呼んでも、作者の役に立たない
   const sorted = countedRows
@@ -271,11 +274,12 @@ function needsText(kind: WorkKindKey | undefined): boolean {
 function measureEpisode(
   kind: WorkKindKey | undefined,
   counts: CharCounts,
-  text: string | undefined
+  text: string | undefined,
+  memoMarkers: MemoMarkers | undefined
 ): KindMeasure | undefined {
   if (!kind) return undefined;
   if (needsText(kind)) {
-    return text === undefined ? undefined : measureKindText(kind, text, counts);
+    return text === undefined ? undefined : measureKindText(kind, text, counts, memoMarkers);
   }
   return measureKindCounts(kind, counts);
 }
@@ -291,7 +295,8 @@ function measureEpisode(
 function measureTotal(
   kind: WorkKindKey | undefined,
   counted: readonly EpisodeFile[],
-  texts: ReadonlyMap<string, string> | undefined
+  texts: ReadonlyMap<string, string> | undefined,
+  memoMarkers: MemoMarkers | undefined
 ): KindMeasure | undefined {
   if (!kind || counted.length === 0) return undefined;
   const total = counted.reduce<CharCounts>(
@@ -311,7 +316,7 @@ function measureTotal(
     if (text === undefined) return undefined;
     bodies.push(text);
   }
-  return measureKindText(kind, bodies.join("\n\n"), total);
+  return measureKindText(kind, bodies.join("\n\n"), total, memoMarkers);
 }
 
 /**

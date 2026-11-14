@@ -1,7 +1,7 @@
 import { parseCollectedFile } from "./collectedFile";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { hashText } from "./hash";
-import { blankMemoLines } from "./sceneMemo";
+import { blankMemoLines, type MemoMarkers } from "./sceneMemo";
 
 /**
  * 1ファイルの本文を、各話あらすじ（P-07）が使う「話ごとの本文」へ分ける。
@@ -36,13 +36,14 @@ export interface EpisodeBodyPart {
  */
 export function splitEpisodeBodyParts(
   text: string,
-  single: { chapter: number | null; title: string | null }
+  single: { chapter: number | null; title: string | null },
+  markers?: MemoMarkers
 ): EpisodeBodyPart[] {
   const collected = parseCollectedFile(text);
   if (collected) {
     const parts: EpisodeBodyPart[] = [];
     for (const inner of collected) {
-      const body = blankMemoLines(inner.body);
+      const body = blankMemoLines(inner.body, markers);
       if (!body.trim()) continue;
       parts.push({
         chapter: inner.chapter,
@@ -57,7 +58,7 @@ export function splitEpisodeBodyParts(
     return parts;
   }
 
-  const body = blankMemoLines(parseEpisodeMetadata(text).body);
+  const body = blankMemoLines(parseEpisodeMetadata(text).body, markers);
   if (!body.trim()) return [];
   return [
     {

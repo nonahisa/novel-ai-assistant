@@ -2,6 +2,7 @@
 // 本文を割る共通の口で、**どの検知のための割り方かはここには届かない**
 // （呼ぶのは矛盾検知と、事実の照合による矛盾検知）。呼ぶ側が
 // useLogFile で作品のログへ向けてから使う。
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { ModelInfo } from "../ai/types";
@@ -83,6 +84,7 @@ export async function collectManuscriptChunks(params: {
 }): Promise<ManuscriptChunks> {
   const { work, info, options, fixedCost, outputTuning, logLabel } = params;
   const scan = await scanWork(work);
+  const memoMarkers = await readMemoMarkers(work);
   const format = await readWorkFormat(work);
   const targets = options.filePaths
     ? scan.episodes.filter((episode) =>
@@ -130,6 +132,7 @@ export async function collectManuscriptChunks(params: {
     // **合本は話ごとに切る**（`core/episodeChunks.ts`）。丸ごと切ると
     // 全チャンクの話数が先頭の話数になり、矛盾の指摘が全部「第1話」になる
     for (const chunk of chunksOfEpisodeFile(episode.filePath, text, episode, {
+      memoMarkers,
       maxChars,
       mergeChars: chunkSettings.mergeChars,
     })) {

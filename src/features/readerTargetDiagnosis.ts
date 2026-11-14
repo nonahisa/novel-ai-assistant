@@ -1,4 +1,5 @@
 // ログの書き先：作品ごと（`useLogFile(work.folderPath)`）
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
@@ -466,7 +467,7 @@ async function collectMaterial(
     return undefined;
   }
 
-  const loaded = await loadEpisodeBodies(scan.episodes);
+  const loaded = await loadEpisodeBodies(scan.episodes, await readMemoMarkers(work));
   const first = loaded.bodies[0];
   if (!first) {
     vscode.window.showWarningMessage(

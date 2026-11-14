@@ -1,3 +1,4 @@
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { z } from "zod";
@@ -418,7 +419,8 @@ function sharedFirstPersonNoticesOf(
     const sources = pastSceneSourcesOf(folder);
     return describeSharedFirstPersonNotices(
       findSharedFirstPersonNotices({
-        workBodyText: sources.map((source) => blankMemoLines(source.text)).join("\n"),
+        workBodyText: sources.map((source) => blankMemoLines(source.text, memoMarkersOfFolder(folder))).join("\n"),
+        memoMarkers: memoMarkersOfFolder(folder),
         people: merge.characters,
         landed: merge.landed,
         episodes: sources,

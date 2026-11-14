@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { listenForFocusWithoutPointer } from "../views/pickerFocus";
 import { wideViewColumn } from "./editorColumn";
@@ -513,6 +514,7 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string, override: 
     perEpisodeGoal: goals.perEpisodeChars,
     kind,
     texts: await episodeTextsFor(kind, scanned.episodes),
+    memoMarkers: await readMemoMarkers(work),
     // **作品一覧・下の帯と同じ数え方**（J1、作者の裁定 2026-09-26）。
     // 純で固定していたため、総文字数を選んでいる作者には画面ごとに
     // 違う数字が出ていた。日次・週次の執筆量は純で固定のまま（countSettings.ts）

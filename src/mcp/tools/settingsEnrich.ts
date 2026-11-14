@@ -1,3 +1,5 @@
+import type { MemoMarkers } from "../../core/memoMarkers";
+import { memoMarkersOfFolder } from "./memoMarkersOfFolder";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { z } from "zod";
@@ -279,11 +281,12 @@ interface EnrichTarget {
 function narrationOf(
   kind: SettingsKind,
   characters: readonly Character[],
-  sources: ExcerptSource[]
+  sources: ExcerptSource[],
+  memoMarkers: MemoMarkers
 ): EnrichTarget["narration"] {
   if (kind !== "character") return null;
   const context = workNarratorContextOf(
-    sources.map((source) => blankMemoLines(source.text)).join("\n"),
+    sources.map((source) => blankMemoLines(source.text, memoMarkers)).join("\n"),
     characters
   );
   return context ? { context, sources } : null;
@@ -334,7 +337,7 @@ function loadTarget(input: SettingsEnrichInput): EnrichTarget {
     characters,
     excerpts,
     sources,
-    narration: narrationOf(kind, characters, sources),
+    narration: narrationOf(kind, characters, sources, memoMarkersOfFolder(input.folder)),
   };
 }
 
@@ -404,7 +407,7 @@ function loadStagedTarget(input: SettingsEnrichInput): EnrichTarget {
     characters,
     excerpts,
     sources,
-    narration: narrationOf(kind, characters, sources),
+    narration: narrationOf(kind, characters, sources, memoMarkersOfFolder(input.folder)),
   };
 }
 

@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
@@ -632,6 +633,7 @@ async function collectEpisodes(
   filePaths?: string[]
 ): Promise<{ episodes: Episode[]; unreadableEpisodes: number }> {
   const scan = await scanWork(work);
+  const memoMarkers = await readMemoMarkers(work);
   const format = await readWorkFormat(work);
   const out: Episode[] = [];
   let unreadableEpisodes = 0;
@@ -653,7 +655,7 @@ async function collectEpisodes(
         ここで落とす。**空行にする**（行ごと落とさない）のは、指摘の
         引用位置が元の本文とずれないようにするためである。
       */
-      text = blankMemoLines((await readTextFile(episode.filePath)).text);
+      text = blankMemoLines((await readTextFile(episode.filePath)).text, memoMarkers);
     } catch (error) {
       // **記録して数える。** 黙って落とすと、その話は検知の対象から
       // 抜けたのに、作者には「何も無かった」と見える

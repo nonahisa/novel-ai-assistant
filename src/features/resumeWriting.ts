@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
@@ -56,7 +57,7 @@ import {
   type ResumeSynopsis,
   type ResumeTodayGoal,
 } from "../core/resumeSheet";
-import { parseMemos } from "../core/sceneMemo";
+import { parseMemos, type MemoMarkers } from "../core/sceneMemo";
 import { parseEpisodePlot } from "../core/episodePlotDoc";
 import {
   episodePlotDraft,
@@ -116,7 +117,7 @@ export async function resumeWriting(
       : null,
     synopses: await recentSynopses(work, chapter, format, notices),
     openForeshadows: await loadOpenForeshadows(work, notices),
-    openMemos: await loadOpenMemos(episodes, format, notices),
+    openMemos: await loadOpenMemos(episodes, format, notices, await readMemoMarkers(work)),
     episodePlot,
     relatedScenes: await relatedScenesFor(work, episodePlot, chapter, notices),
     todayGoal: await todayGoal(work, deviceId, notices),
@@ -539,7 +540,8 @@ function labelOf(
 async function loadOpenMemos(
   episodes: readonly EpisodeFile[],
   format: WorkFormatKey | undefined,
-  notices: string[]
+  notices: string[],
+  memoMarkers: MemoMarkers
 ): Promise<ResumeMemo[]> {
   const memos: ResumeMemo[] = [];
   for (const episode of episodes) {
@@ -553,7 +555,7 @@ async function loadOpenMemos(
         labelOf(episode, format),
         format
       );
-      for (const memo of parseMemos(content.text, episode.filePath)) {
+      for (const memo of parseMemos(content.text, episode.filePath, memoMarkers)) {
         memos.push({
           label: labels.labelAt(memo.line),
           line: memo.line,

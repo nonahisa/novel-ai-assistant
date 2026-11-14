@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -855,7 +856,7 @@ async function runSynopses(
           filePaths.some((filePath) => path.isSamePath(filePath, episode.filePath))
         )
       : scan.episodes;
-  const loaded = await loadEpisodeBodies(episodes);
+  const loaded = await loadEpisodeBodies(episodes, await readMemoMarkers(work));
   if (loaded.bodies.length === 0) {
     return { ok: false, reason: "あらすじを作れる本文がありません（競合のある話は除きます）。" };
   }

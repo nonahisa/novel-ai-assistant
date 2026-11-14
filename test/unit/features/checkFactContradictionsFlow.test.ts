@@ -80,6 +80,8 @@ const state = vi.hoisted(() => ({
 }));
 
 // 待ちは実際には待たない（長さだけ控える）。中止の信号はそのまま返す
+vi.mock("../../../src/core/memoMarkerStore", () => import("../support/memoMarkerStoreStub"));
+
 vi.mock("../../../src/features/rateLimitRetry", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   sleepUnlessAborted: vi.fn(async (ms: number, signal: AbortSignal) => {

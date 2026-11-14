@@ -1,3 +1,4 @@
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import type { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import { CharacterStore } from "../core/characterStore";
@@ -54,9 +55,10 @@ export async function stageNarratorMovesAfterExtraction(
   if (loaded.errors.length > 0) return 0;
   const { sources } = await loadExcerptSources(work);
   if (sources.length === 0) return 0;
+  const memoMarkers = await readMemoMarkers(work);
   // 語り手の決め方は「AIで再読込」と同じ（全話を繋いだ本文。`settingsPanel.narrationOf`）
   const context = workNarratorContextOf(
-    sources.map((source) => blankMemoLines(source.text)).join("\n"),
+    sources.map((source) => blankMemoLines(source.text, memoMarkers)).join("\n"),
     loaded.characters
   );
   if (!context) return 0;
