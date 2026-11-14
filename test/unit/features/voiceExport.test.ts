@@ -189,12 +189,14 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
 
   async function run(
     terms: FakeEngineTerms,
-    options: { synthesisDelayMs?: number; engine?: VoiceEngineId } = {}
+    options: { synthesisDelayMs?: number; engine?: VoiceEngineId; paceRatio?: number } = {}
   ) {
-    const { engine: chosen, ...rest } = options;
+    const { engine: chosen, paceRatio, ...rest } = options;
     engine = await startFakeVoiceEngine({ pcm: true, terms, ...rest });
     const url = engine.url;
     const service = new VoiceReadingService(() => url, undefined, async () => true);
+    // 測った比があるときの窓の文を見る（比の覚え方そのものは別の試験）
+    if (paceRatio !== undefined) vi.spyOn(service, "paceRatio").mockReturnValue(paceRatio);
     const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
     // ［声］で選んだエンジン。偽のエンジンの名乗りに合わせる（違えば止まるのは別の試験）
     const picked = chosen ?? (terms.brand === "VOICEVOX" ? "voicevox" : "aivisspeech");
@@ -243,6 +245,54 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     expect(infoMessages[0].items).toEqual(["フォルダーを開く"]);
     expect(infoMessages[0].message).toContain("ACML");
     expect(infoMessages[0].message).toContain("非公式");
+  });
+
+  test("測った比が無ければ、確認の窓に「かかる見込み」を出さない（推測の数字を出さない）", async () => {
+    await run(ACML_BOTH);
+    expect(state.confirms[0].message).not.toContain("かかる見込み");
+    expect(state.confirms[0].message).toContain("長い話は数分かかります");
+  });
+
+  test("測った比があれば、音の長さの見積もり×比で「この PC では、書き出しにおおよそN分かかる見込み」を出す", async () => {
+    // 4文・音の見積もりは数秒。比を 1000 にして、分の単位で見える大きさにする
+    await run(ACML_BOTH, { paceRatio: 1000 });
+    const message = state.confirms[0].message;
+    expect(message).toMatch(/この PC では、書き出しにおおよそ(\d+分|\d+時間\d+分)かかる見込みです（前に測った速さから）。/);
+    // 音の長さの見積もりの行はそのまま残る
+    expect(message).toMatch(/長さはおおよそ/);
+  });
+
+  test("書き出し・読み上げで新しく作った文の速さをエンジンごとに覚え、次の窓の見込みに使う", async () => {
+    engine = await startFakeVoiceEngine({ pcm: true, terms: ACML_BOTH });
+    const url = engine.url;
+    // 1文ごとに（始め→終わり）を 400ミリ秒ずつ進める。音は 200ミリ秒なので比は 2
+    let clock = 0;
+    let call = 0;
+    const service = new VoiceReadingService(
+      () => url,
+      undefined,
+      async () => true,
+      () => (call++ % 2 === 0 ? clock : (clock += 400))
+    );
+    expect(service.paceRatio("aivisspeech")).toBeUndefined();
+    const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
+    const unit = {
+      engine: "aivisspeech" as const,
+      speech: sentences[0].speech,
+      styleId: 1325133120,
+      gapMs: 0,
+      emotion: "平静",
+      intensity: "中",
+      styled: false,
+    } as unknown as Parameters<InstanceType<typeof VoiceReadingService>["synthesizeForExport"]>[0];
+    const signal = new AbortController().signal;
+    // はじめの2文は数えず、そのあと3文たまるまでは返さない
+    for (let i = 0; i < 4; i++) await service.synthesizeForExport({ ...unit, speech: `${unit.speech}${i}` }, 1, signal);
+    expect(service.paceRatio("aivisspeech")).toBeUndefined();
+    await service.synthesizeForExport({ ...unit, speech: `${unit.speech}z` }, 1, signal);
+    expect(service.paceRatio("aivisspeech")).toBeCloseTo(2, 1);
+    // 別のエンジンは測っていないので返さない
+    expect(service.paceRatio("voicevox")).toBeUndefined();
   });
 
   test("人物の声の調整（老けた声）は、書き出しの道でもエンジンへの頼みの値に効く。語りには当てない（作者の頼み 2026-11-13）", async () => {
@@ -527,7 +577,9 @@ describe("人物ごとにエンジンを混ぜて書き出す（0.151.0）", () 
     engines.length = 0;
   });
 
-  async function mixedRun(options: { voicevoxBrand?: string } = {}) {
+  async function mixedRun(
+    options: { voicevoxBrand?: string; ratios?: Partial<Record<VoiceEngineId, number>> } = {}
+  ) {
     const aivis = await startFakeVoiceEngine({ pcm: true, sampleRate: 44100, terms: ACML_BOTH });
     const voicevox = await startFakeVoiceEngine({
       pcm: true,
@@ -564,6 +616,8 @@ describe("人物ごとにエンジンを混ぜて書き出す（0.151.0）", () 
       undefined,
       async () => true
     );
+    const ratios = options.ratios;
+    if (ratios) vi.spyOn(service, "paceRatio").mockImplementation((engine) => ratios[engine]);
     const sentences = buildReadingPlan(TEXT, "site", [], { splitDialogue: true });
     const outcome = await exportVoiceAudio(
       { work, episodePath: EPISODE, text: TEXT, sentences, engine: "aivisspeech" },
@@ -572,6 +626,15 @@ describe("人物ごとにエンジンを混ぜて書き出す（0.151.0）", () 
     );
     return { outcome, aivis, voicevox };
   }
+
+  test("見込みは、使う全部のエンジンの比がそろったときだけ出す（片方だけなら出さない）", async () => {
+    await mixedRun({ ratios: { aivisspeech: 1000 } });
+    expect(state.confirms[0].message).not.toContain("かかる見込み");
+    state.confirms.length = 0;
+    disk.clear();
+    await mixedRun({ ratios: { aivisspeech: 1000, voicevox: 1000 } });
+    expect(state.confirms[0].message).toContain("かかる見込みです（前に測った速さから）");
+  });
 
   test("2つのエンジンの音を1つの MP3 にし、クレジットと利用条件はエンジンごとに並べる", async () => {
     const { outcome, aivis, voicevox } = await mixedRun();

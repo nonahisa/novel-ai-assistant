@@ -1057,6 +1057,7 @@ body.clipped #cheer { white-space: normal; }
   <button id="posting" aria-haspopup="menu" title="投稿ヘルパーへ渡す・投稿サイト用のコピー・投稿サイト設定を選びます">投稿</button>
   <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
   <button id="exportPagePdf"${pdfHidden} title="開いている話だけを、作品の［PDF出力］と同じ組み方で印刷用のファイルにし、ブラウザで開きます（紙・余白は前回の［PDF出力］の設定）。ブラウザの印刷で「PDFに保存」を選ぶと PDF になります。合本ではカーソルのある話だけです">PDF（この話）</button>
+  <button id="exportVoice"${pdfHidden} title="（試作・テスト中）この話を人物の声で読み、MP3 の音声ファイルに書き出します。読み上げの段の［声］で人物の声（AivisSpeech か VOICEVOX）を選んでおいてください。声のライセンスと注意書きも一緒に置きます。置き場は作品の .aiwriter/exports/音声/ です。本文は書き換えません">音声に書き出す</button>
 </div>
 
 <div id="rowAssist" class="tray" data-tray="assist">
@@ -5896,6 +5897,9 @@ ${RESUME_WRITING_LABEL ? `
       // 音声に書き出すのは作者の機能（設計書6.42.4）。編集者モードでは出さない（拡張機能の側でも断る）
       const voiceExportButton = document.getElementById("aloudVoiceExport");
       if (voiceExportButton) voiceExportButton.hidden = reviewMode;
+      // ［出力］の同じボタン。ブラウザ版で隠してあるもの（initial の hidden）を編集者モードの解除で出さない
+      const voiceExportTrayButton = document.getElementById("exportVoice");
+      if (voiceExportTrayButton) voiceExportTrayButton.hidden = reviewMode || ${JSON.stringify(options.canRunProcesses === false)};
       /* ── SNS記事のnote風（設計書6.69） ── */
       if (typeof message.noteLike === "boolean" && message.noteLike !== noteLike) {
         noteLike = message.noteLike;
@@ -10605,6 +10609,8 @@ ${IME_ENTER_GUARD_SOURCE}
     aloudCastRun.disabled = busy;
     aloudCastOpen.disabled = busy;
     aloudVoiceExport.disabled = busy;
+    const tray = document.getElementById("exportVoice");
+    if (tray) tray.disabled = busy;
   }
 
   /** 様子が届いた（操作が終わった）。ボタンを押せる形へ戻す */
@@ -10633,6 +10639,23 @@ ${IME_ENTER_GUARD_SOURCE}
     voiceCastBusy(true);
     voiceCastAsk("export");
   });
+  /*
+    ［出力］の［音声に書き出す］。上の読み上げの段のボタンと**同じ道**（同じ確認の窓・同じ書き出し）。
+    読み上げの段が閉じていても押せる。人物の声を選んでいないときは、エンジンを添えずに送り、
+    拡張機能の側が「［声］で選んでから」と答える
+  */
+  const exportVoiceTray = document.getElementById("exportVoice");
+  if (exportVoiceTray) {
+    exportVoiceTray.addEventListener("click", function () {
+      voiceCastBusy(true);
+      vscode.postMessage({
+        type: "voiceCast",
+        action: "export",
+        text: aloudTextNow(),
+        engine: voiceMode ? voiceEngineName : "",
+      });
+    });
+  }
 
   aloudRate.addEventListener("change", function () {
     // その場限り。**設定へは書き戻さない**（速さは読み方で変わる）

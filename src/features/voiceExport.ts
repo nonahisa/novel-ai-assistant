@@ -17,6 +17,7 @@ import {
 } from "../core/voiceEngine";
 import { clipSeconds, joinClips, parseWav, WavError, type PcmClip } from "../core/wavPcm";
 import { encodeMp3, type Mp3EncoderFactory } from "../core/mp3Encode";
+import { expectedWorkSeconds } from "../core/voicePace";
 import {
   buildCreditNotice,
   classifyLicense,
@@ -461,6 +462,21 @@ export async function exportVoiceAudio(
   const gapSeconds = units.reduce((sum, unit, i) => sum + (i === 0 ? 0 : unit.gapMs), 0) / 1000;
   const estimate = minutesLabel(chars / CHARS_PER_SECOND + gapSeconds);
   const nonCommercial = terms.filter(isNonCommercial);
+  /*
+    かかる見込み（2026-11-14）。音の長さの見積もり×このエンジンで測った比。**測った比が無いエンジンが
+    1つでもあれば出さない**（推測の数字を出さない）。ノートPC（CPU）では音の長さの約3.7倍かかった。
+    文の間の無音は、その文のエンジンの分として数える
+  */
+  const expected = expectedWorkSeconds(
+    engines.map((engine) => ({
+      audioSeconds: units.reduce(
+        (sum, unit, i) =>
+          unit.engine === engine ? sum + unit.speech.length / CHARS_PER_SECOND + (i === 0 ? 0 : unit.gapMs / 1000) : sum,
+        0
+      ),
+      ratio: service.paceRatio(engine),
+    }))
+  );
 
   /*
     確認は処理量を示してから（実装スタイル）。文の数・おおよその長さ・置き場。
@@ -472,6 +488,9 @@ export async function exportVoiceAudio(
         ? [`この声は非商用のみです：${nonCommercial.map(describeVoice).join("、")}。営利の目的では使えません。`]
         : []),
       `「${stem}」を人物の声で音声（MP3）に書き出します。${units.length}文・長さはおおよそ${estimate.replace(/^約/, "")}です。`,
+      ...(expected !== undefined
+        ? [`この PC では、書き出しにおおよそ${minutesLabel(expected).replace(/^約/, "")}かかる見込みです（前に測った速さから）。`]
+        : []),
       `置き場：${shownFolder(work, folder)}/`,
       `使う声：${terms.map(describeVoice).join("、")}`,
       // 割り当てた声が引けず代わりの声で読むなら、書き出す前に分かるようにする（0.146.0）

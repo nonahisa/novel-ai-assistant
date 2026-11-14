@@ -82,11 +82,12 @@ describe("2段目の中身", () => {
     expect(html).toContain("body.dictating .dictate-on { display: inline-block; }");
   });
 
-  it("出力：投稿・読み上げ・PDF（読み上げを押すと、今の読み上げの段が開く）", () => {
+  it("出力：投稿・読み上げ・PDF・音声に書き出す（読み上げを押すと、今の読み上げの段が開く）", () => {
     expect(buttons(block("rowOutput"))).toEqual([
       ["posting", "投稿"],
       ["aloudToggle", "読み上げ"],
       ["exportPagePdf", "PDF（この話）"],
+      ["exportVoice", "音声に書き出す"],
     ]);
     expect(block("rowOutput")).toMatch(/<button id="posting" aria-haspopup="menu"/);
     // 読み上げの段は今のまま（［音声に書き出す］も含む）
@@ -261,6 +262,9 @@ describe("バックアップから・PDF（この話）（0.150.0）", () => {
       canRunProcesses: false,
     });
     expect(new RegExp('<button id="exportPagePdf"[^>]*>').exec(browser)?.[0]).toContain(" hidden ");
+    // 人物の声は手元のエンジンへ繋ぐので、［出力］の［音声に書き出す］もブラウザ版では隠す（実装ルール7）
+    expect(new RegExp('<button id="exportVoice"[^>]*>').exec(browser)?.[0]).toContain(" hidden ");
+    expect(new RegExp('<button id="exportVoice"[^>]*>').exec(html)?.[0]).not.toContain("hidden");
     // バックアップからはブラウザ版でも使える（番号ずらしだけを中で並べない。0.147.0 と同じ）
     expect(new RegExp('<button id="importBackup"[^>]*>').exec(browser)?.[0]).not.toContain("hidden");
     const desktop = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", undefined, {

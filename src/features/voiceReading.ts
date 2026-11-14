@@ -109,7 +109,7 @@ import {
   VOICE_PICK_COUNTS_KEY,
   type GroupableVoiceRow,
 } from "../core/voiceGroups";
-import { slowPaceNotice, SynthesisPaceWatch, wavSeconds } from "../core/voicePace";
+import { PaceMemory, slowPaceNotice, SynthesisPaceWatch, wavSeconds } from "../core/voicePace";
 
 /**
  * 人物の声で朗読する（AivisSpeech／VOICEVOX。設計書6.42.3）。
@@ -183,6 +183,13 @@ export class VoiceReadingService {
    * 並べた待ちの差し引き（前の音ができた時刻）も、速いほうの時刻で遅いほうの時間を削ってしまう
    */
   private readonly lanes = new Map<VoiceEngineId, EngineLane>();
+  /** 測った速さの比（エンジンごと。この起動の間だけ）。書き出しの確認の窓の「かかる見込み」に使う */
+  private readonly paceMemory = new PaceMemory<VoiceEngineId>();
+
+  /** そのエンジンの、音1秒を作るのにかかる秒（測れていなければ undefined） */
+  paceRatio(engine: VoiceEngineId): number | undefined {
+    return this.paceMemory.ratio(engine);
+  }
 
   /** 本文を送ってよいと作者が答えた外のホスト（この起動の間だけ。設定や端末には残さない） */
   private readonly allowedRemoteHosts = new Set<string>();
@@ -315,9 +322,17 @@ export class VoiceReadingService {
       const cached = this.cache.get(synthesisKey(client.baseUrl, unit.styleId, unit.speech, params));
       if (cached) return Promise.resolve(cached);
     }
-    return this.limited(unit.engine, () => {
+    const lane = this.lane(unit.engine);
+    return this.limited(unit.engine, async () => {
       if (signal.aborted) throw new VoiceEngineError("aborted", "中止しました", undefined, unit.engine);
-      return client.speak(unit.speech, unit.styleId, params, signal, options.outputSamplingRate);
+      const startedAt = this.now();
+      const wav = await client.speak(unit.speech, unit.styleId, params, signal, options.outputSamplingRate);
+      const endedAt = this.now();
+      // 読み上げと同じ測り方（前の音ができた時刻より前は数えない）。書き出しの見込みの材料にする
+      const busyFrom = Math.max(startedAt, lane.lastSynthEndAt);
+      lane.lastSynthEndAt = Math.max(lane.lastSynthEndAt, endedAt);
+      this.paceMemory.record(unit.engine, (endedAt - busyFrom) / 1000, wavSeconds(wav));
+      return wav;
     });
   }
 
@@ -548,6 +563,7 @@ export class VoiceReadingService {
   /** 1文の速さを見張りへ。追いつかない状態が続いたら、知らせを1回ぶん貯める */
   private notePace(engine: VoiceEngineId, elapsedSeconds: number, wav: Uint8Array): void {
     const audioSeconds = wavSeconds(wav);
+    this.paceMemory.record(engine, elapsedSeconds, audioSeconds);
     // 見張りはエンジンごと。知らせの文には、追いつかないほうのエンジンの名前が入る
     const slow = this.lane(engine).pace.record(elapsedSeconds, audioSeconds);
     if (!slow) return;

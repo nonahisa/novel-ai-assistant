@@ -99,3 +99,66 @@ export function slowPaceNotice(engineLabel: string, pace: SlowPace): string {
     "［音声に書き出す］で先に作っておくと、間をあけずに聞けます。"
   );
 }
+
+/**
+ * 測った速さの比（かかった秒÷音の長さの秒）を、エンジンごとに覚える（作者の依頼 2026-11-14。
+ * ［音声に書き出す］の確認の窓に「この PC では何分かかる見込みか」を出すため）。
+ *
+ * ノートPC（AivisSpeech を CPU）の実測：第16話 3,069字で、音の長さ 507秒に 1,893秒（約3.7倍）。
+ * 音の長さの見積もりだけでは、遅い PC で待つ時間を実際の数分の一に思わせてしまう。
+ *
+ * **覚えるのは、この拡張機能が起きている間だけ**（ディスクへは書かない。PC の速さは負荷や
+ * 設定で変わるので、古い値を黙って使い続けない）。読み上げ・書き出しで新しく作った文だけを数える
+ * （控えから出した音は数えない）。**はじめの数文は数えない**（モデルの読み込みで遅く出る。
+ * 見張りと同じ理由）。`PACE_MEMORY_MIN` 文に満たないうちは比を返さない（推測の数字を出さない）。
+ * 古い文は捨て、直近の `PACE_MEMORY_WINDOW` 文だけで出す。
+ */
+export const PACE_MEMORY_MIN = 3;
+export const PACE_MEMORY_WINDOW = 40;
+
+export class PaceMemory<K extends string = string> {
+  private readonly counted = new Map<K, number>();
+  private readonly samples = new Map<K, Array<{ elapsed: number; audio: number }>>();
+
+  constructor(private readonly warmup = PACE_WARMUP_SENTENCES) {}
+
+  record(key: K, elapsedSeconds: number, audioSeconds: number | undefined): void {
+    if (audioSeconds === undefined || !(audioSeconds > 0) || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
+      return;
+    }
+    const seen = (this.counted.get(key) ?? 0) + 1;
+    this.counted.set(key, seen);
+    if (seen <= this.warmup) return;
+    const list = this.samples.get(key) ?? [];
+    list.push({ elapsed: elapsedSeconds, audio: audioSeconds });
+    if (list.length > PACE_MEMORY_WINDOW) list.shift();
+    this.samples.set(key, list);
+  }
+
+  /** 音1秒を作るのにかかる秒。測れていなければ undefined */
+  ratio(key: K): number | undefined {
+    const list = this.samples.get(key);
+    if (!list || list.length < PACE_MEMORY_MIN) return undefined;
+    const total = list.reduce(
+      (sum, one) => ({ elapsed: sum.elapsed + one.elapsed, audio: sum.audio + one.audio }),
+      { elapsed: 0, audio: 0 }
+    );
+    return total.audio > 0 ? total.elapsed / total.audio : undefined;
+  }
+}
+
+/**
+ * 書き出しにかかる見込みの秒。**どれかのエンジンの比が無ければ undefined**
+ * （一部だけの足し算は、足りない分だけ短く見せてしまう）
+ */
+export function expectedWorkSeconds(
+  parts: ReadonlyArray<{ audioSeconds: number; ratio: number | undefined }>
+): number | undefined {
+  if (parts.length === 0) return undefined;
+  let total = 0;
+  for (const part of parts) {
+    if (part.ratio === undefined || !(part.ratio > 0)) return undefined;
+    total += part.audioSeconds * part.ratio;
+  }
+  return total;
+}
