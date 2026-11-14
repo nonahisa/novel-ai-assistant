@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { whilePickerOpen } from "./pickerFocus";
 
 /**
  * 入力欄と選択画面の入口（設計書6.17.2）。
@@ -43,12 +44,16 @@ import * as vscode from "vscode";
 export async function askText(
   options: vscode.InputBoxOptions
 ): Promise<string | undefined> {
-  return vscode.window.showInputBox({
-    ...options,
-    // 入力の取りこぼしを防ぐ。**外側をクリックしても閉じない**ので、
-    // 出口は `Esc` だけになる（その案内は VS Code が出す。上の説明）
-    ignoreFocusOut: options.ignoreFocusOut ?? true,
-  });
+  // 出ている間に WebView（原稿エディター・パネル）が焦点を取り返したら、窓へ戻す
+  // （設計書6.81。外をクリックしても閉じない窓なので、取られると打った字が窓へ届かない）
+  return whilePickerOpen(() =>
+    vscode.window.showInputBox({
+      ...options,
+      // 入力の取りこぼしを防ぐ。**外側をクリックしても閉じない**ので、
+      // 出口は `Esc` だけになる（その案内は VS Code が出す。上の説明）
+      ignoreFocusOut: options.ignoreFocusOut ?? true,
+    })
+  );
 }
 
 /**

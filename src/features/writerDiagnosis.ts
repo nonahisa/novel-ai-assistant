@@ -1,7 +1,7 @@
 // ログの書き先：作品が定まらない
 // （使用開始時に、作品を1つも登録していない状態でも通る画面である）
 import * as vscode from "vscode";
-import { showQuickPickKeepingFocus } from "../views/pickerFocus";
+import { showQuickPickKeepingFocus, whilePickerOpen } from "../views/pickerFocus";
 import {
   buildWriterStyle,
   describeWriterStyle,
@@ -673,7 +673,9 @@ function askStep(
     tooltip: "この段は済んでいる／飛ばす",
   };
 
-  return new Promise<StepPick>((resolve) => {
+  // 出ている間に WebView（横に開いた紙など）が焦点を取り返したら、一覧へ戻す（設計書6.81）。
+  // 行にボタンを付けるため createQuickPick で組んでおり、showQuickPickKeepingFocus を通らない
+  return whilePickerOpen(() => new Promise<StepPick>((resolve) => {
     const quickPick = vscode.window.createQuickPick<Item>();
     let settled = false;
     // 結果を1回だけ確定して一覧を閉じる。dispose は onDidHide も呼ぶので、
@@ -717,7 +719,7 @@ function askStep(
     // Esc や画面の外のクリックで閉じられたとき
     quickPick.onDidHide(() => finish(undefined));
     quickPick.show();
-  });
+  }));
 }
 
 /**
