@@ -24,6 +24,7 @@ import { OUTBOX_CONTEXT_CHARS, outboxContextOf, type OutboxContext } from "../..
 import { EDITING_SITE_FILE } from "../../core/editingRepo";
 import { parseEditingSite, reviewLockLoginOf } from "../../core/editingSiteText";
 import { AIWRITER_DIR } from "../../models/types";
+import { isSjisMarkFinding } from "../../core/sjisMarkFinding";
 import { findingList, readFindingViews } from "./findingList";
 import { describeBodyWriteFailure, writeBodyPreservingFormat } from "./bodyWrite";
 import {
@@ -184,6 +185,9 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
     if (item.state !== "pending") continue;
     const view = views.get(item.id);
     if (!view) continue;
+    // 〓の行（Shift_JIS に無い字）は送らない。pending.list は校正・メモパネルと揃えて〓が残る限り
+    // 未処理と返すが、〓の行は直す案も採る道も無い。送るかは別に決める（実装の残り 116行で揃えたときの判断）
+    if (isSjisMarkFinding(view)) continue;
     const text = texts.get(toSlash(item.file));
     findings.push({
       id: item.id,

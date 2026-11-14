@@ -12,10 +12,11 @@ import {
   DEFAULT_FINDINGS_RETENTION_DAYS,
   FINDING_PANEL_STATES,
   FINDING_PANEL_STATE_LABELS,
-  findingPanelStateOf,
+  findingPanelStatesOf,
   type FindingPanelState,
 } from "../../core/findingPanelState";
 import { McpToolError, readBody } from "./shared";
+import { SJIS_MARK_FINDING_LABEL } from "../../core/sjisMarkFinding";
 
 /**
  * 提案パネルの指摘を外から読む（MCP `pending.list` の `kind: "finding"`。
@@ -128,7 +129,10 @@ export function findingList(input: FindingListInput): FindingListResult {
   const views = readViews(nodePath.join(root, AIWRITER_DIR, FINDINGS_FILE_NAME));
   const texts = readTexts(input.folder, views);
 
-  const all = views.map((view) => toItem(view, texts.get(view.file), retentionDays, now));
+  // 〓の行は同じファイルの〓とまとめて突き合わせるので、1件ずつでなく一度に決める（6.96.4 の例外）
+  const all = findingPanelStatesOf(views, texts, retentionDays, now).map(({ finding, state, line }) =>
+    toItem(finding, state, line)
+  );
   const ordered = [
     ...sortByPlace(all.filter((item) => item.state === "pending")),
     ...sortByPlace(all.filter((item) => item.state !== "pending")),
@@ -158,6 +162,8 @@ export function findingList(input: FindingListInput): FindingListResult {
       "読むだけです。採用・却下・片づけはしていません。状態の決め方は提案パネルと同じ関数を通しています。" +
       `期限切れは ${retentionDays === 0 ? "無期限（隠さない）" : `${retentionDays}日`} で判定しました` +
       "（VS Code の設定 novelai.findings.retentionDays と違えば retentionDays に同じ値を渡すと画面と揃います）。" +
+      `「${SJIS_MARK_FINDING_LABEL}」の行は校正・メモパネルと同じく日付では期限切れにせず、` +
+      "本文の〓が残る限り pending（校正・メモパネルに並ぶ）、〓が無くなれば stale です。" +
       "「期限切れ指摘消去」で消えた分は数えていません。",
   };
 }
@@ -203,13 +209,7 @@ function readTexts(folder: string, views: readonly FindingView[]): Map<string, s
   return texts;
 }
 
-function toItem(
-  view: FindingView,
-  text: string | undefined,
-  retentionDays: number,
-  now: Date
-): FindingListItem {
-  const { state, line } = findingPanelStateOf(view, text, retentionDays, now);
+function toItem(view: FindingView, state: FindingPanelState, line: number): FindingListItem {
   const external = view.origin?.kind === "external";
   return {
     id: view.id,

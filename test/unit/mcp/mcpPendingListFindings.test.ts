@@ -25,6 +25,12 @@ import {
   type FindingDecision,
 } from "../../../src/models/finding";
 import { folderFingerprint as fingerprintOf } from "../support/folderFingerprint";
+import {
+  SJIS_MARK_FINDING_LABEL,
+  buildSjisMarkFindings,
+  isSjisMarkFinding,
+  placeSjisMarkFindings,
+} from "../../../src/core/sjisMarkFinding";
 
 /**
  * 提案パネルの指摘を外から読む（MCP `pending.list` の `kind: "finding"`。
@@ -504,5 +510,82 @@ describe("読むだけ・記録（設計書6.87.9）", () => {
     expect(result.byProducer.reduce((sum, group) => sum + group.total, 0)).toBe(8);
     // 未処理（パネルに並ぶもの）が先
     expect(result.items.every((item) => item.state === "pending")).toBe(true);
+  });
+});
+
+/**
+ * 「Shift_JIS に無い字」の行（〓の行）は、校正・メモパネルと同じ決め方で返す（実装の残り 116行。
+ * 設計書5.4.2・6.96.4 の例外）。日付で「期限切れ」にせず、〓が本文に残る限り未処理、
+ * 〓が本文から無くなったら陳腐化。パネルが並べるもの（`placeSjisMarkFindings`）と同じ集合になる
+ */
+describe("〓の行（Shift_JIS に無い字）", () => {
+  const MARK_FILE = "本文/010_しるし.txt";
+  const SAVED = "一行目\nあい〓うえお\nかき〓くけこ\nさし〓すせそ\nたち〓つてと\n";
+
+  function seedMarks(folder: string): Finding[] {
+    const absolute = nodePath.join(folder, MARK_FILE);
+    fs.writeFileSync(absolute, SAVED, "utf8");
+    const marks = [
+      { char: "♡", line: 2, context: "あい〓うえ" },
+      { char: "♡", line: 3, context: "かき〓くけ" },
+      { char: "♡", line: 4, context: "さし〓すせ" },
+      { char: "♡", line: 5, context: "たち〓つて" },
+    ];
+    // 10日前の保存（既定の3日を過ぎている）
+    const rows = buildSjisMarkFindings(folder, absolute, SAVED, marks, undefined, daysAgo(10));
+    expect(rows).toHaveLength(4);
+    // 消えた話のファイルを指す行（本文が読めない）
+    const missing: Finding = { ...rows[0], id: "fmissing", file: "本文/099_無い話.txt" };
+    const lines = [
+      ...[...rows, missing].map((finding) => JSON.stringify({ kind: "finding", ...finding })),
+      JSON.stringify({ kind: "decision", findingId: rows[3].id, time: daysAgo(9), status: "dismissed", note: "" }),
+    ];
+    fs.writeFileSync(findingsFile(folder), `${lines.join("\n")}\n`, "utf8");
+    return [...rows, missing];
+  }
+
+  it("日付で期限切れにせず、〓が残る行は未処理・〓を直した行は陳腐化・見送った行は却下", () => {
+    const folder = workCopy();
+    const [kept, neighbor, fixed, dismissed, missing] = seedMarks(folder);
+    // 2行目はそのまま、3行目は〓の隣の字だけ直した、4行目は〓を直した
+    fs.writeFileSync(
+      nodePath.join(folder, MARK_FILE),
+      "一行目\nあい〓うえお\nかぎ〓くけこ\nさし好すせそ\nたち〓つてと\n",
+      "utf8"
+    );
+
+    const result = pendingListTool({ folder, kind: "finding" });
+    const itemOf = (id: string) => result.items.find((item) => item.id === id);
+    expect(itemOf(kept.id)).toMatchObject({ state: "pending", line: 2 });
+    expect(itemOf(neighbor.id)).toMatchObject({ state: "pending", line: 3 });
+    expect(itemOf(fixed.id)?.state).toBe("stale");
+    expect(itemOf(dismissed.id)?.state).toBe("dismissed");
+    expect(itemOf(missing.id)?.state).toBe("unchecked");
+    expect(result.counts.expired).toBe(0);
+  });
+
+  it("並ぶ〓の行は、校正・メモパネルの突き合わせ（placeSjisMarkFindings）と同じ集合", () => {
+    const folder = workCopy();
+    seedMarks(folder);
+    const text = fs.readFileSync(nodePath.join(folder, MARK_FILE), "utf8");
+    const views = resolveFindings(parseFindingLines(fs.readFileSync(findingsFile(folder), "utf8")));
+    const panel = placeSjisMarkFindings(views.filter(isSjisMarkFinding), new Map([[MARK_FILE, text]]))
+      .map((row) => row.id)
+      .sort();
+
+    const result = pendingListTool({ folder, kind: "finding" });
+    const listed = result.items
+      .filter((item) => item.state === "pending" && item.label === SJIS_MARK_FINDING_LABEL)
+      .map((item) => item.id)
+      .sort();
+    expect(listed).toEqual(panel);
+    expect(listed).toHaveLength(3);
+  });
+
+  it("〓でない指摘の扱いは変わらない（10日前の未決は期限切れ）", () => {
+    const folder = workCopy();
+    const seeded = seed(folder);
+    const result = pendingListTool({ folder, kind: "finding" });
+    expect(result.items.find((item) => item.id === seeded.externalExpired.id)?.state).toBe("expired");
   });
 });

@@ -114,6 +114,36 @@ function findingStatus(id: string): string | undefined {
   return resolveFindings(parseFindingLines(text)).find((view) => view.id === id)?.status;
 }
 
+describe("outbox.pack——〓の行（Shift_JIS に無い字）は送らない", () => {
+  /*
+    pending.list は 〓の行を校正・メモパネルと同じく〓が残る限り未処理と返すようになった
+    （実装の残り 116行）。原稿箱は送る中身を pending.list と同じ決め方で選ぶので、そのままだと
+    〓の行が出先へ流れる。〓の行は直す案も採る道も無く、取り込みの側も受けない形なので、
+    今までどおり送らない（送るかは別に決める）
+  */
+  it("〓が本文に残っていても、〓の行は findings に入れない。ほかの指摘は今までどおり", () => {
+    writeBody("一行目\n彼はわらった。\nあい〓うえお\n");
+    placeFindings([
+      finding(),
+      finding({
+        id: "f_mark",
+        hintLine: 3,
+        original: "あい〓うえ",
+        target: "〓",
+        suggestion: "",
+        message: "「♡」は Shift_JIS に無い字なので「〓」にしました。",
+        category: "other",
+        label: "Shift_JIS に無い字",
+        time: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    ]);
+
+    const result = outboxPack({ folder: root });
+
+    expect(result.findings.map((item) => item.id)).toEqual(["f_typo1"]);
+  });
+});
+
 describe("outbox.pack——送る中身", () => {
   it("本文の全体は返さない（題・ハッシュ・未処理の指摘の一文と、その前後2行だけ）", async () => {
     const secret = "この一文は外へ出てはいけない本文である。";

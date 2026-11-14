@@ -1,6 +1,7 @@
 import { isFindingExpired, type FindingView } from "../models/finding";
 import { locateFinding } from "./findingLocation";
 import { findingRestoreOf } from "./findingSource";
+import { isSjisMarkFinding, placeSjisMarkFindings } from "./sjisMarkFinding";
 
 /**
  * 置き場（`.aiwriter/findings.jsonl`、設計書6.96）の指摘が、提案パネルで
@@ -127,4 +128,48 @@ export function findingPanelStateOf(
   const where = locateFinding(finding, text);
   if (where.status === "lost") return { state: "stale", ...hint };
   return { state: "pending", line: where.line };
+}
+
+/**
+ * 置き場の指摘を**まとめて**、パネルでの扱いにする（実装の残り 116行）。
+ *
+ * **「Shift_JIS に無い字」の行（〓の行）は、校正・メモパネルと同じ決め方にする**（設計書5.4.2・
+ * 6.96.4 の例外）。1件ずつの `findingPanelStateOf` では揃わない——〓の行は日付で隠さず、
+ * 提案パネルへ戻す表にも入れていない（1件ずつだと `expired` か `unrestorable` になる）うえ、
+ * 生き死には本文の〓との**1対1の突き合わせ**（`placeSjisMarkFindings`。見送った行も〓を
+ * 取っておく）で決まるので、同じファイルの〓の行を一度に見る必要がある。
+ *
+ * - 採った・退けた：その判断
+ * - 本文が読めない：`unchecked`
+ * - 〓が割り当たった未決の行：`pending`（行は〓のいまの行）
+ * - 割り当たらなかった未決の行：`stale`（〓が本文から無くなった＝直した）
+ *
+ * ほかの指摘は `findingPanelStateOf` のまま。並びは渡した順。
+ *
+ * @param texts ファイル（`Finding.file` と同じ表記）→ その全文。読めないファイルは入れない
+ */
+export function findingPanelStatesOf<T extends FindingView>(
+  findings: readonly T[],
+  texts: ReadonlyMap<string, string>,
+  retentionDays: number,
+  now: Date = new Date()
+): Array<{ finding: T; state: FindingPanelState; line: number }> {
+  // 判断も日付も見ずに全部渡す（パネルの `loadVisibleFindings` の `marks` と同じ）
+  const placed = new Map(
+    placeSjisMarkFindings(findings.filter(isSjisMarkFinding), texts).map((row) => [row.id, row.line])
+  );
+  return findings.map((finding) => {
+    if (!isSjisMarkFinding(finding)) {
+      return { finding, ...findingPanelStateOf(finding, texts.get(finding.file), retentionDays, now) };
+    }
+    const hint = finding.hintLine;
+    if (finding.status === "accepted" || finding.status === "dismissed") {
+      return { finding, state: finding.status, line: hint };
+    }
+    if (!texts.has(finding.file)) return { finding, state: "unchecked", line: hint };
+    const line = placed.get(finding.id);
+    return line === undefined
+      ? { finding, state: "stale", line: hint }
+      : { finding, state: "pending", line };
+  });
 }
