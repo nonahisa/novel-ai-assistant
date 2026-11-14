@@ -26,10 +26,15 @@ import {
  * 全形式に通し**、Markdown に出ないものがどこにも出ないことを見る。
  */
 
-function allFormats(audience: (typeof EXPORT_AUDIENCES)[number], chapter: number | null) {
+function allFormats(
+  audience: (typeof EXPORT_AUDIENCES)[number],
+  chapter: number | null,
+  fromChapter: number | null = null
+) {
   const document = buildExportDocument(audience, fixtureData(), {
     ...FIXTURE_OPTIONS,
     chapter,
+    fromChapter,
   });
   const docx = unzipSync(buildExportDocx(document));
   return {
@@ -62,6 +67,17 @@ describe("伏せるものは、どの形式にも出ない", () => {
       expect(text, format).not.toContain("白鳥");
       // 時点で絞ったら、いつ書かれたか分からない補足も出さない
       expect(text, format).not.toContain("資料向けの補足");
+    }
+  });
+
+  test("第2〜3話に絞っても、作者だけの印の人物・作者のメモ・第9話の人物・補足はどの形式にも出ない", () => {
+    for (const audience of EXPORT_AUDIENCES) {
+      for (const [format, text] of Object.entries(allFormats(audience, 3, 2))) {
+        expect(text, `${audience}・${format}`).not.toContain(HIDDEN_NAME);
+        expect(text, `${audience}・${format}`).not.toContain(AUTHOR_NOTE_TEXT);
+        expect(text, `${audience}・${format}`).not.toContain("白鳥");
+        expect(text, `${audience}・${format}`).not.toContain("資料向けの補足");
+      }
     }
   });
 

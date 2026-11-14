@@ -49,6 +49,11 @@ export interface ChronicleMarkdownOptions {
   workTitle?: string;
   /** どちらの並びを書き出したか。読み返したときに分かるようにする */
   order?: "chapter" | "timeline";
+  /**
+   * 話数で絞っていれば、その範囲（「第3話〜第8話」）。絞っていなければ省く。
+   * 渡された紙だけを読む人が「これで全部」と取り違えないように書く
+   */
+  rangeText?: string;
 }
 
 export function chronicleToMarkdown(
@@ -68,6 +73,7 @@ export function chronicleToMarkdown(
       ""
     );
   }
+  if (options.rangeText) lines.push(`範囲：${options.rangeText}`, "");
 
   for (const section of sections) {
     // **段の見出しは、行が1つでも必ず出す。** IF編の話を本編と

@@ -112,12 +112,14 @@ import type {
   RecordConflict,
 } from "../models/jsonValidation";
 import {
+  addressLastChapter,
   buildAddressListView,
   buildCharacterAddressView,
   type AddressListView,
   type AddressScope,
   type CharacterAddressView,
 } from "../core/addressPairsView";
+import { normalizeChapterRange, type ChapterRange } from "../core/chapterRange";
 import {
   buildAbilityListItems,
   buildCharacterListItems,
@@ -604,6 +606,11 @@ export class SettingsPanel {
   private manuscriptChapter: number | null = null;
   /** 作者が呼び合いの絞りを外したか。話数が変わったら戻す */
   private showAllAddresses = false;
+  /**
+   * 呼び合いの一覧の話数の範囲（第M〜N話）。開いたときは第1話〜最終話
+   * （作者の答え 2026-11-10 の④）。端は null で持ち、話が増えても追いつく
+   */
+  private addressRange: ChapterRange = { from: null, to: null };
   /** 選択中のレコードごとのやり取り。保存はしない */
   private readonly chatHistory = new Map<string, ChatTurn[]>();
   /** 有料のAIについて確認を取り終えたモデル名。切り替えたら取り直す */
@@ -931,7 +938,12 @@ export class SettingsPanel {
   private workInfoView(): WorkInfoView {
     return {
       ...this.workInfo,
-      addresses: buildAddressListView(this.characters, this.addressScope()),
+      // 範囲（第M〜N話）は作品ぜんたいの一覧だけに効かせる。人物詳細の節は
+      // 話の絞りだけを持つ（`AddressScope.range` の注記）
+      addresses: buildAddressListView(this.characters, {
+        ...this.addressScope(),
+        range: this.addressRange,
+      }),
     };
   }
 
@@ -1485,6 +1497,9 @@ export class SettingsPanel {
         case "addressScope":
           this.handleAddressScope(message);
           return;
+        case "addressRange":
+          this.handleAddressRange(message);
+          return;
         case "openPendingUpdates":
           await this.handleOpenPendingUpdates();
           return;
@@ -1573,6 +1588,23 @@ export class SettingsPanel {
    */
   private handleAddressScope(message: AddressScopeMessage): void {
     this.showAllAddresses = message.all;
+    this.postAddresses(message);
+  }
+
+  /**
+   * 呼び合いの一覧の話数のつまみ（作者の答え 2026-11-10）。
+   * M＞N の入れ替えと端の寄せは `normalizeChapterRange` の1か所で決める
+   */
+  private handleAddressRange(message: AddressRangeMessage): void {
+    this.addressRange = normalizeChapterRange(
+      message.from,
+      message.to,
+      addressLastChapter(this.characters)
+    );
+    this.postAddresses(message);
+  }
+
+  private postAddresses(message: { kind?: SettingsKind; id?: string }): void {
     this.post({
       type: "addresses",
       workInfo: this.workInfoView(),
@@ -4484,6 +4516,15 @@ interface AddressScopeMessage {
   id?: string;
 }
 
+/** 呼び合いの一覧の話数のつまみを放したとき（第M〜N話） */
+interface AddressRangeMessage {
+  type: "addressRange";
+  from: number;
+  to: number;
+  kind?: SettingsKind;
+  id?: string;
+}
+
 interface PlaceMisattributedMessage {
   type: "placeMisattributed";
   /** はじいた記述の位置。中身は拡張機能側の控えから引く */
@@ -4497,6 +4538,7 @@ type PanelMessage =
   | ApplyProposalMessage
   | PlaceMisattributedMessage
   | AddressScopeMessage
+  | AddressRangeMessage
   | { type: "select"; kind: SettingsKind; id: string }
   | {
       type: "save";

@@ -44,6 +44,12 @@ describe("書き出すファイルの名前", () => {
     );
   });
 
+  test("第M〜N話で絞ったときは、範囲が名前に入る", () => {
+    expect(exportFileBaseName("illustration", { from: 3, to: 8 })).toBe(
+      "設定資料（イラスト発注用・第3〜8話）"
+    );
+  });
+
   test("いちばん先に試すのは、時刻の付かない名前", () => {
     // 何度も書き出すものではないので、ふだんは読みやすい名前で置く
     expect(exportFileNameCandidates("illustration", 12, AT, 3)).toEqual([

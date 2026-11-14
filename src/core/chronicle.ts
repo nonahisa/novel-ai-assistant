@@ -8,6 +8,7 @@ import { findLine, lineOfEpisode, timepointOfEpisode } from "../models/timeline"
 // **`import` も併記する。** `export { X } from "…"` だけではローカル束縛が
 // 作られず、このファイルの中で使っている箇所が「Cannot find name」になる
 import { CHARACTER_FIELD_LABELS } from "./characterFieldLabels";
+import { spanOverlapsRange, type ChapterRange } from "./chapterRange";
 import { episodeTitle, formatChapterLabel } from "./episodeLabel";
 import { toTimelineEpisodePath } from "./timelineEdit";
 import type { WorkFormatKey } from "./workFormat";
@@ -347,6 +348,12 @@ export interface ChronicleFilter {
   characterId?: string;
   /** 出す出来事の種類。省略すると絞らない */
   kinds?: readonly ChronicleEventKind[];
+  /**
+   * 第M〜N話の行だけにする（作者の答え 2026-11-10）。省略すると絞らない。
+   * 合本は幅のどこかが範囲に掛かれば残し、話数の読めない行も残す
+   * （`spanOverlapsRange`）
+   */
+  range?: ChapterRange;
 }
 
 /**
@@ -361,11 +368,14 @@ export function filterChronicle(
   rows: readonly ChronicleRow[],
   filter: ChronicleFilter
 ): ChronicleRow[] {
-  const { characterId, kinds } = filter;
+  const { characterId, kinds, range } = filter;
   const kindSet = kinds ? new Set<ChronicleEventKind>(kinds) : null;
 
   const result: ChronicleRow[] = [];
   for (const row of rows) {
+    if (range && !spanOverlapsRange(row.chapter, row.chapterEnd, range)) {
+      continue;
+    }
     let appeared = row.appeared;
     let events = row.events;
 
@@ -382,6 +392,19 @@ export function filterChronicle(
     result.push({ ...row, appeared, events });
   }
   return result;
+}
+
+/**
+ * 年表の最終話（話数のつまみの上限）。行のいちばん後ろの話数で、
+ * 合本は終わりの話数で見る。話数の読める行が1つも無ければ0
+ */
+export function chronicleLastChapter(rows: readonly ChronicleRow[]): number {
+  let last = 0;
+  for (const row of rows) {
+    const end = row.chapterEnd ?? row.chapter;
+    if (end !== null && Number.isFinite(end)) last = Math.max(last, end);
+  }
+  return last;
 }
 
 /**

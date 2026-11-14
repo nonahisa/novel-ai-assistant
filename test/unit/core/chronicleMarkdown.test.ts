@@ -149,4 +149,13 @@ describe("年表のMarkdown", () => {
       })
     ).toContain("# 年表（夜の底）");
   });
+
+  it("話数で絞って書き出したら範囲が残り、絞っていなければ書かない", () => {
+    expect(
+      chronicleToMarkdown([section("本編", [row()])], { rangeText: "第3話〜第8話" })
+    ).toContain("範囲：第3話〜第8話");
+    expect(chronicleToMarkdown([section("本編", [row()])], {})).not.toContain(
+      "範囲："
+    );
+  });
 });

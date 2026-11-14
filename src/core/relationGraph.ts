@@ -3,7 +3,13 @@ import {
   createNameResolver,
   type UnresolvedReason,
 } from "./characterNameResolve";
-import { chaptersAsOf, hasAppearedBy } from "./settingsAsOf";
+import {
+  appearedInRange,
+  chaptersInRange,
+  isFullChapterRange,
+  type ChapterRange,
+} from "./chapterRange";
+import { hasAppearedBy } from "./settingsAsOf";
 
 /**
  * 人物相関図の材料を組み立てる（設計書6.38.1）。
@@ -482,6 +488,16 @@ export interface RelationGraphFilter {
    * 黙って図から消える（`settingsAsOf.ts` の `hasAppearedBy` と同じ倒し方）
    */
   upToChapter?: number | null;
+  /**
+   * 第M話からの図にする（作者の答え 2026-11-10「第M〜N話に出てきた人物
+   * だけを残す」）。未指定・null なら第1話から。
+   *
+   * **人物だけに効く。** 関係と呼称は今までどおり「第N話までに始まったか」
+   * で引く——第M話より前に始まった関係も、範囲の中の2人を結んでいるなら
+   * 範囲の中でも続いている（作者の答えの①）。丸の大きさは範囲の中の
+   * 登場回数。
+   */
+  fromChapter?: number | null;
   /** 出す辺の種類。空や未指定なら両方 */
   kinds?: RelationLabelKind[];
   /**
@@ -514,6 +530,7 @@ export function filterRelationGraph(
 ): FilteredRelationGraph {
   const kinds = filter.kinds && filter.kinds.length > 0 ? filter.kinds : null;
   const upTo = filter.upToChapter ?? null;
+  const range: ChapterRange = { from: filter.fromChapter ?? null, to: upTo };
   const affiliations = filter.affiliations
     ? new Set(filter.affiliations)
     : null;
@@ -521,7 +538,10 @@ export function filterRelationGraph(
   const keptReal = new Set<string>();
   for (const node of graph.nodes) {
     if (node.provisional) continue;
-    if (!hasAppearedBy(node.appearedChapters, upTo)) continue;
+    // 下端が無ければ `hasAppearedBy(…, upTo)` と同じ答えになる
+    // （第N話までに初登場＝第1〜N話のどこかに出た）。話数の記録が
+    // 空の人物は、どちらも落とさない
+    if (!appearedInRange(node.appearedChapters, range)) continue;
     if (
       affiliations &&
       !affiliations.has(node.affiliation ?? NO_AFFILIATION_KEY)
@@ -564,7 +584,7 @@ export function filterRelationGraph(
       continue;
     }
     if (!keptReal.has(original.id)) continue;
-    const node = nodeAsOf(original, upTo);
+    const node = nodeAsOf(original, range);
     if (linked.has(node.id) || filter.showIsolated) {
       nodes.push(node);
       continue;
@@ -654,12 +674,13 @@ function labelStartedBy(label: RelationLabel, upTo: number | null): boolean {
 }
 
 /**
- * ノードを第N話の時点の形にする。大きさ（登場話数）も第N話までで数え直す
- * ——第2話までの図で、第9話までの登場回数の大きさを見せない
+ * ノードを第M〜N話の形にする。大きさ（登場話数）も範囲の中で数え直す
+ * ——第2話までの図で、第9話までの登場回数の大きさを見せない。第5〜8話の
+ * 図で、第1〜4話の登場回数を混ぜない（作者の答え 2026-11-10 の②）
  */
-function nodeAsOf(node: RelationNode, upTo: number | null): RelationNode {
-  if (upTo === null) return node;
-  const appearedChapters = chaptersAsOf(node.appearedChapters, upTo);
+function nodeAsOf(node: RelationNode, range: ChapterRange): RelationNode {
+  if (isFullChapterRange(range)) return node;
+  const appearedChapters = chaptersInRange(node.appearedChapters, range);
   if (appearedChapters.length === node.appearedChapters.length) return node;
   return {
     ...node,

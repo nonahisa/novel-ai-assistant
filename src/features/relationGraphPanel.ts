@@ -17,7 +17,6 @@ import {
   filterRelationGraph,
   isUnresolvedId,
   lastChapterOf,
-  normalizeUpToChapter,
   restrictUnresolved,
   NO_AFFILIATION_KEY,
   type RelationGraph,
@@ -31,6 +30,7 @@ import {
   type GraphLayout,
 } from "../core/relationGraphLayout";
 import { createNonce } from "../core/webviewNonce";
+import { normalizeChapterRange } from "../core/chapterRange";
 
 /**
  * 人物相関図（設計書6.38）。
@@ -161,6 +161,8 @@ export function stepCenterHistory(
 interface FilterView {
   /** 第N話まで。画面へ送るときは「最終話まで」も最終話の番号にして送る */
   upToChapter: number;
+  /** 第M話から。画面へ送るときは「第1話から」も 1 にして送る */
+  fromChapter: number;
   kinds: RelationLabelKind[];
   affiliations: string[];
   showIsolated: boolean;
@@ -186,6 +188,11 @@ class RelationGraphPanel {
    * 最終話を選んだら null に戻す——資料が増えても図が追いつく
    */
   private upToChapter: number | null = null;
+  /**
+   * 第M話から。null は「第1話から」（既定。作者の答え 2026-11-10 の④
+   * 「開いたときは第1話〜最終話」）
+   */
+  private fromChapter: number | null = null;
   private kinds: RelationLabelKind[] = ["relation", "address"];
   /** 選んでいる所属。null は「全部」（まだ触っていない） */
   private affiliations: string[] | null = null;
@@ -319,10 +326,7 @@ class RelationGraphPanel {
     this.knownAffiliations = new Set(keys);
 
     // 資料が減って最終話を超えた値は、最終話へ寄せる
-    this.upToChapter = normalizeUpToChapter(
-      this.upToChapter,
-      this.lastChapter()
-    );
+    this.setRange(this.fromChapter, this.upToChapter);
     this.post();
   }
 
@@ -333,10 +337,7 @@ class RelationGraphPanel {
           this.post();
           return;
         case "filter":
-          this.upToChapter = normalizeUpToChapter(
-            message.filter.upToChapter,
-            this.lastChapter()
-          );
+          this.setRange(message.filter.fromChapter, message.filter.upToChapter);
           this.kinds = message.filter.kinds;
           this.affiliations = message.filter.affiliations;
           this.showIsolated = message.filter.showIsolated;
@@ -380,6 +381,19 @@ class RelationGraphPanel {
       workLog(this.work.folderPath).failure("人物相関図", { 作品: this.work.title, 内容: detail });
       void vscode.window.showErrorMessage(`人物相関図でエラーが起きました。${detail}`);
     }
+  }
+
+  /**
+   * つまみの値を範囲として持つ。M＞N の入れ替えと端の `null` 寄せは
+   * `normalizeChapterRange` の1か所で決める（4つの画面で同じ判断にする）
+   */
+  private setRange(
+    from: number | null | undefined,
+    to: number | null | undefined
+  ): void {
+    const range = normalizeChapterRange(from, to, this.lastChapter());
+    this.fromChapter = range.from;
+    this.upToChapter = range.to;
   }
 
   private setCenter(id: string): void {
@@ -460,6 +474,7 @@ class RelationGraphPanel {
     const lastChapter = this.lastChapter();
     const filter: RelationGraphFilter = {
       upToChapter: this.upToChapter,
+      fromChapter: this.fromChapter,
       kinds: this.kinds,
       affiliations: this.affiliations ?? undefined,
       showIsolated: this.showIsolated,
@@ -510,6 +525,7 @@ class RelationGraphPanel {
       showSecondRing: this.showSecondRing,
       filter: {
         upToChapter: this.upToChapter ?? lastChapter,
+        fromChapter: this.fromChapter ?? 1,
         kinds: this.kinds,
         affiliations: this.affiliations ?? options.map((entry) => entry.key),
         showIsolated: this.showIsolated,
@@ -562,7 +578,7 @@ class RelationGraphPanel {
     if (this.mode === "ego" && this.centerId) {
       return (
         "この人物は、いまの絞り込みでは図に居ません。" +
-        "「第N話まで」を後ろの話へ動かすか、所属の選び直しをしてください。"
+        "話数の範囲を広げるか、所属の選び直しをしてください。"
       );
     }
     return "絞り込みに合う人物が居ません。条件をゆるめてください。";

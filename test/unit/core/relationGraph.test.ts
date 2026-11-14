@@ -644,6 +644,136 @@ describe("絞り込み", () => {
   });
 });
 
+describe("第M〜N話の相関図（作者の答え 2026-11-10）", () => {
+  /**
+   * 灯は第1〜2話だけ、月島は第1話と第5〜6話、犬は第4話だけ。
+   * 灯→月島の関係は話数なし、灯→月島の呼称「先生」は第1話から、
+   * 月島→犬の呼称「ポチ」は第6話から。
+   */
+  function rangeSample(): Character[] {
+    return [
+      character("char_001", "灯", {
+        appearedChapters: [1, 2],
+        relations: [{ name: "月島", relation: "師匠" }],
+        addressTerms: [
+          {
+            targetName: "月島",
+            targetId: null,
+            authorLocked: false,
+            forms: [addressForm("先生", 1)],
+          },
+        ],
+      }),
+      character("char_002", "月島", {
+        appearedChapters: [1, 5, 6],
+        addressTerms: [
+          {
+            targetName: "犬",
+            targetId: null,
+            authorLocked: false,
+            forms: [addressForm("ポチ", 6)],
+          },
+        ],
+      }),
+      character("char_003", "犬", { appearedChapters: [4] }),
+    ];
+  }
+
+  test("第M話より前にしか出ていない人物は落ちる", () => {
+    const result = filterRelationGraph(buildRelationGraph(rangeSample()), {
+      fromChapter: 3,
+      upToChapter: 6,
+      showIsolated: true,
+    });
+    expect(result.graph.nodes.map((node) => node.id)).toEqual([
+      "char_002",
+      "char_003",
+    ]);
+  });
+
+  test("範囲の端（M・N ちょうど）に出た人物は残る", () => {
+    const graph = buildRelationGraph(rangeSample());
+    const atFour = filterRelationGraph(graph, {
+      fromChapter: 4,
+      upToChapter: 4,
+      showIsolated: true,
+    });
+    expect(atFour.graph.nodes.map((node) => node.id)).toEqual(["char_003"]);
+    const fromTwo = filterRelationGraph(graph, {
+      fromChapter: 2,
+      upToChapter: 2,
+      showIsolated: true,
+    });
+    expect(fromTwo.graph.nodes.map((node) => node.id)).toEqual(["char_001"]);
+  });
+
+  test("丸の大きさは範囲の中の登場回数", () => {
+    const result = filterRelationGraph(buildRelationGraph(rangeSample()), {
+      fromChapter: 5,
+      upToChapter: 6,
+      showIsolated: true,
+    });
+    const tsukishima = result.graph.nodes.find((node) => node.id === "char_002");
+    // 第1話の登場は範囲の外なので数えない
+    expect(tsukishima?.chapterCount).toBe(2);
+    expect(tsukishima?.appearedChapters).toEqual([5, 6]);
+  });
+
+  test("関係と呼称は第N話までに始まったものを引く（第M話より前に始まっていても引く）", () => {
+    const graph = buildRelationGraph(rangeSample());
+    // 灯と月島が両方出る第1〜2話。「先生」（第1話から）も関係も引く
+    const early = filterRelationGraph(graph, { fromChapter: 1, upToChapter: 2 });
+    expect(early.graph.edges).toHaveLength(1);
+    expect(
+      early.graph.edges[0].labels.map((label) => label.text).sort()
+    ).toEqual(["先生", "師匠"].sort());
+
+    // 第4〜5話：月島と犬が範囲に居るが、「ポチ」は第6話からなので引かない
+    const middle = filterRelationGraph(graph, { fromChapter: 4, upToChapter: 5 });
+    expect(middle.graph.edges).toEqual([]);
+
+    // 第4〜6話なら「ポチ」が始まっている
+    const late = filterRelationGraph(graph, { fromChapter: 4, upToChapter: 6 });
+    expect(late.graph.edges.map((edge) => edge.labels[0].text)).toEqual(["ポチ"]);
+  });
+
+  test("登場話数の記録が無い人物は、範囲を狭めても出す", () => {
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        appearedChapters: [5],
+        relations: [{ name: "月島", relation: "師匠" }],
+      }),
+      character("char_002", "月島", {}),
+    ]);
+    const result = filterRelationGraph(graph, { fromChapter: 5, upToChapter: 5 });
+    expect(result.graph.nodes.map((node) => node.id)).toEqual([
+      "char_001",
+      "char_002",
+    ]);
+  });
+
+  test("仮ノードは、範囲でも登場話数では落とさない", () => {
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        appearedChapters: [3],
+        relations: [{ name: "名も無き剣士", relation: "恩人" }],
+      }),
+    ]);
+    const result = filterRelationGraph(graph, { fromChapter: 3, upToChapter: 3 });
+    expect(result.graph.nodes.map((node) => node.provisional)).toEqual([
+      false,
+      true,
+    ]);
+  });
+
+  test("第1話からを指定しても、指定しないのと同じ", () => {
+    const graph = buildRelationGraph(rangeSample());
+    expect(
+      filterRelationGraph(graph, { fromChapter: 1, showIsolated: true })
+    ).toEqual(filterRelationGraph(graph, { showIsolated: true }));
+  });
+});
+
 describe("注記の件数（設計書6.38.5）", () => {
   /**
    * 灯 — 月島 の鎖。月島だけが「ハナ」（同名が2人いて決められない）を呼ぶ。

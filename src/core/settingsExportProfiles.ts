@@ -26,6 +26,7 @@ import {
   isVisibleAtSpoilerLevel,
 } from "./settingsMarkdown";
 import { formatDayStamp } from "./timestampedFileName";
+import { chapterRangeText } from "./chapterRange";
 
 /**
  * 設定資料を、提供先の型に合わせて絞って並べ直す（設計書6.75）。
@@ -361,6 +362,16 @@ export interface SettingsExportOptions {
   authorName?: string | null;
   /** 第N話まで。`null` なら全話ぶん */
   chapter: number | null;
+  /**
+   * 第M話から（作者の答え 2026-11-10「第M〜N話に出てきた人物だけを残す」）。
+   * 省略・null なら第1話から。`chapter` が null（全話ぶん）のときは使わない。
+   *
+   * **効くのは載せる人物の選び方だけ。** 値の巻き戻し・名指しされた相手の
+   * 関門（6.75 の7・8）は今までどおり第N話で見る——第M話より前に出た人物は
+   * ネタバレではないので、関係欄の名前から消す理由が無い。場所・能力・組織・
+   * 世界観も第N話までのまま（世界の決まりは第M話より前に書かれていても続く）
+   */
+  fromChapter?: number | null;
   /** 作成日。呼び出し側から渡して、試験で固定できるようにしてある */
   at: Date;
 }
@@ -430,6 +441,39 @@ function appearsBy(
   const known = record.appearedChapters.filter((at) => Number.isFinite(at));
   if (known.length === 0) return false;
   return Math.min(...known) <= chapter;
+}
+
+/**
+ * 下端（第M話から）。全話ぶんのとき・第1話以下・第N話を超えるときの扱いを
+ * ここで決める。**第N話を超える下端は第N話に寄せる**（入力欄の M＞N は
+ * 呼び出し側で入れ替えるが、口を直に呼ばれても範囲が空にならないように）
+ */
+function exportFromChapter(options: SettingsExportOptions): number | null {
+  const from = options.fromChapter ?? null;
+  if (options.chapter === null || from === null || !Number.isFinite(from)) {
+    return null;
+  }
+  const rounded = Math.round(from);
+  if (rounded <= 1) return null;
+  return Math.min(rounded, options.chapter);
+}
+
+/**
+ * 第M〜N話のどこかに出てきたか（載せる人物の選び方）。
+ *
+ * 呼ぶ前に `isExportable` を通しているので、登場話の記録が空の人物は
+ * ここへ来ない（書き出しはネタバレ側へ倒す。`appearsBy`）。
+ */
+function appearsWithin(
+  record: { appearedChapters: readonly number[] },
+  fromChapter: number | null,
+  chapter: number | null
+): boolean {
+  if (fromChapter === null) return true;
+  return record.appearedChapters.some(
+    (at) =>
+      Number.isFinite(at) && at >= fromChapter && (chapter === null || at <= chapter)
+  );
 }
 
 /** その提供先・その時点で、このレコードを出してよいか */
@@ -629,6 +673,7 @@ export function buildExportDocument(
 ): ExportDocument {
   const profile = AUDIENCE_PROFILES[audience];
   const chapter = options.chapter;
+  const fromChapter = exportFromChapter(options);
   /**
    * 話数の分からない自由記述を出してよいか。
    *
@@ -641,7 +686,14 @@ export function buildExportDocument(
   const sections: ExportSection[] = [];
   if (profile.characters) {
     sections.push(
-      characterSection(profile, profile.characters, data, chapter, undatedText)
+      characterSection(
+        profile,
+        profile.characters,
+        data,
+        chapter,
+        undatedText,
+        fromChapter
+      )
     );
   }
   if (profile.locations) {
@@ -758,10 +810,14 @@ function buildHeader(
   options: SettingsExportOptions,
   undatedText: boolean
 ): ExportHeader {
+  const fromChapter = exportFromChapter(options);
   const scope =
     options.chapter === null
       ? "全話ぶん"
-      : `第${options.chapter}話までに書かれたことだけ`;
+      : fromChapter === null
+        ? `第${options.chapter}話までに書かれたことだけ`
+        : `${chapterRangeText(fromChapter, options.chapter)}に出てきた人物と、` +
+          `第${options.chapter}話までに書かれたことだけ`;
 
   const meta: ExportField[] = [{ label: "作品名", value: options.workTitle }];
   if (options.authorName?.trim()) {
@@ -905,10 +961,15 @@ function characterSection(
   fields: readonly CharacterExportField[],
   data: SettingsExportData,
   chapter: number | null,
-  undatedText: boolean
+  undatedText: boolean,
+  fromChapter: number | null = null
 ): ExportSection {
   const visible = data.characters
-    .filter((character) => isExportable(character, profile, chapter))
+    .filter(
+      (character) =>
+        isExportable(character, profile, chapter) &&
+        appearsWithin(character, fromChapter, chapter)
+    )
     .map((character) =>
       recordAsOf(character, CHARACTER_AS_OF_FIELDS, chapter)
     );

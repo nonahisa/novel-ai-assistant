@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildChronicle,
   chronicleCharacters,
+  chronicleLastChapter,
   filterChronicle,
   groupByTimepoint,
   sortByTimeline,
@@ -612,5 +613,61 @@ describe("絞り込み", () => {
     );
 
     expect(options.map((entry) => entry.name)).toEqual(["太志", "文佳"]);
+  });
+});
+
+describe("話数の範囲で絞る（第M〜N話）", () => {
+  const MANY = [
+    episode(null, "プロローグ.txt"),
+    episode(1, "第01話.txt"),
+    episode(2, "第02話.txt"),
+    episode(3, "第03-05話.txt", { chapterEnd: 5 }),
+    episode(6, "第06話.txt"),
+  ];
+
+  it("範囲の外の話は落ち、両端の話は残る", () => {
+    const rows = filterChronicle(build(MANY), { range: { from: 2, to: 6 } });
+    // 話数の読めない行は、話数順では末尾に並ぶ
+    expect(rows.map((row) => row.fileName)).toEqual([
+      "第02話.txt",
+      "第03-05話.txt",
+      "第06話.txt",
+      "プロローグ.txt",
+    ]);
+  });
+
+  it("合本は幅のどこかが範囲に掛かれば残る", () => {
+    const rows = filterChronicle(build(MANY), { range: { from: 4, to: 4 } });
+    expect(rows.map((row) => row.fileName)).toEqual([
+      "第03-05話.txt",
+      "プロローグ.txt",
+    ]);
+  });
+
+  it("話数の読めない行は、範囲を狭めても残す", () => {
+    const rows = filterChronicle(build(MANY), { range: { from: 6, to: 6 } });
+    expect(rows.map((row) => row.fileName)).toEqual([
+      "第06話.txt",
+      "プロローグ.txt",
+    ]);
+  });
+
+  it("人物・種類の絞りと重ねられる", () => {
+    const characters = [
+      character("char_001", "太志", { appearedChapters: [1, 6] }),
+    ];
+    const rows = filterChronicle(build(MANY, characters), {
+      characterId: "char_001",
+      range: { from: 2, to: null },
+    });
+    expect(rows.map((row) => row.chapter)).toEqual([6]);
+  });
+
+  it("最終話は合本の終わりの話数で見る", () => {
+    expect(chronicleLastChapter(build(MANY))).toBe(6);
+    expect(
+      chronicleLastChapter(build([episode(1, "第01-03話.txt", { chapterEnd: 3 })]))
+    ).toBe(3);
+    expect(chronicleLastChapter(build([episode(null, "あとがき.txt")]))).toBe(0);
   });
 });

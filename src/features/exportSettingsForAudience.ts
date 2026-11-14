@@ -39,6 +39,7 @@ import {
   timestampedFileNameCandidates,
 } from "../core/timestampedFileName";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
+import { parseChapterRangeInput } from "../core/chapterRange";
 import { canRunProcesses } from "../core/runtime";
 import { describeProcessesBlocked } from "../core/processAvailability";
 import { openInDefaultApp } from "../core/openExternalFile";
@@ -59,12 +60,34 @@ import { revealFolder } from "../views/openDocument";
  * ので、出す項目は形式によって変わらない。
  */
 
+/**
+ * どこまでの資料か。`null` は全話ぶん、数は第N話まで、範囲は第M〜N話
+ * （作者の答え 2026-11-10。M が第1話なら数で持つ——今までの名前のまま）
+ */
+export type ExportChapterScope = number | null | { from: number; to: number };
+
+/** 範囲を、資料を組む口（`buildExportDocument`）の引数へ分ける */
+function chapterOptionsOf(scope: ExportChapterScope): {
+  chapter: number | null;
+  fromChapter: number | null;
+} {
+  if (scope === null || typeof scope === "number") {
+    return { chapter: scope, fromChapter: null };
+  }
+  return { chapter: scope.to, fromChapter: scope.from };
+}
+
 /** 書き出すファイル名の、拡張子を除いた部分 */
 export function exportFileBaseName(
   audience: ExportAudience,
-  chapter: number | null
+  chapter: ExportChapterScope
 ): string {
-  const scope = chapter === null ? "全話" : `第${chapter}話まで`;
+  const scope =
+    chapter === null
+      ? "全話"
+      : typeof chapter === "number"
+        ? `第${chapter}話まで`
+        : `第${chapter.from}〜${chapter.to}話`;
   return `設定資料（${AUDIENCE_PROFILES[audience].fileLabel}・${scope}）`;
 }
 
@@ -79,7 +102,7 @@ export function exportFileBaseName(
  */
 export function exportFileNameCandidates(
   audience: ExportAudience,
-  chapter: number | null,
+  chapter: ExportChapterScope,
   at: Date,
   tries: number = TIMESTAMPED_NAME_TRIES,
   extension: string = ".md",
@@ -109,7 +132,7 @@ export interface ExportNaming {
 export async function writeAudienceExport(
   directory: string,
   audience: ExportAudience,
-  chapter: number | null,
+  chapter: ExportChapterScope,
   content: string | Uint8Array,
   at: Date = new Date(),
   naming: ExportNaming = {}
@@ -127,7 +150,7 @@ export async function writeAudienceExport(
 async function freshTarget(
   directory: string,
   audience: ExportAudience,
-  chapter: number | null,
+  chapter: ExportChapterScope,
   at: Date,
   naming: ExportNaming
 ): Promise<string> {
@@ -165,7 +188,7 @@ async function freshTarget(
 export async function writeAudienceCsvExport(
   directory: string,
   audience: ExportAudience,
-  chapter: number | null,
+  chapter: ExportChapterScope,
   files: readonly ExportCsvFile[],
   about: string,
   at: Date = new Date()
@@ -316,7 +339,7 @@ export async function exportSettingsForAudience(
   const document = buildExportDocument(audience, data, {
     workTitle: work.title,
     authorName: await readAuthorName(work),
-    chapter,
+    ...chapterOptionsOf(chapter),
     at,
   });
 
@@ -608,10 +631,10 @@ async function askAudience(): Promise<ExportAudience | undefined> {
  */
 async function askChapter(
   latest: number | null
-): Promise<number | null | "cancelled"> {
+): Promise<ExportChapterScope | "cancelled"> {
   const all = { label: "全話ぶん", detail: "いま資料にあることを全部入れます" };
   const upTo = {
-    label: "第N話までの情報だけ",
+    label: "第M〜N話の情報だけ",
     detail: "先の話で分かったことを外します（ネタバレを避けたいとき）",
   };
   const picked = await showQuickPickKeepingFocus([all, upTo, cancelItem()], {
@@ -621,20 +644,22 @@ async function askChapter(
   if (!picked || isCancelItem(picked)) return "cancelled";
   if (picked === all) return null;
 
+  // 初めの値は第1話〜最終話（作者の答え 2026-11-10 の④）。数字1つだけでも
+  // 今までどおり「第1話〜その話」として受ける（`parseChapterRangeInput`）
   const answer = await askText({
-    title: "第何話までの情報を入れますか",
-    prompt: "その話までに書かれたことだけを資料にします。",
-    value: latest === null ? "" : String(latest),
-    validateInput: (value) => {
-      const number = Number(value.trim());
-      if (!Number.isSafeInteger(number) || number < 1) {
-        return "1以上の整数で入れてください。";
-      }
-      return undefined;
-    },
+    title: "第何話から第何話までの情報を入れますか",
+    prompt: "例：3〜8",
+    value: latest === null ? "" : `1〜${latest}`,
+    validateInput: (value) =>
+      parseChapterRangeInput(value)
+        ? undefined
+        : "「3〜8」のように、1以上の整数を2つ入れてください。",
   });
   if (answer === undefined) return "cancelled";
-  return Number(answer.trim());
+  const range = parseChapterRangeInput(answer);
+  if (!range) return "cancelled";
+  // 第1話からなら今までの「第N話まで」と同じもの（名前も頭書きも変えない）
+  return range.from <= 1 ? range.to : range;
 }
 
 /**

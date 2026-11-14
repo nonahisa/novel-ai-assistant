@@ -78,6 +78,9 @@ select {
   color: var(--vscode-descriptionForeground);
 }
 .kinds { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.range { display: inline-flex; gap: 6px; align-items: center; }
+.range[hidden] { display: none; }
+.range input[type="range"] { width: 110px; }
 .kinds label { display: inline-flex; align-items: center; gap: 3px; }
 #notice {
   padding: 6px 16px;
@@ -148,6 +151,12 @@ details p { margin: 4px 0 0; white-space: pre-wrap; }
   <h1 id="title">年表</h1>
   <button id="byChapter">話数順</button>
   <button id="byTimeline">時系列順</button>
+  <span class="range" id="range" hidden>
+    <span class="group-label">話数</span>
+    <input type="range" id="fromChapter" min="1" max="1" value="1" aria-label="何話から">
+    <input type="range" id="toChapter" min="1" max="1" value="1" aria-label="何話まで">
+    <span id="rangeValue"></span>
+  </span>
   <span class="group-label">人物で絞る</span>
   <select id="character"></select>
   <span class="kinds" id="kinds"></span>
@@ -171,6 +180,10 @@ const el = {
   byChapter: document.getElementById("byChapter"),
   byTimeline: document.getElementById("byTimeline"),
   character: document.getElementById("character"),
+  range: document.getElementById("range"),
+  fromChapter: document.getElementById("fromChapter"),
+  toChapter: document.getElementById("toChapter"),
+  rangeValue: document.getElementById("rangeValue"),
   kinds: document.getElementById("kinds"),
   exportMd: document.getElementById("export"),
   edit: document.getElementById("edit"),
@@ -204,7 +217,49 @@ function sendFilter() {
   for (const box of boxes) {
     if (box.checked) kinds.push(box.dataset.kind);
   }
-  post("filter", { characterId: el.character.value, kinds: kinds });
+  post("filter", {
+    characterId: el.character.value,
+    kinds: kinds,
+    fromChapter: Number(el.fromChapter.value),
+    toChapter: Number(el.toChapter.value),
+  });
+}
+
+/*
+  話数のつまみ（人物相関図のつまみと同じ作り）。core/chapterRange.ts の
+  chapterRangeText と同じ形で読む。2本が追い越していても小さいほうから。
+  動かしている最中は数字だけ直し、放したときに引き直す
+*/
+function chapterRangeText(a, b) {
+  const from = Math.min(a, b);
+  const to = Math.max(a, b);
+  return from === to ? "第" + from + "話" : "第" + from + "話〜第" + to + "話";
+}
+function showRangeText() {
+  el.rangeValue.textContent = chapterRangeText(
+    Number(el.fromChapter.value),
+    Number(el.toChapter.value)
+  );
+}
+el.fromChapter.addEventListener("input", showRangeText);
+el.toChapter.addEventListener("input", showRangeText);
+el.fromChapter.addEventListener("change", sendFilter);
+el.toChapter.addEventListener("change", sendFilter);
+
+function renderRange() {
+  // 1話しか無い作品では絞りようがないので、つまみごと出さない
+  el.range.hidden = data.lastChapter <= 1;
+  if (el.range.hidden) return;
+  const top = String(data.lastChapter);
+  el.fromChapter.max = top;
+  el.toChapter.max = top;
+  if (document.activeElement !== el.fromChapter) {
+    el.fromChapter.value = String(data.fromChapter);
+  }
+  if (document.activeElement !== el.toChapter) {
+    el.toChapter.value = String(data.toChapter);
+  }
+  el.rangeValue.textContent = chapterRangeText(data.fromChapter, data.toChapter);
 }
 
 /**
@@ -316,6 +371,7 @@ function render() {
   el.byTimeline.disabled = !data.canTimeline;
   el.exportMd.disabled = data.sections.length === 0;
 
+  renderRange();
   renderCharacters();
   renderKinds();
 

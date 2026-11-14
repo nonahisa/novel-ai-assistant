@@ -820,3 +820,109 @@ describe("時点の記録を持たない項目を、冒頭で断る", () => {
     expect(build("introduction", 3)).not.toContain("時点の記録を持たない");
   });
 });
+
+describe("第M〜N話に絞る（作者の答え 2026-11-10）", () => {
+  /** 月島灯（第1〜3話）・白鳥（第1話だけ）・黒木（第5〜6話）・まだ出ない人（第9話） */
+  function rangeData(): SettingsExportData {
+    const data = baseData();
+    data.characters = [
+      { ...fullCharacter(), relations: [{ name: "白鳥", relation: "同僚" }] },
+      {
+        ...emptyCharacter("char_002", "白鳥"),
+        summary: "第1話だけの同僚。",
+        appearedChapters: [1],
+      },
+      {
+        ...emptyCharacter("char_003", "黒木"),
+        summary: "第5話からの上司。",
+        appearedChapters: [5, 6],
+      },
+      {
+        ...emptyCharacter("char_004", "まだ出ない人"),
+        summary: "第9話の黒幕。",
+        appearedChapters: [9],
+      },
+    ];
+    return data;
+  }
+
+  const rangeOf = (chapter: number | null, fromChapter: number) =>
+    buildExportMarkdown("editorial", rangeData(), {
+      ...OPTIONS,
+      chapter,
+      fromChapter,
+    });
+
+  test("第M話より前にしか出ていない人物は載せない", () => {
+    const built = rangeOf(6, 3);
+    expect(built).toContain("月島灯");
+    expect(built).toContain("第5話からの上司。");
+    expect(built).not.toContain("第1話だけの同僚。");
+  });
+
+  test("第N話より後に出る人物は、今までどおり載せない", () => {
+    expect(rangeOf(6, 3)).not.toContain("第9話の黒幕。");
+  });
+
+  test("範囲の端（M・N ちょうど）に出た人物は載せる", () => {
+    expect(rangeOf(3, 3)).toContain("月島灯");
+    const atFive = rangeOf(5, 5);
+    expect(atFive).toContain("第5話からの上司。");
+    expect(atFive).not.toContain("第1話だけの同僚。");
+  });
+
+  test("範囲より前に出た相手の名前は、関係の欄から消さない（ネタバレではない）", () => {
+    expect(rangeOf(6, 2)).toContain("白鳥（同僚）");
+  });
+
+  test("登場話数の無い人物は、範囲でも載せない（時点で絞るときと同じ）", () => {
+    const data = rangeData();
+    data.characters = [
+      ...data.characters,
+      {
+        ...emptyCharacter("char_005", "話数の無い人"),
+        summary: "いつ出たか分からない。",
+      },
+    ];
+    const built = buildExportMarkdown("editorial", data, {
+      ...OPTIONS,
+      chapter: 6,
+      fromChapter: 2,
+    });
+    expect(built).not.toContain("いつ出たか分からない。");
+  });
+
+  test("場所・能力・組織・世界観は第N話までのまま（第M話より前でも載せる）", () => {
+    const built = rangeOf(6, 3);
+    // 組織と世界観は第1話、能力は第2話に出たもの
+    expect(built).toContain("窓口課");
+    expect(built).toContain("死者が遺す想いの断片。");
+    expect(built).toContain("霊視");
+  });
+
+  test("頭書きの範囲に、第M話〜第N話が出る", () => {
+    expect(rangeOf(6, 3)).toContain(
+      "**範囲**: 第3話〜第6話に出てきた人物と、第6話までに書かれたことだけ"
+    );
+  });
+
+  test("第1話からなら、今までの「第N話まで」と同じ資料になる", () => {
+    const without = buildExportMarkdown("editorial", rangeData(), {
+      ...OPTIONS,
+      chapter: 6,
+    });
+    expect(rangeOf(6, 1)).toBe(without);
+  });
+
+  test("全話ぶんのときは下端を使わない", () => {
+    const built = rangeOf(null, 5);
+    expect(built).toContain("第1話だけの同僚。");
+    expect(built).toContain("**範囲**: 全話ぶん");
+  });
+
+  test("下端が上端を超えて渡されても、第N話の1話ぶんとして扱う", () => {
+    const built = rangeOf(5, 8);
+    expect(built).toContain("第5話からの上司。");
+    expect(built).toContain("**範囲**: 第5話に出てきた人物");
+  });
+});

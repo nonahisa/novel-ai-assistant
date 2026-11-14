@@ -9,6 +9,14 @@ import {
   type AddressPair,
   type AddressPairs,
 } from "./addressPairs";
+import {
+  appearedInRange,
+  chapterRangeBounds,
+  chapterRangeText,
+  FULL_CHAPTER_RANGE,
+  isFullChapterRange,
+  type ChapterRange,
+} from "./chapterRange";
 
 /**
  * 呼び合いを画面へ出す形に組む（設計書6.92）。
@@ -47,6 +55,26 @@ export interface AddressScope {
   chapter: number | null;
   /** 作者が絞りを外したか。話数があっても、これが立っていれば全部出す */
   showAll: boolean;
+  /**
+   * 作品ぜんたいの一覧を第M〜N話で絞る（作者の答え 2026-11-10）。
+   * 省略・端まで（両方 null）なら絞らない。
+   *
+   * **効くのは作品情報タブの一覧で、話で絞っていないときだけ。** 本文から
+   * 開いて「第5話に出る人どうし」に絞っている間は、範囲より狭い1話の絞りが
+   * 先に立つ（2つを重ねても、範囲が第5話を含む限り結果は変わらない）。
+   * 人物詳細の節は会話を書きながら見るもので、話の絞りだけを持つ。
+   */
+  range?: ChapterRange;
+}
+
+/** 一覧の話数のつまみ。話数の分かる記録が2話ぶん以上なければ出さない */
+export interface AddressRangeSlider {
+  /** つまみの上限（最終話） */
+  last: number;
+  from: number;
+  to: number;
+  /** 「第3話〜第8話」 */
+  text: string;
 }
 
 /** 画面に出す1行 */
@@ -94,6 +122,11 @@ export interface AddressListView {
   emptyNote: string;
   /** 絞りの切り替え。話数が分からなければ label は空文字 */
   toggle: AddressToggle;
+  /**
+   * 話数のつまみ。1話で絞っているあいだと、最終話が1話以下の作品では
+   * null（つまみを出さない）
+   */
+  rangeSlider: AddressRangeSlider | null;
 }
 
 /** 絞りを掛けたあとの組 */
@@ -102,6 +135,8 @@ interface ScopedPairs {
   needsCheck: AddressPair[];
   /** いま話で絞っているか */
   filtered: boolean;
+  /** 範囲で絞っているときの数字（「第3話〜第8話」）。絞っていなければ空文字 */
+  rangeText: string;
   /**
    * 絞る前の組。**「絞ったから0件」と「そもそも0件」を分ける**ために持つ。
    * 同じ「ありません」で済ませると、絞りを外せば見られることに気づけない。
@@ -136,10 +171,22 @@ function scopePairs(
   const all = buildAddressPairs(characters);
   const chapter = scope.chapter;
   if (chapter === null || scope.showAll) {
+    const range = scope.range;
+    if (range && !isFullChapterRange(range)) {
+      const bounds = chapterRangeBounds(range, addressLastChapter(characters));
+      return {
+        usable: narrowToRange(all.usable, range, characters),
+        needsCheck: narrowToRange(all.needsCheck, range, characters),
+        filtered: false,
+        rangeText: chapterRangeText(bounds.from, bounds.to),
+        before: all,
+      };
+    }
     return {
       usable: all.usable,
       needsCheck: all.needsCheck,
       filtered: false,
+      rangeText: "",
       before: all,
     };
   }
@@ -147,7 +194,86 @@ function scopePairs(
     usable: narrow(all.usable, chapter, characters),
     needsCheck: narrow(all.needsCheck, chapter, characters),
     filtered: true,
+    rangeText: "",
     before: all,
+  };
+}
+
+/**
+ * 第M〜N話に出てきた人どうし・第N話までに使われ始めた呼び方だけにする
+ * （作者の答え 2026-11-10。相関図と同じ判断）。
+ *
+ * - **人**：呼ぶ側と呼ばれる側の**両方**が範囲のどこかに出ていること
+ *   （`pairsInChapter` と同じく、片方だけだと範囲に居ない相手への呼び方が並ぶ）。
+ *   登場話数が空の人物と、資料に当たらない相手は落とさない
+ * - **呼び方**：使い始めが第N話までのもの。第M話より前に始まった呼び方も、
+ *   範囲の中で使われていれば一覧に要るので落とさない。使い始めの分からない
+ *   呼び方も落とさない
+ */
+function narrowToRange(
+  pairs: readonly AddressPair[],
+  range: ChapterRange,
+  characters: readonly Character[]
+): AddressPair[] {
+  const appears = new Map<string, boolean>();
+  for (const character of characters) {
+    appears.set(
+      character.id,
+      appearedInRange(character.appearedChapters ?? [], range)
+    );
+  }
+  const here = (id: string | null): boolean =>
+    id === null ? true : (appears.get(id) ?? true);
+  return pairs
+    .filter((pair) => here(pair.fromId) && here(pair.toId))
+    .map((pair) => ({
+      ...pair,
+      uses: pair.uses.filter(
+        (use) =>
+          use.firstChapter === null ||
+          range.to === null ||
+          use.firstChapter <= range.to
+      ),
+    }))
+    .filter((pair) => pair.uses.length > 0);
+}
+
+/**
+ * 一覧のつまみの上限（最終話）。人物の登場話と、呼び方の使い始め・使い終わりの
+ * いちばん後ろ（相関図の `lastChapterOf` と同じ考え方）。記録が無ければ0
+ */
+export function addressLastChapter(characters: readonly Character[]): number {
+  let last = 0;
+  const take = (at: number | null | undefined): void => {
+    if (typeof at === "number" && Number.isFinite(at)) last = Math.max(last, at);
+  };
+  for (const character of characters) {
+    for (const at of character.appearedChapters ?? []) take(at);
+    for (const term of character.addressTerms ?? []) {
+      for (const form of term.forms) {
+        take(form.firstChapter);
+        take(form.lastChapter);
+      }
+    }
+  }
+  return last;
+}
+
+/** 一覧のつまみ。1話で絞っているときと、絞りようのない作品では出さない */
+function rangeSliderOf(
+  characters: readonly Character[],
+  scope: AddressScope,
+  filtered: boolean
+): AddressRangeSlider | null {
+  if (filtered) return null;
+  const last = addressLastChapter(characters);
+  if (last <= 1) return null;
+  const bounds = chapterRangeBounds(scope.range ?? FULL_CHAPTER_RANGE, last);
+  return {
+    last,
+    from: bounds.from,
+    to: bounds.to,
+    text: chapterRangeText(bounds.from, bounds.to),
   };
 }
 
@@ -203,7 +329,9 @@ export function buildAddressListView(
   const count = scoped.usable.length;
   const summary = scoped.filtered
     ? `第${scope.chapter}話に出る人どうし：${count}組`
-    : `作品ぜんたい：${count}組`;
+    : scoped.rangeText
+      ? `${scoped.rangeText}：${count}組`
+      : `作品ぜんたい：${count}組`;
 
   return {
     summary,
@@ -216,6 +344,7 @@ export function buildAddressListView(
     needsCheckHint: scoped.needsCheck.length > 0 ? NEEDS_CHECK_HINT : "",
     emptyNote: emptyNoteOf(scoped),
     toggle: toggleOf(scope, scoped.filtered),
+    rangeSlider: rangeSliderOf(characters, scope, scoped.filtered),
   };
 }
 
@@ -233,6 +362,9 @@ function emptyNoteOf(scoped: ScopedPairs): string {
       "この話に出る人どうしの呼び合いはありません。" +
       "「全部を見る」でほかの話の分が見られます。"
     );
+  }
+  if (scoped.rangeText && before > 0) {
+    return `${scoped.rangeText}の呼び合いはありません。`;
   }
   return (
     "呼び合いはまだありません。" +
@@ -255,7 +387,8 @@ export function buildCharacterAddressView(
   characterId: string,
   scope: AddressScope
 ): CharacterAddressView | undefined {
-  const scoped = scopePairs(characters, scope);
+  // 範囲は作品ぜんたいの一覧だけに効かせる（`AddressScope.range` の注記）
+  const scoped = scopePairs(characters, { ...scope, range: undefined });
   const { calls, calledBy } = addressesOf(scoped.usable, characterId);
   if (calls.length === 0 && calledBy.length === 0) {
     /*

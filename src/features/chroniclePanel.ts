@@ -16,6 +16,7 @@ import { logFailure, useLogFile } from "../core/logger";
 import {
   buildChronicle,
   chronicleCharacters,
+  chronicleLastChapter,
   CHRONICLE_EVENT_KINDS,
   CHRONICLE_EVENT_LABELS,
   filterChronicle,
@@ -32,6 +33,13 @@ import { openGeneratedMarkdown } from "../views/openDocument";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
 import { createNonce } from "../core/webviewNonce";
 import { messageOf } from "../core/errorMessage";
+import {
+  chapterRangeBounds,
+  chapterRangeText,
+  isFullChapterRange,
+  normalizeChapterRange,
+  type ChapterRange,
+} from "../core/chapterRange";
 
 /**
  * 年表（設計書6.39）。
@@ -103,6 +111,11 @@ class ChroniclePanel {
   private characterId = "";
   /** 出す出来事の種類。既定は全部 */
   private kinds: ChronicleEventKind[] = [...CHRONICLE_EVENT_KINDS];
+  /**
+   * 第M〜N話（作者の答え 2026-11-10）。開いたときは第1話〜最終話。
+   * 端は `null` で持ち、話が増えても最終話まで追いつく
+   */
+  private range: ChapterRange = { from: null, to: null };
 
   private rows: ChronicleRow[] = [];
   private timeline: Timeline | null = null;
@@ -177,6 +190,12 @@ class ChroniclePanel {
     if (this.order === "timeline" && !this.canTimeline()) {
       this.order = "chapter";
     }
+    // 話が減って最終話を超えた値は、最終話へ寄せる
+    this.range = normalizeChapterRange(
+      this.range.from,
+      this.range.to,
+      chronicleLastChapter(this.rows)
+    );
     this.post();
   }
 
@@ -264,6 +283,11 @@ class ChroniclePanel {
         case "filter":
           this.characterId = message.characterId;
           this.kinds = message.kinds;
+          this.range = normalizeChapterRange(
+            message.fromChapter,
+            message.toChapter,
+            chronicleLastChapter(this.rows)
+          );
           this.post();
           return;
         case "openCharacter":
@@ -302,10 +326,21 @@ class ChroniclePanel {
       chronicleToMarkdown(this.sections(), {
         workTitle: this.work.title,
         order: this.order,
+        rangeText: this.rangeText(),
       }),
       { preview: false },
       { work: this.work }
     );
+  }
+
+  /** 話数で絞っているときの範囲の数字。絞っていなければ undefined */
+  private rangeText(): string | undefined {
+    if (isFullChapterRange(this.range)) return undefined;
+    const bounds = chapterRangeBounds(
+      this.range,
+      chronicleLastChapter(this.rows)
+    );
+    return chapterRangeText(bounds.from, bounds.to);
   }
 
   /** 時系列で並べられるか。時期が1つも無ければ並べようがない */
@@ -322,6 +357,7 @@ class ChroniclePanel {
         this.kinds.length === CHRONICLE_EVENT_KINDS.length
           ? undefined
           : this.kinds,
+      range: isFullChapterRange(this.range) ? undefined : this.range,
     });
 
     if (this.order === "timeline") return sortByTimeline(rows, this.timeline);
@@ -340,10 +376,15 @@ class ChroniclePanel {
 
   private build(): ChronicleView {
     const sections = this.sections();
+    const lastChapter = chronicleLastChapter(this.rows);
+    const bounds = chapterRangeBounds(this.range, lastChapter);
     return {
       title: `${this.work.title} の年表`,
       order: this.order,
       canTimeline: this.canTimeline(),
+      lastChapter,
+      fromChapter: bounds.from,
+      toChapter: bounds.to,
       characterId: this.characterId,
       characters: chronicleCharacters(this.rows),
       kinds: this.kinds,
@@ -387,7 +428,7 @@ class ChroniclePanel {
         "並べる話がありません。作品に本文ファイルを入れてから開き直してください。"
       );
     }
-    return "絞り込みに合う話がありません。人物か種類の条件をゆるめてください。";
+    return "絞り込みに合う話がありません。話数・人物・種類の条件をゆるめてください。";
   }
 
   /** 画面の上に出す注意書き。読めなかったものを黙って落とさない */
@@ -437,6 +478,10 @@ interface ChronicleView {
   title: string;
   order: ChronicleOrder;
   canTimeline: boolean;
+  /** 話数のつまみの上限。0 ならつまみを出さない（話数の読める話が無い） */
+  lastChapter: number;
+  fromChapter: number;
+  toChapter: number;
   characterId: string;
   characters: Array<{ id: string; name: string }>;
   kinds: ChronicleEventKind[];
@@ -453,7 +498,13 @@ interface ChronicleView {
 type PanelMessage =
   | { type: "ready" }
   | { type: "order"; order: ChronicleOrder }
-  | { type: "filter"; characterId: string; kinds: ChronicleEventKind[] }
+  | {
+      type: "filter";
+      characterId: string;
+      kinds: ChronicleEventKind[];
+      fromChapter?: number;
+      toChapter?: number;
+    }
   | { type: "openCharacter"; characterId: string }
   | { type: "openEpisode"; filePath: string }
   | { type: "edit" }

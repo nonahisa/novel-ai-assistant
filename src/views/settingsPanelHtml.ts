@@ -1280,6 +1280,51 @@ button.danger:hover {
     return row;
   }
 
+  /*
+    呼び合いの一覧の話数のつまみ（作者の答え 2026-11-10）。人物相関図の
+    つまみと同じ作り：2本の range を並べ、動かしている最中は数字だけ直し、
+    放したときに拡張機能へ送る。数字の読み方は core/chapterRange.ts の
+    chapterRangeText と同じ形で、2本が追い越していても小さいほうから読む。
+    出すかどうか・初めの位置は拡張機能（addressPairsView）が決める
+  */
+  function addressRangeRow(slider) {
+    if (!slider) return null;
+    const row = document.createElement("div");
+    row.className = "row address-range";
+    const title = document.createElement("span");
+    title.textContent = "話数";
+    const from = document.createElement("input");
+    const to = document.createElement("input");
+    const value = document.createElement("span");
+    for (const input of [from, to]) {
+      input.type = "range";
+      input.min = "1";
+      input.max = String(slider.last);
+    }
+    from.value = String(slider.from);
+    to.value = String(slider.to);
+    from.setAttribute("aria-label", "何話から");
+    to.setAttribute("aria-label", "何話まで");
+    value.textContent = slider.text;
+    function show() {
+      const a = Math.min(Number(from.value), Number(to.value));
+      const b = Math.max(Number(from.value), Number(to.value));
+      value.textContent = a === b ? "第" + a + "話" : "第" + a + "話〜第" + b + "話";
+    }
+    function send() {
+      post("addressRange", { from: Number(from.value), to: Number(to.value) });
+    }
+    from.addEventListener("input", show);
+    to.addEventListener("input", show);
+    from.addEventListener("change", send);
+    to.addEventListener("change", send);
+    row.appendChild(title);
+    row.appendChild(from);
+    row.appendChild(to);
+    row.appendChild(value);
+    return row;
+  }
+
   /**
    * 要確認は畳んで出す（作者の裁定、2026-09-13）。
    *
@@ -1332,6 +1377,8 @@ button.danger:hover {
 
       const toggleRow = addressToggle(view.toggle, null);
       if (toggleRow) body.appendChild(toggleRow);
+      const rangeRow = addressRangeRow(view.rangeSlider);
+      if (rangeRow) body.appendChild(rangeRow);
 
       if (view.emptyNote) {
         const empty = document.createElement("div");
