@@ -999,6 +999,26 @@ export async function ensureOnUseIgnoreRule(
 }
 
 /**
+ * 作者が押したときだけ、置き場の根の .gitignore の末尾へ行を足す（設計書5.5.21）。
+ *
+ * GitHub に送れない大きさのファイルを記録から外す［.gitignore に足す］のボタンが呼ぶ。
+ * **既存の行は変えない**（実装ルール2）。足し方は起動の整備と同じ部品
+ * （作者の記述をバイト単位で保ち、追記だけで書き、書いたあと読み直して確かめる）。
+ * 既にある行は足さない。
+ */
+export async function appendIgnoreRules(
+  root: string,
+  rules: readonly string[]
+): Promise<void> {
+  await appendMissingIgnoreRules(root, (bytes) => {
+    const present = lineSet(bytes);
+    // 行の比べは前後の空白を落とした形（`lineSet` と同じ）。末尾を打ち消した空白の行でも
+    // 二度足さず、書いたあとの読み直しでも「足りない」と言わない
+    return [...new Set(rules)].filter((rule) => !present.has(rule.trim()));
+  });
+}
+
+/**
  * 編集者へ渡した写し（編集用リポジトリ）の作品フォルダーか。**`.gitignore` を書かない**ために見る。
  *
  * 写しの `.gitignore` は作者が送ったもので、編集者の側の「校閲を終えて返す」は `.aiwriter/` しか

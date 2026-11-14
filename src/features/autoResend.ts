@@ -2,11 +2,17 @@ import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
+  headCommit,
   push,
   readOperationInProgress,
   readSyncStatus,
+  runGit,
   type GitCommandRunner,
 } from "../core/git";
+import { describeTooLargeToSend, findLargeFilesToSend } from "../core/gitLargeFiles";
+import { noReasonText } from "../core/gitFailureReason";
+import { globalPushRejections, type PushRejectionMemory } from "./pushRejectionMemory";
+import { whenNoticePicked } from "../views/notify";
 import {
   DEFAULT_RESEND_INTERVAL_MINUTES,
   FOCUS_MIN_GAP_MS,
@@ -22,7 +28,7 @@ import {
 import { buildSyncTarget } from "../core/syncTarget";
 import { describePlaceWorks } from "../core/syncAllPlan";
 import { normalizeForComparison } from "../core/paths";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, showLog } from "../core/logger";
 import { useSyncLog } from "./syncLog";
 import { noticeMissingWorksOnce } from "./missingWorksNotice";
 import { findMissingWorks } from "../core/workFolderPresence";
@@ -77,6 +83,8 @@ export interface AutoResendDeps {
   now?: () => number;
   /** 送れたあと（「送らずに閉じた」印を付け直す） */
   afterSent?: () => Promise<void>;
+  /** 断られた記録の覚え（試験で差し替える）。省けば拡張機能で1つの覚え */
+  rejections?: PushRejectionMemory;
 }
 
 /** 1回試した結果。試験と記録のため */
@@ -382,12 +390,55 @@ export class AutoResender implements vscode.Disposable {
       return;
     }
 
+    /*
+      **同じ記録で断られたなら、作者が何かを変えるまで試さない**（設計書5.5.21。2026-11-14 の
+      作者の実機：100MB を超えるファイルの入った記録を、5分おきに送っては断られていた）。
+      鍵は HEAD のコミットID（記録し直す・取り込むと外れる）。作者が押した同期・送信は
+      この覚えを見ないので、押せばまた試す。**見送りはログへ書かない**——断られたときに
+      1行残してあり、5分おきに書き足すとログが埋まる（`noteHold` の覚えは試すたびに消える）
+    */
+    const rejections = this.deps.rejections ?? globalPushRejections;
+    const head = await headCommit(target.root, this.deps.run);
+    if (rejections.rejectedReason(target.root, head)) {
+      outcome.skipped.push({ label, reason: "同じ記録を GitHub に断られた" });
+      return;
+    }
+    // 送る記録に上限を超えるファイルがあれば、送らずに覚える（送っても断られる）
+    const unsendable = await findLargeFilesToSend(target.root, "@{u}", this.deps.run ?? runGit);
+    if (unsendable.length > 0) {
+      const text = describeTooLargeToSend(unsendable);
+      rejections.remember(target.root, head, text);
+      outcome.failed.push({ label, detail: text });
+      await useSyncLog(target.root, target.works);
+      logFailure("自動の送り直し：送る記録に GitHub に送れない大きさのファイルがあるので送らなかった", {
+        置き場: label,
+        きっかけ: trigger,
+        ファイル: unsendable.map((one) => `${one.path}（${one.size}バイト）`).join("、"),
+      });
+      this.noticeRejected(label, text, target.root);
+      return;
+    }
+
     // **押し付け（force）はしない。** 別の環境が先に送っていれば、
     // GitHub が拒んでそこで止まる
     const result = await push(target.root, this.deps.run);
     // 書庫なら書庫のログへ（設計書5.7.9。先頭の作品のログへ紛れさせない）
     await useSyncLog(target.root, target.works);
     const key = target.root;
+
+    if (!result.ok && result.rejected) {
+      // 断られた。**同じ記録では試し直さない**（上の覚え）。知らせはこの記録につき1回
+      const text = `GitHub に送るのを断られました。\n${result.reason ?? noReasonText(undefined)}`;
+      rejections.remember(target.root, head, text);
+      outcome.failed.push({ label, detail: result.detail ?? text });
+      logFailure("自動の送り直しで、送信を断られた（同じ記録では試し直しません）", {
+        置き場: label,
+        きっかけ: trigger,
+        詳細: result.detail ?? "（詳細なし）",
+      });
+      this.noticeRejected(label, text, target.root);
+      return;
+    }
 
     if (!result.ok) {
       const detail = result.detail ?? "（詳細なし）";
@@ -407,6 +458,7 @@ export class AutoResender implements vscode.Disposable {
 
     const failedBefore = this.failures.get(key)?.count ?? 0;
     this.failures.delete(key);
+    rejections.forget(target.root);
     outcome.sent.push({ label, ahead: decision.ahead });
     logStep(
       `自動の送り直し：送った（${label}／${decision.ahead}件／きっかけ ${trigger}` +
@@ -453,6 +505,21 @@ export class AutoResender implements vscode.Disposable {
       return status?.kind === "tracked" && status.aheadHere > 0;
     });
     return describePlaceWorks(place.label, place.works, involved);
+  }
+
+  /**
+   * 断られたことを知らせる。**送り直しで窓を出すのはここだけ**——回線の無い失敗と違い、
+   * 待っても通らないので、作者が知らないままになる。同じ記録では試し直さないので、
+   * 知らせもその記録につき1回になる。ボタンの答えは待たない（`whenNoticePicked`）
+   */
+  private noticeRejected(label: string, text: string, root: string): void {
+    whenNoticePicked(
+      vscode.window.showWarningMessage(`${label}：${text}`, "ログを表示"),
+      (picked) => {
+        if (picked === "ログを表示") showLog();
+      },
+      { label: "自動の送り直しで断られた知らせ", workFolder: root }
+    );
   }
 
   private async refreshWorks(works: readonly WorkEntry[]): Promise<void> {

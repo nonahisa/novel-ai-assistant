@@ -4,6 +4,8 @@ import { divergenceLine } from "./gitSyncStatusText";
 import { isPathInside, isSameFolder, join } from "./pathText";
 import { settingsToChooseCount, type ConflictWalkStart } from "./divergenceScan";
 import { finishReviewLabel, saveAndSyncLabel, setupGithubLabel } from "./syncEntryNames";
+import { noReasonText, pickGitFailureReason } from "./gitFailureReason";
+import type { LargeFile } from "./gitLargeFiles";
 
 /**
  * 「作品をすべて同期する」で、置き場ごとに何をするかを決める（設計書5.5.14）。
@@ -423,11 +425,17 @@ export function afterCommit(result: {
   ok: boolean;
   detail?: string;
   nothingToCommit?: boolean;
+  code?: number;
 }): { stop: true; error: string } | { stop: false; committed: boolean } {
   if (!result.ok) {
+    // **warning の行を理由にしない**（設計書5.5.21。2026-11-14、LF→CRLF の warning が
+    // 理由として並んだ）。エラーの行を前に出し、無ければ終了コードとログの在りかを言う。
+    // 全文は呼び出し側がログへ残す
     return {
       stop: true,
-      error: `記録できませんでした: ${result.detail ?? "（詳細なし）"}`,
+      error: `記録できませんでした: ${
+        pickGitFailureReason(result.detail) ?? noReasonText(result.code)
+      }`,
     };
   }
   return { stop: false, committed: !result.nothingToCommit };
@@ -688,6 +696,17 @@ export interface SyncTargetOutcome {
    */
   pushFailed?: boolean;
   /**
+   * 送信を GitHub が断ったか（設計書5.5.21）。`pushFailed`（届かなかった）とは分ける——
+   * 「ネットにつながったら自動で送ります」は、断られた記録には当てはまらない。
+   * `error` に断りの文が入る
+   */
+  pushRejected?: boolean;
+  /**
+   * GitHub に送れない大きさのファイルが見つかって、記録の前に止めた（設計書5.5.21）。
+   * 報告に［.gitignore に足す］を出すための材料（置き場の根と、まだ git に入っていない道）
+   */
+  tooLarge?: { root: string; files: LargeFile[] };
+  /**
    * 分かれた分を、その場で合わせた結果（設計書5.5.18）。
    *
    * **件数を持つ。** 作者の指摘（2026-09-10）：「競合解決があるかないか
@@ -753,7 +772,11 @@ export function describeOutcomes(
   const head = parts.length > 0 ? `${parts.join("・")}を済ませました。` : "";
   const tail =
     failed > 0 ? `${failed}か所は最後まで通りませんでした。` : "";
-  return `${head}${unsent}${tail}${describePreRecordPulls(outcomes)}${describeFolds(
+  // **止まったことを先に、済んだことはあとに**（2026-11-03 の決まり）。2026-11-14 の作者の
+  // 実機では「記録 1か所・…を済ませました。1か所は最後まで通りませんでした」で始まり、
+  // 止まった置き場が読み飛ばされた。送信だけ届かなかった文（`unsent`）の並びは、作者の
+  // 裁定（2026-11-03 夜）どおり済んだ数のあとのまま
+  return `${tail}${head}${unsent}${describePreRecordPulls(outcomes)}${describeFolds(
     outcomes
   )}`;
 }

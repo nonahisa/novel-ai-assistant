@@ -34,6 +34,11 @@ export interface GitSetupResult {
    * 扱い、**後の手順（取り込み・送信）は続ける**こと。
    */
   nothingToCommit?: boolean;
+  /**
+   * 失敗したときの git の終了コード（設計書5.5.21）。git の文に理由の行が無いとき
+   * （warning しか出さずに止まった）に、空の理由の代わりに添える
+   */
+  code?: number;
 }
 
 /**
@@ -668,7 +673,7 @@ export const runCommand: CommandRunner = (command, args, cwd, timeoutMs) =>
   });
 
 function failure(result: GitCommandResult): GitSetupResult {
-  return { ok: false, detail: (result.stderr || result.stdout).trim() };
+  return { ok: false, detail: (result.stderr || result.stdout).trim(), code: result.code };
 }
 
 /**

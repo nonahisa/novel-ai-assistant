@@ -3,6 +3,7 @@ import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
   fetchRemote,
+  headCommit,
   pullFastForward,
   push,
   readPendingPaths,
@@ -62,6 +63,15 @@ import type { SyncPresave } from "./presaveBeforeSync";
 import { describePresaveFailures } from "../core/syncPresave";
 import { readAutoResendSettings } from "./autoResend";
 import { globalFetchTroubleMemory } from "./fetchTroubleMemory";
+import { globalPushRejections } from "./pushRejectionMemory";
+import {
+  describeTooLargeToRecord,
+  describeTooLargeToSend,
+  findLargeFilesToRecord,
+  findLargeFilesToSend,
+} from "../core/gitLargeFiles";
+import { noReasonText } from "../core/gitFailureReason";
+import { IGNORE_LARGE_FILES_LABEL, ignoreLargeFiles } from "./largeFilesIgnore";
 
 /**
  * 作品をすべて同期する（設計書5.5.14）。
@@ -751,11 +761,36 @@ async function runPlan(
       outcome.error = IDENTITY_MISSING_HINT;
       return outcome;
     }
+    /*
+      **GitHub に送れない大きさのファイルがあれば、記録しない**（設計書5.5.21。2026-11-14 の
+      作者の実機：722MB の zip が記録に入り、送信が断られ続けた）。記録してからでは作者の手で
+      戻しにくい。止めるのはこの置き場だけで、ほかの置き場は続ける。報告に
+      ［.gitignore に足す］を出す（押したときだけ足す。ファイルは動かさない・消さない）
+    */
+    const large = await findLargeFilesToRecord(cwd, run);
+    if (large.files.length > 0) {
+      outcome.error = describeTooLargeToRecord(large.files);
+      // .gitignore で外れるのは、まだ git に入っていないファイルだけ。記録済みのファイルが
+      // 大きくなったものは、足しても次の同期で同じく止まるのでボタンを出さない
+      const untracked = large.files.filter((one) => one.untracked);
+      if (untracked.length > 0) outcome.tooLarge = { root: large.root, files: untracked };
+      logFailure("すべて同期：GitHub に送れない大きさのファイルがあるので記録しなかった", {
+        置き場: name,
+        ファイル: large.files.map((one) => `${one.path}（${one.size}バイト）`).join("、"),
+      });
+      return outcome;
+    }
     const message = syncCommitMessage(trackable, new Date());
-    const next = afterCommit(await commitAll(cwd, message, run));
+    const committed = await commitAll(cwd, message, run);
+    const next = afterCommit(committed);
     if (next.stop) {
       outcome.error = next.error;
-      logFailure("すべて同期：記録に失敗", { 置き場: name, 詳細: outcome.error });
+      // 画面の理由は絞ってある。**ログには git の文の全文を残す**（実装ルール5）
+      logFailure("すべて同期：記録に失敗", {
+        置き場: name,
+        詳細: committed.detail ?? "（詳細なし）",
+        終了コード: committed.code ?? "（不明）",
+      });
       return outcome;
     }
     // **記録するものが無いのは失敗ではない。** 止めると、本当に必要な
@@ -822,7 +857,41 @@ async function runPlan(
     !outcome.committed &&
     !outcome.folded;
   if (plan.push && !nothingToSend) {
+    /*
+      **送る記録に上限を超えるファイルが入っていれば、送らない**（設計書5.5.21）。記録の前の
+      検査より前にできた記録（作者の書庫がいまこの形）は、ここで止める。送ると GitHub が
+      断るうえ、1GB 近い送信は断りの返事より先に時間切れになりうる。記録を取り消すかは
+      作者の判断なので、ここでは何も戻さない
+    */
+    const unsendable = await findLargeFilesToSend(cwd, "@{u}", run);
+    if (unsendable.length > 0) {
+      outcome.pushRejected = true;
+      outcome.error = describeTooLargeToSend(unsendable);
+      globalPushRejections.remember(cwd, await headCommit(cwd, run), outcome.error);
+      logFailure("すべて同期：送る記録に GitHub に送れない大きさのファイルがあるので送らなかった", {
+        置き場: name,
+        ファイル: unsendable.map((one) => `${one.path}（${one.size}バイト）`).join("、"),
+      });
+      return outcome;
+    }
     const result = await push(cwd, deps.run);
+    if (!result.ok && result.rejected) {
+      /*
+        **断られたときは、断りの文をそのまま見せる**（設計書5.5.21）。言い換えない——原因は
+        当てない（実装ルール5）。warning・hint の行は外してある（`PushResult.reason`）。
+        自動の送り直しが同じ記録で試し直さないよう覚える（作者が押せばまた試す）
+      */
+      outcome.pushRejected = true;
+      outcome.error = `GitHub に送るのを断られました。\n${
+        result.reason ?? noReasonText(undefined)
+      }`;
+      globalPushRejections.remember(cwd, await headCommit(cwd, run), outcome.error);
+      logFailure("すべて同期：送信を断られた", {
+        置き場: name,
+        詳細: result.detail ?? "（詳細なし）",
+      });
+      return outcome;
+    }
     if (!result.ok) {
       /*
         **届いていない事実だけを言う**（作者の裁定 2026-11-03 夜）。git の文は画面に
@@ -838,6 +907,7 @@ async function runPlan(
       return outcome;
     }
     outcome.pushed = true;
+    globalPushRejections.forget(cwd);
     logStep(`すべて同期：送信（${name}）`);
   }
 
@@ -943,12 +1013,14 @@ async function report(
   await runNextStep(next, action);
 }
 
-/** 報告に添える「次の一手」のボタン1つ */
+/** 報告に添える「次の一手」のボタン1つ。命令を開くか、その場で動かす（`run`） */
 interface NextStep {
   label: string;
-  command: string;
+  command?: string;
   work?: WorkEntry;
+  run?: () => Promise<void>;
 }
+
 
 /** 分かれたときのボタン。文の言葉と同じにする（`handoffSync.ts` の同じ名前のボタン） */
 const CHOOSE_SIDE_TO_KEEP = "どちらを残すか選ぶ";
@@ -968,6 +1040,17 @@ function nextSteps(
   const workOf = (target: SyncTargetPlan["target"]) =>
     target.involved?.[0] ?? target.works[0];
   const steps: NextStep[] = [];
+
+  // 大きすぎて記録しなかった置き場（最初の1か所ぶん。ほかの置き場は直したあとの同期でまた出る）
+  const tooLargeOutcome = outcomes.find((one) => one.tooLarge);
+  const tooLarge = tooLargeOutcome?.tooLarge;
+  if (tooLargeOutcome && tooLarge) {
+    steps.push({
+      label: IGNORE_LARGE_FILES_LABEL,
+      run: () =>
+        ignoreLargeFiles(tooLarge.root, tooLarge.files, tooLargeOutcome.plan.target.works),
+    });
+  }
 
   const conflicted =
     outcomes.find((one) => one.conflicted)?.plan.target ??
@@ -1044,6 +1127,11 @@ async function runNextStep(
 ): Promise<void> {
   const step = steps.find((one) => one.label === picked);
   if (!step) return;
+  if (step.run) {
+    await step.run();
+    return;
+  }
+  if (!step.command) return;
   await vscode.commands.executeCommand(
     step.command,
     step.work ? { type: "work", work: step.work } : undefined
