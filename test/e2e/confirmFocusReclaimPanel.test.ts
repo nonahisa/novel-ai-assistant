@@ -1,40 +1,43 @@
 /**
  * 確認の窓が出た直後に、提案パネル（WebView）が焦点を取り返しても、焦点が窓へ戻る
- * （画面の自動テスト、設計書6.113。2026-11-14。0.152.1 の原稿エディターの件
+ * （画面の自動テスト、設計書6.81・6.113。2026-11-14。0.152.1 の原稿エディターの件
  * `confirmFocusReclaim.test.ts` を写し、ほかのパネルへ広げた直しを見る）。
  *
  * ## 何が起きうるか
  *
- * 窓（突き合わせ方・読み方）が閉じると、VS Code 本体は焦点を前に出ているエディター——
+ * 範囲の窓（どこまで見ますか）が閉じると、VS Code 本体は焦点を前に出ているエディター——
  * ここでは提案パネル——へ戻す。WebView への戻し方は **50ms 遅らせてから「focus」の便を中へ
- * 送る**（本体の `_focusDelayer`）。便の処理が遅れると、続けて出た処理量の確認（外をクリック
+ * 送る**（本体の `_focusDelayer`）。便の処理が遅れると、続けて出た実行の確認（外をクリック
  * しても閉じない窓）から焦点を取り、Enter が窓へ届かない。パネルの画面は押さずに受けた焦点を
  * 知らせ（`views/focusReportScript.ts`）、拡張機能が窓へ戻す（`views/pickerFocus.ts`）。
  *
- * ## このテストでの作り方（原稿エディターの件と同じ）
+ * ## 題材：推敲を、提案パネルを前に出してコマンドパレットから
+ *
+ * 話を11話置く。範囲の窓は、選べるものが「全体」だけなら出ない（`core/typoCheckScope.ts` の
+ * `scopeKinds`。11話あれば「はじめの10話だけ」が並ぶ）。推敲の実行の確認は、送るチャンクがあれば
+ * 必ず出る（`features/checkProofread.ts`。初回なので全部が未処理）。
+ * はじめは矛盾検知で書いたが、話2つ・1チャンクの題材では送るものが無く、確認の窓が出ないまま
+ * 走った（2026-11-14 の全件で落ちた）ので、確認が必ず出る推敲に替えた。
+ *
+ * ## 仕込み（原稿エディターの件と同じ）
  *
  * - 接続の確かめ（偽の Ollama の `/api/tags`）を 150ms 遅らせる——確認の窓が、本体の 50ms の
  *   遅らせより後に出るようにする
- * - 読み方の窓で「分けて読む」を押す直前に、提案パネルの中（外枠と中身）を空回しさせる——
+ * - 範囲の窓で行を押す直前に、提案パネルの中（外枠と中身）を空回しさせる——
  *   「focus」の便の処理を、確認の窓が出たあとへずらす
  *
  * 取り返しが起きて拡張機能が窓へ戻したこと（操作ログの「提案パネルが焦点を取ったので、窓へ
- * 戻しました」）を確かめてから、**焦点が確認の窓にあり、Enter で矛盾検知が走る**ことを見る。
+ * 戻しました」）を確かめてから、**焦点が確認の窓にあり、Enter で推敲が走る**ことを見る。
  * 取り返しが起きなければ、仕込みが効いていないので落とす（何も確かめずに通さない）。
- *
- * 矛盾検知の題材は `locationContradictionCheck.test.ts` と同じ（場所の位置関係の食い違い）。
- * 話が2つなので「どこまで見ますか」は出ない。
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { afterAll, beforeAll, test } from "vitest";
-import { emptyLocation, locationFileName, type Location, type LocationRelation } from "../../src/models/location";
-import { DEFAULT_SETTINGS_DIR } from "../../src/models/types";
 import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
 import { runCommand } from "./support/quickInput";
 import { OPEN_PROPOSALS_LAUNCH, OPEN_PROPOSALS_PRESS, proposalPanelFrame } from "./support/sampleFinding";
-import { withVsCode, type E2ESession } from "./support/vscodeApp";
+import { withVsCode, type E2ESession, type FixtureEpisode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import {
   activeElementSummary,
@@ -45,42 +48,23 @@ import {
   quickPickTitle,
 } from "./support/workbenchDom";
 
-const EPISODE_3 = "003_朝.txt";
-const EPISODE_7 = "007_夕方.txt";
-const BODY_3 = "　朝。\n　学校は港の北の高台にある。\n　坂を上った。\n";
-const BODY_7 = "　夕方。\n\n　港は学校の北に見えた。\n";
-const QUOTE_3 = "学校は港の北の高台にある";
-const QUOTE_7 = "港は学校の北に見えた";
+/** 11話。10話を超えるので、範囲の窓に「はじめの10話だけ」と「作品全体」が並ぶ */
+const EPISODES: FixtureEpisode[] = Array.from({ length: 11 }, (_, index) => {
+  const number = String(index + 1).padStart(3, "0");
+  return { name: `${number}_第${index + 1}話.txt`, text: `　第${index + 1}話の朝は静かだった。\n　改札を抜けて、白い息を吐いた。\n` };
+});
 
 /** 接続の確かめを遅らせる長さ。本体が WebView へ焦点を戻すまでの遅らせ（50ms）より長くする */
 const TAGS_DELAY_MS = 150;
-/**
- * パネルの中を空回しさせる長さ。確認の窓が出るまで（接続の確かめ2回ぶんの遅らせ＋モデルの情報＋
- * 区切りの計算）より長くする。原稿エディターの件（400ms）より、確認までの段が多いぶん長い
- */
-const BUSY_MS = 2_000;
+/** パネルの中を空回しさせる長さ。確認の窓が出るまで（上の遅らせ＋区切りの計算）より長くする */
+const BUSY_MS = 1_500;
 /** 拡張機能が窓へ戻したときに操作ログへ書く行（`views/pickerFocus.ts` の `reclaimPickerFocus`） */
 const RECLAIM_LOG = "確認の窓が出ている間に提案パネルが焦点を取ったので、窓へ戻しました";
-
-function rel(target: string, targetId: string, chapter: number, evidence: string): LocationRelation {
-  return { kind: "direction", target, targetId, value: "北", chapters: [chapter], evidence, authorLocked: false };
-}
-
-/** 学校は港の北（第3話）／港は学校の北（第7話）。互いに相手を「北」に置くので食い違う */
-function places(): Location[] {
-  return [
-    { ...emptyLocation("loc_001", "学校"), appearedChapters: [3], relations: [rel("港", "loc_002", 3, QUOTE_3)] },
-    { ...emptyLocation("loc_002", "港"), appearedChapters: [7], relations: [rel("学校", "loc_001", 7, `「${QUOTE_7}。」`)] },
-  ];
-}
-
-/** 偽の AI は、矛盾検知の答えの形で「指摘0件」を返す */
-const NO_FINDINGS = JSON.stringify({ perspective_taking: [], joint_attention: [], contradictions: [] });
 
 let fake: FakeOllama;
 let tagsDelay = 0;
 beforeAll(async () => {
-  fake = await startFakeOllama(() => NO_FINDINGS, {
+  fake = await startFakeOllama(() => JSON.stringify({ issues: [] }), {
     beforeTags: () => new Promise((resolve) => setTimeout(resolve, tagsDelay)),
   });
 });
@@ -137,13 +121,10 @@ async function stateText(page: Page, session: E2ESession, frame: Frame): Promise
   );
 }
 
-test("確認の窓が出た直後に提案パネルが焦点を取り返しても、焦点は確認の窓へ戻り、Enter で矛盾検知が走る", async () => {
+test("確認の窓が出た直後に提案パネルが焦点を取り返しても、焦点は確認の窓へ戻り、Enter で推敲が走る", async () => {
   await withVsCode(
     "確認の窓の焦点の取り返し（提案パネル）",
-    [
-      { name: EPISODE_3, text: BODY_3 },
-      { name: EPISODE_7, text: BODY_7 },
-    ],
+    EPISODES,
     async (session) => {
       const { page } = session;
 
@@ -159,25 +140,21 @@ test("確認の窓が出た直後に提案パネルが焦点を取り返して�
         throw new Error(`${String(error)}\n${await stateText(page, session, frame)}`);
       };
 
-      /* ── 突き合わせ方 → 読み方 ── */
-      await runCommand(page, "矛盾検知");
-      await waitUntil(async () => (await quickPickTitle(page)) === "矛盾検知：何と何を突き合わせるか", "突き合わせ方の窓が出る", 20_000).catch(fail);
-      await pickQuickPickRow(page, "設定との照合だけ");
-      await waitUntil(async () => (await quickPickTitle(page)) === "矛盾検知：読み方を選ぶ", "読み方の窓が出る", 20_000).catch(fail);
+      /* ── 推敲 → 範囲の窓 ── */
+      await runCommand(page, "推敲");
+      await waitUntil(async () => (await quickPickTitle(page)) === "どこまで見ますか", "範囲の窓が出る", 20_000).catch(fail);
 
       tagsDelay = TAGS_DELAY_MS;
       const before = await faceFocusCount(frame);
       await busyFace(frame, 30, BUSY_MS);
-      await pickQuickPickRow(page, "分けて読む");
+      await pickQuickPickRow(page, "はじめの10話だけ");
 
       await waitUntil(
         async () => {
           await passLocalAiGate(page);
-          const title = (await quickPickTitle(page)) ?? "";
-          const words = [title, ...(await quickPickRows(page)).map((row) => row.label)].join(" ");
-          return words.includes("矛盾を検知します");
+          return ((await quickPickTitle(page)) ?? "").includes("推敲を行います");
         },
-        "処理量の確認の窓が出る",
+        "実行の確認の窓が出る",
         30_000
       ).catch(fail);
 
@@ -196,27 +173,17 @@ test("確認の窓が出た直後に提案パネルが焦点を取り返して�
       ).catch(fail);
 
       tagsDelay = 0;
-      // 偽の AI の `requests` は `/api/chat` の頼みだけを数える。確認の前には0件のはず
-      const sentBefore = fake.requests.length;
       await page.keyboard.press("Enter");
       await waitUntil(
         async () => {
           await passLocalAiGate(page);
-          return (await quickPickTitle(page)) === undefined && fake.requests.length > sentBefore;
+          const log = await actionLog(session);
+          return log.includes("推敲を開始:") && log.includes("推敲を終了:");
         },
-        "確認の窓で Enter を押すと矛盾検知が走る（偽の AI へ頼みが届く）",
+        "確認の窓で Enter を押すと推敲が走る",
         60_000
       ).catch(fail);
     },
-    fakeOllamaLaunch(fake, {
-      ...OPEN_PROPOSALS_LAUNCH,
-      prepareWork: async ({ workFolder }) => {
-        const folder = path.join(workFolder, DEFAULT_SETTINGS_DIR, "locations");
-        await mkdir(folder, { recursive: true });
-        for (const location of places()) {
-          await writeFile(path.join(folder, locationFileName(location)), `${JSON.stringify(location, null, 2)}\n`, "utf8");
-        }
-      },
-    })
+    fakeOllamaLaunch(fake, OPEN_PROPOSALS_LAUNCH)
   );
 }, 300_000);
