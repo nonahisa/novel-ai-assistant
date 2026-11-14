@@ -7,7 +7,9 @@ import {
   collectKnownReadings,
   compareKana,
   findMisreadCandidates,
+  isSettingsReadingFinding,
   judgeMisreads,
+  misreadMessage,
   MisreadAnswerError,
   misreadWindow,
   normalizeKana,
@@ -43,13 +45,13 @@ function audioQueryTexts(): string[] {
 }
 
 describe("ルビを1回だけ振った語の2回目", () => {
-  const text = "　{灯|あかり}が笑った。\n　灯は走った。";
+  const text = "　{灯里|あかり}が笑った。\n　灯里は走った。";
 
   it("エンジンが別の読みで読むと、行が出る（エンジンの読みと正しい読みが分かる）", async () => {
     const known = collectKnownReadings([episode(text)], []);
     const { candidates } = findMisreadCandidates(text, "curly", [], known);
-    expect(candidates.map((c) => [c.word, c.line])).toEqual([["灯", 2]]);
-    const found = await judgeMisreads(candidates, await queryWith({ 灯: "ヒ", 走: "ハシ" }));
+    expect(candidates.map((c) => [c.word, c.line])).toEqual([["灯里", 2]]);
+    const found = await judgeMisreads(candidates, await queryWith({ 灯里: "ヒ", 走: "ハシ" }));
     expect(found).toHaveLength(1);
     expect(found[0].engineReading).toBe("ヒ");
     expect(found[0].expected.reading).toBe("あかり");
@@ -59,12 +61,12 @@ describe("ルビを1回だけ振った語の2回目", () => {
   it("エンジンが正しく読むと、出ない", async () => {
     const known = collectKnownReadings([episode(text)], []);
     const { candidates } = findMisreadCandidates(text, "curly", [], known);
-    const found = await judgeMisreads(candidates, await queryWith({ 灯: "アカリ", 走: "ハシ" }));
+    const found = await judgeMisreads(candidates, await queryWith({ 灯里: "アカリ", 走: "ハシ" }));
     expect(found).toEqual([]);
   });
 
   it("ルビそのもの（記法の内側）は問わない", () => {
-    const only = "　{灯|あかり}が笑った。";
+    const only = "　{灯里|あかり}が笑った。";
     const known = collectKnownReadings([episode(only)], []);
     expect(findMisreadCandidates(only, "curly", [], known).candidates).toEqual([]);
   });
@@ -72,15 +74,15 @@ describe("ルビを1回だけ振った語の2回目", () => {
 
 describe("置き換え済みの所", () => {
   it("読みの範囲（辞書・設定資料の読み）で置き換えた所は問わない", () => {
-    const text = "　{灯|あかり}が笑った。\n　灯は走った。";
-    const at = text.lastIndexOf("灯");
+    const text = "　{灯里|あかり}が笑った。\n　灯里は走った。";
+    const at = text.lastIndexOf("灯里");
     const known = collectKnownReadings([episode(text)], []);
     const spans = [{ start: at, end: at + 1, reading: "あかり" }];
     expect(findMisreadCandidates(text, "curly", spans, known).candidates).toEqual([]);
   });
 
   it("熟語の中（前後が漢字）は拾わない", () => {
-    const text = "　{灯|あかり}が来た。\n　街灯が光る。";
+    const text = "　{灯里|あかり}が来た。\n　灯里火が光る。";
     const known = collectKnownReadings([episode(text)], []);
     expect(findMisreadCandidates(text, "curly", [], known).candidates).toEqual([]);
   });
@@ -144,18 +146,18 @@ describe("かなのならし", () => {
 
 describe("エンジンへの頼み", () => {
   it("同じ文は2回問わない（1文に語が2つあっても、送る文は1回）", async () => {
-    const text = "　{灯|あかり}と{恵|めぐみ}。\n　灯は恵と話した。";
+    const text = "　{灯里|あかり}と{恵美|めぐみ}。\n　灯里は恵美と話した。";
     const known = collectKnownReadings([episode(text)], []);
     const { candidates } = findMisreadCandidates(text, "curly", [], known);
-    expect(candidates.map((c) => c.word)).toEqual(["灯", "恵"]);
-    await judgeMisreads(candidates, await queryWith({ 灯: "ヒ", 恵: "ケイ", 話: "ハナ" }));
+    expect(candidates.map((c) => c.word)).toEqual(["灯里", "恵美"]);
+    await judgeMisreads(candidates, await queryWith({ 灯里: "ヒ", 恵美: "ケイ", 話: "ハナ" }));
     const sent = audioQueryTexts();
-    expect(sent.filter((t) => t === "灯は恵と話した。")).toHaveLength(1);
+    expect(sent.filter((t) => t === "灯里は恵美と話した。")).toHaveLength(1);
     expect(new Set(sent).size).toBe(sent.length);
   });
 
   it("エンジンが起きていなければ、調べずに投げる（呼ぶ側が理由を出す）", async () => {
-    const text = "　{灯|あかり}が来た。\n　灯が来た。";
+    const text = "　{灯里|あかり}が来た。\n　灯里が来た。";
     const known = collectKnownReadings([episode(text)], []);
     const { candidates } = findMisreadCandidates(text, "curly", [], known);
     const client = new VoiceEngineClient("http://127.0.0.1:9");
@@ -165,7 +167,7 @@ describe("エンジンへの頼み", () => {
   });
 
   it("答えにモーラの並びが無ければ、形が読めないとして投げる", async () => {
-    const text = "　{灯|あかり}が来た。\n　灯が来た。";
+    const text = "　{灯里|あかり}が来た。\n　灯里が来た。";
     const known = collectKnownReadings([episode(text)], []);
     const { candidates } = findMisreadCandidates(text, "curly", [], known);
     engine = await startFakeVoiceEngine({ brokenAudioQuery: true });
@@ -186,6 +188,31 @@ describe("読みを集める", () => {
     expect([...known.keys()]).toEqual(["恵"]);
   });
 
+  it("1字の語のルビ（{風|かぜ}）は集めない。設定資料の1字の名前・読みの辞書の1字の語は集める", () => {
+    const known = collectKnownReadings(
+      [episode("　{風|かぜ}が吹く。{港|みなと}。\n　風が止んだ。", "第1話", [
+        { word: "空", quote: "空が", reading: "そら", source: "author" },
+      ])],
+      [{ surface: "恵", reading: "めぐみ" }]
+    );
+    expect(known.has("風")).toBe(false);
+    expect(known.has("港")).toBe(false);
+    expect(known.get("空")?.[0].source.kind).toBe("dictionary");
+    expect(known.get("恵")?.[0].source).toEqual({ kind: "settings" });
+    const text = "　{風|かぜ}が吹く。\n　風が止んだ。";
+    const only = collectKnownReadings([episode(text)], []);
+    expect(findMisreadCandidates(text, "curly", [], only).candidates).toEqual([]);
+  });
+
+  it("行の出どころが設定資料の読みか、文で見分ける", () => {
+    const settings = collectKnownReadings([], [{ surface: "近衛騎士", reading: "こんえいきし" }]).get("近衛騎士")![0];
+    const ruby = collectKnownReadings([episode("　{灯里|あかり}。")], []).get("灯里")![0];
+    const label = "読み間違いの見込み";
+    expect(isSettingsReadingFinding({ label, message: misreadMessage("近衛騎士", "コノエキシ", settings) })).toBe(true);
+    expect(isSettingsReadingFinding({ label, message: misreadMessage("灯里", "ヒ", ruby) })).toBe(false);
+    expect(isSettingsReadingFinding({ label: "誤字", message: misreadMessage("近衛騎士", "コノエキシ", settings) })).toBe(false);
+  });
+
   it("消した辞書の項目（墓標）は使わない", () => {
     const known = collectKnownReadings(
       [episode("　港。", "第1話", [{ word: "港", quote: "港。", reading: "みなと", source: "author", removed: true }])],
@@ -197,7 +224,7 @@ describe("読みを集める", () => {
 
 describe("送る文の写しを作り直す", () => {
   it("読みを足さなければ、計画の文と同じ写しになる", () => {
-    const text = "　{灯|あかり}が「行こう」と言った。——灯は頷く。\n// メモ\n　｜恵《めぐみ》";
+    const text = "　{灯里|あかり}が「行こう」と言った。——灯里は頷く。\n// メモ\n　｜恵《めぐみ》";
     const spans = [{ start: text.indexOf("頷"), end: text.indexOf("頷") + 1, reading: "うなず" }];
     const plan = buildReadingPlan(text, "curly", spans, { splitDialogue: true });
     for (const sentence of plan) {
@@ -218,15 +245,15 @@ describe("［ここにルビを振る］で本文に当てる（提案パネル�
     return buildMisreadFindings(folder, `${folder}/${file}`, text, notation, found, time);
   }
 
-  it(".md は {灯|あかり}、ルビの親文字には当たらない", async () => {
-    const text = "　{灯|あかり}と灯が来た。";
-    const rows = await rowsFor(text, "01.md", { 灯: "ヒ" });
+  it(".md は {灯里|あかり}、ルビの親文字には当たらない", async () => {
+    const text = "　{灯里|あかり}と灯里が来た。";
+    const rows = await rowsFor(text, "01.md", { 灯里: "ヒ" });
     expect(rows).toHaveLength(1);
     const applied = applyFindingToText(text, { ...rows[0], line: rows[0].hintLine });
-    expect(applied.kind === "applied" && applied.text).toBe("　{灯|あかり}と{灯|あかり}が来た。");
+    expect(applied.kind === "applied" && applied.text).toBe("　{灯里|あかり}と{灯里|あかり}が来た。");
   });
 
-  it(".txt は ｜灯《あかり》、当て読みのカタカナはそのまま振る", async () => {
+  it(".txt は ｜灯里《あかり》、当て読みのカタカナはそのまま振る", async () => {
     const text = "　｜本気《マジ》で行く。\n　本気だった。";
     const rows = await rowsFor(text, "01.txt", { 本気: "ホンキ" });
     expect(rows).toHaveLength(1);
@@ -236,22 +263,22 @@ describe("［ここにルビを振る］で本文に当てる（提案パネル�
   });
 
   it("同じ窓が前の行にもあるとき、行の手がかりで指した行に当たる", async () => {
-    const text = "　{灯|あかり}だ。\n「灯！」\n「灯！」";
-    const rows = await rowsFor(text, "01.md", { 灯: "ヒ" });
+    const text = "　{灯里|あかり}だ。\n「灯里！」\n「灯里！」";
+    const rows = await rowsFor(text, "01.md", { 灯里: "ヒ" });
     // 同じ窓は1つの番号に畳まれる（1つ目に当て、調べ直すと2つ目がまた並ぶ。features の試験）
     expect(rows).toHaveLength(1);
     const applied = applyFindingToText(text, { ...rows[0], line: rows[0].hintLine });
-    expect(applied.kind === "applied" && applied.text).toBe("　{灯|あかり}だ。\n「{灯|あかり}！」\n「灯！」");
+    expect(applied.kind === "applied" && applied.text).toBe("　{灯里|あかり}だ。\n「{灯里|あかり}！」\n「灯里！」");
   });
 });
 
 describe("行の原文（窓）", () => {
   it("記法を含まず、語がちょうど1回", () => {
-    const text = "　{灯|あかり}と灯が灯す。";
-    const at = text.indexOf("と灯") + 1;
+    const text = "　{灯里|あかり}と灯里が灯里す。";
+    const at = text.indexOf("と灯里") + 1;
     const window = misreadWindow(text, at, at + 1, "curly");
     expect(window).not.toMatch(/[{}|]/);
-    expect(window.split("灯").length - 1).toBe(1);
-    expect(window.startsWith("と灯")).toBe(true);
+    expect(window.split("灯里").length - 1).toBe(1);
+    expect(window.startsWith("と灯里")).toBe(true);
   });
 });

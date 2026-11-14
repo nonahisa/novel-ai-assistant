@@ -17,7 +17,7 @@ import {
 } from "./readAloud";
 import { buildFinding } from "./findingSource";
 import { rubyEditReplacement, rubyNotationFor } from "./ruby";
-import { MISREAD_FINDING_LABEL } from "./readingMisreadLabel";
+import { MISREAD_FINDING_LABEL, isMisreadFinding } from "./readingMisreadLabel";
 import type { Finding } from "../models/finding";
 
 /**
@@ -79,11 +79,25 @@ export interface KnownNameReading {
   reading: string;
 }
 
+/** 出どころが設定資料のときの言い方。行の文に残るので、行から出どころを見分ける目印も兼ねる */
+const SETTINGS_SOURCE_TEXT = "設定資料の読み";
+
 /** 正しい読みの出どころを、作者に見せる言い方へ */
 export function describeReadingSource(source: KnownReadingSource): string {
   if (source.kind === "ruby") return `${source.episode}のルビ`;
   if (source.kind === "dictionary") return `${source.episode}の読みの辞書`;
-  return "設定資料の読み";
+  return SETTINGS_SOURCE_TEXT;
+}
+
+/**
+ * 読み間違いの見込みの行の出どころが、設定資料の読みか。
+ *
+ * 行（Finding）には出どころの欄が無く、`misreadMessage` の文にだけ残る。欄を足すと
+ * 保存済みの記録の形が変わるので、文の言い方（`describeReadingSource` と同じ字）で見分ける。
+ * 設定資料の読みが違う・欠けているときの誤検出は、設定資料を直すと止まる
+ */
+export function isSettingsReadingFinding(finding: { label: string; message: string }): boolean {
+  return isMisreadFinding(finding) && finding.message.includes(`（${SETTINGS_SOURCE_TEXT}）`);
 }
 
 /**
@@ -107,6 +121,9 @@ export function collectKnownReadings(
   const known = new Map<string, KnownReading[]>();
   const add = (word: string, rawReading: string, source: KnownReadingSource): void => {
     const surface = word.trim();
+    // 1字の語にルビを振ったもの（風《かぜ》）は、文脈で読みが変わる普通の語で、誤検出になった。
+    // 設定資料・読みの辞書の1字の語は、作者が読みを決めたものなので今までどおり
+    if (source.kind === "ruby" && [...surface].length === 1) return;
     const written = rawReading.replace(/[\s　]+/g, "");
     const reading = toHiragana(written);
     if (surface === "" || !KANJI.test(surface) || !HIRAGANA_ONLY.test(reading)) return;

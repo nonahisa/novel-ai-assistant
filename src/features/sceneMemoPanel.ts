@@ -60,6 +60,7 @@ import {
 import { locateFindings } from "../core/findingLocation";
 import { isSjisMarkFinding, placeSjisMarkFindings } from "../core/sjisMarkFinding";
 import { isMisreadFinding } from "../core/readingMisreadLabel";
+import { isSettingsReadingFinding } from "../core/readingMisread";
 import { findingAppliesDirectly, findingFileKey } from "../core/findingSource";
 import { CharacterStore } from "../core/characterStore";
 import { findMergeCandidates } from "../core/characterMerge";
@@ -853,6 +854,7 @@ type PanelMessage =
   | { type: "dismissFinding"; findingId: string }
   /** 読み間違いの見込みの行の［読みの辞書へ足す］（設計書6.42.5） */
   | { type: "addReading"; findingId: string }
+  | { type: "openSettings" }
   /**
    * 編集者の提案を決める（［採る］［読んだ］は accept、［見送る］は reject）。
    * 決める中身は拡張機能の側（`deps.decideEditorProposal`）にある
@@ -1223,6 +1225,13 @@ class SceneMemoPanel {
           return;
         case "dismissFinding":
           await this.dismissFinding(message.findingId);
+          return;
+        case "openSettings":
+          // 作品一覧の右クリックと同じ形（作品を名指し）で設定資料集を開く
+          await vscode.commands.executeCommand("novelai.openSettingsPanel", {
+            type: "work",
+            work: this.work,
+          });
           return;
         case "addReading":
           await this.addReading(message.findingId);
@@ -1998,6 +2007,8 @@ class SceneMemoPanel {
       // 読み間違いの見込み（設計書6.42.5）。［直す］を［ここにルビを振る］と呼び、［読みの辞書へ足す］を添える
       misread: isMisreadFinding(finding),
       canAddReading: isMisreadFinding(finding) && this.deps.addMisreadToDictionary !== undefined,
+      // 出どころが設定資料の読みの行には、設定資料を直す口を添える
+      fromSettings: isSettingsReadingFinding(finding),
       // 修正案の無い推敲の指摘には［AIに相談］も出す（作者の要望 2026-10-04）。
       // **口が無ければ出さない**（押しても何も起きない口を作らない）
       canConsult: this.canConsult(finding),

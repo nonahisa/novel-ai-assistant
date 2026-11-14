@@ -2,7 +2,7 @@
  * 命令「読み間違いを調べる」（画面の自動テスト、設計書6.42.5・6.113。作者の決定 2026-11-14 夜）。
  *
  * 見張ること：
- * 1. 第1話でルビを振った「灯」を、第2話でルビなしに書く。偽のエンジンは「灯」を「ヒ」と読む
+ * 1. 第1話でルビを振った「灯里」を、第2話でルビなしに書く。偽のエンジンは「灯里」を「ヒ」と読む
  * 2. 第2話を原稿エディターで開いてパレットから「読み間違いを調べる」を押すと、校正・メモパネルが開き、
  *    「読み間違いの見込み」の行（エンジンの読み「ヒ」・正しい読み「あかり」・第1話のルビ）が並ぶ
  * 3. 行に［読みの辞書へ足す］［ここにルビを振る］［見送る］がある
@@ -23,11 +23,11 @@ import { notificationTexts } from "./support/workbenchDom";
 
 const FIRST = "001_はじまり.txt";
 const SECOND = "002_つづき.txt";
-const FIRST_TEXT = "　｜灯《あかり》が笑った。\n";
-const SECOND_TEXT = "　灯は走った。\n";
+const FIRST_TEXT = "　｜灯里《あかり》が笑った。\n";
+const SECOND_TEXT = "　灯里は走った。\n";
 
 test("「読み間違いを調べる」で、校正・メモパネルに読み間違いの見込みの行が出る（音声は作らない）", async () => {
-  const fake = await startFakeVoiceEngine({ brand: "AivisSpeech", readings: { 灯: "ヒ", 走: "ハシ", 笑: "ワラ" } });
+  const fake = await startFakeVoiceEngine({ brand: "AivisSpeech", readings: { 灯里: "ヒ", 走: "ハシ", 笑: "ワラ" } });
   try {
     await withVsCode(
       "読み間違いを調べる",
@@ -37,7 +37,7 @@ test("「読み間違いを調べる」で、校正・メモパネルに読み�
       ],
       async (session) => {
         const { page } = session;
-        await openEpisode(page, SECOND, "灯は走った");
+        await openEpisode(page, SECOND, "灯里は走った");
         await runCommand(page, "読み間違いを調べる");
 
         let body = "";
@@ -54,7 +54,7 @@ test("「読み間違いを調べる」で、校正・メモパネルに読み�
             `${String(error)}（パネル：${JSON.stringify(body.slice(0, 400))}／右下の知らせ：${JSON.stringify(await notificationTexts(page))}）`
           );
         });
-        expect(body).toContain("「灯」を、声のエンジンは「ヒ」と読みそうです");
+        expect(body).toContain("「灯里」を、声のエンジンは「ヒ」と読みそうです");
         expect(body).toContain("正しい読みは「あかり」（第1話のルビ）");
 
         const frame = await memoPanelFrame(page);

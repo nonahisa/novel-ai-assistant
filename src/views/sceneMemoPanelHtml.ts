@@ -458,6 +458,10 @@ el.list.addEventListener("click", function (event) {
     post("addReading", { findingId: row.findingId });
     return;
   }
+  if (act === "openSettings") {
+    post("openSettings", {});
+    return;
+  }
   if (act === "proposalAccept" || act === "proposalReject") {
     // 編集者の提案（2026-11-08）。採る・読んだ・見送るを決めるのは拡張機能の側で、
     // 提案パネルのころと同じ道を通る。この画面は頼むだけ
@@ -546,6 +550,12 @@ function renderActions(row) {
       buttons.push(
         '<button class="done" data-act="addReading" data-key="' + key +
           '" title="この語をこの場所の読みとして、この話の読みの辞書へ足します（本文は変わりません）">読みの辞書へ足す</button>'
+      );
+    }
+    if (row.misread && row.fromSettings) {
+      buttons.push(
+        '<button class="done" data-act="openSettings" data-key="' + key +
+          '" title="設定資料集を開きます（読みを直す手がかりに）">設定資料を開く</button>'
       );
     }
     if (row.misread && row.fixAction === "apply") {

@@ -40,11 +40,11 @@ const { readingSpansFor } = await import("../../../src/core/readingDictionary");
 const { buildReadingPlan } = await import("../../../src/core/readAloud");
 const paths = await import("../../../src/core/paths");
 
-const work = { id: "w1", title: "灯の話", folderPath: paths.join("C:", "works", "akari") } as WorkEntry;
+const work = { id: "w1", title: "灯里の話", folderPath: paths.join("C:", "works", "akari") } as WorkEntry;
 const EP1 = paths.join(work.folderPath, "本文", "01.md");
 const EP2 = paths.join(work.folderPath, "本文", "02.md");
-const TEXT1 = "　{灯|あかり}が笑った。";
-const TEXT2 = "　灯は走った。\n　港へ行く。";
+const TEXT1 = "　{灯里|あかり}が笑った。";
+const TEXT2 = "　灯里は走った。\n　港へ行く。";
 
 const disk = new Map<string, Uint8Array>();
 let engine: FakeEngine | undefined;
@@ -86,15 +86,15 @@ const target = { work, episodePath: EP2, text: TEXT2, readings: [], engine: "aiv
 
 describe("読み間違いを調べる", () => {
   it("第1話のルビで分かる語を、第2話でエンジンが別の読みで読むと、行が置かれる（音声は作らない）", async () => {
-    const service = await serviceWith({ 灯: "ヒ", 走: "ハシ", 港: "ミナト", 行: "イ" });
+    const service = await serviceWith({ 灯里: "ヒ", 走: "ハシ", 港: "ミナト", 行: "イ" });
     const outcome = await checkReadingMisreads(target, service, { episodes, askRemote: true });
     expect(outcome).toEqual({ kind: "checked", found: 1, shown: 1 });
     const rows = await new FindingStore(work).load();
     expect(rows).toHaveLength(1);
     expect(rows[0].label).toBe("読み間違いの見込み");
     expect(rows[0].hintLine).toBe(1);
-    expect(rows[0].target).toBe("灯");
-    expect(rows[0].suggestion).toBe("{灯|あかり}");
+    expect(rows[0].target).toBe("灯里");
+    expect(rows[0].suggestion).toBe("{灯里|あかり}");
     expect(rows[0].message).toContain("「ヒ」");
     expect(rows[0].message).toContain("第1話のルビ");
     expect(engine?.requests.some((r) => r.path === "/synthesis")).toBe(false);
@@ -103,14 +103,14 @@ describe("読み間違いを調べる", () => {
   });
 
   it("エンジンが正しく読めば、行は置かれない", async () => {
-    const service = await serviceWith({ 灯: "アカリ", 走: "ハシ" });
+    const service = await serviceWith({ 灯里: "アカリ", 走: "ハシ" });
     const outcome = await checkReadingMisreads(target, service, { episodes, askRemote: true });
     expect(outcome).toEqual({ kind: "checked", found: 0, shown: 0 });
     expect(await new FindingStore(work).load()).toEqual([]);
   });
 
   it("同じ文は、調べ直しても2回目からはエンジンへ問わない", async () => {
-    const service = await serviceWith({ 灯: "ヒ", 走: "ハシ" });
+    const service = await serviceWith({ 灯里: "ヒ", 走: "ハシ" });
     await checkReadingMisreads(target, service, { episodes, askRemote: true });
     const first = audioQueries();
     expect(first).toBeGreaterThan(0);
@@ -140,9 +140,9 @@ describe("読み間違いを調べる", () => {
 
 describe("同じ窓の出現が2つある話", () => {
   it("1つ目にルビを振った（採った）あとで2つ目が見つかれば、また並ぶ。見送った行は並べない", async () => {
-    const text = "「灯！」\n「灯！」";
+    const text = "「灯里！」\n「灯里！」";
     put(EP2, text);
-    const service = await serviceWith({ 灯: "ヒ" });
+    const service = await serviceWith({ 灯里: "ヒ" });
     const here = { ...target, text };
     expect(await checkReadingMisreads(here, service, { episodes, askRemote: true })).toEqual({
       kind: "checked",
@@ -154,7 +154,7 @@ describe("同じ窓の出現が2つある話", () => {
     await new FindingStore(work).decide([
       { findingId: row.id, time: new Date(Date.now() - 1000).toISOString(), status: "accepted", note: "" },
     ]);
-    const after = "「{灯|あかり}！」\n「灯！」";
+    const after = "「{灯里|あかり}！」\n「灯里！」";
     expect(
       await checkReadingMisreads({ ...here, text: after }, service, { episodes, askRemote: true })
     ).toEqual({ kind: "checked", found: 1, shown: 1 });
@@ -173,14 +173,14 @@ describe("同じ窓の出現が2つある話", () => {
 
 describe("［読みの辞書へ足す］", () => {
   it("押すと、その話の辞書に作者の項目が入り、次の計画ではその漢字が写しから消える。行は一覧から外れる", async () => {
-    const service = await serviceWith({ 灯: "ヒ", 走: "ハシ" });
+    const service = await serviceWith({ 灯里: "ヒ", 走: "ハシ" });
     await checkReadingMisreads(target, service, { episodes, askRemote: true });
     const [row] = await new FindingStore(work).load();
     const added = await addMisreadToDictionary(work, { ...row, filePath: EP2 });
     expect(added.ok).toBe(true);
 
     const { file } = await loadReadingDictionary(work, EP2);
-    expect(file.entries).toEqual([{ word: "灯", quote: row.original, reading: "あかり", source: "author" }]);
+    expect(file.entries).toEqual([{ word: "灯里", quote: row.original, reading: "あかり", source: "author" }]);
     const spans = readingSpansFor(TEXT2, file.entries).spans;
     const plan = buildReadingPlan(TEXT2, "curly", spans, { splitDialogue: true });
     expect(plan[0].speech).toBe("あかりは走った。");
@@ -197,7 +197,7 @@ describe("［読みの辞書へ足す］", () => {
   });
 
   it("同じ語・同じ句のAIの項目があれば、足さずに作者の項目へ直す", async () => {
-    const service = await serviceWith({ 灯: "ヒ", 走: "ハシ" });
+    const service = await serviceWith({ 灯里: "ヒ", 走: "ハシ" });
     await checkReadingMisreads(target, service, { episodes, askRemote: true });
     const [row] = await new FindingStore(work).load();
     const dictionaryPath = paths.join(work.folderPath, ".aiwriter", "readings", "本文__02.md.json");
@@ -206,11 +206,11 @@ describe("［読みの辞書へ足す］", () => {
       JSON.stringify({
         version: 1,
         episode: "本文/02.md",
-        entries: [{ word: "灯", quote: row.original, reading: "ひ", source: "ai" }],
+        entries: [{ word: "灯里", quote: row.original, reading: "ひ", source: "ai" }],
       })
     );
     expect((await addMisreadToDictionary(work, { ...row, filePath: EP2 })).ok).toBe(true);
     const { file } = await loadReadingDictionary(work, EP2);
-    expect(file.entries).toEqual([{ word: "灯", quote: row.original, reading: "あかり", source: "author" }]);
+    expect(file.entries).toEqual([{ word: "灯里", quote: row.original, reading: "あかり", source: "author" }]);
   });
 });
