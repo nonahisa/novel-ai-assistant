@@ -44,7 +44,7 @@ function lineOf(index: number): string {
 /**
  * 合本を作る。`marks` 個の〓を、本文の行に均して置く（行の真ん中の1字を〓にする）
  */
-function buildText(totalChars: number, marks: number): string {
+function buildText(totalChars: number, marks: number, eol = "\n"): string {
   const lineCount = Math.ceil(totalChars / LINE_CHARS);
   const every = Math.max(1, Math.floor(lineCount / Math.max(1, marks)));
   const lines: string[] = [];
@@ -59,7 +59,7 @@ function buildText(totalChars: number, marks: number): string {
     // 話の区切りの空行（4,000字ごと）
     if ((index + 1) % (EPISODE_CHARS / LINE_CHARS) === 0) lines.push("");
   }
-  return `${lines.join("\n")}\n`;
+  return `${lines.join(eol)}${eol}`;
 }
 
 function row(id: string, line: number, original: string, status: FindingView["status"]): FindingView {
@@ -121,17 +121,22 @@ describe.skipIf(!OUT)("〓の行の突き合わせの重さ（測る台本）", 
     };
     write(`# 〓の行の突き合わせの重さ（${new Date().toISOString()}、Node ${process.version}）`);
 
-    const cases: Array<{ chars: number; marks: number; resolved: number }> = [];
+    const cases: Array<{ chars: number; marks: number; resolved: number; eol?: string }> = [];
     for (const chars of [830_000, 3_100_000]) {
       for (const marks of [200, 1000, 5000]) {
         for (const resolved of [0, marks]) cases.push({ chars, marks, resolved });
       }
     }
+    /*
+      改行が CRLF の合本も1つ測る。〓ごとに行の頭を探す `lastIndexOf("\r", …)` は、CR の無い本文では
+      頭まで戻る。CRLF なら近くで見つかるので、「〓を拾う」が大きく縮めばそこが重さの元だと分かる
+    */
+    cases.push({ chars: 3_100_000, marks: 1000, resolved: 0, eol: "\r\n" });
 
     // 比べる相手の数を先に書く
     for (const item of cases) {
       write(
-        `相手: 合本 ${item.chars.toLocaleString()}字・〓 ${item.marks}個・置き場の〓の行 ${item.marks + item.resolved}行` +
+        `相手: 合本 ${item.chars.toLocaleString()}字${item.eol ? "（CRLF）" : ""}・〓 ${item.marks}個・置き場の〓の行 ${item.marks + item.resolved}行` +
           `（〓が残る ${item.marks}＝未決 ${item.marks - Math.floor(item.marks / 4)}・見送り ${Math.floor(item.marks / 4)}、直して出なくなった ${item.resolved}）`
       );
     }
@@ -140,7 +145,7 @@ describe.skipIf(!OUT)("〓の行の突き合わせの重さ（測る台本）", 
     write("|---:|---:|---:|---:|---:|---:|---:|");
 
     for (const item of cases) {
-      const text = buildText(item.chars, item.marks);
+      const text = buildText(item.chars, item.marks, item.eol);
       const found = sjisMarkPlaces(text).length;
       expect(found).toBe(item.marks);
       const rows = buildRows(text, item.resolved);
@@ -156,7 +161,7 @@ describe.skipIf(!OUT)("〓の行の突き合わせの重さ（測る台本）", 
         findingPanelStatesOf(rows, texts, 3);
       });
       write(
-        `| ${item.chars.toLocaleString()} | ${item.marks} | ${rows.length} | ${scan.toFixed(1)}ms | ${place.toFixed(1)}ms | ${states.toFixed(1)}ms | ${shown} |`
+        `| ${item.chars.toLocaleString()}${item.eol ? "（CRLF）" : ""} | ${item.marks} | ${rows.length} | ${scan.toFixed(1)}ms | ${place.toFixed(1)}ms | ${states.toFixed(1)}ms | ${shown} |`
       );
     }
   }, 600_000);
