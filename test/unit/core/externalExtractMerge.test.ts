@@ -39,7 +39,7 @@ function chunkOf(filePath: string, chapter: number, text: string): Chunk {
     chapterStart: chapter,
     chapterEnd: chapter,
   });
-  return chunksOfSources(sources, { maxChars: 4000 })[0];
+  return chunksOfSources(sources, { maxChars: 4000, memoMarkers: undefined })[0];
 }
 
 const CHUNK_1 = chunkOf(

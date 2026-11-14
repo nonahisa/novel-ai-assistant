@@ -72,7 +72,7 @@ describe("話ごとのチャンク（合本）", () => {
       PATH,
       COLLECTED,
       { chapterStart: 1, chapterEnd: 3 },
-      { maxChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined }
     );
 
     // まとめない指定なので、話の数だけ返る
@@ -92,7 +92,7 @@ describe("話ごとのチャンク（合本）", () => {
       PATH,
       COLLECTED,
       { chapterStart: 1, chapterEnd: 3 },
-      { maxChars: 8000, mergeChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined, mergeChars: 8000 }
     );
 
     expect(chunks).toHaveLength(1);
@@ -124,7 +124,7 @@ describe("話ごとのチャンク（合本）", () => {
       PATH,
       COLLECTED,
       { chapterStart: 1, chapterEnd: 3 },
-      { maxChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined }
     );
     expect(chunks.map((chunk) => chunk.startLine)).toEqual(
       sources.map((source) => source.lineOffset)
@@ -140,7 +140,7 @@ describe("行番号の戻し（合本）", () => {
       PATH,
       COLLECTED,
       { chapterStart: 1, chapterEnd: 3 },
-      { maxChars: 8000, mergeChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined, mergeChars: 8000 }
     );
     const numbered = withLineNumbers(chunks[0]).split("\n");
     const fileLines = COLLECTED.replace(/\r\n?/g, "\n").split("\n");
@@ -180,7 +180,7 @@ describe("行から話数を引く（合本）", () => {
       PATH,
       COLLECTED,
       { chapterStart: 1, chapterEnd: 3 },
-      { maxChars: 8000, mergeChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined, mergeChars: 8000 }
     );
     const numbered = withLineNumbers(chunks[0]).split("\n");
 
@@ -198,7 +198,7 @@ describe("行から話数を引く（合本）", () => {
       PATH,
       COLLECTED,
       { chapterStart: 1, chapterEnd: 3 },
-      { maxChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined }
     );
 
     for (const [word, chapter] of BY_CHAPTER) {
@@ -219,7 +219,7 @@ describe("行から話数を引く（合本）", () => {
       PATH,
       COLLECTED,
       { chapterStart: 1, chapterEnd: 3 },
-      { maxChars: 8000, mergeChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined, mergeChars: 8000 }
     );
 
     // AIは平気で範囲外の行を返す。話数を当てずっぽうで埋めない
@@ -315,7 +315,7 @@ describe("話ごとのチャンク（ばらのファイル）", () => {
       "C:/works/005.txt",
       PLAIN,
       { chapterStart: 5, chapterEnd: 5 },
-      { maxChars: 8000, mergeChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined, mergeChars: 8000 }
     );
 
     expect(chunks).toHaveLength(1);
@@ -332,7 +332,7 @@ describe("話ごとのチャンク（ばらのファイル）", () => {
       "C:/works/003-004.txt",
       PLAIN,
       { chapterStart: 3, chapterEnd: 4 },
-      { maxChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined }
     );
 
     expect(chunks[0].chapterStart).toBe(3);
@@ -356,7 +356,7 @@ describe("話ごとのチャンク（ばらのファイル）", () => {
       "C:/works/007.txt",
       raw,
       { chapterStart: 7, chapterEnd: 7 },
-      { maxChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined }
     );
 
     expect(chunks).toHaveLength(1);
@@ -373,7 +373,7 @@ describe("話ごとのチャンク（ばらのファイル）", () => {
         "C:/works/empty.txt",
         "\n\n",
         { chapterStart: 1, chapterEnd: 1 },
-        { maxChars: 8000 }
+        { maxChars: 8000, memoMarkers: undefined }
       )
     ).toEqual([]);
   });

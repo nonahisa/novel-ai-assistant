@@ -37,6 +37,11 @@ vi.mock("../../../src/core/scanner", () => ({
         ({
           filePath,
           fileName: filePath.split("/").pop(),
+          // 本物の話は kind を必ず持つ（無いと見出しが「undefined1」になる）。題は無い話もある
+          kind: "本編",
+          subtitle: null,
+          metaTitle: null,
+          date: null,
           chapterStart: index + 1,
           chapterEnd: index + 1,
           hasConflictMarkers: false,

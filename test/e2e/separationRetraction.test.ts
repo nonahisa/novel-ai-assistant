@@ -111,7 +111,7 @@ async function seedExtractionCache(
   const raw = await readFile(episodePath, "utf8");
   // 1話だけの短い本文なので、チャンクの大きさに関わらず1つになる（製品のまとめ送信も同じ1つ）
   const chunks = mergeAdjacentChunks(
-    chunksOfEpisodeFile(episodePath, raw, { chapterStart: 1, chapterEnd: 1 }, { maxChars: 20_000 }),
+    chunksOfEpisodeFile(episodePath, raw, { chapterStart: 1, chapterEnd: 1 }, { maxChars: 20_000, memoMarkers: undefined }),
     { maxChars: 20_000 }
   );
   expect(chunks).toHaveLength(1);

@@ -724,7 +724,7 @@ describe("引用の位置", () => {
       "C:/works/all.txt",
       COLLECTED_SAMPLE,
       { chapterStart: 1, chapterEnd: 3 },
-      { maxChars: 8000, mergeChars: 8000 }
+      { maxChars: 8000, memoMarkers: undefined, mergeChars: 8000 }
     );
 
     expect(chunks).toHaveLength(1);

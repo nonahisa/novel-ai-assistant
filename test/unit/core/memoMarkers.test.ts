@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MEMO_MARKERS,
   MemoMarkersConfigError,
+  UnclosedMemoNoticeMemory,
   memoInsertOf,
   memoMarkersOf,
   resolveMemoMarkers,
@@ -20,6 +21,8 @@ import {
   stripMemoLines,
   unclosedMemoCommentLine,
 } from "../../../src/core/sceneMemo";
+import * as workRegistry from "../../../src/core/workRegistry";
+import type { WorkConfig } from "../../../src/models/types";
 import { countChars, countManuscriptLines } from "../../../src/core/charCount";
 import { convertForPosting } from "../../../src/core/postingConvert";
 import { normalizePostingBody } from "../../../src/core/postingBodyHash";
@@ -259,5 +262,55 @@ describe("切り替える前の数え上げ（linesStartingWithMarkers）", () =
     const text = "本文\n%% 一\n　％％ 二\n<!-- 閉じ忘れでも数える\n// 既にオン";
     expect(linesStartingWithMarkers(text, memoMarkersOf(["percent"]))).toEqual([2, 3]);
     expect(linesStartingWithMarkers(text, memoMarkersOf(["comment"]))).toEqual([4]);
+  });
+});
+
+describe("保存の閉じ忘れの知らせの覚え（UnclosedMemoNoticeMemory）", () => {
+  it("同じ話・同じ場所では2回出さない。場所が変われば、また出す", () => {
+    const memory = new UnclosedMemoNoticeMemory();
+    expect(memory.shouldNotify("a.txt", 3)).toBe(true);
+    expect(memory.shouldNotify("a.txt", 3)).toBe(false);
+    expect(memory.shouldNotify("a.txt", 5)).toBe(true);
+    // 別の話は別に覚える
+    expect(memory.shouldNotify("b.txt", 3)).toBe(true);
+    expect(memory.shouldNotify("a.txt", 5)).toBe(false);
+  });
+
+  it("閉じたら覚えを捨て、あとでまた同じ場所で閉じ忘れたら、また知らせる", () => {
+    const memory = new UnclosedMemoNoticeMemory();
+    expect(memory.shouldNotify("a.txt", 3)).toBe(true);
+    expect(memory.shouldNotify("a.txt", null)).toBe(false);
+    expect(memory.shouldNotify("a.txt", 3)).toBe(true);
+  });
+
+  it("閉じ忘れの無い話では出さない", () => {
+    expect(new UnclosedMemoNoticeMemory().shouldNotify("a.txt", null)).toBe(false);
+  });
+});
+
+describe("作品設定の memoMarkers 欄（parseWorkConfig）", () => {
+  const parseWorkConfig = (
+    workRegistry as unknown as { parseWorkConfig: (raw: unknown) => WorkConfig }
+  ).parseWorkConfig;
+  const base = {
+    schemaVersion: "0.1",
+    workTitle: "テスト作品",
+    manuscriptDir: "本文",
+    settingsDir: "設定",
+    createdAt: "2026-11-14T00:00:00.000Z",
+  };
+
+  it("欄が無ければ欄を足さず、名前の並びならそのまま残す（知らない名前も消さない）", () => {
+    expect(parseWorkConfig(base).memoMarkers).toBeUndefined();
+    expect(parseWorkConfig({ ...base, memoMarkers: ["percent", "future"] }).memoMarkers).toEqual([
+      "percent",
+      "future",
+    ]);
+  });
+
+  it("壊れた欄では直さずに止める", () => {
+    for (const broken of ["percent", [1], [], ["unknown"], { slash: true }]) {
+      expect(() => parseWorkConfig({ ...base, memoMarkers: broken })).toThrow(MemoMarkersConfigError);
+    }
   });
 });
