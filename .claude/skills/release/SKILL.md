@@ -69,6 +69,7 @@ gh workflow run publish-marketplace.yml -f version=<版> -f reason=<理由>
 - **承認では止まらない**（2026-11-07 作者の決定「承認を省く」。作者が GitHub の Environment `marketplace` の Required reviewers を外した。動かせるのは main だけ、の決まりは残っている）。動かすとそのまま公開まで進み、**公開は取り消せない**。動かす前に、上げるもの・バイト数・SHA-256・実機確認の済み具合を作者へ知らせる。母艦が `gh workflow run` を撃つと自動の判定に「外に公開する操作」で止められることがあるので、そのときは作者に「出してよい」の一言をもらう（迂回しない）。投稿ヘルパーの Chrome ウェブストア（Environment `chrome-web-store`）も同じ日に承認を外した
 - Marketplace 側の登録は、管理画面の「信頼できる出版」の `novel-ai-assistant-publish`（リポジトリ nonahisa/novel-ai-assistant・手順 publish-marketplace.yml・Environment marketplace）。**手順のファイルの名前か Environment を変えたら、この登録も直す**（食い違うと鍵の交換で断られる。PAT へは落ちない）
 - 終わったら手順8（`node scripts/checkMarketplace.mjs`）で反映を確かめる
+- **反映を確かめたら、README の冒頭の「Marketplace に出ている版は **…**」を出した版へ直してコミットする**。この行は Marketplace の画面にもそのまま出る。手順に無かったため 0.148.2 のまま 0.152.8 まで残り、作者に指摘された（2026-11-14）。README は次に Marketplace へ出したときに向こうへ届く
 - vsce は 4.0.2 以降が要る（devDependencies と手順のファイルの `npx @vscode/vsce@<版>` をそろえる）
 - **Open VSX へも同じ手順の中で上げる**（作者の裁定 2026-10-31「進める」。設計書5.9）。Marketplace の段のあとに `npx ovsx@<版> publish <同じ VSIX>` の段がある（トークンは ovsx が環境変数 `OVSX_PAT` から自分で読む）。Environment は Marketplace と共通。落ちたら手順は赤になる（`continue-on-error` は付けない。気づけるように）
   - Open VSX の名前空間とトークン（`OVSX_PAT`）は準備済み（2026-10-31）。トークンが切れたら、作者に open-vsx.org の Settings → Access Tokens で発行し直してもらい、GitHub のリポジトリの Settings → Secrets and variables → Actions の `OVSX_PAT` を入れ替えてもらう
