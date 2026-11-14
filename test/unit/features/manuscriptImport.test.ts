@@ -238,13 +238,23 @@ describe("原稿エディターの取り込み", () => {
     expect(asked[0].titles).toEqual(["最後に加える", "上書きする", "やめる"]);
   });
 
-  test("ブラウザ版では［次の話として足す］を並べない（番号ずらしは手元の VS Code だけ）", async () => {
-    disk.set(sourcePath, encoder.encode("新しい話。\n"));
+  /*
+    0.148.4 で番号ずらしの道（`insertEpisode.ts`）がブラウザ版でも動くようになった（名前だけの
+    コミットの確認だけを出さない）。並べ方も手元と同じにする（実装の残り 106行。設計書5.8.16「動くものは出す」）
+  */
+  test("ブラウザ版でも［次の話として足す］を並べ、番号をずらして入れる", async () => {
+    disk.set(sourcePath, encoder.encode("差し込む話。\n"));
     runtime.processes = false;
+    press = "次の話として足す";
 
-    await importInto("003.txt");
+    const result = await importInto("003.txt");
 
-    expect(asked[0].titles).toEqual(["最後に加える", "上書きする", "やめる"]);
+    expect(asked[0].titles).toEqual(["次の話として足す", "最後に加える", "上書きする", "やめる"]);
+    expect(result).toEqual({ changed: true, newFilePath: diskPath("004.txt") });
+    expect(read("004.txt")).toBe("差し込む話。\n");
+    expect(read("005.txt")).toBe("第004.txtの本文。\n");
+    expect(read("006.txt")).toBe("第005.txtの本文。\n");
+    expect(errors).toEqual([]);
   });
 
   test("［次の話として足す］：あとの話の番号を1つずつずらし、空いた番号へ入れる", async () => {

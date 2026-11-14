@@ -146,6 +146,9 @@ describe("ブラウザ版で起動した瞬間に落ちないか", () => {
 const BROWSER_USABLE_DYNAMIC_ENTRIES = [
   "features/insertEpisode.ts",
   "features/removeEpisode.ts",
+  // 原稿エディターの［入力］の取り込み。［次の話として足す］はブラウザ版でも並べ、
+  // 中で insertEpisode.ts を動的 import する（実装の残り 106行）
+  "features/manuscriptImport.ts",
 ];
 
 describe("ブラウザでも押せる動的 import の入口が、Node専用へ届かない", () => {
