@@ -1,5 +1,5 @@
 /**
- * 横書きの組んで書く面で、**本物のマウスで押した所**に、**日本語入力の変換（composition）で確定した字**が入るか
+ * 組んで書く面（横書き・縦書き）で、**本物のマウスで押した所**に、**日本語入力の変換（composition）で確定した字**が入るか
  * （画面の自動テスト、設計書6.25・6.113。2026-11-14 夕 Mac の実機確認の報告から）。
  *
  * 報告：Mac で作者が2行目の「若」の前を押して「〜」を打つと、字は2行目の行頭に入った
@@ -24,7 +24,8 @@ import iconv = require("iconv-lite");
 import type { CDPSession, Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { caretPosition, composeText, openEpisode } from "./support/manuscriptFrame";
-import { withVsCode, type E2ESession } from "./support/vscodeApp";
+import { turnVertical, VERTICAL_LAUNCH } from "./support/verticalFace";
+import { withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 
 const EPISODE = "004_シフトJISの話.txt";
@@ -32,7 +33,10 @@ const BODY = "雨が上がった。\n男は意外にも若かった。\n三行�
 const TYPED = "〜";
 const TIMES = 3;
 
-/** 組んで書く面で、`needle` の最初の字の**左の端**（その字の前）を押す点（面の左上から） */
+/**
+ * 組んで書く面で、`needle` の最初の字の**前の端**を押す点（面の左上から）。
+ * 横書きは字の左の端、縦書きは字の上の端（字は上から下へ流れる）
+ */
 async function pointBefore(frame: Frame, needle: string): Promise<{ x: number; y: number }> {
   const point = await frame.evaluate((text) => {
     const compose = document.getElementById("compose");
@@ -46,8 +50,11 @@ async function pointBefore(frame: Frame, needle: string): Promise<{ x: number; y
       range.setStart(node, at);
       range.setEnd(node, at + 1);
       const rect = range.getBoundingClientRect();
-      // 字の左の端から1画素だけ内側（字の前半を押すと、カーソルは字の前に置かれる）
-      return { x: rect.left - box.left + 1, y: rect.top - box.top + rect.height / 2 };
+      // 字の前の端から1画素だけ内側（字の前半を押すと、カーソルは字の前に置かれる）
+      const vertical = getComputedStyle(compose).writingMode.startsWith("vertical");
+      return vertical
+        ? { x: rect.left - box.left + rect.width / 2, y: rect.top - box.top + 1 }
+        : { x: rect.left - box.left + 1, y: rect.top - box.top + rect.height / 2 };
     }
     return null;
   }, needle);
@@ -69,28 +76,50 @@ async function fileText(session: E2ESession, encoding: "utf8" | "shift_jis"): Pr
   return (encoding === "utf8" ? raw.toString("utf8") : iconv.decode(raw, "shift_jis")).replace(/\r\n/g, "\n");
 }
 
+function launchFor(sjis: boolean, vertical: boolean): LaunchOptions {
+  return {
+    ...(vertical ? VERTICAL_LAUNCH : {}),
+    ...(sjis
+      ? {
+          settings: { "files.encoding": "shiftjis" },
+          prepareWork: async ({ manuscriptFolder }: { manuscriptFolder: string }) => {
+            await writeFile(path.join(manuscriptFolder, EPISODE), iconv.encode(BODY, "shift_jis"));
+          },
+        }
+      : {}),
+  };
+}
+
 async function focusExplorer(page: Page): Promise<void> {
   // エクスプローラーへ焦点を移す（面の外に焦点がある状態から、押して戻る）
   await page.keyboard.press("ControlOrMeta+Shift+KeyE");
   await new Promise((resolve) => setTimeout(resolve, 400));
 }
 
-const cases: Array<{ label: string; sjis: boolean; fromOutside: boolean }> = [
-  { label: "UTF-8・面に焦点がある", sjis: false, fromOutside: false },
-  { label: "UTF-8・エクスプローラーから押して戻る", sjis: false, fromOutside: true },
-  { label: "Shift_JIS・エクスプローラーから押して戻る", sjis: true, fromOutside: true },
+/*
+  縦書きの2通りは 2026-11-14 夜に足した（MAC実機確認のセッションの見立て：61行の確認のとき、作者は
+  原稿エディターを縦書きに切り替えていたらしい。横書きの3通りは Windows・Mac とも通った）
+*/
+const cases: Array<{ label: string; sjis: boolean; fromOutside: boolean; vertical: boolean }> = [
+  { label: "UTF-8・面に焦点がある", sjis: false, fromOutside: false, vertical: false },
+  { label: "UTF-8・エクスプローラーから押して戻る", sjis: false, fromOutside: true, vertical: false },
+  { label: "Shift_JIS・エクスプローラーから押して戻る", sjis: true, fromOutside: true, vertical: false },
+  { label: "Shift_JIS・面に焦点がある", sjis: true, fromOutside: false, vertical: true },
+  { label: "Shift_JIS・エクスプローラーから押して戻る", sjis: true, fromOutside: true, vertical: true },
 ];
 
-for (const { label, sjis, fromOutside } of cases) {
-  test(`横書き（${label}）：「若」の前を押して変換で「〜」を${TIMES}回確定すると、字は「若」の前に入る`, async () => {
+for (const { label, sjis, fromOutside, vertical } of cases) {
+  const face = vertical ? "縦書き" : "横書き";
+  test(`${face}（${label}）：「若」の前を押して変換で「〜」を${TIMES}回確定すると、字は「若」の前に入る`, async () => {
     const encoding = sjis ? "shift_jis" : "utf8";
     const expectedFile = BODY.replace("若", `${(sjis ? "～" : TYPED).repeat(TIMES)}若`);
     await withVsCode(
-      `押した所への変換（${label}）`,
+      `押した所への変換（${face}・${label}）`,
       [{ name: EPISODE, text: BODY }],
       async (session) => {
         const { page } = session;
-        const frame = await openEpisode(page, EPISODE, "若かった");
+        let frame = await openEpisode(page, EPISODE, "若かった");
+        if (vertical) frame = await turnVertical(session, "若かった");
         // 一度、最後の行を押して焦点とカーソルを面に置いておく（前の回の「最後の行」に当たる）
         await frame.locator("#compose").click({ position: await pointBefore(frame, "終わり") });
         if (fromOutside) await focusExplorer(page);
@@ -137,14 +166,7 @@ for (const { label, sjis, fromOutside } of cases) {
           throw new Error(`${String(error)}（ファイル：${JSON.stringify(last)}）`);
         });
       },
-      sjis
-        ? {
-            settings: { "files.encoding": "shiftjis" },
-            prepareWork: async ({ manuscriptFolder }) => {
-              await writeFile(path.join(manuscriptFolder, EPISODE), iconv.encode(BODY, "shift_jis"));
-            },
-          }
-        : {}
+      launchFor(sjis, vertical)
     );
   }, 120_000);
 }
