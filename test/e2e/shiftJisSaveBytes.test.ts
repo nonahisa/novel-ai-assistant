@@ -4,9 +4,9 @@
  * 無い字は、どこにあるかを出して止める」。作者の打って保存する道も含む意図）。
  *
  * 見張ること：
- * 1. **対照（素の VS Code の動き）**：作品の外の Shift_JIS のファイルに「〜」「♡」を打って保存すると、
- *    VS Code 自身がどう書くか。製品の受け口は作品の外に効かないので、VS Code の動きがそのままバイトに出る。
- *    見込みは「?」（0x3f）に黙って化ける（iconv-lite の系統。母艦の製品セッションが iconv-lite で確かめた形）
+ * 1. **作品一覧に登録していない原稿**（作品の外の Shift_JIS の .txt）に「〜」「♡」を打って保存すると、
+ *    「～」（81 60）と「〓」（81 AC）で書かれ、置き換えたことが知らされる（0.152.10。それまでは製品の受け口が
+ *    作品の外に効かず、素の VS Code が黙って「?」〈0x3f〉にしていた。2026-11-14 夕 Mac の実機確認で見つかった）
  * 2. 作品の話を素のエディターで開いて「〜」を打ち Ctrl+S → ファイルは「～」（81 60）で、0x3f が無い
  * 3. 原稿エディターで「〜」を打ち Ctrl+S → 同じく 81 60（原稿エディターの保存も同じ受け口を通る）
  * 4. 自動保存（`files.autoSave: afterDelay`）の原稿エディターで「〜」を打つ → 押さずに 81 60 になり、
@@ -28,6 +28,7 @@ import { composeText, openEpisode, placeCaretAfter } from "./support/manuscriptF
 import { withVsCode, type LaunchOptions } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { dialogText, focusTextEditor, quickOpen } from "./support/workbenchDom";
+import { describeNotices, waitForNotice } from "./support/noticeRecord";
 import { EDITOR_BOTTOM_PRESS } from "./support/keys";
 
 const EPISODE = "001_駅.txt";
@@ -96,9 +97,10 @@ async function typeAtEndAndSave(page: Parameters<typeof focusTextEditor>[0], tex
   await page.keyboard.press("ControlOrMeta+KeyS");
 }
 
-test("対照：作品の外の Shift_JIS のファイルでは、VS Code は「〜」「♡」を何として書くか（製品の受け口は効かない）", async () => {
-  await withVsCode("Shift_JIS 対照", [{ name: EPISODE, text: BODY }], async (session) => {
+test("作品一覧に登録していない Shift_JIS の原稿でも、「〜」は「～」（81 60）、「♡」は「〓」（81 AC）で書かれ、置き換えたことが知らされる（0.152.10）", async () => {
+  await withVsCode("Shift_JIS 登録していない原稿", [{ name: EPISODE, text: BODY }], async (session) => {
     const { page, workFolder } = session;
+    const since = Date.now();
     await quickOpen(page, CONTROL);
     await typeAtEndAndSave(page, "〜♡");
     const bytes = await waitForSavedBytes(
@@ -106,9 +108,33 @@ test("対照：作品の外の Shift_JIS のファイルでは、VS Code は「�
       "作品の外のファイルが保存される",
       (now) => now.length > originalLength
     );
-    // 素の VS Code は、符号の無い字を黙って「?」にする見込み（ここが違えば報告する）
     const tail = bytes.slice(originalLength);
-    expect(Array.from(tail), `作品の外のファイルの末尾：${hex(tail)}（全体：${hex(bytes)}）`).toEqual([QUESTION, QUESTION]);
+    expect(Array.from(tail), `作品の外のファイルの末尾：${hex(tail)}（全体：${hex(bytes)}）`).toEqual([
+      ...FULLWIDTH_TILDE,
+      ...GETA_MARK,
+    ]);
+    // 「〜」を置き換えた知らせ（右下）
+    await waitForNotice(
+      session,
+      (message) => message.includes("Shift_JIS に無い字を置き換えて保存しました") && message.includes(CONTROL),
+      "置き換えたことの知らせが出る",
+      { since }
+    ).catch(async (error: unknown) => {
+      throw new Error(`${String(error)}（${await describeNotices(session, since)}）`);
+    });
+    // 「♡」を〓にした窓：登録していないのでパネルには残していない、と書く
+    let shown: string | undefined;
+    await waitUntil(
+      async () => {
+        shown = await dialogText(page);
+        return shown !== undefined && shown.includes("♡");
+      },
+      "〓にした字の窓が出る",
+      15_000
+    ).catch((error: unknown) => {
+      throw new Error(`${String(error)}（いまの窓：${JSON.stringify(shown)}）`);
+    });
+    expect(shown).toContain("作品一覧に登録していないので、校正・メモパネルには場所を残していません");
   }, sjisLaunch(PLAIN_EDITOR));
 });
 
