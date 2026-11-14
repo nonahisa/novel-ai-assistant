@@ -3,7 +3,10 @@
  * 入れたばかりの人が最初に見る声かけから、AI をつないで作品を1つ登録し、原稿エディターで開くまで。
  *
  * 流れ：作風診断の声かけ［あとで］→ AI の声かけ［AIを選ぶ］→ Ollama → gemma4:e4b →
- *       フォルダー登録（VS Code の中に描く簡易のフォルダー選び）→ 作品名 → 作品一覧 → 第1話を開く。
+ *       作品一覧の案内の［バックアップ取込］（投稿サイトのバックアップから作る。2026-11-14 に
+ *       「フォルダー登録」から差し替え。作者の「作品を登録する所が分かりにくい」）→ ZIP を選ぶ →
+ *       取り込む中身の確認 → 作品を置く場所 → 作品名 → 作品一覧 → 第1話を開く。
+ *       バックアップは台本の中で作る作り物（カクヨムの形の3話。作者の原稿は使わない）。
  *
  * **撮るのは作品を登録する前**（`LaunchOptions.beforeRegister`）。`withVsCode` は本体の前に
  * 作品を登録して知らせを消すので、本体の中では「登録する所」も起動直後の声かけも撮れない。
@@ -26,19 +29,21 @@
  * 出力：`media/promo/features/initial-setup.mp4` と `initial-setup.png`
  */
 import { execFile } from "node:child_process";
-import { mkdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { connect, createServer, type Server } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { zipSync } from "fflate";
 import type { Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { waitForManuscriptFrame } from "../support/manuscriptFrame";
 import { startFakeOllama } from "../support/fakeOllama";
-import { answerInput, runCommand, waitForQuickInput } from "../support/quickInput";
+import { BACKUP_DIALOG_TITLE } from "../support/importFlow";
+import { fillInput, waitForQuickInput } from "../support/quickInput";
 import { SIDEBAR_LAUNCH, expandTreeRow, showSidebar, treeRow, treeRowLabels } from "../support/sidebar";
 import { withVsCode, type FixtureEpisode } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
-import { clearNotifications, dismissWorkbenchHover, notificationTexts, quickInputWaitContext, quickPickRows, quickPickTitle } from "../support/workbenchDom";
+import { clearNotifications, dialogText, dismissWorkbenchHover, notificationTexts, pressWorkbenchKey, quickInputWaitContext, quickPickRows, quickPickTitle } from "../support/workbenchDom";
 import { durationSeconds, findFfmpeg, toMp4 } from "./support/encode";
 import { PROMO_SETTINGS } from "./support/featureScene";
 import { clickWithCursor, hideCaption, hideTitleCard, parkCursor, showCaption, showTitleCard } from "./support/overlay";
@@ -57,6 +62,58 @@ const EPISODES: FixtureEpisode[] = [
   { name: "002_始発.txt", text: "　始発を待つあいだ、ベンチの端で切符を握りしめていた。\n" },
   { name: "003_改札.txt", text: "　改札の向こうで、駅員がこちらに手を振った。\n" },
 ];
+
+/**
+ * 見せるのは、投稿サイト（カクヨム）のバックアップから作る作品。作者の原稿は使わず、台本の中で作る作り物
+ * （カクヨムのバックアップの形：about.txt と、話ごとの episode_NNNN.txt を ZIP に固めたもの。
+ * 形は `test/unit/core/workZip.test.ts` の見本と同じ）。
+ * 土台の作品（上の WORK_TITLE）は、撮影のあとの登録のために残る（撮影の中では登録されていない）
+ */
+const IMPORTED_TITLE = "ゆきどけ通りの時計屋";
+const BACKUP_NAME = `${IMPORTED_TITLE}.zip`;
+const DOWNLOAD_FOLDER_NAME = "ダウンロード";
+const encoder = new TextEncoder();
+const backupEpisode = (title: string, lines: string[]) => encoder.encode(["【タイトル】", title, "", `【本文（${lines.length}行）】`, ...lines, ""].join("\n"));
+const BACKUP_ZIP = zipSync({
+  "about.txt": encoder.encode(
+    [
+      "【タイトル】",
+      IMPORTED_TITLE,
+      "",
+      "【ジャンル】",
+      "現代ドラマ",
+      "",
+      "【キャッチコピー】",
+      "止まった時計が、春をつれてくる。",
+      "",
+      "【紹介文（2行）】",
+      "　雪どけの街の小さな時計屋に、ふしぎな客が訪ねてくる。",
+      "　時計と人をめぐる、ささやかな連作。",
+      "",
+      "【タグ】",
+      "- 現代ドラマ",
+      "- 日常",
+      "",
+    ].join("\n")
+  ),
+  "episode_0001.txt": backupEpisode("第1話　春いちばんの客", [
+    "　雪どけの朝、ゆきどけ通りの古い時計屋に、小さな客が訪ねてきた。",
+    "　「この時計、動かなくなっちゃったの」",
+  ]),
+  "episode_0002.txt": backupEpisode("第2話　止まった針", [
+    "　祖父の形見だという懐中時計の針は、三時十分で止まっていた。",
+    "　店主はふたを開け、小さなねじをそっと回した。",
+  ]),
+  "episode_0003.txt": backupEpisode("第3話　動き出す音", [
+    "　かちり、と小さな音がして、秒針が動き出した。",
+    "　少女の顔に、ゆっくり笑みが広がっていった。",
+  ]),
+});
+
+/** 簡易の窓の入力欄の値（いま開いているフォルダーの道）。窓が出ていなければ空 */
+async function dialogPath(page: Page): Promise<string> {
+  return page.locator(".quick-input-widget input").first().inputValue().catch(() => "");
+}
 
 /** 誰も応えない番地（discard のポート） */
 const DEAD_ENDPOINT = "http://127.0.0.1:9";
@@ -127,6 +184,8 @@ test("はじめての設定の広報素材を撮る", async () => {
   });
   const gate = await startGate(Number(new URL(fake.endpoint).port));
   let workFolder = "";
+  /** バックアップの ZIP を置いたフォルダー（作品とワークスペースの外。作者の「ダウンロード」に当たる） */
+  let downloadFolder = "";
   let sceneStartedAt = 0;
   let sceneEndedAt = 0;
   let videoStartedAt = 0;
@@ -176,57 +235,80 @@ test("はじめての設定の広報素材を撮る", async () => {
     await showCaption(page, "これで、AIの準備ができました", CAPTION);
     await page.waitForTimeout(3_000);
 
-    // 4. 作品を登録する（フォルダー登録。簡易のフォルダー選び）
-    // 選んだあとに出る「まだ測っていません（AIチューニング）」の知らせは、登録の絵に重なるので閉じる
+    // 4. 作品を登録する（投稿サイトのバックアップから。作者2026-11-14「作品を登録する所が分かりにくい」）
+    // 作品が1つも無いので、左の列の作品一覧には案内（バックアップ取込・フォルダー登録…）が出る。その［バックアップ取込］を押す
+    // 選んだあとに出る「まだ測っていません（AIチューニング）」の知らせは、絵に重なるので閉じる
     await clearNotifications(page);
-    await showCaption(page, "次に、原稿のフォルダーを作品として登録", CAPTION);
-    await page.waitForTimeout(1_800);
-    await runCommand(page, "フォルダー登録");
-    await waitForQuickInput(page, "作品フォルダを選択", 20_000);
-    await waitRow(page, WORK_TITLE, `フォルダー選びに「${WORK_TITLE}」が並ぶ`);
-    process.stdout.write(`[広報] フォルダー選びの行: ${JSON.stringify(await quickPickRows(page))}\n`);
-    await page.waitForTimeout(1_800);
-    await clickWithCursor(page, quickPickRow(page, WORK_TITLE), `フォルダー選びの「${WORK_TITLE}」`);
-    // 押すとそのフォルダーの中へ入る（入力欄の道が「…\雨の駅\」になる）
-    await waitUntil(
-      async () => (await page.locator(".quick-input-widget input").first().inputValue().catch(() => "")).replace(/[\\/]+$/, "").endsWith(WORK_TITLE),
-      `フォルダー選びが「${WORK_TITLE}」の中へ入る`,
-      10_000
-    );
+    await showCaption(page, "すでに投稿サイトで書いているなら、バックアップから始められます", CAPTION);
+    await pressWorkbenchKey(page, "Control+Alt+Shift+KeyJ");
+    const importButton = page.locator(".welcome-view-content :is(a, .monaco-button)", { hasText: "バックアップ取込" }).first();
+    await waitUntil(async () => (await importButton.count()) > 0, "作品一覧の案内に［バックアップ取込］が出る", 20_000).catch(async (error: unknown) => {
+      throw new Error(`${String(error)}（行：${(await treeRowLabels(page)).join(" / ")}）`);
+    });
+    await page.waitForTimeout(2_000);
+    await clickWithCursor(page, importButton, "作品一覧の［バックアップ取込］");
+
+    // 4-1. バックアップのファイルを選ぶ（簡易の窓。ダウンロードのフォルダーを開いて、ZIP を押す）
+    await waitForQuickInput(page, BACKUP_DIALOG_TITLE, 20_000);
+    await waitUntil(async () => (await dialogPath(page)).length > 0, "ファイルを選ぶ窓の入力欄に道が入る", 10_000);
+    await showCaption(page, "サイトから落としたバックアップ（ZIP）を選ぶ", CAPTION);
+    await fillInput(page, `${downloadFolder}${path.sep}`);
+    await waitRow(page, BACKUP_NAME, `ファイルを選ぶ窓に「${BACKUP_NAME}」が並ぶ`);
     await page.waitForTimeout(1_200);
-    const accept = page.locator(".quick-input-widget .monaco-button", { hasText: "この作品フォルダを登録" }).first();
-    if ((await accept.count()) > 0 && (await accept.isVisible())) {
-      await clickWithCursor(page, accept, "［この作品フォルダを登録］");
+    await clickWithCursor(page, quickPickRow(page, BACKUP_NAME), `ファイルを選ぶ窓の「${BACKUP_NAME}」`);
+    // 簡易の窓は、行を押しただけでは決まらないことがある。題が消えるまで（3回まで）Enter で決める
+    for (let attempt = 0; attempt < 3 && ((await quickPickTitle(page)) ?? "").includes(BACKUP_DIALOG_TITLE); attempt++) {
+      await page.keyboard.press("Enter");
+      await waitUntil(async () => !((await quickPickTitle(page)) ?? "").includes(BACKUP_DIALOG_TITLE), "ファイルを選ぶ窓が閉じる", 3_000).catch(() => undefined);
+    }
+
+    // 4-2. 取り込む中身の確かめ（確認の窓。話数と文字数が出る）
+    await waitUntil(async () => ((await dialogText(page)) ?? "").includes("取り込む話"), "取り込む中身の確認の窓が出る", 30_000).catch(async (error: unknown) => {
+      throw new Error(`${String(error)}（窓：${JSON.stringify((await dialogText(page)) ?? null)}／知らせ：${JSON.stringify(await notificationTexts(page))}）`);
+    });
+    await showCaption(page, "話数と文字数を確かめて、取り込む", CAPTION);
+    await page.waitForTimeout(3_000);
+    await clickWithCursor(page, page.locator(".monaco-dialog-box .monaco-button", { hasText: "取り込む" }).first(), "確認の窓の［取り込む］");
+
+    // 4-3. 作品を置く場所（作品が1つも無いので訊かれる。開いたままの場所をそのまま受ける）
+    await waitForQuickInput(page, "作品を置く場所を選択", 30_000);
+    await showCaption(page, "作品を置く場所を選ぶ", CAPTION);
+    await page.waitForTimeout(1_500);
+    const place = page.locator(".quick-input-widget .monaco-button", { hasText: "ここに作品を置く" }).first();
+    if ((await place.count()) > 0 && (await place.isVisible())) {
+      await clickWithCursor(page, place, "［ここに作品を置く］");
     } else {
       await page.keyboard.press("Enter");
     }
-    // 作品名の入力欄は題を持たず、問いは入力欄の下の文に出る（題で待つと20秒止まった）
+
+    // 4-4. 作品名（バックアップの題が入っている。そのまま受ける）
     await waitUntil(
-      async () => ((await page.locator(".quick-input-widget").first().innerText().catch(() => "")) ?? "").includes("作品名を入力してください"),
+      async () => ((await page.locator(".quick-input-widget").first().innerText().catch(() => "")) ?? "").includes("作品名を確かめてください"),
       "作品名の入力欄が出る",
-      20_000
+      30_000
     );
     await showCaption(page, "作品名を確かめて、決める", CAPTION);
-    await page.waitForTimeout(2_200);
-    await answerInput(page, WORK_TITLE);
-    await waitToast(page, "を登録しました", "「登録しました」の知らせが出る", 30_000);
-    await showCaption(page, "話数と文字数を数えて、登録します", CAPTION);
-    await page.waitForTimeout(3_000);
+    await page.waitForTimeout(1_800);
+    await page.keyboard.press("Enter");
+    await waitToast(page, "話を取り込みました", "「取り込みました」の知らせが出る", 60_000);
+    await showCaption(page, "話と文字数を数えて、作品として登録します", CAPTION);
+    await page.waitForTimeout(1_800);
 
     // 5. 作品一覧に並び、話を押すと原稿エディターで開く
-    await showSidebar(page, WORK_TITLE);
-    await expandTreeRow(page, WORK_TITLE);
+    await clearNotifications(page);
+    await showSidebar(page, IMPORTED_TITLE);
+    await expandTreeRow(page, IMPORTED_TITLE);
     await waitUntil(async () => (await treeRow(page, "第1話").count()) > 0, "作品の下に第1話の行が出る").catch(async (error: unknown) => {
       throw new Error(`${String(error)}（いまの行：${(await treeRowLabels(page)).join(" / ")}）`);
     });
     await showCaption(page, "作品一覧から、話を押して書き始められます", CAPTION);
-    await page.waitForTimeout(1_800);
-    await clickWithCursor(page, treeRow(page, "第1話"), "作品一覧の第1話");
-    await waitForManuscriptFrame(page, "零時を指していた", "第1話が原稿エディターで開く");
-    await parkCursor(page, SIZE.width * 0.92, SIZE.height * 0.9);
     await page.waitForTimeout(1_500);
+    await clickWithCursor(page, treeRow(page, "第1話"), "作品一覧の第1話");
+    await waitForManuscriptFrame(page, "古い時計屋", "第1話が原稿エディターで開く");
+    await parkCursor(page, SIZE.width * 0.92, SIZE.height * 0.9);
+    await page.waitForTimeout(1_200);
     await showCaption(page, "これで、書き始められます", CAPTION);
-    await page.waitForTimeout(3_000);
+    await page.waitForTimeout(2_500);
 
     await hideCaption(page);
     await showTitleCard(page, "統合小説執筆環境", "VS Code の拡張機能");
@@ -259,6 +341,9 @@ test("はじめての設定の広報素材を撮る", async () => {
         workTitle: WORK_TITLE,
         prepareWork: async (folders) => {
           workFolder = folders.workFolder;
+          downloadFolder = path.join(path.dirname(path.dirname(folders.workFolder)), DOWNLOAD_FOLDER_NAME);
+          await mkdir(downloadFolder, { recursive: true });
+          await writeFile(path.join(downloadFolder, BACKUP_NAME), BACKUP_ZIP);
         },
         // 作風診断の声かけは出す（「はじめまして」の印〔novelai.writerWelcome〕は置かない）
         beforeRegister: play,
