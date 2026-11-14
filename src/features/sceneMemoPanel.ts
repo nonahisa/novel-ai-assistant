@@ -70,6 +70,7 @@ import {
   buildSceneMemoUnrestorableHtml,
 } from "../views/sceneMemoPanelHtml";
 import { openGeneratedMarkdown } from "../views/openDocument";
+import { listenForFocusWithoutPointer } from "../views/pickerFocus";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
 import {
   lastManuscriptCaret,
@@ -951,6 +952,8 @@ class SceneMemoPanel {
       createNonce(),
       this.panel.webview.cspSource
     );
+    // 押さずに焦点を受けたら、出ている窓へ焦点を戻す（ほかのパネルと同じ。設計書6.81）
+    listenForFocusWithoutPointer(this.panel.webview, "校正・メモパネル");
     this.panel.webview.onDidReceiveMessage((message: unknown) => {
       void this.handleMessage(message as PanelMessage);
     });

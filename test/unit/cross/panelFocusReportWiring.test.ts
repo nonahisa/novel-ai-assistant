@@ -11,8 +11,6 @@
  * 例外：
  * - 原稿エディター（`manuscriptEditorHtml.ts`・`manuscriptEditor.ts`）は 0.152.1 の自前の写しを持つ
  *   （画面の側は同じ決まりの写し、受け口は便の型の中で `reclaimPickerFocus` を呼ぶ）
- * - 校正・メモパネル（`sceneMemoPanelHtml.ts`・`sceneMemoPanel.ts`）は、ほかの担当が触っている
- *   間は当てない。当てたら例外から外す
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -29,6 +27,7 @@ import { buildProposalPanelHtml } from "../../../src/views/proposalPanelHtml";
 import { buildRelationGraphPanelHtml } from "../../../src/views/relationGraphPanelHtml";
 import { buildSchedulePanelHtml } from "../../../src/views/schedulePanelHtml";
 import { buildSettingsPanelHtml } from "../../../src/views/settingsPanelHtml";
+import { buildSceneMemoPanelHtml } from "../../../src/views/sceneMemoPanelHtml";
 import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
 import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanelHtml";
 
@@ -36,8 +35,8 @@ const root = path.resolve(__dirname, "../../..");
 const viewsDir = path.join(root, "src", "views");
 const featuresDir = path.join(root, "src", "features");
 
-const HTML_EXCEPTIONS = new Set(["manuscriptEditorHtml.ts", "sceneMemoPanelHtml.ts"]);
-const FEATURE_EXCEPTIONS = new Set(["manuscriptEditor.ts", "sceneMemoPanel.ts"]);
+const HTML_EXCEPTIONS = new Set(["manuscriptEditorHtml.ts"]);
+const FEATURE_EXCEPTIONS = new Set(["manuscriptEditor.ts"]);
 
 function count(text: string, word: string): number {
   return text.split(word).length - 1;
@@ -97,6 +96,7 @@ describe("パネルの台本が構文として通る（部品を埋めたあと�
     ["人物相関図", () => buildRelationGraphPanelHtml(NONCE, "vscode-resource:")],
     ["スケジュール", () => buildSchedulePanelHtml(NONCE, "vscode-resource:")],
     ["設定資料", () => buildSettingsPanelHtml(NONCE, "vscode-resource:")],
+    ["校正・メモパネル", () => buildSceneMemoPanelHtml(NONCE, "vscode-resource:")],
     ["相談", () => buildWorkChatPanelHtml(NONCE, "vscode-resource:")],
     ["執筆量", () => buildWritingStatsPanelHtml(NONCE, "vscode-resource:")],
   ];

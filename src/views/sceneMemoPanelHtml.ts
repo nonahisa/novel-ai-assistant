@@ -1,4 +1,5 @@
 import { noteToneClasses } from "../core/sceneMemoRows";
+import { reportFocusWithoutPointerScript } from "./focusReportScript";
 // 開き直せない画面は台本を持たない（下の説明）ので、キーの書き方は拡張機能の側の OS で決める
 import { hostKeyOs, keysInText, type KeyOs } from "../core/keyLabels";
 
@@ -339,6 +340,7 @@ select#tag option { color: var(--note-color, var(--vscode-dropdown-foreground));
 </div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${reportFocusWithoutPointerScript("vscode")}
 
 /** 拡張機能から届いた一覧。画面はこれを描くだけで、作り替えはしない */
 let data = null;
