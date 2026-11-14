@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 
@@ -56,7 +57,10 @@ async function makeLibrary(options: { rejectingHook?: boolean } = {}): Promise<{
   remote: string;
   work: WorkEntry;
 }> {
-  const base = await fs.mkdtemp(nodePath.join(os.tmpdir(), "syncB_"));
+  // 長い名前に直してから使う。GitHub の Windows の機械では一時フォルダーが短い名前
+  // （C:\Users\RUNNER~1\…）で渡り、製品は git の返す長い名前の置き場で送り直しの覚えを
+  // 付けるので、短い名前のままでは覚えを引けずに落ちた（2026-11-15。手元は短い名前が無く通っていた）
+  const base = realpathSync.native(await fs.mkdtemp(nodePath.join(os.tmpdir(), "syncB_")));
   tempRoots.push(base);
   const remote = nodePath.join(base, "remote.git");
   const root = nodePath.join(base, "書庫");
