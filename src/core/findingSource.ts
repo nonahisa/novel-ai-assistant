@@ -6,6 +6,7 @@
 import * as path from "./pathText";
 import { relocateQuote } from "./relocateQuote";
 import { FACT_CONTRADICTION_CATEGORY } from "./factContradiction";
+import { MISREAD_FINDING_LABEL } from "./readingMisreadLabel";
 import {
   findingId,
   type Finding,
@@ -71,6 +72,12 @@ const RECORDED: ReadonlyMap<
     { category: "contradiction", shape: "contradiction" },
   ],
   ["プロット逸脱", { category: "deviation", shape: "contradiction" }],
+  /*
+    読み間違いの見込み（設計書6.42.6）。AIの検知ではないが、修正案（その場所へ振るルビ）を持つ
+    本文の置き換えなので、提案パネルにも並べ、［適用］と校正・メモパネルの［ここにルビを振る］を
+    同じ当て方（ハッシュの照合・文字コードと改行の保持・［戻す］）に乗せる
+  */
+  [MISREAD_FINDING_LABEL, { category: "other", shape: "item" }],
 ]);
 
 /**

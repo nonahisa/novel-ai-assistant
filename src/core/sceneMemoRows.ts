@@ -10,6 +10,7 @@ import {
 // 「矛盾（事実の照合）」の分類名。写さずに検知の側の定数を読む
 import { FACT_CONTRADICTION_CATEGORY } from "./factContradiction";
 import { SJIS_MARK_FINDING_LABEL } from "./sjisMarkFinding";
+import { isMisreadFinding, MISREAD_FINDING_LABEL } from "./readingMisreadLabel";
 import type { Finding, FindingCategory } from "../models/finding";
 
 /**
@@ -369,6 +370,8 @@ export const FINDING_TONES = {
   // 編集者の提案（2026-11-08 から校正・メモパネルに並ぶ）。AIの指摘と見分けるため、
   // グラフの色のうち指摘が使っていない黄色を当てる
   editorProposal: "var(--vscode-charts-yellow, #cca700)",
+  // 読み間違いの見込み（設計書6.42.6）。グラフの色は使い切ったので、端末の色（テーマが必ず持つ）を借りる
+  misread: "var(--vscode-terminal-ansiCyan, #11a8cd)",
   // 知らない種類（外から置かれた指摘・これから足す検知）。勝手に強調しない
   other: "var(--vscode-charts-foreground, #cccccc)",
 } as const;
@@ -392,6 +395,7 @@ const FINDING_LABEL_TONES: Readonly<Record<string, FindingToneKey>> = {
   [EDITOR_PROPOSAL_TAG]: "editorProposal",
   // 保存の直前に「〓」にした字の説明（0.148.3）。AIの検知ではないので、検知の色は当てない
   [SJIS_MARK_FINDING_LABEL]: "other",
+  [MISREAD_FINDING_LABEL]: "misread",
   指摘: "other",
 };
 
@@ -461,6 +465,8 @@ export function tagTonesOf(
  * 「どうする指摘なのか」が一目で分かる側を先に置く。
  */
 export function findingHeadline(finding: Finding): string {
+  // 読み間違いの見込み（設計書6.42.6）は、修正案（振るルビの記法）より「エンジンがどう読むか」が主文
+  if (isMisreadFinding(finding) && finding.message) return finding.message;
   if (finding.suggestion && finding.target) {
     return `「${finding.target}」→「${finding.suggestion}」`;
   }

@@ -15,6 +15,10 @@ import {
   sentenceSpeechWith,
   type ReadingSentence,
 } from "./readAloud";
+import { buildFinding } from "./findingSource";
+import { rubyEditReplacement, rubyNotationFor } from "./ruby";
+import { MISREAD_FINDING_LABEL } from "./readingMisreadLabel";
+import type { Finding } from "../models/finding";
 
 /**
  * 読み上げの読み間違いを、声を作る前に見つける（設計書6.42.6。作者の決定 2026-11-14 夜）。
@@ -433,4 +437,84 @@ export function misreadWindow(text: string, start: number, end: number, notation
     window = text.slice(from, to);
   }
   return window;
+}
+
+/* ── 校正・メモパネルの行 ─────────────────────────────── */
+
+/**
+ * 見込みを、校正・メモパネルの行（指摘の置き場 `.aiwriter/findings.jsonl`）の形へ組む。
+ *
+ * - 原文（`original`）は `misreadWindow`、置き換える範囲（`target`）は語
+ * - 修正案（`suggestion`）はその場所へ振るルビ（その原稿の書き方。`.md` は `{灯|あかり}`、
+ *   `.txt` は `｜灯《あかり》`）。**当てるのは作者が［ここにルビを振る］を押したときだけ**で、
+ *   当てる道は提案パネルの［適用］と同じ（ハッシュの照合・文字コードと改行の保持）
+ * - 番号は中身から作る（`buildFinding`）ので、調べ直しても同じ所は同じ番号になり、
+ *   見送った行は見送ったまま
+ * - 種類は `other`（AIの検知ではない。声のエンジンの読みとの比べ）
+ */
+export function buildMisreadFindings(
+  workFolder: string,
+  filePath: string,
+  text: string,
+  notation: NotationMode,
+  found: readonly MisreadFinding[],
+  time: string
+): Finding[] {
+  const out: Finding[] = [];
+  const seen = new Set<string>();
+  for (const item of found) {
+    const { candidate, expected } = item;
+    const original = misreadWindow(text, candidate.start, candidate.end, notation);
+    const finding = buildFinding(
+      workFolder,
+      {
+        filePath,
+        line: candidate.line,
+        original,
+        target: candidate.word,
+        suggestion: rubyEditReplacement(candidate.word, expected.reading, rubyNotationFor(filePath)),
+        message: misreadMessage(candidate.word, item.engineReading, expected),
+        category: "other",
+        label: MISREAD_FINDING_LABEL,
+      },
+      text,
+      time
+    );
+    if (!finding || seen.has(finding.id)) continue;
+    seen.add(finding.id);
+    out.push(finding);
+  }
+  return out;
+}
+
+/** 行の主文（場所の札の横に出る1文） */
+export function misreadMessage(word: string, engineReading: string, expected: KnownReading): string {
+  const heard = engineReading === "" ? "読み飛ばしそうです" : `「${engineReading}」と読みそうです`;
+  return `「${word}」を、声のエンジンは${heard}。正しい読みは「${expected.reading}」（${describeReadingSource(expected.source)}）。`;
+}
+
+/**
+ * ［読みの辞書へ足す］で足す項目（語・句・読み）。足せなければ理由の文。
+ *
+ * 句は行の原文（記法を含まない短い窓）。読みの辞書の決まり（30字以内・改行なし・語より長い・
+ * 本文にそのまま在る）を、ここで確かめる——足しても当たらない項目を作らない
+ */
+export function misreadDictionaryEntry(
+  finding: Pick<Finding, "original" | "target" | "suggestion">,
+  notation: NotationMode,
+  text: string
+): { word: string; quote: string; reading: string } | string {
+  const word = finding.target;
+  const quote = finding.original;
+  const ruby = tokenizeLine(finding.suggestion, notation).find((token) => token.kind === "ruby");
+  const reading = ruby && ruby.kind === "ruby" ? toHiragana(ruby.reading) : "";
+  if (word === "" || !HIRAGANA_ONLY.test(reading)) return "この行から読みを取り出せませんでした。";
+  if (quote === word || !quote.includes(word)) {
+    return `「${word}」の前後に字が無いので、読みの辞書の句にできません（［ここにルビを振る］で直してください）。`;
+  }
+  if (quote.length > READING_QUOTE_MAX || /[\r\n]/.test(quote)) return "句が長すぎて、読みの辞書に入れられません。";
+  if (!text.includes(quote)) {
+    return "本文が変わっていて、この場所が見つかりません。もう一度「読み間違いを調べる」を押してください。";
+  }
+  return { word, quote, reading };
 }
