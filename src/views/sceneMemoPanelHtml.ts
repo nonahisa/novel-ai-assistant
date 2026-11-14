@@ -555,7 +555,7 @@ function renderActions(row) {
     if (row.misread && row.fromSettings) {
       buttons.push(
         '<button class="done" data-act="openSettings" data-key="' + key +
-          '" title="設定資料集を開きます（読みを直す手がかりに）">設定資料を開く</button>'
+          '" title="設定資料集を開きます">設定資料を開く</button>'
       );
     }
     if (row.misread && row.fixAction === "apply") {
