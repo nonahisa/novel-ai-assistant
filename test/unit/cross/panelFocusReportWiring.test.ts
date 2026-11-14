@@ -17,6 +17,20 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildAuthorDecisionsHtml } from "../../../src/views/authorDecisionsPanelHtml";
+import { buildChroniclePanelHtml } from "../../../src/views/chroniclePanelHtml";
+import { buildEditHistoryHtml } from "../../../src/views/editHistoryPanelHtml";
+import { buildEpubEditorPanelHtml } from "../../../src/views/epubEditorPanelHtml";
+import { buildLocationSketchPanelHtml } from "../../../src/views/locationSketchPanelHtml";
+import { buildNameCheckPanelHtml } from "../../../src/views/nameCheckPanelHtml";
+import { buildPhotoTranscribeHtml } from "../../../src/views/photoTranscribePanelHtml";
+import { buildPlotModePanelHtml } from "../../../src/views/plotModePanelHtml";
+import { buildProposalPanelHtml } from "../../../src/views/proposalPanelHtml";
+import { buildRelationGraphPanelHtml } from "../../../src/views/relationGraphPanelHtml";
+import { buildSchedulePanelHtml } from "../../../src/views/schedulePanelHtml";
+import { buildSettingsPanelHtml } from "../../../src/views/settingsPanelHtml";
+import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
+import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanelHtml";
 
 const root = path.resolve(__dirname, "../../..");
 const viewsDir = path.join(root, "src", "views");
@@ -56,6 +70,52 @@ describe("パネルの焦点の知らせの配線", () => {
     it(`${name} は、受け口ごとに焦点の知らせを聞く`, () => {
       const text = readFileSync(path.join(featuresDir, name), "utf8");
       expect(count(text, "listenForFocusWithoutPointer(")).toBeGreaterThanOrEqual(count(text, ".onDidReceiveMessage("));
+    });
+  }
+});
+
+/**
+ * 組み上がった画面の台本が、構文として通るか。
+ *
+ * 部品は `acquireVsCodeApi()` の次の行へ差し込んだ。差し込みで1枚でも構文が崩れると、
+ * そのパネルは何も動かなくなる（上の配線の検査は名前があることしか見ていない）。
+ * ここでは組み上げた HTML から `<script nonce>` の中身を取り出し、`new Function` に通す
+ * （動かさずに、読めるかだけを見る）。
+ */
+describe("パネルの台本が構文として通る（部品を埋めたあと）", () => {
+  const NONCE = "NONCE123";
+  const built: Array<[string, () => string]> = [
+    ["作者の判断", () => buildAuthorDecisionsHtml(NONCE, "c", "作者の採否", [])],
+    ["年表", () => buildChroniclePanelHtml(NONCE, "vscode-resource:")],
+    ["書き換えの履歴", () => buildEditHistoryHtml(NONCE, "vscode-resource:")],
+    ["EPUBの設計図", () => buildEpubEditorPanelHtml(NONCE, "vscode-resource:")],
+    ["場所の見取り図", () => buildLocationSketchPanelHtml(NONCE, "vscode-resource:")],
+    ["名前の点検", () => buildNameCheckPanelHtml(NONCE, "vscode-resource:")],
+    ["写真の書き起こし", () => buildPhotoTranscribeHtml(NONCE, "vscode-resource:")],
+    ["プロットモード", () => buildPlotModePanelHtml(NONCE, "vscode-resource:")],
+    ["提案パネル", () => buildProposalPanelHtml(NONCE, "vscode-resource:")],
+    ["人物相関図", () => buildRelationGraphPanelHtml(NONCE, "vscode-resource:")],
+    ["スケジュール", () => buildSchedulePanelHtml(NONCE, "vscode-resource:")],
+    ["設定資料", () => buildSettingsPanelHtml(NONCE, "vscode-resource:")],
+    ["相談", () => buildWorkChatPanelHtml(NONCE, "vscode-resource:")],
+    ["執筆量", () => buildWritingStatsPanelHtml(NONCE, "vscode-resource:")],
+  ];
+
+  it("上の配線の検査と同じ枚数を見る", () => {
+    const htmlCount = readdirSync(viewsDir).filter((name) => name.endsWith("Html.ts") && !HTML_EXCEPTIONS.has(name)).length;
+    expect(built).toHaveLength(htmlCount);
+  });
+
+  for (const [label, build] of built) {
+    it(`${label}：部品を含み、台本が構文として読める`, () => {
+      const html = build();
+      const scripts = [...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+      const joined = scripts.join("\n");
+      expect(joined).toContain("function reportFocusWithoutPointer(");
+      expect(joined).toContain('postMessage({ type: "focusWithoutPointer" })');
+      for (const script of scripts) {
+        expect(() => new Function(script)).not.toThrow();
+      }
     });
   }
 });
