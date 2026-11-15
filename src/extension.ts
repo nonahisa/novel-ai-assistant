@@ -225,6 +225,7 @@ import { probeGeneration } from "./ai/generationProbe";
 import { connectionCheckLogLine } from "./features/aiConnectionLog";
 import { FETCH_CEILING_RECOVERY } from "./ai/types";
 import { setVerifiedStateReporter, verifiedState } from "./core/verifiedMemento";
+import { globalPushRejections } from "./features/pushRejectionMemory";
 import {
   SettingsWatcher,
   notifyExternalChange,
@@ -924,6 +925,12 @@ export async function activate(
   context: vscode.ExtensionContext
 ): Promise<{ extendMarkdownIt<T extends MarkdownItLike>(md: T): T }> {
   voicePaceStore = verifiedState(context.globalState);
+  // 送信を断られた覚えを、起動し直しても残す（作者の答え 2026-11-16。設計書5.5.21）
+  globalPushRejections.attach(verifiedState(context.globalState), (error) =>
+    logFailure("送信を断られた覚えを保管庫へ写せなかった", {
+      詳細: error instanceof Error ? error.message : String(error),
+    })
+  );
   /**
    * 起動の所要時間（設計書6.107）。
    *

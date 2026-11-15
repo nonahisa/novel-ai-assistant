@@ -172,9 +172,27 @@ export function describeTooLargeToRecord(files: readonly LargeFile[]): string {
 export function describeTooLargeToSend(files: readonly LargeFile[]): string {
   return (
     "まだ送っていない記録に、GitHub に送れない大きさ（1ファイル100MB超）のファイルが入っているので、送りませんでした。\n" +
-    listLargeFiles(files)
+    listLargeFiles(files) +
+    "\n" +
+    UNDO_RECORD_STEPS
   );
 }
+
+/**
+ * 記録してしまった大きなファイルの戻し方（作者の答え 2026-11-16「案内だけ出す」。記録の操作は作者が自分で）。
+ *
+ * 名前は VS Code の日本語の画面のまま（言語パックの `command.undoCommit`・`command.unstage`・
+ * 「ステージされている変更」）。「前回のコミットを元に戻す」は `reset --soft` なので、取り消した記録の
+ * 中身はステージされたまま手元に残る。そのままでは .gitignore に書いても外れないので、大きなファイル
+ * だけステージング解除してもらう。解除すると git に入っていないファイルになり、次の同期の記録の前の
+ * 検査が止めて［.gitignore に足す］を出す
+ */
+export const UNDO_RECORD_STEPS =
+  "戻し方（記録を取り消しても、原稿は消えません）：\n" +
+  "1. 左の端の「ソース管理」を開く\n" +
+  "2. 上の「…」→「コミット」→「前回のコミットを元に戻す」を押す。左下の ↑ の横の数が 0 になるまで繰り返す\n" +
+  "3. 「ステージされている変更」に並んだ上のファイルの「−」（変更のステージング解除）を押す\n" +
+  "4. もう一度同期すると［.gitignore に足す］が出るので、押してから、もう一度同期する";
 
 /**
  * .gitignore に足す1行。根からの道に固定する（`/` で始める）。

@@ -12,16 +12,44 @@ import { normalizeForComparison } from "../core/paths";
  *
  * **回線が無くて届かなかったときは覚えない**——それは待てば通るので、送り直しの本来の仕事。
  * 覚えるのは、送り先が受け取ったうえで断ったとき（`PushResult.rejected`）と、送る前に
- * 上限を超えるファイルが見つかったときだけ。拡張機能を起動し直すと忘れる（覚えは画面の
- * 中だけ）。
+ * 上限を超えるファイルが見つかったときだけ。
+ *
+ * **起動し直しても覚えている**（作者の答え 2026-11-16「残す」。1.0.16）。前は画面の中だけで、
+ * 起動のたびに1回送って断られ、窓も1回出ていた。保管庫（globalState。機械ごと）に置き場ごとの
+ * 記録と断りの文を写す。窓が2つあると互いの書き込みで片方の覚えが消えることがあるが、そのときは
+ * 1回試して覚え直すだけ（作者の原稿やデータには触れない）
  */
 export class PushRejectionMemory {
+  /** 保管庫の鍵 */
+  static readonly STORAGE_KEY = "novelai.pushRejections";
+
   private readonly rejected = new Map<string, { head: string; reason: string }>();
+  private store: RejectionStore | undefined;
+  private onStoreError: ((error: unknown) => void) | undefined;
+
+  /**
+   * 保管庫につなぎ、前の起動で覚えたものを読む（activate で1回）。形の合わない値は捨てる
+   * （壊れた覚えで送りを止めない。捨てても1回試して覚え直すだけ）
+   */
+  attach(store: RejectionStore, onStoreError?: (error: unknown) => void): void {
+    this.store = store;
+    this.onStoreError = onStoreError;
+    const saved: unknown = store.get<unknown>(PushRejectionMemory.STORAGE_KEY, {});
+    if (typeof saved !== "object" || saved === null) return;
+    for (const [root, value] of Object.entries(saved)) {
+      if (this.rejected.has(root) || typeof value !== "object" || value === null) continue;
+      const { head, reason } = value as { head?: unknown; reason?: unknown };
+      if (typeof head === "string" && head !== "" && typeof reason === "string") {
+        this.rejected.set(root, { head, reason });
+      }
+    }
+  }
 
   /** この置き場のこの記録を、断られたものとして覚える */
   remember(root: string, head: string | undefined, reason: string): void {
     if (!head) return;
     this.rejected.set(normalizeForComparison(root), { head, reason });
+    this.persist();
   }
 
   /** この置き場のこの記録が、前に断られたものか。断りの文を返す */
@@ -33,8 +61,23 @@ export class PushRejectionMemory {
 
   /** 通った・記録が変わったら忘れる */
   forget(root: string): void {
-    this.rejected.delete(normalizeForComparison(root));
+    if (this.rejected.delete(normalizeForComparison(root))) this.persist();
   }
+
+  /** 待たずに保管庫へ写す。写せなくても送りの判断は画面の中の覚えで続ける（失敗はログへ） */
+  private persist(): void {
+    if (!this.store) return;
+    const snapshot = Object.fromEntries(this.rejected);
+    Promise.resolve()
+      .then(() => this.store?.update(PushRejectionMemory.STORAGE_KEY, snapshot))
+      .catch((error: unknown) => this.onStoreError?.(error));
+  }
+}
+
+/** 使うのは読みと書きだけ（`vscode.Memento` の一部。試験から作り物を渡せる） */
+export interface RejectionStore {
+  get<T>(key: string, defaultValue: T): T;
+  update(key: string, value: unknown): Thenable<void>;
 }
 
 /** 拡張機能の中で1つだけ（すべて同期・単独の送信・自動の送り直しが同じものを見る） */
