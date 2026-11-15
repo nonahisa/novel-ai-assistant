@@ -418,16 +418,20 @@ test("ヘルパーから届いた順位で、自己最高を抜いた・日間�
         for (const notice of wanted) {
           await waitForNotice(session, (message) => message === notice, `お祝いの知らせ「${notice}」`, { since });
         }
-        await holdsFor(
-          async () => {
-            const recorded = (await recordedNotices(session)).filter((entry) => Date.parse(entry.at) >= since - 1_000).map((entry) => entry.message);
-            return wanted.every((notice) => recorded.filter((message) => message === notice).length === 1);
-          },
-          "お祝いの知らせはどれも1回だけ",
-          3_000
-        ).catch(async (error: unknown) => {
-          throw new Error(`${String(error)}（${await describeNotices(session, since - 1_000)}）`);
-        });
+        // 上の待ちは右下の知らせで先に通ることがある。記録は1秒まとめて書かれ、書き換えの最中は
+        // 読めない（空に見える）ので、まず4つとも記録に載るのを待ってから、2回目が出ないことを見張る
+        // （2026-11-14 ノートPC：右下には4つとも出ていたのに、すぐ数えた記録が [] で落ちた）
+        const countsOf = async (): Promise<number[]> => {
+          const recorded = (await recordedNotices(session)).filter((entry) => Date.parse(entry.at) >= since - 1_000).map((entry) => entry.message);
+          return wanted.map((notice) => recorded.filter((message) => message === notice).length);
+        };
+        const describe = async (error: unknown): Promise<never> => {
+          throw new Error(`${String(error)}（数：${JSON.stringify(await countsOf())}／${await describeNotices(session, since - 1_000)}）`);
+        };
+        await waitUntil(async () => (await countsOf()).every((count) => count >= 1), "お祝いの知らせが4つとも記録に載る", 15_000).catch(describe);
+        // 書き換えの最中に読むと0件に見えるので、見張るのは「2回以上」だけにする
+        await holdsFor(async () => (await countsOf()).every((count) => count <= 1), "お祝いの知らせはどれも1回だけ", 3_000).catch(describe);
+        await waitUntil(async () => (await countsOf()).every((count) => count === 1), "お祝いの知らせがどれもちょうど1回記録にある", 5_000).catch(describe);
 
         // 執筆統計を開くと、まだ見せていないお祝いの札と絵が出る（札には4つの区分の行）
         const frame = await openStats(page, 1);

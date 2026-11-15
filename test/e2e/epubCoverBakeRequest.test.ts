@@ -26,6 +26,7 @@ import { formatExternalAccessPermission } from "../../src/core/externalAccessPer
 import { sha256Text } from "../../src/core/hash";
 import { buildRunUri, parseRunState, RUN_REQUEST_DIRECTORY, runStateFileName, runTicketFileName, type RunStateRecord, type RunTicket } from "../../src/core/runRequest";
 import { defaultBookConfig } from "../../src/models/book";
+import { readFileWhenPresent } from "./support/fileSettle";
 import { describeNotices } from "./support/noticeRecord";
 import { fillInput } from "./support/quickInput";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -49,8 +50,9 @@ function bookFile(session: E2ESession): string {
   return path.join(session.workFolder, "設定", "書籍", "book.json");
 }
 
+/** book.json は書き戻しの途中に一瞬無いことがあるので、無いときは少し待って読み直す（support/fileSettle.ts の表） */
 async function readBookText(session: E2ESession): Promise<string> {
-  return readFile(bookFile(session), "utf8");
+  return readFileWhenPresent(bookFile(session));
 }
 
 /** 保管庫（この拡張機能の globalStorage）。VS Code が作る名前を探し、無ければ同じ名前で作る */

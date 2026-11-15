@@ -372,6 +372,15 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
         manuscriptFootNarrow・manuscriptSurfaceNarrow）。手元の 100% の機械で写すために使う
       */
       ...(/^\d+(\.\d+)?$/.test(process.env.NOVELAI_E2E_SCALE ?? "") ? [`--force-device-scale-factor=${process.env.NOVELAI_E2E_SCALE}`] : []),
+      /*
+        環境を渡されたときは、VS Code にログインシェルから環境を読み直させない。Mac と Linux の
+        VS Code は、端末から起こされていないと起動時にログインシェルの環境（PATH など）を読んで
+        上書きする（本体の resolveShellEnv。Windows では読まない）。そのため Mac では、PATH を空に
+        したつもりでも拡張機能の側では本物の PATH に戻り、`open` が本物のブラウザを開いた
+        （2026-11-14 Mac、exportEpisodePdf）。テストの側の安全弁は vitest の環境で確かめるので、
+        これに気づけない
+      */
+      ...(options.env ? ["--force-disable-user-env"] : []),
   ];
   // 開き直し（`restartVsCode`）が同じ引数で起こせるよう控える
   relaunchContexts.set(root, { executablePath, args, windowSize: options.windowSize ?? windowSizeFromEnv() });
