@@ -1194,6 +1194,9 @@ export async function checkContradictions(
                   本文: bodyWithLines.length,
                   人物: relevant.characters.length,
                   場所: relevant.locations.length,
+                  // 2026-11-15 から載る材料。**新しく増えた材料は独立した項目で測る**
+                  組織: relevant.organizations.length,
+                  能力: relevant.abilities.length,
                   // ここだけ上限が無かった（設計書6.27.6の穴2）。いまは
                   // `WORLDVIEW_MAX_CHARS` で頭を打つが、**実測はまだ無い**ので、
                   // 何字になるのかを測れるよう独立した項目として出し続ける
