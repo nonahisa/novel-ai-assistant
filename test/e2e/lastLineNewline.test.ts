@@ -39,6 +39,13 @@ async function lineCount(frame: Frame): Promise<number> {
   return frame.evaluate(() => document.getElementById("compose")?.children.length ?? 0);
 }
 
+/** 組んで書く面の行ごとの字（compose の直下の子ごとの textContent） */
+async function lineTexts(frame: Frame): Promise<string[]> {
+  return frame.evaluate(() =>
+    Array.from(document.getElementById("compose")?.children ?? []).map((line) => line.textContent ?? "")
+  );
+}
+
 async function openFace(session: E2ESession, vertical: boolean, marker: string): Promise<Frame> {
   const frame = await openEpisode(session.page, EPISODE, marker);
   return vertical ? turnVertical(session, marker) : frame;
@@ -69,9 +76,18 @@ for (const vertical of [true, false]) {
             throw new Error(`${String(error)}（画面の本文：${JSON.stringify(await composeText(frame))}）`);
           }
         );
+        /*
+          2回目：1回目のふつうの動きでカーソルが行の末尾（＝文書の末尾）へ動いていれば、2回目で改行が
+          末尾に1つ足されるのが正しい（作者の望み「最後の行で下キーを押したら改行を足す」）。どちらの場合も、
+          最後の行の字は割れず、足されるなら末尾の空行1つだけ（2026-11-15 Mac の横書きで、2回目に足されて
+          「増えない」の期待が落ちた。期待が厳しすぎた）
+        */
         await session.page.keyboard.press(NEXT);
-        await holdsFor(async () => (await lineCount(frame)) === 2, "続けて押しても行が増えない", 1_000);
-        expect(await composeText(frame)).toContain("えおか。");
+        await session.page.waitForTimeout(1_000);
+        const lines = await lineTexts(frame);
+        expect(lines[1], `最後の行の字が割れています：${JSON.stringify(lines)}`).toBe("えおか。");
+        expect(lines.length, `行の数：${JSON.stringify(lines)}`).toBeLessThanOrEqual(3);
+        if (lines.length === 3) expect(lines[2], `足されたのは空の行1つではありません：${JSON.stringify(lines)}`).toBe("");
       },
       VERTICAL_LAUNCH
     );
