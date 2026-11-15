@@ -200,16 +200,26 @@ export function placeSjisMarkFindings<T extends FindingView>(
     const ordered = [...list].sort(
       (a, b) => compareTimeDesc(a.row.time, b.row.time) || a.row.hintLine - b.row.hintLine || a.order - b.order
     );
-    const neighbors = neighborLinesOf(texts.get(file) ?? "");
-    const passes: Array<(row: T, occurrence: SjisMarkOccurrence) => boolean> = [
-      (row, occurrence) => row.original === occurrence.context,
-      (row, occurrence) => sharesOneSide(row.original, occurrence),
-      (row, occurrence) => sharesNeighborLine(row, neighbors(occurrence.line)),
+    /*
+      **〓を手がかりごとの索引にまとめてから引く**（1.0.14、実装の残り #128）。前は行ごとに全部の〓を
+      見て3段回していたので、行の数×〓の数に比例し、〓の行が 5,000 で約0.28秒・10,000 で約0.78秒
+      かかった（パネルを開くたびと pending.list のたび）。手がかりはどれも「文字列が同じか」なので、
+      その文字列で〓を引けば、候補はその索引の中だけになる。選び方（行のいちばん近いもの・同じ距離なら前）
+      は変えない（`sjisMarkPlacementEquivalence.test.ts` が前の作りと比べて見張る）
+    */
+    const index = indexOccurrences(occurrences, neighborLinesOf(texts.get(file) ?? ""));
+    const passes: Array<(row: T) => Array<readonly number[] | undefined>> = [
+      (row) => [index.byContext.get(row.original)],
+      (row) => oneSideKeysOf(row.original).map(({ side, key }) => (side === "before" ? index.byBefore : index.byAfter).get(key)),
+      (row) => [
+        row.before.trim().length > 0 ? index.byLineBefore.get(row.before) : undefined,
+        row.after.trim().length > 0 ? index.byLineAfter.get(row.after) : undefined,
+      ],
     ];
-    for (const matches of passes) {
+    for (const candidatesOf of passes) {
       for (const { row, order } of ordered) {
         if (assigned.has(order)) continue;
-        const occurrence = nearestFree(occurrences, taken, row.hintLine, (candidate) => matches(row, candidate));
+        const occurrence = nearestFree(occurrences, taken, row.hintLine, candidatesOf(row));
         if (!occurrence) continue;
         taken.add(occurrence.index);
         assigned.set(order, occurrence);
@@ -234,18 +244,63 @@ function compareTimeDesc(left: string, right: string): number {
 }
 
 /**
- * 記録した前後（`original`）と、いまの〓の前後の、片方だけでも合うか。
+ * 記録した前後（`original`）を、いまの〓の前か後ろと比べる手がかりに割る（片方だけでも合えばよい）。
  * 記録した前後に〓が2つ以上あるとき（「あい〓〓うえ」）は、どの〓が目印だったか分からないので、
- * どの区切り方で合ってもよい。空の側（行の頭・終わりの〓）は、どの行の頭とも合ってしまうので見ない
+ * どの区切り方でも手がかりにする。空の側（行の頭・終わりの〓）は、どの行の頭とも合ってしまうので使わない
  */
-function sharesOneSide(original: string, occurrence: SjisMarkOccurrence): boolean {
+function oneSideKeysOf(original: string): Array<{ side: "before" | "after"; key: string }> {
+  const keys: Array<{ side: "before" | "after"; key: string }> = [];
   for (let at = original.indexOf(MARK); at >= 0; at = original.indexOf(MARK, at + MARK.length)) {
     const before = original.slice(0, at);
     const after = original.slice(at + MARK.length);
-    if (before.length > 0 && before === occurrence.before) return true;
-    if (after.length > 0 && after === occurrence.after) return true;
+    if (before.length > 0) keys.push({ side: "before", key: before });
+    if (after.length > 0) keys.push({ side: "after", key: after });
   }
-  return false;
+  return keys;
+}
+
+/** 〓の手がかりごとの索引。中身は `occurrences` の中の位置（前から順） */
+interface OccurrenceIndex {
+  byContext: Map<string, number[]>;
+  byBefore: Map<string, number[]>;
+  byAfter: Map<string, number[]>;
+  /** 〓の行の前の、中身のある1行 */
+  byLineBefore: Map<string, number[]>;
+  /** 〓の行の後ろの、中身のある1行 */
+  byLineAfter: Map<string, number[]>;
+}
+
+function indexOccurrences(
+  occurrences: readonly SjisMarkOccurrence[],
+  neighbors: (line: number) => { before: string; after: string }
+): OccurrenceIndex {
+  const index: OccurrenceIndex = {
+    byContext: new Map(),
+    byBefore: new Map(),
+    byAfter: new Map(),
+    byLineBefore: new Map(),
+    byLineAfter: new Map(),
+  };
+  const add = (map: Map<string, number[]>, key: string, position: number): void => {
+    const list = map.get(key);
+    if (list) list.push(position);
+    else map.set(key, [position]);
+  };
+  // 同じ行の〓は前後の行も同じなので、行ごとに1回だけ引く
+  let lastLine = -1;
+  let lineNeighbors = { before: "", after: "" };
+  occurrences.forEach((occurrence, position) => {
+    add(index.byContext, occurrence.context, position);
+    add(index.byBefore, occurrence.before, position);
+    add(index.byAfter, occurrence.after, position);
+    if (occurrence.line !== lastLine) {
+      lastLine = occurrence.line;
+      lineNeighbors = neighbors(occurrence.line);
+    }
+    add(index.byLineBefore, lineNeighbors.before, position);
+    add(index.byLineAfter, lineNeighbors.after, position);
+  });
+  return index;
 }
 
 /**
@@ -264,22 +319,29 @@ function neighborLinesOf(text: string): (line: number) => { before: string; afte
   return (line) => ({ before: nearest(line, -1), after: nearest(line, 1) });
 }
 
-/** 記録したときの前後の行（`before`・`after`）の片方が、いまの〓の行の前後の行と同じか。空の行は手がかりにしない */
-function sharesNeighborLine(row: Pick<Finding, "before" | "after">, now: { before: string; after: string }): boolean {
-  return (row.before.trim().length > 0 && row.before === now.before) || (row.after.trim().length > 0 && row.after === now.after);
-}
-
-/** まだ取られていない〓のうち、条件に合い、行がいちばん近いもの（同じ距離なら前） */
+/**
+ * 候補（索引から引いた〓の位置。いくつかの索引にまたがり、重なってもよい）のうち、まだ取られておらず、
+ * 行がいちばん近いもの（同じ距離なら本文の前のほう）
+ */
 function nearestFree(
   occurrences: readonly SjisMarkOccurrence[],
   taken: ReadonlySet<number>,
   hintLine: number,
-  matches: (occurrence: SjisMarkOccurrence) => boolean
+  candidates: ReadonlyArray<readonly number[] | undefined>
 ): SjisMarkOccurrence | undefined {
-  let best: SjisMarkOccurrence | undefined;
-  for (const occurrence of occurrences) {
-    if (taken.has(occurrence.index) || !matches(occurrence)) continue;
-    if (!best || Math.abs(occurrence.line - hintLine) < Math.abs(best.line - hintLine)) best = occurrence;
+  let best: number | undefined;
+  let bestDistance = Infinity;
+  for (const list of candidates) {
+    if (!list) continue;
+    for (const position of list) {
+      const occurrence = occurrences[position];
+      if (taken.has(occurrence.index)) continue;
+      const distance = Math.abs(occurrence.line - hintLine);
+      if (distance < bestDistance || (distance === bestDistance && best !== undefined && position < best)) {
+        best = position;
+        bestDistance = distance;
+      }
+    }
   }
-  return best;
+  return best === undefined ? undefined : occurrences[best];
 }
