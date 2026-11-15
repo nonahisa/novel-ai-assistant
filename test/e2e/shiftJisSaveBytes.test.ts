@@ -150,6 +150,9 @@ test("作品の話を素のエディターで「〜」を打って保存する�
     );
     expect(includesSequence(bytes, FULLWIDTH_TILDE), `ファイル：${hex(bytes)}`).toBe(true);
     expect(bytes.includes(QUESTION), `ファイル：${hex(bytes)}`).toBe(false);
+    // 置き換えが保存に間に合った保存では、保存し直さない（1.0.5。間に合わなかったときの道は shiftJisLateSave）
+    const log = await readFile(path.join(session.workFolder, ".aiwriter", "logs", "actions.log"), "utf8").catch(() => "");
+    expect(log, "間に合った保存なのに保存し直しています").not.toContain("保存し直しました");
   }, sjisLaunch(PLAIN_EDITOR));
 });
 

@@ -88,6 +88,11 @@ export interface ShiftJisSaveDeps {
   onClean(document: vscode.TextDocument): void;
   /** 控えを待つ上限（ミリ秒）。単体テストで縮める */
   keepWaitMs?: number;
+  /**
+   * 置き換えを計画した保存を知らせる（1.0.5。`createLateSaveRepair` の `willSave`）。
+   * 計画が保存に間に合ったかは、保存が済んだあとに見る
+   */
+  onPlanned?(document: vscode.TextDocument, version: number, edits: Promise<readonly vscode.TextEdit[]>): void;
 }
 
 /** `onWillSaveTextDocument` の知らせのうち、使う所だけ */
@@ -133,9 +138,9 @@ export function handleWillSave(event: WillSaveEvent, deps: ShiftJisSaveDeps): vo
 
   // 本文は呼ばれた瞬間のものを使う。待つあいだに打たれたら、VS Code が書き換えを捨てる（API の決まり）
   const text = document.getText();
+  const version = document.version;
   const startedAt = Date.now();
-  event.waitUntil(
-    (async (): Promise<vscode.TextEdit[]> => {
+  const planned = (async (): Promise<vscode.TextEdit[]> => {
       try {
         /*
           **全部の字が Shift_JIS で往復できるなら、置き換える字は無い**ので、ファイルを読む前に抜ける。
@@ -156,8 +161,156 @@ export function handleWillSave(event: WillSaveEvent, deps: ShiftJisSaveDeps): vo
         );
         return [];
       }
-    })()
-  );
+    })();
+  event.waitUntil(planned);
+  deps.onPlanned?.(document, version, planned);
+}
+
+/** 保存し直す係の外とのつなぎ。単体テストで差し替える */
+export interface LateSaveRepairDeps {
+  /** 文書が version から変わるのを待つ。変われば true、`ms` で諦めれば false */
+  whenChanged(document: vscode.TextDocument, version: number, ms: number): Promise<boolean>;
+  /** 書き換えを文書へ当てる。当たれば true */
+  applyEdits(document: vscode.TextDocument, edits: readonly vscode.TextEdit[]): Promise<boolean>;
+  /** 文書を保存する（`TextDocument.save()`）。保存できれば true */
+  save(document: vscode.TextDocument): Promise<boolean>;
+  /** 直せなかったことを真ん中の窓で知らせる */
+  warn(message: string, detail: string): void;
+  log(workFolder: string | undefined, message: string): void;
+  workFolderOf(filePath: string): string | undefined;
+  /** 置き換えの受け持ち（作品の話か、登録していない原稿）か */
+  isTarget(filePath: string): boolean;
+  /** 文書が Shift_JIS か（受け口が呼ばれなかった保存で使う） */
+  isShiftJis(document: vscode.TextDocument): Promise<boolean>;
+  /** いまの時刻（ミリ秒）。単体テストで差し替える */
+  now?(): number;
+}
+
+/** 遅れて届く書き換えを待つ長さ。拡張機能の側の持ち時間（1.5秒）が過ぎれば、届くか捨てられるかが決まる */
+const LATE_EDIT_WAIT_MS = 3_000;
+/** 同じ文書で続けて保存し直すのは、この間に2回まで（3回目は直さずに知らせる。保存し直しを繰り返さない） */
+const REPAIR_WINDOW_MS = 30_000;
+const REPAIR_LIMIT = 2;
+
+/**
+ * 保存の直前の置き換えが、**その保存に間に合わなかった**ときに、正しい字で保存し直す（1.0.5）。
+ *
+ * VS Code の画面の側は、受け口の答えを 1.75 秒しか待たない（本体のコード）。過ぎると書き換え無しで
+ * 保存し、Shift_JIS に無い字（「〜」など）は「?」（0x3f）で書かれる。拡張機能の側の答えが遅れて
+ * 出ると、その書き換えは保存の**あと**に文書へ当たり、未保存の印が残る。ノートPC（2026-11-15）では、
+ * ビルド直後の重い時に42万字の合本で3回のうち1回、この形で末尾が「?」で書かれた。
+ * また、前の拡張機能の受け口が持ち時間を使い切った保存や、遅れが重なって呼ばれなくなったあとの保存では、
+ * この受け口そのものが呼ばれない（本体のコード）。
+ *
+ * 受け口の中では保存を止められない（API の決まり）。そこで保存が済んだあとに見て、「?」で書かれたのが
+ * 確かなら保存し直す（実装ルール1：黙って壊さない）。確かなのは次のとき：
+ * - 置き換えを計画したのに、文書の版が受け口の時から変わっていない（書き換えが保存の前に当たっていない）
+ * - 保存した本文に、Shift_JIS で往復できない字が残っている（受け口が呼ばれなかった保存も、これで拾う）
+ *
+ * 保存し直すのは、遅れて届く書き換えを待ってから。届かなければ自分で置き換えてから保存する。
+ * 直せないとき・30秒に3回目のときは、真ん中の窓で知らせる
+ */
+export function createLateSaveRepair(deps: LateSaveRepairDeps): {
+  willSave(document: vscode.TextDocument, version: number, edits: Promise<readonly vscode.TextEdit[]>): void;
+  didSave(document: vscode.TextDocument): Promise<void>;
+} {
+  const pending = new Map<string, { version: number; edits: Promise<readonly vscode.TextEdit[]> }>();
+  const repairs = new Map<string, number[]>();
+  const now = (): number => (deps.now ? deps.now() : Date.now());
+
+  const warnBroken = (document: vscode.TextDocument, workFolder: string | undefined, reason: string): void => {
+    const name = path.basename(path.fromUri(document.uri));
+    deps.log(workFolder, `保存の前の Shift_JIS の置き換えが保存に間に合わず、「?」で書かれた字があります（${name}）：${reason}`);
+    deps.warn(
+      `「${name}」を保存したとき、Shift_JIS に無い字が「?」で書かれました。`,
+      [
+        `理由：${reason}`,
+        "開いている原稿の字はそのままです。もう一度保存してください。原稿を閉じていた場合は、「?」になった所を直してください。",
+      ].join("\n\n")
+    );
+  };
+
+  return {
+    willSave(document, version, edits) {
+      pending.set(document.uri.toString(), { version, edits });
+    },
+    async didSave(document) {
+      const key = document.uri.toString();
+      const entry = pending.get(key);
+      pending.delete(key);
+      // 保存の済んだ瞬間の様子を、待つ前に控える（待つあいだに遅れた書き換えが当たる）
+      const versionAtSave = document.version;
+      const textAtSave = document.getText();
+      const dirtyAtSave = document.isDirty;
+      const filePath = path.fromUri(document.uri);
+      if (!deps.isTarget(filePath)) return;
+      const savedClean = roundTripsInShiftJis(textAtSave);
+
+      /** 「?」で書かれたのが確か（版が変わっていない・保存した本文に書けない字がある） */
+      let certain: boolean;
+      if (entry) {
+        const planned = await entry.edits.catch(() => [] as readonly vscode.TextEdit[]);
+        // 書き換えを計画しなかった保存は、Shift_JIS でないか、置き換える字が無かった
+        if (planned.length === 0) return;
+        certain = versionAtSave === entry.version || !savedClean;
+        if (!certain) {
+          /*
+            版が進み本文も書ける字だけなのに未保存：書き換えが書き込みの最中に当たったか、保存の直後に
+            作者が打ったか。見分けられないので保存し直すだけにし、回数にも数えず窓も出さない
+            （自動保存では打つたびに起きうる。偽の窓を出さない）
+          */
+          if (dirtyAtSave && !document.isClosed && !(await deps.save(document))) {
+            deps.log(deps.workFolderOf(filePath), `保存の直後に未保存だった原稿を保存し直せませんでした（${path.basename(filePath)}）`);
+          }
+          return;
+        }
+      } else {
+        /*
+          受け口が呼ばれなかった保存。前の拡張機能の受け口が持ち時間を使い切ると後ろは呼ばれず、遅れや
+          失敗が重なった受け口は以後呼ばれなくなる（本体の決まり）。保存した本文で見る
+        */
+        if (savedClean || !(await deps.isShiftJis(document))) return;
+        certain = true;
+      }
+      if (!certain) return;
+
+      const workFolder = deps.workFolderOf(filePath);
+      const name = path.basename(filePath);
+      const baseVersion = entry?.version ?? versionAtSave;
+      const recent = (repairs.get(key) ?? []).filter((at) => now() - at < REPAIR_WINDOW_MS);
+      if (recent.length >= REPAIR_LIMIT) {
+        repairs.set(key, recent);
+        warnBroken(document, workFolder, "保存し直しても置き換えが間に合いませんでした");
+        return;
+      }
+      repairs.set(key, [...recent, now()]);
+
+      if (entry && document.version === baseVersion) await deps.whenChanged(document, baseVersion, LATE_EDIT_WAIT_MS);
+      if (document.isClosed) {
+        warnBroken(document, workFolder, "保存し直す前に原稿が閉じられました");
+        return;
+      }
+      const text = document.getText();
+      if (!roundTripsInShiftJis(text)) {
+        const plan = planShiftJisSave(text);
+        const edits = plan.spans.map((span) =>
+          vscode.TextEdit.replace(
+            new vscode.Range(document.positionAt(span.index), document.positionAt(span.index + span.length)),
+            span.to
+          )
+        );
+        if (!(await deps.applyEdits(document, edits))) {
+          warnBroken(document, workFolder, "置き換えを原稿に当てられませんでした");
+          return;
+        }
+      }
+      if (!(await deps.save(document))) {
+        warnBroken(document, workFolder, "保存し直せませんでした");
+        return;
+      }
+      deps.log(workFolder, `保存の前の置き換えが保存に間に合わず「?」で書かれたので、置き換えて保存し直しました（${name}）`);
+    },
+  };
 }
 
 /**
@@ -483,6 +636,53 @@ export function installShiftJisSaveGuard(registry: { list(): readonly WorkEntry[
     },
     onUnencodable: (report) => warner.report(report),
     onClean: (document) => warner.forget(document),
+    onPlanned: (document, version, edits) => repair.willSave(document, version, edits),
   };
-  return vscode.workspace.onWillSaveTextDocument((event) => handleWillSave(event, deps));
+  const repair = createLateSaveRepair({
+    whenChanged: (document, version, ms) =>
+      new Promise<boolean>((resolve) => {
+        const key = document.uri.toString();
+        const timer = setTimeout(() => finish(false), ms);
+        const listener = vscode.workspace.onDidChangeTextDocument((change) => {
+          if (change.document.uri.toString() === key && change.document.version !== version) finish(true);
+        });
+        function finish(changed: boolean): void {
+          clearTimeout(timer);
+          listener.dispose();
+          resolve(changed);
+        }
+      }),
+    applyEdits: async (document, edits) => {
+      const edit = new vscode.WorkspaceEdit();
+      edit.set(document.uri, [...edits]);
+      return vscode.workspace.applyEdit(edit);
+    },
+    save: async (document) => document.save(),
+    warn: (message, detail) => {
+      void vscode.window.showWarningMessage(message, { modal: true, detail });
+    },
+    log,
+    workFolderOf: deps.workFolderOf,
+    isTarget: (filePath) => deps.workFolderOf(filePath) !== undefined || deps.isUnregisteredManuscript(filePath),
+    isShiftJis: async (document) => {
+      const declared = declaredEncoding(document);
+      return declared !== undefined ? declared === VSCODE_SHIFT_JIS : isShiftJisOn190(document, deps);
+    },
+  });
+  /*
+    置き換えの表（iconv の Shift_JIS の表）は初めて使うときに組まれるので、最初の保存の受け口の時間に
+    入らないよう、起動して落ち着いた頃に1回組んでおく（どれだけ効くかは測っていない。保存し直す係が本筋）
+  */
+  const warmUp = setTimeout(() => {
+    roundTripsInShiftJis("あ〜");
+  }, 2_000);
+  return vscode.Disposable.from(
+    vscode.workspace.onWillSaveTextDocument((event) => handleWillSave(event, deps)),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      void repair.didSave(document).catch((error: unknown) => {
+        log(deps.workFolderOf(path.fromUri(document.uri)), `保存し直しの確かめで失敗しました：${messageOf(error)}`);
+      });
+    }),
+    { dispose: () => clearTimeout(warmUp) }
+  );
 }

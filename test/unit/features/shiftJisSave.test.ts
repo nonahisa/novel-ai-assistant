@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import iconv = require("iconv-lite");
 import * as vscode from "vscode";
 import {
+  createLateSaveRepair,
   createUnencodableWarner,
   handleWillSave,
+  type LateSaveRepairDeps,
   recordMarkFindings,
   type ShiftJisSaveDeps,
   type UnencodableSave,
@@ -339,6 +341,213 @@ describe("保存の直前の Shift_JIS の置き換え（onWillSaveTextDocument�
       expect(edits).toEqual([]);
       expect(h.logs.join("\n")).toContain("設定を読めない");
     });
+  });
+});
+
+/**
+ * 置き換えが保存に間に合わなかったとき（1.0.5）。
+ *
+ * **再現したいこと**（ノートPC 2026-11-15）：42万字の Shift_JIS の合本で「〜」を打って保存すると、
+ * ビルド直後の重い時の1回目だけ、ファイルの末尾が「?」（0x3f）で書かれ、未保存の印が残った。
+ * VS Code の画面の側は受け口の答えを 1.75 秒しか待たず、過ぎると書き換え無しで保存する。遅れて出た
+ * 書き換えは保存のあとに文書へ当たる。保存のあとで見分けて、正しい字で保存し直す
+ */
+describe("置き換えが保存に間に合わなかった保存を、正しい字で保存し直す", () => {
+  /** 版と未保存の印を動かせる作り物の文書 */
+  function liveDocument(text: string): {
+    document: vscode.TextDocument;
+    state: { text: string; version: number; isDirty: boolean; isClosed: boolean };
+  } {
+    const state = { text, version: 1, isDirty: true, isClosed: false };
+    const document = {
+      uri: vscode.Uri.file(EPISODE),
+      get version() {
+        return state.version;
+      },
+      get isDirty() {
+        return state.isDirty;
+      },
+      get isClosed() {
+        return state.isClosed;
+      },
+      encoding: "shiftjis",
+      getText: () => state.text,
+      positionAt: (offset: number) => {
+        const lines = state.text.slice(0, offset).split("\n");
+        return new vscode.Position(lines.length - 1, lines[lines.length - 1].length);
+      },
+    };
+    return { document: document as unknown as vscode.TextDocument, state };
+  }
+
+  function repairHarness(overrides: Partial<LateSaveRepairDeps> = {}) {
+    const calls: string[] = [];
+    const warnings: string[] = [];
+    const logs: string[] = [];
+    const deps: LateSaveRepairDeps = {
+      whenChanged: async () => {
+        calls.push("待つ");
+        return false;
+      },
+      applyEdits: async (_document, edits) => {
+        calls.push(`当てる ${edits.map((edit) => edit.newText).join("")}`);
+        return true;
+      },
+      save: async () => {
+        calls.push("保存");
+        return true;
+      },
+      warn: (message) => warnings.push(message),
+      log: (_work, message) => logs.push(message),
+      workFolderOf: () => WORK,
+      isTarget: () => true,
+      isShiftJis: async () => true,
+      ...overrides,
+    };
+    return { deps, calls, warnings, logs };
+  }
+
+  it("書き換えが保存の前に当たらず「?」で書かれたら、置き換えを当てて保存し直し、ログに残す", async () => {
+    const { document, state } = liveDocument("あ〜");
+    const h = repairHarness();
+    const repair = createLateSaveRepair(h.deps);
+    const sjis = harness({ onPlanned: (doc, version, edits) => repair.willSave(doc, version, edits) });
+    // 受け口が鳴り、書き換えを計画する。画面の側は待ちきれずに保存した（文書の版も本文も変わらないまま）
+    fireRaw(document, sjis.deps);
+    state.isDirty = false;
+    await repair.didSave(document);
+    expect(h.calls).toEqual(["待つ", "当てる ～", "保存"]);
+    expect(h.logs.join("\n")).toContain("保存し直しました");
+    expect(h.warnings).toEqual([]);
+  });
+
+  it("遅れた書き換えが保存のあとに当たっていたら、自分では当てずに保存し直すだけ", async () => {
+    const { document, state } = liveDocument("あ〜");
+    const h = repairHarness({
+      whenChanged: async () => {
+        h.calls.push("待つ");
+        // 遅れて届いた書き換え（〜→～）が当たり、未保存になる
+        state.text = "あ～";
+        state.version = 2;
+        state.isDirty = true;
+        return true;
+      },
+    });
+    const repair = createLateSaveRepair(h.deps);
+    fireRaw(document, harness({ onPlanned: (doc, version, edits) => repair.willSave(doc, version, edits) }).deps);
+    state.isDirty = false;
+    await repair.didSave(document);
+    expect(h.calls).toEqual(["待つ", "保存"]);
+  });
+
+  it("書き換えが保存の前に当たっていれば、何もしない", async () => {
+    const { document, state } = liveDocument("あ〜");
+    const h = repairHarness();
+    const repair = createLateSaveRepair(h.deps);
+    const edits = fireRaw(document, harness({ onPlanned: (doc, version, planned) => repair.willSave(doc, version, planned) }).deps);
+    await edits;
+    // 書き換えが当たって版が進み、その本文で保存された
+    state.text = "あ～";
+    state.version = 2;
+    state.isDirty = false;
+    await repair.didSave(document);
+    expect(h.calls).toEqual([]);
+  });
+
+  it("置き換える字の無い保存では、何もしない", async () => {
+    const { document, state } = liveDocument("あいう");
+    const h = repairHarness();
+    const repair = createLateSaveRepair(h.deps);
+    fireRaw(document, harness({ onPlanned: (doc, version, edits) => repair.willSave(doc, version, edits) }).deps);
+    state.isDirty = false;
+    await repair.didSave(document);
+    expect(h.calls).toEqual([]);
+  });
+
+  it("保存し直す前に原稿が閉じられたら、「?」で書かれたことを窓で知らせる（黙らない）", async () => {
+    const { document, state } = liveDocument("あ〜");
+    const h = repairHarness();
+    const repair = createLateSaveRepair(h.deps);
+    fireRaw(document, harness({ onPlanned: (doc, version, edits) => repair.willSave(doc, version, edits) }).deps);
+    state.isDirty = false;
+    state.isClosed = true;
+    await repair.didSave(document);
+    expect(h.calls).toEqual(["待つ"]);
+    expect(h.warnings.join("\n")).toContain("「?」で書かれました");
+  });
+
+  it("保存し直せなかったら、窓で知らせる", async () => {
+    const { document, state } = liveDocument("あ〜");
+    const h = repairHarness({ save: async () => false });
+    const repair = createLateSaveRepair(h.deps);
+    fireRaw(document, harness({ onPlanned: (doc, version, edits) => repair.willSave(doc, version, edits) }).deps);
+    state.isDirty = false;
+    await repair.didSave(document);
+    expect(h.warnings.join("\n")).toContain("「?」で書かれました");
+  });
+
+  it("受け口が呼ばれなかった保存でも、保存した本文に書けない字が残っていれば、置き換えて保存し直す", async () => {
+    const { document, state } = liveDocument("あ〜");
+    const h = repairHarness();
+    const repair = createLateSaveRepair(h.deps);
+    // 受け口は鳴らない（前の拡張機能が持ち時間を使い切った・呼ばれなくなった）
+    state.isDirty = false;
+    await repair.didSave(document);
+    expect(h.calls).toEqual(["当てる ～", "保存"]);
+  });
+
+  it("受け口が呼ばれなかった保存で、Shift_JIS でない原稿なら何もしない（UTF-8 は「〜」を書ける）", async () => {
+    const { document, state } = liveDocument("あ〜");
+    const h = repairHarness({ isShiftJis: async () => false });
+    const repair = createLateSaveRepair(h.deps);
+    state.isDirty = false;
+    await repair.didSave(document);
+    expect(h.calls).toEqual([]);
+  });
+
+  it("受け持ちの外のファイルなら何もしない", async () => {
+    const { document, state } = liveDocument("あ〜");
+    const h = repairHarness({ isTarget: () => false });
+    const repair = createLateSaveRepair(h.deps);
+    state.isDirty = false;
+    await repair.didSave(document);
+    expect(h.calls).toEqual([]);
+  });
+
+  it("書き換えが当たって版が進み、未保存の印だけが残っていたら、保存し直すだけで、回数に数えず窓も出さない", async () => {
+    const { document, state } = liveDocument("あ〜");
+    let clock = 0;
+    const h = repairHarness({ now: () => clock });
+    const repair = createLateSaveRepair(h.deps);
+    const sjis = harness({ onPlanned: (doc, version, edits) => repair.willSave(doc, version, edits) });
+    for (let round = 0; round < 4; round += 1) {
+      state.text = "あ〜";
+      fireRaw(document, sjis.deps);
+      // 書き換えは当たって保存されたが、保存の直後に作者が打って未保存になった
+      state.text = "あ～";
+      state.version += 1;
+      state.isDirty = true;
+      await repair.didSave(document);
+      clock += 1_000;
+    }
+    expect(h.calls).toEqual(["保存", "保存", "保存", "保存"]);
+    expect(h.warnings).toEqual([]);
+  });
+
+  it("同じ原稿で続けて間に合わないときは、3回目は保存し直さずに知らせる（保存し直しを繰り返さない）", async () => {
+    const { document, state } = liveDocument("あ〜");
+    let clock = 0;
+    const h = repairHarness({ now: () => clock });
+    const repair = createLateSaveRepair(h.deps);
+    const sjis = harness({ onPlanned: (doc, version, edits) => repair.willSave(doc, version, edits) });
+    for (let round = 0; round < 3; round += 1) {
+      fireRaw(document, sjis.deps);
+      state.isDirty = false;
+      await repair.didSave(document);
+      clock += 1_000;
+    }
+    expect(h.calls.filter((call) => call === "保存")).toHaveLength(2);
+    expect(h.warnings).toHaveLength(1);
   });
 });
 
