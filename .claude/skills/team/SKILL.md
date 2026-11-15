@@ -76,12 +76,13 @@ description: この作品の役割分担。まとまった実装・レビュー�
 - **置き場**：`C:\Users\nonah\.claude\mods\progress-panel\inbox\` に、**報告1件＝1ファイル**。名前は `<YYYYMMDD-HHMMSS>-<英数字の短い印>.json`（日本語の名前にしない）。1つのファイルへ追記しない（母艦が消すときにぶつかる）
 - **中身**（UTF-8 の JSON）：`{"at": "2026-11-15T15:00:00+09:00", "from": "製品：投稿ヘルパー", "title": "題（一行）", "body": "本文", "choices": ["案1", "案2"], "urgent": false, "where": "詳しく書いてある所（任意）"}`。`choices` は作者に選んでほしいときだけ（2〜4つ。推す案を先頭に）。**題に原稿の本文や個人の情報を書かない**（題と件数は出先のページに載る）
 - **別の機械のセッション**（ノートPC・Mac）と、他のリポジトリで team を読まないセッションは、今までどおり母艦へ SendMessage で送る。急がないものは母艦が上の形で inbox へ書く（「急がないので置きます」と返す）
-- **見せる手順**（パネルの［報告］が押されると、母艦に「スキル team の『パネルの報告』の手順で」と頼みが入る）：
+- **見せる手順**（パネルの［報告］が押されると、押したパネルのセッションに「スキル team の『パネルの報告』の手順で」と頼みが入る）：
+  0. 母艦でないセッション（同じフォルダーの「製品：統合小説執筆環境」にもボタンが出る）は作者に見せず、頼みを母艦へ SendMessage で取り次ぐ。inbox が空なら「報告はありません」の1行で終える
   1. inbox の `*.json` を名前の順（古い順）に全部読む。読めないファイルは中身をそのまま作者に見せる
   2. `choices` のあるものは AskUserQuestion でまとめて訊く（1回に4問まで。多ければ何回かに分ける。急ぎを先に）。`choices` の無いものは本文で、セッションごとにまとめて見せる
   3. 答えは送り主へ SendMessage で返す（別の機械のものは、今までどおり母艦が取り次ぐ）
   4. 見せ終えたファイルは消す（`rm`）。答えを待っているものは消さずに残す。控えが要る判断は、今までどおり引継ぎ書の8章へ
-- **出先のページ**：https://claude.ai/artifact/PGwjRY4oCeCvJNDBZEyybX （非公開。パネルと同じ中身を、作者がスマホで読む。報告は件数と題だけ）。**母艦の見回りのたびに写す**：`ArtifactData` の `get`（`collection: "panel"`, `doc_id: "snapshot"`）で `version` を読み、`set` に `file_path: "C:/Users/nonah/.claude/mods/progress-panel/mobile-snapshot.json"` と `if_version` を付けて送る（まだ無いときは `if_version` なしで作る）。`mobile-snapshot.json` は mod が1分おきと各ターンの終わりに書き直す。inbox を消したあとも1回写す
+- **出先のページ**：https://claude.ai/artifact/PGwjRY4oCeCvJNDBZEyybX （非公開。パネルと同じ中身を、作者がスマホで読む。報告は件数と題だけ）。**母艦の見回りのたびに写す**：`ArtifactData` の `get`（`collection: "panel"`, `doc_id: "snapshot"`）で `version` を読み、`set` に `file_path: "C:/Users/nonah/.claude/mods/progress-panel/mobile-snapshot.json"` と `if_version` を付けて送る（まだ無いときは `if_version` なしで作る）。`mobile-snapshot.json` は mod が1分おきと各ターンの終わりに書き直す。inbox を消したあとは、`mobile-snapshot.json` の `inbox.count` が減ったのを見てから写す（すぐ写すと古い数が載る）
 
 ## 振り分けの早見
 
