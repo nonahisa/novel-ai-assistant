@@ -143,6 +143,18 @@ function shownFolder(work: WorkEntry, folder: string): string {
   return path.relative(work.folderPath, folder).replace(/\\/g, "/");
 }
 
+/**
+ * 確認の窓の「置き場」の行。**切れ目の無い長い道を1語で出さない**——確認の窓は、`/` と英数字と
+ * 話の名前が続く道を、窓の幅に余裕があっても話の名前の途中で折り返した（ノートPC 2026-11-15、
+ * 「…episode_0016_長い」「坂道/」の2行）。入れ物の道と話のフォルダーの名前を分けて書き、
+ * 折り返すなら「の中の」「「」の所で切れるようにする
+ */
+export function voiceExportPlaceLine(shown: string): string {
+  const cut = shown.lastIndexOf("/");
+  if (cut <= 0) return `置き場：${shown}/`;
+  return `置き場：${shown.slice(0, cut)} の中の「${shown.slice(cut + 1)}」`;
+}
+
 /** 使った声（話者ごと）。スタイルは使った順 */
 interface UsedVoice {
   speaker: VoiceSpeaker;
@@ -501,7 +513,7 @@ export async function exportVoiceAudio(
       ...(expected !== undefined
         ? [`前に測った速さでは、この PC で書き出しにおおよそ${minutesLabel(expected).replace(/^約/, "")}かかる見込みです。`]
         : []),
-      `置き場：${shownFolder(work, folder)}/`,
+      voiceExportPlaceLine(shownFolder(work, folder)),
       `使う声：${terms.map(describeVoice).join("、")}`,
       // 割り当てた声が引けず代わりの声で読むなら、書き出す前に分かるようにする（0.146.0）
       ...(planned.notice ? [planned.notice] : []),

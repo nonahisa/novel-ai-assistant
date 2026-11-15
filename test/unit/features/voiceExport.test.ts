@@ -272,7 +272,8 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     expect(state.confirms).toHaveLength(1);
     expect(state.confirms[0].message).toContain("4文");
     expect(state.confirms[0].message).toMatch(/おおよそ/);
-    expect(state.confirms[0].message).toContain(".aiwriter/exports/音声/01_はじまり");
+    // 置き場の行は、入れ物の道と話のフォルダーの名前を分けて書く（1.0.8。話の名前の途中で折り返さないため）
+    expect(state.confirms[0].message).toContain("置き場：.aiwriter/exports/音声 の中の「01_はじまり」");
     // 知らせに要点と［フォルダーを開く］
     expect(infoMessages).toHaveLength(1);
     expect(infoMessages[0].items).toEqual(["フォルダーを開く"]);
