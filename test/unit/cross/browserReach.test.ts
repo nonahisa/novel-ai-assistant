@@ -149,6 +149,8 @@ const BROWSER_USABLE_DYNAMIC_ENTRIES = [
   // 原稿エディターの［入力］の取り込み。［次の話として足す］はブラウザ版でも並べ、
   // 中で insertEpisode.ts を動的 import する（実装の残り 106行）
   "features/manuscriptImport.ts",
+  // 「バックアップから取り込む」。同じく［次の話として足す］をブラウザ版でも並べる
+  "features/manuscriptBackupImport.ts",
 ];
 
 describe("ブラウザでも押せる動的 import の入口が、Node専用へ届かない", () => {

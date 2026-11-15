@@ -356,12 +356,19 @@ describe("原稿エディターのバックアップからの取り込み", () =
     expect(asked[0].titles).toEqual(["次の話として足す", "最後に加える", "上書きする", "やめる"]);
   });
 
-  test("ブラウザ版では［次の話として足す］を並べない", async () => {
+  // 0.148.4 で番号ずらしの道（`insertEpisode.ts`）がブラウザ版でも動くようになった（名前だけの
+  // コミットの確認だけを出さない）。並べ方も手元と同じにする（設計書5.8.16「動くものは出す」）
+  test("ブラウザ版でも［次の話として足す］を並べ、番号をずらして入れる", async () => {
     runtime.processes = false;
+    press = "次の話として足す";
 
-    await importInto("003.txt");
+    const result = await importInto("003.txt");
 
-    expect(asked[0].titles).toEqual(["最後に加える", "やめる"]);
+    expect(asked[0].titles).toEqual(["次の話として足す", "最後に加える", "やめる"]);
+    expect(result).toEqual({ changed: true, newFilePath: diskPath("004_転生前夜.txt") });
+    expect(read("004_転生前夜.txt")).toBe("　夜が更けていく。\n");
+    expect(read("007.txt")).toBe("第004.txtの本文。\n");
+    expect(read("008.txt")).toBe("第005.txtの本文。\n");
   });
 
   test("番号ずらしの途中で失敗したら、新しい話は1つも作らず、どこまで済んだかと空いた番号を言う", async () => {

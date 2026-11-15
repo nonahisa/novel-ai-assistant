@@ -146,6 +146,15 @@ describe("確認の窓の焦点を取り返す", () => {
     expect(body).toContain("createQuickPick");
   });
 
+  test("覚えられる選択の一覧（pickWithMemory の createQuickPick）も、出している間を whilePickerOpen で包む", () => {
+    // 右上のピンを付けるため createQuickPick で組んでおり、showQuickPickKeepingFocus を通らない
+    const source = fs.readFileSync(nodePath.join(__dirname, "../../../src/views/notify.ts"), "utf8");
+    const body = findBlockAfter(source, "export async function pickWithMemory<");
+    expect(body).toBeDefined();
+    expect(body).toContain("whilePickerOpen(");
+    expect(body).toContain("createQuickPick");
+  });
+
   test("コマンドが断られても投げない（窓はクリックで選べる）", async () => {
     commands.executeCommand = async () => {
       throw new Error("無いコマンド");

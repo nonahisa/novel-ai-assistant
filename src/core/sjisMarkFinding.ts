@@ -78,12 +78,20 @@ export interface SjisMarkOccurrence {
 export function sjisMarkPlaces(text: string): SjisMarkOccurrence[] {
   const found: SjisMarkOccurrence[] = [];
   let line = 1;
-  let counted = 0;
+  /*
+    行の番号と行の頭の位置は、改行を前から1つずつ見ながら持ち回す。〓ごとに lastIndexOf で行の頭まで
+    戻る形は、LF だけの本文（CR が無いので \r の探しが先頭まで戻る）で〓の数だけ全文を読み直し、
+    300万字・〓1,000個で約0.39秒かかった。〓は改行の字ではないので、CRLF が〓をまたいで切れることは無い
+  */
+  const breaks = /\r\n|\r|\n/g;
+  let nextBreak: RegExpExecArray | null = breaks.exec(text);
+  let lineStart = 0;
   for (let at = text.indexOf(MARK); at >= 0; at = text.indexOf(MARK, at + MARK.length)) {
-    // 前の〓からここまでの改行を数える。区切りは〓の位置なので、CRLF の途中で切れることはない
-    line += countBreaks(text.slice(counted, at));
-    counted = at;
-    const lineStart = Math.max(text.lastIndexOf("\n", at - 1), text.lastIndexOf("\r", at - 1)) + 1;
+    while (nextBreak !== null && nextBreak.index < at) {
+      line += 1;
+      lineStart = nextBreak.index + nextBreak[0].length;
+      nextBreak = breaks.exec(text);
+    }
     const rest = text.slice(at + MARK.length, at + MARK.length + SJIS_MARK_CONTEXT_CHARS * 2 + 2);
     const lineEnd = rest.search(/\r|\n/);
     const head = text.slice(Math.max(lineStart, at - SJIS_MARK_CONTEXT_CHARS * 2), at);
@@ -92,10 +100,6 @@ export function sjisMarkPlaces(text: string): SjisMarkOccurrence[] {
     found.push({ index: at, line, before, after, context: `${before}${MARK}${after}` });
   }
   return found;
-}
-
-function countBreaks(segment: string): number {
-  return (segment.match(/\r\n|\r|\n/g) ?? []).length;
 }
 
 /** 「Shift_JIS に無い字」の行か（日付で隠さない・消さない行） */

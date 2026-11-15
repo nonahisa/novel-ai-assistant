@@ -33,7 +33,6 @@ import { findLatestEpisode } from "../core/latestEpisode";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { copyEmphasisFor } from "../core/postingCopyTargets";
 import type { EmphasisSite } from "../core/ruby";
-import { canRunProcesses } from "../core/runtime";
 import { encodeForNewFile, readTextFile, type TextFileContent } from "../core/textFile";
 import { BACKUP_FILE_EXTENSIONS, WorkZipError, inspectWorkBackup, type WorkZipInspection } from "../core/workZip";
 import { withCancellableProgress } from "../views/progress";
@@ -85,8 +84,9 @@ import { registeredPostingSites } from "./postingCopyRegistered";
  *   ときだけで、バックアップの道では効かない——サイトの記法どうしを読み替えると、
  *   作者が書いた字そのものに手が入るため（0.150.0 で決めた）
  *
- * **`insertEpisode.ts` は動的 import**（`core/git.ts` に届く。設計書5.8.5）。ブラウザ版では
- * ［次の話として足す］を並べない（0.147.0 と同じ）。
+ * **`insertEpisode.ts` は動的 import**（`core/git.ts` に届く。設計書5.8.5）。ブラウザ版でも
+ * ［次の話として足す］を並べる（0.148.4 から番号ずらしの道がブラウザ版でも動く。
+ * `insertEpisode.ts` の先が Node 専用へ静的に届かないことは `browserReach.test.ts` が見る）。
  */
 export async function importBackupIntoWork(input: {
   readonly work: WorkEntry;
@@ -160,8 +160,9 @@ export async function importBackupIntoWork(input: {
   const folder = path.dirname(current.filePath);
   const number = episodeNumberOf(current.fileName);
   const pivot = number === null ? null : number + 1;
-  const shiftPlan =
-    pivot === null || !canRunProcesses() ? null : planInsertion(scan.episodes, pivot, folder, count);
+  // ブラウザ版でも番号ずらしを出す（0.148.4 から付け替えの道が動く。git の要る「名前だけの
+  // コミット」の確認は、その道の中で canRunProcesses を見て出さない。設計書5.8.16「動くものは出す」）
+  const shiftPlan = pivot === null ? null : planInsertion(scan.episodes, pivot, folder, count);
   const latest = findLatestEpisode(scan.episodes);
   const collected = (current.collectedCount ?? 0) > 1;
   const plan = planBackupImport({

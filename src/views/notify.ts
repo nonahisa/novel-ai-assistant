@@ -637,7 +637,9 @@ export async function pickWithMemory<T extends string>(params: {
   if (canRemember) quickPick.buttons = [offButton];
 
   try {
-    const picked = await new Promise<MemorablePick<T> | undefined>(
+    // 出ている間に WebView（原稿エディター・パネル）が焦点を取り返したら、一覧へ戻す（設計書6.81）。
+    // 右上のピンを付けるため createQuickPick で組んでおり、showQuickPickKeepingFocus を通らない
+    const picked = await whilePickerOpen(() => new Promise<MemorablePick<T> | undefined>(
       (resolve) => {
         quickPick.onDidTriggerButton(() => {
           pinned = !pinned;
@@ -655,7 +657,7 @@ export async function pickWithMemory<T extends string>(params: {
         quickPick.onDidHide(() => resolve(undefined));
         quickPick.show();
       }
-    );
+    ));
 
     const value = picked?.value;
     if (value === undefined) return undefined;
