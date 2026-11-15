@@ -10,6 +10,12 @@ import {
 } from "../models/workGoals";
 import { workPaths } from "./workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
+import {
+  detectExternalChange,
+  externalChangeMessage,
+  keepUnsavedCopy,
+  snapshotOf,
+} from "./readWriteGuard";
 
 /**
  * 作品ごとの目標の保存（設計書6.3.6）。
@@ -22,8 +28,25 @@ import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
  * 呼び出し側が作者へ伝える。直して上書きすると、作者が書いた値が黙って消える。
  */
 
-/** 読んだ結果を覚える。話ごとの一覧は行ごとに目標を参照する */
-const cache = new Map<string, WorkGoals>();
+export class WorkGoalsStoreError extends Error {
+  constructor(
+    message: string,
+    readonly recoveryPaths: string[] = [],
+    readonly kind?: "modified_externally"
+  ) {
+    super(message);
+    this.name = "WorkGoalsStoreError";
+  }
+}
+
+/**
+ * 読んだ結果を覚える。話ごとの一覧は行ごとに目標を参照する。
+ *
+ * **読んだときの控え（中身のハッシュ）も一緒に持つ**（`readWriteGuard.ts`）。
+ * 作者が画面に出ている目標を直して保存するとき、その目標を読んでから外（同期・手）で
+ * 書き換わっていれば、覚えていた古い目標で上書きしてしまう。書く前に控えと照合する。
+ */
+const cache = new Map<string, { goals: WorkGoals; snapshot: string | null }>();
 
 function goalsPath(work: WorkEntry): string {
   return path.join(workPaths(work).aiwriter, WORK_GOALS_FILE);
@@ -36,26 +59,29 @@ function goalsPath(work: WorkEntry): string {
  */
 export async function readWorkGoals(work: WorkEntry): Promise<WorkGoals> {
   const cached = cache.get(work.id);
-  if (cached) return cached;
+  if (cached) return cached.goals;
 
   let goals: WorkGoals;
+  let snapshot: string | null;
   try {
     const bytes = await vscode.workspace.fs.readFile(
       path.toUri(goalsPath(work))
     );
     goals = parseWorkGoals(JSON.parse(new TextDecoder().decode(bytes)));
+    snapshot = snapshotOf(bytes);
   } catch (error) {
     if (
       error instanceof vscode.FileSystemError &&
       error.code === "FileNotFound"
     ) {
       goals = emptyWorkGoals();
+      snapshot = null;
     } else {
       throw error;
     }
   }
 
-  cache.set(work.id, goals);
+  cache.set(work.id, { goals, snapshot });
   return goals;
 }
 
@@ -70,6 +96,17 @@ export async function readWorkGoalsOrEmpty(
   }
 }
 
+/**
+ * 目標を書く。
+ *
+ * **退避の前に、読んだときから外で変わっていないかを照合する**（`readWriteGuard.ts`）。
+ * 違えば書かずに止め、直そうとした目標を回復先へ控える。**覚えていた目標も捨てる**
+ * ——捨てないと次も古い目標を読み、何度やり直しても断り続ける。
+ *
+ * 読めなかった目標（壊れたJSON。`readWorkGoalsOrEmpty` は空として返す）は覚えて
+ * いないので、ここでは「読んでいない」と同じ扱いになり、そこにファイルがあれば止まる
+ * ——壊れたファイルを空の目標で塗り替えない。
+ */
 export async function writeWorkGoals(
   work: WorkEntry,
   goals: WorkGoals
@@ -81,10 +118,27 @@ export async function writeWorkGoals(
       null,
       2
     ) + "\n";
+  const encoded = new TextEncoder().encode(body);
 
   await vscode.workspace.fs.createDirectory(
     path.toUri(path.dirname(target))
   );
+
+  const change = await detectExternalChange(target, cache.get(work.id)?.snapshot);
+  if (change) {
+    cache.delete(work.id);
+    const unsavedCopy = await keepUnsavedCopy(target, encoded);
+    throw new WorkGoalsStoreError(
+      externalChangeMessage({
+        label: "作品の目標",
+        fileLabel: `.aiwriter/${WORK_GOALS_FILE}`,
+        change,
+        unsavedCopy,
+      }),
+      unsavedCopy ? [target, unsavedCopy] : [target],
+      "modified_externally"
+    );
+  }
 
   // 既存ファイルは上書きできない（`atomicWrite.ts`）。
   // 退避してから作り直す
@@ -97,10 +151,11 @@ export async function writeWorkGoals(
     });
   }
 
-  await atomicWriteFile(target, new TextEncoder().encode(body), {
+  await atomicWriteFile(target, encoded, {
     mode: "create",
   });
-  cache.set(work.id, goals);
+  // 自分で書いた中身で覚え直す。覚え直さないと、続けての保存を外部変更と取り違える
+  cache.set(work.id, { goals, snapshot: snapshotOf(encoded) });
 }
 
 export function invalidateWorkGoals(workId?: string): void {

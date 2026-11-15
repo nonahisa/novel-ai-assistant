@@ -19,6 +19,7 @@ import {
   type EpisodeBody,
 } from "../core/episodeBodies";
 import { SynopsisStore, SynopsisStoreError } from "../core/synopsisStore";
+import { isExternalChangeError } from "../core/readWriteGuard";
 import {
   findSynopsis,
   upsertSynopsis,
@@ -124,7 +125,11 @@ export async function generateSynopses(
     return "failed";
   }
 
-  set = await syncStaleFileNamesAndTitles(store, set, loaded.bodies);
+  const synced = await syncStaleFileNamesAndTitles(store, set, loaded.bodies);
+  // 読んだあとに外で書き換わっていた。このまま AI を回しても、最後の保存も同じ照合で
+  // 必ず止まり、呼び出しが無駄になる。知らせは出してあるので、ここで戻る
+  if (!synced) return "failed";
+  set = synced;
 
   /*
     **サブタイトルは宛先を見て選ばせる**（作者の依頼、2026-09-22
@@ -420,12 +425,15 @@ export async function generateSynopses(
  * 「第18話」のようにサブタイトルが表示されなくなっていた。2026-08-13）。
  *
  * AIを呼ばない軽い同期なので、`pending`が0件で終わる場合でも必ず行う。
+ *
+ * 保存が「読んだあとに外で書き換わっていた」で止まったときだけ null を返す
+ * （呼び手は AI を呼ぶ前に戻る）。ほかの失敗では、これまでどおり続ける。
  */
 async function syncStaleFileNamesAndTitles(
   store: SynopsisStore,
   set: ChapterSynopsisSet,
   bodies: EpisodeBody[]
-): Promise<ChapterSynopsisSet> {
+): Promise<ChapterSynopsisSet | null> {
   let changed = false;
 
   for (const episode of bodies) {
@@ -451,6 +459,7 @@ async function syncStaleFileNamesAndTitles(
     await store.save(set);
   } catch (error) {
     reportStoreError(error);
+    if (isExternalChangeError(error)) return null;
     // 保存できなくても、この回のあらすじ生成自体は続ける
   }
   return set;

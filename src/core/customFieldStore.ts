@@ -12,6 +12,13 @@ import {
   type CustomFieldSet,
 } from "../models/customField";
 import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
+import {
+  detectExternalChange,
+  externalChangeMessage,
+  keepUnsavedCopy,
+  snapshotOf,
+  type ReadSnapshot,
+} from "./readWriteGuard";
 
 /**
  * 作者が足した項目の定義の保存先。
@@ -28,13 +35,20 @@ import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
 export const CUSTOM_FIELDS_FILE = "custom_fields.json";
 
 export class CustomFieldStoreError extends Error {
-  constructor(message: string, readonly recoveryPaths: string[] = []) {
+  constructor(
+    message: string,
+    readonly recoveryPaths: string[] = [],
+    readonly kind?: "modified_externally"
+  ) {
     super(message);
     this.name = "CustomFieldStoreError";
   }
 }
 
 export class CustomFieldStore {
+  /** 読んだときの控え（`readWriteGuard.ts`）。書く直前の照合に使う */
+  private snapshot: ReadSnapshot;
+
   constructor(private readonly work: WorkEntry) {}
 
   private async filePath(): Promise<string> {
@@ -50,6 +64,8 @@ export class CustomFieldStore {
    */
   async load(): Promise<CustomFieldSet> {
     const target = await this.filePath();
+    // 読めなかったときに前の控えが残ると、読めなかったものを上書きしてしまう
+    this.snapshot = undefined;
     let bytes: Uint8Array;
     try {
       bytes = await vscode.workspace.fs.readFile(path.toUri(target));
@@ -58,13 +74,16 @@ export class CustomFieldStore {
         error instanceof vscode.FileSystemError &&
         error.code === "FileNotFound"
       ) {
+        this.snapshot = null;
         return emptyCustomFieldSet();
       }
       throw error;
     }
 
     try {
-      return parseCustomFieldSet(JSON.parse(new TextDecoder().decode(bytes)));
+      const parsed = parseCustomFieldSet(JSON.parse(new TextDecoder().decode(bytes)));
+      this.snapshot = snapshotOf(bytes);
+      return parsed;
     } catch (error) {
       throw new CustomFieldStoreError(
         `${CUSTOM_FIELDS_FILE} を読めませんでした: ${
@@ -110,6 +129,10 @@ export class CustomFieldStore {
    * 既存ファイルは上書きできない（`atomicWrite` を参照）ので、
    * **元ファイルを回復先へ退避してから新規作成する。**
    * 人物設定の `update()` と同じ手順。
+   *
+   * **退避の前に、読んだときから外で変わっていないかを照合する**（`readWriteGuard.ts`）。
+   * 違えば書かずに止め、作者が選んで組んだ定義を回復先へ控える
+   * （画面で選び直した手間を、黙って捨てない）。
    */
   async save(set: CustomFieldSet): Promise<void> {
     const target = await this.filePath();
@@ -121,6 +144,21 @@ export class CustomFieldStore {
     await vscode.workspace.fs.createDirectory(
       path.toUri(path.dirname(target))
     );
+
+    const change = await detectExternalChange(target, this.snapshot);
+    if (change) {
+      const unsavedCopy = await keepUnsavedCopy(target, bytes);
+      throw new CustomFieldStoreError(
+        externalChangeMessage({
+          label: "追加項目の定義",
+          fileLabel: `設定/${CUSTOM_FIELDS_FILE}`,
+          change,
+          unsavedCopy,
+        }),
+        unsavedCopy ? [target, unsavedCopy] : [target],
+        "modified_externally"
+      );
+    }
 
     const existed = await this.exists(target);
     let recoveryPath: string | undefined;
@@ -155,6 +193,8 @@ export class CustomFieldStore {
         recoveryPath ? [recoveryPath] : []
       );
     }
+    // 自分で書いた中身で覚え直す。覚え直さないと、続けての保存を外部変更と取り違える
+    this.snapshot = snapshotOf(bytes);
   }
 
   private async exists(filePath: string): Promise<boolean> {

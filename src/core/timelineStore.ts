@@ -9,6 +9,13 @@ import {
   type Timeline,
 } from "../models/timeline";
 import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
+import {
+  detectExternalChange,
+  externalChangeMessage,
+  keepUnsavedCopy,
+  snapshotOf,
+  type ReadSnapshot,
+} from "./readWriteGuard";
 
 /**
  * 作中の時間（系統・時期・話との対応）の保存先。
@@ -26,13 +33,20 @@ import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
 export const TIMELINE_FILE = "timeline.json";
 
 export class TimelineStoreError extends Error {
-  constructor(message: string, readonly recoveryPaths: string[] = []) {
+  constructor(
+    message: string,
+    readonly recoveryPaths: string[] = [],
+    readonly kind?: "modified_externally"
+  ) {
     super(message);
     this.name = "TimelineStoreError";
   }
 }
 
 export class TimelineStore {
+  /** 読んだときの控え（`readWriteGuard.ts`）。書く直前の照合に使う */
+  private snapshot: ReadSnapshot;
+
   constructor(private readonly work: WorkEntry) {}
 
   private async filePath(): Promise<string> {
@@ -51,6 +65,8 @@ export class TimelineStore {
    */
   async load(): Promise<Timeline> {
     const target = await this.filePath();
+    // 読めなかったときに前の控えが残ると、読めなかったものを上書きしてしまう
+    this.snapshot = undefined;
     let bytes: Uint8Array;
     try {
       bytes = await vscode.workspace.fs.readFile(path.toUri(target));
@@ -59,13 +75,16 @@ export class TimelineStore {
         error instanceof vscode.FileSystemError &&
         error.code === "FileNotFound"
       ) {
+        this.snapshot = null;
         return emptyTimeline();
       }
       throw error;
     }
 
     try {
-      return parseTimeline(JSON.parse(new TextDecoder().decode(bytes)));
+      const parsed = parseTimeline(JSON.parse(new TextDecoder().decode(bytes)));
+      this.snapshot = snapshotOf(bytes);
+      return parsed;
     } catch (error) {
       throw new TimelineStoreError(
         `${TIMELINE_FILE} を読めませんでした: ${
@@ -97,6 +116,9 @@ export class TimelineStore {
    * 既存ファイルは上書きできない（`atomicWrite` を参照）ので、
    * **元ファイルを回復先へ退避してから新規作成する。**
    * `CustomFieldStore.save()` と同じ手順。
+   *
+   * **退避の前に、読んだときから外で変わっていないかを照合する**（`readWriteGuard.ts`）。
+   * 違えば書かずに止め、組んだ年表を回復先へ控える。
    */
   async save(timeline: Timeline): Promise<void> {
     const target = await this.filePath();
@@ -115,6 +137,21 @@ export class TimelineStore {
     await vscode.workspace.fs.createDirectory(
       path.toUri(path.dirname(target))
     );
+
+    const change = await detectExternalChange(target, this.snapshot);
+    if (change) {
+      const unsavedCopy = await keepUnsavedCopy(target, bytes);
+      throw new TimelineStoreError(
+        externalChangeMessage({
+          label: "年表（時期・系統）",
+          fileLabel: `設定/${TIMELINE_FILE}`,
+          change,
+          unsavedCopy,
+        }),
+        unsavedCopy ? [target, unsavedCopy] : [target],
+        "modified_externally"
+      );
+    }
 
     const existed = await this.exists(target);
     let recoveryPath: string | undefined;
@@ -149,6 +186,8 @@ export class TimelineStore {
         recoveryPath ? [recoveryPath] : []
       );
     }
+    // 自分で書いた中身で覚え直す。覚え直さないと、続けての保存を外部変更と取り違える
+    this.snapshot = snapshotOf(bytes);
   }
 
   private async exists(filePath: string): Promise<boolean> {

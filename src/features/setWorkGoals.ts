@@ -3,7 +3,11 @@ import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
 import { isDateKey, type ContestGoal, type WorkGoals } from "../models/workGoals";
-import { readWorkGoalsOrEmpty, writeWorkGoals } from "../core/workGoalsStore";
+import {
+  readWorkGoalsOrEmpty,
+  writeWorkGoals,
+  WorkGoalsStoreError,
+} from "../core/workGoalsStore";
 import { readWorkFormat } from "../core/workFormatStore";
 import { episodeUnit } from "../core/episodeLabel";
 import { asOfLabel } from "../core/contestInbox";
@@ -371,10 +375,13 @@ async function save(work: WorkEntry, goals: WorkGoals): Promise<void> {
   try {
     await writeWorkGoals(work, goals);
   } catch (error) {
+    // 照合で止めた知らせは「保存していません」から始まる一文に組んである。前置きを重ねない
     vscode.window.showErrorMessage(
-      `目標を保存できませんでした: ${
-        error instanceof Error ? error.message : String(error)
-      }`
+      error instanceof WorkGoalsStoreError
+        ? error.message
+        : `目標を保存できませんでした: ${
+            error instanceof Error ? error.message : String(error)
+          }`
     );
   }
 }
