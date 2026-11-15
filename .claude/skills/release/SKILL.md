@@ -71,6 +71,7 @@ gh workflow run publish-marketplace.yml -f version=<版> -f reason=<理由>
 - Marketplace 側の登録は、管理画面の「信頼できる出版」の `novel-ai-assistant-publish`（リポジトリ nonahisa/novel-ai-assistant・手順 publish-marketplace.yml・Environment marketplace）。**手順のファイルの名前か Environment を変えたら、この登録も直す**（食い違うと鍵の交換で断られる。PAT へは落ちない）
 - 終わったら手順8（`node scripts/checkMarketplace.mjs`）で反映を確かめる
 - **反映を確かめたら、README の冒頭の「Marketplace に出ている版は **…**」を出した版へ直してコミットする**。この行は Marketplace の画面にもそのまま出る。手順に無かったため 0.148.2 のまま 0.152.8 まで残り、作者に指摘された（2026-11-14）。README は次に Marketplace へ出したときに向こうへ届く
+- **出し終えたら、製品：Discord のセッションへ「ボットの答えを新しい版に合わせる」を頼む**（作者の指示 2026-11-15「配信の手順に組み込んでください」）。頼む中身：①メニューの地図・よくある質問・機能紹介の在庫を、出した版の README・CHANGELOG・メニューに合わせる ②その版で変わった機能について試しの問いを作ってボットに答えさせ、今の製品と合うかを見て、合わない答えを直す ③何問中何問が合ったかと、直したものを母艦へ返す ④起動し直したら、ボットのプロセスが1つだけか数える。画面の撮り直しが要るときは、本物の VS Code を起こす前に母艦へ一言（作者の画面の焦点を取るため）
 - vsce は 4.0.2 以降が要る（devDependencies と手順のファイルの `npx @vscode/vsce@<版>` をそろえる）
 - **Open VSX へも同じ手順の中で上げる**（作者の裁定 2026-10-31「進める」。設計書5.9）。Marketplace の段のあとに `npx ovsx@<版> publish <同じ VSIX>` の段がある（トークンは ovsx が環境変数 `OVSX_PAT` から自分で読む）。Environment は Marketplace と共通。落ちたら手順は赤になる（`continue-on-error` は付けない。気づけるように）
   - Open VSX の名前空間とトークン（`OVSX_PAT`）は準備済み（2026-10-31）。トークンが切れたら、作者に open-vsx.org の Settings → Access Tokens で発行し直してもらい、GitHub のリポジトリの Settings → Secrets and variables → Actions の `OVSX_PAT` を入れ替えてもらう
