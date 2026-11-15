@@ -41,6 +41,7 @@ import {
 } from "./support/sampleFinding";
 import { collapseSidebarPane, SIDEBAR_LAUNCH, scrollTreeUntilRow, showSidebar } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
+import { readFileWhenPresent } from "./support/fileSettle";
 import { holdsFor, waitUntil } from "./support/wait";
 import {
   clearNotifications,
@@ -189,7 +190,7 @@ test("簡単ステップメニュー「6. 編集者校正・校閲」の「作�
         throw new Error(`${String(error)}（下の帯：${JSON.stringify(await statusBarTexts(page))}／右下の知らせ：${JSON.stringify(await notificationTexts(page))}）`);
       });
       // 押さえても本文は変わらない
-      expect((await readFile(path.join(session.manuscriptFolder, EPISODE), "utf8")).replace(/\r\n/g, "\n")).toBe(TEXT);
+      expect((await readFileWhenPresent(path.join(session.manuscriptFolder, EPISODE))).replace(/\r\n/g, "\n")).toBe(TEXT);
     },
     plainEditorLaunch()
   );
@@ -207,7 +208,8 @@ test("編集者が押さえているファイルを作者が［適用］で直�
     async (session) => {
       const { page, workFolder } = session;
       const file = path.join(session.manuscriptFolder, EPISODE);
-      const read = async () => (await readFile(file, "utf8")).replace(/\r\n/g, "\n");
+      // ［適用］の書き戻しは「退避 → 削除 → 作り直し」で一瞬ファイルが無いので、無いときは待って読み直す
+      const read = async () => (await readFileWhenPresent(file)).replace(/\r\n/g, "\n");
       await openPlain(session);
 
       /* ── 提案パネルの［適用］で直そうとする ── */
