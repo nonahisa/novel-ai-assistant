@@ -71,7 +71,8 @@ test("［出力］の［音声に書き出す］を押すと、列のボタン�
         ).catch(async (error: unknown) => {
           throw new Error(`${String(error)}（いまの窓：${JSON.stringify(text)}／右下の知らせ：${JSON.stringify(await notificationTexts(page))}）${await quickInputWaitContext(page)}`);
         });
-        expect(text, `確認の窓：${text}`).toContain(`.aiwriter/exports/音声/${EPISODE_STEM}`);
+        // 置き場の行は、入れ物の道と話のフォルダーの名前を分けて書く（1.0.8。話の名前の途中で折り返さないため）
+        expect(text, `確認の窓：${text}`).toContain(`置き場：.aiwriter/exports/音声 の中の「${EPISODE_STEM}」`);
         // 確認で答える前は、本文を合成へ送らない
         expect(textCarrying(fake).filter((request) => request.path === "/synthesis"), "確認の前に合成しました").toHaveLength(0);
         // 閉じる（書き出さない）

@@ -44,7 +44,11 @@ async function openFace(session: E2ESession, vertical: boolean, marker: string):
 
 for (const vertical of [true, false]) {
   const face = vertical ? "縦書き" : "横書き";
-  const NEXT = vertical ? "ArrowLeft" : "ArrowDown";
+  /*
+    次の行へ進むキー。Mac の縦書きは ↓（Mac では矢印に編集の命令が添えて届き、縦書きの ← は1字前へ戻る。
+    製品も Mac の縦書きは ↓ で足す。lastLineNewlineScript.ts。2026-11-15 Mac で縦書きの2本が毎回落ちた）
+  */
+  const NEXT = vertical ? (process.platform === "darwin" ? "ArrowDown" : "ArrowLeft") : "ArrowDown";
 
   test(`${face}：最後の行で押すと改行が1つ増え、カーソルが新しい行へ進む。続けて押すと空行2行で止まる`, async () => {
     await withVsCode(

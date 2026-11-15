@@ -32,14 +32,32 @@ export const LAST_LINE_NEWLINE_KEY_HORIZONTAL = "ArrowDown";
  */
 export const LAST_LINE_NEWLINE_KEY_VERTICAL = "ArrowLeft";
 
+/**
+ * 次の行へ進むキー（縦書き・Mac）。**Mac では、縦書きの ← は本文の流れで1字前へ戻り、↓ が次の行へ動く**
+ * （1.0.9。Mac は矢印に編集の命令〔moveLeft など〕を添えて届け、Chromium はそれを縦書きでも横書きと
+ * 同じ向きで解く。画面を出さない Edge で、Mac と同じ届け方を試して確かめた。1.0.7 からの動き）。
+ * Mac で ← のまま置くと、最後の行の末尾で「1字戻る」つもりの ← が改行を足してしまう
+ */
+export const LAST_LINE_NEWLINE_KEY_VERTICAL_MAC = "ArrowDown";
+
 export const LAST_LINE_NEWLINE_SOURCE = `
 var LAST_LINE_NEWLINE_MAX_BLANK = ${LAST_LINE_NEWLINE_MAX_BLANK};
 var LAST_LINE_NEWLINE_KEY_HORIZONTAL = ${JSON.stringify(LAST_LINE_NEWLINE_KEY_HORIZONTAL)};
 var LAST_LINE_NEWLINE_KEY_VERTICAL = ${JSON.stringify(LAST_LINE_NEWLINE_KEY_VERTICAL)};
+var LAST_LINE_NEWLINE_KEY_VERTICAL_MAC = ${JSON.stringify(LAST_LINE_NEWLINE_KEY_VERTICAL_MAC)};
 
-/** 次の行へ進むキーの名前（event.key）。縦書きかどうかで替わる */
-function lastLineNewlineKey(vertical) {
-  return vertical ? LAST_LINE_NEWLINE_KEY_VERTICAL : LAST_LINE_NEWLINE_KEY_HORIZONTAL;
+/** 次の行へ進むキーの名前（event.key）。縦書きかどうか・Mac かどうかで替わる */
+function lastLineNewlineKey(vertical, mac) {
+  if (!vertical) return LAST_LINE_NEWLINE_KEY_HORIZONTAL;
+  return mac ? LAST_LINE_NEWLINE_KEY_VERTICAL_MAC : LAST_LINE_NEWLINE_KEY_VERTICAL;
+}
+
+/** 動いている機械が Mac か（WebView の中の navigator で見る） */
+function lastLineNewlineOnMac() {
+  var nav = typeof navigator === "undefined" ? null : navigator;
+  if (!nav) return false;
+  var platform = String(nav.platform || (nav.userAgentData && nav.userAgentData.platform) || "");
+  return /mac/i.test(platform);
 }
 
 /** 本文の末尾に並ぶ空行（字の無い行）の数。LF の本文を渡す。空の本文は空行1行と数える */

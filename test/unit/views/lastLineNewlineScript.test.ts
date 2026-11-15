@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   LAST_LINE_NEWLINE_KEY_HORIZONTAL,
   LAST_LINE_NEWLINE_KEY_VERTICAL,
+  LAST_LINE_NEWLINE_KEY_VERTICAL_MAC,
   LAST_LINE_NEWLINE_SOURCE,
 } from "../../../src/views/lastLineNewlineScript";
 import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
@@ -21,7 +22,7 @@ interface Box {
 }
 
 interface Part {
-  lastLineNewlineKey(vertical: boolean): string;
+  lastLineNewlineKey(vertical: boolean, mac: boolean): string;
   lastLineBlankCount(text: string): number;
   lastLineNewlineAllowed(text: string, start: number, end: number): boolean;
   lastLineSameRow(a: Box | null, b: Box | null, vertical: boolean): boolean;
@@ -33,11 +34,22 @@ const part = new Function(
 )() as Part;
 
 describe("次の行へ進むキー", () => {
-  it("横書きは ↓、縦書きは ←（縦書きは作者に未確認なので、定数1か所で替えられる）", () => {
-    expect(part.lastLineNewlineKey(false)).toBe(LAST_LINE_NEWLINE_KEY_HORIZONTAL);
-    expect(part.lastLineNewlineKey(true)).toBe(LAST_LINE_NEWLINE_KEY_VERTICAL);
+  it("横書きは ↓、縦書きは ←（作者の答え 2026-11-15「縦書きは←キー」）", () => {
+    expect(part.lastLineNewlineKey(false, false)).toBe(LAST_LINE_NEWLINE_KEY_HORIZONTAL);
+    expect(part.lastLineNewlineKey(true, false)).toBe(LAST_LINE_NEWLINE_KEY_VERTICAL);
     expect(LAST_LINE_NEWLINE_KEY_HORIZONTAL).toBe("ArrowDown");
     expect(LAST_LINE_NEWLINE_KEY_VERTICAL).toBe("ArrowLeft");
+  });
+
+  it("Mac の縦書きは ↓（Mac では縦書きの ← が1字前へ戻り、↓ が次の行へ動くため）。横書きは Mac でも ↓", () => {
+    expect(part.lastLineNewlineKey(true, true)).toBe(LAST_LINE_NEWLINE_KEY_VERTICAL_MAC);
+    expect(LAST_LINE_NEWLINE_KEY_VERTICAL_MAC).toBe("ArrowDown");
+    expect(part.lastLineNewlineKey(false, true)).toBe(LAST_LINE_NEWLINE_KEY_HORIZONTAL);
+  });
+
+  it("原稿エディターは、動いている機械が Mac かを見てキーを選ぶ", () => {
+    const html = buildManuscriptEditorHtml("n", "c");
+    expect(html).toContain("lastLineNewlineKey(isVertical, lastLineNewlineOnMac())");
   });
 });
 

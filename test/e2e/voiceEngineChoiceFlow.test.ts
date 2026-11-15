@@ -523,7 +523,8 @@ for (const engine of ["aivisspeech", "voicevox"] as const) {
           await clickAloudButton(frame, "aloudVoiceExport");
           const confirm = await waitExportConfirm(page);
           expect(confirm, `確認の窓：${confirm}`).toContain(`置き場：`);
-          expect(confirm, `確認の窓：${confirm}`).toContain(`.aiwriter/exports/音声/${EPISODE_STEM}`);
+          // 置き場の行は、入れ物の道と話のフォルダーの名前を分けて書く（1.0.8。話の名前の途中で折り返さないため）
+          expect(confirm, `確認の窓：${confirm}`).toContain(`置き場：.aiwriter/exports/音声 の中の「${EPISODE_STEM}」`);
           // 確認で答える前は、本文を合成へ送らない
           expect(textCarrying(fake).filter((request) => request.path === "/synthesis"), "確認の前に合成しました").toHaveLength(0);
           const rows = await quickPickRows(page);

@@ -8298,7 +8298,7 @@ ${RESUME_WRITING_LABEL ? `
   /* lastLineNewline:start */
   /*
     ── 最後の行で「次の行へ進むキー」を押したら、改行を1つ足す（作者の依頼、2026-11-15。設計書6.25） ──
-    横書きは ↓、縦書きは ←。末尾の空行が2行になったら、それ以上は足さない。
+    横書きは ↓、縦書きは ←（Mac の縦書きは ↓。lastLineNewlineScript.ts）。末尾の空行が2行になったら、それ以上は足さない。
     判定（行の数え方・最後の行か・足すか）は lastLineNewlineScript.ts の部品。
     **改行はふつうに打った Enter と同じ道で入れる**（execCommand。取り消し〔Ctrl+Z〕に乗り、
     input が起きて文書の改行の種類に合わせた書き戻しへ流れる）。ファイルへ直に書かない。
@@ -8378,7 +8378,7 @@ ${LAST_LINE_NEWLINE_SOURCE}
     // Shift（範囲を伸ばす）・Ctrl・Alt・Meta つきは、ふだんの動きのまま
     if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
     const isVertical = vertical !== false;
-    if (event.key !== lastLineNewlineKey(isVertical)) return;
+    if (event.key !== lastLineNewlineKey(isVertical, lastLineNewlineOnMac())) return;
     // 校閲中は字を入れない（改行も字のうち）
     if (reviewLocked) return;
     if (onCompose ? !lastLineNewlineWantedOnCompose(isVertical) : !lastLineNewlineWantedOnWrite(isVertical)) return;
