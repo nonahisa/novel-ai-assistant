@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { downloadAndUnzipVSCode } from "@vscode/test-electron";
-import { _electron, type ElectronApplication, type Page } from "playwright-core";
+import { _electron, type ElectronApplication, type Frame, type Page } from "playwright-core";
 import { recordLaunch, stopLaunch } from "./cleanup";
 import { waitUntil } from "./wait";
 import { CLEAR_NOTIFICATIONS_KEY, clearNotifications, closeDialog, dialogText } from "./workbenchDom";
@@ -169,6 +169,19 @@ export interface LaunchOptions {
    * package.json だけの見本をこの道で読ませる。**製品に口を足さずに済む**
    */
   extraExtensions?: (root: string) => Promise<readonly string[]>;
+  /**
+   * **窓を画面の中で前に出し、本物の焦点を取る**（2026-11-15。本物の日本語入力で打つ試し
+   * `test/e2e/realIme/` だけが使う）。
+   *
+   * 本物の IME へは OS のキー（SendInput）で打つので、Playwright の合図と違い、**前に出ている窓にしか
+   * 届かない**。そのため、窓を画面の外へ置く仕掛け（`keepOutOfTheWay`）と焦点のふり
+   * （`Emulation.setFocusEmulationEnabled`）を使わず、ワークベンチが組み上がったら窓を出して前へ持ってくる。
+   * 焦点のふりを残すと、本物の焦点が無くても `document.hasFocus()` が真になり、打つ直前の確かめ
+   * （`assertTestWindowFocused`）が効かなくなるので、ふりも外す。
+   *
+   * **作者の画面の前面を取る**ので、作者がこの PC を使っていないときだけ流す。省けば今までどおり
+   */
+  foreground?: boolean;
 }
 
 /** package.json の `publisher.name`。globalState はこの名前の行に1つの JSON で入る */
@@ -239,7 +252,7 @@ export function e2eTmpRoot(): string {
 /** 開き直し（`restartVsCode`）のために控える、起こしたときの引数（一時フォルダーの根で引く） */
 const relaunchContexts = new Map<
   string,
-  { executablePath: string; args: string[]; windowSize?: { width: number; height: number } }
+  { executablePath: string; args: string[]; windowSize?: { width: number; height: number }; foreground: boolean }
 >();
 
 /**
@@ -383,7 +396,13 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
       ...(options.env ? ["--force-disable-user-env"] : []),
   ];
   // 開き直し（`restartVsCode`）が同じ引数で起こせるよう控える
-  relaunchContexts.set(root, { executablePath, args, windowSize: options.windowSize ?? windowSizeFromEnv() });
+  const foreground = options.foreground === true;
+  relaunchContexts.set(root, {
+    executablePath,
+    args,
+    windowSize: options.windowSize ?? windowSizeFromEnv(),
+    foreground,
+  });
 
   const app = await _electron.launch({
     executablePath,
@@ -405,17 +424,21 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
     return { app, page, root, workFolder, manuscriptFolder, videoStartedAt };
   };
   try {
-    await keepOutOfTheWay(app);
+    if (!foreground) await keepOutOfTheWay(app);
     page = await app.firstWindow();
     if (options.recordVideo) videoStartedAt = Date.now();
-    // 窓が裏にあっても、画面の中では「焦点がある」として振る舞わせる（下の説明）
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    // 窓が裏にあっても、画面の中では「焦点がある」として振る舞わせる（下の説明）。
+    // 前に出す起こし方では、本物の焦点を確かめたいので、ふりをしない
+    if (!foreground) {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    }
     // ワークベンチが組み上がるまで待つ（ここまでは拡張機能と関係が無い）
     await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
-    await keepOutOfTheWay(app);
+    if (!foreground) await keepOutOfTheWay(app);
     const windowSize = options.windowSize ?? windowSizeFromEnv();
     if (windowSize) await resizeWindows(app, windowSize);
+    if (foreground) await bringToFront(app, page);
     if (options.beforeRegister) await options.beforeRegister(page);
     if (!options.skipRegister) await registerWork(session(), workTitle, options.outsideWorkspace === true);
   } catch (error) {
@@ -474,13 +497,17 @@ export async function restartVsCode(
   const app = await _electron.launch({ executablePath: context.executablePath, args: context.args, env: cleanEnv(), timeout: 60_000 });
   const pid = app.process().pid;
   if (pid !== undefined) await recordLaunch({ root: session.root, pid });
-  await keepOutOfTheWay(app);
+  // 起こしたときと同じ扱い（前に出す起こし方なら、開き直しも前に出す）
+  if (!context.foreground) await keepOutOfTheWay(app);
   const page = await app.firstWindow();
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  if (!context.foreground) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  }
   await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
-  await keepOutOfTheWay(app);
+  if (!context.foreground) await keepOutOfTheWay(app);
   if (context.windowSize) await resizeWindows(app, context.windowSize);
+  if (context.foreground) await bringToFront(app, page);
   session.app = app;
   session.page = page;
   // 起動のときの案内などが残っていれば閉じる
@@ -556,6 +583,102 @@ async function moveWindowsAway(app: ElectronApplication): Promise<void> {
     }
     for (const win of BrowserWindow.getAllWindows()) away(win);
   });
+}
+
+/**
+ * 前に出す起こし方で、Windows が前面を渡さなかった（製品の不具合ではなく、台の側の事情）。
+ * 本物の IME の試しは、これを「台が整っていない」として飛ばす
+ */
+export class ForegroundRefusedError extends Error {}
+
+/** Electron の本体の窓のうち、前へ出す・焦点を確かめるのに使う所だけ（`any` を避けるため） */
+interface MainWindowHandle {
+  id: number;
+  isMinimized(): boolean;
+  restore(): void;
+  minimize(): void;
+  show(): void;
+  moveTop(): void;
+  focus(): void;
+  isFocused(): boolean;
+  setAlwaysOnTop(flag: boolean): void;
+  webContents: { focus(): void };
+}
+
+/**
+ * 前に出す起こし方（`LaunchOptions.foreground`）で、窓を出して前へ持ってきて、焦点を取る。
+ *
+ * **Windows は、ほかのプロセスが前面を取るのを断ることがある**（タスクバーが光るだけで、前の窓が
+ * 替わらない）。いちど最前面に固定して `focus` し、すぐ固定を外す。それでも取れなければ、
+ * 2回目からは最小化して戻す（戻すときに前面へ出る）。15秒で取れなければ投げる——前面が
+ * 作者の窓のまま打ち始めないため。打つ側は `assertTestWindowFocused` でも毎回確かめる
+ */
+async function bringToFront(app: ElectronApplication, page: Page): Promise<void> {
+  const handle = await app.browserWindow(page);
+  const until = Date.now() + 15_000;
+  for (let round = 0; ; round++) {
+    await handle.evaluate((win: MainWindowHandle, again: boolean) => {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      if (again) {
+        win.minimize();
+        win.restore();
+      }
+      win.setAlwaysOnTop(true);
+      win.moveTop();
+      win.focus();
+      win.setAlwaysOnTop(false);
+      win.webContents.focus();
+    }, round > 0);
+    const state = await readWindowFocus(app, page).catch(() => undefined);
+    if (state?.windowFocused && state.documentFocused) return;
+    if (Date.now() > until) {
+      throw new ForegroundRefusedError(
+        `テスト用の VS Code の窓を前へ出せませんでした（Windows が前面を渡しませんでした。` +
+          `焦点のある窓が試し用か: ${String(state?.windowFocused)}、画面の中の焦点: ${String(state?.documentFocused)}）`
+      );
+    }
+    await page.waitForTimeout(1_000);
+  }
+}
+
+/** 試し用の窓に、Electron の本体で見ても画面の中で見ても焦点があるか */
+async function readWindowFocus(
+  app: ElectronApplication,
+  page: Page
+): Promise<{ windowFocused: boolean; documentFocused: boolean }> {
+  const handle = await app.browserWindow(page);
+  const ownId = await handle.evaluate((win: MainWindowHandle) => win.id);
+  const focusedId = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.id ?? null);
+  const documentFocused = await page.evaluate(() => document.hasFocus());
+  return { windowFocused: focusedId === ownId, documentFocused };
+}
+
+/**
+ * **本物のキーを打つ直前の安全確認**（2026-11-15。`test/e2e/realIme/` が、OS のキーを送る台本を呼ぶ直前に毎回呼ぶ）。
+ *
+ * OS のキーは前に出ている窓へ届くので、焦点が作者の窓へ移っていたら、作者の窓へ打ち込む。
+ * Electron の本体で `BrowserWindow.getFocusedWindow()` がこの試しの窓であること、画面の中で
+ * `document.hasFocus()` が真であること（`frame` を渡せば、その面の中でも真であること）を確かめ、
+ * 違えば**打たずに投げる**。IME の側の台本も1打ごとに前の窓を確かめるので、二重に守る。
+ *
+ * 前に出す起こし方（`foreground`）でない窓では、焦点のふりで `document.hasFocus()` がいつも真に
+ * なり確かめにならないので、それだけで投げる
+ */
+export async function assertTestWindowFocused(session: E2ESession, frame?: Frame): Promise<void> {
+  if (relaunchContexts.get(session.root)?.foreground !== true) {
+    throw new Error("打つ前の確かめ：前に出す起こし方（foreground）の窓ではありません。打たずに止めました");
+  }
+  const state = await readWindowFocus(session.app, session.page);
+  const frameFocused = frame ? await frame.evaluate(() => document.hasFocus()).catch(() => false) : true;
+  if (!state.windowFocused || !state.documentFocused || !frameFocused) {
+    throw new Error(
+      "打つ前の確かめ：焦点が試し用の VS Code の窓にありません。打たずに止めました" +
+        `（本体で焦点のある窓が試し用か: ${String(state.windowFocused)}、画面の中: ${String(state.documentFocused)}` +
+        (frame ? `、原稿エディターの面の中: ${String(frameFocused)}` : "") +
+        "）"
+    );
+  }
 }
 
 /**
