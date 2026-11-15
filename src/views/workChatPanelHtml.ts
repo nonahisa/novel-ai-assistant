@@ -215,7 +215,13 @@ textarea {
   /* 角を丸くする（作者の依頼、2026-08-28。入力欄すべて） */
   border-radius: 4px;
 }
-textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
+/*
+  VS Code 本体の入力欄の色に合わせる（作者の答え 2026-11-15「色だけ整える」。vscode-elements の欄には置き換えない
+  ——部品の中〔shadow DOM〕で日本語の確定の Enter が今と同じに動くかを確かめていないため）。焦点の枠は欄の内側に
+  引き（本体の入力欄と同じ）、案内の薄い字は本体の案内の色にする
+*/
+textarea:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
 #composer .row {
   display: flex;
   gap: 6px;

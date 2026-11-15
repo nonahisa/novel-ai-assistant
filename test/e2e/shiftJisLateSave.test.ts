@@ -16,7 +16,7 @@
  *
  * 製品にテスト専用の口は足していない。**AI は呼ばない。**
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import iconv = require("iconv-lite");
 import { expect, test } from "vitest";
@@ -60,10 +60,14 @@ async function slowSaveExtension(root: string): Promise<string[]> {
     path.join(folder, "extension.js"),
     [
       'const vscode = require("vscode");',
+      'const fs = require("fs");',
+      'const path = require("path");',
       "let armed = false;",
       "exports.activate = (context) => {",
       "  context.subscriptions.push(",
-      '    vscode.commands.registerCommand("e2eSlowSave.arm", () => { armed = true; }),',
+      // 仕掛けたことを印のファイルで知らせる（テストはこれを待ってから Ctrl+S を押す。重いとき、
+      // パレットの命令が拡張機能の側へ届く前に保存が走ると、ふさがずに保存されて揺れた）
+      '    vscode.commands.registerCommand("e2eSlowSave.arm", () => { armed = true; fs.writeFileSync(path.join(context.extensionPath, "armed.flag"), "1"); }),',
       "    vscode.workspace.onWillSaveTextDocument(() => {",
       "      if (!armed) return;",
       "      armed = false;",
@@ -89,6 +93,8 @@ test("保存の直前の置き換えが保存に間に合わなくても、フ�
       const original = iconv.encode(BODY, "shift_jis").length;
       await quickOpen(page, EPISODE);
       await runCommand(page, ARM_TITLE);
+      const armedFlag = path.join(session.root, "補助の拡張機能", "e2e-slow-save", "armed.flag");
+      await waitUntil(async () => (await stat(armedFlag).catch(() => undefined)) !== undefined, "補助の拡張機能が次の保存を仕掛けた", 15_000);
       await focusTextEditor(page);
       await page.keyboard.press(EDITOR_BOTTOM_PRESS);
       await page.keyboard.insertText("〜");
@@ -110,8 +116,15 @@ test("保存の直前の置き換えが保存に間に合わなくても、フ�
       });
       expect(bytes.includes(0x3f), `ファイル：${hex(bytes)}`).toBe(false);
 
-      const log = await readFile(path.join(workFolder, ".aiwriter", "logs", "actions.log"), "utf8").catch(() => "");
-      expect(log, "作品のログに保存し直したことが残る").toContain("保存し直しました");
+      // ログは書き込みが遅れることがあるので、出るまで待って読む
+      let log = "";
+      await waitUntil(
+        async () => (log = await readFile(path.join(workFolder, ".aiwriter", "logs", "actions.log"), "utf8").catch(() => "")).includes("保存し直しました"),
+        "作品のログに保存し直したことが残る",
+        15_000
+      ).catch((error: unknown) => {
+        throw new Error(`${String(error)}（ログの末尾：${JSON.stringify(log.slice(-400))}）`);
+      });
     },
     {
       settings: { "files.encoding": "shiftjis", "workbench.editorAssociations": { "*.txt": "default", "*.md": "default" } },
