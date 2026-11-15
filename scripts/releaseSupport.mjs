@@ -24,6 +24,9 @@ export const EXPECTED_ARCHIVE_FILES = [
   // MP3 の変換の部品（LAME の JavaScript 版。LGPL-3.0。設計書6.42.4）。拡張機能の束へ混ぜず、
   // 別のファイルのまま配る（差し替えられるように）。**入っていないと音声に書き出せない**
   "extension/dist/lame.js",
+  // 画面（WebView）の部品（`@vscode-elements/elements`。作者の決定 2026-11-15）。拡張機能の束へ
+  // 混ぜず、画面が `<script src>` で読む。**入っていないと執筆統計のボタンと折りたたみが素の形になる**
+  "extension/dist/webview-elements.js",
   "extension/media/icon.svg",
   // 初回の道案内（設計書6.104 入口2）の段ごとの説明。`package.json` の
   // `contributes.walkthroughs` が指す。**入っていないと段の右側が空になる**

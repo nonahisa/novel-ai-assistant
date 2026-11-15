@@ -1,6 +1,7 @@
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { listenForFocusWithoutPointer } from "../views/pickerFocus";
+import { webviewElementsRoot, webviewElementsScriptUri } from "../views/webviewElements";
 import { wideViewColumn } from "./editorColumn";
 import { openSiteLink } from "./openSiteLink";
 // ブラウザ版でも同じ場所を指すため、`node:path` ではなくこちらを使う
@@ -150,7 +151,15 @@ export async function openWritingStatsPanel(
     "novelai.writingStats",
     `執筆統計: ${work.title}`,
     wideViewColumn(),
-    { enableScripts: true, retainContextWhenHidden: true }
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      /*
+        画面から読めるのは部品の束の置き場（dist）だけにする。指定しないと、作業場のフォルダーと
+        拡張機能の置き場の全部が読める既定になる。この画面はほかのファイルを読まない
+      */
+      localResourceRoots: [webviewElementsRoot(context.extensionUri)],
+    }
   );
   openPanels.set(work.id, panel);
   openTargets.set(work.id, { work, deviceId });
@@ -190,6 +199,8 @@ export async function openWritingStatsPanel(
       */
       initialTab: rememberedWritingStatsTab(verifiedState(context.globalState), work.id),
       readerSites: initialSites,
+      // ボタンと折りたたみの部品（作者の決定 2026-11-15）
+      elementsScriptUri: webviewElementsScriptUri(panel.webview, context.extensionUri),
     }
   );
 

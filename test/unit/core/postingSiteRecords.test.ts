@@ -741,7 +741,9 @@ describe("執筆量パネルの側", () => {
     );
     expect(html).toContain("話ごとの記録（2話・最新 2026/09/22");
     // 既定では閉じている（open を付けない）
-    expect(html).not.toContain("<details class=\"fold\" open>");
+    // 折りたたみは VS Code の部品（vscode-collapsible。2026-11-15）。畳んだ形で出し、open を付けない
+    expect(html).toContain('<vscode-collapsible class="fold" heading="話ごとの記録（');
+    expect(html).not.toMatch(/<vscode-collapsible[^>]*\sopen[\s>]/);
   });
 
   /**

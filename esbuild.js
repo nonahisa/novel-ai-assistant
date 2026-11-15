@@ -55,7 +55,7 @@ const BROWSER_EXTERNAL_BUILTINS = [
 // （作者の指示、2026-09-10。設計書6.26）
 
 /**
- * 3つの束の設定。
+ * 束の設定（拡張機能の2つ・MCPサーバー・MP3 の部品・画面の部品）。
  *
  * **同梱表示（THIRD-PARTY-NOTICES.md）を作るスクリプトも、これを読む**
  * （`scripts/bundledPackages.mjs`）。束に何が入るかは `external`・`alias` で
@@ -148,13 +148,43 @@ function bundleOptions() {
     logLevel: "info",
   };
 
-  return { desktop, browser, mcp, lame };
+  /**
+   * 画面（WebView）の中で使う部品（`@vscode-elements/elements`。作者の決定 2026-11-15）。
+   *
+   * **拡張機能の束へ混ぜず、別のファイル `dist/webview-elements.js` にする。** この部品は
+   * 読み込まれた瞬間に `customElements.define` を呼ぶ。拡張機能が動く所（拡張機能ホスト）には
+   * `customElements` が無いので、拡張機能の束に入ると起動した瞬間に落ちる。画面は
+   * `<script nonce="…" src="asWebviewUri(dist/webview-elements.js)">` で読む
+   * （手元でもブラウザ版でも同じ形。`extension.ts` から届かないことは
+   * `test/unit/cross/webviewElementsReach.test.ts` が見張る）。
+   *
+   * **入れる部品は使う分だけ**（入口 `src/vendor/webviewElementsEntry.ts`）。全部入りにすると
+   * 束が数倍になり、配布物が重くなる。`iife` にして、画面の名前空間へ何も漏らさない。
+   * 同梱表示（`scripts/bundledPackages.mjs`）もこの設定を読むので、表示から抜けない。
+   */
+  const webviewElements = {
+    entryPoints: ["src/vendor/webviewElementsEntry.ts"],
+    bundle: true,
+    format: "iife",
+    minify: production,
+    sourcemap: !production,
+    sourcesContent: false,
+    platform: "browser",
+    target: "es2022",
+    outfile: "dist/webview-elements.js",
+    external: [],
+    logLevel: "info",
+  };
+
+  return { desktop, browser, mcp, lame, webviewElements };
 }
 
 async function main() {
   const options = bundleOptions();
   const contexts = await Promise.all(
-    [options.desktop, options.browser, options.mcp, options.lame].map((config) => esbuild.context(config))
+    [options.desktop, options.browser, options.mcp, options.lame, options.webviewElements].map((config) =>
+      esbuild.context(config)
+    )
   );
 
   if (watch) {

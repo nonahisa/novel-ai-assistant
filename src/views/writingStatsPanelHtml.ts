@@ -64,6 +64,14 @@ export function buildWritingStatsPanelHtml(
      * 開いたときに出しておくサイトのタブ（`readerSiteTabs` の並び）。統計が届けば揃え直す
      */
     readerSites?: readonly ReaderSiteTab[];
+    /**
+     * 画面の部品の束（`dist/webview-elements.js`）を `asWebviewUri` で変えた URI。
+     * ボタン（`vscode-button`）と折りたたみ（`vscode-collapsible`）の中身はここにある
+     * （作者の決定 2026-11-15）。**パネルは必ず渡す**（`writingStatsPanel.ts`・
+     * `allWorksWritingStatsPanel.ts`）。渡さない呼び出し（台本だけを読む単体テスト）では
+     * 読み込みの行を出さない——部品が無くても押せること・字が読めることは変わらない
+     */
+    elementsScriptUri?: string;
   } = {}
 ): string {
   const hasEpisodesTab = options.hasEpisodesTab ?? true;
@@ -97,6 +105,16 @@ export function buildWritingStatsPanelHtml(
     ? (options.initialTab as string)
     : "overview";
   const pageClass = (key: string): string => (key === initialTab ? "page active" : "page");
+  /*
+    部品の束は nonce を付けて読む。CSP の script-src は nonce だけを許しているので、
+    在りか（手元では vscode-resource、ブラウザ版では vscode-cdn）を足さずに通る。
+    **属性は nonce を先に書く**——単体テストは `<script nonce="…">` で台本の本体を取り出すので、
+    この行がそちらに当たらないように（src を持つ行は `">` で閉じない）。
+    在りかは HTML の属性へ埋めるので、引用符を逃がす
+  */
+  const elementsScript = options.elementsScriptUri
+    ? `<script nonce="${nonce}" src="${escapeMarkup(options.elementsScriptUri)}"></script>\n`
+    : "";
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -163,10 +181,11 @@ section.page { display: none; }
 section.page.active { display: flex; flex-direction: column; gap: var(--gap); }
 section.page > * { margin: 0; min-width: 0; }
 section.page > :empty { display: none; }
+/* 節の頭は、サイトの面の小見出し（.site-sub）と同じ見た目にそろえる（2026-11-15） */
 h3 {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-foreground);
   margin: 0 0 8px;
 }
 /*
@@ -216,36 +235,12 @@ h3 {
 .meter { display: block; }
 .meter-fill { fill: var(--vscode-charts-blue, #3794ff); }
 .meter-fill.achieved { fill: var(--vscode-testing-iconPassed, #4caf50); }
+/*
+  ボタンは VS Code の部品（vscode-button。作者の決定 2026-11-15）。色・角・押したときの枠は
+  部品が VS Code の変数から取る。粒度の切り替えは、選んでいるものだけを主のボタン、
+  ほかを控えめなボタン（secondary）にして、どれを見ているかを色で示す
+*/
 .controls { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-/* 粒度の切り替えは控えめに。選んでいるものだけ色を付ける */
-.controls button {
-  background: transparent;
-  color: var(--vscode-descriptionForeground);
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 12px;
-  padding: 2px 12px;
-}
-.controls button:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, transparent); }
-.controls button.active {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-  border-color: var(--vscode-button-background);
-}
-button {
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
-  border: none;
-  border-radius: 2px;
-  padding: 4px 12px;
-  cursor: pointer;
-  font-size: inherit;
-  font-family: inherit;
-}
-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
-button.active {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-}
 .chart-wrap { overflow-x: auto; }
 svg { display: block; }
 .axis { stroke: var(--vscode-panel-border); stroke-width: 1; }
@@ -261,7 +256,11 @@ svg { display: block; }
   順位の推移（作者の指示 2026-11-02）。**幅に合わせて縮む**（viewBox＋width:100%）ので、
   狭い幅でも横に送らない。線の色は種別ごとに VS Code のグラフの色（暗いテーマでも読める）
 */
-.rank-chart svg { width: 100%; height: auto; max-width: 760px; }
+/*
+  幅は 560px まで（2026-11-15）。760px まで広げると縦も比例して伸び、順位のグラフだけで
+  面の上半分を取って、下の最新の反応が見えなかった。ほかのグラフ（話ごとのPV）とも幅がそろう
+*/
+.rank-chart svg { width: 100%; height: auto; max-width: 560px; }
 .rank-line { fill: none; stroke: var(--rank-color); stroke-width: 1.8; }
 .rank-dot { fill: var(--rank-color); }
 .rank-s0 { --rank-color: var(--vscode-charts-blue, #3794ff); }
@@ -280,6 +279,13 @@ svg { display: block; }
 .narou-api label.disabled { color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); }
 /* 率の表は3行しかない。画面幅いっぱいに広げると、率と式が左右に離れて読みにくい */
 table.reader-rates { width: auto; }
+/*
+  順位・反応・内訳の表も同じ（2026-11-15「執筆統計を見やすく」）。列が3〜4本しかないのに幅いっぱいに
+  広げると、日時と順位が画面の両端に離れ、行を目で追えなかった。中身の幅に合わせ、列の間だけ空ける。
+  **話ごとの表（#episode-table）は幅いっぱいのまま**——題の列が長く、幅で吸収する作りのため
+*/
+.site table, #devices table { width: auto; min-width: min(100%, 360px); }
+.site th, .site td, #devices th, #devices td { padding-right: 20px; }
 .tick { fill: var(--vscode-descriptionForeground); font-size: 10px; }
 table { border-collapse: collapse; width: 100%; }
 th, td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--vscode-panel-border); }
@@ -314,12 +320,18 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 .flag.long { border-color: var(--vscode-charts-blue, #3794ff); }
 .mini { height: 8px; background: var(--vscode-panel-border); border-radius: 4px; min-width: 60px; overflow: hidden; }
 .note { color: var(--vscode-descriptionForeground); font-size: 12px; margin: 12px 0; line-height: 1.6; }
+/*
+  注記の1行が長すぎると読みにくい（広い窓では 1行 70字を超えた。2026-11-15）。
+  行の長さだけを詰め、字はそのまま
+*/
+.note, .site-foot, .contest-detail { max-width: 64em; }
 /* サイトの記録（設計書6.68.5）。作品情報の1行と、その下に順位の履歴 */
 .site { margin-bottom: var(--gap); }
 /* サイトが並ぶときは、細い線1本で区切る */
 .site + .site { border-top: 1px solid var(--vscode-panel-border); padding-top: var(--gap); }
 .site-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
-.site-name { font-weight: 600; }
+/* サイトの名前は面の題。下の小見出しより一段大きくする（2026-11-15） */
+.site-name { font-weight: 600; font-size: 1.15em; }
 .site-meta { font-size: 12px; color: var(--vscode-descriptionForeground); }
 .site-latest { font-size: 12px; }
 /*
@@ -334,27 +346,67 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
   border-radius: 3px;
 }
 .facts-warn { color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); }
-/* 順位の表と読者の反応の表を見分けるための小見出し（設計書6.79.7） */
-.site-sub { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 10px 0 2px; }
+/*
+  順位の表と読者の反応の表を見分けるための小見出し（設計書6.79.7）。
+  **節の頭として読めるように**（2026-11-15「執筆統計を見やすく」）。以前は 12px の薄い字で、
+  下の注記と同じ見た目だったため、順位・最新の反応・率・助言・グラフ・表が1本の流れに見えた。
+  字を地の色・太字にし、節の上を広く空けて、まとまりを余白で分ける
+*/
+.site-sub {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  margin: 28px 0 8px;
+}
+.site-head + .site-sub, .site > .site-sub:first-child { margin-top: 16px; }
 /*
   最新の反応（設計書6.79.7）。**数字を先に読めるように**、ラベルは小さく薄く、
   数字は通常の大きさで並べる。1本の長い文字列だと読む気にならない
   （作者の言葉「サイトの記録が読みにくいです」、2026-09-22）
 */
-.reader-latest { margin: 8px 0 2px; }
-.reader-latest-head { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 3px; }
-/* 折り返しは flex に任せる。狭い画面では縦に積むだけで読める */
-.reader-values { display: flex; flex-wrap: wrap; gap: 4px 18px; }
-.reader-value { display: flex; align-items: baseline; gap: 5px; font-variant-numeric: tabular-nums; }
+.reader-latest { margin: 28px 0 2px; }
+/* 「最新の反応」の見出しも、ほかの節の頭（.site-sub）とそろえる */
+.reader-latest-head { font-size: 13px; font-weight: 600; color: var(--vscode-foreground); margin-bottom: 8px; }
+/*
+  折り返しは flex に任せる。狭い画面では縦に積むだけで読める。
+  **最新の数はこの面でいちばん知りたい数**なので、数字を一段大きく太くする（2026-11-15）。
+  名前は数字の上に小さく置き、横に並ぶ数どうしが見比べやすいようにする
+*/
+.reader-values { display: flex; flex-wrap: wrap; gap: 8px 28px; }
+.reader-value { display: flex; flex-direction: column; gap: 0; font-variant-numeric: tabular-nums; }
+.reader-value > .v { font-size: 1.35em; font-weight: 600; line-height: 1.3; }
 .reader-value > .k { font-size: 11px; color: var(--vscode-descriptionForeground); }
-/* 古い記録・話ごとの記録は畳んでおく（開いた状態は覚えない） */
-details.fold { margin: 4px 0 0; }
-details.fold > summary {
+/*
+  古い記録・話ごとの記録は畳んでおく（開いた状態は覚えない）。折りたたみは VS Code の部品
+  （vscode-collapsible。作者の決定 2026-11-15）。部品の既定は横の欄（サイドバー）の色なので、
+  地の色を透かしてエディターの地に馴染ませる。見出しは部品が描く（属性 heading）
+*/
+vscode-collapsible.fold {
+  margin: 4px 0 0;
+  --vscode-sideBar-background: transparent;
+  --vscode-sideBarSectionHeader-background: transparent;
+  --vscode-sideBarTitle-foreground: var(--vscode-descriptionForeground);
+}
+/*
+  部品の束が届く前（と、届かなかったとき）も押せて読めるように、素の要素として最低限の形を付ける。
+  届けば :defined になり、部品の見た目に替わる
+*/
+vscode-button:not(:defined) {
+  display: inline-block;
+  padding: 2px 12px;
+  border-radius: 4px;
   cursor: pointer;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+vscode-button:not(:defined)[disabled] { opacity: 0.4; cursor: default; pointer-events: none; }
+vscode-collapsible:not(:defined)::before {
+  content: attr(heading);
+  display: block;
   font-size: 12px;
   color: var(--vscode-descriptionForeground);
-  padding: 4px 0;
 }
+/* 届かなかったときに中身を隠すと二度と読めないので、畳まずに見せる（束は head で先に読むので、ふだんはこの形にならない） */
 .site-foot { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 4px 0 0; }
 /* 読者の反応の助言（設計書6.79.7.3）。AIの答えを1件ずつ左に線を引いて、率の表と見分ける */
 .advice-item { margin: 6px 0 8px; padding-left: 8px; border-left: 2px solid var(--vscode-panel-border); line-height: 1.6; }
@@ -366,7 +418,6 @@ ul.advice-list { margin: 2px 0; padding-left: 18px; }
 .advice-mark { color: var(--vscode-editorWarning-foreground, #cca700); font-size: 12px; }
 /* AIへ渡す材料。送る文そのものなので、改行を保って見せる */
 .advice-material { white-space: pre-wrap; font-size: 12px; line-height: 1.5; max-height: 320px; overflow: auto; padding: 6px 8px; background: var(--vscode-textBlockQuote-background, rgba(127,127,127,0.08)); }
-button:disabled { opacity: 0.6; cursor: default; }
 a, .link {
   color: var(--vscode-textLink-foreground);
   cursor: pointer;
@@ -377,7 +428,9 @@ a:hover, .link:hover { text-decoration: underline; }
 .conflicted { color: var(--vscode-editorWarning-foreground, #cca700); }
 /* 達成の記録（設計書6.3.8）。どの目標をいつ達成したかを、控えめに並べる */
 .achievements { margin: 0; }
-.achievements-head { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 0 0 4px; }
+/* 見出しはほかの節の頭とそろえる。最長の連続（.best）は薄いまま添える（2026-11-15） */
+.achievements-head { font-size: 13px; font-weight: 600; color: var(--vscode-foreground); margin: 0 0 6px; }
+.achievements-head .best { font-weight: normal; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .achievement-row { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; padding: 2px 0; }
 .achievement-row .mark {
   color: var(--vscode-testing-iconPassed, #4caf50);
@@ -418,7 +471,7 @@ a:hover, .link:hover { text-decoration: underline; }
   .celebrate-banner { transition: none; }
 }
 </style>
-</head>
+${elementsScript}</head>
 <body data-initial-tab="${initialTab}">
 <header>
   <h1 id="title">執筆量</h1>
@@ -606,9 +659,10 @@ function renderGranularity() {
   const host = document.getElementById('granularity');
   host.innerHTML = Object.keys(GRANULARITY_LABELS)
     .map((key) =>
-      '<button data-granularity="' + key + '"' +
-      (key === granularity ? ' class="active"' : '') + '>' +
-      GRANULARITY_LABELS[key] + '</button>'
+      // 選んでいる刻みだけ主のボタン、ほかは控えめに（secondary）。印の class="active" も残す
+      '<vscode-button data-granularity="' + key + '"' +
+      (key === granularity ? ' class="active"' : ' secondary') + '>' +
+      GRANULARITY_LABELS[key] + '</vscode-button>'
     )
     .join('');
   host.querySelectorAll('[data-granularity]').forEach((el) => {
@@ -1139,7 +1193,11 @@ function renderSiteRecords() {
   });
   host.querySelectorAll('[data-narou-fetch]').forEach((el) => {
     el.addEventListener('click', () => {
-      if (narouApiBusy || el.disabled) return;
+      /*
+        押せない印は属性で見る。部品（vscode-button）が届く前や届かなかったときは
+        el.disabled が undefined になり、同意の前でも取りに行ってしまう
+      */
+      if (narouApiBusy || el.hasAttribute('disabled')) return;
       narouApiBusy = true;
       renderSiteRecords();
       vscode.postMessage({ type: 'narouFetch' });
@@ -1194,8 +1252,8 @@ function renderNarouApi(api) {
       : '<span class="site-meta">先にガイドラインを開いてください</span>') +
     '</div>');
   const label = narouApiBusy ? '取得しています…' : 'なろうAPIによる作品情報取得';
-  parts.push('<div class="row"><button data-narou-fetch="1"' +
-    (api.agreed && !narouApiBusy ? '' : ' disabled') + '>' + escapeHtml(label) + '</button></div>');
+  parts.push('<div class="row"><vscode-button secondary data-narou-fetch="1"' +
+    (api.agreed && !narouApiBusy ? '' : ' disabled') + '>' + escapeHtml(label) + '</vscode-button></div>');
   parts.push('<div class="site-meta">Nコード ' + escapeHtml(api.ncode || '') +
     ' の作品の数と順位を1回取ります（同じ作品は' + escapeHtml(String(api.intervalMinutes)) +
     '分に1回・1日' + escapeHtml(String(api.dailyLimit)) +
@@ -1399,9 +1457,9 @@ function renderReaderAdvice(site, advice, outcome, busy) {
   const label = busy
     ? 'AIに聞いています…'
     : (answered ? 'AIに聞き直す' : 'AIに助言をもらう');
-  const button = '<button class="advice-ask" data-advice-site="' + escapeHtml(site) + '"' +
+  const button = '<vscode-button secondary class="advice-ask" data-advice-site="' + escapeHtml(site) + '"' +
     (answered ? ' data-force="1"' : '') + (busy ? ' disabled' : '') + '>' +
-    escapeHtml(label) + '</button>';
+    escapeHtml(label) + '</vscode-button>';
 
   const parts = ['<div class="site-sub">助言</div>'];
   parts.push('<div class="advice-ask-row">' + button +
@@ -1412,9 +1470,9 @@ function renderReaderAdvice(site, advice, outcome, busy) {
   }
   if (answered) parts.push(renderReaderAdviceAnswer(outcome));
 
-  parts.push('<details class="fold"><summary>AIへ渡す材料</summary>' +
+  parts.push('<vscode-collapsible class="fold" heading="AIへ渡す材料">' +
     '<div class="advice-material">' + escapeHtml(advice.materialText || '') + '</div>' +
-    readerAdviceSources(advice.sources) + '</details>');
+    readerAdviceSources(advice.sources) + '</vscode-collapsible>');
   return parts.join('');
 }
 
@@ -1746,9 +1804,9 @@ function renderReaderStatsTable(table, title, fold) {
   let html = title ? '<div class="site-sub">' + escapeHtml(title) + '</div>' : '';
   html += readerTableOf(head, shown);
   if (rest.length > 0) {
-    html += '<details class="fold"><summary>これまでの記録（あと ' +
-      formatCount(rest.length) + ' 件）</summary>' +
-      readerTableOf(head, rest) + '</details>';
+    html += '<vscode-collapsible class="fold" heading="これまでの記録（あと ' +
+      formatCount(rest.length) + ' 件）">' +
+      readerTableOf(head, rest) + '</vscode-collapsible>';
   }
   // 出どころが1種類なら、列にせず表の下へ1回だけ書く
   if (columns.onlySource) {
@@ -1771,10 +1829,11 @@ function readerTableOf(head, body) {
  */
 function renderReaderEpisodes(table) {
   if (!table || !table.rows || table.rows.length === 0) return '';
-  return '<details class="fold"><summary>話ごとの記録（' +
+  // 見出しは属性（heading）へ入れるので、逃がした字だけを使う
+  return '<vscode-collapsible class="fold" heading="話ごとの記録（' +
     formatCount(table.rows.length) + '話・最新 ' +
-    escapeHtml(formatWhen(table.rows[0].readAt)) + '）</summary>' +
-    renderReaderStatsTable(table, '', false) + '</details>';
+    escapeHtml(formatWhen(table.rows[0].readAt)) + '）">' +
+    renderReaderStatsTable(table, '', false) + '</vscode-collapsible>';
 }
 
 /**
@@ -1968,12 +2027,12 @@ function renderSiteTags(record) {
         '<td>' + what + '</td>' +
         '<td>' + (change.before.length > 0 ? change.before.map(escapeHtml).join('・') : 'なし') + '</td></tr>';
     });
-    html += '<details class="fold"><summary>タグの付け替え（' +
-      formatCount(history.length) + '回）</summary>' +
+    html += '<vscode-collapsible class="fold" heading="タグの付け替え（' +
+      formatCount(history.length) + '回）">' +
       '<table><thead><tr><th>気づいた日時</th><th>変えたところ</th><th>前のタグ</th></tr></thead>' +
       '<tbody>' + rows.join('') + '</tbody></table>' +
       '<div class="site-foot">日時は、付け替えたあとの画面を読んだときのものです（サイトで付け替えた時刻ではありません）。</div>' +
-      '</details>';
+      '</vscode-collapsible>';
   }
   return html;
 }

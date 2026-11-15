@@ -77,6 +77,8 @@ function stubPanel(): { posted: Posted[]; send: (message: unknown) => Promise<vo
       webview: {
         html: "",
         cspSource: "vscode-webview:",
+        // 画面の部品の束の在りか（2026-11-15）。本物は vscode-resource の URI に変える
+        asWebviewUri: (uri: { toString(): string }) => uri,
         onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => {
           listener = handler;
           return { dispose: () => undefined };
@@ -155,7 +157,7 @@ afterEach(() => {
 
 async function openPanel() {
   const panel = stubPanel();
-  const context = { subscriptions: [] as unknown[], globalState: inner };
+  const context = { subscriptions: [] as unknown[], globalState: inner, extensionUri: Uri.file("C:/ext") };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await openWritingStatsPanel(context as any, work, "pc-1");
   return panel;

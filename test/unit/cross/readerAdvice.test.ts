@@ -674,7 +674,9 @@ describe("画面：助言", () => {
       html.indexOf("直すべき所は見当たりません")
     );
     // 折りたたまない（良いところを details の中へ入れない）
-    const folded = html.indexOf("<details");
+    // 折りたたみは VS Code の部品（vscode-collapsible。2026-11-15）。材料の折りたたみがあることも確かめ、空振りさせない
+    const folded = html.indexOf("<vscode-collapsible");
+    expect(folded).toBeGreaterThan(-1);
     expect(folded === -1 || html.indexOf("第2話へよく続いています。") < folded).toBe(true);
   });
 

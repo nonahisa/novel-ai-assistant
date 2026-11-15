@@ -607,6 +607,16 @@ function decodeUriQuery(value: string): { query: string; text: string } {
 }
 
 export const Uri = {
+  /**
+   * 本物と同じく、道の部分へ `/` でつなぐ（scheme と authority はそのまま）。
+   * 画面の部品の束の在りか（`views/webviewElements.ts`。2026-11-15）がこれで作る
+   */
+  joinPath: (base: StubUri, ...segments: string[]) => {
+    const joined = [base.path.replace(/\/+$/, ""), ...segments.map((part) => part.replace(/^\/+|\/+$/g, ""))].join("/");
+    const fsPath = [base.fsPath.replace(/[\\/]+$/, ""), ...segments].join("/");
+    const text = base.text.replace(/\/+$/, "") + "/" + segments.map((part) => part.replace(/^\/+|\/+$/g, "")).join("/");
+    return new StubUri(base.scheme, base.authority, joined, fsPath, text);
+  },
   file: (fsPath: string) => {
     const normalized = fsPath.replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
     const slashed = normalized.replace(/\\/g, "/");

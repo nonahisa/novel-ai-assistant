@@ -26,7 +26,7 @@ const packages = await collectBundledPackages();
 const parts = [
   "# 同梱しているソフトウェアについて",
   "",
-  "この拡張機能（`dist/extension.js`・`dist/browser-extension.js`・`dist/mcp-server.mjs`・`dist/lame.js`）には、次のライブラリが組み込まれています。",
+  "この拡張機能（`dist/extension.js`・`dist/browser-extension.js`・`dist/mcp-server.mjs`・`dist/lame.js`・`dist/webview-elements.js`）には、次のライブラリが組み込まれています。",
   "著作権はそれぞれの権利者に属し、以下のライセンスの条件で配布しています。",
   "",
   "拡張機能そのもののライセンスは [LICENSE](LICENSE)（MIT）です。",

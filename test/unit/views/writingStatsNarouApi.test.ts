@@ -61,7 +61,8 @@ function checkbox(html: string): string {
   return html.match(/<input type="checkbox"[^>]*>/)?.[0] ?? "";
 }
 function fetchButton(html: string): string {
-  return html.match(/<button data-narou-fetch="1"[^>]*>/)?.[0] ?? "";
+  // ボタンは VS Code の部品（vscode-button。2026-11-15）。見つからなければ空になり、下の検査が落ちる
+  return html.match(/<vscode-button secondary data-narou-fetch="1"[^>]*>/)?.[0] ?? "";
 }
 
 describe("なろうAPIの欄", () => {
