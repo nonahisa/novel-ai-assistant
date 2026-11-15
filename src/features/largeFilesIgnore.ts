@@ -23,12 +23,14 @@ export const IGNORE_LARGE_FILES_LABEL = ".gitignore に足す";
  * ［.gitignore に足す］を押したときだけ、置き場の根の .gitignore の末尾へ道を足す。
  *
  * **ファイルは動かさない・消さない。** 作者が書いた行は変えない（`appendIgnoreRules`）。
- * 足したあと、もう一度同期すれば、そのファイルを除いて記録される
+ * 足したあと、もう一度同期すれば、そのファイルを除いて記録される。
+ * 同期でない所（変更の記録・最初の記録・復元）から押されたときは、`again` で次の一手を言い替える
  */
 export async function ignoreLargeFiles(
   root: string,
   files: readonly LargeFile[],
-  works: readonly WorkEntry[]
+  works: readonly WorkEntry[],
+  again = "もう一度同期してください。"
 ): Promise<void> {
   // 押されるのは報告のあとなので、ログの向きを置き場へ向け直す（書庫なら書庫のログ。設計書5.7.9）
   await useSyncLog(root, works);
@@ -43,7 +45,7 @@ export async function ignoreLargeFiles(
         .join("、")}）`
     );
     void vscode.window.showInformationMessage(
-      `${files.length}件を .gitignore に足しました。もう一度同期してください。`
+      `${files.length}件を .gitignore に足しました。${again}`
     );
   } catch (error) {
     logFailure(".gitignore に足せなかった", {
@@ -70,6 +72,10 @@ export interface TooLargeNoticeOptions {
   works: readonly WorkEntry[];
   /** 知らせのボタンが失敗したときの記録の名前（`whenNoticePicked`） */
   label: string;
+  /** 道の一覧のあとに足す1行（復元で「戻していない」と言うときなど）。無ければ足さない */
+  tail?: string;
+  /** ［.gitignore に足す］のあとの次の一手。無ければ「もう一度同期してください。」 */
+  again?: string;
   /** 試験で大きさを差し替える */
   sizeOf?: SizeOf;
 }
@@ -102,13 +108,14 @@ export async function stopIfTooLargeToRecord(
   const head = options.subject !== undefined ? `「${options.subject}」：` : "";
   whenNoticePicked(
     vscode.window.showWarningMessage(
-      `${head}${describeTooLargeToRecord(large.files)}`,
+      `${head}${describeTooLargeToRecord(large.files)}` +
+        (options.tail !== undefined ? `\n${options.tail}` : ""),
       ...(untracked.length > 0 ? [IGNORE_LARGE_FILES_LABEL] : []),
       "ログを表示"
     ),
     async (action) => {
       if (action === IGNORE_LARGE_FILES_LABEL) {
-        await ignoreLargeFiles(large.root, untracked, options.works);
+        await ignoreLargeFiles(large.root, untracked, options.works, options.again);
       }
       if (action === "ログを表示") showLog();
     },

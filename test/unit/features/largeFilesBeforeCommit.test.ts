@@ -196,6 +196,7 @@ describe("記録の前に、GitHub に送れない大きさのファイルを見
     expect(committed()).toBe(false);
     expect(calls.some((args) => args[0] === "checkout")).toBe(false);
     expect(largeNotices()).toHaveLength(1);
+    expect(largeNotices()[0].message).toContain("過去の版へは戻していません");
     expect(shown.some((one) => one.message.includes("版に戻しました"))).toBe(false);
   });
 
@@ -212,6 +213,22 @@ describe("記録の前に、GitHub に送れない大きさのファイルを見
     expect(calls.some((args) => args[0] === "branch")).toBe(false);
     expect(calls.some((args) => args[0] === "merge")).toBe(false);
     expect(vi.mocked(logFailure)).toHaveBeenCalled();
+    // まだ git に入っていないファイルは、失敗の窓の［.gitignore に足す］へ渡す
+    expect(result.tooLarge?.root).toBe(root);
+    expect(result.tooLarge?.files.map((one) => one.path)).toEqual([BIG]);
+  });
+
+  test("分岐を合わせる前：記録済みのファイルが大きくなっただけなら、足す先を渡さない", async () => {
+    zStatus = ` M ${BIG}\u0000`;
+    const result = await foldDivergence(
+      { registry: { list: () => [work] } as unknown as WorkRegistry, run },
+      { root, label: "書庫", upstream: "origin/main" }
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain(BIG);
+    expect(result.tooLarge).toBeUndefined();
+    expect(committed()).toBe(false);
   });
 
   test("編集部へ渡す：記録も送信もせず、理由を返す（送り直しの合わせ直しへ回さない印つき）", async () => {

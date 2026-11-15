@@ -1245,7 +1245,12 @@ async function reportFold(
       "ログを表示"
     );
     if (action === IGNORE_LARGE_FILES_LABEL && result.tooLarge) {
-      await ignoreLargeFiles(result.tooLarge.root, result.tooLarge.files, deps.registry.list());
+      await ignoreLargeFiles(
+        result.tooLarge.root,
+        result.tooLarge.files,
+        deps.registry.list(),
+        "もう一度お試しください。"
+      );
     }
     if (action === "ログを表示") showLog();
     return;

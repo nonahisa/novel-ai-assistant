@@ -193,6 +193,8 @@ async function stopTooLarge(
     logFields: { 置き場: target.label },
     works: target.works,
     label: "大きすぎるファイルの案内",
+    // 同期の途中ではないので「もう一度同期」とは言わない
+    again: "もう一度お試しください。",
   });
 }
 
@@ -385,8 +387,9 @@ async function commitFirstRecord(
   /*
     **GitHub に送れない大きさのファイルがあれば、1つ目の記録を作らない**（設計書5.5.21）。
     見るのは `git init` のあと——状態を読めない所では検査が空を返して黙って通るため。
-    止めても履歴の箱（.git）は残るが、［.gitignore に足す］のあと「GitHubのセットアップ」を
-    押し直せば、記録が無い置き場の段（`ensureFirstRecord`）からここへ戻ってくる
+    止めても履歴の箱（.git）は残る。［.gitignore に足す］のあと「GitHubのセットアップ」を
+    押し直すと、状態は「送り先が無い」になり、作って送る道（`createAndSend`）とはじめての
+    送信（`firstPush`）の入口の `ensureFirstRecord` から、記録が無ければここへ戻ってくる
   */
   if (await stopTooLarge(target, run, "初回コミット")) return undefined;
 

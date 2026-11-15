@@ -127,6 +127,9 @@ export async function restoreFromHistory(
       logFolder: work.folderPath,
       works: deps.works ?? [work],
       label: "大きすぎるファイルの案内",
+      // 「記録も送信もしませんでした」だけでは、戻したのかどうかが読めない
+      tail: "過去の版へは戻していません。原稿には手を触れていません。",
+      again: "もう一度お試しください。",
     })
   ) {
     return;
