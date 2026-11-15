@@ -97,7 +97,7 @@ async function collectWebviewFrames(cdpPort) {
     for (const frame of frames) {
       if (seen.has(frame.id)) continue;
       seen.add(frame.id);
-      found.push({ url: frame.url, title: frame.title, text: frame.text, pages: frame.pages });
+      found.push({ url: frame.url, title: frame.title, text: frame.text, pages: frame.pages, codicon: frame.codicon });
     }
   }
   return found;
@@ -119,6 +119,18 @@ async function framesOfTarget(webSocketUrl) {
           frameId: frame.id,
           worldName: "novelai-web-probe",
         });
+        // アイコンのある画面では、先に字形の読み込みを1回頼む。アイコンのボタンが前に出ていない面にあると、
+        // 字形は使われるまで読み込まれず（unloaded）、ブラウザ版で読めるかを確かめられないため（2026-11-16）。
+        // 読み込めなければ（CSP の font-src で断られる・ファイルが届かない）unloaded か error のまま残る
+        await session
+          .send("Runtime.evaluate", {
+            contextId: executionContextId,
+            awaitPromise: true,
+            expression:
+              "(document.querySelector('.codicon, vscode-button[icon], vscode-icon') && document.fonts)" +
+              " ? document.fonts.load('16px codicon').then(function () { return true; }, function () { return false; }) : false",
+          })
+          .catch(() => undefined);
         const { result: value } = await session.send("Runtime.evaluate", {
           contextId: executionContextId,
           returnByValue: true,
@@ -126,12 +138,21 @@ async function framesOfTarget(webSocketUrl) {
             // pages：タブで切り替わる面（section.page）の中身。隠れた面は innerText に出ないので、
             // textContent で別に読む（前に出ていない「なろうの反応」の1行を確かめるため）。
             // body 全体の textContent は script の文字列まで拾うので使わない
+            // narouApiButtons：1.0.10 からボタンは vscode-button なので、それも数える（数えないと「出さない」が空振りで通る）。
+            // codicon：アイコンの字形（codicon のフォント）が読み込まれたか。使われて初めて読み込まれるので、
+            // アイコンのある画面でだけ意味がある（1.0.10 の執筆統計は vscode-button の icon 属性で付け、絵は部品の中に
+            // 描かれるので、外からは icon 属性の要素を数える。字形は head の codicon.css で読むので document.fonts に出る）
             "({ title: document.title, text: document.body ? document.body.innerText : ''," +
             " pages: Array.from(document.querySelectorAll('section.page')).map(function (el) {" +
-            " return { id: el.id, text: el.textContent || '', narouApiButtons: el.querySelectorAll('.narou-api button, .narou-api input').length }; }) })",
+            " return { id: el.id, text: el.textContent || '', narouApiButtons: el.querySelectorAll('.narou-api button, .narou-api vscode-button, .narou-api input').length }; })," +
+            " codicon: { elements: document.querySelectorAll('.codicon, vscode-button[icon], vscode-icon').length," +
+            " loaded: document.fonts ? Array.from(document.fonts).some(function (f) { return /codicon/i.test(f.family) && f.status === 'loaded'; }) : false," +
+            // 落ちたときの手がかり：フォントの一覧と状態・codicon.css の link が読めたか（sheet があれば読めた）
+            " fonts: document.fonts ? Array.from(document.fonts).map(function (f) { return f.family + ':' + f.status; }) : []," +
+            " stylesheet: (function () { var l = document.getElementById('vscode-codicon-stylesheet'); return l ? (l.sheet ? 'loaded' : 'not-loaded') : 'missing'; })() } })",
         });
         const read = value && value.value ? value.value : { title: "", text: "", pages: [] };
-        result.push({ id: frame.id, url: frame.url, title: read.title, text: read.text, pages: read.pages || [] });
+        result.push({ id: frame.id, url: frame.url, title: read.title, text: read.text, pages: read.pages || [], codicon: read.codicon });
       } catch {
         // 別プロセスのフレームは、この標的からは読めない（その標的の番で読む）
       }

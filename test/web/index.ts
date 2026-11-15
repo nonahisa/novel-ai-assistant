@@ -366,6 +366,23 @@ export async function run(): Promise<void> {
         `執筆統計が本文の列（${textColumn}列目）ではなく${group.viewColumn}列目に開きました`
       );
       await expectWebviewContent("執筆量");
+      /*
+        ボタンのアイコンの字形（codicon。1.0.10）がブラウザ版でも読めるか。字形は拡張機能の dist/codicons から
+        asWebviewUri で読み、CSP の font-src で許す。読めないと、ボタンの絵が四角や空白になる
+      */
+      let codicon: ProbeFrame["codicon"];
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const stats = (await readWebviewFrames()).find((frame) => (frame.codicon?.elements ?? 0) > 0);
+        codicon = stats?.codicon;
+        if (codicon?.loaded) break;
+        await delay(250);
+      }
+      assert(codicon !== undefined && codicon.elements > 0, "執筆統計にアイコンの付いたボタン（icon 属性）が見つかりません");
+      assert(
+        codicon.loaded,
+        `執筆統計のアイコンの字形（codicon）が読み込まれていません（要素 ${codicon.elements}個・codicon.css ${codicon.stylesheet}・フォント ${JSON.stringify(codicon.fonts)}）`
+      );
+      console.log(`[web] 執筆統計のアイコン：要素 ${codicon.elements}個・字形は読み込み済み`);
     }
   );
 
@@ -877,6 +894,8 @@ interface ProbeFrame {
   text: string;
   /** タブで切り替わる面（section.page）の中身。隠れた面も読める */
   pages?: Array<{ id: string; text: string; narouApiButtons: number }>;
+  /** アイコンの字形（codicon）。elements は .codicon の要素の数、loaded はフォントが読み込まれたか */
+  codicon?: { elements: number; loaded: boolean; fonts?: string[]; stylesheet?: string };
 }
 
 async function readWebviewFrames(): Promise<ProbeFrame[]> {

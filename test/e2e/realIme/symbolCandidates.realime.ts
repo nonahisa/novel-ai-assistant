@@ -19,26 +19,30 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "vitest";
-import { caretPosition, composeText, openEpisode, placeCaretAfter } from "../support/manuscriptFrame";
+import { caretPosition, composeText, openEpisode, placeCaretBefore } from "../support/manuscriptFrame";
 import { saveAndSettle } from "../support/fileSettle";
 import { waitUntil } from "../support/wait";
 import { describeSignals, REAL_IME_ENABLED, runRealImeTest } from "./support/imeBridge";
 
+/*
+  **打つ所は行の頭**（2026-11-16）。IME の今の決まりでは、閉じ括弧が付くのは開き括弧が行の頭にあるときだけ
+  （作者 2026-11-15「行頭でやる場合は今までどおりで、行中では「だけ」）
+*/
 const EPISODE = "003_記号の候補.txt";
 const BODY = "一行目の終わり。\n二行目の終わり。\n";
 const FIRST = "一行目の終わり。";
 const SECOND = "二行目の終わり。";
-const EXPECTED_BODY = "一行目の終わり。『』\n二行目の終わり。『彼は』\n";
+const EXPECTED_BODY = "『』一行目の終わり。\n『彼は』二行目の終わり。\n";
 
 test.skipIf(!REAL_IME_ENABLED)("本物の IME：「 → SPACE の2番目の 『 で 『』 が入ってカーソルが間に来る。「かれは → SPACE の2番目の『彼は で 』 が付く", async (ctx) => {
   await runRealImeTest(ctx, "記号の候補", [{ name: EPISODE, text: BODY }], async (session, ime) => {
     const frame = await openEpisode(session.page, EPISODE, FIRST);
 
     // 1. 「 → SPACE → 2番目（『）で確定
-    await placeCaretAfter(frame, FIRST);
+    await placeCaretBefore(frame, FIRST);
     const mark1 = await ime.mark();
     await ime.type(frame, ["char:[", "key:SPACE", "wait:600", "key:DOWN", "wait:200", "key:ENTER"]);
-    await waitUntil(async () => (await composeText(frame)).includes(`${FIRST}『』`), "『』 が画面に出る", 15_000).catch(
+    await waitUntil(async () => (await composeText(frame)).includes(`『』${FIRST}`), "『』 が画面に出る", 15_000).catch(
       async (error: unknown) => {
         throw new Error(
           `${String(error)}（画面の本文：${JSON.stringify(await composeText(frame))}・${describeSignals(await ime.signalsSince(mark1))}）`
@@ -46,15 +50,15 @@ test.skipIf(!REAL_IME_ENABLED)("本物の IME：「 → SPACE の2番目の 『 
       }
     );
     expect(await caretPosition(frame), `カーソルが 『』 の間にある（${describeSignals(await ime.signalsSince(mark1))}）`).toEqual({
-      lineText: `${FIRST}『』`,
-      column: `${FIRST}『`.length,
+      lineText: `『』${FIRST}`,
+      column: "『".length,
     });
 
     // 2. 「 → かれは → SPACE → 2番目（『彼は）で確定
-    await placeCaretAfter(frame, SECOND);
+    await placeCaretBefore(frame, SECOND);
     const mark2 = await ime.mark();
     await ime.type(frame, ["char:[", "romaji:kareha", "key:SPACE", "wait:600", "key:DOWN", "wait:200", "key:ENTER"]);
-    await waitUntil(async () => (await composeText(frame)).includes(`${SECOND}『彼は』`), "『彼は』 が画面に出る", 15_000).catch(
+    await waitUntil(async () => (await composeText(frame)).includes(`『彼は』${SECOND}`), "『彼は』 が画面に出る", 15_000).catch(
       async (error: unknown) => {
         throw new Error(
           `${String(error)}（画面の本文：${JSON.stringify(await composeText(frame))}・${describeSignals(await ime.signalsSince(mark2))}）`

@@ -4,10 +4,9 @@
  * 「 のキー → ENTER → romaji:a → ENTER と OS のキーで打つ。殻は「 を確定すると 」 を足し、カーソルを
  * 「」の間に置く。続けて打った「あ」は間に入り、本文は「あ」になるのが正しい。
  *
- * **いまは落ちる見込み**（IME の側の答え、2026-11-15）：いまの VS Code（原稿エディター）では、殻が 」 を足した
- * あとカーソルが 」 の後ろへ行き、本文は「」あ になる。まだ直っていない。テストは正しい動き（「あ」）を確かめる形で
- * 書いてあり、`test.fails` にはしない（落ちる見込みのものが「通った」に見えないように）。
- * 直ったら、このコメントの「いまは落ちる見込み」を消す。
+ * 2026-11-15 の IME の側の答えでは、殻が 」 を足したあとカーソルが 」 の後ろへ行き、本文が「」あ になっていた
+ * （括弧のカーソルの置き直しは、そのあと IME の側で直した）。テストは正しい動き（「あ」）を確かめる形で書いてあり、
+ * `test.fails` にはしない。
  *
  * 落ちたとき（と通ったときも）の調べのために、殻の合図の pairs（括弧の対）・carets（カーソルの置き直し）を
  * 失敗の文と試しの注記（annotate）に添える。
@@ -17,21 +16,25 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "vitest";
-import { composeText, openEpisode, placeCaretAfter } from "../support/manuscriptFrame";
+import { composeText, openEpisode, placeCaretBefore } from "../support/manuscriptFrame";
 import { saveAndSettle } from "../support/fileSettle";
 import { waitUntil } from "../support/wait";
 import { describeSignals, REAL_IME_ENABLED, runRealImeTest } from "./support/imeBridge";
 
+/*
+  **打つ所は行の頭**（2026-11-16）。IME の今の決まり（作者 2026-11-15「行頭でやる場合は今までどおりで、行中では「だけ」）
+  では、開き括弧の前が行の初めから空白と開き括弧だけのときだけ閉じ括弧を足す。行の途中で打つと 」 は付かない
+*/
 const EPISODE = "002_かぎ括弧.txt";
 const BODY = "雨が上がった。\n二行目の終わり。\n";
-const NEEDLE = "雨が上がった。";
-const EXPECTED_LINE = "雨が上がった。「あ」";
-const EXPECTED_BODY = "雨が上がった。「あ」\n二行目の終わり。\n";
+const NEEDLE = "二行目の終わり。";
+const EXPECTED_LINE = "「あ」二行目の終わり。";
+const EXPECTED_BODY = "雨が上がった。\n「あ」二行目の終わり。\n";
 
-test.skipIf(!REAL_IME_ENABLED)("本物の IME：「 を確定すると 」 が付いてカーソルが間に来て、続けて打った「あ」が間に入る（いまは落ちる見込み）", async (ctx) => {
+test.skipIf(!REAL_IME_ENABLED)("本物の IME：行の頭で「 を確定すると 」 が付いてカーソルが間に来て、続けて打った「あ」が間に入る", async (ctx) => {
   await runRealImeTest(ctx, "かぎ括弧の対", [{ name: EPISODE, text: BODY }], async (session, ime) => {
     const frame = await openEpisode(session.page, EPISODE, NEEDLE);
-    await placeCaretAfter(frame, NEEDLE);
+    await placeCaretBefore(frame, NEEDLE);
     const mark = await ime.mark();
     await ime.type(frame, ["char:[", "key:ENTER", "wait:300", "romaji:a", "key:ENTER"]);
     // 打った字が画面に出きるのを待つ（「 と 」 と あ の3字が増える）

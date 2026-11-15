@@ -112,6 +112,33 @@ export async function placeCaretAfter(frame: Frame, needle: string): Promise<voi
 }
 
 /**
+ * 組んで書く面の、`needle` の直前へカーソルを置く（その面へ焦点も移す）。行の頭へ置くときに使う
+ * （`needle` に行の初めの字を渡す。本物の IME の試しで、括弧の対が行の頭でだけ付くのを確かめるため）
+ */
+export async function placeCaretBefore(frame: Frame, needle: string): Promise<void> {
+  await frame.locator("#compose").click();
+  const ok = await frame.evaluate((text) => {
+    const compose = document.getElementById("compose");
+    if (!compose) return false;
+    compose.focus();
+    const walker = document.createTreeWalker(compose, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = (node.textContent ?? "").indexOf(text);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return true;
+    }
+    return false;
+  }, needle);
+  if (!ok) throw new Error(`組んで書く面に「${needle}」が見つからず、カーソルを置けません`);
+}
+
+/**
  * 組んで書く面で、`needle` の字を選ぶ（その面へ焦点も移す）。
  *
  * 見えている字で選ぶ——記法の印（《《 》》など）が組んだ面に出ていなくても、
