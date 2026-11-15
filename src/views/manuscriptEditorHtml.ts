@@ -45,6 +45,7 @@ import type { WorkKindKey } from "../core/workKind";
 import { findAction } from "./actionList";
 import { OBSERVE_VISIBLE_WIDTH_SOURCE } from "./visibleWidthScript";
 import { IME_ENTER_GUARD_SOURCE } from "./imeEnterGuardScript";
+import { LAST_LINE_NEWLINE_SOURCE } from "./lastLineNewlineScript";
 import { KEY_LABEL_SCRIPT } from "../core/keyLabels";
 
 /**
@@ -8293,6 +8294,121 @@ ${RESUME_WRITING_LABEL ? `
     }
   });
   /* lineBoundary:end */
+
+  /* lastLineNewline:start */
+  /*
+    ── 最後の行で「次の行へ進むキー」を押したら、改行を1つ足す（作者の依頼、2026-11-15。設計書6.25） ──
+    横書きは ↓、縦書きは ←。末尾の空行が2行になったら、それ以上は足さない。
+    判定（行の数え方・最後の行か・足すか）は lastLineNewlineScript.ts の部品。
+    **改行はふつうに打った Enter と同じ道で入れる**（execCommand。取り消し〔Ctrl+Z〕に乗り、
+    input が起きて文書の改行の種類に合わせた書き戻しへ流れる）。ファイルへ直に書かない。
+    動かす矢印の受け口（下の composeEscapeArrowNow）より先に張り、足したときはそちらへ行かせない
+  */
+${LAST_LINE_NEWLINE_SOURCE}
+  /** カーソル（節点と位置）の見えている箱。collapsed の範囲は箱を持たないことがあるので、近くの字・要素で補う */
+  function lastLineRectOfPoint(node, offset) {
+    const range = document.createRange();
+    try {
+      range.setStart(node, offset);
+      range.collapse(true);
+    } catch (error) {
+      return null;
+    }
+    const rects = range.getClientRects();
+    const first = rects.length > 0 ? rects[0] : range.getBoundingClientRect();
+    if (first && (first.width > 0 || first.height > 0)) return first;
+    if (node.nodeType === 3) {
+      const length = (node.nodeValue || "").length;
+      try {
+        if (offset > 0) {
+          range.setStart(node, offset - 1);
+          range.setEnd(node, offset);
+        } else if (length > 0) {
+          range.setStart(node, 0);
+          range.setEnd(node, 1);
+        }
+        const near = range.getBoundingClientRect();
+        if (near.width > 0 || near.height > 0) return near;
+      } catch (error) {
+        /* 補えなければ、下の要素の箱へ */
+      }
+    }
+    const element = node.nodeType === 1 ? node : node.parentElement;
+    if (element) {
+      const box = element.getBoundingClientRect();
+      if (box.width > 0 || box.height > 0) return box;
+    }
+    return null;
+  }
+
+  /** 組んで書く面：カーソルが本文の最後の見えている行にあるか（選んだ範囲なし・足してよい本文のときだけ true） */
+  function lastLineNewlineWantedOnCompose(isVertical) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
+    if (!selection.focusNode || !compose.contains(selection.focusNode)) return false;
+    const at = composeSelectionNow();
+    if (!at) return false;
+    const text = composeTextNow();
+    if (!lastLineNewlineAllowed(text, at.start, at.end)) return false;
+    const endPoint = composeOffsetToPoint(composeCurrentAtoms(), text.length);
+    if (!endPoint) return false;
+    return lastLineSameRow(
+      lastLineRectOfPoint(selection.focusNode, selection.focusOffset),
+      lastLineRectOfPoint(endPoint.node, endPoint.offset),
+      isVertical
+    );
+  }
+
+  /** 打つ面：同じ判定。字の箱は、見えている行を測るための写し（viewMeasureWrite）で読む */
+  function lastLineNewlineWantedOnWrite(isVertical) {
+    const start = write.selectionStart;
+    const end = write.selectionEnd;
+    if (!lastLineNewlineAllowed(write.value, start, end)) return false;
+    const measure = viewMeasureWrite(isVertical);
+    try {
+      return lastLineSameRow(measure.rectAt(start), measure.rectAt(write.value.length), isVertical);
+    } finally {
+      measure.done();
+    }
+  }
+
+  function lastLineNewlinePress(event, onCompose) {
+    // 変換中・変換を確定する打鍵は日本語入力に任せる
+    if (composing || event.isComposing || event.keyCode === 229) return;
+    // Shift（範囲を伸ばす）・Ctrl・Alt・Meta つきは、ふだんの動きのまま
+    if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+    const isVertical = vertical !== false;
+    if (event.key !== lastLineNewlineKey(isVertical)) return;
+    // 校閲中は字を入れない（改行も字のうち）
+    if (reviewLocked) return;
+    if (onCompose ? !lastLineNewlineWantedOnCompose(isVertical) : !lastLineNewlineWantedOnWrite(isVertical)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (onCompose) {
+      // execCommand は beforeinput を起こさないので、Enter が通る逃がしだけここで当てる
+      composeEscapeEllipsis("insertParagraph");
+      document.execCommand("insertParagraph");
+      return;
+    }
+    const at = write.selectionStart;
+    let inserted = false;
+    try {
+      inserted = document.execCommand("insertText", false, "\\n");
+    } catch (error) {
+      /* 使えない環境では、下の手で入れる */
+    }
+    if (!inserted) {
+      write.setRangeText("\\n", at, at, "end");
+      write.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
+  compose.addEventListener("keydown", function (event) {
+    lastLineNewlinePress(event, true);
+  });
+  write.addEventListener("keydown", function (event) {
+    lastLineNewlinePress(event, false);
+  });
+  /* lastLineNewline:end */
 
   compose.addEventListener("keydown", function (event) {
     if (composing) return;
