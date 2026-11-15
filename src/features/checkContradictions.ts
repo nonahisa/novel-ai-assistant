@@ -1481,6 +1481,10 @@ export async function checkContradictions(
       chunkTextWithLineNumbers: bodyWithLines,
       characterDetails: relevant.characters,
       locationDetails: relevant.locations,
+      // **組織・能力は設定の欄なので、向き（settled／future）を問わず渡す**
+      // （1.10）。空なら欄ごと出ない
+      organizationDetails: relevant.organizations,
+      abilityDetails: relevant.abilities,
       worldviewSummary: relevant.worldview,
       previousSynopses,
       categories,
@@ -1981,8 +1985,17 @@ async function collectSettings(
   const people = characters.characters.filter((character) => !character.isMob);
   const places = locations.records;
   const worldItems = world.records;
+  // 組織と能力も照らす相手にする（2026-11-15 作者の決定）
+  const organizationRecords = organizations.records;
+  const abilityRecords = abilities.records;
 
-  if (people.length === 0 && places.length === 0 && worldItems.length === 0) {
+  if (
+    people.length === 0 &&
+    places.length === 0 &&
+    worldItems.length === 0 &&
+    organizationRecords.length === 0 &&
+    abilityRecords.length === 0
+  ) {
     // **まとめ実行では、ここで作者を止めない**（設計書6.80）。走らせられない
     // ことに変わりはないが、この前提は矛盾検知だけのものなので、残りの検知
     // （誤字脱字・伏線など）まで巻き添えで止まるのは筋が通らない。
@@ -2017,6 +2030,8 @@ async function collectSettings(
   // 本文に出てくるものを探すための索引。用語ハイライトと同じ作り。
   // **組み方は core に置いてある**——ここと試す側で別々に組むと、別名の
   // 広げ方が食い違って「テストでは当たるのに実機では当たらない」が起きる
+  // **組織・能力はこの索引に入れない**（材料の組み立て役が別の索引で探す。
+  // 混ぜると過去の場面を引く語が変わる。`buildOrganizationAbilityIndex`）
   const index = buildContradictionTermIndex({ people, places });
 
   // **材料の組み立ては core の純粋関数へ出した**（設計書6.10.3）。
@@ -2025,17 +2040,27 @@ async function collectSettings(
     people,
     places,
     worldItems,
+    organizations: organizationRecords,
+    abilities: abilityRecords,
     index,
     worldviewMax,
   });
 
   const characterById = new Map(people.map((item) => [item.id, item]));
-  const abilitySystem = abilities.records;
 
   // 設定が変われば同じ本文でも答えが変わる。**更新時刻ではなく中身**で見る
   // （抽出は中身が同じでも updatedAt を書き換えるため。以前ここに
   // updatedAt が混ざっており、抽出のたびに全チャンクのキャッシュが飛んでいた）
-  const fingerprint = settingsFingerprint({ people, places, worldItems });
+  //
+  // **組織・能力も混ぜる**（2026-11-15）。材料に載るようになったので、
+  // 混ぜないと組織の説明を直しても古い指摘が出続ける
+  const fingerprint = settingsFingerprint({
+    people,
+    places,
+    worldItems,
+    organizations: organizationRecords,
+    abilities: abilityRecords,
+  });
 
   let synopses: Array<{ chapter: number | null; synopsis: string }> = [];
   try {
@@ -2091,9 +2116,6 @@ async function collectSettings(
     // 日付を読むのは本文と一緒に1回だけ（作品ぜんぶで1度）
     synopsisTexts: synopses,
   };
-  // 能力・組織はまだ渡していない（引継ぎ書に残した）
-  void abilitySystem;
-  void organizations;
 }
 
 /**

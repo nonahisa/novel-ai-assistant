@@ -74,7 +74,11 @@ import type { NarratorHint } from "../core/narrator";
 //      小さいモデルへの文面は 1.7 と同じに戻るが、**検算は 1.8 のもの**
 //      （括弧を外す照合・設定の欄の自己否定・指示の写し）なので、1.7 と
 //      同じ鍵にはしない——版を上げて、小さいモデルの処理済みを作り直す
-export const CONTRADICTION_CHECK_VERSION = "1.9";
+// 1.10: **組織と能力を材料に載せた**（2026-11-15 作者の決定。設計書6.10.3）。
+//      【組織設定】【能力設定】の欄を、本文に名前が出たものがあるときだけ出す。
+//      出ない回の文面は 1.9 と1文字も変わらないが、出る回は答えが変わるので
+//      版を上げる（設定の指紋にも組織・能力を混ぜたので、どのみち作り直しになる）
+export const CONTRADICTION_CHECK_VERSION = "1.10";
 
 /**
  * 口調の照らし方の指示（1.8）。**そのまま答えに返ってくる前提で置く**
@@ -214,6 +218,16 @@ export interface ContradictionCheckInput {
   characterDetails: string;
   /** 本文に出てくる場所の設定だけ */
   locationDetails: string;
+  /**
+   * 本文に出てくる組織の設定だけ（1.10）。**空なら欄ごと出さない。**
+   *
+   * 人物・場所の欄は空でも「（登録されていません）」と出すが、組織・能力は
+   * 資料を持たない作品が多い。毎回「登録されていません」を2行足すと、
+   * 小さいモデルの読む量が増えるだけで照らす相手は増えない
+   */
+  organizationDetails?: string;
+  /** 本文に出てくる能力の設定だけ（1.10）。空なら欄ごと出さない */
+  abilityDetails?: string;
   /** 世界観のまとめ */
   worldviewSummary: string;
   /** これまでの経緯（前の話のあらすじ） */
@@ -449,7 +463,7 @@ ${orNone(input.characterDetails)}
 
 【場所設定】（本文に登場する場所のみ）
 ${orNone(input.locationDetails)}
-
+${optionalSettingSection("組織設定", "本文に登場する組織のみ", input.organizationDetails)}${optionalSettingSection("能力設定", "本文に登場する能力のみ", input.abilityDetails)}
 【世界観設定】
 ${orNone(input.worldviewSummary)}
 
@@ -706,6 +720,22 @@ export function replyToContradictionToolCall(call: {
 /** 道具の引数を文字列として読む。**無い・空・文字列でないときは空** */
 function textArgument(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * 組織・能力の欄（1.10）。中身が無ければ欄ごと出さない。
+ *
+ * **出さない回の文面は 1.9 と1文字も変わらない**（場所の欄のあとの空行の
+ * 数まで同じ）。欄の後ろに空行を1つ置き、次の【世界観設定】との間を保つ。
+ */
+function optionalSettingSection(
+  title: string,
+  scope: string,
+  value: string | undefined
+): string {
+  const trimmed = value?.trim();
+  if (!trimmed) return "";
+  return `\n【${title}】（${scope}）\n${trimmed}\n`;
 }
 
 function orNone(value: string): string {

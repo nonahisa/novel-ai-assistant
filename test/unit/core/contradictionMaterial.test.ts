@@ -14,12 +14,19 @@ import {
   CARRY_OVER_MAX_CHAPTERS,
 } from "../../../src/core/contradictionMaterial";
 import {
+  describeAbility,
   describeCharacter,
   describeLocation,
+  describeOrganization,
   describeWorldItem,
 } from "../../../src/core/settingsSummary";
+import { emptyAbility, type Ability } from "../../../src/models/ability";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import { emptyLocation, type Location } from "../../../src/models/location";
+import {
+  emptyOrganization,
+  type Organization,
+} from "../../../src/models/organization";
 import { emptyWorldItem, type WorldItem } from "../../../src/models/world";
 import type { RecordChange } from "../../../src/models/jsonValidation";
 
@@ -97,23 +104,202 @@ function world(options: {
   };
 }
 
+function organization(options: {
+  id: string;
+  name: string;
+  aliases?: string[];
+  description?: string | null;
+  chapters?: number[];
+}): Organization {
+  return {
+    ...emptyOrganization(options.id, options.name),
+    aliases: options.aliases ?? [],
+    description: options.description ?? null,
+    appearedChapters: options.chapters ?? [],
+  };
+}
+
+function ability(options: {
+  id: string;
+  name: string;
+  aliases?: string[];
+  limitation?: string | null;
+  userNames?: string[];
+  chapters?: number[];
+}): Ability {
+  return {
+    ...emptyAbility(options.id, options.name),
+    aliases: options.aliases ?? [],
+    limitation: options.limitation ?? null,
+    userNames: options.userNames ?? [],
+    appearedChapters: options.chapters ?? [],
+  };
+}
+
 /** 索引の組み方も本番と同じものを通す（別々に組むと食い違いに気づけない） */
 function material(options: {
   people?: Character[];
   places?: Location[];
   worldItems?: WorldItem[];
+  organizations?: Organization[];
+  abilities?: Ability[];
   worldviewMax?: number;
 }) {
   const people = options.people ?? [];
   const places = options.places ?? [];
+  const organizations = options.organizations ?? [];
+  const abilities = options.abilities ?? [];
   return createContradictionMaterial({
     people,
     places,
     worldItems: options.worldItems ?? [],
+    organizations,
+    abilities,
     index: buildContradictionTermIndex({ people, places }),
     worldviewMax: options.worldviewMax ?? 30000,
   });
 }
+
+describe("組織と能力も材料に載せる（2026-11-15 作者の決定）", () => {
+  test("本文に名前が出た組織と能力だけが載る", () => {
+    const guild = organization({
+      id: "org_001",
+      name: "冒険者ギルド",
+      description: "依頼の仲介料を取る",
+    });
+    const order = organization({
+      id: "org_002",
+      name: "王国騎士団",
+      description: "街道の巡回を受け持つ",
+    });
+    const heal = ability({
+      id: "abil_001",
+      name: "回復魔法",
+      limitation: "自分には使えない",
+    });
+    const fire = ability({ id: "abil_002", name: "火球", limitation: "詠唱が要る" });
+
+    const relevant = material({
+      organizations: [guild, order],
+      abilities: [heal, fire],
+    }).relevantFor("冒険者ギルドの窓口で、回復魔法の話を聞いた。", null);
+
+    // **組み立ては describeOrganization・describeAbility そのまま**
+    expect(relevant.organizations).toBe(describeOrganization(guild));
+    expect(relevant.abilities).toBe(describeAbility(heal));
+    expect(relevant.organizations).not.toContain("王国騎士団");
+    expect(relevant.abilities).not.toContain("火球");
+  });
+
+  test("組織か能力しか当たらない本文でも、AIへ送る（照らす相手がある）", () => {
+    const guild = organization({
+      id: "org_001",
+      name: "冒険者ギルド",
+      description: "依頼の仲介料を取る",
+    });
+
+    const relevant = material({ organizations: [guild] }).relevantFor(
+      "冒険者ギルドに顔を出した。",
+      null
+    );
+
+    expect(relevant.hasAnything).toBe(true);
+  });
+
+  test("先の話で初めて出る組織・能力は載らない（設計書6.10.3）", () => {
+    const guild = organization({
+      id: "org_001",
+      name: "冒険者ギルド",
+      description: "依頼の仲介料を取る",
+      chapters: [5],
+    });
+    const heal = ability({
+      id: "abil_001",
+      name: "回復魔法",
+      limitation: "自分には使えない",
+      chapters: [7],
+    });
+
+    const at3 = material({
+      organizations: [guild],
+      abilities: [heal],
+    }).relevantFor("冒険者ギルドで回復魔法を見た。", 3);
+    expect(at3.organizations).toBe("");
+    expect(at3.abilities).toBe("");
+    expect(at3.hasAnything).toBe(false);
+
+    const at7 = material({
+      organizations: [guild],
+      abilities: [heal],
+    }).relevantFor("冒険者ギルドで回復魔法を見た。", 7);
+    expect(at7.organizations).toContain("冒険者ギルド");
+    expect(at7.abilities).toContain("回復魔法");
+  });
+
+  test("別名でも拾う", () => {
+    const guild = organization({
+      id: "org_001",
+      name: "冒険者ギルド",
+      aliases: ["ギルド"],
+      description: "依頼の仲介料を取る",
+    });
+
+    const relevant = material({ organizations: [guild] }).relevantFor(
+      "ギルドに寄ってから帰った。",
+      null
+    );
+    expect(relevant.organizations).toContain("冒険者ギルド");
+  });
+
+  test("能力の使い手に、その話までに出ていない人物を書かない", () => {
+    const hero = person({ id: "char_001", name: "灯", chapters: [1] });
+    const later = person({ id: "char_002", name: "ミナ", chapters: [9] });
+    const heal = ability({
+      id: "abil_001",
+      name: "回復魔法",
+      limitation: "自分には使えない",
+      userNames: ["灯", "ミナ"],
+    });
+
+    const relevant = material({
+      people: [hero, later],
+      abilities: [heal],
+    }).relevantFor("回復魔法を使った。", 3);
+    expect(relevant.abilities).toContain("使い手: 灯");
+    expect(relevant.abilities).not.toContain("ミナ");
+  });
+
+  test("過去の場面を引く語には、組織・能力を混ぜない（設計書6.74）", () => {
+    // 混ぜて測ると要る場面の拾いが減った（作者の19話・219話の写し、2026-11-15）
+    const guild = organization({
+      id: "org_001",
+      name: "冒険者ギルド",
+      description: "依頼の仲介料を取る",
+    });
+    const names = material({ organizations: [guild] }).namesIn(
+      "冒険者ギルドに寄った。"
+    );
+    expect(names).not.toContain("冒険者ギルド");
+  });
+
+  test("組織名が人物の名前を含んでいても、人物は見つかる", () => {
+    // 同じ索引に混ぜると、重なった語のうち長いほう（組織名）が採られて人物が消える
+    const nine = person({ id: "char_001", name: "ミナ", role: "生徒会長" });
+    const court = organization({
+      id: "org_001",
+      name: "ミナ親衛隊",
+      description: "生徒会長の身辺を守る",
+    });
+
+    const relevant = material({
+      people: [nine],
+      organizations: [court],
+    }).relevantFor("ミナ親衛隊が門を固めた。", null);
+
+    expect(relevant.characters).toContain("ミナ");
+    expect(relevant.organizations).toContain("ミナ親衛隊");
+  });
+});
 
 describe("本文に出てくるものだけを渡す", () => {
   test("名前の出ない人物は載らない", () => {

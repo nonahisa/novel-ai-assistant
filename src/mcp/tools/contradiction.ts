@@ -82,6 +82,8 @@ import {
   type EpisodeText,
 } from "../../core/locationConsistency";
 import { parseWorldItem, type WorldItem } from "../../models/world";
+import { parseOrganization } from "../../models/organization";
+import { parseAbility } from "../../models/ability";
 import { parseSynopsisSet } from "../../models/synopsis";
 import {
   McpToolError,
@@ -141,6 +143,9 @@ interface Settings {
   people: Character[];
   places: Location[];
   worldItems: WorldItem[];
+  /** 件数だけ持つ（中身は `material` が抱えている） */
+  organizationCount: number;
+  abilityCount: number;
   material: ContradictionMaterial;
   synopsesBefore(chapter: number | null): string;
   /**
@@ -190,7 +195,19 @@ function loadSettings(
     SETTINGS_SUBDIRS.world,
     parseWorldItem
   );
+  // 組織と能力も照らす相手にする（2026-11-15 作者の決定。製品と同じ）
+  const organizations = readSettingsRecords(
+    folder,
+    SETTINGS_SUBDIRS.organizations,
+    parseOrganization
+  );
+  const abilities = readSettingsRecords(
+    folder,
+    SETTINGS_SUBDIRS.abilities,
+    parseAbility
+  );
 
+  // 組織・能力はこの索引に入れない（製品と同じ。`buildOrganizationAbilityIndex`）
   const index = buildContradictionTermIndex({
     people: people.records,
     places: places.records,
@@ -199,6 +216,8 @@ function loadSettings(
     people: people.records,
     places: places.records,
     worldItems: worldItems.records,
+    organizations: organizations.records,
+    abilities: abilities.records,
     index,
     worldviewMax: worldviewMaxChars(contextWindow),
   });
@@ -220,6 +239,8 @@ function loadSettings(
     people: people.records,
     places: places.records,
     worldItems: worldItems.records,
+    organizationCount: organizations.records.length,
+    abilityCount: abilities.records.length,
     material,
     synopsesBefore(chapter) {
       if (chapter === null) return "";
@@ -235,7 +256,12 @@ function loadSettings(
     // 日付を読むのは本文と一緒に1回だけ（作品ぜんぶで1度）
     synopses,
     knownAt: buildKnownAtIndex(people.records),
-    unreadable: people.unreadable + places.unreadable + worldItems.unreadable,
+    unreadable:
+      people.unreadable +
+      places.unreadable +
+      worldItems.unreadable +
+      organizations.unreadable +
+      abilities.unreadable,
   };
 }
 
@@ -638,6 +664,10 @@ export interface ContradictionChunkMaterial {
   characterDetails: string;
   /** 本文に出てくる場所の設定だけ */
   locationDetails: string;
+  /** 本文に出てくる組織の設定だけ（その話までに出たもの。2026-11-15） */
+  organizationDetails: string;
+  /** 本文に出てくる能力の設定だけ（その話までに出たもの。2026-11-15） */
+  abilityDetails: string;
   worldviewSummary: string;
   previousSynopses: string;
   /** 照らし合わせる相手があるか。**無ければAIへ送らない** */
@@ -714,7 +744,13 @@ export interface ContradictionMaterialInput {
 }
 
 export function contradictionMaterial(input: ContradictionMaterialInput): {
-  settingsCount: { people: number; places: number; world: number };
+  settingsCount: {
+    people: number;
+    places: number;
+    world: number;
+    organizations: number;
+    abilities: number;
+  };
   unreadableSettings: number;
   referenceBudgetChars: number;
   /** 材料の予算と、それを決めた読める長さ */
@@ -741,6 +777,8 @@ export function contradictionMaterial(input: ContradictionMaterialInput): {
       people: settings.people.length,
       places: settings.places.length,
       world: settings.worldItems.length,
+      organizations: settings.organizationCount,
+      abilities: settings.abilityCount,
     },
     unreadableSettings: settings.unreadable,
     referenceBudgetChars: settings.material.referenceBudgetChars,
@@ -788,6 +826,8 @@ function materialForChunk(
     chars: chunk.text.length,
     characterDetails: relevant.characters,
     locationDetails: relevant.locations,
+    organizationDetails: relevant.organizations,
+    abilityDetails: relevant.abilities,
     worldviewSummary: relevant.worldview,
     previousSynopses: settings.synopsesBefore(chunk.chapterStart),
     hasAnything: relevant.hasAnything,
@@ -928,6 +968,8 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
         chunkTextWithLineNumbers: withLineNumbers(chunk),
         characterDetails: material.characterDetails,
         locationDetails: material.locationDetails,
+        organizationDetails: material.organizationDetails,
+        abilityDetails: material.abilityDetails,
         worldviewSummary: material.worldviewSummary,
         previousSynopses: material.previousSynopses,
         categories,

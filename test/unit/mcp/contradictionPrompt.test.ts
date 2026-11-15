@@ -189,7 +189,7 @@ describe("MCP の options.suppression", () => {
     const built = promptFor();
 
     expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT);
-    expect(built.promptVersion).toBe("1.9");
+    expect(built.promptVersion).toBe("1.10");
     // 空文字は打ち間違いとみなさず、既定へ倒す
     expect(promptFor("")).toEqual(built);
   });
@@ -199,7 +199,7 @@ describe("MCP の options.suppression", () => {
     const built = promptFor("strict");
 
     expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT);
-    expect(built.promptVersion).toBe("1.9:strict");
+    expect(built.promptVersion).toBe("1.10:strict");
   });
 
   test("strict では口調の指示も外れ、既定では残る（P-12 1.9。製品と同じ組み合わせ）", () => {

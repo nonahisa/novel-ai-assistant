@@ -1,7 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { settingsFingerprint } from "../../../src/core/settingsSummary";
+import { hashText } from "../../../src/core/hash";
+import {
+  describeCharacter,
+  describeLocation,
+  describeWorldItem,
+  settingsFingerprint,
+} from "../../../src/core/settingsSummary";
 import { emptyCharacter, type Character } from "../../../src/models/character";
+import { emptyAbility } from "../../../src/models/ability";
 import { emptyLocation } from "../../../src/models/location";
+import { emptyOrganization } from "../../../src/models/organization";
 import { emptyWorldItem } from "../../../src/models/world";
 
 function character(overrides: Partial<Character> = {}): Character {
@@ -81,5 +89,51 @@ describe("設定の指紋（矛盾検知のキャッシュ鍵）", () => {
     });
 
     expect(moved).not.toBe(base);
+  });
+
+  test("組織や能力の中身が変われば、指紋は変わる（2026-11-15 から材料に載る）", () => {
+    const of = (description: string | null, limitation: string | null) =>
+      settingsFingerprint({
+        people: [character()],
+        places: [],
+        worldItems: [],
+        organizations: [
+          { ...emptyOrganization("org_001", "冒険者ギルド"), description },
+        ],
+        abilities: [{ ...emptyAbility("abil_001", "回復魔法"), limitation }],
+      });
+
+    const base = of(null, null);
+    expect(of("依頼の仲介料を取る", null)).not.toBe(base);
+    expect(of(null, "自分には使えない")).not.toBe(base);
+  });
+
+  test("組織・能力を渡さない呼び手の指紋は、直す前の式と同じ", () => {
+    // 渡さない呼び手のキャッシュを、この変更で飛ばさない。直す前（1.0.7）の
+    // 式をここに写して比べる
+    const person = character();
+    const place = emptyLocation("loc_001", "月見坂");
+    const item = emptyWorldItem("world_001", "灯火の儀");
+    const before = hashText(
+      JSON.stringify([
+        [[person.id, describeCharacter(person, [])]],
+        [[place.id, describeLocation(place)]],
+        [[item.id, describeWorldItem(item)]],
+      ])
+    ).slice(0, 16);
+
+    expect(
+      settingsFingerprint({ people: [person], places: [place], worldItems: [item] })
+    ).toBe(before);
+    // 渡したときは（空の並びでも）別の指紋になる
+    expect(
+      settingsFingerprint({
+        people: [person],
+        places: [place],
+        worldItems: [item],
+        organizations: [],
+        abilities: [],
+      })
+    ).not.toBe(before);
   });
 });

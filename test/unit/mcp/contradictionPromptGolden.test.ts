@@ -40,6 +40,11 @@ import { contradictionPrompt } from "../../../src/mcp/tools/contradiction";
  * 予算を決めていた日に作ったので、同じ長さを読める長さとして渡すと1文字も
  * 変わらない。**材料の組み立てそのものは変えていない**ので、版も写しも据え置く。
  */
+/*
+ * **1.10（2026-11-15）では、写しの版の文字列だけを直した。** 組織・能力の欄を
+ * 足したが、この台は組織・能力の資料を持たないので欄が出ず、userPrompt は
+ * 1文字も変わらない（変わったら欄の空行の数の不具合である）。
+ */
 const GOLDEN_CONTEXT_WINDOW = 16384;
 
 interface GoldenChunk {

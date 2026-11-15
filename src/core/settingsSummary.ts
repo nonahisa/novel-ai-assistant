@@ -265,12 +265,23 @@ export function settingsFingerprint(options: {
   people: readonly Character[];
   places: readonly Location[];
   worldItems: readonly WorldItem[];
+  /** 矛盾検知の材料に載る組織・能力（2026-11-15）。省くと混ぜない */
+  organizations?: readonly Organization[];
+  abilities?: readonly Ability[];
 }): string {
-  return hashText(
-    JSON.stringify([
-      options.people.map((c) => [c.id, describeCharacter(c, [])]),
-      options.places.map((l) => [l.id, describeLocation(l)]),
-      options.worldItems.map((w) => [w.id, describeWorldItem(w)]),
-    ])
-  ).slice(0, 16);
+  const parts: unknown[] = [
+    options.people.map((c) => [c.id, describeCharacter(c, [])]),
+    options.places.map((l) => [l.id, describeLocation(l)]),
+    options.worldItems.map((w) => [w.id, describeWorldItem(w)]),
+  ];
+  // **渡されたときだけ足す。** 渡さない呼び手の指紋は以前と同じままにする。
+  // 空の並びでも渡されたら足す——矛盾検知は材料の形が変わったので、
+  // 組織・能力を持たない作品でも一度は作り直してよい（版も上げてある）
+  if (options.organizations || options.abilities) {
+    parts.push(
+      (options.organizations ?? []).map((o) => [o.id, describeOrganization(o)]),
+      (options.abilities ?? []).map((a) => [a.id, describeAbility(a)])
+    );
+  }
+  return hashText(JSON.stringify(parts)).slice(0, 16);
 }

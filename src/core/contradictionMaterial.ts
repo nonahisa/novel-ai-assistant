@@ -1,5 +1,7 @@
+import type { Ability } from "../models/ability";
 import type { Character } from "../models/character";
 import type { Location } from "../models/location";
+import type { Organization } from "../models/organization";
 import type { WorldItem } from "../models/world";
 import { sha1Text } from "./hash";
 import { detectNarrator, type NarratorHint } from "./narrator";
@@ -11,8 +13,10 @@ import {
   recordAsOf,
 } from "./settingsAsOf";
 import {
+  describeAbility,
   describeCharacter,
   describeLocation,
+  describeOrganization,
   describeWorldItem,
 } from "./settingsSummary";
 import { TermIndex, expandNameVariants, type TermEntry } from "./termIndex";
@@ -56,10 +60,43 @@ export const CHARACTER_AS_OF_FIELDS = [
 
 export const LOCATION_AS_OF_FIELDS = ["summary", "region", "description"];
 
+/**
+ * 組織・能力で話数を巻き戻す項目（2026-11-15）。
+ *
+ * いまの資料の形には変化の記録（`changes`）が無いので、`recordAsOf` は
+ * そのまま通す。**それでも人物・場所と同じ道を通しておく**——変化の記録を
+ * 足した日に、ここを書き足すだけで巻き戻しが効くようにするため。
+ */
+export const ORGANIZATION_AS_OF_FIELDS = [
+  "summary",
+  "category",
+  "parent",
+  "description",
+];
+
+export const ABILITY_AS_OF_FIELDS = [
+  "summary",
+  "category",
+  "description",
+  "cost",
+  "limitation",
+];
+
 /** そのチャンクへ載せる材料（プロンプトの各欄へそのまま入る） */
 export interface RelevantSettings {
   characters: string;
   locations: string;
+  /**
+   * 本文に名前（別名）が出た組織（2026-11-15 作者の決定「組織と能力を入れる」）。
+   *
+   * 1.0.7 までは人物・場所・世界観しか載らず、組織の決まりと食い違う本文は
+   * **構造上拾えなかった**（作者の219話の測りで、組織・能力の問い7件は
+   * 1件も材料に載らなかった）。載せ方は場所と同じ——本文に名前が出たもの、
+   * その話までに出たものだけ
+   */
+  organizations: string;
+  /** 本文に名前（別名）が出た能力。載せ方は組織と同じ */
+  abilities: string;
   /** そのチャンクへ載せる世界観。上限内なら全項目（設計書6.27.6） */
   worldview: string;
   /**
@@ -175,10 +212,11 @@ export interface ContradictionMaterial {
   /**
    * その本文に出てくる、索引にある語（設計書6.74）。
    *
-   * **種別で絞らない。** いま索引に載っているのは人物と場所だが、能力名・
-   * 組織名も過去の場面を引く語としては同じように役に立つ（本体の裁定、
-   * 0.32.6）。索引へ足せばそのまま検索語になるよう、ここでは
-   * `TermKind` を見ずに全部返す。
+   * **種別で絞らない。** 能力名・組織名も過去の場面を引く語としては
+   * 同じように役に立つと考えていた（本体の裁定、0.32.6）。ただし
+   * 2026-11-15 に組織・能力をこの索引へ足して測ると、要る場面の拾いが
+   * 減ったので、**組織・能力は別の索引に置き、ここへは混ぜていない**
+   * （`buildOrganizationAbilityIndex`）。ここでは `TermKind` を見ずに全部返す。
    *
    * **本文に現れた表記そのもの**を返す（正式名称ではない）。過去の場面は
    * 語句一致で引くので、本文が「灯くん」としか書いていないのに正式名称の
@@ -228,6 +266,53 @@ export function buildContradictionTermIndex(options: {
 }
 
 /**
+ * 組織・能力を本文から探す索引（2026-11-15）。
+ *
+ * **人物・場所の索引（`buildContradictionTermIndex`）とは別に組む。** 同じ
+ * 索引に混ぜると、2つのことが変わってしまうと測って分かった（作者の19話・
+ * 219話の写し、`--ai off`）。
+ *
+ * 1. **過去の場面を引く語（`namesIn`）が増え、要る場面の拾いが減った**
+ *    （19話で確実の場面 18→17、219話でたぶんの場面 5→4）。**推定だが**、
+ *    組織・能力の名前は多くの話に出るので、人物の名前で引けていた場面が
+ *    枠（8件・6,000字）から押し出されたと見ている
+ * 2. 索引は重なった語のうち長いほう（最左最長）を採るので、人物・場所の
+ *    名前を含む組織名があると、その人物・場所が本文から見つからなくなる
+ *    （219話で、1チャンクに載る人物が平均 13.5→13.4人に減った）
+ *
+ * **別名は広げない**（場所と同じ）。「冒険者ギルド」を区切りで切ると
+ * 「ギルド」が残り、ほかの組織の名前とも重なる。作者や抽出が別名として
+ * 登録した表記だけで引く。
+ */
+function buildOrganizationAbilityIndex(
+  organizations: readonly Organization[],
+  abilities: readonly Ability[]
+): TermIndex {
+  const entries: TermEntry[] = [];
+  for (const organization of organizations) {
+    for (const text of [organization.name, ...organization.aliases]) {
+      entries.push({
+        text,
+        kind: "organization",
+        id: organization.id,
+        canonicalName: organization.name,
+      });
+    }
+  }
+  for (const ability of abilities) {
+    for (const text of [ability.name, ...ability.aliases]) {
+      entries.push({
+        text,
+        kind: "ability",
+        id: ability.id,
+        canonicalName: ability.name,
+      });
+    }
+  }
+  return new TermIndex(entries);
+}
+
+/**
  * 突き合わせる材料の組み立て役を作る。
  *
  * **索引と対応表は1回だけ作る。** `relevantFor` はチャンクごとに呼ばれるので、
@@ -237,15 +322,31 @@ export function createContradictionMaterial(options: {
   people: readonly Character[];
   places: readonly Location[];
   worldItems: readonly WorldItem[];
+  /**
+   * 組織と能力（2026-11-15）。本文から探す索引はここで別に組む
+   * （`buildOrganizationAbilityIndex`）。省くと載せない
+   */
+  organizations?: readonly Organization[];
+  abilities?: readonly Ability[];
   /** `buildContradictionTermIndex` で組んだもの。呼ぶ側が別の用途にも使う */
   index: TermIndex;
   /** そのモデルで世界観に使ってよい字数（`worldviewMaxChars`） */
   worldviewMax: number;
 }): ContradictionMaterial {
   const { people, places, worldItems, index, worldviewMax } = options;
+  const organizations = options.organizations ?? [];
+  const abilities = options.abilities ?? [];
 
   const characterById = new Map(people.map((item) => [item.id, item]));
   const locationById = new Map(places.map((item) => [item.id, item]));
+  const organizationById = new Map(
+    organizations.map((item) => [item.id, item])
+  );
+  const abilityById = new Map(abilities.map((item) => [item.id, item]));
+  const organizationAbilityIndex = buildOrganizationAbilityIndex(
+    organizations,
+    abilities
+  );
 
   // 世界観の全文（上限に掛ける前）の長さ。チャンクの大きさを決めるときに、
   // 「上限いっぱい確保する」のではなく実際に必要な分だけ引くために測る
@@ -258,9 +359,28 @@ export function createContradictionMaterial(options: {
     relevantFor(text, chapter, relevantOptions) {
       const seenCharacters = new Set<string>();
       const seenLocations = new Set<string>();
+      const seenOrganizations = new Set<string>();
+      const seenAbilities = new Set<string>();
+      /*
+        **能力の「使い手」から、その話までに出ていない人物を外す**（6.10.3）。
+        使い手の並びは作品全体から作られているので、そのまま書くと**先の話で
+        覚える人**が材料に漏れる。人物の資料に無い名前は、出た話が分からない
+        ので残す（分からないものを消すと、作者が手で書いた名前が黙って消える）
+      */
+      const notYetAppearedNames = new Set(
+        people
+          .filter((item) => !hasAppearedBy(item.appearedChapters, chapter))
+          .map((item) => item.name)
+      );
       for (const match of index.find(text)) {
         if (match.entry.kind === "character") seenCharacters.add(match.entry.id);
         if (match.entry.kind === "location") seenLocations.add(match.entry.id);
+      }
+      for (const match of organizationAbilityIndex.find(text)) {
+        if (match.entry.kind === "organization") {
+          seenOrganizations.add(match.entry.id);
+        }
+        if (match.entry.kind === "ability") seenAbilities.add(match.entry.id);
       }
 
       /*
@@ -391,6 +511,44 @@ export function createContradictionMaterial(options: {
         .join("\n\n");
 
       /*
+        **組織・能力も、本文に名前が出たものだけ・その話までに出たものだけ**
+        （2026-11-15 作者の決定。載せる基準は人物・場所と同じ）。
+
+        **前の話から引き継がない。** 引き継ぎは「名前を言わない語り手」を
+        拾うための仕組みで（6.10.6）、組織や能力で落ちる穴は測れていない。
+        場所と同じく、引き継ぐと**いまの場面に関わらない決まり**が積み上がる。
+
+        **所属する人物は書かない**（`describeOrganization` の第2引数を渡さない）。
+        所属は人物の側（`affiliation`）にあり、その人が載れば材料に入る。
+        組織の側で並べると、先の話で加わる人まで書くことになる。
+      */
+      const organizationText = [...seenOrganizations]
+        .map((id) => organizationById.get(id))
+        .filter((item) => item !== undefined)
+        .filter((item) => hasAppearedBy(item.appearedChapters, chapter))
+        .map((item) => recordAsOf(item, ORGANIZATION_AS_OF_FIELDS, chapter))
+        .filter(
+          (item) => !isEmptyAfterRollback(item, ORGANIZATION_AS_OF_FIELDS)
+        )
+        .map((item) => describeOrganization(item))
+        .join("\n\n");
+      const abilityText = [...seenAbilities]
+        .map((id) => abilityById.get(id))
+        .filter((item) => item !== undefined)
+        .filter((item) => hasAppearedBy(item.appearedChapters, chapter))
+        .map((item) => recordAsOf(item, ABILITY_AS_OF_FIELDS, chapter))
+        .filter((item) => !isEmptyAfterRollback(item, ABILITY_AS_OF_FIELDS))
+        .map((item) =>
+          describeAbility({
+            ...item,
+            userNames: item.userNames.filter(
+              (name) => !notYetAppearedNames.has(name)
+            ),
+          })
+        )
+        .join("\n\n");
+
+      /*
         **世界観も、その話までに出た項目だけにする**（6.10.3。2026-09-26 の比べ）。
 
         世界観は人物・場所と違って話数で絞っておらず、上限の範囲で作品全体から
@@ -408,6 +566,8 @@ export function createContradictionMaterial(options: {
       return {
         characters: characterText,
         locations: locationText,
+        organizations: organizationText,
+        abilities: abilityText,
         // **世界観にも上限を置く**（設計書6.27.6の穴2）。上限内なら
         // 全項目が元の並び順で入るので、いまの作品では従来と同じ文字列になる
         worldview:
@@ -425,7 +585,11 @@ export function createContradictionMaterial(options: {
         // 上限で絞っても1件は必ず残るので、項目があるかどうかで見てよい
         // （**その話までに出た項目で**数える。先の話の項目しか無ければ材料にしない）
         hasAnything: Boolean(
-          characterText || locationText || knownWorldItems.length > 0
+          characterText ||
+            locationText ||
+            organizationText ||
+            abilityText ||
+            knownWorldItems.length > 0
         ),
         missedCharacters,
         narrator,
