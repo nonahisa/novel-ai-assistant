@@ -60,6 +60,7 @@ import {
   TypoDismissedHistory,
 } from "../core/typoIssueHistory";
 import { checkWritingStyle } from "../core/writingStyleCheck";
+import { checkKanaSwaps, isSameFix } from "../core/kanaSwapCheck";
 import { CharacterStore } from "../core/characterStore";
 import {
   createAbilityStore,
@@ -433,8 +434,19 @@ export async function checkTypos(
   // 文章作法（三点リーダー・ダッシュの偶数使用、鉤括弧内文末の句点、
   // 感嘆符・疑問符後の空白）はAIを使わずコードだけで判定できるため、
   // AIの実行有無・キャッシュに関係なく毎回すべてのチャンクに対して行う
+  //
+  // 隣どうしの仮名の入れ替わり（「もろちん」→「もちろん」）も同じ扱いにする
+  // （設計書6.8.21）。手元のAIが素通りした形で、語の一覧と照らせば決まる。
+  // 固有名詞と「直さない語」に重なる所は出さない（わざと書いた台詞を守れるように）
+  const kanaSwapGuards = {
+    protectedNames,
+    keepWords: keepWords.map((entry) => entry.word),
+  };
   for (const chunk of chunks) {
-    for (const issue of checkWritingStyle(chunk)) {
+    for (const issue of [
+      ...checkWritingStyle(chunk),
+      ...checkKanaSwaps(chunk, kanaSwapGuards),
+    ]) {
       // **まとめたチャンクでは、行番号が元ファイルのものではない。**
       // 戻せないものは捨てる（どこを直すのか分からないため）
       const at = locateChunkLine(chunk, issue.line);
@@ -981,6 +993,18 @@ export function collectIssues(
       )
     ) {
       alreadyApplied++;
+      continue;
+    }
+
+    // **同じ所を同じ形に直す指摘が、もう一覧にあれば足さない。** コードで拾った
+    // 仮名の入れ替わり（設計書6.8.21）をAIも指摘すると、パネルに2件並び、
+    // 片方を当てるともう片方は当てられなくなる
+    if (
+      out.some(
+        (existing) =>
+          existing.filePath === at.filePath && isSameFix(existing, located)
+      )
+    ) {
       continue;
     }
 
