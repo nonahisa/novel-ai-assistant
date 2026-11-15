@@ -28,6 +28,8 @@ node scripts/checkMarketplace.mjs
 
 ### 1. VSIX を作って検証する
 
+**配布の前の全件は、Mac だけに頼らない**（作者の指示 2026-11-15「Mac だけにすると Windows での確認ができません。交互に行うとか Windows で確認するとか、もっとゆるく対応して OK です」）。版ごとに Mac と Windows（この PC の package:vsix・test:e2e）を交互にしてよく、Mac の全件を待って配布を止めない。Mac で落ちた件は次の版までに直す。どちらの番かは配布の記録に書く。
+
 **検査したコミットで作業場を切って作る。main の先頭から作らない**（配布を待つ間に、製品のセッションの記録などが main へ積まれる。Mac などで全件を通したコミットと、VSIX の中身をそろえるため。2026-11-15 の引き継ぎの教訓）。`git worktree add <場所> <完全なコミット番号>` で切り、その作業場で `npm ci` から始める。
 
 **PowerShell から走らせる**（Git Bash だと `verify:vsix` の `tar` が GNU tar になり ZIP を読めない）。**先に `ELECTRON_RUN_AS_NODE` を外す**（拡張機能ホストの環境変数を継ぐと Electron 製の子プロセスが即終了する）。
