@@ -96,8 +96,19 @@ test("相談する作品を選んでおくと、VS Code を開き直したあと
       await clearNotifications(page0);
 
       // ファイルは開かず、相談する作品を作品Bに選ぶ
-      await runCommand(page0, "相談作品選択");
-      await waitForQuickPick(page0, "どの作品について相談しますか");
+      /*
+        登録の知らせが出ても、作品の一覧に作品Bが入るのは少しあと。選ぶ画面の行は開いた時の一覧で並ぶので、
+        作品Bの行が無ければ閉じて開き直す（2026-11-15 Mac、作品Bの行が無いまま押しに行って落ちた）
+      */
+      let rows: Awaited<ReturnType<typeof waitForQuickPick>> = [];
+      for (let attempt = 1; ; attempt += 1) {
+        await runCommand(page0, "相談作品選択");
+        rows = await waitForQuickPick(page0, "どの作品について相談しますか");
+        if (rows.some((row) => row.label.includes(OTHER_TITLE))) break;
+        if (attempt >= 5) throw new Error(`選ぶ画面に「${OTHER_TITLE}」の行が出ません（行：${JSON.stringify(rows)}）`);
+        await page0.keyboard.press("Escape");
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
       await pickQuickPickRow(page0, OTHER_TITLE);
 
       // 相談パネルを開くと、上部に作品Bが出る
