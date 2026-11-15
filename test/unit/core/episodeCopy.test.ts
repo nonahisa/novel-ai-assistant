@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  subtitleRenameRefusal,
   collectedEpisodeAt,
   extractEpisodeParts,
   sourceForPostingCopy,
@@ -373,5 +374,23 @@ describe("合本は1話ぶんだけコピーする", () => {
         collectedEpisodeAt(COLLECTED, lineOf("　朝の駅で手を振った。"))?.body
       )
     ).toBe("選んだところ");
+  });
+});
+
+/**
+ * サブタイトルを付けられなかったときの知らせ（2026-11-16 の画面テストの担当の気づき）。
+ * 話数の無い話（閑話.txt）に「題が話数だけのようです」と出ていた。
+ */
+describe("サブタイトルを付けられなかったときの知らせ", () => {
+  test("すでに付いている", () => {
+    expect(subtitleRenameRefusal("001_はじまり.txt", "はじまり", 1)).toBe("001_はじまり.txt には既にサブタイトルが付いています。");
+  });
+  test("話数のある話で読めない：題が話数だけ", () => {
+    expect(subtitleRenameRefusal("001.txt", "", 1)).toBe("001.txt からサブタイトルを読み取れませんでした（題が話数だけのようです）。");
+  });
+  test("話数の無い話で読めない：【タイトル】が無い（話数のことは言わない）", () => {
+    const text = subtitleRenameRefusal("閑話.txt", "", null);
+    expect(text).toBe("閑話.txt からサブタイトルを読み取れませんでした（ファイルの中に【タイトル】が無いようです）。");
+    expect(text).not.toContain("話数");
   });
 });

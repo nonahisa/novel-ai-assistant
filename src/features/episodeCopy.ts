@@ -2,7 +2,7 @@ import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
-import { extractEpisodeParts, nameWithSubtitle } from "../core/episodeCopy";
+import { extractEpisodeParts, nameWithSubtitle, subtitleRenameRefusal } from "../core/episodeCopy";
 import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
 import { readTextFile } from "../core/textFile";
@@ -162,9 +162,7 @@ export async function renameWithSubtitle(
   const next = nameWithSubtitle(episode.fileName, nameSubtitle, subtitle);
   if (!next) {
     void vscode.window.showInformationMessage(
-      subtitle
-        ? `${episode.fileName} には既にサブタイトルが付いています。`
-        : `${episode.fileName} からサブタイトルを読み取れませんでした（題が話数だけのようです）。`
+      subtitleRenameRefusal(episode.fileName, subtitle, episode.chapterStart)
     );
     return;
   }
