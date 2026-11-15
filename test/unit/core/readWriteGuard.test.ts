@@ -213,7 +213,7 @@ describe("読んで足して書く口の、書く前の照合", () => {
 
       expect(text(disk.get(target))).toBe(text(externalBytes));
       expect(isExternalChangeError(failure)).toBe(true);
-      const copy = disk.get(diskPath("設定", ".novelai-recovery", "custom_fields.unsaved.json"));
+      const copy = disk.get(diskPath("設定", ".novelai-recovery", "custom_fields.json.unsaved"));
       expect(text(copy)).toContain("口癖");
     });
 
@@ -245,7 +245,7 @@ describe("読んで足して書く口の、書く前の照合", () => {
       expect(text(disk.get(target))).toBe(text(externalBytes));
       expect(isExternalChangeError(failure)).toBe(true);
       const copy = disk.get(
-        diskPath("設定", ".novelai-recovery", "chapter_synopses.unsaved.json")
+        diskPath("設定", ".novelai-recovery", "chapter_synopses.json.unsaved")
       );
       expect(text(copy)).toContain("こちらで作ったあらすじ");
     });
@@ -266,7 +266,7 @@ describe("読んで足して書く口の、書く前の照合", () => {
 
       expect(text(disk.get(target))).toBe(text(externalBytes));
       expect(isExternalChangeError(failure)).toBe(true);
-      const copy = disk.get(diskPath("設定", ".novelai-recovery", "timeline.unsaved.json"));
+      const copy = disk.get(diskPath("設定", ".novelai-recovery", "timeline.json.unsaved"));
       expect(text(copy)).toContain("こちらの系統");
     });
 
@@ -299,7 +299,7 @@ describe("読んで足して書く口の、書く前の照合", () => {
 
       expect(text(disk.get(target))).toBe(text(external));
       expect(isExternalChangeError(failure)).toBe(true);
-      const copy = disk.get(diskPath(".aiwriter", ".novelai-recovery", "goals.unsaved.json"));
+      const copy = disk.get(diskPath(".aiwriter", ".novelai-recovery", "goals.json.unsaved"));
       expect(text(copy)).toContain("4000");
       // 止めたら覚えていた古い目標を捨てる。捨てないと、何度やり直しても断り続ける
       expect((await readWorkGoals(work)).perEpisodeChars).toBe(5000);
@@ -319,6 +319,26 @@ describe("読んで足して書く口の、書く前の照合", () => {
 
       expect(text(disk.get(target))).toBe(text(broken));
       expect(isExternalChangeError(failure)).toBe(true);
+      // 「もう一度操作すると読み直して保存します」は嘘になる（何度やっても止まる）。直してもらう
+      expect(String(failure)).toMatch(/読めない形/);
+      expect(String(failure)).toMatch(/ファイルを直してから/);
+      expect(String(failure)).not.toMatch(/読み直してから保存します/);
+    });
+
+    test("作品の目標：読んだあとに外で作られた読める目標は、読み直せば保存できると伝える", async () => {
+      const target = diskPath(".aiwriter", "goals.json");
+      await readWorkGoals(work);
+      disk.set(
+        target,
+        utf8(`${JSON.stringify({ ...emptyWorkGoals(), perEpisodeChars: 5000 }, null, 2)}\n`)
+      );
+
+      const failure = await writeWorkGoals(work, emptyWorkGoals()).catch(
+        (error: unknown) => error
+      );
+
+      expect(String(failure)).toMatch(/保存していません/);
+      expect(String(failure)).toMatch(/読み直してから保存します/);
     });
 
     test("自分で保存したあとは、続けて保存できる（控えを書いた中身で覚え直す）", async () => {

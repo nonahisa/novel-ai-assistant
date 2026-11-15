@@ -128,13 +128,18 @@ export async function writeWorkGoals(
   if (change) {
     cache.delete(work.id);
     const unsavedCopy = await keepUnsavedCopy(target, encoded);
+    const fileLabel = `.aiwriter/${WORK_GOALS_FILE}`;
+    // 「読んでいない」のにファイルがある枝は、壊れていて読めなかった目標でも通る
+    // （画面は `readWorkGoalsOrEmpty` の空の目標で開ける）。そのときに「もう一度操作すると
+    // 読み直して保存します」と出すと、何度やっても同じ所で止まる。直してもらう文に分ける
+    const unreadable = change === "created" && !(await isReadableGoals(target));
     throw new WorkGoalsStoreError(
-      externalChangeMessage({
-        label: "作品の目標",
-        fileLabel: `.aiwriter/${WORK_GOALS_FILE}`,
-        change,
-        unsavedCopy,
-      }),
+      unreadable
+        ? `作品の目標（${fileLabel}）は保存していません。` +
+            "いまのファイルが読めない形（壊れたJSON・競合の印など）のため、上書きすると中の値が消えるからです。" +
+            (unsavedCopy ? `保存しようとした内容は「${unsavedCopy}」に控えました。` : "") +
+            "ファイルを直してから、もう一度操作してください。"
+        : externalChangeMessage({ label: "作品の目標", fileLabel, change, unsavedCopy }),
       unsavedCopy ? [target, unsavedCopy] : [target],
       "modified_externally"
     );
@@ -163,6 +168,17 @@ export function invalidateWorkGoals(workId?: string): void {
     cache.delete(workId);
   } else {
     cache.clear();
+  }
+}
+
+/** いまの目標のファイルが読める形か（読めなければ false。無いときも false） */
+async function isReadableGoals(filePath: string): Promise<boolean> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(filePath));
+    parseWorkGoals(JSON.parse(new TextDecoder().decode(bytes)));
+    return true;
+  } catch {
+    return false;
   }
 }
 

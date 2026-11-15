@@ -92,7 +92,7 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
   // 読んで足して書く口の照合（2026-11-15）。正規のファイルには書かない
   "readWriteGuard.ts":
     "照合で止めたときに、書けなかった中身を回復先の決まった1枠" +
-    "（.novelai-recovery/<名前>.unsaved.json）へ控えるだけ。拡張機能だけが書く管理領域",
+    "（.novelai-recovery/<名前>.unsaved）へ控えるだけ。拡張機能だけが書く管理領域",
 
   // 読み込み→併合→保存で、作者の書いたものを守る
   "abilityStore.ts":

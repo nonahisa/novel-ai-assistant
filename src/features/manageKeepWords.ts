@@ -66,7 +66,17 @@ export async function manageKeepWords(work: WorkEntry): Promise<void> {
         { modal: true },
         "消す"
       );
-      if (yes === "消す") await store.remove(picked.word);
+      if (yes === "消す") {
+        try {
+          await store.remove(picked.word);
+        } catch (error) {
+          // 投げたままだと本体の「命令が失敗しました」の窓に埋もれる。こちらで組んだ
+          // 知らせ（保存していないこと・次にすること）をそのまま出し、一覧へ戻る
+          void vscode.window.showErrorMessage(
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      }
     }
   }
 }

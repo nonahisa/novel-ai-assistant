@@ -77,8 +77,9 @@ export async function keepUnsavedCopy(
   bytes: Uint8Array
 ): Promise<string | undefined> {
   const directory = path.join(path.dirname(target), RECOVERY_DIRECTORY_NAME);
-  const base = path.basename(target).replace(/\.json$/u, "");
-  const copy = path.join(directory, `${base}.unsaved.json`);
+  // `.json` で終わらせない（`book.json.draft` と同じ）。`*.json` を拾う読み手が
+  // 回復先を除き忘れても、資料や台帳として読まれない
+  const copy = path.join(directory, `${path.basename(target)}.unsaved`);
   try {
     await vscode.workspace.fs.createDirectory(path.toUri(directory));
     // 拡張機能だけが書く管理領域のファイルなので、指定なし（上書き）の道で置き換える
