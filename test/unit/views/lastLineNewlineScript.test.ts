@@ -9,47 +9,33 @@ import { describe, expect, it } from "vitest";
 import {
   LAST_LINE_NEWLINE_KEY_HORIZONTAL,
   LAST_LINE_NEWLINE_KEY_VERTICAL,
-  LAST_LINE_NEWLINE_KEY_VERTICAL_MAC,
   LAST_LINE_NEWLINE_SOURCE,
 } from "../../../src/views/lastLineNewlineScript";
 import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
 
-interface Box {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-}
-
 interface Part {
-  lastLineNewlineKey(vertical: boolean, mac: boolean): string;
+  lastLineNewlineKey(vertical: boolean): string;
   lastLineBlankCount(text: string): number;
   lastLineNewlineAllowed(text: string, start: number, end: number): boolean;
-  lastLineSameRow(a: Box | null, b: Box | null, vertical: boolean): boolean;
 }
 
 const part = new Function(
   `${LAST_LINE_NEWLINE_SOURCE}
-  return { lastLineNewlineKey, lastLineBlankCount, lastLineNewlineAllowed, lastLineSameRow };`
+  return { lastLineNewlineKey, lastLineBlankCount, lastLineNewlineAllowed };`
 )() as Part;
 
 describe("次の行へ進むキー", () => {
-  it("横書きは ↓、縦書きは ←（作者の答え 2026-11-15「縦書きは←キー」）", () => {
-    expect(part.lastLineNewlineKey(false, false)).toBe(LAST_LINE_NEWLINE_KEY_HORIZONTAL);
-    expect(part.lastLineNewlineKey(true, false)).toBe(LAST_LINE_NEWLINE_KEY_VERTICAL);
+  it("横書きは ↓、縦書きは ←（作者の答え 2026-11-15「縦書きは←キー」。本物の Mac でも ← が次の行へ進む）", () => {
+    expect(part.lastLineNewlineKey(false)).toBe(LAST_LINE_NEWLINE_KEY_HORIZONTAL);
+    expect(part.lastLineNewlineKey(true)).toBe(LAST_LINE_NEWLINE_KEY_VERTICAL);
     expect(LAST_LINE_NEWLINE_KEY_HORIZONTAL).toBe("ArrowDown");
     expect(LAST_LINE_NEWLINE_KEY_VERTICAL).toBe("ArrowLeft");
   });
 
-  it("Mac の縦書きは ↓（Mac では縦書きの ← が1字前へ戻り、↓ が次の行へ動くため）。横書きは Mac でも ↓", () => {
-    expect(part.lastLineNewlineKey(true, true)).toBe(LAST_LINE_NEWLINE_KEY_VERTICAL_MAC);
-    expect(LAST_LINE_NEWLINE_KEY_VERTICAL_MAC).toBe("ArrowDown");
-    expect(part.lastLineNewlineKey(false, true)).toBe(LAST_LINE_NEWLINE_KEY_HORIZONTAL);
-  });
-
-  it("原稿エディターは、動いている機械が Mac かを見てキーを選ぶ", () => {
+  it("機械（Mac かどうか）でキーを分けない（1.0.9 の分け方は 1.0.11 でやめた）", () => {
     const html = buildManuscriptEditorHtml("n", "c");
-    expect(html).toContain("lastLineNewlineKey(isVertical, lastLineNewlineOnMac())");
+    expect(html).toContain("lastLineNewlineKey(isVertical)");
+    expect(html).not.toContain("lastLineNewlineOnMac");
   });
 });
 
@@ -67,10 +53,16 @@ describe("末尾の空行の数", () => {
 });
 
 describe("改行を足してよいか", () => {
-  it("最後の行に字があるときは足す（空行が1行増える）", () => {
+  it("カーソルが文書の末尾（後ろに字が無い所）にあるときは足す（空行が1行増える）", () => {
     expect(part.lastLineNewlineAllowed("あいう", 3, 3)).toBe(true);
-    // 最後の行の途中でも、最後の行であることは変わらない
-    expect(part.lastLineNewlineAllowed("あ\nいう", 3, 3)).toBe(true);
+    expect(part.lastLineNewlineAllowed("あ\nいう", 4, 4)).toBe(true);
+  });
+
+  it("最後の行の途中では足さない（行を割って字を押し出さない。作者 2026-11-15 本物の Mac で「。」が次の行へ押し出された）", () => {
+    // 「あ\nいう。」の「。」の手前・「い」の後ろ
+    expect(part.lastLineNewlineAllowed("あ\nいう。", 4, 4)).toBe(false);
+    expect(part.lastLineNewlineAllowed("あ\nいう。", 3, 3)).toBe(false);
+    expect(part.lastLineNewlineAllowed("あいう", 0, 0)).toBe(false);
   });
 
   it("続けて押すと、末尾の空行が2行になるまで足し、そこで止まる", () => {
@@ -102,23 +94,6 @@ describe("改行を足してよいか", () => {
   it("位置が読めないときは足さない", () => {
     expect(part.lastLineNewlineAllowed("あいう", -1, -1)).toBe(false);
     expect(part.lastLineNewlineAllowed("あいう", 9, 9)).toBe(false);
-  });
-});
-
-describe("同じ見えている行か", () => {
-  const h = (top: number): Box => ({ left: 0, right: 16, top, bottom: top + 20 });
-  const v = (left: number): Box => ({ left, right: left + 20, top: 0, bottom: 16 });
-
-  it("横書きは上下の位置、縦書きは左右の位置で決める", () => {
-    expect(part.lastLineSameRow(h(100), h(102), false)).toBe(true);
-    expect(part.lastLineSameRow(h(100), h(124), false)).toBe(false);
-    expect(part.lastLineSameRow(v(100), v(103), true)).toBe(true);
-    expect(part.lastLineSameRow(v(100), v(124), true)).toBe(false);
-  });
-
-  it("測れなかったときは同じ行と見なさない（足さずに、ふつうの動きへ任せる）", () => {
-    expect(part.lastLineSameRow(null, h(0), false)).toBe(false);
-    expect(part.lastLineSameRow(h(0), null, false)).toBe(false);
   });
 });
 

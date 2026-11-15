@@ -2,12 +2,14 @@
  * 最後の行で「次の行へ進むキー」を押すと、改行が1つ足される（作者の依頼、2026-11-15。設計書6.25）。
  *
  * 作者の言葉：「最終行で下ボタンを押した場合、改行を自動で入れて欲しい。ただし空行2行でストップで」。
- * 次の行へ進むキーは、横書きでは ↓、縦書きでは ←（縦書きのキーは作者に未確認。決め打ちは
+ * 次の行へ進むキーは、横書きでは ↓、縦書きでは ←（作者の答え 2026-11-15。決め打ちは
  * `views/lastLineNewlineScript.ts` の定数1か所）。
  *
  * 見張ること（横書き・縦書きの両方）：
- * - 最後の行で押すと改行が1つ増え、カーソルが新しい行へ進む。続けて押しても末尾の空行が2行で止まる
+ * - 文書の末尾で押すと改行が1つ増え、カーソルが新しい行へ進む。続けて押しても末尾の空行が2行で止まる
  * - 保存したファイルの末尾が、足した改行ぶんだけ増えている（CRLF の文書には CRLF で足す）
+ * - **最後の行の途中で押しても足さず、行を割らない**（1.0.11。作者が本物の Mac で、最後の行の「。」の
+ *   手前で押して「。」が次の行へ押し出された）
  * - 最後の行でないとき・折り返した最後の段落の途中の行のときは足さない（ふつうに動く）
  * - 変換中・選んだ範囲があるとき・Shift を押しているときは足さない
  *
@@ -45,10 +47,35 @@ async function openFace(session: E2ESession, vertical: boolean, marker: string):
 for (const vertical of [true, false]) {
   const face = vertical ? "縦書き" : "横書き";
   /*
-    次の行へ進むキー。Mac の縦書きは ↓（Mac では矢印に編集の命令が添えて届き、縦書きの ← は1字前へ戻る。
-    製品も Mac の縦書きは ↓ で足す。lastLineNewlineScript.ts。2026-11-15 Mac で縦書きの2本が毎回落ちた）
+    次の行へ進むキー（横書き ↓・縦書き ←。本物の Mac でも ← が次の行へ進む。2026-11-15 作者が手で確かめた）。
+    Mac の E2E テストでは、Playwright の届け方で縦書きの ← が1字前へ戻るので、ふつうの動き（次の行へ動く）を
+    見る2本は Mac では行が増えないことだけを見る（下の MOVES_NATIVELY）
   */
-  const NEXT = vertical ? (process.platform === "darwin" ? "ArrowDown" : "ArrowLeft") : "ArrowDown";
+  const NEXT = vertical ? "ArrowLeft" : "ArrowDown";
+  const MOVES_NATIVELY = !(vertical && process.platform === "darwin");
+
+  test(`${face}：最後の行の途中で押しても足さず、行を割らない（字が動かない）`, async () => {
+    await withVsCode(
+      `最後の行の途中では足さない（${face}）`,
+      [{ name: EPISODE, text: "あいう\nえおか。" }],
+      async (session) => {
+        const frame = await openFace(session, vertical, "えおか");
+        // 最後の行の「。」の手前（作者が本物の Mac で押して、「。」が次の行へ押し出された形）
+        await placeCaretAfter(frame, "えおか");
+        await session.page.keyboard.press(NEXT);
+        await holdsFor(async () => (await lineCount(frame)) === 2, "最後の行の途中なので行が増えない", 2_000);
+        await holdsFor(async () => (await composeText(frame)).includes("えおか。"), "最後の行の字が割れない", 1_000).catch(
+          async (error: unknown) => {
+            throw new Error(`${String(error)}（画面の本文：${JSON.stringify(await composeText(frame))}）`);
+          }
+        );
+        await session.page.keyboard.press(NEXT);
+        await holdsFor(async () => (await lineCount(frame)) === 2, "続けて押しても行が増えない", 1_000);
+        expect(await composeText(frame)).toContain("えおか。");
+      },
+      VERTICAL_LAUNCH
+    );
+  });
 
   test(`${face}：最後の行で押すと改行が1つ増え、カーソルが新しい行へ進む。続けて押すと空行2行で止まる`, async () => {
     await withVsCode(
@@ -104,6 +131,7 @@ for (const vertical of [true, false]) {
         await placeCaretAfter(frame, "あいう");
         await session.page.keyboard.press(NEXT);
         await holdsFor(async () => (await lineCount(frame)) === 3, "最後の行でないので行が増えない", 2_000);
+        if (!MOVES_NATIVELY) return;
         const moved = await caretPosition(frame);
         expect(moved?.lineText, "次の行へ動いていません").toBe("えお");
       },
@@ -121,6 +149,7 @@ for (const vertical of [true, false]) {
         const before = await caretPosition(frame);
         await session.page.keyboard.press(NEXT);
         await holdsFor(async () => (await lineCount(frame)) === 2, "途中の行なので行が増えない", 2_000);
+        if (!MOVES_NATIVELY) return;
         const after = await caretPosition(frame);
         expect(after?.lineText, "最後の段落から出ています").toBe(LONG);
         expect(after!.column, "次の見えている行へ動いていません").toBeGreaterThan(before!.column);
