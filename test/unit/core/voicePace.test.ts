@@ -89,7 +89,7 @@ describe("知らせの文", () => {
   });
 });
 
-describe("測った速さの比を覚える（書き出しの見込み。2026-11-14）", () => {
+describe("測った速さ（1字あたりの秒）を覚える（書き出しの見込み。2026-11-14／物差しは読む字 2026-11-15）", () => {
   test("測っていなければ比を返さない（推測の数字を出さない）", () => {
     const memory = new PaceMemory<string>();
     expect(memory.ratio("aivisspeech")).toBeUndefined();
@@ -99,7 +99,7 @@ describe("測った速さの比を覚える（書き出しの見込み。2026-11
     expect(memory.ratio("aivisspeech")).toBeUndefined();
   });
 
-  test("はじめの数文を除いて、かかった秒の合計÷音の秒の合計を返す", () => {
+  test("はじめの数文を除いて、かかった秒の合計÷読む字の数の合計（1字あたりの秒）を返す", () => {
     const memory = new PaceMemory<string>();
     memory.record("aivisspeech", 100, 1); // はじめの2文は数えない
     memory.record("aivisspeech", 100, 1);
@@ -115,7 +115,7 @@ describe("測った速さの比を覚える（書き出しの見込み。2026-11
     expect(memory.ratio("voicevox")).toBeCloseTo(0.5, 5);
   });
 
-  test("測れない文（音の長さ不明・0秒・非有限）は数えない。古い文は捨てて直近で出す", () => {
+  test("測れない文（字数不明・0字・非有限）は数えない。古い文は捨てて直近で出す", () => {
     const memory = new PaceMemory<string>(0);
     memory.record("a", 10, undefined);
     memory.record("a", 10, 0);
@@ -183,18 +183,18 @@ describe("測った速さの比を覚える（書き出しの見込み。2026-11
     expect(memory.ratio("future")).toBeUndefined();
   });
 
-  test("書き出しの見込み：音の長さ×比。1つでも比が無ければ出さない", () => {
-    expect(expectedWorkSeconds([{ audioSeconds: 500, ratio: 3.7 }])).toBeCloseTo(1850, 5);
+  test("書き出しの見込み：読む字の数×1字あたりの秒。1つでも無ければ出さない", () => {
+    expect(expectedWorkSeconds([{ chars: 3069, ratio: 0.25 }])).toBeCloseTo(767.25, 5);
     expect(
       expectedWorkSeconds([
-        { audioSeconds: 400, ratio: 3 },
-        { audioSeconds: 100, ratio: 0.5 },
+        { chars: 400, ratio: 3 },
+        { chars: 100, ratio: 0.5 },
       ])
     ).toBeCloseTo(1250, 5);
     expect(
       expectedWorkSeconds([
-        { audioSeconds: 400, ratio: 3 },
-        { audioSeconds: 100, ratio: undefined },
+        { chars: 400, ratio: 3 },
+        { chars: 100, ratio: undefined },
       ])
     ).toBeUndefined();
     expect(expectedWorkSeconds([])).toBeUndefined();

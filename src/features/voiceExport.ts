@@ -469,17 +469,14 @@ export async function exportVoiceAudio(
   const estimate = minutesLabel(chars / CHARS_PER_SECOND + gapSeconds);
   const nonCommercial = terms.filter(isNonCommercial);
   /*
-    かかる見込み（2026-11-14）。音の長さの見積もり×このエンジンで測った比。**測った比が無いエンジンが
-    1つでもあれば出さない**（推測の数字を出さない）。ノートPC（CPU）では音の長さの約3.7倍かかった。
-    文の間の無音は、その文のエンジンの分として数える
+    かかる見込み（2026-11-14）。エンジンごとの読む字の数×そのエンジンで測った1字あたりの秒。
+    **測った値が無いエンジンが1つでもあれば出さない**（推測の数字を出さない）。
+    文の間の無音は足さない（声づくりの時間がかからない。足すと実際より長く見える）。
+    測る物差し（字数）と見込む物差しをそろえてある（音の秒で測ると約28%短く出た）
   */
   const expected = expectedWorkSeconds(
     engines.map((engine) => ({
-      audioSeconds: units.reduce(
-        (sum, unit, i) =>
-          unit.engine === engine ? sum + unit.speech.length / CHARS_PER_SECOND + (i === 0 ? 0 : unit.gapMs / 1000) : sum,
-        0
-      ),
+      chars: units.reduce((sum, unit) => (unit.engine === engine ? sum + unit.speech.length : sum), 0),
       ratio: service.paceRatio(engine),
     }))
   );
@@ -502,7 +499,7 @@ export async function exportVoiceAudio(
         : []),
       `「${stem}」を人物の声で音声（MP3）に書き出します。${units.length}文・長さはおおよそ${estimate.replace(/^約/, "")}です。`,
       ...(expected !== undefined
-        ? [`この PC では、書き出しにおおよそ${minutesLabel(expected).replace(/^約/, "")}かかる見込みです（前に測った速さから）。`]
+        ? [`前に測った速さでは、この PC で書き出しにおおよそ${minutesLabel(expected).replace(/^約/, "")}かかる見込みです。`]
         : []),
       `置き場：${shownFolder(work, folder)}/`,
       `使う声：${terms.map(describeVoice).join("、")}`,

@@ -101,11 +101,13 @@ export function slowPaceNotice(engineLabel: string, pace: SlowPace): string {
 }
 
 /**
- * 測った速さの比（かかった秒÷音の長さの秒）を、エンジンごとに覚える（作者の依頼 2026-11-14。
+ * 測った速さ（かかった秒÷読む字の数＝1字あたりの秒）を、エンジンごとに覚える（作者の依頼 2026-11-14。
  * ［音声に書き出す］の確認の窓に「この PC では何分かかる見込みか」を出すため）。
  *
  * ノートPC（AivisSpeech を CPU）の実測：第16話 3,069字で、音の長さ 507秒に 1,893秒（約3.7倍）。
  * 音の長さの見積もりだけでは、遅い PC で待つ時間を実際の数分の一に思わせてしまう。
+ * 物差しは「読む字」にそろえる（2026-11-15）。音の秒で割ると、見込みの側の字数÷7字/秒の見積もりと
+ * 実際の音の長さがずれ、約10分と出して実際は766秒（約28%長い）だった
  *
  * **端末へは要約だけ残す**（エンジンごとに 直近の比・数えた文の数・測った日時。本文や文は書かない）。
  * 再起動のあとの最初の書き出しでも見込みを出すため。PC の速さは負荷や設定で変わるので、
@@ -123,7 +125,7 @@ export const PACE_STORED_MAX_AGE_DAYS = 90;
 
 /** 端末に残す1エンジンぶんの要約 */
 export interface PaceSummary {
-  /** 音1秒を作るのにかかる秒 */
+  /** 読む字1字を作るのにかかる秒（フィールド名は `ratio` のまま。端末の鍵は物差しごとに分けてある） */
   ratio: number;
   /** その比を出した文の数 */
   count: number;
@@ -131,12 +133,16 @@ export interface PaceSummary {
   at: string;
 }
 
-/** 端末に残す形の鍵（`novelai.voicePace.ratios`）。書く口は `features/voiceReading.ts` の1か所 */
-export const VOICE_PACE_STORED_KEY = "novelai.voicePace.ratios";
+/**
+ * 端末に残す形の鍵（`novelai.voicePace.secondsPerChar`）。書く口は `features/voiceReading.ts` の1か所。
+ * **前の鍵 `novelai.voicePace.ratios` は「音1秒あたりの秒」で物差しが違うので読まない**
+ * （字数からの見積もりとずれ、見込みが約28%短く出た。換算して使うと推測の数字になる）
+ */
+export const VOICE_PACE_STORED_KEY = "novelai.voicePace.secondsPerChar";
 
 export class PaceMemory<K extends string = string> {
   private readonly counted = new Map<K, number>();
-  private readonly samples = new Map<K, Array<{ elapsed: number; audio: number }>>();
+  private readonly samples = new Map<K, Array<{ elapsed: number; chars: number }>>();
   /** 前の起動までに端末へ残した要約（読み戻したもの） */
   private readonly restored = new Map<K, PaceSummary>();
   /** 前に保存してから、新しく測った文があるか */
@@ -198,21 +204,26 @@ export class PaceMemory<K extends string = string> {
     return out;
   }
 
-  record(key: K, elapsedSeconds: number, audioSeconds: number | undefined): void {
-    if (audioSeconds === undefined || !(audioSeconds > 0) || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
+  /**
+   * 新しく作った1文を記録する。`chars` はその文の**読む字の数**（`unit.speech.length`）。
+   * 物差しは見込みの側（字数×1字あたりの秒）とそろえる。WAV の音の秒で割ると、字数から見積もった
+   * 音の長さとずれて、見込みが実際より短く出た（ノートPCで約28%）
+   */
+  record(key: K, elapsedSeconds: number, chars: number | undefined): void {
+    if (chars === undefined || !(chars > 0) || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
       return;
     }
     const seen = (this.counted.get(key) ?? 0) + 1;
     this.counted.set(key, seen);
     if (seen <= this.warmup) return;
     const list = this.samples.get(key) ?? [];
-    list.push({ elapsed: elapsedSeconds, audio: audioSeconds });
+    list.push({ elapsed: elapsedSeconds, chars });
     if (list.length > PACE_MEMORY_WINDOW) list.shift();
     this.samples.set(key, list);
     this.dirty = true;
   }
 
-  /** 音1秒を作るのにかかる秒。測れていなければ undefined（今回の起動で十分に測れなければ、端末に残した新しい比） */
+  /** 読む字1字を作るのにかかる秒。測れていなければ undefined（今回の起動で十分に測れなければ、端末に残した新しい比） */
   ratio(key: K): number | undefined {
     const live = this.liveRatio(key);
     if (live !== undefined) return live;
@@ -226,25 +237,26 @@ export class PaceMemory<K extends string = string> {
     const list = this.samples.get(key);
     if (!list || list.length < PACE_MEMORY_MIN) return undefined;
     const total = list.reduce(
-      (sum, one) => ({ elapsed: sum.elapsed + one.elapsed, audio: sum.audio + one.audio }),
-      { elapsed: 0, audio: 0 }
+      (sum, one) => ({ elapsed: sum.elapsed + one.elapsed, chars: sum.chars + one.chars }),
+      { elapsed: 0, chars: 0 }
     );
-    return total.audio > 0 ? total.elapsed / total.audio : undefined;
+    return total.chars > 0 ? total.elapsed / total.chars : undefined;
   }
 }
 
 /**
- * 書き出しにかかる見込みの秒。**どれかのエンジンの比が無ければ undefined**
- * （一部だけの足し算は、足りない分だけ短く見せてしまう）
+ * 書き出しにかかる見込みの秒＝読む字の数×1字あたりの秒。**どれかのエンジンの比が無ければ undefined**
+ * （一部だけの足し算は、足りない分だけ短く見せてしまう）。**文の間の無音は足さない**
+ * （無音は声づくりの時間がかからない）
  */
 export function expectedWorkSeconds(
-  parts: ReadonlyArray<{ audioSeconds: number; ratio: number | undefined }>
+  parts: ReadonlyArray<{ chars: number; ratio: number | undefined }>
 ): number | undefined {
   if (parts.length === 0) return undefined;
   let total = 0;
   for (const part of parts) {
     if (part.ratio === undefined || !(part.ratio > 0)) return undefined;
-    total += part.audioSeconds * part.ratio;
+    total += part.chars * part.ratio;
   }
   return total;
 }

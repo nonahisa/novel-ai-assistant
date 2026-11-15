@@ -164,7 +164,7 @@ const KEYS: KeyRow[] = [
   // ［声の割り当て］のよく使う声の回数（作者の頼み 2026-11-13「分類してわかりやすく」）
   { key: "novelai.voiceAssign.pickCounts", literalIn: "core/voiceGroups.ts", writtenIn: "features/voiceReading.ts", write: /\.update\(\s*VOICE_PICK_COUNTS_KEY\b/g, guarded: true },
   // 声づくりの速さの要約（エンジンごとの比・文の数・日時。2026-11-14。書き出しの見込み時間用）
-  { key: "novelai.voicePace.ratios", literalIn: "core/voicePace.ts", writtenIn: "features/voiceReading.ts", write: /\.update\(\s*VOICE_PACE_STORED_KEY\b/g, guarded: true },
+  { key: "novelai.voicePace.secondsPerChar", literalIn: "core/voicePace.ts", writtenIn: "features/voiceReading.ts", write: /\.update\(\s*VOICE_PACE_STORED_KEY\b/g, guarded: true },
   { key: "novelai.manuscript.markdownDeclined", literalIn: "extension.ts", writtenIn: "extension.ts", write: /\.patch<string\[\]>\(\s*MARKDOWN_DECLINED_KEY\b/g, guarded: true },
   { key: "novelai.actions.expandedGroups", literalIn: "extension.ts", writtenIn: "extension.ts", write: /rememberInBackground\(ACTION_GROUPS_KEY\b/g, guarded: true },
   { key: "novelai.steps.expandedGroups", literalIn: "extension.ts", writtenIn: "extension.ts", write: /rememberInBackground\(STEP_GROUPS_KEY\b/g, guarded: true },

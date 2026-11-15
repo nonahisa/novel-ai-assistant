@@ -286,19 +286,35 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     expect(state.confirms[0].message).toContain("長い話は数分かかります");
   });
 
-  test("測った比があれば、音の長さの見積もり×比で「この PC では、書き出しにおおよそN分かかる見込み」を出す", async () => {
-    // 4文・音の見積もりは数秒。比を 1000 にして、分の単位で見える大きさにする
-    await run(ACML_BOTH, { paceRatio: 1000 });
+  test("測った速さがあれば、読む字の数×1字あたりの秒で「前に測った速さでは、この PC で書き出しにおおよそN分かかる見込みです。」を出す。括弧で終えない", async () => {
+    // 4文・数十字。1字あたり 100秒にして、分の単位で見える大きさにする
+    await run(ACML_BOTH, { paceRatio: 100 });
     const message = state.confirms[0].message;
-    expect(message).toMatch(/この PC では、書き出しにおおよそ(\d+分|\d+時間\d+分)かかる見込みです（前に測った速さから）。/);
+    expect(message).toMatch(/前に測った速さでは、この PC で書き出しにおおよそ(\d+分|\d+時間\d+分)かかる見込みです。/);
+    // 閉じ括弧の直後の「。」だけが次の行へ送られた（2026-11-15）ので、この行は括弧で終えない
+    const line = message.split("\n").find((one) => one.includes("かかる見込み"))!;
+    expect(line.endsWith("。")).toBe(true);
+    expect(line).not.toContain("）。");
     // 音の長さの見積もりの行はそのまま残る
     expect(message).toMatch(/長さはおおよそ/);
+  });
+
+  test("文の間の無音（gapMs）は見込みに足さない：見込みは、エンジンへ頼んだ字数×1字あたりの秒だけで決まる", async () => {
+    // 文の間は語り↔台詞で長めに入る（gapMs > 0）。足すと字数だけの見込みより長くなる。
+    // 1字100秒なら、足された無音は数分の差になって見える
+    await run(ACML_BOTH, { paceRatio: 100 });
+    const asked = engine!.requests.filter((r) => r.path === "/audio_query").map((r) => String(r.query.text));
+    const chars = asked.reduce((sum, text) => sum + text.length, 0);
+    const seconds = chars * 100;
+    const minutes = Math.round(seconds / 60);
+    const label = minutes < 60 ? `${minutes}分` : `${Math.floor(minutes / 60)}時間${minutes % 60}分`;
+    expect(state.confirms[0].message).toContain(`おおよそ${label}かかる見込みです。`);
   });
 
   test("書き出し・読み上げで新しく作った文の速さをエンジンごとに覚え、次の窓の見込みに使う", async () => {
     engine = await startFakeVoiceEngine({ pcm: true, terms: ACML_BOTH });
     const url = engine.url;
-    // 1文ごとに（始め→終わり）を 400ミリ秒ずつ進める。音は 200ミリ秒なので比は 2
+    // 1文ごとに（始め→終わり）を 400ミリ秒ずつ進める。比は〔かかった秒÷読む字の数〕
     let clock = 0;
     let call = 0;
     const service = new VoiceReadingService(
@@ -323,7 +339,8 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     for (let i = 0; i < 4; i++) await service.synthesizeForExport({ ...unit, speech: `${unit.speech}${i}` }, 1, signal);
     expect(service.paceRatio("aivisspeech")).toBeUndefined();
     await service.synthesizeForExport({ ...unit, speech: `${unit.speech}z` }, 1, signal);
-    expect(service.paceRatio("aivisspeech")).toBeCloseTo(2, 1);
+    // 比は読む字1字あたりの秒（1文 400ミリ秒を、字数 unit.speech.length+1 で割る。音の秒ではない）
+    expect(service.paceRatio("aivisspeech")).toBeCloseTo(0.4 / (unit.speech.length + 1), 5);
     // 別のエンジンは測っていないので返さない
     expect(service.paceRatio("voicevox")).toBeUndefined();
   });
@@ -357,10 +374,13 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     const signal = new AbortController().signal;
     for (let i = 0; i < 6; i++) await first.synthesizeForExport({ ...unit, speech: `あ${i}` }, 1, signal);
     await first.savePace();
-    const saved = kept.get("novelai.voicePace.ratios") as Record<string, { ratio: number; count: number; at: string }>;
+    // 前の鍵（音1秒あたり）は物差しが違うので読まない
+    kept.set("novelai.voicePace.ratios", { aivisspeech: { ratio: 99, count: 9, at: new Date().toISOString() } });
+    const saved = kept.get("novelai.voicePace.secondsPerChar") as Record<string, { ratio: number; count: number; at: string }>;
     expect(Object.keys(saved)).toEqual(["aivisspeech"]);
     expect(Object.keys(saved.aivisspeech).sort()).toEqual(["at", "count", "ratio"]);
-    expect(saved.aivisspeech.ratio).toBeCloseTo(2, 1);
+    // 「あ0」〜「あ5」は2字で、1文400ミリ秒 → 1字あたり0.2秒
+    expect(saved.aivisspeech.ratio).toBeCloseTo(0.2, 5);
 
     // 再起動（新しい係）：読み戻すと同じ比
     const second = new VoiceReadingService(() => url, undefined, async () => true);
@@ -369,7 +389,7 @@ describe("人物の声で音声に書き出す（偽のエンジン）", () => {
     expect(second.paceRatio("aivisspeech")).toBeCloseTo(saved.aivisspeech.ratio, 5);
 
     // 壊れた値は使わない
-    kept.set("novelai.voicePace.ratios", { aivisspeech: { ratio: "遅い", count: 9, at: "いつか" } });
+    kept.set("novelai.voicePace.secondsPerChar", { aivisspeech: { ratio: "遅い", count: 9, at: "いつか" } });
     const third = new VoiceReadingService(() => url, undefined, async () => true);
     third.usePaceStore(store);
     expect(third.paceRatio("aivisspeech")).toBeUndefined();
@@ -713,7 +733,7 @@ describe("人物ごとにエンジンを混ぜて書き出す（0.151.0）", () 
     state.confirms.length = 0;
     disk.clear();
     await mixedRun({ ratios: { aivisspeech: 1000, voicevox: 1000 } });
-    expect(state.confirms[0].message).toContain("かかる見込みです（前に測った速さから）");
+    expect(state.confirms[0].message).toContain("かかる見込みです。");
   });
 
   test("2つのエンジンの音を1つの MP3 にし、クレジットと利用条件はエンジンごとに並べる", async () => {

@@ -194,7 +194,7 @@ export class VoiceReadingService {
   private paceStore: VoicePickMemory | undefined;
   private paceSaveTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /** そのエンジンの、音1秒を作るのにかかる秒（測れていなければ undefined） */
+  /** そのエンジンの、読む字1字を作るのにかかる秒（測れていなければ undefined） */
   paceRatio(engine: VoiceEngineId): number | undefined {
     return this.paceMemory.ratio(engine);
   }
@@ -392,7 +392,8 @@ export class VoiceReadingService {
       // 読み上げと同じ測り方（前の音ができた時刻より前は数えない）。書き出しの見込みの材料にする
       const busyFrom = Math.max(startedAt, lane.lastSynthEndAt);
       lane.lastSynthEndAt = Math.max(lane.lastSynthEndAt, endedAt);
-      this.paceMemory.record(unit.engine, (endedAt - busyFrom) / 1000, wavSeconds(wav));
+      // 物差しは読む字の数（見込みと同じ。WAV の音の秒ではない）
+      this.paceMemory.record(unit.engine, (endedAt - busyFrom) / 1000, unit.speech.length);
       this.schedulePaceSave();
       return wav;
     });
@@ -599,7 +600,7 @@ export class VoiceReadingService {
       */
       const busyFrom = Math.max(startedAt, lane.lastSynthEndAt);
       lane.lastSynthEndAt = Math.max(lane.lastSynthEndAt, endedAt);
-      this.notePace(unit.engine, (endedAt - busyFrom) / 1000, wav);
+      this.notePace(unit.engine, (endedAt - busyFrom) / 1000, wav, unit.speech.length);
       return wav;
     })
       .then(
@@ -624,9 +625,10 @@ export class VoiceReadingService {
   }
 
   /** 1文の速さを見張りへ。追いつかない状態が続いたら、知らせを1回ぶん貯める */
-  private notePace(engine: VoiceEngineId, elapsedSeconds: number, wav: Uint8Array): void {
+  private notePace(engine: VoiceEngineId, elapsedSeconds: number, wav: Uint8Array, chars: number): void {
     const audioSeconds = wavSeconds(wav);
-    this.paceMemory.record(engine, elapsedSeconds, audioSeconds);
+    // 書き出しの見込み用は読む字の数で、読む速さに追いついているかの見張りは音の秒で見る（物差しが別）
+    this.paceMemory.record(engine, elapsedSeconds, chars);
     this.schedulePaceSave();
     // 見張りはエンジンごと。知らせの文には、追いつかないほうのエンジンの名前が入る
     const slow = this.lane(engine).pace.record(elapsedSeconds, audioSeconds);
