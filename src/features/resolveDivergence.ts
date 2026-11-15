@@ -13,6 +13,12 @@ import {
 } from "../core/git";
 import { mergeProposalJsonl } from "../core/editingRepo";
 import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSetup";
+import {
+  describeTooLargeToRecord,
+  findLargeFilesToRecord,
+  type LargeFile,
+} from "../core/gitLargeFiles";
+import { IGNORE_LARGE_FILES_LABEL, ignoreLargeFiles } from "./largeFilesIgnore";
 import { buildSyncTarget, worksInside } from "../core/syncTarget";
 import {
   describeMergePreview,
@@ -193,6 +199,11 @@ export type FoldOutcome =
        * （`describeFoldFailureNotice`）
        */
       stoppedByAuthor?: boolean;
+      /**
+       * GitHub に送れない大きさで記録を止めたときの、まだ git に入っていないファイル
+       * （設計書5.5.21）。あれば失敗の窓に［.gitignore に足す］を出す
+       */
+      tooLarge?: { root: string; files: LargeFile[] };
     };
 
 /**
@@ -572,6 +583,21 @@ export async function foldDivergence(
       return {
         ok: false,
         reason: IDENTITY_MISSING_HINT,
+      };
+    }
+    // **GitHub に送れない大きさのファイルがあれば記録しない**（設計書5.5.21）。控えのブランチを
+    // 作る前に止める（断るならブランチは要らない）。ログには道とバイト数を残す
+    const large = await findLargeFilesToRecord(root, run);
+    if (large.files.length > 0) {
+      logFailure("合わせる前の自動保存：GitHub に送れない大きさのファイルがあるので記録しなかった", {
+        置き場: label,
+        ファイル: large.files.map((one) => `${one.path}（${one.size}バイト）`).join("、"),
+      });
+      const untracked = large.files.filter((one) => one.untracked);
+      return {
+        ok: false,
+        reason: describeTooLargeToRecord(large.files),
+        ...(untracked.length > 0 ? { tooLarge: { root: large.root, files: untracked } } : {}),
       };
     }
     const committed = await commitAll(
@@ -1215,8 +1241,12 @@ async function reportFold(
     const action = await vscode.window.showErrorMessage(
       notice.message,
       { modal: true, detail: notice.detail },
+      ...(result.tooLarge ? [IGNORE_LARGE_FILES_LABEL] : []),
       "ログを表示"
     );
+    if (action === IGNORE_LARGE_FILES_LABEL && result.tooLarge) {
+      await ignoreLargeFiles(result.tooLarge.root, result.tooLarge.files, deps.registry.list());
+    }
     if (action === "ログを表示") showLog();
     return;
   }

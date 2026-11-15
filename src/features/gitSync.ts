@@ -53,14 +53,13 @@ import { withProgress } from "../views/progress";
 import { isEditorMode } from "../core/actorContext";
 import { globalFetchTroubleMemory } from "./fetchTroubleMemory";
 import { globalPushRejections } from "./pushRejectionMemory";
-import {
-  describeTooLargeToRecord,
-  describeTooLargeToSend,
-  findLargeFilesToRecord,
-  findLargeFilesToSend,
-} from "../core/gitLargeFiles";
+import { describeTooLargeToSend, findLargeFilesToSend } from "../core/gitLargeFiles";
 import { noReasonText } from "../core/gitFailureReason";
-import { IGNORE_LARGE_FILES_LABEL, ignoreLargeFiles } from "./largeFilesIgnore";
+import {
+  IGNORE_LARGE_FILES_LABEL,
+  ignoreLargeFiles,
+  stopIfTooLargeToRecord,
+} from "./largeFilesIgnore";
 
 // ツリーのバッジ用は core/gitSyncStatusText.ts へ切り出した。
 // このファイルは静的importするだけでNode専用（node:child_process）を
@@ -1557,28 +1556,16 @@ ${reason}` : ""}`,
     }
 
     // **GitHub に送れない大きさのファイルがあれば記録しない**（設計書5.5.21。「すべて同期」と同じ）
-    const large = await findLargeFilesToRecord(root, run);
-    if (large.files.length > 0) {
-      useLogFile(work.folderPath);
-      logFailure("取り込む前の記録：GitHub に送れない大きさのファイルがあるので記録しなかった", {
-        作品: work.title,
-        ファイル: large.files.map((one) => `${one.path}（${one.size}バイト）`).join("、"),
-      });
-      const untracked = large.files.filter((one) => one.untracked);
-      whenNoticePicked(
-        vscode.window.showWarningMessage(
-          `「${work.title}」：${describeTooLargeToRecord(large.files)}`,
-          ...(untracked.length > 0 ? [IGNORE_LARGE_FILES_LABEL] : []),
-          "ログを表示"
-        ),
-        async (action) => {
-          if (action === IGNORE_LARGE_FILES_LABEL) {
-            await ignoreLargeFiles(large.root, untracked, [work]);
-          }
-          if (action === "ログを表示") showLog();
-        },
-        { label: "大きすぎるファイルの案内", workFolder: work.folderPath }
-      );
+    if (
+      await stopIfTooLargeToRecord(root, run, {
+        step: "取り込む前の記録",
+        subject: work.title,
+        logFields: { 作品: work.title },
+        logFolder: work.folderPath,
+        works: [work],
+        label: "大きすぎるファイルの案内",
+      })
+    ) {
       return false;
     }
     const pending = await countTrackableFiles(root, run);
@@ -1782,8 +1769,12 @@ ${reason}` : ""}`,
       const action = await vscode.window.showWarningMessage(
         notice.message,
         { modal: true, detail: notice.detail },
+        ...(result.tooLarge ? [IGNORE_LARGE_FILES_LABEL] : []),
         "ログを表示"
       );
+      if (action === IGNORE_LARGE_FILES_LABEL && result.tooLarge) {
+        await ignoreLargeFiles(result.tooLarge.root, result.tooLarge.files, [work]);
+      }
       if (action === "ログを表示") showLog();
       return false;
     }

@@ -42,6 +42,7 @@ import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 import { saveAndSyncLabel } from "../core/syncEntryNames";
 import { installGuideFor } from "../core/requirements";
 import { hostPlatform } from "../core/runtime";
+import { stopIfTooLargeToRecord } from "./largeFilesIgnore";
 
 /**
  * GitHub同期を始めるまでの案内。
@@ -125,6 +126,10 @@ export async function recordChanges(
     return false;
   }
 
+  // **GitHub に送れない大きさのファイルがあれば記録しない**（設計書5.5.21）。説明を打って
+  // もらう前に見る（打ったあとで断ると、打った手間が無駄になる）
+  if (await stopTooLarge(target, run, "変更の記録")) return false;
+
   if (!(await hasCommitIdentity(target.folderPath, run))) {
     if (!(await askCommitIdentity(target, run))) return false;
   }
@@ -171,6 +176,24 @@ export async function recordChanges(
  */
 async function useTargetLog(target: SyncTarget): Promise<void> {
   await useSyncLog(target.folderPath, target.works);
+}
+
+/**
+ * GitHub に送れない大きさのファイルがあれば、知らせて止める（設計書5.5.21）。止めたら true。
+ * ログの書き先は入口（`useTargetLog`）で置き場へ向けてあるので、ここでは向け直さない
+ */
+async function stopTooLarge(
+  target: SyncTarget,
+  run: GitCommandRunner,
+  step: string
+): Promise<boolean> {
+  return stopIfTooLargeToRecord(target.folderPath, run, {
+    step,
+    subject: target.label,
+    logFields: { 置き場: target.label },
+    works: target.works,
+    label: "大きすぎるファイルの案内",
+  });
 }
 
 /**
@@ -358,6 +381,14 @@ async function commitFirstRecord(
   if (!(await hasCommitIdentity(target.folderPath, run))) {
     if (!(await askCommitIdentity(target, run))) return undefined;
   }
+
+  /*
+    **GitHub に送れない大きさのファイルがあれば、1つ目の記録を作らない**（設計書5.5.21）。
+    見るのは `git init` のあと——状態を読めない所では検査が空を返して黙って通るため。
+    止めても履歴の箱（.git）は残るが、［.gitignore に足す］のあと「GitHubのセットアップ」を
+    押し直せば、記録が無い置き場の段（`ensureFirstRecord`）からここへ戻ってくる
+  */
+  if (await stopTooLarge(target, run, "初回コミット")) return undefined;
 
   const count = await countTrackableFiles(target.folderPath, run);
 

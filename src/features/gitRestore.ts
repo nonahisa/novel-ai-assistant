@@ -17,6 +17,7 @@ import { logFailure, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
 import { cancelItem } from "../views/dialogs";
 import { whenNoticePicked } from "../views/notify";
+import { stopIfTooLargeToRecord } from "./largeFilesIgnore";
 
 /**
  * 過去の版に戻す（設計書5.5.10）。
@@ -111,6 +112,25 @@ export async function restoreFromHistory(
 
   const confirmed = await confirmRestore(picked, plan);
   if (!confirmed) return;
+
+  /*
+    **GitHub に送れない大きさのファイルがあれば、戻さない**（設計書5.5.21）。作業木を書き換える
+    前に、ここで1回だけ見る。戻したあとの記録（3.）で初めて断ると、原稿は戻ったのに記録が無く、
+    しかも「戻しました」と出てしまう。下の `dirty` は既定の `status --porcelain` で数えるので
+    未追跡も数えるが、0 のときは 1. を飛ばしても 3. は必ず記録するので、`dirty` に関わらず見る
+  */
+  if (
+    await stopIfTooLargeToRecord(work.folderPath, run, {
+      step: "復元",
+      subject: work.title,
+      logFields: { 作品: work.title },
+      logFolder: work.folderPath,
+      works: deps.works ?? [work],
+      label: "大きすぎるファイルの案内",
+    })
+  ) {
+    return;
+  }
 
   // 1. 今の状態を退避する。戻したあとで「やっぱり元に」ができるようにする。
   //    **残すものが無いときは、コミットは作られないが失敗でもない**

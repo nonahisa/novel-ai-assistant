@@ -67,6 +67,7 @@ import {
 import { defaultParentForNewFolder, pickNewFolderParent } from "./pickFolder";
 import { RECOVERY_DIRECTORY_NAME } from "../core/atomicWrite";
 import { logFailure, logStep, useLogFile } from "../core/logger";
+import { describeTooLargeToRecord, findLargeFilesToRecord } from "../core/gitLargeFiles";
 import { isWorkFolderPresent } from "../core/workFolderPresence";
 import { findMissingWorksAt, noticeMissingWorks } from "./missingWorksNotice";
 import { withProgress } from "../views/progress";
@@ -850,7 +851,7 @@ export async function sendToEditor(
     ...ctx.setUp,
   };
   let result = await setUpAndPush(work, destination, setUp);
-  if (!result.ok && (await pushWasRejected(destination, run))) {
+  if (!result.ok && !result.tooLarge && (await pushWasRejected(destination, run))) {
     logStep(`編集用フォルダーへの送信が断られたので、台帳を混ぜて合わせ直して送り直す（${work.title}）`);
     const reconciled = await reconcileDiverged(destination, run, { registeredWorks: registered });
     if (!reconciled.ok) return { ok: false, detail: reconciled.detail };
@@ -1418,6 +1419,11 @@ export interface PushOutcome {
   viaAccount?: boolean;
   /** 編集部が校閲中のため、送らなかった話（作品からの相対パス） */
   skippedLocked?: string[];
+  /**
+   * GitHub に送れない大きさのファイルがあるので、記録の前に止めた（設計書5.5.21）。
+   * **送り直しの合わせ直しへ回さない**——未記録の写しのまま `reset --hard` を走らせないため
+   */
+  tooLarge?: boolean;
 }
 
 /**
@@ -1521,6 +1527,22 @@ export async function setUpAndPush(
     if (!initialized.ok) {
       return { ok: false, detail: initialized.detail ?? "リポジトリを作れませんでした" };
     }
+  }
+
+  /*
+    **GitHub に送れない大きさのファイルがあれば記録しない**（設計書5.5.21）。写しは拡張機能が
+    作るので、［.gitignore に足す］は出さない（足す先が写しの .gitignore になり、作品の側の
+    ファイルは残る）。印（`tooLarge`）を付けて返し、送り直しの合わせ直しへ回さない
+  */
+  const large = await findLargeFilesToRecord(destination, run);
+  if (large.files.length > 0) {
+    useLogFile(work.folderPath);
+    logFailure("編集部へ渡す記録：GitHub に送れない大きさのファイルがあるので記録しなかった", {
+      作品: work.title,
+      編集用フォルダー: destination,
+      ファイル: large.files.map((one) => `${one.path}（${one.size}バイト）`).join("、"),
+    });
+    return { ok: false, detail: describeTooLargeToRecord(large.files), tooLarge: true };
   }
 
   const message = deps.message ?? `${work.title} を編集部へ渡す`;

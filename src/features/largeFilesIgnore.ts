@@ -1,8 +1,16 @@
 import * as vscode from "vscode";
-import { ignoreRuleFor, type LargeFile } from "../core/gitLargeFiles";
+import {
+  describeTooLargeToRecord,
+  findLargeFilesToRecord,
+  ignoreRuleFor,
+  type LargeFile,
+  type SizeOf,
+} from "../core/gitLargeFiles";
+import type { GitCommandRunner } from "../core/git";
 import { appendIgnoreRules } from "../core/workRegistry";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import type { WorkEntry } from "../models/types";
+import { whenNoticePicked } from "../views/notify";
 import { useSyncLog } from "./syncLog";
 
 /**
@@ -46,4 +54,65 @@ export async function ignoreLargeFiles(
       ".gitignore に足せませんでした（詳しくはログにあります）。"
     );
   }
+}
+
+/** 記録の前に大きさで止めたときの、知らせとログの出し方 */
+export interface TooLargeNoticeOptions {
+  /** ログの見出し（どの操作の記録を止めたか。「取り込む前の記録」など） */
+  step: string;
+  /** 知らせの頭に付ける名前（「「作品」：」の形で付く）。無ければ付けない */
+  subject?: string;
+  /** ログの付記（作品名・置き場名など）。ファイルの道と大きさはこの部品が足す */
+  logFields?: Record<string, string>;
+  /** ログを書く前に向ける作品フォルダー。呼び出し側がもう向けていれば省く */
+  logFolder?: string;
+  /** ［.gitignore に足す］を押したとき、ログを向け直すための登録済みの作品 */
+  works: readonly WorkEntry[];
+  /** 知らせのボタンが失敗したときの記録の名前（`whenNoticePicked`） */
+  label: string;
+  /** 試験で大きさを差し替える */
+  sizeOf?: SizeOf;
+}
+
+/**
+ * GitHub に送れない大きさのファイルがあれば、記録の前に止めて知らせる（設計書5.5.21）。
+ * 止めたら true（呼び出し側は記録しないで戻る）。
+ *
+ * `commitAll` の中に入れないのは、呼び出し元ごとに戻り値と知らせの形が違うため。
+ * 単独の同期・最初の記録・変更の記録・復元が同じ知らせを出すので、ここに1つだけ置く。
+ *
+ * **ボタンの答えは待たない**（`whenNoticePicked`）。同期の旗の中から呼ばれるので、待つと
+ * 作者が閉じるまで自動の送り直しが控え続ける。［.gitignore に足す］は、まだ git に
+ * 入っていないファイルがあるときだけ出す——記録済みのファイルが大きくなったものは、
+ * 足しても次の記録で同じく止まる
+ */
+export async function stopIfTooLargeToRecord(
+  cwd: string,
+  run: GitCommandRunner,
+  options: TooLargeNoticeOptions
+): Promise<boolean> {
+  const large = await findLargeFilesToRecord(cwd, run, options.sizeOf);
+  if (large.files.length === 0) return false;
+  if (options.logFolder !== undefined) useLogFile(options.logFolder);
+  logFailure(`${options.step}：GitHub に送れない大きさのファイルがあるので記録しなかった`, {
+    ...(options.logFields ?? {}),
+    ファイル: large.files.map((one) => `${one.path}（${one.size}バイト）`).join("、"),
+  });
+  const untracked = large.files.filter((one) => one.untracked);
+  const head = options.subject !== undefined ? `「${options.subject}」：` : "";
+  whenNoticePicked(
+    vscode.window.showWarningMessage(
+      `${head}${describeTooLargeToRecord(large.files)}`,
+      ...(untracked.length > 0 ? [IGNORE_LARGE_FILES_LABEL] : []),
+      "ログを表示"
+    ),
+    async (action) => {
+      if (action === IGNORE_LARGE_FILES_LABEL) {
+        await ignoreLargeFiles(large.root, untracked, options.works);
+      }
+      if (action === "ログを表示") showLog();
+    },
+    { label: options.label, workFolder: options.logFolder ?? options.works[0]?.folderPath }
+  );
+  return true;
 }
