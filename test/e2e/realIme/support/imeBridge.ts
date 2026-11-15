@@ -68,10 +68,55 @@ function userDataDir(session: E2ESession): string {
   return path.join(session.root, "user-data");
 }
 
-/** 試し用の VS Code の本体の exe の名前（`.vscode-test` の Code.exe） */
-function exeName(session: E2ESession): string {
-  const spawned = session.app.process().spawnfile;
-  return spawned ? path.basename(spawned) : "Code.exe";
+/**
+ * 試し用の VS Code の本体の exe の名前（`.vscode-test` の Code.exe）。
+ * **起こしたプロセスの名前（spawnfile）は使わない**——Windows では Playwright が cmd.exe を通して起こすので
+ * cmd.exe になり、IME の側が「前の窓が cmd.exe ではない」と打つのを止めた（2026-11-16）
+ */
+function exeName(_session: E2ESession): string {
+  return "Code.exe";
+}
+
+/** OS で前に出ている窓のプロセスの名前（Windows。読めなければ undefined） */
+async function osForegroundProcess(): Promise<string | undefined> {
+  const { execFile } = await import("node:child_process");
+  const script =
+    'Add-Type -TypeDefinition "using System;using System.Runtime.InteropServices;public class NovelaiFg{' +
+    '[DllImport(\\"user32.dll\\")]public static extern IntPtr GetForegroundWindow();' +
+    '[DllImport(\\"user32.dll\\")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);}";' +
+    "$p=0;[void][NovelaiFg]::GetWindowThreadProcessId([NovelaiFg]::GetForegroundWindow(),[ref]$p);(Get-Process -Id $p).ProcessName";
+  return new Promise((resolve) => {
+    execFile("powershell", ["-NoProfile", "-Command", script], { windowsHide: true }, (error, stdout) => {
+      resolve(error ? undefined : String(stdout).trim() || undefined);
+    });
+  });
+}
+
+/**
+ * **OS で前に出ているのが試し用の VS Code か**を確かめ、違えば窓を一度しまって戻して前面を取り直す（3回まで）。
+ * Electron の側の「焦点がある」は、Windows が前面を渡さなかったときも真を返すことがあった
+ * （2026-11-16、前に出ていたのはこのセッションのアプリ claude.exe だった）。取れなければ打たずに飛ばす
+ */
+async function ensureOsForeground(session: E2ESession): Promise<void> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const name = await osForegroundProcess();
+    if (name !== undefined && /^code$/i.test(name)) return;
+    await session.app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (!win) return;
+      win.minimize();
+      win.restore();
+      win.setAlwaysOnTop(true);
+      win.show();
+      win.focus();
+      win.setAlwaysOnTop(false);
+      win.webContents.focus();
+    });
+    await session.page.waitForTimeout(800);
+  }
+  const last = await osForegroundProcess();
+  if (last !== undefined && /^code$/i.test(last)) return;
+  throw new ForegroundRefusedError(`OS で前に出ている窓が試し用の VS Code になりません（いま前にあるのは ${last ?? "不明"}）。打たずに飛ばします`);
 }
 
 /**
@@ -123,7 +168,10 @@ export class RealIme {
   }
 
   private async send(frame: Frame, steps: readonly KeyStep[]): Promise<void> {
-    // **台本を呼ぶ直前に毎回**、焦点が試し用の窓（とその原稿エディターの面）にあるかを確かめる
+    // **台本を呼ぶ直前に毎回**、OS で前にある窓と、焦点が試し用の窓（とその原稿エディターの面）にあるかを確かめる
+    await ensureOsForeground(this.session);
+    // 窓をしまって戻したあとは、原稿の面へ焦点を戻す
+    await frame.locator("#compose").focus().catch(() => undefined);
     await assertTestWindowFocused(this.session, frame);
     /*
       段は JSON のファイルで渡す（-StepsFile）。`powershell -File` に JSON を直に渡すと引用符が落ちる。
