@@ -83,7 +83,7 @@ description: この作品の役割分担。まとまった実装・レビュー�
   2. `choices` のあるものは AskUserQuestion でまとめて訊く（1回に4問まで。多ければ何回かに分ける。急ぎを先に）。`choices` の無いものは本文で、セッションごとにまとめて見せる
   3. 答えは送り主へ SendMessage で返す（別の機械のものは、今までどおり母艦が取り次ぐ）
   4. 答えをもらったファイルは、全部を訊き終えるのを待たずに、その回の答えが来たらすぐ消す（`rm`。残すとパネルの残数が減らない。2026-11-15 作者「パネルの問いの残数が減りませんね」）。答えを待っているもの（作者の手待ちなど）は消さずに残す。控えが要る判断は、今までどおり引継ぎ書の8章へ
-- **出先のページ**：https://claude.ai/artifact/PGwjRY4oCeCvJNDBZEyybX （非公開。パネルと同じ中身を、作者がスマホで読む。報告は件数と題だけ）。**2026-11-16 から、進捗パネルの mod（0.5.0）が自分で5分おきに写す**（作者「パネルと同期させれば、節約できませんか？」。母艦のフォルダーのセッションだけが `$.tool.call` で ArtifactData を撃つ。Claude の設定の allow に `ArtifactData` が要る）。止まって見えたら、mod が読み込まれているか・allow が残っているかを見て、手で写す。手で写すとき：`ArtifactData` の `get`（`collection: "panel"`, `doc_id: "snapshot"`）で `version` を読み、`set` に `file_path: "C:/Users/nonah/.claude/mods/progress-panel/mobile-snapshot.json"` と `if_version` を付けて送る（まだ無いときは `if_version` なしで作る）。`mobile-snapshot.json` は mod が1分おきと各ターンの終わりに書き直す。inbox を消したあとは、`mobile-snapshot.json` の `inbox.count` が減ったのを見てから写す（すぐ写すと古い数が載る）
+- **出先のページ**：https://claude.ai/artifact/PGwjRY4oCeCvJNDBZEyybX （非公開。パネルと同じ中身を、作者がスマホで読む。報告は件数と題だけ）。**進捗パネルの mod（0.5.0）に自分で5分おきに写す口を作ったが、まだ動かない**（作者「パネルと同期させれば、節約できませんか？」2026-11-16）。`get` は通るが `set` は「人の承認が要り、mod の呼び出しからは求められない」と断られる（Claude の設定の allow に `ArtifactData` を足しても同じ。結果は mod の push-status.json）。許可の書き方を調べ直すまで、**母艦の見回り（/loop）のたびに手で写す**。手で写すとき：`ArtifactData` の `get`（`collection: "panel"`, `doc_id: "snapshot"`）で `version` を読み、`set` に `file_path: "C:/Users/nonah/.claude/mods/progress-panel/mobile-snapshot.json"` と `if_version` を付けて送る（まだ無いときは `if_version` なしで作る）。`mobile-snapshot.json` は mod が1分おきと各ターンの終わりに書き直す。inbox を消したあとは、`mobile-snapshot.json` の `inbox.count` が減ったのを見てから写す（すぐ写すと古い数が載る）
 
 ## 振り分けの早見
 
