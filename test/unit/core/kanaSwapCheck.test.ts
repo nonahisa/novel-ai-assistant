@@ -6,6 +6,7 @@ import {
   isSameFix,
 } from "../../../src/core/kanaSwapCheck";
 import type { Chunk } from "../../../src/core/chunker";
+import { validateTypoIssues } from "../../../src/core/typoCheckValidation";
 
 function makeChunk(text: string, startLine = 0): Chunk {
   return {
@@ -77,7 +78,7 @@ describe("ほかのよく使う語の入れ替わりも拾う", () => {
 
 /**
  * **誤検出の罠。** 入れ替わりの形が、本物の語やその一部になるもの。
- * 作者の作品の写し（約92万字）で実際に当たった形と、一覧を目で見て除いた形
+ * 作者の作品の写しで実際に当たった形と、一覧を目で見て除いた形
  */
 describe("本物の語に重なる形は指摘しない", () => {
   test.each([
@@ -162,5 +163,54 @@ describe("isSameFix：同じ所を同じ形に直すか", () => {
 
   test("重ならなければ別", () => {
     expect(isSameFix(code, { line: 2, target: "鮮度", suggestion: "新鮮さ" })).toBe(false);
+  });
+
+  test("修正案の「$」を置き換えの記号として読まない", () => {
+    expect(
+      isSameFix(
+        { line: 1, target: "価格", suggestion: "$&円" },
+        { line: 1, target: "価格は", suggestion: "$&円は" }
+      )
+    ).toBe(true);
+  });
+});
+
+/**
+ * 直す前の測り（gemma4:e4b）で、第1話の「もろちん」などが検算の `no_change` で落ちた。
+ * **検算が正しい直しまで落としているのではない**ことを、AIが指した対象そのままで確かめる
+ * （落ちたのは、AIの修正案が直しになっていなかったため）
+ */
+describe("検算は、入れ替わりの正しい直しなら通す", () => {
+  const text = [
+    "　朝の市場は、いつもより人が多かった。",
+    "　露店の主人は、もろちん顔なじみだった。",
+    "「今日は魚が安いよ。もろちん、鮮度は保証する」",
+    "　主人は胸を張って言った。",
+    "「ありとがう。じゃあ、二尾もらおうかな」",
+    "　わたしが財布を出すと、主人は笑った。",
+    "「すまみせん、細かいのがなくて」",
+    "「いいよいいよ。また来てくれれば」",
+    "　帰り道、いなきり雨が降り出した。",
+  ].join("\n");
+
+  test.each([
+    [2, "もろちん顔なじみ", "もちろん顔なじみ"],
+    [3, "もろちん", "もちろん"],
+    [5, "ありとがう", "ありがとう"],
+    [7, "すまみせん", "すみません"],
+    [9, "いなきり", "いきなり"],
+  ])("%i行目「%s」", (line, target, suggestion) => {
+    const lineText = text.split("\n")[line - 1];
+    const result = validateTypoIssues(
+      {
+        issues: [
+          { line, original: lineText, target, suggestion, reason: "入力ミス", confidence: "high" },
+        ],
+      },
+      makeChunk(text),
+      []
+    );
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
   });
 });

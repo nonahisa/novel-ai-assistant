@@ -17,15 +17,15 @@ import { escapeRegExp } from "./regexEscape";
  * ## 誤検出をどう抑えたか
  *
  * - **4字以上の語だけを載せる。** 3字以下は入れ替わりの形が本物の語の一部に
- *   なりやすい。作者の作品の写し（約92万字）で数えると、「わたし」→「わした」は
+ *   なりやすい。作者の作品の写し2作（約86万字）で数えると、「わたし」→「わした」は
  *   「かわした」に18件、「やはり」→「はやり」は「はやりすぎた」に4件当たった
  * - **入れ替わりの形が本物の語（やその一部）になるものは、形ごと除く**
  *   （`REAL_WORD_SWAPS`）。「わからない」→「かわらない」（変わらない）、
  *   「かならず」→「なからず」（少なからず）など
  * - 同じ仮名が並ぶ所（「ぜんぜん」の「ぜぜ」にはならない）は入れ替えても同じなので作らない
  *
- * 載せた語の入れ替わりの形は、作者の作品の写し4作（約92万字）で0件だった
- * （除いた形を除いて。2026-11-15）。
+ * 載せた語の入れ替わりの形は、作者の作品の写し4作（本文約84万字）と原稿の
+ * フォルダー全体（約109万字）で0件だった（除いた形を除いて。2026-11-15）。
  */
 
 /**
@@ -277,7 +277,8 @@ export function isSameFix(
   const [longer, shorter] = a.target.length >= b.target.length ? [a, b] : [b, a];
   if (!longer.target.includes(shorter.target)) return false;
   return (
-    longer.target.replace(shorter.target, shorter.suggestion) ===
+    // 関数で渡す（文字列で渡すと、修正案の「$」が置き換えの記号として読まれる）
+    longer.target.replace(shorter.target, () => shorter.suggestion) ===
     longer.suggestion
   );
 }

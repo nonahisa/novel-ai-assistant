@@ -252,6 +252,8 @@ describe("「もろちん」を、AIが拾わなくても指摘する", () => {
     const result = await checkTypos(work, registry);
 
     expect(swapIssuesOf(result)).toHaveLength(1);
+    // 黙って落とさない（一覧が空のときに、どこで落ちたかを追えるように）
+    expect(state.logged.some((line) => line.includes("同じ直しが一覧にあるため除外 1件"))).toBe(true);
   });
 
   test("作者が「直さない語」に登録していれば、指摘しない", async () => {

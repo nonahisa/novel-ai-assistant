@@ -962,6 +962,7 @@ export function collectIssues(
   const label = describeChunkFile(chunk.filePath, chunk);
   let rejectedCount = validated.rejected.length;
   let alreadyApplied = 0;
+  let sameFix = 0;
 
   if (validated.rejected.length > 0) {
     log.step(
@@ -1005,10 +1006,16 @@ export function collectIssues(
           existing.filePath === at.filePath && isSameFix(existing, located)
       )
     ) {
+      sameFix++;
       continue;
     }
 
     out.push({ ...located, filePath: at.filePath, chunkHash: chunk.hash });
+  }
+
+  // 落とした道は、どれもログへ残す（この関数の説明。一覧が空のときに追えるように）
+  if (sameFix > 0) {
+    log.step(`${label}: 同じ直しが一覧にあるため除外 ${sameFix}件`);
   }
 
   if (alreadyApplied > 0) {
