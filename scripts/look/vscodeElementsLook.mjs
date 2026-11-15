@@ -113,12 +113,19 @@ function cssVariables(kind, themesDir) {
 
 // ── 束 ──
 
-/** 見本の便と HTML を作る部品を束ねる。before は HEAD の画面、after は作業中の画面 */
+/**
+ * 見本の便と HTML を作る部品を束ねる。before は置き換える前の画面（main と分かれた所の
+ * writingStatsPanelHtml.ts。枝にコミットしたあとも「今」が置き換えた形にならないように）、
+ * after は作業中の画面
+ */
 async function loadSample(which) {
   const outfile = path.join(work, `vsel_sample_${which}.mjs`);
   const target = path.join(root, "src", "views", "writingStatsPanelHtml.ts").replace(/\\/g, "/");
+  const base = which === "before"
+    ? execFileSync("git", ["-C", root, "merge-base", "HEAD", "main"], { encoding: "utf8" }).trim()
+    : "";
   const before = which === "before"
-    ? execFileSync("git", ["-C", root, "show", "HEAD:src/views/writingStatsPanelHtml.ts"], { encoding: "utf8" })
+    ? execFileSync("git", ["-C", root, "show", `${base}:src/views/writingStatsPanelHtml.ts`], { encoding: "utf8" })
     : undefined;
   await esbuild.build({
     entryPoints: [path.join(root, "scripts", "look", "writingStatsSample.ts")],
@@ -266,6 +273,9 @@ async function main() {
     if (name === "webview-elements.js") return route.fulfill({ status: 200, contentType: "text/javascript", body: elementsBundle });
     if (name === "look-elements.js") return route.fulfill({ status: 200, contentType: "text/javascript", body: lookElements });
     if (name === "codicon.css") return route.fulfill({ status: 200, contentType: "text/css", body: fs.readFileSync(path.join(codiconDir, "codicon.css")) });
+    // 製品と同じ置き場（dist/codicons。esbuild.js が写す）。先に npm run build が要る
+    if (name === "codicons/codicon.css") return route.fulfill({ status: 200, contentType: "text/css", body: fs.readFileSync(path.join(root, "dist", "codicons", "codicon.css")) });
+    if (name.startsWith("codicons/codicon.ttf")) return route.fulfill({ status: 200, contentType: "font/ttf", body: fs.readFileSync(path.join(root, "dist", "codicons", "codicon.ttf")) });
     if (name.startsWith("codicon.ttf")) return route.fulfill({ status: 200, contentType: "font/ttf", body: fs.readFileSync(path.join(codiconDir, "codicon.ttf")) });
     return route.fulfill({ status: 404, body: "" });
   });
@@ -335,7 +345,9 @@ async function main() {
     if (tab) await page.click(`.tab[data-page="${tab}"]`);
   };
 
-  for (const kind of ["dark", "light"]) {
+  // VSEL_ONLY=final のときは ④（仕上げの1枚ずつ）だけを撮る
+  const onlyFinal = process.env.VSEL_ONLY === "final";
+  for (const kind of onlyFinal ? [] : ["dark", "light"]) {
     const vars = cssVariables(kind, themesDir);
     const themeName = kind === "dark" ? "暗い色" : "明るい色";
 
@@ -369,6 +381,45 @@ async function main() {
     await compose(`③執筆統計_${themeName}.png`, kind, rows, ["今", "見やすくした形"]);
   }
 
+  /*
+    ④ 仕上げ（作者の答え 2026-11-15「この形で進める」「アイコン有り」）。見やすくした形をページごとに
+    1枚ずつ撮る。**作者のスマホへ送るので、1枚の長い側を 8000 ピクセル以下にする**（③は 14,572 で送れなかった）。
+    長いときは縮める
+  */
+  const MAX_SIDE = 8000;
+  for (const kind of ["dark", "light"]) {
+    const vars = cssVariables(kind, themesDir);
+    const themeName = kind === "dark" ? "暗い色" : "明るい色";
+    const data = after.sampleStatsData();
+    const finalPages = [["overview", 760], ["trend", 760], ["episodes", 760], ["site-kakuyomu", 760], ["site-narou", 760]];
+    let index = 0;
+    for (const [tab, width] of finalPages) {
+      index += 1;
+      const html = injectPrelude(
+        after.sampleStatsHtml({
+          nonce: NONCE,
+          cspSource: ORIGIN,
+          elementsScriptUri: `${ORIGIN}/webview-elements.js`,
+          codiconsCssUri: `${ORIGIN}/codicons/codicon.css`,
+        }),
+        hostPrelude(vars, kind, data)
+      );
+      let png = await shoot(`final-${tab}-${kind}.html`, html, width, statsPrepare(tab === "overview" ? null : tab));
+      const h = png.readUInt32BE(20);
+      const w = png.readUInt32BE(16);
+      if (Math.max(w, h) > MAX_SIDE) {
+        // 縮める（Edge で画像を小さく描き直して撮る）
+        const scale = MAX_SIDE / Math.max(w, h);
+        const page = await browser.newPage({ deviceScaleFactor: 1, viewport: { width: Math.floor(w * scale), height: Math.floor(h * scale) } });
+        await page.setContent(`<html><body style="margin:0"><img style="display:block;width:${Math.floor(w * scale)}px" src="data:image/png;base64,${png.toString("base64")}"></body></html>`);
+        await page.waitForTimeout(200);
+        png = await page.screenshot();
+        await page.close();
+      }
+      fs.writeFileSync(path.join(outDir, `④執筆統計_仕上げ_${themeName}_${index}.png`), png);
+    }
+  }
+
   // ── 動きの確かめ（VS Code の画面の自動テストを流せないときの代わり。置き換えた画面で） ──
   const checks = await checkBehavior(context, pages, after, cssVariables("dark", themesDir));
   for (const [name, ok] of Object.entries(checks)) console.log(`${ok === true ? "通った" : "落ちた"}：${name}${ok === true ? "" : ` ${JSON.stringify(ok)}`}`);
@@ -391,7 +442,12 @@ async function checkBehavior(context, pages, after, vars) {
   const open = async (name, narouApi) => {
     const data = { ...after.sampleStatsData(), narouApi };
     const html = injectPrelude(
-      after.sampleStatsHtml({ nonce: NONCE, cspSource: ORIGIN, elementsScriptUri: `${ORIGIN}/webview-elements.js` }),
+      after.sampleStatsHtml({
+        nonce: NONCE,
+        cspSource: ORIGIN,
+        elementsScriptUri: `${ORIGIN}/webview-elements.js`,
+        codiconsCssUri: `${ORIGIN}/codicons/codicon.css`,
+      }),
       hostPrelude(vars, "dark", data)
     );
     pages.set(name, html);
@@ -453,6 +509,11 @@ async function checkBehavior(context, pages, after, vars) {
   );
   results["折りたたみは閉じて始まり、押すと開く。閉じていても中の表に届く"] =
     typeof fold === "object" && fold.open === false && fold.rowsWhileClosed > 0 && opened === true ? true : { fold, opened };
+  // アイコンのフォントが読めたか（font-src に止められると四角になる）
+  results["アイコンのフォントが読める"] = await page.evaluate(async () => {
+    await document.fonts.ready;
+    return [...document.fonts].some((font) => font.family.replace(/"/g, "") === "codicon" && font.status === "loaded");
+  }) || "codicon のフォントが読めていない";
   results["台本の誤り・CSP の違反が無い"] =
     errors.length === 0 && (await page.evaluate(() => window.__violations.length)) === 0 ? true : { errors };
   await page.close();

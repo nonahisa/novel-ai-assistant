@@ -179,7 +179,43 @@ function bundleOptions() {
   return { desktop, browser, mcp, lame, webviewElements };
 }
 
+/**
+ * 束ねずに**そのまま写して**配るもの（作者の決定 2026-11-15「ボタンのアイコンは有り」）。
+ *
+ * 画面のボタンのアイコン（codicon）は字形のフォントと、それを使う CSS の2つでできている。
+ * CSS とフォントは esbuild の束にできないので、`node_modules` から `dist/codicons/` へ写す。
+ * 画面は `<link id="vscode-codicon-stylesheet" href="asWebviewUri(dist/codicons/codicon.css)">` で読む
+ * （部品 vscode-icon がこの id を探す）。CSS の中の `./codicon.ttf` は同じフォルダーを指すので、
+ * 2つは同じフォルダーへ置く。
+ *
+ * **同梱表示（`scripts/bundledPackages.mjs`）も、配布物の許可リスト（`scripts/releaseSupport.mjs`）も
+ * この一覧を読む。** 束の中身から作る表示では、写したものは拾われないため。
+ */
+const COPIED_ASSETS = [
+  {
+    package: "@vscode/codicons",
+    from: "node_modules/@vscode/codicons/dist/codicon.css",
+    to: "dist/codicons/codicon.css",
+  },
+  {
+    package: "@vscode/codicons",
+    from: "node_modules/@vscode/codicons/dist/codicon.ttf",
+    to: "dist/codicons/codicon.ttf",
+  },
+];
+
+function copyAssets() {
+  const fs = require("fs");
+  const path = require("path");
+  for (const asset of COPIED_ASSETS) {
+    const target = path.join(__dirname, asset.to);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(__dirname, asset.from), target);
+  }
+}
+
 async function main() {
+  copyAssets();
   const options = bundleOptions();
   const contexts = await Promise.all(
     [options.desktop, options.browser, options.mcp, options.lame, options.webviewElements].map((config) =>
@@ -195,7 +231,7 @@ async function main() {
   }
 }
 
-module.exports = { bundleOptions };
+module.exports = { bundleOptions, COPIED_ASSETS };
 
 // `require` で読まれたとき（同梱表示のスクリプト・テスト）は、ビルドしない
 if (require.main === module) {

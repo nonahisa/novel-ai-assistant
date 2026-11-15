@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
 import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanelHtml";
-import { EXPECTED_ARCHIVE_FILES } from "../../../scripts/releaseSupport.mjs";
+import { EXPECTED_ARCHIVE_FILES, FORBIDDEN_CONTENT_PATTERNS } from "../../../scripts/releaseSupport.mjs";
 
 /**
  * 執筆統計のボタンと折りたたみを、VS Code の部品（`@vscode-elements/elements`）へ
@@ -65,9 +65,9 @@ describe("執筆統計：ボタンと折りたたみは VS Code の部品", () =
 
   test("画面の自動テストが探す印は、部品の外枠に残す", () => {
     // 粒度の切り替え・なろうAPIの取得・AIの助言
-    expect(html).toContain(`'<vscode-button data-granularity="'`);
-    expect(html).toContain(`'<div class="row"><vscode-button secondary data-narou-fetch="1"'`);
-    expect(html).toContain(`'<vscode-button secondary class="advice-ask" data-advice-site="'`);
+    expect(html).toContain(`'<vscode-button data-granularity="' + key + '" icon="' + GRANULARITY_ICONS[key] + '"'`);
+    expect(html).toContain(`'<div class="row"><vscode-button secondary data-narou-fetch="1" icon="cloud-download"'`);
+    expect(html).toContain(`'<vscode-button secondary icon="sparkle" class="advice-ask" data-advice-site="'`);
     // 折りたたみは4か所（AIへ渡す材料・これまでの記録・話ごとの記録・タグの付け替え）
     expect([...html.matchAll(/<vscode-collapsible class="fold" heading="/g)]).toHaveLength(4);
   });
@@ -82,12 +82,42 @@ describe("執筆統計：ボタンと折りたたみは VS Code の部品", () =
   });
 });
 
+describe("執筆統計：ボタンのアイコン（codicon。作者の決定 2026-11-15「アイコン有り」）", () => {
+  const CSS = "https://file+.vscode-resource.vscode-cdn.net/ext/dist/codicons/codicon.css";
+  const html = buildWritingStatsPanelHtml(NONCE, "vscode-resource:", { elementsScriptUri: URI, codiconsCssUri: CSS });
+
+  test("部品が探す id で CSS を読み、束より先に置く", () => {
+    const link = `<link rel="stylesheet" id="vscode-codicon-stylesheet" href="${CSS}">`;
+    expect(html).toContain(link);
+    expect(html.indexOf(link)).toBeLessThan(html.indexOf(`src="${URI}"`));
+    expect(html.indexOf(link)).toBeLessThan(html.indexOf("</head>"));
+  });
+
+  test("CSP の font-src は cspSource だけを許す（フォントが読めないとアイコンが四角になる）", () => {
+    const csp = /<meta http-equiv="Content-Security-Policy"\s+content="([^"]*)"/.exec(html)?.[1] ?? "";
+    expect(csp).toContain("font-src vscode-resource:;");
+    expect(csp).toContain("style-src vscode-resource: ");
+    expect(csp).not.toMatch(/font-src[^;]*(\*|data:|https:)/);
+  });
+
+  test("粒度の4つとサイトの面の2つのボタンに、写真②の右と同じアイコンを付ける", () => {
+    expect(html).toContain("const GRANULARITY_ICONS = { daily: 'calendar', weekly: 'graph', monthly: 'graph-line', yearly: 'history' };");
+    expect(html).toContain('icon="cloud-download"');
+    expect(html).toContain('icon="sparkle"');
+  });
+
+  test("CSS を渡さない呼び出しでは link を出さない", () => {
+    expect(buildWritingStatsPanelHtml(NONCE, "c")).not.toContain("vscode-codicon-stylesheet");
+  });
+});
+
 describe("執筆統計のパネル：束の URI と読める場所を渡す", () => {
   for (const file of ["src/features/writingStatsPanel.ts", "src/features/allWorksWritingStatsPanel.ts"]) {
     test(file, () => {
       const source = readFileSync(file, "utf8");
       expect(source).toContain("localResourceRoots: [webviewElementsRoot(context.extensionUri)]");
       expect(source).toMatch(/elementsScriptUri: webviewElementsScriptUri\((panel|created)\.webview, context\.extensionUri\)/);
+      expect(source).toMatch(/codiconsCssUri: webviewCodiconsUri\((panel|created)\.webview, context\.extensionUri\)/);
     });
   }
 
@@ -119,6 +149,34 @@ describe("画面の部品の束", () => {
 
   test("配布物の許可リストに載っている", () => {
     expect(EXPECTED_ARCHIVE_FILES).toContain("extension/dist/webview-elements.js");
+  });
+
+  test("写して配るアイコンの CSS とフォントが、許可リストに載り、写し元が在る", () => {
+    const { COPIED_ASSETS } = require("../../../esbuild.js") as {
+      COPIED_ASSETS: Array<{ package: string; from: string; to: string }>;
+    };
+    expect(COPIED_ASSETS.map((asset) => asset.to).sort()).toEqual(["dist/codicons/codicon.css", "dist/codicons/codicon.ttf"]);
+    for (const asset of COPIED_ASSETS) {
+      expect(EXPECTED_ARCHIVE_FILES).toContain(`extension/${asset.to}`);
+      // 写し元が無ければビルドが落ちる。依存に入っていることも見る（peer のまま自動で入るのに頼らない）
+      expect(() => readFileSync(asset.from)).not.toThrow();
+    }
+    const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { dependencies: Record<string, string> };
+    expect(pkg.dependencies["@vscode/codicons"]).toBeDefined();
+  });
+
+  test("写すファイルは、配布の出口の見張り（鍵・手元のパス）に引っかからない", () => {
+    const { COPIED_ASSETS } = require("../../../esbuild.js") as { COPIED_ASSETS: Array<{ from: string }> };
+    for (const asset of COPIED_ASSETS) {
+      // 出口（validateArchiveContents）と同じく文字列として読んで当てる
+      const content = readFileSync(asset.from, "utf8");
+      expect(FORBIDDEN_CONTENT_PATTERNS.some((pattern) => pattern.test(content)), asset.from).toBe(false);
+    }
+  });
+
+  test("CSS が指すフォントは、同じフォルダーの codicon.ttf（写す先と食い違わない）", () => {
+    const css = readFileSync("node_modules/@vscode/codicons/dist/codicon.css", "utf8");
+    expect(css).toMatch(/src: url\("\.\/codicon\.ttf\?[0-9a-f]+"\)/);
   });
 
   test("入れる部品は使う分だけ（全部入りにしない）", () => {

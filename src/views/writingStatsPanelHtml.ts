@@ -72,6 +72,12 @@ export function buildWritingStatsPanelHtml(
      * 読み込みの行を出さない——部品が無くても押せること・字が読めることは変わらない
      */
     elementsScriptUri?: string;
+    /**
+     * ボタンのアイコン（codicon）の CSS を `asWebviewUri` で変えた URI（作者の決定 2026-11-15
+     * 「アイコン有り」）。部品 vscode-icon が id `vscode-codicon-stylesheet` の link を探して読む。
+     * 渡さなければ link を出さない（アイコンの所が空になるだけで、押せることは変わらない）
+     */
+    codiconsCssUri?: string;
   } = {}
 ): string {
   const hasEpisodesTab = options.hasEpisodesTab ?? true;
@@ -112,6 +118,13 @@ export function buildWritingStatsPanelHtml(
     この行がそちらに当たらないように（src を持つ行は `">` で閉じない）。
     在りかは HTML の属性へ埋めるので、引用符を逃がす
   */
+  /*
+    アイコンの CSS は束より先に置く（部品は描くときにこの link を探す）。style-src は cspSource を
+    許しているので通る。CSS が読むフォントのために、CSP の font-src にも cspSource を足した
+  */
+  const codiconsLink = options.codiconsCssUri
+    ? `<link rel="stylesheet" id="vscode-codicon-stylesheet" href="${escapeMarkup(options.codiconsCssUri)}">\n`
+    : "";
   const elementsScript = options.elementsScriptUri
     ? `<script nonce="${nonce}" src="${escapeMarkup(options.elementsScriptUri)}"></script>\n`
     : "";
@@ -120,7 +133,7 @@ export function buildWritingStatsPanelHtml(
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+      content="default-src 'none'; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}'; font-src ${cspSource};">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>執筆量</title>
 <style nonce="${nonce}">
@@ -276,6 +289,8 @@ svg { display: block; }
 .narou-api { margin: 8px 0 12px; padding: 8px 10px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
 .narou-api label { display: inline-flex; align-items: center; gap: 6px; }
 .narou-api .row { margin: 4px 0; }
+/* 枠の中の頭の見出しは、節の頭の広い余白（.site-sub）を取らない。枠の上に空きが出るため */
+.narou-api > .site-sub:first-child { margin-top: 0; }
 .narou-api label.disabled { color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); }
 /* 率の表は3行しかない。画面幅いっぱいに広げると、率と式が左右に離れて読みにくい */
 table.reader-rates { width: auto; }
@@ -471,7 +486,7 @@ a:hover, .link:hover { text-decoration: underline; }
   .celebrate-banner { transition: none; }
 }
 </style>
-${elementsScript}</head>
+${codiconsLink}${elementsScript}</head>
 <body data-initial-tab="${initialTab}">
 <header>
   <h1 id="title">執筆量</h1>
@@ -521,6 +536,11 @@ let narouApiOutcome = null;
 let narouApiBusy = false;
 
 const GRANULARITY_LABELS = { daily: '日次', weekly: '週次', monthly: '月次', yearly: '年次' };
+/*
+  ボタンのアイコン（codicon の名前。作者の決定 2026-11-15「アイコン有り」。見比べの写真②の右の形）。
+  名前の字が主で、アイコンは見分けの助け。アイコンが読めなくても字で押せる
+*/
+const GRANULARITY_ICONS = { daily: 'calendar', weekly: 'graph', monthly: 'graph-line', yearly: 'history' };
 
 function escapeHtml(text) {
   return String(text)
@@ -660,7 +680,7 @@ function renderGranularity() {
   host.innerHTML = Object.keys(GRANULARITY_LABELS)
     .map((key) =>
       // 選んでいる刻みだけ主のボタン、ほかは控えめに（secondary）。印の class="active" も残す
-      '<vscode-button data-granularity="' + key + '"' +
+      '<vscode-button data-granularity="' + key + '" icon="' + GRANULARITY_ICONS[key] + '"' +
       (key === granularity ? ' class="active"' : ' secondary') + '>' +
       GRANULARITY_LABELS[key] + '</vscode-button>'
     )
@@ -1252,7 +1272,7 @@ function renderNarouApi(api) {
       : '<span class="site-meta">先にガイドラインを開いてください</span>') +
     '</div>');
   const label = narouApiBusy ? '取得しています…' : 'なろうAPIによる作品情報取得';
-  parts.push('<div class="row"><vscode-button secondary data-narou-fetch="1"' +
+  parts.push('<div class="row"><vscode-button secondary data-narou-fetch="1" icon="cloud-download"' +
     (api.agreed && !narouApiBusy ? '' : ' disabled') + '>' + escapeHtml(label) + '</vscode-button></div>');
   parts.push('<div class="site-meta">Nコード ' + escapeHtml(api.ncode || '') +
     ' の作品の数と順位を1回取ります（同じ作品は' + escapeHtml(String(api.intervalMinutes)) +
@@ -1457,7 +1477,7 @@ function renderReaderAdvice(site, advice, outcome, busy) {
   const label = busy
     ? 'AIに聞いています…'
     : (answered ? 'AIに聞き直す' : 'AIに助言をもらう');
-  const button = '<vscode-button secondary class="advice-ask" data-advice-site="' + escapeHtml(site) + '"' +
+  const button = '<vscode-button secondary icon="sparkle" class="advice-ask" data-advice-site="' + escapeHtml(site) + '"' +
     (answered ? ' data-force="1"' : '') + (busy ? ' disabled' : '') + '>' +
     escapeHtml(label) + '</vscode-button>';
 

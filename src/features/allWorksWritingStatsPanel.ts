@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { listenForFocusWithoutPointer } from "../views/pickerFocus";
-import { webviewElementsRoot, webviewElementsScriptUri } from "../views/webviewElements";
+import { webviewCodiconsUri, webviewElementsRoot, webviewElementsScriptUri } from "../views/webviewElements";
 import { wideViewColumn } from "./editorColumn";
 import type { WorkRegistry } from "../core/workRegistry";
 import { toManuscriptPages } from "../core/charCount";
@@ -108,6 +108,7 @@ export async function openAllWorksWritingStatsPanel(
     // 前に見ていたタブで開く（作品ごとの画面と同じ。全作品の画面は作品とは別の鍵。2026-11-01）
     initialTab: rememberedWritingStatsTab(verifiedState(context.globalState), ALL_WORKS_TAB_KEY),
     elementsScriptUri: webviewElementsScriptUri(created.webview, context.extensionUri),
+    codiconsCssUri: webviewCodiconsUri(created.webview, context.extensionUri),
   });
 
   // 窓が出ている間に押さずに焦点を受けたら、窓へ戻す（views/pickerFocus.ts）

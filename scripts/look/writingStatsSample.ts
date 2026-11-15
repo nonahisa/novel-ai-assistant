@@ -184,7 +184,8 @@ export function sampleStatsData(): Record<string, unknown> {
     siteRecords: records,
     siteRecordsError: null,
     readerSites: readerSiteTabs(ledger, records),
-    narouApi: null,
+    // なろうAPIの欄（同意済み。取得のボタンとアイコンが見える形）
+    narouApi: { status: "ready", ncode: "n0000aa", opened: true, agreed: true, agreedAt: "2026-11-10T00:00:00.000Z", intervalMinutes: 60, dailyLimit: 10 },
     workFacts: buildWorkPostingFacts(ledger),
     achievements: [
       { day: "2026-11-14", text: "1日の目標 2,000字", streak: "3日連続" },
@@ -210,12 +211,19 @@ export function sampleStatsData(): Record<string, unknown> {
 }
 
 /** 画面の HTML（今の形・置き換えた形のどちらも、この関数の出力を使う） */
-export function sampleStatsHtml(options: { nonce: string; cspSource: string; elementsScriptUri?: string; initialTab?: string }): string {
+export function sampleStatsHtml(options: {
+  nonce: string;
+  cspSource: string;
+  elementsScriptUri?: string;
+  codiconsCssUri?: string;
+  initialTab?: string;
+}): string {
   const ledger = sampleLedger();
   const records = buildPostingSiteRecords(ledger);
   return buildWritingStatsPanelHtml(options.nonce, options.cspSource, {
     initialTab: options.initialTab,
     readerSites: readerSiteTabs(ledger, records),
     elementsScriptUri: options.elementsScriptUri,
-  });
+    codiconsCssUri: options.codiconsCssUri,
+  } as Parameters<typeof buildWritingStatsPanelHtml>[2]);
 }

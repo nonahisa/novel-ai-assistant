@@ -1,7 +1,7 @@
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { listenForFocusWithoutPointer } from "../views/pickerFocus";
-import { webviewElementsRoot, webviewElementsScriptUri } from "../views/webviewElements";
+import { webviewCodiconsUri, webviewElementsRoot, webviewElementsScriptUri } from "../views/webviewElements";
 import { wideViewColumn } from "./editorColumn";
 import { openSiteLink } from "./openSiteLink";
 // ブラウザ版でも同じ場所を指すため、`node:path` ではなくこちらを使う
@@ -201,6 +201,8 @@ export async function openWritingStatsPanel(
       readerSites: initialSites,
       // ボタンと折りたたみの部品（作者の決定 2026-11-15）
       elementsScriptUri: webviewElementsScriptUri(panel.webview, context.extensionUri),
+      // ボタンのアイコン（作者の決定 2026-11-15「アイコン有り」）
+      codiconsCssUri: webviewCodiconsUri(panel.webview, context.extensionUri),
     }
   );
 

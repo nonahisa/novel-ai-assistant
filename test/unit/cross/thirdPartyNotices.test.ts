@@ -63,6 +63,24 @@ describe("同梱ライブラリの表示", () => {
     expect(names.has("@modelcontextprotocol/sdk")).toBe(true);
   });
 
+  /**
+   * **写して配るもの（束ねないもの）も載る**（画面のボタンのアイコン。2026-11-15）。
+   * 束の metafile には出てこないので、`esbuild.js` の `COPIED_ASSETS` から足している。
+   * 字形とフォントは CC-BY-4.0、CSS は MIT なので、両方の全文が要る
+   */
+  test("写して配るアイコン（@vscode/codicons）も、両方の条件の全文つきで載る", () => {
+    const codicons = bundled.find(({ name }) => name === "@vscode/codicons");
+    expect(codicons?.bundles).toEqual(["dist/codicons/codicon.css", "dist/codicons/codicon.ttf"]);
+    // 節の終わりは次の部品の見出し（CC-BY の本文の中にも区切りの線があるので、線では切らない）
+    const section = NOTICES.slice(NOTICES.indexOf("## @vscode/codicons "));
+    const next = section.indexOf("\n## ", 1);
+    const body = next < 0 ? section : section.slice(0, next);
+    expect(body).toContain("- ライセンス: CC-BY-4.0");
+    expect(body).toContain("Attribution 4.0 International");
+    expect(body).toContain("MIT License");
+    expect(body).toContain("Copyright (c) Microsoft Corporation.");
+  });
+
   test("配布の道具は束に入らない", () => {
     expect(bundled.map(({ name }) => name)).not.toContain("@vscode/vsce");
     expect(bundled.map(({ name }) => name)).not.toContain("esbuild");

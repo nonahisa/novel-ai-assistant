@@ -67,6 +67,17 @@ export async function collectBundledPackages() {
     }
   }
 
+  /*
+    束ねずに写して配るもの（`esbuild.js` の `COPIED_ASSETS`。画面のアイコンの CSS とフォント。
+    2026-11-15）。metafile には出てこないので、一覧から足す。配る先は写した先のファイル
+  */
+  const { COPIED_ASSETS } = require(path.join(root, "esbuild.js"));
+  for (const asset of COPIED_ASSETS) {
+    const dir = `node_modules/${asset.package}`;
+    if (!found.has(dir)) found.set(dir, new Set());
+    found.get(dir).add(asset.to);
+  }
+
   const packages = [...found.entries()].map(([dir, bundles]) => {
     const meta = JSON.parse(
       fs.readFileSync(path.join(root, dir, "package.json"), "utf-8")
@@ -78,6 +89,8 @@ export async function collectBundledPackages() {
       homepage: meta.homepage,
       dir,
       bundles: [...bundles].sort(),
+      // 写して配るもの（束ねない）。表示では「写して配っている」と書き分ける
+      copied: COPIED_ASSETS.some((asset) => `node_modules/${asset.package}` === dir),
     };
   });
 

@@ -26,7 +26,7 @@ const packages = await collectBundledPackages();
 const parts = [
   "# 同梱しているソフトウェアについて",
   "",
-  "この拡張機能（`dist/extension.js`・`dist/browser-extension.js`・`dist/mcp-server.mjs`・`dist/lame.js`・`dist/webview-elements.js`）には、次のライブラリが組み込まれています。",
+  "この拡張機能（`dist/extension.js`・`dist/browser-extension.js`・`dist/mcp-server.mjs`・`dist/lame.js`・`dist/webview-elements.js`・`dist/codicons/`）には、次のライブラリが組み込まれています。",
   "著作権はそれぞれの権利者に属し、以下のライセンスの条件で配布しています。",
   "",
   "拡張機能そのもののライセンスは [LICENSE](LICENSE)（MIT）です。",
@@ -51,7 +51,17 @@ for (const entry of packages) {
     );
   }
 
-  const body = fs.readFileSync(path.join(dir, licenseFile), "utf-8").trim();
+  /*
+    写して配るもの（`@vscode/codicons`）は、条件の文が2つある——字形とフォントは CC-BY-4.0（LICENSE）、
+    CSS などのコードは MIT（LICENSE-CODE）。CSS とフォントの両方を配るので、**両方の全文**を添える
+  */
+  const licenseFiles = entry.copied
+    ? fs.readdirSync(dir).filter((name) => /^licen[cs]e/i.test(name)).sort()
+    : [licenseFile];
+  const body = licenseFiles
+    // codicons の LICENSE は CRLF で書かれている。表示の中で改行がまざらないよう LF にそろえる
+    .map((name) => fs.readFileSync(path.join(dir, name), "utf-8").replace(/^﻿/, "").replace(/\r\n/g, "\n").trim())
+    .join("\n\n");
   const lgpl = /^LGPL-/i.test(entry.license ?? "");
   parts.push(
     `## ${entry.name} ${entry.version}`,
@@ -59,6 +69,12 @@ for (const entry of packages) {
     `- ライセンス: ${entry.license ?? "（package.json に記載なし）"}`,
     ...(entry.homepage ? [`- 配布元: ${entry.homepage}`] : []),
     ...(lgpl ? [`- 入っている束: ${entry.bundles.join("・")}（拡張機能の束とは別のファイル）`] : []),
+    ...(entry.copied
+      ? [
+          `- 配っているファイル: ${entry.bundles.map((file) => `\`${file}\``).join("・")}（改変せずに写したもの。画面のボタンのアイコンに使います）`,
+          "- 字形とフォントは CC-BY-4.0（https://creativecommons.org/licenses/by/4.0/）、CSS などのコードは MIT です。下に両方の全文を載せます。",
+        ]
+      : []),
     "",
     "```",
     body,
