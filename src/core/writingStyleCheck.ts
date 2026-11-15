@@ -4,7 +4,7 @@ import { escapeRegExp } from "./regexEscape";
 
 /**
  * 文章作法のチェック（三点リーダー・ダッシュの偶数使用、鉤括弧内文末の句点、
- * 感嘆符・疑問符後の空白）。
+ * 感嘆符・疑問符後の空白、半角の空白の字下げ）。
  *
  * 縦書き原稿の伝統的な作法だが、Web小説では人に強制すべきものではない
  * （参考：https://creative-story.net/rule-novel/ 、作者の指摘）。
@@ -49,18 +49,23 @@ const REASON_CLOSING_QUOTE_PERIOD =
 const REASON_MARK_SPACING =
   "文章作法：感嘆符・疑問符の後に全角スペースを入れる書き方が一般的です。意図的な表現であれば無視してください。";
 
+const REASON_HALF_WIDTH_INDENT =
+  "文章作法：字下げが半角の空白になっています。全角の空白で字下げする書き方が一般的です。意図的な表現であれば無視してください。";
+
 /** original に含める前後の文字数。target を一意に特定しやすくする程度でよい */
 const CONTEXT_RADIUS = 8;
 
 export function checkWritingStyle(chunk: Chunk): AcceptedTypoIssue[] {
   const findings: AcceptedTypoIssue[] = [];
   const lines = chunk.text.split("\n");
+  const markdown = /\.(md|markdown)$/iu.test(chunk.filePath);
   lines.forEach((lineText, index) => {
     const lineNumber = chunk.startLine + index + 1;
     findings.push(...findOddRuns(lineText, lineNumber, "…", REASON_ELLIPSIS));
     findings.push(...findDashRuns(lineText, lineNumber));
     findings.push(...findClosingQuotePeriods(lineText, lineNumber));
     findings.push(...findMissingSpaceAfterMark(lineText, lineNumber));
+    findings.push(...findHalfWidthIndent(lineText, lineNumber, markdown));
   });
   return findings;
 }
@@ -230,4 +235,46 @@ function findMissingSpaceAfterMark(
     });
   }
   return findings;
+}
+
+/**
+ * 行の頭の字下げに、半角の空白（U+0020）・U+00A0・タブが混ざっている行を見る
+ * （作者の報告 2026-11-16「校正で字下げが指摘されませんでした」。日本語入力の設定で、
+ * 字下げが全角でなく半角の空白になっていた）。
+ *
+ * 直し案は**同じ数の全角の空白**（字下げの深さは作者の書いたまま）。字下げしない作品・
+ * 会話文の頭は、行の頭に空白が無いので何も言わない。全角だけの字下げも言わない。
+ *
+ * 指摘しないもの：
+ * - 空白だけの行（見えず、字下げではない）
+ * - 英字・数字が続く行（欧文の行や、数字の桁を揃えた表）
+ * - **Markdown の構造の字下げ**：タブ・半角2つ以上（入れ子・コード）、箇条書き・引用・見出し・表・
+ *   コードの印が続く行。Markdown では行の頭の半角の空白に意味があるので、和文の頭の半角1つだけを見る
+ *
+ * `target` は空白の連なりと続く1字（行の頭だと分かる形にして、同じ行のほかの空白と取り違えない）
+ */
+function findHalfWidthIndent(line: string, lineNumber: number, markdown: boolean): AcceptedTypoIssue[] {
+  const match = /^[  \t　]+/u.exec(line);
+  if (!match) return [];
+  const run = match[0];
+  if (!/[  \t]/u.test(run)) return [];
+  const next = line[run.length];
+  if (next === undefined || /\s/u.test(next)) return [];
+  if (/[A-Za-z0-9]/u.test(next)) return [];
+  if (markdown) {
+    const halfWidth = run.replace(/　/gu, "");
+    if (halfWidth.includes("\t") || halfWidth.length >= 2) return [];
+    if ("-*+>#|`".includes(next)) return [];
+  }
+  const target = run + next;
+  return [
+    {
+      line: lineNumber,
+      original: contextAround(line, 0, target.length),
+      target,
+      suggestion: "　".repeat(run.length) + next,
+      reason: REASON_HALF_WIDTH_INDENT,
+      confidence: "medium",
+    },
+  ];
 }

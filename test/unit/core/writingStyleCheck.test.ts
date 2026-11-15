@@ -196,3 +196,45 @@ describe("行番号とテスト対象外のルール", () => {
     }
   });
 });
+
+/**
+ * 行の頭の字下げが半角（U+0020・U+00A0・タブ）になっている行（作者の報告 2026-11-16
+ * 「校正で字下げが指摘されませんでした」。IME の設定で字下げが半角の空白になっていた）。
+ * 本文は書き換えず、全角の空白へ置き換える案を指摘として出すだけ。
+ */
+describe("字下げが半角の空白", () => {
+  const indentFindings = (text: string, filePath = "C:\\work\\001.txt") =>
+    checkWritingStyle({ ...makeChunk(text), filePath }).filter((f) => f.reason.includes("字下げ"));
+
+  test("行の頭の半角の空白を、全角の空白へ置き換える案で指摘する", () => {
+    const found = indentFindings("　雨が上がった。\n 傘を閉じた。\n");
+    expect(found).toHaveLength(1);
+    expect(found[0].line).toBe(2);
+    expect(found[0].target).toBe(" 傘");
+    expect(found[0].suggestion).toBe("　傘");
+    expect(found[0].original.startsWith(" 傘")).toBe(true);
+    expect(found[0].confidence).toBe("medium");
+    expect(found[0].reason).toContain("意図的な表現であれば無視してください");
+  });
+
+  test("U+00A0・タブ・全角と半角の混ざりも、同じ数の全角へ", () => {
+    const nbsp = String.fromCodePoint(0xa0);
+    expect(indentFindings(`${nbsp}雨。`)[0]?.suggestion).toBe("　雨");
+    expect(indentFindings("\t雨。")[0]?.suggestion).toBe("　雨");
+    expect(indentFindings("　 雨。")[0]?.suggestion).toBe("　　雨");
+  });
+
+  test("指摘しない：全角の字下げ・字下げの無い行・会話文の頭・空白だけの行", () => {
+    expect(indentFindings("　雨が上がった。\n「行こう」\n雨。\n   \n\n")).toEqual([]);
+  });
+
+  test("指摘しない：英字や数字が続く行（欧文・表の揃え）", () => {
+    expect(indentFindings(" Hello World\n 12時\n")).toEqual([]);
+  });
+
+  test("Markdown では、箇条書き・引用・入れ子・コードの字下げを指摘しない。和文の頭の半角1つは指摘する", () => {
+    const md = "C:\\work\\001.md";
+    expect(indentFindings("  - 項目\n > 引用\n    コード\n\t入れ子\n 1. 番号\n", md)).toEqual([]);
+    expect(indentFindings(" 雨が上がった。\n", md)).toHaveLength(1);
+  });
+});
