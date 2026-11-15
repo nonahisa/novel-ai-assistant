@@ -96,6 +96,12 @@ const FALLBACK = {
 
 function cssVariables(kind, themesDir) {
   const colors = { ...FALLBACK[kind], ...themeColors(themesDir, kind === "dark" ? "dark_modern.json" : "light_modern.json") };
+  // 設定の欄の色は、VS Code の既定では入力欄の色を引き継ぐ（テーマの定義には書かれていない）
+  for (const part of ["Background", "Border", "Foreground"]) {
+    const key = `settings.textInput${part}`;
+    const source = colors[`input.${part.toLowerCase()}`];
+    if (!(key in colors) && source) colors[key] = source;
+  }
   const vars = {};
   for (const [key, value] of Object.entries(colors)) vars[`--vscode-${key.replace(/\./g, "-")}`] = value;
   vars["--vscode-font-family"] = "\"Segoe WPC\", \"Segoe UI\", \"Yu Gothic UI\", \"Meiryo UI\", sans-serif";
@@ -177,7 +183,8 @@ function injectPrelude(html, prelude) {
 }
 
 function inputPage(vars, kind, replaced) {
-  const csp = `default-src 'none'; style-src ${ORIGIN} 'nonce-${NONCE}'; script-src 'nonce-${NONCE}'; font-src ${ORIGIN};`;
+  // vscode-textarea は右下のつまみを data: の絵で描く。置き換えるなら img-src data: が要る
+  const csp = `default-src 'none'; style-src ${ORIGIN} 'nonce-${NONCE}'; script-src 'nonce-${NONCE}'; font-src ${ORIGIN}; img-src data:;`;
   const text = "第3話の冒頭、主人公が駅で待つ場面は説明が多すぎないでしょうか。雨の音を先に書いたほうが入りやすい気がします。";
   const field = replaced
     ? `<vscode-textarea id="input" rows="3" resize="vertical" placeholder="聞きたいことを書いてください（Ctrl+Enterで送信）" value="${text}"></vscode-textarea>`
@@ -349,7 +356,7 @@ async function main() {
     // ③ 執筆統計（概要・執筆の推移・カクヨムの反応）
     const data = after.sampleStatsData();
     const rows = [];
-    for (const [tab, caption, width] of [["overview", "概要", 760], ["trend", "執筆の推移", 760], ["site-kakuyomu", "カクヨムの反応", 760], ["overview", "概要（狭い窓 380px）", 380]]) {
+    for (const [tab, caption, width] of [["overview", "概要", 760], ["trend", "執筆の推移", 760], ["site-kakuyomu", "カクヨムの反応", 760], ["overview", "概要（狭い窓 380px）", 380], ["site-kakuyomu", "カクヨムの反応（狭い窓 380px）", 380]]) {
       const nowHtml = injectPrelude(before.sampleStatsHtml({ nonce: NONCE, cspSource: ORIGIN }), hostPrelude(vars, kind, data));
       const newHtml = injectPrelude(
         after.sampleStatsHtml({ nonce: NONCE, cspSource: ORIGIN, elementsScriptUri: `${ORIGIN}/webview-elements.js` }),
