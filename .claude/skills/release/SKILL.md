@@ -28,6 +28,8 @@ node scripts/checkMarketplace.mjs
 
 ### 1. VSIX を作って検証する
 
+**検査したコミットで作業場を切って作る。main の先頭から作らない**（配布を待つ間に、製品のセッションの記録などが main へ積まれる。Mac などで全件を通したコミットと、VSIX の中身をそろえるため。2026-11-15 の引き継ぎの教訓）。`git worktree add <場所> <完全なコミット番号>` で切り、その作業場で `npm ci` から始める。
+
 **PowerShell から走らせる**（Git Bash だと `verify:vsix` の `tar` が GNU tar になり ZIP を読めない）。**先に `ELECTRON_RUN_AS_NODE` を外す**（拡張機能ホストの環境変数を継ぐと Electron 製の子プロセスが即終了する）。
 
 ```powershell
