@@ -77,40 +77,107 @@ function exeName(_session: E2ESession): string {
   return "Code.exe";
 }
 
-/** OS で前に出ている窓のプロセスの名前（Windows。読めなければ undefined） */
-async function osForegroundProcess(): Promise<string | undefined> {
+/**
+ * PowerShell の台本を走らせて、標準出力を返す（走らなければ undefined）。
+ *
+ * **台本は -EncodedCommand（UTF-16LE の base64）で渡す。** -Command に文字列で渡すと、Node が引数の
+ * 引用符を打ち消す形と PowerShell 5.1 の読み方が合わず、Add-Type の中の "user32.dll" で文字列が切れて
+ * Add-Type が黙って失敗し、前面の窓はいつも「Idle」（番号 0 のプロセス）と読めていた（2026-11-16。
+ * 外から測ると前面はずっとこの PC のアプリだった）。失敗は標準エラーにだけ出て終了コードは 0 だった
+ */
+async function runPowerShell(script: string): Promise<string | undefined> {
   const { execFile } = await import("node:child_process");
-  const script =
-    'Add-Type -TypeDefinition "using System;using System.Runtime.InteropServices;public class NovelaiFg{' +
-    '[DllImport(\\"user32.dll\\")]public static extern IntPtr GetForegroundWindow();' +
-    '[DllImport(\\"user32.dll\\")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);}";' +
-    "$p=0;[void][NovelaiFg]::GetWindowThreadProcessId([NovelaiFg]::GetForegroundWindow(),[ref]$p);(Get-Process -Id $p).ProcessName";
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
   return new Promise((resolve) => {
-    execFile("powershell", ["-NoProfile", "-Command", script], { windowsHide: true }, (error, stdout) => {
-      resolve(error ? undefined : String(stdout).trim() || undefined);
-    });
+    execFile(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+      { windowsHide: true },
+      (error, stdout) => {
+        /*
+          標準エラーは見ない。-EncodedCommand では Add-Type の進み具合が CLIXML で標準エラーへ出る（失敗ではない）。
+          台本の中で失敗したときは、標準出力が空になるので、読む側が undefined に倒す
+        */
+        resolve(error ? undefined : String(stdout).trim());
+      }
+    );
   });
 }
 
+const USER32 = String.raw`
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class NovelaiWin {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+  [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")] public static extern uint ThreadOf(IntPtr h, IntPtr p);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+}
+'@
+`;
+
+/** OS で前に出ている窓のプロセスの名前（Windows。読めなければ undefined。前面の窓が無ければ "none"。日本語は標準出力の文字コードで化けるので使わない） */
+async function osForegroundProcess(): Promise<string | undefined> {
+  const out = await runPowerShell(
+    USER32 +
+      "$p = 0; [void][NovelaiWin]::GetWindowThreadProcessId([NovelaiWin]::GetForegroundWindow(), [ref]$p)\n" +
+      "if ($p -eq 0) { 'none' } else { (Get-Process -Id $p).ProcessName }\n"
+  );
+  return out === undefined || out === "" ? undefined : out;
+}
+
 /**
- * **OS で前に出ているのが試し用の VS Code か**を確かめ、違えば窓を一度しまって戻して前面を取り直す（3回まで）。
- * Electron の側の「焦点がある」は、Windows が前面を渡さなかったときも真を返すことがあった
- * （2026-11-16、前に出ていたのはこのセッションのアプリ claude.exe だった）。取れなければ打たずに飛ばす
+ * 窓（ハンドルの数）を、OS の前面へ出す。Windows は前面に無いプロセスからの SetForegroundWindow を断るので、
+ * いま前面にある窓のスレッドの入力へ一時的につないでから（AttachThreadInput）出す
  */
+async function raiseWindowByHandle(handle: string): Promise<void> {
+  if (!/^\d+$/.test(handle)) return;
+  await runPowerShell(
+    USER32 +
+      `$h = [IntPtr]::new([Int64]${handle})` + "\n" +
+      "$me = [NovelaiWin]::GetCurrentThreadId(); $other = [NovelaiWin]::ThreadOf([NovelaiWin]::GetForegroundWindow(), [IntPtr]::Zero)\n" +
+      "$attached = $other -ne 0 -and $other -ne $me -and [NovelaiWin]::AttachThreadInput($me, $other, $true)\n" +
+      "if ([NovelaiWin]::IsIconic($h)) { [void][NovelaiWin]::ShowWindow($h, 9) }\n" +
+      "[void][NovelaiWin]::BringWindowToTop($h); [void][NovelaiWin]::SetForegroundWindow($h)\n" +
+      "if ($attached) { [void][NovelaiWin]::AttachThreadInput($me, $other, $false) }\n"
+  );
+}
+
+/**
+ * **OS で前に出ているのが試し用の VS Code か**を確かめ、違えば前面を取り直す（3回まで）。
+ * Electron の側の「焦点がある」は、Windows が前面を渡さなかったときも真を返すことがあった
+ * （2026-11-16、前に出ていたのはこのセッションのアプリ claude.exe だった）。取れなければ打たずに飛ばす。
+ *
+ * 前面を取り直すときは、窓をしまって戻す形（minimize → restore）を使わず、窓のハンドルを OS の側から前へ出す
+ * （しまった瞬間は前面の窓が無くなり、入力につなぐ先が無くなる）
+ */
+/** OS で前に出ているのが試し用の VS Code か */
+async function isOsForegroundTestWindow(): Promise<boolean> {
+  const name = await osForegroundProcess();
+  return name !== undefined && /^code$/i.test(name);
+}
+
 async function ensureOsForeground(session: E2ESession): Promise<void> {
   for (let attempt = 1; attempt <= 3; attempt++) {
     const name = await osForegroundProcess();
     if (name !== undefined && /^code$/i.test(name)) return;
+    const handle = await session.app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (!win) return undefined;
+      win.show();
+      return win.getNativeWindowHandle().readBigUInt64LE(0).toString();
+    });
+    if (handle !== undefined) await raiseWindowByHandle(handle);
     await session.app.evaluate(({ BrowserWindow }) => {
       const win = BrowserWindow.getAllWindows()[0];
-      if (!win) return;
-      win.minimize();
-      win.restore();
-      win.setAlwaysOnTop(true);
-      win.show();
-      win.focus();
-      win.setAlwaysOnTop(false);
-      win.webContents.focus();
+      win?.focus();
+      win?.webContents.focus();
     });
     await session.page.waitForTimeout(800);
   }
@@ -154,6 +221,12 @@ export class RealIme {
       await trialRefresh(this.session.workFolder);
       this.refreshedAt = Date.now();
     }
+    /*
+      **前面とカーソルを整えるのは、1打目の前に1回だけ**（2026-11-16。IME の記録との突き合わせ）。前は送るたびに
+      前面を取り直してカーソルを置き直していたので、最初の1打を送ってから残りを送るまでの約4.5秒の間に、
+      変換中の字（「k」）を Chromium が確定し、続きは置き直したカーソル（末尾）へ入っていた
+    */
+    await this.prepareFocus(frame);
     let rest = [...steps];
     if (!this.checked) {
       const [first, after] = splitFirstKey(rest);
@@ -167,11 +240,67 @@ export class RealIme {
     if (rest.length > 0) await this.send(frame, rest);
   }
 
-  private async send(frame: Frame, steps: readonly KeyStep[]): Promise<void> {
-    // **台本を呼ぶ直前に毎回**、OS で前にある窓と、焦点が試し用の窓（とその原稿エディターの面）にあるかを確かめる
+  /**
+   * 前面を試し用の窓にし、原稿の面へ焦点とカーソルを戻す（打ち始める前に1回）。
+   */
+  private async prepareFocus(frame: Frame): Promise<void> {
+    /*
+      **置いたカーソルを、前面を取り直したあとに置き直す**（2026-11-16）。窓が前へ出て焦点が戻ると、原稿の面の
+      カーソルが末尾へ動き、行の頭で打つはずの字が文書の終わりに入った。取り直す間に焦点が一度外れると、原稿
+      エディターは書きかけを送って面を組み直す（blur → flushUnsent）ので、選択の Range は古い要素を指したまま
+      使えなくなる。**面の頭から何字目か**で控え、焦点を戻したあとに組み直された面で当て直す
+    */
+    await frame
+      .evaluate(() => {
+        const compose = document.getElementById("compose");
+        const selection = window.getSelection();
+        const box = window as unknown as { __novelaiImeOffset?: number };
+        box.__novelaiImeOffset = undefined;
+        if (!compose || !selection || selection.rangeCount === 0) return;
+        const range = selection.getRangeAt(0);
+        if (!compose.contains(range.startContainer)) return;
+        const head = document.createRange();
+        head.setStart(compose, 0);
+        head.setEnd(range.startContainer, range.startOffset);
+        box.__novelaiImeOffset = head.toString().length;
+      })
+      .catch(() => undefined);
+    const raised = !(await isOsForegroundTestWindow());
     await ensureOsForeground(this.session);
-    // 窓をしまって戻したあとは、原稿の面へ焦点を戻す
+    // 焦点が一度外れたなら、面の組み直し（拡張機能との往復）が済むのを待ってから当て直す
+    if (raised) await frame.page().waitForTimeout(1_500);
+    // 原稿の面へ焦点を戻し、控えた選択を当て直す
     await frame.locator("#compose").focus().catch(() => undefined);
+    await frame
+      .evaluate(() => {
+        const box = window as unknown as { __novelaiImeOffset?: number };
+        const offset = box.__novelaiImeOffset;
+        const compose = document.getElementById("compose");
+        if (offset === undefined || !compose) return;
+        // 字の数え方は控えたときと同じ（文字の節だけを頭から足す。Range.toString と同じ数え方）
+        const walker = document.createTreeWalker(compose, NodeFilter.SHOW_TEXT);
+        let rest = offset;
+        let last: Text | undefined;
+        for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+          last = node;
+          if (rest <= node.length) {
+            const range = document.createRange();
+            range.setStart(node, rest);
+            range.collapse(true);
+            const selection = window.getSelection();
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+            return;
+          }
+          rest -= node.length;
+        }
+        if (last) window.getSelection()?.collapse(last, last.length);
+      })
+      .catch(() => undefined);
+  }
+
+  private async send(frame: Frame, steps: readonly KeyStep[]): Promise<void> {
+    // **台本を呼ぶ直前に毎回**、焦点が試し用の窓（とその原稿エディターの面）にあるかを確かめる（窓もカーソルも動かさない）
     await assertTestWindowFocused(this.session, frame);
     /*
       段は JSON のファイルで渡す（-StepsFile）。`powershell -File` に JSON を直に渡すと引用符が落ちる。
