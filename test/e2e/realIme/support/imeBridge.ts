@@ -192,6 +192,17 @@ async function ensureOsForeground(session: E2ESession): Promise<void> {
  * **最初の1打だけを別に送り、殻の合図で Setsuna かを確かめてから残りを送る**（打つ先が Setsuna でなければ、
  * 残りの打鍵はほかの入力の打鍵になるだけなので打たない）。変換中の字は台本の呼び出しをまたいで続く
  */
+/** 原稿エディターの組んで書く面。`RealIme.type` の焦点の既定 */
+const COMPOSE_SELECTOR = "#compose";
+
+export interface TypeOptions {
+  /**
+   * 打つ前に焦点を置く欄（既定は原稿の面 `#compose`）。原稿の面のときだけ、置いたカーソルを控えて当て直す。
+   * ほかの欄（プロットモードの相談の欄など）へ打つ試しのために足した（2026-11-16）
+   */
+  focus?: string;
+}
+
 export class RealIme {
   private checked = false;
   private stepFiles = 0;
@@ -216,8 +227,8 @@ export class RealIme {
    * `steps` を本物の IME で打つ。`frame` は打つ先の原稿エディターの面（焦点がその面の中にあることも確かめる）。
    * 呼ぶたびに、台本を呼ぶ直前に `assertTestWindowFocused` を通す
    */
-  async type(frame: Frame, steps: readonly KeyStep[]): Promise<void> {
-    await this.prepare(frame);
+  async type(frame: Frame, steps: readonly KeyStep[], options: TypeOptions = {}): Promise<void> {
+    await this.prepare(frame, options.focus);
     await this.sendChecked(frame, steps);
   }
 
@@ -254,7 +265,7 @@ export class RealIme {
   }
 
   /** 打ち始める前に1回：長い試しなら試しの作品の知らせを書き直し、前面とカーソルを整える */
-  private async prepare(frame: Frame): Promise<void> {
+  private async prepare(frame: Frame, focus = COMPOSE_SELECTOR): Promise<void> {
     if (Date.now() - this.refreshedAt > REFRESH_AFTER_MS) {
       await trialRefresh(this.session.workFolder);
       this.refreshedAt = Date.now();
@@ -264,7 +275,7 @@ export class RealIme {
       前面を取り直してカーソルを置き直していたので、最初の1打を送ってから残りを送るまでの約4.5秒の間に、
       変換中の字（「k」）を Chromium が確定し、続きは置き直したカーソル（末尾）へ入っていた
     */
-    await this.prepareFocus(frame);
+    await this.prepareFocus(frame, focus);
   }
 
   /** 最初の1打だけを別に送って Setsuna かを確かめ（1回目だけ）、残りを送る */
@@ -285,7 +296,15 @@ export class RealIme {
   /**
    * 前面を試し用の窓にし、原稿の面へ焦点とカーソルを戻す（打ち始める前に1回）。
    */
-  private async prepareFocus(frame: Frame): Promise<void> {
+  private async prepareFocus(frame: Frame, focus: string): Promise<void> {
+    if (focus !== COMPOSE_SELECTOR) {
+      // 原稿の面でない欄（プロットモードの相談の欄など）は、前面を整えてからその欄へ焦点を置くだけ（カーソルは末尾のまま）
+      const raised = !(await isOsForegroundTestWindow());
+      await ensureOsForeground(this.session);
+      if (raised) await frame.page().waitForTimeout(1_500);
+      await frame.locator(focus).focus();
+      return;
+    }
     /*
       **置いたカーソルを、前面を取り直したあとに置き直す**（2026-11-16）。窓が前へ出て焦点が戻ると、原稿の面の
       カーソルが末尾へ動き、行の頭で打つはずの字が文書の終わりに入った。取り直す間に焦点が一度外れると、原稿
