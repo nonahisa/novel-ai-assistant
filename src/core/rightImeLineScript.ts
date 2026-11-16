@@ -195,9 +195,15 @@ function rlCreateSession(initialText, hooks) {
   let state = { text: initialText, selection: initialText.length, composing: false, formats: [] };
   /* 変換中に外から届いた本文。確定してから片づける */
   let pending = null;
+  /*
+    打つ面の値と同じだと分かっている本文（最後に送った・入れ直した・揃えた本文）。
+    欄の字がこれと違う間は、まだ送っていない字がある（確定の合図から送るまでの1周など）
+  */
+  let synced = initialText;
 
   function commitNow() {
     hooks.commit(state.text);
+    synced = state.text;
   }
 
   /* 確定のあとに、待たせていた本文を片づける（打つ面の flushPending と同じ） */
@@ -226,6 +232,7 @@ function rlCreateSession(initialText, hooks) {
       ? rlClamp(undoCaret, 0, text.length)
       : rlShiftCaret(before, text, state.selection);
     state = { text: text, selection: at, composing: false, formats: [] };
+    synced = text;
     hooks.tellContext(0, before.length, text, at);
     hooks.render();
     hooks.setEditBase(text);
@@ -313,13 +320,17 @@ function rlCreateSession(initialText, hooks) {
     incoming: incoming,
     /**
      * 打つ面の値に揃える（右の入力欄の外の操作——右クリックの品書きなど——が打つ面の値を
-     * 書き換えて送ったとき）。送り済みの本文なので、送り直さない。変換中は触らない
+     * 書き換えて送ったとき）。送り済みの本文なので、送り直さない。変換中は触らない。
+     * **まだ送っていない字があるときも触らない**——確定の合図から送るまでの1周のあいだ、
+     * 打つ面の値は確定前の本文なので、揃えると確定した語が消える
      */
     adopt: function (text) {
       if (state.composing || text === state.text) return;
+      if (state.text !== synced) return;
       const before = state.text;
       const at = rlShiftCaret(before, text, state.selection);
       state = { text: text, selection: at, composing: false, formats: [] };
+      synced = text;
       hooks.tellContext(0, before.length, text, at);
       hooks.render();
     },

@@ -320,6 +320,34 @@ describe("確定の合図のあとに来る確定ぶんの入力（設計書6.25
     expect(t.sent.at(-1)).toBe("朝の駅");
   });
 
+  /**
+   * 確定の合図から送るまでの1周のあいだ、打つ面の値はまだ確定前の本文である。そこで
+   * 「打つ面の値に揃える」（遅れて届く確定の keydown・前の語の返事）が走っても、確定した語を
+   * 古い本文へ戻さない
+   */
+  it("確定してから送るまでの間に打つ面の値へ揃えようとしても、確定した語は消えない", () => {
+    const t = setup("朝の");
+    t.session.compositionStart();
+    t.session.textUpdate({ start: 2, end: 2, text: "駅", selection: 3 });
+    t.session.compositionEnd();
+    // 打つ面の値はまだ「朝の」（送る前）
+    t.session.adopt("朝の");
+    expect(t.session.state().text).toBe("朝の駅");
+    t.tick();
+    expect(t.sent).toEqual(["朝の駅"]);
+  });
+
+  it("送り終えたあとなら、欄の外の書き換え（打つ面の値）に揃える", () => {
+    const t = setup("朝の");
+    t.session.textUpdate({ start: 2, end: 2, text: "駅", selection: 3 });
+    expect(t.sent).toEqual(["朝の駅"]);
+    // 品書きの貼り付けなどが打つ面の値を変えて送った
+    t.session.adopt("朝の駅前");
+    expect(t.session.state().text).toBe("朝の駅前");
+    // 送り済みの本文なので送り直さない
+    expect(t.sent).toEqual(["朝の駅"]);
+  });
+
   it("合図の時点の本文を送るのは1周あと（その間に字が来なくても送る）", () => {
     const t = setup("朝の");
     t.session.compositionStart();

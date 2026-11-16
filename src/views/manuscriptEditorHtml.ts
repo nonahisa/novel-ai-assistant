@@ -10028,6 +10028,15 @@ ${RIGHT_IME_LINE_SOURCE}
     if (rlSession.isComposing()) return;
     const kind = rlKeyKind(event, vertical !== false, rlIsImeEnter);
     if (kind === null) return;
+    /*
+      **校閲中は、書き換えるキーを止める**（6.25.12。打つ面と同じく、カーソルの移動は通す）。
+      打った字（EditContext の textupdate）は止められないが、拡張機能が文書へ入れずに本文を
+      送り直すので、欄は元へ戻る（最後の守り）
+    */
+    if (kind !== "back" && kind !== "forward" && refuseWhileReviewLocked()) {
+      event.preventDefault();
+      return;
+    }
     rlSession.key(kind);
     event.preventDefault();
   });
@@ -10041,6 +10050,8 @@ ${RIGHT_IME_LINE_SOURCE}
   rline.addEventListener("paste", function (event) {
     if (!rlOn || !rlSession || rlSession.isComposing()) return;
     event.preventDefault();
+    // 校閲中は貼らない（6.25.12）
+    if (refuseWhileReviewLocked()) return;
     const text = event.clipboardData ? event.clipboardData.getData("text/plain") : "";
     if (text) rlSession.insert(text.replace(/\\r\\n?/g, "\\n"));
   });
