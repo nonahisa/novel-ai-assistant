@@ -16,9 +16,19 @@ import { isAutoWrittenLine } from "../../../src/core/git";
 
 const run = promisify(execFile);
 
+/**
+ * 裸の置き場（送り先）の中で git を打つことを許す。
+ *
+ * git 2.56 から `safe.bareRepository` の既定が `explicit` になり、裸の置き場をフォルダーの位置だけで
+ * 見つける打ち方（`cwd` を送り先にして `rev-parse` など）が断られる（2026-11-17、ノートPCの git 2.56 で
+ * 10件落ちた）。製品は送り先の中で git を打たない（push・fetch・clone は explicit でも通る）ので、
+ * 許すのは試しの読み取りだけ。`-c` は利用者の設定より強いので、どの機械でも同じに動く
+ */
+const ALLOW_BARE = ["-c", "safe.bareRepository=all"] as const;
+
 /** 置き場で git を走らせる。失敗は投げる（準備が崩れたまま試験を進めない） */
 export async function git(folder: string, args: readonly string[]): Promise<string> {
-  const { stdout } = await run("git", [...args], { cwd: folder, windowsHide: true });
+  const { stdout } = await run("git", [...ALLOW_BARE, ...args], { cwd: folder, windowsHide: true });
   return stdout;
 }
 
