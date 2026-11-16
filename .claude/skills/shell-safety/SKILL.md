@@ -34,3 +34,5 @@ description: node -e・printf・sed・perl・heredoc・Edit/Write で文字列�
 ## PowerShell の WriteAllLines は改行を CRLF にする（2026-11-04）
 
 `[IO.File]::WriteAllLines` は行の終わりに CRLF を付ける。LF のファイル（`docs/実機確認リスト.md` など）を行の配列で書き直すと、ファイル全体が CRLF になる（git は差分を小さく見せるが、作業場のファイルは変わっている）。**読むのも書くのも `ReadAllText`／`WriteAllText`（UTF-8・BOM なし）で文字列のまま扱い**、行を足すなら元の改行（`"`n"` か `"`r`n"`）を調べて合わせる。
+
+**Python も同じ**（2026-11-16）。`open(p, encoding='utf-8')` で読んで `open(p, 'w', encoding='utf-8')` で書き戻すと、Windows では text モードが `\n` を `\r\n` にして、LF のファイル全体が CRLF になる（引継ぎ書で起きた。git の差分は数行に見える）。書き戻すなら `open(p, 'wb')` でバイトのまま、か `newline=''` を付ける。足すだけなら heredoc の追記（`cat >> … <<'EOF'`）でよい。
