@@ -234,7 +234,16 @@ export class RealIme {
     const mark = await shellMark();
     await this.sendChecked(frame, steps);
     const window = (await shellSince(mark)).lastCandidates;
-    if (!window) throw new Error(`候補の窓が出ていません（「${target}」を選べません。殻の合図に lastCandidates が無い）`);
+    /*
+      **並びが読めないときは、落とさずに飛ばす**（2026-11-16）。SPACE の前に答えが届いてその場で窓を開く道では、
+      古いフロントエンドは並びを tsf.log に書かない（setsuna 4279e5a で書くようにした。効くのはデスクトップの
+      フロントエンドを BB929CCF 以降へ入れ替えてから）。製品の不具合ではないので、IME の記録待ちとして飛ばす
+    */
+    if (!window) {
+      throw new RigNotReady(
+        `候補の窓の並びが殻の記録にありません（「${target}」を選べません）。IME の記録待ち：デスクトップのフロントエンドが BB929CCF より前だと、SPACE の前に答えが届いた窓の並びを書きません`
+      );
+    }
     const at = window.list.indexOf(target);
     if (at < 0) {
       throw new Error(`候補の窓に「${target}」がありません（並び：${JSON.stringify(window.list)}・選んでいる番目 ${window.selected}）`);
