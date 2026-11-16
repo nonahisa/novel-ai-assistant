@@ -248,21 +248,28 @@ export class RealIme {
       **置いたカーソルを、前面を取り直したあとに置き直す**（2026-11-16）。窓が前へ出て焦点が戻ると、原稿の面の
       カーソルが末尾へ動き、行の頭で打つはずの字が文書の終わりに入った。取り直す間に焦点が一度外れると、原稿
       エディターは書きかけを送って面を組み直す（blur → flushUnsent）ので、選択の Range は古い要素を指したまま
-      使えなくなる。**面の頭から何字目か**で控え、焦点を戻したあとに組み直された面で当て直す
+      使えなくなる。**何番目の字の節の何字目か**で控え、焦点を戻したあとに組み直された面で当て直す
     */
     await frame
       .evaluate(() => {
         const compose = document.getElementById("compose");
         const selection = window.getSelection();
-        const box = window as unknown as { __novelaiImeOffset?: number };
+        const box = window as unknown as { __novelaiImeOffset?: { node: number; offset: number } };
         box.__novelaiImeOffset = undefined;
         if (!compose || !selection || selection.rangeCount === 0) return;
         const range = selection.getRangeAt(0);
         if (!compose.contains(range.startContainer)) return;
-        const head = document.createRange();
-        head.setStart(compose, 0);
-        head.setEnd(range.startContainer, range.startOffset);
-        box.__novelaiImeOffset = head.toString().length;
+        // **何番目の字の節の何字目か**で控える（字の数で控えると改行が数に入らず、行の境で前の行の末尾と次の行の
+        // 頭を取り違えた。2026-11-16 かぎ括弧の対の試しで「あ」が前の行の末尾に入った）
+        if (range.startContainer.nodeType !== Node.TEXT_NODE) return;
+        const walker = document.createTreeWalker(compose, NodeFilter.SHOW_TEXT);
+        let index = 0;
+        for (let node = walker.nextNode(); node; node = walker.nextNode(), index++) {
+          if (node === range.startContainer) {
+            box.__novelaiImeOffset = { node: index, offset: range.startOffset };
+            return;
+          }
+        }
       })
       .catch(() => undefined);
     const raised = !(await isOsForegroundTestWindow());
@@ -273,26 +280,25 @@ export class RealIme {
     await frame.locator("#compose").focus().catch(() => undefined);
     await frame
       .evaluate(() => {
-        const box = window as unknown as { __novelaiImeOffset?: number };
-        const offset = box.__novelaiImeOffset;
+        const box = window as unknown as { __novelaiImeOffset?: { node: number; offset: number } };
+        const saved = box.__novelaiImeOffset;
         const compose = document.getElementById("compose");
-        if (offset === undefined || !compose) return;
-        // 字の数え方は控えたときと同じ（文字の節だけを頭から足す。Range.toString と同じ数え方）
+        if (saved === undefined || !compose) return;
+        // 組み直された面でも字の節の並びは同じなので、同じ番目の節の同じ字へ当て直す
         const walker = document.createTreeWalker(compose, NodeFilter.SHOW_TEXT);
-        let rest = offset;
+        let index = 0;
         let last: Text | undefined;
-        for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+        for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null, index++) {
           last = node;
-          if (rest <= node.length) {
+          if (index === saved.node) {
             const range = document.createRange();
-            range.setStart(node, rest);
+            range.setStart(node, Math.min(saved.offset, node.length));
             range.collapse(true);
             const selection = window.getSelection();
             selection?.removeAllRanges();
             selection?.addRange(range);
             return;
           }
-          rest -= node.length;
         }
         if (last) window.getSelection()?.collapse(last, last.length);
       })
@@ -317,6 +323,13 @@ export class RealIme {
       TITLE_MARK,
       "-StepsFile",
       file,
+      /*
+        **窓のまん中を押させない**（2026-11-16）。IME の側の台本は題名の印を渡されると、打つ前に前の窓のまん中を
+        本物のマウスで1回押す（頁の試しで textarea へ焦点を置くため。novel-ime fc7b4f8）。VS Code ではまん中が
+        原稿エディターの面の上にあり、短い本文では字の無い所を押すのでカーソルが文書の末尾へ動き、置いたカーソル
+        でなく末尾に字が入っていた。焦点とカーソルは `prepareFocus` が置く
+      */
+      "-NoClick",
     ]);
     if (run.code === 0) return;
     if (run.code === 2) {
