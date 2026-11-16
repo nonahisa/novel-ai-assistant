@@ -28,6 +28,15 @@ import { notifyDone } from "../views/notify";
 import { manualModelEntryPrompt } from "./hiddenModels";
 import { verifiedState } from "../core/verifiedMemento";
 import { imageSupportFor, type ImageSupport } from "./imageInput";
+import {
+  ASSIGNABLE_FEATURE_LABELS,
+  decideFeatureAI,
+  withAssignment,
+  withoutAssignment,
+  type AssignableFeature,
+  type FeatureAssignment as CoreFeatureAssignment,
+  type FeatureAssignments as CoreFeatureAssignments,
+} from "../core/featureAssignment";
 
 /**
  * モデルの行の説明へ、写真を読めるかを添える（設計書6.117.4）。
@@ -56,101 +65,19 @@ const KEY_MODEL = "novelai.ai.model";
  */
 const KEY_FEATURE_ASSIGNMENTS = "novelai.ai.featureAssignments";
 
-/**
- * 作者が割り当てを選べる機能のまとまり。増やすときはメニューの文言も揃える。
- *
- * **粒度は「作者が使い分けたい単位」で切っている。** 内部の
- * `meta.feature`（`contradiction_verify` など）より粗いのは、
- * 矛盾検知の本体と検証だけ別のAIにしたい作者はいないため。
- */
-export type AssignableFeature =
-  | "extract" // 設定資料の抽出（人物・場所・能力・組織・世界観、AIで再読込・項目の充実）
-  | "typo" // 誤字脱字
-  | "proofread" // 推敲
-  | "contradiction" // 矛盾検知（指摘の検証・再チェックも含む）
-  /*
-    場面の事実の抽出（P-37。設計書6.88.9）。
+/*
+  割り当てられる機能・表示名・並び順と、割当の決め方は `core/featureAssignment.ts`
+  （モバイル版と同じものを使うため、vscode に頼らない部品へ切り出した。2026-11-16）。
+  ここからも同じ名前で読めるようにしておく（呼ぶ側を書き換えない）。
+*/
+export {
+  ASSIGNABLE_FEATURE_LABELS,
+  ASSIGNABLE_FEATURES,
+  type AssignableFeature,
+} from "../core/featureAssignment";
 
-    **矛盾検知と分けてあるのは、要る地力が違うから**である。抽出は
-    「本文に書いてあることを項目に分けて返す」定型のJSON化で、ローカルの
-    小さいモデルでも足りる。一方、絞り込まれた候補2か所を見て
-    「矛盾か／意図的な変化か／誤検知か」を決める工程は地力が要るので、
-    そちらは `contradiction` の割当をそのまま使う（キーを増やさない）。
-  */
-  | "factExtract"
-  | "deviation" // プロットからの逸脱
-  | "foreshadow" // 伏線の検知（配置と回収。どちらも同じ台帳を見る）
-  | "generate" // あらすじ・紹介文・キャッチコピー・更新告知・プロット逆算・冒頭診断・感情曲線・読者像の読み取り・適合度・ターゲットシートの助言
-  | "chat" // 相談（相談パネル・設定の相談・検索語の生成・独り言・推敲の指摘の［AIに相談］）
-  /*
-    写真の書き起こし（P-48。設計書6.117）。**写真を読めるAIでないと動かない**
-    ので、ほかの機能と相乗りさせない（相乗りすると、相談のために選んだ文字だけの
-    AIへ写真を回すことになる）。
-  */
-  | "transcribe"
-  /*
-    読み上げの読みの辞書（P-50。設計書6.42.1）。**話ごとに1回走らせる軽い
-    作業**で、手元の小さいモデルでも足りる。ほかの機能と相乗りさせると、
-    推敲のために選んだ大きなクラウドのAIへ、押すたびに1話ぶん送ることになる。
-  */
-  | "readingDictionary"
-  /*
-    人物の声で朗読する——台詞の話者と感情の推定（P-54。設計書6.42.3）。
-    読みの辞書と分けるのは、要る地力が違うから。読みは語を見るだけだが、
-    話者は前後の地の文と人物の口調を突き合わせて決める。
-  */
-  | "voiceCast";
-
-/**
- * 機能の表示名。**画面に出す名前はここだけが持つ。**
- * 割当の選択画面・通知・ログのすべてがこれを読む。
- */
-export const ASSIGNABLE_FEATURE_LABELS: Record<AssignableFeature, string> = {
-  extract: "設定資料の抽出",
-  typo: "誤字脱字",
-  proofread: "推敲",
-  contradiction: "矛盾検知",
-  factExtract: "場面の事実の抽出",
-  deviation: "プロットからの逸脱",
-  foreshadow: "伏線の検知",
-  generate: "あらすじ・紹介文・キャッチコピーなど",
-  chat: "AIに相談",
-  transcribe: "写真の書き起こし",
-  readingDictionary: "読み上げの読みの確かめ",
-  voiceCast: "朗読の台詞の話者と感情",
-};
-
-/** 選択画面に並べる順。重い（＝手元AIの効きが大きい）ものから */
-export const ASSIGNABLE_FEATURES: AssignableFeature[] = [
-  "extract",
-  "typo",
-  "proofread",
-  "contradiction",
-  "factExtract",
-  "deviation",
-  "foreshadow",
-  "generate",
-  "chat",
-  "transcribe",
-  "readingDictionary",
-  "voiceCast",
-];
-
-export interface FeatureAssignment {
-  provider: ProviderId;
-  model: string;
-}
-
-/**
- * 保存されている割当。**キーが無い＝既定を使う。**
- *
- * 「機能別割当が有効か」のフラグは作らない（設計書6.28.7）。
- * フラグと中身の2か所が食い違うと、割り当てたのに効かない・
- * 外したのに効き続ける、という追いにくい状態ができる。
- */
-export type FeatureAssignments = Partial<
-  Record<AssignableFeature, FeatureAssignment>
->;
+export type FeatureAssignment = CoreFeatureAssignment<ProviderId>;
+export type FeatureAssignments = CoreFeatureAssignments<ProviderId>;
 
 /**
  * 実行環境で選べないプロバイダを外す。
@@ -301,18 +228,15 @@ export class AIRegistry {
     providerId: ProviderId,
     model: string
   ): Promise<void> {
-    await this.patchAssignments((current) => ({
-      ...current,
-      [feature]: { provider: providerId, model },
-    }));
+    await this.patchAssignments((current) =>
+      withAssignment(current, feature, providerId, model)
+    );
   }
 
   async unassign(feature: AssignableFeature): Promise<void> {
-    await this.patchAssignments((current) => {
-      const next = { ...current };
-      delete next[feature];
-      return next;
-    });
+    await this.patchAssignments((current) =>
+      withoutAssignment(current, feature)
+    );
   }
 
   /**
@@ -357,25 +281,23 @@ export class AIRegistry {
   resolve(
     feature: AssignableFeature | "default"
   ): { provider: AIProvider; model: string } | undefined {
-    const assigned =
-      feature === "default" ? undefined : this.assignments()[feature];
-    if (assigned) {
-      const provider = this.providers.get(assigned.provider);
-      if (provider && this.isUsableHere(provider)) {
-        return { provider: this.meter(provider), model: assigned.model };
+    // 決め方は `core/featureAssignment.ts`（割当が使えなければ既定へ落とす。**止めない**）
+    const decided = decideFeatureAI(
+      feature,
+      this.assignments(),
+      { provider: this.selectedProviderId, model: this.selectedModel },
+      (id) => {
+        const provider = this.providers.get(id);
+        return provider !== undefined && this.isUsableHere(provider);
       }
-      // 割当先が使えないときは既定へ落とす。**止めない。**
-      // ブラウザ版で開いただけで全機能が死ぬのは、作者から見て
-      // 「壊れた」としか見えない（設計書5.8の「消さずに理由を出す」）
-      this.noteFallback(feature as AssignableFeature, assigned.provider);
+    );
+    if (decided.fellBackFrom && feature !== "default") {
+      this.noteFallback(feature, decided.fellBackFrom);
     }
-
-    const id = this.selectedProviderId;
-    const model = this.selectedModel;
-    if (!id || !model) return undefined;
-    const provider = this.providers.get(id);
+    if (!decided.choice) return undefined;
+    const provider = this.providers.get(decided.choice.provider);
     if (!provider) return undefined;
-    return { provider: this.meter(provider), model };
+    return { provider: this.meter(provider), model: decided.choice.model };
   }
 
   /**
