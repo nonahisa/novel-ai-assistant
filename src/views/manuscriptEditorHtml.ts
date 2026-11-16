@@ -47,6 +47,7 @@ import { OBSERVE_VISIBLE_WIDTH_SOURCE } from "./visibleWidthScript";
 import { IME_ENTER_GUARD_SOURCE } from "./imeEnterGuardScript";
 import { LAST_LINE_NEWLINE_SOURCE } from "./lastLineNewlineScript";
 import { KEY_LABEL_SCRIPT } from "../core/keyLabels";
+import { RIGHT_IME_LINE_SOURCE } from "../core/rightImeLineScript";
 
 /**
  * 測る書体の名前。
@@ -513,6 +514,58 @@ body.compose #compose { display: block; }
    組んで書く面の読み上げは Highlight API で塗るので、層は要らない */
 body.compose #write, body.compose #marks,
 body.compose #aloudmarks { display: none; }
+/* ── 右傍線の入力欄（設定「変換中の線」が右のとき・縦書きだけ。設計書6.25.2。テスト中） ──
+   字と変換中の線をこの画面が描く（EditContext）。線の向きは text-underline-position で決まる
+   ——打つ面では日本語入力の層が線を引くので効かなかった指定が、ここでは効く。
+   出ている間は、打つ面・組んで書く面・重ねる2枚の層を描かせない。打つ面の値は裏で揃えておく
+   （字数・控え・未送信の見回りがその値を読む） */
+#rline {
+  display: none;
+  position: absolute;
+  inset: 0;
+  padding: 24px 28px;
+  overflow: auto;
+  line-height: 1.9;
+  font-size: var(--novelai-size, 16px);
+  font-family: var(--novelai-font, "Yu Mincho", "YuMincho",
+    "Hiragino Mincho ProN", "MS Mincho", serif);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 4;
+  text-spacing-trim: space-all;
+  color: var(--vscode-editor-foreground);
+  outline: none;
+  cursor: text;
+  /* ブラウザのカーソルは文の頭に残るので隠す（カーソルは .rl-caret で描く） */
+  caret-color: transparent;
+}
+body.rline #rline { display: block; }
+body.rline #write, body.rline #marks,
+body.rline #aloudmarks, body.rline #compose { display: none; }
+body.vertical #rline {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  padding: 28px 24px;
+}
+#rline .rl-comp {
+  text-decoration-line: underline;
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  text-underline-position: right;
+}
+#rline .rl-comp.rl-thick { text-decoration-thickness: 3px; }
+#rline .rl-comp.rl-dotted { text-decoration-style: dotted; }
+#rline .rl-comp.rl-dashed { text-decoration-style: dashed; }
+#rline .rl-comp.rl-wavy { text-decoration-style: wavy; }
+/* カーソル：縦書きは、見えない字を1つ入れた箱の上の線（線が列の真ん中に来る。モバイル版と同じ） */
+#rline .rl-caret {
+  display: inline;
+  border-top: 2px solid var(--vscode-editorCursor-foreground, currentColor);
+  animation: rl-blink 1s steps(1) infinite;
+}
+#rline:not(:focus) .rl-caret { visibility: hidden; }
+@keyframes rl-blink { 50% { opacity: 0; } }
 /* 行の段落。**打っている間に増える入れ物にも効かせる**——改行で作られる
    入れ物は環境によって p と div のどちらにもなりうる（直列化の側は
    どちらも行の切れ目として読む） */
@@ -1142,6 +1195,7 @@ body.clipped #cheer { white-space: normal; }
   <div id="marks" aria-hidden="true"></div>
   <textarea id="write" spellcheck="false" wrap="soft"></textarea>
   <div id="compose" spellcheck="false"></div>
+  <div id="rline" spellcheck="false" lang="ja" aria-label="原稿の本文"></div>
   <div id="notepv"></div>
 </div>
 
@@ -1558,6 +1612,8 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     aloudFinish();
     paint();
     viewRestore(anchor);
+    // 右傍線の入力欄は縦書きのときだけ（横書きにしたら今までの面へ戻す。設計書6.25.2）
+    rlRefresh();
     remember();
   });
 
@@ -5832,10 +5888,19 @@ ${RESUME_WRITING_LABEL ? `
           // 届いた本文で組み直した（次の便の元。設計書6.25.9）
           setEditBase(message.text);
         } else composeTakeIncoming(message.text, undoCaret);
-      } else takeIncoming(message.text, undoCaret);
+      } else if (rlOn) rlTakeIncoming(message.text, undoCaret);
+      else takeIncoming(message.text, undoCaret);
+      /*
+        **設定「変換中の線」を受け取り、入力欄を選び直す**（設計書6.25.2）。本文を当てたあとに
+        見る——右の入力欄は打つ面の値から始めるので。組んで書くを開く前に見る——右の入力欄へ
+        入るなら、組んで書くは開かずに望みだけ残す（rlEnter）。左のままなら何もしない
+      */
+      if (typeof message.compositionLine === "string") rlSetting = message.compositionLine;
+      rlRefresh();
       // 覚えていた「組んで書く」は、本文が届いてから開く。
       // **一度きりにする**——安全弁で断られたときに、届くたび試し直さない
-      if (composeWanted && !composeOn) {
+      // 右傍線の入力欄にいる間は開かない（望みは残し、出るときに開く。設計書6.25.2）
+      if (composeWanted && !composeOn && !rlOn) {
         composeWanted = false;
         composeEnter();
       }
@@ -6027,8 +6092,11 @@ ${RESUME_WRITING_LABEL ? `
       vertical = message.appearance.vertical;
       size = message.appearance.size;
       paint();
-      if (message.appearance.compose && !composeOn) composeEnter();
+      // 右傍線の入力欄にいる間は、組んで書くの望みだけ受け取る（出るときに当てる。設計書6.25.2）
+      if (rlOn) composeWanted = message.appearance.compose === true;
+      else if (message.appearance.compose && !composeOn) composeEnter();
       else if (!message.appearance.compose && composeOn) composeLeave();
+      rlRefresh();
       // 当てた見た目は、この原稿の覚えにする（開き直しても残す）
       remember();
     } else if (message.type === "askNotation") {
@@ -9711,6 +9779,275 @@ ${IME_ENTER_GUARD_SOURCE}
   write.addEventListener("input", findOnEdit);
   compose.addEventListener("input", findOnEdit);
   /* find:end */
+
+  /* rline:start */
+  /*
+    ── 右傍線の入力欄（設計書6.25.2 の【裁定】2026-11-16 夜。テスト中） ──
+    設定「変換中の線」が右で、縦書きで、EditContext があるときだけ、打つ面の代わりに出す。
+    中身の決まり（送る間合い・溜め方・返事の見分け方）は core/rightImeLineScript.ts。
+    **本文の送受は打つ面と同じ道を通る**：打つ面の値（write.value）を揃えて send を呼ぶので、
+    current・返事の履歴（rememberSent／isOwnEcho）・便の番号と元（postEdit）・字数・控えは
+    打つ面のものをそのまま使う。拡張機能の側の受け取りと書き戻しも同じ。
+    組んで書く面のルビの組みは持ち込まない（地の文の字を記法のまま並べる。テスト中の制限）
+  */
+${RIGHT_IME_LINE_SOURCE}
+  const rline = document.getElementById("rline");
+  /** 設定「変換中の線」（"left"／"right"。本文の便に添えて届く） */
+  let rlSetting = "left";
+  /** 右の入力欄を出しているか */
+  let rlOn = false;
+  /** 右の入力欄の受け持ち（rlCreateSession）と、いまの EditContext */
+  let rlSession = null;
+  let rlContext = null;
+  /** EditContext が無いことを、もう知らせたか（知らせは1回だけ） */
+  let rlUnsupportedNoted = false;
+  /** 確定の合図を、確定の Enter の見分け（watchImeEnter）へも渡す受け口 */
+  const rlCompositionWatchers = { compositionstart: [], compositionend: [] };
+  /*
+    **確定の Enter を改行にしない**（設計書6.25.2）。探す欄と同じ watchImeEnter を通す。
+    合図（compositionstart／compositionend）は EditContext に届き、キーは欄に届くので、
+    受け口を分けて渡す
+  */
+  const rlIsImeEnter = watchImeEnter({
+    addEventListener: function (type, listener) {
+      if (type === "compositionstart" || type === "compositionend") {
+        rlCompositionWatchers[type].push(listener);
+      } else {
+        rline.addEventListener(type, listener);
+      }
+    },
+  });
+
+  /** どの面を使うかを選び直す。左のまま（既定）なら何もしない */
+  function rlRefresh() {
+    if (!rline) return;
+    const want = rlChoosePane(rlSetting, vertical !== false, "EditContext" in window);
+    if (want === "unsupported" && !rlUnsupportedNoted) {
+      rlUnsupportedNoted = true;
+      note.textContent =
+        "変換中の線を右に出す入力欄は、この画面では使えません。今までの入力欄で書きます";
+      vscode.postMessage({
+        type: "log",
+        text: "原稿エディタ：設定「変換中の線」が右ですが、EditContext が無いので今までの入力欄で開きました",
+      });
+    }
+    if (want === "rline" && !rlOn) rlEnter();
+    else if (want !== "rline" && rlOn) rlLeave();
+  }
+
+  /** 打つ面の値と、右の入力欄の字が食い違っていれば揃える（品書きなど、欄の外の書き換え） */
+  function rlAdoptWrite() {
+    if (rlOn && rlSession) rlSession.adopt(write.value);
+  }
+
+  /** カーソルを打つ面の値にも置く（カーソルの行・品書き・付箋が打つ面の選択を読むため） */
+  function rlSyncWriteCaret() {
+    if (!rlSession) return;
+    const at = rlSession.state().selection;
+    try {
+      if (write.selectionStart !== at || write.selectionEnd !== at) write.setSelectionRange(at, at);
+    } catch (error) {
+      /* 範囲外なら置かない（本文は壊れない） */
+    }
+  }
+
+  /** 欄と、カーソルの場所を EditContext へ返す（候補の窓を出す場所） */
+  function rlReportBounds() {
+    if (!rlContext) return;
+    rlContext.updateControlBounds(rline.getBoundingClientRect());
+    const caret = rline.querySelector(".rl-caret");
+    if (caret) rlContext.updateSelectionBounds(caret.getBoundingClientRect());
+  }
+
+  /** カーソルを見える所へ（この欄は字を自分で描くので、ブラウザは送ってくれない） */
+  function rlRevealCaret() {
+    const caret = rline.querySelector(".rl-caret");
+    if (!caret) return;
+    const delta = rlRevealDelta(caret.getBoundingClientRect(), rline.getBoundingClientRect(), 24);
+    if (delta.x !== 0) rline.scrollLeft += delta.x;
+    if (delta.y !== 0) rline.scrollTop += delta.y;
+  }
+
+  function rlRender() {
+    if (!rlSession) return;
+    rline.innerHTML = rlRenderHtml(rlSession.state());
+    rlReportBounds();
+    rlSyncWriteCaret();
+    // 変換中は転がさない（確定の描き直しで送る）
+    if (document.activeElement === rline && !rlSession.isComposing()) rlRevealCaret();
+  }
+
+  /** 描いた字（data-i の span）の四隅 */
+  function rlReadBoxes() {
+    return Array.prototype.map.call(rline.querySelectorAll("[data-i]"), function (span) {
+      const r = span.getBoundingClientRect();
+      return {
+        i: Number(span.dataset.i),
+        n: Number(span.dataset.n || "1"),
+        newline: span.textContent === "\\n",
+        left: r.left,
+        top: r.top,
+        right: r.right,
+        bottom: r.bottom,
+      };
+    });
+  }
+
+  function rlMount(text, at) {
+    const Ctor = window.EditContext;
+    const context = new Ctor({ text: text, selectionStart: at, selectionEnd: at });
+    rlContext = context;
+    rline.editContext = context;
+    rline.tabIndex = 0;
+    rline.setAttribute("role", "textbox");
+    rline.setAttribute("aria-multiline", "true");
+    rlSession = rlCreateSession(text, {
+      // 打つ面の send と同じ道で送る（同じ本文なら送らない・送ったら返事の履歴に覚える）
+      commit: function (next) {
+        if (write.value !== next) write.value = next;
+        rlSyncWriteCaret();
+        send();
+      },
+      isOwnEcho: isOwnEcho,
+      forgetSent: forgetSent,
+      setEditBase: setEditBase,
+      current: function () { return current; },
+      defer: function (fn) { setTimeout(fn, 0); },
+      tellContext: function (start, end, inserted, selection) {
+        if (rlContext !== context) return;
+        context.updateText(start, end, inserted);
+        context.updateSelection(selection, selection);
+      },
+      render: rlRender,
+    });
+    context.addEventListener("textupdate", function (event) {
+      if (rlContext !== context) return;
+      rlSession.textUpdate({
+        start: event.updateRangeStart,
+        end: event.updateRangeEnd,
+        text: event.text,
+        selection: event.selectionStart,
+      });
+    });
+    context.addEventListener("textformatupdate", function (event) {
+      if (rlContext !== context) return;
+      const formats = event.getTextFormats().map(function (f) {
+        return { start: f.rangeStart, end: f.rangeEnd, style: String(f.underlineStyle), thickness: String(f.underlineThickness) };
+      });
+      rlSession.formatUpdate(formats);
+    });
+    context.addEventListener("compositionstart", function (event) {
+      if (rlContext !== context) return;
+      rlSession.compositionStart();
+      rlCompositionWatchers.compositionstart.forEach(function (listener) { listener(event); });
+    });
+    context.addEventListener("compositionend", function (event) {
+      if (rlContext !== context) return;
+      rlSession.compositionEnd();
+      rlCompositionWatchers.compositionend.forEach(function (listener) { listener(event); });
+    });
+    // 候補の窓を変換中の字の横に出すため、字の場所を返す
+    context.addEventListener("characterboundsupdate", function (event) {
+      if (rlContext !== context) return;
+      const rects = [];
+      for (let i = event.rangeStart; i < event.rangeEnd; i++) {
+        const span = rline.querySelector('[data-i="' + i + '"]');
+        rects.push(span ? span.getBoundingClientRect() : new DOMRect());
+      }
+      context.updateCharacterBounds(event.rangeStart, rects);
+    });
+    rlSession.moveCaret(at);
+  }
+
+  /** 右の入力欄へ入る。組んで書く面にいたら、望みを残して出る */
+  function rlEnter() {
+    // 本文がまだ届いていなければ待つ（届いた便で選び直す）
+    if (!updateTaken) return;
+    const composeAt = composeOn ? composeSelectionNow() : null;
+    const at = composeAt ? composeAt.start : write.selectionStart || 0;
+    /*
+      **組んで書く面にいたら、望み（composeWanted）にして出る。** composeLeave の remember より
+      先に立てる——覚えを false にすると、拡張機能にも送られて、左へ戻したときや次の話で
+      組んで書く面で開かなくなる。右の入力欄にいる間も、組んで書くを覚えたままにする
+    */
+    if (composeOn) {
+      composeWanted = true;
+      composeLeave();
+    }
+    aloudFinish();
+    rlOn = true;
+    document.body.classList.add("rline");
+    rlMount(write.value, Math.max(0, Math.min(write.value.length, at)));
+    rline.focus();
+    rlRevealCaret();
+    vscode.postMessage({
+      type: "log",
+      text: "原稿エディタ：変換中の線を右に出す入力欄に切り替えました（テスト中）",
+    });
+  }
+
+  /** 右の入力欄から出る。入る前に組んで書く面にいたら、そこへ戻す */
+  function rlLeave() {
+    if (!rlOn) return;
+    // 打つ面の値は、確定して送った本文のまま（変換中の字は送らない——確定前の字を残さない）
+    const at = rlSession ? Math.min(rlSession.state().selection, write.value.length) : write.selectionStart;
+    rline.editContext = null;
+    rlContext = null;
+    rlSession = null;
+    rline.innerHTML = "";
+    rlOn = false;
+    document.body.classList.remove("rline");
+    const resume = composeWanted;
+    composeWanted = false;
+    write.focus();
+    try {
+      write.setSelectionRange(at, at);
+    } catch (error) {
+      /* 範囲外なら置かない */
+    }
+    if (resume) composeEnter();
+  }
+
+  /** 外から届いた本文（打つ面の takeIncoming の代わり。順は同じ） */
+  function rlTakeIncoming(text, undoCaret) {
+    const shownLength = rlSession.state().text.length;
+    const result = rlSession.incoming(text, typeof undoCaret === "number" ? undoCaret : undefined);
+    if (result === "applied") {
+      logRebuildFromIncoming("右傍線", text, shownLength);
+      write.value = text;
+      rlSyncWriteCaret();
+    } else if (result === "echo") {
+      // 欄の外の操作（品書きの貼り付けなど）が打つ面の値を変えて送った返事なら、ここで揃える
+      rlAdoptWrite();
+    }
+  }
+
+  rline.addEventListener("keydown", function (event) {
+    if (!rlOn || !rlSession) return;
+    rlAdoptWrite();
+    if (rlSession.isComposing()) return;
+    const kind = rlKeyKind(event, vertical !== false, rlIsImeEnter);
+    if (kind === null) return;
+    rlSession.key(kind);
+    event.preventDefault();
+  });
+  rline.addEventListener("pointerdown", function (event) {
+    if (!rlOn || !rlSession || rlSession.isComposing()) return;
+    rlAdoptWrite();
+    // 字の無い所（列の下の端の先など）を押しても、いちばん近い列のその位置へ置く
+    const to = rlCaretFromPoint(rlReadBoxes(), event.clientX, event.clientY, vertical !== false);
+    if (to !== undefined) rlSession.moveCaret(to);
+  });
+  rline.addEventListener("paste", function (event) {
+    if (!rlOn || !rlSession || rlSession.isComposing()) return;
+    event.preventDefault();
+    const text = event.clipboardData ? event.clipboardData.getData("text/plain") : "";
+    if (text) rlSession.insert(text.replace(/\\r\\n?/g, "\\n"));
+  });
+  rline.addEventListener("focus", rlAdoptWrite);
+  rline.addEventListener("scroll", rlReportBounds);
+  window.addEventListener("resize", rlReportBounds);
+  /* rline:end */
 
   /* ══ 読み上げ（音読推敲。設計書6.42） ═══════════════════ */
 

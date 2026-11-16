@@ -23,6 +23,12 @@ import {
 import { buildManuscriptEditorHtml } from "../views/manuscriptEditorHtml";
 import { canRunProcesses } from "../core/runtime";
 import {
+  COMPOSITION_LINE_KEY,
+  COMPOSITION_LINE_SETTING,
+  readCompositionLine,
+  type CompositionLine,
+} from "../core/compositionLine";
+import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   manuscriptViewTypeFor,
@@ -2993,9 +2999,11 @@ export class ManuscriptEditorProvider
       vscode.workspace.onDidChangeConfiguration((event) => {
         // 作者／編集者の切り替え（novelai.mode）も送り直す。右クリックの
         // 「直しを提案する」の出し入れは本文の便に乗っている（設計書5.6.1.1）
+        // 変換中の線（設計書6.25.2）も同じ便に乗るので、変えたらその場で入力欄を切り替える
         if (
           !event.affectsConfiguration("novelai.manuscriptEditor") &&
-          !event.affectsConfiguration("novelai.mode")
+          !event.affectsConfiguration("novelai.mode") &&
+          !event.affectsConfiguration(COMPOSITION_LINE_SETTING)
         ) {
           return;
         }
@@ -5693,6 +5701,11 @@ function readAppearance(): {
   markFontFamily: string;
   /** 読み上げの速さの既定（設計書6.42）。列で変えたぶんは書き戻さない */
   readAloudRate: number;
+  /**
+   * 変換中の線を出す側（設計書6.25.2）。右でも、使うのは縦書きのときだけ——
+   * どの入力欄にするかは画面が向きと EditContext の有無を見て決める
+   */
+  compositionLine: CompositionLine;
 } {
   const config = vscode.workspace.getConfiguration("novelai");
   const fontFamily = config
@@ -5714,6 +5727,7 @@ function readAppearance(): {
     readAloudRate: clampReadAloudRate(
       config.get<number>("manuscriptEditor.readAloudRate", 1)
     ),
+    compositionLine: readCompositionLine(config.get<unknown>(COMPOSITION_LINE_KEY)),
   };
 }
 

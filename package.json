@@ -2305,6 +2305,23 @@
           "maximum": 2,
           "description": "読み上げの速さ。1が標準（原稿エディターの上の列の［出力］→［読み上げ］の「速さ」でも、その場だけ変えられる）。"
         },
+        "novelai.compositionLine": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "enumItemLabels": [
+            "左",
+            "右（テスト中）"
+          ],
+          "enumDescriptions": [
+            "今までの入力欄",
+            "テスト中：範囲を選べないので、ルビと傍点は選んだ字に振れません。ルビは組まずに記法の字のまま出ます"
+          ],
+          "default": "left",
+          "description": "変換中の線（縦書きの原稿エディターで、変換中の字に付く線を出す側）。"
+        },
         "novelai.readAloud.aivisSpeechUrl": {
           "type": "string",
           "default": "http://127.0.0.1:10101",
