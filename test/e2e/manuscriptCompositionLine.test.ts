@@ -15,12 +15,11 @@
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { Frame, Page } from "playwright-core";
+import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
-import { clickToolButton, frameLayer, manuscriptFrames, openEpisode } from "./support/manuscriptFrame";
+import { clickToolButton, openEpisode } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { quickOpen } from "./support/workbenchDom";
 
 const EPISODE = "001_変換中の線.md";
 const MARKER = "朝の駅は静かだった。";
@@ -63,34 +62,6 @@ async function rlineShown(frame: Frame): Promise<boolean> {
   });
 }
 
-/**
- * 話を開き、右傍線の入力欄が本文を描くまで待つ（`openEpisode` は組んで書く面の字を待つので、
- * 右の入力欄では使えない）
- */
-async function openEpisodeInRightLine(page: Page, fileName: string, expected: string): Promise<Frame> {
-  await quickOpen(page, fileName);
-  let found: Frame | undefined;
-  let lastState = "";
-  await waitUntil(
-    async () => {
-      for (const frame of await manuscriptFrames(page)) {
-        lastState = await surfaceState(frame);
-        if (!(await rlineText(frame).catch(() => "")).includes(expected)) continue;
-        if ((await frameLayer(page, frame).catch(() => undefined))?.inFront) {
-          found = frame;
-          return true;
-        }
-      }
-      return false;
-    },
-    `右傍線の入力欄に「${fileName}」の本文が出る`,
-    30_000
-  ).catch((error: unknown) => {
-    throw new Error(`${String(error)}（最後に見た面：${lastState}）`);
-  });
-  return found as Frame;
-}
-
 async function typeAndSave(session: E2ESession, frame: Frame): Promise<void> {
   const { page } = session;
   // 欄を押して焦点を移す（押した点にカーソルが置かれる）
@@ -114,7 +85,14 @@ async function typeAndSave(session: E2ESession, frame: Frame): Promise<void> {
 test("既定（左）では、今までの面を使い、右傍線の入力欄は出ない", async () => {
   await withVsCode("変換中の線・既定", [{ name: EPISODE, text: TEXT }], async (session) => {
     const { page } = session;
+    // E2E の設定は *.txt を横書きの入口に結んでいるので、開いたあと［縦書き］を押す（Mac の 1.0.21 の流しで分かった）
     const frame = await openEpisode(page, EPISODE, MARKER);
+    await clickToolButton(frame, "dir");
+    await waitUntil(async () => (await surfaceState(frame)).includes("vertical"), "［縦書き］で縦書きの面になる").catch(
+      async (error: unknown) => {
+        throw new Error(`${String(error)}（面：${await surfaceState(frame)}）`);
+      }
+    );
     const state = await surfaceState(frame);
     const parsed = JSON.parse(state) as { body: string; compose: string; rline: string };
     expect(parsed.body, `縦書きの組んで書く面で開く：${state}`).toContain("vertical");
@@ -132,7 +110,14 @@ test("縦書きで右を選ぶと右傍線の入力欄が出て、打った字�
     [{ name: EPISODE, text: TEXT }],
     async (session) => {
       const { page } = session;
-      const frame = await openEpisodeInRightLine(page, EPISODE, MARKER);
+      // 横書きの入口で開き（右でも横書きでは組んで書く面）、［縦書き］で右傍線の入力欄へ
+      const frame = await openEpisode(page, EPISODE, MARKER);
+      await clickToolButton(frame, "dir");
+      await waitUntil(async () => (await rlineText(frame).catch(() => "")).includes(MARKER), "縦書きにすると右傍線の入力欄に本文が出る").catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（面：${await surfaceState(frame)}）`);
+        }
+      );
       expect(await rlineShown(frame), `右傍線の入力欄が出る：${await surfaceState(frame)}`).toBe(true);
       const state = JSON.parse(await surfaceState(frame)) as { compose: string; write: string; editContext: boolean };
       expect(state.editContext, "テスト用の VS Code に EditContext がある").toBe(true);
