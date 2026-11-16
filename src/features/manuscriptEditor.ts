@@ -797,6 +797,65 @@ function writingManuscriptViewType(): string | undefined {
   return fromTab ?? reference?.panel.viewType;
 }
 
+/*
+  ── オリジナルIME へ「いまの作品」と向きを知らせる口（設計書6.13.7） ──
+
+  前に出ている原稿エディター（無ければ最後に前へ出ていた面）の原稿と向き。
+  IME へ知らせる側（features/imeCurrentWork.ts）が、面が前に来たとき・向きを
+  替えたときに読み直す。ここは知らせるきっかけを鳴らすだけで、何を書くかは決めない。
+*/
+const frontListeners = new Set<() => void>();
+
+function fireFrontManuscriptChanged(): void {
+  for (const listener of [...frontListeners]) {
+    try {
+      listener();
+    } catch {
+      // 知らせる側の失敗で、原稿エディターを止めない
+    }
+  }
+}
+
+/** 原稿エディターの面が前に来た・前の面の向きが替わったとき */
+export function onDidChangeFrontManuscript(listener: () => void): vscode.Disposable {
+  frontListeners.add(listener);
+  return { dispose: () => void frontListeners.delete(listener) };
+}
+
+/**
+ * 前に出ている原稿エディターの原稿と向き。前に無ければ、最後に前へ出ていた面
+ * （閉じていれば無し）。`active` はいま前に出ているか。
+ *
+ * 向きは画面の見た目（［縦書きにする］で替わる）。まだ見た目を知らせていない面
+ * （開いた直後）だけ入口で代える——`writingManuscriptViewType` と同じ考え方。
+ */
+export function frontManuscript():
+  | { filePath: string; vertical: boolean; active: boolean }
+  | undefined {
+  const all = openManuscripts.values();
+  const isActive = (open: OpenManuscript): boolean => {
+    try {
+      return open.panel.active;
+    } catch {
+      return false;
+    }
+  };
+  const activeOne = all.find(isActive);
+  const reference =
+    activeOne ??
+    (lastFrontPanel ? all.find((open) => open.panel === lastFrontPanel) : undefined);
+  if (!reference) return undefined;
+  const vertical = reference.appearance()?.vertical;
+  return {
+    filePath: fromUri(reference.document.uri),
+    vertical:
+      typeof vertical === "boolean"
+        ? vertical
+        : reference.panel.viewType === MANUSCRIPT_EDITOR_VIEW_TYPE,
+    active: activeOne !== undefined,
+  };
+}
+
 /**
  * その原稿を開いている画面の、下段の字数を測り直す。
  *
@@ -2868,7 +2927,10 @@ export class ManuscriptEditorProvider
     // 開いた瞬間に前へ出ている面は、前に出た知らせ（onDidChangeViewState）が
     // 来ないことがあるので、ここでも覚える
     try {
-      if (panel.active) lastFrontPanel = panel;
+      if (panel.active) {
+        lastFrontPanel = panel;
+        fireFrontManuscriptChanged();
+      }
     } catch {
       // 試験の代役など、active を読めない面では覚えない
     }
@@ -3077,6 +3139,8 @@ export class ManuscriptEditorProvider
           openManuscripts.touch(key, entry);
           // 開いていない話へ飛ぶときの向きは、この面に揃える（6.25.11）
           lastFrontPanel = panel;
+          // オリジナルIME へ、いまの作品と向きを知らせる（設計書6.13.7）
+          fireFrontManuscriptChanged();
           const filePath = fromUri(document.uri);
           this.deps.onManuscriptShown?.(
             filePath,
@@ -3589,15 +3653,22 @@ export class ManuscriptEditorProvider
           await pickFont(message.installed);
           break;
 
-        case "appearance":
+        case "appearance": {
           // 前後の話へ移るときに、この値をそのまま次の画面へ持って行く
           // （設計書6.25.5）。覚えるのは画面の側で、こちらは写しを持つだけ
+          const verticalBefore = appearanceNow?.vertical;
           appearanceNow = {
             vertical: message.vertical,
             size: message.size,
             compose: message.compose,
           };
+          // 縦と横を切り替えた（または最初の見た目が届いた）。前の面なら
+          // オリジナルIME の向きを書き直す（設計書6.13.7）。大きさだけの変更では鳴らさない
+          if (verticalBefore !== message.vertical && lastFrontPanel === panel) {
+            fireFrontManuscriptChanged();
+          }
           break;
+        }
 
         case "log":
           await this.logForDocument(document, `原稿エディタ：${message.text}`);

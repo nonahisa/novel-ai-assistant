@@ -1,0 +1,575 @@
+// ログの書き先：作品が定まらない——知らせと一覧は窓ごと・機械ごとの話で、どの作品の
+// ログでもないので保管庫のログへ倒す（窓の札と同じ扱い）
+import * as vscode from "vscode";
+import * as path from "../core/paths";
+import type { WorkEntry } from "../models/types";
+import {
+  findWorkForFile,
+  parseWorkConfig,
+  workPaths,
+  writeWorkConfig,
+} from "../core/workRegistry";
+import { atomicWriteFile } from "../core/atomicWrite";
+import { isNotFound } from "../core/fileRead";
+import { sha256Bytes } from "../core/hash";
+import { logLine } from "../core/logger";
+import {
+  canRunProcesses,
+  environmentVariable,
+  hostPlatform,
+  hostTag,
+  randomUuid,
+} from "../core/runtime";
+import { isEditorMode } from "../core/actorContext";
+import { imeExcludedKey } from "../core/imeDictionary";
+import {
+  IME_CURRENT_WORK_FILE,
+  IME_DICTIONARY_SETTLE_MS,
+  IME_HEARTBEAT_MS,
+  IME_TSV_SEGMENTS,
+  IME_WORKS_FILE,
+  buildCurrentWorkNotice,
+  buildImeTsv,
+  buildWorksList,
+  decideImeFront,
+  imeNoticeKey,
+  imeStateDir,
+  noticeWindowOf,
+  serializeImeJson,
+  shouldWriteImeNotice,
+  withoutExcluded,
+  workUidStateOf,
+  type ImeFront,
+  type ImeFrontEvent,
+  type ImeObservedFront,
+  type ImeWorkRef,
+} from "../core/imeCurrentWork";
+import { loadDictionaryForWork } from "./exportImeDictionary";
+
+/**
+ * オリジナルIME（Setsuna）へ、いまの作品・作品の一覧・核向けの辞書を書く（設計書6.13.7）。
+ *
+ * 形と決まりの正は IME の計画書（`novel-ime/docs/作品ごとの辞書の切り替え_計画.md` 3.1〜3.5）。
+ * 何を書くか・いまの作品をどう決めるかは `core/imeCurrentWork.ts`（純粋な部分）。
+ * ここは VS Code から読んでファイルへ書くだけ。
+ *
+ * **失敗しても画面には出さない。** 作者が頼んだ操作ではなく、IME の無い機械では
+ * 起きて当たり前のことでもある。理由はログへ残す（窓の札と同じ扱い）。
+ *
+ * **書く物は作者のデータではない**（知らせ・一覧・派生の辞書）。上書きの経路
+ * （`atomicWriteFile` の指定なし）で書く。作者のデータに触れるのは `config.json` へ
+ * 番号を足すときだけで、そこは既存の `writeWorkConfig`（改行の形を保つ）を通し、
+ * 既にある番号は変えず、壊れた JSON は直さず止める（実装ルール2）。
+ */
+
+/** 設定の名前（package.json の `novelai.ime.notifyCurrentWork`） */
+export const IME_NOTIFY_SETTING = "ime.notifyCurrentWork";
+
+/** `config.json` の番号を確かめた結果 */
+export type EnsureWorkUidResult =
+  | { kind: "ready"; workUid: string; added: boolean }
+  | { kind: "stopped"; reason: string };
+
+/**
+ * 作品の番号（`workUid`）を確かめ、無ければ足す（計画書 3.6）。
+ *
+ * - **既にある番号は変えない**
+ * - 壊れた JSON・形の悪い番号は**直さず止める**（ログへ理由。次のきっかけでまた試す）
+ * - `allowAdd` が偽（編集者モード）なら足さない。編集部の機械が作者の設定ファイルを
+ *   書き換えると、作者の書庫に覚えのない変更が出る
+ * - 読んでから書くまでの間に設定ファイルが変わったら書かない（同期の取り込みなどと
+ *   重なったときに、その変更を古い中身で消さない）
+ *
+ * 番号は**毎回ファイルから読む**（覚えておかない）。2台で別々に足して同期でぶつかった
+ * とき、ファイルに残ったほうへすぐ揃うため（設計書6.13.7）。
+ */
+export async function ensureWorkUid(
+  work: WorkEntry,
+  options: { allowAdd: boolean; newUid?: () => string }
+): Promise<EnsureWorkUidResult> {
+  const configUri = path.toUri(workPaths(work).configFile);
+  const readBytes = async (): Promise<Uint8Array | undefined> => {
+    try {
+      return await vscode.workspace.fs.readFile(configUri);
+    } catch (error) {
+      if (isNotFound(error)) return undefined;
+      throw error;
+    }
+  };
+
+  let bytes: Uint8Array | undefined;
+  try {
+    bytes = await readBytes();
+  } catch (error) {
+    return { kind: "stopped", reason: `作品設定を読めません（${errorText(error)}）` };
+  }
+  if (!bytes) {
+    // 設定ファイルの無い作品へ新しく作ることはしない（作品の形は登録が決める）
+    return { kind: "stopped", reason: "作品設定（.aiwriter/config.json）がありません" };
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(stripBom(new TextDecoder().decode(bytes)));
+  } catch {
+    return {
+      kind: "stopped",
+      reason: "作品設定（.aiwriter/config.json）が JSON として読めません。直さずに止めました",
+    };
+  }
+
+  const state = workUidStateOf(raw);
+  if (state.kind === "present") {
+    return { kind: "ready", workUid: state.workUid, added: false };
+  }
+  if (state.kind === "invalid") {
+    return {
+      kind: "stopped",
+      reason:
+        "作品設定の workUid の形が違います（英数字と - _ の8〜64字）。書き換えずに止めました",
+    };
+  }
+  if (!options.allowAdd) {
+    return { kind: "stopped", reason: "編集者モードでは作品の番号を足しません" };
+  }
+
+  let config;
+  try {
+    config = parseWorkConfig(raw);
+  } catch (error) {
+    return { kind: "stopped", reason: `作品設定の形が違います（${errorText(error)}）` };
+  }
+
+  const workUid = (options.newUid ?? randomUuid)();
+  try {
+    const again = await readBytes();
+    if (!again || !sameBytes(again, bytes)) {
+      return { kind: "stopped", reason: "作品設定が読んでいる間に変わったので、今回は足しません" };
+    }
+    await writeWorkConfig(work, { ...config, workUid });
+  } catch (error) {
+    return { kind: "stopped", reason: `作品設定へ番号を書けません（${errorText(error)}）` };
+  }
+  return { kind: "ready", workUid, added: true };
+}
+
+/** 核向けの辞書の場所 */
+export function imeTsvFile(work: WorkEntry): string {
+  return path.join(work.folderPath, ...IME_TSV_SEGMENTS);
+}
+
+/** 書いた（または同じ中身で既にあった）辞書のハッシュ（`sha256:` を前に付ける） */
+function dictionaryHashText(bytes: Uint8Array): string {
+  return `sha256:${sha256Bytes(bytes)}`;
+}
+
+/**
+ * 核向けの辞書を書く。**中身が同じなら書かない**（同期の外とはいえ、無駄に時刻を進めない）。
+ * @returns 辞書のハッシュ
+ */
+export async function writeImeTsv(work: WorkEntry, text: string): Promise<string> {
+  const file = imeTsvFile(work);
+  const bytes = new TextEncoder().encode(text);
+  try {
+    const existing = await vscode.workspace.fs.readFile(path.toUri(file));
+    if (sameBytes(existing, bytes)) return dictionaryHashText(bytes);
+  } catch {
+    // 無い・読めない。書き直す
+  }
+  await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(file)));
+  await atomicWriteFile(file, bytes);
+  return dictionaryHashText(bytes);
+}
+
+/** いまある辞書のハッシュ。無ければ null（核は設定資料を直に読む） */
+async function existingDictionaryHash(work: WorkEntry): Promise<string | null> {
+  try {
+    return dictionaryHashText(await vscode.workspace.fs.readFile(path.toUri(imeTsvFile(work))));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 設定資料から核向けの辞書を組み立てて書く。
+ *
+ * 語の選び方は IME 辞書出力と同じ（`loadDictionaryForWork` → `buildDictionary`。
+ * 作者が外した語も外す）。**読めない設定資料が1つでもあれば書かない**——前の辞書を
+ * 残す（欠けた辞書で作品の語が消えるより、少し古い語のほうが打てる）。
+ *
+ * @returns 辞書のハッシュ。書けなかったら前の辞書のハッシュ（無ければ null）
+ */
+export async function rebuildImeTsv(
+  work: WorkEntry,
+  state: vscode.Memento | undefined
+): Promise<string | null> {
+  const loaded = await loadDictionaryForWork(work);
+  if (!loaded.ok) {
+    logLine(
+      `オリジナルIME 向けの辞書を書き直しませんでした（読めない設定ファイル：${loaded.errorFiles.join("、")}）。前の辞書のままです：${work.title}`
+    );
+    return existingDictionaryHash(work);
+  }
+  const excluded = state?.get<string[]>(imeExcludedKey(work.id)) ?? [];
+  const entries = withoutExcluded(loaded.built.entries, excluded);
+  return writeImeTsv(work, buildImeTsv(entries));
+}
+
+/** 知らせ・一覧を置き場へ書く（一時ファイルから名前を替える） */
+export async function writeImeJson(file: string, text: string): Promise<void> {
+  await atomicWriteFile(file, new TextEncoder().encode(text));
+}
+
+export interface ImeLinkOptions {
+  /** 登録簿（作品の一覧と、変わったときの知らせ） */
+  registry: {
+    list(): WorkEntry[];
+    onDidChange: vscode.Event<void>;
+  };
+  /** 作者が外した語の控え（IME 辞書出力と同じ globalState） */
+  state?: vscode.Memento;
+  /** 前に出ている原稿エディター（`features/manuscriptEditor.ts` の `frontManuscript`） */
+  frontManuscript: () =>
+    | { filePath: string; vertical: boolean; active: boolean }
+    | undefined;
+  /** 原稿エディターの面が前に来た・向きを替えた */
+  onDidChangeFrontManuscript: (listener: () => void) => vscode.Disposable;
+}
+
+export interface ImeLinkHandle extends vscode.Disposable {
+  /** 拡張機能がファイルを書いた（`atomicWrite` の受け口から。設定資料なら辞書を書き直す） */
+  noteFileWritten(filePath: string): void;
+  /** 作品の設定資料が変わった（外での書き換え・取り込み） */
+  noteSettingsChanged(work: WorkEntry): void;
+  /** 作者が IME 辞書出力を押した（外した語が変わったかもしれない） */
+  dictionaryExported(work: WorkEntry): void;
+  /** 拡張機能を止める。この窓が書いた知らせなら `workUid: null` にする（待たれないことがある） */
+  close(): Promise<void>;
+}
+
+/**
+ * オリジナルIME との連動を始める。**ブラウザ版・リモートでは何もしない**（undefined）。
+ *
+ * 書くのは4つがそろうときだけ（`shouldWriteImeNotice`）。設定と置き場は書くたびに
+ * 確かめる——IME をあとから入れた・設定を切り替えたときも、窓を開き直さずに効く。
+ */
+export function startImeLink(
+  context: vscode.ExtensionContext,
+  options: ImeLinkOptions
+): ImeLinkHandle | undefined {
+  if (!canRunProcesses()) return undefined;
+  if (vscode.env.remoteName) return undefined;
+
+  // 窓の番号は拡張機能ホストのプロセス番号（計画書 3.2）。素の `process` は読まない
+  // （`core/runtime.ts` だけが読む決まり）。手元では `hostTag()` がプロセス番号そのもの
+  const pid = Number(hostTag());
+  let closed = false;
+  // 書き込みを1本の列に並べる（窓の札と同じ）。閉じるときの null が、あとから届いた
+  // 打ち直しに追い越されると、閉じた窓の作品が「いまの作品」に戻る
+  let queue: Promise<void> = Promise.resolve();
+  const enqueue = (task: () => Promise<void>): Promise<void> => {
+    queue = queue.then(task).catch((error) => {
+      logLine(`オリジナルIME への知らせを書けませんでした：${errorText(error)}`);
+    });
+    return queue;
+  };
+
+  let front: ImeFront<WorkEntry> | undefined;
+  let lastNoticeKey: string | undefined;
+  let lastWorksKey: string | undefined;
+  /** この起動のあいだに辞書を書き直した作品（起動前の変更を拾うため、最初の1回は組み直す） */
+  const freshDictionaries = new Set<string>();
+  /** 番号を確かめられなかった理由を、同じ作品で何度も書かない */
+  const loggedStops = new Map<string, string>();
+
+  let stateDirPromise: Promise<string | undefined> | undefined;
+  const resolveStateDir = (): Promise<string | undefined> => {
+    stateDirPromise ??= (async () => {
+      const platform = hostPlatform();
+      let home: string | undefined;
+      if (platform === "darwin") {
+        try {
+          // `node:os` は動的に読む（実装ルール7。静的に書くとブラウザ版が起動で落ちる）
+          home = (await import("node:os")).homedir();
+        } catch {
+          home = environmentVariable("HOME");
+        }
+      }
+      return imeStateDir({
+        platform,
+        localAppData: environmentVariable("LOCALAPPDATA"),
+        home,
+      });
+    })();
+    return stateDirPromise;
+  };
+
+  /** 4つがそろえば置き場を返す。**置き場は作らない**（IME の無い機械では何もしない） */
+  const writableStateDir = async (): Promise<string | undefined> => {
+    const stateDir = await resolveStateDir();
+    let stateDirExists = false;
+    if (stateDir) {
+      try {
+        const stat = await vscode.workspace.fs.stat(path.toUri(stateDir));
+        stateDirExists = (stat.type & vscode.FileType.Directory) !== 0;
+      } catch {
+        stateDirExists = false;
+      }
+    }
+    const ok = shouldWriteImeNotice({
+      canRunProcesses: canRunProcesses(),
+      remoteName: vscode.env.remoteName,
+      enabled: vscode.workspace
+        .getConfiguration("novelai")
+        .get<boolean>(IME_NOTIFY_SETTING, true),
+      stateDirExists,
+    });
+    return ok ? stateDir : undefined;
+  };
+
+  const workUidFor = async (work: WorkEntry): Promise<string | undefined> => {
+    const result = await ensureWorkUid(work, { allowAdd: !isEditorMode() });
+    if (result.kind === "ready") {
+      loggedStops.delete(work.id);
+      if (result.added) {
+        logLine(`オリジナルIME の作品の番号を作品設定へ足しました：${work.title}`);
+      }
+      return result.workUid;
+    }
+    if (loggedStops.get(work.id) !== result.reason) {
+      loggedStops.set(work.id, result.reason);
+      logLine(`オリジナルIME へこの作品を知らせません（${result.reason}）：${work.title}`);
+    }
+    return undefined;
+  };
+
+  const refOf = (work: WorkEntry, workUid: string): ImeWorkRef => ({
+    workUid,
+    title: work.title,
+    workDir: work.folderPath,
+    dictionary: imeTsvFile(work),
+  });
+
+  /** いまの作品の辞書のハッシュ。この起動で初めてなら組み直す（起動前の変更を拾う） */
+  const dictionaryHashFor = async (work: WorkEntry): Promise<string | null> => {
+    if (!freshDictionaries.has(work.id)) {
+      freshDictionaries.add(work.id);
+      return rebuildImeTsv(work, options.state);
+    }
+    return existingDictionaryHash(work);
+  };
+
+  const writeCurrent = (force: boolean): Promise<void> =>
+    enqueue(async () => {
+      if (closed) return;
+      // 焦点の無い窓は書かない（焦点のある窓が「いまの作品」を持つ。計画書 3.4）
+      if (!vscode.window.state.focused) return;
+      const stateDir = await writableStateDir();
+      if (!stateDir || !front) return;
+      const workUid = await workUidFor(front.work);
+      // 番号が無い作品は知らせない（直前の作品のまま。IME は名前で鍵を作らない）
+      if (!workUid) return;
+      const notice = buildCurrentWorkNotice({
+        work: refOf(front.work, workUid),
+        dictionaryHash: await dictionaryHashFor(front.work),
+        vertical: front.vertical,
+        window: pid,
+        now: new Date(),
+      });
+      const key = imeNoticeKey(notice);
+      if (!force && key === lastNoticeKey) return;
+      await writeImeJson(path.join(stateDir, IME_CURRENT_WORK_FILE), serializeImeJson(notice));
+      lastNoticeKey = key;
+    });
+
+  const writeWorks = (): Promise<void> =>
+    enqueue(async () => {
+      if (closed) return;
+      const stateDir = await writableStateDir();
+      if (!stateDir) return;
+      const refs: ImeWorkRef[] = [];
+      for (const work of options.registry.list()) {
+        const workUid = await workUidFor(work);
+        if (workUid) refs.push(refOf(work, workUid));
+      }
+      const list = buildWorksList({ works: refs, window: pid, now: new Date() });
+      const key = imeNoticeKey(list);
+      if (key === lastWorksKey) return;
+      await writeImeJson(path.join(stateDir, IME_WORKS_FILE), serializeImeJson(list));
+      lastWorksKey = key;
+    });
+
+  const findWork = (filePath: string): WorkEntry | undefined =>
+    findWorkForFile(options.registry.list(), filePath);
+
+  const manuscriptObserved = (): ImeObservedFront | undefined => {
+    const manuscript = options.frontManuscript();
+    return manuscript
+      ? { source: "manuscript", filePath: manuscript.filePath, vertical: manuscript.vertical }
+      : undefined;
+  };
+
+  /** 焦点・起動のとき：前の原稿エディター → 前のエディター → 最後の原稿エディター */
+  const windowObserved = (): ImeObservedFront => {
+    const manuscript = options.frontManuscript();
+    if (manuscript?.active) {
+      return { source: "manuscript", filePath: manuscript.filePath, vertical: manuscript.vertical };
+    }
+    const editor = vscode.window.activeTextEditor;
+    if (editor) return { source: "text", filePath: path.fromUri(editor.document.uri) };
+    return manuscriptObserved() ?? { source: "none" };
+  };
+
+  const apply = (event: ImeFrontEvent<WorkEntry>, force: boolean): void => {
+    front = decideImeFront(front, event, findWork);
+    void writeCurrent(force);
+  };
+
+  const openWorks = (): WorkEntry[] => {
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) =>
+      path.fromUri(folder.uri)
+    );
+    return options.registry.list().filter((work) =>
+      folders.some(
+        (folder) =>
+          path.isSamePath(folder, work.folderPath) ||
+          path.isPathInside(folder, work.folderPath) ||
+          path.isPathInside(work.folderPath, folder)
+      )
+    );
+  };
+
+  // 起動：作品の一覧と、いまの作品（前のもので決まらなければ、開いている作品が1つならそれ）
+  void writeWorks();
+  apply({ kind: "startup", front: windowObserved(), openWorks: openWorks() }, true);
+
+  const settleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const scheduleDictionary = (work: WorkEntry): void => {
+    const pending = settleTimers.get(work.id);
+    if (pending) clearTimeout(pending);
+    settleTimers.set(
+      work.id,
+      setTimeout(() => {
+        settleTimers.delete(work.id);
+        void enqueue(async () => {
+          if (closed) return;
+          if (!(await writableStateDir())) return;
+          // 番号が無い作品の辞書は読む相手がいない（作品の一覧にも載らない）
+          if (!(await workUidFor(work))) return;
+          freshDictionaries.add(work.id);
+          await rebuildImeTsv(work, options.state);
+        });
+        // いまの作品なら、ハッシュを替えて知らせを書き直す
+        if (front?.work.id === work.id) void writeCurrent(false);
+      }, IME_DICTIONARY_SETTLE_MS)
+    );
+  };
+
+  const disposables: vscode.Disposable[] = [
+    options.onDidChangeFrontManuscript(() => {
+      const observed = manuscriptObserved();
+      if (observed) apply({ kind: "front", front: observed }, false);
+    }),
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      // 作品の外のファイル・エディターが無い（パネルが前）ときは替えない
+      if (!editor) return;
+      apply({ kind: "front", front: { source: "text", filePath: path.fromUri(editor.document.uri) } }, false);
+    }),
+    vscode.window.onDidChangeWindowState((windowState) => {
+      // 焦点が来た窓が「いまの作品」を書き直す。ほかの窓が書いた知らせを上書きするので必ず書く
+      if (windowState.focused) apply({ kind: "focus", front: windowObserved() }, true);
+    }),
+    options.registry.onDidChange(() => {
+      void writeWorks();
+      // 登録を外した作品が「いまの作品」だったら、知らせからも外す（作品の外へ移ったのと同じ）
+      if (front && !options.registry.list().some((work) => work.id === front?.work.id)) {
+        front = undefined;
+      }
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration(`novelai.${IME_NOTIFY_SETTING}`)) return;
+      // 入れたときにすぐ書く（切ったときは書かない。IME は古い知らせを15分で閉じた扱いにする）
+      lastNoticeKey = undefined;
+      lastWorksKey = undefined;
+      void writeWorks();
+      void writeCurrent(true);
+    }),
+  ];
+  // 心拍：焦点のある窓だけが `at` を書き直す（writeCurrent が焦点を見る）
+  const heartbeat = setInterval(() => void writeCurrent(true), IME_HEARTBEAT_MS);
+
+  const settingsWork = (filePath: string): WorkEntry | undefined => {
+    if (!/\.json$/i.test(filePath)) return undefined;
+    const work = findWork(filePath);
+    if (!work) return undefined;
+    // 自分の書いた辞書・作品設定（`.aiwriter/` の下）は設定資料ではない
+    if (path.isPathInside(path.join(work.folderPath, ".aiwriter"), filePath)) return undefined;
+    return work;
+  };
+
+  const close = (): Promise<void> => {
+    if (closed) return queue;
+    closed = true;
+    clearInterval(heartbeat);
+    for (const timer of settleTimers.values()) clearTimeout(timer);
+    settleTimers.clear();
+    for (const item of disposables) item.dispose();
+    queue = queue
+      .then(async () => {
+        const stateDir = await writableStateDir();
+        if (!stateDir) return;
+        const file = path.join(stateDir, IME_CURRENT_WORK_FILE);
+        let text: string;
+        try {
+          text = new TextDecoder().decode(await vscode.workspace.fs.readFile(path.toUri(file)));
+        } catch {
+          return;
+        }
+        // **この窓が書いた知らせのときだけ** null にする。ほかの窓が書いた「いまの作品」を
+        // 閉じる窓が消すと、開いている窓で打っているのに作品の語が消える
+        if (noticeWindowOf(text) !== pid) return;
+        const notice = buildCurrentWorkNotice({
+          work: null,
+          dictionaryHash: null,
+          vertical: null,
+          window: pid,
+          now: new Date(),
+        });
+        await writeImeJson(file, serializeImeJson(notice));
+      })
+      .catch((error) => {
+        logLine(`オリジナルIME へ閉じたことを知らせられませんでした：${errorText(error)}`);
+      });
+    return queue;
+  };
+
+  context.subscriptions.push({ dispose: () => void close() });
+
+  return {
+    noteFileWritten: (filePath) => {
+      if (closed) return;
+      const work = settingsWork(filePath);
+      if (work) scheduleDictionary(work);
+    },
+    noteSettingsChanged: (work) => {
+      if (!closed) scheduleDictionary(work);
+    },
+    dictionaryExported: (work) => {
+      if (!closed) scheduleDictionary(work);
+    },
+    close,
+    dispose: () => void close(),
+  };
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((byte, index) => byte === right[index]);
+}
+
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

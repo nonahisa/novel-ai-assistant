@@ -64,6 +64,14 @@ export interface DictionaryEntry {
    * 元のレコードに書くものが無ければ入らない（空文字は持たない）
    */
   note?: string;
+  /**
+   * 別名の行にだけ入る、本体の名前（「リン」なら「リンセップ・アウクト」）。
+   *
+   * オリジナルIME 向けの辞書（`core/imeCurrentWork.ts` の4列目）が使う。
+   * 3つのIMEの形式には出さない（列を持たない）。本体の行には入れない
+   * ——空文字も持たない（`note` と同じ持ち方）
+   */
+  baseName?: string;
 }
 
 export interface DictionaryBuildInput {
@@ -138,7 +146,8 @@ export function buildDictionary(
     reading: string | null,
     partOfSpeech: string,
     kind: DictionaryKind,
-    note: string
+    note: string,
+    baseName?: string
   ) => {
     const text = surface.trim();
     if (text.length < MIN_SURFACE_LENGTH) return;
@@ -165,6 +174,10 @@ export function buildDictionary(
       kind,
       // 空文字は持たない。持つと4列目が「作品名：」と尻切れになる
       ...(note ? { note } : {}),
+      // 本体と同じ表記の別名（書き間違いの重複）は本体扱い。名前が無い本体も持たない
+      ...(baseName && baseName.trim() && baseName.trim() !== text
+        ? { baseName: baseName.trim() }
+        : {}),
     });
   };
 
@@ -179,7 +192,7 @@ export function buildDictionary(
     // 解説は本体と同じものを付ける——別名だけ手がかりが無いと、
     // 一覧で「リン」だけ見せられても誰のことか分からない
     for (const alias of character.aliases) {
-      add(alias, null, "人名", "character", note);
+      add(alias, null, "人名", "character", note, character.name);
     }
   }
 
@@ -187,7 +200,7 @@ export function buildDictionary(
     const note = summarizeForComment(location.summary ?? location.description);
     add(location.name, location.reading, "地名", "location", note);
     for (const alias of location.aliases) {
-      add(alias, null, "地名", "location", note);
+      add(alias, null, "地名", "location", note, location.name);
     }
   }
 
@@ -199,7 +212,7 @@ export function buildDictionary(
     );
     add(organization.name, organization.reading, "名詞", "organization", note);
     for (const alias of organization.aliases) {
-      add(alias, null, "名詞", "organization", note);
+      add(alias, null, "名詞", "organization", note, organization.name);
     }
   }
 
@@ -207,7 +220,7 @@ export function buildDictionary(
     const note = summarizeForComment(ability.summary ?? ability.description);
     add(ability.name, ability.reading, "名詞", "ability", note);
     for (const alias of ability.aliases) {
-      add(alias, null, "名詞", "ability", note);
+      add(alias, null, "名詞", "ability", note, ability.name);
     }
   }
 
@@ -226,7 +239,9 @@ export function buildDictionary(
     const note = summarizeForComment(item.description);
     add(item.name, item.reading, "名詞", "term", note);
     // 別名は名前の読みを流用できない。カタカナなら作れる
-    for (const alias of item.aliases) add(alias, null, "名詞", "term", note);
+    for (const alias of item.aliases) {
+      add(alias, null, "名詞", "term", note, item.name);
+    }
   }
 
   /*

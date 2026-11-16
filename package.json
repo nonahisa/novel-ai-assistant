@@ -2322,6 +2322,11 @@
           "default": "left",
           "description": "変換中の線（縦書きの原稿エディターで、変換中の字に付く線を出す側）。"
         },
+        "novelai.ime.notifyCurrentWork": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "IME へいまの作品を知らせる（オリジナルIME の作品ごとの辞書）。\n\n・オリジナルIME が入っている PC でだけ働く\n・オンのあいだは、作品の `.aiwriter/config.json` に作品の番号（`workUid`）を足す"
+        },
         "novelai.readAloud.aivisSpeechUrl": {
           "type": "string",
           "default": "http://127.0.0.1:10101",

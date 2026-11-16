@@ -48,6 +48,31 @@ export async function exportImeDictionary(
   work: WorkEntry,
   state?: vscode.Memento
 ): Promise<void> {
+  const loaded = await loadDictionaryForWork(work);
+  if (!loaded.ok) {
+    // 読めない設定があるまま書き出すと、欠けた辞書が正しく見えてしまう
+    await vscode.window.showErrorMessage(
+      "読み込めない設定ファイルがあるため、辞書を書き出しませんでした。" +
+        `（${loaded.errorFiles.join("、")}）`
+    );
+    return;
+  }
+  const built = loaded.built;
+  await exportImeDictionaryWith(work, built, state);
+}
+
+/**
+ * 辞書に入れる語を設定資料から組み立てる（IME 辞書出力とオリジナルIME 向けの辞書が共用。
+ * 設計書6.13.7。**選び方の写しを作らない**——片方だけ直すと2つの辞書の語がずれる）。
+ *
+ * 読めない設定ファイルが1つでもあれば組み立てない（欠けた辞書を正しく見せない）。
+ */
+export async function loadDictionaryForWork(
+  work: WorkEntry
+): Promise<
+  | { ok: true; built: ReturnType<typeof buildDictionary> }
+  | { ok: false; errorFiles: string[] }
+> {
   const loadedCharacters = await new CharacterStore(work).loadAll();
   const loadedAbilities = await createAbilityStore(work).loadAll();
   const loadedLocations = await createLocationStore(work).loadAll();
@@ -62,12 +87,7 @@ export async function exportImeDictionary(
     ...loadedWorld.errors,
   ];
   if (errors.length > 0) {
-    // 読めない設定があるまま書き出すと、欠けた辞書が正しく見えてしまう
-    await vscode.window.showErrorMessage(
-      "読み込めない設定ファイルがあるため、辞書を書き出しませんでした。" +
-        `（${errors.map((error) => error.file).join("、")}）`
-    );
-    return;
+    return { ok: false, errorFiles: errors.map((error) => error.file) };
   }
 
   const built = buildDictionary({
@@ -80,7 +100,14 @@ export async function exportImeDictionary(
     // つないでいなければ空なので、これまでと何も変わらない
     seriesTerms: await loadSeriesTerms(work),
   });
+  return { ok: true, built };
+}
 
+async function exportImeDictionaryWith(
+  work: WorkEntry,
+  built: ReturnType<typeof buildDictionary>,
+  state?: vscode.Memento
+): Promise<void> {
   if (built.entries.length === 0) {
     vscode.window.showInformationMessage(
       "辞書にできる語がありません。先に「まとめて生成」で設定資料を作ってください。"
@@ -311,6 +338,9 @@ function buildHowToDocument(dialects: ImeDialect[]): string {
     "- **作品ごとの自動切り替えもできません。** 同じ理由です。",
     "  複数の作品を登録しても、作品固有の造語は読みが重なりにくいため、",
     "  実際にはあまり困りません。",
+    "  **オリジナルIME（Setsuna）だけは例外です。** いま書いている作品と作品の語を",
+    "  この拡張機能が知らせるので、作品を替えると辞書も切り替わります",
+    "  （設定「IME へいまの作品を知らせる」）。取り込みの手作業も要りません。",
     "",
     "## うまく取り込めない場合",
     "",

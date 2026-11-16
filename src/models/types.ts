@@ -231,6 +231,14 @@ export interface WorkConfig {
    * 書き戻すときに消さない）。読み方と確かめ方は `core/memoMarkers.ts` の `resolveMemoMarkers`
    */
   memoMarkers?: string[];
+  /**
+   * 作品の変わらない番号（オリジナルIME の作品ごとの辞書の鍵。設計書6.13.7）。
+   * **省略できる。** IME との連動が有効なときだけ足し、**一度書いたら変えない**。
+   * 登録簿の作品ID（機械ごと・globalState）と違い、作品と一緒に同期されるので
+   * 2台でも、フォルダーを動かしても同じ番号になる。
+   * 読み方と確かめ方は `core/imeCurrentWork.ts` の `isValidWorkUid`
+   */
+  workUid?: string;
 }
 
 /**

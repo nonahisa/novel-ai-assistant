@@ -550,6 +550,8 @@ import {
   refreshManuscriptMemoMarkers,
   collectManuscriptEditorsCard,
   onDidChangeManuscriptStatus,
+  frontManuscript,
+  onDidChangeFrontManuscript,
   watchManuscriptTabs,
   watchDisconnectedManuscripts,
   carryAppearanceToRenamed,
@@ -588,6 +590,7 @@ import {
   refreshWriterProfileMirror,
 } from "./features/adviceProfileMirror";
 import { startWindowCard } from "./features/windowCard";
+import { startImeLink, type ImeLinkHandle } from "./features/imeCurrentWork";
 import { startLocalAiGate } from "./features/localAiGate";
 import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
@@ -2008,7 +2011,13 @@ export async function activate(
   const selfWrites = new SelfWriteTracker();
   // 拡張機能の書き込みは、書き込み口の1か所で印を付ける。
   // これが無いと、自分が保存するたび「外部で変更されました」と出る
-  setWriteObserver((filePath) => selfWrites.markWriting(filePath));
+  // **受け口は1つだけ**なので、オリジナルIME の辞書の書き直し（設計書6.13.7）も
+  // ここへ足す（別に setWriteObserver を呼ぶと、上の印付けが外れる）。
+  // 設定資料の書き込み（パネル・抽出・承認待ちの反映）はみなこの口を通る
+  setWriteObserver((filePath) => {
+    selfWrites.markWriting(filePath);
+    imeLink?.noteFileWritten(filePath);
+  });
   context.subscriptions.push({ dispose: () => setWriteObserver(undefined) });
 
   // 競合の見比べは、同期の中からも呼ばれる（設計書5.5.18）。
@@ -2306,6 +2315,8 @@ export async function activate(
   const reloadAfterExternalChange = async (work: WorkEntry): Promise<void> => {
     highlighter.invalidate();
     forgetImeNames(work.id);
+    // 同期の取り込みもここを通る。オリジナルIME 向けの辞書を書き直す（設計書6.13.7）
+    imeLink?.noteSettingsChanged(work);
     treeProvider.refresh(work.id);
     // 開いていなければ何もしない（勝手に画面を開かない）
     await findOpenSettingsPanel(work.id)?.refreshFromDisk();
@@ -2315,6 +2326,9 @@ export async function activate(
     registry,
     selfWrites,
     (work, files) => {
+      // 外で書き換わった設定資料も、オリジナルIME 向けの辞書へ映す（設計書6.13.7）。
+      // 取り込むかの確認とは別——辞書は派生物で、ファイルが正本である
+      imeLink?.noteSettingsChanged(work);
       void notifyExternalChange(work, files, {
         // 中身を見て取り込むかを決める。勝手に確定させない
         review: async () => {
@@ -4390,6 +4404,16 @@ export async function activate(
     context.subscriptions.push(windowCard);
     closeWindowCard = windowCard.close;
   }
+  // ─── オリジナルIME へいまの作品を知らせる（設計書6.13.7。作者の答え 2026-11-15） ───
+  // ブラウザ版・リモートでは始めない。IME の置き場が無い機械では何も書かない
+  imeLink = startImeLink(context, {
+    registry,
+    state: verifiedState(context.globalState),
+    frontManuscript,
+    onDidChangeFrontManuscript,
+  });
+  if (imeLink) closeImeLink = imeLink.close;
+
   // つながりの切れた原稿エディター（拡張機能ホストの起動し直し）を見つけて、
   // ウィンドウの再読み込みを勧める（作者の裁定 2026-10-02。設計書6.25.9）。
   // 札と違ってブラウザ版でも起きうるので、札の有無に関わらず見張る。
@@ -6365,6 +6389,8 @@ export async function activate(
         if (!work) return;
         // 保管庫を渡すと、作者が外した語を覚えて次からも外したままにする
         await exportImeDictionary(work, verifiedState(context.globalState));
+        // 外した語が変わったかもしれない。オリジナルIME 向けの辞書も揃える（設計書6.13.7）
+        imeLink?.dictionaryExported(work);
         // 書き出したので「辞書が古い」の印を消す。
         // 残ったままだと、押しても消えない印を作者が気にし続けることになる
         refreshActionBadges(work.id);
@@ -9847,6 +9873,14 @@ let beforeClose: (() => void) | undefined;
 let closeWindowCard: (() => Promise<void>) | undefined;
 
 /**
+ * オリジナルIME との連動（設計書6.13.7）。起動時に作り、閉じるときに
+ * 「作品なし」（`workUid: null`）を書く。札と同じく待ち切られないことがあり、
+ * そのときは IME が知らせの古さ（15分）で閉じた扱いにする。
+ */
+let imeLink: ImeLinkHandle | undefined;
+let closeImeLink: (() => Promise<void>) | undefined;
+
+/**
  * 知らせの記録（MCP の notices.recent）の溜まっている分を書き出す。起動時に掴んでおく。
  * 札と同じく待ち切られないことがあるが、そのときは閉じる前の1秒ぶんが欠けるだけ。
  */
@@ -9880,9 +9914,10 @@ export function deactivate(): Promise<void> | undefined {
 
   // 札は最後に消す（上の問いやログの片づけを、札の消去の待ちで遅らせない）。
   // 知らせの記録も溜まっている分を書き出す（閉じる直前の知らせを落とさない）
-  if (!closeWindowCard && !flushNoticeRecorder) return undefined;
+  if (!closeWindowCard && !flushNoticeRecorder && !closeImeLink) return undefined;
   return Promise.all([
     closeWindowCard?.().catch(() => undefined),
+    closeImeLink?.().catch(() => undefined),
     flushNoticeRecorder?.().catch(() => undefined),
   ]).then(() => undefined);
 }
