@@ -175,6 +175,11 @@ export interface ShellSignals {
   /** 殻が日本語の入力で起きたか */
   modeOn: boolean;
   requests?: unknown;
+  /**
+   * 最後に出した候補の窓（novel-ime 2cb1301）。list は候補の並び、selected は選んでいる番目（0 から）、shown は窓を出した回数。
+   * 窓が無ければ null。並びは作者の学習で替わるので、番目を決め打ちせずにここから読む
+   */
+  lastCandidates?: { list: string[]; selected: number; shown: number } | null;
 }
 
 /** いまの殻の記録の行の数（打つ前に取り、打ったあと `shellSince` へ渡す） */
@@ -202,6 +207,9 @@ export async function shellSince(mark: ShellMark): Promise<ShellSignals> {
     pairs: list(run.json.pairs),
     carets: list(run.json.carets),
     activated: list(run.json.activated),
+    lastCandidates: run.json.lastCandidates
+      ? { ...run.json.lastCandidates, list: list(run.json.lastCandidates.list) }
+      : run.json.lastCandidates,
   };
 }
 

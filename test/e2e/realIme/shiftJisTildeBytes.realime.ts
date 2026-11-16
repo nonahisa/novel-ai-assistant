@@ -10,6 +10,8 @@
  * **7番目の選び方**：SPACE で変換を始め（1番目が選ばれる）、少し待って候補が届いてから DOWN を6回。核は「から」の
  * 読みに、ふつうの語の2つのあと3位から記号を出すが、あとで足す英語の候補に押されて波ダッシュは7位
  * （novel-ime の docs/引継ぎ書.md、2026-11-14「から〜」）。数字のキー（7）は候補の窓の1頁の数しだいなので使わない。
+ * **DOWN の回数は決め打ちしない**（2026-11-16）：学習で並びが替わるので、候補の窓の並びを殻の合図から読んで、
+ * 波ダッシュの番目まで動かす（`RealIme.typeAndChoose`）。「7位」は学習の無いときの並び。
  * 選び間違い（候補の順が違う）と製品の不具合を分けるため、**保存の前に**画面の本文が U+301C になったことを確かめる。
  * 7番目を選ぶと IME の学習に入るので、試しの作品で打つ（試しの後が学習を消す）。
  *
@@ -72,19 +74,7 @@ test.skipIf(!REAL_IME_ENABLED)("本物の IME：Shift_JIS の原稿で、~ の�
 
       // 2. から → SPACE → 7番目（波ダッシュ）で確定 → 保存
       await placeCaretAfter(frame, "駅の");
-      await ime.type(frame, [
-        "romaji:kara",
-        "key:SPACE",
-        "wait:600",
-        "key:DOWN",
-        "key:DOWN",
-        "key:DOWN",
-        "key:DOWN",
-        "key:DOWN",
-        "key:DOWN",
-        "wait:200",
-        "key:ENTER",
-      ]);
+      await ime.typeAndChoose(frame, ["romaji:kara", "key:SPACE", "wait:600"], WAVE_DASH);
       // 保存の前に、選んだのが波ダッシュであることを確かめる（候補の順の違いを製品の不具合と取り違えない）
       await waitUntil(async () => (await composeText(frame)).includes(`駅の${WAVE_DASH}ホーム`), "7番目の候補の波ダッシュが画面に出る", 15_000).catch(
         async (error: unknown) => {

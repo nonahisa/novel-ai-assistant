@@ -217,6 +217,35 @@ export class RealIme {
    * 呼ぶたびに、台本を呼ぶ直前に `assertTestWindowFocused` を通す
    */
   async type(frame: Frame, steps: readonly KeyStep[]): Promise<void> {
+    await this.prepare(frame);
+    await this.sendChecked(frame, steps);
+  }
+
+  /**
+   * `steps`（読みを打って SPACE で候補の窓を出し、少し待つところまで）を打ち、**出た候補の窓の並びを殻の合図から読んで**、
+   * `target` の番目まで DOWN（UP）で動かして ENTER で確定する（2026-11-16）。
+   *
+   * **番目を決め打ちしない。** 候補の並びは作者の学習（フロントエンドとエンジンのアプリごとの学習）・裏の並べ直し・
+   * 作品の辞書で替わる。「何もしなければ 『 が2番目」と決め打ちすると、作者の機械では 『 がもう1番目で、DOWN 1回で
+   * 「 を確定して落ちていた（novel-ime の見立て）。`target` が並びに無ければ、IME の候補の不具合として落とす
+   */
+  async typeAndChoose(frame: Frame, steps: readonly KeyStep[], target: string): Promise<void> {
+    await this.prepare(frame);
+    const mark = await shellMark();
+    await this.sendChecked(frame, steps);
+    const window = (await shellSince(mark)).lastCandidates;
+    if (!window) throw new Error(`候補の窓が出ていません（「${target}」を選べません。殻の合図に lastCandidates が無い）`);
+    const at = window.list.indexOf(target);
+    if (at < 0) {
+      throw new Error(`候補の窓に「${target}」がありません（並び：${JSON.stringify(window.list)}・選んでいる番目 ${window.selected}）`);
+    }
+    const move = at - window.selected;
+    const key: KeyStep = move >= 0 ? "key:DOWN" : "key:UP";
+    await this.send(frame, [...Array.from({ length: Math.abs(move) }, () => key), "wait:200", "key:ENTER"]);
+  }
+
+  /** 打ち始める前に1回：長い試しなら試しの作品の知らせを書き直し、前面とカーソルを整える */
+  private async prepare(frame: Frame): Promise<void> {
     if (Date.now() - this.refreshedAt > REFRESH_AFTER_MS) {
       await trialRefresh(this.session.workFolder);
       this.refreshedAt = Date.now();
@@ -227,6 +256,10 @@ export class RealIme {
       変換中の字（「k」）を Chromium が確定し、続きは置き直したカーソル（末尾）へ入っていた
     */
     await this.prepareFocus(frame);
+  }
+
+  /** 最初の1打だけを別に送って Setsuna かを確かめ（1回目だけ）、残りを送る */
+  private async sendChecked(frame: Frame, steps: readonly KeyStep[]): Promise<void> {
     let rest = [...steps];
     if (!this.checked) {
       const [first, after] = splitFirstKey(rest);
