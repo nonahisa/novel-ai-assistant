@@ -36,6 +36,9 @@ import {
   shouldWriteImeNotice,
   withoutExcluded,
   workUidStateOf,
+  createdAtOf,
+  planWorkUids,
+  type WorkUidCandidate,
   type ImeFront,
   type ImeFrontEvent,
   type ImeObservedFront,
@@ -123,7 +126,7 @@ export async function ensureWorkUid(
     return {
       kind: "stopped",
       reason:
-        "作品設定の workUid の形が違います（英数字と - _ の8〜64字）。書き換えずに止めました",
+        "作品設定の workUid の形が違います（英数字と - の8〜99字）。書き換えずに止めました",
     };
   }
   if (!options.allowAdd) {
@@ -137,7 +140,23 @@ export async function ensureWorkUid(
     return { kind: "stopped", reason: `作品設定の形が違います（${errorText(error)}）` };
   }
 
-  const workUid = (options.newUid ?? randomUuid)();
+  // 番号を決める道は1つ（`planWorkUids`）。ほかの作品との重なりまで見るときは
+  // `ensureAllWorkUids` が決めた番号を `newUid` で渡す
+  const workUid = (
+    options.newUid ??
+    (() =>
+      planWorkUids(
+        [
+          {
+            key: work.id,
+            createdAt: createdAtOf(raw),
+            title: work.title,
+            folderName: path.basename(work.folderPath),
+          },
+        ],
+        randomUuid
+      ).get(work.id) ?? randomUuid())
+  )();
   try {
     const again = await readBytes();
     if (!again || !sameBytes(again, bytes)) {
@@ -158,6 +177,69 @@ export async function ensureWorkUid(
     return { kind: "stopped", reason: `作品設定へ番号を書けません（${errorText(error)}）` };
   }
   return { kind: "ready", workUid, added: true };
+}
+
+/**
+ * 登録してある作品すべての番号を確かめ、無い作品へ足す（作者の決定 2026-11-17「A」）。
+ *
+ * 番号は `createdAt` から作る（`planWorkUids`）。作品を写して `createdAt` が重なったときに
+ * 2台で同じ作品へ同じ番号が付くよう、**番号の無い作品だけでなく、既にある番号もまとめて
+ * 見てから決める**（1作品ずつ決めると、機械ごとに見た順で重なりの避け方が変わる）。
+ *
+ * @returns 作品ID → 結果
+ */
+export async function ensureAllWorkUids(
+  works: readonly WorkEntry[],
+  options: { allowAdd: boolean; random?: () => string }
+): Promise<Map<string, EnsureWorkUidResult>> {
+  const results = new Map<string, EnsureWorkUidResult>();
+  const candidates: WorkUidCandidate[] = [];
+  const absent: WorkEntry[] = [];
+  for (const work of works) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(
+        stripBom(
+          new TextDecoder().decode(
+            await vscode.workspace.fs.readFile(path.toUri(workPaths(work).configFile))
+          )
+        )
+      );
+    } catch {
+      // 無い・読めない・壊れている。理由は `ensureWorkUid` が確かめて返す
+      results.set(work.id, await ensureWorkUid(work, { allowAdd: false }));
+      continue;
+    }
+    const state = workUidStateOf(raw);
+    const base = {
+      key: work.id,
+      createdAt: createdAtOf(raw),
+      title: work.title,
+      folderName: path.basename(work.folderPath),
+    };
+    if (state.kind === "present") {
+      candidates.push({ ...base, existing: state.workUid });
+      results.set(work.id, { kind: "ready", workUid: state.workUid, added: false });
+    } else if (state.kind === "absent") {
+      candidates.push(base);
+      absent.push(work);
+    } else {
+      results.set(work.id, await ensureWorkUid(work, { allowAdd: false }));
+    }
+  }
+  if (absent.length === 0) return results;
+  const planned = planWorkUids(candidates, options.random ?? randomUuid);
+  for (const work of absent) {
+    const workUid = planned.get(work.id);
+    results.set(
+      work.id,
+      await ensureWorkUid(work, {
+        allowAdd: options.allowAdd,
+        newUid: workUid ? () => workUid : undefined,
+      })
+    );
+  }
+  return results;
 }
 
 /** 核向けの辞書の場所 */
@@ -340,8 +422,8 @@ export function startImeLink(
     return ok ? stateDir : undefined;
   };
 
-  const workUidFor = async (work: WorkEntry): Promise<string | undefined> => {
-    const result = await ensureWorkUid(work, { allowAdd: !isEditorMode() });
+  /** 結果をログへ（足したとき・止めた理由が変わったとき）。番号を返す */
+  const settle = (work: WorkEntry, result: EnsureWorkUidResult): string | undefined => {
     if (result.kind === "ready") {
       loggedStops.delete(work.id);
       if (result.added) {
@@ -354,6 +436,26 @@ export function startImeLink(
       logLine(`オリジナルIME へこの作品を知らせません（${result.reason}）：${work.title}`);
     }
     return undefined;
+  };
+
+  /** 登録してある作品すべての番号（無い作品へは足す）。作品ID → 番号 */
+  const allWorkUids = async (): Promise<Map<string, string>> => {
+    const works = options.registry.list();
+    const results = await ensureAllWorkUids(works, { allowAdd: !isEditorMode() });
+    const uids = new Map<string, string>();
+    for (const work of works) {
+      const result = results.get(work.id);
+      const uid = result ? settle(work, result) : undefined;
+      if (uid) uids.set(work.id, uid);
+    }
+    return uids;
+  };
+
+  const workUidFor = async (work: WorkEntry): Promise<string | undefined> => {
+    // 既にあれば、その作品の設定ファイルだけを読んで済ませる（タブを替えるたびに全作品を読まない）
+    const own = await ensureWorkUid(work, { allowAdd: false });
+    if (own.kind === "ready") return settle(work, own);
+    return (await allWorkUids()).get(work.id);
   };
 
   const refOf = (work: WorkEntry, workUid: string): ImeWorkRef => ({
@@ -401,8 +503,9 @@ export function startImeLink(
       const stateDir = await writableStateDir();
       if (!stateDir) return;
       const refs: ImeWorkRef[] = [];
+      const uids = await allWorkUids();
       for (const work of options.registry.list()) {
-        const workUid = await workUidFor(work);
+        const workUid = uids.get(work.id);
         if (workUid) refs.push(refOf(work, workUid));
       }
       const list = buildWorksList({ works: refs, window: pid, now: new Date() });

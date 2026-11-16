@@ -4,12 +4,13 @@ import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { FileSystemError, FileType, workspace } from "../support/vscodeStub";
 import {
+  ensureAllWorkUids,
   ensureWorkUid,
   imeTsvFile,
   writeImeTsv,
 } from "../../../src/features/imeCurrentWork";
 import { writeWorkConfig, readWorkConfig } from "../../../src/core/workRegistry";
-import { IME_TSV_HEADER } from "../../../src/core/imeCurrentWork";
+import { IME_TSV_HEADER, deriveWorkUid } from "../../../src/core/imeCurrentWork";
 import type { WorkEntry } from "../../../src/models/types";
 
 /**
@@ -152,6 +153,58 @@ describe("作品の番号を足す（ensureWorkUid）", () => {
     const parsed = JSON.parse(await fsp.readFile(configPath(), "utf8"));
     expect(parsed.workTitle).toBe("改題");
     expect(parsed.workUid).toBe(UID_A);
+  });
+});
+
+describe("番号は createdAt から作る（ensureAllWorkUids。作者の決定 2026-11-17）", () => {
+  const expected = deriveWorkUid(new Date(baseConfig.createdAt).toISOString());
+  const noRandom = () => {
+    throw new Error("乱数は使わないはず");
+  };
+
+  test("番号は createdAt から決まり、2台で同じになる", async () => {
+    await placeConfig(JSON.stringify(baseConfig, null, 2));
+    const results = await ensureAllWorkUids([work], { allowAdd: true, random: noRandom });
+    expect(results.get(work.id)).toEqual({ kind: "ready", workUid: expected, added: true });
+  });
+
+  test("古いバージョンが番号を落としても、次の起動で同じ番号ができ直す", async () => {
+    await placeConfig(JSON.stringify(baseConfig, null, 2));
+    await ensureAllWorkUids([work], { allowAdd: true, random: noRandom });
+    const first = JSON.parse(await fsp.readFile(configPath(), "utf8")).workUid;
+    // 古いバージョンの書き直し（知らない欄の workUid を落とす）
+    await placeConfig(JSON.stringify(baseConfig, null, 2));
+    await ensureAllWorkUids([work], { allowAdd: true, random: noRandom });
+    const again = JSON.parse(await fsp.readFile(configPath(), "utf8")).workUid;
+    expect(again).toBe(first);
+    expect(again).toBe(expected);
+  });
+
+  test("同期で届いた番号は変えない", async () => {
+    await placeConfig(JSON.stringify({ ...baseConfig, workUid: UID_A }, null, 2));
+    const results = await ensureAllWorkUids([work], { allowAdd: true, random: noRandom });
+    expect(results.get(work.id)).toEqual({ kind: "ready", workUid: UID_A, added: false });
+  });
+
+  test("写した作品（createdAt が同じ）は、題から作った別の番号になる", async () => {
+    await placeConfig(JSON.stringify(baseConfig, null, 2));
+    const copy = {
+      id: "work_copy",
+      title: "番号の試験（写し）",
+      folderPath: nodePath.join(base, "写し"),
+    } as WorkEntry;
+    const copyConfig = nodePath.join(copy.folderPath, ".aiwriter", "config.json");
+    await fsp.mkdir(nodePath.dirname(copyConfig), { recursive: true });
+    await fsp.writeFile(copyConfig, JSON.stringify(baseConfig, null, 2), "utf8");
+    const results = await ensureAllWorkUids([copy, work], { allowAdd: true, random: noRandom });
+    const uidOf = (id: string) => {
+      const result = results.get(id);
+      return result?.kind === "ready" ? result.workUid : undefined;
+    };
+    expect(uidOf(work.id)).toBe(expected);
+    expect(uidOf(copy.id)).toBe(
+      deriveWorkUid(JSON.stringify([new Date(baseConfig.createdAt).toISOString(), copy.title]))
+    );
   });
 });
 

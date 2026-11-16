@@ -1,5 +1,6 @@
 import type { DictionaryEntry, DictionaryKind } from "./imeDictionary";
 import { localIsoString } from "./contestInbox";
+import { sha256Text } from "./hash";
 
 /**
  * オリジナルIME（Setsuna）へ「いまの作品」と作品の一覧・核向けの辞書を渡す（設計書6.13.7）。
@@ -46,16 +47,16 @@ export const IME_TSV_MAX_FIELD_CHARS = 64;
 /**
  * 作品の番号として受け取る形。
  *
- * **IME はこの番号をファイル名に使う**（`学習\<workUid>.json`）。手で書き換えられた値に
- * `\` や `:` が混じると、IME の学習が別の場所へ書かれるので、英数字と `-`・`_` だけを
- * 番号として認める（こちらが作るのは `randomUUID()` の形）。
+ * **IME はこの番号をファイル名に使う**（`学習\<workUid>.json`）。`: / \ * ? " < > |` は
+ * IME が `_` に替えるので、替えた結果がほかの作品と重ならないよう、**英数字と `-` だけ**を
+ * 番号と認める（計画書 3.6）。長さは8字以上・100字未満（ファイルの名前になる）。
  */
 export function isValidWorkUid(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length >= 8 &&
-    value.length <= 64 &&
-    /^[A-Za-z0-9_-]+$/.test(value)
+    value.length < 100 &&
+    /^[A-Za-z0-9-]+$/.test(value)
   );
 }
 
@@ -79,6 +80,125 @@ export function workUidStateOf(rawConfig: unknown): WorkUidState {
   const value = (rawConfig as Record<string, unknown>).workUid;
   if (value === undefined) return { kind: "absent" };
   return isValidWorkUid(value) ? { kind: "present", workUid: value } : { kind: "invalid" };
+}
+
+/**
+ * 試しの作品の印（フォルダーの名前の頭）。IME の核は、番号がこれで始まる作品の学習を
+ * ほかの機械へ運ばない（計画書 3.6。`record::is_test_work`）
+ */
+export const TEST_WORK_PREFIX = "test-";
+/** ふつうの作品の番号の頭（`createdAt` から作った印） */
+export const WORK_UID_PREFIX = "c-";
+
+/** 番号の頭。フォルダーの名前が `test-` で始まる作品は `test-`（乱数のときも同じ） */
+export function workUidPrefixFor(folderName: string): string {
+  return folderName.startsWith(TEST_WORK_PREFIX) ? TEST_WORK_PREFIX : WORK_UID_PREFIX;
+}
+
+/**
+ * 種から作品の番号を作る（頭 ＋ SHA-256 の16進の先頭32字）。
+ *
+ * **2台で同じ値になるように、乱数ではなく作品の中の値から決める**（作者の決定
+ * 2026-11-17「A：作品の createdAt から作る」。計画書 3.6 を IME が 9b4e445 で改めた）。
+ * 2台が同期の前にそれぞれ番号を足しても同じ行になるので、同期でぶつからない。
+ * 古いバージョンが欄を落としても、次の起動で同じ番号ができ直す。
+ * ハッシュは自前の `hash.ts`（ブラウザ版にも `node:crypto` を持ち込まない）。
+ */
+export function deriveWorkUid(seed: string, prefix: string = WORK_UID_PREFIX): string {
+  return `${prefix}${sha256Text(seed).slice(0, 32)}`;
+}
+
+/** 番号を決める作品1つ（`existing` は config.json に既にある番号） */
+export interface WorkUidCandidate {
+  /** 呼び手が結果を引くための鍵（登録簿の作品ID など。決め方には使わない） */
+  key: string;
+  /** config.json の `createdAt` を UTC にそろえたもの（`createdAtOf`）。読めなければ undefined */
+  createdAt: string | undefined;
+  title: string;
+  /** 作品のフォルダーの名前（`test-` の見分けと、名前と同じ字にしない確かめに使う） */
+  folderName: string;
+  existing?: string;
+}
+
+/**
+ * 番号の無い作品に番号を決める（既にある番号は変えない。同期で届いた値も含む）。
+ *
+ * 1. `createdAt` から作る
+ * 2. それがほかの作品の番号（既にあるもの・ここで先に決めたもの）と重なれば、
+ *    `createdAt` と作品名から作る（作品のフォルダーを写すと `createdAt` が重なる）
+ * 3. それでも重なるとき・`createdAt` が無い／日時として読めないときだけ乱数
+ *
+ * **どちらの機械でも同じ順で決まるよう、`createdAt` → 作品名の順に並べてから決める**
+ * （フォルダーの場所は機械ごとに違うので順に使わない）。
+ *
+ * @param random 乱数（`randomUUID()` の形。頭は付けずに渡す）
+ * @returns 鍵 → 番号（既にある作品は、その番号のまま入る）
+ */
+export function planWorkUids(
+  candidates: readonly WorkUidCandidate[],
+  random: () => string
+): Map<string, string> {
+  const result = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const candidate of candidates) {
+    if (candidate.existing !== undefined) {
+      result.set(candidate.key, candidate.existing);
+      taken.add(candidate.existing);
+    }
+  }
+  const pending = candidates
+    .filter((candidate) => candidate.existing === undefined)
+    .sort(
+      (a, b) =>
+        compareText(a.createdAt ?? "", b.createdAt ?? "") || compareText(a.title, b.title)
+    );
+  for (const candidate of pending) {
+    const prefix = workUidPrefixFor(candidate.folderName);
+    const createdAt = candidate.createdAt;
+    const tries = createdAt
+      ? [
+          deriveWorkUid(createdAt, prefix),
+          deriveWorkUid(JSON.stringify([createdAt, candidate.title]), prefix),
+        ]
+      : [];
+    // 作品の題やフォルダーの名前と同じ字にしない（IME は名前と番号を別の鍵として扱う）
+    const usable = (uid: string): boolean =>
+      !taken.has(uid) &&
+      isValidWorkUid(uid) &&
+      uid !== candidate.title &&
+      uid !== candidate.folderName;
+    let workUid = tries.find(usable);
+    // 乱数が重なることは事実上無いが、渡された乱数が使えない形でも回り続けないよう回数を切る
+    for (let attempt = 0; workUid === undefined && attempt < 16; attempt++) {
+      const drawn = `${prefix}${random().replace(/[^A-Za-z0-9-]/g, "")}`;
+      if (usable(drawn)) workUid = drawn;
+    }
+    if (workUid === undefined) {
+      throw new Error("作品の番号を決められませんでした（乱数が使える形になりません）");
+    }
+    result.set(candidate.key, workUid);
+    taken.add(workUid);
+  }
+  return result;
+}
+
+/** 機械の言語設定に依らない比べ方（`localeCompare` は機械で順が変わりうる） */
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * config.json の `createdAt` を UTC の形（`toISOString()`）にそろえて返す。
+ *
+ * 時間帯の書き方（`+09:00` と `Z`）が機械で違っても同じ番号になるように、そろえてから
+ * ハッシュにかける（計画書 3.6）。無い・日時として読めないときは undefined（乱数にする）。
+ */
+export function createdAtOf(rawConfig: unknown): string | undefined {
+  if (typeof rawConfig !== "object" || rawConfig === null) return undefined;
+  const value = (rawConfig as Record<string, unknown>).createdAt;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const time = new Date(value.trim());
+  return Number.isNaN(time.getTime()) ? undefined : time.toISOString();
 }
 
 /**

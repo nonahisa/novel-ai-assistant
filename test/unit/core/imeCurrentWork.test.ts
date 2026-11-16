@@ -5,7 +5,11 @@ import {
   buildCurrentWorkNotice,
   buildImeTsv,
   buildWorksList,
+  createdAtOf,
   decideImeFront,
+  deriveWorkUid,
+  planWorkUids,
+  type WorkUidCandidate,
   imeNoticeKey,
   imeStateDir,
   imeTsvPath,
@@ -299,6 +303,127 @@ describe("作品の番号（workUid）", () => {
       workUid: ref.workUid,
     });
     expect(config.workUid).toBe(ref.workUid);
+  });
+});
+
+describe("番号の作り方（作者の決定 2026-11-17「A：createdAt から作る」。計画書 3.6 は 9b4e445）", () => {
+  const createdAt = createdAtOf({ createdAt: "2026-11-16T00:00:00.000Z" }) as string;
+  const candidate = (
+    key: string,
+    extra: Partial<WorkUidCandidate> = {}
+  ): WorkUidCandidate => ({
+    key,
+    createdAt,
+    title: `作品${key}`,
+    folderName: `作品${key}`,
+    ...extra,
+  });
+  const noRandom = () => {
+    throw new Error("乱数は使わないはず");
+  };
+
+  test("同じ createdAt なら、どの機械でも同じ番号", () => {
+    const a = planWorkUids([candidate("1")], noRandom).get("1");
+    const b = planWorkUids([candidate("1")], noRandom).get("1");
+    expect(a).toBe(b);
+    expect(a).toBe(deriveWorkUid(createdAt));
+    expect(a).toMatch(/^c-[0-9a-f]{32}$/);
+  });
+
+  test("時間帯の書き方が違っても同じ（UTC にそろえてからハッシュにかける）", () => {
+    expect(createdAtOf({ createdAt: "2026-11-16T09:00:00+09:00" })).toBe(
+      createdAtOf({ createdAt: "2026-11-16T00:00:00.000Z" })
+    );
+    expect(createdAtOf({ createdAt: "2026-11-16T09:00:00+09:00" })).toBe(
+      "2026-11-16T00:00:00.000Z"
+    );
+  });
+
+  test("createdAt が無い・日時として読めないときは乱数", () => {
+    expect(createdAtOf({})).toBeUndefined();
+    expect(createdAtOf({ createdAt: "きのう" })).toBeUndefined();
+    expect(createdAtOf({ createdAt: 20261116 })).toBeUndefined();
+    const uid = planWorkUids(
+      [candidate("1", { createdAt: undefined })],
+      () => "0f8c2a54-1b9e-4c1d-9a7e-3d2f6b8e1c40"
+    ).get("1");
+    expect(uid).toBe("c-0f8c2a54-1b9e-4c1d-9a7e-3d2f6b8e1c40");
+  });
+
+  test("番号の字は英数字と - だけ。: / \\ * ? \" < > | と _ が入らない。空でなく100字未満", () => {
+    const uids = [
+      ...planWorkUids(
+        [
+          candidate("1"),
+          candidate("2"),
+          candidate("3", { title: "作品1", folderName: "test-写し" }),
+          // 乱数が使えない字を含んでも、英数字と - だけに落としてから使う
+          candidate("4", { createdAt: undefined }),
+        ],
+        () => "a_b:c/d\\e*f?g\"h<i>j|k-1234-5678"
+      ).values(),
+    ];
+    for (const uid of uids) {
+      expect(uid.length).toBeGreaterThan(0);
+      expect(uid.length).toBeLessThan(100);
+      expect(uid).toMatch(/^[A-Za-z0-9-]+$/);
+      expect(/[:/\\*?"<>|_]/.test(uid)).toBe(false);
+      expect(isValidWorkUid(uid)).toBe(true);
+    }
+    expect(isValidWorkUid("abc_defgh")).toBe(false);
+    expect(isValidWorkUid("a".repeat(100))).toBe(false);
+    expect(isValidWorkUid("a".repeat(99))).toBe(true);
+  });
+
+  test("作品の題やフォルダーの名前と同じ字にしない", () => {
+    const derived = deriveWorkUid(createdAt);
+    // 題が（ありえないが）作った番号と同じなら、次の作り方へ移る
+    const uid = planWorkUids([candidate("1", { title: derived, folderName: derived })], noRandom).get("1");
+    expect(uid).not.toBe(derived);
+    expect(uid).toBe(deriveWorkUid(JSON.stringify([createdAt, derived])));
+  });
+
+  test("試しの作品（フォルダーが test- で始まる）は番号も test- で始まる。乱数のときも", () => {
+    const derived = planWorkUids([candidate("1", { folderName: "test-作品" })], noRandom).get("1");
+    expect(derived).toMatch(/^test-[0-9a-f]{32}$/);
+    const drawn = planWorkUids(
+      [candidate("1", { folderName: "test-作品", createdAt: undefined })],
+      () => "0f8c2a54-1b9e-4c1d-9a7e-3d2f6b8e1c40"
+    ).get("1");
+    expect(drawn).toBe("test-0f8c2a54-1b9e-4c1d-9a7e-3d2f6b8e1c40");
+  });
+
+  test("写して createdAt が重なったら、2つ目は createdAt と題から。順は渡し方に依らない", () => {
+    const original = candidate("x", { title: "あ" });
+    const copy = candidate("y", { title: "い" });
+    const forward = planWorkUids([original, copy], noRandom);
+    const backward = planWorkUids([copy, original], noRandom);
+    expect(forward.get("x")).toBe(deriveWorkUid(createdAt));
+    expect(forward.get("y")).toBe(deriveWorkUid(JSON.stringify([createdAt, "い"])));
+    expect(backward).toEqual(forward);
+  });
+
+  test("2つの作り方がどちらも重なったとき（createdAt も題も同じ3つ目）だけ乱数", () => {
+    const uids = planWorkUids(
+      [
+        candidate("x", { title: "同じ" }),
+        candidate("y", { title: "同じ" }),
+        candidate("z", { title: "同じ" }),
+      ],
+      () => "0f8c2a54-1b9e-4c1d-9a7e-3d2f6b8e1c40"
+    );
+    expect(uids.get("x")).toBe(deriveWorkUid(createdAt));
+    expect(uids.get("y")).toBe(deriveWorkUid(JSON.stringify([createdAt, "同じ"])));
+    expect(uids.get("z")).toBe("c-0f8c2a54-1b9e-4c1d-9a7e-3d2f6b8e1c40");
+  });
+
+  test("既にある番号は変えず、新しい番号はそれと重ならない", () => {
+    const uids = planWorkUids(
+      [candidate("old", { existing: deriveWorkUid(createdAt) }), candidate("new", { title: "新" })],
+      noRandom
+    );
+    expect(uids.get("old")).toBe(deriveWorkUid(createdAt));
+    expect(uids.get("new")).toBe(deriveWorkUid(JSON.stringify([createdAt, "新"])));
   });
 });
 

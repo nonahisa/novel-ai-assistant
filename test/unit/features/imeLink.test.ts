@@ -13,6 +13,7 @@ import {
 } from "../support/vscodeStub";
 import { startImeLink, type ImeLinkHandle } from "../../../src/features/imeCurrentWork";
 import { hostTag } from "../../../src/core/runtime";
+import { deriveWorkUid } from "../../../src/core/imeCurrentWork";
 import type { WorkEntry } from "../../../src/models/types";
 
 /**
@@ -187,7 +188,8 @@ describe("オリジナルIME との連動", () => {
     const list = JSON.parse(await fsp.readFile(worksFile(), "utf8"));
     const config = JSON.parse(await fsp.readFile(configPath(), "utf8"));
 
-    expect(typeof config.workUid).toBe("string");
+    // 番号は createdAt から決まる（作者の決定 2026-11-17）
+    expect(config.workUid).toBe(deriveWorkUid("2026-11-16T00:00:00.000Z"));
     expect(config.futureField).toEqual({ keep: true });
     expect(config.announce).toBe("形の悪い値");
 
