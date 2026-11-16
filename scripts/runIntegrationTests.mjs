@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,18 @@ const repositoryRoot = path.resolve(
 );
 const temporaryRoot = await mkdtemp(
   path.join(tmpdir(), "novel-ai-assistant-vscode-test-")
+);
+
+/*
+  使い捨ての利用者設定で、オリジナルIME への知らせを切る（設計書6.13.7）。この PC に
+  IME の置き場（%LOCALAPPDATA%\novel-ime）があると、試験の窓が作者のいまの作品を書き替え、
+  試験の作品の config.json に番号を足す
+*/
+await mkdir(path.join(temporaryRoot, "user-data", "User"), { recursive: true });
+await writeFile(
+  path.join(temporaryRoot, "user-data", "User", "settings.json"),
+  JSON.stringify({ "novelai.ime.notifyCurrentWork": false }, null, 2),
+  "utf8"
 );
 
 /**

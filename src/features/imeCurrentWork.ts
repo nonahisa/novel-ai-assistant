@@ -3,13 +3,10 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
-import {
-  findWorkForFile,
-  parseWorkConfig,
-  workPaths,
-  writeWorkConfig,
-} from "../core/workRegistry";
+import { findWorkForFile, parseWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile } from "../core/atomicWrite";
+import { detectJsonFileFormat, formatJsonForFile } from "../core/jsonFileFormat";
+import { isWatchedSettingsFile, kindOfSettingsFile } from "../core/externalChanges";
 import { isNotFound } from "../core/fileRead";
 import { sha256Bytes } from "../core/hash";
 import { logLine } from "../core/logger";
@@ -58,7 +55,7 @@ import { loadDictionaryForWork } from "./exportImeDictionary";
  *
  * **書く物は作者のデータではない**（知らせ・一覧・派生の辞書）。上書きの経路
  * （`atomicWriteFile` の指定なし）で書く。作者のデータに触れるのは `config.json` へ
- * 番号を足すときだけで、そこは既存の `writeWorkConfig`（改行の形を保つ）を通し、
+ * 番号を足すときだけで、読んだ中身に番号の1欄だけを足し（ほかの欄と改行の形はそのまま）、
  * 既にある番号は変えず、壊れた JSON は直さず止める（実装ルール2）。
  */
 
@@ -133,9 +130,9 @@ export async function ensureWorkUid(
     return { kind: "stopped", reason: "編集者モードでは作品の番号を足しません" };
   }
 
-  let config;
+  // 確かめるのは作品設定の読み口（`parseWorkConfig`）と同じ形。読めない設定へは足さない
   try {
-    config = parseWorkConfig(raw);
+    workPaths(work, parseWorkConfig(raw));
   } catch (error) {
     return { kind: "stopped", reason: `作品設定の形が違います（${errorText(error)}）` };
   }
@@ -146,7 +143,17 @@ export async function ensureWorkUid(
     if (!again || !sameBytes(again, bytes)) {
       return { kind: "stopped", reason: "作品設定が読んでいる間に変わったので、今回は足しません" };
     }
-    await writeWorkConfig(work, { ...config, workUid });
+    /*
+      **読んだ生の中身に番号だけを足して書く**（`writeWorkConfig` を通さない）。あちらは
+      知っている欄だけで作り直すので、新しい版が足した欄や、形の悪い任意の欄（`announce`
+      など）を落とす。作者が操作したときなら作者の書き直しだが、ここは起動のたびに全作品へ
+      自動で走るので、番号以外の1字も変えない（実装ルール2）。改行の形は読んだまま
+    */
+    const next = { ...(raw as Record<string, unknown>), workUid };
+    await atomicWriteFile(
+      workPaths(work).configFile,
+      new TextEncoder().encode(formatJsonForFile(next, detectJsonFileFormat(bytes)))
+    );
   } catch (error) {
     return { kind: "stopped", reason: `作品設定へ番号を書けません（${errorText(error)}）` };
   }
@@ -234,6 +241,11 @@ export interface ImeLinkOptions {
     | undefined;
   /** 原稿エディターの面が前に来た・向きを替えた */
   onDidChangeFrontManuscript: (listener: () => void) => vscode.Disposable;
+  /**
+   * 置き場を差し替える（試験だけ。作者の %LOCALAPPDATA%\novel-ime に書かないため）。
+   * 省くと OS ごとの決まった所（`imeStateDir`）
+   */
+  stateDir?: string;
 }
 
 export interface ImeLinkHandle extends vscode.Disposable {
@@ -285,6 +297,7 @@ export function startImeLink(
   let stateDirPromise: Promise<string | undefined> | undefined;
   const resolveStateDir = (): Promise<string | undefined> => {
     stateDirPromise ??= (async () => {
+      if (options.stateDir !== undefined) return options.stateDir;
       const platform = hostPlatform();
       let home: string | undefined;
       if (platform === "darwin") {
@@ -399,6 +412,33 @@ export function startImeLink(
       lastWorksKey = key;
     });
 
+  /**
+   * 「作品なし」（`workUid: null`）を書く（閉じるとき・いまの作品の登録を外したとき）。
+   * **この窓が書いた知らせのときだけ**——ほかの窓が書いた「いまの作品」を消すと、
+   * 開いている窓で打っているのに作品の語が消える。
+   */
+  const closedNoticeTask = async (): Promise<void> => {
+    const stateDir = await writableStateDir();
+    if (!stateDir) return;
+    const file = path.join(stateDir, IME_CURRENT_WORK_FILE);
+    let text: string;
+    try {
+      text = new TextDecoder().decode(await vscode.workspace.fs.readFile(path.toUri(file)));
+    } catch {
+      return;
+    }
+    if (noticeWindowOf(text) !== pid) return;
+    const notice = buildCurrentWorkNotice({
+      work: null,
+      dictionaryHash: null,
+      vertical: null,
+      window: pid,
+      now: new Date(),
+    });
+    await writeImeJson(file, serializeImeJson(notice));
+    lastNoticeKey = imeNoticeKey(notice);
+  };
+
   const findWork = (filePath: string): WorkEntry | undefined =>
     findWorkForFile(options.registry.list(), filePath);
 
@@ -481,10 +521,20 @@ export function startImeLink(
     }),
     options.registry.onDidChange(() => {
       void writeWorks();
-      // 登録を外した作品が「いまの作品」だったら、知らせからも外す（作品の外へ移ったのと同じ）
-      if (front && !options.registry.list().some((work) => work.id === front?.work.id)) {
-        front = undefined;
+      if (!front) return;
+      const id = front.work.id;
+      const fresh = options.registry.list().find((work) => work.id === id);
+      if (fresh) {
+        // 名前の変更・フォルダーの移動のあとも、心拍が古い題と道を書き続けないよう引き直す
+        front = { ...front, work: fresh };
+        void writeCurrent(false);
+        return;
       }
+      // 登録を外した作品が「いまの作品」だった。作品を閉じたのと同じく `workUid: null` にする
+      front = undefined;
+      void enqueue(async () => {
+        if (!closed) await closedNoticeTask();
+      });
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration(`novelai.${IME_NOTIFY_SETTING}`)) return;
@@ -498,13 +548,16 @@ export function startImeLink(
   // 心拍：焦点のある窓だけが `at` を書き直す（writeCurrent が焦点を見る）
   const heartbeat = setInterval(() => void writeCurrent(true), IME_HEARTBEAT_MS);
 
+  /*
+    辞書に入る語の入った設定資料（人物・場所・組織・能力・世界観のフォルダーの JSON）だけを
+    拾う。外での書き換えの見張り（SettingsWatcher）と同じ判定を通す——作品の中の JSON を
+    みな拾うと、執筆量や履歴の保存のたびに設定資料を全部読み直すことになる
+  */
   const settingsWork = (filePath: string): WorkEntry | undefined => {
-    if (!/\.json$/i.test(filePath)) return undefined;
-    const work = findWork(filePath);
-    if (!work) return undefined;
-    // 自分の書いた辞書・作品設定（`.aiwriter/` の下）は設定資料ではない
-    if (path.isPathInside(path.join(work.folderPath, ".aiwriter"), filePath)) return undefined;
-    return work;
+    if (!isWatchedSettingsFile(filePath)) return undefined;
+    const kind = kindOfSettingsFile(filePath);
+    if (!kind || kind === "customFields") return undefined;
+    return findWork(filePath);
   };
 
   const close = (): Promise<void> => {
@@ -515,28 +568,7 @@ export function startImeLink(
     settleTimers.clear();
     for (const item of disposables) item.dispose();
     queue = queue
-      .then(async () => {
-        const stateDir = await writableStateDir();
-        if (!stateDir) return;
-        const file = path.join(stateDir, IME_CURRENT_WORK_FILE);
-        let text: string;
-        try {
-          text = new TextDecoder().decode(await vscode.workspace.fs.readFile(path.toUri(file)));
-        } catch {
-          return;
-        }
-        // **この窓が書いた知らせのときだけ** null にする。ほかの窓が書いた「いまの作品」を
-        // 閉じる窓が消すと、開いている窓で打っているのに作品の語が消える
-        if (noticeWindowOf(text) !== pid) return;
-        const notice = buildCurrentWorkNotice({
-          work: null,
-          dictionaryHash: null,
-          vertical: null,
-          window: pid,
-          now: new Date(),
-        });
-        await writeImeJson(file, serializeImeJson(notice));
-      })
+      .then(() => closedNoticeTask())
       .catch((error) => {
         logLine(`オリジナルIME へ閉じたことを知らせられませんでした：${errorText(error)}`);
       });

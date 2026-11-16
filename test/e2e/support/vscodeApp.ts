@@ -316,6 +316,10 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
         // 「アニメーション効果」に従うので、作者が設定を変えると選ぶ画面の行が動いている最中に
         // 押したり Esc を送ったりして、17件が落ちた（2026-11-03）。機械の設定に結果を左右させない
         "workbench.reduceMotion": "on",
+        // オリジナルIME へ知らせない（設計書6.13.7）。この PC に IME の置き場があると、作者の
+        // %LOCALAPPDATA%\novel-ime のいまの作品を試験の作品で書き替え、試験の作品の
+        // config.json に番号が足される
+        "novelai.ime.notifyCurrentWork": false,
         /*
           **Mac では品書き（右クリック・上の帯）も VS Code の中に描かせる。** 1.141.0 の `window.menuStyle`
           （custom／native／inherit）は Mac の stable の既定が native で、OS のメニューは Playwright から
