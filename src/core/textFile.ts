@@ -185,6 +185,37 @@ export async function convertTextFileToUtf8(
   });
 }
 
+/**
+ * Google ドライブで受け取った中身で、既にあるファイルを置き換える（設計書5.10.9。段階3）。
+ *
+ * **受け取ったバイトをそのまま書く**（文字コード・改行・BOM を手元の形へ直さない）。
+ * ドライブの同期は中身のハッシュで2台をそろえるので、手元の形へ直して書くと、書けた中身の
+ * ハッシュが向こうと違い、系譜が進まずに毎回「書けませんでした」になる（直すたびに送り返して
+ * 2台で永久に往復する）。中身の形は、もう1台の同じファイルの形そのものである。
+ *
+ * それ以外の守りは本文の書き戻しと同じものを通る（写しを作ると、片方だけ直る日が来る）：
+ * 校閲中の話は書かない・未保存の文書があれば書かない・受け取った中身にも今の中身にも
+ * 競合の印があれば書かない・ハッシュを2回照らす・今の中身を回復先へ控えてから消して
+ * 作り直す（5世代）。本文だけでなく設定資料・人物の JSON もこの道で書く——どれも控えが残る。
+ */
+export async function replaceFileWithReceivedBytes(
+  filePath: string,
+  bytes: Uint8Array,
+  expectedHash: string
+): Promise<WriteTextFileResult> {
+  if (bodyWriteGuard) {
+    const refusal = await bodyWriteGuard(filePath);
+    if (refusal) return { ok: false, reason: "editor_locked", detail: refusal };
+  }
+  if (hasUnsavedChanges(filePath)) {
+    return { ok: false, reason: "unsaved_changes" };
+  }
+  if (decodeBytes(bytes).hasConflictMarkers) {
+    return { ok: false, reason: "conflict_markers" };
+  }
+  return replaceBodyBytes(filePath, expectedHash, () => ({ ok: true, bytes }));
+}
+
 type BytesBuildResult =
   | { ok: true; bytes: Uint8Array }
   | Extract<WriteTextFileResult, { ok: false }>;
