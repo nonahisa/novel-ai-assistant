@@ -590,7 +590,11 @@ import {
   refreshWriterProfileMirror,
 } from "./features/adviceProfileMirror";
 import { startWindowCard } from "./features/windowCard";
-import { startImeLink, type ImeLinkHandle } from "./features/imeCurrentWork";
+import {
+  IME_FREQUENT_WORDS_ENABLED,
+  startImeLink,
+  type ImeLinkHandle,
+} from "./features/imeCurrentWork";
 import { startLocalAiGate } from "./features/localAiGate";
 import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
@@ -4413,6 +4417,10 @@ export async function activate(
     onDidChangeFrontManuscript,
   });
   if (imeLink) closeImeLink = imeLink.close;
+  // 「よく使う語を選ぶ」を品書きへ出す鍵。出し始める（定数が true）まで立てない
+  if (IME_FREQUENT_WORDS_ENABLED) {
+    void vscode.commands.executeCommand("setContext", "novelai.imeFrequentWords", true);
+  }
 
   // つながりの切れた原稿エディター（拡張機能ホストの起動し直し）を見つけて、
   // ウィンドウの再読み込みを勧める（作者の裁定 2026-10-02。設計書6.25.9）。
@@ -6394,6 +6402,27 @@ export async function activate(
         // 書き出したので「辞書が古い」の印を消す。
         // 残ったままだと、押しても消えない印を作者が気にし続けることになる
         refreshActionBadges(work.id);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.chooseImeFrequentWords",
+      async (node?: WorkNode) => {
+        // 品書きには出していない間も、ほかの道から呼ばれうる。理由を出して止める
+        if (!IME_FREQUENT_WORDS_ENABLED) {
+          void vscode.window.showInformationMessage("よく使う語の出力は、まだ始めていません。");
+          return;
+        }
+        const work = await resolveWork(node, registry, {
+          title: "よく使う語を選ぶ作品を選択",
+        });
+        if (!work) return;
+        const { chooseImeFrequentWords } = await import("./features/chooseImeFrequentWords.js");
+        const changed = await chooseImeFrequentWords(work, verifiedState(context.globalState));
+        // 選び終えたら、オリジナルIME 向けの辞書を書き直す
+        if (changed) imeLink?.dictionaryExported(work);
       }
     )
   );

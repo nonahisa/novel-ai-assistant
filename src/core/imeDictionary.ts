@@ -424,6 +424,18 @@ export function imeExcludedKey(workId: string): string {
 }
 
 /**
+ * 「本文でよく使う語」から外した語の控えの鍵（`globalState`）。作品ごと。
+ *
+ * **`imeExcludedKey` とは別の鍵**にする：あちらは3つのIMEの書き出しが `built.entries`
+ * から外した語を毎回作り直して書くので、よく使う語の覚えを混ぜると消える。
+ */
+export const IME_FREQUENT_EXCLUDED_KEY_PREFIX = "novelai.imeDictionary.frequentExcluded.";
+
+export function imeFrequentExcludedKey(workId: string): string {
+  return `${IME_FREQUENT_EXCLUDED_KEY_PREFIX}${workId}`;
+}
+
+/**
  * 一覧に出す項目。**VS Codeの型に寄せない**（`core` はUIを知らない）。
  * 呼び出し側が `vscode.QuickPickItem` へ移し替える。
  */

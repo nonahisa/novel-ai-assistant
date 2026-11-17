@@ -190,6 +190,7 @@ const KEYS: KeyRow[] = [
   { key: "novelai.siteLink.browserGuideShown", literalIn: "features/openSiteLink.ts", writtenIn: "features/openSiteLink.ts", write: /\.update\(SITE_LINK_GUIDE_SHOWN_KEY\b/g, guarded: true },
   { key: "novelai.proofreadingSuite.selection", literalIn: "core/proofreadingSuite.ts", writtenIn: "features/proofreadingSuite.ts", write: /\.update\(\s*PROOFREADING_SUITE_SELECTION_KEY\b/g, guarded: true },
   { key: "novelai.imeDictionary.excluded.", literalIn: "core/imeDictionary.ts", writtenIn: "features/exportImeDictionary.ts", write: /\.update\(imeExcludedKey\(work\.id\)/g, guarded: true },
+  { key: "novelai.imeDictionary.frequentExcluded.", literalIn: "core/imeDictionary.ts", writtenIn: "features/chooseImeFrequentWords.ts", write: /\.update\(\s*imeFrequentExcludedKey\(work\.id\)/g, guarded: true },
   { key: "novelai.pendingRename.", literalIn: "features/nameRename.ts", writtenIn: "features/nameRename.ts", write: /\.update\(pendingRenameKey\(workId\)/g, guarded: true },
   { key: "novelai.manuscriptReloadJump", literalIn: "core/manuscriptReloadJump.ts", writtenIn: "features/manuscriptEditor.ts", write: /\.update\(\s*MANUSCRIPT_RELOAD_JUMP_STATE_KEY\b/g, guarded: true },
   { key: "novelai.lmAvailability", literalIn: "core/lmAvailability.ts", writtenIn: "extension.ts", write: /\.update\(\s*LM_AVAILABILITY_KEY\b/g, guarded: true },
@@ -231,6 +232,7 @@ describe("鍵ごとに書く口は1か所", () => {
     const builders: Record<string, string[]> = {
       advicePolicyKey: [],
       imeExcludedKey: ["features/exportImeDictionary.ts"],
+      imeFrequentExcludedKey: ["features/chooseImeFrequentWords.ts"],
       pendingRenameKey: ["features/nameRename.ts"],
       supportKey: ["ai/geminiProvider.ts", "ai/claudeProvider.ts"],
     };

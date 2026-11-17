@@ -18,7 +18,7 @@ import {
   randomUuid,
 } from "../core/runtime";
 import { isEditorMode } from "../core/actorContext";
-import { imeExcludedKey } from "../core/imeDictionary";
+import { imeExcludedKey, imeFrequentExcludedKey } from "../core/imeDictionary";
 import {
   IME_CURRENT_WORK_FILE,
   IME_DICTIONARY_SETTLE_MS,
@@ -44,7 +44,12 @@ import {
   type ImeObservedFront,
   type ImeWorkRef,
 } from "../core/imeCurrentWork";
-import { countFrequentWords, type FrequentWord } from "../core/imeFrequent";
+import {
+  countFrequentWords,
+  frequentSkipSurfaces,
+  isEpisodeFilePath,
+  type FrequentWord,
+} from "../core/imeFrequent";
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies } from "../core/episodeBodies";
 import { readMemoMarkers } from "../core/memoMarkerStore";
@@ -53,18 +58,23 @@ import { loadDictionaryForWork } from "./exportImeDictionary";
 /**
  * 本文でよく使う語を辞書の末尾へ出すか。
  *
- * ノートPCの IME のエンジンが 5B4203B5 以降になったら true にする
+ * ノートPCの IME のエンジンが frequent を読める版（C3953A97 以降）に入れ替わったら true にする
  * （前のエンジンは frequent の行を先頭に出してしまう）。false の間は数えもしない
  * （本文を読まない）。
  */
 export const IME_FREQUENT_WORDS_ENABLED = false;
+
+/** 定数を boolean として読む（false の間も、その先のコードが「到達しない」扱いにならないように） */
+export function frequentWordsEnabled(): boolean {
+  return IME_FREQUENT_WORDS_ENABLED as boolean;
+}
 
 /**
  * 作品の話の本文から、よく使う語を数える。**読めない話があっても止めず、読めた分で作る。**
  * 話の一覧は走査（`scanWork`）の結果——ゴミ箱・回復先・書き出しの写しは入らない。
  * シーンメモは `loadEpisodeBodies` が消す。
  */
-async function loadFrequentWords(
+export async function loadFrequentWords(
   work: WorkEntry,
   excludedSurfaces: ReadonlySet<string>
 ): Promise<FrequentWord[]> {
@@ -349,10 +359,15 @@ export async function rebuildImeTsv(
   const excluded = state?.get<string[]>(imeExcludedKey(work.id)) ?? [];
   const entries = withoutExcluded(loaded.built.entries, excluded);
   // 設定資料の語（外した語も含む）と同じ表記は、よく使う語へ出さない
+  // 「よく使う語」から外した語は別の鍵で覚えている（3つの IME の書き出しの覚えと混ぜない）
   const frequent = frequentEnabled
     ? await loadFrequentWords(
         work,
-        new Set([...loaded.built.entries.map((entry) => entry.surface), ...excluded])
+        frequentSkipSurfaces(
+          loaded.built.entries.map((entry) => entry.surface),
+          excluded,
+          state?.get<string[]>(imeFrequentExcludedKey(work.id)) ?? []
+        )
       )
     : [];
   return writeImeTsv(work, buildImeTsv(entries, frequent));
@@ -717,6 +732,26 @@ export function startImeLink(
     return findWork(filePath);
   };
 
+  /*
+    話の保存でも辞書を組み直す（よく使う語の数え直し）。**定数が false の間は何もしない**
+    （話の保存のたびに本文を読み直さない）。設定フォルダーは既定の場所で見る
+    （作品設定を読み直さない。違う場所にした作品でも、数える側は走査の結果だけを読む）
+  */
+  const episodeWork = (filePath: string): WorkEntry | undefined => {
+    if (!frequentWordsEnabled()) return undefined;
+    const work = findWork(filePath);
+    if (!work) return undefined;
+    return isEpisodeFilePath(work.folderPath, workPaths(work).settings, filePath) ? work : undefined;
+  };
+
+  disposables.push(
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (closed) return;
+      const work = episodeWork(path.fromUri(document.uri));
+      if (work) scheduleDictionary(work);
+    })
+  );
+
   const close = (): Promise<void> => {
     if (closed) return queue;
     closed = true;
@@ -737,7 +772,7 @@ export function startImeLink(
   return {
     noteFileWritten: (filePath) => {
       if (closed) return;
-      const work = settingsWork(filePath);
+      const work = settingsWork(filePath) ?? episodeWork(filePath);
       if (work) scheduleDictionary(work);
     },
     noteSettingsChanged: (work) => {

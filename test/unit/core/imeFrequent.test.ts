@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { IME_FREQUENT_MIN_COUNT, countFrequentWords } from "../../../src/core/imeFrequent";
+import {
+  IME_FREQUENT_MIN_COUNT,
+  countFrequentWords,
+  frequentSkipSurfaces,
+  isEpisodeFilePath,
+  nextFrequentExcluded,
+} from "../../../src/core/imeFrequent";
 
 const none = new Set<string>();
 const times = (text: string, n: number): string => Array.from({ length: n }, () => text).join("。");
@@ -81,5 +87,54 @@ describe("よく使う語を数える", () => {
     expect(json).not.toContain("静かに");
     expect(json).not.toContain("見上げた");
     expect(got.length).toBe(2);
+  });
+});
+
+describe("話のファイルの判定", () => {
+  const work = "C:/w/作品";
+  const settings = "C:/w/作品/設定";
+  const yes = (file: string): boolean => isEpisodeFilePath(work, settings, file);
+
+  test("話の .txt/.md は真", () => {
+    expect(yes("C:/w/作品/本文/第001話.txt")).toBe(true);
+    expect(yes("C:/w/作品/本文/第一章/第002話.md")).toBe(true);
+    expect(yes("C:/w/作品/第003話.txt")).toBe(true);
+  });
+
+  test(".aiwriter・回復先・ゴミ箱・書き出しの写し・設定の下は偽", () => {
+    expect(yes("C:/w/作品/.aiwriter/cache/第001話.txt")).toBe(false);
+    expect(yes("C:/w/作品/本文/.novelai-recovery/第001話.txt")).toBe(false);
+    expect(yes("C:/w/作品/.trash/第001話.txt")).toBe(false);
+    expect(yes("C:/w/作品/exports/ime/第001話.txt")).toBe(false);
+    expect(yes("C:/w/作品/設定/characters/人物.md")).toBe(false);
+  });
+
+  test("設定資料の JSON・README・作品の外は偽", () => {
+    expect(yes("C:/w/作品/設定/characters/a.json")).toBe(false);
+    expect(yes("C:/w/作品/README.md")).toBe(false);
+    expect(yes("C:/w/別の作品/第001話.txt")).toBe(false);
+  });
+});
+
+describe("外した語の覚えの合わせ方", () => {
+  test("前の覚え＋今回外した語−今回チェックした語", () => {
+    // 前に外した A・B。今回の一覧は B・C・D、チェックは B（戻した）・D。C を外した
+    expect(nextFrequentExcluded(["A", "B"], ["B", "C", "D"], ["B", "D"]).sort()).toEqual(["A", "C"]);
+  });
+
+  test("一覧に出ない語の覚えは消さない", () => {
+    expect(nextFrequentExcluded(["A"], ["X"], ["X"])).toEqual(["A"]);
+  });
+});
+
+describe("よく使う語から除く表記", () => {
+  test("設定資料の語・外した語・よく使う語として外した語が入る", () => {
+    const skip = frequentSkipSurfaces(["魔法陣"], ["外し1"], ["外し2"]);
+    expect([...skip].sort()).toEqual(["外し1", "外し2", "魔法陣"].sort());
+    const words = countFrequentWords(
+      [times("{外し2|はずし}と{残る|のこる}", 3)],
+      skip
+    );
+    expect(words.map((word) => word.surface)).toEqual(["残る"]);
   });
 });

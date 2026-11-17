@@ -145,6 +145,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.checkVoiceMisreadings": { class: "C4", label: "読み間違いを調べる", reason: "作者の判断" },
   "novelai.openEpubEditor": { class: "C3", label: "EPUBエディター（試作）" },
   "novelai.exportImeDictionary": { class: "C2", label: "IME辞書出力" },
+  "novelai.chooseImeFrequentWords": { class: "C4", label: "よく使う語を選ぶ", reason: "作者の判断" },
   "novelai.generateSettingsDocs": { class: "C2", label: "設定資料集出力" },
   "novelai.exportSettingsForAudience": { class: "C2", label: "提供先別出力" },
   "novelai.generateCharacterDocs": { class: "C2", label: "人物一覧を生成" },

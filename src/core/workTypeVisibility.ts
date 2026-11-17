@@ -385,6 +385,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // IME辞書の元は設定資料だが、**手で足した語も入る**。
   // 入力を楽にする道具なので全タイプに倒した
   "novelai.exportImeDictionary": "allTypes",
+  "novelai.chooseImeFrequentWords": "allTypes",
 
   // ── あらすじ・広報 ──
   "novelai.generateSynopses": "story",

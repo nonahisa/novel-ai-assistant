@@ -1,5 +1,7 @@
 import { INTERNAL_RUBY_SOURCE, findRuby, fromSiteNotation } from "./ruby";
 import { deriveReading, toDictionaryReading } from "./reading";
+import * as path from "./pathText";
+import { acceptManuscriptEntry, isKnownNonManuscript } from "./manuscriptFolderRule";
 
 /**
  * 本文でよく使う語を数える（設計書6.13.7）。オリジナルIME へ渡す辞書の末尾の行になる。
@@ -103,4 +105,73 @@ export function countFrequentWords(
     }
   }
   return result.sort(compareFrequent);
+}
+
+/**
+ * 話のファイルか（話の保存で「よく使う語」を数え直すかの判定）。
+ *
+ * 走査（`scanWork`）が話として拾う条件と揃える：`.txt`/`.md`、`.` で始まる名前の
+ * フォルダー（`.aiwriter`・`.novelai-recovery`・ゴミ箱）の下ではない、`exports`・`設定`・
+ * 設定フォルダーの下ではない、競合の退避ファイルではない、作品の根の README などではない。
+ * **選り分けは `acceptManuscriptEntry` に任せる**（写しを作ると片方だけ古くなる）。
+ *
+ * 本文フォルダーの中かまでは見ない（読み口が要るため）。数え直すのが無駄になるだけで、
+ * 数える側は走査の結果だけを読むので、話でないファイルが混ざることはない。
+ */
+export function isEpisodeFilePath(
+  workFolder: string,
+  settingsDir: string,
+  filePath: string
+): boolean {
+  if (!path.isPathInside(workFolder, filePath)) return false;
+  const relative = path.relative(workFolder, filePath);
+  const segments = relative.split(/[\\/]+/).filter((part) => part !== "");
+  if (segments.length === 0) return false;
+  const accept = acceptManuscriptEntry(settingsDir);
+  let current = workFolder;
+  for (const [index, name] of segments.entries()) {
+    current = path.join(current, name);
+    if (index < segments.length - 1) {
+      if (name.startsWith(".") || !accept(name, "directory", current)) return false;
+    } else if (!accept(name, "file", current)) {
+      return false;
+    }
+  }
+  return !isKnownNonManuscript(filePath, workFolder, settingsDir);
+}
+
+/**
+ * 「よく使う語を選ぶ」窓のあとに覚える外した語を決める。
+ *
+ * 覚えるのは外した語。**前に外していて、いまの一覧に出ない語（本文から減った・設定資料に入った）の
+ * 覚えは消さない。** 前の覚えと今回外した語の和から、今回チェックした語を引く。
+ *
+ * @param previous 前に覚えた外した語
+ * @param shown 今回の一覧に出した語の表記
+ * @param checked 今回チェックが入っていた語の表記
+ */
+export function nextFrequentExcluded(
+  previous: readonly string[],
+  shown: readonly string[],
+  checked: readonly string[]
+): string[] {
+  const keep = new Set(checked);
+  const result = new Set(previous);
+  for (const surface of shown) {
+    if (!keep.has(surface)) result.add(surface);
+  }
+  for (const surface of keep) result.delete(surface);
+  return [...result];
+}
+
+/**
+ * 辞書の組み直しで、よく使う語から除く表記。
+ * 設定資料の語（外した語も含む）・設定資料の語として外した語・よく使う語として外した語。
+ */
+export function frequentSkipSurfaces(
+  settingsSurfaces: readonly string[],
+  settingsExcluded: readonly string[],
+  frequentExcluded: readonly string[]
+): Set<string> {
+  return new Set([...settingsSurfaces, ...settingsExcluded, ...frequentExcluded]);
 }
