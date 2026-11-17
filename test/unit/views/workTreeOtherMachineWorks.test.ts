@@ -115,6 +115,8 @@ describe("ほかの機械の作品", () => {
     expect(item.contextValue).toBe("otherMachineWork");
     expect(item.description).toBeUndefined();
     expect(item.collapsibleState).toBe(0);
+    // 読み上げの名前は作品名（文字列の tooltip だと VS Code は URL を aria-label にする）
+    expect(item.accessibilityInformation).toEqual({ label: "別の機械の作品" });
     expect(await provider.getChildren(children[0])).toEqual([]);
   });
 

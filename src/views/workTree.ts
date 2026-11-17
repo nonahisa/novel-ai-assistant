@@ -1026,6 +1026,11 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       item.iconPath = new vscode.ThemeIcon("repo");
       // 取り寄せ先は名前だけでは分からないので、ホバーで URL を見せる
       item.tooltip = node.work.remoteUrl;
+      /*
+        **読み上げの名前は作品名にする。** VS Code は文字列の tooltip を行の読み上げの名前
+        （aria-label）に使うので、置かないと URL が読まれる（2026-11-17、Mac の画面の自動テストで分かった）
+      */
+      item.accessibilityInformation = { label: node.work.title };
       return item;
     }
     if (node.type === "ownWorksHeader") {
