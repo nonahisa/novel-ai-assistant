@@ -28,8 +28,19 @@ import { afterAll } from "vitest";
  * 雛形へ流れ込んで次のテストを汚す。写したら `pointOrigin` で写し先へ向け直す。
  */
 
+/**
+ * 裸の置き場（GitHub役）の中で git を打つことを許す。
+ *
+ * git 2.56 から `safe.bareRepository` の既定が `explicit` になり、`cwd` を裸の置き場にした打ち方
+ * （設定の書き込み・`rev-parse` など）が「not in a git directory」で断られる（2026-11-18、ノートPCの
+ * git 2.56 で44件落ちた。E2E の手伝いは 172392ac で同じ手当て済み）。製品は送り先の中で git を
+ * 打たない（push・fetch・clone は explicit でも通る）ので、許すのは試しの手伝いだけ。
+ * `-c` は利用者の設定より強いので、どの機械でも同じに動く
+ */
+export const ALLOW_BARE = ["-c", "safe.bareRepository=all"] as const;
+
 export function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" });
+  return execFileSync("git", [...ALLOW_BARE, ...args], { cwd, encoding: "utf8" });
 }
 
 export interface GitTemplate {

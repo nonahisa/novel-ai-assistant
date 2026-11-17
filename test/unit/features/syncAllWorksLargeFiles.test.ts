@@ -23,6 +23,7 @@ import type { WorkRegistry } from "../../../src/core/workRegistry";
 import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
 import type { WorkEntry } from "../../../src/models/types";
 import { window, workspace } from "../support/vscodeStub";
+import { ALLOW_BARE } from "../support/gitTemplate";
 
 /**
  * GitHub に送れない大きさのファイルと、送信を断られたときの知らせ（設計書5.5.21）。
@@ -44,7 +45,8 @@ let shown: Array<{ message: string; buttons: string[] }>;
 let press: string | undefined;
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const result = await runGit(args, cwd, 60_000);
+  // 裸の置き場（送り先）の中でも打てるように（git 2.56 の既定。support/gitTemplate.ts の ALLOW_BARE）
+  const result = await runGit([...ALLOW_BARE, ...args], cwd, 60_000);
   if (result.code !== 0) {
     throw new Error(`git ${args.join(" ")} が失敗: ${result.stderr || result.stdout}`);
   }
