@@ -13,7 +13,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { caretPosition, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { caretPosition, composeText, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import {
   OPEN_PROPOSALS_LAUNCH,
   OPEN_PROPOSALS_PRESS,
@@ -161,6 +161,13 @@ test("0.50.2の再現：複数行の直しで行数が変わっても、その�
       const after = await fileText(session);
       expect(after.split("\n").length, `行数が増えていない（見張りにならない）：${JSON.stringify(after)}`).toBeGreaterThan(JUMP_TEXT.split("\n").length);
 
+      /*
+        **原稿エディターが直したあとの本文を出すまで待ってから飛ぶ**（2026-11-17、Mac の全件で1回落ちた）。
+        ファイルに入ったのを見ただけで押すと、混んだ機械では、エディターが本文を読み直す前に
+        ［本文を見る］が届く。そのあとの読み直しでカーソルが動き、最後の行に残っていた
+        （「ホームの時計が…」の行。単独では2回とも通った）
+      */
+      await waitUntil(async () => (await composeText(frame)).includes("彼は座った"), "原稿エディターに直したあとの本文が出る", 15_000);
       // 古い行番号のままなら外れる位置にある、あとの指摘へ飛ぶ
       await proposals.locator(`.location[data-action="jump"][data-id="${laterId}"]`).click();
       await waitUntil(
