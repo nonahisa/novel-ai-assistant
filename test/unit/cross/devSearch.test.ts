@@ -120,24 +120,24 @@ describe("開発用の意味の検索：変わった窓だけ埋め直す", () =
 });
 
 describe("開発用の意味の検索：上位10件の並べ方", () => {
-  it("点の高い順に10件で、同じファイルの重なる窓は高いほうだけ残す", () => {
+  it("点の高い順に10件で、同じ節の窓が2つ上位に来ても1行になり、いちばん高い窓の行を出す", () => {
     // 2次元の単位ベクトル。角度が問いに近いほど点が高い
     const wins = Array.from({ length: 14 }, (_, i) => ({
       path: `f${i}.md`, startLine: 1, endLine: 5, hp: `h${i}`, key: `k${i}`,
     }));
-    wins.push({ path: "f0.md", startLine: 3, endLine: 9, hp: "重なり", key: "dup" });
+    wins.push({ path: "f0.md", startLine: 40, endLine: 50, hp: "h0", key: "dup" }); // f0 と同じ節の2つ目の窓
     const angle = (i: number) => i * 0.05;
     const vecs = new Float32Array(wins.length * 2);
     wins.forEach((_, i) => {
-      const a = i === 14 ? angle(1) : angle(i);
+      // 2つ目の窓のほうが、f0 の1つ目の窓より問いに近い
+      const a = i === 14 ? 0.01 : i === 0 ? 0.3 : angle(i);
       vecs[i * 2] = Math.cos(a);
       vecs[i * 2 + 1] = Math.sin(a);
     });
     const top = rankTop(wins, vecs, 2, new Float32Array([1, 0]), 10);
     expect(top).toHaveLength(10);
-    expect(top[0].path).toBe("f0.md");
-    // f0 と重なる窓（最後）は f0 のほうが高いので落ちる
-    expect(top.some((t: { hp: string }) => t.hp === "重なり")).toBe(false);
+    expect(top[0]).toMatchObject({ path: "f0.md", hp: "h0", startLine: 40, endLine: 50 });
+    expect(top.filter((t: { path: string; hp: string }) => t.path === "f0.md" && t.hp === "h0")).toHaveLength(1);
     const scores = top.map((t: { score: number }) => t.score);
     expect([...scores].sort((a, b) => b - a)).toEqual(scores);
   });

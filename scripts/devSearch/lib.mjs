@@ -285,24 +285,22 @@ export async function refreshIndex({ current, old, embed, model = MODEL, batch =
 
 // ---------- 並べ方 ----------
 
-/** 点の高い順に上位 k 件。同じファイルで行の範囲が重なる窓は、点の高いほうだけ残す（重なりの窓が並ぶのを避ける） */
+/**
+ * 節ごとに1行にまとめた上位 k 件。節は「文書＝見出しの道（#### まで）、コード＝ファイル」で、
+ * その節でいちばん点の高い窓を節の代表にする（測りの retrieve.mjs と同じ。同じ節の窓が並んで種類が減るのを避ける）
+ */
 export function rankTop(windows, vectors, dim, qvec, k = TOP_K) {
-  const scored = [];
+  const best = new Map();
   for (let i = 0; i < windows.length; i++) {
     let s = 0;
     const o = i * dim;
     for (let d = 0; d < dim; d++) s += vectors[o + d] * qvec[d];
-    scored.push([s, i]);
-  }
-  scored.sort((a, b) => b[0] - a[0]);
-  const picked = [];
-  for (const [s, i] of scored) {
     const w = windows[i];
-    if (picked.some((p) => p.path === w.path && w.startLine <= p.endLine && p.startLine <= w.endLine)) continue;
-    picked.push({ ...w, score: s });
-    if (picked.length >= k) break;
+    const g = JSON.stringify([w.path, w.hp]);
+    const cur = best.get(g);
+    if (!cur || s > cur.score) best.set(g, { ...w, score: s });
   }
-  return picked;
+  return [...best.values()].sort((x, y) => y.score - x.score).slice(0, k);
 }
 
 export function formatResult(r) {
