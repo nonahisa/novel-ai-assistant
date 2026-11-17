@@ -223,6 +223,20 @@ beforeEach(() => {
   vi.mocked(revealTextLocation).mockClear();
 });
 
+/*
+  **再読み込みの受け口（serializer）だけを確かめる試しは、残ったタブの掃除を本物の時計に残さない**
+  （2026-11-17、CI で「作品が分からないタブは…閉じる」が、閉じた数3つで落ちた）。
+  登録すると1秒後に掃除が走る。本物の時計のまま登録すると、その掃除は試しが終わっても残り、
+  1秒後に走っている別の試しのタブを閉じる（自分の分と、残った2つの分で3回）。
+  遅い CI でだけ、その1秒が「案内の画面に替えて閉じる」の最中に当たった。
+  偽の時計で登録して、走らせずに本物へ戻すと、掃除は捨てられる
+*/
+function registerWithoutSweep(): void {
+  vi.useFakeTimers();
+  registerSceneMemoPanelRestore(context(), deps, works);
+  vi.useRealTimers();
+}
+
 async function settle(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -276,7 +290,7 @@ describe("ウィンドウの再読み込み（serializer の口）", () => {
   });
 
   test("作品が分からなければ、空の案内に替える（受け口は持たない）", async () => {
-    registerSceneMemoPanelRestore(context(), deps, works);
+    registerWithoutSweep();
     const panel = fakePanel("校正・メモパネル: 消えた作品", 2);
     live.push(panel);
     await serializer!.deserializeWebviewPanel(panel, undefined);
@@ -287,7 +301,7 @@ describe("ウィンドウの再読み込み（serializer の口）", () => {
   });
 
   test("同じ作品のパネルが既にあれば、戻ってきたほうを閉じる（1作品1枚）", async () => {
-    registerSceneMemoPanelRestore(context(), deps, works);
+    registerWithoutSweep();
     const first = fakePanel("校正・メモパネル: いじめられっ子", 2);
     const second = fakePanel("校正・メモパネル: いじめられっ子", 3);
     live.push(first, second);
