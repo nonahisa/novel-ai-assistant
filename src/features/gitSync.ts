@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { DRIVE_WORK_GIT_SKIP, driveWorkGitRefusal } from "../core/driveDestination";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import * as path from "../core/paths";
 // 場所の比べ方は `paths` の1か所に任せる（2026-09-23。以前はこのファイルの
@@ -295,6 +296,11 @@ export interface GitSyncOptions {
    * `extension.ts` が共有の1つを渡す。省くと自前の1つを持つ（試験用）
    */
   folderWatchHub?: FolderWatchHub;
+  /**
+   * git でそろえない作品か（送り先が Google ドライブの作品。設計書5.10.9）。真なら取り込み・
+   * 受け取り・送信をせず、未取得の知らせも出さない（1つの作品で GitHub と併用しない）
+   */
+  isGitDisabled?: (work: WorkEntry) => boolean;
 }
 
 /**
@@ -1097,6 +1103,8 @@ export class GitSyncMonitor implements vscode.Disposable {
    * 作者が知らせを押さずに置くと、その作品の数え直しが止まったままになる。
    */
   private notifyIfBehind(work: WorkEntry, status: GitSyncStatus): void {
+    // Google ドライブの作品は git から取り込まないので、未取得を知らせない
+    if (this.options.isGitDisabled?.(work)) return;
     if (status.kind !== "tracked" || status.behind === 0) {
       this.notified.delete(work.id);
       return;
@@ -1161,6 +1169,13 @@ export class GitSyncMonitor implements vscode.Disposable {
   /** 一度伝えた作品。**取り込むたびに出すと、消せない表示になる** */
   private readonly autoCrlfWarned = new Set<string>();
 
+  /** Google ドライブの作品なら理由を出して true（git を呼ばない。設計書5.10.9） */
+  private refuseIfDriveWork(work: WorkEntry): boolean {
+    if (!this.options.isGitDisabled?.(work)) return false;
+    void vscode.window.showInformationMessage(driveWorkGitRefusal(work.title));
+    return true;
+  }
+
   /**
    * 取り込む（作者の操作が起点）。
    *
@@ -1193,6 +1208,7 @@ export class GitSyncMonitor implements vscode.Disposable {
    *   同じ考え。あちらは記録の前の判断なので、新しい控えがあれば使う）
    */
   async receive(work: WorkEntry): Promise<ReceiveOutcome> {
+    if (this.options.isGitDisabled?.(work)) return { kind: "skipped", reason: DRIVE_WORK_GIT_SKIP };
     const run = this.options.run ?? runGit;
     this.quietInbox += 1;
     try {
@@ -1399,6 +1415,7 @@ export class GitSyncMonitor implements vscode.Disposable {
     work: WorkEntry,
     afterRecording: boolean
   ): Promise<boolean> {
+    if (this.refuseIfDriveWork(work)) return false;
     // **同じ置き場に、フォルダーが無い作品があれば取り込まない**（2026-11-14。設計書5.5.14）。
     // 取り込むと、見えない作品のフォルダーへ git が書き戻して作り直すことがある
     if (await this.stopIfWorksMissing(work, this.options.run ?? runGit)) return false;
@@ -1811,6 +1828,7 @@ ${reason}` : ""}`,
   }
 
   private async runPush(work: WorkEntry): Promise<boolean> {
+    if (this.refuseIfDriveWork(work)) return false;
     // **同じ置き場に、フォルダーが無い作品があれば送らない**（2026-11-14。設計書5.5.14）。
     // 送ると、止めた置き場の古い記録（移した作品の削除を含みうる）が GitHub に載る。確認の前に止める。
     // 状態を読むより先に見る——押した作品そのものが無いと状態が読めず、何も言わずに終わっていた

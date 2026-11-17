@@ -90,6 +90,13 @@ describe("無いファイルを置く（create）と元の文の置き場", () =
     expect(new TextDecoder().decode(disk.get(at("本文", "第2話.txt")))).toBe("第2話");
   });
 
+  test("受け取った中身に競合マーカーがあれば、新しくも置かない", async () => {
+    const marked = enc("<<<<<<< HEAD\nこちら\n=======\nあちら\n>>>>>>> main\n");
+    const outcome = await workFiles(work, DEVICE).writer.create("本文/第3話.txt", marked);
+    expect(outcome).toMatchObject({ ok: false, reason: "競合マーカーがあります" });
+    expect(disk.has(at("本文", "第3話.txt"))).toBe(false);
+  });
+
   test("置き場は名前が中身のハッシュ。消すのは置き場の中だけ（ハッシュの形でない名前は消さない）", async () => {
     const { writer, local } = workFiles(work, DEVICE);
     const bytes = enc("元の文");

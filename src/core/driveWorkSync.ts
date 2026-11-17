@@ -26,6 +26,8 @@ export type DriveWorkSyncResult =
   | { kind: "too_large"; paths: string[] }
   | { kind: "send_failed"; error: DriveApiError }
   | { kind: "own_manifest_unreadable"; reason: string }
+  /** 競合マーカーの入ったファイルがある。何も送っていない（受け取りもしていない） */
+  | { kind: "conflict_markers"; paths: string[] }
   | {
       kind: "done";
       /** 送った道（送らなかったときは空） */
@@ -69,6 +71,7 @@ export async function runDriveWorkSync(input: {
     });
     if (sent.kind === "failed") return { kind: "send_failed", error: sent.error };
     if (sent.kind === "own_manifest_unreadable") return { kind: "own_manifest_unreadable", reason: sent.reason };
+    if (sent.kind === "conflict_markers") return { kind: "conflict_markers", paths: sent.paths };
     record = sent.record;
     recordChanged = true;
     uploaded = sent.uploaded;
@@ -118,6 +121,13 @@ export function describeDriveWorkSync(title: string, result: DriveWorkSyncResult
       ...quiet,
       problem: true,
       text: `「${title}」は Google ドライブへ送れませんでした。${driveNextAction(result.error.kind)}`,
+    };
+  }
+  if (result.kind === "conflict_markers") {
+    return {
+      ...quiet,
+      problem: true,
+      text: `「${title}」は Google ドライブへ送っていません。競合マーカー（<<<<<<<）の残ったファイルがあります：${result.paths.join("、")}。マーカーを消して保存してから、もう一度［保存・同期］を押してください。`,
     };
   }
   if (result.kind === "own_manifest_unreadable") {

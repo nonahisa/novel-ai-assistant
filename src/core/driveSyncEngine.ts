@@ -36,7 +36,7 @@ import {
   type DriveTextMerge,
 } from "./driveTextMerge";
 import { hashBytes } from "./hash";
-import { hasConflictMarkers } from "./textDecode";
+import { decodeBytes, hasConflictMarkers } from "./textDecode";
 import {
   decideSettingsConflict,
   isSettingsJsonPath,
@@ -182,7 +182,12 @@ export type DriveSendResult =
    */
   | { kind: "failed"; error: DriveApiError; uploaded: string[] }
   /** 前に送った自分の目録が読めない。直さずに止める */
-  | { kind: "own_manifest_unreadable"; reason: string };
+  | { kind: "own_manifest_unreadable"; reason: string }
+  /**
+   * 競合マーカーの入ったファイルがある。**何も送っていない**（ドライブに触れる前に止める）。
+   * 送ると、もう1台がマーカー入りの原稿を新しい中身として受け取る（実装ルール1）
+   */
+  | { kind: "conflict_markers"; paths: string[] };
 
 /**
  * 手元の作品を、この端末のフォルダーへ送る。変わったファイルだけを書き、
@@ -203,6 +208,13 @@ export async function sendToDrive(input: {
   const uploaded: string[] = [];
   const isSendable = (entry: string) =>
     isSendableSyncPath(entry, { ownDeviceId: layout.deviceId, ignoredPaths: input.ignoredPaths });
+  // 送る前に、送るもの全部の競合マーカーを見る（1つでもあれば何も送らない）
+  const marked: string[] = [];
+  for (const entry of (await input.local.list()).filter(isSendable).sort()) {
+    const bytes = await input.local.read(entry);
+    if (bytes !== undefined && decodeBytes(bytes).hasConflictMarkers) marked.push(entry);
+  }
+  if (marked.length > 0) return { kind: "conflict_markers", paths: marked };
   try {
     const root = await client.ensureFolder(MY_DRIVE, layout.rootFolderName ?? DRIVE_ROOT_FOLDER_NAME);
     const work = await client.ensureFolder(root.id, layout.workFolderName);

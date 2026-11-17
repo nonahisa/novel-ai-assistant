@@ -75,7 +75,8 @@ describe("見張りの張り方", () => {
     expect(extension).toContain("const folderWatchHub = sharedFolderWatchHub();");
     expect(extension).toContain("context.subscriptions.push(folderWatchHub);");
     // 同期
-    expect(extension).toMatch(/GitSyncMonitor\(registry, \{\s*folderWatchHub,?\s*\}\)/);
+    // 共有の1つを渡す。ほかの指定（Google ドライブの作品の止め。設計書5.10.9）は並んでよい
+    expect(extension).toMatch(/GitSyncMonitor\(registry, \{\s*folderWatchHub,[^}]*\}\)/);
     // 本文
     expect(extension).toMatch(/new WorkFolderWatchers\([\s\S]{0,200}?\}, folderWatchHub\)/);
     // 設定資料（`new SettingsWatcher(` の呼び出しの中で渡している）

@@ -94,6 +94,17 @@ describe("git の同期から外す", () => {
     expect(cwds.some((cwd) => cwd.includes("ドライブ"))).toBe(false);
   });
 
+  test("「すべて同期」を直に押したときは、飛ばしたドライブの作品を結果の知らせに書く", async () => {
+    works = [driveWork];
+    await syncAllWorks({ registry, monitor, run, skipWork: isDrive, noteSkippedWorks: true });
+    expect(cwds).toEqual([]);
+    expect(shown.join("\n")).toContain("「ドライブの作品」は送り先が Google ドライブなので、GitHub とはそろえていません");
+    shown = [];
+    works = [driveWork, gitWork];
+    await syncAllWorks({ registry, monitor, run, skipWork: isDrive, noteSkippedWorks: true });
+    expect(shown.join("\n")).toContain("「ドライブの作品」は送り先が Google ドライブなので");
+  });
+
   test("渡さなければ今までどおり（全作品で git を起こす）", async () => {
     works = [driveWork, gitWork];
     await syncAllWorks({ registry, monitor, run });

@@ -85,6 +85,8 @@ export interface AutoResendDeps {
   afterSent?: () => Promise<void>;
   /** 断られた記録の覚え（試験で差し替える）。省けば拡張機能で1つの覚え */
   rejections?: PushRejectionMemory;
+  /** git でそろえない作品（送り先が Google ドライブの作品。設計書5.10.9）。送り直しの対象に入れない */
+  skipWork?: (work: WorkEntry) => boolean;
 }
 
 /** 1回試した結果。試験と記録のため */
@@ -205,7 +207,7 @@ export class AutoResender implements vscode.Disposable {
     // **送るものがあるかを先に見る**（控えを読むだけで git は呼ばない）。
     // 送るものが無いのに「走っているので見送った」と書くと、同期のたびに
     // ログが埋まる
-    const works = this.deps.registry.list();
+    const works = this.deps.registry.list().filter((work) => !this.deps.skipWork?.(work));
     const { targets, holds } = planResend(
       works.map((work) => ({ work, status: this.deps.monitor.statusFor(work.id) }))
     );

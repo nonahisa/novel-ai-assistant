@@ -631,3 +631,20 @@ describe("見送るときは黙らない（2026-10-11 の再現）", () => {
     expect(result?.sent).toEqual([{ label: "書庫 の いじめられっ子・ハイエルフ未亡人", ahead: 1 }]);
   });
 });
+
+describe("送り先が Google ドライブの作品（設計書5.10.9）", () => {
+  test("git でそろえない作品だけの置き場は、回線が戻っても送り直さない", async () => {
+    repo.online = true;
+    const resender = new AutoResender({
+      registry,
+      monitor,
+      run: fakeGit,
+      isSyncBusy: () => busy,
+      settings: () => settings,
+      now: () => clock,
+      skipWork: () => true,
+    });
+    await resender.attempt("wake");
+    expect(pushes()).toEqual([]);
+  });
+});

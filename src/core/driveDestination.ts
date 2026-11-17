@@ -61,6 +61,23 @@ export async function writeDestination(
 }
 
 /**
+ * 送り先が Google ドライブの作品で、git の操作（記録・取り込み・送信）を断るときの文
+ * （1つの作品で GitHub と併用しない。設計書5.10.1・5.10.9）
+ */
+export function driveWorkGitRefusal(title: string): string {
+  return `「${title}」は送り先が Google ドライブなので、GitHub とはそろえません。GitHub でそろえるときは「送り先の切り替え」で戻してください。`;
+}
+
+/** 受け取りを飛ばした理由（ログと受け取りの報告に） */
+export const DRIVE_WORK_GIT_SKIP = "送り先が Google ドライブの作品";
+
+/** 「すべて同期」で飛ばした作品の一言（結果の知らせの末尾に添える） */
+export function describeSkippedDriveWorks(titles: readonly string[]): string {
+  if (titles.length === 0) return "";
+  return `\n\n${titles.map((title) => `「${title}」`).join("")}は送り先が Google ドライブなので、GitHub とはそろえていません（［保存・同期］でドライブとそろえます）。`;
+}
+
+/**
  * まだドライブへ送っていない道（設計書5.10.5「未送信」）。
  *
  * 手元の今の中身のハッシュが、控えの系譜の頭と違う道。控えに頭があるのに手元に

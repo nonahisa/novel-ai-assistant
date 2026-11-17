@@ -1060,8 +1060,11 @@ describe("場所が違えば合わせ、同じ場所だけ選ばせる（設計�
     const drive = createFakeDrive();
     const [a, b] = devicesOn(drive, 2, { [EP1]: story() });
     await syncAll([a, b]);
-    a.work.write(EP1, story({ 2: "二を A。" }));
-    b.work.write(EP1, story({ 5: "<<<<<<< HEAD\n五を B。\n=======\n五。\n>>>>>>> other" }));
+    // 送る側はマーカー入りのファイルを送らない（段階3）。受け取る側の守りは、手元の中身に
+    // マーカーが残っている形で見る
+    a.work.write(EP1, story({ 2: "<<<<<<< HEAD\n二を A。\n=======\n二。\n>>>>>>> other" }));
+    expect((await a.send()).kind).toBe("conflict_markers");
+    b.work.write(EP1, story({ 5: "五を B。" }));
     await b.send();
     const atA = received(await a.receive());
     countPlaces("候補に競合マーカー", atA, 1);

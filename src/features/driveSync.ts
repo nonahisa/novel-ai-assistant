@@ -12,7 +12,7 @@ import {
 import { atomicWriteFile } from "../core/atomicWrite";
 import { isNotFound } from "../core/fileRead";
 import { hashBytes } from "../core/hash";
-import { hasUnsavedChanges, replaceFileWithReceivedBytes } from "../core/textFile";
+import { decodeBytes, hasUnsavedChanges, replaceFileWithReceivedBytes } from "../core/textFile";
 import { logFailure, logLine, useLogFile } from "../core/logger";
 import type { GitSyncStatus } from "../core/git";
 import {
@@ -629,6 +629,8 @@ export function workFiles(work: WorkEntry, deviceId: string): {
     create: async (entry, bytes) => {
       const location = abs(entry);
       if (hasUnsavedChanges(location)) return { ok: false, reason: "保存していない文書が開いています" };
+      // 既にあるファイルの置き換え（`replaceFileWithReceivedBytes`）と同じく、マーカー入りの中身は置かない
+      if (decodeBytes(bytes).hasConflictMarkers) return { ok: false, reason: "競合マーカーがあります" };
       return create(location, bytes);
     },
     writeBase: async (hash, bytes) => {

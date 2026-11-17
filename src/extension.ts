@@ -246,7 +246,7 @@ import {
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
-import { destinationOf, readDestinations } from "./core/driveDestination";
+import { destinationOf, driveWorkGitRefusal, readDestinations } from "./core/driveDestination";
 import { legacyVoiceEngine, type VoiceEngineId } from "./core/voiceEngine";
 import {
   readAloudEngineChoiceOf,
@@ -1659,9 +1659,20 @@ export async function activate(
   // 本数が元に戻る）
   const folderWatchHub = sharedFolderWatchHub();
   context.subscriptions.push(folderWatchHub);
+  /** 送り先が Google ドライブの作品か（git でそろえない。設計書5.10.9） */
+  const isDriveDestinationWork = (work: WorkEntry): boolean =>
+    destinationOf(verifiedState(context.globalState), work.id) === "googleDrive";
+  /** Google ドライブの作品なら、git の操作を断る理由を出して true */
+  const refuseGitForDriveWork = (work: WorkEntry): boolean => {
+    if (!isDriveDestinationWork(work)) return false;
+    void vscode.window.showInformationMessage(driveWorkGitRefusal(work.title));
+    return true;
+  };
   const gitSync: GitSyncMonitorLike = canRunProcesses()
     ? new (await import("./features/gitSync.js")).GitSyncMonitor(registry, {
         folderWatchHub,
+        // Google ドライブの作品は、見張りも取り込み・受け取り・送信をしない（設計書5.10.9）
+        isGitDisabled: isDriveDestinationWork,
       })
     : new NullGitSyncMonitor();
   context.subscriptions.push(gitSync);
@@ -2965,7 +2976,7 @@ export async function activate(
     // 記録の前に、作品の中の未保存を保存する（設計書5.5.19）
     presave: createSyncPresave(),
     // 送り先が Google ドライブの作品は git でそろえない（設計書5.10.9。1つの作品で併用しない）
-    skipWork: (work: WorkEntry) => destinationOf(verifiedState(context.globalState), work.id) === "googleDrive",
+    skipWork: isDriveDestinationWork,
   });
 
   /*
@@ -3092,6 +3103,9 @@ export async function activate(
       await syncAllWorks({
         registry,
         monitor: gitSync,
+        // Google ドライブの作品は git でそろえず、飛ばしたことを結果の知らせに書く（設計書5.10.9）
+        skipWork: isDriveDestinationWork,
+        noteSkippedWorks: true,
         pauseSettingsWatch: () => settingsWatcher.pause(),
         batchFileNotices: batch,
         // 記録の前に、作品の中の未保存を保存する（作者の裁定、2026-10-04。設計書5.5.19）
@@ -5945,6 +5959,7 @@ export async function activate(
             : undefined,
         });
         if (!work) return;
+        if (refuseGitForDriveWork(work)) return;
         if (!canRunProcesses()) {
           // 行き止まりにせず、VS Code のソース管理へ案内する（設計書5.8.9）
           const { showWebSyncGuide } = await import("./features/webSync.js");
@@ -6032,6 +6047,7 @@ export async function activate(
             : undefined,
         });
         if (!work) return;
+        if (refuseGitForDriveWork(work)) return;
         if (!canRunProcesses()) {
           vscode.window.showWarningMessage(
             "GitHub同期はブラウザ版では使えません。"
@@ -6071,6 +6087,7 @@ export async function activate(
             : undefined,
         });
         if (!work) return;
+        if (refuseGitForDriveWork(work)) return;
         if (!canRunProcesses()) {
           vscode.window.showWarningMessage(
             "GitHub同期はブラウザ版では使えません。"
@@ -9842,6 +9859,8 @@ export async function activate(
       const resender = new AutoResender({
         registry,
         monitor: gitSync,
+        // Google ドライブの作品は git で送り直さない（設計書5.10.9）
+        skipWork: isDriveDestinationWork,
         // 理由を返すと、見送ったときにその理由がログに1行残る（2026-10-11。
         // 旗が立ちっぱなしで黙って見送り続けた不具合の、次の手がかりにする）
         isSyncBusy: () =>
