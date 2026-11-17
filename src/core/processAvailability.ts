@@ -223,6 +223,12 @@ const WEB_BLOCKED_PALETTE_ONLY: readonly string[] = [
     ブラウザ版では［ファイルから取り込む］だけを出す
   */
   "novelai.fetchOwnWorkBackup",
+  /*
+    「ほかの機械の作品」（設計書5.5.11.1）。行はブラウザ版では出さない（origin を読む
+    git が無い）。取り寄せは git clone で、外すのも同じ一覧の操作なので、揃えて隠す
+  */
+  "novelai.cloneSyncedWork",
+  "novelai.forgetSyncedWork",
 ];
 
 /**

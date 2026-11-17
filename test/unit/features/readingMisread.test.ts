@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
-import { startFakeVoiceEngine, type FakeEngine } from "../support/fakeVoiceEngine";
+import { FAKE_VOICEVOX_SPEAKERS, startFakeVoiceEngine, type FakeEngine } from "../support/fakeVoiceEngine";
 
 /**
  * 読み間違いの見込みを調べて行を置く道と、［読みの辞書へ足す］（設計書6.42.5）。
@@ -23,10 +23,12 @@ vi.mock("../../../src/core/characterStore", () => ({
     }
   },
 }));
+/** 声の割り当て（試しごとに語り手の声を替える） */
+const voices = vi.hoisted(() => ({ assignment: { version: 1, characters: {} } as Record<string, unknown> }));
 vi.mock("../../../src/core/voiceCastStore", () => ({
   loadVoiceCast: async () => ({ file: { version: 1, episode: "01.md", entries: [] }, hash: undefined }),
   saveVoiceCast: async () => "h",
-  loadVoiceAssignment: async () => ({ file: { version: 1, characters: {} }, hash: undefined }),
+  loadVoiceAssignment: async () => ({ file: voices.assignment, hash: undefined }),
   saveVoiceAssignment: async () => "h",
 }));
 
@@ -70,6 +72,7 @@ function audioQueries(): number {
 }
 
 beforeEach(() => {
+  voices.assignment = { version: 1, characters: {} };
   disk.clear();
   workspace.fs = memoryFs(disk);
   forgetMisreadAnswers();
@@ -127,6 +130,33 @@ describe("読み間違いを調べる", () => {
     expect(outcome.kind).toBe("stopped");
     expect(outcome.kind === "stopped" && outcome.engineDown).toBe(true);
     expect(await new FindingStore(work).load()).toEqual([]);
+  });
+
+  it("語り手の声が［声］と別のエンジンなら、その文はそのエンジンへ問う（止めない）", async () => {
+    // ［声］は AivisSpeech だが、語り手は VOICEVOX の声。読むのは VOICEVOX なので、VOICEVOX の読みで比べる
+    const aivis = await startFakeVoiceEngine({ readings: { 灯里: "アカリ", 走: "ハシ" } });
+    const voicevox = await startFakeVoiceEngine({ readings: { 灯里: "ヒ", 走: "ハシ" }, speakers: FAKE_VOICEVOX_SPEAKERS });
+    try {
+      voices.assignment = {
+        version: 1,
+        characters: {},
+        narrator: { speakerUuid: "uuid-zunda", speakerName: "ずんだもん", styleName: "ノーマル", styleId: 3, engine: "voicevox" },
+      };
+      const service = new VoiceReadingService(
+        (which) => (which === "voicevox" ? voicevox.url : aivis.url),
+        undefined,
+        async () => true
+      );
+      const outcome = await checkReadingMisreads(target, service, { episodes, askRemote: true });
+      expect(outcome).toEqual({ kind: "checked", found: 1, shown: 1 });
+      const asked = (fake: FakeEngine) => fake.requests.filter((r) => r.path === "/audio_query");
+      expect(asked(voicevox).length).toBeGreaterThan(0);
+      expect(asked(aivis)).toEqual([]);
+      expect(asked(voicevox).every((r) => r.query.speaker === "3")).toBe(true);
+    } finally {
+      await aivis.close();
+      await voicevox.close();
+    }
   });
 
   it("書き出しの手前（確認の窓を出せない）では、許可していない外のホストへは問わない", async () => {

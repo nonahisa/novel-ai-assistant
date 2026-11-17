@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -402,6 +402,18 @@
       {
         "command": "novelai.hideOwnWork",
         "title": "この作品を一覧に出さない",
+        "category": "統合小説執筆環境"
+      },
+      {
+        "command": "novelai.cloneSyncedWork",
+        "title": "取り寄せる",
+        "icon": "$(cloud-download)",
+        "category": "統合小説執筆環境"
+      },
+      {
+        "command": "novelai.forgetSyncedWork",
+        "title": "一覧から外す",
+        "icon": "$(close)",
         "category": "統合小説執筆環境"
       },
       {
@@ -1774,6 +1786,26 @@
           "group": "1_ownWork@1"
         },
         {
+          "command": "novelai.cloneSyncedWork",
+          "when": "view == novelai.works && viewItem =~ /^otherMachineWork$/ && !novelai.processesBlocked",
+          "group": "inline@1"
+        },
+        {
+          "command": "novelai.forgetSyncedWork",
+          "when": "view == novelai.works && viewItem =~ /^otherMachineWork$/ && !novelai.processesBlocked",
+          "group": "inline@2"
+        },
+        {
+          "command": "novelai.cloneSyncedWork",
+          "when": "view == novelai.works && viewItem =~ /^otherMachineWork$/ && !novelai.processesBlocked",
+          "group": "1_otherMachineWork@1"
+        },
+        {
+          "command": "novelai.forgetSyncedWork",
+          "when": "view == novelai.works && viewItem =~ /^otherMachineWork$/ && !novelai.processesBlocked",
+          "group": "9_otherMachineWork@1"
+        },
+        {
           "command": "novelai.checkTyposForFile",
           "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "1_actions@1"
@@ -2011,6 +2043,14 @@
         },
         {
           "command": "novelai.restoreHiddenOwnWorks",
+          "when": "false"
+        },
+        {
+          "command": "novelai.cloneSyncedWork",
+          "when": "false"
+        },
+        {
+          "command": "novelai.forgetSyncedWork",
           "when": "false"
         },
         {

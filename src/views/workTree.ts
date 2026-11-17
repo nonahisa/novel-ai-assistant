@@ -75,6 +75,7 @@ import {
 } from "../core/unregisteredOwnWorks";
 import { processCommandsUsableHere } from "../core/processAvailability";
 import { keysForHost } from "../core/keyLabels";
+import type { SyncedWork } from "../core/syncedWorkList";
 
 /**
  * 作品一覧の走査を同時に走らせる数（設計書6.1.2）。
@@ -122,7 +123,35 @@ export type TreeNode =
   | MessageNode
   | OwnWorksHeaderNode
   | OwnWorkFrameNode
-  | GuideActionNode;
+  | GuideActionNode
+  | OtherMachineWorksHeaderNode
+  | OtherMachineWorkNode;
+
+/**
+ * 「ほかの機械の作品」を出すための口（設計書5.5.11.1）。
+ *
+ * 一覧（設定の同期で届いたもの）を持ち、この機械に無いものを選ぶのは
+ * `features/syncedWorkList.ts`。`views` から `features` を読み込まないよう、口で受け取る。
+ * ブラウザ版と編集者モードでは渡されないか、空を返す。
+ */
+export interface OtherMachineWorksSource {
+  /** この機械に無い作品 */
+  list(): readonly SyncedWork[];
+  readonly onDidChange: vscode.Event<void>;
+}
+
+/** 「ほかの機械の作品」の見出し。作品の行（と未登録の自分の作品）の後ろに1つだけ置く */
+export class OtherMachineWorksHeaderNode {
+  readonly type = "otherMachineWorksHeader" as const;
+  /** 中身が増減しても見出しは同じ行のまま差し替える（`OwnWorksHeaderNode` と同じ理由） */
+  constructor(public works: OtherMachineWorkNode[]) {}
+}
+
+/** ほかの機械の作品1つ。名前だけで、中身（話）は無い */
+export class OtherMachineWorkNode {
+  readonly type = "otherMachineWork" as const;
+  constructor(public readonly work: SyncedWork) {}
+}
 
 /**
  * 「未登録の自分の作品」の枠を出すための口（作者の指示 2026-11-01。設計書6.99.8）。
@@ -646,6 +675,35 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this._onDidChangeTreeData.fire();
   }
 
+  /** 「ほかの機械の作品」の口（`setOtherMachineWorksSource` で渡される。無ければ出さない） */
+  private otherMachineWorks: OtherMachineWorksSource | undefined;
+
+  /** いま画面に出している「ほかの機械の作品」の見出し */
+  private otherHeader: OtherMachineWorksHeaderNode | undefined;
+
+  /**
+   * 「ほかの機械の作品」の口をつなぐ（設計書5.5.11.1）。変わったら見出しの行だけを
+   * 描き直し、見出しが出る・消えるときだけ一覧を丸ごと描き直す（未登録の自分の作品と同じ）
+   */
+  setOtherMachineWorksSource(source: OtherMachineWorksSource): vscode.Disposable {
+    this.otherMachineWorks = source;
+    return source.onDidChange(() => {
+      const rows = this.otherMachineRows();
+      const header = this.otherHeader;
+      if (header && rows.length > 0) {
+        header.works = rows;
+        this._onDidChangeTreeData.fire(header);
+        return;
+      }
+      if (!header && rows.length === 0) return;
+      this.redrawWholeList();
+    });
+  }
+
+  private otherMachineRows(): OtherMachineWorkNode[] {
+    return (this.otherMachineWorks?.list() ?? []).map((work) => new OtherMachineWorkNode(work));
+  }
+
   /** 「未登録の自分の作品」の覚え（`setOwnWorksSource` で渡される。無ければ出さない） */
   private ownWorks: OwnWorksSource | undefined;
 
@@ -700,9 +758,19 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       : { frames: [], hidden: 0 };
     this.ownHeader =
       frames.length > 0 || hidden > 0 ? new OwnWorksHeaderNode(frames, hidden) : undefined;
-    if (!this.ownHeader) return nodes;
+    /*
+      「ほかの機械の作品」（設計書5.5.11.1）。新しい機械で作品が0件のときがいちばんの
+      使いどころなので、そのときも登録の案内を上に置く（行があると viewsWelcome が消える）
+    */
+    const others = this.otherMachineRows();
+    this.otherHeader = others.length > 0 ? new OtherMachineWorksHeaderNode(others) : undefined;
+    const tail: TreeNode[] = [
+      ...(this.ownHeader ? [this.ownHeader] : []),
+      ...(this.otherHeader ? [this.otherHeader] : []),
+    ];
+    if (tail.length === 0) return nodes;
     const guide = works.length === 0 ? noWorksGuideNodes() : [];
-    return [...guide, ...nodes, this.ownHeader];
+    return [...guide, ...nodes, ...tail];
   }
 
   /** 登録済みのサイトと作品IDの組（［出さないにした作品を戻す］で登録済みを並べないため） */
@@ -939,6 +1007,30 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       item.contextValue = "guideAction";
       item.iconPath = new vscode.ThemeIcon(node.icon);
       item.command = { command: node.command, title: node.label };
+      return item;
+    }
+    if (node.type === "otherMachineWorksHeader") {
+      const item = new vscode.TreeItem(
+        "ほかの機械の作品",
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.id = "otherMachineWorks:header";
+      item.contextValue = "otherMachineWorksHeader";
+      item.iconPath = new vscode.ThemeIcon("remote-explorer");
+      return item;
+    }
+    if (node.type === "otherMachineWork") {
+      const item = new vscode.TreeItem(node.work.title, vscode.TreeItemCollapsibleState.None);
+      item.id = `otherMachineWork:${node.work.remoteUrl.toLowerCase()}`;
+      item.contextValue = "otherMachineWork";
+      item.iconPath = new vscode.ThemeIcon("repo");
+      // 取り寄せ先は名前だけでは分からないので、ホバーで URL を見せる
+      item.tooltip = node.work.remoteUrl;
+      /*
+        **読み上げの名前は作品名にする。** VS Code は文字列の tooltip を行の読み上げの名前
+        （aria-label）に使うので、置かないと URL が読まれる（2026-11-17、Mac の画面の自動テストで分かった）
+      */
+      item.accessibilityInformation = { label: node.work.title };
       return item;
     }
     if (node.type === "ownWorksHeader") {
@@ -1467,7 +1559,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     if (node.type === "library") return node.works;
     if (node.type === "ownWorksHeader") return node.frames;
-    if (node.type === "ownWorkFrame" || node.type === "guideAction") return [];
+    if (node.type === "otherMachineWorksHeader") return node.works;
+    if (
+      node.type === "ownWorkFrame" ||
+      node.type === "guideAction" ||
+      node.type === "otherMachineWork"
+    ) {
+      return [];
+    }
 
     if (node.type === "work") {
       // 走査に失敗していれば、開いたときに理由を出す。

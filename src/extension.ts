@@ -22,8 +22,10 @@ import {
   MemoFolderNode,
   MemoFileNode,
   OwnWorkFrameNode,
+  OtherMachineWorkNode,
   type TreeNode,
 } from "./views/workTree";
+import type { SyncedWorkList } from "./features/syncedWorkList";
 import { requireTreeNode } from "./views/treeCommandNode";
 import { describeTreeMenuCall, treeMenuCommandsFrom } from "./core/treeMenuLog";
 import { formatCount } from "./core/charCount";
@@ -3164,6 +3166,34 @@ export async function activate(
   });
   context.subscriptions.push(ownWorks, treeProvider.setOwnWorksSource(ownWorks));
 
+  /*
+    「ほかの機械の作品」（設計書5.5.11.1）。作品の名前と GitHub の URL だけを
+    設定の同期で運び、この機械に無い作品を一覧の最後に並べる。
+    **ブラウザ版では読みも書きもせず、同期の鍵も渡さない**（origin を読む git が無く、
+    フォルダーの場所もこの機械の外にあるため。実装ルール7）。編集者モードでは
+    読み書きも並べもしない（編集者の機械の作品を作者の一覧へ混ぜない）
+  */
+  let syncedWorks: SyncedWorkList | undefined;
+  if (canRunProcesses()) {
+    const { SyncedWorkList: SyncedWorkListClass, activateSyncedWorkList } = await import(
+      "./features/syncedWorkList.js"
+    );
+    syncedWorks = new SyncedWorkListClass({
+      state: verifiedState(context.globalState),
+      works: () => registry.list(),
+      enabled: () => !isEditorMode(),
+    });
+    context.subscriptions.push(
+      syncedWorks,
+      treeProvider.setOtherMachineWorksSource(syncedWorks),
+      activateSyncedWorkList(
+        (keys) => context.globalState.setKeysForSync(keys),
+        syncedWorks,
+        registry.onDidChange
+      )
+    );
+  }
+
   const treeView = vscode.window.createTreeView("novelai.works", {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
@@ -4926,6 +4956,38 @@ export async function activate(
     「未登録の自分の作品」の枠の右クリック（作者の指示 2026-11-01。設計書6.99.8）。
     枠から呼ばれたときだけ動く（コマンドパレットには出していない）
   */
+  /*
+    「ほかの機械の作品」の行の右クリックとインラインのボタン（設計書5.5.11.1）。
+    行から呼ばれたときだけ動く（コマンドパレットには出していない）
+  */
+  const otherMachineWorkOf = (node: unknown): OtherMachineWorkNode | undefined => {
+    if (!canRunProcesses()) {
+      void vscode.window.showWarningMessage(describeProcessesBlocked("novelai.cloneSyncedWork"));
+      return undefined;
+    }
+    if (node instanceof OtherMachineWorkNode) return node;
+    void vscode.window.showInformationMessage(
+      keysForHost("作品一覧の「ほかの機械の作品」の行を右クリックしてお使いください。")
+    );
+    return undefined;
+  };
+  context.subscriptions.push(
+    registerCommand("novelai.cloneSyncedWork", async (node?: unknown) => {
+      const row = otherMachineWorkOf(node);
+      if (!row) return;
+      const { addWorkFromGithub } = await import("./features/addWorkFromGithub.js");
+      const entries = await addWorkFromGithub(registry, { url: row.work.remoteUrl });
+      if (entries.length === 0) return;
+      // 登録で一覧の読み直しが走り、取り寄せた作品の行は「ほかの機械の作品」から消える
+      treeProvider.refreshRoot();
+      highlighter.invalidate();
+    }),
+    registerCommand("novelai.forgetSyncedWork", async (node?: unknown) => {
+      const row = otherMachineWorkOf(node);
+      if (row) await syncedWorks?.forget(row.work);
+    })
+  );
+
   const frameOf = (node: unknown): OwnWorkFrameNode | undefined => {
     if (node instanceof OwnWorkFrameNode) return node;
     void vscode.window.showInformationMessage(

@@ -93,8 +93,9 @@ describe("globalState・workspaceState への素の書き込みが無い", () =>
       for (const match of code.matchAll(pattern)) {
         if (match[1]) continue; // verifiedState( で包んでいる
         const after = code.slice((match.index ?? 0) + match[0].length);
-        // 読むだけ（get・keys）は守らなくてよい
-        if (/^\s*\.\s*(get|keys)\s*[<(]/.test(after)) continue;
+        // 読むだけ（get・keys）は守らなくてよい。setKeysForSync も値を書かない
+        // （同期の対象の鍵を VS Code へ知らせるだけ。設計書5.5.11.1）
+        if (/^\s*\.\s*(get|keys|setKeysForSync)\s*[<(]/.test(after)) continue;
         // 名前としての出現（オブジェクトの鍵・型の欄）は値ではない
         if (/^\s*\??\s*:/.test(after)) continue;
         found[rel] = (found[rel] ?? 0) + 1;
