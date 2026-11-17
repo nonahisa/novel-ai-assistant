@@ -17,8 +17,13 @@ import { compareFrequent, type FrequentWord } from "./imeFrequent";
 export const IME_NOTICE_VERSION = 1;
 /** 書き手の名前（計画書 3.2） */
 export const IME_NOTICE_SENDER = "novel-ai-assistant";
-/** 置き場のフォルダーの名前（IME の `stateDir`） */
-export const IME_STATE_DIR_NAME = "novel-ime";
+/** 置き場のフォルダーの名前（六徳 IME の `stateDir`。改名後の名前） */
+export const IME_STATE_DIR_NAME = "rittoku-ime";
+/**
+ * 改名前の置き場の名前。移る間は古い版の IME もここを読むので、あるときは両方へ書く
+ * （やめる日は後で決める。設計書6.13.7）
+ */
+export const IME_OLD_STATE_DIR_NAME = "novel-ime";
 /** いまの作品（計画書 3.2） */
 export const IME_CURRENT_WORK_FILE = "integration-current-work.json";
 /** 作品の一覧（計画書 3.3） */
@@ -203,28 +208,45 @@ export function createdAtOf(rawConfig: unknown): string | undefined {
 }
 
 /**
- * IME の置き場（`stateDir`）。統合が自分で組み立てる（核を呼ばない。計画書 3.1）。
+ * 置き場（`stateDir`）の場所を、フォルダーの名前を替えて組み立てる。
  *
- * - Windows：`%LOCALAPPDATA%\novel-ime`
- * - Mac：`~/Library/Application Support/novel-ime`
+ * - Windows：`%LOCALAPPDATA%\<名前>`
+ * - Mac：`~/Library/Application Support/<名前>`
  * - それ以外（Linux・ブラウザ版）・材料が無いとき：undefined（書かない）
  */
+function stateDirNamed(
+  input: { platform: string | undefined; localAppData?: string; home?: string },
+  name: string
+): string | undefined {
+  if (input.platform === "win32") {
+    const base = input.localAppData?.trim();
+    if (!base) return undefined;
+    return `${base.replace(/[\\/]+$/, "")}\\${name}`;
+  }
+  if (input.platform === "darwin") {
+    const home = input.home?.trim();
+    if (!home) return undefined;
+    return `${home.replace(/\/+$/, "")}/Library/Application Support/${name}`;
+  }
+  return undefined;
+}
+
+/** 六徳 IME の置き場（`stateDir`）。統合が自分で組み立てる（核を呼ばない。計画書 3.1） */
 export function imeStateDir(input: {
   platform: string | undefined;
   localAppData?: string;
   home?: string;
 }): string | undefined {
-  if (input.platform === "win32") {
-    const base = input.localAppData?.trim();
-    if (!base) return undefined;
-    return `${base.replace(/[\\/]+$/, "")}\\${IME_STATE_DIR_NAME}`;
-  }
-  if (input.platform === "darwin") {
-    const home = input.home?.trim();
-    if (!home) return undefined;
-    return `${home.replace(/\/+$/, "")}/Library/Application Support/${IME_STATE_DIR_NAME}`;
-  }
-  return undefined;
+  return stateDirNamed(input, IME_STATE_DIR_NAME);
+}
+
+/** 改名前の置き場（`novel-ime`）。移る間だけ使う */
+export function imeOldStateDir(input: {
+  platform: string | undefined;
+  localAppData?: string;
+  home?: string;
+}): string | undefined {
+  return stateDirNamed(input, IME_OLD_STATE_DIR_NAME);
 }
 
 /** 書いてよいかを決める材料（計画書 3.1 の4つ） */

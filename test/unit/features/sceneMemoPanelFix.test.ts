@@ -75,14 +75,14 @@ vi.mock("vscode", () => {
   };
 });
 
-const FILE_PATH = "C:/小説/いじめられっ子/本文/003.txt";
+const FILE_PATH = absPath("小説", "いじめられっ子", "本文", "003.txt");
 const TEXT = "　彼は走つた。\n　夜が明けた。\n";
 
 vi.mock("../../../src/core/scanner", () => ({
   scanWork: vi.fn(async () => ({
     episodes: [
       {
-        filePath: "C:/小説/いじめられっ子/本文/003.txt",
+        filePath: absPath("小説", "いじめられっ子", "本文", "003.txt"),
         fileName: "003.txt",
         hasConflictMarkers: false,
       },
@@ -131,6 +131,7 @@ import { revealTextLocation } from "../../../src/features/revealLocation";
 import { FindingStore } from "../../../src/features/findingStore";
 import { findingId, type Finding } from "../../../src/models/finding";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 const FILE = "本文/003.txt";
 
@@ -186,7 +187,7 @@ function newWork(): WorkEntry {
   return {
     id: `w${workCount}`,
     title: "いじめられっ子",
-    folderPath: "C:/小説/いじめられっ子",
+    folderPath: absPath("小説", "いじめられっ子"),
     registeredAt: "2026-10-03T00:00:00.000Z",
   };
 }
@@ -225,7 +226,7 @@ function newWorkForStore(): WorkEntry {
   return {
     id: "store",
     title: "いじめられっ子",
-    folderPath: "C:/小説/いじめられっ子",
+    folderPath: absPath("小説", "いじめられっ子"),
     registeredAt: "2026-10-03T00:00:00.000Z",
   };
 }

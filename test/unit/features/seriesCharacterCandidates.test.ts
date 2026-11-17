@@ -15,6 +15,7 @@ import {
   window,
   workspace,
 } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 設定資料の抽出で出た新しい人物に、シリーズの同名を候補として並べる。
@@ -23,7 +24,7 @@ import {
  * 既定は「別人として扱う」で、作者が選ばなければ1バイトも変わらない。
  */
 
-const LIBRARY = "C:\\小説";
+const LIBRARY = absPath("小説");
 const SELF = nodePath.join(LIBRARY, "別視点");
 const NEIGHBOR = nodePath.join(LIBRARY, "教科書チート");
 

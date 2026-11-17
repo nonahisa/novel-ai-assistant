@@ -5,6 +5,7 @@ import type { WorkEntry } from "../../../src/models/types";
 import type { ChapterSynopsis } from "../../../src/models/synopsis";
 import { commands, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * あらすじの文書に章の見出しが挟まること（設計書6.66.4の3）。
@@ -17,7 +18,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_synopsis_chapters",
   title: "氷の街",
-  folderPath: "C:\\novels\\work",
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

@@ -7,6 +7,7 @@ import type { WorkChatTurn } from "../../../src/prompts/workChat";
 import { AIError, type GenerateParams } from "../../../src/ai/types";
 import { cancelRunningTask } from "../../../src/views/progress";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 「相談を資料へ反映」を、AIを待っている最中に中止ボタンで止める
@@ -68,7 +69,7 @@ const { applyChatToSettings } = await import(
 const work: WorkEntry = {
   id: "work_cancel",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "cancel"),
+  folderPath: absPath("novels", "cancel"),
   registeredAt: "2026-10-11T00:00:00.000Z",
 };
 

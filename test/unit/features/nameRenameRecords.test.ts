@@ -23,6 +23,7 @@ import { emptyOrganization } from "../../../src/models/organization";
 import { emptyWorldItem } from "../../../src/models/world";
 import { emptyForeshadow } from "../../../src/models/foreshadow";
 import { emptySynopsisSet } from "../../../src/models/synopsis";
+import { absPath } from "../support/osPath";
 
 /**
  * 「名前の付け替えを資料にも反映」が、人物以外の資料まで届くか
@@ -40,7 +41,7 @@ import { emptySynopsisSet } from "../../../src/models/synopsis";
 const work: WorkEntry = {
   id: "work_rename_records",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "rename-records"),
+  folderPath: absPath("novels", "rename-records"),
   registeredAt: "2026-10-11T00:00:00.000Z",
 };
 

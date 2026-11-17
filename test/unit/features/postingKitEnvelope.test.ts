@@ -6,6 +6,7 @@ import type { AIRegistry } from "../../../src/ai/registry";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 「貼り込み係へ渡す形でコピー」（設計書6.79.3）の配線。
@@ -21,7 +22,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_envelope",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "envelope"),
+  folderPath: absPath("novels", "envelope"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

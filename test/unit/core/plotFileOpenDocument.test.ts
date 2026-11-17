@@ -5,6 +5,7 @@ import { installFakeDisk, openFakeDocument, type FakeDisk } from "../support/ope
 import { writePlotSections } from "../../../src/core/plotFile";
 import { consumeOwnPlotSave } from "../../../src/core/ownPlotSave";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * プロットの節を書く口（`writePlotSections`。生成・形式とジャンル・作品の作成・ZIPの取り込み・
@@ -18,7 +19,7 @@ import type { WorkEntry } from "../../../src/models/types";
 const work: WorkEntry = {
   id: "work_plot_open",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work_plot_open"),
+  folderPath: absPath("novels", "work_plot_open"),
   registeredAt: "2026-10-16T00:00:00.000Z",
 };
 const plotFile = nodePath.join(work.folderPath, "設定", "plot.md");

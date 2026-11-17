@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * ブラウザ版の相談パネルが、ブラウザで開いた本文を相談の相手にする
@@ -53,7 +54,7 @@ const BROWSER_WORK: WorkEntry = {
 const DESKTOP_WORK: WorkEntry = {
   id: "w_desktop",
   title: "春の庭",
-  folderPath: "C:\\novels\\春の庭",
+  folderPath: absPath("novels", "春の庭"),
   registeredAt: "2026-09-24T00:00:00.000Z",
 };
 
@@ -97,7 +98,7 @@ describe("相談パネルが受け取る文書（ブラウザ版）", () => {
   test("手元の本文（file）は、今までどおりその作品が対象になる", () => {
     const panel = makePanel();
     panel.trackEditor(
-      editorAt(vscode.Uri.file("C:\\novels\\春の庭\\第1話.txt"))
+      editorAt(vscode.Uri.file(absPath("novels", "春の庭", "第1話.txt")))
     );
     expect(panel.currentWorkId()).toBe(DESKTOP_WORK.id);
   });

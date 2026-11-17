@@ -10,6 +10,7 @@ import {
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 投稿状態の台帳の読み書き（設計書6.68.2）。
@@ -22,7 +23,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

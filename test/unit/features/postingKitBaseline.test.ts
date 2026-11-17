@@ -25,8 +25,8 @@ import { Uri, window, workspace } from "../support/vscodeStub";
  */
 
 const episodes = [
-  { fileName: "第1話.txt", filePath: path.join("C:", "novels", "base", "本文", "第1話.txt") },
-  { fileName: "第2話.txt", filePath: path.join("C:", "novels", "base", "本文", "第2話.txt") },
+  { fileName: "第1話.txt", filePath: absPath("novels", "base", "本文", "第1話.txt") },
+  { fileName: "第2話.txt", filePath: absPath("novels", "base", "本文", "第2話.txt") },
 ];
 
 const scanWork = vi.fn();
@@ -39,11 +39,12 @@ vi.mock("../../../src/core/workFormatStore", () => ({
 
 import { configurePostingSites } from "../../../src/features/postingKit";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_baseline",
   title: "灯台の下",
-  folderPath: path.join("C:", "novels", "base"),
+  folderPath: absPath("novels", "base"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

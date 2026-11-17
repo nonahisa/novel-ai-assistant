@@ -5,6 +5,7 @@ import { describeSettingsLoadErrors } from "../../../src/features/settingsPanel"
 import { buildSettingsPanelHtml } from "../../../src/views/settingsPanelHtml";
 import type { WorkEntry } from "../../../src/models/types";
 import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 「形の違う人物ファイルは黙って消えるのか」（49 の問い、2026-09-11）。
@@ -24,7 +25,7 @@ import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub
 const work: WorkEntry = {
   id: "work_test",
   title: "作品",
-  folderPath: ["C:", "novels", "work"].join(path.sep),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-08-06T00:00:00.000Z",
 };
 

@@ -258,6 +258,11 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   // ── 同期・GitHub
   "novelai.gitSync": { class: "C4", label: "GitHubと同期", reason: "送信" },
   "novelai.saveAndSync": { class: "C4", label: "保存・同期", reason: "送信" },
+  // Google ドライブで2台をそろえる（設計書5.10.9）。送り先・ログインは作者がその機械で決めるもの
+  "novelai.switchSyncDestination": { class: "C4", label: "送り先の切り替え", reason: "送信" },
+  "novelai.importWorkFromDrive": { class: "C4", label: "ドライブから追加", reason: "送信" },
+  "novelai.googleDriveSetup": { class: "C4", label: "Google ドライブの接続を設定", reason: "設定" },
+  "novelai.googleDriveLogout": { class: "C4", label: "Google ドライブからログアウト", reason: "設定" },
   "novelai.gitPull": { class: "C4", label: "別の環境の変更を取り込む", reason: "原稿" },
   "novelai.gitPush": { class: "C4", label: "この環境の変更を送信する", reason: "送信" },
   "novelai.syncAllWorks": { class: "C4", label: "全作品同期", reason: "送信" },

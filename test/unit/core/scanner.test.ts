@@ -6,11 +6,12 @@ import {
   vscodeFileReaderForTests,
 } from "../../../src/core/fileRead";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_test",
   title: "作品",
-  folderPath: "C:\\novels\\work",
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-08-06T00:00:00.000Z",
 };
 
@@ -447,7 +448,7 @@ describe("走査の計測をまとめる", () => {
  */
 describe("下ごしらえも読み口で読む", () => {
   /** 既定の本文フォルダー（作品設定が無いときの `workPaths().manuscript`） */
-  const MANUSCRIPT_DIR = `${work.folderPath}\\本文`;
+  const MANUSCRIPT_DIR = absPath("novels", "work", "本文");
 
   beforeEach(() => {
     workspace.getConfiguration = () => ({
@@ -533,7 +534,8 @@ describe("下ごしらえも読み口で読む", () => {
  * 既存の作品の話数が変わらないことを、作者の作品の形を写した作り物で押さえる。
  */
 describe("作品の根を歩くとき", () => {
-  const ROOT = "c:/novels/work";
+  // 作品の根を、比べる形（斜線・ドライブ文字は小文字）で持つ。Mac では `/novels/work`
+  const ROOT = work.folderPath.replace(/\\/g, "/").replace(/^[A-Z]:/, (d) => d.toLowerCase());
 
   beforeEach(() => {
     workspace.getConfiguration = () => ({
@@ -876,14 +878,14 @@ describe("数えなかったファイルの知らせ", () => {
 
     expect(
       describeSkippedFiles({
-        nonEpisodeFiles: ["C:\\novels\\work\\README.md"],
+        nonEpisodeFiles: [absPath("novels", "work", "README.md")],
         workInfoFiles: [],
       })
     ).toBe("本文として数えなかったファイル：1件（README.md）");
     expect(
       describeSkippedFiles({
-        nonEpisodeFiles: ["C:\\novels\\work\\README.md"],
-        workInfoFiles: ["C:\\novels\\work\\about.txt"],
+        nonEpisodeFiles: [absPath("novels", "work", "README.md")],
+        workInfoFiles: [absPath("novels", "work", "about.txt")],
       })
     ).toBe("本文として数えなかったファイル：2件（README.md ほか）");
   });

@@ -10,11 +10,12 @@ import {
   TypoDismissedHistory,
 } from "../../../src/core/typoIssueHistory";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "w1",
   title: "テスト作品",
-  folderPath: "C:\\novels\\テスト作品",
+  folderPath: absPath("novels", "テスト作品"),
   registeredAt: new Date(0).toISOString(),
 };
 
@@ -35,7 +36,7 @@ describe("無視した指摘のキー", () => {
 
   test("絶対パスでも相対パスでも同じキーになる", () => {
     // 呼ぶ場所によってどちらも来る。ファイル名だけで揃える
-    expect(dismissKey("C:\\novels\\作品\\本文\\001.txt", issue)).toBe(
+    expect(dismissKey(absPath("novels", "作品", "本文", "001.txt"), issue)).toBe(
       dismissKey("本文/001.txt", issue)
     );
   });
@@ -205,7 +206,7 @@ describe("却下履歴とAI操作ログ", () => {
     });
 
     const logPath = Uri.file(
-      "C:\\novels\\テスト作品\\.aiwriter\\logs\\ai_actions.log"
+      absPath("novels", "テスト作品", ".aiwriter", "logs", "ai_actions.log")
     ).fsPath;
     const bytes = files.get(logPath);
     expect(bytes).toBeDefined();
@@ -234,13 +235,13 @@ describe("却下履歴とAI操作ログ", () => {
       category: "typo",
       action: "applied",
       file: "第1話.txt",
-      filePath: "C:\\novels\\テスト作品\\第1部\\第1話.txt",
+      filePath: absPath("novels", "テスト作品", "第1部", "第1話.txt"),
       line: 3,
       target: "意外",
       suggestion: "以外",
     });
     const logPath = Uri.file(
-      "C:\\novels\\テスト作品\\.aiwriter\\logs\\ai_actions.log"
+      absPath("novels", "テスト作品", ".aiwriter", "logs", "ai_actions.log")
     ).fsPath;
     const line = JSON.parse(new TextDecoder().decode(files.get(logPath)).trim());
     expect(line).toMatchObject({ file: "第1話.txt", path: "第1部/第1話.txt" });
@@ -340,7 +341,7 @@ describe("却下履歴とAI操作ログ", () => {
         suggestion: "意外",
       });
       const logPath = Uri.file(
-        "C:\\novels\\テスト作品\\.aiwriter\\logs\\ai_actions.log"
+        absPath("novels", "テスト作品", ".aiwriter", "logs", "ai_actions.log")
       ).fsPath;
       const existing = files.get(logPath)!;
       const broken = new Uint8Array([

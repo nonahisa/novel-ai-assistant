@@ -4,6 +4,7 @@ import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 import { installFakeDisk, openFakeDocument, type FakeDisk } from "../support/openDocumentFake";
 import { applyChatEdit } from "../../../src/features/applyChatEdit";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * 相談パネルからの書き込みは `applyChatEdit` を通る（設計書6.4.7）。
@@ -20,7 +21,7 @@ import type { WorkEntry } from "../../../src/models/types";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work_chat_edit"),
+  folderPath: absPath("novels", "work_chat_edit"),
   registeredAt: "2026-09-22T00:00:00.000Z",
 };
 

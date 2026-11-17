@@ -10,6 +10,7 @@ import {
   reportRenumberOutcome,
 } from "../../../src/features/episodeRenumberShared";
 import { emptyLedgerFollowSummary } from "../../../src/features/episodeLedgers";
+import { absPath } from "../support/osPath";
 
 /**
  * 「名前だけの独立コミット」（設計書6.67.1）の配線と、実行前後の関所。
@@ -22,7 +23,7 @@ import { emptyLedgerFollowSummary } from "../../../src/features/episodeLedgers";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-03T00:00:00.000Z",
 };
 

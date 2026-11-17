@@ -216,6 +216,81 @@ describe("オリジナルIME との連動", () => {
     expect(closed.window).toBe(pid);
   });
 
+  describe("置き場が2つ（novel-ime と rittoku-ime）の間", () => {
+    const oldDir = (): string => nodePath.join(base, "novel-ime");
+    const newDir = (): string => nodePath.join(base, "rittoku-ime");
+    const startBoth = (): ImeLinkHandle | undefined => {
+      const context = { subscriptions: [] as { dispose(): void }[] };
+      return startImeLink(context as never, {
+        registry: { list: () => [work], onDidChange: new EventEmitter<void>().event },
+        frontManuscript: () => undefined,
+        onDidChangeFrontManuscript: () => ({ dispose() {} }),
+        stateDirs: [oldDir(), newDir()],
+      });
+    };
+    const inDir = (dir: string, name: string): string => nodePath.join(dir, name);
+
+    test("両方あれば、同じ中身を両方へ書き、閉じるときも両方を作品なしにする", async () => {
+      await fsp.mkdir(oldDir());
+      await fsp.mkdir(newDir());
+      handle = startBoth();
+      await vi.waitFor(
+        async () => {
+          expect(await exists(inDir(oldDir(), "integration-works.json"))).toBe(true);
+          expect(await exists(inDir(newDir(), "integration-works.json"))).toBe(true);
+          expect(await exists(inDir(oldDir(), "integration-current-work.json"))).toBe(true);
+          expect(await exists(inDir(newDir(), "integration-current-work.json"))).toBe(true);
+        },
+        { timeout: 5000 }
+      );
+      const a = JSON.parse(await fsp.readFile(inDir(oldDir(), "integration-current-work.json"), "utf8"));
+      const b = JSON.parse(await fsp.readFile(inDir(newDir(), "integration-current-work.json"), "utf8"));
+      expect(a.workUid).toBeTruthy();
+      expect(a.workUid).toBe(b.workUid);
+      await handle?.close();
+      handle = undefined;
+      for (const dir of [oldDir(), newDir()]) {
+        const closed = JSON.parse(await fsp.readFile(inDir(dir, "integration-current-work.json"), "utf8"));
+        expect(closed.workUid).toBeNull();
+      }
+    });
+
+    test("新しい方だけあれば新しい方だけ、古い方だけあれば古い方だけ。無い方は作らない", async () => {
+      await fsp.mkdir(newDir());
+      handle = startBoth();
+      await vi.waitFor(
+        async () => {
+          expect(await exists(inDir(newDir(), "integration-current-work.json"))).toBe(true);
+        },
+        { timeout: 5000 }
+      );
+      await handle?.close();
+      handle = undefined;
+      expect(await exists(oldDir())).toBe(false);
+
+      await fsp.rm(newDir(), { recursive: true });
+      await fsp.mkdir(oldDir());
+      handle = startBoth();
+      await vi.waitFor(
+        async () => {
+          expect(await exists(inDir(oldDir(), "integration-current-work.json"))).toBe(true);
+        },
+        { timeout: 5000 }
+      );
+      await handle?.close();
+      handle = undefined;
+      expect(await exists(newDir())).toBe(false);
+    });
+
+    test("どちらも無ければ何も作らない", async () => {
+      handle = startBoth();
+      await handle?.close();
+      handle = undefined;
+      expect(await exists(oldDir())).toBe(false);
+      expect(await exists(newDir())).toBe(false);
+    });
+  });
+
   test("焦点の無い窓は、いまの作品を書かない（一覧は書く）", async () => {
     await fsp.mkdir(stateDir);
     focused = false;

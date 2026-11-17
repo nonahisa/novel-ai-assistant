@@ -226,10 +226,23 @@ export function isSafeSyncPath(syncPath: string): boolean {
   // 円記号は Windows では区切りになるので、道の形が端末で変わる。
   // 「:」はドライブ文字と NTFS の別ストリームの印
   if (syncPath.includes(BACKSLASH) || syncPath.includes(":")) return false;
-  const segments = syncPath.split("/");
+  // 末尾の「.」と空白を落とした形でも見る（Windows はそう読む。「.. 」は「..」と同じ所を指す）
+  const segments = foldSyncPath(syncPath).split("/");
   return segments.every(
     (segment) => segment !== "" && segment !== "." && segment !== ".."
   );
+}
+
+/**
+ * 道を、Windows が同じ所と読む形へそろえる（照らすためだけ。名前そのものは変えない）。
+ * 区切りごとに末尾の「.」と空白を落とし、小文字にする。送らない道の照合をこれで行わないと、
+ * 「.GIT/hooks/…」「.git./…」のように書くだけで .git・回復先・この端末の控えへ届く
+ */
+export function foldSyncPath(syncPath: string): string {
+  return syncPath
+    .split("/")
+    .map((segment) => (segment === "." || segment === ".." ? segment : segment.replace(/[. ]+$/, "")).toLowerCase())
+    .join("/");
 }
 
 /**
@@ -476,11 +489,13 @@ export type DeviceScopedDir = (typeof DEVICE_SCOPED_DIRS)[number];
 export function deviceScopedPath(
   syncPath: string
 ): { dir: DeviceScopedDir; deviceId: string } | undefined {
-  const segments = syncPath.split("/");
+  // 置き場の名前は Windows が同じ所と読む形で見る。端末ID はファイル名のまま（大小で別の端末）
+  const raw = syncPath.split("/");
+  const segments = foldSyncPath(syncPath).split("/");
   if (segments.length !== 3 || segments[0] !== ".aiwriter") return undefined;
   const dir = DEVICE_SCOPED_DIRS.find((name) => name === segments[1]);
   if (!dir || !segments[2].endsWith(".json")) return undefined;
-  const deviceId = segments[2].slice(0, -".json".length);
+  const deviceId = raw[2].replace(/[. ]+$/, "").slice(0, -".json".length);
   // 端末IDの形でない名前（作者が置いた別のファイル）は、ふつうのファイルとして扱う
   return isValidDeviceId(deviceId) ? { dir, deviceId } : undefined;
 }
@@ -511,12 +526,64 @@ export function isIgnoredSyncPath(
   syncPath: string,
   ignoredPaths: readonly string[]
 ): boolean {
-  for (const rule of [...ALWAYS_IGNORED, ...ignoredPaths]) {
-    if (rule.endsWith("/") ? syncPath.startsWith(rule) : syncPath === rule) {
+  // 道も規則も、Windows が同じ所と読む形へそろえてから照らす（`foldSyncPath`）
+  const folded = foldSyncPath(syncPath);
+  for (const raw of [...ALWAYS_IGNORED, ...ignoredPaths]) {
+    if (raw.startsWith(DRIVE_GLOB_RULE_PREFIX)) {
+      if (matchesDriveGlobRule(folded.split("/"), raw.slice(DRIVE_GLOB_RULE_PREFIX.length))) return true;
+      continue;
+    }
+    const rule = raw.endsWith("/") ? `${foldSyncPath(raw.slice(0, -1))}/` : foldSyncPath(raw);
+    if (rule.endsWith("/") ? folded.startsWith(rule) : folded === rule) {
       return true;
     }
   }
   return false;
+}
+
+/**
+ * 作者の .gitignore から読んだ行の印（`driveGitignore.ts` が作る）。この印で始まる項目は
+ * 根から当てる型（`**`・`*`・`?` を区切りごとに読む）で、`/` で終われば「フォルダーだけ」。
+ * 区切りは `foldSyncPath` でそろえてある
+ */
+export const DRIVE_GLOB_RULE_PREFIX = "glob:";
+
+/**
+ * 型が道に当たるか（.gitignore と同じく、フォルダーに当たればその中も全部）。
+ * 道の頭から k 個の区切りが型に当たり、それがフォルダー（k < 全部）か、型が
+ * 「フォルダーだけ」でなければ当たり
+ */
+function matchesDriveGlobRule(segments: readonly string[], rule: string): boolean {
+  const dirOnly = rule.endsWith("/");
+  const pattern = (dirOnly ? rule.slice(0, -1) : rule).split("/");
+  for (let k = 1; k <= segments.length; k++) {
+    if (k === segments.length && dirOnly) break;
+    if (globMatch(pattern, 0, segments.slice(0, k), 0)) return true;
+  }
+  return false;
+}
+
+function globMatch(pattern: readonly string[], p: number, path: readonly string[], s: number): boolean {
+  if (p === pattern.length) return s === path.length;
+  if (pattern[p] === "*".repeat(2)) {
+    // 終わりの「**」は中の全部（1つ以上）。頭・途中の「**」は0個以上の区切り
+    const min = p === pattern.length - 1 ? 1 : 0;
+    for (let skip = min; s + skip <= path.length; skip++) {
+      if (globMatch(pattern, p + 1, path, s + skip)) return true;
+    }
+    return false;
+  }
+  if (s === path.length || !segmentMatch(pattern[p], path[s])) return false;
+  return globMatch(pattern, p + 1, path, s + 1);
+}
+
+/** 区切り1つの型（`*` は0字以上、`?` は1字。区切りはまたがない） */
+function segmentMatch(pattern: string, segment: string): boolean {
+  if (!pattern.includes("*") && !pattern.includes("?")) return pattern === segment;
+  const source = [...pattern]
+    .map((ch) => (ch === "*" ? ".*" : ch === "?" ? "." : ch.replace(/[.+^${}()|[\]\\]/g, (c) => `\\${c}`)))
+    .join("");
+  return new RegExp(`^${source}$`, "u").test(segment);
 }
 
 /** 何もしない理由。画面の文言ではなく、ログと試験のための印 */

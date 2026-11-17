@@ -82,6 +82,11 @@ export interface HandoffDeps {
   pauseSettingsWatch?: () => () => void;
   /** 「すべて同期」の記録の前の保存（設計書5.5.19）。保存ボタンから同期へ渡す */
   presave?: SyncPresave;
+  /**
+   * git の同期から外す作品（送り先が Google ドライブの作品。設計書5.10.9）。開いたときの点検・
+   * 「送らずに閉じた」印・保存ボタンの git の分のどれにも入れない
+   */
+  skipWork?: (work: WorkEntry) => boolean;
 }
 
 /** 置き場1つぶんの、点検の材料 */
@@ -264,7 +269,7 @@ function sameRootState(held: GitSyncStatus, fresh: GitSyncStatus): boolean {
 
 /** 置き場ごとにまとめる。**ここではまだネットワークに出ない** */
 async function collectTargets(deps: HandoffDeps): Promise<HandoffTarget[]> {
-  const works = deps.registry.list();
+  const works = gitWorks(deps);
   const byRoot = new Map<string, HandoffTarget>();
   /** 根を先に調べた作品の、根 → 状態を読んだ置き場（同じ置き場を二度読まない） */
   const targetOfRoot = new Map<string, HandoffTarget>();
@@ -790,6 +795,11 @@ function describeStopped(
 export async function saveAndSyncAll(
   deps: HandoffDeps & {
     batchFileNotices?: () => () => Promise<void>;
+    /**
+     * 送り先が Google ドライブの作品の「送る → 受け取る」（設計書5.10.9）。保存のあと、
+     * git の分の前に1回だけ呼ぶ（git の作品が無くても呼ぶ）
+     */
+    driveSync?: () => Promise<void>;
   }
 ): Promise<void> {
   // **作者が押したときだけ保存する。** 自動の経路（開いたとき・閉じる前）は
@@ -807,8 +817,16 @@ export async function saveAndSyncAll(
     if (go !== "このまま同期する") return;
   }
 
+  await deps.driveSync?.();
+  // git でそろえる作品が無ければ（全部が Google ドライブ）、git の分は開かない
+  if (deps.skipWork && deps.registry.list().length > 0 && gitWorks(deps).length === 0) {
+    await refreshUnsentMark(deps);
+    return;
+  }
+
   const { syncAllWorks } = await import("./syncAllWorks.js");
   await syncAllWorks({
+    skipWork: deps.skipWork,
     registry: deps.registry,
     monitor: deps.monitor,
     run: deps.run,
@@ -895,12 +913,17 @@ function currentEntries(
 ): Array<{ label: string; status: GitSyncStatus }> {
   const works = deps.registry.list();
   const entries: Array<{ label: string; status: GitSyncStatus }> = [];
-  for (const work of works) {
+  for (const work of gitWorks(deps)) {
     const status = deps.monitor.statusFor(work.id);
     if (!status || !("root" in status)) continue;
     entries.push({ label: buildSyncTarget(status.root, works).label, status });
   }
   return entries;
+}
+
+/** git でそろえる作品（送り先が Google ドライブの作品を除く。設計書5.10.9） */
+function gitWorks(deps: HandoffDeps): WorkEntry[] {
+  return deps.registry.list().filter((work) => !deps.skipWork?.(work));
 }
 
 /** 取りに行ける状態か。`features/gitSync.ts` の `canFetch` と同じ判断 */

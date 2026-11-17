@@ -4,6 +4,7 @@ import {
   newFolderHomeCandidates,
 } from "../../../src/core/newFolderHome";
 import { isSameLocation } from "../../../src/core/locationCompare";
+import { absPath } from "../support/osPath";
 
 /**
  * 「新しい置き場を作る」ときの既定の場所（設計書6.97.6）。
@@ -22,9 +23,9 @@ import { isSameLocation } from "../../../src/core/locationCompare";
  */
 
 /** 実機で起きた並び（書庫の中に作品が並ぶ）を、そのまま写した */
-const LIBRARY = "C:/Users/nonah/Documents/novels/novels";
+const LIBRARY = absPath("Users", "nonah", "Documents", "novels", "novels");
 /** 書庫の1つ上。ここが既定であってほしい */
-const ABOVE_LIBRARY = "C:/Users/nonah/Documents/novels";
+const ABOVE_LIBRARY = absPath("Users", "nonah", "Documents", "novels");
 const WORKS = [
   { folderPath: `${LIBRARY}/初恋相手の王女` },
   { folderPath: `${LIBRARY}/いじめられっ子` },
@@ -61,24 +62,24 @@ describe("新しい置き場の既定", () => {
 
   it("書庫が分かれていれば、作品の多いほうの親を先に出す", () => {
     const candidates = newFolderHomeCandidates({
-      works: [...WORKS, { folderPath: "D:/わき道/単発/短編" }],
+      works: [...WORKS, { folderPath: absPath("わき道", "単発", "短編") }],
     });
 
     expect(isSameLocation(candidates[0], ABOVE_LIBRARY)).toBe(true);
-    expect(includesLocation(candidates, "D:/わき道")).toBe(true);
+    expect(includesLocation(candidates, absPath("わき道"))).toBe(true);
   });
 
   it("同じ場所を二度出さない", () => {
     // 書庫が2つ並んでいると、親は同じ1つになる
     const candidates = newFolderHomeCandidates({
       works: [
-        { folderPath: "C:/小説/書庫A/作品1" },
-        { folderPath: "C:/小説/書庫B/作品2" },
+        { folderPath: absPath("小説", "書庫A", "作品1") },
+        { folderPath: absPath("小説", "書庫B", "作品2") },
       ],
     });
 
     expect(
-      candidates.filter((c) => isSameLocation(c, "C:/小説"))
+      candidates.filter((c) => isSameLocation(c, absPath("小説")))
     ).toHaveLength(1);
   });
 
@@ -86,22 +87,22 @@ describe("新しい置き場の既定", () => {
     // 作品の中にもう1つ作品を作ってしまっている作者が居ても、
     // **その内側を既定にはしない**
     const works = [
-      { folderPath: "C:/Users/nonah/小説/親作品" },
-      { folderPath: "C:/Users/nonah/小説/親作品/書庫/子作品" },
+      { folderPath: absPath("Users", "nonah", "小説", "親作品") },
+      { folderPath: absPath("Users", "nonah", "小説", "親作品", "書庫", "子作品") },
     ];
     const candidates = newFolderHomeCandidates({ works });
 
-    expect(includesLocation(candidates, "C:/Users/nonah/小説/親作品")).toBe(
+    expect(includesLocation(candidates, absPath("Users", "nonah", "小説", "親作品"))).toBe(
       false
     );
-    expect(isSameLocation(candidates[0], "C:/Users/nonah")).toBe(true);
+    expect(isSameLocation(candidates[0], absPath("Users", "nonah"))).toBe(true);
   });
 
   it("ドライブの直下は既定にしない", () => {
     // 作品が根の近くにあると、書庫の親が `C:\` になる。そこを開いて
     // 見せられても、作者はどこへ置けばよいのか分からない
     const candidates = newFolderHomeCandidates({
-      works: [{ folderPath: "C:/小説/作品" }],
+      works: [{ folderPath: absPath("小説", "作品") }],
     });
 
     expect(candidates).toEqual([]);
@@ -110,10 +111,10 @@ describe("新しい置き場の既定", () => {
   it("作品がまだ無ければ、開いているフォルダーを使う", () => {
     const candidates = newFolderHomeCandidates({
       works: [],
-      workspaceFolders: ["C:/Users/nonah/Documents"],
+      workspaceFolders: [absPath("Users", "nonah", "Documents")],
     });
 
-    expect(candidates).toEqual(["C:/Users/nonah/Documents"]);
+    expect(candidates).toEqual([absPath("Users", "nonah", "Documents")]);
   });
 
   it("開いているフォルダーが作品そのものなら使わない", () => {

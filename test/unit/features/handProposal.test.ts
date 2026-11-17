@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { Position, Range, Uri, window, workspace } from "../support/vscodeStub";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * 編集部の手書きの直し（設計書5.6.1.1。作者の指示 2026-11-01「作る」）。
@@ -48,14 +49,18 @@ const { proposeByHand, proposeEditFromCommand } = await import(
 );
 const { writeTextFilePreservingFormat } = await import("../../../src/core/textFile");
 const { ProposalStore } = await import("../../../src/core/proposalStore");
+const { keysForHost } = await import("../../../src/core/keyLabels");
+
+// 右クリックの言い方は動いている OS で変わる（Mac は control＋クリックを添える）。製品と同じ直し方で期待を作る
+const SELECT_FIRST = keysForHost("修正したい所を本文で選んでから押してください（右クリックからも出せます）。");
 
 const work: WorkEntry = {
   id: "w1",
   title: "いじめられっ子",
-  folderPath: "C:/小説/いじめられっ子",
+  folderPath: absPath("小説", "いじめられっ子"),
   registeredAt: "2026-09-06T00:00:00.000Z",
 };
-const filePath = "C:/小説/いじめられっ子/本文/003.txt";
+const filePath = absPath("小説", "いじめられっ子", "本文", "003.txt");
 const body = "　彼女が走った。彼は走つた。\n　夜が明けた。\n";
 
 function fakeDocument(text: string) {
@@ -212,7 +217,7 @@ describe("編集者の手書きの直しは、本文を書き換えず提案と�
     const placed = await proposeByHand(work, fakeDocument(body), range(0, 0, 0, 0), "edit");
     expect(placed).toBe(false);
     expect(said).toEqual([
-      "修正したい所を本文で選んでから押してください（右クリックからも出せます）。",
+      SELECT_FIRST,
     ]);
   });
 });
@@ -289,7 +294,7 @@ describe("コマンド（詳細メニュー・コマンドパレット）から�
     expect(await proposeEditFromCommand(deps)).toBe("noSelection");
     expect(proposed).toEqual([]);
     expect(said).toEqual([
-      "修正したい所を本文で選んでから押してください（右クリックからも出せます）。",
+      SELECT_FIRST,
     ]);
   });
 
@@ -298,7 +303,7 @@ describe("コマンド（詳細メニュー・コマンドパレット）から�
     const { deps } = commandDeps();
     expect(await proposeEditFromCommand(deps)).toBe("noSelection");
     expect(said).toEqual([
-      "修正したい所を本文で選んでから押してください（右クリックからも出せます）。",
+      SELECT_FIRST,
     ]);
   });
 });

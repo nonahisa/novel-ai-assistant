@@ -4,6 +4,7 @@ import { openEpubEditorPanel } from "../../../src/features/epubEditorPanel";
 import type { WorkEntry } from "../../../src/models/types";
 import { commands, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * EPUBエディターの「未保存」の扱い（設計書6.65.6。作者の指摘、2026-09-06）。
@@ -89,7 +90,7 @@ beforeEach(() => {
   work = {
     id: `work_epub_dirty_${counter}`,
     title: "氷の街",
-    folderPath: `C:\\novels\\dirty${counter}`,
+    folderPath: absPath("novels", `dirty${counter}`),
     registeredAt: "2026-09-06T00:00:00.000Z",
   };
   disk.clear();

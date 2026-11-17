@@ -10,6 +10,7 @@ import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { isConfirmPick, readConfirm } from "../support/confirmPicker";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 分け済みの作品の、話ごとのファイルの見出しから章を立てる（設計書6.66）。
@@ -61,7 +62,7 @@ function episodeText(n: number, title: string, part?: [number, string]): string 
   ].join("\r\n");
 }
 
-const WORK_FOLDER = path.join("C:", "novels", "textbook");
+const WORK_FOLDER = absPath("novels", "textbook");
 
 function source(
   n: number,

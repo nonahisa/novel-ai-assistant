@@ -5,6 +5,7 @@ import { X_SHARE_LABEL } from "../../../src/core/snsShare";
 import type { WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 更新告知の結果画面から、Xの投稿画面を開く配線（設計書6.79.8）。
@@ -20,7 +21,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_share",
   title: "図書塔の魔女",
-  folderPath: path.join("C:", "novels", "share"),
+  folderPath: absPath("novels", "share"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

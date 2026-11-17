@@ -1,4 +1,3 @@
-import * as path from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 /**
@@ -50,11 +49,12 @@ import type { UnregisteredOwnWork } from "../../../src/core/unregisteredOwnWorks
 import type { WorkEntry } from "../../../src/models/types";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
 import { WORK_LIST_SNAPSHOT_KEY, buildWorkListSnapshot } from "../../../src/core/workListSnapshot";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_1",
   title: "登録した作品",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 
@@ -213,7 +213,7 @@ describe("実機と同じ形（書庫があり、前回の一覧の控えがあ�
   const library = Array.from({ length: 17 }, (_, index): WorkEntry => ({
     id: `novel_${index}`,
     title: `書庫の作品${index}`,
-    folderPath: path.join("C:", "Users", "someone", "novel", `作品${index}`),
+    folderPath: absPath("Users", "someone", "novel", `作品${index}`),
     registeredAt: "2026-09-04T00:00:00.000Z",
   }));
   // 「確認用コピー」も2作品を抱えるまとまり（書庫が2つあると、一覧に書庫の段が付く）
@@ -221,7 +221,7 @@ describe("実機と同じ形（書庫があり、前回の一覧の控えがあ�
     (name, index): WorkEntry => ({
       id: `copy_${index}`,
       title: name,
-      folderPath: path.join("C:", "Users", "someone", "Documents", "確認用コピー", name),
+      folderPath: absPath("Users", "someone", "Documents", "確認用コピー", name),
       registeredAt: "2026-09-04T00:00:00.000Z",
     })
   );
@@ -229,7 +229,7 @@ describe("実機と同じ形（書庫があり、前回の一覧の控えがあ�
     (name, index): WorkEntry => ({
       id: `solo_${index}`,
       title: name,
-      folderPath: path.join("C:", "Users", "someone", "Documents", `置き場${index}`, name),
+      folderPath: absPath("Users", "someone", "Documents", `置き場${index}`, name),
       registeredAt: "2026-09-04T00:00:00.000Z",
     })
   );

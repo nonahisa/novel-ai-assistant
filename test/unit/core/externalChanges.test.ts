@@ -58,7 +58,8 @@ describe("自分の書き込みと区別する", () => {
     );
   });
 
-  test("区切り文字が違っても同じパスとみなす", () => {
+  // 円記号を区切りと読むのは Windows の道だけ（Mac では円記号は名前の一部）
+  test.runIf(process.platform === "win32")("区切り文字が違っても同じパスとみなす", () => {
     const tracker = new SelfWriteTracker();
     tracker.markWriting("C:\\work\\設定\\characters\\char_001.json");
 

@@ -4,6 +4,7 @@ import { setWorkGoals } from "../../../src/features/setWorkGoals";
 import { invalidateWorkGoals } from "../../../src/core/workGoalsStore";
 import type { WorkEntry } from "../../../src/models/types";
 import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 作品目標設定の「応募先の締切と目標」に、**いつの情報か**を添える
@@ -17,7 +18,7 @@ import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 const work: WorkEntry = {
   id: "w_goals_asof",
   title: "星を継ぐ者たち",
-  folderPath: path.join("C:", "novels", "goals-asof"),
+  folderPath: absPath("novels", "goals-asof"),
   registeredAt: "2026-09-01T00:00:00.000Z",
 };
 

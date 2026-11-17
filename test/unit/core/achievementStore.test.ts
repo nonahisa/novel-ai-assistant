@@ -5,6 +5,7 @@ import type { Achievement } from "../../../src/core/celebrations";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 作品の達成の記録（設計書6.3.8）。
@@ -16,7 +17,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_test",
   title: "空の港",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-03T00:00:00.000Z",
 };
 

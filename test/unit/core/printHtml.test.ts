@@ -21,6 +21,7 @@ import {
   SCRIPT_ROLE_WIDTH,
 } from "../../../src/core/scriptLines";
 import { PRINT_PAGINATE_SCRIPT } from "../../../src/core/printPaginate";
+import { pinHostPlatform } from "../support/osPath";
 
 /**
  * 印刷用HTML（PDF出力のもと）。
@@ -284,7 +285,14 @@ describe("印刷に近いプレビュー", () => {
   });
 
   test("画面の上に、印刷のしかたの案内帯を出す", () => {
-    const out = html("本文");
+    // キーの書き方は動いている OS で変わる。ここは Windows の書き方（Ctrl+P）で見る
+    const restore = pinHostPlatform("win32");
+    let out: string;
+    try {
+      out = html("本文");
+    } finally {
+      restore();
+    }
 
     expect(out).toContain('<div class="print-guide">');
     expect(out).toContain("Ctrl+P");

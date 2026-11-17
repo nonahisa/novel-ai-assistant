@@ -6,6 +6,7 @@ import { applyChatEdit } from "../../../src/features/applyChatEdit";
 import { applyRenameToRecords, type PendingRename } from "../../../src/features/nameRename";
 import { buildRenameMapping } from "../../../src/core/nameRename";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * synopsis.md（作品紹介文・キャッチコピー・各話あらすじの読み物）を書く口も、plot.md と同じ口
@@ -19,7 +20,7 @@ import type { WorkEntry } from "../../../src/models/types";
 const work: WorkEntry = {
   id: "work_synopsis_open",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work_synopsis_open"),
+  folderPath: absPath("novels", "work_synopsis_open"),
   registeredAt: "2026-10-16T00:00:00.000Z",
 };
 const synopsisFile = nodePath.join(work.folderPath, "設定", "synopsis.md");

@@ -15,6 +15,7 @@ import {
 } from "../../../src/core/syncTarget";
 import type { GitCommandRunner } from "../../../src/core/git";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * 「まとめて1つの置き場にする」（設計書5.7.9）の**出るものの中身**。
@@ -192,12 +193,12 @@ describe("どこを1つの置き場にするか", () => {
 
 describe("はじめての送信の確認", () => {
   const works: WorkEntry[] = [
-    { id: "a", title: "いじめられっ子", folderPath: nodePath.join("C:", "書庫", "a") },
-    { id: "b", title: "ハイエルフ未亡人", folderPath: nodePath.join("C:", "書庫", "b") },
+    { id: "a", title: "いじめられっ子", folderPath: absPath("書庫", "a") },
+    { id: "b", title: "ハイエルフ未亡人", folderPath: absPath("書庫", "b") },
   ] as WorkEntry[];
 
   test("入っている作品を名前で挙げる（実機確認リスト「まとめて1つの置き場にする」の代わり）", () => {
-    const target = buildSyncTarget(nodePath.join("C:", "書庫"), works);
+    const target = buildSyncTarget(absPath("書庫"), works);
     expect(describeIncludedWorks(target)).toBe(
       "入っている作品: いじめられっ子・ハイエルフ未亡人"
     );

@@ -1,4 +1,3 @@
-import * as path from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 /**
@@ -61,6 +60,7 @@ import { abbreviateTitle, isAbbreviated } from "../../../src/core/abbreviateTitl
 import { WorkTreeProvider } from "../../../src/views/workTree";
 import type { WorkEntry } from "../../../src/models/types";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
+import { absPath } from "../support/osPath";
 
 describe("作品名の省略", () => {
   test("20字ちょうどは省略しない", () => {
@@ -104,7 +104,7 @@ const longTitle =
 const work: WorkEntry = {
   id: "work_1",
   title: longTitle,
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-06T00:00:00.000Z",
 };
 

@@ -17,6 +17,7 @@ import {
 } from "../../../src/core/coverBake";
 import { parseBookConfig, type BookConfig } from "../../../src/models/book";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 表紙・裏表紙の合成（設計書6.65.8）。
@@ -96,7 +97,7 @@ describe("焼いた画像のdataURLを検める", () => {
 
 describe("焼いた画像の置き場所", () => {
   test("設定/書籍 の下に、合成済みと分かる名前で置く", () => {
-    const settings = path.join("C:", "novels", "work", "設定");
+    const settings = absPath("novels", "work", "設定");
 
     expect(bakedCoverPath(settings, "front")).toBe(
       path.join(settings, "書籍", "表紙_合成済み.png")

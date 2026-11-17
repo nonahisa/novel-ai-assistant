@@ -4,6 +4,7 @@ import { buildSynopsisChapterMarks } from "../../../src/core/synopsisChapters";
 import type { Chapter } from "../../../src/models/chapter";
 import type { ChapterSynopsis, ChapterSynopsisSet } from "../../../src/models/synopsis";
 import type { EpisodeFile } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * あらすじの文書へ挟む章の印（設計書6.66.4の3）。
@@ -16,7 +17,7 @@ import type { EpisodeFile } from "../../../src/models/types";
  * ここで別に束ねると、一覧の章の切れ目と文書の切れ目がずれる。
  */
 
-const WORK_FOLDER = path.join("C:", "novels", "work");
+const WORK_FOLDER = absPath("novels", "work");
 
 function episodeFile(chapterStart: number, fileName: string): EpisodeFile {
   return {

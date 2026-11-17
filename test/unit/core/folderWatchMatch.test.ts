@@ -43,7 +43,8 @@ describe("「下のすべて」（同期の見張り）", () => {
     expect(isUnderFolder(WORK, filePath)).toBe(expected);
   });
 
-  it("区切りが円記号でも同じに見る", () => {
+  // 円記号を区切りと読むのは Windows の道だけ（Mac では円記号は名前の一部）
+  it.runIf(process.platform === "win32")("区切りが円記号でも同じに見る", () => {
     expect(isUnderFolder("C:\\小説\\作品", "C:\\小説\\作品\\第1話.txt")).toBe(true);
   });
 });

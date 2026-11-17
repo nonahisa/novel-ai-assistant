@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { commands, Uri, window, workspace } from "../support/vscodeStub";
 import type { WorkEntry } from "../../../src/models/types";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 「単話プロットを作る」を**実際に動かして**、既にある単話プロットを
@@ -26,7 +27,7 @@ const { createEpisodePlot } = await import("../../../src/features/resumeWriting"
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

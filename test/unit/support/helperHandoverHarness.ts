@@ -14,6 +14,7 @@ import {
 } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
 import { memoryFs } from "./memoryDisk";
+import { absPath } from "./osPath";
 import { env, Uri, window, workspace } from "./vscodeStub";
 
 /**
@@ -39,7 +40,7 @@ export function workEntry(id: string, title: string): WorkEntry {
   return {
     id,
     title,
-    folderPath: path.join("C:", "novels", id),
+    folderPath: absPath("novels", id),
     registeredAt: "2026-10-31T00:00:00.000Z",
   };
 }

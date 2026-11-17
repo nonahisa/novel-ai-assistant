@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import * as nodePath from "path";
 import type { WorkEntry } from "../../../src/models/types";
 
 /**
@@ -60,16 +59,17 @@ vi.mock("vscode", async (importOriginal) => {
 import { activeTabFileUri } from "../../../src/features/manuscriptTab";
 import { toggleReviewLock } from "../../../src/features/reviewProposals";
 import { MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE } from "../../../src/core/manuscriptViewTypes";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-10-12T00:00:00.000Z",
 };
 
 /** この作品の外にある話（押さえる手前の「作品のファイルか」で止まる） */
-const outside = { fsPath: nodePath.join("C:", "novels", "other", "本文", "001.md") };
+const outside = { fsPath: absPath("novels", "other", "本文", "001.md") };
 
 beforeEach(() => {
   stub.activeTabInput = undefined;

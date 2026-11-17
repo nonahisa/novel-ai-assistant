@@ -855,6 +855,28 @@ export async function closeDialog(page: Page): Promise<void> {
   await box.waitFor({ state: "detached", timeout: 5_000 });
 }
 
+/**
+ * 選ぶ画面（確認の窓）を Esc で閉じる（何も選ばない）。
+ *
+ * **WebView のボタンから開いた選ぶ画面は、焦点が WebView に残ることがある**（2026-11-18 Mac、
+ * plotModeAiEntrances。Esc の前の焦点は `iframe.webview.ready`、1回目の Esc は WebView が受け取って
+ * 焦点が選ぶ画面へ移るだけで、窓は開いたままだった。Windows では起きない）。
+ * 先に選ぶ画面の入力欄へ焦点を置いてから押す。行は押さない（何かを選んだことになる）。
+ * 作者の実機で1回の Esc で閉じるかは、実機確認リストの項目で見る
+ */
+export async function closeQuickPick(page: Page): Promise<void> {
+  const input = page.locator(".quick-input-widget .quick-input-box input").first();
+  if (!(await focusInside(page, ".quick-input-widget"))) {
+    await input.focus().catch(() => undefined);
+  }
+  await page.keyboard.press("Escape");
+  await waitUntil(async () => (await quickPickTitle(page)) === undefined, "選ぶ画面を Esc で閉じる", 10_000).catch(
+    async (error: unknown) => {
+      throw new Error(`${String(error)}（いまの焦点：${await activeElementSummary(page)}）`);
+    }
+  );
+}
+
 /** キーボード ショートカットの画面を開くキー。使う件は `LaunchOptions.keybindings` へ足す */
 export const OPEN_KEYBINDINGS_KEY = "ctrl+alt+shift+f4";
 export const OPEN_KEYBINDINGS_PRESS = "Control+Alt+Shift+F4";

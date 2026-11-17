@@ -6,6 +6,7 @@ import type { WorkEntry } from "../../../src/models/types";
 import { createSchedule } from "../../../src/core/scheduleTemplates";
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * `設定/スケジュール.json` の読み書き（設計書6.111.8）。
@@ -17,7 +18,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

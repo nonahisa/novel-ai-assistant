@@ -25,11 +25,12 @@ vi.mock("../../../src/ai/registry", () => ({
 
 import { generatePlot } from "../../../src/features/generatePlot";
 import type { AIRegistry } from "../../../src/ai/registry";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_plot_unsaved",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work_plot_unsaved"),
+  folderPath: absPath("novels", "work_plot_unsaved"),
   registeredAt: "2026-10-16T00:00:00.000Z",
 };
 const plotFile = nodePath.join(work.folderPath, "設定", "plot.md");

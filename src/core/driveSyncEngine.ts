@@ -36,7 +36,7 @@ import {
   type DriveTextMerge,
 } from "./driveTextMerge";
 import { hashBytes } from "./hash";
-import { hasConflictMarkers } from "./textDecode";
+import { decodeBytes, hasConflictMarkers } from "./textDecode";
 import {
   decideSettingsConflict,
   isSettingsJsonPath,
@@ -50,8 +50,9 @@ import {
  * 計画（`driveSyncPlan.ts`）と Drive の口（`driveApi.ts`）をつなぐ。
  * **手元のファイルの読み書きも差し替えられる形**にした（`LocalWorkFiles`・
  * `LocalWorkWriter`）。core は原稿へ直に書かない——手元の原稿へ書く口は
- * 呼び手が `writeTextFilePreservingFormat`（既にある話）と `atomicWriteFile` の
- * `create`（新しい話）で作って渡す（設計書5.10.2）。モバイル版はそこだけ
+ * 呼び手が `textFile.ts` の `replaceFileWithReceivedBytes`（既にあるファイル。本文の
+ * 書き戻しと同じ関所で、受け取ったバイトをそのまま書く）と `atomicWriteFile` の
+ * `create`（新しいファイル）で作って渡す（設計書5.10.2・5.10.9。`features/driveSync.ts`）。モバイル版はそこだけ
  * 差し替えて同じ手順を使う。`vscode`・`node:` は読まない
  * （`driveSyncEngine.test.ts` が見張る）。
  *
@@ -66,10 +67,9 @@ import {
  *   （例：名前が「本文/第1話.txt」）。話ごとにフォルダーを掘ると、送るたびに
  *   フォルダーの数だけ一覧を読むことになる。目録（`manifest.json`）と同じ
  *   フォルダーに置かないのは、作品の根に `manifest.json` という話があると
- *   名前がぶつかるため。名前に「/」を使えるかは見立て（`driveApi.ts`）
+ *   名前がぶつかるため。名前に「/」を使えるかは公式の頁に記述が無く見立て（設計書5.10.9）
  * - 作品のフォルダー名は**呼び手が決めて渡す**（`DriveSyncLayout.workFolderName`）。
- *   どの端末でも同じでなければならないが、今の作品の設定（`config.json`）には
- *   端末に共通の識別子が無い。誰がどう作るかは段階3で決める
+ *   どの端末でも同じもの——段階3で `config.json` の `workUid` に決めた（設計書5.10.9）
  *
  * ## 相手は何台でもよい（設計書5.10.6）
  *
@@ -133,7 +133,7 @@ export type LocalWriteOutcome =
 /**
  * 手元の作品フォルダーへ書く口。**書くのは呼び手**（設計書5.10.2）。
  *
- * - `replace`：既にあるファイルを向こうの中身へ。本文は `writeTextFilePreservingFormat`
+ * - `replace`：既にあるファイルを向こうの中身へ。`replaceFileWithReceivedBytes`
  *   （`expectedHash` に `expectedLocalHash`）。未保存の文書・競合マーカー・
  *   編集部が校閲中の話は書かずに `ok: false`
  * - `create`：手元に無いファイルを置く（`atomicWriteFile` の `create`）
@@ -142,7 +142,7 @@ export type LocalWriteOutcome =
  * 書く口が改行や文字コードを手元の形へ直すと、書けたもののハッシュが
  * 目録と違い、次に「手元で書いた」と読んで送り返す——端末の間で永久に
  * 往復する。そこで `writtenHash` が向こうのハッシュと違えば系譜を進めず、
- * 失敗に数える（受け取ったバイトの形をどう書くかは段階3の呼び手が決める）
+ * 失敗に数える（段階3の呼び手は、受け取ったバイトをそのまま書く。設計書5.10.9）
  */
 export interface LocalWorkWriter {
   replace(path: string, bytes: Uint8Array, expectedLocalHash: string): Promise<LocalWriteOutcome>;
@@ -182,7 +182,12 @@ export type DriveSendResult =
    */
   | { kind: "failed"; error: DriveApiError; uploaded: string[] }
   /** 前に送った自分の目録が読めない。直さずに止める */
-  | { kind: "own_manifest_unreadable"; reason: string };
+  | { kind: "own_manifest_unreadable"; reason: string }
+  /**
+   * 競合マーカーの入ったファイルがある。**何も送っていない**（ドライブに触れる前に止める）。
+   * 送ると、もう1台がマーカー入りの原稿を新しい中身として受け取る（実装ルール1）
+   */
+  | { kind: "conflict_markers"; paths: string[] };
 
 /**
  * 手元の作品を、この端末のフォルダーへ送る。変わったファイルだけを書き、
@@ -203,6 +208,13 @@ export async function sendToDrive(input: {
   const uploaded: string[] = [];
   const isSendable = (entry: string) =>
     isSendableSyncPath(entry, { ownDeviceId: layout.deviceId, ignoredPaths: input.ignoredPaths });
+  // 送る前に、送るもの全部の競合マーカーを見る（1つでもあれば何も送らない）
+  const marked: string[] = [];
+  for (const entry of (await input.local.list()).filter(isSendable).sort()) {
+    const bytes = await input.local.read(entry);
+    if (bytes !== undefined && decodeBytes(bytes).hasConflictMarkers) marked.push(entry);
+  }
+  if (marked.length > 0) return { kind: "conflict_markers", paths: marked };
   try {
     const root = await client.ensureFolder(MY_DRIVE, layout.rootFolderName ?? DRIVE_ROOT_FOLDER_NAME);
     const work = await client.ensureFolder(root.id, layout.workFolderName);

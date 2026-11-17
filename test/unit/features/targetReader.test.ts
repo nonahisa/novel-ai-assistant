@@ -13,6 +13,7 @@ import * as paths from "../../../src/core/paths";
 import { emptyPostingLedger, POSTING_FILE } from "../../../src/models/posting";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { WorkEntry } from "../../../src/models/types";
+import { fsPathOf } from "../support/osPath";
 
 /**
  * 「ターゲット読者」の入口（設計書6.108.6）。
@@ -28,7 +29,7 @@ import type { WorkEntry } from "../../../src/models/types";
  * 流れの分かれ目だけを見る）。
  */
 
-const WORK_FOLDER = paths.normalize("c:/小説/鉛の海");
+const WORK_FOLDER = fsPathOf("小説", "鉛の海");
 const SETTINGS = paths.join(WORK_FOLDER, "設定");
 const SHEET = paths.join(SETTINGS, "ターゲットシート.md");
 const PROFILE = paths.join(SETTINGS, "読者像.json");

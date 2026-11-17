@@ -11,6 +11,7 @@ import {
 import { emptyTimeline } from "../../../src/models/timeline";
 import type { WorkEntry } from "../../../src/models/types";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 時期を作って話へ結んだものが `設定/timeline.json` に残り、**開き直しても
@@ -26,7 +27,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

@@ -5,6 +5,7 @@ import { withRevision } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 修正版の出し直しの記録が、保存を通って残るか（設計書6.68.7）。
@@ -15,7 +16,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_revision_store",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "revision-store"),
+  folderPath: absPath("novels", "revision-store"),
   registeredAt: "2026-11-03T00:00:00.000Z",
 };
 

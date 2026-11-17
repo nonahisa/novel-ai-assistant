@@ -6,6 +6,7 @@ import { readPostingLedger, type PostingLedger } from "../../../src/models/posti
 import type { WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 2択を開いている間に、別の取り込みが台帳へ書いた（0.81.4）。
@@ -33,7 +34,7 @@ const workId = "16816927859";
 const work: WorkEntry = {
   id: "work_stale_ledger",
   title: "雨の日の図書館",
-  folderPath: path.join("C:", "novels", "stale-ledger"),
+  folderPath: absPath("novels", "stale-ledger"),
   registeredAt: "2026-09-23T00:00:00.000Z",
 };
 

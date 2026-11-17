@@ -9,6 +9,7 @@ import type { GenerateParams } from "../../../src/ai/types";
 import { AIError } from "../../../src/ai/types";
 import { PLOT_ADVICE_SUGGESTION_MARK } from "../../../src/core/plotAdviceValidation";
 import type { PlotAdviceView } from "../../../src/features/plotAdvice";
+import { absPath } from "../support/osPath";
 
 /**
  * プロットモードのAI助言（P-01、設計書6.4.10）の送受信と書き込み。
@@ -66,7 +67,7 @@ const { PlotAdviceSession } = await import("../../../src/features/plotAdvice");
 const work: WorkEntry = {
   id: "work_test",
   title: "現代ダンジョンのインフラ担当",
-  folderPath: nodePath.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-10-09T00:00:00.000Z",
 };
 const plotFile = nodePath.join(work.folderPath, "設定", "plot.md");

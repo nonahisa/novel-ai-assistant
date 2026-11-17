@@ -4,6 +4,7 @@ import { Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 import { decodeBytes } from "../../../src/core/textDecode";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * 原稿 UTF-8 変換の流れ（設計書5.4.2、0.149.0）。
@@ -28,9 +29,9 @@ vi.mock("../../../src/core/actorContext", () => ({
 
 const { convertToUtf8 } = await import("../../../src/features/convertToUtf8");
 
-const WORK_FOLDER = Uri.file("C:\\novels\\作品").fsPath;
+const WORK_FOLDER = Uri.file(absPath("novels", "作品")).fsPath;
 const work = { id: "w", title: "作品", folderPath: WORK_FOLDER } as unknown as WorkEntry;
-const at = (name: string): string => Uri.file(`C:\\novels\\作品\\${name}`).fsPath;
+const at = (name: string): string => Uri.file(absPath("novels", "作品", name)).fsPath;
 const sjis = (text: string): Uint8Array => iconv.encode(text, "shift_jis");
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 

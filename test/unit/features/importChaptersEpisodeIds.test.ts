@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * ヘルパーの章立て（`novelai-chapters`）の行の話の番号を、投稿の記録へ写す（設計書6.68.8）。
@@ -31,7 +32,7 @@ const { importChaptersFromHelper } = await import("../../../src/features/importC
 const work: WorkEntry = {
   id: "work_chapter_ids",
   title: "架空の灯台守",
-  folderPath: path.join("C:", "novels", "chapterIds"),
+  folderPath: absPath("novels", "chapterIds"),
   registeredAt: "2026-11-03T00:00:00.000Z",
 };
 const ledgerPath = Uri.file(path.join(work.folderPath, "設定", "投稿状態.json")).fsPath;

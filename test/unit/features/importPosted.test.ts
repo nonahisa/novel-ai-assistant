@@ -4,6 +4,7 @@ import type { AIRegistry } from "../../../src/ai/registry";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * ヘルパーから届いた投稿した話の番号を受け取る（`/import-posted`。設計書6.68.8）。
@@ -51,7 +52,7 @@ function freshMemento() {
 const work: WorkEntry = {
   id: "work_posted",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "posted"),
+  folderPath: absPath("novels", "posted"),
   registeredAt: "2026-11-03T00:00:00.000Z",
 };
 const ledgerPath = Uri.file(path.join(work.folderPath, "設定", "投稿状態.json")).fsPath;

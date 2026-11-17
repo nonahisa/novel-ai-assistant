@@ -19,6 +19,7 @@ import {
 } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
 import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * まとめて渡された読者の反応（ヘルパー 0.9.0 の「まとめて渡す」）を取り込む。
@@ -37,7 +38,7 @@ function work(id: string, title: string): WorkEntry {
   return {
     id,
     title,
-    folderPath: path.join("C:", "novels", id),
+    folderPath: absPath("novels", id),
     registeredAt: "2026-09-23T00:00:00.000Z",
   };
 }

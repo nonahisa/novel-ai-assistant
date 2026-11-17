@@ -6,6 +6,7 @@ import type { WorkEntry } from "../../../src/models/types";
 import { FileType, Uri, window, workspace } from "../support/vscodeStub";
 import { cancelRunningTask } from "../../../src/views/progress";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * Word（.docx）を .md へ一括変換する（設計書6.85）。
@@ -23,7 +24,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_docx",
   title: "氷の街",
-  folderPath: "C:\\novels\\work",
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-06T00:00:00.000Z",
 };
 

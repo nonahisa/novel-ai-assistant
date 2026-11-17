@@ -1,4 +1,3 @@
-import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import {
   announceRenameProposals,
@@ -8,6 +7,7 @@ import {
 import { findAction } from "../../../src/views/actionList";
 import type { WorkEntry } from "../../../src/models/types";
 import { commands, window } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 名前を付け替えたあとの知らせから、資料への反映へ進める（設計書6.37.3）。
@@ -22,7 +22,7 @@ import { commands, window } from "../support/vscodeStub";
 const work: WorkEntry = {
   id: "work_rename",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "rename"),
+  folderPath: absPath("novels", "rename"),
   registeredAt: "2026-09-23T00:00:00.000Z",
 };
 

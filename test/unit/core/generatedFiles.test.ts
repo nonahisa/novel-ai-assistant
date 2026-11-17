@@ -12,6 +12,7 @@ import {
   type GeneratedFileEntry,
 } from "../../../src/core/generatedFiles";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { absPath, SEP } from "../support/osPath";
 
 /**
  * その場で組み立てる読み物を、実ファイルとして置く（設計書6.17.7）。
@@ -181,7 +182,7 @@ describe("消してよいものを選ぶ", () => {
  * ファイルの仕組みは作り物に差し替える（`atomicWrite.test.ts` と同じ手）。
  */
 describe("置き場への書き出しと片付け", () => {
-  const DIRECTORY = "C:\\works\\ある作品\\.aiwriter\\generated";
+  const DIRECTORY = absPath("works", "ある作品", ".aiwriter", "generated");
   const files = new Map<string, { bytes: Uint8Array; mtime: number }>();
   const directories = new Set<string>();
   const deleted: string[] = [];
@@ -191,7 +192,7 @@ describe("置き場への書き出しと片付け", () => {
   }
 
   function place(name: string, mtime: number): void {
-    files.set(key(`${DIRECTORY}\\${name}`), {
+    files.set(key(`${DIRECTORY}${SEP}${name}`), {
       bytes: new TextEncoder().encode("既にあるもの"),
       mtime,
     });
@@ -199,7 +200,7 @@ describe("置き場への書き出しと片付け", () => {
 
   function names(): string[] {
     return [...files.keys()]
-      .map((full) => full.slice(full.lastIndexOf("\\") + 1))
+      .map((full) => full.slice(full.lastIndexOf(SEP) + 1))
       .sort();
   }
 
@@ -226,7 +227,7 @@ describe("置き場への書き出しと片付け", () => {
           throw new FileSystemError("missing", "FileNotFound");
         }
         return [...files.keys()].map((full) => [
-          full.slice(full.lastIndexOf("\\") + 1),
+          full.slice(full.lastIndexOf(SEP) + 1),
           1,
         ]);
       }),
@@ -257,7 +258,7 @@ describe("置き場への書き出しと片付け", () => {
         if (!files.delete(uri.fsPath)) {
           throw new FileSystemError("missing", "FileNotFound");
         }
-        deleted.push(uri.fsPath.slice(uri.fsPath.lastIndexOf("\\") + 1));
+        deleted.push(uri.fsPath.slice(uri.fsPath.lastIndexOf(SEP) + 1));
       }),
     } as never;
   });
@@ -311,7 +312,7 @@ describe("置き場への書き出しと片付け", () => {
   test("置き場がまだ無くても、失敗にしない", async () => {
     // 初回は掃除するものが無い。ここで投げると、読み物が開けなくなる
     await expect(
-      pruneGeneratedFiles("C:\\works\\無い作品\\.aiwriter\\generated", "使い方")
+      pruneGeneratedFiles(absPath("works", "無い作品", ".aiwriter", "generated"), "使い方")
     ).resolves.toBe(0);
   });
 
@@ -342,7 +343,7 @@ describe("置き場への書き出しと片付け", () => {
   test("置き場がまだ無くても、失敗にしない（比べる相手が無いだけ）", async () => {
     await expect(
       findSameGeneratedFile(
-        "C:\\works\\無い作品\\.aiwriter\\generated",
+        absPath("works", "無い作品", ".aiwriter", "generated"),
         "伏線の一覧",
         "本文"
       )
@@ -385,7 +386,7 @@ describe("置き場への書き出しと片付け", () => {
   test("片づけは置き場（.aiwriter/generated）の中だけを読み、本文の `//` のメモに触れない", async () => {
     const DAY = 24 * 60 * 60 * 1000;
     // 本文は作品の直下にあり、置き場の外。読みにも行かない
-    const episode = "C:\\works\\ある作品\\episode_0001.md";
+    const episode = absPath("works", "ある作品", "episode_0001.md");
     const body = new TextEncoder().encode("本文\n// シーンメモ：ここを直す\n続き\n");
     files.set(key(episode), { bytes: body, mtime: AT.getTime() - 40 * DAY });
     place("シーンメモ_2026-07-20_1000.md", AT.getTime() - 40 * DAY);

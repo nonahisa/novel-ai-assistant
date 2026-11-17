@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { workspace } from "../support/vscodeStub";
 import { installFakeDisk, openFakeDocument, type FakeDisk } from "../support/openDocumentFake";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 vi.mock("../../../src/core/logger", () => ({
   logFailure: vi.fn(),
@@ -22,7 +23,7 @@ const { renumberEpisodePlotHeadings } = await import("../../../src/features/epis
 const work: WorkEntry = {
   id: "work_episode_plot_open",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work_episode_plot_open"),
+  folderPath: absPath("novels", "work_episode_plot_open"),
   registeredAt: "2026-10-16T00:00:00.000Z",
 };
 const directory = nodePath.join(work.folderPath, "設定", "単話プロット");

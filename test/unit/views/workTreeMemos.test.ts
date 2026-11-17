@@ -47,11 +47,12 @@ import {
 } from "../../../src/views/workTree";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_1",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

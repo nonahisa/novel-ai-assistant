@@ -30,6 +30,7 @@ import type { WorkEntry } from "../../../src/models/types";
 import { importChaptersFromHelper } from "../../../src/features/importChaptersFromBackup";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * ヘルパーからの受け口（設計書6.79.7「ヘルパーからの受け口」）。
@@ -53,7 +54,7 @@ function work(id: string, title: string): WorkEntry {
   return {
     id,
     title,
-    folderPath: path.join("C:", "novels", id),
+    folderPath: absPath("novels", id),
     registeredAt: "2026-09-23T00:00:00.000Z",
   };
 }

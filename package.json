@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。",
-  "version": "1.0.26",
+  "version": "1.0.27",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -676,7 +676,7 @@
       },
       {
         "command": "novelai.chooseImeFrequentWords",
-        "title": "オリジナルIME へ渡すよく使う語を選ぶ",
+        "title": "六徳 IME へ渡すよく使う語を選ぶ",
         "category": "統合小説執筆環境",
         "icon": "$(symbol-keyword)"
       },
@@ -1020,6 +1020,30 @@
         "title": "保存・同期",
         "category": "統合小説執筆環境",
         "icon": "$(save-all)"
+      },
+      {
+        "command": "novelai.importWorkFromDrive",
+        "title": "ドライブから追加",
+        "category": "統合小説執筆環境",
+        "icon": "$(cloud)"
+      },
+      {
+        "command": "novelai.switchSyncDestination",
+        "title": "送り先の切り替え",
+        "category": "統合小説執筆環境",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "novelai.googleDriveSetup",
+        "title": "Google接続設定",
+        "category": "統合小説執筆環境",
+        "icon": "$(cloud)"
+      },
+      {
+        "command": "novelai.googleDriveLogout",
+        "title": "Googleログアウト",
+        "category": "統合小説執筆環境",
+        "icon": "$(sign-out)"
       },
       {
         "command": "novelai.gitPull",
@@ -1612,6 +1636,11 @@
           "command": "novelai.addWorkFromGithub",
           "when": "view == novelai.works",
           "group": "navigation@2"
+        },
+        {
+          "command": "novelai.importWorkFromDrive",
+          "when": "view == novelai.works && !novelai.processesBlocked",
+          "group": "navigation@2.5"
         },
         {
           "command": "novelai.importWorkFromZip",
@@ -2282,6 +2311,22 @@
           "when": "true"
         },
         {
+          "command": "novelai.switchSyncDestination",
+          "when": "!novelai.processesBlocked"
+        },
+        {
+          "command": "novelai.importWorkFromDrive",
+          "when": "!novelai.processesBlocked"
+        },
+        {
+          "command": "novelai.googleDriveSetup",
+          "when": "!novelai.processesBlocked"
+        },
+        {
+          "command": "novelai.googleDriveLogout",
+          "when": "!novelai.processesBlocked"
+        },
+        {
           "command": "novelai.resolveDivergence",
           "when": "!novelai.processesBlocked"
         },
@@ -2372,10 +2417,15 @@
           "default": "left",
           "description": "変換中の線（縦書きの原稿エディターで、変換中の字に付く線を出す側）。"
         },
+        "novelai.googleDrive.syncImeLearning": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "送り先が Google ドライブの作品があるとき、六徳 IME の学習も Google ドライブでそろえる。\n\n・六徳 IME のエンジンが入っている PC でだけ働く\n・送るのは学習の写しだけ（打った文は送らない）\n・オンのあいだは、IME の同期のアプリはこの PC からは送らない"
+        },
         "novelai.ime.notifyCurrentWork": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "IME へいまの作品を知らせる（オリジナルIME の作品ごとの辞書）。\n\n・オリジナルIME が入っている PC でだけ働く\n・オンのあいだは、作品の `.aiwriter/config.json` に作品の番号（`workUid`）を足す"
+          "markdownDescription": "IME へいまの作品を知らせる（六徳 IME の作品ごとの辞書）。\n\n・六徳 IME が入っている PC でだけ働く\n・オンのあいだは、作品の `.aiwriter/config.json` に作品の番号（`workUid`）を足す"
         },
         "novelai.readAloud.aivisSpeechUrl": {
           "type": "string",
@@ -2865,7 +2915,7 @@
     "manual:shots": "npm run build && vitest run --config vitest.manual.config.mts",
     "check:env": "node scripts/checkEnv.mjs",
     "check": "npm run check:deps && npm run typecheck && npm run typecheck:tests && npm run test:unit && npm run build && npm run bundle:core",
-    "audit": "npm audit --omit=dev --audit-level=moderate && npm audit --audit-level=high",
+    "audit": "npm audit --omit=dev --audit-level=moderate && node scripts/auditDevGate.mjs",
     "ci": "npm run check:deps && npm run typecheck && npm run typecheck:tests && npm run test:unit && npm run test:quality && npm run test:coverage && npm run build && npm run test:integration && npm run audit",
     "test:integration:patched": "node scripts/runIntegrationTests.mjs --vscode=1.138.0",
     "check:release": "npm run check && npm run test:integration && npm run test:integration:patched && npm run test:web && npm run audit",

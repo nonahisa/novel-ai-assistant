@@ -23,6 +23,7 @@ import type { WorkRegistry } from "../../../src/core/workRegistry";
 import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
 import type { WorkEntry } from "../../../src/models/types";
 import { window, workspace } from "../support/vscodeStub";
+import { ALLOW_BARE } from "../support/gitTemplate";
 
 /**
  * GitHub に送れない大きさのファイルと、送信を断られたときの知らせ（設計書5.5.21）。
@@ -44,7 +45,8 @@ let shown: Array<{ message: string; buttons: string[] }>;
 let press: string | undefined;
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const result = await runGit(args, cwd, 60_000);
+  // 裸の置き場（送り先）の中でも打てるように（git 2.56 の既定。support/gitTemplate.ts の ALLOW_BARE）
+  const result = await runGit([...ALLOW_BARE, ...args], cwd, 60_000);
   if (result.code !== 0) {
     throw new Error(`git ${args.join(" ")} が失敗: ${result.stderr || result.stdout}`);
   }
@@ -93,6 +95,9 @@ async function makeLibrary(options: { rejectingHook?: boolean } = {}): Promise<{
         "",
       ].join("\n")
     );
+    // **実行できる印を付ける。** Mac・Linux の git は実行できないフックを黙って飛ばすので、
+    // 付けないと断られずに通り、この試しが落ちた（2026-11-18 Mac の全件）。Windows は印を見ない
+    await fs.chmod(nodePath.join(remote, "hooks", "pre-receive"), 0o755);
   }
   const work = { id: "w1", title: "確認用コピー", folderPath: folder } as WorkEntry;
   return { root, remote, work };

@@ -6,6 +6,7 @@ import {
   EXTRA_GUIDE,
 } from "../../../src/core/featureGuide";
 import { ACTION_TREE } from "../../../src/views/actionList";
+import { INDEX_CHAR_LIMIT } from "../support/featureIndexLimit";
 
 /**
  * 相談へ渡す「使い方の説明」（目次＋束）。
@@ -26,12 +27,6 @@ const bundles = buildGuideBundles();
 /** 束をすべてつないだもの。「どれかの束に入っているか」を見るのに使う */
 const bundleText = bundles.map((bundle) => bundle.text).join("\n");
 const index = buildFeatureIndex();
-/**
- * 目次の字数の上限。上げた経緯は「相談へ渡す目次」の最初の検査の注記にある。
- * **1つにしておく**——作品の質問へ渡すものは目次そのものなので、同じ上限で見る。
- * 2か所に数字を書いていたら、目次だけ 2,700 へ上げて片方が 2,600 のまま残った。
- */
-const INDEX_CHAR_LIMIT = 3000;
 
 function allActions() {
   return ACTION_TREE.flatMap((group) =>
@@ -378,6 +373,11 @@ describe("相談へ渡す目次", () => {
 
       2,900→3,000：原稿を UTF-8 に変換（設計書5.4.2、0.149.0）で操作が1つ増え、
       編集者モードの目次が 2,913字になった（**名前だけ**。説明は混ざっていない）。
+
+      3,000→3,100：Google ドライブへの同期（設計書5.10.9、1.0.27）で操作が増え、
+      編集者モードの目次が Windows で 2,999字・Mac で 3,019字になった（**名前だけ**）。
+      Mac は「右クリック」に「（Mac は control＋クリック）」が添わるぶん長い。
+      Mac の形は `featureGuideMac.test.ts` が、どの機械でも見る。
     */
     expect(index.length).toBeLessThan(INDEX_CHAR_LIMIT);
   });

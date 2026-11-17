@@ -75,7 +75,9 @@ describe("単発の順番待ちの表示", () => {
 
     const controller = new AbortController();
     const waiting = localAiGate()!.enter({ ...request, signal: controller.signal });
-    await vi.waitFor(() => expect(messages.length).toBeGreaterThan(0), { timeout: 2000 });
+    // 2秒では、全件で重い Mac（全件 365秒の回）に足りなかった（2026-11-18、単独では通る）。
+    // 表示が出ればすぐ抜けるので、長めに待っても速い機械は遅くならない
+    await vi.waitFor(() => expect(messages.length).toBeGreaterThan(0), { timeout: 10_000 });
     controller.abort();
     await expect(waiting).rejects.toBeInstanceOf(AiQueueAbortError);
 

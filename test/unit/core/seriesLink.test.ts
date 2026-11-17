@@ -15,6 +15,7 @@ import {
 import { parseWorkConfig } from "../../../src/core/workRegistry";
 import { SRC, chainTo, relativeName, walkStaticImports } from "../support/importGraph";
 import * as path from "node:path";
+import { absPath } from "../support/osPath";
 
 /**
  * シリーズ作品を、設定資料でゆるくつなぐ（設計書6.95）の決めごと。
@@ -66,7 +67,7 @@ describe("作品設定の series を読む（設計書6.95.2）", () => {
       name: "教科書チートの世界",
       related: [
         "教科書チート",
-        "C:\\Users\\nonah\\Documents\\novel\\教科書チート",
+        absPath("Users", "nonah", "Documents", "novel", "教科書チート"),
         "../教科書チート",
         "..",
         "",
@@ -90,17 +91,17 @@ describe("作品設定の series を読む（設計書6.95.2）", () => {
 
 describe("相手の場所は、自分の親から組み立てる（設計書6.95.2）", () => {
   it("同じ親フォルダーの子として解決する", () => {
-    const resolved = resolveRelatedWorkPaths("C:\\小説\\別視点", {
+    const resolved = resolveRelatedWorkPaths(absPath("小説", "別視点"), {
       name: "教科書チートの世界",
       related: ["教科書チート"],
     });
     expect(resolved).toHaveLength(1);
     expect(resolved[0].folderName).toBe("教科書チート");
-    expect(resolved[0].folderPath).toBe(path.join("C:\\小説", "教科書チート"));
+    expect(resolved[0].folderPath).toBe(path.join(absPath("小説"), "教科書チート"));
   });
 
   it("自分自身を相手に書かれても外す", () => {
-    const resolved = resolveRelatedWorkPaths("C:\\小説\\別視点", {
+    const resolved = resolveRelatedWorkPaths(absPath("小説", "別視点"), {
       name: "シリーズ",
       related: ["別視点", "教科書チート"],
     });
@@ -108,7 +109,7 @@ describe("相手の場所は、自分の親から組み立てる（設計書6.95
   });
 
   it("series が無ければ、相手は1つも出ない", () => {
-    expect(resolveRelatedWorkPaths("C:\\小説\\別視点", undefined)).toEqual([]);
+    expect(resolveRelatedWorkPaths(absPath("小説", "別視点"), undefined)).toEqual([]);
   });
 });
 
@@ -186,10 +187,10 @@ describe("人物は候補として並べるだけ（設計書6.95.3）", () => {
 
 describe("登録したときに気づかせるのは、1度だけ（設計書6.95.4）", () => {
   const works = [
-    { folderPath: "C:\\小説\\教科書チート" },
-    { folderPath: "C:\\小説\\別視点" },
+    { folderPath: absPath("小説", "教科書チート") },
+    { folderPath: absPath("小説", "別視点") },
   ];
-  const added = { folderPath: "C:\\小説\\別視点" };
+  const added = { folderPath: absPath("小説", "別視点") };
 
   it("書庫に隣の作品があれば勧める", () => {
     expect(
@@ -227,7 +228,7 @@ describe("登録したときに気づかせるのは、1度だけ（設計書6.9
   it("隣に作品が無ければ勧めない", () => {
     expect(
       shouldOfferSeriesLink({
-        works: [{ folderPath: "C:\\別の場所\\教科書チート" }, added],
+        works: [{ folderPath: absPath("別の場所", "教科書チート") }, added],
         added,
         addedHasSeries: false,
         alreadyOffered: false,
@@ -239,13 +240,13 @@ describe("登録したときに気づかせるのは、1度だけ（設計書6.9
     expect(
       findSiblingWorks(
         [
-          { folderPath: "C:\\小説\\教科書チート" },
-          { folderPath: "C:\\小説\\別視点" },
-          { folderPath: "D:\\ほか\\短編" },
+          { folderPath: absPath("小説", "教科書チート") },
+          { folderPath: absPath("小説", "別視点") },
+          { folderPath: absPath("ほか", "短編") },
         ],
         added
       ).map((work) => work.folderPath)
-    ).toEqual(["C:\\小説\\教科書チート"]);
+    ).toEqual([absPath("小説", "教科書チート")]);
   });
 });
 

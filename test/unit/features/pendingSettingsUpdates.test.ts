@@ -20,6 +20,7 @@ import {
   window,
   workspace,
 } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 「更新分を反映」を人物以外の資料へ広げる（作者の裁定、2026-09-23 問11 B）。
@@ -33,7 +34,7 @@ import {
 const work: WorkEntry = {
   id: "work_test",
   title: "作品",
-  folderPath: ["C:", "novels", "work"].join(path.sep),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-23T00:00:00.000Z",
 };
 

@@ -11,6 +11,7 @@ import {
 import { IGNORED_PATHS } from "../../../src/core/workRegistry";
 import type { WorkEntry } from "../../../src/models/types";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 写真の書き起こしの「AIへの頼み」の置き場（設計書6.117.7。作者の裁定、2026-10-12 夜）。
@@ -24,7 +25,7 @@ function workAt(id: string, folder: string): WorkEntry {
   return {
     id,
     title: id,
-    folderPath: path.join("C:", "novels", folder),
+    folderPath: absPath("novels", folder),
     registeredAt: "2026-10-12T00:00:00.000Z",
   };
 }

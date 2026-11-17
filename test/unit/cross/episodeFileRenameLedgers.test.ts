@@ -12,6 +12,7 @@ import { ChapterStore } from "../../../src/core/chapterStore";
 import { PostingStore } from "../../../src/core/postingStore";
 import { TimelineStore } from "../../../src/core/timelineStore";
 import { isPosted } from "../../../src/models/posting";
+import { absPath } from "../support/osPath";
 
 /**
  * 製品の中で話の**名前だけ**を変えたとき、パスで話を指す台帳がついてくる
@@ -37,7 +38,7 @@ import { isPosted } from "../../../src/models/posting";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-03T00:00:00.000Z",
 };
 

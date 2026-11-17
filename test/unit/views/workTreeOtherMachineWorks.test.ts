@@ -1,4 +1,3 @@
-import * as path from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 /**
@@ -54,11 +53,12 @@ import type { SyncedWork } from "../../../src/core/syncedWorkList";
 import type { WorkEntry } from "../../../src/models/types";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
 import { EventEmitter } from "vscode";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_1",
   title: "登録した作品",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

@@ -10,6 +10,7 @@ import {
   sjisMarkPlaces,
 } from "../../../src/core/sjisMarkFinding";
 import type { FindingView } from "../../../src/models/finding";
+import { absPath } from "../support/osPath";
 
 /**
  * 保存の直前に「〓」にした字の説明を、校正・メモパネルの行にする（設計書5.4.2、0.148.3。
@@ -18,9 +19,9 @@ import type { FindingView } from "../../../src/models/finding";
  * 見張ること：〓の行へ飛べる・作者が〓を直したら行が消える・［直す］や提案パネルの道に乗らない。
  */
 
-const WORK = "C:\\小説\\作品";
-const EPISODE = `${WORK}\\本文\\001.txt`;
-const RECOVERY = `${WORK}\\本文\\.novelai-recovery\\001.txt.20261109.bak`;
+const WORK = absPath("小説", "作品");
+const EPISODE = absPath("小説", "作品", "本文", "001.txt");
+const RECOVERY = absPath("小説", "作品", "本文", ".novelai-recovery", "001.txt.20261109.bak");
 const TIME = "2026-11-09T01:00:00.000Z";
 
 function marksOf(text: string) {

@@ -1,10 +1,17 @@
 import * as crypto from "crypto";
 import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import { AtomicWriteFileError, atomicWriteFile } from "../../../src/core/atomicWrite";
+import * as nodePath from "node:path";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
-const path = "C:\\novels\\001.txt";
+const path = absPath("novels", "001.txt");
 const destinationPath = Uri.file(path).fsPath;
+// 区切りは OS に合わせる（Mac では「/」。製品の道の部品が OS の path を使うため）
+const novelsDir = Uri.file(absPath("novels")).fsPath;
+const sep = nodePath.sep;
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const temporaryPattern = new RegExp(`^${escapeRegExp(destinationPath)}\\.novelai-\\d+-.+\\.tmp$`);
 
 function sha256(bytes: Uint8Array): string {
   return crypto.createHash("sha256").update(bytes).digest("hex");
@@ -31,7 +38,7 @@ describe("原稿の原子的な保存", () => {
   beforeEach(() => {
     files.clear();
     directories.clear();
-    directories.add("c:\\novels");
+    directories.add(novelsDir);
     deletedPaths.length = 0;
     renameBase = vi.fn(
       async (
@@ -62,8 +69,8 @@ describe("原稿の原子的な保存", () => {
           throw new FileSystemError("missing", "FileNotFound");
         }
         return [...files.keys()]
-          .filter((filePath) => filePath.slice(0, filePath.lastIndexOf("\\")) === uri.fsPath)
-          .map((filePath) => [filePath.slice(filePath.lastIndexOf("\\") + 1), 1]);
+          .filter((filePath) => filePath.slice(0, filePath.lastIndexOf(sep)) === uri.fsPath)
+          .map((filePath) => [filePath.slice(filePath.lastIndexOf(sep) + 1), 1]);
       }),
       writeFile: vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
         files.set(uri.fsPath, bytes);
@@ -88,7 +95,7 @@ describe("原稿の原子的な保存", () => {
       { fsPath: string },
       { overwrite: boolean },
     ];
-    expect(temporary.fsPath).toMatch(/^c:\\novels\\001\.txt\.novelai-\d+-.+\.tmp$/);
+    expect(temporary.fsPath).toMatch(temporaryPattern);
     expect(destination.fsPath).toBe(destinationPath);
     expect(options).toEqual({ overwrite: true });
     expect(files.get(destinationPath)).toEqual(bytes);
@@ -107,7 +114,7 @@ describe("原稿の原子的な保存", () => {
 
     expect(deletedPaths).toHaveLength(1);
     expect(deletedPaths[0]).not.toBe(destinationPath);
-    expect(deletedPaths[0]).toMatch(/^c:\\novels\\001\.txt\.novelai-\d+-.+\.tmp$/);
+    expect(deletedPaths[0]).toMatch(temporaryPattern);
     expect(files.get(destinationPath)).toEqual(original);
   });
 
@@ -398,8 +405,8 @@ describe("原稿の原子的な保存", () => {
   });
 
   test("6回の置換提案後は管理回復ディレクトリに最新5世代だけ残す", async () => {
-    const recoveryDir = "c:\\novels\\.novelai-recovery";
-    const unmanagedPath = `${recoveryDir}\\作者保管.bak`;
+    const recoveryDir = `${novelsDir}${sep}.novelai-recovery`;
+    const unmanagedPath = `${recoveryDir}${sep}作者保管.bak`;
     directories.add(recoveryDir);
     files.set(unmanagedPath, new Uint8Array([0x41]));
     const original = new Uint8Array([0x42]);
@@ -417,10 +424,10 @@ describe("原稿の原子的な保存", () => {
 
     const managed = [...files.entries()].filter(
       ([filePath]) =>
-        filePath.startsWith(`${recoveryDir}\\`) && filePath !== unmanagedPath
+        filePath.startsWith(`${recoveryDir}${sep}`) && filePath !== unmanagedPath
     );
     expect(managed).toHaveLength(5);
-    expect(new Set(managed.map(([filePath]) => filePath.split("\\").at(-1)?.split("-")[0])).size)
+    expect(new Set(managed.map(([filePath]) => filePath.split(sep).at(-1)?.split("-")[0])).size)
       .toBe(1);
     expect(files.get(unmanagedPath)).toEqual(new Uint8Array([0x41]));
     expect(files.get(destinationPath)).toEqual(original);

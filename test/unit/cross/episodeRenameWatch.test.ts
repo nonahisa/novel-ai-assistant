@@ -13,6 +13,7 @@ import { TimelineStore } from "../../../src/core/timelineStore";
 import { isPosted } from "../../../src/models/posting";
 import { postingTextHash } from "../../../src/core/postingBodyHash";
 import { findWorkForFile } from "../../../src/core/workRegistry";
+import { absPath } from "../support/osPath";
 
 /**
  * 製品の外で話の名前を変えたとき、パスで話を指す台帳を付け替える
@@ -28,7 +29,7 @@ import { findWorkForFile } from "../../../src/core/workRegistry";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-03T00:00:00.000Z",
 };
 

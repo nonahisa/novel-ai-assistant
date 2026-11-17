@@ -21,6 +21,7 @@ import { setExternalClientName } from "../../../src/mcp/tools/accessLog";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 相談ログ・ログ・編集履歴を読む鍵は、**`"*"` に含めない**
@@ -132,7 +133,7 @@ describe("許可の印を書く側（拡張機能）", () => {
   const work: WorkEntry = {
     id: "work_test",
     title: "氷の街",
-    folderPath: path.join("C:", "novels", "work"),
+    folderPath: absPath("novels", "work"),
     registeredAt: "2026-09-03T00:00:00.000Z",
   };
   const target = Uri.file(path.join(work.folderPath, ".aiwriter", "external-access.json")).fsPath;

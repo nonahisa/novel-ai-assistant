@@ -13,6 +13,7 @@ import {
   runGit,
   type GitCommandRunner,
 } from "../core/git";
+import { describeSkippedDriveWorks } from "../core/driveDestination";
 import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSetup";
 import { buildSyncTarget } from "../core/syncTarget";
 import {
@@ -148,10 +149,26 @@ export interface SyncAllDeps {
   diagnoseFetch?: (work: WorkEntry) => Promise<"revoked" | "offline" | "unknown">;
   /** 見分けた理由の知らせ（試験の差し替え口）。省けば `showFetchTrouble` */
   showFetchTrouble?: (work: WorkEntry, trouble: "revoked" | "offline") => void;
+  /** git の同期から外す作品（送り先が Google ドライブの作品。設計書5.10.9） */
+  skipWork?: (work: WorkEntry) => boolean;
+  /**
+   * 外した作品を結果の知らせに書くか（「すべて同期」を直に押したとき。［保存・同期］は
+   * ドライブの分を自分で知らせるので書かない）
+   */
+  noteSkippedWorks?: boolean;
 }
 
 export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
-  const works = deps.registry.list();
+  const all = deps.registry.list();
+  const works = all.filter((work) => !deps.skipWork?.(work));
+  const skippedNote = deps.noteSkippedWorks
+    ? describeSkippedDriveWorks(all.filter((work) => deps.skipWork?.(work)).map((work) => work.title))
+    : "";
+  if (works.length === 0 && all.length > 0) {
+    // 全部が Google ドライブの作品。git では何もしない
+    if (skippedNote) void vscode.window.showInformationMessage(skippedNote.replace(/^\n+/, ""));
+    return;
+  }
   if (works.length === 0) {
     void vscode.window.showInformationMessage(
       "登録されている作品がありません。先に作品を追加してください。"
@@ -188,7 +205,7 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
       vscode.window.showInformationMessage(
         hasMissingWorks(rest)
           ? skips.replace(/^\n+/, "")
-          : `同期するものはありませんでした。${skips}`,
+          : `同期するものはありませんでした。${skips}${skippedNote}`,
         ...next.map((step) => step.label)
       ),
       (picked) => runNextStep(next, picked),
@@ -247,7 +264,7 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
   // （2026-10-30、母艦のレビュー）
   deps.monitor.notifyRepositoryChanged?.();
 
-  await report(outcomes, plans, deps.autoResend ?? readAutoResendSettings().enabled !== false);
+  await report(outcomes, plans, deps.autoResend ?? readAutoResendSettings().enabled !== false, skippedNote);
   // ほかの置き場を同期した回でも、届かなかった置き場には［この作品の編集を終える］を出す
   showFetchTroubles(deps, plans);
 }
@@ -968,7 +985,9 @@ function describePullFailure(kind: "dirty" | "failed"): string {
 async function report(
   outcomes: readonly SyncTargetOutcome[],
   plans: readonly SyncTargetPlan[],
-  autoResend: boolean
+  autoResend: boolean,
+  /** 外した作品の一言（Google ドライブの作品。設計書5.10.9） */
+  skippedNote = ""
 ): Promise<void> {
   const failed = outcomes.filter((one) => one.error);
   // 作品のフォルダーが無くて止めた置き場は、済んだことより先に書く（届いていないことを先に。
@@ -977,7 +996,7 @@ async function report(
   const skips = describeSyncSkips(plans, "after");
   const summary = hasMissingWorks(plans)
     ? `${skips.replace(/^\n+/, "")}\n\n${done}`
-    : done + skips;
+    : done + skips + skippedNote;
   const next = nextSteps(plans, outcomes);
 
   if (failed.length === 0) {

@@ -5,6 +5,7 @@ import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { emptyCounts } from "../../../src/core/charCount";
 import { insertEpisodeBefore } from "../../../src/features/insertEpisode";
 import { removeEpisodeAndRenumber } from "../../../src/features/removeEpisode";
+import { absPath } from "../support/osPath";
 
 /**
  * 話の挿入と削除（設計書6.67.4）。
@@ -19,7 +20,7 @@ import { removeEpisodeAndRenumber } from "../../../src/features/removeEpisode";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-03T00:00:00.000Z",
 };
 

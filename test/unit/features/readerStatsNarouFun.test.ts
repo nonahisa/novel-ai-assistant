@@ -21,6 +21,7 @@ import {
 import type { WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * Narou.fun（なろうの分析サイト）の封筒を受ける（残課題 B11。作者の依頼、2026-09-23）。
@@ -282,7 +283,7 @@ describe("なろうの評価率は、評価者数で割る", () => {
 const work: WorkEntry = {
   id: "work_narou_fun",
   title: "星を継ぐ者たち",
-  folderPath: path.join("C:", "novels", "narou-fun"),
+  folderPath: absPath("novels", "narou-fun"),
   registeredAt: "2026-09-23T00:00:00.000Z",
 };
 

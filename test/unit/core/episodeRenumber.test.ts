@@ -15,6 +15,7 @@ import {
 } from "../../../src/core/episodeRenumber";
 import { emptyCharacter } from "../../../src/models/character";
 import type { Chapter } from "../../../src/models/chapter";
+import { absPath } from "../support/osPath";
 
 /**
  * 話数の付け替え（設計書6.67）。
@@ -23,7 +24,7 @@ import type { Chapter } from "../../../src/models/chapter";
  * 名前にするか」と「話数を指している台帳をどうずらすか」だけである。
  */
 
-const DIR = path.join("C:", "novels", "work", "本文");
+const DIR = absPath("novels", "work", "本文");
 
 function ep(fileName: string): RenumberEpisode {
   return { filePath: path.join(DIR, fileName), fileName };

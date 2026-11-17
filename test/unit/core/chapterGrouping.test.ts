@@ -9,6 +9,7 @@ import {
 } from "../../../src/core/chapterGrouping";
 import type { Chapter } from "../../../src/models/chapter";
 import type { EpisodeFile } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * 章ごとに話を束ねる論理（設計書6.66.1・6.66.3）。
@@ -18,7 +19,7 @@ import type { EpisodeFile } from "../../../src/models/types";
  * 最初の章より前の話は章なし（作品の直下）に残る。
  */
 
-const WORK_FOLDER = path.join("C:", "novels", "work");
+const WORK_FOLDER = absPath("novels", "work");
 
 function episode(chapterStart: number, fileName: string): EpisodeFile {
   return {

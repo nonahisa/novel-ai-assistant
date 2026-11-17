@@ -59,13 +59,23 @@ describe("写しを組み立てる（buildWorksSnapshot）", () => {
     ]);
   });
 
-  it("同じ場所の二重登録を挙げる（大小・末尾の区切りの違いも同じ場所）", () => {
+  // ドライブ名の大小・円記号の区切りは Windows の道だけのもの。Mac の形は次の試しで見る
+  it.runIf(process.platform === "win32")("同じ場所の二重登録を挙げる（大小・末尾の区切りの違いも同じ場所）", () => {
     const snapshot = buildWorksSnapshot(
       [work("a", "C:\\小説\\灯台"), work("b", "c:\\小説\\灯台\\"), work("c", "C:\\小説\\港")],
       WRITER,
       NOW
     );
     expect(snapshot.duplicates).toEqual([{ folderPath: "C:\\小説\\灯台", ids: ["a", "b"] }]);
+  });
+
+  it.runIf(process.platform !== "win32")("同じ場所の二重登録を挙げる（末尾の区切りの違いも同じ場所。Mac の道）", () => {
+    const snapshot = buildWorksSnapshot(
+      [work("a", "/小説/灯台"), work("b", "/小説/灯台/"), work("c", "/小説/港")],
+      WRITER,
+      NOW
+    );
+    expect(snapshot.duplicates).toEqual([{ folderPath: "/小説/灯台", ids: ["a", "b"] }]);
   });
 
   it("項目が欠けた記録も落とさず、空の文字で埋めて並べる", () => {

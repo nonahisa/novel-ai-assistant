@@ -2,6 +2,7 @@ import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { checkDictionaryFreshness } from "../../../src/core/imeDictionaryStatus";
 import { FileType, Uri, workspace } from "../support/vscodeStub";
+import { absPath, SEP } from "../support/osPath";
 
 /**
  * 「書き出したIME辞書が古くなっていないか」の判定（設計書6.13）。
@@ -11,7 +12,7 @@ import { FileType, Uri, workspace } from "../support/vscodeStub";
  * 作者から見ると「抽出したのに変換に出ない」としか見えない。
  */
 
-const settingsDir = "C:\\novels\\work\\設定";
+const settingsDir = absPath("novels", "work", "設定");
 
 function diskPath(filePath: string): string {
   return Uri.file(filePath).fsPath;
@@ -31,12 +32,12 @@ describe("IME辞書の新しさ", () => {
     }) as never;
 
     workspace.fs.readDirectory = (async (uri: { fsPath: string }) => {
-      const prefix = `${uri.fsPath}\\`;
+      const prefix = `${uri.fsPath}${SEP}`;
       const entries: Array<[string, FileType]> = [];
       for (const filePath of files.keys()) {
         if (!filePath.startsWith(prefix)) continue;
         const name = filePath.slice(prefix.length);
-        if (name.includes("\\")) continue; // 直下だけ
+        if (name.includes(SEP)) continue; // 直下だけ
         entries.push([name, FileType.File]);
       }
       if (entries.length === 0) throw new Error("FileNotFound");

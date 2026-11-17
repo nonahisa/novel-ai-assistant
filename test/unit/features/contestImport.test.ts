@@ -12,6 +12,7 @@ import { invalidateWorkGoals } from "../../../src/core/workGoalsStore";
 import { parseWorkGoals, type WorkGoals } from "../../../src/models/workGoals";
 import type { WorkEntry } from "../../../src/models/types";
 import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 公募の一覧の取り込みと、応募先への入れ方（設計書6.3.6.1）。
@@ -71,7 +72,7 @@ function work(id: string, title: string): WorkEntry {
   return {
     id,
     title,
-    folderPath: path.join("C:", "novels", id),
+    folderPath: absPath("novels", id),
     registeredAt: "2026-09-23T00:00:00.000Z",
   };
 }

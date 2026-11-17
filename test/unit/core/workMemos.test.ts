@@ -10,6 +10,7 @@ import {
 } from "../../../src/core/workMemos";
 import type { WorkEntry } from "../../../src/models/types";
 import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 作品ごとのメモと、創作メモ集からの移管（設計書6.71）。
@@ -24,14 +25,14 @@ import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub
 const memoWork: WorkEntry = {
   id: "work_memo",
   title: "創作メモ集",
-  folderPath: path.join("C:", "novels", "memos"),
+  folderPath: absPath("novels", "memos"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 
 const novelWork: WorkEntry = {
   id: "work_novel",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "ice"),
+  folderPath: absPath("novels", "ice"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 
@@ -224,7 +225,7 @@ describe("作品ごとのメモ", () => {
     });
 
     test("作品の外のファイルは消さない", async () => {
-      const outside = path.join("C:", "novels", "よそ.md");
+      const outside = absPath("novels", "よそ.md");
       disk.set(diskPath(outside), utf8("よそのファイル"));
 
       await expect(
@@ -272,7 +273,7 @@ describe("作品ごとのメモ", () => {
     });
 
     test("移す元が作品の外なら断る", async () => {
-      const outside = path.join("C:", "novels", "よそ.md");
+      const outside = absPath("novels", "よそ.md");
       disk.set(diskPath(outside), utf8("よそのファイル"));
 
       await expect(

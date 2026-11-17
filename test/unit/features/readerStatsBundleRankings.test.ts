@@ -20,6 +20,7 @@ import {
 } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
 import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * まとめて渡された束の順位（`rankings`。ヘルパー 0.19.0、2026-11-02）を、作品の台帳の
@@ -34,7 +35,7 @@ import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeS
  */
 
 function work(id: string, title: string): WorkEntry {
-  return { id, title, folderPath: path.join("C:", "novels", id), registeredAt: "2026-11-01T00:00:00.000Z" };
+  return { id, title, folderPath: absPath("novels", id), registeredAt: "2026-11-01T00:00:00.000Z" };
 }
 
 function ledgerPath(entry: WorkEntry): string {

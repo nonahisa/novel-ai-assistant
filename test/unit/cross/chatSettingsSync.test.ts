@@ -5,6 +5,7 @@ import { emptyCharacter, type Character } from "../../../src/models/character";
 import type { WorkEntry } from "../../../src/models/types";
 import type { WorkChatTurn } from "../../../src/prompts/workChat";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 相談から設定資料への書き込み（設計書6.72、P-32）。
@@ -129,7 +130,7 @@ const { applyChatToSettings } = await import(
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

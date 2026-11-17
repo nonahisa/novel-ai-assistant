@@ -61,15 +61,15 @@ vi.mock("vscode", () => {
   };
 });
 
-const WORK_FOLDER = "C:/小説/作品";
-const FILE_PATH = "C:/小説/作品/本文/001.txt";
+const WORK_FOLDER = absPath("小説", "作品");
+const FILE_PATH = absPath("小説", "作品", "本文", "001.txt");
 
 /** いまの本文（テストごとに書き換える。作者が保存したあとの本文のつもり） */
 let currentText = "";
 
 vi.mock("../../../src/core/scanner", () => ({
   scanWork: vi.fn(async () => ({
-    episodes: [{ filePath: "C:/小説/作品/本文/001.txt", fileName: "001.txt", hasConflictMarkers: false }],
+    episodes: [{ filePath: absPath("小説", "作品", "本文", "001.txt"), fileName: "001.txt", hasConflictMarkers: false }],
   })),
 }));
 
@@ -109,6 +109,7 @@ import { planShiftJisSave } from "../../../src/core/sjisFallback";
 import { buildSjisMarkFindings, SJIS_MARK_FINDING_LABEL } from "../../../src/core/sjisMarkFinding";
 import { findingId, type Finding } from "../../../src/models/finding";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 let workCount = 0;
 function newWork(): WorkEntry {

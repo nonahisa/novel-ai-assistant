@@ -10,6 +10,7 @@ import {
   readingDictionaryExists,
   saveReadingDictionary,
 } from "../../../src/core/readingDictionaryStore";
+import { absPath } from "../support/osPath";
 
 const logged = vi.hoisted(() => [] as string[]);
 vi.mock("../../../src/core/logger", async (importOriginal) => {
@@ -33,7 +34,7 @@ vi.mock("../../../src/core/logger", async (importOriginal) => {
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-03T00:00:00.000Z",
 };
 

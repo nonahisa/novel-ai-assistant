@@ -34,6 +34,12 @@ const BROWSER_EXTERNAL_BUILTINS = [
     ブラウザ版では引かない（`isWebRuntime()` で先に返す）ので、読み込まれない
   */
   "node:dns",
+  /*
+    Google のログインの戻りを手元の 127.0.0.1 で待ち受ける（設計書5.10.9。
+    `features/googleDriveAuth.ts`）。ブラウザ版では命令を隠し、呼ばれても
+    `canRunProcesses()` で先に返すので、読み込まれない
+  */
+  "node:http",
   "child_process",
   /*
     **`undici` はNodeにしか無い**（設計書6.63）。

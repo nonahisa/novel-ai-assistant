@@ -15,6 +15,7 @@ import { registeredSiteWorkKeys, type UnregisteredOwnWork } from "../../../src/c
 import { buildReaderStatsEnvelope } from "../../../src/core/readerStatsEnvelope";
 import { emptyPostingLedger, parsePostingLedger, type PostingLedger } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
+import { fsPathOf } from "../support/osPath";
 
 /**
  * 未登録の自分の作品の控えが、バックアップからの登録の直後に台帳へ入るか
@@ -34,8 +35,8 @@ import type { WorkEntry } from "../../../src/models/types";
  * 書庫は2つ（「どこに作りますか」が出る）。
  */
 
-const LIBRARY_A = paths.normalize("c:/小説/連載");
-const LIBRARY_B = paths.normalize("c:/小説/短編");
+const LIBRARY_A = fsPathOf("小説", "連載");
+const LIBRARY_B = fsPathOf("小説", "短編");
 
 const FIRST: UnregisteredOwnWork = {
   site: "kakuyomu",
@@ -270,7 +271,7 @@ describe("訊かずにバックアップから登録した直後に、控えた�
     works.push({
       id: "c1",
       title: "別の作品",
-      folderPath: paths.join(paths.normalize("c:/小説/別"), "別の作品"),
+      folderPath: paths.join(fsPathOf("小説", "別"), "別の作品"),
       registeredAt: "2026-01-01T00:00:00.000Z",
     });
     window.showQuickPick = (async (items: readonly { home?: string }[]) => {

@@ -8,6 +8,7 @@ import {
   initBackupPickFolder,
   showBackupOpenDialog,
 } from "../../../src/features/backupPickFolder";
+import { absPath } from "../support/osPath";
 
 /**
  * バックアップを選ぶ画面を、前に選んだフォルダーから開く（2026-09-23）。
@@ -16,8 +17,8 @@ import {
  * フォルダーから開き直すと、そのたびに辿り直すことになる。
  */
 
-const PICKED = "C:\\Users\\a\\小説\\短編\\N4190FX.txt";
-const FOLDER = "C:\\Users\\a\\小説\\短編";
+const PICKED = absPath("Users", "a", "小説", "短編", "N4190FX.txt");
+const FOLDER = absPath("Users", "a", "小説", "短編");
 
 class FakeMemento {
   readonly values = new Map<string, unknown>();
@@ -102,7 +103,7 @@ describe("前に選んだフォルダーから開く", () => {
 
   it("覚えた場所が今は無ければ、既定を出さない", async () => {
     const memento = new FakeMemento();
-    memento.values.set(BACKUP_PICK_FOLDER_KEY, "C:\\消したフォルダー");
+    memento.values.set(BACKUP_PICK_FOLDER_KEY, absPath("消したフォルダー"));
     initBackupPickFolder(memento as unknown as vscode.Memento);
     stubDialog(undefined);
 

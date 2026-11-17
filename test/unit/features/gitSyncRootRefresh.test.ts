@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { GitSyncStatus } from "../../../src/core/git";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 // 作品のフォルダーは在るものとして扱う（作り物の道はディスクに無い）。無いときの決まりは
 // `gitSyncPullPushMissingWork.test.ts` が見る（2026-11-14）
@@ -55,17 +56,17 @@ const { fileSystemWatchers, resetFileSystemWatchers } = await import(
   "../support/vscodeStub"
 );
 
-const ROOT = "C:/novels/library";
+const ROOT = absPath("novels", "library");
 const A: WorkEntry = {
   id: "a",
   title: "作品A",
-  folderPath: "C:\\novels\\library\\a",
+  folderPath: absPath("novels", "library", "a"),
   registeredAt: "2026-10-05T00:00:00.000Z",
 };
 const B: WorkEntry = {
   id: "b",
   title: "作品B",
-  folderPath: "C:\\novels\\library\\b",
+  folderPath: absPath("novels", "library", "b"),
   registeredAt: "2026-10-05T00:00:00.000Z",
 };
 
@@ -328,7 +329,7 @@ describe("git の操作の最中は、見張りの数え直しを待たせる", 
     const gate = deferred<void>();
     const operation = monitor.whileOperating(() => gate.promise);
 
-    watcher.fireChange("C:\\novels\\library\\a\\第1話.txt");
+    watcher.fireChange(absPath("novels", "library", "a", "第1話.txt"));
     await vi.advanceTimersByTimeAsync(2500);
     expect(readSyncStatus).not.toHaveBeenCalled();
 

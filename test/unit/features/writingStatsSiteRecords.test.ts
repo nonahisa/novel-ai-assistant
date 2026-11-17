@@ -4,6 +4,7 @@ import { readSiteRecords } from "../../../src/features/writingStatsPanel";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 執筆量パネルの「サイトの記録」を読むところ（0.33.9のレビュー、中1）。
@@ -17,7 +18,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_stats",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "stats"),
+  folderPath: absPath("novels", "stats"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

@@ -5,6 +5,7 @@ import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { isConfirmPick, readConfirm } from "../support/confirmPicker";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 既にある作品へ、バックアップの章立てだけを取り込む（残課題 B7。設計書6.66.6）。
@@ -66,7 +67,7 @@ function outline(): OutlineEpisode[] {
   }));
 }
 
-const WORK_FOLDER = path.join("C:", "novels", "lighthouse");
+const WORK_FOLDER = absPath("novels", "lighthouse");
 const work: WorkEntry = {
   id: "work_lighthouse",
   title: "架空の灯台守",
