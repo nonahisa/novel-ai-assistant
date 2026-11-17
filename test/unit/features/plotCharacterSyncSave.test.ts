@@ -4,6 +4,7 @@ import { Uri, window, workspace } from "../support/vscodeStub";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import type { WorkEntry } from "../../../src/models/types";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * plot.md を保存したときの、設定資料への差分反映（設計書6.4.9）。
@@ -65,7 +66,7 @@ const {
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 
@@ -481,7 +482,7 @@ describe("plot.md の保存で人物の更新案を積む", () => {
     const entry: WorkEntry = {
       ...work,
       id,
-      folderPath: nodePath.join("C:", "novels", id),
+      folderPath: absPath("novels", id),
     };
     const digestPath = Uri.file(
       nodePath.join(entry.folderPath, ".aiwriter", "plot-sync.json")
@@ -568,7 +569,7 @@ describe("plot.md の保存で人物の更新案を積む", () => {
  * 画面テスト plotRenamePending の知らせが崩れた。見分けは時間でなく中身で行う。
  */
 describe("自分で保存した plot.md の見分け", () => {
-  const plotFile = nodePath.join("C:", "novels", "work", "設定", "plot.md");
+  const plotFile = absPath("novels", "work", "設定", "plot.md");
 
   test("覚えた中身と同じ保存は1度だけ当たる（改行の違いは見ない）", () => {
     noteOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：\n");
@@ -599,7 +600,7 @@ describe("自分で保存した plot.md の見分け", () => {
 
   test("忘れたら当たらない・ほかのファイルには当たらない", () => {
     noteOwnPlotSave(plotFile, "本文\n");
-    expect(consumeOwnPlotSave(nodePath.join("C:", "novels", "other", "設定", "plot.md"), "本文\n")).toBe(false);
+    expect(consumeOwnPlotSave(absPath("novels", "other", "設定", "plot.md"), "本文\n")).toBe(false);
     forgetOwnPlotSave(plotFile);
     expect(consumeOwnPlotSave(plotFile, "本文\n")).toBe(false);
   });

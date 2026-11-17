@@ -32,16 +32,17 @@ vi.mock("../../../src/core/workFormatStore", () => ({
 
 import { configurePostingSites } from "../../../src/features/postingKit";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_log_target",
   title: "灯台の下",
-  folderPath: path.join("C:", "novels", "lighthouse"),
+  folderPath: absPath("novels", "lighthouse"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 
 /** 直前に触っていた、関係の無い作品 */
-const otherFolder = path.join("C:", "novels", "unrelated");
+const otherFolder = absPath("novels", "unrelated");
 
 const ledgerPath = Uri.file(
   path.join(work.folderPath, "設定", "投稿状態.json")

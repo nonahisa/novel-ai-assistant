@@ -7,6 +7,7 @@ import {
 } from "../../../src/core/epubOrnamentFolder";
 import { BUILTIN_ORNAMENTS } from "../../../src/core/epubOrnaments";
 import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 外から足す飾りを読む口（設計書6.65.17）。
@@ -18,8 +19,8 @@ import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub
  * ことがあるので、その場合は組み込みの飾りだけになる。
  */
 
-const settingsDir = "C:\\novels\\work\\設定";
-const sharedDir = "C:\\飾り置き場";
+const settingsDir = absPath("novels", "work", "設定");
+const sharedDir = absPath("飾り置き場");
 
 const disk = new Map<string, string>();
 /** 実在するフォルダー。`readDirectory` はここに無ければ FileNotFound */

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 投稿済みのメモを別の作品へ移すとき、**移す前に**「投稿の記録が N件残ります」と
@@ -33,14 +34,14 @@ const { transferMemo } = await import("../../../src/features/manageWorkMemos");
 const memoWork: WorkEntry = {
   id: "work_memo",
   title: "創作メモ集",
-  folderPath: path.join("C:", "novels", "memos"),
+  folderPath: absPath("novels", "memos"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 
 const novelWork: WorkEntry = {
   id: "work_novel",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "ice"),
+  folderPath: absPath("novels", "ice"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

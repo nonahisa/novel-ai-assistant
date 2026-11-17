@@ -14,6 +14,7 @@ import {
 import type { WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * カクヨムの直近30日の日ごとのPVを、取り込むたびに積み直さない
@@ -150,7 +151,7 @@ describe("判定：カクヨムの日ごとのPVも、いま見えている数�
 const work: WorkEntry = {
   id: "work_kakuyomu_daily",
   title: "星を継ぐ者たち",
-  folderPath: path.join("C:", "novels", "kakuyomu-daily"),
+  folderPath: absPath("novels", "kakuyomu-daily"),
   registeredAt: "2026-09-23T00:00:00.000Z",
 };
 

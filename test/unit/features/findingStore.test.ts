@@ -13,6 +13,7 @@ import {
   type FindingView,
 } from "../../../src/models/finding";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * AIの指摘を数日残す置き場（設計書6.96）。
@@ -28,12 +29,12 @@ import type { WorkEntry } from "../../../src/models/types";
 const work: WorkEntry = {
   id: "w1",
   title: "テスト作品",
-  folderPath: "C:\\novels\\テスト作品",
+  folderPath: absPath("novels", "テスト作品"),
   registeredAt: new Date(0).toISOString(),
 };
 
 const FINDINGS_PATH = Uri.file(
-  "C:\\novels\\テスト作品\\.aiwriter\\findings.jsonl"
+  absPath("novels", "テスト作品", ".aiwriter", "findings.jsonl")
 ).fsPath;
 
 function finding(overrides: Partial<Finding> = {}): Finding {
@@ -232,7 +233,7 @@ describe("1件の形を読む", () => {
     );
     // 絶対パスでも相対パスでも揃う
     expect(
-      findingId("C:\\novels\\作品\\本文\\a.txt", "原文", "語", "直し", "typo")
+      findingId(absPath("novels", "作品", "本文", "a.txt"), "原文", "語", "直し", "typo")
     ).toBe(findingId("本文/a.txt", "原文", "語", "直し", "typo"));
     // 中身が違えば別物
     expect(findingId("a.txt", "原文", "語", "直し", "typo")).not.toBe(

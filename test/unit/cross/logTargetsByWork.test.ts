@@ -18,6 +18,7 @@ import {
   useLogFile,
 } from "../../../src/core/logger";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * 処理が作品を知っているときは、記録をその作品の操作の記録
@@ -31,7 +32,7 @@ import type { WorkEntry } from "../../../src/models/types";
 const work: WorkEntry = {
   id: "work_log",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "logwork"),
+  folderPath: absPath("novels", "logwork"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 
@@ -39,7 +40,7 @@ const workLogPath = Uri.file(
   path.join(work.folderPath, ".aiwriter", "logs", "actions.log")
 ).fsPath;
 const vaultLogPath = Uri.file(
-  path.join("C:", "vault", ".aiwriter", "logs", "actions.log")
+  absPath("vault", ".aiwriter", "logs", "actions.log")
 ).fsPath;
 
 const disk = new Map<string, Uint8Array>();
@@ -53,7 +54,7 @@ beforeEach(() => {
   disk.clear();
   workspace.textDocuments = [];
   workspace.fs = memoryFs(disk);
-  setFallbackLogRoot(path.join("C:", "vault"));
+  setFallbackLogRoot(absPath("vault"));
   useLogFile(undefined);
 });
 

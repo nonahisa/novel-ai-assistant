@@ -13,6 +13,7 @@ import { BAKED_COVER_FILES } from "../../../src/core/coverBake";
 import type { WorkEntry } from "../../../src/models/types";
 import { commands, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * EPUBエディターのプレビュー（設計書6.65.6・6.65.8・6.65.10・6.65.11）。
@@ -155,7 +156,7 @@ beforeEach(() => {
   work = {
     id: `work_epub_panel_${counter}`,
     title: "氷の街",
-    folderPath: `C:\\novels\\work${counter}`,
+    folderPath: absPath("novels", `work${counter}`),
     registeredAt: "2026-09-03T00:00:00.000Z",
   };
   disk.clear();

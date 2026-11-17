@@ -346,11 +346,12 @@ import {
   type ConfirmPicker,
 } from "../support/confirmPicker";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_test",
   title: "作品",
-  folderPath: "C:\\novels\\work",
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-08-06T00:00:00.000Z",
 };
 
@@ -460,7 +461,7 @@ describe("人物抽出フロー", () => {
   test("保存に失敗した文書がある場合はunsafe continueを提示せず中止する", async () => {
     const save = vi.fn(async () => false);
     workspace.textDocuments = [{
-      uri: { fsPath: "c:\\NOVELS\\WORK\\本文\\001.txt" },
+      uri: { fsPath: absPath("NOVELS", "WORK", "本文", "001.txt") },
       isDirty: true,
       getText: () => "未保存本文",
       save,
@@ -484,7 +485,7 @@ describe("人物抽出フロー", () => {
 
   test("saveがtrueでもdirtyのままなら再検査で中止する", async () => {
     const document = {
-      uri: { fsPath: "C:\\novels\\work\\設定\\characters\\char_001_灯.json" },
+      uri: { fsPath: absPath("novels", "work", "設定", "characters", "char_001_灯.json") },
       isDirty: true,
       getText: () => "未保存設定",
       save: vi.fn(async () => true),
@@ -1116,7 +1117,7 @@ describe("人物抽出フロー", () => {
       showInformationMessage: vi.fn(async () => "実行"),
     });
     state.dirtyDocumentPaths.mockResolvedValue([
-      "C:\\NOVELS\\WORK\\設定\\characters\\char_001_灯.json",
+      absPath("NOVELS", "WORK", "設定", "characters", "char_001_灯.json"),
     ]);
 
     await extractCharacters(work, testRegistry());
@@ -1145,7 +1146,7 @@ describe("人物抽出フロー", () => {
     });
     // 保存する前だけ未保存。保存したあとの読み直しでは残っていない
     state.dirtyDocumentPaths
-      .mockResolvedValueOnce(["C:\\NOVELS\\WORK\\設定\\characters\\char_001_灯.json"])
+      .mockResolvedValueOnce([absPath("NOVELS", "WORK", "設定", "characters", "char_001_灯.json")])
       .mockResolvedValue([]);
     state.generate.mockResolvedValue(successfulResult("灯"));
     const presave = { count: 1, save: vi.fn(async () => true) };
@@ -1179,7 +1180,7 @@ describe("人物抽出フロー", () => {
     });
     state.dirtyDocumentPaths
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(["C:\\novels\\work\\設定\\characters\\char_001_灯.json"]);
+      .mockResolvedValueOnce([absPath("novels", "work", "設定", "characters", "char_001_灯.json")]);
     state.generate
       .mockResolvedValueOnce(successfulResult("灯"))
       .mockResolvedValueOnce(successfulResult("澪"));
@@ -1495,8 +1496,8 @@ describe("人物抽出フロー", () => {
   });
 
   test("曖昧な保存失敗は型付きの保存先と回復パスだけを詳細表示する", async () => {
-    const destination = "C:\\novels\\work\\設定\\characters\\char_001_灯.json";
-    const recovery = "C:\\novels\\work\\設定\\characters\\.novelai-recovery\\safe.bak";
+    const destination = absPath("novels", "work", "設定", "characters", "char_001_灯.json");
+    const recovery = absPath("novels", "work", "設定", "characters", ".novelai-recovery", "safe.bak");
     let detailContent = "";
     Object.assign(workspace, {
       openTextDocument: vi.fn(async (options: { content: string }) => {

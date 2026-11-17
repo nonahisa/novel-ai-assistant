@@ -49,7 +49,8 @@ describe("順番待ちの鎖", () => {
     await expect(next).resolves.toBe("続き");
   });
 
-  test("編集用フォルダーの鍵は、書き方の違う同じ場所で同じになる", () => {
+  // 円記号・斜線とドライブ名の書き方の違いは Windows の道だけのもの
+  test.runIf(process.platform === "win32")("編集用フォルダーの鍵は、書き方の違う同じ場所で同じになる", () => {
     expect(editingQueueKey("C:\\Novels\\編集部\\氷の街-編集用")).toBe(
       editingQueueKey("C:/Novels/編集部/氷の街-編集用")
     );

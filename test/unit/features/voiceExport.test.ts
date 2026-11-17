@@ -14,6 +14,7 @@ import {
   type FakeEngine,
   type FakeEngineTerms,
 } from "../support/fakeVoiceEngine";
+import { absPath } from "../support/osPath";
 
 /**
  * 人物の声の朗読を音声ファイルに書き出す（設計書6.42.4）。
@@ -115,8 +116,8 @@ const { buildReadingPlan } = await import("../../../src/core/readAloud");
 const { IGNORED_PATHS } = await import("../../../src/core/workRegistry");
 const pathModule = await import("../../../src/core/paths");
 
-const work = { id: "w1", title: "鉛の海", folderPath: "C:\\works\\namari" } as WorkEntry;
-const EPISODE = "C:\\works\\namari\\本文\\01_はじまり.txt";
+const work = { id: "w1", title: "鉛の海", folderPath: absPath("works", "namari") } as WorkEntry;
+const EPISODE = absPath("works", "namari", "本文", "01_はじまり.txt");
 const TEXT = "「やった！」と灯は笑った。\n「静かにしろ」と蓮は囁いた。";
 const lame = { mp3Encoder: async () => (c: number, r: number, k: number) => new Mp3Encoder(c, r, k) };
 

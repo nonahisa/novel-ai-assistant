@@ -14,6 +14,7 @@ vi.mock("../../../src/core/runtime", async (importOriginal) => {
   return { ...actual, canRunProcesses: () => runtime.processes };
 });
 import { cancelRunningTask } from "../../../src/views/progress";
+import { absPath } from "../support/osPath";
 
 /**
  * 原稿エディターの［入力］→「テキストファイルから」「Word から」（作者の決定 2026-11-08。
@@ -27,12 +28,12 @@ import { cancelRunningTask } from "../../../src/views/progress";
 const work: WorkEntry = {
   id: "work_import",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "import"),
+  folderPath: absPath("novels", "import"),
   registeredAt: "2026-11-08T00:00:00.000Z",
 };
 const manuscriptDir = Uri.file(path.join(work.folderPath, "本文")).fsPath;
-const sourcePath = Uri.file(path.join("C:", "外", "取り込む.txt")).fsPath;
-const wordPath = Uri.file(path.join("C:", "外", "雪の朝.docx")).fsPath;
+const sourcePath = Uri.file(absPath("外", "取り込む.txt")).fsPath;
+const wordPath = Uri.file(absPath("外", "雪の朝.docx")).fsPath;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

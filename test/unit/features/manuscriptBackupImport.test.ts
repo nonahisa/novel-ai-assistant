@@ -6,6 +6,7 @@ import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { emptyCounts } from "../../../src/core/charCount";
 import { importBackupIntoWork } from "../../../src/features/manuscriptBackupImport";
 import { cancelRunningTask } from "../../../src/views/progress";
+import { absPath } from "../support/osPath";
 
 /** ブラウザ版のふり（外部プロセスを起動できない） */
 const runtime = vi.hoisted(() => ({ processes: true }));
@@ -26,11 +27,11 @@ vi.mock("../../../src/core/runtime", async (importOriginal) => {
 const work: WorkEntry = {
   id: "work_backup_import",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "backup-import"),
+  folderPath: absPath("novels", "backup-import"),
   registeredAt: "2026-11-12T00:00:00.000Z",
 };
 const manuscriptDir = Uri.file(path.join(work.folderPath, "本文")).fsPath;
-const zipPath = Uri.file(path.join("C:", "外", "星の街.zip")).fsPath;
+const zipPath = Uri.file(absPath("外", "星の街.zip")).fsPath;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

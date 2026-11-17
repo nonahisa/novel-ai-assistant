@@ -8,6 +8,7 @@ import { withSiteFacts, withWorkCompletion } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 知らない連載の状態を読んだときの台帳の持ち回り（作者の判断 2026-11-01）。
@@ -22,7 +23,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

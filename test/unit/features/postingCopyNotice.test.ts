@@ -12,6 +12,8 @@ import { showPostingCopyNotice } from "../../../src/features/postingCopyNotice";
 import type { NoteMarkdownResult } from "../../../src/core/noteMarkdown";
 import type { WorkEntry } from "../../../src/models/types";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
+import { fsPathOf } from "../support/osPath";
 
 /**
  * noteへコピーしたあとの知らせ（設計書6.84）。
@@ -22,7 +24,7 @@ import { memoryFs } from "../support/memoryDisk";
 
 const NOTE: NoteMarkdownResult = {
   body: "【画像：猫（cat.png）】",
-  images: [{ alt: "猫", path: "画像\\cat.png", line: 1 }],
+  images: [{ alt: "猫", path: "画像/cat.png", line: 1 }],
   embeds: [],
   warnings: [],
 };
@@ -59,12 +61,12 @@ afterEach(() => {
 describe("画像のフォルダーを開くボタン", () => {
   it("画像が実在するときだけ出す", async () => {
     const captured = captureButtons();
-    onlyExisting(["c:\\works\\a\\画像\\cat.png"]);
+    onlyExisting([fsPathOf("works", "a", "画像", "cat.png")]);
 
     await showPostingCopyNotice({
       conversion: { text: "本文", note: NOTE },
       summary: "noteの知らせが出ていれば、この文は使われない",
-      sourcePath: "c:\\works\\a\\第1話.md",
+      sourcePath: fsPathOf("works", "a", "第1話.md"),
     });
 
     expect(captured.items).toContain("画像のフォルダーを開く");
@@ -81,7 +83,7 @@ describe("画像のフォルダーを開くボタン", () => {
     await showPostingCopyNotice({
       conversion: { text: "本文", note: NOTE },
       summary: "noteの知らせが出ていれば、この文は使われない",
-      sourcePath: "c:\\works\\a\\第1話.md",
+      sourcePath: fsPathOf("works", "a", "第1話.md"),
     });
 
     expect(captured.items).not.toContain("画像のフォルダーを開く");
@@ -92,7 +94,8 @@ describe("画像のフォルダーを開くボタン", () => {
    * （scheme）」と読むと、手元にある画像を「外のURLだから開かない」と
    * 断ってしまう。
    */
-  it("Windowsの絶対パス（C:\\…）を、外のURLと読み違えない", async () => {
+  // ドライブ名で始まる道は Windows だけのもの
+  it.runIf(process.platform === "win32")("Windowsの絶対パス（C:\\…）を、外のURLと読み違えない", async () => {
     const captured = captureButtons();
     onlyExisting(["c:\\画像\\cat.png"]);
 
@@ -105,7 +108,7 @@ describe("画像のフォルダーを開くボタン", () => {
         },
       },
       summary: "noteの知らせが出ていれば、この文は使われない",
-      sourcePath: "c:\\works\\a\\第1話.md",
+      sourcePath: fsPathOf("works", "a", "第1話.md"),
     });
 
     expect(captured.items).toContain("画像のフォルダーを開く");
@@ -114,7 +117,7 @@ describe("画像のフォルダーを開くボタン", () => {
   /** 外のURLは、手元にファイルが無いので開けない（これまでどおり） */
   it("http のURLでは出さない", async () => {
     const captured = captureButtons();
-    onlyExisting(["c:\\works\\a\\画像\\cat.png"]);
+    onlyExisting([fsPathOf("works", "a", "画像", "cat.png")]);
 
     await showPostingCopyNotice({
       conversion: {
@@ -127,7 +130,7 @@ describe("画像のフォルダーを開くボタン", () => {
         },
       },
       summary: "noteの知らせが出ていれば、この文は使われない",
-      sourcePath: "c:\\works\\a\\第1話.md",
+      sourcePath: fsPathOf("works", "a", "第1話.md"),
     });
 
     expect(captured.items).not.toContain("画像のフォルダーを開く");
@@ -146,7 +149,7 @@ describe("投稿ページを開くボタン", () => {
   const work: WorkEntry = {
     id: "work_test",
     title: "氷の街",
-    folderPath: nodePath.join("C:", "novels", "work"),
+    folderPath: absPath("novels", "work"),
     registeredAt: "2026-09-04T00:00:00.000Z",
   };
   const ledgerPath = Uri.file(

@@ -5,6 +5,7 @@ import { POSTING_SITES, postingSiteInfo } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * サイトごとの作品情報を訊く画面（設計書6.68.5）。
@@ -21,7 +22,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_profile",
   title: "星の在処",
-  folderPath: path.join("C:", "novels", "profile"),
+  folderPath: absPath("novels", "profile"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

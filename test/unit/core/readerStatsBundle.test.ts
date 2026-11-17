@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { keysForHost } from "../../../src/core/keyLabels";
 import {
   applyReaderStatsEnvelope,
   buildReaderStatsEnvelope,
@@ -475,10 +476,13 @@ describe("登録の無い作品IDをその場で登録する（作者の裁定 2
       framed: ["星の数ほどいるクズ"],
     });
     expect(notice.level).toBe("info");
+    // 右クリックの言い方は動いている OS で変わる（Mac は control＋クリックを添える）
     expect(notice.message).toBe(
-      "「星の数ほどいるクズ」を作品一覧の「未登録の自分の作品」に載せました。" +
-        "右クリックの［バックアップを取る］でバックアップを落とすと、自動で登録します" +
-        "（読者の反応も控えてあり、登録したら取り込みます）。"
+      keysForHost(
+        "「星の数ほどいるクズ」を作品一覧の「未登録の自分の作品」に載せました。" +
+          "右クリックの［バックアップを取る］でバックアップを落とすと、自動で登録します" +
+          "（読者の反応も控えてあり、登録したら取り込みます）。"
+      )
     );
     expect(notice.message).not.toContain("登録しないことにした");
   });

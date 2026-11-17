@@ -29,11 +29,12 @@ import {
 } from "../../../src/features/generateBlurb";
 import { applyChatEdit } from "../../../src/features/applyChatEdit";
 import type { AIRegistry } from "../../../src/ai/registry";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_synopsis_writers",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work_synopsis_writers"),
+  folderPath: absPath("novels", "work_synopsis_writers"),
   registeredAt: "2026-10-16T00:00:00.000Z",
 };
 const synopsisFile = nodePath.join(work.folderPath, "設定", "synopsis.md");

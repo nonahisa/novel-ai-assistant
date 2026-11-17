@@ -8,12 +8,13 @@ import {
   buildEpisodeTimeline,
   recordPointsToEpisode,
 } from "../../../src/core/episodeTimeline";
+import { absPath } from "../support/osPath";
 
 /**
  * 編集履歴の `file` に入れる形（作品フォルダーからの相対・`/` 区切り）。
  * 名前だけを書いていたので、別の章の同じ名前の話と取り違えていた（0.130.4）。
  */
-const work = nodePath.join("C:", "小説", "氷の街");
+const work = absPath("小説", "氷の街");
 const chapter1 = nodePath.join(work, "本文", "第1章", "Episode_0001.md");
 const chapter2 = nodePath.join(work, "本文", "第2章", "Episode_0001.md");
 
@@ -23,7 +24,7 @@ describe("editHistoryFile", () => {
   });
 
   test("作品の外は、場所をそのまま残す", () => {
-    const outside = nodePath.join("C:", "小説", "別の作品", "001.md");
+    const outside = absPath("小説", "別の作品", "001.md");
     expect(editHistoryFile(work, outside)).toBe(outside);
   });
 

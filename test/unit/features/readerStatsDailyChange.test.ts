@@ -24,6 +24,7 @@ import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanel
 import type { WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * Narou.fun の日ごとのブクマと評価の表を、日ごとの増減として受ける
@@ -380,7 +381,7 @@ describe("率：記録の日時が最終取得日時なら、72時間の境目�
 const work: WorkEntry = {
   id: "work_narou_fun_daily",
   title: "星を継ぐ者たち",
-  folderPath: path.join("C:", "novels", "narou-fun-daily"),
+  folderPath: absPath("novels", "narou-fun-daily"),
   registeredAt: "2026-09-23T00:00:00.000Z",
 };
 

@@ -25,6 +25,7 @@ import {
 } from "../../../src/core/readingDictionaryStore";
 import { findSynopsis, type ChapterSynopsis } from "../../../src/models/synopsis";
 import { findWorkForFile } from "../../../src/core/workRegistry";
+import { absPath } from "../support/osPath";
 
 /**
  * 話の名前を変えたとき、各話あらすじと読みの辞書がついてくる（設計書6.68.2）。
@@ -45,7 +46,7 @@ import { findWorkForFile } from "../../../src/core/workRegistry";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-03T00:00:00.000Z",
 };
 

@@ -21,6 +21,7 @@ import { inspectWorkBackup } from "../../../src/core/workZip";
 // 書くと、動かす環境（Windows と そうでないもの）で試験だけが落ちる
 import * as paths from "../../../src/core/paths";
 import type { WorkEntry } from "../../../src/models/types";
+import { fsPathOf } from "../support/osPath";
 
 /**
  * ZIPからの取り込み（設計書6.98）の、書き込みまわり。
@@ -34,9 +35,9 @@ import type { WorkEntry } from "../../../src/models/types";
  * 走らせない）。
  */
 
-const ZIP_PATH = "c:/Downloads/星を継ぐ者たち_20260919.zip";
+const ZIP_PATH = fsPathOf("Downloads", "星を継ぐ者たち_20260919.zip");
 /** 登録済みの作品の親。ここが書庫になり、作品フォルダーができる */
-const LIBRARY = paths.normalize("c:/小説");
+const LIBRARY = fsPathOf("小説");
 const WORK_FOLDER = paths.join(LIBRARY, "星を継ぐ者たち");
 const MANUSCRIPT = paths.join(WORK_FOLDER, "本文");
 const SETTINGS = paths.join(WORK_FOLDER, "設定");
@@ -103,7 +104,7 @@ const KAKUYOMU_ZIP_BYTES = zipSync({
  * **Nコードの名前の .txt が1つだけ**で、頭に作品情報、続けて全話が並ぶ。
  * 話ごとの【リアクション】と、末尾の【免責事項】まで含めて組む。
  */
-const NAROU_ZIP_PATH = "c:/Downloads/N4190FX.zip";
+const NAROU_ZIP_PATH = fsPathOf("Downloads", "N4190FX.zip");
 const NAROU_TITLE = "肉片とラジオと心霊現象";
 const NAROU_WORK_FOLDER = paths.join(LIBRARY, NAROU_TITLE);
 const NAROU_POSTING = paths.join(NAROU_WORK_FOLDER, "設定", "投稿状態.json");
@@ -851,7 +852,7 @@ describe("ZIPから作品を取り込む", () => {
  * ファイル名から採るしかない。ここで見るのは**どこへ何を置いたか**と、
  * **重複・欠番を作者へ言っているか**（作者の指示、2026-09-19）である。
  */
-const ALPHAPOLIS_PATH = "c:/Downloads/転生受験生の教科書チート生活 (2).txt";
+const ALPHAPOLIS_PATH = fsPathOf("Downloads", "転生受験生の教科書チート生活 (2).txt");
 const ALPHAPOLIS_TITLE = "転生受験生の教科書チート生活";
 const ALPHAPOLIS_FOLDER = paths.join(LIBRARY, ALPHAPOLIS_TITLE);
 

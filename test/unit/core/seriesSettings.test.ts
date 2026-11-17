@@ -9,6 +9,7 @@ import {
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import type { WorkEntry } from "../../../src/models/types";
 import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * つないだ作品から、借りてよいものだけを読む（設計書6.95.3）。
@@ -17,7 +18,7 @@ import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub
  * 原稿なので、テストからは1バイトも触らない。
  */
 
-const LIBRARY = "C:\\小説";
+const LIBRARY = absPath("小説");
 const SELF = nodePath.join(LIBRARY, "別視点");
 const NEIGHBOR = nodePath.join(LIBRARY, "教科書チート");
 

@@ -15,6 +15,7 @@ import {
   INSIDE_COLLECTED_REASON,
 } from "../../../src/features/proposeChapters";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 章立ての提案を承認したときの書き込み（設計書6.66.4）。
@@ -27,7 +28,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

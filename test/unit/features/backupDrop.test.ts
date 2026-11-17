@@ -17,6 +17,7 @@ import * as paths from "../../../src/core/paths";
 import { setFallbackLogRoot, useLogFile } from "../../../src/core/logger";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import type { PickedBackup } from "../../../src/features/importWorkFromZip";
+import { fsPathOf } from "../support/osPath";
 
 /**
  * 相談パネルへ持ち込まれたバックアップを捌く（作者の依頼、2026-09-23）。
@@ -33,7 +34,7 @@ import type { PickedBackup } from "../../../src/features/importWorkFromZip";
  */
 
 const scanned: EpisodeFile[] = [];
-const LIBRARY = paths.normalize("c:/小説");
+const LIBRARY = fsPathOf("小説");
 const WORK_FOLDER = paths.join(LIBRARY, "眠りから覚めたら");
 const MANUSCRIPT = paths.join(WORK_FOLDER, "本文");
 const SETTINGS = paths.join(WORK_FOLDER, "設定");
@@ -598,7 +599,7 @@ describe("受け取れないもの", () => {
   `useLogFile(work)` より前にあり、直前に触った作品の記録へ落ちていた。
 */
 describe("記録（ログ）の書き先", () => {
-  const FALLBACK = paths.normalize("c:/保管庫");
+  const FALLBACK = fsPathOf("保管庫");
   const logOf = (folder: string) =>
     text(paths.join(folder, ".aiwriter", "logs", "actions.log"));
   /** 記録は順番待ちの列で書かれるので、書き終わるまで待つ */

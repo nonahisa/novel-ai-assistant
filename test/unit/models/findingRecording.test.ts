@@ -123,15 +123,16 @@ import {
 import type { AcceptedContradiction } from "../../../src/core/contradictionValidation";
 import type { WorkEntry } from "../../../src/models/types";
 import type { FindingLine } from "../../../src/models/finding";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "w1",
   title: "いじめられっ子",
-  folderPath: "C:/小説/いじめられっ子",
+  folderPath: absPath("小説", "いじめられっ子"),
   registeredAt: "2026-09-19T00:00:00.000Z",
 };
 
-const FILE = "C:/小説/いじめられっ子/本文/001.txt";
+const FILE = absPath("小説", "いじめられっ子", "本文", "001.txt");
 
 /** 誤字脱字の1件（本文の3行目を指す） */
 function issue() {

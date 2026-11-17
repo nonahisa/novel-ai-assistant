@@ -18,6 +18,7 @@ import {
   fixtureData,
 } from "../support/settingsExportFixture";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { absPath, SEP } from "../support/osPath";
 
 /**
  * 提供先を選んだ設定資料の書き出し（設計書6.75）。
@@ -90,14 +91,14 @@ describe("形式の選択肢（F6）", () => {
   });
 
   test("差分の控えは .aiwriter の下に、提供先ごとに1つ", () => {
-    expect(snapshotPath("C:\\works\\灯の塔\\.aiwriter", "illustration")).toBe(
-      "C:\\works\\灯の塔\\.aiwriter\\settings-exports\\illustration.json"
+    expect(snapshotPath(absPath("works", "灯の塔", ".aiwriter"), "illustration")).toBe(
+      absPath("works", "灯の塔", ".aiwriter", "settings-exports", "illustration.json")
     );
   });
 });
 
 describe("書き出し", () => {
-  const DIRECTORY = "C:\\works\\灯の塔\\設定";
+  const DIRECTORY = absPath("works", "灯の塔", "設定");
   const files = new Map<string, Uint8Array>();
   const directories = new Set<string>();
 
@@ -105,7 +106,7 @@ describe("書き出し", () => {
 
   function names(): string[] {
     return [...files.keys()]
-      .map((full) => full.slice(full.lastIndexOf("\\") + 1))
+      .map((full) => full.slice(full.lastIndexOf(SEP) + 1))
       .sort();
   }
 
@@ -177,7 +178,7 @@ describe("書き出し", () => {
     // 1回目の中身がそのまま残っている＝上書きされていない
     expect(
       new TextDecoder().decode(
-        files.get(key(`${DIRECTORY}\\設定資料（イラスト発注用・第12話まで）.md`))
+        files.get(key(`${DIRECTORY}${SEP}設定資料（イラスト発注用・第12話まで）.md`))
       )
     ).toBe("1回目");
   });
@@ -230,7 +231,7 @@ describe("書き出し", () => {
   test("CSV のフォルダーが既にあれば、別名のフォルダーにする（中へ書き足さない）", async () => {
     // 前回の書き出しで作ったフォルダーが残っている
     files.set(
-      key(`${DIRECTORY}\\設定資料（編集部用・全話）（CSV）`),
+      key(`${DIRECTORY}${SEP}設定資料（編集部用・全話）（CSV）`),
       new Uint8Array()
     );
     const folder = await writeAudienceCsvExport(
@@ -250,7 +251,7 @@ describe("書き出し", () => {
       既存ファイルへの書き込みが必ず失敗する経路（`replaceGuarded`）を
       取り違えていないことを、実際に2度書いて読み戻して確かめる。
     */
-    const file = snapshotPath(`${DIRECTORY}\\..\\.aiwriter`, "editorial");
+    const file = snapshotPath(`${DIRECTORY}${SEP}..${SEP}.aiwriter`, "editorial");
     expect(await readSnapshot(file)).toEqual({ snapshot: null, reason: "none" });
 
     const first = snapshotOf(
@@ -275,7 +276,7 @@ describe("書き出し", () => {
   });
 
   test("壊れた控えは直さずに「読めない」と返す", async () => {
-    const file = snapshotPath(`${DIRECTORY}\\..\\.aiwriter`, "editorial");
+    const file = snapshotPath(`${DIRECTORY}${SEP}..${SEP}.aiwriter`, "editorial");
     files.set(key(file), new TextEncoder().encode("{ 壊れている"));
     expect(await readSnapshot(file)).toEqual({ snapshot: null, reason: "broken" });
     // 読んだだけで、中身は変えていない
@@ -284,7 +285,7 @@ describe("書き出し", () => {
 
   test("作者が置いた同名のファイルも潰さない", async () => {
     // 「設定資料（紹介用・全話）.md」を作者が手で作っていることがある
-    const byAuthor = `${DIRECTORY}\\設定資料（紹介用・全話）.md`;
+    const byAuthor = `${DIRECTORY}${SEP}設定資料（紹介用・全話）.md`;
     files.set(key(byAuthor), new TextEncoder().encode("作者が書いたもの"));
 
     const target = await writeAudienceExport(
@@ -303,8 +304,8 @@ describe("書き出し", () => {
 });
 
 describe("置き場と控えの更新（2026-10-09 の裁定）", () => {
-  const SETTINGS = "C:\\works\\灯の塔\\設定";
-  const AIWRITER = "C:\\works\\灯の塔\\.aiwriter";
+  const SETTINGS = absPath("works", "灯の塔", "設定");
+  const AIWRITER = absPath("works", "灯の塔", ".aiwriter");
 
   test("Markdown と差分は設定フォルダー、HTML・Word・CSV は git の外", () => {
     const dir = (format: Parameters<typeof exportDirectoryFor>[0]) =>

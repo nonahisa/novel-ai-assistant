@@ -6,6 +6,7 @@ import { emptyCharacter } from "../../../src/models/character";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 書き出しが作者へ伝えること（設計書6.65.8・6.65.10）。
@@ -21,7 +22,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_epub_notices",
   title: "氷の街",
-  folderPath: "C:\\novels\\work",
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-03T00:00:00.000Z",
 };
 

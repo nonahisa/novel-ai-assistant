@@ -4,6 +4,7 @@ import { registeredPostingSites } from "../../../src/features/postingCopyRegiste
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 「コピー（投稿サイト用）」で、登録済みの投稿先を先頭に出すための
@@ -17,7 +18,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

@@ -5,6 +5,7 @@ import { exportEpub } from "../../../src/features/exportEpub";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 「章ごとに区切る」目次の束ね（設計書6.66.4の3・6.65.7の4）。
@@ -21,7 +22,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_epub_chapter_toc",
   title: "氷の街",
-  folderPath: "C:\\novels\\work",
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

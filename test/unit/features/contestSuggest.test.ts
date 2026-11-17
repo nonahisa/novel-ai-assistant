@@ -30,6 +30,7 @@ const { Uri, window, workspace } = await import("../support/vscodeStub");
 const { memoryFs } = await import("../support/memoryDisk");
 import type { WorkEntry } from "../../../src/models/types";
 import type { AIRegistry } from "../../../src/ai/registry";
+import { absPath } from "../support/osPath";
 
 class MemoryStub {
   readonly values = new Map<string, unknown>();
@@ -44,7 +45,7 @@ class MemoryStub {
 const MAIN: WorkEntry = {
   id: "w1",
   title: "潮騒の図書館",
-  folderPath: path.join("C:", "novels", "w1"),
+  folderPath: absPath("novels", "w1"),
   registeredAt: "2026-09-01T00:00:00.000Z",
 };
 

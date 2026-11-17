@@ -7,6 +7,7 @@ import {
 } from "../../../src/core/pendingUpdates";
 import { emptyCharacter } from "../../../src/models/character";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * 承認待ちの更新案の「出どころ」（設計書6.4.9）。
@@ -23,7 +24,7 @@ import type { WorkEntry } from "../../../src/models/types";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

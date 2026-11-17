@@ -19,6 +19,7 @@ import {
   PLOT_WRITE_SUMMARY_OPTION,
 } from "../../../src/core/plotInterview";
 import { PLOT_DIG_ON_OPTION, PLOT_FIELD_ORDER } from "../../../src/core/plotDialogueStyles";
+import { absPath } from "../support/osPath";
 
 /**
  * 対話式プロット作成（設計書6.4.7。0.86.2 で作り直した）。
@@ -51,7 +52,7 @@ const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
 const WORK: WorkEntry = {
   id: "w_dialogue",
   title: "回線の街",
-  folderPath: nodePath.join("C:", "novels", "plot_dialogue"),
+  folderPath: absPath("novels", "plot_dialogue"),
   registeredAt: "2026-09-24T00:00:00.000Z",
 };
 const PLOT_PATH = Uri.file(nodePath.join(WORK.folderPath, "設定", "plot.md")).fsPath;

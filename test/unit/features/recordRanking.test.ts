@@ -4,6 +4,7 @@ import { recordRanking } from "../../../src/features/postingKit";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 「ランキングを記録する」（設計書6.68.5）。
@@ -19,7 +20,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_rank",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "rank"),
+  folderPath: absPath("novels", "rank"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

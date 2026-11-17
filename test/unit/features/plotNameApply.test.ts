@@ -8,6 +8,7 @@ import type { WorkEntry } from "../../../src/models/types";
 import type { TextFileContent } from "../../../src/core/textFile";
 import { findRoleOnlyCharacters } from "../../../src/core/plotNameTargets";
 import type { NameCandidate } from "../../../src/prompts/nameSuggest";
+import { absPath } from "../support/osPath";
 
 /**
  * プロットモードの「名前の候補を出す」で、選んだ名前を入れる（設計書6.4.8）。
@@ -90,7 +91,7 @@ const { applyPlotNames } = await import("../../../src/features/plotNameSuggest")
 const work: WorkEntry = {
   id: "work_test",
   title: "現代ダンジョンのインフラ担当",
-  folderPath: nodePath.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-25T00:00:00.000Z",
 };
 

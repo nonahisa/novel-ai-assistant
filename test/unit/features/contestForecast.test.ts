@@ -15,6 +15,7 @@ import type { WorkEntry } from "../../../src/models/types";
 import type { DeviceWritingStats } from "../../../src/models/writingStats";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 完成予定から公募を選ぶ（設計書6.3.6.3）。入口は作品目標設定。
@@ -63,7 +64,7 @@ class MemoryStub implements ContestMemory {
 }
 
 function work(id: string, title: string): WorkEntry {
-  return { id, title, folderPath: path.join("C:", "novels", id), registeredAt: "2026-09-01T00:00:00.000Z" };
+  return { id, title, folderPath: absPath("novels", id), registeredAt: "2026-09-01T00:00:00.000Z" };
 }
 
 const MAIN = work("w1", "潮騒の図書館");

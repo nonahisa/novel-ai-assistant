@@ -17,11 +17,12 @@ import {
   Uri,
   workspace,
 } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_test",
   title: "作品",
-  folderPath: "C:\\novels\\work",
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-08-06T00:00:00.000Z",
 };
 

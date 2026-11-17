@@ -13,11 +13,12 @@ import {
 import { emptyLocation, type Location } from "../../../src/models/location";
 import type { WorkEntry } from "../../../src/models/types";
 import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_test",
   title: "作品",
-  folderPath: "C:\\novels\\work",
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-08-08T00:00:00.000Z",
 };
 
@@ -215,7 +216,8 @@ describe("能力・場所の保存", () => {
     // `abil_001_Fire.json` へ書いたあと `abil_001_fire.json` を消すと、
     // **同じ1つのファイルなので、今書いたものが消える**（資料が丸ごと失われる）。
     // 人物側は `samePath` で判定していたが、設定資料側は文字列比較のままだった。
-    const caseInsensitive = process.platform === "win32";
+    // Mac（APFS の既定）も大文字小文字を区別しない。製品もそう扱う（`core/runtime.ts`）
+    const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
     const findKey = (filePath: string): string | undefined =>
       caseInsensitive
         ? [...disk.keys()].find(

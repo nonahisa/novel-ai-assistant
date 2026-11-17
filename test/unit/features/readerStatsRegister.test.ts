@@ -5,6 +5,7 @@ import {
   type FingerprintMemory,
 } from "../../../src/features/readerStatsHelperLink";
 import { importReaderStats } from "../../../src/features/readerStats";
+import { keysForHost } from "../../../src/core/keyLabels";
 import {
   DECLINED_READER_STATS_IDS_KEY,
   REGISTER_WORK_ID_LABEL,
@@ -24,6 +25,7 @@ import {
 import type { WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 登録の無い作品IDの読者の反応を、その場で作品に登録して取り込む（作者の裁定 2026-10-11）。
@@ -43,7 +45,7 @@ function work(id: string, title: string): WorkEntry {
   return {
     id,
     title,
-    folderPath: path.join("C:", "novels", id),
+    folderPath: absPath("novels", id),
     registeredAt: "2026-10-11T00:00:00.000Z",
   };
 }
@@ -430,10 +432,13 @@ describe("まとめて渡された分（URI）", () => {
     env.clipboard.text = bundleText([owned("2026-10-11T10:00:00.000+09:00")]);
     await helper.handleUri({ path: "/import-reader-stats" });
     expect(noted).toEqual([KAKUYOMU_ID]);
+    // 右クリックの言い方は動いている OS で変わる（Mac は control＋クリックを添える）
     expect([...warned, ...informed]).toEqual([
-      "「星の数ほどいるクズ」を作品一覧の「未登録の自分の作品」に載せました。" +
-        "右クリックの［バックアップを取る］でバックアップを落とすと、自動で登録します" +
-        "（読者の反応も控えてあり、登録したら取り込みます）。",
+      keysForHost(
+        "「星の数ほどいるクズ」を作品一覧の「未登録の自分の作品」に載せました。" +
+          "右クリックの［バックアップを取る］でバックアップを落とすと、自動で登録します" +
+          "（読者の反応も控えてあり、登録したら取り込みます）。"
+      ),
     ]);
 
     warned.length = 0;

@@ -13,6 +13,7 @@ import { readPostingLedger } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * ZIPから取り込んだ直後の作品で、**読者の反応の口が通るか**（設計書6.99／6.79.7）。
@@ -31,7 +32,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_imported",
   title: "星を継ぐ者たち",
-  folderPath: path.join("C:", "novels", "imported"),
+  folderPath: absPath("novels", "imported"),
   registeredAt: "2026-09-19T00:00:00.000Z",
 };
 

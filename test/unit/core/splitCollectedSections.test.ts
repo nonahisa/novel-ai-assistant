@@ -10,6 +10,7 @@ import { planSplit } from "../../../src/core/splitCollected";
 import { splitCollectedFile } from "../../../src/features/splitCollectedFile";
 import type { WorkEntry } from "../../../src/models/types";
 import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 /**
  * 合本を話ごとに分けるとき、中の【第N章】から章を立てる（設計書6.66.4・6.2.2）。
@@ -275,7 +276,7 @@ describe("台帳へ書くものを決める", () => {
 const work: WorkEntry = {
   id: "work_split_sections",
   title: "コールドスリープ",
-  folderPath: path.join("C:", "novels", "coldsleep"),
+  folderPath: absPath("novels", "coldsleep"),
   registeredAt: "2026-09-23T00:00:00.000Z",
 };
 

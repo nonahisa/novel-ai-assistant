@@ -10,6 +10,7 @@ import {
   postingTextHash,
   postingTitleHash,
 } from "../../../src/core/postingBodyHash";
+import { absPath } from "../support/osPath";
 
 /**
  * 修正版の出し直し（作者の依頼 2026-11-03「修正後再投稿に対応してください」。設計書6.68.7）。
@@ -25,7 +26,7 @@ import {
 const work: WorkEntry = {
   id: "work_revision",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "revision"),
+  folderPath: absPath("novels", "revision"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

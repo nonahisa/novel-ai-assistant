@@ -9,6 +9,7 @@ vi.mock("vscode", () => ({
 
 import { libraryLogCandidates, syncLogPlace } from "../../../src/core/syncTarget";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath, ROOT, SEP } from "../support/osPath";
 
 /**
  * 書庫の同期の記録を、書庫のログ1つへ（作者の裁定、2026-10-03。設計書5.7.9）。
@@ -25,9 +26,9 @@ function work(title: string, folderPath: string): WorkEntry {
   };
 }
 
-const library = "C:/書庫";
-const a = work("いじめられっ子", "C:/書庫/いじめられっ子");
-const b = work("ハイエルフ未亡人", "C:/書庫/ハイエルフ未亡人");
+const library = absPath("書庫");
+const a = work("いじめられっ子", absPath("書庫", "いじめられっ子"));
+const b = work("ハイエルフ未亡人", absPath("書庫", "ハイエルフ未亡人"));
 
 describe("同期の記録の書き先", () => {
   it("書庫なら、先頭の作品ではなく書庫の直下", () => {
@@ -42,7 +43,7 @@ describe("同期の記録の書き先", () => {
   });
 
   it("作品ごとに分けたリポジトリなら、これまでどおり作品のログ", () => {
-    expect(syncLogPlace("C:/書庫/いじめられっ子/", [a])).toEqual({
+    expect(syncLogPlace(absPath("書庫", "いじめられっ子") + SEP, [a])).toEqual({
       folder: a.folderPath,
       library: false,
     });
@@ -55,8 +56,8 @@ describe("同期の記録の書き先", () => {
 
 describe("掃除の対象にする書庫の直下", () => {
   it("作品の親を重ねずに並べ、作品そのものは外す", () => {
-    const solo = work("単独", "D:/単独作品");
-    const nested = work("入れ子", "D:/単独作品/外伝");
-    expect(libraryLogCandidates([a, b, solo, nested])).toEqual([library, "D:/"]);
+    const solo = work("単独", absPath("単独作品"));
+    const nested = work("入れ子", absPath("単独作品", "外伝"));
+    expect(libraryLogCandidates([a, b, solo, nested])).toEqual([library, ROOT]);
   });
 });

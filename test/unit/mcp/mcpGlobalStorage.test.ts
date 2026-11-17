@@ -30,18 +30,24 @@ function probe(overrides: Partial<StorageProbe>): StorageProbe {
   };
 }
 
+/*
+  束の場所（C:\…）の親を、製品は動いている OS の path で割る。下の3件は Windows の道で
+  束の親を組み立てて比べるので Windows だけで流す（Mac では円記号が区切りにならない）
+*/
+const onWindows = process.platform === "win32";
+
 describe("resolveStorageRoot", () => {
   it("環境変数があれば必ずそれ", () => {
     const got = resolveStorageRoot(probe({ env: "D:\\store", exists: () => true }));
     expect(got).toEqual({ root: nodePath.resolve("D:\\store"), source: "env" });
   });
 
-  it("dist から走らせた束は、VS Code の既定の保管庫を見つけて使う（再現：以前は dist を返した）", () => {
+  it.runIf(onWindows)("dist から走らせた束は、VS Code の既定の保管庫を見つけて使う（再現：以前は dist を返した）", () => {
     const got = resolveStorageRoot(probe({ exists: (dir) => dir === WIN_DEFAULT }));
     expect(got).toEqual({ root: WIN_DEFAULT, source: "default" });
   });
 
-  it("束が保管庫に写してあれば、既定の場所より先にそこを使う（Insiders などの取り違えを防ぐ）", () => {
+  it.runIf(onWindows)("束が保管庫に写してあれば、既定の場所より先にそこを使う（Insiders などの取り違えを防ぐ）", () => {
     const bundleDir = "C:\\Users\\a\\AppData\\Roaming\\Code - Insiders\\User\\globalStorage\\nonahisa.novel-ai-assistant";
     const got = resolveStorageRoot(
       probe({ bundlePath: `${bundleDir}\\mcp-server.mjs`, exists: () => true })
@@ -50,7 +56,7 @@ describe("resolveStorageRoot", () => {
     expect(got?.root).toBe(nodePath.resolve(bundleDir));
   });
 
-  it("どこにも無ければ束の親へ落ち、断りの1行が出る", () => {
+  it.runIf(onWindows)("どこにも無ければ束の親へ落ち、断りの1行が出る", () => {
     const got = resolveStorageRoot(probe({}));
     expect(got?.source).toBe("bundleFallback");
     expect(storageFallbackLine(got)).toContain("保管庫は");

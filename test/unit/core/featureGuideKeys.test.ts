@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { buildGuideBundles, EXTRA_GUIDE } from "../../../src/core/featureGuide";
 import { MANUSCRIPT_KEY_BINDINGS } from "../../../src/core/manuscriptKeys";
+import { pinHostPlatform } from "../support/osPath";
 
 /**
  * 原稿エディターのキー操作（設計書6.25.10）は、メニューの項目に無いので
@@ -49,7 +50,14 @@ describe("原稿エディターのキー操作の説明", () => {
   });
 
   test("束として選べる", () => {
-    const bundle = buildGuideBundles().find((entry) => entry.key === "keys");
+    // キーの書き方は動いている OS で変わる。ここは Windows の書き方（Ctrl）で見る
+    const restore = pinHostPlatform("win32");
+    let bundle: ReturnType<typeof buildGuideBundles>[number] | undefined;
+    try {
+      bundle = buildGuideBundles().find((entry) => entry.key === "keys");
+    } finally {
+      restore();
+    }
     expect(bundle, "キー操作の束がない").toBeTruthy();
     expect(bundle?.label).toBe("原稿エディターのキー操作");
     expect(bundle?.text).toContain("Ctrl+F");

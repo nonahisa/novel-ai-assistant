@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 /**
  * 校正・メモパネルを、拡張機能ホストの再起動・ウィンドウの再読み込みのあとも
@@ -132,7 +132,7 @@ vi.mock("vscode", () => {
   };
 });
 
-const FILE_PATH = "C:/小説/いじめられっ子/本文/003.txt";
+const FILE_PATH = absPath("小説", "いじめられっ子", "本文", "003.txt");
 
 vi.mock("../../../src/core/scanner", () => ({
   scanWork: vi.fn(async () => ({
@@ -185,16 +185,17 @@ import {
 } from "../../../src/features/sceneMemoPanel";
 import { revealTextLocation } from "../../../src/features/revealLocation";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath, pinHostPlatform } from "../support/osPath";
 
 const WORK = {
   id: "w1",
   title: "いじめられっ子",
-  folderPath: "C:/小説/いじめられっ子",
+  folderPath: absPath("小説", "いじめられっ子"),
 } as unknown as WorkEntry;
 const OTHER = {
   id: "w2",
   title: "別の作品",
-  folderPath: "C:/小説/別の作品",
+  folderPath: absPath("小説", "別の作品"),
 } as unknown as WorkEntry;
 
 const works = {
@@ -214,7 +215,15 @@ const textTabInput = (): unknown => new (vscode.TabInputText as unknown as new (
 /** 片づけ：前のテストで引き取ったパネルを閉じる（作品ごとに1枚の約束があるため） */
 const live: FakePanel[] = [];
 
+// 案内の画面のキーの書き方（Ctrl+Alt+M）は動いている OS で変わる。Windows の書き方で見る
+let restorePlatform: (() => void) | undefined;
+afterEach(() => {
+  restorePlatform?.();
+  restorePlatform = undefined;
+});
+
 beforeEach(() => {
+  restorePlatform = pinHostPlatform("win32");
   for (const panel of live.splice(0)) panel.dispose();
   for (const entry of created.splice(0)) entry.panel.dispose();
   serializer = undefined;

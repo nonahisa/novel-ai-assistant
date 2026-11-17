@@ -7,6 +7,7 @@ import { WorkRegistry } from "../../../src/core/workRegistry";
 import { affectsSyncStatus, GitSyncMonitor } from "../../../src/features/gitSync";
 import type { GitCommandResult, GitCommandRunner } from "../../../src/core/git";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath, SEP } from "../support/osPath";
 
 /**
  * 保存しただけで「送っていないもの」の印が変わるか（設計書6.15.1）。
@@ -36,7 +37,7 @@ function fakeContext(works: WorkEntry[]): { globalState: unknown } {
 const WORK: WorkEntry = {
   id: "w1",
   title: "テスト作品",
-  folderPath: "C:\\novels\\w1",
+  folderPath: absPath("novels", "w1"),
   registeredAt: "2026-09-21T00:00:00.000Z",
 };
 
@@ -75,11 +76,11 @@ describe("作品フォルダーの見張り（未送信の常時表示の契機�
   test("本文を保存すると、2秒後に1回だけ作り直す（取りに行かず・知らせず）", () => {
     const { monitor, refresh, watcher } = setup();
 
-    watcher.fireChange("C:\\novels\\w1\\第1話.txt");
+    watcher.fireChange(absPath("novels", "w1", "第1話.txt"));
     // 待っている間は走らない（続けて保存されるのが普通なので、まとめる）
     vi.advanceTimersByTime(1000);
     expect(refresh).not.toHaveBeenCalled();
-    watcher.fireChange("C:\\novels\\w1\\第2話.txt");
+    watcher.fireChange(absPath("novels", "w1", "第2話.txt"));
     vi.advanceTimersByTime(2000);
 
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -97,9 +98,9 @@ describe("作品フォルダーの見張り（未送信の常時表示の契機�
     const { monitor, refresh, watcher } = setup();
 
     // ここで回すと、作り直しが自分でログを書いて自分を起こし続ける
-    watcher.fireChange("C:\\novels\\w1\\.aiwriter\\logs\\2026-09-21.log");
-    watcher.fireChange("C:\\novels\\w1\\.aiwriter\\stats\\2026-09.json");
-    watcher.fireChange("C:\\novels\\w1\\.git\\index");
+    watcher.fireChange(absPath("novels", "w1", ".aiwriter", "logs", "2026-09-21.log"));
+    watcher.fireChange(absPath("novels", "w1", ".aiwriter", "stats", "2026-09.json"));
+    watcher.fireChange(absPath("novels", "w1", ".git", "index"));
     vi.advanceTimersByTime(5000);
 
     expect(refresh).not.toHaveBeenCalled();
@@ -109,7 +110,7 @@ describe("作品フォルダーの見張り（未送信の常時表示の契機�
   test("dispose すると見張りも待ちも止まる", () => {
     const { monitor, refresh, watcher } = setup();
 
-    watcher.fireChange("C:\\novels\\w1\\第1話.txt");
+    watcher.fireChange(absPath("novels", "w1", "第1話.txt"));
     monitor.dispose();
     vi.advanceTimersByTime(5000);
 
@@ -120,12 +121,12 @@ describe("作品フォルダーの見張り（未送信の常時表示の契機�
 
 describe("その変化で送信待ちの数が変わりうるか", () => {
   test("原稿と設定資料は数える", () => {
-    expect(affectsSyncStatus("C:\\novels\\w1\\第1話.txt")).toBe(true);
-    expect(affectsSyncStatus("C:\\novels\\w1\\設定\\人物.json")).toBe(true);
+    expect(affectsSyncStatus(absPath("novels", "w1", "第1話.txt"))).toBe(true);
+    expect(affectsSyncStatus(absPath("novels", "w1", "設定", "人物.json"))).toBe(true);
   });
 
   test("記録・統計・gitの中は数えない", () => {
-    expect(affectsSyncStatus("C:\\novels\\w1\\.git\\index")).toBe(false);
+    expect(affectsSyncStatus(absPath("novels", "w1", ".git", "index"))).toBe(false);
     expect(affectsSyncStatus("/novels/w1/.aiwriter/logs/a.log")).toBe(false);
     expect(affectsSyncStatus("/novels/w1/.aiwriter/stats/a.json")).toBe(false);
   });
@@ -147,17 +148,17 @@ describe("その変化で送信待ちの数が変わりうるか", () => {
  * 末尾の作品だけ作り直しても、表示が見るのは古いままの先頭の作品になる。
  */
 describe("書庫の見張り（置き場ごとにまとめて作り直す）", () => {
-  const LIBRARY = "C:\\novels\\書庫";
+  const LIBRARY = absPath("novels", "書庫");
   const WORK_A: WorkEntry = {
     id: "lib-a",
     title: "あかつきの記",
-    folderPath: `${LIBRARY}\\あかつきの記`,
+    folderPath: `${LIBRARY}${SEP}あかつきの記`,
     registeredAt: "2026-09-21T00:00:00.000Z",
   };
   const WORK_B: WorkEntry = {
     id: "lib-b",
     title: "たゆたう鉛",
-    folderPath: `${LIBRARY}\\たゆたう鉛`,
+    folderPath: `${LIBRARY}${SEP}たゆたう鉛`,
     registeredAt: "2026-09-21T00:00:00.000Z",
   };
 
@@ -250,7 +251,7 @@ describe("書庫の見張り（置き場ごとにまとめて作り直す）", (
 
     // 作者が**末尾の作品**の本文を保存した。置き場の未記録は2件になる
     state.porcelain = " M あかつきの記/001.txt\n M たゆたう鉛/001.txt\n";
-    watcherFor(tail.folderPath).fireChange(`${tail.folderPath}\\001.txt`);
+    watcherFor(tail.folderPath).fireChange(`${tail.folderPath}${SEP}001.txt`);
     await vi.advanceTimersByTimeAsync(2000);
 
     // 先頭の作品の状態が古いままだと、画面の数字は変わらない
@@ -263,7 +264,7 @@ describe("書庫の見張り（置き場ごとにまとめて作り直す）", (
     const OTHER: WorkEntry = {
       id: "solo",
       title: "ひとりだけの作品",
-      folderPath: "C:\\別の場所\\単独作品",
+      folderPath: absPath("別の場所", "単独作品"),
       registeredAt: "2026-09-21T00:00:00.000Z",
     };
     const state = { porcelain: " M 001.txt\n" };
@@ -275,7 +276,7 @@ describe("書庫の見張り（置き場ごとにまとめて作り直す）", (
     await monitor.refreshAll({ fetch: false });
     git.calls.length = 0;
 
-    watcherFor(OTHER.folderPath).fireChange(`${OTHER.folderPath}\\001.txt`);
+    watcherFor(OTHER.folderPath).fireChange(`${OTHER.folderPath}${SEP}001.txt`);
     await vi.advanceTimersByTimeAsync(2000);
 
     expect(statusRuns(git.calls, OTHER.folderPath)).toBe(1);
@@ -291,9 +292,9 @@ describe("書庫の見張り（置き場ごとにまとめて作り直す）", (
     await monitor.refreshAll({ fetch: false });
     git.calls.length = 0;
 
-    watcherFor(WORK_A.folderPath).fireChange(`${WORK_A.folderPath}\\001.txt`);
+    watcherFor(WORK_A.folderPath).fireChange(`${WORK_A.folderPath}${SEP}001.txt`);
     await vi.advanceTimersByTimeAsync(1000);
-    watcherFor(WORK_B.folderPath).fireChange(`${WORK_B.folderPath}\\001.txt`);
+    watcherFor(WORK_B.folderPath).fireChange(`${WORK_B.folderPath}${SEP}001.txt`);
     await vi.advanceTimersByTimeAsync(2000);
 
     // 待ちは置き場ごとに1本なので、まとまって1回ぶんだけ走る。

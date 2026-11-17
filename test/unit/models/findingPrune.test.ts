@@ -3,6 +3,7 @@ import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 import { FindingStore } from "../../../src/features/findingStore";
 import type { Finding, FindingDecision } from "../../../src/models/finding";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * 「期限切れ指摘消去」（設計書6.96.4）。
@@ -18,12 +19,12 @@ import type { WorkEntry } from "../../../src/models/types";
 const work: WorkEntry = {
   id: "w1",
   title: "テスト作品",
-  folderPath: "C:\\novels\\テスト作品",
+  folderPath: absPath("novels", "テスト作品"),
   registeredAt: new Date(0).toISOString(),
 };
 
 const FINDINGS_PATH = Uri.file(
-  "C:\\novels\\テスト作品\\.aiwriter\\findings.jsonl"
+  absPath("novels", "テスト作品", ".aiwriter", "findings.jsonl")
 ).fsPath;
 
 const NOW = new Date("2026-09-19T12:00:00.000Z");

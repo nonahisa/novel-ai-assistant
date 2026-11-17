@@ -17,6 +17,7 @@ import {
   window,
   workspace,
 } from "../support/vscodeStub";
+import { absPath, isWindowsHost } from "../support/osPath";
 
 const parseWorkConfig = (
   workRegistry as unknown as {
@@ -27,7 +28,7 @@ const parseWorkConfig = (
 const work: WorkEntry = {
   id: "work_test",
   title: "テスト作品",
-  folderPath: "C:\\novels\\test-work",
+  folderPath: absPath("novels", "test-work"),
   registeredAt: "2026-08-06T00:00:00.000Z",
 };
 
@@ -135,7 +136,13 @@ describe("作品設定", () => {
     expect(config.workTitle).toBe("テスト作品");
   });
 
-  test.each(["..\\outside", "C:\\outside", "本文\\..\\..\\outside"])(
+  // 円記号で上へ出る形は、Windows の道でだけ区切りとして読まれる（Mac では名前の一部）
+  test.each([
+    "../outside",
+    absPath("outside"),
+    "本文/../../outside",
+    ...(isWindowsHost ? ["..\\outside", "本文\\..\\..\\outside"] : []),
+  ])(
     "作品ルート外へ出る本文パス %s を拒否する",
     (manuscriptDir) => {
       expect(() =>
@@ -146,8 +153,8 @@ describe("作品設定", () => {
 
   test("正しい相対パスを作品ルート内の絶対パスへ解決する", () => {
     const paths = workRegistry.workPaths(work, validConfig);
-    expect(paths.manuscript).toBe("C:\\novels\\test-work\\本文");
-    expect(paths.settings).toBe("C:\\novels\\test-work\\設定");
+    expect(paths.manuscript).toBe(absPath("novels", "test-work", "本文"));
+    expect(paths.settings).toBe(absPath("novels", "test-work", "設定"));
   });
 
   test("不正な設定を持つ既存フォルダは登録状態を変更しない", async () => {
@@ -164,13 +171,13 @@ describe("作品設定", () => {
     const registry = new workRegistry.WorkRegistry(context as never);
 
     await expect(
-      registry.addExisting("C:\\novels\\broken", "壊れた作品")
+      registry.addExisting(absPath("novels", "broken"), "壊れた作品")
     ).rejects.toThrow("作品設定");
     expect(updates).toEqual([]);
   });
 
   test("新規作品のgitignoreへ管理回復ディレクトリを追加する", async () => {
-    const root = "C:\\novels\\new-work";
+    const root = absPath("novels", "new-work");
     const files = new Map<string, Uint8Array>();
     workspace.fs = {
       stat: async () => {
@@ -191,7 +198,7 @@ describe("作品設定", () => {
   });
 
   test("プロットから始めるなら、テンプレートを置く", async () => {
-    const root = "C:\\novels\\with-plot";
+    const root = absPath("novels", "with-plot");
     const files = scaffoldStub();
 
     await workRegistry.scaffoldWorkFolder(root, "新作", { withPlot: true });
@@ -206,7 +213,7 @@ describe("作品設定", () => {
   test("本文から始めるなら、プロットは置かない", async () => {
     // 使わないテンプレートが設定資料に混ざると、紹介文を作るときの材料にも
     // 空のプロットとして渡ってしまう。あとから「プロットを作る」で足せる
-    const root = "C:\\novels\\without-plot";
+    const root = absPath("novels", "without-plot");
     const files = scaffoldStub();
 
     await workRegistry.scaffoldWorkFolder(root, "新作", { withPlot: false });
@@ -221,7 +228,7 @@ describe("作品設定", () => {
   });
 
   test("指定しなければ、これまでどおりプロットを置く", async () => {
-    const root = "C:\\novels\\default-plot";
+    const root = absPath("novels", "default-plot");
     const files = scaffoldStub();
 
     await workRegistry.scaffoldWorkFolder(root, "新作");
@@ -357,7 +364,7 @@ describe("作品設定", () => {
     const registered = ["う作品", "あ作品", "い作品"].map((title, index) => ({
       id: `work_${index}`,
       title,
-      folderPath: `C:\\novels\\${index}`,
+      folderPath: absPath("novels", String(index)),
       registeredAt: "2026-09-01T00:00:00.000Z",
     }));
     const previousFs = workspace.fs;

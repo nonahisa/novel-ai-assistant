@@ -76,11 +76,12 @@ vi.mock("../../../src/views/notify", () => ({
 }));
 
 import { toggleReviewLock } from "../../../src/features/reviewProposals";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: nodePath.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-11-06T00:00:00.000Z",
 };
 

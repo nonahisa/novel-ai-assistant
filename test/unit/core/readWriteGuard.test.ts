@@ -19,6 +19,7 @@ import { emptyTimeline } from "../../../src/models/timeline";
 import { emptyWorkGoals } from "../../../src/models/workGoals";
 import { KEEP_WORD_SCHEMA_VERSION } from "../../../src/models/keepWord";
 import { isExternalChangeError } from "../../../src/core/readWriteGuard";
+import { absPath } from "../support/osPath";
 
 /**
  * 「読んで、足して、書き戻す」口の、書く前の照合（2026-11-15 作者の決定「足す」）。
@@ -36,7 +37,7 @@ import { isExternalChangeError } from "../../../src/core/readWriteGuard";
 const work: WorkEntry = {
   id: "work_readappend",
   title: "外の変更の街",
-  folderPath: path.join("C:", "novels", "readappend"),
+  folderPath: absPath("novels", "readappend"),
   registeredAt: "2026-11-15T00:00:00.000Z",
 };
 

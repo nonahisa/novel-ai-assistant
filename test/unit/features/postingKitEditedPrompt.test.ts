@@ -9,6 +9,7 @@ import {
 } from "../../../src/core/postingBodyHash";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 作品から投稿を始めたとき、投稿のあとに本文を直した話があれば出し直しを促す
@@ -23,7 +24,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_edited",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "edited"),
+  folderPath: absPath("novels", "edited"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

@@ -42,6 +42,7 @@ import { WorkTreeProvider, type TreeNode } from "../../../src/views/workTree";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
 import { MANUSCRIPT_EDITOR_VIEW_TYPE } from "../../../src/core/manuscriptViewTypes";
+import { absPath } from "../support/osPath";
 
 /** ホバーの本文。スタブの `MarkdownString` は `value` に持つ */
 function tooltipText(tooltip: unknown): string {
@@ -54,7 +55,7 @@ function tooltipText(tooltip: unknown): string {
 const work: WorkEntry = {
   id: "work_1",
   title: "書きかけの束",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-04T00:00:00.000Z",
 };
 

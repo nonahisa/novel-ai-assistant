@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { WorkEntry } from "../../../src/models/types";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath, pinHostPlatform } from "../support/osPath";
 
 /**
  * 合本（1ファイルに複数話）をPDF（印刷用HTML）へ組む（設計書6.65.15）。
@@ -38,7 +39,7 @@ const { exportPdf } = await import("../../../src/features/exportPdf");
 const work: WorkEntry = {
   id: "work_pdf_collected",
   title: "氷の街",
-  folderPath: "C:\\novels\\work",
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 
@@ -612,7 +613,13 @@ describe("単話だけの作品の紙は変わらない（回帰の固定）", (
     put("本文/第1話 出会い.txt", "　朝が来た。\n\n　鐘が鳴る。");
     put("本文/第2話.txt", WITH_HEADER);
 
-    await exportPdf(work);
+    // 紙の上の案内帯のキー（Ctrl+P）は動いている OS で変わる。期待値は Windows で採ったもの
+    const restore = pinHostPlatform("win32");
+    try {
+      await exportPdf(work);
+    } finally {
+      restore();
+    }
     const digest = createHash("sha256")
       .update(new TextEncoder().encode(exportedHtml()))
       .digest("hex");

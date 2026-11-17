@@ -4,11 +4,12 @@ import { SynopsisStore } from "../../../src/core/synopsisStore";
 import type { WorkEntry } from "../../../src/models/types";
 import type { ChapterSynopsis } from "../../../src/models/synopsis";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { absPath } from "../support/osPath";
 
 const work: WorkEntry = {
   id: "w1",
   title: "テスト作品",
-  folderPath: "C:\\novels\\テスト作品",
+  folderPath: absPath("novels", "テスト作品"),
   registeredAt: new Date(0).toISOString(),
 };
 

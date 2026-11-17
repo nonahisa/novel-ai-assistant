@@ -10,6 +10,7 @@ import {
   openWritingStatsPanel,
   refreshWritingStatsAfterRepair,
 } from "../../../src/features/writingStatsPanel";
+import { absPath } from "../support/osPath";
 
 /**
  * なろうAPIの同意のチェックが、描き直しで外れる弱さ（0.141.1。画面テストの担当の見立て）。
@@ -25,7 +26,7 @@ import {
 let work: WorkEntry = {
   id: "work_narou_agree_0",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "narou-agree"),
+  folderPath: absPath("novels", "narou-agree"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

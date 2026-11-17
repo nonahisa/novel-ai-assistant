@@ -18,6 +18,7 @@ import { emptyCharacter } from "../../../src/models/character";
 import { emptyAbility } from "../../../src/models/ability";
 import { emptyForeshadow } from "../../../src/models/foreshadow";
 import { emptySynopsisSet } from "../../../src/models/synopsis";
+import { absPath } from "../support/osPath";
 
 /**
  * 話数を指している台帳の追従（設計書6.67.3）。
@@ -30,7 +31,7 @@ import { emptySynopsisSet } from "../../../src/models/synopsis";
 const work: WorkEntry = {
   id: "work_test",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "work"),
+  folderPath: absPath("novels", "work"),
   registeredAt: "2026-09-03T00:00:00.000Z",
 };
 

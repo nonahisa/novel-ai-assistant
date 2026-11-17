@@ -6,6 +6,7 @@ import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 import { postingTextHash, postingTitleHash } from "../../../src/core/postingBodyHash";
 import { parseEpisodeFileName } from "../../../src/core/episodeParser";
+import { absPath } from "../support/osPath";
 
 /**
  * 本文を .md にしただけの話を、「投稿後に直しています」と言わない（設計書6.68.7・6.12.4）。
@@ -25,7 +26,7 @@ import { parseEpisodeFileName } from "../../../src/core/episodeParser";
 const work: WorkEntry = {
   id: "work_md_convert",
   title: "氷の街",
-  folderPath: path.join("C:", "novels", "mdconvert"),
+  folderPath: absPath("novels", "mdconvert"),
   registeredAt: "2026-09-05T00:00:00.000Z",
 };
 

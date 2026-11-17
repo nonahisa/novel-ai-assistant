@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import * as vscode from "vscode";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { WorkEntry } from "../../../src/models/types";
+import { absPath } from "../support/osPath";
 
 /**
  * 校正・メモパネルの［AIに相談］が、相談パネルへ問いを送る口
@@ -38,7 +39,7 @@ const { buildFindingAdviceQuestion } = await import("../../../src/prompts/workCh
 const WORK: WorkEntry = {
   id: "w_consult",
   title: "氷の街",
-  folderPath: "C:\\novels\\w_consult",
+  folderPath: absPath("novels", "w_consult"),
   registeredAt: "2026-10-04T00:00:00.000Z",
 };
 
@@ -138,7 +139,7 @@ describe("相談パネルへ送る口", () => {
     const other: WorkEntry = {
       id: "w_other",
       title: "雪の町",
-      folderPath: "C:\\novels\\w_other",
+      folderPath: absPath("novels", "w_other"),
       registeredAt: "2026-10-04T00:00:00.000Z",
     };
     const { panel } = openPanel([WORK, other]);
@@ -154,7 +155,7 @@ describe("相談パネルへ送る口", () => {
       }
     );
     const document = {
-      uri: vscode.Uri.file("C:\\novels\\w_other\\001.txt"),
+      uri: vscode.Uri.file(absPath("novels", "w_other", "001.txt")),
       getText: () => "　朝が来た。",
       offsetAt: () => 0,
     } as unknown as vscode.TextDocument;

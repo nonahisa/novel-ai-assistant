@@ -12,6 +12,7 @@ import { buildReaderStatsEnvelope } from "../../../src/core/readerStatsEnvelope"
 import type { WorkEntry } from "../../../src/models/types";
 import { env, Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
+import { absPath } from "../support/osPath";
 
 /**
  * 読者の反応を取り込んだあとの知らせが、**作者が読む前に消える**（残課題9。
@@ -32,7 +33,7 @@ import { memoryFs } from "../support/memoryDisk";
 const work: WorkEntry = {
   id: "work_notice",
   title: "星を継ぐ者たち",
-  folderPath: path.join("C:", "novels", "notice"),
+  folderPath: absPath("novels", "notice"),
   registeredAt: "2026-09-24T00:00:00.000Z",
 };
 
