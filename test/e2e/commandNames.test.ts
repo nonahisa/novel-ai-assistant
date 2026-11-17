@@ -57,6 +57,8 @@ test("パレット・キーの画面・パネルのタブに「校正・メモ�
       "novelai.prevSceneMemo",
       "novelai.addSceneMemo",
       "novelai.importChaptersFromBackup",
+      // 1.0.25 でよく使う語を出し始めた（IME_FREQUENT_WORDS_ENABLED）。出している間だけパレットに出る
+      "novelai.chooseImeFrequentWords",
     ]) {
       const name = await paletteNameOf(command);
       const title = name.replace(/^[^:]+: /, "");

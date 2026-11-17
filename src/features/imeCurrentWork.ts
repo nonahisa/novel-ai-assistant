@@ -58,11 +58,11 @@ import { loadDictionaryForWork } from "./exportImeDictionary";
 /**
  * 本文でよく使う語を辞書の末尾へ出すか。
  *
- * ノートPCの IME のエンジンが frequent を読める版（C3953A97 以降）に入れ替わったら true にする
- * （前のエンジンは frequent の行を先頭に出してしまう）。false の間は数えもしない
- * （本文を読まない）。
+ * 2026-11-17 に true にした（デスクトップは AFDCA1AC、ノートPCは C3953A97 に入れ替わり、どちらの
+ * エンジンも frequent を読める）。それより前のエンジンは frequent の行を先頭に出してしまうので、
+ * 出さない形へ戻すときは false にする（false の間は数えもしない＝本文を読まない）。
  */
-export const IME_FREQUENT_WORDS_ENABLED = false;
+export const IME_FREQUENT_WORDS_ENABLED = true;
 
 /** 定数を boolean として読む（false の間も、その先のコードが「到達しない」扱いにならないように） */
 export function frequentWordsEnabled(): boolean {
