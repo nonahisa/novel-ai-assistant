@@ -6,8 +6,10 @@ import {
   buildImeSenderJson,
   checkImeExport,
   imeCoreExecutable,
+  isImeMachineId,
   parseImeSyncInfo,
   receiveImeLearning,
+  runImeLearningSync,
   sendImeLearning,
 } from "../../../src/core/imeLearningSync";
 import { createFakeDrive } from "../support/fakeDrive";
@@ -34,8 +36,8 @@ describe("エンジンの場所と sync-info", () => {
   });
 
   test("sync-info の出力を読む。機械ID の形が違えば断る（ドライブのフォルダー名になる）", () => {
-    expect(parseImeSyncInfo('{"machine":"m-1a2b3c","dir":"C:\\\\x\\\\記録","records":[]}\n')).toEqual({
-      machineId: "m-1a2b3c",
+    expect(parseImeSyncInfo('{"machine":"1a2b3c4d","dir":"C:\\\\x\\\\記録","records":[]}\n')).toEqual({
+      machineId: "1a2b3c4d",
       dir: "C:\\x\\記録",
     });
     expect(typeof parseImeSyncInfo('{"machine":"../x","dir":"d"}')).toBe("string");
@@ -45,16 +47,16 @@ describe("エンジンの場所と sync-info", () => {
 
 describe("写しの確かめ", () => {
   test("頭と終わりの行があり dev= がその機械なら通す。途中で切れた・別の機械・頭が無い は断る", () => {
-    expect(checkImeExport(exportOf("m-aaaa"), "m-aaaa")).toBe(true);
-    const cut = enc("#novel-ime-sync 1 dev=m-aaaa from=1 to=2 lines=2\n{}\n");
-    expect(checkImeExport(cut, "m-aaaa")).toMatch(/終わり/);
-    expect(checkImeExport(exportOf("m-bbbb"), "m-aaaa")).toMatch(/機械ID/);
-    expect(checkImeExport(enc('{"t":1}\n#end dev=m-aaaa to=1\n'), "m-aaaa")).toMatch(/頭/);
+    expect(checkImeExport(exportOf("aaaaaaaa"), "aaaaaaaa")).toBe(true);
+    const cut = enc("#novel-ime-sync 1 dev=aaaaaaaa from=1 to=2 lines=2\n{}\n");
+    expect(checkImeExport(cut, "aaaaaaaa")).toMatch(/終わり/);
+    expect(checkImeExport(exportOf("bbbbbbbb"), "aaaaaaaa")).toMatch(/機械ID/);
+    expect(checkImeExport(enc('{"t":1}\n#end dev=aaaaaaaa to=1\n'), "aaaaaaaa")).toMatch(/頭/);
   });
 
   test("送り手の印の形（オリジナルIME の設計書 6.3.1 の決まり）", () => {
-    const text = buildImeSenderJson({ version: "1.0.26", machineId: "m-aaaa", at: new Date("2026-11-18T00:00:00Z") });
-    expect(JSON.parse(text)).toEqual({ sender: "novel-ai-assistant", version: "1.0.26", machineId: "m-aaaa", at: "2026-11-18T00:00:00.000Z" });
+    const text = buildImeSenderJson({ version: "1.0.26", machineId: "aaaaaaaa", at: new Date("2026-11-18T00:00:00Z") });
+    expect(JSON.parse(text)).toEqual({ sender: "novel-ai-assistant", version: "1.0.26", machineId: "aaaaaaaa", at: "2026-11-18T00:00:00.000Z" });
   });
 });
 
@@ -62,29 +64,106 @@ describe("偽のドライブで2台が往復する", () => {
   test("自分のフォルダーにだけ書き、受け取りは自分の分を読まない。同じ中身は書き直さない", async () => {
     const drive = createFakeDrive({ reportsSha256: true });
     const client = createDriveClient({ fetch: drive.fetch, accessToken: drive.accessToken, sleep: async () => undefined });
-    expect(await sendImeLearning({ client, machineId: "m-desk", bytes: exportOf("m-desk") })).toEqual({ kind: "sent" });
-    expect(await sendImeLearning({ client, machineId: "m-desk", bytes: exportOf("m-desk") })).toEqual({ kind: "unchanged" });
-    await sendImeLearning({ client, machineId: "m-note", bytes: exportOf("m-note") });
-    expect(drive.find("統合小説執筆環境", IME_DRIVE_FOLDER_NAME, "m-desk", IME_DRIVE_FILE_NAME)).toBeDefined();
+    expect(await sendImeLearning({ client, machineId: "d0d0d0d0d0d0d0d0", bytes: exportOf("d0d0d0d0d0d0d0d0") })).toEqual({ kind: "sent" });
+    expect(await sendImeLearning({ client, machineId: "d0d0d0d0d0d0d0d0", bytes: exportOf("d0d0d0d0d0d0d0d0") })).toEqual({ kind: "unchanged" });
+    await sendImeLearning({ client, machineId: "a1a1a1a1a1a1a1a1", bytes: exportOf("a1a1a1a1a1a1a1a1") });
+    expect(drive.find("統合小説執筆環境", IME_DRIVE_FOLDER_NAME, "d0d0d0d0d0d0d0d0", IME_DRIVE_FILE_NAME)).toBeDefined();
 
-    const atDesk = await receiveImeLearning({ client, machineId: "m-desk" });
-    expect(atDesk.received.map((r) => r.machineId)).toEqual(["m-note"]);
-    expect(new TextDecoder().decode(atDesk.received[0].bytes)).toContain("#end dev=m-note");
+    const atDesk = await receiveImeLearning({ client, machineId: "d0d0d0d0d0d0d0d0" });
+    expect(atDesk.received.map((r) => r.machineId)).toEqual(["a1a1a1a1a1a1a1a1"]);
+    expect(new TextDecoder().decode(atDesk.received[0].bytes)).toContain("#end dev=a1a1a1a1a1a1a1a1");
   });
 
   test("書いている途中の写し・名前の違う写しは sync-in へ渡さない（skipped）", async () => {
     const drive = createFakeDrive();
     const client = createDriveClient({ fetch: drive.fetch, accessToken: drive.accessToken, sleep: async () => undefined });
-    await sendImeLearning({ client, machineId: "m-note", bytes: enc("#novel-ime-sync 1 dev=m-note\n{}\n") });
-    await sendImeLearning({ client, machineId: "m-mac1", bytes: exportOf("m-note") });
-    const atDesk = await receiveImeLearning({ client, machineId: "m-desk" });
+    await sendImeLearning({ client, machineId: "a1a1a1a1a1a1a1a1", bytes: enc("#novel-ime-sync 1 dev=a1a1a1a1a1a1a1a1\n{}\n") });
+    await sendImeLearning({ client, machineId: "c2c2c2c2c2c2c2c2", bytes: exportOf("a1a1a1a1a1a1a1a1") });
+    const atDesk = await receiveImeLearning({ client, machineId: "d0d0d0d0d0d0d0d0" });
     expect(atDesk.received).toEqual([]);
-    expect(atDesk.skipped.map((s) => s.machineId)).toEqual(["m-mac1", "m-note"]);
+    expect(atDesk.skipped.map((s) => s.machineId)).toEqual(["a1a1a1a1a1a1a1a1", "c2c2c2c2c2c2c2c2"]);
   });
 
   test("まだ誰も送っていなければ空", async () => {
     const drive = createFakeDrive();
     const client = createDriveClient({ fetch: drive.fetch, accessToken: drive.accessToken, sleep: async () => undefined });
-    expect(await receiveImeLearning({ client, machineId: "m-desk" })).toEqual({ received: [], skipped: [] });
+    expect(await receiveImeLearning({ client, machineId: "d0d0d0d0d0d0d0d0" })).toEqual({ received: [], skipped: [] });
+  });
+});
+
+describe("1回の手順の順番（偽のエンジン）", () => {
+  const DESK = "d0d0d0d0d0d0d0d0";
+  const NOTE = "a1a1a1a1a1a1a1a1";
+  function engine(exported: Uint8Array | string) {
+    const calls: string[] = [];
+    return {
+      calls,
+      engine: {
+        info: async () => {
+          calls.push("info");
+          return { machineId: DESK, dir: "記録" };
+        },
+        exportAll: async () => {
+          calls.push("export");
+          return exported;
+        },
+        importExport: async (machineId: string) => {
+          calls.push(`import:${machineId}`);
+        },
+      },
+    };
+  }
+
+  test("送れたあとだけ送り手の印を書き、ほかの機械の写しだけを sync-in へ渡す", async () => {
+    const drive = createFakeDrive();
+    const client = createDriveClient({ fetch: drive.fetch, accessToken: drive.accessToken, sleep: async () => undefined });
+    await sendImeLearning({ client, machineId: NOTE, bytes: exportOf(NOTE) });
+    const fake = engine(exportOf(DESK));
+    const result = await runImeLearningSync({
+      engine: fake.engine,
+      client,
+      writeSender: async (machineId) => {
+        fake.calls.push(`sender:${machineId}`);
+      },
+    });
+    expect(result).toEqual({ sent: true, imported: [NOTE], skipped: [] });
+    expect(fake.calls).toEqual(["info", "export", `sender:${DESK}`, `import:${NOTE}`]);
+    expect(drive.find("統合小説執筆環境", IME_DRIVE_FOLDER_NAME, DESK, IME_DRIVE_FILE_NAME)).toBeDefined();
+  });
+
+  test("写しが無い・頭が違う・別の機械の写し なら送らず、送り手の印も書かない（受け取りは続ける）", async () => {
+    for (const exported of ["写しがありません", enc("頭の無い文\n"), exportOf(NOTE)] as const) {
+      const drive = createFakeDrive();
+      const client = createDriveClient({ fetch: drive.fetch, accessToken: drive.accessToken, sleep: async () => undefined });
+      const fake = engine(exported);
+      const result = await runImeLearningSync({
+        engine: fake.engine,
+        client,
+        writeSender: async () => {
+          fake.calls.push("sender");
+        },
+      });
+      expect(typeof result === "string" ? result : result.sent).not.toBe(true);
+      expect(fake.calls).not.toContain("sender");
+      expect(drive.find("統合小説執筆環境", IME_DRIVE_FOLDER_NAME, DESK)).toBeUndefined();
+    }
+  });
+
+  test("送れない（ネットが切れた）ときは印を書かずに投げる", async () => {
+    const drive = createFakeDrive();
+    const client = createDriveClient({ fetch: drive.fetch, accessToken: drive.accessToken, sleep: async () => undefined });
+    drive.setFault(() => "network");
+    const fake = engine(exportOf(DESK));
+    await expect(
+      runImeLearningSync({ engine: fake.engine, client, writeSender: async () => void fake.calls.push("sender") })
+    ).rejects.toMatchObject({ kind: "network" });
+    expect(fake.calls).not.toContain("sender");
+  });
+
+  test("機械ID の形はエンジンと同じ（16進の8〜32字）", () => {
+    expect(isImeMachineId("0123456789abcdef")).toBe(true);
+    expect(isImeMachineId("1234567")).toBe(false);
+    expect(isImeMachineId("m-desk-01")).toBe(false);
+    expect(isImeMachineId("a".repeat(33))).toBe(false);
   });
 });

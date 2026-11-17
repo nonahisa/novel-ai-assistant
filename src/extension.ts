@@ -246,7 +246,7 @@ import {
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
-import { destinationOf } from "./core/driveDestination";
+import { destinationOf, readDestinations } from "./core/driveDestination";
 import { legacyVoiceEngine, type VoiceEngineId } from "./core/voiceEngine";
 import {
   readAloudEngineChoiceOf,
@@ -3002,17 +3002,30 @@ export async function activate(
     return driveDepsPromise;
   };
   /** ［保存・同期］の Google ドライブの分（作品の「送る → 受け取る」と、IME の学習） */
+  /** 送り先が Google ドライブの作品があるか（部品を読む前に、globalState だけで見る） */
+  const hasDriveWorks = (): boolean => {
+    const table = readDestinations(verifiedState(context.globalState));
+    return registry.list().some((work) => table.get(work.id) === "googleDrive");
+  };
   const runDriveSync = async (receiveOnly: boolean): Promise<void> => {
-    const deps = await driveDeps();
-    if (!deps) return;
-    const drive = await import("./features/driveSync.js");
-    if (drive.driveWorksOf(deps).length === 0) return;
-    await drive.syncDriveWorks(deps, { receiveOnly, quietWhenNothing: receiveOnly });
-    if (await deps.auth.isLoggedIn()) {
-      const ime = await import("./features/imeLearningSync.js");
-      await ime.syncImeLearning({
-        client: deps.auth.driveClient(),
-        version: String(context.extension.packageJSON.version),
+    // Google ドライブを使わない人の［保存・同期］では、部品を読みにも行かない
+    if (!canRunProcesses() || !hasDriveWorks()) return;
+    // ドライブの分の失敗で、続く GitHub の分を止めない
+    try {
+      const deps = await driveDeps();
+      if (!deps) return;
+      const drive = await import("./features/driveSync.js");
+      await drive.syncDriveWorks(deps, { receiveOnly, quietWhenNothing: receiveOnly });
+      if (await deps.auth.isLoggedIn()) {
+        const ime = await import("./features/imeLearningSync.js");
+        await ime.syncImeLearning({
+          client: deps.auth.driveClient(),
+          version: String(context.extension.packageJSON.version),
+        });
+      }
+    } catch (error) {
+      logFailure("Google ドライブの同期", {
+        詳細: error instanceof Error ? error.message : String(error),
       });
     }
   };
@@ -9792,9 +9805,12 @@ export async function activate(
       }
     })();
     const version = String(context.extension.packageJSON.version);
+    // 送り手の印は、Google ドライブの作品がありログインしているときだけ（送れないのに書くと、
+    // IME の同期のアプリが送るのをやめて誰も送らなくなる。設計書5.10.8）
     const writeSender = async () => {
+      if (!hasDriveWorks()) return;
       const ime = await import("./features/imeLearningSync.js");
-      await ime.writeImeSender(version);
+      await ime.refreshImeSender(version, async () => (await driveDeps())?.auth.isLoggedIn() ?? false);
     };
     void writeSender();
     const senderTimer = setInterval(() => void writeSender(), 24 * 60 * 60 * 1000);

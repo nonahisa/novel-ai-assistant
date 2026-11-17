@@ -107,8 +107,12 @@ export function driveWorksOf(deps: Pick<DriveSyncDeps, "registry" | "storage">):
   return deps.registry.list().filter((work) => table.get(work.id) === "googleDrive");
 }
 
-/** 同時に2回走らせない（2つの同期が同じ控えを読んで書くと、片方の進みが消える） */
-let running = false;
+/**
+ * 同時に2回走らせない（2つの同期が同じ控えを読んで書くと、片方の進みが消える）。
+ * 走っている間に押されたら、終わるのを待ってから走る（開いた直後の受け取りの最中に
+ * ［保存・同期］を押しても、黙って見送らない）
+ */
+let running: Promise<void> | undefined;
 
 /**
  * ［保存・同期］のうち、送り先が Google ドライブの作品の分（「送る → 受け取る」）。
@@ -119,12 +123,25 @@ export async function syncDriveWorks(
   deps: DriveSyncDeps,
   options: { receiveOnly: boolean; quietWhenNothing?: boolean }
 ): Promise<void> {
+  while (running) await running.catch(() => undefined);
+  let finish: () => void = () => undefined;
+  running = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  try {
+    await syncDriveWorksNow(deps, options);
+  } finally {
+    running = undefined;
+    finish();
+  }
+}
+
+async function syncDriveWorksNow(
+  deps: DriveSyncDeps,
+  options: { receiveOnly: boolean; quietWhenNothing?: boolean }
+): Promise<void> {
   const works = driveWorksOf(deps);
   if (works.length === 0) return;
-  if (running) {
-    logLine("Google ドライブの同期がまだ走っているので、今回は見送りました");
-    return;
-  }
   if (!(await deps.auth.isLoggedIn())) {
     const login = "ログインする";
     whenNoticePicked(
@@ -137,7 +154,6 @@ export async function syncDriveWorks(
     );
     return;
   }
-  running = true;
   const resume = deps.pauseSettingsWatch?.();
   const lines: { text: string; problem: boolean }[] = [];
   const toChoose: { work: WorkEntry; reports: DriveConflictReport[] }[] = [];
@@ -161,7 +177,6 @@ export async function syncDriveWorks(
     }
   } finally {
     resume?.();
-    running = false;
   }
   const problems = lines.filter((line) => line.problem);
   if (options.quietWhenNothing && problems.length === 0 && toChoose.length === 0 && lines.every((l) => /変わったものはありませんでした|まだ何も届いていません/.test(l.text))) {
@@ -206,6 +221,8 @@ async function syncOneWork(
       reports: [],
     };
   }
+  // Git の除外の行は送る前に足す（送ったあとで足すと、.gitignore がいつも「送っていない変更」になる）
+  await ensureOnUseIgnoreRule(work.folderPath, DRIVE_SYNC_RECORD_IGNORE_RULE);
   const files = workFiles(work, deps.deviceId);
   const layout: DriveSyncLayout = { workFolderName: uid.workUid, deviceId: deps.deviceId, deviceName: deps.deviceName };
   const result = await runDriveWorkSync({
@@ -298,6 +315,8 @@ async function chooseWholeFile(
   type Item = vscode.QuickPickItem & { act: "local" | "remote" | "both" | "view"; peer?: string; remoteIndex?: number };
   const items: Item[] = [];
   if (report.localBytes !== undefined) items.push({ label: `$(arrow-left) ${HERE}の文を残す`, act: "local" });
+  // このパソコンで消した × もう1台で書いた：消したままにする道が無いと、選べずに控えに残り続ける
+  else if (report.decision.local !== null) items.push({ label: `$(trash) ${HERE}で消したままにする`, act: "local" });
   report.remotes.forEach((remote, index) => {
     items.push({ label: `$(arrow-right) ${namesOf(remote)}の文を残す`, act: "remote", peer: remote.devices[0].deviceId, remoteIndex: index });
   });
@@ -427,6 +446,8 @@ export async function switchSyncDestination(deps: DriveSyncDeps, work: WorkEntry
       await refuse(work, [ensured.reason], undefined);
       return;
     }
+    // Git の除外の行は切り替えるときに足す（2台とも、送る前に同じ1行が入る）
+    await ensureOnUseIgnoreRule(work.folderPath, DRIVE_SYNC_RECORD_IGNORE_RULE);
     await writeDestination(deps.storage, work.id, "googleDrive");
     logLine(`[drive] 送り先を Google ドライブにしました：${work.title}`);
     const sync = "保存・同期";

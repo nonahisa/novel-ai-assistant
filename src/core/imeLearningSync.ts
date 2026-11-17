@@ -35,8 +35,11 @@ export const IME_SENDER_FILE = "sender.json";
 /** 送り手の印を書き直す間（1日1回。設計書5.10.8） */
 export const IME_SENDER_REFRESH_MS = 24 * 60 * 60 * 1000;
 
-/** 機械ID の形（ドライブのフォルダー名と写しの `dev=` に使う。区切り・空白を含まない） */
-const MACHINE_ID_PATTERN = /^[0-9A-Za-z_-]{4,64}$/;
+/**
+ * 機械ID の形（ドライブのフォルダー名と写しの `dev=` に使う）。エンジンの決まり
+ * （novel-ime `core/src/record.rs` の `valid_dev`：16進の8〜32字）と同じにする
+ */
+const MACHINE_ID_PATTERN = /^[0-9a-fA-F]{8,32}$/;
 
 export function isImeMachineId(value: string): boolean {
   return MACHINE_ID_PATTERN.test(value);
@@ -173,4 +176,57 @@ function oldestFile(entries: readonly DriveFileEntry[], name: string): DriveFile
   return [...entries]
     .filter((entry) => entry.mimeType !== DRIVE_FOLDER_MIME && entry.name === name)
     .sort(compareDriveEntriesByAge)[0];
+}
+
+/** エンジン（`novel-ime-core`）の口。手元は exe を起こし、試験は偽物を渡す */
+export interface ImeEngine {
+  /** `sync-info`。読めなければ理由 */
+  info(): Promise<ImeSyncInfo | string>;
+  /** `sync-out --all --file <一時の先>` で書かせた写し。書かなければ理由 */
+  exportAll(): Promise<Uint8Array | string>;
+  /** ほかの機械の写しを一時の所に置いて `sync-in <ファイル>` へ渡す */
+  importExport(machineId: string, bytes: Uint8Array): Promise<void>;
+}
+
+export interface ImeLearningSyncResult {
+  /** 送れた（前と同じで書かなかったものを含む）か。送れなければ理由 */
+  sent: true | string;
+  /** sync-in へ渡した機械 */
+  imported: string[];
+  skipped: { machineId: string; reason: string }[];
+}
+
+/**
+ * 学習を1回そろえる（設計書5.10.8）。順は sync-info → 写しを書かせる → 書き終わった形と
+ * 機械ID を確かめる → 送る → **送れたあとだけ送り手の印を書く** → ほかの機械の写しを確かめて
+ * sync-in へ。送り手の印を送れないときに書くと、IME の同期のアプリが送るのをやめ、
+ * 誰も送らなくなるため。ドライブの失敗はそのまま投げる（呼び手がログへ）
+ */
+export async function runImeLearningSync(input: {
+  engine: ImeEngine;
+  client: DriveClient;
+  /** 送り手の印を書く（機械ID を渡す） */
+  writeSender: (machineId: string) => Promise<void>;
+}): Promise<ImeLearningSyncResult | string> {
+  const info = await input.engine.info();
+  if (typeof info === "string") return info;
+  let sent: true | string;
+  const bytes = await input.engine.exportAll();
+  if (typeof bytes === "string") sent = bytes;
+  else {
+    const checked = checkImeExport(bytes, info.machineId);
+    if (checked !== true) sent = checked;
+    else {
+      await sendImeLearning({ client: input.client, machineId: info.machineId, bytes });
+      sent = true;
+    }
+  }
+  if (sent === true) await input.writeSender(info.machineId);
+  const received = await receiveImeLearning({ client: input.client, machineId: info.machineId });
+  const imported: string[] = [];
+  for (const item of received.received) {
+    await input.engine.importExport(item.machineId, item.bytes);
+    imported.push(item.machineId);
+  }
+  return { sent, imported, skipped: received.skipped };
 }
