@@ -2405,7 +2405,7 @@
         "novelai.googleDrive.syncImeLearning": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "送り先が Google ドライブの作品があるとき、オリジナルIME の学習も Google ドライブでそろえる。\n\n・オリジナルIME のエンジンが入っている PC でだけ働く\n・送るのは学習の写しだけ（打った文は送らない）\n・オンのあいだは、IME の同期のアプリはこの PC からは送らない"
+          "markdownDescription": "送り先が Google ドライブの作品があるとき、六徳 IME の学習も Google ドライブでそろえる。\n\n・六徳 IME のエンジンが入っている PC でだけ働く\n・送るのは学習の写しだけ（打った文は送らない）\n・オンのあいだは、IME の同期のアプリはこの PC からは送らない"
         },
         "novelai.ime.notifyCurrentWork": {
           "type": "boolean",

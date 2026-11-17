@@ -112,12 +112,12 @@ export async function refreshImeSender(version: string, canSend: () => Promise<b
     if (!exe || !(await canSend())) return;
     const info = await syncInfo(exe);
     if (typeof info === "string") {
-      logLine(`オリジナルIME の送り手の印を書いていません（${info}）`);
+      logLine(`六徳 IME の送り手の印を書いていません（${info}）`);
       return;
     }
     await writeSenderFile(info.dir, info.machineId, version);
   } catch (error) {
-    logLine(`オリジナルIME の送り手の印を書けませんでした（${error instanceof Error ? error.message : String(error)}）`);
+    logLine(`六徳 IME の送り手の印を書けませんでした（${error instanceof Error ? error.message : String(error)}）`);
   }
 }
 
@@ -144,7 +144,7 @@ export async function syncImeLearning(input: { client: DriveClient; version: str
       exportAll: async () => {
         const outFile = path.join(temp, "out.jsonl");
         const run = await runEngine(exe, ["sync-out", "--all", "--file", outFile]);
-        logLine(`オリジナルIME の写しを作りました（終了コード ${run.code}）${run.stderr.trim()}`);
+        logLine(`六徳 IME の写しを作りました（終了コード ${run.code}）${run.stderr.trim()}`);
         if (run.code !== 0) return `sync-out が終了コード ${run.code}`;
         try {
           return await vscode.workspace.fs.readFile(path.toUri(outFile));
@@ -157,7 +157,7 @@ export async function syncImeLearning(input: { client: DriveClient; version: str
         const file = path.join(temp, `in-${machineId}.jsonl`);
         await atomicWriteFile(file, bytes, { mode: "create" });
         const run = await runEngine(exe, ["sync-in", file]);
-        logLine(`オリジナルIME の学習を受け取りました（${machineId}、終了コード ${run.code}）${run.stdout.trim()}`);
+        logLine(`六徳 IME の学習を受け取りました（${machineId}、終了コード ${run.code}）${run.stdout.trim()}`);
       },
     };
     const result = await runImeLearningSync({
@@ -168,18 +168,18 @@ export async function syncImeLearning(input: { client: DriveClient; version: str
       },
     });
     if (typeof result === "string") {
-      logLine(`オリジナルIME の学習をそろえませんでした（${result}）`);
+      logLine(`六徳 IME の学習をそろえませんでした（${result}）`);
       return;
     }
-    if (result.sent !== true) logLine(`オリジナルIME の学習を送っていません（${result.sent}）`);
+    if (result.sent !== true) logLine(`六徳 IME の学習を送っていません（${result.sent}）`);
     for (const skipped of result.skipped) {
-      logLine(`オリジナルIME の写しを受け取っていません（${skipped.machineId}：${skipped.reason}）`);
+      logLine(`六徳 IME の写しを受け取っていません（${skipped.machineId}：${skipped.reason}）`);
     }
   } catch (error) {
     if (error instanceof DriveApiError) {
-      logLine(`オリジナルIME の学習をそろえられませんでした（${error.kind}）。${driveNextAction(error.kind)}`);
+      logLine(`六徳 IME の学習をそろえられませんでした（${error.kind}）。${driveNextAction(error.kind)}`);
     } else {
-      logLine(`オリジナルIME の学習をそろえられませんでした（${error instanceof Error ? error.message : String(error)}）`);
+      logLine(`六徳 IME の学習をそろえられませんでした（${error instanceof Error ? error.message : String(error)}）`);
     }
   } finally {
     if (tempDir) {
