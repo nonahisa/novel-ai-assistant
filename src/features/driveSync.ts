@@ -28,6 +28,7 @@ import {
   type WorkGitState,
 } from "../core/driveDestination";
 import { isSendableSyncPath } from "../core/driveSyncPlan";
+import { gitignoreForDrive } from "../core/driveGitignore";
 import {
   applyDriveConflictChoice,
   applyDriveMergeChoice,
@@ -73,6 +74,41 @@ import { CHOOSE_TEXT_TO_KEEP } from "../core/gitSyncMenuText";
 
 /** ドライブへ送らないもの：一括の除外と、使った作品だけに足す除外（IME の控え・この端末の控え） */
 export const DRIVE_IGNORED_PATHS: readonly string[] = [...IGNORED_PATHS, ...ON_USE_IGNORED_PATHS];
+
+/**
+ * この作品で送らないもの：決まった除外と、作品の根の `.gitignore` の読める行（設計書5.10.9）。
+ * `.gitignore` が無い・読めないときは決まった除外だけ。読めない行は `unreadable` に返す
+ */
+export async function driveIgnoredPathsFor(
+  work: WorkEntry
+): Promise<{ paths: string[]; unreadable: { line: number; text: string }[] }> {
+  let text: string | undefined;
+  try {
+    text = new TextDecoder().decode(await vscode.workspace.fs.readFile(path.toUri(path.join(work.folderPath, ".gitignore"))));
+  } catch {
+    text = undefined;
+  }
+  if (text === undefined) return { paths: [...DRIVE_IGNORED_PATHS], unreadable: [] };
+  const read = gitignoreForDrive(text);
+  return { paths: [...DRIVE_IGNORED_PATHS, ...read.rules], unreadable: read.unreadable };
+}
+
+/** 読めない行を知らせた作品と中身（同じ中身で何度も知らせない。この起動のあいだ） */
+const notedUnreadable = new Set<string>();
+
+/** 読めない行の一言（同じ作品・同じ中身なら2度目は空） */
+export function noteUnreadableGitignore(work: WorkEntry, unreadable: readonly { line: number; text: string }[]): string {
+  if (unreadable.length === 0) return "";
+  const key = JSON.stringify([work.id, unreadable]);
+  if (notedUnreadable.has(key)) return "";
+  notedUnreadable.add(key);
+  const shown = unreadable
+    .slice(0, 3)
+    .map((item) => `${item.line}行目「${item.text}」`)
+    .join("・");
+  const more = unreadable.length > 3 ? `ほか${unreadable.length - 3}行` : "";
+  return `\n「${work.title}」の .gitignore に、送らないものとして読めない行があります（${shown}${more}）。その行はドライブへ送るかどうかに使っていません。送りたくないものは、読める形（名前・「*」・「**」・末尾の「/」）で書き直してください。`;
+}
 
 export interface DriveSyncDeps {
   registry: WorkRegistry;
@@ -223,7 +259,9 @@ async function syncOneWork(
   }
   // Git の除外の行は送る前に足す（送ったあとで足すと、.gitignore がいつも「送っていない変更」になる）
   await ensureOnUseIgnoreRule(work.folderPath, DRIVE_SYNC_RECORD_IGNORE_RULE);
-  const files = workFiles(work, deps.deviceId);
+  // 作者が .gitignore に書いた行も送らないものに足す（読めない行は知らせる。設計書5.10.9）
+  const ignore = await driveIgnoredPathsFor(work);
+  const files = workFiles(work, deps.deviceId, ignore.paths);
   const layout: DriveSyncLayout = { workFolderName: uid.workUid, deviceId: deps.deviceId, deviceName: deps.deviceName };
   const result = await runDriveWorkSync({
     client: deps.auth.driveClient(),
@@ -231,13 +269,15 @@ async function syncOneWork(
     local: files.local,
     writer: files.writer,
     record: loaded.record,
-    ignoredPaths: DRIVE_IGNORED_PATHS,
+    ignoredPaths: ignore.paths,
     now: new Date(),
     sizes: receiveOnly ? new Map() : await files.sizes(),
     receiveOnly,
   });
   if (result.kind === "done" && result.recordChanged) await writeRecord(work, deps.deviceId, result.record);
   const notice = describeDriveWorkSync(work.title, result);
+  const unreadableNote = noteUnreadableGitignore(work, ignore.unreadable);
+  if (unreadableNote) notice.text += unreadableNote;
   logLine(`[drive] ${notice.text}`);
   if (result.kind === "done" && result.receive.kind === "received") {
     if (result.receive.written.length > 0) await deps.afterReceived?.(work);
@@ -466,7 +506,8 @@ export async function switchSyncDestination(deps: DriveSyncDeps, work: WorkEntry
   const loaded = await readRecord(work, deps.deviceId);
   let unsent: string[] | undefined;
   if (loaded.ok) {
-    const files = workFiles(work, deps.deviceId);
+    const ignore = await driveIgnoredPathsFor(work);
+    const files = workFiles(work, deps.deviceId, ignore.paths);
     const local = new Map<string, string>();
     for (const entry of await files.local.list()) {
       const bytes = await files.local.read(entry);
@@ -475,7 +516,7 @@ export async function switchSyncDestination(deps: DriveSyncDeps, work: WorkEntry
     unsent = findDriveUnsent({
       record: loaded.record,
       local,
-      isSendable: (entry) => isSendableSyncPath(entry, { ownDeviceId: deps.deviceId, ignoredPaths: DRIVE_IGNORED_PATHS }),
+      isSendable: (entry) => isSendableSyncPath(entry, { ownDeviceId: deps.deviceId, ignoredPaths: ignore.paths }),
     });
   }
   const check = checkSwitchToGithub({
@@ -544,7 +585,12 @@ function gitStateOf(deps: DriveSyncDeps, work: WorkEntry): WorkGitState | undefi
 }
 
 /** 手元の作品のフォルダーの読み書きの口（core の `LocalWorkFiles`・`LocalWorkWriter`） */
-export function workFiles(work: WorkEntry, deviceId: string): {
+export function workFiles(
+  work: WorkEntry,
+  deviceId: string,
+  /** 送らないもの（大きさを数えないもの）。省けば決まった除外だけ */
+  ignoredPaths: readonly string[] = DRIVE_IGNORED_PATHS
+): {
   local: LocalWorkFiles;
   writer: LocalWorkWriter;
   sizes(): Promise<Map<string, number>>;
@@ -653,7 +699,7 @@ export function workFiles(work: WorkEntry, deviceId: string): {
   const sizes = async () => {
     const out = new Map<string, number>();
     for (const { entry } of await walk()) {
-      if (!isSendableSyncPath(entry, { ownDeviceId: deviceId, ignoredPaths: DRIVE_IGNORED_PATHS })) continue;
+      if (!isSendableSyncPath(entry, { ownDeviceId: deviceId, ignoredPaths })) continue;
       try {
         out.set(entry, (await vscode.workspace.fs.stat(path.toUri(abs(entry)))).size);
       } catch (error) {

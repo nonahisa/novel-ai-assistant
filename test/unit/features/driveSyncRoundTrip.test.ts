@@ -9,7 +9,7 @@ import { isSendableSyncPath } from "../../../src/core/driveSyncPlan";
 import { runDriveWorkSync } from "../../../src/core/driveWorkSync";
 import { hashBytes } from "../../../src/core/hash";
 import { DRIVE_SYNC_RECORD_IGNORE_RULE, ensureOnUseIgnoreRule } from "../../../src/core/workRegistry";
-import { DRIVE_IGNORED_PATHS, readRecord, workFiles, writeRecord } from "../../../src/features/driveSync";
+import { DRIVE_IGNORED_PATHS, driveIgnoredPathsFor, noteUnreadableGitignore, readRecord, workFiles, writeRecord } from "../../../src/features/driveSync";
 import { createFakeDrive } from "../support/fakeDrive";
 
 /**
@@ -106,5 +106,33 @@ describe("製品の手元の口で2台を往復する", () => {
     expect(names.some((name) => name.startsWith(".novelai-recovery/"))).toBe(false);
     expect(names.some((name) => name.startsWith(".aiwriter/cache/"))).toBe(false);
     expect(names).toContain(".gitignore");
+  });
+
+  test("作者が .gitignore に書いた行のファイルは送らない。読めない行は返し、知らせは1度だけ", async () => {
+    disk.set(nodePath.join(DESK.root, ".gitignore"), enc("下書き/\n*.bak\n!大事.bak\n"));
+    disk.set(nodePath.join(DESK.root, "下書き", "メモ.txt"), enc("送らない"));
+    disk.set(nodePath.join(DESK.root, "本文", "第1話.bak"), enc("送らない"));
+    const work = workOf(DESK);
+    const ignore = await driveIgnoredPathsFor(work);
+    expect(ignore.unreadable).toEqual([{ line: 3, text: "!大事.bak" }]);
+    expect(noteUnreadableGitignore(work, ignore.unreadable)).toContain("3行目「!大事.bak」");
+    expect(noteUnreadableGitignore(work, ignore.unreadable)).toBe("");
+
+    const files = workFiles(work, DESK.device, ignore.paths);
+    const result = await runDriveWorkSync({
+      client: createDriveClient({ fetch: drive.fetch, accessToken: drive.accessToken, sleep: async () => undefined }),
+      layout: { workFolderName: "w-2026-0001", deviceId: DESK.device, deviceName: DESK.name },
+      local: files.local,
+      writer: files.writer,
+      record: (await readRecord(work, DESK.device) as { ok: true; record: Parameters<typeof writeRecord>[2] }).record,
+      ignoredPaths: ignore.paths,
+      now: new Date("2026-11-18T09:00:00Z"),
+      sizes: await files.sizes(),
+    });
+    expect(result.kind).toBe("done");
+    const names = [...drive.files.values()].map((file) => file.name);
+    expect(names).toContain("本文/第1話.txt");
+    expect(names).not.toContain("下書き/メモ.txt");
+    expect(names).not.toContain("本文/第1話.bak");
   });
 });
