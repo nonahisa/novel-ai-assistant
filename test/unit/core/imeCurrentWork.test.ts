@@ -483,3 +483,39 @@ describe("いまの作品と向きを決める（計画書 3.4）", () => {
     ).toEqual({ work: b, vertical: true });
   });
 });
+
+describe("buildImeTsv：よく使う語（frequent）", () => {
+  const base: DictionaryEntry[] = [
+    { surface: "月島灯", reading: "つきしまあかり", kind: "character", partOfSpeech: "名詞" },
+  ];
+
+  test("frequent が無ければ今と完全に同じ出力", () => {
+    expect(buildImeTsv(base, [])).toBe(buildImeTsv(base));
+    expect(buildImeTsv(base)).toBe(`${IME_TSV_HEADER}\n月島灯\tつきしまあかり\tcharacter\t\n`);
+  });
+
+  test("末尾に5列で出る・4列目は空・設定資料の行は変わらない", () => {
+    const text = buildImeTsv(base, [
+      { surface: "ゲーム", reading: "げーむ", count: 3 },
+      { surface: "ドラゴン", reading: "どらごん", count: 7 },
+    ]);
+    const lines = text.split("\n").filter(Boolean);
+    expect(lines[0]).toBe(IME_TSV_HEADER);
+    expect(lines[1]).toBe("月島灯\tつきしまあかり\tcharacter\t");
+    expect(lines[2].split("\t")).toEqual(["ドラゴン", "どらごん", "frequent", "", "7"]);
+    expect(lines[3].split("\t")).toEqual(["ゲーム", "げーむ", "frequent", "", "3"]);
+    expect(text.endsWith("\n")).toBe(true);
+  });
+
+  test("64字を超える語・タブを含む語は落とす", () => {
+    const text = buildImeTsv([], [
+      { surface: "ア".repeat(65), reading: "あ", count: 3 },
+      { surface: "割れ\tた", reading: "われた", count: 3 },
+    ]);
+    expect(text).toBe(`${IME_TSV_HEADER}\n`);
+  });
+
+  test("種類の一覧に frequent は入らない", () => {
+    expect(IME_TSV_KINDS).not.toContain("frequent" as never);
+  });
+});

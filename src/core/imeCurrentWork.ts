@@ -1,6 +1,7 @@
 import type { DictionaryEntry, DictionaryKind } from "./imeDictionary";
 import { localIsoString } from "./contestInbox";
 import { sha256Text } from "./hash";
+import { compareFrequent, type FrequentWord } from "./imeFrequent";
 
 /**
  * オリジナルIME（Setsuna）へ「いまの作品」と作品の一覧・核向けの辞書を渡す（設計書6.13.7）。
@@ -400,7 +401,10 @@ const TSV_BREAKING = /[\t\r\n]/;
  * （写しを作らない）。ここで落とすのは、**タブ・改行を含む語**（その行が壊れる）と
  * **IME が捨てる長さ**の語だけ。
  */
-export function buildImeTsv(entries: readonly DictionaryEntry[]): string {
+export function buildImeTsv(
+  entries: readonly DictionaryEntry[],
+  frequent: readonly FrequentWord[] = []
+): string {
   const lines = [IME_TSV_HEADER];
   for (const entry of entries) {
     const base = entry.baseName ?? "";
@@ -418,6 +422,18 @@ export function buildImeTsv(entries: readonly DictionaryEntry[]): string {
       continue;
     }
     lines.push([entry.surface, entry.reading, entry.kind, base].join("\t"));
+  }
+  // 本文でよく使う語は設定資料の語のあと（ファイルの末尾）。種類は frequent、4列目は空、
+  // 5列目に回数。DictionaryKind には入れない（設定資料パネルや3つのIMEの書き出しへ出さないため）
+  for (const word of [...frequent].sort(compareFrequent)) {
+    if (TSV_BREAKING.test(word.surface) || TSV_BREAKING.test(word.reading)) continue;
+    if (
+      [...word.surface].length > IME_TSV_MAX_FIELD_CHARS ||
+      [...word.reading].length > IME_TSV_MAX_FIELD_CHARS
+    ) {
+      continue;
+    }
+    lines.push([word.surface, word.reading, "frequent", "", String(word.count)].join("\t"));
   }
   return `${lines.join("\n")}\n`;
 }

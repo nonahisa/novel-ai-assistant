@@ -44,7 +44,53 @@ import {
   type ImeObservedFront,
   type ImeWorkRef,
 } from "../core/imeCurrentWork";
+import { countFrequentWords, type FrequentWord } from "../core/imeFrequent";
+import { scanWork } from "../core/scanner";
+import { loadEpisodeBodies } from "../core/episodeBodies";
+import { readMemoMarkers } from "../core/memoMarkerStore";
 import { loadDictionaryForWork } from "./exportImeDictionary";
+
+/**
+ * 本文でよく使う語を辞書の末尾へ出すか。
+ *
+ * ノートPCの IME のエンジンが 5B4203B5 以降になったら true にする
+ * （前のエンジンは frequent の行を先頭に出してしまう）。false の間は数えもしない
+ * （本文を読まない）。
+ */
+export const IME_FREQUENT_WORDS_ENABLED = false;
+
+/**
+ * 作品の話の本文から、よく使う語を数える。**読めない話があっても止めず、読めた分で作る。**
+ * 話の一覧は走査（`scanWork`）の結果——ゴミ箱・回復先・書き出しの写しは入らない。
+ * シーンメモは `loadEpisodeBodies` が消す。
+ */
+async function loadFrequentWords(
+  work: WorkEntry,
+  excludedSurfaces: ReadonlySet<string>
+): Promise<FrequentWord[]> {
+  try {
+    const scan = await scanWork(work);
+    const memoMarkers = await readMemoMarkers(work);
+    const bodies: string[] = [];
+    for (const episode of scan.episodes) {
+      try {
+        const loaded = await loadEpisodeBodies([episode], memoMarkers);
+        for (const one of loaded.bodies) bodies.push(one.body);
+      } catch (error) {
+        logLine(
+          `よく使う語を数えるとき、読めない話を飛ばしました：${episode.fileName}（${error instanceof Error ? error.message : String(error)}）`
+        );
+      }
+    }
+    return countFrequentWords(bodies, excludedSurfaces);
+  } catch (error) {
+    // 数えられなくても、設定資料の辞書は書く
+    logLine(
+      `よく使う語を数えられませんでした：${work.title}（${error instanceof Error ? error.message : String(error)}）`
+    );
+    return [];
+  }
+}
 
 /**
  * オリジナルIME（Setsuna）へ、いまの作品・作品の一覧・核向けの辞書を書く（設計書6.13.7）。
@@ -290,7 +336,8 @@ async function existingDictionaryHash(work: WorkEntry): Promise<string | null> {
  */
 export async function rebuildImeTsv(
   work: WorkEntry,
-  state: vscode.Memento | undefined
+  state: vscode.Memento | undefined,
+  frequentEnabled: boolean = IME_FREQUENT_WORDS_ENABLED
 ): Promise<string | null> {
   const loaded = await loadDictionaryForWork(work);
   if (!loaded.ok) {
@@ -301,7 +348,14 @@ export async function rebuildImeTsv(
   }
   const excluded = state?.get<string[]>(imeExcludedKey(work.id)) ?? [];
   const entries = withoutExcluded(loaded.built.entries, excluded);
-  return writeImeTsv(work, buildImeTsv(entries));
+  // 設定資料の語（外した語も含む）と同じ表記は、よく使う語へ出さない
+  const frequent = frequentEnabled
+    ? await loadFrequentWords(
+        work,
+        new Set([...loaded.built.entries.map((entry) => entry.surface), ...excluded])
+      )
+    : [];
+  return writeImeTsv(work, buildImeTsv(entries, frequent));
 }
 
 /** 知らせ・一覧を置き場へ書く（一時ファイルから名前を替える） */
