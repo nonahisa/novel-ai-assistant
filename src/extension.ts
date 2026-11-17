@@ -246,6 +246,7 @@ import {
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
+import { destinationOf } from "./core/driveDestination";
 import { legacyVoiceEngine, type VoiceEngineId } from "./core/voiceEngine";
 import {
   readAloudEngineChoiceOf,
@@ -2963,7 +2964,58 @@ export async function activate(
     batchFileNotices: gitSync.beginBatchedFileNotices?.bind(gitSync),
     // 記録の前に、作品の中の未保存を保存する（設計書5.5.19）
     presave: createSyncPresave(),
+    // 送り先が Google ドライブの作品は git でそろえない（設計書5.10.9。1つの作品で併用しない）
+    skipWork: (work: WorkEntry) => destinationOf(verifiedState(context.globalState), work.id) === "googleDrive",
   });
+
+  /*
+    Google ドライブで2台をそろえる（設計書5.10.9。段階3）。**ブラウザ版では作らない**
+    （手元で待ち受けられない。5.10.2）。部品はどれも動的 import——提供者は `node:http` を、
+    IME の学習の同期は `node:child_process` を、使う場面で動的に読む（実装ルール7）
+  */
+  let driveDepsPromise: Promise<import("./features/driveSync").DriveSyncDeps | undefined> | undefined;
+  const driveDeps = (): Promise<import("./features/driveSync").DriveSyncDeps | undefined> => {
+    driveDepsPromise ??= (async () => {
+      if (!canRunProcesses() || !conflictProvider) return undefined;
+      const [{ createGoogleDriveAuth }, { readMachineName }] = await Promise.all([
+        import("./features/googleDriveAuth.js"),
+        import("./features/windowCard.js"),
+      ]);
+      const compare = conflictProvider;
+      return {
+        registry,
+        storage: verifiedState(context.globalState),
+        deviceId,
+        deviceName: (await readMachineName()) ?? deviceId,
+        auth: createGoogleDriveAuth(context.secrets),
+        gitStatusOf: (workId: string) => gitSync.statusFor(workId),
+        pauseSettingsWatch: () => settingsWatcher.pause(),
+        compare,
+        // 受け取りで手元のファイルが変わった。git の取り込みのあとと同じく作り直す（設計書5.5.8）
+        afterReceived: async (work: WorkEntry) => {
+          await reloadAfterExternalChange(work);
+          await progress.rebaseline(work);
+          updateStatusBar();
+        },
+      };
+    })();
+    return driveDepsPromise;
+  };
+  /** ［保存・同期］の Google ドライブの分（作品の「送る → 受け取る」と、IME の学習） */
+  const runDriveSync = async (receiveOnly: boolean): Promise<void> => {
+    const deps = await driveDeps();
+    if (!deps) return;
+    const drive = await import("./features/driveSync.js");
+    if (drive.driveWorksOf(deps).length === 0) return;
+    await drive.syncDriveWorks(deps, { receiveOnly, quietWhenNothing: receiveOnly });
+    if (await deps.auth.isLoggedIn()) {
+      const ime = await import("./features/imeLearningSync.js");
+      await ime.syncImeLearning({
+        client: deps.auth.driveClient(),
+        version: String(context.extension.packageJSON.version),
+      });
+    }
+  };
 
   context.subscriptions.push(
     // **1押しで 保存 → 記録 → 送信**（設計書6.15.1の②）。既存の「GitHubと
@@ -2986,7 +3038,37 @@ export async function activate(
         return;
       }
       const { saveAndSyncAll } = await import("./features/handoffSync.js");
-      await saveAndSyncAll(handoffDeps());
+      await saveAndSyncAll({ ...handoffDeps(), driveSync: () => runDriveSync(false) });
+    }),
+    // Google ドライブの接続を設定（クライアントを入れる → ログイン。設計書5.10.9）
+    registerCommand("novelai.googleDriveSetup", async () => {
+      const deps = await driveDeps();
+      if (!deps) {
+        void vscode.window.showWarningMessage(describeProcessesBlocked("novelai.googleDriveSetup"));
+        return;
+      }
+      await deps.auth.setup();
+    }),
+    registerCommand("novelai.googleDriveLogout", async () => {
+      const deps = await driveDeps();
+      if (!deps) {
+        void vscode.window.showWarningMessage(describeProcessesBlocked("novelai.googleDriveLogout"));
+        return;
+      }
+      await deps.auth.logout();
+    }),
+    // 作品ごとの送り先（GitHub ⇔ Google ドライブ）。未送信・食い違い・未保存を残したまま移らない（5.10.5）
+    registerCommand("novelai.switchSyncDestination", async (node?: WorkNode) => {
+      const deps = await driveDeps();
+      if (!deps) {
+        void vscode.window.showWarningMessage(describeProcessesBlocked("novelai.switchSyncDestination"));
+        return;
+      }
+      const work = await resolveWork(node, registry, { title: "送り先を切り替える作品を選択" });
+      if (!work) return;
+      const drive = await import("./features/driveSync.js");
+      await drive.switchSyncDestination(deps, work);
+      treeProvider.refresh(work.id);
     }),
     registerCommand("novelai.syncAllWorks", async () => {
       const { syncAllWorks } = await import("./features/syncAllWorks.js");
@@ -9693,6 +9775,32 @@ export async function activate(
     **ブラウザ版ではgitの子プロセスを起こせない**ので、これまでどおり
     代役の `refreshAll`（何もしない）で済ませる（設計書5.8.5）。
   */
+  /*
+    **開いたときに Google ドライブから受け取る**（設計書5.10.1。送り先が Google ドライブの作品だけ）。
+    保存していない文書のある作品は受け取らない（`syncDriveWorks`）。起動を待たせない。
+    何も変わらなければ知らせない。ログインの窓も見比べも自動では開かない（知らせのボタンから）。
+    オリジナルIME の送り手の印は、設定が入っているときだけ起動のたびと1日1回書く（5.10.8）
+  */
+  if (canRunProcesses()) {
+    void (async () => {
+      try {
+        await runDriveSync(true);
+      } catch (error) {
+        logFailure("開いたときの Google ドライブからの受け取り", {
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+    const version = String(context.extension.packageJSON.version);
+    const writeSender = async () => {
+      const ime = await import("./features/imeLearningSync.js");
+      await ime.writeImeSender(version);
+    };
+    void writeSender();
+    const senderTimer = setInterval(() => void writeSender(), 24 * 60 * 60 * 1000);
+    context.subscriptions.push({ dispose: () => clearInterval(senderTimer) });
+  }
+
   if (canRunProcesses()) {
     void (async () => {
       const handoff = await import("./features/handoffSync.js");

@@ -67,6 +67,11 @@ const REQUIRES_PROCESSES = new Set<string>([
   // **Claude Code の CLI を起動して登録する**（設計書6.87.18）。MCP サーバーも
   // この機械で起動するもので、ブラウザ版には起こす先が無い
   "novelai.connectClaudeCode",
+  // **Google ドライブで2台をそろえる**（設計書5.10.2）。ログインは手元の 127.0.0.1 で待ち受ける
+  // （ブラウザには待ち受けが無い）うえ、ブラウザ版の作品は GitHub そのもの
+  "novelai.switchSyncDestination",
+  "novelai.googleDriveSetup",
+  "novelai.googleDriveLogout",
 ]);
 
 /**

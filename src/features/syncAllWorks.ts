@@ -148,10 +148,12 @@ export interface SyncAllDeps {
   diagnoseFetch?: (work: WorkEntry) => Promise<"revoked" | "offline" | "unknown">;
   /** 見分けた理由の知らせ（試験の差し替え口）。省けば `showFetchTrouble` */
   showFetchTrouble?: (work: WorkEntry, trouble: "revoked" | "offline") => void;
+  /** git の同期から外す作品（送り先が Google ドライブの作品。設計書5.10.9） */
+  skipWork?: (work: WorkEntry) => boolean;
 }
 
 export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
-  const works = deps.registry.list();
+  const works = deps.registry.list().filter((work) => !deps.skipWork?.(work));
   if (works.length === 0) {
     void vscode.window.showInformationMessage(
       "登録されている作品がありません。先に作品を追加してください。"

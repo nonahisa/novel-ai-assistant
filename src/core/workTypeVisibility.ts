@@ -208,6 +208,10 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.resolveDivergence": "allTypes",
   "novelai.resolveConflicts": "allTypes",
   "novelai.gitRestore": "allTypes",
+  // Google ドライブで2台をそろえる（設計書5.10.9）。原稿の中身を問わない
+  "novelai.switchSyncDestination": "allTypes",
+  "novelai.googleDriveSetup": "allTypes",
+  "novelai.googleDriveLogout": "allTypes",
 
   // ── 話・メモ・投稿のファイル操作 ──
   "novelai.addEpisode": "allTypes",

@@ -510,11 +510,41 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "save-all",
             requiresWork: false,
             detail:
-              "開いている原稿を保存して、GitHubとそろえる\n\n" +
+              "開いている原稿を保存して、GitHub か Google ドライブとそろえる\n\n" +
               "・いまの状態を見て、記録・受け取り・送信のうち要るものだけを進める\n\n" +
               "・同じ置き場に入っている作品も、まとめて1回の確認でそろえる\n\n" +
               "・2台で同じ所を書き換えていたら、残す文を選ぶ画面へその場で進む\n\n" +
               "編集者モードでは受け取るだけ（送るのは「校閲を終えて返す」）。",
+          },
+          {
+            kind: "action",
+            command: "novelai.switchSyncDestination",
+            label: "送り先の切り替え",
+            icon: "arrow-swap",
+            requiresWork: true,
+            detail:
+              "この作品をそろえる先（GitHub か Google ドライブ）の切り替え\n\n" +
+              "・Google ドライブの作品では、［保存・同期］が「送る → 受け取る」になる\n\n" +
+              "・送っていない変更・選んでいない食い違い・保存していないファイルがあると切り替えない",
+          },
+          {
+            kind: "action",
+            command: "novelai.googleDriveSetup",
+            label: "Google 接続設定",
+            icon: "cloud",
+            requiresWork: false,
+            detail:
+              "Google ドライブとつなぐクライアントを入れて、ログインする\n\n" +
+              "・Google Cloud で作ったデスクトップ アプリのクライアント\n\n" +
+              "・ダウンロードした JSON のファイルを読み込むか、クライアント ID を入れる",
+          },
+          {
+            kind: "action",
+            command: "novelai.googleDriveLogout",
+            label: "Google ログアウト",
+            icon: "sign-out",
+            requiresWork: false,
+            detail: "このパソコンに置いた Google の鍵を消す\n\n・ドライブの写しは消さない",
           },
           {
             kind: "action",
