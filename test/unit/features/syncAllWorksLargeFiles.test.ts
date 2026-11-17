@@ -93,6 +93,9 @@ async function makeLibrary(options: { rejectingHook?: boolean } = {}): Promise<{
         "",
       ].join("\n")
     );
+    // **実行できる印を付ける。** Mac・Linux の git は実行できないフックを黙って飛ばすので、
+    // 付けないと断られずに通り、この試しが落ちた（2026-11-18 Mac の全件）。Windows は印を見ない
+    await fs.chmod(nodePath.join(remote, "hooks", "pre-receive"), 0o755);
   }
   const work = { id: "w1", title: "確認用コピー", folderPath: folder } as WorkEntry;
   return { root, remote, work };
