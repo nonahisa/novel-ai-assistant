@@ -59,6 +59,9 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.importOwnWorkBackupFile": { class: "C4", label: "ファイルから取り込む", reason: "作者の判断" },
   "novelai.hideOwnWork": { class: "C4", label: "この作品を一覧に出さない", reason: "作者の判断" },
   "novelai.restoreHiddenOwnWorks": { class: "C4", label: "出さないにした作品を戻す", reason: "作者の判断" },
+  // 「ほかの機械の作品」（設計書5.5.11.1）。取り寄せは「GitHubから作品を追加」と同じ扱い
+  "novelai.cloneSyncedWork": { class: "C4", label: "取り寄せる", reason: "送信" },
+  "novelai.forgetSyncedWork": { class: "C4", label: "一覧から外す", reason: "作者の判断" },
   "novelai.createWork": { class: "B", label: "新規作品を作成" },
   "novelai.renameWork": { class: "C4", label: "作品名変更", reason: "設定" },
   "novelai.setSeries": { class: "C4", label: "シリーズ連結", reason: "設定" },

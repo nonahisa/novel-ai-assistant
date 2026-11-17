@@ -17,6 +17,14 @@ import { tryRegisterAsCollection } from "./addCollection";
 import { pickNewFolderParent } from "./pickFolder";
 import { notifyDone } from "../views/notify";
 
+export interface AddWorkFromGithubOptions {
+  /**
+   * 取り寄せる URL。渡されたら URL の入力を省く（ほかの機械の作品の［取り寄せる］。
+   * 設計書5.5.11.1）。置き場所・フォルダー名・既にあるフォルダーでの中止はそのまま通る
+   */
+  url?: string;
+}
+
 /**
  * GitHubにある作品を取り寄せて登録する（設計書5.5.11）。
  *
@@ -25,7 +33,8 @@ import { notifyDone } from "../views/notify";
  * 中止する。上書きすると、その環境で書いた原稿が消える。
  */
 export async function addWorkFromGithub(
-  registry: WorkRegistry
+  registry: WorkRegistry,
+  options: AddWorkFromGithubOptions = {}
 ): Promise<WorkEntry[]> {
   if (!(await isGitAvailable())) {
     const action = await vscode.window.showInformationMessage(
@@ -41,13 +50,24 @@ export async function addWorkFromGithub(
     return [];
   }
 
-  const url = await askText({
-    title: "GitHubから作品を取り寄せる",
-    prompt: "リポジトリのURLを貼り付けてください",
-    placeHolder: "https://github.com/ユーザー名/リポジトリ名.git",
-    ignoreFocusOut: true,
-    validateInput: (value) => validateRepositoryUrl(value) ?? null,
-  });
+  // ほかの機械の作品（設計書5.5.11.1）から来たときは URL がもう決まっている。
+  // 同期で届いた値なので、入力と同じ確かめを通してから使う
+  const given = options.url?.trim();
+  if (given !== undefined && validateRepositoryUrl(given)) {
+    vscode.window.showErrorMessage(
+      "取り寄せ先の URL が読めない形だったため、取り寄せを中止しました。"
+    );
+    return [];
+  }
+  const url =
+    given ??
+    (await askText({
+      title: "GitHubから作品を取り寄せる",
+      prompt: "リポジトリのURLを貼り付けてください",
+      placeHolder: "https://github.com/ユーザー名/リポジトリ名.git",
+      ignoreFocusOut: true,
+      validateInput: (value) => validateRepositoryUrl(value) ?? null,
+    }));
   if (!url) return [];
 
   // **既定の場所を明示する**（設計書6.97.6）。渡さないとVS Codeは
