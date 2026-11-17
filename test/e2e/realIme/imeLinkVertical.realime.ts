@@ -47,12 +47,22 @@ const LINK_FILES = [
   "integration-works.json",
 ] as const;
 
-function linkFile(name: (typeof LINK_FILES)[number]): string {
-  return path.join(process.env.LOCALAPPDATA ?? "", "novel-ime", name);
+/**
+ * 置き場は新しい名前（rittoku-ime）と改名前（novel-ime）の2つ。拡張機能はあるほうの全部へ
+ * 書くので、前後の戻しは両方を対象にする（片方だけ戻すと、作者の置き場に試しの知らせが残る）
+ */
+const LINK_DIR_NAMES = ["rittoku-ime", "novel-ime"] as const;
+
+function linkFileIn(
+  dirName: (typeof LINK_DIR_NAMES)[number],
+  name: (typeof LINK_FILES)[number],
+): string {
+  return path.join(process.env.LOCALAPPDATA ?? "", dirName, name);
 }
 
-function currentWorkFile(): string {
-  return linkFile("integration-current-work.json");
+/** 読む先は新しい置き場を先に、無ければ古い置き場 */
+function currentWorkFiles(): string[] {
+  return LINK_DIR_NAMES.map((dir) => linkFileIn(dir, "integration-current-work.json"));
 }
 
 /**
@@ -62,27 +72,29 @@ function currentWorkFile(): string {
  */
 async function snapshotLinkFiles(): Promise<() => Promise<void>> {
   const saved = new Map<string, string | undefined>();
-  for (const name of LINK_FILES) {
-    saved.set(
-      name,
-      await readFile(linkFile(name), "utf8").catch(() => undefined),
-    );
+  for (const dir of LINK_DIR_NAMES) {
+    for (const name of LINK_FILES) {
+      const file = linkFileIn(dir, name);
+      saved.set(file, await readFile(file, "utf8").catch(() => undefined));
+    }
   }
   return async () => {
-    for (const name of LINK_FILES) {
-      const text = saved.get(name);
-      if (text === undefined) await rm(linkFile(name), { force: true });
-      else await writeFile(linkFile(name), text, "utf8");
+    for (const [file, text] of saved) {
+      if (text === undefined) await rm(file, { force: true });
+      else await writeFile(file, text, "utf8");
     }
   };
 }
 
 async function readCurrentWork(): Promise<CurrentWork | undefined> {
-  try {
-    return JSON.parse(await readFile(currentWorkFile(), "utf8")) as CurrentWork;
-  } catch {
-    return undefined;
+  for (const file of currentWorkFiles()) {
+    try {
+      return JSON.parse(await readFile(file, "utf8")) as CurrentWork;
+    } catch {
+      // 無い・読めない。次の置き場へ
+    }
   }
+  return undefined;
 }
 
 /** 拡張機能が書いた知らせ（試しの台本 -Before の test-realime ではない）で、向きが `vertical` になるまで待つ */

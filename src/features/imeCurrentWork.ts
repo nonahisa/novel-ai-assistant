@@ -30,6 +30,7 @@ import {
   buildWorksList,
   decideImeFront,
   imeNoticeKey,
+  imeOldStateDir,
   imeStateDir,
   noticeWindowOf,
   serializeImeJson,
@@ -393,10 +394,12 @@ export interface ImeLinkOptions {
   /** 原稿エディターの面が前に来た・向きを替えた */
   onDidChangeFrontManuscript: (listener: () => void) => vscode.Disposable;
   /**
-   * 置き場を差し替える（試験だけ。作者の %LOCALAPPDATA%\novel-ime に書かないため）。
-   * 省くと OS ごとの決まった所（`imeStateDir`）
+   * 置き場を差し替える（試験だけ。作者の %LOCALAPPDATA% に書かないため）。
+   * 省くと OS ごとの決まった所（`imeStateDir`・`imeOldStateDir`）
    */
   stateDir?: string;
+  /** 置き場を複数差し替える（試験だけ。古い→新しいの順に書く。`stateDir` より優先） */
+  stateDirs?: readonly string[];
 }
 
 export interface ImeLinkHandle extends vscode.Disposable {
@@ -445,10 +448,12 @@ export function startImeLink(
   /** 番号を確かめられなかった理由を、同じ作品で何度も書かない */
   const loggedStops = new Map<string, string>();
 
-  let stateDirPromise: Promise<string | undefined> | undefined;
-  const resolveStateDir = (): Promise<string | undefined> => {
-    stateDirPromise ??= (async () => {
-      if (options.stateDir !== undefined) return options.stateDir;
+  let stateDirsPromise: Promise<string[]> | undefined;
+  /** 置き場の候補。改名前（novel-ime）→ 新しい名前（rittoku-ime）の順 */
+  const resolveStateDirs = (): Promise<string[]> => {
+    stateDirsPromise ??= (async () => {
+      if (options.stateDirs !== undefined) return [...options.stateDirs];
+      if (options.stateDir !== undefined) return [options.stateDir];
       const platform = hostPlatform();
       let home: string | undefined;
       if (platform === "darwin") {
@@ -459,36 +464,64 @@ export function startImeLink(
           home = environmentVariable("HOME");
         }
       }
-      return imeStateDir({
-        platform,
-        localAppData: environmentVariable("LOCALAPPDATA"),
-        home,
-      });
+      const where = { platform, localAppData: environmentVariable("LOCALAPPDATA"), home };
+      return [imeOldStateDir(where), imeStateDir(where)].filter(
+        (dir): dir is string => dir !== undefined
+      );
     })();
-    return stateDirPromise;
+    return stateDirsPromise;
   };
 
-  /** 4つがそろえば置き場を返す。**置き場は作らない**（IME の無い機械では何もしない） */
-  const writableStateDir = async (): Promise<string | undefined> => {
-    const stateDir = await resolveStateDir();
-    let stateDirExists = false;
-    if (stateDir) {
+  /**
+   * 4つがそろえば、書いてよい置き場（**フォルダーがある方の全部**。古い→新しいの順）を返す。
+   * **置き場は作らない**（IME の無い機械では何もしない）。移る間は古い版の IME も旧い置き場を
+   * 読むので、両方あれば両方へ同じ中身を書く
+   */
+  const writableStateDirs = async (): Promise<string[]> => {
+    const enabled = vscode.workspace
+      .getConfiguration("novelai")
+      .get<boolean>(IME_NOTIFY_SETTING, true);
+    const found: string[] = [];
+    for (const stateDir of await resolveStateDirs()) {
+      let stateDirExists = false;
       try {
         const stat = await vscode.workspace.fs.stat(path.toUri(stateDir));
         stateDirExists = (stat.type & vscode.FileType.Directory) !== 0;
       } catch {
         stateDirExists = false;
       }
+      const ok = shouldWriteImeNotice({
+        canRunProcesses: canRunProcesses(),
+        remoteName: vscode.env.remoteName,
+        enabled,
+        stateDirExists,
+      });
+      if (ok) found.push(stateDir);
     }
-    const ok = shouldWriteImeNotice({
-      canRunProcesses: canRunProcesses(),
-      remoteName: vscode.env.remoteName,
-      enabled: vscode.workspace
-        .getConfiguration("novelai")
-        .get<boolean>(IME_NOTIFY_SETTING, true),
-      stateDirExists,
-    });
-    return ok ? stateDir : undefined;
+    return found;
+  };
+
+  /**
+   * 置き場ごとに書く。片方が書けなくても、もう片方へは書く（理由はログへ）。
+   * 1か所も書けなかったときだけ失敗として投げる（呼び手が「書いた」ことにしない）
+   */
+  const writeToAll = async (
+    stateDirs: readonly string[],
+    fileName: string,
+    text: string
+  ): Promise<void> => {
+    let failure: unknown;
+    let wrote = 0;
+    for (const stateDir of stateDirs) {
+      try {
+        await writeImeJson(path.join(stateDir, fileName), text);
+        wrote++;
+      } catch (error) {
+        failure ??= error;
+        logLine(`六徳 IME への知らせを書けませんでした（${stateDir}）：${errorText(error)}`);
+      }
+    }
+    if (wrote === 0 && failure !== undefined) throw failure;
   };
 
   /** 結果をログへ（足したとき・止めた理由が変わったとき）。番号を返す */
@@ -548,8 +581,8 @@ export function startImeLink(
       if (closed) return;
       // 焦点の無い窓は書かない（焦点のある窓が「いまの作品」を持つ。計画書 3.4）
       if (!vscode.window.state.focused) return;
-      const stateDir = await writableStateDir();
-      if (!stateDir || !front) return;
+      const stateDirs = await writableStateDirs();
+      if (stateDirs.length === 0 || !front) return;
       const workUid = await workUidFor(front.work);
       // 番号が無い作品は知らせない（直前の作品のまま。IME は名前で鍵を作らない）
       if (!workUid) return;
@@ -562,15 +595,15 @@ export function startImeLink(
       });
       const key = imeNoticeKey(notice);
       if (!force && key === lastNoticeKey) return;
-      await writeImeJson(path.join(stateDir, IME_CURRENT_WORK_FILE), serializeImeJson(notice));
+      await writeToAll(stateDirs, IME_CURRENT_WORK_FILE, serializeImeJson(notice));
       lastNoticeKey = key;
     });
 
   const writeWorks = (): Promise<void> =>
     enqueue(async () => {
       if (closed) return;
-      const stateDir = await writableStateDir();
-      if (!stateDir) return;
+      const stateDirs = await writableStateDirs();
+      if (stateDirs.length === 0) return;
       const refs: ImeWorkRef[] = [];
       const uids = await allWorkUids();
       for (const work of options.registry.list()) {
@@ -580,7 +613,7 @@ export function startImeLink(
       const list = buildWorksList({ works: refs, window: pid, now: new Date() });
       const key = imeNoticeKey(list);
       if (key === lastWorksKey) return;
-      await writeImeJson(path.join(stateDir, IME_WORKS_FILE), serializeImeJson(list));
+      await writeToAll(stateDirs, IME_WORKS_FILE, serializeImeJson(list));
       lastWorksKey = key;
     });
 
@@ -590,16 +623,13 @@ export function startImeLink(
    * 開いている窓で打っているのに作品の語が消える。
    */
   const closedNoticeTask = async (): Promise<void> => {
-    const stateDir = await writableStateDir();
-    if (!stateDir) return;
-    const file = path.join(stateDir, IME_CURRENT_WORK_FILE);
-    let text: string;
-    try {
-      text = new TextDecoder().decode(await vscode.workspace.fs.readFile(path.toUri(file)));
-    } catch {
-      return;
+    // 両方の置き場で、それぞれ「この窓が書いた知らせ」だけを消す
+    const mine: string[] = [];
+    for (const stateDir of await writableStateDirs()) {
+      const text = await readText(path.join(stateDir, IME_CURRENT_WORK_FILE));
+      if (text !== undefined && noticeWindowOf(text) === pid) mine.push(stateDir);
     }
-    if (noticeWindowOf(text) !== pid) return;
+    if (mine.length === 0) return;
     const notice = buildCurrentWorkNotice({
       work: null,
       dictionaryHash: null,
@@ -607,7 +637,7 @@ export function startImeLink(
       window: pid,
       now: new Date(),
     });
-    await writeImeJson(file, serializeImeJson(notice));
+    await writeToAll(mine, IME_CURRENT_WORK_FILE, serializeImeJson(notice));
     lastNoticeKey = imeNoticeKey(notice);
   };
 
@@ -665,7 +695,7 @@ export function startImeLink(
         settleTimers.delete(work.id);
         void enqueue(async () => {
           if (closed) return;
-          if (!(await writableStateDir())) return;
+          if ((await writableStateDirs()).length === 0) return;
           // 番号が無い作品の辞書は読む相手がいない（作品の一覧にも載らない）
           if (!(await workUidFor(work))) return;
           freshDictionaries.add(work.id);
@@ -784,6 +814,14 @@ export function startImeLink(
     close,
     dispose: () => void close(),
   };
+}
+
+async function readText(file: string): Promise<string | undefined> {
+  try {
+    return new TextDecoder().decode(await vscode.workspace.fs.readFile(path.toUri(file)));
+  } catch {
+    return undefined;
+  }
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {

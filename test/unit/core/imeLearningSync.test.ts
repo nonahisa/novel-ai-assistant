@@ -6,6 +6,7 @@ import {
   buildImeSenderJson,
   checkImeExport,
   imeCoreExecutable,
+  imeCoreExecutableCandidates,
   isImeMachineId,
   parseImeSyncInfo,
   receiveImeLearning,
@@ -25,14 +26,32 @@ const exportOf = (dev: string, lines: string[] = ['{"t":1,"dev":"x","n":1,"op":"
 
 describe("エンジンの場所と sync-info", () => {
   test("IME 連動と同じ置き場の中の exe。Linux は無い", () => {
-    expect(imeCoreExecutable("C:\\Users\\u\\AppData\\Local\\novel-ime", "win32")).toBe(
-      "C:\\Users\\u\\AppData\\Local\\novel-ime\\novel-ime-core.exe"
+    expect(imeCoreExecutable("C:\\Users\\u\\AppData\\Local\\rittoku-ime", "win32")).toBe(
+      "C:\\Users\\u\\AppData\\Local\\rittoku-ime\\rittoku-core.exe"
     );
-    expect(imeCoreExecutable("/Users/u/Library/Application Support/novel-ime/", "darwin")).toBe(
-      "/Users/u/Library/Application Support/novel-ime/novel-ime-core"
+    expect(imeCoreExecutable("/Users/u/Library/Application Support/rittoku-ime/", "darwin")).toBe(
+      "/Users/u/Library/Application Support/rittoku-ime/rittoku-core"
     );
     expect(imeCoreExecutable("/x", "linux")).toBeUndefined();
     expect(imeCoreExecutable(undefined, "win32")).toBeUndefined();
+  });
+
+  test("エンジンの候補は新しい置き場・新しい名前を先に、古い名前も後ろに並べる", () => {
+    const win = imeCoreExecutableCandidates(
+      ["C:\\L\\rittoku-ime", "C:\\L\\novel-ime", undefined],
+      "win32"
+    );
+    expect(win).toEqual([
+      "C:\\L\\rittoku-ime\\rittoku-core.exe",
+      "C:\\L\\rittoku-ime\\novel-ime-core.exe",
+      "C:\\L\\novel-ime\\rittoku-core.exe",
+      "C:\\L\\novel-ime\\novel-ime-core.exe",
+    ]);
+    expect(imeCoreExecutableCandidates(["/a/novel-ime/"], "darwin")).toEqual([
+      "/a/novel-ime/rittoku-core",
+      "/a/novel-ime/novel-ime-core",
+    ]);
+    expect(imeCoreExecutableCandidates(["/x"], "linux")).toEqual([]);
   });
 
   test("sync-info の出力を読む。機械ID の形が違えば断る（ドライブのフォルダー名になる）", () => {

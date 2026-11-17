@@ -11,6 +11,7 @@ import {
   planWorkUids,
   type WorkUidCandidate,
   imeNoticeKey,
+  imeOldStateDir,
   imeStateDir,
   imeTsvPath,
   isValidWorkUid,
@@ -269,13 +270,24 @@ describe("書かない4つの条件", () => {
   test("置き場は Windows が LOCALAPPDATA、Mac が Application Support。ほかは無し", () => {
     expect(
       imeStateDir({ platform: "win32", localAppData: "C:\\Users\\a\\AppData\\Local\\" })
-    ).toBe("C:\\Users\\a\\AppData\\Local\\novel-ime");
+    ).toBe("C:\\Users\\a\\AppData\\Local\\rittoku-ime");
     expect(imeStateDir({ platform: "darwin", home: "/Users/a" })).toBe(
-      "/Users/a/Library/Application Support/novel-ime"
+      "/Users/a/Library/Application Support/rittoku-ime"
     );
     expect(imeStateDir({ platform: "win32" })).toBeUndefined();
     expect(imeStateDir({ platform: "linux", home: "/home/a" })).toBeUndefined();
     expect(imeStateDir({ platform: undefined })).toBeUndefined();
+  });
+
+  test("改名前の置き場（novel-ime）も同じ決め方で返す", () => {
+    expect(
+      imeOldStateDir({ platform: "win32", localAppData: "C:\\Users\\a\\AppData\\Local\\" })
+    ).toBe("C:\\Users\\a\\AppData\\Local\\novel-ime");
+    expect(imeOldStateDir({ platform: "darwin", home: "/Users/a/" })).toBe(
+      "/Users/a/Library/Application Support/novel-ime"
+    );
+    expect(imeOldStateDir({ platform: "linux", home: "/home/a" })).toBeUndefined();
+    expect(imeOldStateDir({ platform: "win32" })).toBeUndefined();
   });
 });
 

@@ -3,11 +3,11 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { DriveApiError, driveNextAction, type DriveClient } from "../core/driveApi";
-import { imeStateDir } from "../core/imeCurrentWork";
+import { imeOldStateDir, imeStateDir } from "../core/imeCurrentWork";
 import {
   IME_SENDER_FILE,
   buildImeSenderJson,
-  imeCoreExecutable,
+  imeCoreExecutableCandidates,
   parseImeSyncInfo,
   runImeLearningSync,
   type ImeEngine,
@@ -19,7 +19,7 @@ import { canRunProcesses, environmentVariable, hostPlatform, randomHex } from ".
 /**
  * オリジナルIME の学習を Google ドライブでそろえる（設計書5.10.8。段階3）。
  * 手順・写しの確かめ・ドライブの読み書きは `core/imeLearningSync.ts`（`runImeLearningSync`）。
- * ここはエンジン（`novel-ime-core`）を起こす口と、送り手の印（`sender.json`）を書く所だけ。
+ * ここはエンジン（`rittoku-core`。改名前は `novel-ime-core`）を起こす口と、送り手の印（`sender.json`）を書く所だけ。
  *
  * **設定（`novelai.googleDrive.syncImeLearning`、既定 off）を入れたときだけ動く**。off の間は
  * エンジンを起こすことも含めて何もしない（本物での往復を確かめてから作者が入れる）。
@@ -58,14 +58,20 @@ async function findEngine(): Promise<string | undefined> {
       home = environmentVariable("HOME");
     }
   }
-  const exe = imeCoreExecutable(imeStateDir({ platform, localAppData: environmentVariable("LOCALAPPDATA"), home }), platform);
-  if (!exe) return undefined;
-  try {
-    const stat = await vscode.workspace.fs.stat(path.toUri(exe));
-    return (stat.type & vscode.FileType.File) !== 0 ? exe : undefined;
-  } catch {
-    return undefined;
+  const where = { platform, localAppData: environmentVariable("LOCALAPPDATA"), home };
+  // 入れ替わる間は、新旧どちらの置き場にもどちらの名前の exe も有りうる。新しい名前を先に探す
+  for (const exe of imeCoreExecutableCandidates(
+    [imeStateDir(where), imeOldStateDir(where)],
+    platform
+  )) {
+    try {
+      const stat = await vscode.workspace.fs.stat(path.toUri(exe));
+      if ((stat.type & vscode.FileType.File) !== 0) return exe;
+    } catch {
+      // 無い。次の候補へ
+    }
   }
+  return undefined;
 }
 
 interface EngineRun {
