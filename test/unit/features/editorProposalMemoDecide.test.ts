@@ -180,12 +180,6 @@ describe("校正・メモパネルの行から、編集者の提案を決める"
   });
 
   /** 送り返しは待たずに走る（動的 import の先）ので、少し回して落ち着かせる */
-  const settle = async () => {
-    for (let round = 0; round < 20; round++) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-  };
-
   test("並べる行：作者モードの未決だけ。理由に「（kmizu の提案）」を添える", async () => {
     await new ProposalStore(work()).propose([
       proposal("p1", 1, "　彼は走つた。", "走つた", "走った"),
@@ -304,12 +298,16 @@ describe("校正・メモパネルの行から、編集者の提案を決める"
     ]);
     const rows = await loadEditorProposalsForMemo(work());
 
+    /*
+      送り返しは裏で台帳を読んでから記録する。固定の回数だけ待つと、混んだ機械（CI）では2件目の読み取りが
+      済む前に見てしまい、1件目の記録（未決1）を読んで落ちた（2026-11-17）。呼ばれた数が揃うまで待つ
+    */
     await decideEditorProposal(work(), rows[0], "accept");
-    await settle();
+    await vi.waitFor(() => expect(returnCalls).toHaveLength(1), { timeout: 5_000 });
     expect(returnCalls.at(-1)).toEqual({ workId: "work_memo", pending: 1 });
 
     await decideEditorProposal(work(), rows[1], "accept");
-    await settle();
+    await vi.waitFor(() => expect(returnCalls).toHaveLength(2), { timeout: 5_000 });
     // 決め終えた（未決0）ところで呼ばれている＝送り返しの条件が揃う
     expect(returnCalls.at(-1)).toEqual({ workId: "work_memo", pending: 0 });
   });

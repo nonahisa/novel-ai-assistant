@@ -838,8 +838,21 @@ export async function pressDialogButton(page: Page, label: string): Promise<void
 
 /** 確認の画面を Esc で閉じる（何も選ばない） */
 export async function closeDialog(page: Page): Promise<void> {
+  const box = page.locator(".monaco-dialog-box");
   await page.keyboard.press("Escape");
-  await page.locator(".monaco-dialog-box").waitFor({ state: "detached", timeout: 5_000 });
+  const closed = await box
+    .waitFor({ state: "detached", timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (closed) return;
+  /*
+    **閉じなければ、窓へ焦点を置いてもう1回 Esc を押す**（2026-11-17）。ノートPCで待機から戻った直後、
+    版の窓が出たのに焦点が窓の外にあり、Esc が届かず5秒で落ちた（imeLinkVertical の作品の登録の段）。
+    ボタンは押さない（何かを選んだことになる）。それでも閉じなければ今までどおり落とす
+  */
+  await box.first().focus().catch(() => undefined);
+  await page.keyboard.press("Escape");
+  await box.waitFor({ state: "detached", timeout: 5_000 });
 }
 
 /** キーボード ショートカットの画面を開くキー。使う件は `LaunchOptions.keybindings` へ足す */

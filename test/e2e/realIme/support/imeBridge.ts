@@ -207,6 +207,8 @@ export class RealIme {
   private checked = false;
   private stepFiles = 0;
   private refreshedAt = Date.now();
+  /** 最後に焦点を置いた欄（打つ前の確かめで焦点が外れていたとき、取り直す先） */
+  private lastFocus = COMPOSE_SELECTOR;
 
   constructor(
     readonly session: E2ESession,
@@ -275,6 +277,7 @@ export class RealIme {
       前面を取り直してカーソルを置き直していたので、最初の1打を送ってから残りを送るまでの約4.5秒の間に、
       変換中の字（「k」）を Chromium が確定し、続きは置き直したカーソル（末尾）へ入っていた
     */
+    this.lastFocus = focus;
     await this.prepareFocus(frame, focus);
   }
 
@@ -368,7 +371,17 @@ export class RealIme {
 
   private async send(frame: Frame, steps: readonly KeyStep[]): Promise<void> {
     // **台本を呼ぶ直前に毎回**、焦点が試し用の窓（とその原稿エディターの面）にあるかを確かめる（窓もカーソルも動かさない）
-    await assertTestWindowFocused(this.session, frame);
+    try {
+      await assertTestWindowFocused(this.session, frame);
+    } catch {
+      /*
+        **外れていたら、前面と焦点を1回だけ取り直して確かめ直す**（2026-11-17）。ノートPCで待機から戻った直後、
+        打つ前の確かめで Claude のアプリが前に出ていて落ちた（imeLinkVertical）。取り直しても戻らなければ、
+        今までどおり打たずに止める（IME の側の台本も1打ごとに前の窓を確かめる）
+      */
+      await this.prepareFocus(frame, this.lastFocus);
+      await assertTestWindowFocused(this.session, frame);
+    }
     /*
       段は JSON のファイルで渡す（-StepsFile）。`powershell -File` に JSON を直に渡すと引用符が落ちる。
       置き場は一時フォルダーの根（試しのあとに VS Code ごと消える）
