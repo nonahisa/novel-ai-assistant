@@ -185,28 +185,60 @@ export async function checkReadingMisreads(
       return { kind: "skipped", reason: `${engineName}の接続先がこの PC の外なので、読み間違いは調べませんでした。` };
     }
 
-    // 話者は作品の地の文の声で1つに決める（読みは話者で変わらない前提。設計書6.42.5）
+    /*
+      **その文を読む声で問う**（2026-11-17）。読みはエンジンの辞書で決まるので、語り手や人物の声が
+      ［声］と別のエンジンなら、その文はそのエンジンへ問う。前は［声］のエンジンの地の文の声1つで
+      問うていたので、語り手が別のエンジンの声だと「読む文がありません」で止まり、台詞を別の
+      エンジンで読む作品では、読まないエンジンの読みで比べていた。同じエンジンの中では話者で
+      読みは変わらない前提（設計書6.42.5）なので、控えの鍵に話者は入れない
+    */
     const planned = await service.plan(work, episodePath, target.text, sentences, engine);
     if ("problem" in planned) {
       return { kind: "stopped", reason: planned.problem, ...(planned.engineDown ? { engineDown: true } : {}) };
     }
-    const narration = planned.units.find(
-      (unit, index) => unit.engine === engine && sentences[index]?.kind === "narration"
-    );
-    const unit = narration ?? planned.units.find((item) => item.engine === engine);
-    if (!unit) {
+    const groups = new Map<string, { engine: VoiceEngineId; styleId: number; items: typeof candidates }>();
+    for (const candidate of candidates) {
+      const unit = planned.units[candidate.sentence];
+      if (!unit) continue;
+      const key = `${unit.engine}\u0000${unit.styleId}`;
+      const group = groups.get(key) ?? { engine: unit.engine, styleId: unit.styleId, items: [] };
+      group.items.push(candidate);
+      groups.set(key, group);
+    }
+    if (groups.size === 0) {
       return { kind: "stopped", reason: `${engineName}で読む文がありません。` };
     }
-    const client = service.engineClient(engine);
-    const query = async (speech: string): Promise<unknown> => {
-      const key = `${engine}\u0000${client.baseUrl}\u0000${speech}`;
-      if (answerCache.has(key)) return answerCache.get(key);
-      const answer = await client.audioQuery(speech, unit.styleId, deps.signal);
-      rememberAnswer(key, answer);
-      return answer;
+    // ［声］のエンジンは上で確かめた。ほかのエンジンも、本文を運ぶ前に同じ確かめを通す
+    const allowedEngines = new Set<VoiceEngineId>([engine]);
+    const refusedEngines = new Set<VoiceEngineId>();
+    const mayCarry = async (which: VoiceEngineId): Promise<boolean> => {
+      if (allowedEngines.has(which)) return true;
+      if (refusedEngines.has(which)) return false;
+      const ok = deps.askRemote
+        ? (await service.allowCarryText(which)).ok
+        : service.carryAllowedWithoutAsking(which);
+      (ok ? allowedEngines : refusedEngines).add(which);
+      return ok;
     };
-
-    const found = await judgeMisreads(candidates, query, deps.signal);
+    const found: Awaited<ReturnType<typeof judgeMisreads>> = [];
+    for (const group of groups.values()) {
+      if (deps.signal?.aborted) break;
+      if (!(await mayCarry(group.engine))) {
+        logStep(
+          `読み間違いの見込み：${VOICE_ENGINE_LABEL[group.engine]}で読む文（${group.items.length}か所）は、本文を送る許可が無いので調べませんでした`
+        );
+        continue;
+      }
+      const client = service.engineClient(group.engine);
+      const query = async (speech: string): Promise<unknown> => {
+        const key = `${group.engine}\u0000${client.baseUrl}\u0000${speech}`;
+        if (answerCache.has(key)) return answerCache.get(key);
+        const answer = await client.audioQuery(speech, group.styleId, deps.signal);
+        rememberAnswer(key, answer);
+        return answer;
+      };
+      found.push(...(await judgeMisreads(group.items, query, deps.signal)));
+    }
     if (deps.signal?.aborted) return { kind: "skipped", reason: "読み間違いを調べるのを止めました。" };
 
     const time = (deps.now?.() ?? new Date()).toISOString();
