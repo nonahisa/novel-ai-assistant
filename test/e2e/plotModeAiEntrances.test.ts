@@ -35,7 +35,7 @@ import {
 import { SIDEBAR_LAUNCH } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { activateTab, clearNotifications, quickInputWaitContext, quickOpen, quickPickRows, quickPickTitle } from "./support/workbenchDom";
+import { activateTab, clearNotifications, closeQuickPick, quickInputWaitContext, quickOpen, quickPickRows, quickPickTitle } from "./support/workbenchDom";
 
 /** 名前の候補の答えを止めておく栓。`release` で解く */
 let releaseNames: (() => void) | undefined;
@@ -188,8 +188,8 @@ test("プロットモードの「プロット逆算」「対話式プロット�
       expect(confirm, `確認が作品Bのものになっています：${confirm}`).not.toContain(OTHER_TITLE);
       expect(sentHere(), `確認の前に AI が呼ばれました（${describeFakeRequests(fake.requests, sentBefore)}）`).toBe(0);
       // 取りやめる（AI は呼ばない）
-      await page.keyboard.press("Escape");
-      await waitUntil(async () => (await quickPickTitle(page)) === undefined, "確認を Esc で閉じる", 10_000);
+      // 焦点が WebView に残っていることがある（Mac）。窓へ焦点を置いてから Esc（closeQuickPick の説明）
+      await closeQuickPick(page);
 
       /* ── 「対話式プロット作成」：相談パネルに、プロットモードの作品の問答が始まる ── */
       /*
