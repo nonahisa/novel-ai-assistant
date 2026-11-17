@@ -352,7 +352,7 @@ export async function rebuildImeTsv(
   const loaded = await loadDictionaryForWork(work);
   if (!loaded.ok) {
     logLine(
-      `オリジナルIME 向けの辞書を書き直しませんでした（読めない設定ファイル：${loaded.errorFiles.join("、")}）。前の辞書のままです：${work.title}`
+      `六徳 IME 向けの辞書を書き直しませんでした（読めない設定ファイル：${loaded.errorFiles.join("、")}）。前の辞書のままです：${work.title}`
     );
     return existingDictionaryHash(work);
   }
@@ -432,7 +432,7 @@ export function startImeLink(
   let queue: Promise<void> = Promise.resolve();
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     queue = queue.then(task).catch((error) => {
-      logLine(`オリジナルIME への知らせを書けませんでした：${errorText(error)}`);
+      logLine(`六徳 IME への知らせを書けませんでした：${errorText(error)}`);
     });
     return queue;
   };
@@ -496,13 +496,13 @@ export function startImeLink(
     if (result.kind === "ready") {
       loggedStops.delete(work.id);
       if (result.added) {
-        logLine(`オリジナルIME の作品の番号を作品設定へ足しました：${work.title}`);
+        logLine(`六徳 IME の作品の番号を作品設定へ足しました：${work.title}`);
       }
       return result.workUid;
     }
     if (loggedStops.get(work.id) !== result.reason) {
       loggedStops.set(work.id, result.reason);
-      logLine(`オリジナルIME へこの作品を知らせません（${result.reason}）：${work.title}`);
+      logLine(`六徳 IME へこの作品を知らせません（${result.reason}）：${work.title}`);
     }
     return undefined;
   };
@@ -762,7 +762,7 @@ export function startImeLink(
     queue = queue
       .then(() => closedNoticeTask())
       .catch((error) => {
-        logLine(`オリジナルIME へ閉じたことを知らせられませんでした：${errorText(error)}`);
+        logLine(`六徳 IME へ閉じたことを知らせられませんでした：${errorText(error)}`);
       });
     return queue;
   };
