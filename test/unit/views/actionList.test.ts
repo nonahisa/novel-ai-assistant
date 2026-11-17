@@ -376,6 +376,7 @@ describe("操作メニューの構成", () => {
     ]);
     expect(commandsIn("クラウド取得")).toEqual([
       "novelai.addWorkFromGithub",
+      "novelai.importWorkFromDrive",
     ]);
   });
 });

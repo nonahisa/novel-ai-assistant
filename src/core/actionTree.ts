@@ -472,6 +472,17 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・新しいPCで続きを書き始めるときに使う\n\n" +
               "・複数の作品が入ったリポジトリならまとめて登録",
           },
+          {
+            kind: "action",
+            command: "novelai.importWorkFromDrive",
+            label: "ドライブから追加",
+            icon: "cloud",
+            requiresWork: false,
+            detail:
+              "Google ドライブの作品を取り寄せて登録\n\n" +
+              "・新しいフォルダーへ受け取り、送り先を Google ドライブにする\n\n" +
+              "・既にあるフォルダーへは取り寄せない",
+          },
         ],
       },
       {
@@ -530,7 +541,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.googleDriveSetup",
-            label: "Google 接続設定",
+            label: "Google接続設定",
             icon: "cloud",
             requiresWork: false,
             detail:
@@ -541,7 +552,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.googleDriveLogout",
-            label: "Google ログアウト",
+            label: "Googleログアウト",
             icon: "sign-out",
             requiresWork: false,
             detail: "このパソコンに置いた Google の鍵を消す\n\n・ドライブの写しは消さない",

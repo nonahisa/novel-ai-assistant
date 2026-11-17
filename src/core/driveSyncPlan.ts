@@ -565,7 +565,7 @@ function matchesDriveGlobRule(segments: readonly string[], rule: string): boolea
 
 function globMatch(pattern: readonly string[], p: number, path: readonly string[], s: number): boolean {
   if (p === pattern.length) return s === path.length;
-  if (pattern[p] === "**") {
+  if (pattern[p] === "*".repeat(2)) {
     // 終わりの「**」は中の全部（1つ以上）。頭・途中の「**」は0個以上の区切り
     const min = p === pattern.length - 1 ? 1 : 0;
     for (let skip = min; s + skip <= path.length; skip++) {

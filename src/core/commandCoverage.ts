@@ -260,6 +260,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.saveAndSync": { class: "C4", label: "保存・同期", reason: "送信" },
   // Google ドライブで2台をそろえる（設計書5.10.9）。送り先・ログインは作者がその機械で決めるもの
   "novelai.switchSyncDestination": { class: "C4", label: "送り先の切り替え", reason: "送信" },
+  "novelai.importWorkFromDrive": { class: "C4", label: "ドライブから追加", reason: "送信" },
   "novelai.googleDriveSetup": { class: "C4", label: "Google ドライブの接続を設定", reason: "設定" },
   "novelai.googleDriveLogout": { class: "C4", label: "Google ドライブからログアウト", reason: "設定" },
   "novelai.gitPull": { class: "C4", label: "別の環境の変更を取り込む", reason: "原稿" },

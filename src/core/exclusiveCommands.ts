@@ -79,6 +79,7 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
 
   // 取り寄せ・下ごしらえ。同じ場所へ2本が同時に入れに行く
   { id: "novelai.addWorkFromGithub", label: "GitHubから作品を追加" },
+  { id: "novelai.importWorkFromDrive", label: "ドライブから追加" },
   { id: "novelai.runFullSetup", label: "セットアップ" },
   { id: "novelai.setupOllama", label: "Ollama導入" },
   { id: "novelai.setupLmStudio", label: "LM Studio導入" },

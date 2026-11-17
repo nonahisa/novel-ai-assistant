@@ -210,6 +210,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.gitRestore": "allTypes",
   // Google ドライブで2台をそろえる（設計書5.10.9）。原稿の中身を問わない
   "novelai.switchSyncDestination": "allTypes",
+  "novelai.importWorkFromDrive": "allTypes",
   "novelai.googleDriveSetup": "allTypes",
   "novelai.googleDriveLogout": "allTypes",
 

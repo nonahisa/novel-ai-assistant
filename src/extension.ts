@@ -3081,6 +3081,17 @@ export async function activate(
       }
       await deps.auth.logout();
     }),
+    // 作品の無い機械が、Google ドライブから作品を取り寄せる（新しいフォルダーへだけ。設計書5.10.9）
+    registerCommand("novelai.importWorkFromDrive", async () => {
+      const deps = await driveDeps();
+      if (!deps) {
+        void vscode.window.showWarningMessage(describeProcessesBlocked("novelai.importWorkFromDrive"));
+        return;
+      }
+      const { importWorkFromDrive } = await import("./features/driveWorkImport.js");
+      const entry = await importWorkFromDrive(deps);
+      if (entry) treeProvider.refreshRoot();
+    }),
     // 作品ごとの送り先（GitHub ⇔ Google ドライブ）。未送信・食い違い・未保存を残したまま移らない（5.10.5）
     registerCommand("novelai.switchSyncDestination", async (node?: WorkNode) => {
       const deps = await driveDeps();

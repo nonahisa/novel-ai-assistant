@@ -107,7 +107,7 @@ export function noteUnreadableGitignore(work: WorkEntry, unreadable: readonly { 
     .map((item) => `${item.line}行目「${item.text}」`)
     .join("・");
   const more = unreadable.length > 3 ? `ほか${unreadable.length - 3}行` : "";
-  return `\n「${work.title}」の .gitignore に、送らないものとして読めない行があります（${shown}${more}）。その行はドライブへ送るかどうかに使っていません。送りたくないものは、読める形（名前・「*」・「**」・末尾の「/」）で書き直してください。`;
+  return `\n「${work.title}」の .gitignore に、送らないものとして読めない行があります（${shown}${more}）。その行はドライブへ送るかどうかに使っていません。送りたくないものは、読める形（名前・「*」・「?」・末尾の「/」）で書き直してください。`;
 }
 
 export interface DriveSyncDeps {

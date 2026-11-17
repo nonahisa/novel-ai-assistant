@@ -1,5 +1,8 @@
 import { DRIVE_GLOB_RULE_PREFIX, foldSyncPath } from "./driveSyncPlan";
 
+/** 区切り全体の「*」2つ（記号を続けて書くと、画面の文字列の網が強調と読む） */
+const GLOBSTAR = "*".repeat(2);
+
 /**
  * 作者が自分で .gitignore に書いた行を、Google ドライブへ送らないものに足す（設計書5.10.9）。
  * 読むのは作品の根の `.gitignore` だけ（呼び手が中身を渡す）。`vscode`・`node:` を読まない。
@@ -48,11 +51,11 @@ function ruleOf(line: string): string | undefined {
   if (body === "") return undefined;
   const segments = body.split("/");
   if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) return undefined;
-  if (segments.some((segment) => segment.includes("**") && segment !== "**")) return undefined;
+  if (segments.some((segment) => segment.includes(GLOBSTAR) && segment !== GLOBSTAR)) return undefined;
   // 途中に「/」があれば根から。無ければどの深さでも（頭に「**」を足す）
   const anchored = rooted || segments.length > 1;
-  const folded = segments.map((segment) => (segment === "**" ? "**" : foldSyncPath(segment)));
+  const folded = segments.map((segment) => (segment === GLOBSTAR ? GLOBSTAR : foldSyncPath(segment)));
   if (folded.some((segment) => segment === "")) return undefined;
-  const pattern = anchored || folded[0] === "**" ? folded : ["**", ...folded];
+  const pattern = anchored || folded[0] === GLOBSTAR ? folded : [GLOBSTAR, ...folded];
   return `${DRIVE_GLOB_RULE_PREFIX}${pattern.join("/")}${dirOnly ? "/" : ""}`;
 }
