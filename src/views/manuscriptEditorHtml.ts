@@ -29,7 +29,12 @@
  * を守る。
  */
 
-import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
+import {
+  CHOSEN_FONT_LINE_HEIGHT,
+  DEFAULT_LINE_HEIGHT,
+  DEFAULT_MANUSCRIPT_FONT,
+  MANUSCRIPT_FONTS,
+} from "../core/manuscriptFonts";
 import { MANUSCRIPT_SIZE_DEFAULT } from "../core/manuscriptAppearance";
 import { NOTATION_RULES } from "../core/manuscriptRender";
 import { DEFAULT_MEMO_MARKERS, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
@@ -107,7 +112,7 @@ export function buildManuscriptEditorHtml(
     台本と漫画の原作だけ、台詞のぶら下げを「「」の位置にそろえる印と、ト書き・柱
     （漫画の原作では絵の説明とページ・コマ）のゴシックを足す（作者の裁定、2026-10-17。
     紙と同じ `kindLayoutCss`）。台詞と人物名は、作者が選んだ書体
-    （novelai.manuscriptEditor.fontFamily。既定は明朝）のまま。
+    （novelai.manuscriptEditor.fontFamily。既定はゴシック）のまま。
     ゴシックは選んだ書体に関わらず固定の並び（選んだ書体がゴシックなら
     全部ゴシックに見えるだけで、困ることはない）
   */
@@ -331,13 +336,13 @@ body.dictating #dictate { display: none; }
   inset: 0;
   padding: 24px 28px;
   overflow: auto;
-  line-height: 1.9;
+  line-height: var(--novelai-line, ${DEFAULT_LINE_HEIGHT});
   font-size: var(--novelai-size, 16px);
-  /* **小説は明朝で読む。** VS Code の編集用フォント（等幅の欧文書体）は
-     縦書きの日本語を想定していないので、仮名の位置が揃わない。
-     設定 novelai.manuscriptEditor.fontFamily で変えられる */
-  font-family: var(--novelai-font, "Yu Mincho", "YuMincho",
-    "Hiragino Mincho ProN", "MS Mincho", serif);
+  /* **既定は投稿サイトに寄せたゴシック・行間1.8**（作者の決定 2026-11-18。設計書6.25.3）。
+     VS Code の編集用フォント（等幅の欧文書体）は縦書きの日本語を想定していないので、
+     既定にしない。設定 novelai.manuscriptEditor.fontFamily で変えられ、選んだ人の
+     行間は今までの 1.9（--novelai-line） */
+  font-family: var(--novelai-font, ${DEFAULT_MANUSCRIPT_FONT});
 }
 /* **打つ面に重ねる用語の色**（設計書6.25.6）。
    打つ面と同じ字送りで同じ本文を置き、用語のところだけ色を付ける。
@@ -525,10 +530,9 @@ body.compose #aloudmarks { display: none; }
   inset: 0;
   padding: 24px 28px;
   overflow: auto;
-  line-height: 1.9;
+  line-height: var(--novelai-line, ${DEFAULT_LINE_HEIGHT});
   font-size: var(--novelai-size, 16px);
-  font-family: var(--novelai-font, "Yu Mincho", "YuMincho",
-    "Hiragino Mincho ProN", "MS Mincho", serif);
+  font-family: var(--novelai-font, ${DEFAULT_MANUSCRIPT_FONT});
   white-space: pre-wrap;
   overflow-wrap: break-word;
   tab-size: 4;
@@ -656,8 +660,8 @@ body.vertical #compose .memo::before {
      （游明朝・ＭＳ 明朝・游ゴシック・VS Codeの等幅）があり、CSSの引き当ては
      そこで後ろへ落ちてくれない。**どの書体を印に使うかは拡張機能側が決め**
      （core/markFont.ts）、困らない書体のときは作者の書体そのものが入る */
-  font-family: var(--novelai-mark-font, var(--novelai-font, "Yu Mincho")),
-    var(--novelai-font, "Yu Mincho"), "Yu Mincho", "YuMincho",
+  font-family: var(--novelai-mark-font, var(--novelai-font, "Meiryo", "Hiragino Kaku Gothic ProN")),
+    var(--novelai-font, "Meiryo", "Hiragino Kaku Gothic ProN"), "Yu Mincho", "YuMincho",
     "Hiragino Mincho ProN", "MS Mincho", serif;
 }
 /* **箱を1em角の正方形に固定する**（実機の報告、2026-08-28）。
@@ -701,8 +705,8 @@ body.vertical #compose .ellipsis {
    letter-spacing が効くと span の中で隙間が開く。テーマや上位の指定が
    値を持ち込んでも、印の中だけは 0 に留める。 */
 #compose .dash {
-  font-family: var(--novelai-mark-font, var(--novelai-font, "Yu Mincho")),
-    var(--novelai-font, "Yu Mincho"), "Yu Mincho", "YuMincho",
+  font-family: var(--novelai-mark-font, var(--novelai-font, "Meiryo", "Hiragino Kaku Gothic ProN")),
+    var(--novelai-font, "Meiryo", "Hiragino Kaku Gothic ProN"), "Yu Mincho", "YuMincho",
     "Hiragino Mincho ProN", "MS Mincho", serif;
   letter-spacing: 0;
 }
@@ -2153,7 +2157,7 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
       if (line > 0) return line;
       // line-height が normal だと数で取れない。文字の大きさから見積もる
       const font = parseFloat(styles.fontSize);
-      return font > 0 ? font * 1.9 : 30;
+      return font > 0 ? font * ${DEFAULT_LINE_HEIGHT} : 29;
     }
     // 画面単位。縦書きの「1画面」は幅のぶん（少し重ねて、読む場所を見失わせない）
     if (mode === 2) return Math.max(face.clientWidth - 40, 40);
@@ -5928,21 +5932,30 @@ ${RESUME_WRITING_LABEL ? `
         termsForText = message.text;
         composeScheduleHighlight();
       }
-      if (message.fontFamily) {
+      if (typeof message.fontFamily === "string") {
         /*
           **書体が変わったときだけ、見ていた場所を控えて戻す**（view-anchor）。
           書体の名前は本文が届くたびに添えてくるので、同じなら何もしない
           ——打鍵のたびに画面を動かすことになる。最初の1回（まだ何も
           当てていない）は開いたところなので、戻す場所が無い。
+          **空は「既定へ戻した」**。変数ごと外さないと、前に選んだ書体が
+          開き直すまで残る。選んだ人の行間は今までの値、既定は CSS の既定
+          （設計書6.25.3）
         */
         const fontChanged =
           viewFontApplied !== null && viewFontApplied !== message.fontFamily;
         const anchor = fontChanged ? viewTakeFontPress() : null;
         viewFontApplied = message.fontFamily;
-        document.documentElement.style.setProperty(
-          "--novelai-font",
-          message.fontFamily
-        );
+        if (message.fontFamily) {
+          document.documentElement.style.setProperty(
+            "--novelai-font",
+            message.fontFamily
+          );
+          document.documentElement.style.setProperty("--novelai-line", "${CHOSEN_FONT_LINE_HEIGHT}");
+        } else {
+          document.documentElement.style.removeProperty("--novelai-font");
+          document.documentElement.style.removeProperty("--novelai-line");
+        }
         if (anchor) viewRestore(anchor);
       }
       /* **印（ダッシュ・三点リーダ）の書体は別に受ける**（設計書6.34）。
