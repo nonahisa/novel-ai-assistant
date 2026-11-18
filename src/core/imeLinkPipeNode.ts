@@ -184,13 +184,21 @@ export function startImeLinkClient(options: ImeLinkClientOptions): ImeLinkClient
  * （パイプの名前が作れないので、つながない）。
  *
  * エンジンは自分のトークンから SID を取る（`setsuna_pipe::win::user_sid`）。同じユーザーの
- * 同じ値になるので、名前がそろう
+ * 同じ値になるので、名前がそろう。
+ *
+ * **Windows の whoami.exe を道で名指しする。** 名前だけで呼ぶと、PATH の先に Git の usr\bin などが
+ * あるとき別の whoami（`/user` を知らない）に当たって読めない（2026-11-18、Git Bash から走らせた単体テストで落ちた）
  */
+function windowsWhoami(): string {
+  const root = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows";
+  return `${root.replace(/[\\/]+$/, "")}\\System32\\whoami.exe`;
+}
+
 export function readWindowsUserSid(): Promise<string | undefined> {
   return new Promise((resolve) => {
     try {
       execFile(
-        "whoami",
+        windowsWhoami(),
         ["/user", "/fo", "csv", "/nh"],
         { windowsHide: true, timeout: 5000 },
         (error, stdout) => {
