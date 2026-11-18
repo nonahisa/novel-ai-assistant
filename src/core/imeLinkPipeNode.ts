@@ -50,6 +50,12 @@ export interface ImeLinkClientOptions {
 export interface ImeLinkClient {
   /** いま確定の知らせを許されてつながっているか */
   granted(): boolean;
+  /**
+   * 待っている最中なら、待ちを飛ばしてすぐ1回つなぎ直す（窓に焦点が戻ったとき。作者が
+   * IME の設定のアプリで許した直後に、5分待たせない）。つながっている・つなぎに行っている
+   * 最中・止めたあとは何もしない
+   */
+  retryNow(): void;
   /** 切る。このあとはつなぎ直さない */
   stop(): void;
 }
@@ -155,6 +161,12 @@ export function startImeLinkClient(options: ImeLinkClientOptions): ImeLinkClient
 
   return {
     granted: () => state === "granted",
+    retryNow: () => {
+      if (stopped || !timer) return;
+      clearTimeout(timer);
+      timer = undefined;
+      connect();
+    },
     stop: () => {
       if (stopped) return;
       stopped = true;

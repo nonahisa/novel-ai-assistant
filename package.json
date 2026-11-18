@@ -2425,7 +2425,7 @@
         "novelai.ime.notifyCurrentWork": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "IME へいまの作品を知らせる（六徳 IME の作品ごとの辞書）。\n\n・六徳 IME が入っている PC でだけ働く\n・オンのあいだは、作品の `.aiwriter/config.json` に作品の番号（`workUid`）を足す"
+          "markdownDescription": "IME へいまの作品を知らせる（六徳 IME の作品ごとの辞書）。\n\n・六徳 IME が入っている PC でだけ働く\n・オンのあいだは、作品の `.aiwriter/config.json` に作品の番号（`workUid`）を足す\n・六徳 IME で確定の知らせを許していれば、原稿エディターで打った名前の読みをそこから受け取る"
         },
         "novelai.readAloud.aivisSpeechUrl": {
           "type": "string",

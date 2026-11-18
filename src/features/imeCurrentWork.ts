@@ -415,6 +415,37 @@ export interface ImeLinkOptions {
   appVersion?: string;
 }
 
+/** OS ごとの決まった置き場の候補。改名前（novel-ime）→ 新しい名前（rittoku-ime）の順 */
+export async function defaultImeStateDirs(): Promise<string[]> {
+  const platform = hostPlatform();
+  let home: string | undefined;
+  if (platform === "darwin") {
+    try {
+      // `node:os` は動的に読む（実装ルール7。静的に書くと、ブラウザ版が起動で落ちる）
+      home = (await import("node:os")).homedir();
+    } catch {
+      home = environmentVariable("HOME");
+    }
+  }
+  const where = { platform, localAppData: environmentVariable("LOCALAPPDATA"), home };
+  return [imeOldStateDir(where), imeStateDir(where)].filter(
+    (dir): dir is string => dir !== undefined
+  );
+}
+
+/** 置き場のフォルダーが1つでもあるか（六徳 IME の入っている機械か） */
+export async function anyImeStateDirExists(): Promise<boolean> {
+  for (const dir of await defaultImeStateDirs()) {
+    try {
+      const stat = await vscode.workspace.fs.stat(path.toUri(dir));
+      if ((stat.type & vscode.FileType.Directory) !== 0) return true;
+    } catch {
+      // 無い。次を見る
+    }
+  }
+  return false;
+}
+
 /** アプリ連動の口の置き場（`stateDir\連携\novel-ai-assistant`。設計書6.13.8） */
 export function imeAppLinkDir(stateDir: string): string {
   return path.join(stateDir, IME_LINK_DIR, IME_APP_ID);
@@ -472,20 +503,7 @@ export function startImeLink(
     stateDirsPromise ??= (async () => {
       if (options.stateDirs !== undefined) return [...options.stateDirs];
       if (options.stateDir !== undefined) return [options.stateDir];
-      const platform = hostPlatform();
-      let home: string | undefined;
-      if (platform === "darwin") {
-        try {
-          // `node:os` は動的に読む（実装ルール7。静的に書くとブラウザ版が起動で落ちる）
-          home = (await import("node:os")).homedir();
-        } catch {
-          home = environmentVariable("HOME");
-        }
-      }
-      const where = { platform, localAppData: environmentVariable("LOCALAPPDATA"), home };
-      return [imeOldStateDir(where), imeStateDir(where)].filter(
-        (dir): dir is string => dir !== undefined
-      );
+      return defaultImeStateDirs();
     })();
     return stateDirsPromise;
   };

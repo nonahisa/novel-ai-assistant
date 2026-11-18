@@ -10,7 +10,8 @@ import {
   buildAppWorks,
   imeLinkHelloLine,
   imeLinkPipeName,
-  imeReadingSource,
+  ImeTypingMerge,
+  type ImeTypingItem,
   nextImeLinkDelay,
   parseImeLinkCommit,
   parseImeLinkWelcome,
@@ -190,10 +191,65 @@ describe("つなぎ直しの間", () => {
   });
 });
 
-describe("読みをどちらの道で拾うか", () => {
-  test("パイプが確定を許されてつながっている間はパイプが正", () => {
-    expect(imeReadingSource({ pipeGranted: true })).toBe("pipe");
-    expect(imeReadingSource({ pipeGranted: false })).toBe("composition");
+describe("同じ確定を二重に数えない（パイプと composition の突き合わせ）", () => {
+  const pipe = (committed: string, kana = "あかり", filePath = "a"): ImeTypingItem => ({
+    source: "pipe",
+    filePath,
+    kana,
+    committed,
+  });
+  const comp = (committed: string, kana = "あかり", filePath = "a"): ImeTypingItem => ({
+    source: "composition",
+    filePath,
+    kana,
+    committed,
+    before: "は",
+  });
+
+  test("パイプだけ：すぐ出す", () => {
+    const merge = new ImeTypingMerge(1500);
+    expect(merge.offer(pipe("灯"), 0)).toEqual({ emit: [pipe("灯")] });
+    expect(merge.flush(5000)).toEqual([]);
+  });
+
+  test("composition だけ：預かって、間が過ぎたら今までどおり出す", () => {
+    const merge = new ImeTypingMerge(1500);
+    expect(merge.offer(comp("灯"), 0)).toEqual({ emit: [], flushAfterMs: 1500 });
+    expect(merge.flush(1000)).toEqual([]);
+    expect(merge.flush(1500)).toEqual([comp("灯")]);
+    expect(merge.flush(3000)).toEqual([]);
+  });
+
+  test("composition が先・パイプが後：預かった方を捨ててパイプを1回だけ", () => {
+    const merge = new ImeTypingMerge(1500);
+    merge.offer(comp("灯", "あか"), 0);
+    expect(merge.offer(pipe("灯"), 300).emit).toEqual([pipe("灯")]);
+    expect(merge.flush(2000)).toEqual([]);
+  });
+
+  test("パイプが先・composition が後：パイプを1回だけ", () => {
+    const merge = new ImeTypingMerge(1500);
+    expect(merge.offer(pipe("灯"), 0).emit).toEqual([pipe("灯")]);
+    expect(merge.offer(comp("灯"), 200)).toEqual({ emit: [] });
+    expect(merge.flush(2000)).toEqual([]);
+    // 突き合わせたパイプは使い切る。次の同じ字の composition は預かる
+    expect(merge.offer(comp("灯"), 300).flushAfterMs).toBe(1500);
+  });
+
+  test("字が違う・話が違う・間を過ぎた：別々に数える", () => {
+    const merge = new ImeTypingMerge(1500);
+    merge.offer(pipe("灯"), 0);
+    expect(merge.offer(comp("白樺"), 100).flushAfterMs).toBe(1500);
+    expect(merge.offer(comp("灯", "あかり", "b"), 100).flushAfterMs).toBe(1500);
+    expect(merge.flush(1600).map((one) => one.committed)).toEqual(["白樺", "灯"]);
+    // パイプから間を過ぎて来た composition は別の確定
+    merge.offer(pipe("森", "もり"), 2000);
+    expect(merge.offer(comp("森", "もり"), 4000).flushAfterMs).toBe(1500);
+    // 預かってから間を過ぎて来たパイプは、預かった方と突き合わせない
+    const late = new ImeTypingMerge(1500);
+    late.offer(comp("湖", "みずうみ"), 0);
+    expect(late.offer(pipe("湖", "みずうみ"), 1600).emit).toHaveLength(1);
+    expect(late.flush(1600)).toHaveLength(1);
   });
 });
 

@@ -19,6 +19,7 @@ let handle: ImeCommitLinkHandle | undefined;
 let focused = true;
 let front: { filePath: string; active: boolean } | undefined;
 let enabled = true;
+let focusListener: ((state: { focused: boolean }) => void) | undefined;
 let configListener: ((event: { affectsConfiguration(key: string): boolean }) => void) | undefined;
 const savedPipe = process.env.RITTOKU_LINK_PIPE;
 const saved = { getConfiguration: workspace.getConfiguration };
@@ -48,6 +49,10 @@ beforeEach(() => {
       get focused() {
         return focused;
       },
+    },
+    onDidChangeWindowState: (listener: typeof focusListener) => {
+      focusListener = listener;
+      return { dispose() {} };
     },
   });
   Object.assign(env, { remoteName: undefined });
@@ -86,6 +91,7 @@ describe.skipIf(!onWindows)("六徳 IME の確定の知らせを受ける", () =
         calls++;
         return front;
       },
+      hasStateDir: async () => true,
       onCommit: (filePath, reading, text, previous) => got.push({ filePath, reading, text, previous }),
     });
     expect(handle).toBeDefined();
@@ -144,6 +150,7 @@ describe.skipIf(!onWindows)("六徳 IME の確定の知らせを受ける", () =
     await listen(name);
     handle = startImeCommitLink({ subscriptions: [] } as never, {
       frontManuscript: () => front,
+      hasStateDir: async () => true,
       onCommit: () => undefined,
     });
     await vi.waitFor(() => expect(handle?.granted()).toBe(true), { timeout: 5000 });
@@ -163,16 +170,55 @@ describe.skipIf(!onWindows)("六徳 IME の確定の知らせを受ける", () =
     enabled = false;
     handle = startImeCommitLink({ subscriptions: [] } as never, {
       frontManuscript: () => front,
+      hasStateDir: async () => true,
       onCommit: () => undefined,
     });
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(sockets).toHaveLength(0);
   });
 
+  test("六徳 IME の置き場が無ければ、つなぎに行かない（窓に焦点が戻っても）", async () => {
+    const name = `\\\\.\\pipe\\novelai-test-commit-${Math.random().toString(16).slice(2)}`;
+    process.env.RITTOKU_LINK_PIPE = name;
+    await listen(name);
+    let asked = 0;
+    handle = startImeCommitLink({ subscriptions: [] } as never, {
+      frontManuscript: () => front,
+      hasStateDir: async () => {
+        asked++;
+        return false;
+      },
+      onCommit: () => undefined,
+    });
+    await vi.waitFor(() => expect(asked).toBe(1), { timeout: 5000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    focusListener?.({ focused: true });
+    await vi.waitFor(() => expect(asked).toBe(2), { timeout: 5000 });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(sockets).toHaveLength(0);
+  });
+
+  test("窓に焦点が戻ったら、待ちを飛ばしてすぐつなぎ直す", async () => {
+    const name = `\\\\.\\pipe\\novelai-test-commit-${Math.random().toString(16).slice(2)}`;
+    process.env.RITTOKU_LINK_PIPE = name;
+    // IME が居ない（パイプが無い）ので、次は30秒待つことになる
+    handle = startImeCommitLink({ subscriptions: [] } as never, {
+      frontManuscript: () => front,
+      hasStateDir: async () => true,
+      onCommit: () => undefined,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(handle?.granted()).toBe(false);
+    await listen(name);
+    focusListener?.({ focused: true });
+    await vi.waitFor(() => expect(handle?.granted()).toBe(true), { timeout: 3000 });
+  });
+
   test("リモートではつながない", () => {
     Object.assign(env, { remoteName: "ssh-remote" });
     handle = startImeCommitLink({ subscriptions: [] } as never, {
       frontManuscript: () => front,
+      hasStateDir: async () => true,
       onCommit: () => undefined,
     });
     expect(handle).toBeUndefined();

@@ -598,8 +598,8 @@ import {
   startImeLink,
   type ImeLinkHandle,
 } from "./features/imeCurrentWork";
-import { startImeCommitLink, type ImeCommitLinkHandle } from "./features/imeCommitLink";
-import { imeReadingSource } from "./core/imeAppLink";
+import { startImeCommitLink } from "./features/imeCommitLink";
+import { ImeTypingMerge, type ImeTypingItem } from "./core/imeAppLink";
 import { startLocalAiGate } from "./features/localAiGate";
 import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
@@ -2140,8 +2140,23 @@ export async function activate(
     }
   };
 
-  /** 六徳 IME の確定の知らせ（パイプ）。つながるのは Windows の手元の VS Code だけ（設計書6.13.8） */
-  let imeCommitLink: ImeCommitLinkHandle | undefined;
+  /**
+   * 画面の推し量りと六徳 IME の確定の知らせを突き合わせてから照合へ渡す（設計書6.42.2）。
+   * 同じ話・同じ字が預かる間（`IME_TYPING_HOLD_MS`）に両方から来たら、パイプの方を1回だけ使う
+   */
+  const imeTypingMerge = new ImeTypingMerge();
+  const passImeTyping = (items: readonly ImeTypingItem[]): void => {
+    for (const item of items) {
+      void recordImeTyping(item.filePath, item.kana, item.committed, item.previous, item.before);
+    }
+  };
+  const offerImeTyping = (item: ImeTypingItem): void => {
+    const result = imeTypingMerge.offer(item, Date.now());
+    passImeTyping(result.emit);
+    if (result.flushAfterMs !== undefined) {
+      setTimeout(() => passImeTyping(imeTypingMerge.flush(Date.now())), result.flushAfterMs);
+    }
+  };
 
   /**
    * 人物の声で読む文の計画（設計書6.42.3・6.42.4）。**原稿エディターの［▶ 読む］と同じ重ね方**
@@ -2684,10 +2699,9 @@ export async function activate(
         return result.spans;
       },
       record: async (filePath, kana, committed, previous, before) => {
-        // 六徳 IME の確定の知らせが許されてつながっている間は、そちらが正（二重に数えない）。
-        // つながっていない間は、ほかの IME を使う作者のために画面の推し量りで拾う
-        if (imeReadingSource({ pipeGranted: imeCommitLink?.granted() ?? false }) === "pipe") return;
-        await recordImeTyping(filePath, kana, committed, previous, before);
+        // 画面の推し量りの確定は少し預かり、同じ字の六徳 IME の確定が来たらそちらを使う
+        // （二重に数えない。来なければ今までどおり。ほかの IME を使う作者のため）
+        offerImeTyping({ source: "composition", filePath, kana, committed, previous, before });
       },
     },
     // シーンメモ（設計書6.40.4）。**繋ぐのはここだけ**——原稿エディタが
@@ -4595,10 +4609,10 @@ export async function activate(
   // 六徳 IME の確定の知らせ（設計書6.13.8・6.42.2）。焦点のある原稿エディターで打った
   // 確定だけを、画面の推し量りと同じ照合（名前・別名・名前以外の語）へ渡す。
   // 姓と名をつなぐ照合も同じ。「変換を始めた所の直前の字」はパイプから来ないので渡さない
-  imeCommitLink = startImeCommitLink(context, {
+  startImeCommitLink(context, {
     frontManuscript,
     onCommit: (filePath, reading, text, previous) => {
-      void recordImeTyping(filePath, reading, text, previous, undefined);
+      offerImeTyping({ source: "pipe", filePath, kana: reading, committed: text, previous });
     },
   });
   // 「よく使う語を選ぶ」を品書きへ出す鍵。出し始める（定数が true）まで立てない

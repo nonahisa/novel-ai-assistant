@@ -239,16 +239,83 @@ export function nextImeLinkDelay(end: ImeLinkEnd, previous: number | undefined):
 
 /* ── 受けた確定の使い道（設計書6.42.2） ─────────────── */
 
+/** 変換1回ぶん。どちらの道から来たかと、照合へ渡す材料 */
+export interface ImeTypingItem {
+  source: "pipe" | "composition";
+  /** 打った話のファイル */
+  filePath: string;
+  /** 打った読み（パイプは IME の読み、composition は画面の推し量り） */
+  kana: string;
+  committed: string;
+  previous?: CompositionPair;
+  /** 変換を始めた所の直前の字（composition の道だけが持つ） */
+  before?: string;
+}
+
 /**
- * IMEで打った読みを、どちらの道で拾うか。
- *
- * パイプが確定を許されてつながっている間は、パイプが正（字と読みが確かな形で届く）。
- * そのあいだ原稿エディターの推し量り（composition）の道からは控えに足さない——
- * 両方から足すと同じ確定を二重に数える。つながっていない・許されていない間は、
- * ほかの IME（MS-IME など）を使う作者のために今までどおり composition で拾う
+ * composition の道の確定を預かる長さ（ミリ秒）。パイプの確定は IME が確定したすぐあとに
+ * 届き、画面の compositionend もほぼ同じ時に来る。どちらが先でも1回に数えられるよう、
+ * 打鍵の間より短く、届く遅れより長く取った
  */
-export function imeReadingSource(input: { pipeGranted: boolean }): "pipe" | "composition" {
-  return input.pipeGranted ? "pipe" : "composition";
+export const IME_TYPING_HOLD_MS = 1500;
+
+/**
+ * 同じ確定を二重に数えないための突き合わせ（設計書6.42.2）。
+ *
+ * 「パイプがつながっている間は composition を止める」形にしないのは、つながっていても
+ * パイプに確定が来ないことがあるため（MS-IME へ切り替えた・試しの作品・つないだあとで
+ * 許しを外した）。そこで両方を受け、**同じ話・同じ字が預かる間に両方から来たら1回**にする。
+ *
+ * - composition が来たら、すぐ控えへ入れずに預かる。預かる間に同じ字のパイプが来たら、
+ *   預かった方を捨ててパイプの方を使う（読みが確か）。来なければ `flush` で今までどおり出す
+ * - パイプが先に来たら、すぐ出し、預かる間だけ覚えておく。そのあと同じ字の composition が
+ *   来たら捨てる
+ *
+ * 時刻は呼び手が渡す（試しで時計を動かせるように）。`vscode` には触らない
+ */
+export class ImeTypingMerge {
+  private held: Array<{ item: ImeTypingItem; at: number }> = [];
+  private recentPipe: Array<{ filePath: string; committed: string; at: number }> = [];
+
+  constructor(private readonly holdMs: number = IME_TYPING_HOLD_MS) {}
+
+  /**
+   * 1つ受ける。`emit` はいま照合へ渡すもの。`flushAfterMs` があれば、その後で `flush` を呼ぶ
+   */
+  offer(item: ImeTypingItem, now: number): { emit: ImeTypingItem[]; flushAfterMs?: number } {
+    this.recentPipe = this.recentPipe.filter((one) => now - one.at <= this.holdMs);
+    const committed = item.committed.trim();
+    if (item.source === "pipe") {
+      const index = this.held.findIndex(
+        (one) =>
+          one.item.filePath === item.filePath &&
+          one.item.committed.trim() === committed &&
+          now - one.at <= this.holdMs
+      );
+      if (index >= 0) {
+        this.held.splice(index, 1);
+      } else {
+        this.recentPipe.push({ filePath: item.filePath, committed, at: now });
+      }
+      return { emit: [item] };
+    }
+    const match = this.recentPipe.findIndex(
+      (one) => one.filePath === item.filePath && one.committed === committed
+    );
+    if (match >= 0) {
+      this.recentPipe.splice(match, 1);
+      return { emit: [] };
+    }
+    this.held.push({ item, at: now });
+    return { emit: [], flushAfterMs: this.holdMs };
+  }
+
+  /** 預かる間を過ぎた composition の確定を、来た順に出す */
+  flush(now: number): ImeTypingItem[] {
+    const due = this.held.filter((one) => now - one.at >= this.holdMs);
+    this.held = this.held.filter((one) => now - one.at < this.holdMs);
+    return due.map((one) => one.item);
+  }
 }
 
 /**

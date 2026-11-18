@@ -11,7 +11,7 @@ import {
   type ImePipeLastCommit,
 } from "../core/imeAppLink";
 import type { CompositionPair } from "../core/imeReading";
-import { IME_NOTIFY_SETTING } from "./imeCurrentWork";
+import { IME_NOTIFY_SETTING, anyImeStateDirExists } from "./imeCurrentWork";
 
 /**
  * 六徳 IME の確定の知らせ（パイプ）を受ける（設計書6.13.8・6.42.2）。
@@ -33,10 +33,15 @@ export interface ImeCommitLinkOptions {
    * `previous` は同じ話で間を置かずに続いた前の確定（姓と名を分けて確定する打ち方）
    */
   onCommit(filePath: string, reading: string, text: string, previous?: CompositionPair): void;
+  /**
+   * 六徳 IME の置き場があるか（省くと OS ごとの決まった所を見る。試しで差し替える）。
+   * **無ければ whoami も呼ばず、つなぎにも行かず、ログも出さない**（IME の無い機械で何も起こさない）
+   */
+  hasStateDir?: () => Promise<boolean>;
 }
 
 export interface ImeCommitLinkHandle extends vscode.Disposable {
-  /** いま確定の知らせを許されてつながっているか（composition の道を控えるかの判定に使う） */
+  /** いま確定の知らせを許されてつながっているか */
   granted(): boolean;
 }
 
@@ -61,7 +66,8 @@ export function startImeCommitLink(
   if (vscode.env.remoteName) return undefined;
   if (hostPlatform() !== "win32") return undefined;
 
-  type Client = { granted(): boolean; stop(): void };
+  type Client = { granted(): boolean; retryNow(): void; stop(): void };
+  const hasStateDir = options.hasStateDir ?? anyImeStateDirExists;
   let client: Client | undefined;
   let starting = false;
   let disposed = false;
@@ -93,6 +99,9 @@ export function startImeCommitLink(
     if (client || starting || disposed || !enabled()) return;
     starting = true;
     try {
+      // IME の無い機械では何もしない（窓に焦点が戻ったとき・設定を入れたときに見直す）
+      if (!(await hasStateDir())) return;
+      if (disposed || !enabled()) return;
       // Node の部品（net・child_process）は動的に読む（実装ルール7）
       const node = await import("../core/imeLinkPipeNode.js");
       const override = environmentVariable(IME_LINK_PIPE_ENV);
@@ -137,12 +146,24 @@ export function startImeCommitLink(
     else disconnect();
   });
 
+  // 窓に焦点が戻ったら、つながっていなければ待ちを飛ばしてすぐ1回つなぎ直す
+  // （作者が IME の設定のアプリで許して VS Code へ戻ったとき、最長5分待たせない）
+  const focusWatch = vscode.window.onDidChangeWindowState((windowState) => {
+    if (!windowState.focused || disposed) return;
+    if (client) {
+      if (!client.granted()) client.retryNow();
+    } else {
+      void connect();
+    }
+  });
+
   const handle: ImeCommitLinkHandle = {
     granted: () => client?.granted() ?? false,
     dispose: () => {
       if (disposed) return;
       disposed = true;
       configWatch.dispose();
+      focusWatch.dispose();
       disconnect();
     },
   };

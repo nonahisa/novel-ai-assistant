@@ -164,6 +164,28 @@ describe.skipIf(!onWindows)("パイプの客（本物の名前付きパイプ）
     expect(states).toEqual(["absent", "granted"]);
   });
 
+  test("待っている最中に retryNow を呼べば、待ちを飛ばしてすぐつなぎ直す", async () => {
+    const name = pipeName();
+    const states: ImeLinkState[] = [];
+    let waits = 0;
+    client = startImeLinkClient({
+      pipeName: name,
+      onCommit: () => undefined,
+      onState: (state) => states.push(state),
+      delay: () => {
+        waits++;
+        return 10 * 60_000;
+      },
+    });
+    await vi.waitFor(() => expect(waits).toBe(1), { timeout: 5000 });
+    ime = await fakeIme(name, () => true, () => []);
+    client.retryNow();
+    await vi.waitFor(() => expect(states).toEqual(["absent", "granted"]), { timeout: 5000 });
+    // つながっている間は何もしない
+    client.retryNow();
+    expect(ime.hellos).toHaveLength(1);
+  });
+
   test("止めたあとはつなぎ直さない", async () => {
     const name = pipeName();
     ime = await fakeIme(name, () => true, () => []);
