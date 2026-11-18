@@ -479,7 +479,7 @@ VS Code 版の Claude Code から、この拡張機能の道具（MCPサーバ�
 | `novelai.countMode` | `net` | ステータスバーに表示する文字数の種類 |
 | `novelai.excludeRubyFromCount` | `true` | ルビ部分を文字数から除外する |
 | `novelai.manuscriptEditor.vertical` | `true` | 「原稿エディターで開く」で開いた原稿を、はじめから縦書きにする |
-| `novelai.manuscriptEditor.fontFamily` | （空） | 原稿の画面で使う書体。空なら明朝体 |
+| `novelai.manuscriptEditor.fontFamily` | （空） | 原稿の画面で使う書体。空ならゴシック（Windows はメイリオ、Mac はヒラギノ角ゴ） |
 | `novelai.manuscriptEditor.readAloudRate` | `1` | 読み上げの速さ（0.5〜2） |
 | `novelai.compositionLine` | `left` | 縦書きで変換中の字に付く線を、行の左右どちらに出すか。右はテスト中 |
 | `novelai.googleDrive.syncImeLearning` | `false` | 送り先が Google ドライブの作品があるとき、六徳 IME の学習も Google ドライブでそろえる。送るのは学習の写しだけ |
