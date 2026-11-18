@@ -11,6 +11,7 @@
  */
 import type { Frame, Page } from "playwright-core";
 import { waitUntil } from "./wait";
+import { delayMessagesToHost, dropMessagesToHost } from "./webviewDrop";
 import { quickOpen, webviewLayer, webviewLayers, type WebviewLayer } from "./workbenchDom";
 
 /** 原稿エディターの面（`#surface` を持つ）を全部。2枚目ができていないかを数えるのにも使う */
@@ -338,22 +339,7 @@ export async function delayEditsToHost(frame: Frame, delayMs: number): Promise<v
     本文を送り直す順を、揺れに頼らず毎回作るため。便どうしの順は変えない
     （同じ長さだけ遅らせるので、先に送った便が先に着く）
   */
-  const outer = frame.parentFrame();
-  if (!outer) throw new Error("WebView の外側の枠が見つかりません");
-  await outer.evaluate((ms) => {
-    const proto = MessagePort.prototype as MessagePort & { __e2eDelay?: boolean };
-    if (proto.__e2eDelay) return;
-    proto.__e2eDelay = true;
-    const original = proto.postMessage;
-    proto.postMessage = function (this: MessagePort, ...args: unknown[]) {
-      const message = args[0] as { channel?: string; data?: { message?: { type?: string } } } | undefined;
-      if (message?.channel === "onmessage" && message.data?.message?.type === "edit") {
-        setTimeout(() => (original as (...rest: unknown[]) => void).apply(this, args), ms);
-        return;
-      }
-      return (original as (...rest: unknown[]) => void).apply(this, args);
-    } as typeof proto.postMessage;
-  }, delayMs);
+  await delayMessagesToHost(frame, ["edit"], delayMs);
 }
 
 /**
@@ -387,22 +373,10 @@ export async function composeTrace(frame: Frame): Promise<Array<{ t: number; tex
  * 拡張機能ホストが起動し直して受け手を失った画面（6.25.9）と同じく、便は送られるのに
  * 返事が来ない形を作る。**製品には何も足さない**——VS Code の WebView の外側の枠
  * （`pre/index.html`）は、内側の枠の `postMessage` を MessagePort で本体へ渡すので、
- * テストの側からその枠の MessagePort をくるむ。画面の状態の書き込み（do-update-state）は
+ * テストの側からその枠の MessagePort をくるむ（くるみは起こすときに置く。`webviewDrop.ts`）。画面の状態の書き込み（do-update-state）は
  * 通すので、控えは本物どおり状態に残る。枠はウィンドウの再読み込みで作り直されるので、
  * くるみも消える（拡張機能ホストの再起動では枠は作り直されないので、くるみは残る）
  */
 export async function dropEditsToHost(frame: Frame): Promise<void> {
-  const outer = frame.parentFrame();
-  if (!outer) throw new Error("WebView の外側の枠が見つかりません");
-  await outer.evaluate(() => {
-    const proto = MessagePort.prototype as MessagePort & { __e2eDrop?: boolean };
-    if (proto.__e2eDrop) return;
-    proto.__e2eDrop = true;
-    const original = proto.postMessage;
-    proto.postMessage = function (this: MessagePort, ...args: unknown[]) {
-      const message = args[0] as { channel?: string; data?: { message?: { type?: string } } } | undefined;
-      if (message?.channel === "onmessage" && message.data?.message?.type === "edit") return;
-      return (original as (...rest: unknown[]) => void).apply(this, args);
-    } as typeof proto.postMessage;
-  });
+  await dropMessagesToHost(frame, ["edit"]);
 }

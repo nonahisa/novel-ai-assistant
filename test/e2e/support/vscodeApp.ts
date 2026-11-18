@@ -25,6 +25,7 @@ import { downloadAndUnzipVSCode } from "@vscode/test-electron";
 import { _electron, type ElectronApplication, type Frame, type Page } from "playwright-core";
 import { recordLaunch, stopLaunch } from "./cleanup";
 import { waitUntil } from "./wait";
+import { installWebviewDrop } from "./webviewDrop";
 import { CLEAR_NOTIFICATIONS_KEY, clearNotifications, closeDialog, dialogText } from "./workbenchDom";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -420,6 +421,8 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
   });
   const pid = app.process().pid;
   if (pid !== undefined) await recordLaunch({ root, pid });
+  // WebView の便を落とす仕掛けは、枠の読み込みより前に置く（1.147 から、あとでは効かない。webviewDrop.ts）
+  await installWebviewDrop(app);
 
   let page: Page | undefined;
   let videoStartedAt: number | undefined;
@@ -501,6 +504,7 @@ export async function restartVsCode(
   const app = await _electron.launch({ executablePath: context.executablePath, args: context.args, env: cleanEnv(), timeout: 60_000 });
   const pid = app.process().pid;
   if (pid !== undefined) await recordLaunch({ root: session.root, pid });
+  await installWebviewDrop(app);
   // 起こしたときと同じ扱い（前に出す起こし方なら、開き直しも前に出す）
   if (!context.foreground) await keepOutOfTheWay(app);
   const page = await app.firstWindow();

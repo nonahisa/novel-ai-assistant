@@ -44,6 +44,7 @@ import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { actionLogLines } from "./support/nameCheckPanel";
 import { classOpen, dropEditsToHost, openEpisode, placeCaretAfter, rescueBarText, waitForManuscriptFrame } from "./support/manuscriptFrame";
+import { dropMessagesToHost } from "./support/webviewDrop";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { keysInTextFor } from "./support/keys";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -101,22 +102,10 @@ async function copiedTexts(frame: Frame): Promise<string[]> {
 
 /**
  * 画面から拡張機能へ向かう「開き直しの頼み」（reopen）だけを、WebView の外側の枠で落とす。
- * 作りは `dropEditsToHost` と同じ（外側の枠の MessagePort をくるむ。製品には何も足さない）
+ * 作りは `dropEditsToHost` と同じ（`support/webviewDrop.ts`。製品には何も足さない）
  */
 async function dropReopenToHost(frame: Frame): Promise<void> {
-  const outer = frame.parentFrame();
-  if (!outer) throw new Error("WebView の外側の枠が見つかりません");
-  await outer.evaluate(() => {
-    const proto = MessagePort.prototype as MessagePort & { __e2eDropReopen?: boolean };
-    if (proto.__e2eDropReopen) return;
-    proto.__e2eDropReopen = true;
-    const original = proto.postMessage;
-    proto.postMessage = function (this: MessagePort, ...args: unknown[]) {
-      const message = args[0] as { channel?: string; data?: { message?: { type?: string } } } | undefined;
-      if (message?.channel === "onmessage" && message.data?.message?.type === "reopen") return;
-      return (original as (...rest: unknown[]) => void).apply(this, args);
-    } as typeof proto.postMessage;
-  });
+  await dropMessagesToHost(frame, ["reopen"]);
 }
 
 /**
@@ -180,6 +169,8 @@ test("拡張機能は応えるが打った字が原稿へ入らないと、30秒
 
       // ［開き直す］：拡張機能が受け取り、同じ話を開き直す
       await frame.locator("#unsentReopen").click();
+      // 前の面が閉じるのを待ってから新しい面を探す（1.147 では、閉じる前の古い面を掴むことがあった。2026-11-19）
+      await waitUntil(async () => frame.isDetached(), "開き直す前の面が閉じる", 30_000);
       const reopened = await waitForManuscriptFrame(page, "一行目の文", "開き直した原稿エディターの面", 30_000);
       await waitUntil(() => classOpen(reopened, "rescue"), "開き直した画面の上に控えの帯が出る", 20_000).catch(async (error: unknown) => {
         throw new Error(
