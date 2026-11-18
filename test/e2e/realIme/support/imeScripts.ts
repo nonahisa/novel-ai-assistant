@@ -23,10 +23,14 @@ export const REAL_IME_ENABLED = process.env.NOVELAI_REAL_IME === "1" && process.
 
 /**
  * 台本の置き場。環境変数 `NOVEL_IME_TRIAL_DIR` があればそこ（ノートPCは展開先が違う）、
- * 無ければ作者の機械の置き場（ホームの Documents の下の novel-ime）
+ * 無ければ作者の機械の置き場（ホームの Documents の下の rittoku-ime。改名前の novel-ime しか無ければそちら。
+ * リポジトリの改名は IME の改名の最後の段で、日はまだ決まっていない。2026-11-18 夜）
  */
 export function trialDir(): string {
-  return process.env.NOVEL_IME_TRIAL_DIR || path.join(homedir(), "Documents", "novel-ime", "試作", "本物のIMEの試し");
+  if (process.env.NOVEL_IME_TRIAL_DIR) return process.env.NOVEL_IME_TRIAL_DIR;
+  const docs = path.join(homedir(), "Documents");
+  const renamed = path.join(docs, "rittoku-ime", "試作", "本物のIMEの試し");
+  return existsSync(renamed) ? renamed : path.join(docs, "novel-ime", "試作", "本物のIMEの試し");
 }
 
 export const SCRIPT_SEND_KEYS = "キーを送る.ps1";

@@ -27,10 +27,10 @@ const exportOf = (dev: string, lines: string[] = ['{"t":1,"dev":"x","n":1,"op":"
 describe("エンジンの場所と sync-info", () => {
   test("IME 連動と同じ置き場の中の exe。Linux は無い", () => {
     expect(imeCoreExecutable("C:\\Users\\u\\AppData\\Local\\rittoku-ime", "win32")).toBe(
-      "C:\\Users\\u\\AppData\\Local\\rittoku-ime\\rittoku-core.exe"
+      "C:\\Users\\u\\AppData\\Local\\rittoku-ime\\rittoku-ime-core.exe"
     );
     expect(imeCoreExecutable("/Users/u/Library/Application Support/rittoku-ime/", "darwin")).toBe(
-      "/Users/u/Library/Application Support/rittoku-ime/rittoku-core"
+      "/Users/u/Library/Application Support/rittoku-ime/rittoku-ime-core"
     );
     expect(imeCoreExecutable("/x", "linux")).toBeUndefined();
     expect(imeCoreExecutable(undefined, "win32")).toBeUndefined();
@@ -41,13 +41,17 @@ describe("エンジンの場所と sync-info", () => {
       ["C:\\L\\rittoku-ime", "C:\\L\\novel-ime", undefined],
       "win32"
     );
+    // 改名の版（2026-11-18 夜）の rittoku-ime-core を先に。入れたあとも古い exe は残る
     expect(win).toEqual([
+      "C:\\L\\rittoku-ime\\rittoku-ime-core.exe",
       "C:\\L\\rittoku-ime\\rittoku-core.exe",
       "C:\\L\\rittoku-ime\\novel-ime-core.exe",
+      "C:\\L\\novel-ime\\rittoku-ime-core.exe",
       "C:\\L\\novel-ime\\rittoku-core.exe",
       "C:\\L\\novel-ime\\novel-ime-core.exe",
     ]);
     expect(imeCoreExecutableCandidates(["/a/novel-ime/"], "darwin")).toEqual([
+      "/a/novel-ime/rittoku-ime-core",
       "/a/novel-ime/rittoku-core",
       "/a/novel-ime/novel-ime-core",
     ]);
