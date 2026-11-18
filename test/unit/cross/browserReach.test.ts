@@ -119,6 +119,8 @@ describe("ブラウザ版で起動した瞬間に落ちないか", () => {
       "core/externalBrowserWindows.ts",
       // 手元のAIの札（設計書6.76.1）。門（features/localAiGate.ts）が動的 import する
       "core/localAiLeaseNode.ts",
+      // 六徳 IME のパイプの客（設計書6.13.8）。features/imeCommitLink.ts が動的 import する
+      "core/imeLinkPipeNode.ts",
       "core/packageInstall.ts",
       "features/selectOllamaExecutable.ts",
     ];

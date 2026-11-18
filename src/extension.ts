@@ -598,6 +598,8 @@ import {
   startImeLink,
   type ImeLinkHandle,
 } from "./features/imeCurrentWork";
+import { startImeCommitLink, type ImeCommitLinkHandle } from "./features/imeCommitLink";
+import { imeReadingSource } from "./core/imeAppLink";
 import { startLocalAiGate } from "./features/localAiGate";
 import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
@@ -2062,6 +2064,86 @@ export async function activate(
   };
 
   /**
+   * 変換1回ぶん（打った読みと確定した字）を、名前の読みの控えと読みの辞書への提案へ渡す（設計書6.42.2）。
+   * 原稿エディターの推し量り（composition）の道と、六徳 IME の確定の知らせ（パイプ）の道が
+   * **同じここを通る**——記録の行と、開いている設定資料パネルの読み直しを片方だけに
+   * 書くと、もう片方の道で読みを埋めたあとの保存が「外で書き換えられた」で止まる
+   */
+  const recordImeTyping = async (
+    filePath: string,
+    kana: string,
+    committed: string,
+    previous?: { kana: string; committed: string },
+    before?: string
+  ): Promise<void> => {
+    const work = workOfPath(registry, filePath);
+    if (!work) return;
+    try {
+      const { recordImeComposition } = await import("./features/imeReadings.js");
+      imeReadingsLoaded = true;
+      const result = await recordImeComposition(work, kana, committed, previous, {
+        episodePath: filePath,
+        before,
+      });
+      if (
+        result.captures.length === 0 &&
+        result.words.length === 0 &&
+        result.problems.length === 0
+      ) {
+        return;
+      }
+      useLogFile(work.folderPath);
+      // 名前以外の語は読みの辞書への提案（設計書6.42.2）。新しく出たときだけ1行
+      for (const word of result.words) {
+        logLine(
+          `IMEの読み：「${word.word}」を「${word.reading}」と打ちました（読みの辞書への提案）`
+        );
+      }
+      for (const capture of result.captures) {
+        // 別名の読みを埋めたものは別名で、名前の読みを埋めたものは名前で、拾った字と対応させる
+        const filled = result.filled.filter(
+          (item) => (item.alias ?? item.name.trim()) === capture.surface
+        );
+        logLine(
+          `IMEの読み：「${capture.surface}」を「${capture.reading}」と打ちました` +
+            (previous && !committed.includes(capture.surface)
+              ? `（「${previous.committed}」と「${committed}」を続けて確定）`
+              : "") +
+            (filled.length > 0
+              ? `。設定資料の読みが空だったので埋めました（${filled
+                  // 別名の読みを埋めたときは、どの別名かも残す
+                  .map((item) =>
+                    item.alias ? `${item.name}の別名「${item.alias}」` : item.name
+                  )
+                  .join("、")}）`
+              : "")
+        );
+      }
+      for (const problem of result.problems) logLine(`IMEの読み：${problem}`);
+      const panel = findOpenSettingsPanel(work.id);
+      if (result.filled.length > 0 && panel) {
+        // 開いている設定資料パネルを読み直す。読み直さないと、パネルが持つ
+        // 読み込んだときの控えが古いまま残り、次の保存が「外で書き換えられた」で止まる。
+        // 読み直しは詳細を描き直さないので、開いている項目の読みの欄へも映す
+        await panel.refreshFromDisk();
+        for (const item of result.filled) {
+          panel.notifyReadingFilled(item.kind, item.id, item.reading, item.alias);
+        }
+      }
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logLine(
+        `IMEの読み：控えへ足せませんでした（${
+          error instanceof Error ? error.message : String(error)
+        }）`
+      );
+    }
+  };
+
+  /** 六徳 IME の確定の知らせ（パイプ）。つながるのは Windows の手元の VS Code だけ（設計書6.13.8） */
+  let imeCommitLink: ImeCommitLinkHandle | undefined;
+
+  /**
    * 人物の声で読む文の計画（設計書6.42.3・6.42.4）。**原稿エディターの［▶ 読む］と同じ重ね方**
    * ——記法・読みの辞書・設定資料の名前の読み・台詞の境目で切る——にする。
    * 書き出しの入口（列と右クリック）はどちらもここを通す。違う作り方にすると、
@@ -2602,68 +2684,10 @@ export async function activate(
         return result.spans;
       },
       record: async (filePath, kana, committed, previous, before) => {
-        const work = workOfPath(registry, filePath);
-        if (!work) return;
-        try {
-          const { recordImeComposition } = await import("./features/imeReadings.js");
-          imeReadingsLoaded = true;
-          const result = await recordImeComposition(work, kana, committed, previous, {
-            episodePath: filePath,
-            before,
-          });
-          if (
-            result.captures.length === 0 &&
-            result.words.length === 0 &&
-            result.problems.length === 0
-          ) {
-            return;
-          }
-          useLogFile(work.folderPath);
-          // 名前以外の語は読みの辞書への提案（設計書6.42.2）。新しく出たときだけ1行
-          for (const word of result.words) {
-            logLine(
-              `IMEの読み：「${word.word}」を「${word.reading}」と打ちました（読みの辞書への提案）`
-            );
-          }
-          for (const capture of result.captures) {
-            // 別名の読みを埋めたものは別名で、名前の読みを埋めたものは名前で、拾った字と対応させる
-            const filled = result.filled.filter(
-              (item) => (item.alias ?? item.name.trim()) === capture.surface
-            );
-            logLine(
-              `IMEの読み：「${capture.surface}」を「${capture.reading}」と打ちました` +
-                (previous && !committed.includes(capture.surface)
-                  ? `（「${previous.committed}」と「${committed}」を続けて確定）`
-                  : "") +
-                (filled.length > 0
-                  ? `。設定資料の読みが空だったので埋めました（${filled
-                      // 別名の読みを埋めたときは、どの別名かも残す
-                      .map((item) =>
-                        item.alias ? `${item.name}の別名「${item.alias}」` : item.name
-                      )
-                      .join("、")}）`
-                  : "")
-            );
-          }
-          for (const problem of result.problems) logLine(`IMEの読み：${problem}`);
-          const panel = findOpenSettingsPanel(work.id);
-          if (result.filled.length > 0 && panel) {
-            // 開いている設定資料パネルを読み直す。読み直さないと、パネルが持つ
-            // 読み込んだときの控えが古いまま残り、次の保存が「外で書き換えられた」で止まる。
-            // 読み直しは詳細を描き直さないので、開いている項目の読みの欄へも映す
-            await panel.refreshFromDisk();
-            for (const item of result.filled) {
-              panel.notifyReadingFilled(item.kind, item.id, item.reading, item.alias);
-            }
-          }
-        } catch (error) {
-          useLogFile(work.folderPath);
-          logLine(
-            `IMEの読み：控えへ足せませんでした（${
-              error instanceof Error ? error.message : String(error)
-            }）`
-          );
-        }
+        // 六徳 IME の確定の知らせが許されてつながっている間は、そちらが正（二重に数えない）。
+        // つながっていない間は、ほかの IME を使う作者のために画面の推し量りで拾う
+        if (imeReadingSource({ pipeGranted: imeCommitLink?.granted() ?? false }) === "pipe") return;
+        await recordImeTyping(filePath, kana, committed, previous, before);
       },
     },
     // シーンメモ（設計書6.40.4）。**繋ぐのはここだけ**——原稿エディタが
@@ -4565,8 +4589,18 @@ export async function activate(
     state: verifiedState(context.globalState),
     frontManuscript,
     onDidChangeFrontManuscript,
+    appVersion: String(context.extension.packageJSON.version ?? ""),
   });
   if (imeLink) closeImeLink = imeLink.close;
+  // 六徳 IME の確定の知らせ（設計書6.13.8・6.42.2）。焦点のある原稿エディターで打った
+  // 確定だけを、画面の推し量りと同じ照合（名前・別名・名前以外の語）へ渡す。
+  // 姓と名をつなぐ照合も同じ。「変換を始めた所の直前の字」はパイプから来ないので渡さない
+  imeCommitLink = startImeCommitLink(context, {
+    frontManuscript,
+    onCommit: (filePath, reading, text, previous) => {
+      void recordImeTyping(filePath, reading, text, previous, undefined);
+    },
+  });
   // 「よく使う語を選ぶ」を品書きへ出す鍵。出し始める（定数が true）まで立てない
   if (IME_FREQUENT_WORDS_ENABLED) {
     void vscode.commands.executeCommand("setContext", "novelai.imeFrequentWords", true);

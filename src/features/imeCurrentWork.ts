@@ -46,6 +46,17 @@ import {
   type ImeWorkRef,
 } from "../core/imeCurrentWork";
 import {
+  IME_APP_FILE,
+  IME_APP_ID,
+  IME_APP_WORKS_FILE,
+  IME_CONTEXT_FILE,
+  IME_LINK_DIR,
+  buildAppContext,
+  buildAppJson,
+  buildAppWorks,
+  serializeAppLinkJson,
+} from "../core/imeAppLink";
+import {
   countFrequentWords,
   frequentSkipSurfaces,
   isEpisodeFilePath,
@@ -400,6 +411,13 @@ export interface ImeLinkOptions {
   stateDir?: string;
   /** 置き場を複数差し替える（試験だけ。古い→新しいの順に書く。`stateDir` より優先） */
   stateDirs?: readonly string[];
+  /** 拡張機能の版（名乗りの `app.json` に載せる。省くと空の字） */
+  appVersion?: string;
+}
+
+/** アプリ連動の口の置き場（`stateDir\連携\novel-ai-assistant`。設計書6.13.8） */
+export function imeAppLinkDir(stateDir: string): string {
+  return path.join(stateDir, IME_LINK_DIR, IME_APP_ID);
 }
 
 export interface ImeLinkHandle extends vscode.Disposable {
@@ -524,6 +542,44 @@ export function startImeLink(
     if (wrote === 0 && failure !== undefined) throw failure;
   };
 
+  /**
+   * アプリ連動の口（`stateDir\連携\novel-ai-assistant\`）へ書く（設計書6.13.8）。
+   *
+   * **前の形のファイルとは別に、失敗しても投げない**——新しい口が書けなくても、
+   * 前の形の知らせ（いまの版のエンジンが読む）は書けたことにしてよい。連携の
+   * フォルダーは、在る置き場の下にだけ作る（置き場そのものは作らない決まりのまま）
+   */
+  const writeLinkToAll = async (
+    stateDirs: readonly string[],
+    fileName: string,
+    text: string
+  ): Promise<void> => {
+    for (const stateDir of stateDirs) {
+      const dir = imeAppLinkDir(stateDir);
+      try {
+        await vscode.workspace.fs.createDirectory(path.toUri(dir));
+        await writeImeJson(path.join(dir, fileName), text);
+      } catch (error) {
+        logLine(`六徳 IME の連携の口へ書けませんでした（${dir}）：${errorText(error)}`);
+      }
+    }
+  };
+
+  /**
+   * 名乗り（`app.json`）を書く。起動したとき・心拍のとき・設定を入れたとき。
+   * 版が替わるのは拡張機能を入れ替えたとき＝起動し直したときなので、起動のときに
+   * 書けば新しい版が載る。**焦点・いまの作品の有無に関わらず書く**（名乗りが無いと、
+   * エンジンは許した口にも確定を送らない）
+   */
+  const writeApp = (): Promise<void> =>
+    enqueue(async () => {
+      if (closed) return;
+      const stateDirs = await writableStateDirs();
+      if (stateDirs.length === 0) return;
+      const app = buildAppJson({ version: options.appVersion ?? "", now: new Date() });
+      await writeLinkToAll(stateDirs, IME_APP_FILE, serializeAppLinkJson(app));
+    });
+
   /** 結果をログへ（足したとき・止めた理由が変わったとき）。番号を返す */
   const settle = (work: WorkEntry, result: EnsureWorkUidResult): string | undefined => {
     if (result.kind === "ready") {
@@ -596,6 +652,12 @@ export function startImeLink(
       const key = imeNoticeKey(notice);
       if (!force && key === lastNoticeKey) return;
       await writeToAll(stateDirs, IME_CURRENT_WORK_FILE, serializeImeJson(notice));
+      // 新しい口へも同じ知らせ（appId を足しただけ）。本文は入らない
+      await writeLinkToAll(
+        stateDirs,
+        IME_CONTEXT_FILE,
+        serializeAppLinkJson(buildAppContext(notice))
+      );
       lastNoticeKey = key;
     });
 
@@ -614,6 +676,7 @@ export function startImeLink(
       const key = imeNoticeKey(list);
       if (key === lastWorksKey) return;
       await writeToAll(stateDirs, IME_WORKS_FILE, serializeImeJson(list));
+      await writeLinkToAll(stateDirs, IME_APP_WORKS_FILE, serializeAppLinkJson(buildAppWorks(list)));
       lastWorksKey = key;
     });
 
@@ -623,13 +686,17 @@ export function startImeLink(
    * 開いている窓で打っているのに作品の語が消える。
    */
   const closedNoticeTask = async (): Promise<void> => {
-    // 両方の置き場で、それぞれ「この窓が書いた知らせ」だけを消す
+    // 両方の置き場で、それぞれ「この窓が書いた知らせ」だけを消す。前の形と新しい口の
+    // ファイルは別々に確かめる（片方だけ書けた・ほかの窓が片方だけ書き直した、がありうる）
     const mine: string[] = [];
+    const mineLink: string[] = [];
     for (const stateDir of await writableStateDirs()) {
       const text = await readText(path.join(stateDir, IME_CURRENT_WORK_FILE));
       if (text !== undefined && noticeWindowOf(text) === pid) mine.push(stateDir);
+      const linkText = await readText(path.join(imeAppLinkDir(stateDir), IME_CONTEXT_FILE));
+      if (linkText !== undefined && noticeWindowOf(linkText) === pid) mineLink.push(stateDir);
     }
-    if (mine.length === 0) return;
+    if (mine.length === 0 && mineLink.length === 0) return;
     const notice = buildCurrentWorkNotice({
       work: null,
       dictionaryHash: null,
@@ -637,7 +704,16 @@ export function startImeLink(
       window: pid,
       now: new Date(),
     });
-    await writeToAll(mine, IME_CURRENT_WORK_FILE, serializeImeJson(notice));
+    if (mine.length > 0) {
+      await writeToAll(mine, IME_CURRENT_WORK_FILE, serializeImeJson(notice));
+    }
+    if (mineLink.length > 0) {
+      await writeLinkToAll(
+        mineLink,
+        IME_CONTEXT_FILE,
+        serializeAppLinkJson(buildAppContext(notice))
+      );
+    }
     lastNoticeKey = imeNoticeKey(notice);
   };
 
@@ -681,7 +757,8 @@ export function startImeLink(
     );
   };
 
-  // 起動：作品の一覧と、いまの作品（前のもので決まらなければ、開いている作品が1つならそれ）
+  // 起動：名乗り・作品の一覧と、いまの作品（前のもので決まらなければ、開いている作品が1つならそれ）
+  void writeApp();
   void writeWorks();
   apply({ kind: "startup", front: windowObserved(), openWorks: openWorks() }, true);
 
@@ -743,12 +820,17 @@ export function startImeLink(
       // 入れたときにすぐ書く（切ったときは書かない。IME は古い知らせを15分で閉じた扱いにする）
       lastNoticeKey = undefined;
       lastWorksKey = undefined;
+      void writeApp();
       void writeWorks();
       void writeCurrent(true);
     }),
   ];
-  // 心拍：焦点のある窓だけが `at` を書き直す（writeCurrent が焦点を見る）
-  const heartbeat = setInterval(() => void writeCurrent(true), IME_HEARTBEAT_MS);
+  // 心拍：焦点のある窓だけが `at` を書き直す（writeCurrent が焦点を見る）。
+  // 名乗りの `at` は焦点に関わらず書き直す（どの窓が書いても同じ中身）
+  const heartbeat = setInterval(() => {
+    void writeApp();
+    void writeCurrent(true);
+  }, IME_HEARTBEAT_MS);
 
   /*
     辞書に入る語の入った設定資料（人物・場所・組織・能力・世界観のフォルダーの JSON）だけを
