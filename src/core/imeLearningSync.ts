@@ -28,11 +28,14 @@ export const IME_DRIVE_FOLDER_NAME = "オリジナルIME";
 /** 機械のフォルダーの中の写しの名前 */
 export const IME_DRIVE_FILE_NAME = "記録.jsonl";
 /** エンジンの置き場（オリジナルIME の置き場の中）の名前 */
-export const IME_CORE_EXE_WINDOWS = "rittoku-core.exe";
-export const IME_CORE_EXE_MAC = "rittoku-core";
-/** 改名前のエンジン。入れ替わる間は、どちらの置き場にもどちらの名前も有りうる */
-export const IME_OLD_CORE_EXE_WINDOWS = "novel-ime-core.exe";
-export const IME_OLD_CORE_EXE_MAC = "novel-ime-core";
+export const IME_CORE_EXE_WINDOWS = "rittoku-ime-core.exe";
+export const IME_CORE_EXE_MAC = "rittoku-ime-core";
+/**
+ * 前の名前のエンジン（新しいものから順）。入れ替わる間は、どちらの置き場にもどの名前も
+ * 有りうる。改名の版（rittoku-ime-core。2026-11-18 夜 IME と決めた）を入れたあとも古い exe は消さない
+ */
+export const IME_OLD_CORE_EXES_WINDOWS = ["rittoku-core.exe", "novel-ime-core.exe"] as const;
+export const IME_OLD_CORE_EXES_MAC = ["rittoku-core", "novel-ime-core"] as const;
 /** 送り手の印の名前（記録の置き場の中。ASCII） */
 export const IME_SENDER_FILE = "sender.json";
 /** 送り手の印を書き直す間（1日1回。設計書5.10.8） */
@@ -63,9 +66,9 @@ export function imeCoreExecutableCandidates(
     const trimmed = dir.replace(/[\\/]+$/, "");
     const names =
       platform === "win32"
-        ? [IME_CORE_EXE_WINDOWS, IME_OLD_CORE_EXE_WINDOWS]
+        ? [IME_CORE_EXE_WINDOWS, ...IME_OLD_CORE_EXES_WINDOWS]
         : platform === "darwin"
-          ? [IME_CORE_EXE_MAC, IME_OLD_CORE_EXE_MAC]
+          ? [IME_CORE_EXE_MAC, ...IME_OLD_CORE_EXES_MAC]
           : [];
     for (const name of names) result.push(`${trimmed}${sep}${name}`);
   }

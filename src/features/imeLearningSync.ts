@@ -19,7 +19,7 @@ import { canRunProcesses, environmentVariable, hostPlatform, randomHex } from ".
 /**
  * オリジナルIME の学習を Google ドライブでそろえる（設計書5.10.8。段階3）。
  * 手順・写しの確かめ・ドライブの読み書きは `core/imeLearningSync.ts`（`runImeLearningSync`）。
- * ここはエンジン（`rittoku-core`。改名前は `novel-ime-core`）を起こす口と、送り手の印（`sender.json`）を書く所だけ。
+ * ここはエンジン（`rittoku-ime-core`。前は `rittoku-core`・`novel-ime-core`）を起こす口と、送り手の印（`sender.json`）を書く所だけ。
  *
  * **設定（`novelai.googleDrive.syncImeLearning`、既定 off）を入れたときだけ動く**。off の間は
  * エンジンを起こすことも含めて何もしない（本物での往復を確かめてから作者が入れる）。
