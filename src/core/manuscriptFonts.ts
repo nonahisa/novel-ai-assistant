@@ -27,6 +27,24 @@
  * ここは一覧だけを持ち、測るのは画面、選ばせるのは機能の側にする。
  */
 
+/**
+ * 書体を選んでいないときの書体（作者の決定 2026-11-18「なろうに寄せる」。設計書6.25.3）。
+ *
+ * 投稿サイトで読まれる形に近づける。Windows はメイリオ、Mac はヒラギノ角ゴ、
+ * どちらも無ければ端末のゴシック。メイリオのダッシュは繋がる（`markFont.ts`）。
+ */
+export const DEFAULT_MANUSCRIPT_FONT =
+  '"Meiryo", "メイリオ", "Hiragino Kaku Gothic ProN", "ヒラギノ角ゴ ProN W3", sans-serif';
+
+/** 書体を選んでいないときの行間（なろうと同じ 1.8） */
+export const DEFAULT_LINE_HEIGHT = 1.8;
+
+/**
+ * 書体を選んだ人の行間。**今までの 1.9 のまま。** 既定を替えても、
+ * 自分で書体を選んだ人の見た目は変えない（作者の決定 2026-11-18）
+ */
+export const CHOSEN_FONT_LINE_HEIGHT = 1.9;
+
 export interface ManuscriptFont {
   /** 設定に書き込む値。CSSの font-family。空文字は「既定にまかせる」 */
   value: string;
@@ -53,7 +71,7 @@ export interface ManuscriptFont {
 export const MANUSCRIPT_FONTS: readonly ManuscriptFont[] = [
   {
     value: "",
-    label: "既定（明朝を自動で選ぶ）",
+    label: "既定（ゴシックを自動で選ぶ）",
     kind: "既定",
   },
   {
@@ -143,7 +161,7 @@ export function findFont(value: string): ManuscriptFont | undefined {
 export function describeCurrentFont(value: string): string {
   const found = findFont(value);
   if (found) return found.label;
-  return value.trim() === "" ? "既定（明朝を自動で選ぶ）" : `設定した書体（${value.trim()}）`;
+  return value.trim() === "" ? "既定（ゴシックを自動で選ぶ）" : `設定した書体（${value.trim()}）`;
 }
 
 /**
