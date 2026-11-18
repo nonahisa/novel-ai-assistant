@@ -72,13 +72,13 @@ async function chooseFont(session: E2ESession, frame: Frame, label: string): Pro
   await pickQuickPickRow(session.page, label);
 }
 
-test("書体を選んでいない原稿はメイリオ系で行の高さ1.8倍、［書体］で游ゴシックを選ぶと開き直さずに1.9倍、既定へ戻すと1.8倍へ戻り、用語の色の層はいつも同じ", async () => {
+test("書体を選んでいない原稿は既定のゴシック（Windows はメイリオ・Mac はヒラギノ角ゴ）で行の高さ1.8倍、［書体］で游ゴシックを選ぶと開き直さずに1.9倍、既定へ戻すと1.8倍へ戻り、用語の色の層はいつも同じ", async () => {
   await withVsCode("既定の書体", [{ name: EPISODE, text: "既定の書体を確かめる行。\n" }], async (session) => {
     const frame = await openEpisode(session.page, EPISODE, "既定の書体");
     const report = async (stage: string) => `（${stage}：${JSON.stringify(await looks(frame))}）`;
 
     // 1. 設定が空のまま開いた
-    await waitUntil(async () => isDefaultFirst(firstFamily((await looks(frame)).write)), "既定の書体がメイリオ系で始まる").catch(
+    await waitUntil(async () => isDefaultFirst(firstFamily((await looks(frame)).write)), "既定の書体が既定のゴシック（メイリオかヒラギノ角ゴ）で始まる").catch(
       async (error: unknown) => {
         throw new Error(`${String(error)}${await report("開いた直後")}`);
       }
@@ -100,7 +100,7 @@ test("書体を選んでいない原稿はメイリオ系で行の高さ1.8倍�
 
     // 3. 既定へ戻す（開き直さない）
     await chooseFont(session, frame, "既定（ゴシックを自動で選ぶ）");
-    await waitUntil(async () => isDefaultFirst(firstFamily((await looks(frame)).write)), "既定へ戻すとメイリオ系で始まる").catch(
+    await waitUntil(async () => isDefaultFirst(firstFamily((await looks(frame)).write)), "既定へ戻すと既定のゴシック（メイリオかヒラギノ角ゴ）で始まる").catch(
       async (error: unknown) => {
         throw new Error(`${String(error)}${await report("既定へ戻したあと")}`);
       }
