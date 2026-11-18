@@ -76,7 +76,8 @@ describe("note風の組版（編集面）", () => {
     // 従来の寸法（この1行が変わると、すべての原稿の見え方が変わる）
     expect(html).toContain("#write, #marks, #compose, #aloudmarks {");
     expect(html).toContain("  padding: 24px 28px;");
-    expect(html).toContain("  line-height: 1.9;");
+    // 行間は既定 1.8・書体を選んだ人は 1.9（設計書6.25.3。2026-11-18 作者の決定）
+    expect(html).toContain("  line-height: var(--novelai-line, 1.8);");
     // 縦書きの指定もそのまま
     expect(html).toContain("writing-mode: vertical-rl");
     expect(html).toContain("  padding: 28px 24px;");
