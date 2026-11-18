@@ -80,22 +80,37 @@ describe.skipIf(!onWindows)("六徳 IME の確定の知らせを受ける", () =
     process.env.RITTOKU_LINK_PIPE = name;
     await listen(name);
     const got: Array<{ filePath: string; reading: string; text: string; previous?: unknown }> = [];
+    let calls = 0;
     handle = startImeCommitLink({ subscriptions: [] } as never, {
-      frontManuscript: () => front,
+      frontManuscript: () => {
+        calls++;
+        return front;
+      },
       onCommit: (filePath, reading, text, previous) => got.push({ filePath, reading, text, previous }),
     });
     expect(handle).toBeDefined();
     await vi.waitFor(() => expect(handle?.granted()).toBe(true), { timeout: 5000 });
 
+    // 変換を通らない確定（読みが空）は控えへ渡さず捨て、つながりは許されたまま
+    send("abc", "");
+    send("。", "");
     send("白樺", "しらかば");
     send("灯", "あかり");
     await vi.waitFor(() => expect(got).toHaveLength(2), { timeout: 5000 });
     expect(got[0]).toEqual({ filePath: "C:/作品/本文/001.txt", reading: "しらかば", text: "白樺", previous: undefined });
     expect(got[1].previous).toEqual({ kana: "しらかば", committed: "白樺" });
+    expect(got.some((one) => one.text === "abc" || one.text === "。")).toBe(false);
+    expect(handle?.granted()).toBe(true);
 
     // 窓に焦点が無い・原稿エディターが前に無いときの確定は捨てる
-    // （届くのは書いたあとなので、届くまで待ってから状態を替える）
-    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 150));
+    // 届くのは書いたあと。確定のたびに前の原稿エディターを1回読むので、その回数で届いたことを待つ
+    // （時間で待つと、遅い機械で捨てるはずの確定が状態を替えたあとに届いて落ちる）
+    let asked = calls;
+    const settle = async (): Promise<void> => {
+      const target = asked + 1;
+      await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(target), { timeout: 5000 });
+      asked = calls;
+    };
     focused = false;
     send("森", "もり");
     await settle();
@@ -112,6 +127,15 @@ describe.skipIf(!onWindows)("六徳 IME の確定の知らせを受ける", () =
     expect(got[2].text).toBe("海");
     // 捨てた確定は「前の確定」にも残らない
     expect(got[2].previous).toEqual({ kana: "あかり", committed: "灯" });
+
+    // 読みが空の確定が間に入ったら、前の確定とつながない
+    await settle();
+    send("。", "");
+    await settle();
+    send("森", "もり");
+    await vi.waitFor(() => expect(got).toHaveLength(4), { timeout: 5000 });
+    expect(got[3]).toMatchObject({ text: "森", previous: undefined });
+    expect(handle?.granted()).toBe(true);
   });
 
   test("設定を切ったら切り、入れたらつなぎ直す", async () => {

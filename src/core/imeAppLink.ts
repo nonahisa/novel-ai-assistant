@@ -31,7 +31,7 @@ export const IME_LINK_DIR = "連携";
 export const IME_APP_FILE = "app.json";
 export const IME_CONTEXT_FILE = "context.json";
 export const IME_APP_WORKS_FILE = "works.json";
-/** 名乗りの形の版（エンジンは v が 1 でない app.json を読まない） */
+/** 名乗りの形のバージョン（エンジンは v が 1 でない app.json を読まない） */
 const IME_APP_JSON_VERSION = 1;
 
 /** 名乗り（案 2.3） */
@@ -145,7 +145,12 @@ const READING_SHAPE = /^[ぁ-ゖゝゞァ-ヺー・ヽヾ]+$/u;
  *
  * 字も読みも、原稿エディターの道と同じ上限（`IME_TEXT_MAX`）を超えたら捨てる——
  * 照合の側（`captureImeReading`）が同じ長さで切るので、長い確定は受けても使えない。
- * 制御文字を含む字・読みでない読みも捨てる
+ * 制御文字を含む字・読みでない読みも捨てる。
+ *
+ * **読みが空の確定は `reading: ""` のまま返す**（変換を通らない確定。英字の Enter・記号など。
+ * novel-ime 830b20b から届く）。打った読みが無いので控えには使わないが、受け手は
+ * 「前の確定とのあいだに別の字が入った」ことを知る要がある（姓と名のつなぎを切る）。
+ * 控えへ渡さないのは受け手（`features/imeCommitLink.ts`）。つながりは「許されている」のまま
  */
 export function parseImeLinkCommit(line: string): ImeLinkCommit | undefined {
   const commit = parseObject(line)?.commit;
@@ -153,9 +158,9 @@ export function parseImeLinkCommit(line: string): ImeLinkCommit | undefined {
   const { text, reading } = commit;
   if (typeof text !== "string" || typeof reading !== "string") return undefined;
   if (text.length === 0 || text.length > IME_TEXT_MAX) return undefined;
-  if (reading.length === 0 || reading.length > IME_TEXT_MAX) return undefined;
+  if (reading.length > IME_TEXT_MAX) return undefined;
   if (hasControl(text)) return undefined;
-  if (!READING_SHAPE.test(reading)) return undefined;
+  if (reading !== "" && !READING_SHAPE.test(reading)) return undefined;
   return { text, reading };
 }
 

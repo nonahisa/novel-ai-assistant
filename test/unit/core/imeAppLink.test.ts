@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import {
   IME_APP_ID,
@@ -37,11 +38,10 @@ describe("パイプの名前", () => {
   });
 
   test("決まった SID からは決まった12字（値を固定して、作り方の取り違えを止める）", () => {
-    // sha256("S-1-5-21-1111111111-2222222222-3333333333-1001") の頭12字
-    expect(imeLinkPipeName({ sid: SID })).toBe(
-      `\\\\.\\pipe\\rittoku-ime-link-${sha256Text(SID).slice(0, 12)}`
-    );
-    expect(sha256Text("abc").slice(0, 12)).toBe("ba7816bf8f01");
+    // 自前のハッシュと比べるだけでは、作り方を取り違えても通る。Node の SHA-256 で出した値を固定する
+    const expected = "a8c06b3027d3";
+    expect(createHash("sha256").update(SID, "utf8").digest("hex").slice(0, 12)).toBe(expected);
+    expect(imeLinkPipeName({ sid: SID })).toBe(`\\\\.\\pipe\\rittoku-ime-link-${expected}`);
   });
 
   test("試しの名前（RITTOKU_LINK_PIPE）があればそれを使う", () => {
@@ -111,7 +111,14 @@ describe("確定の行の確かめ", () => {
   test("読みでない reading（漢字・英字・空）は捨てる", () => {
     expect(parseImeLinkCommit('{"commit":{"text":"灯","reading":"灯"}}')).toBeUndefined();
     expect(parseImeLinkCommit('{"commit":{"text":"key","reading":"key"}}')).toBeUndefined();
-    expect(parseImeLinkCommit('{"commit":{"text":"灯","reading":""}}')).toBeUndefined();
+    expect(parseImeLinkCommit('{"commit":{"text":"灯","reading":"あ かり"}}')).toBeUndefined();
+  });
+
+  test("読みが空の確定（変換を通らない確定）は読みを空のまま返す（控えへ渡さないのは受け手）", () => {
+    expect(parseImeLinkCommit('{"commit":{"text":"abc","reading":"","at":"x"}}')).toEqual({
+      text: "abc",
+      reading: "",
+    });
     expect(parseImeLinkCommit('{"commit":{"text":"灯","reading":"あ かり"}}')).toBeUndefined();
   });
 

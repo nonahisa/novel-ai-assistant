@@ -42,7 +42,7 @@ export interface ImeCommitLinkHandle extends vscode.Disposable {
 
 /** 状態の言い方（ログの1行。字の中身は書かない） */
 const STATE_TEXT: Record<string, string> = {
-  absent: "六徳 IME の確定の知らせ：つながりません（IME が動いていないか、まだ新しい版でない）。間をおいて試します",
+  absent: "六徳 IME の確定の知らせ：つながりません（IME が動いていないか、まだ新しいバージョンでない）。間をおいて試します",
   denied: "六徳 IME の確定の知らせ：つながりましたが、送ることを許されていません（IME の設定のアプリで許せます）",
   granted: "六徳 IME の確定の知らせ：つながりました。IMEで打った名前の読みは、この知らせから拾います",
   lost: "六徳 IME の確定の知らせ：つながりが切れました。間をおいてつなぎ直します",
@@ -77,6 +77,12 @@ export function startImeCommitLink(
     });
     // 焦点のある原稿エディターが無い確定は、字を覚えもせずに捨てる
     if (!filePath) return;
+    if (commit.reading === "") {
+      // 変換を通らない確定（読みが空）は控えへ渡さない。あいだに別の字が入ったので、
+      // 前の確定とのつなぎも切る（「白樺」「。」「灯」を「白樺灯」とつながない）
+      last = undefined;
+      return;
+    }
     const now = Date.now();
     const previous = pipePreviousCommit(last, filePath, now);
     last = { filePath, kana: commit.reading, committed: commit.text, at: now };
