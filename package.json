@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。",
-  "version": "1.0.27",
+  "version": "1.0.28",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -2425,7 +2425,7 @@
         "novelai.ime.notifyCurrentWork": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "IME へいまの作品を知らせる（六徳 IME の作品ごとの辞書）。\n\n・六徳 IME が入っている PC でだけ働く\n・オンのあいだは、作品の `.aiwriter/config.json` に作品の番号（`workUid`）を足す"
+          "markdownDescription": "IME へいまの作品を知らせる（六徳 IME の作品ごとの辞書）。\n\n・六徳 IME が入っている PC でだけ働く\n・オンのあいだは、作品の `.aiwriter/config.json` に作品の番号（`workUid`）を足す\n・六徳 IME で確定の知らせを許していれば、原稿エディターで打った名前の読みをそこから受け取る"
         },
         "novelai.readAloud.aivisSpeechUrl": {
           "type": "string",

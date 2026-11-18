@@ -40,6 +40,12 @@ const BROWSER_EXTERNAL_BUILTINS = [
     `canRunProcesses()` で先に返すので、読み込まれない
   */
   "node:http",
+  /*
+    六徳 IME の確定の知らせを名前付きパイプで受ける（設計書6.13.8。
+    `core/imeLinkPipeNode.ts`）。`features/imeCommitLink.ts` が Windows の手元の
+    VS Code だと確かめてから動的に読むので、ブラウザでは読み込まれない
+  */
+  "node:net",
   "child_process",
   /*
     **`undici` はNodeにしか無い**（設計書6.63）。

@@ -291,6 +291,105 @@ describe("オリジナルIME との連動", () => {
     });
   });
 
+  describe("アプリ連動の口（連携\\novel-ai-assistant\\。設計書6.13.8）", () => {
+    const oldDir = (): string => nodePath.join(base, "novel-ime");
+    const newDir = (): string => nodePath.join(base, "rittoku-ime");
+    const linkDir = (dir: string): string => nodePath.join(dir, "連携", "novel-ai-assistant");
+    const startBoth = (): ImeLinkHandle | undefined => {
+      const context = { subscriptions: [] as { dispose(): void }[] };
+      return startImeLink(context as never, {
+        registry: { list: () => [work], onDidChange: new EventEmitter<void>().event },
+        frontManuscript: () => undefined,
+        onDidChangeFrontManuscript: () => ({ dispose() {} }),
+        stateDirs: [oldDir(), newDir()],
+        appVersion: "9.8.7",
+      });
+    };
+    const readJson = async (file: string): Promise<Record<string, unknown>> =>
+      JSON.parse(await fsp.readFile(file, "utf8"));
+
+    test("在る置き場すべての下に app.json・context.json・works.json を書き、前の形も書き続ける", async () => {
+      await fsp.mkdir(oldDir());
+      await fsp.mkdir(newDir());
+      await fsp.writeFile(nodePath.join(work.folderPath, "本文", "001.txt"), "秘めた本文の字", "utf8");
+      handle = startBoth();
+      await vi.waitFor(
+        async () => {
+          for (const dir of [oldDir(), newDir()]) {
+            for (const name of ["app.json", "context.json", "works.json"]) {
+              expect(await exists(nodePath.join(linkDir(dir), name))).toBe(true);
+            }
+            expect(await exists(nodePath.join(dir, "integration-current-work.json"))).toBe(true);
+            expect(await exists(nodePath.join(dir, "integration-works.json"))).toBe(true);
+          }
+        },
+        { timeout: 5000 }
+      );
+      for (const dir of [oldDir(), newDir()]) {
+        const app = await readJson(nodePath.join(linkDir(dir), "app.json"));
+        expect(app).toMatchObject({
+          v: 1,
+          appId: "novel-ai-assistant",
+          name: "統合小説執筆環境",
+          processes: ["Code.exe"],
+          version: "9.8.7",
+        });
+        const contextJson = await readJson(nodePath.join(linkDir(dir), "context.json"));
+        const old = await readJson(nodePath.join(dir, "integration-current-work.json"));
+        expect(contextJson.appId).toBe("novel-ai-assistant");
+        const { appId: _appId, ...rest } = contextJson;
+        void _appId;
+        expect(rest).toEqual(old);
+        const works = await readJson(nodePath.join(linkDir(dir), "works.json"));
+        const oldWorks = await readJson(nodePath.join(dir, "integration-works.json"));
+        expect(works.appId).toBe("novel-ai-assistant");
+        expect(works.works).toEqual(oldWorks.works);
+        // 本文は入らない（作品の本文の字が、どのファイルにも無い）
+        for (const name of ["app.json", "context.json", "works.json"]) {
+          expect(await fsp.readFile(nodePath.join(linkDir(dir), name), "utf8")).not.toContain("秘めた");
+        }
+      }
+
+      // 閉じたら、この窓が書いた context.json も作品なしにする
+      await handle?.close();
+      handle = undefined;
+      for (const dir of [oldDir(), newDir()]) {
+        const closed = await readJson(nodePath.join(linkDir(dir), "context.json"));
+        expect(closed.workUid).toBeNull();
+        expect(closed.appId).toBe("novel-ai-assistant");
+      }
+    });
+
+    test("置き場が無ければ連携のフォルダーも作らない", async () => {
+      await fsp.mkdir(newDir());
+      handle = startBoth();
+      await vi.waitFor(
+        async () => {
+          expect(await exists(nodePath.join(linkDir(newDir()), "context.json"))).toBe(true);
+        },
+        { timeout: 5000 }
+      );
+      await handle?.close();
+      handle = undefined;
+      expect(await exists(oldDir())).toBe(false);
+    });
+
+    test("焦点の無い窓でも名乗り（app.json）は書く", async () => {
+      await fsp.mkdir(newDir());
+      focused = false;
+      handle = startBoth();
+      await vi.waitFor(
+        async () => {
+          expect(await exists(nodePath.join(linkDir(newDir()), "app.json"))).toBe(true);
+        },
+        { timeout: 5000 }
+      );
+      await handle?.close();
+      handle = undefined;
+      expect(await exists(nodePath.join(linkDir(newDir()), "context.json"))).toBe(false);
+    });
+  });
+
   test("焦点の無い窓は、いまの作品を書かない（一覧は書く）", async () => {
     await fsp.mkdir(stateDir);
     focused = false;
