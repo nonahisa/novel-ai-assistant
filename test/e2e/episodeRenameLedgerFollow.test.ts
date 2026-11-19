@@ -145,6 +145,48 @@ async function startExplorerRename(page: Page, row: Locator, input: Locator): Pr
   }
 }
 
+const fileExists = (file: string): Promise<boolean> => readFile(file).then(() => true, () => false);
+
+/**
+ * エクスプローラーの名前の入力欄で題を打ち、ディスクで名前が変わるのを見届ける（3回までやり直す）。
+ *
+ * 入力欄が出た直後にエクスプローラーの木が描き直されると、VS Code は入力欄を取り消して閉じる。
+ * そのあと打った字はどこにも入らず、Enter は選ばれた行を開き直すだけになる（1.0.32 の配布の全件で、
+ * 名前も原稿も元のまま落ちた。2026-11-19）。そこで、打った字が入力欄に入ったのを見てから Enter を押し、
+ * 名前が変わらず元のファイルが残っていれば、F2 からやり直す
+ *
+ * @param stem 入力欄に打つ新しい名前（拡張子の手前。入力欄は拡張子の手前までが選ばれている）
+ */
+async function renameInExplorer(page: Page, row: Locator, input: Locator, stem: string, oldFile: string, newFile: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    await startExplorerRename(page, row, input);
+    await page.keyboard.insertText(stem);
+    const typed = await waitUntil(async () => (await input.inputValue({ timeout: 500 }).catch(() => "")).startsWith(stem), "入力欄に新しい名前が入る", 3_000).then(
+      () => true,
+      () => false
+    );
+    if (typed) {
+      await page.keyboard.press("Enter");
+      if (await waitUntil(() => fileExists(newFile), "ディスクで名前が変わる", 5_000).then(() => true, () => false)) return;
+      // 元のファイルが無ければ名前を変えている途中なので、やり直さずに待つ
+      if (!(await fileExists(oldFile))) {
+        await waitUntil(() => fileExists(newFile), `ディスクで「${path.basename(newFile)}」に名前が変わる`, 20_000);
+        return;
+      }
+    } else if (await input.isVisible()) {
+      // 入力欄は出ているのに字が入っていない。名前を変えずに閉じてから押し直す
+      await page.keyboard.press("Escape");
+    }
+    if (attempt === 3) {
+      throw new Error(
+        `ディスクで「${path.basename(newFile)}」に名前が変わりません（3回やり直しました。元の名前が残っている：${String(await fileExists(oldFile))}` +
+          `／入力欄：${String(await input.isVisible())}／焦点：${await activeElementSummary(page)}／知らせ：${JSON.stringify(await noticeLines(page))}）`
+      );
+    }
+    console.warn(`renameInExplorer: ${attempt}回目は名前が変わらなかったので、F2 からやり直します（字が入力欄に入った：${String(typed)}）`);
+  }
+}
+
 async function waitNotice(page: Page, needle: string, what: string): Promise<string> {
   let found = "";
   await waitUntil(
@@ -238,19 +280,24 @@ test("エクスプローラー（本物の F2）で投稿済みの話の名前�
     async (session) => {
       const { page } = session;
       await openRenamedEpisode(page, "第1話_はじまり.txt", "第1話");
-      // 改名の前に、開いた原稿に未保存の変更が残っていないのを待つ。残ったまま改名すると VS Code の
+      // 改名の前に、原稿の面が本文を描き終え、未保存の変更が残っていないのを待つ。残ったまま改名すると VS Code の
       // 保存の窓（Do you want to save the changes…）が出て落ちた（ノートPC、2026-11-13）。このテストは打たない
+      await frontFrameShowing(page, "朝の駅は静かだった", "原稿エディターで第1話の本文が描かれる");
       await waitTabsClean(page);
       await runCommand(page, "Reveal Active File in Explorer View");
       // エクスプローラーで当該ファイルの行が選ばれて焦点を持つまで待つ
       const row = page.locator(".explorer-viewlet .monaco-list-row.focused, .explorer-viewlet .monaco-list-row.selected", { hasText: "第1話_はじまり" }).first();
       await waitUntil(async () => (await row.count()) > 0, "エクスプローラーで第1話の行が選ばれる", 20_000);
-      // 改名のキー（Windows は F2、Mac は Enter）と押し直しは startExplorerRename
+      // 改名のキー（Windows は F2、Mac は Enter）と押し直しは startExplorerRename、打って見届けるのは renameInExplorer
       const input = page.locator(".explorer-viewlet .monaco-inputbox input").first();
-      await startExplorerRename(page, row, input);
-      // 名前の入力欄は拡張子の手前までが選ばれているので、そこへ新しい題を打つ
-      await page.keyboard.insertText("第1話_出会い");
-      await page.keyboard.press("Enter");
+      await renameInExplorer(
+        page,
+        row,
+        input,
+        "第1話_出会い",
+        path.join(session.manuscriptFolder, "第1話_はじまり.txt"),
+        path.join(session.manuscriptFolder, "第1話_出会い.txt")
+      );
 
       const notice = await waitNotice(page, "投稿状態1件", "知らせに「投稿状態1件」が出る");
       expect(notice, "付け替えた知らせの文").toContain("第1話_はじまり.txt を 第1話_出会い.txt に変えたのに合わせて");
@@ -295,26 +342,21 @@ test("話数の読めない話をエクスプローラー（F2）で改名する
     async (session) => {
       const { page } = session;
       await openRenamedEpisode(page, "幕間.txt", "幕間");
+      // 改名の前に、原稿の面が本文を描き終え、未保存の印が無いのを待つ（隣のテストと同じ。1.0.32 の配布の全件で、
+      // 開いて1〜2秒で F2 を押し、入力欄が閉じて落ちた）
+      await frontFrameShowing(page, "十分に待った", "原稿エディターで幕間の本文が描かれる");
+      await waitTabsClean(page);
       await runCommand(page, "Reveal Active File in Explorer View");
       const row = page.locator(".explorer-viewlet .monaco-list-row.focused, .explorer-viewlet .monaco-list-row.selected", { hasText: "幕間" }).first();
       await waitUntil(async () => (await row.count()) > 0, "エクスプローラーで幕間の行が選ばれる", 20_000);
       const input = page.locator(".explorer-viewlet .monaco-inputbox input").first();
-      await startExplorerRename(page, row, input);
-      await page.keyboard.insertText("幕間_湖畔");
-      await page.keyboard.press("Enter");
-
       /*
-        **先に、ディスクで名前が変わったのを見届ける。** 0.127.0 の全件の回（母艦・約1時間）で、知らせを
-        20秒待っても出ずに落ちた（単独・ファイル全体では通る）。名前の入力が入らなかったのか、改名のあとの
+        **先に、ディスクで名前が変わったのを見届ける**（renameInExplorer）。0.127.0 の全件の回（母艦・約1時間）で、
+        知らせを20秒待っても出ずに落ちた（単独・ファイル全体では通る）。名前の入力が入らなかったのか、改名のあとの
         付け替えが遅れたのかを、失敗の文で見分けられるようにする
       */
-      const renamedPath = path.join(session.manuscriptFolder, "幕間_湖畔.txt");
-      const exists = (file: string) => readFile(file).then(() => true, () => false);
-      await waitUntil(async () => exists(renamedPath), "ディスクで「幕間_湖畔.txt」に名前が変わる", 20_000).catch(async (error: unknown) => {
-        throw new Error(
-          `${String(error)}（元の名前が残っている：${String(await exists(path.join(session.manuscriptFolder, "幕間.txt")))}／入力欄：${String(await input.isVisible())}／知らせ：${JSON.stringify(await noticeLines(page))}）`
-        );
-      });
+      await renameInExplorer(page, row, input, "幕間_湖畔", path.join(session.manuscriptFolder, "幕間.txt"), path.join(session.manuscriptFolder, "幕間_湖畔.txt"));
+      const exists = fileExists;
       const notice = await waitNotice(page, "読みの辞書1件", "知らせに「読みの辞書1件」が出る").catch(async (error: unknown) => {
         const dictionaryMoved = await exists(path.join(session.workFolder, ".aiwriter", "readings", "本文__幕間_湖畔.txt.json"));
         throw new Error(`${String(error)}（名前は変わった／読みの辞書が新しい名前へ移った：${String(dictionaryMoved)}）`);
