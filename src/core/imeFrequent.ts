@@ -4,7 +4,7 @@ import * as path from "./pathText";
 import { acceptManuscriptEntry, isKnownNonManuscript } from "./manuscriptFolderRule";
 
 /**
- * 本文でよく使う語を数える（設計書6.13.7）。オリジナルIME へ渡す辞書の末尾の行になる。
+ * 本文でよく使う語を数える（設計書6.13.7）。Rittoku IME へ渡す辞書の末尾の行になる。
  *
  * 拾うのは2種類だけ：
  * - 本文でルビが付いた語（読みはルビ）

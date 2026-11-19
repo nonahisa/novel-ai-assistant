@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -676,7 +676,7 @@
       },
       {
         "command": "novelai.chooseImeFrequentWords",
-        "title": "六徳 IME へ渡すよく使う語を選ぶ",
+        "title": "Rittoku IME へ渡すよく使う語を選ぶ",
         "category": "統合小説執筆環境",
         "icon": "$(symbol-keyword)"
       },
@@ -2420,12 +2420,12 @@
         "novelai.googleDrive.syncImeLearning": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "送り先が Google ドライブの作品があるとき、六徳 IME の学習も Google ドライブでそろえる。\n\n・六徳 IME のエンジンが入っている PC でだけ働く\n・送るのは学習の写しだけ（打った文は送らない）\n・オンのあいだは、IME の同期のアプリはこの PC からは送らない"
+          "markdownDescription": "送り先が Google ドライブの作品があるとき、Rittoku IME の学習も Google ドライブでそろえる。\n\n・Rittoku IME のエンジンが入っている PC でだけ働く\n・送るのは学習の写しだけ（打った文は送らない）\n・オンのあいだは、IME の同期のアプリはこの PC からは送らない"
         },
         "novelai.ime.notifyCurrentWork": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "IME へいまの作品を知らせる（六徳 IME の作品ごとの辞書）。\n\n・六徳 IME が入っている PC でだけ働く\n・オンのあいだは、作品の `.aiwriter/config.json` に作品の番号（`workUid`）を足す\n・六徳 IME で確定の知らせを許していれば、原稿エディターで打った名前の読みをそこから受け取る"
+          "markdownDescription": "IME へいまの作品を知らせる（Rittoku IME の作品ごとの辞書）。\n\n・Rittoku IME が入っている PC でだけ働く\n・オンのあいだは、作品の `.aiwriter/config.json` に作品の番号（`workUid`）を足す\n・Rittoku IME で確定の知らせを許していれば、原稿エディターで打った名前の読みをそこから受け取る"
         },
         "novelai.readAloud.aivisSpeechUrl": {
           "type": "string",

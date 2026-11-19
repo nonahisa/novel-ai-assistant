@@ -67,7 +67,7 @@ export interface DictionaryEntry {
   /**
    * 別名の行にだけ入る、本体の名前（「リン」なら「リンセップ・アウクト」）。
    *
-   * オリジナルIME 向けの辞書（`core/imeCurrentWork.ts` の4列目）が使う。
+   * Rittoku IME 向けの辞書（`core/imeCurrentWork.ts` の4列目）が使う。
    * 3つのIMEの形式には出さない（列を持たない）。本体の行には入れない
    * ——空文字も持たない（`note` と同じ持ち方）
    */

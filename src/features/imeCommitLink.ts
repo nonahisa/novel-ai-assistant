@@ -14,7 +14,7 @@ import type { CompositionPair } from "../core/imeReading";
 import { IME_NOTIFY_SETTING, anyImeStateDirExists } from "./imeCurrentWork";
 
 /**
- * 六徳 IME の確定の知らせ（パイプ）を受ける（設計書6.13.8・6.42.2）。
+ * Rittoku IME の確定の知らせ（パイプ）を受ける（設計書6.13.8・6.42.2）。
  *
  * **動くのは Windows の手元の VS Code だけ**（ブラウザ版・リモートではつながない。
  * リモートでは拡張機能が別の機械で動いていて、作者が打っている機械のパイプへ届かない）。
@@ -34,7 +34,7 @@ export interface ImeCommitLinkOptions {
    */
   onCommit(filePath: string, reading: string, text: string, previous?: CompositionPair): void;
   /**
-   * 六徳 IME の置き場があるか（省くと OS ごとの決まった所を見る。試しで差し替える）。
+   * Rittoku IME の置き場があるか（省くと OS ごとの決まった所を見る。試しで差し替える）。
    * **無ければ whoami も呼ばず、つなぎにも行かず、ログも出さない**（IME の無い機械で何も起こさない）
    */
   hasStateDir?: () => Promise<boolean>;
@@ -47,11 +47,11 @@ export interface ImeCommitLinkHandle extends vscode.Disposable {
 
 /** 状態の言い方（ログの1行。字の中身は書かない） */
 const STATE_TEXT: Record<string, string> = {
-  absent: "六徳 IME の確定の知らせ：つながりません（IME が動いていないか、まだ新しいバージョンでない）。間をおいて試します",
-  denied: "六徳 IME の確定の知らせ：つながりましたが、送ることを許されていません（IME の設定のアプリで許せます）",
-  granted: "六徳 IME の確定の知らせ：つながりました。IMEで打った名前の読みは、この知らせから拾います",
-  lost: "六徳 IME の確定の知らせ：つながりが切れました。間をおいてつなぎ直します",
-  stopped: "六徳 IME の確定の知らせ：切りました",
+  absent: "Rittoku IME の確定の知らせ：つながりません（IME が動いていないか、まだ新しいバージョンでない）。間をおいて試します",
+  denied: "Rittoku IME の確定の知らせ：つながりましたが、送ることを許されていません（IME の設定のアプリで許せます）",
+  granted: "Rittoku IME の確定の知らせ：つながりました。IMEで打った名前の読みは、この知らせから拾います",
+  lost: "Rittoku IME の確定の知らせ：つながりが切れました。間をおいてつなぎ直します",
+  stopped: "Rittoku IME の確定の知らせ：切りました",
 };
 
 /**
@@ -110,7 +110,7 @@ export function startImeCommitLink(
         sid: override ? undefined : await node.readWindowsUserSid(),
       });
       if (!pipeName) {
-        logLine("六徳 IME の確定の知らせ：ユーザーの印（SID）を読めないので、つなぎません");
+        logLine("Rittoku IME の確定の知らせ：ユーザーの印（SID）を読めないので、つなぎません");
         return;
       }
       // 読んでいる間に設定を切った・拡張機能を止めた
@@ -120,12 +120,12 @@ export function startImeCommitLink(
         onCommit: receive,
         onState: (state) => {
           if (state === "lost") last = undefined;
-          logLine(STATE_TEXT[state] ?? `六徳 IME の確定の知らせ：${state}`);
+          logLine(STATE_TEXT[state] ?? `Rittoku IME の確定の知らせ：${state}`);
         },
       });
     } catch (error) {
       logLine(
-        `六徳 IME の確定の知らせを受け始められませんでした：${error instanceof Error ? error.message : String(error)}`
+        `Rittoku IME の確定の知らせを受け始められませんでした：${error instanceof Error ? error.message : String(error)}`
       );
     } finally {
       starting = false;

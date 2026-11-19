@@ -4,7 +4,7 @@ import { IME_JOIN_GAP_MS, IME_TEXT_MAX, type CompositionPair } from "./imeReadin
 import type { ImeCurrentWorkNotice, ImeWorksList } from "./imeCurrentWork";
 
 /**
- * 六徳 IME の「アプリ連動の口」の、統合の側の純粋な部分（設計書6.13.8）。
+ * Rittoku IME の「アプリ連動の口」の、統合の側の純粋な部分（設計書6.13.8）。
  *
  * 形の正は IME のリポジトリの案（`novel-ime/docs/アプリ連動の口_設計の案.md` の 2章・5.2）
  * と、エンジンの実物（`core/src/link.rs`・`core/src/pick.rs`）。**案の 2.2 にある

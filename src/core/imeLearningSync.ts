@@ -3,9 +3,9 @@ import { DRIVE_ROOT_FOLDER_NAME } from "./driveSyncEngine";
 import { hashBytes } from "./hash";
 
 /**
- * オリジナルIME の学習を Google ドライブでそろえる（設計書5.10.8。段階3）。
+ * Rittoku IME の学習を Google ドライブでそろえる（設計書5.10.8。段階3）。
  *
- * 形の正はオリジナルIME の設計書「6.3.1」の「拡張機能からも同期する」「送り手の印」と、
+ * 形の正はRittoku IME の設計書「6.3.1」の「拡張機能からも同期する」「送り手の印」と、
  * 2026-11-17 に IME と決めた形（エンジンが書く写しを運ぶ）。
  *
  * - **送るのはエンジンが書く写し**（`novel-ime-core sync-out --all --file <先>`）。
@@ -23,11 +23,14 @@ import { hashBytes } from "./hash";
  * （`imeLearningSync.test.ts` が見張る）。
  */
 
-/** ドライブの中の、IME の学習の置き場（根のフォルダーの下） */
+/**
+ * ドライブの中の、IME の学習の置き場（根のフォルダーの下）。
+ * 呼び名が Rittoku IME になっても替えない（ほかの機械がすでにこの名前で読み書きしている置き場のため）
+ */
 export const IME_DRIVE_FOLDER_NAME = "オリジナルIME";
 /** 機械のフォルダーの中の写しの名前 */
 export const IME_DRIVE_FILE_NAME = "記録.jsonl";
-/** エンジンの置き場（オリジナルIME の置き場の中）の名前 */
+/** エンジンの置き場（Rittoku IME の置き場の中）の名前 */
 export const IME_CORE_EXE_WINDOWS = "rittoku-ime-core.exe";
 export const IME_CORE_EXE_MAC = "rittoku-ime-core";
 /**
@@ -52,7 +55,7 @@ export function isImeMachineId(value: string): boolean {
 }
 
 /**
- * エンジンの場所。オリジナルIME の置き場（`imeStateDir`。IME 連動と同じ見つけ方）の
+ * エンジンの場所。Rittoku IME の置き場（`imeStateDir`。IME 連動と同じ見つけ方）の
  * 中の exe。置き場が無い OS（Linux 等）では undefined
  */
 export function imeCoreExecutableCandidates(

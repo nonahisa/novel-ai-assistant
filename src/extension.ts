@@ -2031,7 +2031,7 @@ export async function activate(
   const selfWrites = new SelfWriteTracker();
   // 拡張機能の書き込みは、書き込み口の1か所で印を付ける。
   // これが無いと、自分が保存するたび「外部で変更されました」と出る
-  // **受け口は1つだけ**なので、オリジナルIME の辞書の書き直し（設計書6.13.7）も
+  // **受け口は1つだけ**なので、Rittoku IME の辞書の書き直し（設計書6.13.7）も
   // ここへ足す（別に setWriteObserver を呼ぶと、上の印付けが外れる）。
   // 設定資料の書き込み（パネル・抽出・承認待ちの反映）はみなこの口を通る
   setWriteObserver((filePath) => {
@@ -2065,7 +2065,7 @@ export async function activate(
 
   /**
    * 変換1回ぶん（打った読みと確定した字）を、名前の読みの控えと読みの辞書への提案へ渡す（設計書6.42.2）。
-   * 原稿エディターの推し量り（composition）の道と、六徳 IME の確定の知らせ（パイプ）の道が
+   * 原稿エディターの推し量り（composition）の道と、Rittoku IME の確定の知らせ（パイプ）の道が
    * **同じここを通る**——記録の行と、開いている設定資料パネルの読み直しを片方だけに
    * 書くと、もう片方の道で読みを埋めたあとの保存が「外で書き換えられた」で止まる
    */
@@ -2141,7 +2141,7 @@ export async function activate(
   };
 
   /**
-   * 画面の推し量りと六徳 IME の確定の知らせを突き合わせてから照合へ渡す（設計書6.42.2）。
+   * 画面の推し量りとRittoku IME の確定の知らせを突き合わせてから照合へ渡す（設計書6.42.2）。
    * 同じ話・同じ字が預かる間（`IME_TYPING_HOLD_MS`）に両方から来たら、パイプの方を1回だけ使う
    */
   const imeTypingMerge = new ImeTypingMerge();
@@ -2430,7 +2430,7 @@ export async function activate(
   const reloadAfterExternalChange = async (work: WorkEntry): Promise<void> => {
     highlighter.invalidate();
     forgetImeNames(work.id);
-    // 同期の取り込みもここを通る。オリジナルIME 向けの辞書を書き直す（設計書6.13.7）
+    // 同期の取り込みもここを通る。Rittoku IME 向けの辞書を書き直す（設計書6.13.7）
     imeLink?.noteSettingsChanged(work);
     treeProvider.refresh(work.id);
     // 開いていなければ何もしない（勝手に画面を開かない）
@@ -2441,7 +2441,7 @@ export async function activate(
     registry,
     selfWrites,
     (work, files) => {
-      // 外で書き換わった設定資料も、オリジナルIME 向けの辞書へ映す（設計書6.13.7）。
+      // 外で書き換わった設定資料も、Rittoku IME 向けの辞書へ映す（設計書6.13.7）。
       // 取り込むかの確認とは別——辞書は派生物で、ファイルが正本である
       imeLink?.noteSettingsChanged(work);
       void notifyExternalChange(work, files, {
@@ -2699,7 +2699,7 @@ export async function activate(
         return result.spans;
       },
       record: async (filePath, kana, committed, previous, before) => {
-        // 画面の推し量りの確定は少し預かり、同じ字の六徳 IME の確定が来たらそちらを使う
+        // 画面の推し量りの確定は少し預かり、同じ字のRittoku IME の確定が来たらそちらを使う
         // （二重に数えない。来なければ今までどおり。ほかの IME を使う作者のため）
         offerImeTyping({ source: "composition", filePath, kana, committed, previous, before });
       },
@@ -4596,7 +4596,7 @@ export async function activate(
     context.subscriptions.push(windowCard);
     closeWindowCard = windowCard.close;
   }
-  // ─── オリジナルIME へいまの作品を知らせる（設計書6.13.7。作者の答え 2026-11-15） ───
+  // ─── Rittoku IME へいまの作品を知らせる（設計書6.13.7。作者の答え 2026-11-15） ───
   // ブラウザ版・リモートでは始めない。IME の置き場が無い機械では何も書かない
   imeLink = startImeLink(context, {
     registry,
@@ -4606,7 +4606,7 @@ export async function activate(
     appVersion: String(context.extension.packageJSON.version ?? ""),
   });
   if (imeLink) closeImeLink = imeLink.close;
-  // 六徳 IME の確定の知らせ（設計書6.13.8・6.42.2）。焦点のある原稿エディターで打った
+  // Rittoku IME の確定の知らせ（設計書6.13.8・6.42.2）。焦点のある原稿エディターで打った
   // 確定だけを、画面の推し量りと同じ照合（名前・別名・名前以外の語）へ渡す。
   // 姓と名をつなぐ照合も同じ。「変換を始めた所の直前の字」はパイプから来ないので渡さない
   startImeCommitLink(context, {
@@ -6630,7 +6630,7 @@ export async function activate(
         if (!work) return;
         // 保管庫を渡すと、作者が外した語を覚えて次からも外したままにする
         await exportImeDictionary(work, verifiedState(context.globalState));
-        // 外した語が変わったかもしれない。オリジナルIME 向けの辞書も揃える（設計書6.13.7）
+        // 外した語が変わったかもしれない。Rittoku IME 向けの辞書も揃える（設計書6.13.7）
         imeLink?.dictionaryExported(work);
         // 書き出したので「辞書が古い」の印を消す。
         // 残ったままだと、押しても消えない印を作者が気にし続けることになる
@@ -6654,7 +6654,7 @@ export async function activate(
         if (!work) return;
         const { chooseImeFrequentWords } = await import("./features/chooseImeFrequentWords.js");
         const changed = await chooseImeFrequentWords(work, verifiedState(context.globalState));
-        // 選び終えたら、オリジナルIME 向けの辞書を書き直す
+        // 選び終えたら、Rittoku IME 向けの辞書を書き直す
         if (changed) imeLink?.dictionaryExported(work);
       }
     )
@@ -9868,7 +9868,7 @@ export async function activate(
     **開いたときに Google ドライブから受け取る**（設計書5.10.1。送り先が Google ドライブの作品だけ）。
     保存していない文書のある作品は受け取らない（`syncDriveWorks`）。起動を待たせない。
     何も変わらなければ知らせない。ログインの窓も見比べも自動では開かない（知らせのボタンから）。
-    オリジナルIME の送り手の印は、設定が入っているときだけ起動のたびと1日1回書く（5.10.8）
+    Rittoku IME の送り手の印は、設定が入っているときだけ起動のたびと1日1回書く（5.10.8）
   */
   if (canRunProcesses()) {
     void (async () => {
@@ -10166,7 +10166,7 @@ let beforeClose: (() => void) | undefined;
 let closeWindowCard: (() => Promise<void>) | undefined;
 
 /**
- * オリジナルIME との連動（設計書6.13.7）。起動時に作り、閉じるときに
+ * Rittoku IME との連動（設計書6.13.7）。起動時に作り、閉じるときに
  * 「作品なし」（`workUid: null`）を書く。札と同じく待ち切られないことがあり、
  * そのときは IME が知らせの古さ（15分）で閉じた扱いにする。
  */
