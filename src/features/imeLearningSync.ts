@@ -17,7 +17,7 @@ import { logLine } from "../core/logger";
 import { canRunProcesses, environmentVariable, hostPlatform, randomHex } from "../core/runtime";
 
 /**
- * オリジナルIME の学習を Google ドライブでそろえる（設計書5.10.8。段階3）。
+ * Rittoku IME の学習を Google ドライブでそろえる（設計書5.10.8。段階3）。
  * 手順・写しの確かめ・ドライブの読み書きは `core/imeLearningSync.ts`（`runImeLearningSync`）。
  * ここはエンジン（`rittoku-ime-core`。前は `rittoku-core`・`novel-ime-core`）を起こす口と、送り手の印（`sender.json`）を書く所だけ。
  *
@@ -118,12 +118,12 @@ export async function refreshImeSender(version: string, canSend: () => Promise<b
     if (!exe || !(await canSend())) return;
     const info = await syncInfo(exe);
     if (typeof info === "string") {
-      logLine(`六徳 IME の送り手の印を書いていません（${info}）`);
+      logLine(`Rittoku IME の送り手の印を書いていません（${info}）`);
       return;
     }
     await writeSenderFile(info.dir, info.machineId, version);
   } catch (error) {
-    logLine(`六徳 IME の送り手の印を書けませんでした（${error instanceof Error ? error.message : String(error)}）`);
+    logLine(`Rittoku IME の送り手の印を書けませんでした（${error instanceof Error ? error.message : String(error)}）`);
   }
 }
 
@@ -150,7 +150,7 @@ export async function syncImeLearning(input: { client: DriveClient; version: str
       exportAll: async () => {
         const outFile = path.join(temp, "out.jsonl");
         const run = await runEngine(exe, ["sync-out", "--all", "--file", outFile]);
-        logLine(`六徳 IME の写しを作りました（終了コード ${run.code}）${run.stderr.trim()}`);
+        logLine(`Rittoku IME の写しを作りました（終了コード ${run.code}）${run.stderr.trim()}`);
         if (run.code !== 0) return `sync-out が終了コード ${run.code}`;
         try {
           return await vscode.workspace.fs.readFile(path.toUri(outFile));
@@ -163,7 +163,7 @@ export async function syncImeLearning(input: { client: DriveClient; version: str
         const file = path.join(temp, `in-${machineId}.jsonl`);
         await atomicWriteFile(file, bytes, { mode: "create" });
         const run = await runEngine(exe, ["sync-in", file]);
-        logLine(`六徳 IME の学習を受け取りました（${machineId}、終了コード ${run.code}）${run.stdout.trim()}`);
+        logLine(`Rittoku IME の学習を受け取りました（${machineId}、終了コード ${run.code}）${run.stdout.trim()}`);
       },
     };
     const result = await runImeLearningSync({
@@ -174,18 +174,18 @@ export async function syncImeLearning(input: { client: DriveClient; version: str
       },
     });
     if (typeof result === "string") {
-      logLine(`六徳 IME の学習をそろえませんでした（${result}）`);
+      logLine(`Rittoku IME の学習をそろえませんでした（${result}）`);
       return;
     }
-    if (result.sent !== true) logLine(`六徳 IME の学習を送っていません（${result.sent}）`);
+    if (result.sent !== true) logLine(`Rittoku IME の学習を送っていません（${result.sent}）`);
     for (const skipped of result.skipped) {
-      logLine(`六徳 IME の写しを受け取っていません（${skipped.machineId}：${skipped.reason}）`);
+      logLine(`Rittoku IME の写しを受け取っていません（${skipped.machineId}：${skipped.reason}）`);
     }
   } catch (error) {
     if (error instanceof DriveApiError) {
-      logLine(`六徳 IME の学習をそろえられませんでした（${error.kind}）。${driveNextAction(error.kind)}`);
+      logLine(`Rittoku IME の学習をそろえられませんでした（${error.kind}）。${driveNextAction(error.kind)}`);
     } else {
-      logLine(`六徳 IME の学習をそろえられませんでした（${error instanceof Error ? error.message : String(error)}）`);
+      logLine(`Rittoku IME の学習をそろえられませんでした（${error instanceof Error ? error.message : String(error)}）`);
     }
   } finally {
     if (tempDir) {

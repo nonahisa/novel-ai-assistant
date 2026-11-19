@@ -11,7 +11,7 @@ interface FrequentPickItem extends vscode.QuickPickItem {
 }
 
 /**
- * オリジナルIME へ渡す「本文でよく使う語」を、作者が選ぶ（設計書6.13.7）。
+ * Rittoku IME へ渡す「本文でよく使う語」を、作者が選ぶ（設計書6.13.7）。
  *
  * **3つの IME の書き出し（`exportImeDictionary`）とは別の鍵・別の窓**にする：あちらは
  * 設定資料の語から外した語を毎回作り直して覚えるので、ここの覚えを混ぜると消える。

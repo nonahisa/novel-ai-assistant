@@ -4,7 +4,7 @@ import { sha256Text } from "./hash";
 import { compareFrequent, type FrequentWord } from "./imeFrequent";
 
 /**
- * オリジナルIME（Setsuna）へ「いまの作品」と作品の一覧・核向けの辞書を渡す（設計書6.13.7）。
+ * Rittoku IME（Setsuna）へ「いまの作品」と作品の一覧・核向けの辞書を渡す（設計書6.13.7）。
  *
  * 形の正は IME のリポジトリの計画書（`novel-ime/docs/作品ごとの辞書の切り替え_計画.md`
  * の 3.1〜3.5）。**欄の名前は計画書のとおり**——IME の核が同じ名前で読む。
@@ -17,7 +17,7 @@ import { compareFrequent, type FrequentWord } from "./imeFrequent";
 export const IME_NOTICE_VERSION = 1;
 /** 書き手の名前（計画書 3.2） */
 export const IME_NOTICE_SENDER = "novel-ai-assistant";
-/** 置き場のフォルダーの名前（六徳 IME の `stateDir`。改名後の名前） */
+/** 置き場のフォルダーの名前（Rittoku IME の `stateDir`。改名後の名前） */
 export const IME_STATE_DIR_NAME = "rittoku-ime";
 /**
  * 改名前の置き場の名前。移る間は古い版の IME もここを読むので、あるときは両方へ書く
@@ -231,7 +231,7 @@ function stateDirNamed(
   return undefined;
 }
 
-/** 六徳 IME の置き場（`stateDir`）。統合が自分で組み立てる（核を呼ばない。計画書 3.1） */
+/** Rittoku IME の置き場（`stateDir`）。統合が自分で組み立てる（核を呼ばない。計画書 3.1） */
 export function imeStateDir(input: {
   platform: string | undefined;
   localAppData?: string;

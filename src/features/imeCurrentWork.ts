@@ -115,7 +115,7 @@ export async function loadFrequentWords(
 }
 
 /**
- * オリジナルIME（Setsuna）へ、いまの作品・作品の一覧・核向けの辞書を書く（設計書6.13.7）。
+ * Rittoku IME（Setsuna）へ、いまの作品・作品の一覧・核向けの辞書を書く（設計書6.13.7）。
  *
  * 形と決まりの正は IME の計画書（`novel-ime/docs/作品ごとの辞書の切り替え_計画.md` 3.1〜3.5）。
  * 何を書くか・いまの作品をどう決めるかは `core/imeCurrentWork.ts`（純粋な部分）。
@@ -364,7 +364,7 @@ export async function rebuildImeTsv(
   const loaded = await loadDictionaryForWork(work);
   if (!loaded.ok) {
     logLine(
-      `六徳 IME 向けの辞書を書き直しませんでした（読めない設定ファイル：${loaded.errorFiles.join("、")}）。前の辞書のままです：${work.title}`
+      `Rittoku IME 向けの辞書を書き直しませんでした（読めない設定ファイル：${loaded.errorFiles.join("、")}）。前の辞書のままです：${work.title}`
     );
     return existingDictionaryHash(work);
   }
@@ -433,7 +433,7 @@ export async function defaultImeStateDirs(): Promise<string[]> {
   );
 }
 
-/** 置き場のフォルダーが1つでもあるか（六徳 IME の入っている機械か） */
+/** 置き場のフォルダーが1つでもあるか（Rittoku IME の入っている機械か） */
 export async function anyImeStateDirExists(): Promise<boolean> {
   for (const dir of await defaultImeStateDirs()) {
     try {
@@ -463,7 +463,7 @@ export interface ImeLinkHandle extends vscode.Disposable {
 }
 
 /**
- * オリジナルIME との連動を始める。**ブラウザ版・リモートでは何もしない**（undefined）。
+ * Rittoku IME との連動を始める。**ブラウザ版・リモートでは何もしない**（undefined）。
  *
  * 書くのは4つがそろうときだけ（`shouldWriteImeNotice`）。設定と置き場は書くたびに
  * 確かめる——IME をあとから入れた・設定を切り替えたときも、窓を開き直さずに効く。
@@ -484,7 +484,7 @@ export function startImeLink(
   let queue: Promise<void> = Promise.resolve();
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     queue = queue.then(task).catch((error) => {
-      logLine(`六徳 IME への知らせを書けませんでした：${errorText(error)}`);
+      logLine(`Rittoku IME への知らせを書けませんでした：${errorText(error)}`);
     });
     return queue;
   };
@@ -554,7 +554,7 @@ export function startImeLink(
         wrote++;
       } catch (error) {
         failure ??= error;
-        logLine(`六徳 IME への知らせを書けませんでした（${stateDir}）：${errorText(error)}`);
+        logLine(`Rittoku IME への知らせを書けませんでした（${stateDir}）：${errorText(error)}`);
       }
     }
     if (wrote === 0 && failure !== undefined) throw failure;
@@ -578,7 +578,7 @@ export function startImeLink(
         await vscode.workspace.fs.createDirectory(path.toUri(dir));
         await writeImeJson(path.join(dir, fileName), text);
       } catch (error) {
-        logLine(`六徳 IME の連携の口へ書けませんでした（${dir}）：${errorText(error)}`);
+        logLine(`Rittoku IME の連携の口へ書けませんでした（${dir}）：${errorText(error)}`);
       }
     }
   };
@@ -603,13 +603,13 @@ export function startImeLink(
     if (result.kind === "ready") {
       loggedStops.delete(work.id);
       if (result.added) {
-        logLine(`六徳 IME の作品の番号を作品設定へ足しました：${work.title}`);
+        logLine(`Rittoku IME の作品の番号を作品設定へ足しました：${work.title}`);
       }
       return result.workUid;
     }
     if (loggedStops.get(work.id) !== result.reason) {
       loggedStops.set(work.id, result.reason);
-      logLine(`六徳 IME へこの作品を知らせません（${result.reason}）：${work.title}`);
+      logLine(`Rittoku IME へこの作品を知らせません（${result.reason}）：${work.title}`);
     }
     return undefined;
   };
@@ -892,7 +892,7 @@ export function startImeLink(
     queue = queue
       .then(() => closedNoticeTask())
       .catch((error) => {
-        logLine(`六徳 IME へ閉じたことを知らせられませんでした：${errorText(error)}`);
+        logLine(`Rittoku IME へ閉じたことを知らせられませんでした：${errorText(error)}`);
       });
     return queue;
   };

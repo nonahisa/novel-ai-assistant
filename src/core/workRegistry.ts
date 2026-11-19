@@ -1252,7 +1252,7 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
   /*
     作品の変わらない番号（設計書6.13.7）。**ここで通さないと、ほかの欄を書き直すたびに
     番号が消え**（名前の変更・種類・シリーズ・PDF の設定）、次の起動で別の番号ができて
-    オリジナルIME の学習が前の番号に取り残される。形の悪い値は `kind` と同じく
+    Rittoku IME の学習が前の番号に取り残される。形の悪い値は `kind` と同じく
     無かったことにする（投げない。番号のせいで作品が開けなくなるほうが重い）
   */
   const workUid = isValidWorkUid(value.workUid) ? value.workUid : undefined;

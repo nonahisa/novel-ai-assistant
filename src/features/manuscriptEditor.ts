@@ -798,7 +798,7 @@ function writingManuscriptViewType(): string | undefined {
 }
 
 /*
-  ── オリジナルIME へ「いまの作品」と向きを知らせる口（設計書6.13.7） ──
+  ── Rittoku IME へ「いまの作品」と向きを知らせる口（設計書6.13.7） ──
 
   前に出ている原稿エディター（無ければ最後に前へ出ていた面）の原稿と向き。
   IME へ知らせる側（features/imeCurrentWork.ts）が、面が前に来たとき・向きを
@@ -3139,7 +3139,7 @@ export class ManuscriptEditorProvider
           openManuscripts.touch(key, entry);
           // 開いていない話へ飛ぶときの向きは、この面に揃える（6.25.11）
           lastFrontPanel = panel;
-          // オリジナルIME へ、いまの作品と向きを知らせる（設計書6.13.7）
+          // Rittoku IME へ、いまの作品と向きを知らせる（設計書6.13.7）
           fireFrontManuscriptChanged();
           const filePath = fromUri(document.uri);
           this.deps.onManuscriptShown?.(
@@ -3663,7 +3663,7 @@ export class ManuscriptEditorProvider
             compose: message.compose,
           };
           // 縦と横を切り替えた（または最初の見た目が届いた）。前の面なら
-          // オリジナルIME の向きを書き直す（設計書6.13.7）。大きさだけの変更では鳴らさない
+          // Rittoku IME の向きを書き直す（設計書6.13.7）。大きさだけの変更では鳴らさない
           if (verticalBefore !== message.vertical && lastFrontPanel === panel) {
             fireFrontManuscriptChanged();
           }
