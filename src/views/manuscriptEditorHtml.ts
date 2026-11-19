@@ -4856,6 +4856,22 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
           text: "組んで書く：" + line + "行目の位置を測れず、画面を動かせませんでした",
         });
       }
+      /*
+        **開いた直後は、あとでもう一度転がす**（VS Code 1.147 の画面テスト、2026-11-19）。
+        開いていない話へ飛ぶと、行を見せたあとで面の大きさが決まり直し、見えている所が
+        1行目へ戻っていた（カーソルは指摘の行にあるのに、画面は動いていない）。面が落ち着いて
+        から、カーソルがまだその場所にあるときだけ転がし直す（作者が動かしたら触らない）
+      */
+      for (const wait of [150, 500]) {
+        setTimeout(() => {
+          try {
+            const now = composeSelectionNow();
+            if (now && now.start === at && now.end === at) composeRevealParagraph(start);
+          } catch (error) {
+            /* 面が閉じた・作り直されたあとは何もしない（本文には触らない） */
+          }
+        }, wait);
+      }
     } else {
       write.focus();
       try {
