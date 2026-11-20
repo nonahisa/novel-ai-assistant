@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type { StoryFact } from "../models/storyFact";
@@ -454,7 +455,7 @@ export async function checkFactContradictions(
       const confirmed = await confirmRun(
         `${work.title} の事実を取り出して照合します。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkFactContradictions" }, work }
+        { detail, remember: { id: "ai.run.checkFactContradictions", ai: confirmAiOf(provider, model) }, work }
       );
       if (!confirmed) return undefined;
     }
@@ -916,7 +917,7 @@ export async function checkFactContradictions(
             `${work.title} の事実の照合で見つかった候補を確かめます。`,
             "実行",
             // 取り出しから始まる回と同じ id——「以降は訊かない」の答えを揃える
-            { detail, remember: { id: "ai.run.checkFactContradictions" }, work }
+            { detail, remember: { id: "ai.run.checkFactContradictions", ai: confirmAiOf(verifier.provider, verifier.model) }, work }
           );
           if (!confirmed) {
             cancelled = true;
@@ -1118,7 +1119,7 @@ export async function checkFactContradictions(
             .filter(Boolean)
             .join("\n"),
           // 取り出しから始まる回と同じ id——「以降は訊かない」の答えを揃える
-          remember: { id: "ai.run.checkFactContradictions" },
+          remember: { id: "ai.run.checkFactContradictions", ai: confirmAiOf(provider, model) },
           work,
         }
       );

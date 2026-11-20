@@ -17,6 +17,8 @@ import { manageConfirmSkips } from "../../../src/features/manageConfirmSkips";
 
 const ID = "ai.run.checkTypos";
 const MESSAGE = "19話をAIで確認します。";
+/** 送る先のAI。AIを送る確認は、どのAIで覚えたかも覚える */
+const AI = { providerId: "gemini", model: "gemini-2.5-flash", paid: true };
 
 /** `novelai.confirm.remembered` の中身。読み書きとも、ここを通る */
 let remembered: unknown;
@@ -58,7 +60,7 @@ afterEach(() => {
 async function runOnce(answer: string): Promise<{ asked: number; ran: boolean }> {
   const picker = answerConfirms(answer);
   try {
-    const ran = await confirmRun(MESSAGE, "実行", { remember: { id: ID } });
+    const ran = await confirmRun(MESSAGE, "実行", { remember: { id: ID, ai: AI } });
     return { asked: picker.shown.length, ran };
   } finally {
     picker.restore();
@@ -78,6 +80,10 @@ describe("「以降は訊かない」を覚えさせてから見直す", () => {
     await manageConfirmSkips();
     const row = reviewItems.find((item) => item.id === ID);
     expect(row?.label).toContain("誤字脱字の検知：処理量の確認");
+    // どのAIで訊かないことにしたかも並ぶ（忘れると、AIの記録も一緒に消える）
+    expect((row as { description?: string } | undefined)?.description).toBe(
+      "いまの答え: 実行 / gemini/gemini-2.5-flash"
+    );
     expect(statusBarMessages.map((entry) => entry.text).join("\n")).toContain(
       "1件を、また訊くようにしました。"
     );

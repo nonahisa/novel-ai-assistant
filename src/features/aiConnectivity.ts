@@ -7,6 +7,7 @@ import { lmstudioEndpoint } from "../ai/lmstudioProvider";
 import { prepareLmStudioModel } from "../ai/registry";
 import { canRunProcesses } from "../core/runtime";
 import { paidUsageNotice } from "../core/paidUsageNotice";
+import { confirmAiOf } from "../core/confirmMemory";
 import { withProgress } from "../views/progress";
 import { confirmRun, notifyDone, type ConfirmWork } from "../views/notify";
 
@@ -296,7 +297,11 @@ export async function confirmPaidUsage(
   return confirmRun(`${options.actionLabel}を実行しますか`, "実行", {
     detail: notice.lines.join("\n"),
     more: notice.more,
-    remember: options.remember,
+    // **送る先のAIを覚え書きに添える**——別の有料AIへ替えたら、覚えていても訊き直す
+    // （判断は `views/notify.ts`。ここで足すので、`ai.paid.*` の呼び出し側は id だけでよい）
+    remember: options.remember
+      ? { id: options.remember.id, ai: confirmAiOf(provider, options.model) }
+      : undefined,
     work: options.work,
   });
 }

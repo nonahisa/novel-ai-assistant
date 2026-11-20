@@ -155,7 +155,178 @@ export const REMEMBERABLE_CONFIRMS: readonly RememberableConfirm[] = [
  * ボタンの文言をそのまま持つのは、**文言が変わったら覚え直させる**ため。
  * 「実行」から別の言葉へ変えた確認を、古い答えで素通りさせない。
  */
-export type ConfirmMemory = Readonly<Record<string, string>>;
+export type ConfirmMemory = Readonly<Record<string, RememberedEntry>>;
+
+/**
+ * 「以降は訊かない」を覚えたときのAIひとつ（セキュリティ点検「中」、2026-11-21）。
+ *
+ * **AIを送る確認は、どのAIで覚えたかまで覚える。** 無料の Ollama で覚えた答えのまま、
+ * 既定のAIを有料のクラウドへ替えると、次の実行が確認なしで全チャンクを外へ送っていた。
+ * ブラウザ版で割当の Ollama が使えず既定のAIへ落ちるときも同じ道を通る。
+ * 照らし合わせるのはプロバイダIDとモデル名。`paid` は古い形の扱いと、記録を読む人のために添える
+ * （手元かどうかはIDから決める。`isLocalProviderId`）。
+ */
+export interface ConfirmAi {
+  readonly providerId: string;
+  readonly model: string;
+  readonly paid: boolean;
+}
+
+/**
+ * 覚えている答えひとつ。
+ *
+ * - 文字列：AIを使わない確認と、AIを入れる前の古い形
+ * - `{ answer, ai }`：AIを送る確認。`ai` は**作者が［以降は訊かない］を押したAIの全部**
+ *   （別のAIで押し直すと足していく。どれも作者が一度確かめたAIなので、行き来しても訊き直さない。
+ *   事実の照合のように、取り出しと判定で別のAIが同じ id の確認を出す機能もある）
+ */
+export type RememberedEntry =
+  | string
+  | { readonly answer: string; readonly ai: readonly ConfirmAi[] };
+
+/** 渡し方の揺れ（1つか複数か）をそろえる */
+export function confirmAiList(
+  ai: ConfirmAi | readonly ConfirmAi[] | undefined
+): readonly ConfirmAi[] {
+  if (ai === undefined) return [];
+  return isConfirmAiArray(ai) ? ai : [ai];
+}
+
+function isConfirmAiArray(ai: ConfirmAi | readonly ConfirmAi[]): ai is readonly ConfirmAi[] {
+  return Array.isArray(ai);
+}
+
+/** 確認へ渡すAIを、プロバイダとモデルから作る（`ai/` を引き込まないよう形だけ受ける） */
+export function confirmAiOf(
+  provider: { readonly id: string; readonly isPaid: boolean },
+  model: string
+): ConfirmAi {
+  return { providerId: provider.id, model, paid: provider.isPaid };
+}
+
+/** ログに出す形（`ollama/gemma4:e4b`） */
+export function describeConfirmAi(ai: readonly ConfirmAi[]): string {
+  return ai.length === 0
+    ? "（記録なし）"
+    : ai.map((item) => `${item.providerId}/${item.model}`).join("・");
+}
+
+/**
+ * AIを送る確認の id か。**AIを渡さずに呼ばれたら、覚えていても訊く**ための目印。
+ * 呼び出し側の渡し忘れで、どのAIへ送るか分からないまま素通りさせない
+ */
+export function isAiSendingConfirm(id: string): boolean {
+  return id.startsWith("ai.run.") || id.startsWith("ai.paid.");
+}
+
+function sameAi(a: ConfirmAi, b: ConfirmAi): boolean {
+  return a.providerId === b.providerId && a.model === b.model;
+}
+
+function entryAnswer(entry: unknown): string | undefined {
+  if (typeof entry === "string") return entry.length > 0 ? entry : undefined;
+  if (typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
+    const answer = (entry as { answer?: unknown }).answer;
+    return typeof answer === "string" && answer.length > 0 ? answer : undefined;
+  }
+  return undefined;
+}
+
+function isConfirmAi(value: unknown): value is ConfirmAi {
+  if (typeof value !== "object" || value === null) return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.providerId === "string" &&
+    item.providerId.length > 0 &&
+    typeof item.model === "string" &&
+    typeof item.paid === "boolean"
+  );
+}
+
+/** 覚えているAI。古い形（文字列）なら undefined */
+export function rememberedAi(
+  memory: ConfirmMemory,
+  id: string
+): readonly ConfirmAi[] | undefined {
+  const entry: unknown = memory[id];
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const ai: unknown = (entry as { ai?: unknown }).ai;
+  return Array.isArray(ai) ? ai.filter(isConfirmAi) : [];
+}
+
+/**
+ * 設定から読んだ生の値を覚え書きの形へそろえる。**形の合わないものは捨てる**
+ * （手で書き換えられる場所なので、数値や壊れた入れ物があっても落ちない）。
+ * AIの並びに壊れた項目があれば、その項目だけ落とす——残ったAIで照らすので、
+ * 落ちたAIで走るときは訊き直す側に倒れる
+ */
+export function normalizeConfirmMemory(raw: unknown): ConfirmMemory {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const result: Record<string, RememberedEntry> = {};
+  for (const [id, entry] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof entry === "string") {
+      result[id] = entry;
+      continue;
+    }
+    const answer = entryAnswer(entry);
+    if (answer === undefined) continue;
+    const ai: unknown = (entry as { ai?: unknown }).ai;
+    result[id] = { answer, ai: Array.isArray(ai) ? ai.filter(isConfirmAi) : [] };
+  }
+  return result;
+}
+
+/** 覚えた答えで素通りさせてよいかの判断（`views/notify.ts` の確認が1か所で使う） */
+export type RememberedRunDecision =
+  /** 覚えていない（ボタンの文言が違う・一覧に無い） */
+  | { readonly kind: "ask" }
+  /** 覚えたときと同じ条件なので素通りさせてよい */
+  | { readonly kind: "skip" }
+  /**
+   * 覚えてはいるが、**いまのAIは覚えたときのAIに入っていない**。確認を出す。
+   * `before` は覚えていたAI（古い形なら空）、`now` はいまのAI（渡されなければ空）
+   */
+  | {
+      readonly kind: "aiChanged";
+      readonly before: readonly ConfirmAi[];
+      readonly now: readonly ConfirmAi[];
+    };
+
+/**
+ * 覚えた答えを、いまのAIと照らす。**判断はここだけ**に置く（機能の側はAIを渡すだけ）。
+ *
+ * - AIを送る確認（`ai.run.*`・`ai.paid.*`）でAIが渡されなければ、訊く
+ * - AIの入った覚え書き：いまのAIが**全部**、覚えたAIのどれかとプロバイダIDもモデル名も
+ *   同じときだけ素通り。同じ Ollama でもモデルが違えば訊く（モデルで料金も送る量も変わる）
+ * - 古い形（文字列）：いまのAIが全部手元のAI（`isLocal`）で無料なら素通り。
+ *   有料かクラウドが1つでも入れば訊く——古い答えをどのAIで覚えたかは分からないので、
+ *   外へ送る・お金がかかる側だけ確かめ直す。手元のAIなら料金も外への送信も起きないので、
+ *   これまでどおり素通りさせる
+ * - AIを使わない確認：これまでどおり答えの文言だけで決める
+ */
+export function decideRememberedRun(params: {
+  memory: ConfirmMemory;
+  id: string;
+  runLabel: string;
+  ai: readonly ConfirmAi[];
+  isLocal: (providerId: string) => boolean;
+}): RememberedRunDecision {
+  const { memory, id, runLabel, ai, isLocal } = params;
+  if (rememberedAnswer(memory, id) !== runLabel) return { kind: "ask" };
+
+  const before = rememberedAi(memory, id);
+  if (ai.length === 0) {
+    return isAiSendingConfirm(id)
+      ? { kind: "aiChanged", before: before ?? [], now: [] }
+      : { kind: "skip" };
+  }
+  if (before === undefined) {
+    const allLocalFree = ai.every((item) => isLocal(item.providerId) && !item.paid);
+    return allLocalFree ? { kind: "skip" } : { kind: "aiChanged", before: [], now: ai };
+  }
+  const allKnown = ai.every((item) => before.some((known) => sameAi(known, item)));
+  return allKnown ? { kind: "skip" } : { kind: "aiChanged", before, now: ai };
+}
 
 const REMEMBERABLE_IDS = new Set(REMEMBERABLE_CONFIRMS.map((item) => item.id));
 
@@ -196,8 +367,7 @@ export function rememberedAnswer(
   id: string
 ): string | undefined {
   if (!isRememberable(id)) return undefined;
-  const answer = memory[id];
-  return typeof answer === "string" && answer.length > 0 ? answer : undefined;
+  return entryAnswer(memory[id]);
 }
 
 /**
@@ -209,10 +379,20 @@ export function rememberedAnswer(
 export function withRemembered(
   memory: ConfirmMemory,
   id: string,
-  answer: string
+  answer: string,
+  ai: readonly ConfirmAi[] = []
 ): ConfirmMemory {
   if (!isRememberable(id)) return memory;
-  return { ...memory, [id]: answer };
+  // AIを使わない確認は、今までどおり文字列で持つ（設定画面で読みやすく、古い版とも同じ形）
+  if (ai.length === 0) return { ...memory, [id]: answer };
+  // 同じ答えで覚えていたAIには足す。答えの文言が変わっていたら、前のAIは引き継がない
+  const known =
+    rememberedAnswer(memory, id) === answer ? rememberedAi(memory, id) ?? [] : [];
+  const merged = [...known];
+  for (const item of ai) {
+    if (!merged.some((existing) => sameAi(existing, item))) merged.push(item);
+  }
+  return { ...memory, [id]: { answer, ai: merged } };
 }
 
 /** ひとつ忘れる */
@@ -247,15 +427,21 @@ function voiceRemoteHostLabel(id: string): string | undefined {
  */
 export function describeRemembered(
   memory: ConfirmMemory
-): Array<{ id: string; label: string; answer: string }> {
+): Array<{ id: string; label: string; answer: string; ai?: readonly ConfirmAi[] }> {
   const labels = new Map(
     REMEMBERABLE_CONFIRMS.map((item) => [item.id, item.label])
   );
-  return Object.entries(memory)
-    .filter(([, answer]) => typeof answer === "string" && answer.length > 0)
-    .map(([id, answer]) => ({
-      id,
-      label: labels.get(id) ?? voiceRemoteHostLabel(id) ?? `${UNKNOWN_CONFIRM_LABEL} ${id}`,
-      answer,
-    }));
+  return Object.entries(memory).flatMap(([id, entry]) => {
+    const answer = entryAnswer(entry);
+    if (answer === undefined) return [];
+    const ai = rememberedAi(memory, id);
+    return [
+      {
+        id,
+        label: labels.get(id) ?? voiceRemoteHostLabel(id) ?? `${UNKNOWN_CONFIRM_LABEL} ${id}`,
+        answer,
+        ...(ai && ai.length > 0 ? { ai } : {}),
+      },
+    ];
+  });
 }

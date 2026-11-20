@@ -1,6 +1,11 @@
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
-import { describeRemembered, withoutAll, withoutRemembered } from "../core/confirmMemory";
+import {
+  describeConfirmAi,
+  describeRemembered,
+  withoutAll,
+  withoutRemembered,
+} from "../core/confirmMemory";
 import {
   readConfirmMemory,
   saveConfirmMemory,
@@ -40,7 +45,10 @@ export async function manageConfirmSkips(): Promise<void> {
       },
       ...entries.map((entry) => ({
         label: `$(question) ${entry.label}`,
-        description: `いまの答え: ${entry.answer}`,
+        // AIを送る確認は、どのAIで訊かないことにしたかも並べる（ほかのAIでは訊き直す）
+        description:
+          `いまの答え: ${entry.answer}` +
+          (entry.ai ? ` / ${describeConfirmAi(entry.ai)}` : ""),
         detail: entry.id,
         id: entry.id,
       })),

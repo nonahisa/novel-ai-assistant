@@ -1,6 +1,15 @@
 import * as vscode from "vscode";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
-import { isRememberable, rememberedAnswer, withRemembered } from "../core/confirmMemory";
+import {
+  confirmAiList,
+  decideRememberedRun,
+  describeConfirmAi,
+  isRememberable,
+  rememberedAnswer,
+  withRemembered,
+  type ConfirmAi,
+} from "../core/confirmMemory";
+import { isLocalProviderId } from "../core/localProviders";
 import {
   describeInferredWorkSource,
   inferredWorkSource,
@@ -118,8 +127,13 @@ export interface ConfirmOptions {
    *
    * **渡さないかぎり、訊き方は1文字も変わらない。** 危ない操作には
    * 渡さないこと（一覧に無い id は覚えないので、渡しても固定はされない）。
+   *
+   * `ai` は**この確認のあとで送るAI**（実際に送る解決済みのもの。`confirmAiOf`）。
+   * AIを送る確認（`ai.run.*`・`ai.paid.*`）は必ず渡す——覚えたときのAIと違えば、
+   * 覚えていても訊き直す（セキュリティ点検「中」、2026-11-21）。渡さなければ訊く側へ倒れる。
+   * 渡し忘れは `test/unit/cross/rememberAiPassed.test.ts` が見張る
    */
-  remember?: { id: string };
+  remember?: { id: string; ai?: ConfirmAi | readonly ConfirmAi[] };
   /**
    * どの作品に対する実行か。**作品そのもの**を渡す（題名だけでなく）。
    *
@@ -255,6 +269,7 @@ export async function confirmRunOrChoose(
   options: ConfirmOptions & { choices?: readonly string[] } = {}
 ): Promise<ConfirmOrChoice | undefined> {
   const rememberId = options.remember?.id;
+  const rememberAi = confirmAiList(options.remember?.ai);
   const workTitle = options.work?.title;
   const inferred = inferredWorkSource(options.work);
   const presaveCount = options.presave?.count ?? 0;
@@ -264,7 +279,25 @@ export async function confirmRunOrChoose(
   // 覚えた答えが**いまのボタンの文言と同じ**ときだけ素通りさせる。
   // 文言を変えた確認は、古い答えで勝手に走らせない
   if (rememberId && isRememberable(rememberId)) {
-    if (rememberedAnswer(readConfirmMemory(), rememberId) === runLabel) {
+    /*
+      **覚えたときのAIと違えば訊き直す**（セキュリティ点検「中」、2026-11-21）。
+      無料の Ollama で覚えた答えのまま、有料のクラウドへ全チャンクを送らない。
+      判断は `decideRememberedRun` の1か所。訊き直す回も［以降は訊かない］を並べる——
+      隠すと、AIを替えた作者は以後ずっと訊かれ続ける（押せば新しいAIも覚える）
+    */
+    const decision = decideRememberedRun({
+      memory: readConfirmMemory(),
+      id: rememberId,
+      runLabel,
+      ai: rememberAi,
+      isLocal: isLocalProviderId,
+    });
+    if (decision.kind === "aiChanged") {
+      logStep(
+        `AIが変わったので確認を出す: ${rememberId} / 前 ${describeConfirmAi(decision.before)} → 今 ${describeConfirmAi(decision.now)}`
+      );
+    }
+    if (decision.kind === "skip") {
       /*
         **作品を推し量ったときは、覚えていても訊く**（作者の裁定、2026-09-23）。
         作品一覧の行を誤って選んでいただけで、1時間30分の抽出が別の作品で
@@ -278,7 +311,8 @@ export async function confirmRunOrChoose(
         // 画面を出さないぶん、**どの作品で走らせたかは記録に残す**
         logStep(
           `確認を省略（以降は訊かない）: ${rememberId} / ${runLabel}` +
-            (workTitle ? ` / ${workTitle}` : "")
+            (workTitle ? ` / ${workTitle}` : "") +
+            (rememberAi.length > 0 ? ` / ${describeConfirmAi(rememberAi)}` : "")
         );
         return { kind: "run" };
       }
@@ -322,7 +356,7 @@ export async function confirmRunOrChoose(
 
   if (answer === runLabel) return (await savedBeforeRun(options.presave)) ? { kind: "run" } : undefined;
   if (rememberId && answer === rememberLabel(runLabel)) {
-    await rememberConfirmAnswer(rememberId, runLabel);
+    await rememberConfirmAnswer(rememberId, runLabel, rememberAi);
     return (await savedBeforeRun(options.presave)) ? { kind: "run" } : undefined;
   }
   if (answer !== undefined && choices.includes(answer)) {
@@ -509,11 +543,15 @@ export function whenNoticePicked<T extends string>(
  */
 async function rememberConfirmAnswer(
   id: string,
-  answer: string
+  answer: string,
+  ai: readonly ConfirmAi[] = []
 ): Promise<void> {
   try {
-    await saveConfirmMemory(withRemembered(readConfirmMemory(), id, answer));
-    logStep(`以降は訊かないことにしました: ${id} / ${answer}`);
+    await saveConfirmMemory(withRemembered(readConfirmMemory(), id, answer, ai));
+    logStep(
+      `以降は訊かないことにしました: ${id} / ${answer}` +
+        (ai.length > 0 ? ` / ${describeConfirmAi(ai)}` : "")
+    );
   } catch (error) {
     logStep(
       `「以降は訊かない」を覚えられませんでした: ${id} / ${

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { ConfirmMemory } from "./confirmMemory";
+import { normalizeConfirmMemory, type ConfirmMemory } from "./confirmMemory";
 
 /**
  * 「以降は訊かない」の覚え書きを、VS Codeの設定へ置く薄い層。
@@ -24,14 +24,10 @@ const KEY = "confirm.remembered";
 /** いま覚えているもの。設定が壊れていたら「何も覚えていない」に倒す */
 export function readConfirmMemory(): ConfirmMemory {
   const raw = vscode.workspace.getConfiguration(SECTION).get<unknown>(KEY);
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
-
-  // **文字列でない値は捨てる。** 手で書き換えられる場所なので、
-  // 数値や真偽値が入っていても落ちないようにする
-  const entries = Object.entries(raw as Record<string, unknown>).filter(
-    (entry): entry is [string, string] => typeof entry[1] === "string"
-  );
-  return Object.fromEntries(entries);
+  // **形の合わない値は捨てる。** 手で書き換えられる場所なので、
+  // 数値や真偽値が入っていても落ちないようにする。答えは文字列か、
+  // AIを送る確認なら `{ answer, ai }`（どのAIで覚えたか。`core/confirmMemory.ts`）
+  return normalizeConfirmMemory(raw);
 }
 
 /** 覚え書きを丸ごと置き換える */

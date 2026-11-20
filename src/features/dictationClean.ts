@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import { keysForHost } from "../core/keyLabels";
 import * as vscode from "vscode";
@@ -140,7 +141,7 @@ export async function runDictationClean(
     "実行",
     // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）。作品に
     // 属さない文書で呼ばれたときは出さない（名前が無い）
-    { remember: { id: "ai.run.dictationClean" }, work }
+    { remember: { id: "ai.run.dictationClean", ai: confirmAiOf(resolved.provider, resolved.model) }, work }
   );
   if (!confirmed) return;
 

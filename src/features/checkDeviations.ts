@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
@@ -301,7 +302,7 @@ export async function checkDeviations(
       const confirmed = await confirmRun(
         `${work.title} のプロット逸脱を検知します。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkDeviations" }, work }
+        { detail, remember: { id: "ai.run.checkDeviations", ai: confirmAiOf(resolved.provider, resolved.model) }, work }
       );
       if (!confirmed) return undefined;
     }

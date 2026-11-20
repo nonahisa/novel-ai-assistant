@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
@@ -551,7 +552,7 @@ export async function checkTypos(
         offer ? `${notice}\n\n${offer.detail}` : notice,
         "実行",
         {
-          remember: { id: "ai.run.checkTypos" },
+          remember: { id: "ai.run.checkTypos", ai: confirmAiOf(resolved.provider, resolved.model) },
           // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）。
           // 作品そのものを渡す——推し量った作品なら「訊かない」を覚えていても訊く
           work,

@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import type { WorkEntry } from "../models/types";
 import type { PostingSiteId } from "../models/posting";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
@@ -182,7 +183,7 @@ export async function requestReaderAdvice(
       costNotice,
     "実行",
     // 作品名を1行目に出す（ほかのAI機能の確認と同じ。どの作品かを押す前に読ませる）
-    { remember: { id: "ai.run.readerAdvice" }, work }
+    { remember: { id: "ai.run.readerAdvice", ai: confirmAiOf(resolved.provider, resolved.model) }, work }
   );
   if (!confirmed) return { kind: "cancelled" };
 

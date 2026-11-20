@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
@@ -292,7 +293,7 @@ export async function checkProofread(
         "実行",
         {
           detail,
-          remember: { id: "ai.run.checkProofread" },
+          remember: { id: "ai.run.checkProofread", ai: confirmAiOf(resolved.provider, resolved.model) },
           // 推し量った作品なら「訊かない」を覚えていても訊く
           work,
           presave: options.presave,
