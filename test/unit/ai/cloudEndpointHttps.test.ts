@@ -3,7 +3,7 @@ import { workspace } from "../support/vscodeStub";
 import { GeminiProvider } from "../../../src/ai/geminiProvider";
 import { OpenAIProvider } from "../../../src/ai/openaiProvider";
 import { SakuraProvider } from "../../../src/ai/sakuraProvider";
-import { AIError } from "../../../src/ai/types";
+import { AIError, type GenerateParams } from "../../../src/ai/types";
 import { insecureCloudEndpointReason } from "../../../src/core/endpointNotice";
 
 /**
@@ -41,6 +41,14 @@ function fakeContext(): never {
       get: async () => "test-api-key-0123456789",
       store: async () => undefined,
       delete: async () => undefined,
+    },
+    // 指定を外して通った組み合わせの覚え。**断ったときに書かれないこと**も下で見る
+    globalState: {
+      get: () => undefined,
+      update: async () => {
+        throw new Error("断った失敗から覚えを書いてはいけない");
+      },
+      keys: () => [],
     },
   } as never;
 }
@@ -83,6 +91,23 @@ describe("クラウドのAIは、外の http の宛先へ鍵も本文も送ら�
     ["さくら", () => new SakuraProvider(fakeContext())],
   ])("%s：モデルの一覧も送らずに断る", async (_name, make) => {
     await expect(make().listModels()).rejects.toBeInstanceOf(AIError);
+    expect(fetched).toEqual([]);
+  });
+
+  test.each([
+    ["Gemini", () => new GeminiProvider(fakeContext()), "gemini-2.5-flash"],
+    ["ChatGPT", () => new OpenAIProvider(fakeContext()), "gpt-4o-mini"],
+    ["さくら", () => new SakuraProvider(fakeContext()), "preview/gemma-4-31B-it"],
+  ])("%s：生成も本文を送らずに、https の理由で断る（指定を外して試し直さない）", async (_name, make, model) => {
+    const params: GenerateParams = { systemPrompt: "指示", userPrompt: "本文", model, temperature: 0 };
+    const failure = await make()
+      .generate(params)
+      .then(
+        () => undefined,
+        (error: unknown) => error
+      );
+    expect(failure).toBeInstanceOf(AIError);
+    expect((failure as AIError).message).toContain("https");
     expect(fetched).toEqual([]);
   });
 });
