@@ -335,25 +335,93 @@ export function inspectWorkTextBackup(
   };
 }
 
+/** 展開したあとの大きさの上限（バイト） */
+export interface WorkZipSizeLimits {
+  /** 1件 */
+  readonly perEntry: number;
+  /** ZIPの中の全部の合計 */
+  readonly total: number;
+}
+
+/**
+ * 既定の上限（セキュリティ点検 2026-11-21）。
+ *
+ * 圧縮が効く中身は、数十KBのZIPが展開すると数GBになり、拡張機能ホストごと記憶を使い切る。
+ * 投稿サイトのバックアップは本文だけなので、普段はずっと小さい——手元の実データの19話・
+ * 約41,000字で約0.12MB。長い連載（1000万字）の合本を1つにまとめても、UTF-8で約30MB。
+ * 表紙などの画像が入っても数MBなので、1件64MB・合計256MBなら作者の作品で止まらない
+ */
+export const WORK_ZIP_SIZE_LIMITS: WorkZipSizeLimits = {
+  perEntry: 64 * 1024 * 1024,
+  total: 256 * 1024 * 1024,
+};
+
+/** 上限の言い方（「64MB」） */
+function describeBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1 ? `${Math.round(mb)}MB` : `${Math.ceil(bytes / 1024)}KB`;
+}
+
 /**
  * ZIPを読んで、取り込める形にする。**読むだけで、1文字も書かない。**
  *
  * @param zipBytes ZIPそのもの
  * @param zipFileName 拡張子まで含むファイル名（題の予備として使う）
+ * @param limits 展開したあとの大きさの上限（試験で小さな値に差し替える）
  */
 export function inspectWorkZip(
   zipBytes: Uint8Array,
-  zipFileName: string
+  zipFileName: string,
+  limits: WorkZipSizeLimits = WORK_ZIP_SIZE_LIMITS
 ): WorkZipInspection {
   let raw: Record<string, Uint8Array>;
+  /*
+    **展開する前に大きさを見る**（`filter` は項目ごとに、展開の前に呼ばれる）。
+    圧縮した項目は、ZIPに書かれた展開後の大きさ（`originalSize`）の入れ物へ展開され、
+    申告より膨らむ分は捨てられる（fflate 0.8 で確かめた）ので、申告の値で記憶の量が決まる。
+    無圧縮の項目は、そのままの大きさ（`size`）。
+    filter の中で投げると下の catch が「ZIPとして読めません」に包むので、超えた名前は
+    控えて展開を飛ばし、あとでまとめて止める
+  */
+  const tooLarge: string[] = [];
+  let total = 0;
+  let totalExceeded = false;
   try {
-    raw = unzipSync(zipBytes);
+    raw = unzipSync(zipBytes, {
+      filter: (file) => {
+        const size = Math.max(file.size, file.originalSize);
+        if (size > limits.perEntry) {
+          tooLarge.push(file.name);
+          return false;
+        }
+        total += size;
+        if (total > limits.total) {
+          totalExceeded = true;
+          return false;
+        }
+        return true;
+      },
+    });
   } catch (error) {
     throw new WorkZipError(
       "ZIPファイルとして読めませんでした。",
       `ダウンロードが途中で終わっていないか、ご確認ください。（${
         error instanceof Error ? error.message : String(error)
       }）`
+    );
+  }
+
+  // **1件でも超えれば、1件も取り込まない**（一部だけ入った作品フォルダーを作らない）
+  if (tooLarge.length > 0 || totalExceeded) {
+    throw new WorkZipError(
+      "このZIPは、展開すると大きすぎるため取り込みませんでした。",
+      [
+        tooLarge.length > 0
+          ? `1つのファイルの上限（${describeBytes(limits.perEntry)}）を超えたもの：${summarizeNames(tooLarge)}`
+          : `中のファイルの合計が上限（${describeBytes(limits.total)}）を超えました。`,
+        "",
+        "投稿サイトからダウンロードしたバックアップか、ご確認ください。",
+      ].join("\n")
     );
   }
 
