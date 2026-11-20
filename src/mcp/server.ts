@@ -122,6 +122,12 @@ import {
   SETUP_PROMPT_TITLE,
   buildSetupGuide,
 } from "./prompts/setupGuide";
+import { registerSkills } from "./skills";
+/*
+  **スキルの本文は束へ埋め込む**（esbuild の text loader）。製品では束を保管庫へ写してから
+  起こすので、束からの相対で docs を読む道は届かない。正は docs の雛形1つで、写しを持たない
+*/
+import NOVEL_ASSIST_BODY from "../../docs/skills/novel-assist.md";
 
 /**
  * Claude Code から、製品のプロンプトと検算をツールとして呼ぶ（設計書6.87.8）。
@@ -858,6 +864,13 @@ server.registerTool(
   */
   tool("schedule.milestones", (args: { folders: string[] }) => scheduleMilestones(args))
 );
+
+/*
+  **道具の使い方の手順書をスキルとして配る**（拡張 io.modelcontextprotocol/skills）。
+  道具ではないので許可（6.87.14）の対象ではない。作品に触れず、同梱の文を返すだけ。
+  宣言は繋ぐ前でないと足せないので、main() より前に呼ぶ
+*/
+registerSkills(server, NOVEL_ASSIST_BODY);
 
 /*
   **セットアップの手順書**（設計書6.87.18）。Claude Code のチャットで `/` を

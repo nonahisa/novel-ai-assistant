@@ -126,6 +126,12 @@ function bundleOptions() {
     outfile: "dist/mcp-server.mjs",
     external: [],
     /*
+      **配るスキルの本文（docs/skills/novel-assist.md）を文字列として埋め込む**
+      （`src/mcp/skills.ts`）。製品では束を保管庫へ写してから起こすので、
+      束の隣のファイルを読む道は届かない。拡張機能の2つの束には入れない
+    */
+    loader: { ".md": "text" },
+    /*
       **ESM の束に `require` を持たせる**（2026-10-03、出先の原稿箱 6.115）。
       本文の書き戻し（`core/textEncodePreserving.ts`）が使う `iconv-lite` は CommonJS で、
       中で `require("buffer")` を呼ぶ。ESM の束には `require` が無いので、
