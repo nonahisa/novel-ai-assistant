@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
@@ -344,7 +345,7 @@ export async function checkEpisodePlotDesign(
             ? resolved.provider.displayName
             : undefined,
         }),
-        remember: { id: "ai.run.checkEpisodePlotDesign" },
+        remember: { id: "ai.run.checkEpisodePlotDesign", ai: confirmAiOf(resolved.provider, resolved.model) },
         // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
         work,
       }
@@ -575,7 +576,7 @@ export async function contrastEpisodePlot(
             ? resolved.provider.displayName
             : undefined,
         }),
-        remember: { id: "ai.run.checkEpisodePlotContrast" },
+        remember: { id: "ai.run.checkEpisodePlotContrast", ai: confirmAiOf(resolved.provider, resolved.model) },
         work,
       }
     );

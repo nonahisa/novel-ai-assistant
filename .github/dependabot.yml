@@ -1,0 +1,8 @@
+# GitHub Actions のアクションは SHA で固定してあるので、新しい版への更新は Dependabot に週1回出させる。
+# npm は対象にしない（依存の更新は手で決める）
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

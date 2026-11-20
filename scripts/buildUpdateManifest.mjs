@@ -250,8 +250,10 @@ async function main() {
   await writeFile(outPath, formatUpdateManifest(manifest), "utf8");
   console.log(`更新の札を書きました: ${outPath}`);
   console.log(`  版 ${manifest.version}（${manifest.date}）・要約 ${manifest.summary.length} 行・SHA-256 ${sha256}`);
-  console.log("Release に添えるには、gh release create の添付に足すか、出したあとで:");
-  console.log(`  gh release upload v${version} release/${MANIFEST_FILE_NAME} --clobber`);
+  // Release は出したあとで添付を足せない設定（2026-11-20、v1.0.33 で HTTP 422）。
+  // 作るときに一緒に添える道だけを示す
+  console.log("Release を作るときに、gh release create の添付に足してください:");
+  console.log(`  release/${MANIFEST_FILE_NAME}`);
 }
 
 // テストからは純粋関数だけを読む。読み込んだだけでファイルを書かないようにする

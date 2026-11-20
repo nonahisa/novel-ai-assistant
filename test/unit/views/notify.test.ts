@@ -366,7 +366,11 @@ describe("confirmRun：rememberId を渡したとき", () => {
     const picker = answerConfirms("実行");
     try {
       const result = await confirmRun("19話をAIで確認します。", "実行", {
-        remember: { id: "ai.run.checkTypos" },
+        // 送る先のAIを添える（AIの機能でAIが無ければ訊く。rememberedAiConfirm.test.ts）
+        remember: {
+          id: "ai.run.checkTypos",
+          ai: { providerId: "ollama", model: "gemma4:e4b", paid: false },
+        },
       });
       expect(result).toBe(true);
       // 窓を出していれば1件積まれるはず。出さずに通したことの証

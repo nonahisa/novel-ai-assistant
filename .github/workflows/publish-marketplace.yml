@@ -41,6 +41,15 @@ jobs:
       REASON: ${{ inputs.reason }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      # vsce・ovsx はその場で取り寄せず、ロックファイルの devDependencies から動かす。
+      # 公開する VSIX は Release から取るので、ここで取り出すのは道具の版を決めるロックファイルのため
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - name: 公開の道具（vsce・ovsx）を入れる
+        # 道具が要るだけなので、依存のインストール時スクリプトは走らせない
+        run: npm ci --ignore-scripts
       - name: 版の形と出す理由を確かめる
         # 入力は env 経由で読む（式を run の中へ直に埋めると、入力の文字がシェルに解釈される）
         run: |
@@ -73,12 +82,9 @@ jobs:
           if [ "$inner" != "$VERSION" ]; then
             echo "::error::VSIX の中の版（$inner）が $VERSION と違います"; exit 1
           fi
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
       - name: Marketplace へ公開する（OIDC）
-        # vsce の版は package.json の devDependencies と同じに固定する（4.0.2 以降が要る）
-        run: npx --yes @vscode/vsce@4.1.0 publish --packagePath "release/novel-ai-assistant-$VERSION.vsix" --oidc
+        # vsce の版は package.json の devDependencies（ロックファイル）で決まる（4.0.2 以降が要る）
+        run: npx --no-install vsce publish --packagePath "release/novel-ai-assistant-$VERSION.vsix" --oidc
       - name: Open VSX へ公開する（VS Code 以外のエディター向け）
         # 作者の裁定 2026-10-31「進める」（設計書5.9）。Cursor・VSCodium・Windsurf などは
         # Marketplace ではなく Open VSX Registry から入れる。
@@ -88,7 +94,7 @@ jobs:
         #   直に読めないので、env に移してから見る。ovsx は環境変数 OVSX_PAT を自分で読むので
         #   引数（-p）には渡さない
         # - **落ちたら赤にする**（continue-on-error は付けない。気づけるように）
-        # - ovsx の版は固定する（1.2.0 は Node 22 以上が要る。上の setup-node と同じ）
+        # - ovsx の版は package.json の devDependencies（ロックファイル）で決まる（1.4.0 は Node 22 以上が要る。上の setup-node と同じ）
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
@@ -96,4 +102,4 @@ jobs:
             echo "::notice::シークレット OVSX_PAT が無いので、Open VSX へは上げません（Marketplace の公開は済んでいます）"
             exit 0
           fi
-          npx --yes ovsx@1.2.0 publish "release/novel-ai-assistant-$VERSION.vsix"
+          npx --no-install ovsx publish "release/novel-ai-assistant-$VERSION.vsix"

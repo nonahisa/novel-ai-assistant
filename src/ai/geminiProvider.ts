@@ -16,7 +16,7 @@ import { geminiUserParts } from "./imageInput";
 import { aiCallLog, forgetSecret, logLine, registerSecret } from "../core/logger";
 import { verifiedState } from "../core/verifiedMemento";
 import { DEFAULT_TIMEOUT_SECONDS, resolveTimeoutMs } from "../core/modelTuning";
-import { customEndpointNotice } from "../core/endpointNotice";
+import { customEndpointNotice, insecureCloudEndpointReason } from "../core/endpointNotice";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 
@@ -106,11 +106,15 @@ export class GeminiProvider implements ApiKeyProvider {
     this.modelCache.clear();
   }
 
+  /** 宛先。**https でなければ送る前に断る**（`insecureCloudEndpointReason`。2026-11-21） */
   private get endpoint(): string {
-    return vscode.workspace
+    const endpoint = vscode.workspace
       .getConfiguration("novelai")
       .get<string>("gemini.endpoint", DEFAULT_ENDPOINT)
       .replace(/\/+$/, "");
+    const refused = insecureCloudEndpointReason(endpoint);
+    if (refused) throw new AIError(refused, "not_running");
+    return endpoint;
   }
 
   /**

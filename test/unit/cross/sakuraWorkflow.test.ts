@@ -34,14 +34,17 @@ describe("Sakura AI smoke workflow", () => {
     const steps = stepBlocks(workflow);
     const uses = steps.flatMap((step) =>
       step.flatMap((line) => {
-        const match = line.match(/^\s*-\s+uses:\s*(\S+)\s*$/);
-        return match ? [match[1]] : [];
+        // アクションは SHA で固定し、行末に版のコメントを残す（例: @<40桁> # v5.1.0）
+        const match = line.match(
+          /^\s*-\s+uses:\s*(\S+@[0-9a-f]{40})\s+#\s+(v5\.\d+\.\d+)\s*$/
+        );
+        return match ? [match[1].split("@")[0] + "@" + match[2].slice(0, 2)] : [];
       })
     );
     expect(uses).toEqual(["actions/checkout@v5", "actions/setup-node@v5"]);
 
     const setupNode = steps.find((step) =>
-      step.some((line) => line.trim() === "- uses: actions/setup-node@v5")
+      step.some((line) => line.trim().startsWith("- uses: actions/setup-node@"))
     );
     expect(setupNode).toContain("        with:");
     expect(setupNode).toContain("          node-version: 22");

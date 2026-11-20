@@ -76,6 +76,10 @@ export const FORBIDDEN_CONTENT_PATTERNS = [
   // GitHub。同期のトークンで、URLに埋め込まれた形でも紛れ込みうる
   /(?<![A-Za-z0-9])gh[pours]_[A-Za-z0-9_-]{20,}/,
   /(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_-]{20,}/,
+  // Google のサインイン（ドライブ同期）。アクセストークン・リフレッシュトークン・クライアントの秘密
+  /(?<![A-Za-z0-9])ya29\.[A-Za-z0-9_-]{20,}/,
+  /(?<![A-Za-z0-9])1\/\/[A-Za-z0-9_-]{20,}/,
+  /(?<![A-Za-z0-9])GOCSPX-[A-Za-z0-9_-]{20,}/,
   /C:\\Users\\/i,
   /Documents\\/i,
   /_test_extract/i,

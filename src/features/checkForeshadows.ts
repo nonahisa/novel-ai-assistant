@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import { targetsFor, toBrief } from "../core/foreshadowTargets";
 import * as vscode from "vscode";
@@ -297,7 +298,7 @@ export async function checkForeshadows(
       const confirmed = await confirmRun(
         `${work.title} の伏線を検知します。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkForeshadows" }, work }
+        { detail, remember: { id: "ai.run.checkForeshadows", ai: confirmAiOf(resolved.provider, resolved.model) }, work }
       );
       if (!confirmed) return undefined;
     }
@@ -817,7 +818,7 @@ export async function checkForeshadowResolution(
         ]
           .filter(Boolean)
           .join("\n"),
-        remember: { id: "ai.run.checkForeshadowResolutions" },
+        remember: { id: "ai.run.checkForeshadowResolutions", ai: confirmAiOf(resolved.provider, resolved.model) },
         work,
       }
     );

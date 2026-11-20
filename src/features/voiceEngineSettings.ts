@@ -24,14 +24,16 @@ export function isReadAloudEngineChoice(value: unknown): value is ReadAloudEngin
 
 /**
  * 設定に**作者が書いた**値だけを読む（既定の値は入れない）。古い設定を「既定のまま」か
- * 「書き換えた」かで扱いを分けるので、`get` でなく `inspect` で見る
+ * 「書き換えた」かで扱いを分けるので、`get` でなく `inspect` で見る。
+ *
+ * **ユーザー設定（`globalValue`）だけを読む**（セキュリティ点検 2026-11-21）。接続先へは本文が
+ * 送られる。作品フォルダーは同期され編集部とも共有するので、その `.vscode/settings.json` から
+ * 向け先を変えられてはいけない（設定は `machine`。設計書6.78の1）。`machine` の設定でも
+ * `inspect` はワークスペースの値を返しうるので、こちらでも読まない
  */
 export function readEngineUrlSettings(): EngineUrlSettings {
   const config = vscode.workspace.getConfiguration("novelai");
-  const written = (key: string): string | undefined => {
-    const seen = config.inspect<string>(key);
-    return seen?.workspaceFolderValue ?? seen?.workspaceValue ?? seen?.globalValue;
-  };
+  const written = (key: string): string | undefined => config.inspect<string>(key)?.globalValue;
   return {
     aivisSpeechUrl: written(ENGINE_URL_SETTING.aivisspeech),
     voicevoxUrl: written(ENGINE_URL_SETTING.voicevox),

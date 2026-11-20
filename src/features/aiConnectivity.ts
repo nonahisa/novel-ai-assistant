@@ -7,8 +7,14 @@ import { lmstudioEndpoint } from "../ai/lmstudioProvider";
 import { prepareLmStudioModel } from "../ai/registry";
 import { canRunProcesses } from "../core/runtime";
 import { paidUsageNotice } from "../core/paidUsageNotice";
+import { confirmAiOf } from "../core/confirmMemory";
 import { withProgress } from "../views/progress";
 import { confirmRun, notifyDone, type ConfirmWork } from "../views/notify";
+import {
+  confirmLocalAiHost,
+  isLocalAiHostApproved,
+  type LocalAiTarget,
+} from "./localAiHostApproval";
 
 /**
  * AIへの疎通確認と、手元で動くAI（Ollama・LM Studio）の起動導線。
@@ -45,6 +51,10 @@ export async function confirmProviderReachable(
    */
   model?: string
 ): Promise<boolean> {
+  // **手元のAIの宛先が PC の外なら、接続の確認より先に訊く**（2026-11-21）。
+  // 確認の要求も外のホストへ出るので、断られたら何も送らない
+  if (!(await confirmLocalAiDestination(provider.id))) return false;
+
   // testConnection を持たないプロバイダは確認をスキップする（実行自体は妨げない）
   if (typeof provider.testConnection !== "function") return true;
 
@@ -132,6 +142,45 @@ async function localStartLabel(
   }
   if (providerId === "lmstudio") {
     return (await isLocalLmStudioEndpoint()) ? "LM Studioを起動" : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * 手元のAI（Ollama・LM Studio）の宛先が PC の外なら、初回だけ確かめる
+ * （`features/localAiHostApproval.ts`。設計書6.78の17）。ほかのプロバイダは素通り。
+ *
+ * 疎通確認も料金の確認も通らずに本文を送る入口（提案パネルの再チェック）が直に呼ぶので外へ出す
+ */
+export async function confirmLocalAiDestination(providerId: string): Promise<boolean> {
+  const target = localAiTargetOf(providerId);
+  return target ? confirmLocalAiHost(target) : true;
+}
+
+/**
+ * 訊かずに、送ってよいと分かっているか（この PC の中か、前に［送る］と答えたホスト）。
+ * **作者が頼んでいない処理**（独り言）が使う——頼まれていないのに真ん中の窓は出せないので、
+ * 分からなければ送らずに黙る。ほかのプロバイダは true
+ */
+export function localAiDestinationKnownSafe(providerId: string): boolean {
+  const target = localAiTargetOf(providerId);
+  return target ? isLocalAiHostApproved(target) : true;
+}
+
+function localAiTargetOf(providerId: string): LocalAiTarget | undefined {
+  if (providerId === "ollama") {
+    return {
+      displayName: "Ollama",
+      settingKey: "novelai.ollama.endpoint",
+      endpoint: ollamaEndpoint(),
+    };
+  }
+  if (providerId === "lmstudio") {
+    return {
+      displayName: "LM Studio",
+      settingKey: "novelai.lmstudio.endpoint",
+      endpoint: lmstudioEndpoint(),
+    };
   }
   return undefined;
 }
@@ -279,6 +328,9 @@ export async function confirmPaidUsage(
     work?: ConfirmWork;
   }
 ): Promise<boolean> {
+  // 料金の確認だけを通る機能（提案の画面・AIチューニング）もあるので、ここでも見る。
+  // 一度「送る」と答えたホストは覚えているので、疎通確認のあとで2度は訊かない
+  if (!(await confirmLocalAiDestination(provider.id))) return false;
   if (!provider.isPaid) return true;
 
   // **行の中身は `core/paidUsageNotice.ts` の1か所**（外から頼まれた実行の
@@ -296,7 +348,11 @@ export async function confirmPaidUsage(
   return confirmRun(`${options.actionLabel}を実行しますか`, "実行", {
     detail: notice.lines.join("\n"),
     more: notice.more,
-    remember: options.remember,
+    // **送る先のAIを覚え書きに添える**——別の有料AIへ替えたら、覚えていても訊き直す
+    // （判断は `views/notify.ts`。ここで足すので、`ai.paid.*` の呼び出し側は id だけでよい）
+    remember: options.remember
+      ? { id: options.remember.id, ai: confirmAiOf(provider, options.model) }
+      : undefined,
     work: options.work,
   });
 }

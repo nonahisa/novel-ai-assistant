@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { WorkEntry } from "../models/types";
@@ -903,7 +904,7 @@ export async function checkContradictions(
         {
           kind: cloudWhole ? "warning" : undefined,
           detail: [wholeNote, detail].filter(Boolean).join("\n\n"),
-          remember: wholeRead ? undefined : { id: "ai.run.checkContradictions" },
+          remember: wholeRead ? undefined : { id: "ai.run.checkContradictions", ai: confirmAiOf(resolved.provider, resolved.model) },
           // 推し量った作品なら「訊かない」を覚えていても訊く
           work,
         }

@@ -22,7 +22,7 @@ import {
   resolveTimeoutMs,
   type ContextWindowSource,
 } from "../core/modelTuning";
-import { customEndpointNotice } from "../core/endpointNotice";
+import { customEndpointNotice, insecureCloudEndpointReason } from "../core/endpointNotice";
 
 /** APIキーの保存先。settings.json ではなくOSの資格情報ストア */
 const SECRET_KEY = "novelai.openai.apiKey";
@@ -133,11 +133,18 @@ export class OpenAIProvider implements ApiKeyProvider {
     this.modelCache.clear();
   }
 
+  /**
+   * 宛先。**https でなければ送る前に断る**（`insecureCloudEndpointReason`。2026-11-21）。
+   * この PC の中の http は通す（OpenAI 互換の手元のサーバーをここに書く使い方がある）
+   */
   private get endpoint(): string {
-    return vscode.workspace
+    const endpoint = vscode.workspace
       .getConfiguration("novelai")
       .get<string>("openai.endpoint", DEFAULT_ENDPOINT)
       .replace(/\/+$/, "");
+    const refused = insecureCloudEndpointReason(endpoint);
+    if (refused) throw new AIError(refused, "not_running");
+    return endpoint;
   }
 
   /** 1回の呼び出しで待つミリ秒。台帳（AIチューニング）→ 設定 → 既定 の順 */

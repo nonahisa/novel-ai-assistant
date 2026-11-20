@@ -18,7 +18,7 @@ model: sonnet
 
 ## 消してはいけないもの（何があっても）
 
-- 作者の原稿と作品フォルダー（`C:\Users\nonah\Documents\novel\` 以下、`Documents\確認用コピー\` 以下）
+- 作者の原稿と作品フォルダー（`%USERPROFILE%\Documents\novel\` 以下、`Documents\確認用コピー\` 以下）
 - 作品の `設定/`・`.aiwriter/`（許可の印・承認待ち・履歴を含む）
 - 拡張機能の保管庫（`%APPDATA%\Code\User\globalStorage\nonahisa.novel-ai-assistant`）
 - 本体の `node_modules`・`.vscode-test`・`dist`・`release` の**最新の版**
@@ -40,7 +40,7 @@ model: sonnet
    - `Get-CimInstance Win32_Process` のコマンド行で探す：`@vscode/test-web`・`vscode-test-web`（ブラウザ版の試験サーバー）、`.vscode-test\vscode-win32-x64-archive`（統合テストの VS Code）、`dist/mcp-server.mjs`（測定で起こした MCP サーバー）
    - 起動時刻が古く、どの作業にも使われていないものだけを止める。**作者の VS Code・Chrome・Edge の窓、Ollama、LM Studio は止めない**
    - 右の枠のサーバーは本体の道具（`preview_stop`）でしか止められないので、見つけたら本体に頼む
-4. **スクラッチパッドの一時の写し・台**（`C:\Users\nonah\AppData\Local\Temp\claude\C--Users-nonah-Documents-novel-ai-assistant\<セッション>\scratchpad\`）
+4. **スクラッチパッドの一時の写し・台**（`%LOCALAPPDATA%\Temp\claude\C--Users-nonah-Documents-novel-ai-assistant\<セッション>\scratchpad\`）
    - 本体が「測定は記録済み」と言ったものの作品の写し（`*/work/`、`r2/work` など）は消してよい。**測定の結果と台本（`out/`・`*.mjs`・`*.ts`・`*.log`）は、引継ぎ書が場所を指しているので残す**
    - 本文を含む写しは長く置かない（作者の原稿の複製なので）
 5. **Chrome のタブ**（作者の報告、2026-09-25「Chrome上にアップの痕跡がいくつも残ってたことがあった」）

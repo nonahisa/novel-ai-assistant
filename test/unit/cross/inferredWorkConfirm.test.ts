@@ -61,6 +61,12 @@ function captureModal(answer: string | undefined): {
 
 const WORK = { id: "w-1", title: "こちら冒険者ギルド生活保護課!!", folderPath: "/w" };
 
+/**
+ * 送る先のAI。覚え書きは古い形（AIの入っていない文字列）なので、手元の無料のAIなら
+ * これまでどおり素通りする（`rememberedAiConfirm.test.ts`）。ここで見たいのは作品の推し量りだけ
+ */
+const LOCAL_AI = { providerId: "ollama", model: "gemma4:e4b", paid: false };
+
 describe("推し量った作品の印", () => {
   test("印を付けたのは写しで、元の作品には付かない", () => {
     const marked = markInferredWork(WORK, "tree");
@@ -83,7 +89,7 @@ describe("confirmRun：推し量った作品は、覚えていても訊く", () 
     const modal = captureModal("実行");
     try {
       const result = await confirmRun("15 チャンクを処理します。", "実行", {
-        remember: { id: "ai.run.extractCharacters" },
+        remember: { id: "ai.run.extractCharacters", ai: LOCAL_AI },
         work: WORK,
       });
       expect(result).toBe(true);
@@ -99,7 +105,7 @@ describe("confirmRun：推し量った作品は、覚えていても訊く", () 
     const modal = captureModal("実行");
     try {
       const result = await confirmRun("15 チャンクを処理します。", "実行", {
-        remember: { id: "ai.run.extractCharacters" },
+        remember: { id: "ai.run.extractCharacters", ai: LOCAL_AI },
         work: markInferredWork(WORK, "tree"),
       });
       expect(result).toBe(true);
@@ -126,7 +132,7 @@ describe("confirmRun：推し量った作品は、覚えていても訊く", () 
     const modal = captureModal(undefined);
     try {
       const result = await confirmRun("15 チャンクを処理します。", "実行", {
-        remember: { id: "ai.run.extractCharacters" },
+        remember: { id: "ai.run.extractCharacters", ai: LOCAL_AI },
         work: markInferredWork(WORK, "chat"),
       });
       expect(result).toBe(false);
@@ -142,7 +148,7 @@ describe("confirmRun：推し量った作品は、覚えていても訊く", () 
     const modal = captureModal("実行");
     try {
       await confirmRun(`${WORK.title} の誤字脱字を検知します。`, "実行", {
-        remember: { id: "ai.run.checkTypos" },
+        remember: { id: "ai.run.checkTypos", ai: LOCAL_AI },
         work: markInferredWork(WORK, "file"),
       });
       expect(modal.calls).toHaveLength(1);
@@ -158,7 +164,7 @@ describe("confirmRun：推し量った作品は、覚えていても訊く", () 
     const modal = captureModal(undefined);
     try {
       await confirmRun("15 チャンクを処理します。", "実行", {
-        remember: { id: "ai.run.extractCharacters" },
+        remember: { id: "ai.run.extractCharacters", ai: LOCAL_AI },
         work: markInferredWork(WORK, "tree"),
       });
       const [message, , ...buttons] = modal.calls[0];
@@ -297,7 +303,8 @@ describe("作品に対する確認は、作品そのものを渡す", () => {
       .map((match) =>
         callArguments(text, (match.index ?? 0) + match[0].length - 1)
       )
-      .filter((args) => args.includes(`{ id: "${id}" }`));
+      // AIを送る確認は、id のすぐあとに送る先のAI（`ai:`）が続くことがある
+      .filter((args) => args.includes(`{ id: "${id}" }`) || args.includes(`{ id: "${id}", ai:`));
     expect(calls.length, `${file} に ${id} の確認が無い`).toBeGreaterThanOrEqual(1);
     // 同じ id の確認が2か所にあることがある（事実の照合は、取り出しから始まる
     // 回と、判定だけが残っている回の2つ。2026-09-23）。**どれも**作品を渡す

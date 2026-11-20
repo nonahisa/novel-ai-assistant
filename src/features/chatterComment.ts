@@ -1,4 +1,5 @@
 import type { AIProvider } from "../ai/types";
+import { localAiDestinationKnownSafe } from "./aiConnectivity";
 import { logStep, useLogFile } from "../core/logger";
 import { readTextFile } from "../core/textFile";
 import type { WorkEntry } from "../models/types";
@@ -36,6 +37,11 @@ export async function requestChatterComment(
   // **有料のAIでは動かさない。** 独り言の側でも見ているが、ここでも見る
   // ——割当は判断のあとでも変わりうるし、実際に金を使うのはこの行の先である
   if (resolved.provider.isPaid) return undefined;
+
+  // **手元のAIの宛先が PC の外で、まだ［送る］と答えていなければ黙る**（設計書6.78の17）。
+  // 有料でない手元のAIだけが通る道なので、ここで見ないと本文の末尾が黙って外へ出る。
+  // 頼まれていない発言のために真ん中の窓で訊くことはしない（ほかの機能で答えれば話し出す）
+  if (!localAiDestinationKnownSafe(resolved.provider.id)) return undefined;
 
   const content = await readTextFile(manuscriptPath);
   // 競合マーカーの残った本文はAIへ渡さない（実装ルール1）。

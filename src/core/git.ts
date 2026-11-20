@@ -102,6 +102,11 @@ const runGitOnce: GitCommandRunner = (args, cwd, timeoutMs, options) =>
         resolve({ code: 0, stdout: stdout ?? "", stderr: stderr ?? "" });
       }
     );
+    // **書き込みの失敗は拾って捨てる。** git が入力を読み終える前に終わると
+    // （断られた・入力を読まない命令だった）EPIPE が出る。拾わないと捕まえて
+    // いない例外として拡張機能ホストまで上がる（2026-11-21、全件のテストの流しで2件）。
+    // 命令の成否は終了コードのほう（上の callback）が返すので、ここで失うものは無い
+    child.stdin?.on("error", () => undefined);
     // **渡すものが無いときも閉じる。** 開いたままだと、標準入力を読む
     // 命令（`--pathspec-from-file=-`）が入力の終わりを待ち続ける
     child.stdin?.end(options?.input ?? "");

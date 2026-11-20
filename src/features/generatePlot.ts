@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
@@ -110,7 +111,7 @@ export async function generatePlot(
       ]
         .filter(Boolean)
         .join("\n"),
-      remember: { id: "ai.run.generatePlot" },
+      remember: { id: "ai.run.generatePlot", ai: confirmAiOf(resolved.provider, resolved.model) },
       work,
     }
   );

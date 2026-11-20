@@ -632,7 +632,11 @@ describe("人物抽出フロー", () => {
   });
 
   test("別マシンのOllamaには起動ボタンを出さない", async () => {
-    const showWarningMessage = vi.fn<StubMessage>(async () => "中止");
+    // 外のホストへ送ってよいかの確認（2026-11-21。`localAiHostApproval.ts`）には［送る］で答え、
+    // その先の「接続できません」の知らせのボタンを見る
+    const showWarningMessage = vi.fn<StubMessage>(async (message: string) =>
+      message.includes("このパソコンの外") ? "送る" : "中止"
+    );
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,

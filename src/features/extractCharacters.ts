@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import type { FeatureRunResult } from "../core/proofreadingSuite";
@@ -652,7 +653,7 @@ export async function extractCharacters(
       );
     } else {
       const confirmed = await confirmRun(message, "実行", {
-        remember: { id: "ai.run.extractCharacters" },
+        remember: { id: "ai.run.extractCharacters", ai: confirmAiOf(resolved.provider, resolved.model) },
         // **どの作品かを確認画面に出す**（ノートPCの実機、2026-09-23）。
         // 詳細メニューの抽出は作品一覧の選択へ訊かずに進むので、一覧の
         // 行を誤ってクリックしていると、別の作品で確認まで進む

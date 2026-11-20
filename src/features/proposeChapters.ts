@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
 import type { EpisodeFile, WorkEntry } from "../models/types";
@@ -381,7 +382,7 @@ export async function proposeChapters(
     `${work.title} の章立てを提案します（AIの呼び出しは1回）。\n` +
       `モデル: ${resolved.model}${costNotice}${materialNotice}`,
     "実行",
-    { remember: { id: "ai.run.proposeChapters" }, work }
+    { remember: { id: "ai.run.proposeChapters", ai: confirmAiOf(resolved.provider, resolved.model) }, work }
   );
   if (!confirmed) return;
 
@@ -512,7 +513,7 @@ export async function suggestChapterName(
       `対象は ${range.length}話。モデル: ${resolved.model}${costNotice}`,
     "実行",
     // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
-    { remember: { id: "ai.run.proposeChapterName" }, work }
+    { remember: { id: "ai.run.proposeChapterName", ai: confirmAiOf(resolved.provider, resolved.model) }, work }
   );
   if (!confirmed) return false;
 

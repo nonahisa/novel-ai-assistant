@@ -613,6 +613,7 @@ import {
   rememberDecisionMemory,
 } from "./features/decisionMemory";
 import { rememberFetchTroubleMemory } from "./features/fetchTroubleMemory";
+import { rememberLocalAiHostApproval } from "./features/localAiHostApproval";
 import {
   decideEditorProposal,
   loadEditorProposalsForMemo,
@@ -4060,6 +4061,8 @@ export async function activate(
   rememberDecisionMemory(verifiedState(context.globalState));
   // 編集者モードで、「置き場に届きません」を同じ作品で二度知らせないための覚え（設計書5.7.5.4）
   rememberFetchTroubleMemory(verifiedState(context.globalState));
+  // 手元のAIの宛先が PC の外のとき、「送る」と答えたホストの覚え（設計書6.78の17）
+  rememberLocalAiHostApproval(verifiedState(context.globalState));
   context.subscriptions.push(
     // 下段の面。**既定では出さない**（package.json の `when` が設定
     // `novelai.proposals.showInBottomPanel` を見る）。出したときのために登録は残す

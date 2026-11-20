@@ -102,7 +102,11 @@ describe("確認の窓に保存の1行を書き、［実行］で保存する", 
       await expect(
         confirmRun("推敲を行います。", "実行", {
           presave: presave(0),
-          remember: { id: "ai.run.checkProofread" },
+          // 古い形の覚え書きでも、手元の無料のAIなら素通り（rememberedAiConfirm.test.ts）
+          remember: {
+            id: "ai.run.checkProofread",
+            ai: { providerId: "ollama", model: "gemma4:e4b", paid: false },
+          },
         })
       ).resolves.toBe(true);
       expect(picker.shown).toEqual([]);

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 import type { GitCommandResult, GitCommandRunner } from "./git";
+import { githubComRepoRef } from "./githubRepoRef";
 import { isRecord } from "./isRecord";
 
 /**
@@ -759,12 +760,17 @@ export async function rememberGithubCredential(
   cloneUrl: string,
   cwd: string
 ): Promise<boolean> {
-  const target = parseHttpsRemote(cloneUrl);
+  /*
+    **鍵は github.com のものなので、github.com にしか覚えさせない**（セキュリティ点検 2026-11-21）。
+    送り先の URL は同期される作品フォルダーの記録からも来る。ホストを限らないと、
+    書き換えられた記録の指すホストへ、次の取り寄せで鍵が送られる
+  */
+  const target = githubComRepoRef(cloneUrl);
   if (!target) return false;
 
   const input = [
     "protocol=https",
-    `host=${target.host}`,
+    "host=github.com",
     `username=${target.owner}`,
     `password=${token}`,
     "",
@@ -778,6 +784,9 @@ export async function rememberGithubCredential(
       { cwd, timeout: LOCAL_TIMEOUT_MS, windowsHide: true },
       (error) => resolve(!error)
     );
+    // git が先に終わったときの EPIPE を捕まえていない例外にしない（git.ts の runGitOnce と同じ）。
+    // 覚えられたかは終了コードのほうで返す
+    child.stdin?.on("error", () => undefined);
     child.stdin?.end(input);
   });
 }

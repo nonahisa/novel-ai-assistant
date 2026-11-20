@@ -21,7 +21,7 @@ import {
   resolveTimeoutMs,
   type ContextWindowSource,
 } from "../core/modelTuning";
-import { customEndpointNotice } from "../core/endpointNotice";
+import { customEndpointNotice, insecureCloudEndpointReason } from "../core/endpointNotice";
 import {
   asContextOverflowError,
   isChatModel,
@@ -195,11 +195,15 @@ export class SakuraProvider implements ApiKeyProvider {
     this.modelCache.clear();
   }
 
+  /** 宛先。**https でなければ送る前に断る**（`insecureCloudEndpointReason`。2026-11-21） */
   private get endpoint(): string {
-    return vscode.workspace
+    const endpoint = vscode.workspace
       .getConfiguration("novelai")
       .get<string>("sakura.endpoint", DEFAULT_ENDPOINT)
       .replace(/\/+$/, "");
+    const refused = insecureCloudEndpointReason(endpoint);
+    if (refused) throw new AIError(refused, "not_running");
+    return endpoint;
   }
 
   /** 1回の呼び出しで待つミリ秒。台帳（AIチューニング）→ 設定 → 既定 の順 */

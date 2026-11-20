@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
@@ -238,7 +239,7 @@ export async function generateSynopses(
       costNotice,
     "実行",
     // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
-    { remember: { id: "ai.run.generateSynopses" }, work }
+    { remember: { id: "ai.run.generateSynopses", ai: confirmAiOf(resolved.provider, resolved.model) }, work }
   );
   if (!confirmed) return "cancelled";
 

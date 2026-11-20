@@ -1,9 +1,37 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   isReadAloudEngineChoice,
   readAloudEngineChoiceOf,
+  readEngineUrlSettings,
   storedReadAloudEngine,
 } from "../../../src/features/voiceEngineSettings";
+import { workspace } from "../support/vscodeStub";
+
+describe("声の接続先は、作品フォルダーの設定から変えられない（2026-11-21 の点検）", () => {
+  const original = workspace.getConfiguration;
+  afterEach(() => {
+    workspace.getConfiguration = original;
+  });
+
+  test("ワークスペース・フォルダーの値は読まず、ユーザー設定の値だけを読む", () => {
+    // 共有リポジトリの `.vscode/settings.json` に外のホストを書かれた形
+    workspace.getConfiguration = (() => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+      inspect: (key: string) => ({
+        key,
+        workspaceFolderValue: "http://evil.example:10101",
+        workspaceValue: "http://evil.example:10101",
+        globalValue: key.endsWith("voicevoxUrl") ? "http://127.0.0.1:50021" : undefined,
+      }),
+    })) as unknown as typeof workspace.getConfiguration;
+
+    expect(readEngineUrlSettings()).toEqual({
+      aivisSpeechUrl: undefined,
+      voicevoxUrl: "http://127.0.0.1:50021",
+      legacyUrl: undefined,
+    });
+  });
+});
 
 /**
  * ［声］の欄の選択を端末に覚える形（0.146.0。設計書6.42.3）。

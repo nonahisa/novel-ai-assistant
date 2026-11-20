@@ -1,3 +1,4 @@
+import { confirmAiOf } from "../core/confirmMemory";
 import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import { showQuickPickKeepingFocus } from "../views/pickerFocus";
@@ -149,7 +150,7 @@ export async function generateWorkBlurb(
     }),
     "実行",
     // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
-    { remember: { id: "ai.run.generateBlurb" }, work }
+    { remember: { id: "ai.run.generateBlurb", ai: confirmAiOf(resolved.provider, resolved.model) }, work }
   );
   if (!confirmed) return;
   // 確認の画面を出している間に書き始めることがあるので、呼ぶ直前にもう一度見る
@@ -328,7 +329,7 @@ export async function generateCatchphrases(
   const confirmed = await confirmRun(
     `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
     "実行",
-    { remember: { id: "ai.run.generateCatchphrase" }, work }
+    { remember: { id: "ai.run.generateCatchphrase", ai: confirmAiOf(resolved.provider, resolved.model) }, work }
   );
   if (!confirmed) return;
 

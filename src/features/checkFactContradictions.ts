@@ -1,3 +1,4 @@
+import { confirmAiOf, type ConfirmAi } from "../core/confirmMemory";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type { StoryFact } from "../models/storyFact";
@@ -400,6 +401,25 @@ export async function checkFactContradictions(
    * まとめ実行から来たときは、まとめ実行が先に確認している（設計書6.80）
    */
   let confirmedToSend = options.suiteConfirmed === true;
+  /**
+   * この回の確認で同意を取ったAI。まとめ実行から来たときは undefined（まとめ実行が確認した）。
+   *
+   * 最初の確認は「候補は矛盾検知に割り当てたAIが確かめます」と判定まで含めて訊くので、
+   * **判定のAIも「以降は訊かない」の照らし合わせに入れる**（セキュリティ点検「中」、2026-11-21）。
+   * 入れないと、覚えた答えで素通りした回に、判定の割当だけ有料のクラウドへ替えても
+   * 訊かれずに候補が送られる。判定のAIは候補が出てから `ensureConfigured` で引き直すので、
+   * そのとき引いたAIがここに無ければ、判定の前にもう一度訊く
+   */
+  let confirmedAi: readonly ConfirmAi[] | undefined;
+  /** 取り出しのAIと、いま引ける判定のAI（`resolve` は画面を出さない。割当が無ければ取り出しだけ） */
+  const consentAi = (): ConfirmAi[] => {
+    const verifier = registry.resolve("contradiction");
+    const list = [confirmAiOf(provider, model)];
+    if (verifier && (verifier.provider.id !== provider.id || verifier.model !== model)) {
+      list.push(confirmAiOf(verifier.provider, verifier.model));
+    }
+    return list;
+  };
   if (pending.length > 0 || travelPending > 0 || identityPending > 0) {
     // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
     // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
@@ -451,12 +471,14 @@ export async function checkFactContradictions(
       // **飛ばした中身はログへ残す**
       log.step(`矛盾検知（事実の照合）：まとめ実行のため確認を省略\n${detail}`);
     } else {
+      const ai = consentAi();
       const confirmed = await confirmRun(
         `${work.title} の事実を取り出して照合します。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkFactContradictions" }, work }
+        { detail, remember: { id: "ai.run.checkFactContradictions", ai }, work }
       );
       if (!confirmed) return undefined;
+      confirmedAi = ai;
     }
     confirmedToSend = true;
   }
@@ -900,7 +922,15 @@ export async function checkFactContradictions(
           cancelled = true;
           return;
         }
-        if (!confirmedToSend) {
+        // 最初の確認で同意を取ったAIに、いま引いた判定のAIが入っていなければ訊く
+        // （確認のあとで判定の割当が変わった・最初の確認のときは引けなかった）
+        const verifierConsented =
+          confirmedAi === undefined ||
+          confirmedAi.some(
+            (item) =>
+              item.providerId === verifier.provider.id && item.model === verifier.model
+          );
+        if (!confirmedToSend || !verifierConsented) {
           const detail = [
             `本文から事実を取り出す段は処理済みです（${chunks.length}チャンク）。`,
             `見つかった候補 ${unverified}件を、矛盾検知に割り当てたAI` +
@@ -916,7 +946,7 @@ export async function checkFactContradictions(
             `${work.title} の事実の照合で見つかった候補を確かめます。`,
             "実行",
             // 取り出しから始まる回と同じ id——「以降は訊かない」の答えを揃える
-            { detail, remember: { id: "ai.run.checkFactContradictions" }, work }
+            { detail, remember: { id: "ai.run.checkFactContradictions", ai: confirmAiOf(verifier.provider, verifier.model) }, work }
           );
           if (!confirmed) {
             cancelled = true;
@@ -1118,7 +1148,7 @@ export async function checkFactContradictions(
             .filter(Boolean)
             .join("\n"),
           // 取り出しから始まる回と同じ id——「以降は訊かない」の答えを揃える
-          remember: { id: "ai.run.checkFactContradictions" },
+          remember: { id: "ai.run.checkFactContradictions", ai: confirmAiOf(provider, model) },
           work,
         }
       );
@@ -1127,6 +1157,8 @@ export async function checkFactContradictions(
         return undefined;
       }
       confirmedToSend = true;
+      // この確認は読み取りのAIだけを名乗るので、判定のAIは判定の前に訊く
+      confirmedAi = [confirmAiOf(provider, model)];
     }
 
     const feature =
