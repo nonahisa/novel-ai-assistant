@@ -784,6 +784,9 @@ export async function rememberGithubCredential(
       { cwd, timeout: LOCAL_TIMEOUT_MS, windowsHide: true },
       (error) => resolve(!error)
     );
+    // git が先に終わったときの EPIPE を捕まえていない例外にしない（git.ts の runGitOnce と同じ）。
+    // 覚えられたかは終了コードのほうで返す
+    child.stdin?.on("error", () => undefined);
     child.stdin?.end(input);
   });
 }

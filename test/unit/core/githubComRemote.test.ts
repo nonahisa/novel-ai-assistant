@@ -13,7 +13,7 @@ vi.mock("node:child_process", async (importOriginal) => {
       const call = { args, input: "" };
       execCalls.push(call);
       setTimeout(() => callback(null), 0);
-      return { stdin: { end: (text: string) => (call.input = text) } };
+      return { stdin: { on: () => undefined, end: (text: string) => (call.input = text) } };
     },
   };
 });
