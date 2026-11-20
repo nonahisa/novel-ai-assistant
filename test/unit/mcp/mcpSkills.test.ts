@@ -253,6 +253,14 @@ describe("束への配線", () => {
   });
 
   test("MCP の束だけが .md を文字列として読む", () => {
-    expect(esbuild).toMatch(/loader:\s*\{\s*"\.md":\s*"text"\s*\}/);
+    expect(esbuild).toContain('loader: { ".md": "text" }');
+    // 設定そのものを読んで、mcp の束にだけあることを見る（拡張機能の束へ本文を混ぜない）
+    const { bundleOptions } = require(path.join(root, "esbuild.js")) as {
+      bundleOptions: () => Record<string, { loader?: Record<string, string> } | undefined>;
+    };
+    const options = bundleOptions();
+    expect(options.mcp?.loader).toEqual({ ".md": "text" });
+    expect(options.desktop?.loader?.[".md"]).toBeUndefined();
+    expect(options.browser?.loader?.[".md"]).toBeUndefined();
   });
 });
