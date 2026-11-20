@@ -1,8 +1,8 @@
 # この作品を扱うAIへの指示書（統合小説執筆環境）
 
-この指示書は、**作者の作品フォルダーに置かれる**。読んでいるあなた（Claude Code・Codex・Gemini CLI・ローカルLLMなど、どの AI でも同じ）は、この作品について作者から相談を受けたときに、次の決まりで動く。
+この指示書は、**作者の作品フォルダーに置かれるか、統合小説執筆環境の MCP サーバーからスキル `novel-assist` として届く**（中身は同じ）。読んでいるあなた（Claude Code・Codex・Gemini CLI・ローカルLLMなど、どの AI でも同じ）は、この作品について作者から相談を受けたときに、次の決まりで動く。
 
-（雛形の置き場：拡張機能のリポジトリ `docs/skills/novel-assist.md`。作品へは拡張機能が書き出す。設計書6.87.15 柱5・6.87.16）
+（もとの文書：拡張機能のリポジトリの `docs/skills/novel-assist.md`。作品へは拡張機能が書き出し、MCP サーバーは `skills/list`・`skills/get` と `resources/read`〈`skill://novel-assist/SKILL.md`〉で配る）
 
 ## いちばん大事な決まり
 
@@ -45,7 +45,7 @@
 
 **各話あらすじ・作品紹介文も、代わりに作ったときだけ資料へ保存できる。** `novel.validate`（`feature: synopsis`／`blurb`）に `stash: true` を付けて答えを貯め、`novel.synopsis.commit` を呼ぶ。`kind: episodes` は `設定/chapter_synopses.json` へ**まだあらすじの無い話だけ**を足す——既にある話は（作者が書いたものも、拡張機能が作ったものも）変えずに `refused` で返す。`kind: blurb` は `設定/synopsis.md` が**無いときだけ**作り、あれば断って紹介文をそのまま返すので、作者に見せて決めてもらう。答えたあとに本文が変わった話は捨てられる（`discarded`）。これも先に `dryRun: true` で内訳を見るとよい。
 
-本文（`.txt`／`.md`）は**書き換えない**。直したい箇所があれば、道具の指摘として作者に見せる。（例外は下の「出先の原稿箱」「出先の原稿エディター」の取り込みだけで、それも拡張機能のボタンか道具 `outbox.import` が書く。あなたが本文を開いて書くことはない）
+本文（`.txt`／`.md`）は**書き換えない**。直したい箇所があれば、道具の指摘として作者に見せるか、`novel.propose`（`kind: finding`。誤字脱字・推敲・矛盾の指摘）で提案パネルへ置く——道具が検算し直し、通ったものだけが並び、当てるのは作者である。（例外は下の「出先の原稿箱」「出先の原稿エディター」の取り込みだけで、それも拡張機能のボタンか道具 `outbox.import` が書く。あなたが本文を開いて書くことはない）
 
 ## 出先の原稿箱（スマホ・タブレットで書いた分を入れる）
 
@@ -111,16 +111,21 @@
 | したいこと | 道具 |
 |---|---|
 | 作品の構造を知る（話数・字数・相対パス・単話プロットの場所） | `novel.scan` |
-| 作品の資料を読む（設定資料・執筆再開の1枚・伏線・年表・人物相関図・場所の略図） | `novel.read`（`kind`：`settings`／`resume`／`foreshadows`／`chronicle`／`relations`／`locations`。**読むだけ**で、AIは呼ばない。`settings` は `term` で語（名前・別名・名前の片方・読み）から引くと記録の全体、省くと名前と短い紹介の一覧。`recordKind` で種類を絞る。続きを書く相談の前は `resume` が早い） |
+| 作品の資料を読む（設定資料・執筆再開の1枚・伏線・年表・人物相関図・場所の略図・執筆量・投稿用の本文・予定・相談ログ・動作のログ・編集履歴） | `novel.read`（`kind`：`settings`／`resume`／`foreshadows`／`chronicle`／`relations`／`locations`／`writingStats`／`posting`（`site`・`file` が要る。投稿はしない）／`schedule`／`chatLog`／`log`／`editHistory`（この3つは作者が名指しで許したときだけ）。**読むだけ**で、AIは呼ばない。`settings` は `term` で語（名前・別名・名前の片方・読み）から引くと記録の全体、省くと名前と短い紹介の一覧。`recordKind` で種類を絞る。続きを書く相談の前は `resume` が早い） |
 | 誤字脱字／推敲／設定資料の抽出／矛盾／伏線 | `novel.run`（`feature: typo`／`proofread`／`settings`／`contradiction`／`foreshadow`。**`filePath` と `numCtx` が要る**） |
-| 各話あらすじ／プロット逸脱／単話プロット | `novel.run`（`feature: synopsis`／`deviation`／`episodePlot`） |
+| 矛盾（話をまたぐ事実の照合） | `novel.run`（`feature: factContradiction`。作品全体を見るので `filePath` は要らず、**`numCtx` が要る**） |
+| 各話あらすじ／プロット逸脱／単話プロットの緩み／単話プロットと本文の照合 | `novel.run`（`feature: synopsis`／`deviation`／`episodePlot`／`episodePlotContrast`） |
 | 表記ゆれ | `novel.detect`（`feature: notation`）→ 返った組の1件を `novel.run` の `options.group` へ |
 | 名前の衝突／候補 | `novel.detect`（`feature: name`）／`novel.run`（`feature: name`） |
+| AIを使わずに探す：語り手の名前が地の文に三人称で出る所／場所の位置関係の食い違い | `novel.detect`（`feature: proofread`／`contradiction`） |
 | 矛盾の材料だけを見る | `novel.material`（`feature: contradiction`） |
-| 相談／冒頭診断／プロット逆算／章立て／紹介文／キャッチコピー | `novel.run`（`feature: chat`／`opening`／`plotReverse`／`chapter`／`blurb`／`catchphrase`） |
+| 相談／冒頭診断／プロット逆算／章立て／紹介文／キャッチコピー／更新告知文 | `novel.run`（`feature: chat`／`opening`／`plotReverse`／`chapter`／`blurb`／`catchphrase`／`announce`） |
+| 設定資料の1記録を読み直して項目案を出す（AIで再読込） | `novel.run`（`feature: settingsEnrich`、`options.name` か `options.id`）→ 結果の `proposeArgs` を `novel.propose` へ |
 | 相談で、AIが求めたファイルを読んで聞き直す | `novel.run`（`feature: chat`、`runner: ollama`／`sampling`）。**製品と同じく1回だけ**聞き直し、何を求められ・読み・見つからなかったかを `followUp` で返す。`options.overview: true` で作品の全体像も添える（0.85.1） |
 | プロンプトだけ・検算だけ | `novel.prompt`／`novel.validate`（同じ `feature` で） |
 | 設定資料の更新案を置く（人物。能力・組織・場所・世界観は `recordKind` を渡す） | `novel.propose` |
+| 誤字脱字・推敲・矛盾の指摘を提案パネルへ置く | `novel.propose`（`kind: finding`。`feature`・`chunkId`・`response` を渡すと検算し直し、通ったものだけを置く） |
+| 章立て・伏線・予定の段の案を置く | `novel.propose`（`kind: chapter`／`foreshadow`／`schedule`。作者が提案パネルで採ったときだけ台帳へ入る） |
 | 代わりに行った設定資料の抽出を、資料へ保存する | `novel.extract.commit`（`novel.validate` の `stash: true` で貯めた答えを保存。**新しい記録は保存、既存の記録への変更は承認待ち**。`dryRun: true` で内訳だけ） |
 | 代わりに作った各話あらすじ・作品紹介文を、資料へ保存する | `novel.synopsis.commit`（`novel.validate`（`synopsis`／`blurb`）の `stash: true` で貯めた答えを保存。`kind: episodes` は**まだ無い話だけ足す**、`kind: blurb` は `synopsis.md` が**無いときだけ作る**。`dryRun: true` で内訳だけ） |
 | 作者の承認を待っている更新案（提案パネルに並ぶもの）を読む | `pending.list`（**読むだけ**。提案パネルと同じ組み立てで、種類・名前・出どころ・理由・変わる欄の前と後を返す。`status` が `stale` のものは画面に並ばない古い案。`kind`・`source`・`limit` で絞る。0.85.1） |
@@ -133,8 +138,9 @@
 | 拡張機能に登録されている作品の一覧（ID・場所・書庫・二重登録） | `works.list`（**読むだけ**。拡張機能が書いた写しで、`writtenAt` が写しの時刻。作品の中身は読まない。0.85.0） |
 | いま既定のAI・機能ごとのAIの割り当てと、AIチューニングの記録（読める長さ・1000字あたりの秒数・誤字脱字の精度の目安・測った日） | `ai.settings`（**読むだけ**。割り当ては拡張機能が書いた写しで、`writtenAt` が写しの時刻。`assigned` が `null` の機能は既定のAIで動く。記録はこの機械で測った値だけで、`cautions` が古い結果・下限値の印。鍵は返さない） |
 | 初期設定の1段（AIの導入・作品の作成／登録など）を作者の画面に頼む | `setup.request`（**確認が出るだけで、押すのは作者**。手順はプロンプト `setup`。0.82.1） |
-| **作者が VS Code で設定したAI**（クラウドのAIも含む）で機能を走らせてもらう | `run.request`（`feature`：`typo`／`proofread`／`contradiction`／`foreshadow`／`deviation`／`synopsis`。`file` で話を絞る）→ `run.result`（`requestId`）。**作者の画面に毎回確認が出て、押すのは作者**。待たずに戻るので、`run.result` を間を置いて呼ぶ（急かさない）。返事の無い依頼は2件まで、確認は依頼から30分で期限切れ。結果は検算済みで、使ったAI・モデル・プロンプトの版・落とした件数が入る |
+| **作者が VS Code で設定したAI**（クラウドのAIも含む）で機能を走らせてもらう | `run.request`（`feature`：`typo`／`proofread`／`contradiction`／`factContradiction`／`foreshadow`／`deviation`／`synopsis`／`opening`／`settings`（貯めるだけで、保存は `novel.extract.commit`）。`file` で話を絞る。`opening` は第1話の冒頭だけを見るので `file` を使えない）→ `run.result`（`requestId`）。**作者の画面に毎回確認が出て、押すのは作者**。待たずに戻るので、`run.result` を間を置いて呼ぶ（急かさない）。返事の無い依頼は2件まで、確認は依頼から30分で期限切れ。結果は検算済みで、使ったAI・モデル・プロンプトの版・落とした件数が入る |
 | 検索用の索引（ベクトル検索）を作る・更新する（1作品か、登録済みの全作品） | `run.request`（`feature: vectorIndex`。全作品なら `scope: all`。`folder` は全作品のときも1作品を渡す）→ `run.result`。**作者の画面に確認が出て、押すのは作者**（手元の Ollama で無料。作者は途中で止められる）。結果の `findings` が作品ごとの件数・秒・失敗の理由。許可の無い作品は `skipped`。意味検索が「切」なら断られるので、作者に「ベクトル検索準備」を頼む（`setup.request` の `vector`） |
+| 作者のAIがいま動くかを確かめる／印刷用のファイル（PDF）・EPUBを書き出してもらう | `run.request`（`feature: testAI`／`exportPdf`／`exportEpub`）→ `run.result`。**作者の画面に確認が出て、押すのは作者**。`testAI` は本文を送らず、繋がらなかったときも理由と次の操作が結果に入る。書き出しは作品の `.aiwriter/exports/` へ置く |
 | EPUBの表紙を作者の VS Code で焼いて、題名の字が立っているかを測る | `run.request`（`feature: coverBake`、`cover: { side: front／back, vertical: true／false, size: large／medium／small }`）→ `run.result` → `cover.ink`（下の段落） |
 | 質問に近い場面を探す | `novel.search`（`folder`・`query`・`limit` 既定5・上限20。**読むだけ**）。索引があれば `method: vector`、無い・使えないときは語句の一致で探し `method: wordMatch` と `reason` を返す。場面ごとにファイル・話・行・抜粋（200字まで）・近さ。全文が要るなら `novel.material` などで読む。`reason` が「索引が無い」「モデルが違う」「追いついていない」なら、作者に索引づくり（上の行）を提案してよい |
 | 出先の原稿箱・原稿エディターのページを作る（雛形の場所） | `outbox.pack`（**読むだけ**。ページの雛形の場所は `templatePath`、原稿エディターは `editorTemplatePath`。GitHub 経由のページは中身を自分で GitHub から読むので、ほかの欄は補助の道〈保管庫へ送る〉のためのもの：話の題・ハッシュと、提案パネルに並ぶ指摘とその前後の数行〈1指摘あたり2,000字まで〉。本文の全体は返さない。書き先は返事の `nextStep`） |
