@@ -27,21 +27,25 @@ describe("Sakura AI smoke workflow", () => {
     expect(topLevelBlock(workflow, "on")).not.toContain("  schedule:");
   });
 
-  test("checkout v5とsetup-node v5のNode 22だけで実行環境を準備する", () => {
+  test("checkoutとsetup-nodeのNode 22だけで実行環境を準備し、どちらもSHAで固定する", () => {
     expect(topLevelBlock(workflow, "jobs")).toContain(
       "    timeout-minutes: 5"
     );
     const steps = stepBlocks(workflow);
-    const uses = steps.flatMap((step) =>
-      step.flatMap((line) => {
-        // アクションは SHA で固定し、行末に版のコメントを残す（例: @<40桁> # v5.1.0）
-        const match = line.match(
-          /^\s*-\s+uses:\s*(\S+@[0-9a-f]{40})\s+#\s+(v5\.\d+\.\d+)\s*$/
-        );
-        return match ? [match[1].split("@")[0] + "@" + match[2].slice(0, 2)] : [];
-      })
+    const usesLines = steps.flatMap((step) =>
+      step.filter((line) => /^\s*-\s+uses:/.test(line))
     );
-    expect(uses).toEqual(["actions/checkout@v5", "actions/setup-node@v5"]);
+    const uses = usesLines.flatMap((line) => {
+      // アクションは SHA で固定し、行末に版のコメントを残す（例: @<40桁> # v7.0.1）。
+      // 主版は決め打ちしない。Dependabot が版を上げるたびにこのテストが落ちて CI が止まったため（2026-11-21）
+      const match = line.match(
+        /^\s*-\s+uses:\s*([^@\s]+)@[0-9a-f]{40}\s+#\s+v\d+\.\d+\.\d+\s*$/
+      );
+      return match ? [match[1]] : [];
+    });
+    // SHA で固定していない行（タグだけの指定など）があれば、ここで数が合わなくなる
+    expect(uses).toHaveLength(usesLines.length);
+    expect(uses).toEqual(["actions/checkout", "actions/setup-node"]);
 
     const setupNode = steps.find((step) =>
       step.some((line) => line.trim().startsWith("- uses: actions/setup-node@"))
