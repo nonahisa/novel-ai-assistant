@@ -2936,8 +2936,9 @@
     "@vitest/coverage-v8": "^4.1.12",
     "@vscode/test-electron": "3.1.0",
     "@vscode/test-web": "0.0.81",
-    "@vscode/vsce": "4.1.0",
+    "@vscode/vsce": "4.1.1",
     "esbuild": "0.28.1",
+    "ovsx": "1.4.0",
     "typescript": "^5.6.0",
     "vitest": "^4.1.12",
     "zod": "4.6.7"
@@ -2957,6 +2958,7 @@
     "esbuild@0.24.2": true
   },
   "overrides": {
-    "@azure/msal-node": "7.1.1"
+    "@azure/msal-node": "7.1.1",
+    "minimatch": "11.0.9"
   }
 }
