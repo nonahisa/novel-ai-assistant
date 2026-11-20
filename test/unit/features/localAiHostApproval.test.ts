@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { window, workspace } from "../support/vscodeStub";
 import { confirmPaidUsage, confirmProviderReachable } from "../../../src/features/aiConnectivity";
 import { rememberLocalAiHostApproval } from "../../../src/features/localAiHostApproval";
+import type { AIProvider } from "../../../src/ai/types";
 
 /**
  * 手元のAI（Ollama・LM Studio）の宛先がこの PC の外を指すときは、初回だけ確かめて答えを覚える
@@ -65,7 +66,7 @@ const reachable = (id: string) => {
   let tested = 0;
   return {
     provider: {
-      id,
+      id: id as AIProvider["id"],
       testConnection: async () => {
         tested++;
         return { ok: true, message: "つながりました" };
