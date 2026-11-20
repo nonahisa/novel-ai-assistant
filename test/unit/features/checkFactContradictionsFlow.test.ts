@@ -59,6 +59,8 @@ const state = vi.hoisted(() => ({
    * （ollama / test-model）。判定だけを別のAIにした形を作るのに使う
    */
   verifier: null as { id: string; model: string } | null,
+  /** 確認のときに `registry.resolve` が返す判定のAI。undefined なら `verifier` と同じ */
+  resolvedVerifier: undefined as { id: string; model: string } | null | undefined,
   /** 接続確認（`testConnection`）が呼ばれたAIの id の並び */
   reached: [] as string[],
   /** 接続できないことにするAIの id */
@@ -289,6 +291,15 @@ const work: WorkEntry = {
 function registry(): AIRegistry {
   return {
     resolveModelInfo: vi.fn(async () => ({ contextWindow: 32768 })),
+    // 最初の確認で、判定のAIも「以降は訊かない」の照らし合わせに入れるために引く（画面は出さない）。
+    // `resolvedVerifier` を置くと、確認のときと判定のときで割当が食い違った回を写せる
+    resolve: vi.fn((feature: string) => {
+      const verifier =
+        state.resolvedVerifier === undefined ? state.verifier : state.resolvedVerifier;
+      const assigned =
+        feature === "contradiction" && verifier ? verifier : { id: "ollama", model: "test-model" };
+      return { provider: { id: assigned.id, isPaid: false }, model: assigned.model };
+    }),
   } as unknown as AIRegistry;
 }
 
@@ -333,6 +344,7 @@ beforeEach(() => {
   state.extractNeedles = null;
   state.extractCached = false;
   state.verifier = null;
+  state.resolvedVerifier = undefined;
   state.reached = [];
   state.unreachable = [];
   state.realCache = false;
@@ -712,6 +724,45 @@ describe("判定のAIが取り出しと別のとき", () => {
 
     expect(state.reached).toEqual(["gemini"]);
     expect(verifySends()).toHaveLength(1);
+  });
+
+  /*
+    最初の確認は判定まで含めて訊く。そのとき引いた判定のAIと、判定の前に引き直したAIが
+    違えば、判定を送る前にもう一度訊く（セキュリティ点検「中」、2026-11-21。設計書6.89.7）
+  */
+  test("確認のときの判定のAIと、判定で引いたAIが同じなら、確認は1回", async () => {
+    state.verifier = { id: "gemini", model: "judge" };
+
+    await checkFactContradictions(work, registry());
+
+    expect(confirmPicker?.shown).toHaveLength(1);
+    expect(verifySends()).toHaveLength(1);
+  });
+
+  test("判定で引いたAIが、確認で同意を取ったAIに無ければ、判定の前にもう一度訊く", async () => {
+    state.verifier = { id: "gemini", model: "judge" };
+    // 確認のときは判定の割当が取り出しと同じだった（そのあとで替わった）
+    state.resolvedVerifier = null;
+
+    await checkFactContradictions(work, registry());
+
+    expect(confirmPicker?.shown).toHaveLength(2);
+    expect(confirmPicker?.shown[1].text).toContain("gemini / judge");
+    expect(verifySends()).toHaveLength(1);
+  });
+
+  test("判定の前の確認を取りやめれば、判定は送らない", async () => {
+    state.verifier = { id: "gemini", model: "judge" };
+    state.resolvedVerifier = null;
+    let asked = 0;
+    confirmPicker?.restore();
+    confirmPicker = answerConfirms(() => (++asked === 1 ? "実行" : undefined));
+
+    const result = await checkFactContradictions(work, registry());
+
+    expect(asked).toBe(2);
+    expect(verifySends()).toEqual([]);
+    expect(result?.cancelled).toBe(true);
   });
 
   test("判定を全部覚えていれば、判定のAIへ接続を確かめない", async () => {

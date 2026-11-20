@@ -82,7 +82,8 @@ describe("AIを送る確認は、送る先のAIを渡す", () => {
       const call = calls.at(-1);
       expect(call, "確認の呼び出しの中に無い id（どの道で訊いているか分からない）").toBeDefined();
       if (call?.name === "confirmPaidUsage") return;
-      expect(site.after, "id のすぐあとに送る先のAI（ai:）を書く").toMatch(/^, ai: /);
+      // `ai: confirmAiOf(…)` か、先に組んだ並びをそのまま渡す `ai`（事実の照合）
+      expect(site.after, "id のすぐあとに送る先のAI（ai:）を書く").toMatch(/^, ai\b/);
     }
   );
 });
