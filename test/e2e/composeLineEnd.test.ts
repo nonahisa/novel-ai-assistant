@@ -17,6 +17,7 @@ import { caretPosition, composeText, openEpisode, placeCaretAfter, selectText } 
 import { turnVertical, VERTICAL_LAUNCH } from "./support/verticalFace";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
+import { tabIsDirty } from "./support/workbenchDom";
 import { ADD_EMPHASIS_PRESS } from "./support/keys";
 
 const EPISODE = "001_はじまり.md";
@@ -60,9 +61,34 @@ async function fileText(session: E2ESession): Promise<string> {
   return (await readFile(path.join(session.manuscriptFolder, EPISODE), "utf8")).replace(/\r\n/g, "\n");
 }
 
+/**
+ * 保存して、打った字がファイルに入るのを待つ。**未保存の印が付くのを待ってから押し、届かなければ押し直す。**
+ *
+ * ノートPC（NOVELAI_E2E_SLOW_DRAG=1）の全件で、ルビの行の End／Home の件が毎回替わりながら1件ずつ落ちた
+ * （「頭」が15秒入らない。2026-11-21）。End／Home の処理は同期で、画面では字が入っている。打った字が
+ * 拡張機能へ届く前に Ctrl+S が着くと保存が空振りする、composeEmphasisInside.test.ts の saveWithRetry と
+ * 同じ順番の入れ替わりと見て、同じ形で待つ。中身の正しさは呼び手が確かめる
+ */
 async function saveAndWaitFor(session: E2ESession, needle: string): Promise<void> {
-  await session.page.keyboard.press("ControlOrMeta+KeyS");
-  await waitUntil(async () => (await fileText(session)).includes(needle), `「${needle}」がファイルに入る`, 15_000);
+  await waitUntil(async () => tabIsDirty(session.page, EPISODE), `${EPISODE} のタブに未保存の印が付く`, 10_000);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await session.page.keyboard.press("ControlOrMeta+KeyS");
+    try {
+      await waitUntil(
+        async () => (await fileText(session)).includes(needle),
+        `「${needle}」がファイルに入る（${attempt}回目の Ctrl+S）`,
+        5_000
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+      // 印が消えていれば保存は済んでいる（中身が違うだけ）。押し直しても変わらないので落とす
+      if (!(await tabIsDirty(session.page, EPISODE))) break;
+    }
+  }
+  const text = await fileText(session).catch(() => "（読めません）");
+  throw new Error(`${String(lastError)}（ファイル：${JSON.stringify(text)}）`);
 }
 
 /**
