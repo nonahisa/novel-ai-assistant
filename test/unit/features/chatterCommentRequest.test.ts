@@ -6,7 +6,7 @@ import type {
   GenerateResult,
 } from "../../../src/ai/types";
 import type { WorkEntry } from "../../../src/models/types";
-import { workspace } from "../support/vscodeStub";
+import { window, workspace } from "../support/vscodeStub";
 
 /**
  * 本文を読んで言う一言を、AIへ頼みに行くところ（設計書6.21.4、P-34）。
@@ -80,6 +80,37 @@ describe("投げる前に黙る", () => {
 
     expect(provider.calls).toHaveLength(0);
     expect(result).toBeUndefined();
+  });
+
+  test("手元のAIの宛先がこの PC の外で、まだ［送る］と答えていなければ、訊かずに黙る", async () => {
+    // セキュリティ点検 2026-11-21 の続き（設計書6.78の17）。独り言は作者が頼んでいない
+    // 発言なので、真ん中の窓で訊くことはしない。分からなければ本文を送らない
+    const original = workspace.getConfiguration;
+    const warnings: string[] = [];
+    const originalWarning = window.showWarningMessage;
+    workspace.getConfiguration = (() => ({
+      get: <T>(key: string, fallback: T): T =>
+        (key === "ollama.endpoint" ? "http://192.168.1.20:11434" : fallback) as T,
+    })) as unknown as typeof workspace.getConfiguration;
+    window.showWarningMessage = (async (message: string) => {
+      warnings.push(message);
+      return undefined;
+    }) as unknown as typeof window.showWarningMessage;
+    try {
+      const provider = stubProvider();
+      const result = await requestChatterComment(
+        work,
+        manuscriptPath,
+        () => ({ provider, model: "m" }),
+        new AbortController().signal
+      );
+      expect(provider.calls).toHaveLength(0);
+      expect(result).toBeUndefined();
+      expect(warnings).toEqual([]);
+    } finally {
+      workspace.getConfiguration = original;
+      window.showWarningMessage = originalWarning;
+    }
   });
 
   test("書きかけの数行には投げない", async () => {
