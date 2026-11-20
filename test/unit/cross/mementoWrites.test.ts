@@ -187,6 +187,8 @@ const KEYS: KeyRow[] = [
   // 編集者の側で、もう知らせた作者の採否（作者の判断 2026-11-01「届いたら知らせる」）
   { key: "novelai.editorSeenDecisions", literalIn: "features/decisionMemory.ts", writtenIn: "features/decisionMemory.ts", write: /\.update\(STORAGE_KEY\b/g, guarded: true },
   // 編集者の側で、「置き場に届きません」をもう知らせた作品（設計書5.7.5.4。作者の決定 2026-11-07）
+  // 手元のAIの宛先が PC の外のとき、「送る」と答えたホスト（2026-11-21 のセキュリティ点検）
+  { key: "novelai.localAiRemoteHosts", literalIn: "features/localAiHostApproval.ts", writtenIn: "features/localAiHostApproval.ts", write: /\.update\(STORAGE_KEY, next\)/g, guarded: true },
   { key: "novelai.editorUnreachableNotified", literalIn: "features/fetchTroubleMemory.ts", writtenIn: "features/fetchTroubleMemory.ts", write: /\.update\(STORAGE_KEY, ids\)/g, guarded: true },
   { key: "novelai.siteLink.browserGuideShown", literalIn: "features/openSiteLink.ts", writtenIn: "features/openSiteLink.ts", write: /\.update\(SITE_LINK_GUIDE_SHOWN_KEY\b/g, guarded: true },
   { key: "novelai.proofreadingSuite.selection", literalIn: "core/proofreadingSuite.ts", writtenIn: "features/proofreadingSuite.ts", write: /\.update\(\s*PROOFREADING_SUITE_SELECTION_KEY\b/g, guarded: true },
