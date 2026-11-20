@@ -1,3 +1,5 @@
+import { isLoopbackEndpoint } from "./loopbackHost";
+
 /**
  * 既定と違う宛先を使っているときに、接続の知らせへ添える印。
  *
@@ -20,6 +22,32 @@ export function customEndpointNotice(
   if (normalize(configured) === normalize(defaultEndpoint)) return "";
 
   return `（宛先: ${hostOf(configured)}）`;
+}
+
+/**
+ * クラウドのAIへ送ってよい宛先か。だめなら作者に見せる理由、よければ `undefined`
+ * （セキュリティ点検 2026-11-21）。
+ *
+ * **https だけを通す。** 鍵はヘッダーで、本文は要求の中身で送るので、http だと両方が
+ * 平文で回線に出る。**この PC の中（localhost など）の http だけは通す**——OpenAI 互換の
+ * 手元のサーバーを ChatGPT の宛先に書く使い方があり、PC の外へは出ないため。
+ *
+ * 呼ぶのは各プロバイダの「宛先を読む1か所」（接続の確認・モデルの一覧・生成のどれも通る）。
+ * ここで断った失敗は、指定を外して試し直す仕組みにも、失敗の覚えにも入らない（実装ルール5）
+ */
+export function insecureCloudEndpointReason(endpoint: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(endpoint.trim());
+  } catch {
+    return `AIの宛先「${endpoint}」を URL として読めません。https:// で始まる宛先を設定してください。`;
+  }
+  if (url.protocol === "https:") return undefined;
+  if (url.protocol === "http:" && isLoopbackEndpoint(endpoint)) return undefined;
+  return (
+    `AIの宛先「${url.host || endpoint}」が https ではないため、送りませんでした。` +
+    "APIキーと本文が暗号化されずに送られるのを防ぐためです。宛先の設定を https:// で始まるものにしてください。"
+  );
 }
 
 /** 末尾のスラッシュの有無だけの違いは、同じ宛先とみなす */
