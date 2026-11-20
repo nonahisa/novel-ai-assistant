@@ -24,6 +24,21 @@ describe("接頭辞での伏せ字", () => {
     expect(redactSecrets("key=AQ.AbEXAMPLE_not_a_real_key_for_tests_only_0123456789")).toBe("key=AQ.***");
   });
 
+  test("Google のサインインの鍵の形も伏せる（2026-11-21 の点検）", () => {
+    // 作り物。ドライブ同期の失敗がログへ流れ込む形を見る
+    expect(redactSecrets("access=ya29.a0AfB_EXAMPLE-not-real-0123")).toBe("access=ya29.***");
+    expect(redactSecrets("refresh=1//0gEXAMPLE_not_real-0123")).toBe("refresh=1//***");
+    expect(redactSecrets("secret=GOCSPX-EXAMPLE_not_real0123")).toBe("secret=GOCSPX-***");
+  });
+
+  test("Google の形に似ているだけの文は伏せない", () => {
+    // URL の `//` や、数字のあとの `//`（語の途中）は鍵ではない
+    const url = "https://example.com/path";
+    expect(redactSecrets(url)).toBe(url);
+    const comment = "x=11//コメント";
+    expect(redactSecrets(comment)).toBe(comment);
+  });
+
   test("知らない形式は伏せられない（だから値でも消す）", () => {
     // 接頭辞の一覧に無い形式は素通りする。これが接頭辞頼みの限界
     expect(redactSecrets("key=zz9-unknown-format-key")).toContain("zz9-");

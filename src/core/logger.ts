@@ -455,6 +455,11 @@ export const SECRET_PREFIXES = [
   "ghs_",
   "ghr_",
   "github_pat_",
+  // Google のサインイン（ドライブ同期）。アクセストークン・リフレッシュトークン・
+  // クライアントの秘密。失敗の応答や URL ごとログへ流れ込みうる（2026-11-21 の点検）
+  "ya29.",
+  "1//",
+  "GOCSPX-",
 ] as const;
 
 /**
