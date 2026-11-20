@@ -89,6 +89,38 @@ function pickSegments(value: string): [string, string] | undefined {
   return [parts[0], parts[1]];
 }
 
+/**
+ * **github.com の**リポジトリを指す URL か。指していれば持ち主と名前、違えば `undefined`。
+ *
+ * `parseGithubRepoRef` は作者が貼った値を広く受けるため、**ホストを見ない**
+ * （`https://evil.example/a/b` も `a/b` と読む）。GitHub の鍵を渡す先を決めるときは
+ * これを使う——同期される作品フォルダーの記録（`.aiwriter/editing.json`）が
+ * 書き換えられていても、鍵を別のホストへ送らないため（セキュリティ点検 2026-11-21）。
+ *
+ * 受けるのは `https://github.com/owner/repo(.git)` と `git@github.com:owner/repo(.git)` だけ。
+ * 鍵やパスワードの入った URL・`http`・ポート付きは受けない。
+ */
+export function githubComRepoRef(url: string): GithubRepoRef | undefined {
+  const trimmed = url.trim();
+  const ssh = /^git@github\.com:([^/\s]+\/[^/\s]+)$/i.exec(trimmed);
+  if (ssh) return parseGithubRepoRef(ssh[1]);
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== "https:") return undefined;
+  if (parsed.hostname.toLowerCase() !== "github.com") return undefined;
+  if (parsed.username || parsed.password || parsed.port) return undefined;
+  if (parsed.search || parsed.hash) return undefined;
+  // 2段（owner/repo）のほかは受けない。`/tree/main` などの付いた値は取り寄せ先ではない
+  const segments = parsed.pathname.replace(/\/+$/, "").split("/").filter((part) => part.length > 0);
+  if (segments.length !== 2) return undefined;
+  return parseGithubRepoRef(segments.join("/"));
+}
+
 /** 入力欄に出す、直し方の分かる言い方。問題なければ `undefined` */
 export function describeRepoRefProblem(input: string): string | undefined {
   if (input.trim().length === 0) {

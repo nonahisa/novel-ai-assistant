@@ -56,7 +56,7 @@ import {
   inviteCollaborator,
   invitationsUrl,
 } from "../core/githubCollaboration";
-import { parseGithubRepoRef, type GithubRepoRef } from "../core/githubRepoRef";
+import { githubComRepoRef, parseGithubRepoRef, type GithubRepoRef } from "../core/githubRepoRef";
 import { isNestedLocation } from "../core/locationCompare";
 import { resolveManuscriptDir } from "../core/manuscriptFolder";
 import {
@@ -301,7 +301,32 @@ export async function shareWithEditor(
   if (source !== "reuse") {
     destination = await decideDestination(work, works);
     if (!destination) return;
-    if (source === "clone") cloneFrom = site.remoteUrl;
+    if (source === "clone") {
+      /*
+        **github.com と確かめてから使う**（セキュリティ点検 2026-11-21）。この URL は同期される
+        作品フォルダーから読むので、書き換えられていれば GitHub の鍵を別のホストへ送ってしまう。
+        確かめた持ち主と名前から github.com の URL に組み直し、記録の文字列そのものは使わない
+      */
+      const ref = site.remoteUrl ? githubComRepoRef(site.remoteUrl) : undefined;
+      if (!ref) {
+        useLogFile(work.folderPath);
+        logFailure("編集者へ渡す：送り先が github.com のリポジトリではない", {
+          作品: work.title,
+          // 鍵入りの URL でも、ログの書き込みの口（`redactSecrets`）が伏せる
+          送り先: site.remoteUrl ?? "（無し）",
+        });
+        void vscode.window.showErrorMessage(
+          "編集部へ渡すのを止めました。作品フォルダーの .aiwriter/editing.json に書かれた送り先が、github.com のリポジトリではありません。",
+          {
+            modal: true,
+            detail:
+              "GitHub の鍵を別の場所へ送らないため、取り寄せませんでした。心当たりがなければ、そのファイルの remoteUrl を消してから、もう一度渡してください（新しいリポジトリを作ります）。",
+          }
+        );
+        return;
+      }
+      cloneFrom = cloneUrlOf(ref);
+    }
   }
   if (!destination) return;
   const target: string = destination;
@@ -876,15 +901,30 @@ export async function cloneWithCredential(
       detail: `「${destination}」はすでに存在します。中身を失わないため、取り寄せませんでした。`,
     };
   }
+  /*
+    **鍵を渡すなら、送り先は github.com に限る**（セキュリティ点検 2026-11-21）。確かめた持ち主と
+    名前から組み直した URL を使う。鍵を持たない取り寄せ（試験の手元のリポジトリ）はそのまま通す
+  */
+  let source = url;
+  if (token) {
+    const ref = githubComRepoRef(url);
+    if (!ref) {
+      return {
+        ok: false,
+        detail: "送り先が github.com のリポジトリではないため、GitHub の鍵を渡さずに止めました。",
+      };
+    }
+    source = cloneUrlOf(ref);
+  }
   const parent = path.dirname(destination);
   await vscode.workspace.fs.createDirectory(path.toUri(parent));
   // `git credential approve` の作業ディレクトリは、あるフォルダーでなければならない
-  if (token) await rememberGithubCredential(token, url, parent);
+  if (token) await rememberGithubCredential(token, source, parent);
 
-  let result = await cloneRepository(url, destination);
+  let result = await cloneRepository(source, destination);
   // 保管の仕組みが無い環境では、鍵が効かず認証で断られる。gh が使えるなら回す
   if (!result.ok && result.needsAuth && (await ghAvailable())) {
-    result = await cloneWithGh(url, destination);
+    result = await cloneWithGh(source, destination);
   }
   if (result.ok) return { ok: true };
   // **途中のフォルダーを残さない。** 残ると次の回が「すでに存在します」で止まる
