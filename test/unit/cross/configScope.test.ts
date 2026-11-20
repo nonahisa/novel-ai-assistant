@@ -87,6 +87,11 @@ const MACHINE_SCOPED_KEYS = [
   "novelai.ollama.endpoint",
   "novelai.ollama.executablePath",
   "novelai.openai.endpoint",
+  // **読み上げの声の接続先も宛先である**（2026-11-21 の点検）。本文がそのホストへ送られるので、
+  // 共有リポジトリの `.vscode/settings.json` から向け先を変えさせない
+  "novelai.readAloud.aivisSpeechUrl",
+  "novelai.readAloud.voiceEngineUrl",
+  "novelai.readAloud.voicevoxUrl",
   "novelai.sakura.endpoint",
 ];
 
@@ -131,8 +136,9 @@ describe("接続先・実行ファイルの設定スコープ", () => {
     // 名前に endpoint / path が入るものは、まず宛先か実行ファイルである。
     // 一覧にはそれ以外（`novelai.mode`）も入るので、名前で拾えるものが
     // **すべて一覧に含まれているか**を見る
+    // `Url` で終わる名前も宛先（読み上げの声の接続先で抜けていた。2026-11-21）
     const suspects = Object.keys(properties).filter((key) =>
-      /endpoint|path/i.test(key)
+      /endpoint|path|url$/i.test(key)
     );
 
     expect(suspects.length).toBeGreaterThan(0);
