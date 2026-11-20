@@ -344,12 +344,15 @@ export interface OutboxImportResult extends OutboxImportOutcome {
  * VS Code の外から行う（ハッシュ照合 → 回復先へコピー → 元を消す → 新しく作る）
  */
 export function nodeOutboxIo(folder: string): OutboxImportIo {
-  const root = nodePath.resolve(folder);
+  // **読み書きは全部 `resolveInsideFolder` を通す。** 相対パスは取り込む記録から来るので、
+  // `..` を含む値で作品フォルダーの外を読み・足せてしまう（セキュリティ点検 2026-11-21）
   const absolute = (relative: string) => resolveInsideFolder(folder, relative);
   return {
     async readText(relative) {
+      // 外を指すなら断る。try の中で確かめると、断りが「無いファイル」に化ける
+      const target = absolute(relative);
       try {
-        return fs.readFileSync(nodePath.join(root, relative), "utf8");
+        return fs.readFileSync(target, "utf8");
       } catch {
         return undefined;
       }
@@ -371,7 +374,7 @@ export function nodeOutboxIo(folder: string): OutboxImportIo {
     },
     async appendJsonLines(relative, values) {
       if (values.length === 0) return;
-      const target = nodePath.join(root, relative);
+      const target = absolute(relative);
       fs.mkdirSync(nodePath.dirname(target), { recursive: true });
       let existing: Uint8Array = new Uint8Array();
       try {
