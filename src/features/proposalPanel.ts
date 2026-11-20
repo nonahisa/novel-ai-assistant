@@ -83,7 +83,7 @@ import {
 // **型だけを取る。** `AIRegistry` の実体は呼び出し側（extension.ts）が
 // 作ったものを受け取るので、ここで束に取り込む必要がない
 import type { AIRegistry } from "../ai/registry";
-import { confirmPaidUsage } from "./aiConnectivity";
+import { confirmLocalAiDestination, confirmPaidUsage } from "./aiConnectivity";
 import {
   recheckProposal,
   type RecheckItem,
@@ -4246,6 +4246,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       );
       return;
     }
+
+    // **手元のAIの宛先が PC の外なら、送る前に確かめる**（設計書6.78の17）。料金の確認は
+    // 有料のAIのときだけなので、そちらに任せると無料の手元のAIは素通りする
+    if (!(await confirmLocalAiDestination(resolved.provider.id))) return;
 
     // **プロバイダとモデルの組で覚える。** 同じモデル名を持つ別のAIへ
     // 割当が変わったとき、モデル名だけでは切り替わりを見落とす

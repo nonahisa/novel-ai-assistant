@@ -10,7 +10,11 @@ import { paidUsageNotice } from "../core/paidUsageNotice";
 import { confirmAiOf } from "../core/confirmMemory";
 import { withProgress } from "../views/progress";
 import { confirmRun, notifyDone, type ConfirmWork } from "../views/notify";
-import { confirmLocalAiHost } from "./localAiHostApproval";
+import {
+  confirmLocalAiHost,
+  isLocalAiHostApproved,
+  type LocalAiTarget,
+} from "./localAiHostApproval";
 
 /**
  * AIへの疎通確認と、手元で動くAI（Ollama・LM Studio）の起動導線。
@@ -144,24 +148,41 @@ async function localStartLabel(
 
 /**
  * 手元のAI（Ollama・LM Studio）の宛先が PC の外なら、初回だけ確かめる
- * （`features/localAiHostApproval.ts`。設計書6.78の17）。ほかのプロバイダは素通り
+ * （`features/localAiHostApproval.ts`。設計書6.78の17）。ほかのプロバイダは素通り。
+ *
+ * 疎通確認も料金の確認も通らずに本文を送る入口（提案パネルの再チェック）が直に呼ぶので外へ出す
  */
-async function confirmLocalAiDestination(providerId: string): Promise<boolean> {
+export async function confirmLocalAiDestination(providerId: string): Promise<boolean> {
+  const target = localAiTargetOf(providerId);
+  return target ? confirmLocalAiHost(target) : true;
+}
+
+/**
+ * 訊かずに、送ってよいと分かっているか（この PC の中か、前に［送る］と答えたホスト）。
+ * **作者が頼んでいない処理**（独り言）が使う——頼まれていないのに真ん中の窓は出せないので、
+ * 分からなければ送らずに黙る。ほかのプロバイダは true
+ */
+export function localAiDestinationKnownSafe(providerId: string): boolean {
+  const target = localAiTargetOf(providerId);
+  return target ? isLocalAiHostApproved(target) : true;
+}
+
+function localAiTargetOf(providerId: string): LocalAiTarget | undefined {
   if (providerId === "ollama") {
-    return confirmLocalAiHost({
+    return {
       displayName: "Ollama",
       settingKey: "novelai.ollama.endpoint",
       endpoint: ollamaEndpoint(),
-    });
+    };
   }
   if (providerId === "lmstudio") {
-    return confirmLocalAiHost({
+    return {
       displayName: "LM Studio",
       settingKey: "novelai.lmstudio.endpoint",
       endpoint: lmstudioEndpoint(),
-    });
+    };
   }
-  return true;
+  return undefined;
 }
 
 export function ollamaEndpoint(): string {

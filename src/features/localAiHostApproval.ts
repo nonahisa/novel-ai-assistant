@@ -40,12 +40,21 @@ export interface LocalAiTarget {
 
 const SEND = "送る";
 
+/** 訊かずに分かる範囲で、送ってよいか（この PC の中か、前に［送る］と答えたホスト） */
+export function isLocalAiHostApproved(target: LocalAiTarget): boolean {
+  if (isLoopbackEndpoint(target.endpoint)) return true;
+  return readApproved().includes(hostKeyOf(target));
+}
+
+function hostKeyOf(target: LocalAiTarget): string {
+  return endpointHostKey(target.endpoint) ?? target.endpoint.trim();
+}
+
 /** 送ってよいなら true。この PC の中なら訊かない */
 export async function confirmLocalAiHost(target: LocalAiTarget): Promise<boolean> {
-  if (isLoopbackEndpoint(target.endpoint)) return true;
-  const key = endpointHostKey(target.endpoint) ?? target.endpoint.trim();
+  if (isLocalAiHostApproved(target)) return true;
+  const key = hostKeyOf(target);
   const approved = readApproved();
-  if (approved.includes(key)) return true;
 
   const picked = await vscode.window.showWarningMessage(
     `${target.displayName}の接続先が、このパソコンの外（${key}）を指しています。本文をそこへ送りますか？`,
