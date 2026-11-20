@@ -10,21 +10,23 @@
  *
  * ## 作者の本物のブラウザは開かせない
  *
- * 製品は `core/openExternalFile.ts` で、拡張機能ホストから `cmd /c start`（Mac は `open`）を起こす。
- * **起こす VS Code の PATH を空のフォルダーにする**（`LaunchOptions.env`）と、`spawn("cmd")` は
+ * 製品は `core/openExternalFile.ts` で、拡張機能ホストから `explorer.exe`（Mac は `open`。
+ * 1.0.34 までは `cmd /c start`）を名前で起こす。
+ * **起こす VS Code の PATH を空のフォルダーにする**（`LaunchOptions.env`）と、`spawn("explorer.exe")` は
  * ENOENT になり、製品は `vscode.env.openExternal` へ落ちる。そちらは本体側の `shell.openExternal`
  * （と念のため `shell.openPath`）を、開く先を控えるだけの関数に替えて止める（`postingKitSteps` と同じ道）。
- * **押す前の安全弁**：テストの側で、同じ作りの環境（PATH が空のフォルダー）では `cmd` が ENOENT になる
- * ことを確かめる。ENOENT にならなければ、押さずに落とす（本物のブラウザが開くため）。
+ * **押す前の安全弁**：テストの側で、同じ作りの環境（PATH が空のフォルダー）では `explorer.exe` が
+ * 見つからない（Mac は `open` が ENOENT になる）ことを確かめる。見つかれば、押さずに落とす（本物のブラウザが開くため）。
  * 製品にテスト専用の口は足していない。
  * Mac の VS Code は起動時にログインシェルの PATH を読み直すので、`env` を渡すと起こす部品が
  * `--force-disable-user-env` を付ける（`support/vscodeApp.ts`。付けないと Mac では本物のブラウザが開いた）。
  *
  * **見ていないこと**：ブラウザでの見た目・印刷（PDF にする所）。「開いた」のは、開く先へ渡したことまで
  * （「ブラウザを開けませんでした」ではなく「ブラウザで開きました」の知らせが出ること）。
- * 「OS の `start` で本当に開くこと」は見ていない（開かせないため）。**AI は呼ばない。**
+ * 「OS の `explorer.exe` で本当に開くこと」は見ていない（開かせないため）。**AI は呼ばない。**
  */
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -67,18 +69,30 @@ const COLLECTED = [
   "",
 ].join("\n");
 
-/** 「cmd」（Mac は open）が PATH の空のフォルダーでは見つからないことを、押す前に確かめる安全弁 */
+/**
+ * 「explorer.exe」（Mac は open）が PATH の空のフォルダーでは見つからないことを、押す前に確かめる安全弁。
+ *
+ * **Windows は起こさずに探す**（2026-11-21 に製品が `cmd` から `explorer.exe` へ替わった）。
+ * explorer.exe は引数なしで起こすとフォルダーの窓を開くので、確かめるだけで作者の画面に窓が出る。
+ * Node は名前で起こすとき、作業フォルダー → PATH の順に探す（`cmd` のときと同じ）ので、
+ * その2か所に無いことを見る。
+ */
 async function assertOpenCommandCannotRun(
   env: Record<string, string>,
   cwd: string,
 ): Promise<void> {
-  const file =
-    process.platform === "win32"
-      ? "cmd"
-      : process.platform === "darwin"
-        ? "open"
-        : "xdg-open";
-  const args = process.platform === "win32" ? ["/c", "echo", "x"] : [];
+  if (process.platform === "win32") {
+    const pathValue = env.Path ?? env.PATH ?? "";
+    const places = [cwd, ...pathValue.split(";").filter((dir) => dir.length > 0)];
+    const found = places.filter((dir) => existsSync(path.join(dir, "explorer.exe")));
+    expect(
+      found,
+      `PATH を空にしても「explorer.exe」が見つかります（${found.join("、")}）。本物のブラウザが開くので、押さずに止めます`,
+    ).toEqual([]);
+    return;
+  }
+  const file = process.platform === "darwin" ? "open" : "xdg-open";
+  const args: string[] = [];
   const outcome = await new Promise<string>((resolve) => {
     try {
       const child = spawn(file, args, {
@@ -199,6 +213,8 @@ test("［出力］→「PDF（この話）」は、紙を訊かずに開いて�
             await session.app.evaluate(({ app }) => app.getPath("exe")),
           ),
         );
+        // 製品は Windows で作業フォルダーをホームにして起こす（`core/openExternalFile.ts`）
+        await assertOpenCommandCannotRun(full, os.homedir());
         await blockBrowser(session);
 
         /* ── 1話だけのファイル ── */
