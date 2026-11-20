@@ -31,7 +31,7 @@ import {
   asciiRepositoryName,
   validateRepositoryUrl,
 } from "../core/gitSetup";
-import { logFailure, logStep } from "../core/logger";
+import { logFailure, logStep, redactSecrets } from "../core/logger";
 import { useSyncLog } from "./syncLog";
 import { noticeMissingWorks } from "./missingWorksNotice";
 import { findMissingWorks } from "../core/workFolderPresence";
@@ -811,13 +811,18 @@ function reportFailure(context: string, detail: string | undefined): void {
   // ログには生の理由をそのまま残す。言い換えたものだけでは原因を追えない
   logFailure(context, { 内容: detail ?? "（詳細なし）" });
 
+  void warnWithLog(gitFailureNoticeText(context, detail));
+}
+
+/** 失敗の知らせの文。外へ出してあるのは試験のため */
+export function gitFailureNoticeText(context: string, detail: string | undefined): string {
   // つながらないだけなのか、設定が違うのかで、作者が次にやることが変わる
   const translated = describeNetworkFailure(detail);
-  void warnWithLog(
-    translated
-      ? `${context}に失敗しました。\n${translated}`
-      : `${context}に失敗しました。${detail ? `\n${detail.slice(0, 200)}` : ""}`
-  );
+  if (translated) return `${context}に失敗しました。\n${translated}`;
+  // **伏せてから切る。** git の失敗文には送り先の URL が入り、古い `.git/config` だと
+  // 鍵が埋まっている。切ってから伏せると、境目で鍵の形が崩れてすり抜ける（設計書6.78）
+  const shown = detail ? redactSecrets(detail).slice(0, 200) : "";
+  return `${context}に失敗しました。${shown ? `\n${shown}` : ""}`;
 }
 
 /** 現在のブランチ名を知りたい呼び出し元のために公開する */

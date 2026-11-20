@@ -13,7 +13,7 @@ import {
   type CommitEntry,
   type RestorePlan,
 } from "../core/gitHistory";
-import { logFailure, useLogFile } from "../core/logger";
+import { logFailure, redactSecrets, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
 import { cancelItem } from "../views/dialogs";
 import { whenNoticePicked } from "../views/notify";
@@ -77,7 +77,8 @@ export async function restoreFromHistory(
     return;
   }
   if (status.kind === "failed") {
-    vscode.window.showErrorMessage(`履歴を読めませんでした: ${status.detail}`);
+    // git の生の失敗文には送り先の URL が入る。鍵入りの URL が残っていても知らせへ出さない
+    vscode.window.showErrorMessage(`履歴を読めませんでした: ${redactSecrets(status.detail)}`);
     return;
   }
 
