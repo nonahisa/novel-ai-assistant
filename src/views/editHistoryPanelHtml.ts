@@ -179,9 +179,18 @@ function visibleKinds() {
     .map((box) => box.dataset.kind);
 }
 
+// 引用符も逃がす。履歴は同期され編集部の写しからも届くので、属性の中に入っても抜けないように
 function escapeHtml(text) {
   return String(text ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// actor は class 属性と表の引きに使うので、決まった値だけを通す。
+// LABELS[x] の真偽で見ると、constructor のような名前が通ってしまう
+const ACTOR_KIND_LIST = ${JSON.stringify(ACTOR_KINDS)};
+function isKnownActor(value) {
+  return ACTOR_KIND_LIST.includes(value);
 }
 
 /** 時刻は読める形にする。読めない値はそのまま出す（捨てない） */
@@ -196,13 +205,13 @@ function formatTime(value) {
 
 function render() {
   const kinds = visibleKinds();
-  const shown = entries.filter((entry) => kinds.includes(entry.actor));
+  const shown = entries.filter((entry) => isKnownActor(entry.actor) && kinds.includes(entry.actor));
   if (shown.length === 0) {
     listEl.innerHTML = '<p class="empty">まだ記録がありません。</p>';
     return;
   }
   listEl.innerHTML = shown.map((entry) =>
-    '<div class="entry ' + entry.actor + '">' +
+    '<div class="entry ' + escapeHtml(entry.actor) + '">' +
       '<div class="head">' +
         '<span class="who">' + MARKS[entry.actor] + ' ' + LABELS[entry.actor] + '</span>' +
         (entry.actorName ? '<span class="name">' + escapeHtml(entry.actorName) + '</span>' : '') +
