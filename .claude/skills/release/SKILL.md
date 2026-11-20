@@ -53,7 +53,7 @@ node scripts/buildUpdateManifest.mjs --notes <ノート>   # 更新の札 releas
 gh release create v<版> "release/novel-ai-assistant-<版>.vsix" release/update.json --target <完全なコミット番号> --title "v<版>——<一言>" --notes-file <ノート>
 ```
 
-- **更新の札 `update.json` を毎回添える**（設計書5.11・`docs/更新の仕組み_共通.md`）。ノートを書き終えてから作る（ノートの `SHA-256：` と VSIX が違えば止まる）。出したあとに作り直したら `gh release upload v<版> release/update.json --clobber`
+- **更新の札 `update.json` を毎回添える**（設計書5.11・`docs/更新の仕組み_共通.md`）。ノートを書き終えてから作る（ノートの `SHA-256：` と VSIX が違えば止まる）。**Release は出したあとで添付を足せない**（リポジトリが変えられない Release の設定。2026-11-20、v1.0.33 へ後から添えようとして HTTP 422 で断られた）ので、`gh release create` のときに必ず一緒に添える。添え忘れたら、その版には札が無いままにして、次の版で添える
 - **`--target` には完全なコミット番号（40桁。`git rev-parse HEAD`）を渡す。** 短い番号は「target_commitish is invalid」で断られた（2026-10-12）
 
 - 機能の種から入れた機能があれば、CHANGELOG と同じく、同意した参加者の名前を載せる（スキル `docs-sync` の「機能の種から入れた機能には、議論の主な参加者の名前を載せる」）
