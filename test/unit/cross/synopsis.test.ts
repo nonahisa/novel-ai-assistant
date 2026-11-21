@@ -14,6 +14,7 @@ import {
 import {
   buildSynopsisPrompt,
   synopsisPromptVersion,
+  synopsisVersionIsCurrent,
   SYNOPSIS_VERSION,
 } from "../../../src/prompts/synopsis";
 import { buildReaderTypePrompt } from "../../../src/prompts/readerTarget";
@@ -446,6 +447,60 @@ describe("あらすじのプロンプト", () => {
         // そちらのプロンプトに読者像は入らない。混ぜると診断のたびに全話を作り直す
         expect(versionFor(false, profile)).toBe(SYNOPSIS_VERSION);
         expect(versionFor(false, other)).toBe(SYNOPSIS_VERSION);
+      });
+
+      /*
+        **サブタイトル案を選んで話に名前が付いても、あらすじを作り直さない**（2026-11-21、
+        モバイル版の気づき）。案を出した回の版は読者の印つきで控えてあり、名前が付くと
+        その話は「サブタイトルの要らない話」になって、印の無い版と比べられていた。
+        あらすじそのものは同じなので、作り直すと料金だけがかかる
+      */
+      describe("控えた版が今も通るか", () => {
+        test("名前が付いた話は、案を出した回の版（読者の印つき）のままで通る", () => {
+          const stored = versionFor(true, profile);
+          expect(
+            synopsisVersionIsCurrent(stored, {
+              needsSubtitle: false,
+              readerTypeMark: readerTypeCacheMark(profile),
+            })
+          ).toBe(true);
+          // 名前が付いたあとで診断をやり直しても、題を頼まない話は作り直さない
+          expect(
+            synopsisVersionIsCurrent(stored, {
+              needsSubtitle: false,
+              readerTypeMark: readerTypeCacheMark(other),
+            })
+          ).toBe(true);
+        });
+
+        test("プロンプトの版が上がっていれば、名前が付いた話も作り直す", () => {
+          expect(
+            synopsisVersionIsCurrent(`0.9|reader:${readerTypeCacheMark(profile)}`, {
+              needsSubtitle: false,
+              readerTypeMark: readerTypeCacheMark(profile),
+            })
+          ).toBe(false);
+          expect(
+            synopsisVersionIsCurrent("0.9", { needsSubtitle: false, readerTypeMark: "none" })
+          ).toBe(false);
+          expect(
+            synopsisVersionIsCurrent(null, { needsSubtitle: false, readerTypeMark: "none" })
+          ).toBe(false);
+        });
+
+        test("題を頼む話は、読者の印まで合っているときだけ通る（今までどおり）", () => {
+          const mark = readerTypeCacheMark(profile);
+          expect(
+            synopsisVersionIsCurrent(versionFor(true, profile), { needsSubtitle: true, readerTypeMark: mark })
+          ).toBe(true);
+          expect(
+            synopsisVersionIsCurrent(versionFor(true, other), { needsSubtitle: true, readerTypeMark: mark })
+          ).toBe(false);
+          // 名前を外して題が要る話に戻ったら、案を出し直す
+          expect(
+            synopsisVersionIsCurrent(SYNOPSIS_VERSION, { needsSubtitle: true, readerTypeMark: mark })
+          ).toBe(false);
+        });
       });
     });
   });
