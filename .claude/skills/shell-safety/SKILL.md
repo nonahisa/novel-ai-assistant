@@ -15,6 +15,7 @@ description: node -e・printf・sed・perl・heredoc・Edit/Write で文字列�
 | 複数行の文章をファイルへ書く | `Write`。**Windows のパスや `\` を含む内容は必ず `Write` で書く**（2026-09-19、`<<'EOF'` でも `\\` が `\` になった）。**`node -e "..."` の中に heredoc の文字列を渡す**のもだめ |
 | 既存ファイルの一部を置き換える | `Edit`（Read してから）。日本語ファイルに `sed -i`・`perl -0pi` を使わない。**Python・node の置換台本も避ける**（2026-11-06、製品のセッション4つが揃って報告：ヒアドキュメントで `"\n"` が本当の改行になる・テンプレート文字列の `\d` が `d` になる・円記号やパスが崩れる・`\n` を含む文が合わず二度手間）。どうしても台本にするなら、台本をファイルに書いて走らせる |
 | 制御文字が要る | `String.fromCharCode(0)` のように**コードで作る**。`\u0000` を書くと生の NUL が入る |
+| PowerShell 5.1 で .ps1 の台本を走らせる | **台本の中の文字列は英字だけにする**（BOM なしの UTF-8 の日本語は ANSI として読まれ、引用符が壊れて構文から止まる。2026-11-21、配布の台本が何も走らずに止まった）。日本語が要るなら BOM 付きで書く。`$ErrorActionPreference = 'Stop'` は git などの標準エラーの出力で止まるので、外のコマンドを呼ぶ台本では `Continue` にして `$LASTEXITCODE` を見る |
 | PowerShell でファイルを書く | PowerShell 5.1 の `Set-Content -Encoding utf8` は BOM が付く（付けないと既定が ANSI）。**文書は `Write` か node で書く**（`WriteAllText` は末尾の節） |
 
 ## 壊した記録
