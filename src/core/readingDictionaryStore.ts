@@ -4,12 +4,21 @@ import type { WorkEntry } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
 import { hashText } from "./hash";
 import { isNotFound } from "./fileRead";
-import { workPaths } from "./workRegistry";
 import {
   parseReadingDictionary,
   readingDictionaryFileName,
   type ReadingDictionaryFile,
 } from "./readingDictionary";
+import {
+  episodeRelativePath,
+  planReadingDictionaryMove,
+  readingDictionaryFolder,
+  readingDictionaryMoveConflictMessage,
+  readingDictionaryPath,
+} from "./readingDictionaryPlace";
+
+// 置き場の決まりは readingDictionaryPlace.ts（vscode を読まない）。使う側の import を変えずに済むよう、ここからも出す
+export { episodeRelativePath, readingDictionaryPath };
 
 /**
  * 読みの辞書の置き場（`.aiwriter/readings/<話>.json`。設計書6.42.1）。
@@ -28,8 +37,6 @@ import {
  * （同期で別の機械の直しが入っていたら、それを押し流さない）。
  */
 
-const READINGS_DIRECTORY = "readings";
-
 /** 読んだ辞書と、照合に使う読んだ時点のハッシュ（無ければ undefined） */
 export interface LoadedReadingDictionary {
   file: ReadingDictionaryFile;
@@ -43,19 +50,6 @@ export class ReadingDictionaryChangedError extends Error {
       "読みの辞書が、読み込んだあとに別の所で書き換えられました。開き直してからもう一度お試しください。"
     );
   }
-}
-
-/** その話の、作品フォルダーからの相対パス（`/` 区切り） */
-export function episodeRelativePath(work: WorkEntry, episodePath: string): string {
-  return path.relative(work.folderPath, episodePath).replace(/\\/g, "/");
-}
-
-export function readingDictionaryPath(work: WorkEntry, episodePath: string): string {
-  return path.join(
-    workPaths(work).aiwriter,
-    READINGS_DIRECTORY,
-    readingDictionaryFileName(episodeRelativePath(work, episodePath))
-  );
 }
 
 /**
@@ -125,17 +119,14 @@ export async function moveReadingDictionary(
   fromEpisodePath: string,
   toEpisodePath: string
 ): Promise<boolean> {
-  const from = readingDictionaryPath(work, fromEpisodePath);
-  const to = readingDictionaryPath(work, toEpisodePath);
-  if (path.normalizeForComparison(from) === path.normalizeForComparison(to)) return false;
+  const plan = planReadingDictionaryMove(work, fromEpisodePath, toEpisodePath);
+  if (!plan) return false;
+  const { from, to, episode } = plan;
   if ((await readTextOrUndefined(from)) === undefined) return false;
   // 先に読めるかを確かめる（壊れた辞書を動かしてから止まると、どこにあるか分からなくなる）
   await loadReadingDictionary(work, fromEpisodePath);
   if ((await readTextOrUndefined(to)) !== undefined) {
-    throw new Error(
-      `「${path.basename(toEpisodePath)}」にはもう読みの辞書があるので、` +
-        `「${path.basename(fromEpisodePath)}」の辞書を付け替えませんでした（どちらも残しています）。`
-    );
+    throw new Error(readingDictionaryMoveConflictMessage(fromEpisodePath, toEpisodePath));
   }
   await vscode.workspace.fs.rename(path.toUri(from), path.toUri(to), { overwrite: false });
   /*
@@ -143,7 +134,6 @@ export async function moveReadingDictionary(
     読み上げは置き場の名前で引くので効く（`episode` は後から辿るための控え）
   */
   const moved = await loadReadingDictionary(work, toEpisodePath);
-  const episode = episodeRelativePath(work, toEpisodePath);
   if (moved.file.episode !== episode) {
     await saveReadingDictionary(work, toEpisodePath, { ...moved.file, episode }, moved.hash);
   }
@@ -190,7 +180,7 @@ export async function setAsideReadingDictionary(
  * 引くので、合わないものは指し先を確かめられない）。読めない辞書は飛ばす（直さない）。
  */
 export async function listReadingDictionaryEpisodes(work: WorkEntry): Promise<string[]> {
-  const folder = path.join(workPaths(work).aiwriter, READINGS_DIRECTORY);
+  const folder = readingDictionaryFolder(work);
   let entries: [string, vscode.FileType][];
   try {
     entries = await vscode.workspace.fs.readDirectory(path.toUri(folder));
