@@ -331,13 +331,36 @@ function detectKanaKanjiVariants(
 
     groups.push({
       kind: "kana_kanji",
-      key: `kana_kanji:${pair.kanji}|${pair.kana}`,
+      key: kanaKanjiKey(pair),
       label: forms.map((form) => form.surface).join(" ↔ "),
       forms,
     });
   }
 
   return groups;
+}
+
+function kanaKanjiKey(pair: KanaKanjiPair): string {
+  return `kana_kanji:${pair.kanji}|${pair.kana}`;
+}
+
+/**
+ * 揃える先に選んだ表記を、IME へ渡す「表記と読み」にする（設計書6.8.9・6.13.7）。
+ *
+ * **かな⇔漢字の組だけ。** 読みが確かに分かるのはこの組だけで、かな側の表記が読みになる。
+ * 送り仮名の組は漢字の読みを持っていない（推し量らない）。固有名詞は設定資料の語として
+ * もう辞書に入っており、数字の幅は語ではない。
+ *
+ * @returns 渡せないとき（組の種類・組に無い表記）は undefined
+ */
+export function notationChoiceOf(
+  group: Pick<NotationVariantGroup, "kind" | "key">,
+  surface: string
+): { surface: string; reading: string } | undefined {
+  if (group.kind !== "kana_kanji") return undefined;
+  const pair = KANA_KANJI_PAIRS.find((candidate) => kanaKanjiKey(candidate) === group.key);
+  if (!pair || (surface !== pair.kanji && surface !== pair.kana)) return undefined;
+  return { surface, reading: pair.kana };
 }
 
 /**
