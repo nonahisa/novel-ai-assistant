@@ -56,6 +56,31 @@ export function synopsisPromptVersion(input: {
 }
 
 /**
+ * 控えてあるあらすじの版が、今も作り直さずに済むか（2026-11-21）。
+ *
+ * **題を頼む話**は今までどおり、読者の印まで含めて一致したときだけ通す。
+ *
+ * **題を頼まない話**は、印を外したプロンプトの版だけを見る。サブタイトル案を選んで
+ * 話に名前が付くと、その話は題を頼まない話になる。控えた版は案を出した回の
+ * `2.2|reader:…` のままなので、版をそのまま比べると「版が違う」と読んで
+ * 作り直し、あらすじは同じなのに料金だけがかかっていた（モバイル版の気づき）。
+ * 読者の印は題の選び方にしか効かず、あらすじと感情の値は同じプロンプトから出ている
+ * ので、名前が付いたあとは見なくてよい。`SYNOPSIS_VERSION` が上がれば作り直す。
+ *
+ * 名前を付けるときに台帳の版を書き換える形は取らない。名前を変える道
+ * （サブタイトル案の採用・手での改名・モバイル版）のどれかで書き忘れると、
+ * また作り直しが起きるため、比べる側の1か所で決める
+ */
+export function synopsisVersionIsCurrent(
+  stored: string | null | undefined,
+  input: { needsSubtitle: boolean; readerTypeMark: string }
+): boolean {
+  if (typeof stored !== "string") return false;
+  if (input.needsSubtitle) return stored === synopsisPromptVersion(input);
+  return stored.split("|")[0] === SYNOPSIS_VERSION;
+}
+
+/**
  * 送るときの温度。あらすじは事実を並べるだけなので、揺らす必要がない。
  *
  * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。

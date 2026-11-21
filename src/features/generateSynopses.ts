@@ -37,6 +37,7 @@ import {
   SYNOPSIS_TEMPERATURE,
   buildSynopsisPrompt,
   synopsisPromptVersion,
+  synopsisVersionIsCurrent,
   type SubtitleSuggestion,
 } from "../prompts/synopsis";
 import { CharacterStore } from "../core/characterStore";
@@ -172,7 +173,11 @@ export async function generateSynopses(
     return (
       existing.sourceHash !== episode.hash ||
       existing.model !== resolved.model ||
-      existing.promptVersion !== versionFor(episode)
+      // 名前が付いた話は、案を出した回の版（読者の印つき）のままでも作り直さない
+      !synopsisVersionIsCurrent(existing.promptVersion, {
+        needsSubtitle: needsSubtitle(episode),
+        readerTypeMark,
+      })
     );
   });
 
