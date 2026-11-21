@@ -431,6 +431,22 @@ export async function commandPaletteLabels(page: Page, query: string): Promise<s
   const input = page.locator(".quick-input-widget input");
   await input.waitFor({ state: "visible" });
   await page.keyboard.insertText(query);
+  /*
+    **問い合わせの字が欄に入ったのを確かめてから読む。** 2026-11-22 ノートPCの全件で、欄に字が
+    入らないまま（パレットを開いた直後の一覧＝VS Code の既定のコマンド13件だけ）を「出揃った」と
+    読み、「パレットに『統合小説執筆環境: 前のメモへ』がありません」で落ちた（単独では通る）。
+    入っていなければ、欄へ直に書き直す
+  */
+  const expected = `>${query}`;
+  await waitUntil(
+    async () => {
+      if ((await input.inputValue()) === expected) return true;
+      await input.fill(expected);
+      return false;
+    },
+    `コマンドパレットの欄に「${query}」が入る`,
+    10_000
+  );
   const read = () =>
     page.evaluate(() =>
       Array.from(document.querySelectorAll(".quick-input-widget .monaco-list-row")).map((row) =>
