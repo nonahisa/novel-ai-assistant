@@ -31,6 +31,7 @@ import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { EPISODE_DELETE_CHOICES } from "../../src/core/episodeDeleteChoice";
 import { readListedJson } from "./support/fileSettle";
+import { describeNotices, recordedNotices } from "./support/noticeRecord";
 import { clickToolButton, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { answerInput, waitForQuickInput } from "./support/quickInput";
 import { SIDEBAR_LAUNCH, collapseSidebarPane, expandTreeRow, showSidebar, treeContextMenu, treeRowLabels, waitTreeSettled } from "./support/sidebar";
@@ -150,17 +151,39 @@ async function noticeLines(page: Page): Promise<string[]> {
   return [...(await statusBarTexts(page)), ...(await notificationTexts(page))];
 }
 
-async function waitNotice(page: Page, needle: string, what: string): Promise<string> {
+/**
+ * 帯か右下に `needle` を含む知らせが出るまで待つ。
+ *
+ * `recorded` を渡すと、知らせの記録ファイル（`support/noticeRecord.ts`）の `since` より後の分も見る。
+ * 右下の知らせは、ほかの知らせに押し流されたり畳まれたりして、全件の中でだけ見えないことがある
+ * （2026-11-22 ノートPCの全件、「閑話.txt からサブタイトルを読み取れませんでした」を20秒待って落ち、
+ * そのとき右下は空。単独では2回とも通った）。帯へ出す完了の文（notifyDone）は記録に残らないので、
+ * 帯は今までどおり画面で見る
+ */
+async function waitNotice(
+  page: Page,
+  needle: string,
+  what: string,
+  recorded?: { session: E2ESession; since: number }
+): Promise<string> {
   let found = "";
   await waitUntil(
     async () => {
       found = (await noticeLines(page)).find((text) => text.includes(needle)) ?? "";
+      if (found === "" && recorded) {
+        // 時刻は秒の端数で前後しうるので、1秒の余裕を見る
+        found =
+          (await recordedNotices(recorded.session)).find(
+            (entry) => Date.parse(entry.at) >= recorded.since - 1_000 && entry.message.includes(needle)
+          )?.message ?? "";
+      }
       return found !== "";
     },
     what,
     20_000
   ).catch(async (error: unknown) => {
-    throw new Error(`${String(error)}（いまの知らせ：${JSON.stringify(await noticeLines(page))}／確認の窓：${(await dialogText(page)) ?? "なし"}）`);
+    const record = recorded ? `／${await describeNotices(recorded.session, recorded.since - 1_000)}` : "";
+    throw new Error(`${String(error)}（いまの知らせ：${JSON.stringify(await noticeLines(page))}／確認の窓：${(await dialogText(page)) ?? "なし"}${record}）`);
   });
   return found;
 }
@@ -361,8 +384,12 @@ test("右クリック「ファイル名にサブタイトルを付ける」で�
       /* ── 話数も【タイトル】も無い話 ── */
       await waitTreeSettled(page);
       // 閑話.txt の行も名前は「幕間」で始まり、題が無い（行の名前に「星の夜」を含まないほう）
+      const refusalAskedAt = Date.now();
       await treeContextMenu(page, { head: "幕間", lacks: "星の夜" }, "ファイル名にサブタイトルを付ける");
-      const refused = await waitNotice(page, "閑話.txt からサブタイトルを読み取れませんでした", "題の読めない話で「サブタイトルを読み取れませんでした」が出る");
+      const refused = await waitNotice(page, "閑話.txt からサブタイトルを読み取れませんでした", "題の読めない話で「サブタイトルを読み取れませんでした」が出る", {
+        session,
+        since: refusalAskedAt,
+      });
       expect(refused).toContain("閑話.txt");
       await holdsFor(
         async () =>
