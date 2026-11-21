@@ -1385,6 +1385,83 @@ const OTHER_MIND =
 const VIEWPOINT_SHIFT = /(視点|目線|語り)[^。]{0,15}(移|替|変わ|切り?替|揺|ずれ)/u;
 
 /**
+ * 説明が「三人称の語りに一人称が出ている」と言っているか（設計書6.9.3 の E）。
+ * 26b の実際の説明：「三人称の海斗の視点の中に、一人称の「俺」が現れています」
+ * 「三人称一元なのに、海斗の視点から「僕」という一人称が混じっています」
+ */
+const PERSON_SWITCH_CLAIM =
+  /三人称[^。]{0,24}一人称|一人称[^。]{0,12}(現れ|混|紛れ|入り込|出て|使われ)/u;
+/**
+ * 地の文の主語に立った一人称（E の手がかり）。「自分」は三人称の地の文でも人物を
+ * 指すので入れない。「うち」「余」「我」も別の語の一部になるので入れない
+ */
+const NARRATION_FIRST_PERSON_SUBJECT =
+  /(?<![\p{Script=Han}\p{Script=Katakana}])(俺|僕|私|わたし|あたし|ぼく|おれ|オレ|ボク|ワタシ|儂|わし|拙者)(は|が|も)/u;
+/** 人物の考えだと示す語。同じ文にあれば、地の文の語りではなく括弧の無い心の声 */
+const INNER_THOUGHT_CUE = /と思|とつぶや|と呟|心の中|胸の内|と考え|と念じ|内心/u;
+/**
+ * 三人称の場面と見る上限：場面の地の文の一人称（「自分」を除く）がこの数まで。
+ * 仕込み自身が一人称を1つ足すので、0ではなく少しだけ許す
+ */
+const THIRD_SCENE_MAX_FIRST_PERSON = 2;
+
+/**
+ * 三人称の場面の地の文に、一人称の主語が出ている指摘か（E。2026-11-21）。
+ *
+ * **コードで数えるだけでは拾えない**（作者の作品で、一人称の語をあまり書かない
+ * 一人称の場面を35件とも取り違えた。設計書6.9.3）。AI が「三人称の中に一人称」と
+ * 挙げたものを、本文の形で確かめて通す。確かめるのは：
+ *
+ * - 作品全体で一人称の語り手が決まっていない（決まっていれば A・D の受け持ち）
+ * - 原文の地の文（台詞・丸括弧の外）に「一人称＋は／が／も」がある
+ * - その文に心の声の手がかり（と思・心の中 など）が無く、「？！」で終わらない
+ * - 場面の地の文の一人称が少ない（一人称の場面での別の一人称＝D を通さない）
+ */
+function isThirdPersonSlip(input: {
+  chunk: Chunk;
+  chunkLines: readonly string[];
+  lineIndex: number;
+  line: string;
+  at: number;
+  original: string;
+  explanation: string;
+  narrator: ViewpointNarrator | null;
+}): boolean {
+  const { chunk, chunkLines, lineIndex, line, at, original, explanation, narrator } = input;
+  if (narrator) return false;
+  if (!PERSON_SWITCH_CLAIM.test(explanation)) return false;
+  if (/^[\s　]*[（(]/u.test(original) || insideRoundBrackets(line, at)) return false;
+  const narration = maskQuoted(original, " ").replace(/（[^）]*）|\([^)]*\)/gu, " ");
+  if (!NARRATION_FIRST_PERSON_SUBJECT.test(narration)) return false;
+  const sentence = sentenceAround(line, at, original.length).trim();
+  if (INNER_THOUGHT_CUE.test(sentence) || /[？！?!]$/u.test(sentence)) return false;
+  const scene = sceneTextAt(chunk, chunkLines, lineIndex);
+  if (scene === undefined) return false;
+  let firstPersons = 0;
+  // 丸括弧の心の声は語りではないので数えない（台詞は数える関数が落とす）
+  const sceneNarration = scene.replace(/（[^）\n]*）|\([^)\n]*\)/gu, " ");
+  for (const [word, hits] of countNarrationFirstPersons(sceneNarration)) {
+    if (word !== "自分") firstPersons += hits;
+  }
+  return firstPersons <= THIRD_SCENE_MAX_FIRST_PERSON;
+}
+
+/** その行を含む場面の本文（話の境でも割る。`firstPersonSceneKind` と同じ割り方） */
+function sceneTextAt(
+  chunk: Chunk,
+  chunkLines: readonly string[],
+  lineIndex: number
+): string | undefined {
+  const segmentStarts = segmentsOf(chunk).map((segment) =>
+    countNewlines(chunk.text, segment.start)
+  );
+  const scene = sceneRanges(chunkLines, segmentStarts).find(
+    (range) => lineIndex >= range.start && lineIndex < range.end
+  );
+  return scene ? chunkLines.slice(scene.start, scene.end).join("\n") : undefined;
+}
+
+/**
  * 視点の指摘を落とす理由（1.11）。落とさないなら `undefined`。
  *
  * **コードで確かめられるものはコードで落とす**（プロンプトでも絞るが、
@@ -1400,6 +1477,24 @@ function viewpointRejection(
   narrator: ViewpointNarrator | null
 ): RejectedProofreadIssue["reason"] | undefined {
   const found = lineHolding(chunkLines, lineIndex, original);
+  const line = found ? chunkLines[found.index] : original;
+  const at = found ? found.at : 0;
+  // 人称そのものの入れ替わり（E）は、一人称の場面の関門と心の語の関門の前に見る
+  // ——三人称の場面の話で、心の話でもないので、後ろの関門では必ず落ちる
+  if (
+    isThirdPersonSlip({
+      chunk,
+      chunkLines,
+      lineIndex: found?.index ?? lineIndex,
+      line,
+      at,
+      original,
+      explanation,
+      narrator,
+    })
+  ) {
+    return undefined;
+  }
   const scene = firstPersonSceneKind(
     chunk,
     chunkLines,
@@ -1407,8 +1502,6 @@ function viewpointRejection(
     narrator
   );
   if (!scene) return "not_first_person_scene";
-  const line = found ? chunkLines[found.index] : original;
-  const at = found ? found.at : 0;
   if (
     /^[\s　]*[（(]/u.test(original) ||
     insideRoundBrackets(line, at) ||
@@ -1548,14 +1641,8 @@ function firstPersonSceneKind(
   narrator: ViewpointNarrator | null
 ): "pronoun" | "pronounless" | null {
   // まとめたチャンクでは、話の境でも場面を割る（別の話の一人称を数えない）
-  const segmentStarts = segmentsOf(chunk).map((segment) =>
-    countNewlines(chunk.text, segment.start)
-  );
-  const scene = sceneRanges(chunkLines, segmentStarts).find(
-    (range) => lineIndex >= range.start && lineIndex < range.end
-  );
-  if (!scene) return null;
-  const text = chunkLines.slice(scene.start, scene.end).join("\n");
+  const text = sceneTextAt(chunk, chunkLines, lineIndex);
+  if (text === undefined) return null;
   if (narrationFirstPersonOf(text, VIEWPOINT_SCENE_MIN_FIRST_PERSON) !== null) {
     return "pronoun";
   }

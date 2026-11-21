@@ -121,7 +121,7 @@ export function buildAbilityMarkdown(
     lines.push(`## ${category}`, "");
     for (const ability of items) {
       lines.push(
-        ...describeAbility(ability, term, options.customFieldsByKind?.ability)
+        ...describeAbility(ability, options.customFieldsByKind?.ability)
       );
     }
   }
@@ -131,7 +131,6 @@ export function buildAbilityMarkdown(
 
 function describeAbility(
   ability: Ability,
-  term: string,
   customFields: CustomFieldDefinition[] = []
 ): string[] {
   const lines: string[] = [];
