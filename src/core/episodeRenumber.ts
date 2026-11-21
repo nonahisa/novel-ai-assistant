@@ -1,4 +1,5 @@
-import * as path from "./paths";
+// pathText（vscode を読まない）を使う。モバイル版が名前を変えたあとの台帳の付け替えをこのファイルから借りるため（2026-11-21）
+import * as path from "./pathText";
 import { parseEpisodeFileName, sanitizeFileName } from "./episodeParser";
 import { normalizeEpisodePath, type Chapter } from "../models/chapter";
 import type { Character } from "../models/character";
