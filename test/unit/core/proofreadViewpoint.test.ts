@@ -489,6 +489,88 @@ describe("視点の札を絞る（2026-09-25 の2回目）", () => {
   });
 });
 
+describe("三人称の場面の地の文に一人称（E。設計書6.9.3、2026-11-21）", () => {
+  // 台 seeded/proofread（三人称）の写しの第2話・第3話に仕込んだ形。26b は3回とも
+  // 「三人称…一人称が現れています」と正しく挙げたのに、`no_other_mind`（心の語が無い）と
+  // `not_first_person_scene`（一人称の場面ではない）で落ちていた。
+  // 仕込みは1つの場面に1つ（台と同じ）。1行目（11行目）に差し込む
+  const BASE = [
+    "　海斗は湯呑みを両手で包み、残りのお茶を飲み干した。",
+    "　海斗は布団の中で、天井の木目をぼんやり見つめた。",
+    "　母は海斗の部屋を出ると、階下に戻った。",
+    "「明日も早いからね」",
+    "　海斗は頷き、鞄の中の教科書を本棚に戻した。",
+  ];
+  const sceneWith = (first: string) => chunkOf([first, ...BASE].join("\n"));
+  const viewpoint = (first: string, original: string, explanation: string) =>
+    validateProofreadIssues(
+      {
+        issues: [
+          { line: 11, original, suggestion: "海斗は", reason: "視点", explanation, confidence: "medium" },
+        ],
+      },
+      sceneWith(first)
+    );
+
+  test("三人称の場面に一人称の主語が出て、説明もそう言っていれば通す（修正案は空）", () => {
+    const result = viewpoint(
+      "　坂の途中には小さな神社があり、石段の脇に古い灯籠が並んでいた。俺は毎年、正月にここへお参りに来る。",
+      "俺は毎年、正月にここへお参りに来る。",
+      "三人称の海斗の視点の中に、一人称の「俺」が現れています"
+    );
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted[0]).toMatchObject({ reason: "視点", suggestion: "" });
+  });
+
+  test("「三人称一元なのに…という一人称が混じっています」も通す", () => {
+    const result = viewpoint(
+      "　僕は少し不満そうな顔をしたが、それ以上は聞かなかった。",
+      "僕は少し不満そうな顔をしたが",
+      "三人称一元なのに、海斗の視点から「僕」という一人称が混じっています"
+    );
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
+
+  test("括弧の無い心の声・丸括弧の心の声は通さない（囮）", () => {
+    const free = viewpoint(
+      "　俺だって、今日こそはうまくやれる。海斗は心の中でそうつぶやきながら、空を眺めた。",
+      "俺だって、今日こそはうまくやれる。",
+      "三人称の中に一人称の「俺」が現れています"
+    );
+    expect(free.accepted).toEqual([]);
+    const paren = viewpoint(
+      "　海斗は窓の外をぼんやり眺めた。（俺は、ちゃんと復習したっけ）",
+      "（俺は、ちゃんと復習したっけ）",
+      "三人称の中に一人称の「俺」が現れています"
+    );
+    expect(paren.accepted).toEqual([]);
+  });
+
+  test("説明が人称の入れ替わりを言っていなければ、今までどおり落とす", () => {
+    const result = viewpoint(
+      "　俺は毎年、正月にここへお参りに来る。",
+      "俺は毎年、正月にここへお参りに来る。",
+      "ここで視点がぶれています"
+    );
+    expect(result.accepted).toEqual([]);
+  });
+
+  test("一人称の場面の別の一人称（D）は、視点では出さないまま", () => {
+    // 「俺」の語りに出た一人称は矛盾検知が受け持つ（6.9.2 の D）。場面の一人称が多い
+    const result = validate([
+      {
+        line: 15,
+        original: "俺は坂の途中で足を止めた。",
+        suggestion: "",
+        reason: "視点",
+        explanation: "三人称の語りに一人称の「俺」が現れています",
+      },
+    ]);
+    expect(result.accepted).toEqual([]);
+  });
+});
+
 describe("札と指示", () => {
   test("札は7つで、視点が入っている", () => {
     expect(PROOFREAD_REASONS).toHaveLength(7);
