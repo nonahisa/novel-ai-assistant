@@ -44,7 +44,9 @@ import {
   type ImeFrontEvent,
   type ImeObservedFront,
   type ImeWorkRef,
+  type ImeNotationWord,
 } from "../core/imeCurrentWork";
+import { NOTATION_CHOICES_FILE, NotationChoiceStore } from "../core/notationChoiceStore";
 import {
   IME_APP_FILE,
   IME_APP_ID,
@@ -382,7 +384,23 @@ export async function rebuildImeTsv(
         )
       )
     : [];
-  return writeImeTsv(work, buildImeTsv(entries, frequent));
+  return writeImeTsv(work, buildImeTsv(entries, frequent, await loadNotationWords(work)));
+}
+
+/**
+ * 表記ゆれで選んだ揃える先（`設定/notation_choices.json`。設計書6.8.9）。
+ * **読めなくても辞書は書く**（決めごとの行が無いだけで、設定資料の語は打てる）。
+ * 壊れたファイルは直さない。
+ */
+async function loadNotationWords(work: WorkEntry): Promise<ImeNotationWord[]> {
+  try {
+    return (await new NotationChoiceStore(work).load()).choices;
+  } catch (error) {
+    logLine(
+      `Rittoku IME 向けの辞書に表記の決めごとを入れませんでした（${errorText(error)}）：${work.title}`
+    );
+    return [];
+  }
 }
 
 /** 知らせ・一覧を置き場へ書く（一時ファイルから名前を替える） */
@@ -874,10 +892,23 @@ export function startImeLink(
     return isEpisodeFilePath(work.folderPath, workPaths(work).settings, filePath) ? work : undefined;
   };
 
+  /*
+    表記の決めごと（`設定/notation_choices.json`。設計書6.8.9）。表記ゆれ検知が書いたときも、
+    作者が手で直して保存したときも、辞書を組み直す。設定フォルダーは既定の場所で見る
+    （作品設定を読み直さない。上の episodeWork と同じ割り切り）
+  */
+  const notationWork = (filePath: string): WorkEntry | undefined => {
+    if (path.basename(filePath) !== NOTATION_CHOICES_FILE) return undefined;
+    const work = findWork(filePath);
+    if (!work) return undefined;
+    return path.isSamePath(path.dirname(filePath), workPaths(work).settings) ? work : undefined;
+  };
+
   disposables.push(
     vscode.workspace.onDidSaveTextDocument((document) => {
       if (closed) return;
-      const work = episodeWork(path.fromUri(document.uri));
+      const filePath = path.fromUri(document.uri);
+      const work = episodeWork(filePath) ?? notationWork(filePath);
       if (work) scheduleDictionary(work);
     })
   );
@@ -902,7 +933,7 @@ export function startImeLink(
   return {
     noteFileWritten: (filePath) => {
       if (closed) return;
-      const work = settingsWork(filePath) ?? episodeWork(filePath);
+      const work = settingsWork(filePath) ?? episodeWork(filePath) ?? notationWork(filePath);
       if (work) scheduleDictionary(work);
     },
     noteSettingsChanged: (work) => {

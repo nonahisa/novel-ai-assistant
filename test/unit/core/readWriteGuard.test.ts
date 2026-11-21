@@ -6,6 +6,7 @@ import type { WorkEntry } from "../../../src/models/types";
 import { AchievementStore } from "../../../src/core/achievementStore";
 import type { Achievement } from "../../../src/core/celebrations";
 import { KeepWordStore } from "../../../src/core/keepWordStore";
+import { NotationChoiceStore } from "../../../src/core/notationChoiceStore";
 import { CustomFieldStore } from "../../../src/core/customFieldStore";
 import { SynopsisStore } from "../../../src/core/synopsisStore";
 import { TimelineStore } from "../../../src/core/timelineStore";
@@ -137,6 +138,49 @@ describe("読んで足して書く口の、書く前の照合", () => {
       expect(isExternalChangeError(failure)).toBe(true);
       expect(text(disk.get(target))).toBe(text(external(["前", "外2"])));
       expect(String(failure)).toMatch(/保存していません/);
+    });
+  });
+
+  describe("表記の決めごと（読み直して足し直す。設計書6.8.9）", () => {
+    const target = diskPath("設定", "notation_choices.json");
+    const choice = (surface: string, reading: string) => ({
+      surface,
+      reading,
+      decidedAt: "2026-11-21",
+    });
+
+    test("書いて読める。途中で外で足された決めごとも残す", async () => {
+      expect(await new NotationChoiceStore(work).record([choice("出来る", "できる")])).toBe(true);
+      changeOnceAfterFirstRead(
+        target,
+        utf8(
+          `${JSON.stringify({
+            schemaVersion: 1,
+            choices: [choice("出来る", "できる"), choice("すべて", "すべて")],
+          })}\n`
+        )
+      );
+
+      expect(await new NotationChoiceStore(work).record([choice("綺麗", "きれい")])).toBe(true);
+
+      const list = (await new NotationChoiceStore(work).load()).choices.map((c) => c.surface);
+      expect(list).toEqual(["出来る", "すべて", "綺麗"]);
+    });
+
+    test("壊れた JSON は直さず止める（作者の決めごとを消さない）", async () => {
+      disk.set(target, utf8("{ 壊れている"));
+      const failure = await new NotationChoiceStore(work)
+        .record([choice("出来る", "できる")])
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(text(disk.get(target))).toBe("{ 壊れている");
+    });
+
+    test("同じ決めごとしか無ければ書かない", async () => {
+      await new NotationChoiceStore(work).record([choice("出来る", "できる")]);
+      const before = text(disk.get(target));
+      expect(await new NotationChoiceStore(work).record([choice("出来る", "できる")])).toBe(false);
+      expect(text(disk.get(target))).toBe(before);
     });
   });
 

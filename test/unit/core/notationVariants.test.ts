@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   detectNotationVariants,
   findOccurrences,
+  notationChoiceOf,
   switchKanaScript,
   type NotationSource,
 } from "../../../src/core/notationVariants";
@@ -24,6 +25,28 @@ function group(
     entry.forms.some((form) => form.surface === surface)
   );
 }
+
+describe("揃える先を IME へ渡す形にする（notationChoiceOf。設計書6.8.9）", () => {
+  const groupOf = (body: string) => {
+    const group = detectNotationVariants([source(body)], { properNouns: [] }).find(
+      (candidate) => candidate.kind === "kana_kanji"
+    );
+    if (!group) throw new Error("組が見つかりません");
+    return group;
+  };
+
+  test("漢字を選べば漢字の表記、かなを選べばかなの表記。読みはどちらもかな側", () => {
+    const group = groupOf("出来ることをする。できることもある。");
+    expect(notationChoiceOf(group, "出来る")).toEqual({ surface: "出来る", reading: "できる" });
+    expect(notationChoiceOf(group, "できる")).toEqual({ surface: "できる", reading: "できる" });
+  });
+
+  test("組に無い表記・かな⇔漢字でない組は渡さない", () => {
+    expect(notationChoiceOf(groupOf("良い日だ。よい日だ。"), "善い")).toBeUndefined();
+    expect(notationChoiceOf({ kind: "okurigana", key: "okurigana:行う|行なう" }, "行う")).toBeUndefined();
+    expect(notationChoiceOf({ kind: "digit_width", key: "digit_width" }, "３")).toBeUndefined();
+  });
+});
 
 describe("かな⇔漢字の表記ゆれ", () => {
   test("両方の表記が本文に出ていれば組にする", () => {

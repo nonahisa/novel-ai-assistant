@@ -190,6 +190,40 @@ describe("核向けの辞書（novel-ime.tsv）", () => {
     expect(lines[2].split("\t")).toEqual(["アカリ", "あかり", "character", "月島灯"]);
   });
 
+  test("表記の決めごとは notation の行で、設定資料の語のあと・よく使う語の前（設計書6.8.9）", () => {
+    const text = buildImeTsv(
+      [entry("月島灯", "つきしまあかり", "character")],
+      [{ surface: "頑張る", reading: "がんばる", count: 9 }],
+      [
+        { surface: "出来る", reading: "できる" },
+        { surface: "すべて", reading: "すべて" },
+        { surface: "頑張る", reading: "がんばる" },
+      ]
+    );
+    expect(text.split("\n").filter(Boolean)).toEqual([
+      IME_TSV_HEADER,
+      "月島灯\tつきしまあかり\tcharacter\t",
+      "出来る\tできる\tnotation\t",
+      "すべて\tすべて\tnotation\t",
+      // よく使う語の行とは重ねない（決めた表記を2番目止まりで並べない）
+      "頑張る\tがんばる\tnotation\t",
+    ]);
+  });
+
+  test("決めごとの行：1字の表記・かなでない読み・設定資料と同じ表記は出さない", () => {
+    const text = buildImeTsv(
+      [entry("素敵", "すてき", "term")],
+      [],
+      [
+        { surface: "尚", reading: "なお" },
+        { surface: "綺麗", reading: "キレイ" },
+        { surface: "素敵", reading: "すてき" },
+        { surface: "な\tお", reading: "なお" },
+      ]
+    );
+    expect(text.split("\n").filter(Boolean)).toEqual([IME_TSV_HEADER, "素敵\tすてき\tterm\t"]);
+  });
+
   test("種類は計画書の5つ", () => {
     expect(IME_TSV_KINDS).toEqual(["character", "location", "organization", "ability", "term"]);
   });

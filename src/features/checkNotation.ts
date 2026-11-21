@@ -8,6 +8,7 @@ import { episodeBodySources } from "../core/episodeChunks";
 import {
   detectNotationVariants,
   dialogueOnlySurfaces,
+  notationChoiceOf,
   type NotationSource,
   type NotationVariantGroup,
 } from "../core/notationVariants";
@@ -39,7 +40,10 @@ import {
 } from "../prompts/notationAdvice";
 import { cancelItem } from "../views/dialogs";
 import { pickWithMemory, suggestAction } from "../views/notify";
-import { logStep, useLogFile } from "../core/logger";
+import { logLine, logStep, useLogFile } from "../core/logger";
+import { NotationChoiceStore } from "../core/notationChoiceStore";
+import type { NotationChoice } from "../models/notationChoice";
+import { localDateKey } from "../core/localDate";
 // 名前の付け替え（設計書6.37.3）も同じ文脈を使う。あちらは `core` にいて
 // 機能層を読めないので、実体は `core` へ移した。ここは既存の呼び出し口を保つ
 import { buildUniqueContext } from "../core/uniqueContext";
@@ -309,6 +313,8 @@ async function runNotationCheck(
   let dismissedCount = 0;
   /** 途中で閉じたか。0件だったときに理由を伝えるために持つ */
   let stoppedEarly = false;
+  /** 作者が選んだ揃える先（IME の作品辞書へ渡す。設計書6.8.9） */
+  const choices: NotationChoice[] = [];
 
   for (const group of picked) {
     const keep =
@@ -322,6 +328,8 @@ async function runNotationCheck(
     if (keep === null) continue;
 
     unifiedCount++;
+    const choice = notationChoiceOf(group, keep);
+    if (choice) choices.push({ ...choice, decidedAt: localDateKey() });
     // **組ごとに1度だけ組み立てる。** 同じ材料を出現の数だけ作り直さない
     const material = notationMaterial(group);
     for (const form of group.forms) {
@@ -338,6 +346,8 @@ async function runNotationCheck(
     }
   }
 
+  await recordNotationChoices(work, choices);
+
   return {
     issues,
     groupCount: groups.length,
@@ -348,6 +358,30 @@ async function runNotationCheck(
     selectedCount: picked.length,
     stoppedEarly,
   };
+}
+
+/**
+ * 選んだ揃える先を `設定/notation_choices.json` へ残す（設計書6.8.9）。
+ *
+ * 書いたファイルは書き込み口の見張り（`setWriteObserver`）を通るので、IME の作品辞書は
+ * ここから何もしなくても数秒後に作り直される（`features/imeCurrentWork.ts`）。
+ * **書けなくても指摘は出す。** 揃える指摘は作者が頼んだもので、決めごとの控えは添え物。
+ * 壊れた JSON は直さず、作者が直せるように場所を出す（実装ルール2）。
+ */
+async function recordNotationChoices(
+  work: WorkEntry,
+  choices: readonly NotationChoice[]
+): Promise<void> {
+  if (choices.length === 0) return;
+  try {
+    await new NotationChoiceStore(work).record(choices);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logLine(`表記の決めごとを残せませんでした：${detail}`);
+    void vscode.window.showWarningMessage(
+      `選んだ表記を「設定/notation_choices.json」に残せませんでした（IME へは届きません）。揃える指摘は作りました。${detail}`
+    );
+  }
 }
 
 /**

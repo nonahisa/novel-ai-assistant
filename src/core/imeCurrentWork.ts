@@ -415,6 +415,17 @@ export function noticeWindowOf(text: string): number | undefined {
 
 const TSV_BREAKING = /[\t\r\n]/;
 
+/** 表記の決めごとの行の種類（IME と取り決めた名前。設計書6.13.7） */
+export const IME_NOTATION_KIND = "notation";
+/** 決めごとの読み（ひらがなと長音だけ。IME は読みのかなを確かめる） */
+const IME_NOTATION_READING = /^[ぁ-ゖー]+$/u;
+
+/** 表記の決めごとの1語（`models/notationChoice.ts` の表記と読み） */
+export interface ImeNotationWord {
+  surface: string;
+  reading: string;
+}
+
 /**
  * 核向けの辞書（計画書 3.5）。UTF-8・BOM 無し・LF・タブ区切り。
  *
@@ -425,9 +436,11 @@ const TSV_BREAKING = /[\t\r\n]/;
  */
 export function buildImeTsv(
   entries: readonly DictionaryEntry[],
-  frequent: readonly FrequentWord[] = []
+  frequent: readonly FrequentWord[] = [],
+  notation: readonly ImeNotationWord[] = []
 ): string {
   const lines = [IME_TSV_HEADER];
+  const written = new Set<string>();
   for (const entry of entries) {
     const base = entry.baseName ?? "";
     if (
@@ -444,10 +457,26 @@ export function buildImeTsv(
       continue;
     }
     lines.push([entry.surface, entry.reading, entry.kind, base].join("\t"));
+    written.add(entry.surface);
+  }
+  // 作者が表記ゆれで選んだ揃える先（設計書6.8.9）。種類は notation、4列目は空。
+  // IME は frequent 以外の種類を作品辞書の強い語として扱い、第一候補に出す（IME と
+  // 2026-11-21 に取り決め）。表記が1字の行は IME が読まないので出さない。
+  // 設定資料の語と同じ表記なら、設定資料の行を残す（種類と本体の名前を持っている）
+  for (const word of notation) {
+    if (written.has(word.surface)) continue;
+    if (TSV_BREAKING.test(word.surface) || !IME_NOTATION_READING.test(word.reading)) continue;
+    const length = [...word.surface].length;
+    if (length < 2 || length > IME_TSV_MAX_FIELD_CHARS) continue;
+    if ([...word.reading].length > IME_TSV_MAX_FIELD_CHARS) continue;
+    lines.push([word.surface, word.reading, IME_NOTATION_KIND, ""].join("\t"));
+    written.add(word.surface);
   }
   // 本文でよく使う語は設定資料の語のあと（ファイルの末尾）。種類は frequent、4列目は空、
   // 5列目に回数。DictionaryKind には入れない（設定資料パネルや3つのIMEの書き出しへ出さないため）
   for (const word of [...frequent].sort(compareFrequent)) {
+    // 決めた表記と同じ語を2番目止まりの行で重ねない
+    if (written.has(word.surface)) continue;
     if (TSV_BREAKING.test(word.surface) || TSV_BREAKING.test(word.reading)) continue;
     if (
       [...word.surface].length > IME_TSV_MAX_FIELD_CHARS ||
