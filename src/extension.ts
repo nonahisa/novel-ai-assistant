@@ -633,6 +633,7 @@ import { splitCollectedFile } from "./features/splitCollectedFile";
 import {
   copyBodyForPosting,
   copySubtitle,
+  renameEpisode,
   renameWithSubtitle,
 } from "./features/episodeCopy";
 import {
@@ -9392,7 +9393,14 @@ export async function activate(
         await renameWithSubtitle(node.work, node.episode);
         treeProvider.refresh(node.work.id);
       }
-    )
+    ),
+    registerCommand("novelai.renameEpisode", async (picked?: EpisodeNode) => {
+      const node = requireTreeNode(picked, "名前を変える");
+      if (!node) return;
+      // 未保存のまま名前を変えると、あとの保存で旧名のファイルが戻ってくる
+      if (!(await saveDirtyDocumentsBeforeExtraction(node.work, "名前の変更"))) return;
+      if (await renameEpisode(node.work, node.episode)) treeProvider.refresh(node.work.id);
+    })
   );
 
   /*

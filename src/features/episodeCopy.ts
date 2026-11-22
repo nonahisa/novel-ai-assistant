@@ -7,6 +7,11 @@ import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
 import { readTextFile } from "../core/textFile";
 import { parseEpisodeFileName } from "../core/episodeParser";
+import {
+  checkEpisodeRename,
+  episodeRenameInputValue,
+  episodeRenameSelection,
+} from "../core/episodeRenameName";
 // 貼り付け先を訊く画面は1つにする（写すと、片方だけ選べる先が増える）
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
@@ -21,6 +26,7 @@ import { editHistoryFile } from "../core/editHistoryFormat";
 import { logFailure, useLogFile } from "../core/logger";
 import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
 import { notifyDone } from "../views/notify";
+import { askText } from "../views/dialogs";
 import { followEpisodeFileRenames, renameFollowNotice } from "./episodeLedgers";
 import {
   carryAppearanceToRenamed,
@@ -180,6 +186,56 @@ export async function renameWithSubtitle(
   );
   if (answer !== "変える") return;
 
+  await applyEpisodeRename(work, episode, next, "ファイル名にサブタイトルを付けた", next);
+}
+
+/**
+ * 作品一覧の右クリック［名前を変える］（設計書6.68.2）。
+ *
+ * 作者が名前を打つ。話数・日付・種類が変わる名前は入力欄の場で断る（`checkEpisodeRename`）。
+ * **中身は変えない**（本文の【タイトル】も残す）。改名と記録の付け替えは
+ * ［サブタイトルを付ける］と同じ1つの道（`applyEpisodeRename`）を通す。
+ */
+export async function renameEpisode(work: WorkEntry, episode: EpisodeFile): Promise<boolean> {
+  const typed = await askText({
+    title: `${episode.fileName} の名前を変える`,
+    value: episodeRenameInputValue(episode.fileName),
+    valueSelection: episodeRenameSelection(episode.fileName),
+    validateInput: (value) => {
+      const check = checkEpisodeRename(episode.fileName, value);
+      return check.ok ? undefined : check.reason;
+    },
+  });
+  if (typed === undefined) return false;
+  const check = checkEpisodeRename(episode.fileName, typed);
+  if (!check.ok) {
+    void vscode.window.showInformationMessage(check.reason);
+    return false;
+  }
+  return applyEpisodeRename(
+    work,
+    episode,
+    check.fileName,
+    "話の名前を変えた",
+    `${episode.fileName} → ${check.fileName}`
+  );
+}
+
+/**
+ * 話のファイルの名前を変え、パスで話を指す記録を付け替える（名前を変える道はここを通す）。
+ *
+ * 開いている原稿エディターの見た目の持ち越し → 上書きしない改名 → 古い名前の面を閉じる →
+ * 編集の記録 → 記録の付け替え（章立て・本の設計図・年表・投稿状態・読みの辞書・
+ * 話数の無い話の各話あらすじ） → 知らせ、の順。
+ */
+async function applyEpisodeRename(
+  work: WorkEntry,
+  episode: EpisodeFile,
+  next: string,
+  action: string,
+  /** 編集の記録の詳細。サブタイトルを付けたときは元の名前が読めるので新しい名前だけ */
+  detail: string
+): Promise<boolean> {
   const target = path.join(path.dirname(episode.filePath), next);
   try {
     // **開いている原稿エディターの見た目を新しい名前へ持って行く**
@@ -201,21 +257,20 @@ export async function renameWithSubtitle(
     );
     // **記録の直前に書き先を向ける**（0.43.3 と同じ）
     useLogFile(work.folderPath);
-    logFailure("サブタイトルを付けた改名に失敗", {
+    logFailure(`${action}改名に失敗`, {
       ファイル: episode.fileName,
       新しい名前: next,
     });
-    return;
+    return false;
   }
 
   await recordEdit(work, {
     actor: "author",
-    action: "ファイル名にサブタイトルを付けた",
+    action,
     // **改名したあとの場所で残す**（0.130.4）。名前だけだとほかの章の同じ名前の話と
-    // 取り違え、元の場所で残すと改名した話のタイムラインに出ない。元の名前は
-    // 「ファイル名にサブタイトルを付けた」で読める（付けたのはサブタイトルだけ）
+    // 取り違え、元の場所で残すと改名した話のタイムラインに出ない。
     file: editHistoryFile(work.folderPath, target),
-    detail: next,
+    detail,
   });
   // **パスで話を指す台帳（投稿状態など）も付け替える**（6.68.2。0.125.4）。
   // 付け替えないと、投稿済みの話が「未投稿」に見える
@@ -225,6 +280,7 @@ export async function renameWithSubtitle(
   const notice = renameFollowNotice(`${next} に変えました。`, summary);
   if (notice.warn) void vscode.window.showWarningMessage(notice.text);
   else notifyDone(notice.text);
+  return true;
 }
 
 async function read(

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
-import { renameWithSubtitle } from "../../../src/features/episodeCopy";
+import { renameEpisode, renameWithSubtitle } from "../../../src/features/episodeCopy";
 import { convertOne } from "../../../src/features/markdownConvert";
 import { setEpisodeRenameWorkLookup } from "../../../src/features/episodeLedgers";
 import { ChapterStore } from "../../../src/core/chapterStore";
@@ -133,6 +133,43 @@ describe("名前だけを変えたとき、パスで話を指す台帳がつい�
     expect(chapters.chapters[0].startEpisodePath).toBe("本文/003_湖畔の誓い.txt");
     const timeline = await new TimelineStore(work).load();
     expect(timeline.episodes[0].filePath).toBe("本文/003_湖畔の誓い.txt");
+  });
+
+  test("右クリック［名前を変える］でも、投稿済みのまま・章立てと年表も外れない（本文は変えない）", async () => {
+    // 作品一覧の話の右クリックに名前を変える項目が無かった（2026-11-22 作者の報告）
+    const text = "【タイトル】\n湖畔の誓い\n\n【本文（1行）】\n本文です。";
+    disk.set(diskPath("本文", "003_湖畔.txt"), encoder.encode(text));
+    await seedLedgers("本文/003_湖畔.txt");
+    const originalInput = window.showInputBox;
+    window.showInputBox = (async () => "003_湖畔の誓い") as typeof window.showInputBox;
+    try {
+      const renamed = await renameEpisode(work, episodeFile("003_湖畔.txt"));
+      expect(renamed).toBe(true);
+    } finally {
+      window.showInputBox = originalInput;
+    }
+
+    expect(disk.has(diskPath("本文", "003_湖畔.txt"))).toBe(false);
+    expect(new TextDecoder().decode(disk.get(diskPath("本文", "003_湖畔の誓い.txt")))).toBe(text);
+    const ledger = await new PostingStore(work).load();
+    expect(isPosted(ledger, "本文/003_湖畔の誓い.txt", "kakuyomu")).toBe(true);
+    const chapters = await new ChapterStore(work).load();
+    expect(chapters.chapters[0].startEpisodePath).toBe("本文/003_湖畔の誓い.txt");
+    const timeline = await new TimelineStore(work).load();
+    expect(timeline.episodes[0].filePath).toBe("本文/003_湖畔の誓い.txt");
+  });
+
+  test("右クリック［名前を変える］で話数の変わる名前は、ファイルに触らず断る", async () => {
+    disk.set(diskPath("本文", "003_湖畔.txt"), encoder.encode("本文です。"));
+    const originalInput = window.showInputBox;
+    window.showInputBox = (async () => "004_湖畔") as typeof window.showInputBox;
+    try {
+      expect(await renameEpisode(work, episodeFile("003_湖畔.txt"))).toBe(false);
+    } finally {
+      window.showInputBox = originalInput;
+    }
+    expect(disk.has(diskPath("本文", "003_湖畔.txt"))).toBe(true);
+    expect(disk.has(diskPath("本文", "004_湖畔.txt"))).toBe(false);
   });
 
   test("題が中の【タイトル】にだけある話（一覧の題が【タイトル】で埋まっている）にも、サブタイトルを付けられる", async () => {
