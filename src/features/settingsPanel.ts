@@ -150,7 +150,6 @@ import {
   applyNarratorMoves,
   describeNarratorMove,
   findNarratorMoves,
-  type NarratorMoveChoice,
   type NarratorMoveItem,
 } from "../core/narratorMoves";
 import { blankMemoLines } from "../core/sceneMemo";
@@ -237,10 +236,13 @@ import { withCancellableProgress } from "../views/progress";
 import { askText, cancelItem } from "../views/dialogs";
 import { logFailure, logLine, logStep, useLogFile } from "../core/logger";
 import { describeUpdatesDiscardedByMoveLog } from "../core/recordUpdateLog";
+import { discardStaleCharacterUpdates } from "./narratorMovePending";
 import {
+  NARRATOR_MOVE_PREFIX,
   describeDiscardedUpdatesNotice,
-  discardStaleCharacterUpdates,
-} from "./narratorMovePending";
+  describeMoveOutcome,
+  narratorMoveChoicesOf,
+} from "../core/narratorMoveChoices";
 import { knownChaptersOf } from "../core/chapterCitations";
 import { scanWork } from "../core/scanner";
 import { appendChatLog, summarizeMaterials } from "../core/chatLog";
@@ -4364,13 +4366,6 @@ function describeError(
 }
 
 /**
- * 移す案の鍵の印（2026-10-10、0.102.2。設計書6.5.12）。鍵は「印＋控えの位置」
- * ——`narratorMove:3`。値は移し先の人物の id（空なら外すだけ）。
- * 画面は鍵の中身を見ずにそのまま送り返してくる
- */
-export const NARRATOR_MOVE_PREFIX = "narratorMove:";
-
-/**
  * 語り手の取り違えで入った疑いのある値を、移す案の1行にする。
  * **既定では選ばない**——移すかは作者が決める。移し先は選び直せる
  * （名指しできた人が既定、名指しできなければ「外すだけ」が既定）
@@ -4393,66 +4388,6 @@ export function narratorMoveProposal(item: NarratorMoveItem, index: number): Fie
       { id: "", name: "外すだけ（どこにも移さない）" },
     ],
   };
-}
-
-/**
- * 画面から返った移す案の選び（鍵と移し先の id）を、控えの案に引き当てる。
- * **移し先はその案の候補にあるものだけを通す**（画面から返った id で、候補に
- * 無い人物の資料を書き換えない）。候補に無い id・控えに無い位置は落とす
- */
-export function narratorMoveChoicesOf(
-  values: Record<string, string>,
-  items: readonly NarratorMoveItem[]
-): NarratorMoveChoice[] {
-  const choices: NarratorMoveChoice[] = [];
-  for (const [key, value] of Object.entries(values)) {
-    if (!key.startsWith(NARRATOR_MOVE_PREFIX)) continue;
-    const index = Number(key.slice(NARRATOR_MOVE_PREFIX.length));
-    const item = Number.isSafeInteger(index) ? items[index] : undefined;
-    if (!item) continue;
-    const wanted = value.trim();
-    if (wanted && !item.destination.candidates.some((candidate) => candidate.id === wanted)) {
-      continue;
-    }
-    choices.push({ item, destinationId: wanted || null });
-  }
-  return choices;
-}
-
-/**
- * 移す案を反映した結果の知らせ。**黙って据え置いたことにしない**——移した数・
- * 外すだけにした数・見つからなかった数と、移し先の値を上書きしなかったことを書く
- */
-export function describeMoveOutcome(
-  outcome: Pick<
-    ReturnType<typeof applyNarratorMoves>,
-    "destinations" | "moved" | "removedOnly" | "missing" | "notes"
-  >,
-  people: readonly Character[]
-): string {
-  const parts: string[] = [];
-  if (outcome.moved > 0) {
-    const names = outcome.destinations
-      .map((destination) => people.find((person) => person.id === destination.id)?.name ?? destination.name)
-      .map((name) => `「${name}」`)
-      .join("・");
-    parts.push(`${outcome.moved} 件を${names}の資料へ移しました。`);
-  }
-  if (outcome.removedOnly > 0) {
-    parts.push(`${outcome.removedOnly} 件は移し先を選ばなかったので、外すだけにしました。`);
-  }
-  if (outcome.missing > 0) {
-    parts.push(
-      `${outcome.missing} 件はいまの資料に見つからなかったので、何もしていません（別の窓で直されたのかもしれません）。`
-    );
-  }
-  if (outcome.moved + outcome.removedOnly > 0) {
-    parts.push(
-      "外した項目の値と関係は、退けた記録に残しました（次の抽出が同じ値を積み戻さないため）。"
-    );
-  }
-  parts.push(...outcome.notes);
-  return parts.join("");
 }
 
 /** 移す案の鍵を除いた、ふつうの項目の値 */

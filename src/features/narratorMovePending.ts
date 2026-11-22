@@ -5,6 +5,7 @@ import { CharacterStore } from "../core/characterStore";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import { applyNarratorMoves, findNarratorMoves } from "../core/narratorMoves";
+import { staleCharacterUpdates } from "../core/narratorMoveChoices";
 import {
   NarratorMoveDismissedHistory,
   PendingNarratorMoveStore,
@@ -257,31 +258,17 @@ export async function discardStaleCharacterUpdates(
   try {
     const store = new PendingUpdateStore(work);
     const { updates } = await store.loadAll();
+    // どれを片づけるかは core が決める（モバイル版と同じ決まり）。消すのはここ。
+    // 1人ずつ消してから名前を足す（途中で失敗したら、消し終えた人だけを知らせる）
     for (const person of people) {
-      const stale = updates.filter(
-        (update) => update.kind !== "creation" && update.character.id === person.id
-      );
-      if (stale.length === 0) continue;
-      for (const update of stale) await store.discard(update.filePath);
-      names.push(person.name);
+      const stale = staleCharacterUpdates(updates, [person]);
+      for (const filePath of stale.filePaths) await store.discard(filePath);
+      names.push(...stale.names);
     }
   } catch {
     // 承認待ちの置き場が読めないだけ。移した結果はもう台帳にある
   }
   return names;
-}
-
-/**
- * 片づけたことの知らせ（反映の知らせに1行。黙って消したことにしない）。
- * 片づけが無ければ null。
- */
-export function describeDiscardedUpdatesNotice(names: readonly string[]): string | null {
-  if (names.length === 0) return null;
-  return (
-    `${names.map((name) => `「${name}」`).join("")}の承認待ちの更新案を片づけました` +
-    "（移す前の写しなので、承認すると移した値が戻るため）。" +
-    "もう一度「設定資料を抽出」すると作り直されます。"
-  );
 }
 
 /**

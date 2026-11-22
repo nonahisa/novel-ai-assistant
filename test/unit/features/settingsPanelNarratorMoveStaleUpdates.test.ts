@@ -28,9 +28,8 @@ vi.mock("../../../src/core/logger", async (importOriginal) => ({
   useLogFile: vi.fn(),
 }));
 
-const { NARRATOR_MOVE_PREFIX, SettingsPanel } = await import(
-  "../../../src/features/settingsPanel"
-);
+const { SettingsPanel } = await import("../../../src/features/settingsPanel");
+const { NARRATOR_MOVE_PREFIX } = await import("../../../src/core/narratorMoveChoices");
 const { findNarratorMoves } = await import("../../../src/core/narratorMoves");
 const { PendingUpdateStore } = await import("../../../src/core/pendingUpdates");
 
