@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。",
-  "version": "1.0.41",
+  "version": "1.0.42",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -91,6 +91,11 @@
       }
     ],
     "keybindings": [
+      {
+        "key": "f2",
+        "command": "novelai.renameSelectedEpisode",
+        "when": "focusedView == novelai.works && !inputFocus"
+      },
       {
         "key": "ctrl+alt+t",
         "mac": "cmd+alt+t",
@@ -1478,6 +1483,11 @@
         "category": "統合小説執筆環境"
       },
       {
+        "command": "novelai.renameSelectedEpisode",
+        "title": "選んでいる話のファイル名にサブタイトルを付ける",
+        "category": "統合小説執筆環境"
+      },
+      {
         "command": "novelai.addWorkMemo",
         "title": "メモ追加",
         "icon": "$(note)",
@@ -1884,7 +1894,7 @@
         },
         {
           "command": "novelai.renameWithSubtitle",
-          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)(-(essay|lyrics))?$/",
+          "when": "view == novelai.works && viewItem =~ /^episode-/",
           "group": "2_copy@3"
         },
         {
@@ -1993,6 +2003,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "novelai.renameSelectedEpisode",
+          "when": "false"
+        },
         {
           "command": "novelai.chooseImeFrequentWords",
           "when": "novelai.imeFrequentWords"

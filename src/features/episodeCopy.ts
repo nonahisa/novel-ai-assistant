@@ -2,11 +2,11 @@ import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
-import { extractEpisodeParts, nameWithSubtitle, subtitleRenameRefusal } from "../core/episodeCopy";
+import { extractEpisodeParts } from "../core/episodeCopy";
 import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
 import { readTextFile } from "../core/textFile";
-import { parseEpisodeFileName } from "../core/episodeParser";
+import { checkSubtitleRetitle, currentFileTitle } from "../core/episodeRenameName";
 // 貼り付け先を訊く画面は1つにする（写すと、片方だけ選べる先が増える）
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
@@ -21,6 +21,7 @@ import { editHistoryFile } from "../core/editHistoryFormat";
 import { logFailure, useLogFile } from "../core/logger";
 import { formatChapterLabel, stripChapterLabel } from "../core/episodeLabel";
 import { notifyDone } from "../views/notify";
+import { askText } from "../views/dialogs";
 import { followEpisodeFileRenames, renameFollowNotice } from "./episodeLedgers";
 import {
   carryAppearanceToRenamed,
@@ -133,53 +134,99 @@ export async function copyBodyForPosting(
 }
 
 /**
- * ファイル名にサブタイトルを付ける。
+ * ファイル名にサブタイトルを付ける・付け直す（設計書6.68.2）。
  *
  * **話数の部分は変えない。** そこは並び順を決めており、変えると
- * 作品の順序が崩れる。後ろに足すだけにする。
+ * 作品の順序が崩れる。題の部分だけを足す・入れ替える。
+ *
+ * 本文の【タイトル】から読んだ題が、いまファイル名に付いている題と違えば、確認の窓で
+ * その名前を見せる（［変える］か［打ち直す］）。同じとき・【タイトル】が読めないときは、
+ * 題を打つ入力欄を出す（すでに題の付いた話でも付け直せるように。2026-11-22 作者の答え）。
+ * 中身（本文の【タイトル】）は変えない。
+ *
+ * @returns 名前を変えたか
  */
 export async function renameWithSubtitle(
   work: WorkEntry,
   episode: EpisodeFile
-): Promise<void> {
+): Promise<boolean> {
   const parts = await read(episode);
-  if (!parts) return;
+  if (!parts) return false;
 
   // **題から話数を落としてから足す。** 投稿サイトのヘッダーには
   // 「第15話　イジメっ子襲撃」と話数込みで入っている。そのまま足すと
   // `episode_0015_第15話　イジメっ子襲撃.txt` になり、**話数が二重になる**
   // （2026-08-21、作者の指摘）。一覧の見出しは既に `stripChapterLabel` を
   // 通しているのに、ここだけ通っていなかった
-  const subtitle = stripChapterLabel(
-    parts.subtitle,
-    formatChapterLabel(episode)
-  );
+  const label = formatChapterLabel(episode);
+  const subtitle = stripChapterLabel(parts.subtitle, label);
 
   // **いまファイル名に付いている題は、ファイル名から読む。** `episode.subtitle` は
   // 走査（scanner.ts）がファイル名に題が無いと【タイトル】で埋めるので、それを渡すと
   // 「既に付いている」と取り違えて止まる（2026-11-04 画面テストで見つかった）
-  const nameSubtitle = parseEpisodeFileName(episode.fileName).subtitle ?? null;
-  const next = nameWithSubtitle(episode.fileName, nameSubtitle, subtitle);
-  if (!next) {
-    void vscode.window.showInformationMessage(
-      subtitleRenameRefusal(episode.fileName, subtitle, episode.chapterStart)
+  const nameSubtitle = currentFileTitle(episode.fileName);
+  // 【タイトル】から作った名前も、話数・日付・種類が変わるなら確認の窓を出さず打つ欄へ回す
+  const fromBodyCheck = subtitle ? checkSubtitleRetitle(episode.fileName, subtitle) : undefined;
+  const fromBody = fromBodyCheck?.ok ? fromBodyCheck.fileName : undefined;
+
+  if (fromBody) {
+    const answer = await vscode.window.showWarningMessage(
+      "ファイル名を変えます。",
+      {
+        modal: true,
+        detail:
+          `${episode.fileName}\n  ↓\n${fromBody}\n\n` +
+          "中身は変えません。名前だけです。\n" +
+          "話数の部分（並び順を決めている部分）はそのまま残します。",
+      },
+      "変える",
+      "打ち直す"
     );
-    return;
+    if (answer === "変える") {
+      return applyEpisodeRename(work, episode, fromBody, "ファイル名にサブタイトルを付けた", fromBody);
+    }
+    if (answer !== "打ち直す") return false;
   }
 
-  const answer = await vscode.window.showWarningMessage(
-    "ファイル名を変えます。",
-    {
-      modal: true,
-      detail:
-        `${episode.fileName}\n  ↓\n${next}\n\n` +
-        "中身は変えません。名前だけです。\n" +
-        "話数の部分（並び順を決めている部分）はそのまま残します。",
+  // 打つ欄の初めの値：【タイトル】から読めた題、無ければいまファイル名に付いている題
+  const typed = await askText({
+    title: `${episode.fileName} のサブタイトル`,
+    value: subtitle?.trim() || nameSubtitle || "",
+    validateInput: (value) => {
+      const check = checkSubtitleRetitle(episode.fileName, stripChapterLabel(value, label) ?? "");
+      return check.ok ? undefined : check.reason;
     },
-    "変える"
+  });
+  if (typed === undefined) return false;
+  const check = checkSubtitleRetitle(episode.fileName, stripChapterLabel(typed, label) ?? "");
+  if (!check.ok) {
+    void vscode.window.showInformationMessage(check.reason);
+    return false;
+  }
+  return applyEpisodeRename(
+    work,
+    episode,
+    check.fileName,
+    "ファイル名のサブタイトルを付け直した",
+    `${episode.fileName} → ${check.fileName}`
   );
-  if (answer !== "変える") return;
+}
 
+/**
+ * 話のファイルの名前を変え、パスで話を指す記録を付け替える（名前を変える道はここを通す）。
+ *
+ * 開いている原稿エディターの見た目の持ち越し → 上書きしない改名 → 古い名前の面を閉じる →
+ * 編集の記録 → 記録の付け替え（章立て・本の設計図・年表・投稿状態・読みの辞書・
+ * 話数の無い話の各話あらすじ） → 知らせ、の順。
+ */
+async function applyEpisodeRename(
+  work: WorkEntry,
+  episode: EpisodeFile,
+  next: string,
+  action: string,
+  /** 編集の記録の詳細。サブタイトルを付けたときは元の名前が読めるので新しい名前だけ */
+  detail: string
+): Promise<boolean> {
   const target = path.join(path.dirname(episode.filePath), next);
   try {
     // **開いている原稿エディターの見た目を新しい名前へ持って行く**
@@ -201,21 +248,20 @@ export async function renameWithSubtitle(
     );
     // **記録の直前に書き先を向ける**（0.43.3 と同じ）
     useLogFile(work.folderPath);
-    logFailure("サブタイトルを付けた改名に失敗", {
+    logFailure(`${action}改名に失敗`, {
       ファイル: episode.fileName,
       新しい名前: next,
     });
-    return;
+    return false;
   }
 
   await recordEdit(work, {
     actor: "author",
-    action: "ファイル名にサブタイトルを付けた",
+    action,
     // **改名したあとの場所で残す**（0.130.4）。名前だけだとほかの章の同じ名前の話と
-    // 取り違え、元の場所で残すと改名した話のタイムラインに出ない。元の名前は
-    // 「ファイル名にサブタイトルを付けた」で読める（付けたのはサブタイトルだけ）
+    // 取り違え、元の場所で残すと改名した話のタイムラインに出ない。
     file: editHistoryFile(work.folderPath, target),
-    detail: next,
+    detail,
   });
   // **パスで話を指す台帳（投稿状態など）も付け替える**（6.68.2。0.125.4）。
   // 付け替えないと、投稿済みの話が「未投稿」に見える
@@ -225,6 +271,7 @@ export async function renameWithSubtitle(
   const notice = renameFollowNotice(`${next} に変えました。`, summary);
   if (notice.warn) void vscode.window.showWarningMessage(notice.text);
   else notifyDone(notice.text);
+  return true;
 }
 
 async function read(
