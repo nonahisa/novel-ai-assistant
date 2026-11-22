@@ -158,28 +158,12 @@ export function postingCopySource(
  */
 
 /**
- * ファイル名にサブタイトルを付けられなかったときの知らせ。
- *
- * 読めなかった理由は、話数のある話なら「題が話数だけ」、話数の無い話（閑話.txt など）なら
- * 「【タイトル】が無い」（話数の無い話に「題が話数だけ」と出ていた。2026-11-16 の画面テストの気づき）
- */
-export function subtitleRenameRefusal(
-  fileName: string,
-  subtitle: string | null | undefined,
-  chapterStart: number | null
-): string {
-  if (subtitle) return `${fileName} には既にサブタイトルが付いています。`;
-  const why = chapterStart === null ? "ファイルの中に【タイトル】が無いようです" : "題が話数だけのようです";
-  return `${fileName} からサブタイトルを読み取れませんでした（${why}）。`;
-}
-
-/**
  * サブタイトルを含んだファイル名を組み立てる。
  *
  * **話数の部分は変えない。** そこは並び順を決めており、
  * 変えると作品の順序が崩れる。**後ろにサブタイトルを足すだけ**にする。
  *
- * 既にサブタイトルが付いているなら、そのまま返す（付け直さない）。
+ * 既に同じサブタイトルが付いているなら undefined（違う題なら入れ替える）。
  *
  * @returns 新しいファイル名。変える必要が無ければ undefined
  */

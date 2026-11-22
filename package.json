@@ -92,6 +92,11 @@
     ],
     "keybindings": [
       {
+        "key": "f2",
+        "command": "novelai.renameSelectedEpisode",
+        "when": "focusedView == novelai.works && !inputFocus"
+      },
+      {
         "key": "ctrl+alt+t",
         "mac": "cmd+alt+t",
         "command": "novelai.checkTyposForFile",
@@ -1478,9 +1483,8 @@
         "category": "統合小説執筆環境"
       },
       {
-        "command": "novelai.renameEpisode",
-        "title": "名前を変える",
-        "icon": "$(edit)",
+        "command": "novelai.renameSelectedEpisode",
+        "title": "選んでいる話のファイル名にサブタイトルを付ける",
         "category": "統合小説執筆環境"
       },
       {
@@ -1890,13 +1894,8 @@
         },
         {
           "command": "novelai.renameWithSubtitle",
-          "when": "view == novelai.works && viewItem =~ /^episode-(novel|script|unset)(-(essay|lyrics))?$/",
-          "group": "2_copy@3"
-        },
-        {
-          "command": "novelai.renameEpisode",
           "when": "view == novelai.works && viewItem =~ /^episode-/",
-          "group": "2_copy@4"
+          "group": "2_copy@3"
         },
         {
           "command": "novelai.startChapter",
@@ -2004,6 +2003,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "novelai.renameSelectedEpisode",
+          "when": "false"
+        },
         {
           "command": "novelai.chooseImeFrequentWords",
           "when": "novelai.imeFrequentWords"

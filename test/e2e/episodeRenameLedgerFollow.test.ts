@@ -7,6 +7,8 @@
  *
  * 1. **製品の命令**「ファイル名にサブタイトルを付ける」（右クリック）：知らせに「投稿状態1件」が出て、
  *    台帳の posts のパスが新しい名前になる
+ * 1b. **作品一覧で F2**（2026-11-22 作者の答え）：題の付いた話を選んで F2 を押すと、いまの題の入った打つ欄が出て、
+ *    打ち直した題で名前が変わり、台帳の posts のパスも新しい名前になる
  * 2. **エクスプローラーでの改名**（本物のエクスプローラーで F2。`onDidRenameFiles` が鳴る道）：
  *    訊かれずに付け替わり、件数の知らせが出る
  * 3. **VS Code を閉じている間にディスクで名前を変えた**話：開き直して話を開くと、右下に
@@ -24,7 +26,7 @@ import { readJsonWhenPresent } from "./support/fileSettle";
 import type { Locator, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { composeText, frontFrameShowing, placeCaretAfter } from "./support/manuscriptFrame";
-import { runCommand } from "./support/quickInput";
+import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput";
 import { SIDEBAR_LAUNCH, showSidebar, treeContextMenu, treeRowLabels, treeRow, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, restartVsCode, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -42,6 +44,8 @@ import {
 import { postingTextHash, postingTitleHash } from "../../src/core/postingBodyHash";
 
 const KAKUYOMU_POST_URL = "https://kakuyomu.jp/my/works/1177354054934574437/episodes/new";
+/** 作品一覧へ焦点を戻すキー（行を押すと原稿が開いて焦点が原稿へ移るため。F2 は作品一覧に焦点があるときだけ効く） */
+const WORKS_FOCUS_KEY = "ctrl+alt+shift+w";
 const BODY = "　朝の駅は静かだった。\n";
 
 /** 投稿済みの記録（`episodePath` は作品フォルダーからの相対パス） */
@@ -270,6 +274,34 @@ test("製品の命令「ファイル名にサブタイトルを付ける」で�
       await waitPostedPaths(session, ["本文/第1話_はじまり.txt"], "台帳の posts のパスが新しい名前になる");
     },
     launchWith("本文/第1話_旧題.txt", "旧題")
+  );
+}, 180_000);
+
+test("作品一覧で題の付いた投稿済みの話を選んで F2 を押し、題を打ち直すと、名前が変わり台帳のパスも新しい名前になる", async () => {
+  await withVsCode(
+    "改名の台帳追従（作品一覧の F2）",
+    // 名前の題と中の【タイトル】が同じ話。確認の窓を出さず、いまの題の入った打つ欄が出る
+    [{ name: "第1話_はじまり.txt", text: `【タイトル】\nはじまり\n\n【本文】\n${BODY}` }],
+    async (session) => {
+      const { page } = session;
+      await expandWork(page, "第1話");
+      // F2 は選んでいる行に効く（右クリックと違い、行が渡らないので選択から引く）。行を押すと原稿が開いて
+      // 焦点が原稿へ移るので、作品一覧へ焦点を戻してから押す
+      await treeRow(page, "第1話").first().click();
+      await pressWorkbenchKey(page, "Control+Alt+Shift+KeyW");
+      await pressWorkbenchKey(page, "F2");
+      await waitForQuickInput(page, "第1話_はじまり.txt のサブタイトル");
+      expect(await page.locator(".quick-input-widget input").first().inputValue(), "打つ欄にはいまの題").toBe("はじまり");
+      await answerInput(page, "出会い");
+
+      const notice = await waitNotice(page, "投稿状態1件", "知らせに「投稿状態1件」が出る");
+      expect(notice, "付け替えた知らせの文").toContain("投稿状態1件を付け替えました");
+      await waitPostedPaths(session, ["本文/第1話_出会い.txt"], "台帳の posts のパスが新しい名前になる");
+    },
+    {
+      ...launchWith("本文/第1話_はじまり.txt", "はじまり"),
+      keybindings: [...SIDEBAR_LAUNCH.keybindings, { key: WORKS_FOCUS_KEY, command: "novelai.works.focus" }],
+    }
   );
 }, 180_000);
 

@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  checkEpisodeRename,
-  episodeRenameInputValue,
-  episodeRenameSelection,
-} from "../../../src/core/episodeRenameName";
+import { checkEpisodeRename, checkSubtitleRetitle, currentFileTitle } from "../../../src/core/episodeRenameName";
 
-describe("checkEpisodeRename（作品一覧の［名前を変える］）", () => {
+describe("checkEpisodeRename（改名で話数・日付・種類を変えない）", () => {
   it("題の部分だけ変えた名前は通し、拡張子は元のまま付ける", () => {
     expect(checkEpisodeRename("episode_0003_転生.txt", "episode_0003_転生した朝")).toEqual({
       ok: true,
@@ -60,13 +56,46 @@ describe("checkEpisodeRename（作品一覧の［名前を変える］）", () =
   });
 });
 
-describe("入力欄の初めの値と選ぶ範囲", () => {
-  it("拡張子を外した名前を出し、題の部分を選んでおく", () => {
-    expect(episodeRenameInputValue("episode_0003_転生.txt")).toBe("episode_0003_転生");
-    expect(episodeRenameSelection("episode_0003_転生.txt")).toEqual([13, 15]);
+describe("checkSubtitleRetitle（サブタイトルの付け直し）", () => {
+  it("すでに題の付いた話の題を打ち直せる（話数と拡張子は残す）", () => {
+    expect(checkSubtitleRetitle("episode_0003_転生.txt", "転生した朝")).toEqual({
+      ok: true,
+      fileName: "episode_0003_転生した朝.txt",
+    });
   });
 
-  it("題が読めなければ範囲を決めない（全体を選ぶ）", () => {
-    expect(episodeRenameSelection("episode_0007.txt")).toBeUndefined();
+  it("題の無い話に題を付けられる", () => {
+    expect(checkSubtitleRetitle("episode_0007.md", "雨の日")).toEqual({
+      ok: true,
+      fileName: "episode_0007_雨の日.md",
+    });
+  });
+
+  it("日付で並ぶ話（SNS記事など）も、日付を残して題だけ変える", () => {
+    const result = checkSubtitleRetitle("2026-08-16_朝.md", "昼");
+    expect(result).toEqual({ ok: true, fileName: "2026-08-16_昼.md" });
+  });
+
+  it("空・いまと同じ題は断る", () => {
+    expect(checkSubtitleRetitle("episode_0003_転生.txt", "  ").ok).toBe(false);
+    expect(checkSubtitleRetitle("episode_0003_転生.txt", "転生").ok).toBe(false);
+  });
+
+  it("話数の無い種類の話（閑話）は、種類の語を残して題を付け直す（積み重ねない）", () => {
+    expect(checkSubtitleRetitle("閑話.txt", "星の夜")).toEqual({ ok: true, fileName: "閑話_星の夜.txt" });
+    expect(currentFileTitle("閑話_星の夜.txt")).toBe("星の夜");
+    expect(checkSubtitleRetitle("閑話_星の夜.txt", "月の朝")).toEqual({ ok: true, fileName: "閑話_月の朝.txt" });
+  });
+
+  it("話数も日付も種類も無い名前（創作メモ集など）は、名前全体を題として入れ替える（積み重ねない）", () => {
+    // アイデア_題1.md が アイデア_題1_題2.md になっていた（2026-11-22 に見つけた）
+    expect(currentFileTitle("アイデア.md")).toBe("アイデア");
+    expect(checkSubtitleRetitle("アイデア.md", "港町の話")).toEqual({ ok: true, fileName: "港町の話.md" });
+    expect(checkSubtitleRetitle("港町の話.md", "山の話")).toEqual({ ok: true, fileName: "山の話.md" });
+  });
+
+  it("打った題で話数や種類の読みが変わる名前は断る", () => {
+    expect(checkSubtitleRetitle("アイデア.md", "第3話").ok).toBe(false);
+    expect(checkSubtitleRetitle("アイデア.md", "幕間").ok).toBe(false);
   });
 });

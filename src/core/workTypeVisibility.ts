@@ -228,9 +228,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.insertEpisodeBefore": "numbered",
   "novelai.removeEpisodeAndRenumber": "numbered",
   "novelai.splitCollectedFile": "numbered",
-  "novelai.renameWithSubtitle": "numbered",
-  // 名前を変えるのはどのタイプの話でも要る（話数・日付の部分は残す。core/episodeRenameName.ts）
-  "novelai.renameEpisode": "allTypes",
+  // サブタイトルの付け直しはどのタイプの話でも要る（話数・日付の部分は残す。2026-11-22 作者の答え）
+  "novelai.renameWithSubtitle": "allTypes",
+  "novelai.renameSelectedEpisode": "allTypes",
 
   // ── 作品ごとのメモ（設計書6.71） ──
   // メモはどの作品にも要る。**創作メモ集だけのものではない**

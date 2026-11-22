@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { Uri, window, workspace } from "../support/vscodeStub";
 import { memoryFs } from "../support/memoryDisk";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
-import { renameEpisode, renameWithSubtitle } from "../../../src/features/episodeCopy";
+import { renameWithSubtitle } from "../../../src/features/episodeCopy";
 import { convertOne } from "../../../src/features/markdownConvert";
 import { setEpisodeRenameWorkLookup } from "../../../src/features/episodeLedgers";
 import { ChapterStore } from "../../../src/core/chapterStore";
@@ -135,20 +135,26 @@ describe("名前だけを変えたとき、パスで話を指す台帳がつい�
     expect(timeline.episodes[0].filePath).toBe("本文/003_湖畔の誓い.txt");
   });
 
-  test("右クリック［名前を変える］でも、投稿済みのまま・章立てと年表も外れない（本文は変えない）", async () => {
-    // 作品一覧の話の右クリックに名前を変える項目が無かった（2026-11-22 作者の報告）
-    const text = "【タイトル】\n湖畔の誓い\n\n【本文（1行）】\n本文です。";
+  test("すでに題の付いた話も、打ち直した題で付け直せる（投稿済み・章立て・年表は外れず、本文は変えない）", async () => {
+    // 作品一覧の話の名前を変えられなかった（2026-11-22 作者の報告）。【タイトル】と同じ題が
+    // 付いた話は「既にサブタイトルが付いています」で止まっていた
+    const text = "【タイトル】\n湖畔\n\n【本文（1行）】\n本文です。";
     disk.set(diskPath("本文", "003_湖畔.txt"), encoder.encode(text));
     await seedLedgers("本文/003_湖畔.txt");
     const originalInput = window.showInputBox;
-    window.showInputBox = (async () => "003_湖畔の誓い") as typeof window.showInputBox;
+    let shown: string | undefined;
+    window.showInputBox = (async (options?: { value?: string }) => {
+      shown = options?.value;
+      return "湖畔の誓い";
+    }) as typeof window.showInputBox;
     try {
-      const renamed = await renameEpisode(work, episodeFile("003_湖畔.txt"));
-      expect(renamed).toBe(true);
+      expect(await renameWithSubtitle(work, episodeFile("003_湖畔.txt"))).toBe(true);
     } finally {
       window.showInputBox = originalInput;
     }
 
+    // 打つ欄にはいまの題が入っている
+    expect(shown).toBe("湖畔");
     expect(disk.has(diskPath("本文", "003_湖畔.txt"))).toBe(false);
     expect(new TextDecoder().decode(disk.get(diskPath("本文", "003_湖畔の誓い.txt")))).toBe(text);
     const ledger = await new PostingStore(work).load();
@@ -159,17 +165,31 @@ describe("名前だけを変えたとき、パスで話を指す台帳がつい�
     expect(timeline.episodes[0].filePath).toBe("本文/003_湖畔の誓い.txt");
   });
 
-  test("右クリック［名前を変える］で話数の変わる名前は、ファイルに触らず断る", async () => {
-    disk.set(diskPath("本文", "003_湖畔.txt"), encoder.encode("本文です。"));
+  test("確認の窓で［打ち直す］を選ぶと、【タイトル】と違う題でも付けられる", async () => {
+    disk.set(diskPath("本文", "003.txt"), encoder.encode("【タイトル】\n湖畔の誓い\n\n【本文（1行）】\n本文です。"));
+    window.showWarningMessage = (async () => "打ち直す") as typeof window.showWarningMessage;
     const originalInput = window.showInputBox;
-    window.showInputBox = (async () => "004_湖畔") as typeof window.showInputBox;
+    window.showInputBox = (async () => "第3話　旅立ち") as typeof window.showInputBox;
     try {
-      expect(await renameEpisode(work, episodeFile("003_湖畔.txt"))).toBe(false);
+      // 話数の見出し（第3話）は本編の話で作る
+      expect(await renameWithSubtitle(work, { ...episodeFile("003.txt"), kind: "本編" } as EpisodeFile)).toBe(true);
+    } finally {
+      window.showInputBox = originalInput;
+    }
+    // 打った題の話数の見出しは落とす（話数が二重にならない）
+    expect(disk.has(diskPath("本文", "003_旅立ち.txt"))).toBe(true);
+  });
+
+  test("打ち直した題が空なら、ファイルに触らず断る", async () => {
+    disk.set(diskPath("本文", "003_湖畔.txt"), encoder.encode("【タイトル】\n湖畔\n\n本文です。"));
+    const originalInput = window.showInputBox;
+    window.showInputBox = (async () => "") as typeof window.showInputBox;
+    try {
+      expect(await renameWithSubtitle(work, episodeFile("003_湖畔.txt"))).toBe(false);
     } finally {
       window.showInputBox = originalInput;
     }
     expect(disk.has(diskPath("本文", "003_湖畔.txt"))).toBe(true);
-    expect(disk.has(diskPath("本文", "004_湖畔.txt"))).toBe(false);
   });
 
   test("題が中の【タイトル】にだけある話（一覧の題が【タイトル】で埋まっている）にも、サブタイトルを付けられる", async () => {

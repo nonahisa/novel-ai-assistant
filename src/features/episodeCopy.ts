@@ -2,16 +2,11 @@ import { readMemoMarkers } from "../core/memoMarkerStore";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
-import { extractEpisodeParts, nameWithSubtitle, subtitleRenameRefusal } from "../core/episodeCopy";
+import { extractEpisodeParts } from "../core/episodeCopy";
 import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
 import { readTextFile } from "../core/textFile";
-import { parseEpisodeFileName } from "../core/episodeParser";
-import {
-  checkEpisodeRename,
-  episodeRenameInputValue,
-  episodeRenameSelection,
-} from "../core/episodeRenameName";
+import { checkSubtitleRetitle, currentFileTitle } from "../core/episodeRenameName";
 // 貼り付け先を訊く画面は1つにする（写すと、片方だけ選べる先が増える）
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
@@ -139,75 +134,71 @@ export async function copyBodyForPosting(
 }
 
 /**
- * ファイル名にサブタイトルを付ける。
+ * ファイル名にサブタイトルを付ける・付け直す（設計書6.68.2）。
  *
  * **話数の部分は変えない。** そこは並び順を決めており、変えると
- * 作品の順序が崩れる。後ろに足すだけにする。
+ * 作品の順序が崩れる。題の部分だけを足す・入れ替える。
+ *
+ * 本文の【タイトル】から読んだ題が、いまファイル名に付いている題と違えば、確認の窓で
+ * その名前を見せる（［変える］か［打ち直す］）。同じとき・【タイトル】が読めないときは、
+ * 題を打つ入力欄を出す（すでに題の付いた話でも付け直せるように。2026-11-22 作者の答え）。
+ * 中身（本文の【タイトル】）は変えない。
+ *
+ * @returns 名前を変えたか
  */
 export async function renameWithSubtitle(
   work: WorkEntry,
   episode: EpisodeFile
-): Promise<void> {
+): Promise<boolean> {
   const parts = await read(episode);
-  if (!parts) return;
+  if (!parts) return false;
 
   // **題から話数を落としてから足す。** 投稿サイトのヘッダーには
   // 「第15話　イジメっ子襲撃」と話数込みで入っている。そのまま足すと
   // `episode_0015_第15話　イジメっ子襲撃.txt` になり、**話数が二重になる**
   // （2026-08-21、作者の指摘）。一覧の見出しは既に `stripChapterLabel` を
   // 通しているのに、ここだけ通っていなかった
-  const subtitle = stripChapterLabel(
-    parts.subtitle,
-    formatChapterLabel(episode)
-  );
+  const label = formatChapterLabel(episode);
+  const subtitle = stripChapterLabel(parts.subtitle, label);
 
   // **いまファイル名に付いている題は、ファイル名から読む。** `episode.subtitle` は
   // 走査（scanner.ts）がファイル名に題が無いと【タイトル】で埋めるので、それを渡すと
   // 「既に付いている」と取り違えて止まる（2026-11-04 画面テストで見つかった）
-  const nameSubtitle = parseEpisodeFileName(episode.fileName).subtitle ?? null;
-  const next = nameWithSubtitle(episode.fileName, nameSubtitle, subtitle);
-  if (!next) {
-    void vscode.window.showInformationMessage(
-      subtitleRenameRefusal(episode.fileName, subtitle, episode.chapterStart)
+  const nameSubtitle = currentFileTitle(episode.fileName);
+  // 【タイトル】から作った名前も、話数・日付・種類が変わるなら確認の窓を出さず打つ欄へ回す
+  const fromBodyCheck = subtitle ? checkSubtitleRetitle(episode.fileName, subtitle) : undefined;
+  const fromBody = fromBodyCheck?.ok ? fromBodyCheck.fileName : undefined;
+
+  if (fromBody) {
+    const answer = await vscode.window.showWarningMessage(
+      "ファイル名を変えます。",
+      {
+        modal: true,
+        detail:
+          `${episode.fileName}\n  ↓\n${fromBody}\n\n` +
+          "中身は変えません。名前だけです。\n" +
+          "話数の部分（並び順を決めている部分）はそのまま残します。",
+      },
+      "変える",
+      "打ち直す"
     );
-    return;
+    if (answer === "変える") {
+      return applyEpisodeRename(work, episode, fromBody, "ファイル名にサブタイトルを付けた", fromBody);
+    }
+    if (answer !== "打ち直す") return false;
   }
 
-  const answer = await vscode.window.showWarningMessage(
-    "ファイル名を変えます。",
-    {
-      modal: true,
-      detail:
-        `${episode.fileName}\n  ↓\n${next}\n\n` +
-        "中身は変えません。名前だけです。\n" +
-        "話数の部分（並び順を決めている部分）はそのまま残します。",
-    },
-    "変える"
-  );
-  if (answer !== "変える") return;
-
-  await applyEpisodeRename(work, episode, next, "ファイル名にサブタイトルを付けた", next);
-}
-
-/**
- * 作品一覧の右クリック［名前を変える］（設計書6.68.2）。
- *
- * 作者が名前を打つ。話数・日付・種類が変わる名前は入力欄の場で断る（`checkEpisodeRename`）。
- * **中身は変えない**（本文の【タイトル】も残す）。改名と記録の付け替えは
- * ［サブタイトルを付ける］と同じ1つの道（`applyEpisodeRename`）を通す。
- */
-export async function renameEpisode(work: WorkEntry, episode: EpisodeFile): Promise<boolean> {
+  // 打つ欄の初めの値：【タイトル】から読めた題、無ければいまファイル名に付いている題
   const typed = await askText({
-    title: `${episode.fileName} の名前を変える`,
-    value: episodeRenameInputValue(episode.fileName),
-    valueSelection: episodeRenameSelection(episode.fileName),
+    title: `${episode.fileName} のサブタイトル`,
+    value: subtitle?.trim() || nameSubtitle || "",
     validateInput: (value) => {
-      const check = checkEpisodeRename(episode.fileName, value);
+      const check = checkSubtitleRetitle(episode.fileName, stripChapterLabel(value, label) ?? "");
       return check.ok ? undefined : check.reason;
     },
   });
   if (typed === undefined) return false;
-  const check = checkEpisodeRename(episode.fileName, typed);
+  const check = checkSubtitleRetitle(episode.fileName, stripChapterLabel(typed, label) ?? "");
   if (!check.ok) {
     void vscode.window.showInformationMessage(check.reason);
     return false;
@@ -216,7 +207,7 @@ export async function renameEpisode(work: WorkEntry, episode: EpisodeFile): Prom
     work,
     episode,
     check.fileName,
-    "話の名前を変えた",
+    "ファイル名のサブタイトルを付け直した",
     `${episode.fileName} → ${check.fileName}`
   );
 }

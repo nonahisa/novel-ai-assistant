@@ -12,8 +12,8 @@
  *      `renameUnnumberedSynopses` が話数のある行を名前で動かさない作り）
  *    - 話数の無い話（`幕間.txt`）：題を【タイトル】から読むので改名でき、知らせに
  *      「各話あらすじ1件」「読みの辞書1件」、あらすじは新しい名前を指す
- *    - 話数も【タイトル】も無い話（`閑話.txt`）：題を読めず「サブタイトルを読み取れませんでした」で止まり、
- *      名前も記録も変わらない
+ *    - 話数も【タイトル】も無い話（`閑話.txt`）：題を読めないので、空の打つ欄が出る（確認の窓は出ない）。
+ *      Esc で閉じると、名前も記録も変わらない（2026-11-22 付け直しの入力欄を足した）
  * 2. **話の挿入と削除**：「この話の前に挿入」で後ろの話の番号がずれると、あらすじ（話数とファイル名）と
  *    読みの辞書が同じ話についていく。挿入した話を「この話を削除」（話数を詰める）で消すと、元の並びへ戻る
  * 3. **削除した話の読みが、詰めた次の話に効かない**：番号だけの名前（`002.txt`）を消して `003.txt` が
@@ -320,7 +320,7 @@ async function readAloudFrom(page: Page, fileName: string, marker: string, caret
 
 /* ── 1. 右クリック「ファイル名にサブタイトルを付ける」 ── */
 
-test("右クリック「ファイル名にサブタイトルを付ける」で、話数のある話は読みの辞書が、幕間はあらすじと読みの辞書が新しい名前へついてきて、題の読めない話は止まって何も変えない", async () => {
+test("右クリック「ファイル名にサブタイトルを付ける」で、話数のある話は読みの辞書が、幕間はあらすじと読みの辞書が新しい名前へついてきて、題の読めない話は打つ欄を Esc で閉じれば何も変えない", async () => {
   const header = (title: string) => `【タイトル】\n${title}\n\n【本文】\n　十分に待った。\n`;
   await withVsCode(
     "改名の記録追従（サブタイトル）",
@@ -384,18 +384,15 @@ test("右クリック「ファイル名にサブタイトルを付ける」で�
       /* ── 話数も【タイトル】も無い話 ── */
       await waitTreeSettled(page);
       // 閑話.txt の行も名前は「幕間」で始まり、題が無い（行の名前に「星の夜」を含まないほう）
-      const refusalAskedAt = Date.now();
       await treeContextMenu(page, { head: "幕間", lacks: "星の夜" }, "ファイル名にサブタイトルを付ける");
-      const refused = await waitNotice(page, "閑話.txt からサブタイトルを読み取れませんでした", "題の読めない話で「サブタイトルを読み取れませんでした」が出る", {
-        session,
-        since: refusalAskedAt,
-      });
-      expect(refused).toContain("閑話.txt");
+      await waitForQuickInput(page, "閑話.txt のサブタイトル");
+      expect(await page.locator(".quick-input-widget input").first().inputValue(), "題の読めない話の打つ欄は空").toBe("");
+      await page.keyboard.press("Escape");
       await holdsFor(
         async () =>
           (await dialogText(page)) === undefined &&
           JSON.stringify(await episodeFiles(session)) === JSON.stringify(["001_湖畔の誓い.txt", "幕間_星の夜.txt", "閑話.txt"]),
-        "題の読めない話は、確認の窓を出さず名前も変えない",
+        "題の読めない話は、確認の窓を出さず、打つ欄を閉じれば名前も変えない",
         3_000
       ).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（窓：${(await dialogText(page)) ?? "なし"}／いまの話：${JSON.stringify(await episodeFiles(session))}）`);

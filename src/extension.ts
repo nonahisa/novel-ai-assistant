@@ -633,7 +633,6 @@ import { splitCollectedFile } from "./features/splitCollectedFile";
 import {
   copyBodyForPosting,
   copySubtitle,
-  renameEpisode,
   renameWithSubtitle,
 } from "./features/episodeCopy";
 import {
@@ -9390,16 +9389,17 @@ export async function activate(
       async (picked?: EpisodeNode) => {
         const node = requireTreeNode(picked, "ファイル名にサブタイトルを付ける");
         if (!node) return;
-        await renameWithSubtitle(node.work, node.episode);
-        treeProvider.refresh(node.work.id);
+        if (await renameWithSubtitle(node.work, node.episode)) treeProvider.refresh(node.work.id);
       }
     ),
-    registerCommand("novelai.renameEpisode", async (picked?: EpisodeNode) => {
-      const node = requireTreeNode(picked, "名前を変える");
-      if (!node) return;
-      // 未保存のまま名前を変えると、あとの保存で旧名のファイルが戻ってくる
-      if (!(await saveDirtyDocumentsBeforeExtraction(node.work, "名前の変更"))) return;
-      if (await renameEpisode(node.work, node.episode)) treeProvider.refresh(node.work.id);
+    /*
+      作品一覧で F2（2026-11-22 作者の答え）。キーから呼ぶと行が渡らないので、選んでいる行を引く。
+      右クリックと違い、キーは選んでいる行（矢印キー・左クリックで動く行）で押すので取り違えない
+    */
+    registerCommand("novelai.renameSelectedEpisode", async () => {
+      const node = worksView?.selection[0];
+      if (!(node instanceof EpisodeNode)) return;
+      if (await renameWithSubtitle(node.work, node.episode)) treeProvider.refresh(node.work.id);
     })
   );
 

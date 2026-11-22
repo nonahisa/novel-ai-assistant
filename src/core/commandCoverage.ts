@@ -212,7 +212,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.removeEpisodeAndRenumber": { class: "C4", label: "この話を削除（話数を詰める）", reason: "原稿" },
   "novelai.splitCollectedFile": { class: "C4", label: "話ごとのファイルに分ける", reason: "原稿" },
   "novelai.renameWithSubtitle": { class: "C4", label: "ファイル名にサブタイトルを付ける", reason: "原稿" },
-  "novelai.renameEpisode": { class: "C4", label: "名前を変える", reason: "原稿" },
+  "novelai.renameSelectedEpisode": { class: "C4", label: "選んでいる話のファイル名にサブタイトルを付ける", reason: "原稿" },
   "novelai.convertToMarkdown": { class: "C4", label: "本文 .md 化", reason: "原稿" },
   "novelai.unifyEol": { class: "C4", label: "改行コード統一", reason: "原稿" },
   "novelai.convertToUtf8": { class: "C4", label: "原稿 UTF-8 変換", reason: "原稿" },
