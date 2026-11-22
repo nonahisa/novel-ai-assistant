@@ -110,6 +110,16 @@ export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
     command: "novelai.addRuby",
     label: "選んだ語にルビを振る",
   },
+  /*
+    開いている話のファイル名のサブタイトルを付ける・付け直す（作者の答え 2026-11-22）。作品一覧の F2 と
+    同じ処理。原稿エディターは画面（WebView）なので、VS Code の F2（記号の名前の変更。素のエディターに
+    焦点があるときだけ）とは取り合わない。変換中の F2 は本体へ渡さない（manuscriptEditorHtml.ts）
+  */
+  {
+    key: "f2",
+    command: "novelai.renameWithSubtitle",
+    label: "ファイル名にサブタイトルを付ける",
+  },
 ];
 
 /**

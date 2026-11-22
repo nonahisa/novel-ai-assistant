@@ -1301,7 +1301,11 @@ export async function activate(
 
     // 話の節点を受ける命令（この話の誤字脱字、［投稿］の「投稿ヘルパーへ渡す」＝この話を投稿する）。
     // 引数なしで呼ぶと、どちらも「どの行で押されたか」が無いと言って止まる（requireTreeNode）
-    if (command === "novelai.checkTyposForFile" || command === "novelai.postThisEpisode") {
+    if (
+      command === "novelai.checkTyposForFile" ||
+      command === "novelai.postThisEpisode" ||
+      command === "novelai.renameWithSubtitle"
+    ) {
       const episode =
         work && filePath
           ? (await treeProvider.getEpisodes(work)).find((item) =>
@@ -9389,6 +9393,16 @@ export async function activate(
       async (picked?: EpisodeNode) => {
         const node = requireTreeNode(picked, "ファイル名にサブタイトルを付ける");
         if (!node) return;
+        /*
+          原稿エディターの F2 から来たときは、打ちかけのまま名前を変えない。未保存の面は古い名前に
+          残り、あとで保存すると古い名前のファイルが戻ってくる。確認は選択窓（Enter で［保存して実行］）
+        */
+        if (
+          manuscriptKeyFileOf(node) &&
+          !(await saveDirtyDocumentsBeforeExtraction(node.work, "サブタイトルの付け直し", { askInPicker: true }))
+        ) {
+          return;
+        }
         if (await renameWithSubtitle(node.work, node.episode)) treeProvider.refresh(node.work.id);
       }
     ),

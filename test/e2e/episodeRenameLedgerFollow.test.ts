@@ -9,6 +9,8 @@
  *    台帳の posts のパスが新しい名前になる
  * 1b. **作品一覧で F2**（2026-11-22 作者の答え）：題の付いた話を選んで F2 を押すと、いまの題の入った打つ欄が出て、
  *    打ち直した題で名前が変わり、台帳の posts のパスも新しい名前になる
+ * 1c. **原稿エディターで F2**（2026-11-22 作者の答え）：打ちかけのまま押すと、先に保存を訊く（Enter で［保存して実行］）。
+ *    そのあと打つ欄で題を打ち直すと名前が変わり、打った字は新しい名前のファイルに残り、台帳も付いてくる
  * 2. **エクスプローラーでの改名**（本物のエクスプローラーで F2。`onDidRenameFiles` が鳴る道）：
  *    訊かれずに付け替わり、件数の知らせが出る
  * 3. **VS Code を閉じている間にディスクで名前を変えた**話：開き直して話を開くと、右下に
@@ -20,7 +22,7 @@
  *
  * AI は呼ばない。GitHub も呼ばない。
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readJsonWhenPresent } from "./support/fileSettle";
 import type { Locator, Page } from "playwright-core";
@@ -38,6 +40,7 @@ import {
   pressDialogButton,
   pressWorkbenchKey,
   quickOpen,
+  quickPickRows,
   readTabState,
   statusBarTexts,
 } from "./support/workbenchDom";
@@ -288,6 +291,9 @@ test("作品一覧で題の付いた投稿済みの話を選んで F2 を押し�
       // F2 は選んでいる行に効く（右クリックと違い、行が渡らないので選択から引く）。行を押すと原稿が開いて
       // 焦点が原稿へ移るので、作品一覧へ焦点を戻してから押す
       await treeRow(page, "第1話").first().click();
+      // 原稿の面が描き終わるのを待つ。待たずに押すと、開き終わった面が焦点を取り返し、打った題が本文へ入った
+      await frontFrameShowing(page, "朝の駅は静かだった", "原稿エディターで第1話の本文が描かれる");
+      await waitTabsClean(page);
       await pressWorkbenchKey(page, "Control+Alt+Shift+KeyW");
       await pressWorkbenchKey(page, "F2");
       await waitForQuickInput(page, "第1話_はじまり.txt のサブタイトル");
@@ -302,6 +308,39 @@ test("作品一覧で題の付いた投稿済みの話を選んで F2 を押し�
       ...launchWith("本文/第1話_はじまり.txt", "はじまり"),
       keybindings: [...SIDEBAR_LAUNCH.keybindings, { key: WORKS_FOCUS_KEY, command: "novelai.works.focus" }],
     }
+  );
+}, 180_000);
+
+test("原稿エディターで打ちかけのまま F2 を押すと先に保存を訊き、題を打ち直すと打った字を残したまま名前が変わり、台帳のパスも新しい名前になる", async () => {
+  await withVsCode(
+    "改名の台帳追従（原稿エディターの F2）",
+    [{ name: "第1話_はじまり.txt", text: `【タイトル】\nはじまり\n\n【本文】\n${BODY}` }],
+    async (session) => {
+      const { page } = session;
+      await openRenamedEpisode(page, "第1話_はじまり.txt", "第1話");
+      const frame = await frontFrameShowing(page, "朝の駅は静かだった", "原稿エディターで第1話の本文が描かれる");
+      const mark = "【打ちかけ】";
+      await placeCaretAfter(frame, "静かだった。");
+      await page.keyboard.insertText(mark);
+      await waitUntil(async () => (await composeText(frame)).includes(mark), "打った字が面に出る");
+      // 焦点は原稿の面（WebView）の中。画面が本体へ F2 を渡し、本体の割り当てが受ける
+      await page.keyboard.press("F2");
+      await waitUntil(async () => (await quickPickRows(page)).some((row) => row.label.includes("保存して実行")), "先に保存を訊く窓が出る", 20_000);
+      await page.keyboard.press("Enter");
+      await waitForQuickInput(page, "第1話_はじまり.txt のサブタイトル", 20_000);
+      expect(await page.locator(".quick-input-widget input").first().inputValue(), "打つ欄には【タイトル】の題").toBe("はじまり");
+      await answerInput(page, "出会い");
+
+      await waitNotice(page, "投稿状態1件", "知らせに「投稿状態1件」が出る");
+      await waitPostedPaths(session, ["本文/第1話_出会い.txt"], "台帳の posts のパスが新しい名前になる");
+      expect(await readFile(path.join(session.manuscriptFolder, "第1話_出会い.txt"), "utf8"), "打った字が新しい名前のファイルに残る").toContain(mark);
+      await holdsFor(
+        async () => !(await readdir(session.manuscriptFolder)).includes("第1話_はじまり.txt"),
+        "古い名前のファイルが戻ってこない",
+        3_000
+      );
+    },
+    launchWith("本文/第1話_はじまり.txt", "はじまり")
   );
 }, 180_000);
 

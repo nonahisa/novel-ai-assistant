@@ -1,7 +1,7 @@
 import {
-  AddressTerm,
+  type AddressTerm,
   CHARACTER_TEXT_FIELDS,
-  Character,
+  type Character,
   type CharacterRelation,
   emptyCharacter,
   nextCharacterId,

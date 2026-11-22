@@ -55,11 +55,13 @@ const EXPECTED: Record<string, string> = {
   "ctrl+alt+k": "novelai.addEmphasis",
   // ルビ。2026-10-03 に画面の Ctrl+Shift+R から移した（傍点と同じ形に）
   "ctrl+alt+r": "novelai.addRuby",
+  // 開いている話のサブタイトルを付け直す（作者の答え 2026-11-22。作品一覧の F2 と同じ処理）
+  f2: "novelai.renameWithSubtitle",
 };
 
 describe("原稿エディターのキー割り当て（package.json）", () => {
-  test("11件あり、裁定の表と同じ組み合わせ", () => {
-    expect(ours).toHaveLength(11);
+  test("12件あり、裁定の表と同じ組み合わせ", () => {
+    expect(ours).toHaveLength(12);
     const actual = Object.fromEntries(
       ours.map((binding) => [binding.key, binding.command])
     );

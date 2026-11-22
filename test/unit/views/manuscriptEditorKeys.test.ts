@@ -363,6 +363,28 @@ describe("メモのキー（Ctrl+/・F8・Shift+F8）は送ってから本体へ
     }
   });
 
+  it("F2（サブタイトルの付け直し）も止めずに渡し、渡す前に打ちかけの字とカーソルの行を送る", () => {
+    // 送らないと、未保存の確認が打ちかけの字を知らないまま名前を変える（2026-11-22）
+    const h = harness();
+    const event = h.key({ key: "F2", code: "F2" });
+    expect(h.calls()).toContain("flush:キー操作を本体へ渡す");
+    expect(h.posted()).toContainEqual({ type: "caret", line: 7 });
+    expect(event.prevented || event.stopped).toBe(false);
+  });
+
+  it("変換中の F2 は本体へ渡さない（名前の変更を始めない）。変換は止めない", () => {
+    for (const init of [
+      { key: "Process", code: "F2", isComposing: true },
+      { key: "F2", code: "F2", isComposing: true },
+    ]) {
+      const h = harness();
+      const event = h.key(init);
+      expect(event.stopped, JSON.stringify(init)).toBe(true);
+      expect(event.prevented, JSON.stringify(init)).toBe(false);
+      expect(h.posted()).toEqual([]);
+    }
+  });
+
   it("変換中の Ctrl+/ も何もしない（送らない）", () => {
     const h = harness();
     h.key({ key: "/", code: "Slash", ctrlKey: true, isComposing: true });
