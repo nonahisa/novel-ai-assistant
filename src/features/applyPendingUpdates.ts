@@ -62,13 +62,13 @@ import {
 } from "../core/pendingNarratorMoves";
 import {
   applyPendingNarratorMove,
-  describeDiscardedUpdatesNotice,
   dismissPendingNarratorMove,
   narratorMoveViewItems,
   reviewPendingNarratorMoves,
   type NarratorMoveApplied,
   type PendingNarratorMoveReview,
 } from "./narratorMovePending";
+import { describeDiscardedUpdatesNotice } from "../core/narratorMoveChoices";
 import {
   describeNarratorMoveLog,
   describeRecordUpdateBatchLog,

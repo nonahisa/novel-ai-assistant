@@ -1,10 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
-import {
-  NARRATOR_MOVE_PREFIX,
-  SettingsPanel,
-  narratorMoveChoicesOf,
-  narratorMoveProposal,
-} from "../../../src/features/settingsPanel";
+import { SettingsPanel, narratorMoveProposal } from "../../../src/features/settingsPanel";
+import { NARRATOR_MOVE_PREFIX, narratorMoveChoicesOf } from "../../../src/core/narratorMoveChoices";
 import { findNarratorMoves, type NarratorMoveItem } from "../../../src/core/narratorMoves";
 import type { WorkNarratorContext } from "../../../src/core/sceneNarrators";
 import { emptyCharacter, type Character } from "../../../src/models/character";
