@@ -9315,7 +9315,8 @@ ${LAST_LINE_NEWLINE_SOURCE}
     - **変換中のキーは一切奪わない**（isComposing／composing）。
       F6・F7・F9・F10（日本語入力の変換）も、本体の F1・F5・F11・F12・Ctrl+P・
       Ctrl+Shift+P も使わない。F8 だけはメモの「次へ」に使う（作者の裁定）ので、
-      変換中の F8 は本体へ渡さない（下の keyHoldImeF8。半角カナへの変換は止めない）
+      変換中の F8 は本体へ渡さない（下の keyHoldImeF8。半角カナへの変換は止めない）。
+      F2（サブタイトルの付け直し）も本体の割当で受け、変換中は本体へ渡さない
     - Ctrl+S（保存を頼む）と Esc（品書きを閉じる）は、それぞれの受け口のまま。
       ここでは見ない
     - 素の矢印・Shift+矢印は、組んで書く面の矢印の扱い（入り込みの見張り）のまま
@@ -9466,7 +9467,9 @@ ${LAST_LINE_NEWLINE_SOURCE}
       */
       if (
         (ctrl && !event.altKey && !event.shiftKey && (code === "Slash" || key === "/")) ||
-        (!ctrl && !event.altKey && (code === "F8" || key === "F8"))
+        (!ctrl && !event.altKey && (code === "F8" || key === "F8")) ||
+        // F2（サブタイトルの付け直し）も、名前を変える前に打ちかけの字を送る
+        (!ctrl && !event.altKey && !event.shiftKey && (code === "F2" || key === "F2"))
       ) {
         keyHandOver();
         return;
@@ -9514,7 +9517,9 @@ ${LAST_LINE_NEWLINE_SOURCE}
   */
   document.addEventListener("keydown", function keyHoldImeF8(event) {
     if (!(event.isComposing || composing || event.keyCode === 229)) return;
-    if (String(event.code || "") !== "F8") return;
+    // F2 も同じ（変換中に押して、名前の変更が始まらないように。2026-11-22）
+    const imeCode = String(event.code || "");
+    if (imeCode !== "F8" && imeCode !== "F2") return;
     event.stopPropagation();
   });
 

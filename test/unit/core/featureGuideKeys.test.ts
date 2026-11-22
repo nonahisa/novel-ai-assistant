@@ -33,7 +33,7 @@ describe("原稿エディターのキー操作の説明", () => {
     expect(EXTRA_GUIDE).toContain("変換中");
   });
 
-  test("割り当ての11個と、変え方が載っている（設計書6.25.10）", () => {
+  test("割り当ての12個と、変え方が載っている（設計書6.25.10）", () => {
     for (const entry of MANUSCRIPT_KEY_BINDINGS) {
       expect(EXTRA_GUIDE, entry.command).toContain(entry.label);
       // package.json の表記（ctrl+alt+t）を、画面の書き方（Ctrl+Alt+T）にして探す
