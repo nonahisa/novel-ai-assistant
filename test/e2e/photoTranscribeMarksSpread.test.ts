@@ -181,17 +181,22 @@ async function openPanelWithPhoto(page: Page, photoPath: string): Promise<Frame>
 }
 
 /** 手元のAIの向きの推しが札に出るまで待ち、その札の文を返す */
-async function waitOrientGuess(frame: Frame, fake: FakeOllama): Promise<string> {
+async function waitOrientGuess(page: Page, frame: Frame, fake: FakeOllama): Promise<string> {
   let note = "";
   await waitUntil(
     async () => {
+      // 向きの問いも手元のAIへ送る前の関所を通る。この機械の GPU が忙しいと出て、出たまま待つと
+      // 問いが偽の Ollama へ届かずに落ちる（2026-11-12・11-22、本物の Ollama にモデルが載っていた）
+      await passLocalAiGate(page);
       note = ((await frame.locator('[data-testid="photo-orient-guess"]').first().textContent({ timeout: 500 }).catch(() => "")) ?? "").trim();
       return note !== "";
     },
     "手元のAIの向きの推しが写真の札に出る",
     30_000
   ).catch(async (error: unknown) => {
-    throw new Error(`${String(error)}（${await panelState(frame)}）${describeFakeRequests(fake.requests)}`);
+    throw new Error(
+      `${String(error)}（${await panelState(frame)}／確認の窓：${JSON.stringify((await dialogText(page)) ?? "")}）${describeFakeRequests(fake.requests)}`
+    );
   });
   return note;
 }
@@ -274,7 +279,7 @@ test("書き起こした文の、指示に例として挙げた旧字は青・�
         // 縦長の1ページ（見開きの既定に入らない形）
         const photo = await writePhoto(session, "縦長の1ページ.png", paintedPng(100, 160, () => PAPER));
         const frame = await openPanelWithPhoto(page, photo);
-        const guess = await waitOrientGuess(frame, fake);
+        const guess = await waitOrientGuess(page, frame, fake);
         expect(guess, `向きの推しの札：${guess}`).toContain("1ページ");
         await runTranscription(page, frame, fake, 1, 1);
         await waitPagesFilled(frame, 1);
@@ -362,7 +367,7 @@ test("横長の見開きの写真を入れると「左右に切る」に印が�
         const frame = await openPanelWithPhoto(page, photo);
 
         // 推しが返る前でも横長なら切るのが既定だが、推しの札が出てから見る（推しで置き直した結果を見るため）
-        const guess = await waitOrientGuess(frame, fake);
+        const guess = await waitOrientGuess(page, frame, fake);
         expect(guess, `向きの推しの札：${guess}`).toContain("そのまま・見開き");
         expect(await frame.locator('[data-testid="photo-split"]').isChecked(), `「見開き：左右に切る」に印がありません（${await panelState(frame)}）`).toBe(true);
         expect(await frame.locator('[data-testid="photo-order"]').count(), "読む順の選び欄が出ていません").toBe(1);

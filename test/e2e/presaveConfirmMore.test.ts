@@ -269,7 +269,18 @@ test("「以降は訊かない」を覚えている誤字脱字は、未保存�
       ).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（操作の記録の終わり：${(await actionLog(session)).split("\n").slice(-10).join(" ／ ")}）${await quickInputWaitContext(page)}`);
       });
-      await waitUntil(async () => fake.requests.length > from, "偽の AI に誤字脱字の頼みが届く", 30_000);
+      // 「始まった」の記録のあと、送る前の関所（この機械の GPU が忙しいと出る）が出ることがある。
+      // 出たまま待つと頼みが届かずに落ちる（2026-11-22、本物の Ollama にモデルが載っていた）
+      await waitUntil(
+        async () => {
+          await passLocalAiGate(page);
+          return fake.requests.length > from;
+        },
+        "偽の AI に誤字脱字の頼みが届く",
+        30_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（確認の窓：${JSON.stringify((await dialogText(page)) ?? "")}／知らせ：${JSON.stringify(await notificationTexts(page))}）`);
+      });
 
       /* ── 未保存があると確認の窓が出る ── */
       await typeUnsaved(page);
