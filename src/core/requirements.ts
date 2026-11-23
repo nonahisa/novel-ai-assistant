@@ -189,7 +189,7 @@ export const TYPO_MODEL_ADVICE =
  * 変えるかは作者の判断待ちなので、ここでは言い方だけを変えた。
  */
 export const CHAT_MODEL_IS_SMALL_NOTE =
-  "検知（誤字脱字・矛盾・伏線など）に使うなら、gemma4:26b（8GBのGPUでも動きます）かクラウドのAIを勧めます。";
+  "検知（誤字脱字・矛盾・伏線など）に使うなら、gemma4:26b（8GBのGPUでは遅くなり、ほかのアプリがGPUを使っていると読み込めないことがあります）かクラウドのAIを勧めます。";
 
 export const REQUIREMENTS: Requirement[] = [
   {

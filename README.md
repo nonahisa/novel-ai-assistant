@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**1.0.46**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **1.0.41**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**1.0.47**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **1.0.41**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 
@@ -88,7 +88,7 @@ code --install-extension "./novel-ai-assistant-${v#v}.vsix" --force
 
 クラウドAIだけを使うならOllamaとモデルは要らず、1台だけで書くならGitとGitHub CLIも要りません。
 
-誤字脱字・矛盾・伏線などの検知に使うなら、`gemma4:26b`（8GBのGPUでも動きます）かクラウドAIを勧めます。機能別AI割当で、機能ごとに選べます。
+誤字脱字・矛盾・伏線などの検知に使うなら、`gemma4:26b` かクラウドAIを勧めます。`gemma4:26b` は8GBのGPUでも動きますが、GPUに入りきらない分がメモリへあふれるので遅くなり、ほかのアプリがGPUを使っていると読み込めないことがあります。機能別AI割当で、機能ごとに選べます。
 
 ---
 
