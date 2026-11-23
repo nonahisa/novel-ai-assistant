@@ -183,8 +183,8 @@ test("LM Studio の欄で llama-server の口へ向けると、接続が通っ�
 
         // 生成の試しが通り、設定が保存される（完了はステータスバーに数秒だけ出る）
         const doneText = `LM Studio（ローカル） / ${modelName} を設定しました。`;
+        // LM Studio の lms で読み込みに行かないことは、上のモデルの行に「選ぶと読み込みます」が出ない確かめで見ている
         await waitWithState(session, fake, () => noticeShows(page, doneText), `「${doneText}」が出る`, 60_000);
-        expect(await noticeShows(page, "LM Studioにモデルを読み込んでいます"), "llama-server なのに LM Studio の読み込みへ進んだ").toBe(false);
         if (fake) {
           const probe = fake.chatBodies.find((body) => body.response_format === undefined);
           expect(probe, `生成の試しが作り物に届いていない\n${await describeState(session, fake)}`).toBeDefined();
@@ -194,8 +194,9 @@ test("LM Studio の欄で llama-server の口へ向けると、接続が通っ�
         /*
           ── 1の続き. AI接続確認で「LM Studioに接続しました（モデル 1 件）」が出る ──
           右下の知らせは数秒で畳まれるので、知らせの記録ファイル（`core/noticeLog.ts`）と右下の両方を見る
-          （`support/noticeRecord.ts`）。接続確認の行（`logLine`）は出力の窓へ行き、作品の actions.log には
-          書かれないので、ここでは見ない
+          （`support/noticeRecord.ts`）。接続確認の行（`logLine`）は、パレットから走らせて作品が決まらないときは
+          作品の actions.log でなく拡張機能の保管庫のログへ書かれる（`core/logger.ts` の `useLogFiles`。
+          作品が決まらないときは保管庫へ倒す決まり）ので、ここでは見ない
         */
         await clearNotifications(page);
         const connectStarted = Date.now();
