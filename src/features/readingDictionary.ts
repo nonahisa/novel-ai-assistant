@@ -6,6 +6,7 @@ import { AIRegistry, ensureConfigured } from "../ai/registry";
 import {
   resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
+  truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { AIError } from "../ai/types";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
@@ -271,6 +272,11 @@ export async function runReadingDictionary(
   );
 
   let failed = 0;
+  /**
+   * 切り詰められた区切りの、次の一手（最後に見たもの）。失敗の知らせに添える。
+   * 「もう一度押す」だけでは、読める長さに届いて切れた回は直らない
+   */
+  let truncatedAdvice: string | undefined;
   let cancelled = false;
   if (pending.length > 0) {
     await withCancellableProgress(
@@ -310,9 +316,14 @@ export async function runReadingDictionary(
             const items = parseReadingDictionaryResult(response.text);
             if (!items) {
               failed++;
+              // **文言は自前で書かない**（作者の決定 2026-11-23）。直し方の
+              // 言い分けは共通の部品に任せる
+              if (response.truncated) {
+                truncatedAdvice = truncatedOutputAdvice(outputLimit, response);
+              }
               logFailure("読みの確かめ", {
                 理由: response.truncated
-                  ? "応答が出力上限で切り詰められました"
+                  ? truncatedOutputAdvice(outputLimit, response)
                   : "応答を読み取れません",
                 応答: responseExcerptForLog(response.text),
               });
@@ -343,6 +354,7 @@ export async function runReadingDictionary(
   if (failed > 0) {
     void warnWithLog(
       `読みの確かめで${failed}か所が失敗しました。辞書は書き換えていません。` +
+        (truncatedAdvice ?? "") +
         "もう一度押すと、失敗した所だけを送り直します。"
     );
     return;

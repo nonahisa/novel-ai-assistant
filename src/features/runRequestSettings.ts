@@ -44,8 +44,9 @@ import {
   buildCharacterExtractPrompt,
 } from "../prompts/characterExtract";
 import {
+  resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
-  resolveOutputTokensForSend,
+  truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { readChunkSettings, resolveModelInfoOrWarn } from "./chunkSettings";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -162,11 +163,13 @@ export async function runSettingsExtraction(
     resolved.model,
     "character_extract"
   );
-  const sendOutputTokens = resolveOutputTokensForSend(
+  // 出どころごと受け取る（切り詰めの案内が直し方を言い分けるため。製品と同じ）
+  const sendOutputLimit = resolveOutputLimitForSend(
     resolved.provider.id,
     resolved.model,
     "character_extract"
   );
+  const sendOutputTokens = sendOutputLimit.tokens;
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（製品と同じ。設計書6.27.10）
   const overheadChars =
     BASE_SYSTEM_PROMPT.length +
@@ -328,7 +331,11 @@ export async function runSettingsExtraction(
             if (response.truncated) {
               // 割り直さない（割った断片は保存の道で切り直せない）。失敗として数える
               failed++;
-              failureNotes.push(`${label}: 応答が出力上限で切り詰められました（このチャンクは貯めていません）`);
+              // 呼び出し元（外部のAI）へ返す文も、製品と同じ案内にそろえる
+              // （欄の形は変えない。作者の決定 2026-11-23）
+              failureNotes.push(
+                `${label}: ${truncatedOutputAdvice(sendOutputLimit, response)}（このチャンクは貯めていません）`
+              );
               continue;
             }
             const parsed = parseResult(response.text);

@@ -65,6 +65,13 @@ import {
  * LM Studioが動かすのは**公開重みのモデル**で、名前に大きさが入っている
  * （`qwen3-30b-a3b` など）。Ollamaと同じ物差しで能力を見積もる。
  * **「手元で動く＝非力」でも「最新だから最上位」でもない。**
+ *
+ * ## llama.cpp の server もこの欄でつなぐ（2026-11-23）
+ *
+ * 口は同じOpenAI互換なので、接続先を `http://127.0.0.1:8080/v1` などへ
+ * 向ければ動く。LM Studio の自前の口（`/api/v0/models`）が無いときだけ、
+ * llama-server の `/v1/models` の `meta` と `/props` から大きさと長さを補う
+ * （`readLlamaServerModels`）。
  */
 
 /**
@@ -112,7 +119,29 @@ export function lmstudioEndpoint(): string {
 }
 
 interface ModelListResponse {
-  data?: Array<{ id?: string; object?: string }>;
+  data?: Array<{ id?: string; object?: string; meta?: LlamaServerModelMeta }>;
+}
+
+/**
+ * llama.cpp の server（llama-server）が `/v1/models` の各モデルに添える `meta`。
+ *
+ * 項目名は llama-server b12647 の実測に合わせてある（2026-11-23）。
+ * **すべて任意**——LM Studio の `/v1/models` には `meta` 自体が無い。
+ */
+interface LlamaServerModelMeta {
+  /** 起動時に割り当てた文脈の長さ（`-c`）。全スロットの合計 */
+  n_ctx?: number;
+  /** 学習時の最大。**contextWindow には使わない**（`max_context_length` と同じ理由） */
+  n_ctx_train?: number;
+  /** パラメータ数（例 25233142046） */
+  n_params?: number;
+}
+
+/** llama-server の `/props`。使うのはスロットあたりの長さと別名だけ */
+interface LlamaServerProps {
+  default_generation_settings?: { n_ctx?: number };
+  /** `--alias` で付けた名前。付けなければ無い */
+  model_alias?: string;
 }
 
 /**
@@ -132,6 +161,30 @@ interface NativeModelEntry {
   max_context_length?: number;
   /** **いま読み込まれている長さ。** 読込済みのモデルにしか入らない */
   loaded_context_length?: number;
+  /**
+   * パラメータ数。**LM Studio は返さない。** llama-server の `meta.n_params` を
+   * 写したときにだけ入る（`readLlamaServerModels`）
+   */
+  n_params?: number;
+}
+
+function positiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
+/**
+ * パラメータ数を Ollama と同じ表記（"25.2B"・"270M"）にする。
+ *
+ * **Ollama の `parameter_size` と同じ形に揃える**のは、能力の見積もり
+ * （`inferTier`）が同じ物差しで読めるようにするため。
+ */
+export function formatParameterCount(count: number | undefined): string | null {
+  const n = positiveNumber(count);
+  if (n === undefined) return null;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  return `${Math.round(n / 1e6)}M`;
 }
 
 interface NativeModelListResponse {
@@ -359,7 +412,10 @@ export class LmStudioProvider implements AIProvider {
     | undefined
   > {
     const entry = (await this.readNativeModels())?.get(id);
-    if (!entry) return undefined;
+    // **状況の分からない項目を「未読込」と断じない。** llama-server から
+    // 大きさだけ読めたときは state が無い。未読込と返すと、LM Studio の口で
+    // 読み込ませに行ってしまう
+    if (!entry || entry.state === undefined) return undefined;
     const max = entry.max_context_length;
     return {
       loaded: entry.state === "loaded",
@@ -394,21 +450,98 @@ export class LmStudioProvider implements AIProvider {
       }
       return byId;
     } catch (error) {
+      // **LM Studio の口が無いときだけ** llama-server の口で補う（設計書6.24）。
+      // LM Studio の口が読めるときに混ぜると、同じモデルの長さが2か所から来る
+      const fallback = await this.readLlamaServerModels();
       if (!this.nativeFailureLogged) {
         this.nativeFailureLogged = true;
         logLine(
           `LM Studio：${this.nativeModelsUrl} から読み込み状況を取得できませんでした。` +
-            `設定のコンテキスト長を使います（${
-              error instanceof Error ? error.message : String(error)
-            }）。`
+            (fallback
+              ? "/v1/models の meta と /props から補います"
+              : "設定のコンテキスト長を使います") +
+            `（${error instanceof Error ? error.message : String(error)}）。`
         );
       }
-      return undefined;
+      return fallback;
     }
   }
 
+  /**
+   * llama.cpp の server（llama-server）から、大きさと読み込んだ長さを読む。
+   * 読めなければ undefined。
+   *
+   * **失敗を例外にしない**（`readNativeModels` と同じ決まり）。LM Studio の
+   * 古い版も、この口を持たないので undefined になり、これまでどおり動く。
+   *
+   * 長さは **`/props` のスロットあたりの長さ**を先に使う。`meta.n_ctx` は
+   * 全スロットの合計で、`--parallel` で分けて起こすと1回の依頼で読める長さは
+   * それより短い。`n_ctx_train`（学習時の最大）は使わない。
+   */
+  private async readLlamaServerModels(): Promise<
+    Map<string, NativeModelEntry> | undefined
+  > {
+    const base = this.endpoint.replace(/\/v1$/, "");
+    let models: ModelListResponse;
+    try {
+      models = await fetchJson<ModelListResponse>({
+        url: `${this.endpoint}/models`,
+        timeoutMs: 15000,
+        label: LABEL,
+        local: true,
+      });
+    } catch {
+      return undefined;
+    }
+    let props: LlamaServerProps | undefined;
+    try {
+      props = await fetchJson<LlamaServerProps>({
+        url: `${base}/props`,
+        timeoutMs: 15000,
+        label: LABEL,
+        local: true,
+      });
+    } catch {
+      // 無くても meta だけで補える
+      props = undefined;
+    }
+
+    const entries = (models.data ?? []).filter(
+      (entry): entry is { id: string; meta?: LlamaServerModelMeta } =>
+        typeof entry.id === "string" && entry.id !== ""
+    );
+    const slotContext = positiveNumber(props?.default_generation_settings?.n_ctx);
+    const byId = new Map<string, NativeModelEntry>();
+    for (const entry of entries) {
+      // **`/props` はサーバー全体で1つ。** 別名の合うモデルか、1つしか
+      // 並んでいないときだけ当てる。複数のモデルを並べる起こし方で
+      // 全部へ当てると、別のモデルの長さを使ってしまう
+      const propsApplies =
+        entries.length === 1 || props?.model_alias === entry.id;
+      const length =
+        (propsApplies ? slotContext : undefined) ??
+        positiveNumber(entry.meta?.n_ctx);
+      const nParams = positiveNumber(entry.meta?.n_params);
+      if (length === undefined && nParams === undefined) continue;
+      byId.set(entry.id, {
+        id: entry.id,
+        // 長さが分かるのは、llama-server が読み込んで動かしているモデルだけ。
+        // 分からないものは状況も「分からない」のまま
+        ...(length !== undefined
+          ? { state: "loaded", loaded_context_length: length }
+          : {}),
+        ...(nParams !== undefined ? { n_params: nParams } : {}),
+      });
+    }
+    // 何も補えなければ、口が無いのと同じ扱い（これまでどおり）
+    return byId.size > 0 ? byId : undefined;
+  }
+
   private describe(id: string, native?: NativeModelEntry): ModelInfo {
-    const parameterSize = parseParameterSize(id);
+    // llama-server が数えた値があればそちらを使う。`--alias` を付けないと
+    // 名前は gguf の場所になり、名前からは読めないことがある
+    const parameterSize =
+      formatParameterCount(native?.n_params) ?? parseParameterSize(id);
     const max = native?.max_context_length;
     const info: ModelInfo = {
       id,
@@ -488,11 +621,23 @@ export class LmStudioProvider implements AIProvider {
       };
     }
 
+    /*
+      **思考を切る指定は、llama.cpp の server へ届く形で送る**（設計書6.24）。
+      llama-server を思考ありで起こすと、gemma4 が思考で出力の枠を使い切り、
+      本文が空のまま `finish_reason=length` で返った（b12647・gemma4:26b で実測、
+      2026-11-23）。`enable_thinking` はチャットのひな形へ渡す値で、
+      頼まれたとき（検知・抽出）だけ送る。
+    */
+    if (params.disableThinking) {
+      body.chat_template_kwargs = { enable_thinking: false };
+    }
+
     // **断られた指定だけを外して出し直す。**
     // どれが駄目かをエラー文から当てにいかず、1つずつ外して試す。
-    // LM Studioは読み込んだモデルと版によって受ける指定が変わる
+    // LM Studioは読み込んだモデルと版によって受ける指定が変わる。
+    // 回数は「外せる指定の数＋1」（形式の強制・温度・思考の指定）
     let response: ChatResponse | undefined;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
         response = await this.post(body, params.model, params.signal);
         break;
@@ -525,6 +670,17 @@ export class LmStudioProvider implements AIProvider {
           isUnsupportedParameter(error, "temperature")
         ) {
           delete body.temperature;
+          continue;
+        }
+        if (
+          body.chat_template_kwargs !== undefined &&
+          isUnsupportedParameter(error, "chat_template_kwargs")
+        ) {
+          // 思考を切れないだけで、応答は使える（思考の長い答えになりうる）
+          delete body.chat_template_kwargs;
+          aiCallLog(params.meta).line(
+            "LM Studio：思考を切る指定が受け付けられなかったため、外して再試行します。"
+          );
           continue;
         }
         throw error;

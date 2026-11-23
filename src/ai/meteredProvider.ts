@@ -2,6 +2,7 @@ import {
   AIError,
   type AIProvider,
   type ConnectionTestResult,
+  type FilledContextWindow,
   type GenerateParams,
   type GenerateResult,
   type ModelInfo,
@@ -217,12 +218,19 @@ export class MeteredProvider implements AIProvider {
     let overflow: AIError | undefined;
     /** 関所が1回の応答の上限を縮めた回だけ入る（応答へも付けて返す） */
     let windowCap: OutputWindowCap | undefined;
+    /**
+     * 関所が引いた読める長さ。**切れた回を見分けるのにも使う**（下の
+     * `filledContextWindowOf`）。もう一度引かないのは、LM Studio では
+     * 引くたびに1往復するため
+     */
+    let contextWindow: number | undefined;
     if (!skipsContextGuard(requested.meta?.feature)) {
+      contextWindow = await this.contextWindowOf(requested.model, requested.meta);
       const fit: ContextFitInput = {
         systemChars: requested.systemPrompt.length,
         userChars: requested.userPrompt.length,
         outputTokens: this.outputTokensFor(requested),
-        contextWindow: await this.contextWindowOf(requested.model, requested.meta),
+        contextWindow,
         // **チャンクを決めたのと同じ台帳を見る**（設計書6.77）。
         // 実測が無ければ `resolveTokensPerChar` が従来の 0.7 を返す
         measured: modelTuning(this.inner.id, requested.model),
@@ -286,17 +294,35 @@ export class MeteredProvider implements AIProvider {
       });
       // **うまくいった回からだけ速さを採る**（下のコメントに理由）。
       // 台帳への書き込みは抑えてあるので、たいていは何もせずに戻る
+      // 縮めた回は縮めたほうの印だけを付ける（案内が「縮めてありました」と
+      // 正しく言えるので、二重に言わない）
+      const filled =
+        windowCap === undefined && !this.mayHaveRoundTripped(params)
+          ? filledContextWindowOf(result, this.effectiveWindowOf(params, contextWindow))
+          : undefined;
       await this.recordSpeed(params.model, result);
       await this.recordCharsPerToken(params, result);
-      await this.recordFeatureOutput(params, result);
+      await this.recordFeatureOutput(params, result, filled);
       /*
         **縮めたことを応答に付けて返す**（0.89.6 の担当の報告 #5）。切り詰めの
         案内は呼び出し側が組むが、呼び出し側は関所が縮めたことを知らない。
         付けないと「設定の上限を大きくして」と、直らない操作を勧めてしまう。
+
+        **読める長さに届いて切れた回も同じ理由で付ける**（作者の決定 2026-11-23）。
+        見積もりでは入ると判断して縮めなかった回で、上限を上げても直らない。
       */
-      return windowCap !== undefined
-        ? { ...result, outputCappedByWindow: windowCap }
-        : result;
+      if (windowCap !== undefined) {
+        return { ...result, outputCappedByWindow: windowCap };
+      }
+      if (filled !== undefined) {
+        aiCallLog(params.meta).step(
+          `モデル「${params.model}」の応答が、読める長さ` +
+            `（${filled.contextWindow.toLocaleString("ja-JP")}トークン）を` +
+            `入力と出力で使い切って切れました（計${filled.usedTokens.toLocaleString("ja-JP")}トークン）`
+        );
+        return { ...result, filledContextWindow: filled };
+      }
+      return result;
     } catch (error) {
       this.record(params, {
         elapsedMs: Date.now() - started,
@@ -304,6 +330,50 @@ export class MeteredProvider implements AIProvider {
       });
       throw error;
     }
+  }
+
+  /**
+   * 切れた回を見分けるときに比べる、**実際に効いた読める長さ**。
+   *
+   * **Ollama は送った `num_ctx` で切る**（申告が 131,072 でも、8,192 で送れば
+   * 8,192 で切れる）。申告と比べると num_ctx で切れた回に印が付かず、案内が
+   * 「1回の応答の上限を大きく」と直らない操作を勧める。
+   *
+   * **`numCtx` を読むのは Ollama だけ**なので、ほかのプロバイダでは見ない。
+   * 渡されても送られない値と比べると、まだ入る回に印が付く。
+   *
+   * **送る前の関所（入るかの判定）は、今までどおり申告の長さで見る。** ここで
+   * 変えるのは切れた後の見分けだけ。
+   */
+  private effectiveWindowOf(
+    params: GenerateParams,
+    contextWindow: number | undefined
+  ): number | undefined {
+    if (this.inner.id !== "ollama") return contextWindow;
+    // 読める長さの測定は、わざと端まで試す呼び出しなので見分けない（関所と同じ扱い）
+    if (skipsContextGuard(params.meta?.feature)) return contextWindow;
+    const numCtx = params.numCtx;
+    if (typeof numCtx !== "number" || !Number.isFinite(numCtx) || numCtx <= 0) {
+      return contextWindow;
+    }
+    return numCtx;
+  }
+
+  /**
+   * 道具の往復が起こりうる回か。**起こりうる回は、切れた回の見分けをしない。**
+   *
+   * Ollama は道具だけが返ると、返事を足して2回目を投げ、`usage` を2回ぶん
+   * 足して返す（`ollamaProvider.ts` の `generateInner`）。2回目は1回目の会話を
+   * 含めて読み直すので、足した数は「1回の要求の入力＋出力」ではなく、読める
+   * 長さに届いていなくても届いたように見える。往復したかは応答から分からない
+   * ので、往復の受け口（`onToolCall`）を渡した回をまとめて外す（安全側：
+   * 見分けを外した回は、これまでどおり上限の案内になるだけ）。
+   *
+   * **往復するのは Ollama だけ**（ほかのプロバイダは `onToolCall` を読まない）
+   * なので、ほかでは外さない。
+   */
+  private mayHaveRoundTripped(params: GenerateParams): boolean {
+    return this.inner.id === "ollama" && params.onToolCall !== undefined;
   }
 
   /**
@@ -720,7 +790,8 @@ export class MeteredProvider implements AIProvider {
    */
   private async recordFeatureOutput(
     params: GenerateParams,
-    result: GenerateResult
+    result: GenerateResult,
+    filled: FilledContextWindow | undefined
   ): Promise<void> {
     const feature = params.meta?.feature;
     if (feature === undefined || feature.length === 0) return;
@@ -746,6 +817,14 @@ export class MeteredProvider implements AIProvider {
       「要った量」と覚える
     */
     if (result.stoppedEarly) return;
+    /*
+      **読める長さに届いて切れた回も、量も印も残さない**（作者の決定 2026-11-23）。
+      上限が足りなかったのではなく、読める長さが足りなかった。印を付けると
+      以後その機能は見込みを失って設定値の上限で送るが、読める長さは同じ
+      なので同じところで切れる——直らない学習になる。量として残せば、
+      切られた量を「要った量」と覚える
+    */
+    if (filled !== undefined) return;
 
     const tokens = result.usage?.outputTokens;
     if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0) {
@@ -888,6 +967,43 @@ function inputSpeedSample(result: GenerateResult): number | undefined {
   if (ms < MIN_INPUT_SPEED_SAMPLE_MS) return undefined;
   // 丸め方は出力の速さと同じ式を使う（小数1桁）
   return outputTokensPerSecond(tokens, ms);
+}
+
+/**
+ * 切れた応答が、**読める長さを入力と出力で使い切った**回か（作者の決定 2026-11-23）。
+ *
+ * **数だけで決める。** プロバイダが返した `inputTokens + outputTokens` が、
+ * 実際に効いた読める長さ（関所の引いた長さ。Ollama で `num_ctx` を渡した回は
+ * その値。`effectiveWindowOf`）以上のときだけ印を付ける。エラー文や途中で切れた
+ * 文の形からは当てない（実装ルール5）。数が無い・読める長さが分からない回は
+ * 印を付けず、これまでの案内（上限の話）のまま。
+ *
+ * 実機の例：llama.cpp の server・文脈 8,192 で 6,685＋1,507＝8,192。
+ * 見積もりでは入るはずだったので関所は縮めておらず、案内が「1回の応答の
+ * 上限を大きく」になっていた。
+ */
+function filledContextWindowOf(
+  result: GenerateResult,
+  contextWindow: number | undefined
+): FilledContextWindow | undefined {
+  if (!result.truncated) return undefined;
+  if (
+    contextWindow === undefined ||
+    !Number.isFinite(contextWindow) ||
+    contextWindow <= 0
+  ) {
+    return undefined;
+  }
+  const input = result.usage?.inputTokens;
+  const output = result.usage?.outputTokens;
+  if (typeof input !== "number" || !Number.isFinite(input) || input <= 0) {
+    return undefined;
+  }
+  if (typeof output !== "number" || !Number.isFinite(output) || output <= 0) {
+    return undefined;
+  }
+  const usedTokens = input + output;
+  return usedTokens >= contextWindow ? { contextWindow, usedTokens } : undefined;
 }
 
 /** 前回の値から2割以上動いたか。**前回に無かった値が採れたら、動いたと数える** */
