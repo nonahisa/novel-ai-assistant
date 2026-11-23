@@ -397,7 +397,7 @@ export function truncatedOutputAdvice(
    * 縮めた値で、設定を上げても測り直しても変わらない。渡さない呼び出しは
    * これまでどおり。
    */
-  response?: Pick<GenerateResult, "outputCappedByWindow">
+  response?: Pick<GenerateResult, "outputCappedByWindow" | "filledContextWindow">
 ): string {
   const cap = response?.outputCappedByWindow;
   if (cap !== undefined) {
@@ -405,6 +405,21 @@ export function truncatedOutputAdvice(
       "応答が出力上限で切り詰められました。" +
       describeWindowCappedOutput(cap) +
       "送る量を減らすか、もっと長く読めるモデルをお試しください。"
+    );
+  }
+  /*
+    **読める長さに届いて切れた回は、上限の話をしない**（作者の決定 2026-11-23）。
+    上限を上げても、読める長さは同じだけしかない。広げ方はAIによって違う
+    （製品が決める・読み込むときに決める・起こすときに決める）ので、
+    どのAIかを決め打ちせず、一手だけを短く言う（実装ルール5）
+  */
+  const filled = response?.filledContextWindow;
+  if (filled !== undefined) {
+    return (
+      "応答が途中で切れました。このモデルの読める長さ" +
+      `（${filled.contextWindow.toLocaleString("ja-JP")}トークン）を、` +
+      "送った指示と本文と答えで使い切っています。" +
+      "読める長さを広げるか、送る量を減らしてお試しください。"
     );
   }
   if (limit.source === "機能の実測") {
