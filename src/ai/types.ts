@@ -369,6 +369,16 @@ export interface GenerateResult {
    */
   outputCappedByWindow?: OutputWindowCap;
   /**
+   * 関所は縮めずに送ったのに、**実際の数（入力＋出力のトークン）が読める長さに
+   * 届いて切れた**回だけ入る（`ai/meteredProvider.ts` だけが入れる。作者の決定
+   * 2026-11-23）。
+   *
+   * `outputCappedByWindow` とは分ける。あちらは「送る前に縮めた」回で、案内も
+   * そう言う。こちらは見積もりが外れた回で、縮めた事実は無い。どちらも
+   * 「上限を上げても直らない」点は同じなので、案内は上限の話をしない。
+   */
+  filledContextWindow?: FilledContextWindow;
+  /**
    * **書き切る前にこちらから受け取りをやめ、それまでの答えを閉じて渡した**
    * 回だけ入る（2026-10-10。いまは同じ要素の繰り返しだけ。
    * `core/repeatedElements.ts`）。
@@ -394,6 +404,17 @@ export interface OutputWindowCap {
   readonly contextWindow: number;
   /** 縮めた先の、1回の応答の上限 */
   readonly tokens: number;
+}
+
+/**
+ * 読める長さに届いて切れた回の数（トークン）。**プロバイダが返した数だけで
+ * 決める**——エラー文や終わり方の文字から当てない（実装ルール5）。
+ */
+export interface FilledContextWindow {
+  /** 関所が引いた、そのモデルの読める長さ */
+  readonly contextWindow: number;
+  /** プロバイダが返した入力＋出力のトークン数（読める長さ以上） */
+  readonly usedTokens: number;
 }
 
 export interface ConnectionTestResult {

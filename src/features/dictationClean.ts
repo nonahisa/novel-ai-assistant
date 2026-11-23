@@ -161,7 +161,10 @@ export async function runDictationClean(
   );
 
   let response:
-    | Pick<GenerateResult, "text" | "outputCappedByWindow"> & { truncated?: boolean }
+    | Pick<
+        GenerateResult,
+        "text" | "outputCappedByWindow" | "filledContextWindow"
+      > & { truncated?: boolean }
     | undefined;
   await withCancellableProgress(
     "口述で入れた文を整えています",

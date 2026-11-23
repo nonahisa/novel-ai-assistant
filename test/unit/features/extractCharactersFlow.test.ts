@@ -1087,7 +1087,37 @@ describe("人物抽出フロー", () => {
     expect(message).not.toContain("能力:");
   });
 
-  test("切り詰め応答を保存せず出力上限かチャンク縮小を案内する", async () => {
+  test("読める長さに届いて切れた回は、上限ではなく読める長さを案内する", async () => {
+    // 作者の決定 2026-11-23。実機（文脈 8,192）で「出力上限を増やす」と案内していた
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage,
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    state.generate.mockResolvedValue({
+      text: "{\"characters\": [",
+      truncated: true,
+      elapsedMs: 1,
+      filledContextWindow: { contextWindow: 8_192, usedTokens: 8_192 },
+    });
+
+    await extractCharacters(work, testRegistry());
+
+    expect(state.saveAll).not.toHaveBeenCalled();
+    const message = String(showWarningMessage.mock.calls.at(-1)?.[0] ?? "");
+    expect(message).toContain("読める長さを広げるか、送る量を減らして");
+    expect(message).not.toContain("上限を増やす");
+    expect(message).not.toContain("上限」を大きく");
+  });
+
+  test("切り詰め応答を保存せず出力上限の直し方を案内する", async () => {
     const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
@@ -1109,9 +1139,11 @@ describe("人物抽出フロー", () => {
     await extractCharacters(work, testRegistry());
 
     expect(state.saveAll).not.toHaveBeenCalled();
-    expect(showWarningMessage.mock.calls.at(-1)?.[0]).toContain(
-      "出力上限を増やすかチャンクを小さくしてください"
-    );
+    // 文言は共通の部品（`truncatedOutputAdvice`）から来る。直し方は上限の
+    // 出どころ（この試験では同梱の見込み＝機能の実測）で変わるので、頭だけ見る
+    const message = String(showWarningMessage.mock.calls.at(-1)?.[0] ?? "");
+    expect(message).toContain("応答が出力上限で切り詰められました。");
+    expect(message).not.toContain("出力上限を増やすかチャンクを小さく");
   });
 
   test("人物JSONに未保存変更がある場合はAI処理を開始しない", async () => {

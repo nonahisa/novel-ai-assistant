@@ -86,8 +86,9 @@ import { writeExtractedIndex } from "../core/extractedIndexStore";
 import { readEpisodeContents } from "./extractionFreshness";
 import {
   resolveMaxOutputTokens,
+  resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
-  resolveOutputTokensForSend,
+  truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { describeHeldChanges } from "../core/recordChanges";
@@ -393,11 +394,14 @@ export async function extractCharacters(
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
   // 半分になる。抽出のJSONは途中で切れると解析できず、**そのチャンクが
   // 丸ごと捨てられる**（呼び出し1回ぶんが無駄になる）
-  const sendOutputTokens = resolveOutputTokensForSend(
+  // 出どころごと受け取る。割れない底まで切れたときの案内
+  // （`truncatedOutputAdvice`）が、上限の出どころで直し方を言い分けるため
+  const sendOutputLimit = resolveOutputLimitForSend(
     outputTuning.providerId,
     outputTuning.model,
     "character_extract"
   );
+  const sendOutputTokens = sendOutputLimit.tokens;
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // 抽出の指示はいちばん重く、P-04a v5.1 で約11,000字ある。ここを固定の
@@ -966,11 +970,12 @@ export async function extractCharacters(
               done++;
               continue;
             }
+            // **文言は自前で書かない**（作者の決定 2026-11-23）。読める長さに
+            // 届いて切れた回に「出力上限を増やす」と言うと、直らない操作を
+            // 勧めることになる。直し方の言い分けは共通の部品に任せる
             failures.push({
               chunk,
-              message:
-                "AIの応答が出力上限で切り詰められました。" +
-                "出力上限を増やすかチャンクを小さくしてください。",
+              message: truncatedOutputAdvice(sendOutputLimit, res),
             });
             done++;
             continue;
