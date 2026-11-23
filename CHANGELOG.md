@@ -1,6 +1,6 @@
 # Change Log
 
-## 未定
+## 1.0.49 - 2026-11-23
 
 - 足したこと
   - 設定 `novelai.lmstudio.endpoint` を llama.cpp の server（llama-server）の URL にすると、AI設定の「LM Studio」で使えるようにしました。モデルの大きさと読み込んだ文脈の長さは llama-server から読みます
