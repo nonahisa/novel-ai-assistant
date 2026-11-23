@@ -1,5 +1,12 @@
 # Change Log
 
+## 未定
+
+- 足したこと
+  - 設定 `novelai.lmstudio.endpoint` を llama.cpp の server（llama-server）の URL にすると、AI設定の「LM Studio」で使えるようにしました。モデルの大きさと読み込んだ文脈の長さは llama-server から読みます
+- 直したこと
+  - 検知・抽出で「LM Studio」を選んだときに思考を切る指定が送られず、llama-server を思考ありで起動すると空の応答で失敗していたのを直しました
+
 ## 1.0.47 - 2026-11-23
 
 - 変えたこと
