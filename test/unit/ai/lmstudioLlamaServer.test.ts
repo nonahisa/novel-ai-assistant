@@ -209,6 +209,14 @@ describe("llama-server の大きさと文脈長", () => {
 
     expect(models).toHaveLength(1);
     expect(models[0].parameterSize).toBe("25.2B");
+    // 小さいモデル向けの頼み方にならない（大きさの表記を能力の見積もりが読める）
+    expect(models[0].tier).not.toBe("light");
+    // 読み込み済みとして返す。最大が無いので、LM Studio の口で読み直しに行かない
+    expect(await provider.readModelLoadState("gemma4:26b")).toEqual({
+      loaded: true,
+      maxContextLength: undefined,
+      loadedContextLength: 6144,
+    });
     // 設定値（4096）にも meta の n_ctx（8192）にも勝つ
     expect(models[0].contextWindow).toBe(6144);
     // n_ctx_train（262144）は使わない
