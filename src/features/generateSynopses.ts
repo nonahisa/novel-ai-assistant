@@ -9,8 +9,9 @@ import { confirmProviderReachable } from "./aiConnectivity";
 import { paidCostLines } from "../core/paidUsageNotice";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
+  resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
-  resolveOutputTokensForSend,
+  truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { scanWork } from "../core/scanner";
 import {
@@ -265,11 +266,14 @@ export async function generateSynopses(
   // **場所の確保（上）と、実際に送る上限（下）は別物である**（設計書6.77の
   // 第2段）。上を上限として送ると、測っていないモデルでは上限が設定値の
   // 半分になり、長い応答が途中で切れる
-  const sendOutputTokens = resolveOutputTokensForSend(
+  // 出どころごと受け取る。切り詰められたときの案内（`truncatedOutputAdvice`）が、
+  // 上限の出どころで直し方を言い分けるため
+  const sendOutputLimit = resolveOutputLimitForSend(
     resolved.provider.id,
     resolved.model,
     "synopsis"
   );
+  const sendOutputTokens = sendOutputLimit.tokens;
 
   const failures: Array<{ label: string; message: string }> = [];
   const subtitleCandidates: Array<{
@@ -328,8 +332,10 @@ export async function generateSynopses(
           if (!parsed) {
             failures.push({
               label: episodeBodyLabel(episode),
+              // **文言は自前で書かない**（作者の決定 2026-11-23）。読める長さに
+              // 届いて切れた回に「上限を大きく」と言うと、直らない操作を勧める
               message: response.truncated
-                ? "応答が出力上限で切り詰められました。"
+                ? truncatedOutputAdvice(sendOutputLimit, response)
                 : "応答を読み取れませんでした。",
             });
             log.failure(`あらすじ生成（${episodeBodyLabel(episode)}）`, {

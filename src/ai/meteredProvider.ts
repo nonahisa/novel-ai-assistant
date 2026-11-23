@@ -297,8 +297,8 @@ export class MeteredProvider implements AIProvider {
       // 縮めた回は縮めたほうの印だけを付ける（案内が「縮めてありました」と
       // 正しく言えるので、二重に言わない）
       const filled =
-        windowCap === undefined
-          ? filledContextWindowOf(result, contextWindow)
+        windowCap === undefined && !this.mayHaveRoundTripped(params)
+          ? filledContextWindowOf(result, this.effectiveWindowOf(params, contextWindow))
           : undefined;
       await this.recordSpeed(params.model, result);
       await this.recordCharsPerToken(params, result);
@@ -330,6 +330,50 @@ export class MeteredProvider implements AIProvider {
       });
       throw error;
     }
+  }
+
+  /**
+   * 切れた回を見分けるときに比べる、**実際に効いた読める長さ**。
+   *
+   * **Ollama は送った `num_ctx` で切る**（申告が 131,072 でも、8,192 で送れば
+   * 8,192 で切れる）。申告と比べると num_ctx で切れた回に印が付かず、案内が
+   * 「1回の応答の上限を大きく」と直らない操作を勧める。
+   *
+   * **`numCtx` を読むのは Ollama だけ**なので、ほかのプロバイダでは見ない。
+   * 渡されても送られない値と比べると、まだ入る回に印が付く。
+   *
+   * **送る前の関所（入るかの判定）は、今までどおり申告の長さで見る。** ここで
+   * 変えるのは切れた後の見分けだけ。
+   */
+  private effectiveWindowOf(
+    params: GenerateParams,
+    contextWindow: number | undefined
+  ): number | undefined {
+    if (this.inner.id !== "ollama") return contextWindow;
+    // 読める長さの測定は、わざと端まで試す呼び出しなので見分けない（関所と同じ扱い）
+    if (skipsContextGuard(params.meta?.feature)) return contextWindow;
+    const numCtx = params.numCtx;
+    if (typeof numCtx !== "number" || !Number.isFinite(numCtx) || numCtx <= 0) {
+      return contextWindow;
+    }
+    return numCtx;
+  }
+
+  /**
+   * 道具の往復が起こりうる回か。**起こりうる回は、切れた回の見分けをしない。**
+   *
+   * Ollama は道具だけが返ると、返事を足して2回目を投げ、`usage` を2回ぶん
+   * 足して返す（`ollamaProvider.ts` の `generateInner`）。2回目は1回目の会話を
+   * 含めて読み直すので、足した数は「1回の要求の入力＋出力」ではなく、読める
+   * 長さに届いていなくても届いたように見える。往復したかは応答から分からない
+   * ので、往復の受け口（`onToolCall`）を渡した回をまとめて外す（安全側：
+   * 見分けを外した回は、これまでどおり上限の案内になるだけ）。
+   *
+   * **往復するのは Ollama だけ**（ほかのプロバイダは `onToolCall` を読まない）
+   * なので、ほかでは外さない。
+   */
+  private mayHaveRoundTripped(params: GenerateParams): boolean {
+    return this.inner.id === "ollama" && params.onToolCall !== undefined;
   }
 
   /**
@@ -929,7 +973,8 @@ function inputSpeedSample(result: GenerateResult): number | undefined {
  * 切れた応答が、**読める長さを入力と出力で使い切った**回か（作者の決定 2026-11-23）。
  *
  * **数だけで決める。** プロバイダが返した `inputTokens + outputTokens` が、
- * 関所の引いた読める長さ以上のときだけ印を付ける。エラー文や途中で切れた
+ * 実際に効いた読める長さ（関所の引いた長さ。Ollama で `num_ctx` を渡した回は
+ * その値。`effectiveWindowOf`）以上のときだけ印を付ける。エラー文や途中で切れた
  * 文の形からは当てない（実装ルール5）。数が無い・読める長さが分からない回は
  * 印を付けず、これまでの案内（上限の話）のまま。
  *

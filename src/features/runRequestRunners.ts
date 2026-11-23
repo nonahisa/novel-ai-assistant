@@ -43,8 +43,9 @@ import { ReaderTargetStore } from "../core/readerTargetStore";
 import { readerTypeCacheMark } from "../core/readerTarget";
 import type { ReaderProfile } from "../models/readerProfile";
 import {
+  resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
-  resolveOutputTokensForSend,
+  truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { TYPO_CHECK_VERSION } from "../prompts/typoCheck";
 import { PROOFREAD_VERSION } from "../prompts/proofread";
@@ -891,11 +892,13 @@ async function runSynopses(
     resolved.model,
     "synopsis"
   );
-  const sendOutputTokens = resolveOutputTokensForSend(
+  // 出どころごと受け取る（切り詰めの案内が直し方を言い分けるため。製品と同じ）
+  const sendOutputLimit = resolveOutputLimitForSend(
     resolved.provider.id,
     resolved.model,
     "synopsis"
   );
+  const sendOutputTokens = sendOutputLimit.tokens;
 
   const findings: Record<string, unknown>[] = [];
   const failureNotesList: string[] = [];
@@ -953,7 +956,9 @@ async function runSynopses(
               `${label}: ${
                 !parsed
                   ? response.truncated
-                    ? "応答が出力上限で切り詰められました"
+                    ? // 呼び出し元（外部のAI）へ返す文も、製品と同じ案内にそろえる
+                      // （欄の形は変えない。作者の決定 2026-11-23）
+                      truncatedOutputAdvice(sendOutputLimit, response)
                     : "応答を読み取れませんでした"
                   : "あらすじが空でした"
               }`
