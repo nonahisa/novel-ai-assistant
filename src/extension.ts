@@ -43,6 +43,7 @@ import {
 import { manuscriptViewTypeFor } from "./core/manuscriptViewTypes";
 import { nextEpisodeFileNameLike } from "./core/episodeRenumber";
 import { WorkFolderWatchers } from "./features/workFolderWatch";
+import { followManuscriptEdit } from "./features/manuscriptEditFollow";
 import { sharedFolderWatchHub } from "./features/folderWatchHub";
 import { setStreamingSettingReader } from "./ai/ollamaStream";
 import { findLatestEpisode } from "./core/latestEpisode";
@@ -3659,8 +3660,15 @@ export async function activate(
   // **作品フォルダーの本文を見張り、外で変わったら一覧を数え直す**
   // （`features/workFolderWatch.ts`。保存のときだけでは、ルビの適用・
   // 同期・別のエディタでの書き換えが開き直すまで一覧に出なかった）
+  /**
+   * 本文の変化を指摘へ追いつかせる口。作者が本文で直した指摘を、提案パネルと
+   * 校正・メモパネルから外す（作者の知らせ 2026-11-27。`features/manuscriptEditFollow.ts`）。
+   * 提案パネルはこの下で作るので、作り終えて入れるまでは何もしない
+   */
+  let followEdits: ((work: WorkEntry) => void) | undefined;
   const folderWatchers = new WorkFolderWatchers((work) => {
     treeProvider.refresh(work.id);
+    followEdits?.(work);
   }, folderWatchHub);
   folderWatchers.sync(registry.list());
   context.subscriptions.push(
@@ -4070,6 +4078,13 @@ export async function activate(
       }
     }
   );
+  // 見張りが本文の変化を知らせたら、提案パネルが照らし直し、校正・メモパネルが読み直す
+  // （作者の知らせ 2026-11-27。上の `folderWatchers` が呼ぶ）
+  followEdits = (work) =>
+    void followManuscriptEdit(work, {
+      noteManuscriptEdited: (changed) => proposalPanel.noteManuscriptEdited(changed),
+      refreshFindings: refreshSceneMemoFindings,
+    });
   // 自動の同期で編集者の提案が届いたとき、開いている校正・メモパネルを読み直すため
   // （2026-11-08 までは提案パネルの選び欄へ足していた）
   rememberMemoPanelRefresher(refreshSceneMemoFindings);

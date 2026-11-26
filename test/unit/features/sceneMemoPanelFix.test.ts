@@ -126,7 +126,8 @@ vi.mock("../../../src/views/openDocument", () => ({
   openGeneratedMarkdown: vi.fn(async () => undefined),
 }));
 
-import { openSceneMemoPanel } from "../../../src/features/sceneMemoPanel";
+import { openSceneMemoPanel, refreshSceneMemoFindings } from "../../../src/features/sceneMemoPanel";
+import { readTextFile } from "../../../src/core/textFile";
 import { revealTextLocation } from "../../../src/features/revealLocation";
 import { FindingStore } from "../../../src/features/findingStore";
 import { findingId, type Finding } from "../../../src/models/finding";
@@ -584,6 +585,44 @@ describe("種類ごとの色の印", () => {
     }
     // 行の印と選び口の印は同じもの
     expect(tagTones["推敲"]).toBe(rowOf(proofreadNoFix.id)?.tagClass);
+  });
+});
+
+/**
+ * 作者が本文で直した指摘は、見張りの知らせで読み直すと消える（作者の知らせ
+ * 2026-11-27「誤字脱字を直接書き換えるとパネルから消えない」。設計書6.96.5）。
+ * 見張りは `features/manuscriptEditFollow.ts` が `refreshSceneMemoFindings` を呼ぶ。
+ * 提案パネルの側は `proposalPanelFixedInText.test.ts`
+ */
+describe("作者が本文で直した指摘は、読み直しで消える", () => {
+  test("原文が本文から消えた指摘だけが一覧から外れ、ほかは残る", async () => {
+    const work = newWork();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, deps());
+    expect(rowOf(typo.id)).toBeDefined();
+
+    const content = (text: string) =>
+      ({
+        text,
+        hash: "h",
+        encoding: "utf8",
+        eol: "\n",
+        bom: false,
+        hasTrailingNewline: true,
+        hasConflictMarkers: false,
+        hasMixedEol: false,
+      }) as unknown as Awaited<ReturnType<typeof readTextFile>>;
+    vi.mocked(readTextFile).mockResolvedValue(content("　彼は走った。\n　夜が明けた。\n"));
+    try {
+      await refreshSceneMemoFindings(work.id);
+      await settle();
+
+      expect(rowOf(typo.id)).toBeUndefined();
+      expect(rowOf(contradiction.id)).toBeDefined();
+      expect(rowOf(proofreadNoFix.id)).toBeDefined();
+    } finally {
+      vi.mocked(readTextFile).mockResolvedValue(content(TEXT));
+    }
   });
 });
 

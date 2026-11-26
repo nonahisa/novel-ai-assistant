@@ -50,6 +50,7 @@ import {
   type FindingDraft,
 } from "../core/findingSource";
 import { applyFindingToText } from "../core/findingApply";
+import { canCheckFixedInText, isFixedInText } from "../core/findingFixedInText";
 import {
   recordFindingDecision,
   recordFindings,
@@ -339,6 +340,16 @@ export interface ProposalViewItem {
    * 赤く出る。こちらは「確かめた結果」であって不具合ではない。
    */
   recheckNote?: string;
+  /**
+   * 作者が本文を自分で直したのを、見張りの照らし直しが見つけて `"resolved"` に
+   * した印（作者の知らせ 2026-11-27。設計書6.96.5。`noteManuscriptEdited`）。
+   *
+   * **再チェック（P-23）の解消と分ける。** あちらは作者が押してAIが確かめた
+   * 結末で、こちらは本文だけで決めた状態である。いまの本文で決まるものなので、
+   * 作者が元へ戻せば一覧へ戻す——その戻す相手を、この印で見分ける。
+   * 置き場（`findings.jsonl`）には書かない（画面の印だけ）。
+   */
+  fixedInText?: boolean;
   /**
    * 再チェックの最中か。**押した手応えを返すために要る。**
    * AIの応答は数秒〜数十秒かかるので、無反応だと壊れたようにしか見えない。
@@ -1058,6 +1069,13 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   private pendingOffers = new Map<string, { category: string }>();
   /** 面が読み込み終わったら示す行（`focusContradiction`） */
   private focusRowId: string | undefined;
+  /**
+   * 本文の照らし直し（`noteManuscriptEdited`）が走っている作品の鍵と、
+   * 走っている最中にまた知らせが来た作品の鍵。**照らしを重ねない**——
+   * 読み込みの途中で次の知らせが来ても、終わってから1回だけやり直す
+   */
+  private fixCheckRunning = new Set<string>();
+  private fixCheckAgain = new Set<string>();
 
   /**
    * @param ai 再チェック（P-23）で使う。**渡されなければ
@@ -1560,6 +1578,94 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         if (!identities.includes(findingId)) continue;
         row.status = "dismissed";
         changed = true;
+      }
+    }
+    if (changed) this.postItems();
+  }
+
+  /**
+   * 作品の本文が変わったら、まだ手を付けていない指摘を照らし直す（作者の知らせ
+   * 2026-11-27「誤字脱字を直接書き換えるとパネルから消えない」。設計書6.96.5）。
+   *
+   * 呼ぶのは作品フォルダーの見張り（`WorkFolderWatchers`。500ms まとめてから
+   * 作品ごとに1回）。VS Code の素のエディターの保存も、原稿エディターの書き込みも
+   * ここへ届く。
+   *
+   * - 原文が本文のどこにも無くなった指摘は、`"resolved"`＋`fixedInText` にする
+   *   （一覧から外れ、残りの件数も減る）。**見送り（作者の判断）とは混ぜない**
+   * - 外したあとに原文が戻っていれば、未処理へ戻す（いまの本文で決まる状態にする。
+   *   保存の途中を読み違えても、次の知らせで直る）
+   * - **本文には書かない**（実装ルール1）。置き場へも判断の行を足さない——
+   *   見張りのたびに同期されるファイルが変わり、作業ツリーが汚れる。
+   *   校正・メモパネルは、置き場から読み直すときに同じ探し直しで落とす
+   *
+   * 照らすのは、まだ手を付けていない指摘を持つファイルだけ。読めなければ
+   * ログに残して、そのファイルを飛ばす（ほかのファイルは照らす）。
+   */
+  async noteManuscriptEdited(work: WorkEntry): Promise<void> {
+    const key = path.normalizeForComparison(work.folderPath);
+    if (this.fixCheckRunning.has(key)) {
+      this.fixCheckAgain.add(key);
+      return;
+    }
+    this.fixCheckRunning.add(key);
+    try {
+      do {
+        this.fixCheckAgain.delete(key);
+        await this.recheckRowsAgainstText(work);
+      } while (this.fixCheckAgain.has(key));
+    } finally {
+      this.fixCheckRunning.delete(key);
+    }
+  }
+
+  private async recheckRowsAgainstText(work: WorkEntry): Promise<void> {
+    this.stashCurrent();
+    const entry = this.buckets.get(this.keyOf(work));
+    if (!entry) return;
+
+    const byFile = new Map<string, ProposalViewItem[]>();
+    for (const bucket of entry.categories.values()) {
+      for (const row of bucket.items) {
+        if (!isFixCheckTarget(row)) continue;
+        const fileKey = path.normalizeForComparison(row.filePath);
+        const rows = byFile.get(fileKey);
+        if (rows) rows.push(row);
+        else byFile.set(fileKey, [row]);
+      }
+    }
+
+    let changed = false;
+    for (const rows of byFile.values()) {
+      const filePath = rows[0].filePath;
+      let text: string;
+      try {
+        text = (await readTextFile(filePath)).text;
+      } catch (error) {
+        workLog(work.folderPath).line(
+          `提案パネル：本文で直されたかの照らし直しで、読めないファイルを飛ばしました（${filePath}・${
+            error instanceof Error ? error.message : String(error)
+          }）。`
+        );
+        continue;
+      }
+      if (!canCheckFixedInText(text)) continue;
+      for (const row of rows) {
+        // 読み込みを待つあいだに、作者が［適用］や［見送る］を押していることがある
+        if (!isFixCheckTarget(row)) continue;
+        const fixed = isFixedInText(text, row);
+        if (row.status === "resolved") {
+          if (fixed) continue;
+          row.status = "pending";
+          row.fixedInText = undefined;
+          changed = true;
+        } else if (fixed) {
+          row.status = "resolved";
+          row.fixedInText = true;
+          // 前に当て損ねた理由（赤い文）は、直された今は当てはまらない
+          row.statusDetail = undefined;
+          changed = true;
+        }
       }
     }
     if (changed) this.postItems();
@@ -4586,6 +4692,25 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     item.statusDetail = detail;
     this.postItems();
   }
+}
+
+/**
+ * 本文で直されたかを照らす行か（`noteManuscriptEdited`）。
+ *
+ * - **まだ手を付けていない行**（未処理・当て損ね）と、照らし直しが外した行だけ。
+ *   適用・見送り・再チェックの解消は作者の操作の結末なので触らない
+ * - 編集部の提案（`proposalId`）は台帳と対になっているので外さない（見送りの
+ *   送り返しが届かなくなる）。バックアップとの違い（`lineBlock`）は複数行の
+ *   置き換えで、原文の形が違う
+ * - 再チェックの最中の行は、その結末を待つ
+ */
+function isFixCheckTarget(row: ProposalViewItem): boolean {
+  if (row.busy || row.proposalId || row.lineBlock) return false;
+  // **印でなく状態で分ける。** 外した行へ校正・メモパネルの［直す］が届くと、
+  // ［適用］の道が「当て損ね」に戻す（印は立ったまま）。印で分けると、その行は
+  // 二度と照らされず、赤い行のまま残りの件数に数えられ続ける
+  if (row.status === "resolved") return row.fixedInText === true;
+  return row.status === "pending" || row.status === "failed";
 }
 
 /**
