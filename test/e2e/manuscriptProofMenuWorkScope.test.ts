@@ -4,14 +4,15 @@
  *
  * 1. 作品一覧で別の作品（作品B）を選んだままでも、「表記ゆれ（作品全体）」は押した原稿の作品（作品A）で走り
  *    （作品Aの操作の記録に「表記ゆれ検知を開始: 作品A」が残り、作品Bの記録には残らない）、
- *    「まとめて校正（作品全体）」は作品Aで選ぶ画面（「校正をまとめて実行：作品A」）が出る。どちらも作品は訊かれない
+ *    「この話を校正」（2026-11-27 までの「まとめて校正（作品全体）」）は押した話の選ぶ画面（「この話を校正：001_はじまり.txt」）が
+ *    出る。どちらも作品は訊かれない。この話だけで回ることは proofreadEpisodeSuite が見る
  * 2. 窓を幅 400px に狭めても、横書き・縦書きの両方で、上の列のボタンは列の見えている幅の中で折り返し、
  *    ［校正］の品書きは見えている幅と面の高さからはみ出さない
  *
  * 見えている幅は、本体の側で測る（VS Code の編集の列には最小幅があり、狭い窓では列の右端が窓の外へ出る。
  * WebView の中からは自分の幅が広く見えるので、面の中だけで測ると隠れた分を見落とす。manuscriptSurfaceNarrow と同じ）。
  *
- * **AI は呼ばない。** 表記ゆれは AI を使わない。まとめて校正は選ぶ画面で取りやめる。見た目の良し悪し
+ * **AI は呼ばない。** 表記ゆれは AI を使わない。「この話を校正」は選ぶ画面で取りやめる。見た目の良し悪し
  * （折り返し方が読みやすいか）は作者の手に残す。
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -78,7 +79,7 @@ function otherFolderOf(session: E2ESession): string {
   return path.join(path.dirname(session.workFolder), OTHER_TITLE);
 }
 
-test("作品一覧で別の作品を選んだままでも、［校正］の「表記ゆれ（作品全体）」は原稿の作品で走り、「まとめて校正（作品全体）」は原稿の作品で選ぶ画面を出す（作品は訊かれない）", async () => {
+test("作品一覧で別の作品を選んだままでも、［校正］の「表記ゆれ（作品全体）」は原稿の作品で走り、「この話を校正」は押した話の選ぶ画面を出す（作品は訊かれない）", async () => {
   await withVsCode(
     "［校正］の作品全体の2つ",
     [{ name: EPISODE, text: TEXT }],
@@ -102,13 +103,13 @@ test("作品一覧で別の作品を選んだままでも、［校正］の「�
       if ((await quickPickTitle(page)) !== undefined) await page.keyboard.press("Escape");
       await clearNotifications(page);
 
-      /* ── まとめて校正（作品全体）→ 作品Aで選ぶ画面 ── */
-      await pickProofItem(frame, "まとめて校正（作品全体）");
+      /* ── この話を校正 → 押した話（作品Aの話）の選ぶ画面 ── */
+      await pickProofItem(frame, "この話を校正");
       let title = "";
-      await waitUntil(async () => (title = (await quickPickTitle(page)) ?? "").startsWith("校正をまとめて実行"), "まとめて校正の選ぶ画面が出る", 20_000).catch(async (error: unknown) => {
+      await waitUntil(async () => (title = (await quickPickTitle(page)) ?? "").startsWith("この話を校正"), "この話を校正の選ぶ画面が出る", 20_000).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（いまの窓：${JSON.stringify(title)}）${await quickInputWaitContext(page)}`);
       });
-      expect(title).toBe(`校正をまとめて実行：${E2E_WORK_TITLE}`);
+      expect(title).toBe(`この話を校正：${EPISODE}`);
       await page.keyboard.press("Escape");
       await waitUntil(async () => (await quickPickTitle(page)) === undefined, "選ぶ画面が閉じる", 5_000);
     },

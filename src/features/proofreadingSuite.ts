@@ -11,8 +11,13 @@ import {
   describeRunStart,
   describeRunStep,
 } from "../core/runLog";
+import * as path from "../core/paths";
 import {
+  DEFAULT_EPISODE_CHECK_IDS,
+  DEFAULT_PROOFREADING_CHECK_IDS,
+  EPISODE_PROOFREADING_CHECKS,
   PROOFREADING_CHECKS,
+  PROOFREADING_EPISODE_SELECTION_KEY,
   SECONDS_PER_CHUNK,
   PROOFREADING_SUITE_SELECTION_KEY,
   buildSuiteConfirm,
@@ -98,6 +103,14 @@ export interface ProofreadingSuiteDeps {
    * 保存はここでしか訊けない
    */
   presave?: ConfirmPresave;
+  /**
+   * 原稿エディターの「この話を校正」・Ctrl+Alt+A から来たときの、その話の場所
+   * （作者の答え 2026-11-27。設計書6.25）。
+   *
+   * あれば、選べるのは話1つに絞れる校正だけになり、各校正へこの話だけを見るよう
+   * 伝える。前回の選択の控えも作品全体の道と分ける。無ければ今までどおり作品全体
+   */
+  readonly episodeFile?: string;
 }
 
 interface CheckPick extends vscode.QuickPickItem {
@@ -128,11 +141,21 @@ export async function runProofreadingSuite(
   work: WorkEntry,
   deps: ProofreadingSuiteDeps
 ): Promise<void> {
+  // 「この話を校正」なら、並べるもの・既定・控えの鍵を話の道のものに替える。
+  // 走らせ方（確認・札・内訳）は作品全体と同じものを通す（写しを作らない）
+  const episodeFile = deps.episodeFile;
+  const episodeName = episodeFile ? path.basename(episodeFile) : undefined;
+  const pool = episodeFile ? EPISODE_PROOFREADING_CHECKS : PROOFREADING_CHECKS;
+  const selectionKey = episodeFile
+    ? PROOFREADING_EPISODE_SELECTION_KEY
+    : PROOFREADING_SUITE_SELECTION_KEY;
   const previous = parseStoredSelection(
-    deps.memento.get<unknown>(PROOFREADING_SUITE_SELECTION_KEY, undefined)
+    deps.memento.get<unknown>(selectionKey, undefined),
+    pool,
+    episodeFile ? DEFAULT_EPISODE_CHECK_IDS : DEFAULT_PROOFREADING_CHECK_IDS
   );
 
-  const items: CheckPick[] = PROOFREADING_CHECKS.map((check) => ({
+  const items: CheckPick[] = pool.map((check) => ({
     id: check.id,
     label: check.label,
     // 説明の行は置かない（設計書6.82.1）。AIを使う（クラウドなら課金）ものだけ印を付ける
@@ -143,13 +166,18 @@ export async function runProofreadingSuite(
   // 複数選択なので「取りやめる」は足さない。VS Code が自分でボタンを出す
   const picked = await showQuickPickKeepingFocus(items, {
     canPickMany: true,
-    title: `校正をまとめて実行：${work.title}`,
+    title: episodeName
+      ? `この話を校正：${episodeName}`
+      : `校正をまとめて実行：${work.title}`,
     placeHolder: "走らせるものを選んでください（上から順に実行します）",
   });
   // Esc（取りやめ）。**控えも書き換えない**——選び直しの途中で閉じただけ
   if (!picked) return;
 
-  const checks = sortToRunOrder(picked.map((item) => item.id));
+  const checks = sortToRunOrder(
+    picked.map((item) => item.id),
+    pool
+  );
   if (checks.length === 0) {
     // 黙って終わると、押したのに何も起きなかったように見える
     void vscode.window.showInformationMessage(
@@ -158,10 +186,13 @@ export async function runProofreadingSuite(
     return;
   }
 
-  await deps.memento.update(
-    PROOFREADING_SUITE_SELECTION_KEY,
-    serializeSelection(checks)
-  );
+  // 鍵ごとに書く口を1か所にする（`mementoWrites.test.ts`）ので、2つの道を分けて書く
+  const selection = serializeSelection(checks, pool);
+  if (episodeFile) {
+    await deps.memento.update(PROOFREADING_EPISODE_SELECTION_KEY, selection);
+  } else {
+    await deps.memento.update(PROOFREADING_SUITE_SELECTION_KEY, selection);
+  }
 
   // **量と料金の確認は、ここで1回だけ**（設計書6.80）。各機能の確認は
   // このあと飛ばすので、飛ばすぶんの情報をここへ集めて1枚で見せる
@@ -172,6 +203,7 @@ export async function runProofreadingSuite(
     // ころは、並べた名前（5つ）と「選んだ4機能」が食い違って見えていた
     checks,
     estimate: aiChecks.length > 0 ? await deps.estimate?.(aiChecks) : undefined,
+    episodeName,
   });
   const presaveCount = deps.presave?.count ?? 0;
   if (confirm) {
@@ -187,7 +219,9 @@ export async function runProofreadingSuite(
   } else if (presaveCount > 0) {
     // 量の確認が要らない組み合わせでも、黙って保存しない
     const run = await confirmRun(
-      `${work.title} の校正をまとめて実行します。`,
+      episodeName
+        ? `${work.title} の「${episodeName}」を校正します。`
+        : `${work.title} の校正をまとめて実行します。`,
       "実行",
       { work }
     );
@@ -202,7 +236,10 @@ export async function runProofreadingSuite(
    * 何を確認したかは伝えない——機能ごとに文面が違うので、写すと必ずずれる
    */
   const runOptions: CheckRunOptions = {
-    suite: { confirmed: true, holdsRun: true },
+    // 「この話を校正」なら、範囲もこの話だけと伝える（各機能が範囲を訊かずに絞る）
+    suite: episodeFile
+      ? { confirmed: true, holdsRun: true, onlyFile: episodeFile }
+      : { confirmed: true, holdsRun: true },
   };
   const done: SuiteStepResult[] = [];
   /** 中止で走らせなかったものの、先頭の位置。走り切ったら -1 */
@@ -402,14 +439,17 @@ export const ASSIGNED_FEATURE: Record<string, AssignableFeature> = {
 export async function collectSuiteEstimate(
   work: WorkEntry,
   registry: AIRegistry,
-  checks: readonly ProofreadingCheck[]
+  checks: readonly ProofreadingCheck[],
+  /** 「この話を校正」の話の場所。あれば、その話の字数で数える */
+  onlyFile?: string
 ): Promise<SuiteEstimate | undefined> {
   return await collectEstimateForFeatures(
     work,
     registry,
     checks
       .map((check) => ASSIGNED_FEATURE[check.id])
-      .filter((feature): feature is AssignableFeature => Boolean(feature))
+      .filter((feature): feature is AssignableFeature => Boolean(feature)),
+    onlyFile
   );
 }
 
@@ -422,11 +462,15 @@ export async function collectSuiteEstimate(
  * 開いてある。
  *
  * @param assigned 使う機能の割当（重複していてもよい）
+ * @param onlyFile 「この話を校正」の話の場所。あれば作品全体でなくその話の字数で
+ *   数える（作品全体のまま出すと、確認に全話ぶんの量と料金が出る）。見つからなければ
+ *   見積もりを出さない（量の話を省いて確認だけ出す）
  */
 export async function collectEstimateForFeatures(
   work: WorkEntry,
   registry: AIRegistry,
-  assigned: readonly AssignableFeature[]
+  assigned: readonly AssignableFeature[],
+  onlyFile?: string
 ): Promise<SuiteEstimate | undefined> {
   const features = [...new Set(assigned)];
   if (features.length === 0) return undefined;
@@ -443,7 +487,10 @@ export async function collectEstimateForFeatures(
   }
 
   const scan = await scanWork(work);
-  const totalChars = scan.stats.totals.gross;
+  const totalChars = onlyFile
+    ? (scan.episodes.find((episode) => path.isSamePath(episode.filePath, onlyFile))
+        ?.counts.gross ?? 0)
+    : scan.stats.totals.gross;
   if (totalChars === 0) return undefined;
 
   // チャンクの大きさは、先頭の機能の割当モデルで測る。**機能ごとに

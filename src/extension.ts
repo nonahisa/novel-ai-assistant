@@ -513,6 +513,7 @@ import {
   checkSkipped,
   isSuiteConfirmed,
   isSuiteHoldingRun,
+  suiteOnlyFileOf,
   type CheckCommandOutcome,
   type CheckRunOptions,
 } from "./core/proofreadingSuite";
@@ -1302,10 +1303,14 @@ export async function activate(
 
     // 話の節点を受ける命令（この話の誤字脱字、［投稿］の「投稿ヘルパーへ渡す」＝この話を投稿する）。
     // 引数なしで呼ぶと、どちらも「どの行で押されたか」が無いと言って止まる（requireTreeNode）
+    // 「この話を校正」（作者の答え 2026-11-27）も話が要る。話として見つからないのに
+    // 作品を訊く道へ落とすと、押した話でなく作品全体で校正が走る
+    const suite = command === PROOFREADING_SUITE_COMMAND;
     if (
       command === "novelai.checkTyposForFile" ||
       command === "novelai.postThisEpisode" ||
-      command === "novelai.renameWithSubtitle"
+      command === "novelai.renameWithSubtitle" ||
+      suite
     ) {
       const episode =
         work && filePath
@@ -1319,6 +1324,13 @@ export async function activate(
             "作品一覧から話を開いてから押してください。"
         );
         return STOP_MANUSCRIPT_COMMAND;
+      }
+      if (suite) {
+        // まとめ実行は作品の節点を受ける。控えには**走査が返した話の場所**を入れる
+        // （プロット逸脱の絞りは厳密な一致で比べるので、開いたタブの書き方のままだと0話になる）
+        const ref: WorkRef = { type: "work", work };
+        manuscriptKeyFiles.set(ref, episode.filePath);
+        return ref;
       }
       const node = new EpisodeNode(work, episode);
       manuscriptKeyFiles.set(node, filePath);
@@ -7599,15 +7611,23 @@ export async function activate(
           中の検知はそのあとに走るので、未保存を見つけずに進む（キーから来ても
           メニューから来ても同じ）
         */
+        /*
+          **原稿エディターの「この話を校正」と Ctrl+Alt+A は、押した話だけで回す**
+          （作者の答え 2026-11-27）。命令は作品全体と同じで、原稿から来た印
+          （`manuscriptNodeFor` が控えた話）があるときだけ話の道になる。詳細メニュー・
+          手順の案内などほかの入口は印を持たないので、今までどおり作品全体
+        */
+        const episodeFile = manuscriptKeyFileOf(node);
         await runProofreadingSuite(work, {
-          presave: preparePresave(work, "校正の一括実行"),
+          presave: preparePresave(work, episodeFile ? "この話の校正" : "校正の一括実行"),
           memento: verifiedState(context.globalState),
           // 内訳は提案パネルの残り件数から数える（設計書6.37.3）。
           // 各機能の戻り値を覗くと、機能ごとに違う数え方を写すことになる
           remainingIn: (category) => proposalPanel.remainingIn(work, category),
           // 確認に出す量の見積もり。**取れなくても確認は出す**ので、
           // ここで失敗しても呼び出し側は止まらない
-          estimate: (checks) => collectSuiteEstimate(work, aiRegistry, checks),
+          estimate: (checks) => collectSuiteEstimate(work, aiRegistry, checks, episodeFile),
+          episodeFile,
         });
         /*
           **まとめ実行そのものは、走り切ったことしか名乗れない。**
@@ -7660,7 +7680,11 @@ export async function activate(
         const suiteConfirmed = isSuiteConfirmed(options);
         // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
         const suiteHoldsRun = isSuiteHoldingRun(options);
-        const scope = await resolveTypoScope(work, { suiteConfirmed });
+        const scope = await resolveTypoScope(work, {
+          suiteConfirmed,
+          // 「この話を校正」から来たら、その話だけ（作者の答え 2026-11-27）
+          suiteOnlyFile: suiteOnlyFileOf(options),
+        });
         if (!scope) return CHECK_CANCELLED;
 
         const result = await withPanelProgress(
@@ -7934,6 +7958,7 @@ export async function activate(
         // **範囲を選べるのは誤字脱字だけではない**（設計書6.8.7）
         const scope = await resolveCheckScope(work, "deviation", {
           suiteConfirmed,
+          suiteOnlyFile: suiteOnlyFileOf(options),
         });
         if (!scope) return CHECK_CANCELLED;
         const result = await withPanelProgress(
@@ -8162,6 +8187,7 @@ export async function activate(
         const scope = await resolveCheckScope(work, "proofread", {
           suiteConfirmed,
           currentFile: manuscriptKeyFileOf(node),
+          suiteOnlyFile: suiteOnlyFileOf(options),
         });
         if (!scope) return CHECK_CANCELLED;
         const result = await withPanelProgress(work, "推敲", (onProgress) =>
@@ -8420,6 +8446,7 @@ export async function activate(
     // 219話で6時間かかる検知こそ、「まず10話だけ試す」が要る
     const scope = await resolveCheckScope(work, "contradiction", {
       suiteConfirmed,
+      suiteOnlyFile: suiteOnlyFileOf(options),
     });
     if (!scope) return CHECK_CANCELLED;
     /*

@@ -218,7 +218,10 @@ export interface CheckTyposOptions extends SuiteAwareOptions {
  */
 export async function resolveTypoScope(
   work: WorkEntry,
-  options: Pick<CheckTyposOptions, "suiteConfirmed"> = {}
+  options: Pick<CheckTyposOptions, "suiteConfirmed"> & {
+    /** 「この話を校正」から来たときの話（`resolveCheckScope` へそのまま渡す） */
+    suiteOnlyFile?: string;
+  } = {}
 ): Promise<ScopeChoice | undefined> {
   return resolveCheckScope(work, "typo", options);
 }
