@@ -58,6 +58,14 @@ export interface ProofreadingCheck {
    * 詳細メニューからの単独実行も残る。
    */
   readonly inSuite: boolean;
+  /**
+   * 原稿エディターの「この話を校正」に並ぶか（作者の答え 2026-11-27。設計書6.25）。
+   *
+   * 話1つに範囲を絞っても意味が変わらないものだけが真。**表記ゆれは偽**——作品の
+   * 中で表記をそろえる校正なので、話1つに絞ると「この話の中でそろえる」別物になる
+   * （品書きには「表記ゆれ（作品全体）」が別に並ぶ）。
+   */
+  readonly episodeScoped: boolean;
 }
 
 /** まとめ実行の入口。`package.json` と詳細メニューが同じIDを使う */
@@ -66,6 +74,15 @@ export const PROOFREADING_SUITE_COMMAND = "novelai.runProofreadingSuite";
 /** 前回の選択の控え（`globalState`）の鍵 */
 export const PROOFREADING_SUITE_SELECTION_KEY =
   "novelai.proofreadingSuite.selection";
+
+/**
+ * 「この話を校正」の前回の選択の控えの鍵（作者の答え 2026-11-27）。
+ *
+ * **作品全体の控えと分ける。** 話の道には表記ゆれが並ばないので、同じ鍵に書くと
+ * 話の道で走らせるたびに作品全体の控えから表記ゆれが落ちる
+ */
+export const PROOFREADING_EPISODE_SELECTION_KEY =
+  "novelai.proofreadingSuite.episodeSelection";
 
 /**
  * 検知の機能の全件と、その順番（まとめ実行に入らないものも含む）。
@@ -83,6 +100,7 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     label: "表記ゆれ",
     command: "novelai.checkNotation",
     inSuite: true,
+    episodeScoped: false,
     usesAI: false,
     category: "表記ゆれ",
   },
@@ -91,6 +109,7 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     label: "誤字脱字",
     command: "novelai.checkTypos",
     inSuite: true,
+    episodeScoped: true,
     usesAI: true,
     category: "誤字脱字",
   },
@@ -99,6 +118,7 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     label: "推敲",
     command: "novelai.checkProofread",
     inSuite: true,
+    episodeScoped: true,
     usesAI: true,
     category: "推敲",
   },
@@ -108,6 +128,7 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     label: "冒頭診断",
     command: "novelai.checkOpening",
     inSuite: false,
+    episodeScoped: false,
     usesAI: true,
   },
   {
@@ -115,6 +136,7 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     label: "プロット逸脱",
     command: "novelai.checkDeviations",
     inSuite: true,
+    episodeScoped: true,
     usesAI: true,
     category: "プロット逸脱",
   },
@@ -123,6 +145,7 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     label: "矛盾",
     command: "novelai.checkContradictions",
     inSuite: true,
+    episodeScoped: true,
     usesAI: true,
     category: "矛盾",
   },
@@ -131,6 +154,7 @@ export const CHECK_FEATURES: readonly ProofreadingCheck[] = [
     label: "伏線の検知",
     command: "novelai.checkForeshadows",
     inSuite: false,
+    episodeScoped: false,
     usesAI: true,
     category: "伏線の候補",
   },
@@ -160,24 +184,50 @@ export const DEFAULT_PROOFREADING_CHECK_IDS: readonly ProofreadingCheckId[] = [
 ];
 
 /**
+ * 原稿エディターの「この話を校正」で選べる機能（作者の答え 2026-11-27）。
+ *
+ * まとめ実行の並びのうち、話1つに絞れるもの（`episodeScoped`）。並びの順は
+ * 作品全体と同じ（軽いものから重いものへ）。
+ */
+export const EPISODE_PROOFREADING_CHECKS: readonly ProofreadingCheck[] =
+  PROOFREADING_CHECKS.filter((check) => check.episodeScoped);
+
+/**
+ * 「この話を校正」をはじめて開いたときに選ばれているもの。
+ *
+ * **作品全体の既定から、並ばないもの（表記ゆれ）を抜いただけにする。** 別の
+ * 組を決めると、2つの道で「はじめに選ばれているもの」の理由が食い違う
+ */
+export const DEFAULT_EPISODE_CHECK_IDS: readonly ProofreadingCheckId[] =
+  DEFAULT_PROOFREADING_CHECK_IDS.filter((id) =>
+    EPISODE_PROOFREADING_CHECKS.some((check) => check.id === id)
+  );
+
+/**
  * 選ばれたidを、走らせる順に並べ直す。
  *
  * 知らないid（古い控え）は捨て、同じidが2つあっても1度しか走らせない。
+ *
+ * @param pool 選べる機能の並び。既定は作品全体のまとめ実行。「この話を校正」は
+ *   `EPISODE_PROOFREADING_CHECKS` を渡す（並ばないidは捨てる）
  */
 export function sortToRunOrder(
-  ids: Iterable<string>
+  ids: Iterable<string>,
+  pool: readonly ProofreadingCheck[] = PROOFREADING_CHECKS
 ): readonly ProofreadingCheck[] {
   const chosen = new Set(ids);
-  return PROOFREADING_CHECKS.filter((check) => chosen.has(check.id));
+  return pool.filter((check) => chosen.has(check.id));
 }
 
 /** 控えへ書く形（走らせる順のid配列） */
 export function serializeSelection(
-  checks: Iterable<{ readonly id: ProofreadingCheckId }>
+  checks: Iterable<{ readonly id: ProofreadingCheckId }>,
+  pool: readonly ProofreadingCheck[] = PROOFREADING_CHECKS
 ): ProofreadingCheckId[] {
-  return sortToRunOrder([...checks].map((check) => check.id)).map(
-    (check) => check.id
-  );
+  return sortToRunOrder(
+    [...checks].map((check) => check.id),
+    pool
+  ).map((check) => check.id);
 }
 
 /**
@@ -187,13 +237,16 @@ export function serializeSelection(
  * 選ばれていない状態で開き、作者は毎回1件ずつ選び直すことになる。
  */
 export function parseStoredSelection(
-  stored: unknown
+  stored: unknown,
+  pool: readonly ProofreadingCheck[] = PROOFREADING_CHECKS,
+  defaults: readonly ProofreadingCheckId[] = DEFAULT_PROOFREADING_CHECK_IDS
 ): readonly ProofreadingCheckId[] {
-  if (!Array.isArray(stored)) return DEFAULT_PROOFREADING_CHECK_IDS;
+  if (!Array.isArray(stored)) return defaults;
   const known = sortToRunOrder(
-    stored.filter((value): value is string => typeof value === "string")
+    stored.filter((value): value is string => typeof value === "string"),
+    pool
   ).map((check) => check.id);
-  return known.length > 0 ? known : DEFAULT_PROOFREADING_CHECK_IDS;
+  return known.length > 0 ? known : defaults;
 }
 
 /**
@@ -343,6 +396,15 @@ export interface SuiteFeatureContext {
    */
   readonly holdsRun?: true;
   /**
+   * 原稿エディターの「この話を校正」から来たときの、その話の場所（作者の答え
+   * 2026-11-27）。**作品の走査が返した話の場所**を入れる（範囲の絞りが厳密な
+   * 一致で比べる所があるため。入口の `extension.ts` の `manuscriptNodeFor` で直す）。
+   *
+   * 受けた機能は範囲を訊かずにこの話だけを見る（`resolveCheckScope`）。無ければ
+   * 今までどおり作品全体
+   */
+  readonly onlyFile?: string;
+  /**
    * 前提が無くて走れなかった理由を伝える口。
    *
    * **戻り値の型を増やさないための逃げ道である。** 各検知の戻り値は
@@ -399,6 +461,17 @@ export interface SuiteAwareOptions {
  */
 export function isSuiteHoldingRun(options: unknown): boolean {
   return suiteContextOf(options)?.holdsRun === true;
+}
+
+/**
+ * 「この話を校正」から来たなら、その話の場所（コマンドの第2引数を読む）。
+ * 作品全体のまとめ実行・単独の実行では undefined
+ */
+export function suiteOnlyFileOf(options: unknown): string | undefined {
+  const onlyFile = suiteContextOf(options)?.onlyFile;
+  return typeof onlyFile === "string" && onlyFile.length > 0
+    ? onlyFile
+    : undefined;
 }
 
 /** まとめ実行が確認を済ませているか（コマンドの第2引数を読む） */
@@ -493,6 +566,11 @@ export interface SuiteConfirmInput {
   readonly checks: readonly SuiteConfirmCheck[];
   /** 見積もり。取れなければ省く（量の話をしない） */
   readonly estimate?: SuiteEstimate;
+  /**
+   * 「この話を校正」のときの話の名前（ファイル名）。見出しでどの話を送るかを
+   * 名乗る——作品の名前だけだと、全話ぶんを送ると読める
+   */
+  readonly episodeName?: string;
 }
 
 /**
@@ -581,7 +659,9 @@ export function buildSuiteConfirm(
   );
 
   return {
-    message: `${input.workTitle} の校正をまとめて実行します。`,
+    message: input.episodeName
+      ? `${input.workTitle} の「${input.episodeName}」を校正します。`
+      : `${input.workTitle} の校正をまとめて実行します。`,
     detail: lines.join("\n"),
   };
 }

@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**1.0.57**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **1.0.41**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**1.0.58**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **1.0.41**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 
@@ -208,7 +208,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 | `Ctrl+Alt+T` | `Cmd+Option+T` | この話の誤字脱字を検知 |
 | `Ctrl+Alt+P` | `Cmd+Option+P` | 推敲（範囲は「この話だけ」が先頭） |
 | `Ctrl+Alt+H` | `Cmd+Option+H` | 表記ゆれ検知 |
-| `Ctrl+Alt+A` | `Cmd+Option+A` | 校正一括実行 |
+| `Ctrl+Alt+A` | `Cmd+Option+A` | この話を校正 |
 | `Ctrl+Alt+M` | `Cmd+Option+M` | 校正・メモパネルを横に開く |
 | `F8` / `Shift+F8` | `F8` / `Shift+F8` | 次のメモへ / 前のメモへ |
 | `Ctrl+/` | `Cmd+/` | ここにメモを足す |

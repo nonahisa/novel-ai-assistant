@@ -56,10 +56,14 @@ export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
   },
   { key: "ctrl+alt+p", command: "novelai.checkProofread", label: "推敲" },
   { key: "ctrl+alt+h", command: "novelai.checkNotation", label: "表記ゆれ検知" },
+  /*
+    原稿エディターから押すと、押した話だけで回す（作者の答え 2026-11-27。品書きの
+    「この話を校正」と同じ道）。命令は作品全体のまとめ実行と同じで、キーから来た印で分かれる
+  */
   {
     key: "ctrl+alt+a",
     command: "novelai.runProofreadingSuite",
-    label: "校正一括実行",
+    label: "この話を校正",
   },
   {
     key: "ctrl+alt+m",
