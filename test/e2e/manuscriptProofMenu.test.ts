@@ -2,7 +2,7 @@
  * 原稿エディターの上の列の［校正］（画面の自動テスト、設計書6.25・6.113。実機確認リスト 0.122.0 の 362 行と、
  * 366 行のうち「誤字脱字（この話）」の保存の1行を機械へ移した。作者の判断 2026-11-02）。
  *
- * 1. ［校正］を押すと、ボタンの下に「誤字脱字（この話）」「推敲」「表記ゆれ（作品全体）」「まとめて校正（作品全体）」、
+ * 1. ［校正］を押すと、ボタンの下に「誤字脱字（この話）」「推敲」「表記ゆれ（作品全体）」「この話を校正」、
  *    区切りの下に「校正・メモパネルを開く」が並ぶ。もう一度押す・外（本文）を押す・Esc で閉じる
  * 2. 作品一覧で別の作品（作品B）を選んだまま、打ちかけ（未保存）のある原稿で「誤字脱字（この話）」を押すと、
  *    作品を訊かれず、実行の確認の窓（画面の上）が押した原稿の作品（作品A）で出て、
@@ -29,7 +29,8 @@ const TEXT = "　朝の駅は静かだった。\n　改札を抜けて、白い�
 const OTHER_TITLE = "作品B";
 const REGISTER_OTHER_KEY = "ctrl+alt+shift+b";
 const REGISTER_OTHER_PRESS = "Control+Alt+Shift+KeyB";
-const MENU_ITEMS = ["誤字脱字（この話）", "推敲", "表記ゆれ（作品全体）", "まとめて校正（作品全体）", "校正・メモパネルを開く"];
+// 「この話を校正」は前の「まとめて校正（作品全体）」（作者の答え 2026-11-27。押した話だけで回す）
+const MENU_ITEMS = ["誤字脱字（この話）", "推敲", "表記ゆれ（作品全体）", "この話を校正", "校正・メモパネルを開く"];
 /** 確認の窓に出る、保存の1行（`views/notify.ts` の `presaveLine`。proofreadKeyFlow と同じ） */
 const PRESAVE_LINE = "未保存の 1 件を保存してから実行します。";
 
@@ -134,9 +135,9 @@ test("［校正］の品書きは4つの校正と区切りの下の「校正・�
       const shown = await menuItems(frame);
       expect(shown.items, `［校正］の品書き：${JSON.stringify(shown)}`).toEqual(MENU_ITEMS);
       expect(shown.rules, "区切りが1本ではありません").toBe(1);
-      // 区切りは「まとめて校正」と「校正・メモパネルを開く」の間
+      // 区切りは「この話を校正」と「校正・メモパネルを開く」の間
       const ruleAfter = await frame.evaluate(() => (document.querySelector("#menu .rule")?.previousElementSibling?.textContent ?? "").trim());
-      expect(ruleAfter).toBe("まとめて校正（作品全体）");
+      expect(ruleAfter).toBe("この話を校正");
       // もう一度押すと閉じる
       await clickToolButton(frame, "proof");
       await waitUntil(async () => !(await menuOpen(frame)), "［校正］を押し直すと品書きが閉じる", 5_000);

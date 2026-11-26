@@ -350,10 +350,25 @@ export async function resolveCheckScope(
     suiteConfirmed?: boolean;
     /** 原稿エディターのキーから呼んだときの、開いている話（設計書6.25.10） */
     currentFile?: string;
+    /**
+     * まとめ実行が「この話を校正」から来たときの話（`suiteOnlyFileOf`。作者の答え
+     * 2026-11-27）。まとめ実行の中でだけ見る
+     */
+    suiteOnlyFile?: string;
   } = {}
 ): Promise<ScopeChoice | undefined> {
   if (!options.suiteConfirmed) {
     return chooseScope(work, feature, { currentFile: options.currentFile });
+  }
+
+  if (options.suiteOnlyFile) {
+    // 範囲は訊かない（まとめ実行の確認で、この話を送ると見せてある）。
+    // 「（この話）」の断りが完了の知らせに付くよう、種類は「この話だけ」にする
+    useLogFile(work.folderPath);
+    logStep(
+      `${FEATURES[feature].label}：この話を校正のため対象は ${path.basename(options.suiteOnlyFile)} だけ`
+    );
+    return { kind: "current", filePaths: [options.suiteOnlyFile] };
   }
 
   // **飛ばした判断はログへ残す**（確認を省略したときと同じ扱い）。
