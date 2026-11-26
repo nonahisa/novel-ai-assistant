@@ -227,7 +227,15 @@ test("詳細メニューの見出しの「…」の「他のメニューを閉�
         await dismissWorkbenchHover(page);
         await header.hover();
         await waitUntil(async () => (await more.count()) > 0 && (await more.isVisible()), "見出しに「…」が出る", 5_000).catch(() => undefined);
-        await more.click();
+        /*
+          「…」は見出しに指が載っている間だけ出る。素の `click` は出るまで30秒待つので、遅い機械で指が
+          外れると押し直しの前に時間切れになる（2026-11-27 ノートPCの全件）。短く待ち、出なければこの回を数えて押し直す
+        */
+        const clicked = await more.click({ timeout: 5_000 }).then(() => true).catch(() => false);
+        if (!clicked) {
+          moreTries.push(`${attempt}回目：「…」が押せない`);
+          continue;
+        }
         soloShown = await waitUntil(async () => (await soloItem.count()) > 0 && (await soloItem.isVisible()), "見出しの「…」に「他のメニューを閉じる」が出る", 4_000)
           .then(() => true)
           .catch(() => false);
@@ -242,7 +250,7 @@ test("詳細メニューの見出しの「…」の「他のメニューを閉�
           `見出しの「…」に「他のメニューを閉じる」が出ません（3回押しました。${moreTries.join("／")}／窓の大きさ：${JSON.stringify(viewport)}／右クリックの品書き：${JSON.stringify(rightClick)}）`
         );
       }
-      await soloItem.click();
+      await soloItem.click({ timeout: 5_000 }).catch(() => undefined);
       /*
         **開いた直後の品書きは、押しても効かない。** VS Code 本体の品書きの項目は、描かれてから
         100ミリ秒たって初めて「指を離した」を受け付ける（1.141.0 の `runOnceToEnableMouseUp`。
@@ -254,7 +262,7 @@ test("詳細メニューの見出しの「…」の「他のメニューを閉�
       */
       const menuClosed = async () => (await page.locator(".monaco-menu").count()) === 0;
       await waitUntil(menuClosed, "「他のメニューを閉じる」を押すと品書きが閉じる", 2_000).catch(async () => {
-        if (await soloItem.isVisible().catch(() => false)) await soloItem.click();
+        if (await soloItem.isVisible().catch(() => false)) await soloItem.click({ timeout: 5_000 }).catch(() => undefined);
         await waitUntil(menuClosed, "「他のメニューを閉じる」を押し直すと品書きが閉じる", 5_000);
       });
       await waitUntil(
