@@ -335,6 +335,11 @@ describe("直したあとに［当てる］が届いても、ずれた所へ書�
 
     expect(writeSpy).not.toHaveBeenCalled();
     expect(text).toBe("　彼は走った。\n　夜が開けた。\n");
+
+    // ［適用］の道が「当て損ね」に戻しても、次の知らせでまた外れる（赤い行のまま残らない）
+    await panel.noteManuscriptEdited(work);
+    expect(itemsOf(panel)[0].status).toBe("resolved");
+    expect(panel.remainingIn(work, "誤字脱字")).toBe(1);
   });
 
   test("行がずれて残った指摘の［当てる］は originalMissing で止まる", async () => {

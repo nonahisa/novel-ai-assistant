@@ -1654,7 +1654,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         // 読み込みを待つあいだに、作者が［適用］や［見送る］を押していることがある
         if (!isFixCheckTarget(row)) continue;
         const fixed = isFixedInText(text, row);
-        if (row.fixedInText) {
+        if (row.status === "resolved") {
           if (fixed) continue;
           row.status = "pending";
           row.fixedInText = undefined;
@@ -4706,7 +4706,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
  */
 function isFixCheckTarget(row: ProposalViewItem): boolean {
   if (row.busy || row.proposalId || row.lineBlock) return false;
-  if (row.fixedInText) return row.status === "resolved";
+  // **印でなく状態で分ける。** 外した行へ校正・メモパネルの［直す］が届くと、
+  // ［適用］の道が「当て損ね」に戻す（印は立ったまま）。印で分けると、その行は
+  // 二度と照らされず、赤い行のまま残りの件数に数えられ続ける
+  if (row.status === "resolved") return row.fixedInText === true;
   return row.status === "pending" || row.status === "failed";
 }
 

@@ -1,5 +1,6 @@
 import { applyFindingToText, type FindingReplacement } from "./findingApply";
 import { locateFinding } from "./findingLocation";
+import { normalizeForComparison } from "./groundedEvidence";
 import { hasConflictMarkers } from "./textDecode";
 
 /**
@@ -22,8 +23,9 @@ import { hasConflictMarkers } from "./textDecode";
  * 今までどおり `originalMissing` で止まる——AIの出した位置を推し量らない。
  */
 export function isFixedInText(text: string, row: FindingReplacement): boolean {
-  // 原文の無い指摘は照らしようがない（消えたことにしない）
-  if (!row.original.trim()) return false;
+  // 原文の無い指摘は照らしようがない（消えたことにしない）。探し直しは空白を
+  // 除いて比べるので、除いて空になる原文も同じ（探し直しが「無い」を返してしまう）
+  if (normalizeForComparison(row.original) === "") return false;
   if (applyFindingToText(text, row).kind !== "originalMissing") return false;
   return (
     locateFinding(

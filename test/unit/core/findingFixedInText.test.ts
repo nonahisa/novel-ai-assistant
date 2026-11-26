@@ -38,6 +38,15 @@ describe("isFixedInText", () => {
   test("原文の無い指摘は、直されたことにしない", () => {
     expect(isFixedInText("　朝。\n", { ...row, original: "" })).toBe(false);
   });
+
+  test("空白だけの原文も、直されたことにしない（探し直しが空白を除いて比べるため）", () => {
+    expect(isFixedInText("　朝。\n", { ...row, original: "　　", target: "　" })).toBe(false);
+  });
+
+  test("空白だけを直したときは、直されたとみなさない（探し直しが空白を除いて比べる。既知の限り）", () => {
+    const spaced = { line: 1, original: "彼は  走った。", target: "  ", suggestion: "" };
+    expect(isFixedInText("彼は走った。\n", spaced)).toBe(false);
+  });
 });
 
 describe("canCheckFixedInText", () => {
