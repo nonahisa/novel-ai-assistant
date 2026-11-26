@@ -627,17 +627,21 @@ export class LmStudioProvider implements AIProvider {
       本文が空のまま `finish_reason=length` で返った（b12647・gemma4:26b で実測、
       2026-11-23）。`enable_thinking` はチャットのひな形へ渡す値で、
       頼まれたとき（検知・抽出）だけ送る。
+      **LM Studio はこの指定を黙って無視する**ので、`reasoning_effort: "none"` も
+      添える。スキーマ付きの頼みで gemma4 が思考532字・12.1秒だったのが、
+      思考0字・2.6秒になった（google/gemma-4-e4b・LM Studio で実測、2026-11-26）
     */
     if (params.disableThinking) {
       body.chat_template_kwargs = { enable_thinking: false };
+      body.reasoning_effort = "none";
     }
 
     // **断られた指定だけを外して出し直す。**
     // どれが駄目かをエラー文から当てにいかず、1つずつ外して試す。
     // LM Studioは読み込んだモデルと版によって受ける指定が変わる。
-    // 回数は「外せる指定の数＋1」（形式の強制・温度・思考の指定）
+    // 回数は「外せる指定の数＋1」（形式の強制・温度・思考の指定2つ）
     let response: ChatResponse | undefined;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
         response = await this.post(body, params.model, params.signal);
         break;
@@ -680,6 +684,17 @@ export class LmStudioProvider implements AIProvider {
           delete body.chat_template_kwargs;
           aiCallLog(params.meta).line(
             "LM Studio：思考を切る指定が受け付けられなかったため、外して再試行します。"
+          );
+          continue;
+        }
+        if (
+          body.reasoning_effort !== undefined &&
+          isUnsupportedParameter(error, "reasoning_effort")
+        ) {
+          // 思考を切れないだけで、応答は使える（思考の長い答えになりうる）
+          delete body.reasoning_effort;
+          aiCallLog(params.meta).line(
+            "LM Studio：思考の量の指定が受け付けられなかったため、外して再試行します。"
           );
           continue;
         }

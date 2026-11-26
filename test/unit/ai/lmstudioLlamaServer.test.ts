@@ -138,6 +138,95 @@ describe("思考を切る指定（chat_template_kwargs）", () => {
   });
 });
 
+describe("思考を切る指定（reasoning_effort。LM Studio 向け）", () => {
+  /*
+    LM Studio は chat_template_kwargs を黙って無視し、スキーマを付けた頼みでは
+    gemma4 が思考する（google/gemma-4-e4b・LM Studio で実測、2026-11-26：
+    思考532字・12.1秒）。reasoning_effort: "none" を足すと思考0字・2.6秒になった
+  */
+  function stubChat(
+    respond: (body: Record<string, unknown>) => Response
+  ): Record<string, unknown>[] {
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        bodies.push(body);
+        return respond(body);
+      })
+    );
+    return bodies;
+  }
+
+  test("disableThinking のとき、reasoning_effort: none も送る", async () => {
+    const bodies = stubChat(() => jsonResponse(chatOk));
+
+    await new LmStudioProvider().generate({ ...params, disableThinking: true });
+
+    expect(bodies[0].reasoning_effort).toBe("none");
+    expect(bodies[0].chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
+  test("disableThinking が無いときは reasoning_effort を送らない", async () => {
+    const bodies = stubChat(() => jsonResponse(chatOk));
+
+    await new LmStudioProvider().generate(params);
+
+    expect(bodies[0]).not.toHaveProperty("reasoning_effort");
+  });
+
+  test("reasoning_effort だけが断られたら、それだけを外して送り直す", async () => {
+    const bodies = stubChat((body) =>
+      body.reasoning_effort !== undefined
+        ? jsonResponse(
+            { error: { message: "reasoning_effort is not supported" } },
+            400
+          )
+        : jsonResponse(chatOk)
+    );
+
+    const result = await new LmStudioProvider().generate({
+      ...params,
+      disableThinking: true,
+    });
+
+    expect(result.text).toBe('{"ok":true}');
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).not.toHaveProperty("reasoning_effort");
+    // llama-server 向けの指定は残す
+    expect(bodies[1].chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
+  test("外す指定が4つとも断られても、5回目で通る", async () => {
+    const bodies = stubChat((body) => {
+      for (const key of [
+        "response_format",
+        "temperature",
+        "chat_template_kwargs",
+        "reasoning_effort",
+      ]) {
+        if (body[key] !== undefined) {
+          return jsonResponse(
+            { error: { message: `${key} is not supported` } },
+            400
+          );
+        }
+      }
+      return jsonResponse(chatOk);
+    });
+
+    const result = await new LmStudioProvider().generate({
+      ...params,
+      disableThinking: true,
+      jsonSchema: { type: "object", properties: {} },
+    });
+
+    expect(result.text).toBe('{"ok":true}');
+    expect(bodies).toHaveLength(5);
+  });
+});
+
 describe("llama-server の大きさと文脈長", () => {
   /** llama-server b12647 の `/v1/models` の1件 */
   const llamaModel = {
