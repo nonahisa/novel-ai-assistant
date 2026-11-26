@@ -427,7 +427,7 @@ export async function markerWidgetShown(page: Page): Promise<boolean> {
  * 待つ**——打った直後は前の一覧が残っていることがあるので、数が落ち着くまで見る
  */
 export async function commandPaletteLabels(page: Page, query: string): Promise<string[]> {
-  await page.keyboard.press("ControlOrMeta+Shift+KeyP");
+  await pressWorkbenchKey(page, "ControlOrMeta+Shift+KeyP");
   const input = page.locator(".quick-input-widget input");
   await input.waitFor({ state: "visible" });
   await page.keyboard.insertText(query);
@@ -437,11 +437,22 @@ export async function commandPaletteLabels(page: Page, query: string): Promise<s
     読み、「パレットに『統合小説執筆環境: 前のメモへ』がありません」で落ちた（単独では通る）。
     入っていなければ、欄へ直に書き直す
   */
+  /*
+    **欄が閉じていたら開き直してから書く。** 素の `fill` は欄が出るまで30秒待つ。2026-11-27 ノートPCの
+    全件（2回続けて）で、原稿エディター（WebView）を開いた直後に開いたパレットが、遅れて届いた
+    WebView への焦点の移動で閉じ、`fill` が30秒で時間切れになった（単独では通る）。Ctrl+P の
+    `typeIntoQuickOpen` と同じく、本体へ焦点を戻してから開き直し、`fill` は短く待つ
+  */
   const expected = `>${query}`;
   await waitUntil(
     async () => {
-      if ((await input.inputValue()) === expected) return true;
-      await input.fill(expected);
+      if ((await input.isVisible().catch(() => false)) && (await input.inputValue().catch(() => "")) === expected) return true;
+      if (!(await input.isVisible().catch(() => false))) {
+        console.warn(`commandPaletteLabels: 「${query}」を書く前にパレットが閉じたので開き直します`);
+        await pressWorkbenchKey(page, "ControlOrMeta+Shift+KeyP");
+        await input.waitFor({ state: "visible", timeout: 3_000 }).catch(() => undefined);
+      }
+      await input.fill(expected, { timeout: 2_000 }).catch(() => undefined);
       return false;
     },
     `コマンドパレットの欄に「${query}」が入る`,

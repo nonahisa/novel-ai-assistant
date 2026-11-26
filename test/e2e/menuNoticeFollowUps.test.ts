@@ -222,41 +222,67 @@ test("詳細メニューの見出しの「…」の「他のメニューを閉�
           .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? "").trim()).filter((text) => text.length > 0))
           .catch(() => []);
       const moreTries: string[] = [];
-      let soloShown = false;
-      for (let attempt = 1; attempt <= 3 && !soloShown; attempt++) {
+      const menuClosed = async () => (await page.locator(".monaco-menu").count()) === 0;
+      /*
+        **押し直すたびに、品書きを開き直して行を探し直す。** 遅い機械では、「他のメニューを閉じる」の行が
+        見えたあと、押す前に品書きが閉じて行が DOM から外れる（2026-11-27 ノートPCの全件。Call log は
+        「element was detached from the DOM, retrying」を30秒くり返した）。外れた行をいくら待っても戻らないので、
+        押せなければ Escape で閉じて「…」から開き直す（3回まで）。回ごとの様子は失敗の文に出す
+      */
+      let pressed = false;
+      for (let attempt = 1; attempt <= 3 && !pressed; attempt++) {
+        if (!(await menuClosed())) {
+          await page.keyboard.press("Escape");
+          await waitUntil(menuClosed, "品書きが閉じる", 3_000).catch(() => undefined);
+        }
         await dismissWorkbenchHover(page);
         await header.hover();
         await waitUntil(async () => (await more.count()) > 0 && (await more.isVisible()), "見出しに「…」が出る", 5_000).catch(() => undefined);
-        await more.click();
-        soloShown = await waitUntil(async () => (await soloItem.count()) > 0 && (await soloItem.isVisible()), "見出しの「…」に「他のメニューを閉じる」が出る", 4_000)
+        // 「…」は見出しに指が載っている間だけ出る。素の `click` は30秒待つので、短く待って押し直しへ回す
+        if (!(await more.click({ timeout: 5_000 }).then(() => true).catch(() => false))) {
+          moreTries.push(`${attempt}回目：「…」が押せない`);
+          continue;
+        }
+        const soloShown = await waitUntil(async () => (await soloItem.count()) > 0 && (await soloItem.isVisible()), "見出しの「…」に「他のメニューを閉じる」が出る", 4_000)
           .then(() => true)
           .catch(() => false);
-        if (soloShown) break;
-        moreTries.push(`${attempt}回目：開いた品書きの項目=${JSON.stringify(await menuItems())}`);
-        await page.keyboard.press("Escape");
-        await waitUntil(async () => (await page.locator(".monaco-menu").count()) === 0, "品書きが閉じる", 3_000).catch(() => undefined);
+        if (!soloShown) {
+          moreTries.push(`${attempt}回目：開いた品書きの項目=${JSON.stringify(await menuItems())}`);
+          continue;
+        }
+        if (!(await soloItem.click({ timeout: 5_000 }).then(() => true).catch(() => false))) {
+          moreTries.push(`${attempt}回目：「他のメニューを閉じる」を押す前に品書きが閉じた（品書き ${(await menuClosed()) ? "無し" : "あり"}）`);
+          continue;
+        }
+        /*
+          **開いた直後の品書きは、押しても効かない。** VS Code 本体の品書きの項目は、描かれてから
+          100ミリ秒たって初めて「指を離した」を受け付ける（1.141.0 の `runOnceToEnableMouseUp`。
+          右クリックを離した指で項目を選んでしまわないための作り）。画面の動きを止めた設定
+          （`workbench.reduceMotion: on`。2026-11-03 に足した）では Playwright が品書きの現れる動きを
+          待たなくなり、その100ミリ秒のうちに押していた——品書きは開いたまま、見出しも4つのまま
+          だった（走らせて確かめた）。人の手でそこまで速く押すことはないので、製品の不具合ではない。
+          品書きが開いたままなら、押したことになっていないので、もう一度押す（効いたら品書きは閉じる）
+        */
+        if (!(await waitUntil(menuClosed, "「他のメニューを閉じる」を押すと品書きが閉じる", 2_000).then(() => true).catch(() => false))) {
+          if (await soloItem.isVisible().catch(() => false)) await soloItem.click({ timeout: 5_000 }).catch(() => undefined);
+          await waitUntil(menuClosed, "「他のメニューを閉じる」を押し直すと品書きが閉じる", 5_000).catch(() => undefined);
+        }
+        // 押したことになったかは、見出しが減ったかで見る（品書きが閉じただけでは、押す前に閉じたのと見分けられない）
+        pressed = await waitUntil(
+          async () => !(await paneHeaders(page)).some((title) => title.includes("AIに相談")),
+          "「他のメニューを閉じる」が効いて AIに相談の見出しが消える",
+          5_000
+        )
+          .then(() => true)
+          .catch(() => false);
+        if (!pressed) moreTries.push(`${attempt}回目：押したが見出しが減らない（${JSON.stringify(await paneHeaders(page))}）`);
       }
-      if (!soloShown) {
+      if (!pressed) {
         const viewport = page.viewportSize() ?? (await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })));
         throw new Error(
-          `見出しの「…」に「他のメニューを閉じる」が出ません（3回押しました。${moreTries.join("／")}／窓の大きさ：${JSON.stringify(viewport)}／右クリックの品書き：${JSON.stringify(rightClick)}）`
+          `見出しの「…」の「他のメニューを閉じる」が押せません（3回試しました。${moreTries.join("／")}／窓の大きさ：${JSON.stringify(viewport)}／右クリックの品書き：${JSON.stringify(rightClick)}）`
         );
       }
-      await soloItem.click();
-      /*
-        **開いた直後の品書きは、押しても効かない。** VS Code 本体の品書きの項目は、描かれてから
-        100ミリ秒たって初めて「指を離した」を受け付ける（1.141.0 の `runOnceToEnableMouseUp`。
-        右クリックを離した指で項目を選んでしまわないための作り）。画面の動きを止めた設定
-        （`workbench.reduceMotion: on`。2026-11-03 に足した）では Playwright が品書きの現れる動きを
-        待たなくなり、その100ミリ秒のうちに押していた——品書きは開いたまま、見出しも4つのまま
-        だった（走らせて確かめた）。人の手でそこまで速く押すことはないので、製品の不具合ではない。
-        品書きが開いたままなら、押したことになっていないので、もう一度押す（効いたら品書きは閉じる）
-      */
-      const menuClosed = async () => (await page.locator(".monaco-menu").count()) === 0;
-      await waitUntil(menuClosed, "「他のメニューを閉じる」を押すと品書きが閉じる", 2_000).catch(async () => {
-        if (await soloItem.isVisible().catch(() => false)) await soloItem.click();
-        await waitUntil(menuClosed, "「他のメニューを閉じる」を押し直すと品書きが閉じる", 5_000);
-      });
       await waitUntil(
         async () => {
           const shown = await paneHeaders(page);
