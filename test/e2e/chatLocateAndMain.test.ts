@@ -176,7 +176,12 @@ test("原稿エディターで開いている話を相談の「そこを見せ�
         });
         throw new Error(`${String(error)}（本体の焦点：${active}／原稿の面の中の焦点：${(await focusOf(manuscript)).innerActive}）`);
       });
-      expect((await focusOf(manuscript)).innerActive, "原稿の面の中で、組んで書く面に焦点がありません").toBe("compose");
+      // 外側の枠に焦点が来てから、面の中で組んで書く面へ焦点を渡すまでに少し間がある（面への知らせは非同期）。
+      // 全件の検査の負荷の下で、外側だけ先に来た瞬間を読んで落ちた（2026-11-27、単独では2回とも通った）ので、
+      // 着くまで待つ。着かなければ今までどおり落ちる
+      await waitUntil(async () => (await focusOf(manuscript)).innerActive === "compose", "原稿の面の中で、組んで書く面に焦点が来る", 5_000).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（原稿の面の中の焦点：${JSON.stringify((await focusOf(manuscript)).innerActive)}）`);
+      });
 
       /* ── 素のテキストエディターのタブが増えない（遅れて開く2枚目も見逃さない） ── */
       await holdsFor(async () => countTabsNamed((await editorGroupTabs(page)).flat(), EPISODE) === 1 && (await manuscriptFrames(page)).length === 1, "同じ話のタブが1枚のまま").catch(
