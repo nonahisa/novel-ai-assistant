@@ -243,7 +243,7 @@ describe("待ちの表示と諦めた前置き", () => {
   });
 });
 
-describe("同時に送ったチャンクが一緒に上限に当たったとき（設計書6.76.2）", () => {
+describe("同時に送ったチャンクが一緒に上限に当たったとき（設計書6.76.3）", () => {
   test("待ちは1回にまとめ、知らせも1回だけ出す", async () => {
     const state = newRateLimitRetryState();
     const waits: number[] = [];

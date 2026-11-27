@@ -1041,7 +1041,7 @@ export async function checkContradictions(
         // 元の大きさで出し直すほうがよい。分け直した分は、受け取り（`settle`）が
         // 親の直後へ差し込む。
         //
-        // **クラウドのAIへは3つまで同時に送る**（設計書6.76.2）。1つのチャンクの
+        // **クラウドのAIへは3つまで同時に送る**（設計書6.76.3）。1つのチャンクの
         // 中の「本命 → あとで判明する事実」は順に送る（本命が通ったときだけ後者を
         // 問うため）。受け取りと控えへの書き込みはチャンクの順に行う
         type FutureFacts = ReturnType<typeof settings.futureFactsFor>;
@@ -1161,7 +1161,7 @@ export async function checkContradictions(
           chunk: Chunk,
           mode: "settled" | "future",
           futureFacts: string,
-          /** 控えへの書き込みをここへ積む（受け取りの順で書くため。設計書6.76.2） */
+          /** 控えへの書き込みをここへ積む（受け取りの順で書くため。設計書6.76.3） */
           writes: Array<() => Promise<void>>
         ): Promise<unknown | undefined> {
           // **照らし合わせる相手が無いチャンクは飛ばす。**

@@ -242,7 +242,7 @@ describe("札と関所の関係（デッドロックの禁止則）", () => {
   });
 });
 
-describe("関所の幅（クラウドは3件まで。設計書6.76.2）", () => {
+describe("関所の幅（クラウドは3件まで。設計書6.76.3）", () => {
   test("幅3なら3件まで同時に通り、4件目は待つ", async () => {
     const releases = await Promise.all([
       acquireCall(undefined, 3),

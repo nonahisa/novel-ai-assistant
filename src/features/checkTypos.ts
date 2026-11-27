@@ -670,7 +670,7 @@ export async function checkTypos(
         | { kind: "failed"; error: unknown };
 
       /**
-       * **同時に送る数**（設計書6.76.2）。クラウドは3つまで、手元のAIは1つずつ。
+       * **同時に送る数**（設計書6.76.3）。クラウドは3つまで、手元のAIは1つずつ。
        * 進みは「終わった数」で出す（同時に送ると、送った番号は終わった順と揃わない）
        */
       await runOrderedQueue<Chunk, Outcome>(chunks, {
@@ -861,7 +861,7 @@ export async function checkTypos(
             e.kind === "aborted" &&
             (cancelled || token.isCancellationRequested)
           ) {
-            // **送信中に中止された分は捨てる**（設計書6.76.2）
+            // **送信中に中止された分は捨てる**（設計書6.76.3）
             return;
           }
           // **入らなかったなら、小さくして試し直す**（設計書6.27.10）。

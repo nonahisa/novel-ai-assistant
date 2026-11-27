@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 /**
- * 関所（`MeteredProvider`）を通したときに、同時に飛ぶ数（設計書6.76.2）。
+ * 関所（`MeteredProvider`）を通したときに、同時に飛ぶ数（設計書6.76.3）。
  *
  * 機能の輪を3本にしても、関所が1本のままなら速くならない。**作り物のAIを
  * `MeteredProvider` で包んで**確かめる——素のままだと、関所が1本でも通ってしまう。

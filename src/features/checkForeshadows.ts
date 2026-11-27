@@ -892,7 +892,7 @@ export async function checkForeshadowResolution(
       // **上限に入らなかったチャンクは、小さくして試し直す**（設計書6.27.10）。
       // 分け直した分は、受け取り（`settle`）が親の直後へ差し込む。
       //
-      // **クラウドのAIへは3つまで同時に送る**（設計書6.76.2）。掛ける伏線は
+      // **クラウドのAIへは3つまで同時に送る**（設計書6.76.3）。掛ける伏線は
       // チャンクごとに先に決めてあり、前のチャンクの答えを次へ渡さないので、
       // 同時に送れる。「1つの伏線に回収は1つ、話の早いほうを採る」は受け取りが
       // チャンクの順なので変わらない。
@@ -987,7 +987,7 @@ export async function checkForeshadowResolution(
         chunk: Chunk,
         targets: readonly Foreshadow[],
         cacheKey: typeof cacheKeyBase,
-        /** 控えへの書き込みをここへ積む（受け取りの順で書くため。設計書6.76.2） */
+        /** 控えへの書き込みをここへ積む（受け取りの順で書くため。設計書6.76.3） */
         writes: Array<() => Promise<void>>
       ): Promise<unknown | undefined> {
         try {

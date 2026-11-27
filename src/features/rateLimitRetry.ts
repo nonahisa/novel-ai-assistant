@@ -78,7 +78,7 @@ export interface RateLimitRetryState extends RateLimitWaitState {
   gaveUp: boolean;
   /**
    * いま進んでいる待ち。**同時に送っている別のチャンクは、これに相乗りする**
-   * （設計書6.76.2）。3本が別々に待つと、待った回数と合計が3倍に進んで早く
+   * （設計書6.76.3）。3本が別々に待つと、待った回数と合計が3倍に進んで早く
    * 諦め、知らせも3回出る。待ちが終わると自分で undefined に戻る
    */
   activeWait?: Promise<boolean>;
