@@ -2,7 +2,8 @@ import { describe, expect, test } from "vitest";
 import "../support/sweepTimeout";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as ts from "typescript";
+// TypeScript 7 は JS 版のコンパイラ API を持たないため、構文木を読むテストだけ 5.9 を別名で入れて使う。
+import * as ts from "typescript-js-api";
 import {
   LOCAL_PROVIDER_IDS,
   isLocalProviderId,
