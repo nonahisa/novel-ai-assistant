@@ -102,7 +102,8 @@ test("［校正］の「この話を校正」は、表記ゆれを除いた4つ�
       /* ── 走り終わるまで待つ（まとめの知らせ。ステータスバーか右下） ── */
       const finished = async (): Promise<boolean> => {
         const texts = [...(await notificationTexts(page)), ...(await statusBarTexts(page))];
-        return texts.some((text) => text.includes("校正をまとめて実行しました"));
+        // 話の道の知らせ（作者の答え 2026-11-27「分ける」）。作品全体の言い方が出たら、話の道を通っていない
+        return texts.some((text) => text.includes("この話の校正が済みました"));
       };
       await waitUntil(
         async () => {

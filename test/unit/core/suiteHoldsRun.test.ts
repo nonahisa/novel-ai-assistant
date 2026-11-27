@@ -32,7 +32,9 @@ describe("札は、まとめ実行が丸ごと持つ", () => {
   test("**まとめ実行が札を取る**", () => {
     const source = read("features/proofreadingSuite.ts");
     expect(source).toContain('from "./aiTurn"');
-    expect(source).toContain('label: "校正一括実行"');
+    // 札の名前は道ごとに替える（作品全体は「校正一括実行」、原稿エディターからは「この話を校正」。作者の答え 2026-11-27）
+    expect(source).toContain("label: suiteLabel");
+    expect(source).toContain('SUITE_LOG_LABEL = "校正一括実行"');
   });
 
   test("**各機能へ「札はこちらが持っている」と伝える**", () => {

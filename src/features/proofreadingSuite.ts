@@ -118,12 +118,14 @@ interface CheckPick extends vscode.QuickPickItem {
 }
 
 /**
- * 記録の行の先頭に置く名前。
+ * 実行中の題（`withProgress` の見出し）と、記録の行の先頭に置く名前。
  *
- * **画面に出す題（`withProgress` の見出し）と同じ文字にする。** 別の
- * 言い回しにすると、作者が見た画面とログの行が結びつかない。
+ * **画面に出す題と記録の名前は同じ文字にする。** 別の言い回しにすると、
+ * 作者が見た画面とログの行が結びつかない。原稿エディターの「この話を校正」から
+ * 来たときは、押した名前のまま「この話を校正」にする（作者の答え 2026-11-27「分ける」）
  */
 const SUITE_LOG_LABEL = "校正一括実行";
+const EPISODE_SUITE_LABEL = "この話を校正";
 
 /**
  * コマンドへ「この作品で」と伝える最小の形（`extension.ts` の `WorkRef`）。
@@ -145,6 +147,7 @@ export async function runProofreadingSuite(
   // 走らせ方（確認・札・内訳）は作品全体と同じものを通す（写しを作らない）
   const episodeFile = deps.episodeFile;
   const episodeName = episodeFile ? path.basename(episodeFile) : undefined;
+  const suiteLabel = episodeFile ? EPISODE_SUITE_LABEL : SUITE_LOG_LABEL;
   const pool = episodeFile ? EPISODE_PROOFREADING_CHECKS : PROOFREADING_CHECKS;
   const selectionKey = episodeFile
     ? PROOFREADING_EPISODE_SELECTION_KEY
@@ -270,7 +273,7 @@ export async function runProofreadingSuite(
     useLogFile(work.folderPath);
     logStep(
       describeRunStep({
-        runLabel: SUITE_LOG_LABEL,
+        runLabel: suiteLabel,
         done: index + 1,
         total: checks.length,
         step: logOnly
@@ -283,7 +286,7 @@ export async function runProofreadingSuite(
   useLogFile(work.folderPath);
   logStep(
     describeRunStart({
-      runLabel: SUITE_LOG_LABEL,
+      runLabel: suiteLabel,
       workTitle: work.title,
       total: checks.length,
     })
@@ -305,9 +308,9 @@ export async function runProofreadingSuite(
       まとめ実行の最中でも今までどおり割り込める。
     */
     await withAiTurn(
-      { label: "校正一括実行", onCancelled: () => (stoppedAt = 0) },
+      { label: suiteLabel, onCancelled: () => (stoppedAt = 0) },
       async () =>
-        await withProgress("校正一括実行", async (progress) => {
+        await withProgress(suiteLabel, async (progress) => {
       for (const [index, check] of checks.entries()) {
         progress.report({
           message: describeStep(index + 1, checks.length, check.label),
@@ -346,7 +349,7 @@ export async function runProofreadingSuite(
           useLogFile(work.folderPath);
           logStep(
             describeRunCancelledStep({
-              runLabel: SUITE_LOG_LABEL,
+              runLabel: suiteLabel,
               done: index + 1,
               total: checks.length,
               label: check.label,
@@ -386,12 +389,12 @@ export async function runProofreadingSuite(
     // 作者へ伝える値がある
     const remaining =
       stoppedAt < 0 ? [] : checks.slice(stoppedAt).map((check) => check.label);
-    const message = describeSuiteResult({ done, remaining });
+    const message = describeSuiteResult({ done, remaining }, episodeFile ? "episode" : "work");
     if (message) void vscode.window.showInformationMessage(message);
     // **終わったことを、知らせ以外にも残す。** 知らせは消えるので、
     // 「終わったのに気づかない」を繰り返さないための1行である
     useLogFile(work.folderPath);
-    logStep(describeRunEnd({ runLabel: SUITE_LOG_LABEL, done, remaining }));
+    logStep(describeRunEnd({ runLabel: suiteLabel, done, remaining }));
   }
 }
 

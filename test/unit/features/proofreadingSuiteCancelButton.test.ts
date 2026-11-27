@@ -23,7 +23,10 @@ describe("まとめ実行の中止ボタン", () => {
   const suite = code("src/features/proofreadingSuite.ts");
 
   test("走っている間の進捗は、中止ボタンの無い形で出す", () => {
-    expect(suite).toContain('withProgress("校正一括実行"');
+    // 題は道ごとに替える（作品全体は「校正一括実行」、原稿エディターからは「この話を校正」。作者の答え 2026-11-27）
+    expect(suite).toContain("withProgress(suiteLabel");
+    expect(suite).toContain('SUITE_LOG_LABEL = "校正一括実行"');
+    expect(suite).toContain('EPISODE_SUITE_LABEL = "この話を校正"');
     expect(suite).not.toContain("withCancellableProgress");
     expect(suite).not.toContain("withAiTurnProgress");
   });
