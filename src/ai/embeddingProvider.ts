@@ -25,6 +25,8 @@ export type EmbeddingErrorKind =
   | "not_running"
   | "model_missing"
   | "timeout"
+  /** 宛先が PC の外で、作者が［送る］と答えなかった（設計書6.78の17） */
+  | "declined"
   | "unknown";
 
 export class EmbeddingError extends Error {
