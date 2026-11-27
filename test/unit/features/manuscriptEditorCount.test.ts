@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  */
 
 const settings: Record<string, unknown> = {};
-let markers: { ids: string[]; prefixes: string[]; comment: boolean } | undefined;
+let markers: import("../../../src/core/memoMarkers").MemoMarkers | undefined;
 
 vi.mock("vscode", async () => {
   const stub = await import("../support/vscodeStub");
@@ -41,7 +41,7 @@ vi.mock("../../../src/core/episodeCharCount", async (importOriginal) => {
 import { ManuscriptEditorProvider, countForDisplay } from "../../../src/features/manuscriptEditor";
 import { countEpisodeChars } from "../../../src/core/episodeCharCount";
 import { measureKindText } from "../../../src/core/kindMeasure";
-import { DEFAULT_MEMO_MARKERS } from "../../../src/core/memoMarkers";
+import { DEFAULT_MEMO_MARKERS, memoMarkersOf } from "../../../src/core/memoMarkers";
 import type { WorkKindKey } from "../../../src/core/workKind";
 
 type Posted = { type: string; value?: number; measure?: string };
@@ -139,7 +139,7 @@ describe("同じ本文の2回目は、覚えた字数で同じ便を送る", () 
     const { posted, send } = setup();
     await send(TEXT, "C:/作品/本文/001.md");
     // `//` をメモにしない作品へ変えた（メモの行が本文として数えられる）
-    markers = { ids: ["comment"], prefixes: [], comment: true };
+    markers = memoMarkersOf(["comment"]);
     await send(TEXT, "C:/作品/本文/001.md");
     expect(posted[1]).toEqual(expected(TEXT, "C:/作品/本文/001.md"));
     expect(posted[0].value).not.toBe(posted[1].value);
