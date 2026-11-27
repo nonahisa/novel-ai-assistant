@@ -140,10 +140,10 @@ $env:PYTHONIOENCODING = "utf-8"
 
 | 変更 | 上げる桁 |
 |---|---|
-| ふだんの変更（不具合修正・小さな追加。GitHub Release だけに出す版も） | **最下位（パッチ）** 1.0.61 → 1.0.62 |
-| **Marketplace・Open VSX へ出す版** | **マイナー** 1.0.62 → 1.1.0（作者の決定 2026-11-27「Marketplace に出すたび」） |
+| 不具合の直し・速くする直し・文書・テスト・文言の小さな直し | **最下位（パッチ）** 1.0.61 → 1.0.62 |
+| **新しい機能を入れた** | **マイナー** 1.0.62 → 1.1.0（作者の決定 2026-11-27「機能はマイナー、直しはパッチ」） |
 
-Marketplace へ出すと決めたら、検査（package:vsix）を回す前にマイナーへ上げ直す。GitHub Release だけの版はパッチのまま。
+どちらの版も Marketplace・Open VSX へ出しうる（出す・出さないはスキル `release` の表）。
 
 版番号の散らばり先は上の「版は6か所で揃える」の表が正である。**揃え忘れると `test/unit/features/showVersion.test.ts`（プロンプト設計書は `promptDocShape.test.ts`）が落ちる**ので、`npm run check` で気づける。
 

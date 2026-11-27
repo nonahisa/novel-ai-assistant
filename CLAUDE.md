@@ -71,7 +71,7 @@ npm run check            # 型検査＋単体テスト＋本番ビルド
 
 デバッグ起動は **F5**（拡張機能開発ホスト）。配布前は `npm run package:vsix` で全リリースゲートを通し、`npm run verify:vsix` で検証する（スキル `release`）。
 
-**変更を入れたら、同じ作業の中で版を上げる**（ふだんはパッチ、Marketplace・Open VSX へ出す版はマイナー。2026-11-27 作者の決定）。揃える6か所はスキル `docs-sync`。揃え忘れは `showVersion.test.ts` と `promptDocShape.test.ts` が止める。
+**変更を入れたら、同じ作業の中で版を上げる**（直しはパッチ、新しい機能を入れたらマイナー。2026-11-27 作者の決定）。揃える6か所はスキル `docs-sync`。揃え忘れは `showVersion.test.ts` と `promptDocShape.test.ts` が止める。
 
 ---
 
