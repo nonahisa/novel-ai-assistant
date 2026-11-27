@@ -54,8 +54,11 @@ afterEach(() => {
  *
  * このファイルは本文・追記型の記録・履歴・承認待ちの提案。設定資料と、途中で
  * やめたときは `resolveDivergenceFoldSettings.test.ts`。
+ *
+ * 待ち時間は60秒。本物の git を何度も起こすので、CI の機械が遅い回は
+ * 30秒の近くまで延びた（2026-11-28、#64 の CI でファイル全体が main の 32秒に対して 74秒）。
  */
-describe("設定資料と本文の自動合流：本文・追記型の記録・履歴・承認待ち", { timeout: 30_000 }, () => {
+describe("設定資料と本文の自動合流：本文・追記型の記録・履歴・承認待ち", { timeout: 60_000 }, () => {
   useRepository();
 
   function 合わせる(walk?: ConflictWalker) {
