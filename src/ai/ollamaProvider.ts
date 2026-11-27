@@ -12,6 +12,8 @@ import { normalizeToolCalls, toolFollowUpMessages } from "./toolCalls";
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { readExpertCounts, type ModelExperts } from "../core/modelExperts";
 import { contextSizeForPrompt } from "../core/chunker";
+import { decideOllamaNumBatch, needsResidencyCheck } from "../core/ollamaBatch";
+import { isSplitAcrossCpu, parseOllamaPs } from "../core/gpuLoad";
 import { describeFetchFailure, isFetchTimeout } from "./httpClient";
 import { localFetch } from "./fetchTimeouts";
 import {
@@ -323,6 +325,8 @@ export class OllamaProvider implements AIProvider {
 
   /** モデル詳細のキャッシュ。/api/show は毎回呼ぶと重いため */
   private modelCache = new Map<string, ModelInfo>();
+  /** この窓で最後に `/api/ps` で見た、モデルごとの載り方（分けて載っていたか） */
+  private splitSeen = new Map<string, boolean>();
 
   private get endpoint(): string {
     const raw = vscode.workspace
@@ -642,8 +646,17 @@ export class OllamaProvider implements AIProvider {
     // 原因——`num_ctx` がチャンクごとに変わってモデルが読み込み直されていた
     // ——を、ログからは追えなかった（設計書6.53）
     // 呼び出した作品のログへ（`aiCallLog`。待つあいだに別の作品が開かれても紛れない）
+    // 部品を分けたモデルが GPU からあふれているときだけ、まとめて読む量を増やす
+    // （`core/ollamaBatch.ts`。設計書6.53.4）
+    const numBatch = await this.numBatchFor(
+      params.model,
+      numCtx,
+      params.numCtx !== undefined
+    );
     aiCallLog(params.meta).line(
-      `Ollama：num_ctx ${numCtx}（${params.model} / 送信 ${
+      `Ollama：num_ctx ${numCtx}${
+        numBatch !== undefined ? `・num_batch ${numBatch}` : ""
+      }（${params.model} / 送信 ${
         params.systemPrompt.length + params.userPrompt.length
       }字）`
     );
@@ -680,6 +693,7 @@ export class OllamaProvider implements AIProvider {
       // これを指定しないとOllamaは既定の短いコンテキストで動き、
       // 入力が黙って切り捨てられる。長文処理では必須。
       num_ctx: numCtx,
+      ...(numBatch !== undefined ? { num_batch: numBatch } : {}),
     };
     if (params.capOutputTokens && params.maxOutputTokens !== undefined) {
       options.num_predict = params.maxOutputTokens;
@@ -1243,6 +1257,57 @@ export class OllamaProvider implements AIProvider {
       clearTimeout(timer);
       if (deadline !== undefined) clearTimeout(deadline);
       externalSignal?.removeEventListener("abort", onExternalAbort);
+    }
+  }
+
+  /**
+   * 今回送る `num_batch`（`core/ollamaBatch.ts`）。送らないときは undefined。
+   *
+   * **部品を分けたモデルの短い回でだけ `/api/ps` を読む**（ほかの回は往復を
+   * 増やさない）。一覧に見えないとき（まだ読み込んでいない・下ろされた）は、
+   * この窓で最後に見た載り方を使う。一度も見ていなければ送らない。
+   *
+   * 部品の数は、`num_ctx` を呼び出し側が決めた回（測定・写真・MCP）では
+   * **覚えてあるモデル情報だけ**から読む（往復を1回増やさない。測定は送る
+   * 往復の数まで見ている）。ほかの回は覚えていなければ `/api/show` を読む
+   * ——作者が `num_ctx` を設定で決めていると、上で読まずに通るため。
+   */
+  private async numBatchFor(
+    model: string,
+    numCtx: number,
+    callerChoseNumCtx: boolean
+  ): Promise<number | undefined> {
+    const info = callerChoseNumCtx
+      ? this.modelCache.get(model)
+      : await this.getModel(model);
+    const mixtureOfExperts = info?.experts !== undefined;
+    if (!needsResidencyCheck({ numCtx, mixtureOfExperts })) return undefined;
+    const seen = await this.readResidency(model);
+    if (seen !== undefined) this.splitSeen.set(model, seen);
+    return decideOllamaNumBatch({
+      numCtx,
+      mixtureOfExperts,
+      splitAcrossCpu: this.splitSeen.get(model),
+    });
+  }
+
+  /**
+   * `/api/ps` で、そのモデルが GPU と CPU に分けて載っているかを読む。
+   * 一覧に無い・読めないときは undefined。**読めなくても依頼は止めない**
+   * （送らないだけ。2秒で諦める）。
+   */
+  private async readResidency(model: string): Promise<boolean | undefined> {
+    try {
+      const loaded = parseOllamaPs(
+        await this.fetchJson<unknown>("/api/ps", undefined, 2000)
+      );
+      const own = loaded?.find(
+        (entry) => entry.name === model || entry.name === `${model}:latest`
+      );
+      return own !== undefined ? isSplitAcrossCpu(own) : undefined;
+    } catch (error) {
+      logLine(`Ollama：/api/ps を読めませんでした（${String(error)}）`);
+      return undefined;
     }
   }
 
