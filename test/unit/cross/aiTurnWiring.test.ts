@@ -105,7 +105,14 @@ describe("実行の札の配り先", () => {
     const source = read(file);
 
     expect(source).toMatch(/from "\.\/aiTurn"/);
-    expect(source).toContain(`label: "${label}"`);
+    /*
+      まとめ実行は、原稿エディターの「この話を校正」から来たときだけ札の名前を「この話を校正」に替える
+      （作者の答え 2026-11-27）。名前を変数（suiteLabel）で渡すので、変数で渡す形と、その名前の字が
+      ファイルにあることで見る
+    */
+    const direct = source.includes(`label: "${label}"`);
+    const viaSuiteLabel = source.includes("label: suiteLabel") && source.includes(`"${label}"`);
+    expect(direct || viaSuiteLabel, `label: "${label}" で札を取っていません`).toBe(true);
   });
 
   test("チャンクを繰り返す機能が、素の進捗のまま残っていない", () => {

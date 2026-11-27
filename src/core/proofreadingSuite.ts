@@ -736,23 +736,34 @@ export interface SuiteRunSummary {
  * **走らなかったものを黙らない。** 「終わりました」とだけ出すと、
  * 中止で飛ばした機能まで済んだと読める。
  */
-export function describeSuiteResult(summary: SuiteRunSummary): string {
+export function describeSuiteResult(
+  summary: SuiteRunSummary,
+  /**
+   * 原稿エディターの「この話を校正」から来たときは、話の道の言い方にする
+   * （作者の答え 2026-11-27「分ける」。押した名前と知らせの言葉をそろえる）
+   */
+  scope: "work" | "episode" = "work"
+): string {
+  const wording =
+    scope === "episode"
+      ? { prefix: "この話を校正", complete: "この話の校正が済みました。" }
+      : { prefix: "校正をまとめて実行", complete: "校正をまとめて実行しました。" };
   if (summary.done.length === 0) {
     // 走らせるものを選んだのに1件も走らなかったのなら、**黙らない**
     // （1件目で止まると通知がゼロだった。0.33.7のレビュー）
     if (summary.remaining.length === 0) return "";
     return (
-      "校正をまとめて実行：1件も実行せずに止まりました" +
+      `${wording.prefix}：1件も実行せずに止まりました` +
       `（残り：${summary.remaining.join("・")}）。`
     );
   }
 
   const head =
     summary.remaining.length > 0
-      ? `校正をまとめて実行：ここまで実行しました（残り：${summary.remaining.join(
+      ? `${wording.prefix}：ここまで実行しました（残り：${summary.remaining.join(
           "・"
         )}）。`
-      : "校正をまとめて実行しました。";
+      : wording.complete;
 
   const parts = summary.done.map((step) => {
     // **「飛ばした」を「失敗」と言わない**（作者の指摘、2026-09-06）。

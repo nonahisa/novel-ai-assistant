@@ -49,6 +49,8 @@ let offered: OfferedItem[] = [];
 let selection: string[] | undefined;
 /** 控えに書かれた値 */
 let saved: unknown;
+/** 進捗の見出し（withProgress の title） */
+let progressTitles: string[] = [];
 
 const stub = window as unknown as Record<string, unknown>;
 const originalWithProgress = stub.withProgress;
@@ -89,12 +91,17 @@ beforeEach(() => {
   offered = [];
   selection = undefined;
   saved = undefined;
+  progressTitles = [];
 
   // 本物と同じく、渡された処理をそのまま走らせる
   stub.withProgress = async (
-    _options: unknown,
+    options: unknown,
     task: (progress: unknown, token: unknown) => Promise<unknown>
-  ) => task({ report: () => undefined }, undefined);
+  ) => {
+    const title = (options as { title?: unknown } | undefined)?.title;
+    if (typeof title === "string") progressTitles.push(title);
+    return task({ report: () => undefined }, undefined);
+  };
 
   stub.showQuickPick = async (items: OfferedItem[]) => {
     offered = items;
@@ -501,5 +508,51 @@ describe("終わったときの知らせ", () => {
       "校正をまとめて実行：1件も実行せずに止まりました" +
         "（残り：表記ゆれ・誤字脱字）。",
     ]);
+  });
+});
+
+/*
+  原稿エディターの「この話を校正」から来たときは、実行中の題と終わりの知らせも話の道の言い方にする
+  （作者の答え 2026-11-27「分ける」。題は「この話を校正」、知らせは「この話の校正が済みました」）
+*/
+describe("この話を校正の題と知らせ", () => {
+  async function runEpisode(): Promise<void> {
+    await runProofreadingSuite(work, {
+      memento: memento(),
+      remainingIn: (category) => remaining[category] ?? 0,
+      estimate: async () => ({ totalChars: 3000, chunkCount: 1, providerNames: ["Gemini"], isPaid: true }),
+      episodeFile: "C:/works/試しの作品/002_雨の日.txt",
+    });
+  }
+
+  test("走り終えたら「この話の校正が済みました」と知らせ、実行中の題は「この話を校正」", async () => {
+    selection = ["typos", "proofread"];
+    remaining = { 誤字脱字: 2, 推敲: 1 };
+
+    await runEpisode();
+
+    expect(announced).toEqual(["この話の校正が済みました。誤字脱字2件・推敲1件。提案パネルで確認できます。"]);
+    expect(progressTitles.some((title) => title.includes("この話を校正"))).toBe(true);
+    expect(progressTitles.some((title) => title.includes("校正一括実行"))).toBe(false);
+  });
+
+  test("中止したら、話の道の言い方で残りを伝える", async () => {
+    selection = ["typos", "proofread"];
+    remaining = { 誤字脱字: 1 };
+    outcomes = { "novelai.checkProofread": { kind: "cancelled" } };
+
+    await runEpisode();
+
+    expect(announced).toEqual(["この話を校正：ここまで実行しました（残り：推敲）。誤字脱字1件。提案パネルで確認できます。"]);
+  });
+
+  test("作品全体の道は今までの題と知らせのまま", async () => {
+    selection = ["typos"];
+    remaining = { 誤字脱字: 0 };
+
+    await run();
+
+    expect(announced).toEqual(["校正をまとめて実行しました。誤字脱字0件。手を付ける指摘は残っていません。"]);
+    expect(progressTitles).toContain("校正一括実行");
   });
 });
