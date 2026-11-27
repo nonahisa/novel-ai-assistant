@@ -3665,10 +3665,10 @@ export async function activate(
    * 校正・メモパネルから外す（作者の知らせ 2026-11-27。`features/manuscriptEditFollow.ts`）。
    * 提案パネルはこの下で作るので、作り終えて入れるまでは何もしない
    */
-  let followEdits: ((work: WorkEntry) => void) | undefined;
-  const folderWatchers = new WorkFolderWatchers((work) => {
+  let followEdits: ((work: WorkEntry, changedFiles: readonly string[]) => void) | undefined;
+  const folderWatchers = new WorkFolderWatchers((work, changedFiles) => {
     treeProvider.refresh(work.id);
-    followEdits?.(work);
+    followEdits?.(work, changedFiles);
   }, folderWatchHub);
   folderWatchers.sync(registry.list());
   context.subscriptions.push(
@@ -4080,11 +4080,16 @@ export async function activate(
   );
   // 見張りが本文の変化を知らせたら、提案パネルが照らし直し、校正・メモパネルが読み直す
   // （作者の知らせ 2026-11-27。上の `folderWatchers` が呼ぶ）
-  followEdits = (work) =>
-    void followManuscriptEdit(work, {
-      noteManuscriptEdited: (changed) => proposalPanel.noteManuscriptEdited(changed),
-      refreshFindings: refreshSceneMemoFindings,
-    });
+  followEdits = (work, changedFiles) =>
+    void followManuscriptEdit(
+      work,
+      {
+        // 提案パネルは知らせに乗って届いたファイルだけを照らし直す（動作の高速化、2026-11-27）
+        noteManuscriptEdited: (changed, files) => proposalPanel.noteManuscriptEdited(changed, files),
+        refreshFindings: refreshSceneMemoFindings,
+      },
+      changedFiles
+    );
   // 自動の同期で編集者の提案が届いたとき、開いている校正・メモパネルを読み直すため
   // （2026-11-08 までは提案パネルの選び欄へ足していた）
   rememberMemoPanelRefresher(refreshSceneMemoFindings);
@@ -9436,12 +9441,15 @@ export async function activate(
         const node = requireTreeNode(picked, "ファイル名にサブタイトルを付ける");
         if (!node) return;
         /*
-          原稿エディターの F2 から来たときは、打ちかけのまま名前を変えない。未保存の面は古い名前に
-          残り、あとで保存すると古い名前のファイルが戻ってくる。確認は選択窓（Enter で［保存して実行］）
+          打ちかけのまま名前を変えない。未保存の面は古い名前に残り、あとで保存すると古い名前の
+          ファイルが戻ってきて、同じ話が2つに割れる（右クリックの道も同じ。2026-11-27 に見つけた）。
+          原稿エディターの F2 から来たときは選択窓（Enter で［保存して実行］）、メニューからは
+          ほかのメニューと同じ右下の確認
         */
         if (
-          manuscriptKeyFileOf(node) &&
-          !(await saveDirtyDocumentsBeforeExtraction(node.work, "サブタイトルの付け直し", { askInPicker: true }))
+          !(await saveDirtyDocumentsBeforeExtraction(node.work, "サブタイトルの付け直し", {
+            askInPicker: manuscriptKeyFileOf(node) !== undefined,
+          }))
         ) {
           return;
         }
@@ -9455,6 +9463,12 @@ export async function activate(
     registerCommand("novelai.renameSelectedEpisode", async () => {
       const node = worksView?.selection[0];
       if (!(node instanceof EpisodeNode)) return;
+      // 右クリックの道と同じく、打ちかけのまま名前を変えない。キーで来たので確認は選択窓
+      if (
+        !(await saveDirtyDocumentsBeforeExtraction(node.work, "サブタイトルの付け直し", { askInPicker: true }))
+      ) {
+        return;
+      }
       if (await renameWithSubtitle(node.work, node.episode)) treeProvider.refresh(node.work.id);
     })
   );

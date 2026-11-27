@@ -25,6 +25,23 @@ export interface NotationChoice {
 export interface NotationChoiceSet {
   schemaVersion: number;
   choices: NotationChoice[];
+  /**
+   * 読み飛ばした件（形の合わない件・同じ読みの2件目）をそのまま持つ。
+   * **書き戻すときに消さない**——作者が手で書いたもので、捨てると次の保存で黙って消える
+   * （実装ルール2。2026-11-27 のレビューで見つけた）
+   */
+  skipped?: unknown[];
+}
+
+/** ファイルへ書く中身。使う決めごとのあとに、読み飛ばした件を元の形のまま並べる */
+export function notationChoiceFileBody(set: NotationChoiceSet): {
+  schemaVersion: number;
+  choices: unknown[];
+} {
+  return {
+    schemaVersion: NOTATION_CHOICE_SCHEMA_VERSION,
+    choices: [...set.choices, ...(set.skipped ?? [])],
+  };
 }
 
 export function emptyNotationChoiceSet(): NotationChoiceSet {
@@ -49,12 +66,19 @@ export function parseNotationChoiceSet(raw: unknown): NotationChoiceSet {
     throw new Error("choices が配列ではありません。");
   }
   const choices: NotationChoice[] = [];
+  const skipped: unknown[] = [];
   const seen = new Set<string>();
   for (const entry of raw.choices) {
-    if (!isRecord(entry)) continue;
+    if (!isRecord(entry)) {
+      skipped.push(entry);
+      continue;
+    }
     const surface = asString(entry, "surface");
     const reading = asString(entry, "reading");
-    if (!surface || !READING.test(reading) || seen.has(reading)) continue;
+    if (!surface || !READING.test(reading) || seen.has(reading)) {
+      skipped.push(entry);
+      continue;
+    }
     seen.add(reading);
     choices.push({ surface, reading, decidedAt: asString(entry, "decidedAt") });
   }
@@ -64,6 +88,7 @@ export function parseNotationChoiceSet(raw: unknown): NotationChoiceSet {
         ? raw.schemaVersion
         : NOTATION_CHOICE_SCHEMA_VERSION,
     choices,
+    ...(skipped.length > 0 ? { skipped } : {}),
   };
 }
 

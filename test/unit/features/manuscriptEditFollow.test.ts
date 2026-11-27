@@ -57,6 +57,13 @@ describe("followManuscriptEdit", () => {
     expect(refreshFindings).toHaveBeenCalledWith("w1");
   });
 
+  test("見張りが受けた道を、提案パネルの照らし直しへそのまま渡す", async () => {
+    const noteManuscriptEdited = vi.fn(async () => undefined);
+    const files = ["C:/小説/いじめられっ子/本文/001.txt"];
+    await followManuscriptEdit(work, { noteManuscriptEdited, refreshFindings: async () => undefined }, files);
+    expect(noteManuscriptEdited).toHaveBeenCalledWith(work, files);
+  });
+
   test("読み直しが落ちても、知らせの側へ投げ返さない", async () => {
     await expect(
       followManuscriptEdit(work, {

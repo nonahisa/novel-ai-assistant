@@ -19,17 +19,19 @@ import { workLog } from "../core/logger";
  * （画面の自動テストは作者が PC にいるあいだ流せない）。
  */
 export interface ManuscriptEditFollowDeps {
-  noteManuscriptEdited: (work: WorkEntry) => Promise<void>;
+  /** `changedFiles` は見張りが受けた道（無ければ作品ぜんたい）。照らす範囲を狭めるだけ */
+  noteManuscriptEdited: (work: WorkEntry, changedFiles?: readonly string[]) => Promise<void>;
   refreshFindings: (workId: string) => Promise<void>;
 }
 
 export async function followManuscriptEdit(
   work: WorkEntry,
-  deps: ManuscriptEditFollowDeps
+  deps: ManuscriptEditFollowDeps,
+  changedFiles?: readonly string[]
 ): Promise<void> {
   // **片方が落ちても、もう片方は動かす。** どちらも読むだけで本文には触らない
   try {
-    await deps.noteManuscriptEdited(work);
+    await deps.noteManuscriptEdited(work, changedFiles);
   } catch (error) {
     workLog(work.folderPath).line(
       `提案パネル：本文の変化に合わせた照らし直しに失敗しました（${messageOf(error)}）。`

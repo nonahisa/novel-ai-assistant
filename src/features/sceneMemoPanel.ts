@@ -6,6 +6,7 @@ import * as paths from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile, writeTextFilePreservingFormat } from "../core/textFile";
+import { decodeBytes } from "../core/textDecode";
 import { readWorkFormat } from "../core/workFormatStore";
 import {
   collectedLabelIndex,
@@ -657,7 +658,8 @@ async function collectMemos(
     [...stored, ...marks.filter((mark) => mark.status === "pending")].map((finding) => fileKeyOf(work, finding.file))
   );
 
-  const scan = await scanWork(work);
+  // **走査が読んだバイトを使い回す**（下の読みの言い分）
+  const scan = await scanWork(work, { keepBytes: true });
   // 作品のメモの印（設計書6.40.8）。壊れた設定では投げる（パネルが理由を出す）
   const memoMarkers = await readMemoMarkers(work);
   const memos: SceneMemo[] = [];
@@ -679,7 +681,16 @@ async function collectMemos(
       continue;
     }
     try {
-      const content = await readTextFile(episode.filePath);
+      /*
+        **走査が読んだバイトから本文にする**（動作の高速化、2026-11-27）。走査は
+        一括読みで全話を読み終えている。ここで全話を `vscode.workspace.fs` で
+        1つずつ読み直すと、作品のファイルが変わるたびに話数ぶんの往復が並んでいた。
+        本文にする関数は読み直しと同じ `decodeBytes`（改行を LF に揃え、文字コードも
+        同じ見分け）なので、付箋・指摘の位置は前と変わらない。走査が読めなかった
+        ファイルと、バイトを添えない走査（試験の代役）では、これまでどおり読み直す
+      */
+      const bytes = scan.bytes?.get(episode.filePath);
+      const content = bytes ? decodeBytes(bytes) : await readTextFile(episode.filePath);
       memos.push(...parseMemos(content.text, episode.filePath, memoMarkers));
       // 閉じていない囲みは、付箋の代わりに「閉じていない」の行を出す（設計書6.40.8）
       const unclosed = unclosedMemoCommentLine(content.text, memoMarkers);

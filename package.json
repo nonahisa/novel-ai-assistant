@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。",
-  "version": "1.0.61",
+  "version": "1.0.62",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -2958,15 +2958,15 @@
     "publish:marketplace": "node scripts/publishMarketplace.mjs"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
-    "@types/node": "^22.0.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@types/node": "^22.20.7",
     "@types/path-browserify": "^1.0.3",
     "@types/vscode": "^1.90.0",
     "@vitest/coverage-v8": "^4.1.12",
     "@vscode/test-electron": "3.1.0",
     "@vscode/test-web": "0.0.81",
     "@vscode/vsce": "4.1.1",
-    "esbuild": "0.28.1",
+    "esbuild": "0.28.2",
     "ovsx": "1.4.0",
     "typescript": "^5.6.0",
     "vitest": "^4.1.12",
@@ -2981,7 +2981,7 @@
     "fflate": "^0.8.3",
     "iconv-lite": "^0.7.3",
     "path-browserify": "^1.0.1",
-    "undici": "^7.29.0"
+    "undici": "^7.30.2"
   },
   "allowScripts": {
     "esbuild@0.24.2": true

@@ -1620,6 +1620,32 @@ export function countForDisplay(text: string, ext: string, memoMarkers?: MemoMar
   );
 }
 
+/**
+ * 下段の字数（`sendCount`）を決めるものの全部。**どれか1つでも違えば数え直す**
+ * （覚えた字数を使い回すのは、これが全部同じときだけ。動作の高速化、2026-11-27）。
+ * 数えの関数（`countEpisodeChars`・`measureKindText`）はこれ以外の設定を読まない
+ */
+interface CountInput {
+  readonly text: string;
+  readonly ext: string;
+  /** メモの印（`MemoMarkers` を JSON にしたもの。中身で比べる） */
+  readonly markersKey: string;
+  readonly excludeRuby: boolean;
+  readonly mode: ReturnType<typeof currentCountMode>;
+  readonly kind: WorkKindKey | undefined;
+}
+
+function sameCountInput(a: CountInput, b: CountInput): boolean {
+  return (
+    a.ext === b.ext &&
+    a.markersKey === b.markersKey &&
+    a.excludeRuby === b.excludeRuby &&
+    a.mode === b.mode &&
+    a.kind === b.kind &&
+    a.text === b.text
+  );
+}
+
 /** 開いている原稿の拡張子（小文字・ドット付き）。数え方の判断に使う */
 function extensionOf(document: vscode.TextDocument): string {
   return paths.extname(fromUri(document.uri)).toLowerCase();
@@ -2426,6 +2452,15 @@ export class ManuscriptEditorProvider
    * （`askDisconnectedReveal`）。次に同じ原稿へ飛ぶとき「コピーした」と答えられる
    */
   private readonly copyAskedKeys = new Set<string>();
+
+  /**
+   * 画面ごとに、最後に数えた字数（`sendCount`）。同じ本文を二度数えないための覚え。
+   * 画面を閉じれば一緒に消える（WeakMap）
+   */
+  private readonly lastCounts = new WeakMap<
+    vscode.WebviewPanel,
+    { input: CountInput; value: number; measure: string | undefined }
+  >();
 
   /**
    * 再読み込みをまたぐ「この行へ飛ぶ」を書く（undefined で消す）。
@@ -4712,20 +4747,39 @@ export class ManuscriptEditorProvider
   ): Promise<void> {
     const ext = extensionOf(document);
     const memoMarkers = memoMarkersOf(document);
-    const value = countForDisplay(text, ext, memoMarkers);
+    const input: CountInput = {
+      text,
+      ext,
+      markersKey: JSON.stringify(memoMarkers),
+      excludeRuby: excludeRubyFromCount(),
+      mode: currentCountMode(),
+      kind,
+    };
     /*
-      種類ごとの目安（台本の分数・漫画のページ数など）。**字数と同じ数え方の
-      本文**（頭書きを外し、ルビは .md のときだけ外す）から測る——字数と
-      目安が別の本文を見ていると、同じ話で数字が噛み合わなくなる
+      **同じ本文を二度数えない**（動作の高速化、2026-11-27）。打った1便につき、
+      画面の「数えて」（"count" の便）と、文書が変わって本文を送り返すときの
+      2回ここへ来る。どちらも同じ本文なので、数えた結果を覚えておいて使い回す。
+      **便は2回とも今までどおり送る**（画面に出る字数と、出る時機は変わらない）。
+      数えに効くもの（本文・拡張子・メモの印・ルビの扱い・純／総・種類）が
+      1つでも違えば数え直す
     */
-    const measure = kind
-      ? measureKindText(
-          kind,
-          text,
-          countEpisodeChars(text, { ext, excludeRuby: excludeRubyFromCount(), memoMarkers }),
-          memoMarkers
-        )?.short
-      : undefined;
+    const last = this.lastCounts.get(panel);
+    let value: number;
+    let measure: string | undefined;
+    if (last && sameCountInput(last.input, input)) {
+      ({ value, measure } = last);
+    } else {
+      /*
+        字数と目安は**同じ数えの結果**から出す（`countForDisplay` と同じ数え方）。
+        種類ごとの目安（台本の分数・漫画のページ数など）も、字数と同じ数え方の
+        本文（頭書きを外し、ルビは .md のときだけ外す）から測る——字数と
+        目安が別の本文を見ていると、同じ話で数字が噛み合わなくなる
+      */
+      const counts = countEpisodeChars(text, { ext, excludeRuby: input.excludeRuby, memoMarkers });
+      value = pickCount(counts, input.mode);
+      measure = kind ? measureKindText(kind, text, counts, memoMarkers)?.short : undefined;
+      this.lastCounts.set(panel, { input, value, measure });
+    }
     await panel.webview.postMessage({
       type: "count",
       ...(measure ? { measure } : {}),

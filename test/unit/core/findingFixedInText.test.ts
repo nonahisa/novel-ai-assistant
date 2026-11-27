@@ -63,3 +63,41 @@ describe("canCheckFixedInText", () => {
     expect(canCheckFixedInText("<<<<<<< HEAD\n　朝。\n=======\n　昼。\n>>>>>>> b\n")).toBe(false);
   });
 });
+
+/**
+ * 区切った行を渡しても判断は同じ（動作の高速化、2026-11-27）。提案パネルは
+ * ファイルごとに1回だけ区切って、同じ行の配列で何件も照らす。
+ * 物差しは2つの重ね（［当てる］の `originalMissing` と、探し直しの `lost`）のまま。
+ */
+describe("isFixedInText に区切った行を渡す", () => {
+  const body = "　朝。\n　夜が開けた。\n　彼は走つた。\n\n　夜が開けた。\n　終わり。";
+  const rows = [
+    { line: 2, original: "　夜が開けた。", target: "開けた", suggestion: "明けた" },
+    { line: 1, original: "　夜が開けた。", target: "開けた", suggestion: "明けた" },
+    { line: 3, original: "　彼は走つた。", target: "走つた", suggestion: "走った" },
+    { line: 3, original: "　消えた原文。", target: "消えた", suggestion: "残った" },
+    { line: 99, original: "　夜が開けた。", target: "開けた", suggestion: "明けた" },
+    { line: 99, original: "　どこにも無い。", target: "無い", suggestion: "在る" },
+    { line: 4, original: "", target: "", suggestion: "x" },
+    { line: 4, original: "　 ", target: " ", suggestion: "x" },
+    { line: 3, original: "走つ", target: "無い語", suggestion: "x" },
+  ];
+
+  test("1件ごとに区切ったときと、同じ判断になる", () => {
+    const lines = body.split("\n");
+    for (const r of rows) {
+      expect(isFixedInText(body, r, lines), JSON.stringify(r)).toBe(isFixedInText(body, r));
+    }
+    // 判断そのもの（どれが「直された」か）も押さえる
+    expect(rows.map((r) => isFixedInText(body, r, lines))).toEqual([
+      false, false, false, true, false, true, false, false, false,
+    ]);
+  });
+
+  test("渡した行の配列を書き換えない（次の指摘にも同じ配列を使う）", () => {
+    const lines = body.split("\n");
+    const copy = [...lines];
+    for (const r of rows) isFixedInText(body, r, lines);
+    expect(lines).toEqual(copy);
+  });
+});

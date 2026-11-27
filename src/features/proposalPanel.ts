@@ -1076,6 +1076,20 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    */
   private fixCheckRunning = new Set<string>();
   private fixCheckAgain = new Set<string>();
+  /**
+   * 本文の変化の知らせの番号（作品の鍵ごと。動作の高速化、2026-11-27）。
+   * `all` は道の無い知らせ（作品ぜんたい）、`files` は知らせに乗って届いた
+   * ファイルごとの番号。知らせが来た**その場で**進める（照らしの途中に届いた
+   * 知らせも、次の回で取りこぼさない）
+   */
+  private fixCheckGenerations = new Map<string, FixCheckGenerations>();
+  /**
+   * 行ごとに、最後に照らし終えたときの番号と行・原文。番号が今と同じなら、
+   * その行のファイルはそれから変わっていないので照らし直さない。
+   * **照らせたときだけ付ける**（読めなかった・空に見えた・まだ照らしていない
+   * 行は、次の知らせで照らす）
+   */
+  private fixCheckStamps = new WeakMap<ProposalViewItem, FixCheckStamp>();
 
   /**
    * @param ai 再チェック（P-23）で使う。**渡されなければ
@@ -1601,9 +1615,21 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    *
    * 照らすのは、まだ手を付けていない指摘を持つファイルだけ。読めなければ
    * ログに残して、そのファイルを飛ばす（ほかのファイルは照らす）。
+   *
+   * **知らせに乗って届いたファイルだけを照らし直す**（動作の高速化、2026-11-27）。
+   * 1話を保存するたびに、指摘のある全話を読み直していた。照らし終えたあと変わって
+   * いないファイルの行は、照らしても判断が同じなので飛ばす。道の無い知らせでは
+   * 今までどおり全部を照らす。まだ一度も照らせていない行は、どの知らせでも照らす。
+   *
+   * @param changedFiles 変わったファイル（見張りが 500ms のあいだに受けた道）。
+   *   空・省略・URI の道を含むときは作品ぜんたいの知らせとして扱う
    */
-  async noteManuscriptEdited(work: WorkEntry): Promise<void> {
+  async noteManuscriptEdited(
+    work: WorkEntry,
+    changedFiles?: readonly string[]
+  ): Promise<void> {
     const key = path.normalizeForComparison(work.folderPath);
+    this.noteFixCheckChanges(key, changedFiles);
     if (this.fixCheckRunning.has(key)) {
       this.fixCheckAgain.add(key);
       return;
@@ -1619,16 +1645,59 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     }
   }
 
+  /** 知らせの番号を進める（`noteManuscriptEdited`）。照らす前に、届いたその場で呼ぶ */
+  private noteFixCheckChanges(
+    key: string,
+    changedFiles: readonly string[] | undefined
+  ): void {
+    let generations = this.fixCheckGenerations.get(key);
+    if (!generations) {
+      generations = { all: 0, files: new Map() };
+      this.fixCheckGenerations.set(key, generations);
+    }
+    /*
+      **道の分からない知らせは、作品ぜんたいの知らせにする。** URI の場所
+      （ブラウザ版・vscode-vfs）は道の表し方が行の道と揃う保証が無いので、
+      取り違えて照らし漏らすより、全部を照らすほうへ倒す
+    */
+    if (
+      !changedFiles ||
+      changedFiles.length === 0 ||
+      changedFiles.some((filePath) => path.isUriString(filePath))
+    ) {
+      generations.all += 1;
+      return;
+    }
+    for (const filePath of changedFiles) {
+      const fileKey = path.normalizeForComparison(filePath);
+      generations.files.set(fileKey, (generations.files.get(fileKey) ?? 0) + 1);
+    }
+  }
+
   private async recheckRowsAgainstText(work: WorkEntry): Promise<void> {
     this.stashCurrent();
     const entry = this.buckets.get(this.keyOf(work));
     if (!entry) return;
+    const generations = this.fixCheckGenerations.get(
+      path.normalizeForComparison(work.folderPath)
+    ) ?? { all: 0, files: new Map<string, number>() };
 
     const byFile = new Map<string, ProposalViewItem[]>();
     for (const bucket of entry.categories.values()) {
       for (const row of bucket.items) {
         if (!isFixCheckTarget(row)) continue;
         const fileKey = path.normalizeForComparison(row.filePath);
+        // 照らし終えたあと、そのファイルの知らせが来ていない行は飛ばす
+        const stamp = this.fixCheckStamps.get(row);
+        if (
+          stamp &&
+          stamp.all === generations.all &&
+          stamp.file === (generations.files.get(fileKey) ?? 0) &&
+          stamp.line === row.line &&
+          stamp.original === row.original
+        ) {
+          continue;
+        }
         const rows = byFile.get(fileKey);
         if (rows) rows.push(row);
         else byFile.set(fileKey, [row]);
@@ -1636,8 +1705,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     }
 
     let changed = false;
-    for (const rows of byFile.values()) {
+    for (const [fileKey, rows] of byFile) {
       const filePath = rows[0].filePath;
+      // **読む前に番号を控える。** 読んでいる間に届いた知らせは、次の回で照らす
+      const all = generations.all;
+      const file = generations.files.get(fileKey) ?? 0;
       let text: string;
       try {
         text = (await readTextFile(filePath)).text;
@@ -1650,10 +1722,13 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         continue;
       }
       if (!canCheckFixedInText(text)) continue;
+      // **区切るのはファイルごとに1回**（指摘ごとに全文を区切り直さない）
+      const lines = text.split("\n");
       for (const row of rows) {
         // 読み込みを待つあいだに、作者が［適用］や［見送る］を押していることがある
         if (!isFixCheckTarget(row)) continue;
-        const fixed = isFixedInText(text, row);
+        const fixed = isFixedInText(text, row, lines);
+        this.fixCheckStamps.set(row, { all, file, line: row.line, original: row.original });
         if (row.status === "resolved") {
           if (fixed) continue;
           row.status = "pending";
@@ -4704,6 +4779,23 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
  *   置き換えで、原文の形が違う
  * - 再チェックの最中の行は、その結末を待つ
  */
+/** 本文の変化の知らせの番号（`ProposalPanel.fixCheckGenerations`） */
+interface FixCheckGenerations {
+  all: number;
+  files: Map<string, number>;
+}
+
+/**
+ * 1行を最後に照らし終えたときの控え（`ProposalPanel.fixCheckStamps`）。
+ * 行と原文も控えるのは、照らしたあとに行が付け替わったら照らし直すため
+ */
+interface FixCheckStamp {
+  readonly all: number;
+  readonly file: number;
+  readonly line: number;
+  readonly original: string;
+}
+
 function isFixCheckTarget(row: ProposalViewItem): boolean {
   if (row.busy || row.proposalId || row.lineBlock) return false;
   // **印でなく状態で分ける。** 外した行へ校正・メモパネルの［直す］が届くと、

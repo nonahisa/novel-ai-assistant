@@ -4,6 +4,7 @@ import {
   type EmbeddingProvider,
 } from "./embeddingProvider";
 import { localFetch } from "./fetchTimeouts";
+import { confirmLocalAiHost } from "../features/localAiHostApproval";
 
 /**
  * Ollamaの `/api/embed` を使った埋め込み。
@@ -118,6 +119,24 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
     body: unknown,
     timeoutMs: number
   ): Promise<T> {
+    /*
+      **宛先が PC の外なら、送る前に確かめる**（設計書6.78の17）。生成の道は疎通確認で通るが、
+      埋め込みは索引作り・意味検索・伏線の照合・コンテストの似かた・依頼の実行と入口が多く、
+      どれも通っていなかった。送り口のここで止めれば入口を増やしても漏れない。
+      この PC の中か、前に［送る］と答えたホストなら訊かない
+    */
+    const allowed = await confirmLocalAiHost({
+      displayName: "Ollama",
+      settingKey: "novelai.ollama.endpoint",
+      endpoint: this.endpoint,
+    });
+    if (!allowed) {
+      throw new EmbeddingError(
+        `Ollamaの接続先（${this.endpoint}）へは送りませんでした。`,
+        "declined",
+        "接続先の設定（novelai.ollama.endpoint）を確かめてください。"
+      );
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {

@@ -130,6 +130,24 @@ describe("作品フォルダーの監視", () => {
     expect(created[0].disposed).toBe(true);
   });
 
+  test("まとめた 500ms のあいだに届いた本文の道を、重ねずに渡す（提案パネルが絞って照らす）", () => {
+    const changed: Array<[string, readonly string[]]> = [];
+    const watchers = new WorkFolderWatchers((w, files) => changed.push([w.id, files]));
+    watchers.sync([work("a", "C:/小説/A")]);
+
+    created[0].fire("change", "C:/小説/A/episode_0001.md");
+    created[0].fire("change", "C:/小説/A/.aiwriter/logs/x.md");
+    created[0].fire("change", "C:/小説/A/episode_0002.md");
+    created[0].fire("change", "C:/小説/A/episode_0001.md");
+    vi.advanceTimersByTime(600);
+    expect(changed).toEqual([["a", ["C:/小説/A/episode_0001.md", "C:/小説/A/episode_0002.md"]]]);
+
+    // 渡したあとは空からためる（前の回の道を次の回へ持ち越さない）
+    created[0].fire("change", "C:/小説/A/episode_0003.md");
+    vi.advanceTimersByTime(600);
+    expect(changed[1]).toEqual(["a", ["C:/小説/A/episode_0003.md"]]);
+  });
+
   test("本文の場所の判定", () => {
     expect(isManuscriptPath("C:\小説\A\episode_0001.md")).toBe(true);
     expect(isManuscriptPath("C:/小説/A/.aiwriter/generated/x.md")).toBe(false);
