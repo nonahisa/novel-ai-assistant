@@ -81,7 +81,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## @modelcontextprotocol/sdk 1.32.1
+## @modelcontextprotocol/sdk 1.32.2
 
 - ライセンス: MIT
 - 配布元: https://modelcontextprotocol.io
@@ -1182,7 +1182,7 @@ IN THE SOFTWARE.
 
 ---
 
-## undici 7.30.1
+## undici 7.30.2
 
 - ライセンス: MIT
 - 配布元: https://undici.nodejs.org
