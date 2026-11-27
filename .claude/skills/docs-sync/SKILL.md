@@ -140,8 +140,10 @@ $env:PYTHONIOENCODING = "utf-8"
 
 | 変更 | 上げる桁 |
 |---|---|
-| **VSIX化を伴わない**（不具合修正・小さな追加） | **最下位（パッチ）** 0.6.0 → 0.6.1 |
-| VSIX化を伴う配布（説明文の書き換え・機能のまとまり） | マイナー 0.6.1 → 0.7.0 |
+| ふだんの変更（不具合修正・小さな追加。GitHub Release だけに出す版も） | **最下位（パッチ）** 1.0.61 → 1.0.62 |
+| **Marketplace・Open VSX へ出す版** | **マイナー** 1.0.62 → 1.1.0（作者の決定 2026-11-27「Marketplace に出すたび」） |
+
+Marketplace へ出すと決めたら、検査（package:vsix）を回す前にマイナーへ上げ直す。GitHub Release だけの版はパッチのまま。
 
 版番号の散らばり先は上の「版は6か所で揃える」の表が正である。**揃え忘れると `test/unit/features/showVersion.test.ts`（プロンプト設計書は `promptDocShape.test.ts`）が落ちる**ので、`npm run check` で気づける。
 
