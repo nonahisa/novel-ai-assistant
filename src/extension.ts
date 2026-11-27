@@ -3665,10 +3665,10 @@ export async function activate(
    * 校正・メモパネルから外す（作者の知らせ 2026-11-27。`features/manuscriptEditFollow.ts`）。
    * 提案パネルはこの下で作るので、作り終えて入れるまでは何もしない
    */
-  let followEdits: ((work: WorkEntry) => void) | undefined;
-  const folderWatchers = new WorkFolderWatchers((work) => {
+  let followEdits: ((work: WorkEntry, changedFiles: readonly string[]) => void) | undefined;
+  const folderWatchers = new WorkFolderWatchers((work, changedFiles) => {
     treeProvider.refresh(work.id);
-    followEdits?.(work);
+    followEdits?.(work, changedFiles);
   }, folderWatchHub);
   folderWatchers.sync(registry.list());
   context.subscriptions.push(
@@ -4080,11 +4080,16 @@ export async function activate(
   );
   // 見張りが本文の変化を知らせたら、提案パネルが照らし直し、校正・メモパネルが読み直す
   // （作者の知らせ 2026-11-27。上の `folderWatchers` が呼ぶ）
-  followEdits = (work) =>
-    void followManuscriptEdit(work, {
-      noteManuscriptEdited: (changed) => proposalPanel.noteManuscriptEdited(changed),
-      refreshFindings: refreshSceneMemoFindings,
-    });
+  followEdits = (work, changedFiles) =>
+    void followManuscriptEdit(
+      work,
+      {
+        // 提案パネルは知らせに乗って届いたファイルだけを照らし直す（動作の高速化、2026-11-27）
+        noteManuscriptEdited: (changed, files) => proposalPanel.noteManuscriptEdited(changed, files),
+        refreshFindings: refreshSceneMemoFindings,
+      },
+      changedFiles
+    );
   // 自動の同期で編集者の提案が届いたとき、開いている校正・メモパネルを読み直すため
   // （2026-11-08 までは提案パネルの選び欄へ足していた）
   rememberMemoPanelRefresher(refreshSceneMemoFindings);

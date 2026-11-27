@@ -39,9 +39,9 @@ export function applyFindingToText(
 ): FindingApplyOutcome {
   const lines = text.split("\n");
   const lineIndex = finding.line - 1;
-  const lineText = lines[lineIndex];
+  const lineText = findingOriginalLine(lines, finding);
 
-  if (lineText === undefined || !lineText.includes(finding.original)) {
+  if (lineText === undefined) {
     return { kind: "originalMissing" };
   }
 
@@ -58,4 +58,24 @@ export function applyFindingToText(
     lineText.slice(at + finding.target.length);
 
   return { kind: "applied", text: lines.join("\n"), at };
+}
+
+/**
+ * 指摘の行に原文がまだ在れば、その行を返す（無ければ `undefined`）。
+ * `applyFindingToText` が `originalMissing` を返すかどうかは、ここだけで決まる。
+ *
+ * **区切った行を受け取る**（動作の高速化、2026-11-27）。提案パネルの照らし直しは
+ * 1つのファイルに何十件もの指摘を照らすので、1件ごとに全文を区切り直すと
+ * 件数ぶん全文をなめる。呼ぶ側がファイルごとに1回区切って渡す。
+ * **行の配列は書き換えない**（同じ配列を次の指摘にも使う）。
+ *
+ * @param lines `text.split("\n")` の結果（`applyFindingToText` と同じ区切り方）
+ */
+export function findingOriginalLine(
+  lines: readonly string[],
+  finding: Pick<FindingReplacement, "line" | "original">
+): string | undefined {
+  const lineText = lines[finding.line - 1];
+  if (lineText === undefined || !lineText.includes(finding.original)) return undefined;
+  return lineText;
 }

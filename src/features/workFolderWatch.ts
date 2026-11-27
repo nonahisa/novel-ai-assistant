@@ -30,7 +30,12 @@ export class WorkFolderWatchers implements vscode.Disposable {
   private readonly hub: FolderWatchHub;
 
   constructor(
-    private readonly onChanged: (work: WorkEntry) => void,
+    /**
+     * 本文が変わった。`changedFiles` は 500ms のあいだに知らせが届いた道
+     * （同じ道は1つにまとめる。届いた順）。提案パネルが変わったファイルだけを
+     * 照らし直すのに使う（動作の高速化、2026-11-27）
+     */
+    private readonly onChanged: (work: WorkEntry, changedFiles: readonly string[]) => void,
     hub?: FolderWatchHub
   ) {
     this.ownsHub = !hub;
@@ -51,13 +56,16 @@ export class WorkFolderWatchers implements vscode.Disposable {
     }
     for (const [key, work] of wanted) {
       if (this.watchers.has(key)) continue;
-      const entry: WatchEntry = { subscription: { dispose: () => undefined } };
+      const entry: WatchEntry = { subscription: { dispose: () => undefined }, changed: new Set() };
       const schedule = (filePath: string) => {
         if (!isManuscriptPath(filePath)) return;
+        entry.changed.add(filePath);
         if (entry.timer) clearTimeout(entry.timer);
         entry.timer = setTimeout(() => {
           entry.timer = undefined;
-          this.onChanged(work);
+          const changed = [...entry.changed];
+          entry.changed.clear();
+          this.onChanged(work, changed);
         }, 500);
       };
       // 監視を張れない環境（古い VS Code・試験の代役）では、ハブが何も
@@ -89,6 +97,8 @@ export class WorkFolderWatchers implements vscode.Disposable {
 interface WatchEntry {
   subscription: vscode.Disposable;
   timer?: ReturnType<typeof setTimeout>;
+  /** まとめている 500ms のあいだに届いた道 */
+  changed: Set<string>;
 }
 
 /** 本文の場所か（拡張機能の作業フォルダーと退避の中は数えない） */
