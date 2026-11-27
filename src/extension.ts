@@ -9436,12 +9436,15 @@ export async function activate(
         const node = requireTreeNode(picked, "ファイル名にサブタイトルを付ける");
         if (!node) return;
         /*
-          原稿エディターの F2 から来たときは、打ちかけのまま名前を変えない。未保存の面は古い名前に
-          残り、あとで保存すると古い名前のファイルが戻ってくる。確認は選択窓（Enter で［保存して実行］）
+          打ちかけのまま名前を変えない。未保存の面は古い名前に残り、あとで保存すると古い名前の
+          ファイルが戻ってきて、同じ話が2つに割れる（右クリックの道も同じ。2026-11-27 に見つけた）。
+          原稿エディターの F2 から来たときは選択窓（Enter で［保存して実行］）、メニューからは
+          ほかのメニューと同じ右下の確認
         */
         if (
-          manuscriptKeyFileOf(node) &&
-          !(await saveDirtyDocumentsBeforeExtraction(node.work, "サブタイトルの付け直し", { askInPicker: true }))
+          !(await saveDirtyDocumentsBeforeExtraction(node.work, "サブタイトルの付け直し", {
+            askInPicker: manuscriptKeyFileOf(node) !== undefined,
+          }))
         ) {
           return;
         }
@@ -9455,6 +9458,12 @@ export async function activate(
     registerCommand("novelai.renameSelectedEpisode", async () => {
       const node = worksView?.selection[0];
       if (!(node instanceof EpisodeNode)) return;
+      // 右クリックの道と同じく、打ちかけのまま名前を変えない。キーで来たので確認は選択窓
+      if (
+        !(await saveDirtyDocumentsBeforeExtraction(node.work, "サブタイトルの付け直し", { askInPicker: true }))
+      ) {
+        return;
+      }
       if (await renameWithSubtitle(node.work, node.episode)) treeProvider.refresh(node.work.id);
     })
   );
