@@ -147,10 +147,36 @@ export async function runStartupHandoff(deps: HandoffDeps): Promise<void> {
   const { checked, deferred } = orderStartupTargets(targets);
 
   const outcomes: HandoffOutcome[] = [];
+  /*
+    **fetch だけを、置き場ごとに同時に走らせる**（設計書6.15.1。2026-11-28）。
+    1つずつ取りに行くと、中央13秒・最大20秒かかっていた。待ち時間のほとんどは
+    GitHub との往復で、置き場（リポジトリ）が違えば互いにぶつからない。
+
+    **取りに行ったあとの動き（取り込み・送信・記録）は、置き場の順に1つずつ。**
+    記録の書き先（`useSyncLog`）は全体で1つなので、同時に動かすと行が別の置き場の
+    ログへ紛れる。記録の行の並びも、1つずつのころと同じ置き場の順になる。
+    置き場は `collectTargets` が根で1つにまとめてあるので、同じリポジトリへ
+    2本の fetch が同時に走ることは無い
+  */
+  const live: HandoffTarget[] = [];
   for (const target of checked) {
     try {
       if (await skipIfWorksMissing(deps, target)) continue;
-      outcomes.push(await handleTarget(deps, target));
+      live.push(target);
+    } catch (error) {
+      await useSyncLog(target.root, target.works);
+      logFailure("開いたときの点検で例外", {
+        置き場: target.label,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  const fetches = new Map(
+    live.map((target) => [target, prefetch(target, deps.run)] as const)
+  );
+  for (const target of live) {
+    try {
+      outcomes.push(await handleTarget(deps, target, await fetches.get(target)));
     } catch (error) {
       // **1つ落ちても、残りは点検する**（この作品の一括処理と同じ考え方）
       await useSyncLog(target.root, target.works);
@@ -350,10 +376,30 @@ async function skipIfWorksMissing(
   return true;
 }
 
-/** 置き場1つを点検して、決まったとおりに動かす */
+/** fetch の結果。取りに行かない置き場（上流が無いなど）は undefined */
+type PrefetchResult = { ok: boolean; detail?: string } | undefined;
+
+/**
+ * 置き場1つぶんの fetch を始める（同時に走らせるため、待たずに約束を返す）。
+ * **投げない**——落ちても失敗の結果として返し、ほかの置き場の点検を止めない
+ */
+async function prefetch(
+  target: HandoffTarget,
+  run: GitCommandRunner | undefined
+): Promise<PrefetchResult> {
+  if (!canFetchStatus(target.status)) return undefined;
+  try {
+    return await fetchRemote(target.root, run);
+  } catch (error) {
+    return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** 置き場1つを点検して、決まったとおりに動かす（fetch は `prefetch` が済ませてある） */
 async function handleTarget(
   deps: HandoffDeps,
-  target: HandoffTarget
+  target: HandoffTarget,
+  fetched: PrefetchResult
 ): Promise<HandoffOutcome> {
   const run = deps.run ?? runGit;
   /*
@@ -370,16 +416,13 @@ async function handleTarget(
     await useSyncLog(target.root, target.works);
   };
 
-  // 取りに行く。**失敗しても止めない**——オフラインでの執筆は普通にある
-  if (canFetchStatus(target.status)) {
-    const fetched = await fetchRemote(target.root, deps.run);
-    if (!fetched.ok) {
-      await aimLog();
-      logFailure("開いたときの点検でfetchに失敗", {
-        置き場: target.label,
-        詳細: fetched.detail ?? "（詳細なし）",
-      });
-    }
+  // 取りに行った結果。**失敗しても止めない**——オフラインでの執筆は普通にある
+  if (fetched && !fetched.ok) {
+    await aimLog();
+    logFailure("開いたときの点検でfetchに失敗", {
+      置き場: target.label,
+      詳細: fetched.detail ?? "（詳細なし）",
+    });
   }
 
   /*
