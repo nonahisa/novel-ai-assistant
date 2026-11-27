@@ -95,7 +95,20 @@ export interface ScanTiming {
  * そのまま入れたフォルダを登録するケースを想定している。
  * 判定は `resolveManuscriptDir`（`manuscriptFolder.ts`）。
  */
-export async function scanWork(work: WorkEntry): Promise<{
+export interface ScanWorkOptions {
+  /**
+   * 読んだ本文のバイトを結果（`bytes`）に添える。
+   *
+   * **走査のあとに全話を読み直す呼び手のため**（校正・メモパネル）。走査は
+   * 一括読みで全話を一度に読んでいるので、同じファイルを `vscode.workspace.fs` で
+   * 1つずつ読み直すと、混んだ拡張機能ホストでは話数ぶん待たされる。
+   * **既定では添えない**——作品一覧など30か所を超える呼び手が、使わない
+   * バイトを抱え続けることになる。
+   */
+  readonly keepBytes?: boolean;
+}
+
+export async function scanWork(work: WorkEntry, options: ScanWorkOptions = {}): Promise<{
   episodes: EpisodeFile[];
   stats: WorkStats;
   manuscriptDir: string;
@@ -124,6 +137,14 @@ export async function scanWork(work: WorkEntry): Promise<{
    * 読みが増える（設計書6.107 で削った待ち時間を戻すことになる）。
    */
   configuredKind?: WorkKindKey;
+  /**
+   * 読めたファイルのバイト（絶対パス → 中身）。`keepBytes` を頼んだときだけ添える。
+   *
+   * **文字列ではなくバイトを渡す。** 走査の `decodeText` は改行を残し、文字コードの
+   * 見分けも本文の読み書き（`decodeBytes`）より簡素である。使う側が `decodeBytes` を
+   * 通せば、読み直したときと同じ本文になる。読めなかったファイルは入れない。
+   */
+  bytes?: ReadonlyMap<string, Uint8Array>;
 }> {
   const scanStartedAt = performance.now();
   /*
@@ -422,6 +443,13 @@ export async function scanWork(work: WorkEntry): Promise<{
     workInfoFiles,
     nonEpisodeFiles,
     ...(config?.kind ? { configuredKind: config.kind } : {}),
+    ...(options.keepBytes
+      ? {
+          bytes: new Map(
+            files.filter((file) => !file.unreadable).map((file) => [file.path, file.bytes])
+          ),
+        }
+      : {}),
     timing: {
       files: files.length,
       prepMs,
