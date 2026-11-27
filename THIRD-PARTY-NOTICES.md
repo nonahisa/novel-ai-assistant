@@ -668,7 +668,7 @@ THE SOFTWARE.
 
 ---
 
-## buffer 5.7.1
+## buffer 6.0.3
 
 - ライセンス: MIT
 - 配布元: https://github.com/feross/buffer
@@ -699,7 +699,7 @@ THE SOFTWARE.
 
 ---
 
-## diff 8.0.4
+## diff 9.0.0
 
 - ライセンス: BSD-3-Clause
 

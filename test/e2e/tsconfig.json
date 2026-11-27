@@ -9,7 +9,11 @@
   "extends": "../../tsconfig.tests-typecheck.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM"],
-    "types": ["node"]
+    "types": ["node"],
+    // TypeScript 7 は rootDir の既定がこの設定のフォルダーになり、ここから読む
+    // `src/` を「rootDir の外」として止める（TS6059）。出力はしないので、
+    // リポジトリの頭を指しておく（`test/web/tsconfig.json` と同じ）
+    "rootDir": "../.."
   },
   "include": ["./**/*.ts"],
   "exclude": []

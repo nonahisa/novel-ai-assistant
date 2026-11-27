@@ -65,7 +65,8 @@ async function unsentText(frame: Frame): Promise<string> {
 async function reopenButtonState(frame: Frame): Promise<{ hidden: boolean; disabled: boolean }> {
   return frame.evaluate(() => {
     const button = document.getElementById("unsentReopen") as HTMLButtonElement | null;
-    return { hidden: button?.hidden ?? true, disabled: button?.disabled ?? true };
+    // TypeScript 7 の DOM の型では hidden に "until-found" も入る。それも隠れているとみなす
+    return { hidden: button ? button.hidden !== false : true, disabled: button?.disabled ?? true };
   });
 }
 
