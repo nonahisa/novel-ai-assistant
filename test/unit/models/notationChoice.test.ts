@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   emptyNotationChoiceSet,
+  notationChoiceFileBody,
   parseNotationChoiceSet,
   withNotationChoice,
 } from "../../../src/models/notationChoice";
@@ -24,6 +25,33 @@ describe("表記の決めごと（設定/notation_choices.json。設計書6.8.9�
     expect(set.choices).toEqual([
       { surface: "出来る", reading: "できる", decidedAt: "2026-11-21" },
     ]);
+  });
+
+  test("読み飛ばした件も、書き戻すときに消さない（作者が手で書いたもの。実装ルール2）", () => {
+    const raw = {
+      choices: [
+        { surface: "出来る", reading: "できる", decidedAt: "2026-11-21" },
+        { surface: "", reading: "すべて" },
+        { surface: "綺麗", reading: "キレイ" },
+        { surface: "できる", reading: "できる" },
+        "良い",
+      ],
+    };
+    const set = parseNotationChoiceSet(raw);
+    const next = withNotationChoice(set, { surface: "分かる", reading: "わかる", decidedAt: "2026-11-27" });
+    expect(next).toBeDefined();
+    if (!next) return;
+    const written = notationChoiceFileBody(next);
+    expect(written.choices).toEqual([
+      { surface: "出来る", reading: "できる", decidedAt: "2026-11-21" },
+      { surface: "分かる", reading: "わかる", decidedAt: "2026-11-27" },
+      { surface: "", reading: "すべて" },
+      { surface: "綺麗", reading: "キレイ" },
+      { surface: "できる", reading: "できる" },
+      "良い",
+    ]);
+    // 書いたものを読み直しても、使う決めごとは変わらない（2件目の「できる」は先の件が勝つ）
+    expect(parseNotationChoiceSet(written).choices).toEqual(next.choices);
   });
 
   test("選び直したら同じ読みの前の決めごとを置き換える。同じなら書かない", () => {

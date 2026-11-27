@@ -4,7 +4,7 @@ import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import {
   emptyNotationChoiceSet,
-  NOTATION_CHOICE_SCHEMA_VERSION,
+  notationChoiceFileBody,
   parseNotationChoiceSet,
   withNotationChoice,
   type NotationChoice,
@@ -111,11 +111,8 @@ export class NotationChoiceStore {
 
   private async save(set: NotationChoiceSet): Promise<void> {
     const target = await notationChoicesPath(this.work);
-    const body = JSON.stringify(
-      { schemaVersion: NOTATION_CHOICE_SCHEMA_VERSION, choices: set.choices },
-      null,
-      2
-    );
+    // 読み飛ばした件も書き戻す（作者が手で書いたものを黙って消さない）
+    const body = JSON.stringify(notationChoiceFileBody(set), null, 2);
     const bytes = new TextEncoder().encode(`${body}\n`);
     await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
 
