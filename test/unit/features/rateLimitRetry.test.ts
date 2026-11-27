@@ -242,3 +242,54 @@ describe("待ちの表示と諦めた前置き", () => {
     expect(rateLimitGiveUpNote(state)).toContain("合計 122 秒待ちましたが");
   });
 });
+
+describe("同時に送ったチャンクが一緒に上限に当たったとき（設計書6.76.2）", () => {
+  test("待ちは1回にまとめ、知らせも1回だけ出す", async () => {
+    const state = newRateLimitRetryState();
+    const waits: number[] = [];
+    let sleeps = 0;
+    const hooks = {
+      sleep: async () => {
+        sleeps++;
+        await new Promise((r) => setTimeout(r, 5));
+        return true;
+      },
+      onWait: (ms: number) => void waits.push(ms),
+    };
+    // 3本とも1回目は 429、2回目で通る
+    const make = () => {
+      let calls = 0;
+      return async () => {
+        calls++;
+        if (calls === 1) throw new AIError("上限", "rate_limited", "", 10);
+        return "通った";
+      };
+    };
+    const results = await Promise.all([
+      callWithRateLimitWait(make(), state, hooks),
+      callWithRateLimitWait(make(), state, hooks),
+      callWithRateLimitWait(make(), state, hooks),
+    ]);
+    expect(results).toEqual(["通った", "通った", "通った"]);
+    expect(waits).toHaveLength(1);
+    expect(sleeps).toBe(1);
+    expect(state.waits).toBe(1);
+    expect(state.activeWait).toBeUndefined();
+  });
+
+  test("相乗りした待ちが中止されたら、相乗りした側も中止で返る", async () => {
+    const state = newRateLimitRetryState();
+    const hooks = { sleep: async () => false };
+    const always429 = async (): Promise<string> => {
+      throw new AIError("上限", "rate_limited", "", 10);
+    };
+    const results = await Promise.allSettled([
+      callWithRateLimitWait(always429, state, hooks),
+      callWithRateLimitWait(always429, state, hooks),
+    ]);
+    for (const result of results) {
+      expect(result.status).toBe("rejected");
+      expect((result as PromiseRejectedResult).reason.kind).toBe("aborted");
+    }
+  });
+});

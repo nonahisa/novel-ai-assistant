@@ -10,7 +10,7 @@
  * ## 2段構えにする理由
  *
  * - **リクエストの関所**（`acquireCall`）：AIへ実際に送るところを、全体で
- *   1件ずつにする。`MeteredProvider` に置くので**機能側の書き忘れが起きない**
+ *   1件ずつにする（クラウドだけは3件まで。下の `WideLane`、設計書6.76.2）。`MeteredProvider` に置くので**機能側の書き忘れが起きない**
  * - **実行の札**（`acquireRun`）：チャンクや話を繰り返す一括機能が、開始から
  *   終了まで丸ごと持つ。関所だけだと A1,B1,A2,B2… と交互に流れてしまい、
  *   読み込み直しの往復が残る
@@ -141,8 +141,103 @@ class SingleLane {
   }
 }
 
+/** 関所で待っている1件。幅（同時に何本まで並んで通ってよいか）を持つ */
+interface WideWaiter {
+  readonly width: number;
+  readonly resolve: (release: () => void) => void;
+  readonly reject: (error: unknown) => void;
+  readonly detach: () => void;
+}
+
+/**
+ * 幅を持つ関所（設計書6.76.2）。
+ *
+ * もとは同時に1件だけだった。クラウドのAIはチャンクを3つまで同時に受けて
+ * よい（`core/parallelChunks.ts`）ので、**頼む側が「自分は何本まで並んで
+ * 通ってよいか」を名乗る。** 入れるのは、通っている数が自分の幅より少なく、
+ * かつ通っているどの先客の幅よりも少ないときだけ。
+ *
+ * - 手元のAIは幅1で頼む。先客がいれば待ち、通っているあいだはほかを入れない
+ *   （従来の「同時に1件」がそのまま残る）
+ * - 幅を名乗らない呼び出し（MCP の手元のAIなど）も幅1。広げ忘れが
+ *   「並んで送ってしまう」ほうへ倒れないようにするため
+ *
+ * 並び順は FIFO のまま。先頭が入れないうちは、後ろが入れる幅でも追い越さない
+ * （追い越しを許すと、手元のAIの1件が永久に待たされうる）。
+ */
+class WideLane {
+  private readonly holders: number[] = [];
+  private readonly waiting: WideWaiter[] = [];
+
+  pending(): number {
+    return this.waiting.length;
+  }
+
+  private canEnter(width: number): boolean {
+    const active = this.holders.length;
+    return active < width && this.holders.every((held) => active < held);
+  }
+
+  acquire(width: number, signal?: AbortSignal): Promise<() => void> {
+    const own = Math.max(1, Math.floor(width));
+    if (signal?.aborted) return Promise.reject(new AiQueueAbortError());
+    if (this.waiting.length === 0 && this.canEnter(own)) {
+      return Promise.resolve(this.enter(own));
+    }
+    return new Promise<() => void>((resolve, reject) => {
+      const onAbort = (): void => {
+        const at = this.waiting.indexOf(waiter);
+        if (at >= 0) this.waiting.splice(at, 1);
+        waiter.detach();
+        reject(new AiQueueAbortError());
+        // 先頭が抜けたら、後ろが入れるようになっているかもしれない
+        this.admit();
+      };
+      const waiter: WideWaiter = {
+        width: own,
+        resolve,
+        reject,
+        detach: () => signal?.removeEventListener("abort", onAbort),
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      this.waiting.push(waiter);
+    });
+  }
+
+  /** 入れて、解放関数を返す。**二度呼ばれても無害**（`SingleLane` と同じ理由） */
+  private enter(width: number): () => void {
+    const token = width;
+    this.holders.push(token);
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      const at = this.holders.indexOf(token);
+      if (at >= 0) this.holders.splice(at, 1);
+      this.admit();
+    };
+  }
+
+  private admit(): void {
+    while (this.waiting.length > 0 && this.canEnter(this.waiting[0].width)) {
+      const next = this.waiting.shift()!;
+      next.detach();
+      next.resolve(this.enter(next.width));
+    }
+  }
+
+  reset(): void {
+    for (const waiter of this.waiting) {
+      waiter.detach();
+      waiter.reject(new AiQueueAbortError("並びを片付けました。"));
+    }
+    this.waiting.length = 0;
+    this.holders.length = 0;
+  }
+}
+
 /** AIへ実際に送るところ。全機能が必ず通る */
-const callLane = new SingleLane();
+const callLane = new WideLane();
 
 /** 一括処理のひとまとまり。単発の呼び出しは並ばない */
 const runLane = new SingleLane();
@@ -152,9 +247,15 @@ const runLane = new SingleLane();
  *
  * 呼ぶのは `MeteredProvider` だけでよい。機能側から直接呼ぶと、
  * 関所を持ったまま別の待ちに入る経路ができかねない。
+ *
+ * `width` は「同時に何本まで並んで通ってよいか」（上の `WideLane`）。
+ * 省くと1（従来の同時1件）。
  */
-export function acquireCall(signal?: AbortSignal): Promise<() => void> {
-  return callLane.acquire("ai_call", signal);
+export function acquireCall(
+  signal?: AbortSignal,
+  width = 1
+): Promise<() => void> {
+  return callLane.acquire(width, signal);
 }
 
 /** 順番待ちしている送信の件数（試験と診断用） */
