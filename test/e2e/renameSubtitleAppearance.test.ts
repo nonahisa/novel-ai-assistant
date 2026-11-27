@@ -7,7 +7,8 @@
  *
  * 1. 話を開き、［縦書きにする］と［＋］2回で見た目を変える → 右クリックで改名 →
  *    古い名前のタブが閉じる → 新しい名前で開くと、縦書き・同じ字の大きさ・組んで書く面で出る
- * 2. 1字打って**保存しないまま**改名すると、古い名前の面は閉じない（打ちかけを消さない）
+ * 2. 1字打って**保存しないまま**改名すると、先に保存を訊く（中止なら何も変わらず、保存して実行なら打った字を残して名前が変わる。
+ *    前は訊かずに名前を変え、未保存の面が古い名前に残って、保存すると同じ話が2つに割れた。2026-11-27）
  *
  * 「組んで書く」は切り替えのボタンが無い（既定で入り）ので、既定の入りのまま付いてくることだけを見る。
  * サブタイトル案の採用（AI の案）の道は AI を呼ぶので、ここでは押さない。AI・GitHub は呼ばない。
@@ -21,6 +22,7 @@ import { SIDEBAR_LAUNCH, showSidebar, treeContextMenu, treeRow, treeRowLabels, w
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import {
+  clearNotifications,
   countTabsNamed,
   dialogText,
   editorGroupTabs,
@@ -175,9 +177,9 @@ test("縦書き・字の大きさを変えた話を右クリック「ファイ�
   );
 }, 240_000);
 
-test("1字打って保存しないまま右クリックで改名すると、古い名前の面は閉じない（打ちかけを消さない）", async () => {
+test("1字打って保存しないまま右クリックで改名すると、先に保存を訊く。中止なら名前も打ちかけもそのまま、保存して実行なら打った字を残して名前が変わり、古い名前のファイルは戻らない", async () => {
   await withVsCode(
-    "改名で未保存の面を閉じない",
+    "改名の前に保存を訊く",
     [{ name: OLD_NAME, text: TEXT }],
     async (session) => {
       const { page } = session;
@@ -186,25 +188,67 @@ test("1字打って保存しないまま右クリックで改名すると、古�
       await page.keyboard.insertText("【打ちかけ】");
       await waitUntil(async () => tabIsDirty(page, OLD_NAME), "タブが未保存の印（●）になる", 10_000);
 
-      await renameFromTree(page);
-      await waitRenamedOnDisk(session);
-
+      /* ── 中止：名前も打ちかけもそのまま ── */
+      await clearNotifications(page);
+      await expandWork(page);
+      await treeContextMenu(page, "第1話", "ファイル名にサブタイトルを付ける");
+      await waitForSaveQuestion(page);
+      await pressNoticeButton(page, "中止");
       await holdsFor(
-        async () => tabNamesInclude(await allTabs(page), OLD_NAME),
-        "未保存の古い名前の面が閉じられた（打ちかけが消える）",
-        4_000
-      ).catch(async (error: unknown) => {
-        throw new Error(`${String(error)}（タブ：${JSON.stringify(await readTabState(page))}）`);
-      });
-      expect(await tabIsDirty(page, OLD_NAME), "古い名前の面は未保存のまま残る").toBe(true);
-      await waitUntil(async () => (await readActionLogs(session)).includes("未保存のため、面を閉じませんでした"), "閉じなかった記録が残る", 10_000).catch(
+        async () => {
+          const names = await readdir(session.manuscriptFolder).catch(() => [] as string[]);
+          return names.includes(OLD_NAME) && !names.includes(NEW_NAME);
+        },
+        "中止したのに名前が変わった",
+        3_000
+      );
+      expect(await tabIsDirty(page, OLD_NAME), "中止しても打ちかけは残っている").toBe(true);
+
+      /* ── 保存して実行：打った字を残して名前が変わり、古い名前は戻らない ── */
+      await clearNotifications(page);
+      await treeContextMenu(page, "第1話", "ファイル名にサブタイトルを付ける");
+      await waitForSaveQuestion(page);
+      await pressNoticeButton(page, "保存して実行");
+      await waitUntil(async () => ((await dialogText(page)) ?? "").includes("ファイル名を変えます"), "名前を変える確認の窓が出る", 20_000);
+      await pressDialogButton(page, "変える");
+      await waitRenamedOnDisk(session);
+      const renamed = await readFile(path.join(session.manuscriptFolder, NEW_NAME), "utf8");
+      expect(renamed, "打った字が新しい名前のファイルに入っている").toContain("【打ちかけ】");
+      // 保存してから変えたので、古い名前の面は閉じ、古い名前のファイルは戻ってこない（同じ話が2つに割れない）
+      await waitUntil(async () => !tabNamesInclude(await allTabs(page), OLD_NAME), "古い名前のタブが閉じる", 15_000).catch(
         async (error: unknown) => {
-          throw new Error(
-            `${String(error)}（操作ログ：${JSON.stringify((await readActionLogs(session)).split(/\r?\n/).filter((line) => line.includes("原稿エディタ")).slice(-6))}）`
-          );
+          throw new Error(`${String(error)}（タブ：${JSON.stringify(await readTabState(page))}）`);
         }
+      );
+      await holdsFor(
+        async () => !(await readdir(session.manuscriptFolder).catch(() => [] as string[])).includes(OLD_NAME),
+        "古い名前のファイルが戻ってきた",
+        3_000
       );
     },
     SIDEBAR_LAUNCH
   );
 }, 240_000);
+
+/** 右下の「未保存の変更が N 件あります」の知らせを待つ */
+async function waitForSaveQuestion(page: Page): Promise<void> {
+  await waitUntil(
+    async () => (await noticeTexts(page)).some((text) => text.includes("未保存の変更が 1 件あります")),
+    "名前を変える前に保存を訊く知らせが出る",
+    20_000
+  ).catch(async (error: unknown) => {
+    throw new Error(`${String(error)}（知らせ：${JSON.stringify(await noticeTexts(page))}）`);
+  });
+}
+
+/** 右下の知らせの本文（上から） */
+async function noticeTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll(".notification-toast")).map((toast) => (toast as HTMLElement).innerText)
+  );
+}
+
+/** 知らせの中のボタンを名前で押す */
+async function pressNoticeButton(page: Page, label: string): Promise<void> {
+  await page.locator(".notification-toast .monaco-button", { hasText: label }).first().click();
+}
