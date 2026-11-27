@@ -76,6 +76,12 @@ export interface RateLimitRetryState extends RateLimitWaitState {
   waitedSinceSuccessMs: number;
   /** 待っても通らずに諦めた。完了の知らせで「待った」ことを伝えるのに使う */
   gaveUp: boolean;
+  /**
+   * いま進んでいる待ち。**同時に送っている別のチャンクは、これに相乗りする**
+   * （設計書6.76.3）。3本が別々に待つと、待った回数と合計が3倍に進んで早く
+   * 諦め、知らせも3回出る。待ちが終わると自分で undefined に戻る
+   */
+  activeWait?: Promise<boolean>;
 }
 
 export function newRateLimitRetryState(): RateLimitRetryState {
@@ -100,6 +106,18 @@ export async function callWithRateLimitWait<T>(
       state.waitedSinceSuccessMs = 0;
       return result;
     } catch (error) {
+      // **ほかのチャンクがもう待っているなら、同じ待ちに乗る。** 数えず、
+      // 知らせも出さない（上の `activeWait`）
+      if (
+        state.activeWait &&
+        error instanceof AIError &&
+        error.kind === "rate_limited"
+      ) {
+        if (!(await state.activeWait)) {
+          throw new AIError("処理が中止されました。", "aborted");
+        }
+        continue;
+      }
       const waitMs = rateLimitWaitMs(error, {
         waits: state.waits,
         totalWaitedMs: state.waitedSinceSuccessMs,
@@ -120,7 +138,14 @@ export async function callWithRateLimitWait<T>(
       state.totalWaitedMs += waitMs;
       state.waitedSinceSuccessMs += waitMs;
       hooks.onWait?.(waitMs, state);
-      if (!(await hooks.sleep(waitMs))) {
+      // 待ちが終わったら自分で印を外す。外すのを呼び出し側の続きに任せると、
+      // 相乗りした側が「まだ待っている」と見て空回りする
+      const wait = hooks.sleep(waitMs).then((ok) => {
+        if (state.activeWait === wait) state.activeWait = undefined;
+        return ok;
+      });
+      state.activeWait = wait;
+      if (!(await wait)) {
         throw new AIError("処理が中止されました。", "aborted");
       }
     }

@@ -241,3 +241,63 @@ describe("札と関所の関係（デッドロックの禁止則）", () => {
     (await waitingTurn)();
   });
 });
+
+describe("関所の幅（クラウドは3件まで。設計書6.76.3）", () => {
+  test("幅3なら3件まで同時に通り、4件目は待つ", async () => {
+    const releases = await Promise.all([
+      acquireCall(undefined, 3),
+      acquireCall(undefined, 3),
+      acquireCall(undefined, 3),
+    ]);
+    let fourth = false;
+    const waiting = acquireCall(undefined, 3).then((release) => {
+      fourth = true;
+      return release;
+    });
+    await settle();
+    expect(fourth).toBe(false);
+    expect(pendingCallCount()).toBe(1);
+    releases[0]();
+    (await waiting)();
+    expect(fourth).toBe(true);
+    releases[1]();
+    releases[2]();
+  });
+
+  test("幅1（手元のAI）は先客がいれば待ち、通っているあいだはほかを入れない", async () => {
+    const cloud = await acquireCall(undefined, 3);
+    const r = recorder();
+    const local = acquireCall(undefined, 1).then((release) => {
+      r.note("手元");
+      return release;
+    });
+    await settle();
+    expect(r.order).toEqual([]);
+    cloud();
+    const localRelease = await local;
+    // 手元が通っているあいだは、幅3の頼みも入れない
+    const later = acquireCall(undefined, 3).then((release) => {
+      r.note("クラウド");
+      return release;
+    });
+    await settle();
+    expect(r.order).toEqual(["手元"]);
+    localRelease();
+    (await later)();
+    expect(r.order).toEqual(["手元", "クラウド"]);
+  });
+
+  test("幅を名乗らない呼び出しは幅1（従来の同時1件）", async () => {
+    const first = await acquireCall();
+    let second = false;
+    const waiting = acquireCall(undefined, 3).then((release) => {
+      second = true;
+      return release;
+    });
+    await settle();
+    expect(second).toBe(false);
+    first();
+    (await waiting)();
+    expect(second).toBe(true);
+  });
+});

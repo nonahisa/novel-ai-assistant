@@ -27,6 +27,7 @@ import { aiCallLog, logStep } from "../core/logger";
 import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
 import { localAiGate } from "../core/localAiGate";
 import { isLocalProviderId } from "../core/localProviders";
+import { concurrentChunksFor } from "../core/parallelChunks";
 import {
   type SpeedSource,
   modelTuning,
@@ -150,8 +151,9 @@ const MIN_RATIO_SAMPLE_CHARS = 2000;
  * ## リクエストの関所も、ここに置く（設計書6.76）
  *
  * 理由は上の2つとまったく同じである。**全プロバイダ・全機能がここを
- * 通る**ので、1か所で1件ずつに絞れば、機能を足した人が並列に投げて
- * しまう経路が残らない。
+ * 通る**ので、1か所で絞れば、機能を足した人が並列に投げてしまう経路が
+ * 残らない。**手元のAIは1件ずつ、クラウドは3件まで**（設計書6.76.3。
+ * 幅は `concurrentChunksFor` の1か所で決める）。
  *
  * ## 出力の速さも、ここで採る（設計書6.65.14）
  *
@@ -266,7 +268,7 @@ export class MeteredProvider implements AIProvider {
     let release: () => void;
     try {
       leaveLocalGate = await this.enterLocalGate(params);
-      release = await this.enterQueue(params.signal);
+      release = await this.enterQueue(params.signal, concurrentChunksFor(this.inner.id));
     } catch (error) {
       leaveLocalGate?.();
       // 送っていないので、所要時間は0で残す。**順番待ちの長さを
@@ -412,15 +414,19 @@ export class MeteredProvider implements AIProvider {
   }
 
   /**
-   * 送る順番を取る（設計書6.76のリクエストの関所）。
+   * 送る順番を取る（設計書6.76のリクエストの関所）。`width` は同時に
+   * 並んで通ってよい数（手元のAIは1、クラウドは3。設計書6.76.3）。
    *
    * **中止は既存の流儀へ言い換える。** 呼び出し側は例外なく
    * `AIError` の `aborted` を見て「作者が止めた」と判断しており
    * （通知を出さない分岐）、別の型を投げると失敗として報告してしまう。
    */
-  private async enterQueue(signal?: AbortSignal): Promise<() => void> {
+  private async enterQueue(
+    signal: AbortSignal | undefined,
+    width: number
+  ): Promise<() => void> {
     try {
-      return await acquireCall(signal);
+      return await acquireCall(signal, width);
     } catch (error) {
       if (error instanceof AiQueueAbortError) {
         throw new AIError("処理が中止されました。", "aborted");

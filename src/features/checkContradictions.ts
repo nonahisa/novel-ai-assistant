@@ -165,6 +165,7 @@ import {
 } from "../core/contradictionSendPlan";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
+import { concurrentChunksFor, runOrderedQueue } from "../core/parallelChunks";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { paidCostLines } from "../core/paidUsageNotice";
 import {
@@ -1037,90 +1038,111 @@ export async function checkContradictions(
 
         // **まとめたチャンクは、切り詰められたら分けて試し直す**（設計書6.23）。
         // 部分的なJSONは読めないので、まとめたせいで入り切らなかったのなら
-        // 元の大きさで出し直すほうがよい。処理中に増えるので配列で持つ
-        const queue = [...chunks];
-
-        for (let cursor = 0; cursor < queue.length; cursor++) {
-          if (token.isCancellationRequested) break;
-          if (fatalFailure) break;
-          const chunk = queue[cursor];
-
-          const cached = cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk));
-          const raw = cached ?? (await ask(chunk, "settled"));
-          // **キャッシュ命中は数えない。** 進みが一気に飛んで待ち時間が
-          // 読めなくなるうえ、分子が分母（送る件数）を超える
-          if (cached === undefined) {
-            chunksDone++;
-            const eta = runEta.step(chunksDone, chunksTotal);
-            progress.report({
-              message: `${chunksDone}/${chunksTotal}${eta.suffix}`,
-              increment: 100 / Math.max(chunksTotal, 1),
-            });
-            // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-            options.onProgress?.(
-              chunksDone,
-              chunksTotal,
-              skippedChunks,
-              eta.remaining
-            );
-          }
-
-          if (raw === RETRY_SMALLER) {
-            // **まるごと読むときは半分ずつに戻す**（A3⑤）。1話ずつまで戻すと
-            // 30話の区切りが30回の「分けて読む」になり、選んだ意味が消える。
-            // 半分でも切り詰められれば、次の周でもう一度ここを通る
-            const parts = wholeRead ? halveMergedChunk(chunk) : splitMergedChunk(chunk);
-            if (parts.length > 1) {
-              queue.splice(cursor + 1, 0, ...parts);
-              chunksTotal += parts.length;
-              log.step(
-                wholeRead
-                  ? `切り詰められたため ${parts.length} つの区切りに分けて試し直します: ${chunk.hash}`
-                  : `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
+        // 元の大きさで出し直すほうがよい。分け直した分は、受け取り（`settle`）が
+        // 親の直後へ差し込む。
+        //
+        // **クラウドのAIへは3つまで同時に送る**（設計書6.76.3）。1つのチャンクの
+        // 中の「本命 → あとで判明する事実」は順に送る（本命が通ったときだけ後者を
+        // 問うため）。受け取りと控えへの書き込みはチャンクの順に行う
+        type FutureFacts = ReturnType<typeof settings.futureFactsFor>;
+        type Sent = {
+          raw: unknown;
+          future?: { raw: unknown; facts: FutureFacts };
+          /** 控えへの書き込み。受け取りの順で行うため、送る側では書かずに持つ */
+          writes: Array<() => Promise<void>>;
+        };
+        await runOrderedQueue<Chunk, Sent>(chunks, {
+          concurrency: concurrentChunksFor(provider.id),
+          canStart: () => !token.isCancellationRequested && !fatalFailure,
+          // レート上限で待っているあいだは、残りを新しく送らない
+          holdBeforeStart: () => rateLimit.activeWait,
+          send: async (chunk) => {
+            const writes: Array<() => Promise<void>> = [];
+            const cached = cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk));
+            const raw = cached ?? (await ask(chunk, "settled", "", writes));
+            // **キャッシュ命中は数えない。** 進みが一気に飛んで待ち時間が
+            // 読めなくなるうえ、分子が分母（送る件数）を超える。
+            // 進みは終わった数で出す（同時に送ると、終わる順は送った順と揃わない）
+            if (cached === undefined) {
+              chunksDone++;
+              const eta = runEta.step(chunksDone, chunksTotal);
+              progress.report({
+                message: `${chunksDone}/${chunksTotal}${eta.suffix}`,
+                increment: 100 / Math.max(chunksTotal, 1),
+              });
+              // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+              options.onProgress?.(
+                chunksDone,
+                chunksTotal,
+                skippedChunks,
+                eta.remaining
               );
-            } else {
-              failedChunks++;
             }
-            continue;
-          }
-          // 上限に入らなかった。**まとめたぶんを戻す→半分に割る→諦める**の順で、
-          // 諦めるときは理由を残す（設計書6.27.10）
-          if (raw instanceof AIError) {
-            const retry = retryOnOverflow(chunk, raw);
-            if (retry.kind === "split") {
-              queue.splice(cursor + 1, 0, ...retry.parts);
-              chunksTotal += retry.parts.length;
-              log.step(`${chunk.hash}: ${retry.note}`);
-            } else {
-              failedChunks++;
-              log.failure("矛盾検知", { チャンク: chunk.hash, 理由: retry.note });
+            if (raw === undefined || raw === RETRY_SMALLER || raw instanceof AIError) {
+              return { raw, writes };
             }
-            continue;
-          }
-          if (raw === undefined) continue;
-
-          collect(raw, chunk, SETTLED_ORIGIN);
-
-          // **あとで判明する事実とも突き合わせる**（設計書6.10.4）。
-          // 「まだ知らない」ではなく「両立しない」を探す、逆向きの見方である
-          const futureFacts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
-          if (futureFacts.text) {
+            // **あとで判明する事実とも突き合わせる**（設計書6.10.4）。
+            // 「まだ知らない」ではなく「両立しない」を探す、逆向きの見方である
+            const facts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
+            if (!facts.text) return { raw, writes };
             const futureCached = cache.get(chunk.hash, futureKeyBase);
             const futureRaw =
-              futureCached ?? (await ask(chunk, "future", futureFacts.text));
+              futureCached ?? (await ask(chunk, "future", facts.text, writes));
+            return { raw, future: { raw: futureRaw, facts }, writes };
+          },
+          settle: async (chunk, sent) => {
+            for (const write of sent.writes) await write();
+            const raw = sent.raw;
+            if (raw === RETRY_SMALLER) {
+              // **まるごと読むときは半分ずつに戻す**（A3⑤）。1話ずつまで戻すと
+              // 30話の区切りが30回の「分けて読む」になり、選んだ意味が消える。
+              // 半分でも切り詰められれば、次の周でもう一度ここを通る
+              const parts = wholeRead ? halveMergedChunk(chunk) : splitMergedChunk(chunk);
+              if (parts.length > 1) {
+                chunksTotal += parts.length;
+                log.step(
+                  wholeRead
+                    ? `切り詰められたため ${parts.length} つの区切りに分けて試し直します: ${chunk.hash}`
+                    : `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
+                );
+                return parts;
+              }
+              failedChunks++;
+              return undefined;
+            }
+            // 上限に入らなかった。**まとめたぶんを戻す→半分に割る→諦める**の順で、
+            // 諦めるときは理由を残す（設計書6.27.10）
+            if (raw instanceof AIError) {
+              const retry = retryOnOverflow(chunk, raw);
+              if (retry.kind === "split") {
+                chunksTotal += retry.parts.length;
+                log.step(`${chunk.hash}: ${retry.note}`);
+                return retry.parts;
+              }
+              failedChunks++;
+              log.failure("矛盾検知", { チャンク: chunk.hash, 理由: retry.note });
+              return undefined;
+            }
+            if (raw === undefined) return undefined;
+
+            collect(raw, chunk, SETTLED_ORIGIN);
+
             // **入らなかった向きは、ここでは分け直さない。** この段は
             // 「あとで判明する事実」との突き合わせで、本命（settled）が
             // 通ったチャンクの補足である。分け直すと同じ本文を二重に数える
+            const future = sent.future;
             if (
-              futureRaw !== undefined &&
-              futureRaw !== RETRY_SMALLER &&
-              !(futureRaw instanceof AIError)
+              future &&
+              future.raw !== undefined &&
+              future.raw !== RETRY_SMALLER &&
+              !(future.raw instanceof AIError)
             ) {
-              collect(futureRaw, chunk, futureOrigin(futureFacts));
+              collect(future.raw, chunk, futureOrigin(future.facts));
             }
-          }
-          processedChunks++;
-        }
+            processedChunks++;
+            return undefined;
+          },
+        });
 
         /** 応答を検証して、どのチャンクの指摘かを覚えておく */
         function collect(raw: unknown, chunk: Chunk, origin: VerifyOrigin): void {
@@ -1138,7 +1160,9 @@ export async function checkContradictions(
         async function ask(
           chunk: Chunk,
           mode: "settled" | "future",
-          futureFacts = ""
+          futureFacts: string,
+          /** 控えへの書き込みをここへ積む（受け取りの順で書くため。設計書6.76.3） */
+          writes: Array<() => Promise<void>>
         ): Promise<unknown | undefined> {
           // **照らし合わせる相手が無いチャンクは飛ばす。**
           // 材料なしで問うと、本文だけを見て矛盾を作り出す
@@ -1215,7 +1239,7 @@ export async function checkContradictions(
                   sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
                   report: (message) => progress.report({ message }),
                   log: log.step,
-                  position: () => `${chunksDone + 1}/${chunksTotal}`,
+                  position: () => `${chunksDone}/${chunksTotal}`,
                 })
               );
 
@@ -1239,14 +1263,16 @@ export async function checkContradictions(
               });
               return undefined;
             }
-            await cache.set(
-              chunk.hash,
-              mode === "future"
-                ? futureKeyBase
-                : keyWithPastScenes(cacheKeyBase, chunk),
-              parsed,
-              // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
-              { stoppedEarly: response.stoppedEarly }
+            writes.push(() =>
+              cache.set(
+                chunk.hash,
+                mode === "future"
+                  ? futureKeyBase
+                  : keyWithPastScenes(cacheKeyBase, chunk),
+                parsed,
+                // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
+                { stoppedEarly: response.stoppedEarly }
+              )
             );
             return parsed;
           } catch (error) {

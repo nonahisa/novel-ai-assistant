@@ -83,6 +83,7 @@ import {
 import { estimateRunTimeText } from "../ai/runTimeEstimate";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
+import { concurrentChunksFor, runOrderedQueue } from "../core/parallelChunks";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { paidCostLines } from "../core/paidUsageNotice";
 import { confirmRun } from "../views/notify";
@@ -889,81 +890,105 @@ export async function checkForeshadowResolution(
       });
 
       // **上限に入らなかったチャンクは、小さくして試し直す**（設計書6.27.10）。
-      // 処理中に増えるので、`for...of` ではなく番号で回す
-      const queue = [...targeted];
+      // 分け直した分は、受け取り（`settle`）が親の直後へ差し込む。
+      //
+      // **クラウドのAIへは3つまで同時に送る**（設計書6.76.3）。掛ける伏線は
+      // チャンクごとに先に決めてあり、前のチャンクの答えを次へ渡さないので、
+      // 同時に送れる。「1つの伏線に回収は1つ、話の早いほうを採る」は受け取りが
+      // チャンクの順なので変わらない。
+      // （**検知の側は同時に送らない。** 受け入れた候補を次のチャンクの指示へ
+      // 渡しており、同時に送ると同じ候補が重ねて出る）
       // **分母は、実際にAIへ送る件数**（作者の指摘、2026-09-06）
       total = pending.length;
       const skippedChunks = targeted.length - pending.length;
-      for (let cursor = 0; cursor < queue.length; cursor++) {
-        if (token.isCancellationRequested) break;
-        if (fatalFailure) break;
-        const entry = queue[cursor];
-
-        const cached = cache.get(entry.chunk.hash, entry.key);
-        const raw = cached ?? (await ask(entry.chunk, entry.targets, entry.key));
-        if (cached === undefined) {
-          done++;
-          const eta = runEta.step(done, total);
-          progress.report({
-            message: `${done}/${total}${eta.suffix}`,
-            increment: 100 / Math.max(total, 1),
-          });
-          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-          options.onProgress?.(done, total, skippedChunks, eta.remaining);
-        }
-        if (raw instanceof AIError) {
-          const retry = retryOnOverflow(entry.chunk, raw);
-          if (retry.kind === "split") {
-            // **分けたら、その断片に掛かる伏線を選び直す。** 元の組を
-            // そのまま持ち回すと、張った話より前の本文にまで掛けてしまう
-            // **絞った箇所は、絞った組のまま分ける**（設計書6.19.10）。
-            // 分けたとたんに全部の伏線を掛け直すと、絞った意味が無くなり、
-            // 鍵（絞った組の印）と送る中身も食い違う
-            const parts = retry.parts
-              .map((chunk) => ({
-                chunk,
-                targets: targetsFor(entry.narrowed ? entry.targets : open, chunk),
-                narrowed: entry.narrowed,
-                key: entry.key,
-              }))
-              .filter((part) => part.targets.length > 0);
-            queue.splice(cursor + 1, 0, ...parts);
-            total += parts.length;
-            log.step(`${entry.chunk.hash}: ${retry.note}`);
-          } else {
+      type Entry = (typeof targeted)[number];
+      type Sent = {
+        raw: unknown;
+        /** 控えへの書き込み。受け取りの順で行うため、送る側では書かずに持つ */
+        writes: Array<() => Promise<void>>;
+      };
+      await runOrderedQueue<Entry, Sent>(targeted, {
+        concurrency: concurrentChunksFor(provider.id),
+        canStart: () => !token.isCancellationRequested && !fatalFailure,
+        // レート上限で待っているあいだは、残りを新しく送らない
+        holdBeforeStart: () => rateLimit.activeWait,
+        send: async (entry) => {
+          const writes: Array<() => Promise<void>> = [];
+          const cached = cache.get(entry.chunk.hash, entry.key);
+          const raw =
+            cached ?? (await ask(entry.chunk, entry.targets, entry.key, writes));
+          if (cached === undefined) {
+            // 進みは終わった数で出す（同時に送ると、終わる順は送った順と揃わない）
+            done++;
+            const eta = runEta.step(done, total);
+            progress.report({
+              message: `${done}/${total}${eta.suffix}`,
+              increment: 100 / Math.max(total, 1),
+            });
+            // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+            options.onProgress?.(done, total, skippedChunks, eta.remaining);
+          }
+          return { raw, writes };
+        },
+        settle: async (entry, sent) => {
+          for (const write of sent.writes) await write();
+          const raw = sent.raw;
+          if (raw instanceof AIError) {
+            const retry = retryOnOverflow(entry.chunk, raw);
+            if (retry.kind === "split") {
+              // **分けたら、その断片に掛かる伏線を選び直す。** 元の組を
+              // そのまま持ち回すと、張った話より前の本文にまで掛けてしまう
+              // **絞った箇所は、絞った組のまま分ける**（設計書6.19.10）。
+              // 分けたとたんに全部の伏線を掛け直すと、絞った意味が無くなり、
+              // 鍵（絞った組の印）と送る中身も食い違う
+              const parts = retry.parts
+                .map((chunk) => ({
+                  chunk,
+                  targets: targetsFor(entry.narrowed ? entry.targets : open, chunk),
+                  narrowed: entry.narrowed,
+                  key: entry.key,
+                }))
+                .filter((part) => part.targets.length > 0);
+              total += parts.length;
+              log.step(`${entry.chunk.hash}: ${retry.note}`);
+              return parts;
+            }
             // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
             failedChunks++;
             log.failure("伏線の回収の確認", {
               チャンク: entry.chunk.hash,
               理由: retry.note,
             });
+            return undefined;
           }
-          continue;
-        }
-        if (raw === undefined) continue;
+          if (raw === undefined) return undefined;
 
-        const validated = validateForeshadowResolutions(
-          raw,
-          entry.chunk,
-          entry.targets
-        );
-        rejectedCount += validated.rejected.length;
-        rejectReasons.push(...validated.rejected.map((entry) => ({ reason: entry.reason })));
-        for (const resolution of validated.accepted) {
-          // **1つの伏線に回収は1つでよい。** 話の早いほうから見ているので、
-          // 先に見つかったものを採る（あとの話でも触れられることはある）
-          if (seen.has(resolution.id)) continue;
-          const foreshadow = byId.get(resolution.id);
-          if (!foreshadow) continue;
-          seen.add(resolution.id);
-          proposals.push({ foreshadow, resolution });
-        }
-      }
+          const validated = validateForeshadowResolutions(
+            raw,
+            entry.chunk,
+            entry.targets
+          );
+          rejectedCount += validated.rejected.length;
+          rejectReasons.push(...validated.rejected.map((entry) => ({ reason: entry.reason })));
+          for (const resolution of validated.accepted) {
+            // **1つの伏線に回収は1つでよい。** 話の早いほうから見ているので、
+            // 先に見つかったものを採る（あとの話でも触れられることはある）
+            if (seen.has(resolution.id)) continue;
+            const foreshadow = byId.get(resolution.id);
+            if (!foreshadow) continue;
+            seen.add(resolution.id);
+            proposals.push({ foreshadow, resolution });
+          }
+          return undefined;
+        },
+      });
 
       async function ask(
         chunk: Chunk,
         targets: readonly Foreshadow[],
-        cacheKey: typeof cacheKeyBase
+        cacheKey: typeof cacheKeyBase,
+        /** 控えへの書き込みをここへ積む（受け取りの順で書くため。設計書6.76.3） */
+        writes: Array<() => Promise<void>>
       ): Promise<unknown | undefined> {
         try {
           const userPrompt = buildForeshadowResolvePrompt({
@@ -996,7 +1021,7 @@ export async function checkForeshadowResolution(
                   .join("").length,
               }),
             },
-          }), rateLimit, rateLimitHooks(progress, controller.signal, () => `${done + 1}/${total}`, log));
+          }), rateLimit, rateLimitHooks(progress, controller.signal, () => `${done}/${total}`, log));
 
           if (response.truncated || !response.text.trim()) {
             failedChunks++;
@@ -1017,9 +1042,11 @@ export async function checkForeshadowResolution(
             });
             return undefined;
           }
-          await cache.set(chunk.hash, cacheKey, parsed, {
-            stoppedEarly: response.stoppedEarly,
-          });
+          writes.push(() =>
+            cache.set(chunk.hash, cacheKey, parsed, {
+              stoppedEarly: response.stoppedEarly,
+            })
+          );
           return parsed;
         } catch (error) {
           if (error instanceof AIError && error.kind === "aborted") {

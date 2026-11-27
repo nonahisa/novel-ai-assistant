@@ -31,17 +31,23 @@ const FEATURES: readonly string[] = [
 /**
  * キャッシュ命中で分子を進めていないか。
  *
- * 書き方は2通りある。**どちらでも「進めない」ことに変わりはない。**
- * - 早く抜ける形（`checkTypos`）… `if (cached) { … continue; }` の中に
- *   `done++` が無い
+ * 書き方は3通りある。**どれでも「進めない」ことに変わりはない。**
+ * - 早く抜ける形（`checkTypos`）… `if (cached) { … continue; }`（同時に送る輪の
+ *   `send` では `return …`）の中に `done++` が無い
+ * - 1行で早く抜ける形（`checkProofread` の `send`）… `if (cached !== undefined) return …`
  * - 送ったときだけ数える形（ほか）… `if (cached === undefined) { … }` で囲う
  */
 function skipsCachedInCount(source: string): boolean {
   if (source.includes("if (cached === undefined) {")) return true;
+  if (/if \(cached !== undefined\) return [^;\n]*;/.test(source)) return true;
 
   const head = source.indexOf("if (cached) {");
   if (head < 0) return false;
-  const branch = source.slice(head, source.indexOf("continue;", head));
+  const ends = [source.indexOf("continue;", head), source.indexOf("return ", head)].filter(
+    (at) => at >= 0
+  );
+  if (ends.length === 0) return false;
+  const branch = source.slice(head, Math.min(...ends));
   return !branch.includes("done++");
 }
 

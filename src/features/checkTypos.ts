@@ -9,6 +9,7 @@ import {
   isConnectivityFailure,
   isFatalProviderFailure,
   isFetchCeilingTimeout,
+  type GenerateResult,
   type ProviderId,
 } from "../ai/types";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -77,6 +78,7 @@ import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import type { ScopeChoice } from "../core/typoCheckScope";
 import { resolveCheckScope } from "./typoCheckScope";
 import { withAiTurnProgress } from "./aiTurn";
+import { concurrentChunksFor, runOrderedQueue } from "../core/parallelChunks";
 import { logStep, useLogFile, workLog, type WorkLog } from "../core/logger";
 import {
   resolveMaxOutputTokens,
@@ -640,8 +642,7 @@ export async function checkTypos(
       // **切り詰められたら、まとめたぶんを話ごとに戻して試し直す。**
       // まとめると出力も増えるので、上限に当たる見込みが上がる。
       // 捨てるとその話は丸ごと検査されないまま終わる（抽出で実際に起きた）。
-      // 処理中に足すので、`for...of` ではなく番号で回す
-      const queue = [...chunks];
+      // 分け直した分は、受け取り（`settle`）が親の直後へ差し込む
       /**
        * 進捗の分母。**実際にAIへ送る件数である**（作者の指摘、2026-09-06）。
        *
@@ -658,125 +659,181 @@ export async function checkTypos(
       let total = pending.length;
       /** 処理済みで飛ばした数。分母が小さくなっている断りとして画面へ添える */
       const skipped = chunks.length - pending.length;
-      for (let cursor = 0; cursor < queue.length; cursor++) {
-        const chunk = queue[cursor];
-        if (token.isCancellationRequested) break;
+      /** 送った順の番号。ログの「送信」と「受信」を突き合わせるのに使う */
+      let sent = 0;
+      /** 致命的な失敗（権限・残高など）。待っても直らないので新しく送らない */
+      let fatalStop = false;
 
-        const cached = cache.get(chunk.hash, cacheKeyBase);
-        if (cached) {
-          // **キャッシュから戻した分も同じように数える。** 数えないと、
-          // 2回目の実行だけ「除外 0件」に見えて、1回目と食い違う
-          const tally = collectIssues(
-            cached as TypoCheckResult,
-            chunk,
-            protectedNames,
-            keepWords,
-            dismissed,
-            appliedFixKeys,
-            issues,
-            validationOptions,
-            log
-          );
-          rejectedCount += tally.rejected;
-          alreadyAppliedCount += tally.alreadyApplied;
-          // **ここでは数えない。** 数えると分子が分母を超える（分母は
-          // 送る件数だけ）うえ、進みが一気に飛んで待ち時間が読めなくなる
-          continue;
-        }
+      type Outcome =
+        | { kind: "cached"; value: TypoCheckResult }
+        | { kind: "answered"; res: GenerateResult }
+        | { kind: "failed"; error: unknown };
 
-        const label = describeChunkFile(chunk.filePath, chunk);
-        // **見当は「済んだ数」で出す。** 表示は次に送る番号（`done + 1`）
-        // だが、実測が取れているのは終わったぶんだけである
-        const eta = runEta.step(done, total);
-        progress.report({
-          message: `${done + 1}/${total}${eta.suffix}  ${label}`,
-          increment: 100 / Math.max(total, 1),
-        });
-        // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
-        options.onProgress?.(done + 1, total, skipped, eta.remaining);
-        log.step(`AIへ送信: ${done + 1}/${total} ${label}`);
-        const startedAt = Date.now();
-
-        const bodyWithLines = withLineNumbers(chunk);
-        // **「直さない語」は辞書へ混ぜない。** 固有名詞を先に並べて
-        // 200語で切っていたため、固有名詞が多い作品では
-        // **作者が名指しで守った語が1つも届かなかった**（2026-08-21）。
-        // 作法の枠（styleNote）へ独立して出す
-        const dictionary = protectedNames.slice(0, TYPO_DICTIONARY_LIMIT);
-        const userPrompt = buildTypoCheckPrompt({
-          chunkTextWithLineNumbers: bodyWithLines,
-          properNounDictionary: dictionary,
-          styleNote,
-          forSmallModel,
-        });
-
-        const callAI = () =>
-          resolved.provider.generate({
-            systemPrompt,
-            userPrompt,
-            model: resolved.model,
-            temperature: TYPO_CHECK_TEMPERATURE,
-
-            maxOutputTokens: sendOutputTokens,
-            plannedOutputTokens,
-            jsonSchema: TYPO_CHECK_SCHEMA as unknown as object,
-            disableThinking: true,
-            signal: controller.signal,
-            meta: {
-              feature: "typo_check",
-              workFolder: work.folderPath,
-              parts: measureParts(userPrompt, {
-                本文: bodyWithLines.length,
-                辞書: dictionary.join("").length,
-                作法: styleNote?.length ?? 0,
-              }),
-            },
-          });
-
-        try {
-          const res = await callWithRateLimitWait(
-            callAI,
-            rateLimit,
-            rateLimitWaitHooks({
-              sleep: (ms) => delay(ms, token),
-              report: (message) => progress.report({ message }),
-              log: log.step,
-              position: () => `${done + 1}/${total}`,
-            })
-          );
-
-          consecutiveConnectivityFailures = 0;
-          // **分母は `total` を使う。** 送る側（上）と同じ値でなければ、
-          // 同じ実行の中で分母が食い違う。`total` は入り切らなかったチャンクを
-          // 分割して送り直すたびに増えるので、`pending.length` は途中で古くなる
-          // （実際のログに「AIへ送信: 4/9」と「応答を受信: 4/7」が並んでいた。
-          // 作者のログ、2026-08-30）。0.28.13
-          log.step(
-            `応答を受信: ${done + 1}/${total} ${label} ` +
-              `（${Math.round((Date.now() - startedAt) / 1000)}秒）`
-          );
-
-          if (res.truncated || !res.text.trim()) {
-            // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
-            // ある。**捨てるより試すほうがよい**（部分的なJSONは解析できない）
-            const parts = splitMergedChunk(chunk);
-            if (parts.length > 1) {
-              queue.splice(cursor + 1, 0, ...parts);
-              total += parts.length;
-              log.step(
-                `切り詰められたため ${parts.length} 話に分けて試し直します: ${label}`
-              );
-            } else {
-              failedChunks++;
-            }
-            done++;
-            continue;
+      /**
+       * **同時に送る数**（設計書6.76.3）。クラウドは3つまで、手元のAIは1つずつ。
+       * 進みは「終わった数」で出す（同時に送ると、送った番号は終わった順と揃わない）
+       */
+      await runOrderedQueue<Chunk, Outcome>(chunks, {
+        concurrency: concurrentChunksFor(resolved.provider.id),
+        canStart: () =>
+          !cancelled &&
+          !token.isCancellationRequested &&
+          !fatalStop &&
+          !connectivityLost,
+        // レート上限で待っているあいだは、残りを新しく送らない
+        holdBeforeStart: () => rateLimit.activeWait,
+        send: async (chunk) => {
+          const cached = cache.get(chunk.hash, cacheKeyBase);
+          if (cached) {
+            // **ここでは数えない。** 数えると分子が分母を超える（分母は
+            // 送る件数だけ）うえ、進みが一気に飛んで待ち時間が読めなくなる
+            return { kind: "cached", value: cached as TypoCheckResult };
           }
 
-          const parsed = parseTypoCheckResult(res.text);
-          if (!parsed) {
-            failedChunks++;
-          } else {
+          const label = describeChunkFile(chunk.filePath, chunk);
+          const seq = ++sent;
+          // **見当は「済んだ数」で出す。** 実測が取れているのは終わったぶんだけである
+          const eta = runEta.step(done, total);
+          progress.report({ message: `${done}/${total}${eta.suffix}  ${label}` });
+          // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
+          options.onProgress?.(done, total, skipped, eta.remaining);
+          log.step(`AIへ送信: ${seq}/${total} ${label}`);
+          const startedAt = Date.now();
+
+          const bodyWithLines = withLineNumbers(chunk);
+          // **「直さない語」は辞書へ混ぜない。** 固有名詞を先に並べて
+          // 200語で切っていたため、固有名詞が多い作品では
+          // **作者が名指しで守った語が1つも届かなかった**（2026-08-21）。
+          // 作法の枠（styleNote）へ独立して出す
+          const dictionary = protectedNames.slice(0, TYPO_DICTIONARY_LIMIT);
+          const userPrompt = buildTypoCheckPrompt({
+            chunkTextWithLineNumbers: bodyWithLines,
+            properNounDictionary: dictionary,
+            styleNote,
+            forSmallModel,
+          });
+
+          const callAI = () =>
+            resolved.provider.generate({
+              systemPrompt,
+              userPrompt,
+              model: resolved.model,
+              temperature: TYPO_CHECK_TEMPERATURE,
+
+              maxOutputTokens: sendOutputTokens,
+              plannedOutputTokens,
+              jsonSchema: TYPO_CHECK_SCHEMA as unknown as object,
+              disableThinking: true,
+              signal: controller.signal,
+              meta: {
+                feature: "typo_check",
+                workFolder: work.folderPath,
+                parts: measureParts(userPrompt, {
+                  本文: bodyWithLines.length,
+                  辞書: dictionary.join("").length,
+                  作法: styleNote?.length ?? 0,
+                }),
+              },
+            });
+
+          let countedAsDone = true;
+          try {
+            const res = await callWithRateLimitWait(
+              callAI,
+              rateLimit,
+              rateLimitWaitHooks({
+                sleep: (ms) => delay(ms, token),
+                report: (message) => progress.report({ message }),
+                log: log.step,
+                position: () => `${seq}/${total}`,
+              })
+            );
+            consecutiveConnectivityFailures = 0;
+            // **分母は `total` を使う。** 送る側（上）と同じ値でなければ、
+            // 同じ実行の中で分母が食い違う。`total` は入り切らなかったチャンクを
+            // 分割して送り直すたびに増えるので、`pending.length` は途中で古くなる
+            // （実際のログに「AIへ送信: 4/9」と「応答を受信: 4/7」が並んでいた。
+            // 作者のログ、2026-08-30）。0.28.13
+            log.step(
+              `応答を受信: ${seq}/${total} ${label} ` +
+                `（${Math.round((Date.now() - startedAt) / 1000)}秒）`
+            );
+            return { kind: "answered", res };
+          } catch (e) {
+            // **中止で捨てた分は数えない**（1つずつのころの `break` と同じ）
+            if (
+              e instanceof AIError &&
+              e.kind === "aborted" &&
+              (cancelled || token.isCancellationRequested)
+            ) {
+              countedAsDone = false;
+            }
+            // **止める判断は、終わった時点ですぐにする。** 受け取りは並びの順に
+            // なるので、そこまで待つと、その間に次のチャンクを送ってしまう
+            if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
+              fatalStop = true;
+            } else if (e instanceof AIError && isConnectivityFailure(e.kind)) {
+              consecutiveConnectivityFailures++;
+              if (consecutiveConnectivityFailures >= CONNECTIVITY_FAILURE_LIMIT) {
+                connectivityLost = true;
+              }
+            }
+            return { kind: "failed", error: e };
+          } finally {
+            if (countedAsDone) {
+              done++;
+              const after = runEta.step(done, total);
+              progress.report({
+                message: `${done}/${total}${after.suffix}  ${label}`,
+                increment: 100 / Math.max(total, 1),
+              });
+              options.onProgress?.(done, total, skipped, after.remaining);
+            }
+          }
+        },
+        settle: async (chunk, outcome) => {
+          if (outcome.kind === "cached") {
+            // **キャッシュから戻した分も同じように数える。** 数えないと、
+            // 2回目の実行だけ「除外 0件」に見えて、1回目と食い違う
+            const tally = collectIssues(
+              outcome.value,
+              chunk,
+              protectedNames,
+              keepWords,
+              dismissed,
+              appliedFixKeys,
+              issues,
+              validationOptions,
+              log
+            );
+            rejectedCount += tally.rejected;
+            alreadyAppliedCount += tally.alreadyApplied;
+            return;
+          }
+
+          const label = describeChunkFile(chunk.filePath, chunk);
+          if (outcome.kind === "answered") {
+            const res = outcome.res;
+            if (res.truncated || !res.text.trim()) {
+              // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
+              // ある。**捨てるより試すほうがよい**（部分的なJSONは解析できない）
+              const parts = splitMergedChunk(chunk);
+              if (parts.length > 1) {
+                total += parts.length;
+                log.step(
+                  `切り詰められたため ${parts.length} 話に分けて試し直します: ${label}`
+                );
+                return parts;
+              }
+              failedChunks++;
+              return;
+            }
+
+            const parsed = parseTypoCheckResult(res.text);
+            if (!parsed) {
+              failedChunks++;
+              return;
+            }
             const tally = collectIssues(
               parsed,
               chunk,
@@ -795,33 +852,34 @@ export async function checkTypos(
             await cache.set(chunk.hash, cacheKeyBase, parsed, {
               stoppedEarly: res.stoppedEarly,
             });
+            return;
           }
-        } catch (e) {
+
+          const e = outcome.error;
           if (
             e instanceof AIError &&
             e.kind === "aborted" &&
             (cancelled || token.isCancellationRequested)
           ) {
-            break;
+            // **送信中に中止された分は捨てる**（設計書6.76.3）
+            return;
           }
           // **入らなかったなら、小さくして試し直す**（設計書6.27.10）。
           // 切り詰められたときと同じ道だが、こちらは送る前に分かっている
           if (isContextOverflow(e)) {
             const retry = retryOnOverflow(chunk, e);
             if (retry.kind === "split") {
-              queue.splice(cursor + 1, 0, ...retry.parts);
               total += retry.parts.length;
               log.step(`${label}: ${retry.note}`);
-            } else {
-              // 下限まで割っても入らない。**黙って飛ばさず、理由を残す**
-              failedChunks++;
-              log.failure("誤字脱字検知", {
-                チャンク: label,
-                理由: retry.note,
-              });
+              return retry.parts;
             }
-            done++;
-            continue;
+            // 下限まで割っても入らない。**黙って飛ばさず、理由を残す**
+            failedChunks++;
+            log.failure("誤字脱字検知", {
+              チャンク: label,
+              理由: retry.note,
+            });
+            return;
           }
           logTypoFailure(log, chunk, e, {
             provider: resolved.provider.displayName,
@@ -833,21 +891,9 @@ export async function checkTypos(
           if (e instanceof AIError && e.kind === "timeout") timedOutChunks++;
           // 壁で切れたものは別にも数える（延ばしても変わらないので、誘いから外す）
           if (isFetchCeilingTimeout(e)) ceilingTimedOutChunks++;
-          if (e instanceof AIError && isFatalProviderFailure(e.kind)) {
-            done++;
-            break;
-          }
-          if (e instanceof AIError && isConnectivityFailure(e.kind)) {
-            consecutiveConnectivityFailures++;
-            if (consecutiveConnectivityFailures >= CONNECTIVITY_FAILURE_LIMIT) {
-              connectivityLost = true;
-              done++;
-              break;
-            }
-          }
-        }
-        done++;
-      }
+          return undefined;
+        },
+      });
 
       // 分母は送受信と同じ `total`（＝AIへ送る件数）。**`pending.length` は
       // 分割の前の数**なので、分割が起きた回は分母のほうが大きくなる。

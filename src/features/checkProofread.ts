@@ -8,6 +8,7 @@ import {
   AIError,
   isFatalProviderFailure,
   recoveryForAIError,
+  type GenerateResult,
   type ModelInfo,
 } from "../ai/types";
 import { scanWork } from "../core/scanner";
@@ -68,6 +69,7 @@ import {
 import { estimateRunTimeText } from "../ai/runTimeEstimate";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
+import { concurrentChunksFor, runOrderedQueue } from "../core/parallelChunks";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { paidCostLines } from "../core/paidUsageNotice";
 import {
@@ -374,50 +376,25 @@ export async function checkProofread(
 
       // **切り詰められたら、まとめたぶんを話ごとに戻して試し直す。**
       // まとめると出力も増えるので、上限に当たる見込みが上がる。
-      // 処理中に足すので、`for...of` ではなく番号で回す
-      const queue = [...chunks];
-      for (let cursor = 0; cursor < queue.length; cursor++) {
-        const chunk = queue[cursor];
-        if (token.isCancellationRequested) break;
-        if (fatalFailure) break;
-
-        const cached = cache.get(chunk.hash, cacheKeyBase);
-        let raw: unknown | undefined;
-        if (cached !== undefined) {
-          raw = cached;
-        } else {
+      // 分け直した分は、受け取り（`settle`）が親の直後へ差し込む。
+      //
+      // **クラウドのAIへは3つまで同時に送る**（設計書6.76.3）。受け取りは
+      // チャンクの順なので、指摘の並びと控えへの書き込みは1つずつのころと同じ
+      type Sent =
+        | { kind: "cached"; raw: unknown }
+        | { kind: "asked"; asked: AskResult };
+      await runOrderedQueue<Chunk, Sent>(chunks, {
+        concurrency: concurrentChunksFor(provider.id),
+        canStart: () => !token.isCancellationRequested && !fatalFailure,
+        // レート上限で待っているあいだは、残りを新しく送らない
+        holdBeforeStart: () => rateLimit.activeWait,
+        send: async (chunk) => {
+          const cached = cache.get(chunk.hash, cacheKeyBase);
+          if (cached !== undefined) return { kind: "cached", raw: cached };
           const asked = await ask(chunk);
-          if (asked.ok) {
-            raw = asked.value;
-          } else if (asked.overflow) {
-            // 上限に入らなかった。まとめたぶんを戻す→半分に割る→諦める
-            const retry = retryOnOverflow(chunk, asked.overflow);
-            if (retry.kind === "split") {
-              queue.splice(cursor + 1, 0, ...retry.parts);
-              chunksTotal += retry.parts.length;
-              log.step(`${chunk.hash}: ${retry.note}`);
-            } else {
-              // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
-              failedChunks++;
-              log.failure("推敲", { チャンク: chunk.hash, 理由: retry.note });
-            }
-          } else if (asked.truncated) {
-            const parts = splitMergedChunk(chunk);
-            if (parts.length > 1) {
-              queue.splice(cursor + 1, 0, ...parts);
-              chunksTotal += parts.length;
-            } else {
-              // **1話だけでも切り詰められたら、もう分ける先が無い。** ここで数えないと、
-              // その話は推敲されていないのに終わりの1行が「失敗 0件」になり、済んだように
-              // 見える（0.107.2 まで）。誤字脱字と同じく失敗1件と数える。理由は `ask` が
-              // 「応答が上限で切り詰められました」「応答が空でした」としてログへ残している
-              failedChunks++;
-            }
-          }
-        }
-        // **キャッシュ命中は数えない。** 進みが一気に飛んで待ち時間が
-        // 読めなくなるうえ、分子が分母（送る件数）を超える
-        if (cached === undefined) {
+          // **キャッシュ命中は数えない。** 進みが一気に飛んで待ち時間が
+          // 読めなくなるうえ、分子が分母（送る件数）を超える。
+          // 進みは終わった数で出す（同時に送ると、終わる順は送った順と揃わない）
           chunksDone++;
           const eta = runEta.step(chunksDone, chunksTotal);
           progress.report({
@@ -431,46 +408,86 @@ export async function checkProofread(
             skippedChunks,
             eta.remaining
           );
-        }
-        if (raw === undefined) continue;
-
-        const validated = validateProofreadIssues(
-          raw,
-          chunk,
-          keepWords,
-          viewpointNarrator,
-          // 文語調の作品では漢字ひらきを落とす（プロンプト設計書 P-10）
-          archaicWork
-        );
-        rejectedCount += validated.rejected.length;
-        // **落とした理由を残す**（設計書6.8）。総数だけでは、指摘が少ないのが
-        // 「本当に無い」のか「検証で消しすぎ」なのか切り分けられない
-        rejectedReasons.push(...validated.rejected.map((entry) => entry.reason));
-        overBudgetCount += validated.rejected.filter(
-          (entry) => entry.reason === "over_budget"
-        ).length;
-        monotonyDroppedCount += validated.rejected.filter(
-          (entry) => entry.reason === "not_monotonous"
-        ).length;
-        monotonyMergedCount += validated.rejected.filter(
-          (entry) => entry.reason === "monotony_duplicate"
-        ).length;
-        for (const issue of validated.accepted) {
-          // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
-          // AIが返す行番号がまとめた本文の通し番号になっており、そのまま使うと
-          // 別の話のファイルの、まったく違う行を書き換える。
-          // 語尾単調の説明文（行範囲が入る）も、ここで組み上がる
-          const located = locateProofreadIssue(chunk, issue);
-          if (!located) {
-            // **どの行だったかを残す**（設計書6.8）。まとめ方を疑うときの
-            // 唯一の手掛かりになる
-            log.step(`推敲：行番号 ${issue.line} を元のファイルへ戻せず除外`);
-            rejectedCount++;
-            continue;
+          return { kind: "asked", asked };
+        },
+        settle: async (chunk, sent) => {
+          let raw: unknown | undefined;
+          if (sent.kind === "cached") {
+            raw = sent.raw;
+          } else {
+            const asked = sent.asked;
+            if (asked.ok) {
+              raw = asked.value;
+              // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）。
+              // **控えへは受け取りの順で書く**（同時に送っても書き込みの形を変えない）
+              await cache.set(chunk.hash, cacheKeyBase, asked.value, {
+                stoppedEarly: asked.stoppedEarly,
+              });
+            } else if (asked.overflow) {
+              // 上限に入らなかった。まとめたぶんを戻す→半分に割る→諦める
+              const retry = retryOnOverflow(chunk, asked.overflow);
+              if (retry.kind === "split") {
+                chunksTotal += retry.parts.length;
+                log.step(`${chunk.hash}: ${retry.note}`);
+                return retry.parts;
+              }
+              // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
+              failedChunks++;
+              log.failure("推敲", { チャンク: chunk.hash, 理由: retry.note });
+            } else if (asked.truncated) {
+              const parts = splitMergedChunk(chunk);
+              if (parts.length > 1) {
+                chunksTotal += parts.length;
+                return parts;
+              }
+              // **1話だけでも切り詰められたら、もう分ける先が無い。** ここで数えないと、
+              // その話は推敲されていないのに終わりの1行が「失敗 0件」になり、済んだように
+              // 見える（0.107.2 まで）。誤字脱字と同じく失敗1件と数える。理由は `ask` が
+              // 「応答が上限で切り詰められました」「応答が空でした」としてログへ残している
+              failedChunks++;
+            }
           }
-          issues.push({ ...located, chunkHash: chunk.hash });
-        }
-      }
+          if (raw === undefined) return undefined;
+
+          const validated = validateProofreadIssues(
+            raw,
+            chunk,
+            keepWords,
+            viewpointNarrator,
+            // 文語調の作品では漢字ひらきを落とす（プロンプト設計書 P-10）
+            archaicWork
+          );
+          rejectedCount += validated.rejected.length;
+          // **落とした理由を残す**（設計書6.8）。総数だけでは、指摘が少ないのが
+          // 「本当に無い」のか「検証で消しすぎ」なのか切り分けられない
+          rejectedReasons.push(...validated.rejected.map((entry) => entry.reason));
+          overBudgetCount += validated.rejected.filter(
+            (entry) => entry.reason === "over_budget"
+          ).length;
+          monotonyDroppedCount += validated.rejected.filter(
+            (entry) => entry.reason === "not_monotonous"
+          ).length;
+          monotonyMergedCount += validated.rejected.filter(
+            (entry) => entry.reason === "monotony_duplicate"
+          ).length;
+          for (const issue of validated.accepted) {
+            // **どのファイルの何行目かを、ここで確定させる。** まとめたチャンクでは
+            // AIが返す行番号がまとめた本文の通し番号になっており、そのまま使うと
+            // 別の話のファイルの、まったく違う行を書き換える。
+            // 語尾単調の説明文（行範囲が入る）も、ここで組み上がる
+            const located = locateProofreadIssue(chunk, issue);
+            if (!located) {
+              // **どの行だったかを残す**（設計書6.8）。まとめ方を疑うときの
+              // 唯一の手掛かりになる
+              log.step(`推敲：行番号 ${issue.line} を元のファイルへ戻せず除外`);
+              rejectedCount++;
+              continue;
+            }
+            issues.push({ ...located, chunkHash: chunk.hash });
+          }
+          return undefined;
+        },
+      });
 
       /**
        * 応答。切り詰められたとき（印が無いまま空で返ったときを含む）、
@@ -478,7 +495,7 @@ export async function checkProofread(
        * `truncated` は「話ごとに戻してよい」の印として使う
        */
       type AskResult =
-        | { ok: true; value: unknown }
+        | { ok: true; value: unknown; stoppedEarly?: GenerateResult["stoppedEarly"] }
         | { ok: false; truncated: boolean; overflow?: AIError };
 
       async function ask(chunk: Chunk): Promise<AskResult> {
@@ -520,7 +537,7 @@ export async function checkProofread(
                 sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
                 report: (message) => progress.report({ message }),
                 log: log.step,
-                position: () => `${chunksDone + 1}/${chunksTotal}`,
+                position: () => `${chunksDone}/${chunksTotal}`,
               })
             );
 
@@ -547,11 +564,8 @@ export async function checkProofread(
             });
             return { ok: false, truncated: splittable };
           }
-          // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
-          await cache.set(chunk.hash, cacheKeyBase, parsed, {
-            stoppedEarly: response.stoppedEarly,
-          });
-          return { ok: true, value: parsed };
+          // 控えへの書き込みは受け取り（`settle`）で、チャンクの順に行う
+          return { ok: true, value: parsed, stoppedEarly: response.stoppedEarly };
         } catch (error) {
           if (error instanceof AIError && error.kind === "aborted") {
             return { ok: false, truncated: false };
