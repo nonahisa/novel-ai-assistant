@@ -49,7 +49,11 @@ import {
   findingIdOf,
   type FindingDraft,
 } from "../core/findingSource";
-import { applyFindingToText } from "../core/findingApply";
+import {
+  applyFindingToText,
+  carryFindingOverEdit,
+  type LineEdit,
+} from "../core/findingApply";
 import { canCheckFixedInText, isFixedInText } from "../core/findingFixedInText";
 import {
   recordFindingDecision,
@@ -350,6 +354,15 @@ export interface ProposalViewItem {
    * 置き場（`findings.jsonl`）には書かない（画面の印だけ）。
    */
   fixedInText?: boolean;
+  /**
+   * 同じ行の別の指摘をこのパネルの［適用］／［戻す］で書き換えたとき、この指摘の
+   * 原文を写し直せなかった印（設計書6.96.5。`carrySameLineFindings`）。
+   *
+   * 原文が本文から消えたのは**作者の手ではなくパネルの書き換え**なので、見張りの
+   * 照らし直しで「本文で直された」として外さない（Bの誤字は本文に残っている）。
+   * 押せば［適用］の照らしが「位置を特定できません」で止める。画面の印だけ
+   */
+  originalBrokenByApply?: boolean;
   /**
    * 再チェックの最中か。**押した手応えを返すために要る。**
    * AIの応答は数秒〜数十秒かかるので、無反応だと壊れたようにしか見えない。
@@ -1744,6 +1757,61 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       }
     }
     if (changed) this.postItems();
+  }
+
+  /**
+   * このパネルの［適用］／［戻す］で1行を書き換えたあと、同じ行のまだ手を付けて
+   * いない指摘の原文を、書き換えた後の行へ写し直す（設計書6.96.5。同じ文に指摘が
+   * 2つあると、片方を当てたとき、もう片方の原文が本文から消える）。
+   *
+   * - 写せた → 原文を差し替える。押せばそのまま当たる。**置き場での番号は写す前の
+   *   ものを控える**——番号は原文から作るので、差し替えると採った・見送ったの記録が
+   *   置き場の行と噛み合わなくなる
+   * - 写せない → `originalBrokenByApply` を立てて残す（黙って外さない）。押せば
+   *   ［適用］の照らしが「位置を特定できません」で止める
+   * - 前に写せなかった行は、書き換えた後の行に原文が戻っていれば印を外す
+   *   （Aを戻したとき）
+   *
+   * 作者が手で直したときの照らし直し（`recheckRowsAgainstText`）はここを通らない。
+   * 計算は `carryFindingOverEdit`（書き換えた位置から決め、探し直さない）。
+   */
+  private carrySameLineFindings(
+    work: WorkEntry,
+    edited: ProposalViewItem,
+    lineBefore: string | undefined,
+    edit: LineEdit
+  ): void {
+    if (lineBefore === undefined) return;
+    this.stashCurrent();
+    const entry = this.buckets.get(this.keyOf(work));
+    if (!entry) return;
+    const lineAfter =
+      lineBefore.slice(0, edit.at) +
+      edit.inserted +
+      lineBefore.slice(edit.at + edit.removed.length);
+    const fileKey = path.normalizeForComparison(edited.filePath);
+    for (const [category, bucket] of entry.categories) {
+      for (const row of bucket.items) {
+        if (row === edited || row.line !== edited.line) continue;
+        if (row.status !== "pending" && row.status !== "failed") continue;
+        if (row.busy || row.proposalId || row.lineBlock) continue;
+        if (path.normalizeForComparison(row.filePath) !== fileKey) continue;
+        if (row.originalBrokenByApply) {
+          if (lineAfter.includes(row.original)) row.originalBrokenByApply = undefined;
+          continue;
+        }
+        const carried = carryFindingOverEdit(lineBefore, edit, row);
+        if (carried.kind === "untouched") continue;
+        if (carried.kind === "broken") {
+          row.originalBrokenByApply = true;
+          continue;
+        }
+        if (!row.findingId) {
+          row.findingId = identitiesOfRow(work.folderPath, category, row)[0];
+        }
+        row.original = carried.original;
+      }
+    }
   }
 
   /**
@@ -3925,6 +3993,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       return;
     }
 
+    // **読み直しを待つ前に写す。** 見張りの照らし直しに先を越されると、同じ文の
+    // 指摘が「本文で直された」として外れる（設計書6.96.5）
+    this.carrySameLineFindings(work, item, file.text.split("\n")[item.line - 1], {
+      at: absoluteTargetIndex,
+      removed: item.target,
+      inserted: item.suggestion,
+    });
+
     await this.reloadAfterApply(item.filePath);
 
     // **戻すときの手がかりとして、入れた場所を控える**（設計書6.8.12）。
@@ -4275,6 +4351,13 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       offerUtf8ConversionOnEncodingError(result, item.filePath, this.work?.folderPath);
       return;
     }
+
+    // 当てたときと逆向きに写す（当てたときに写した同じ文の指摘が、戻した本文で外れないように）
+    this.carrySameLineFindings(work, item, lineText, {
+      at,
+      removed: item.suggestion,
+      inserted: item.target,
+    });
 
     await this.reloadAfterApply(item.filePath);
 
@@ -4798,6 +4881,8 @@ interface FixCheckStamp {
 
 function isFixCheckTarget(row: ProposalViewItem): boolean {
   if (row.busy || row.proposalId || row.lineBlock) return false;
+  // パネルの書き換えで原文が消えた行は、作者が直したのではない（6.96.5）
+  if (row.originalBrokenByApply) return false;
   // **印でなく状態で分ける。** 外した行へ校正・メモパネルの［直す］が届くと、
   // ［適用］の道が「当て損ね」に戻す（印は立ったまま）。印で分けると、その行は
   // 二度と照らされず、赤い行のまま残りの件数に数えられ続ける

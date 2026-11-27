@@ -60,6 +60,75 @@ export function applyFindingToText(
   return { kind: "applied", text: lines.join("\n"), at };
 }
 
+/** 1行の中の書き換え1か所（`at` から `removed` を消し、`inserted` を入れた） */
+export interface LineEdit {
+  at: number;
+  removed: string;
+  inserted: string;
+}
+
+export type FindingCarryOutcome =
+  /** 書き換えが原文に届いていない（そのまま当てられる） */
+  | { kind: "untouched" }
+  /** 原文を書き換えた後の形へ写した */
+  | { kind: "carried"; original: string }
+  /** 写せない（直す語が書き換えで壊れた・書き換えが原文の端をまたぐ・当たる所が変わる） */
+  | { kind: "broken" };
+
+/**
+ * 同じ行の別の指摘を［適用］（または［戻す］）で書き換えたあと、この指摘の原文を
+ * 書き換えた後の行へ写し直す（設計書6.96.5。同じ文に指摘が2つあるとき）。
+ *
+ * **探し直しではなく、書き換えた位置から計算する**（実装ルール3）。書き換えが
+ * 原文の中にすっぽり収まり、直す語に重ならないときだけ写す。写したあとに、
+ * `applyFindingToText` が書き換えた後の行で同じ所を当てるか（原文も直す語も
+ * 最初に見つかる所が、写した所と一致するか）まで確かめ、ずれるなら写さない。
+ *
+ * @param lineBefore 書き換える前の行
+ */
+export function carryFindingOverEdit(
+  lineBefore: string,
+  edit: LineEdit,
+  finding: Pick<FindingReplacement, "original" | "target">
+): FindingCarryOutcome {
+  const start = lineBefore.indexOf(finding.original);
+  // 書き換える前から当たらない指摘は、写す元が無い（今までどおりの扱いに任せる）
+  if (start === -1 || finding.original === "") return { kind: "untouched" };
+  const end = start + finding.original.length;
+  const editStart = edit.at;
+  const editEnd = edit.at + edit.removed.length;
+  const delta = edit.inserted.length - edit.removed.length;
+  const lineAfter =
+    lineBefore.slice(0, editStart) + edit.inserted + lineBefore.slice(editEnd);
+
+  if (editEnd <= start || editStart >= end) {
+    // 原文には触れていない。ただし前に同じ句ができると、当たる所が前へずれる
+    const expected = editEnd <= start ? start + delta : start;
+    return lineAfter.indexOf(finding.original) === expected
+      ? { kind: "untouched" }
+      : { kind: "broken" };
+  }
+  // 書き換えが原文の端をまたぐ（重なりが大きすぎる）
+  if (editStart < start || editEnd > end) return { kind: "broken" };
+
+  const targetInOriginal = finding.original.indexOf(finding.target);
+  if (targetInOriginal === -1 || finding.target === "") return { kind: "broken" };
+  const targetStart = start + targetInOriginal;
+  const targetEnd = targetStart + finding.target.length;
+  // 直す語そのものが書き換わった（入れただけでも、語の内側なら壊れている）
+  if (editStart < targetEnd && editEnd > targetStart) return { kind: "broken" };
+
+  const offset = editStart - start;
+  const original =
+    finding.original.slice(0, offset) +
+    edit.inserted +
+    finding.original.slice(offset + edit.removed.length);
+  const expectedTarget = editEnd <= targetStart ? targetInOriginal + delta : targetInOriginal;
+  if (original.indexOf(finding.target) !== expectedTarget) return { kind: "broken" };
+  if (lineAfter.indexOf(original) !== start) return { kind: "broken" };
+  return { kind: "carried", original };
+}
+
 /**
  * 指摘の行に原文がまだ在れば、その行を返す（無ければ `undefined`）。
  * `applyFindingToText` が `originalMissing` を返すかどうかは、ここだけで決まる。
