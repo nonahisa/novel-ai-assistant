@@ -384,8 +384,23 @@ test("右クリック「ファイル名にサブタイトルを付ける」で�
       /* ── 話数も【タイトル】も無い話 ── */
       await waitTreeSettled(page);
       // 閑話.txt の行も名前は「幕間」で始まり、題が無い（行の名前に「星の夜」を含まないほう）
-      await treeContextMenu(page, { head: "幕間", lacks: "星の夜" }, "ファイル名にサブタイトルを付ける");
-      await waitForQuickInput(page, "閑話.txt のサブタイトル");
+      /*
+        **打つ欄が出なければ、右クリックからやり直す（3回まで）。** ノートPCの全件で、品書きは閉じたのに
+        打つ欄が15秒出ないまま落ちた（a93976e9 と 99328d06 の2回。単独では通る）。製品は押されれば本文を
+        読んですぐ打つ欄を出し、打つ欄を閉じるまで何も書き換えないので、押し直しても記録は変わらない。
+        直前の改名で木が描き直され、開いていた品書きが押しを受けずに閉じた見込み
+      */
+      for (let attempt = 1; ; attempt++) {
+        await treeContextMenu(page, { head: "幕間", lacks: "星の夜" }, "ファイル名にサブタイトルを付ける");
+        const shown = await waitForQuickInput(page, "閑話.txt のサブタイトル", attempt < 3 ? 7_000 : 15_000).then(
+          () => undefined,
+          (error: unknown) => error
+        );
+        if (shown === undefined) break;
+        if (attempt >= 3 || (await dialogText(page)) !== undefined) throw shown;
+        console.warn(`[episodeRenameSynopsisReading] 閑話.txt の打つ欄が出ず、右クリックし直します（${attempt}回目／${String(shown)}）`);
+        await waitTreeSettled(page);
+      }
       expect(await page.locator(".quick-input-widget input").first().inputValue(), "題の読めない話の打つ欄は空").toBe("");
       await page.keyboard.press("Escape");
       await holdsFor(
