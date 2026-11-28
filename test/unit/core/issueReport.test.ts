@@ -497,3 +497,73 @@ describe("指摘の採否（JSONL）", () => {
     expect(report.document).not.toContain('"良い"');
   });
 });
+
+/**
+ * Discord のボットとの約束（1.1.0。ボットは添付の「# 要約」を見出しで読み分け、入力窓の5欄を埋める）。
+ * 環境は1000字以内、②〜④は各1000字以内、記録（任意）は4000字以内。②〜④がまだ書かれていないことは、
+ * 案内の一文（「（ここに、」で始まり「）」で終わる1行）のままかで見分ける
+ */
+describe("ボットとの約束（添付から入力窓を埋める）", () => {
+  /** 要約を見出しで分け、見出しの下の行（前後の空行を除く）を返す */
+  function sections(summary: string): Map<string, string> {
+    const headings = Object.values(SUMMARY_HEADINGS) as string[];
+    const out = new Map<string, string[]>();
+    let current: string | undefined;
+    for (const line of summary.split("\n")) {
+      if (headings.includes(line)) {
+        current = line;
+        out.set(line, []);
+      } else if (current) {
+        out.get(current)?.push(line);
+      }
+    }
+    return new Map([...out].map(([heading, lines]) => [heading, lines.join("\n").trim()]));
+  }
+
+  /** 割り当てられる全部の機能に、長い名前のモデルを当てた環境（いちばん長くなる形） */
+  const manyAis = [
+    "既定", "人物抽出", "誤字脱字", "推敲", "矛盾検知", "設定資料抽出", "逸脱", "伏線", "生成", "相談", "書き起こし", "読みの辞書", "声の配役",
+  ].map((label) => ({
+    label,
+    provider: "LM Studio",
+    model: "hf.co/unsloth/gemma-4-26b-a4b-it-GGUF:UD-Q4_K_XL-imatrix-long-name",
+    local: true,
+  }));
+
+  test("環境の欄は、AI を全部の機能に割り当てても1000字以内で、報告ID と記録の形の行は残る", () => {
+    const report = buildIssueReport(
+      input([], { environment: { extensionVersion: "1.1.0", vscodeVersion: "1.105.0", os: "win32", browser: false, ais: manyAis } })
+    );
+    const env = sections(report.summary).get(SUMMARY_HEADINGS.environment) ?? "";
+    expect(Array.from(env).length).toBeLessThanOrEqual(1000);
+    expect(env).toContain("報告ID: NAI-20261017-a3k9");
+    expect(env).toContain(ISSUE_REPORT_FORMAT_LINE);
+    expect(env).toContain("拡張機能: 1.1.0");
+  });
+
+  test("②〜④は案内の一文1行だけで、「（ここに、」で始まり「）」で終わる", () => {
+    const report = buildIssueReport(input([]));
+    const parts = sections(report.summary);
+    for (const heading of [SUMMARY_HEADINGS.steps, SUMMARY_HEADINGS.expected, SUMMARY_HEADINGS.actual]) {
+      const body = parts.get(heading) ?? "";
+      expect(body.split("\n"), heading).toHaveLength(1);
+      expect(body.startsWith("（ここに、"), heading).toBe(true);
+      expect(body.endsWith("）"), heading).toBe(true);
+      expect(Array.from(body).length, heading).toBeLessThanOrEqual(1000);
+    }
+  });
+
+  test("記録（任意）は、失敗が多くても4000字以内", () => {
+    const many = Array.from({ length: 200 }, (_, i) =>
+      [
+        `[2026-10-17 13:${String(i % 60).padStart(2, "0")}:00] --- AI呼び出しの失敗 ---`,
+        `  種別: kind_${i}`,
+        "  使用中のAI: ollama / gemma4:e4b",
+      ].join("\n")
+    ).join("\n");
+    const report = buildIssueReport(input([{ label: "動作の記録（作品）", fileName: "actions.log", text: many }]));
+    const record = sections(report.summary).get(SUMMARY_HEADINGS.record) ?? "";
+    expect(record).not.toBe("");
+    expect(Array.from(record).length).toBeLessThanOrEqual(4000);
+  });
+});

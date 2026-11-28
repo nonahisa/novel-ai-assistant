@@ -10,7 +10,7 @@
 
 ![校正・メモパネルで指摘を1件ずつ直すところ](media/promo/fix.gif)
 
-このリポジトリの版：**1.0.68**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **1.0.67**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**1.1.0**（[Marketplace](https://marketplace.visualstudio.com/items?itemName=nonahisa.novel-ai-assistant) に出ている版は **1.0.67**）。Marketplace に出ている版はこれより遅れることがあります。
 
 Cursor・VSCodium など VS Code 以外のエディターでは、[Open VSX](https://open-vsx.org/extension/nonahisa/novel-ai-assistant) から入れられます。
 
@@ -367,7 +367,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 
 「ヘルプ → ログ表示」で見られます。`.aiwriter/logs/actions.log` にも保存されます（Gitの同期対象外）。本文そのものは書かず、APIキーらしき文字列は伏せ字にします。
 
-不具合を伝えるときは「ヘルプ → 障害報告用の記録」で、直近の記録をテキスト1枚に書き出せます。前半の要約を Discord の /不具合を報告 に貼り、ファイルを添付してください。原稿の本文・AIの応答・人物名・作品名・APIキーは伏せます。外へは送りません。
+不具合を伝えるときは「ヘルプ → 障害報告用の記録」で、直近の記録をテキスト1枚に書き出せます。書き出したあとの［Discord で報告する］を押すと、記録ファイルの場所をコピーして Discord の #不具合報告 を開き、送る手順を出します。/不具合を報告 の「添付」にそのファイルを付けると、入力窓に要約が入ります。添付したファイルはほかの会員には見えません。原稿の本文・AIの応答・人物名・作品名・APIキーは伏せます。外へは送りません。
 
 使い方の質問・不具合・要望は、Discord のサーバー「小説執筆部屋」（https://discord.gg/6pcuUaCMax）で受け付けています。「ヘルプ → コミュニティ（Discord）」からも開けます。GitHub をお使いなら、不具合は [Issues](https://github.com/nonahisa/novel-ai-assistant/issues) へも送れます。
 

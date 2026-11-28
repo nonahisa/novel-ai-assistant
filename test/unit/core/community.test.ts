@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { COMMUNITY_DISCORD_URL } from "../../../src/core/community";
+import { BUG_REPORT_CHANNEL_URL, COMMUNITY_DISCORD_URL, bugReportSteps } from "../../../src/core/community";
 
 /**
  * コミュニティ（Discord）への案内のリンク（1.0.0）。リンクは `core/community.ts` の1か所に置き、
@@ -19,5 +19,26 @@ describe("コミュニティ（Discord）のリンク", () => {
     const invites = readme.match(/https:\/\/discord\.gg\/[A-Za-z0-9]+/g) ?? [];
     expect(invites.length).toBeGreaterThan(0);
     expect(new Set(invites)).toEqual(new Set([COMMUNITY_DISCORD_URL]));
+  });
+});
+
+describe("［Discord で報告する］の行き先と手順（1.1.0）", () => {
+  it("#不具合報告 のチャンネルのリンクの形をしている（サーバーとチャンネルの番号）", () => {
+    expect(BUG_REPORT_CHANNEL_URL).toMatch(/^https:\/\/discord\.com\/channels\/\d+\/\d+$/);
+  });
+
+  it("手順は1行に1操作で番号が振ってあり、コマンドの名前と貼るキーが OS ごとに入る", () => {
+    for (const [platform, keys] of [
+      ["win32", "Ctrl+V"],
+      ["darwin", "⇧⌘G"],
+      ["linux", "Ctrl+L"],
+    ] as const) {
+      const steps = bugReportSteps(platform);
+      steps.forEach((line, index) => expect(line.startsWith(`${index + 1}. `), line).toBe(true));
+      const text = steps.join("\n");
+      expect(text).toContain("/不具合を報告");
+      expect(text).toContain("「添付」");
+      expect(text, platform).toContain(keys);
+    }
   });
 });
