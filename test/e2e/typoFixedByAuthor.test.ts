@@ -21,7 +21,7 @@ import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
-import { memoPanelFrame, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { composeText, frontFrameAgain, memoPanelFrame, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { OPEN_PROPOSALS_KEY, OPEN_PROPOSALS_PRESS, proposalPanelFrame } from "./support/sampleFinding";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
@@ -34,6 +34,7 @@ import {
   pressWorkbenchKey,
   quickPickRows,
   quickPickTitle,
+  tabIsDirty,
   textEditorVisibleText,
 } from "./support/workbenchDom";
 import { CHECK_TYPOS_PRESS, EDITOR_TOP_PRESS } from "./support/keys";
@@ -138,6 +139,60 @@ async function detectOneTypo(page: Page, frame: Frame, fake: FakeOllama, from: n
   });
 }
 
+/**
+ * 原稿エディターで「見上げけ」の「け」を1字消し、面の本文とタブの未保存の印で、消えたことを確かめる。
+ * 消えていなければ、前に出ている面を掴み直して置き直す（3回まで）。
+ *
+ * ノートPC（NOVELAI_E2E_SLOW_DRAG=1）の2回目で、Backspace と Ctrl+S のあとファイルが1字も変わらず落ちた
+ * （2026-11-29）。直前に提案パネルを開いているので、タブを戻した直後は原稿の面がまだ前に出ておらず、
+ * カーソルを置く押しとキーが原稿へ届かなかった見込み。**消したかどうかを確かめずに2度は押さない**
+ * （本文を余分に消さないため、面にまだ「見上げけ」があるときだけ押す）
+ */
+async function deleteExtraKe(page: Page, first: Frame): Promise<void> {
+  let frame = first;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    frame = await frontFrameAgain(page, frame, "見上げけ", "原稿エディターの面が前に出ている");
+    if ((await composeText(frame)).includes("見上げけ")) {
+      await placeCaretAfter(frame, "見上げけ");
+      await page.keyboard.press("Backspace");
+    }
+    const done = await waitUntil(
+      async () => !(await composeText(frame)).includes("見上げけ") && (await tabIsDirty(page, EPISODE)),
+      `「け」が消えてタブに未保存の印が付く（${attempt}回目）`,
+      7_000
+    ).then(
+      () => true,
+      () => false
+    );
+    if (done) return;
+    console.warn(`[typoFixedByAuthor] Backspace が原稿エディターに届かず、置き直す（${attempt}回目。面の本文：${JSON.stringify(await composeText(frame))}）`);
+  }
+  throw new Error(`原稿エディターの「け」が消えません。打ったキーが原稿の面へ届いていない（面の本文：${JSON.stringify(await composeText(frame))}）`);
+}
+
+/**
+ * 未保存の印が付いたあとで Ctrl+S を押し、ファイルが直ったとおりになるのを待つ。届かなければ押し直す（3回まで）。
+ * 打った字が拡張機能へ届く前に Ctrl+S が着くと保存が空振りする（composeLineEnd.test.ts の saveAndWaitFor と同じ形）。
+ * **3回押しても印が残ったまま変わらなければ、保存が落ちている（製品の疑い）** と分かる文で落とす
+ */
+async function saveUntilFixed(session: E2ESession): Promise<void> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await session.page.keyboard.press("ControlOrMeta+KeyS");
+    const saved = await waitUntil(async () => (await fileText(session)) === FIXED_TEXT, `ファイルが直ったとおりになる（${attempt}回目の Ctrl+S）`, 5_000).then(
+      () => true,
+      () => false
+    );
+    if (saved) return;
+    // 印が消えていれば保存は済んでいる（中身が違うだけ）。押し直しても変わらないので落とす
+    if (!(await tabIsDirty(session.page, EPISODE))) break;
+    console.warn(`[typoFixedByAuthor] Ctrl+S のあともファイルが変わらず、押し直す（${attempt}回目）`);
+  }
+  const dirty = await tabIsDirty(session.page, EPISODE);
+  throw new Error(
+    `${dirty ? "未保存の印が残ったまま、Ctrl+S を3回押してもファイルに入らない（保存が落ちている疑い）" : "保存は済んだが、ファイルが直したとおりでない"}（いまの本文：${JSON.stringify(await fileText(session))}）`
+  );
+}
+
 /** ファイルが作者の直したとおりになり、2つのパネルから指摘が消えるまで待つ */
 async function expectGoneFromPanels(session: E2ESession, fake: FakeOllama, from: number): Promise<void> {
   const { page } = session;
@@ -183,9 +238,8 @@ test("原稿エディターで誤字を直して保存すると、提案パネ�
 
         // 原稿エディターへ戻り、「見上げけ」の「け」を消して保存する
         await activateTab(page, EPISODE);
-        await placeCaretAfter(frame, "見上げけ");
-        await page.keyboard.press("Backspace");
-        await page.keyboard.press("ControlOrMeta+KeyS");
+        await deleteExtraKe(page, frame);
+        await saveUntilFixed(session);
 
         await expectGoneFromPanels(session, fake, from);
       },
