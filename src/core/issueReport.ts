@@ -32,6 +32,11 @@ export const ISSUE_REPORT_ID_PATTERN = /^NAI-\d{8}-[a-z0-9]{4}$/;
 
 /** 要約の上限。入力窓の1欄（4,000字）に余裕をもって収まる大きさ */
 export const SUMMARY_MAX_CHARS = 3000;
+/**
+ * 環境の欄の上限（1.1.0。Discord のボットとの約束。ボットは添付の要約からこの欄を埋める）。
+ * 再現手順・期待・実際の欄は案内の一文だけなので、1000字には遠く届かない
+ */
+export const ENVIRONMENT_MAX_CHARS = 1000;
 /** Discord の入力窓の1欄の上限 */
 export const DISCORD_FIELD_MAX_CHARS = 4000;
 /** ファイル全体の上限（UTF-8 のバイト数） */
@@ -669,11 +674,21 @@ export interface IssueReportAi {
 }
 
 export interface IssueReportEnvironment {
-  extensionVersion: string;
-  vscodeVersion: string;
+  /**
+   * 製品の名前（1.1.0。モバイル版などほかの製品が同じ形で書き出すとき）。渡すと環境の欄に
+   * 「製品: <名前>」の行が入る。**統合小説執筆環境は渡さない**（ボットは、この行が無ければ統合とみなす）
+   */
+  product?: string;
+  /**
+   * 版・OS の行を、呼ぶ側の製品の形で渡す（1.1.0。例：「アプリ: 0.2.0」「Android: 15」）。
+   * 渡すと、下の拡張機能・VS Code・OS・ブラウザ版の4行の代わりに入る。報告ID・記録の形・製品・AI の行は今までどおり
+   */
+  lines?: readonly string[];
+  extensionVersion?: string;
+  vscodeVersion?: string;
   /** OS の名前。ブラウザ版では undefined */
-  os: string | undefined;
-  browser: boolean;
+  os?: string | undefined;
+  browser?: boolean;
   ais: readonly IssueReportAi[];
 }
 
@@ -693,6 +708,11 @@ export interface IssueReportInput {
   environment: IssueReportEnvironment;
   logs: readonly IssueReportLog[];
   redaction: RedactionOptions;
+  /**
+   * 再現手順の欄の案内の一文（1.1.0。製品ごとに操作の例が違うため）。渡さなければ VS Code の例。
+   * **「（ここに、」で始まり「）」で終わる1行**（ボットはこの行のままなら空とみなす）。形が違えば投げる
+   */
+  stepsHint?: string;
 }
 
 export interface IssueReport {
@@ -770,16 +790,28 @@ function environmentSection(input: IssueReportInput, redactor: IssueRedactor): s
             `AI（${ai.label}）: ${redactor.text(`${ai.provider} / ${ai.model}`)}（${ai.local ? "手元" : "クラウド"}）`
         )
       : ["AI: 未設定"];
-  return [
+  const head = [
     SUMMARY_HEADINGS.environment,
     `報告ID: ${input.reportId}`,
     ISSUE_REPORT_FORMAT_LINE,
-    `拡張機能: ${env.extensionVersion}`,
-    `VS Code: ${env.vscodeVersion}`,
-    `OS: ${env.os ?? "ブラウザ版"}`,
-    `ブラウザ版: ${env.browser ? "はい" : "いいえ"}`,
-    ...ais,
+    ...(env.product !== undefined ? [`製品: ${env.product}`] : []),
+    // 呼ぶ側の行も伏せ方を通す（製品の名前や版に、作者のフォルダー名などが混ざっても外へ出さない）
+    ...(env.lines?.map((line) => redactor.text(line)) ?? [
+      `拡張機能: ${env.extensionVersion ?? "（不明）"}`,
+      `VS Code: ${env.vscodeVersion ?? "（不明）"}`,
+      `OS: ${env.os ?? "ブラウザ版"}`,
+      `ブラウザ版: ${env.browser ? "はい" : "いいえ"}`,
+    ]),
   ];
+  // 欄の中身（見出しの下）を上限に収める。溢れたら AI の行を後ろから畳む（報告ID・記録の形・版は必ず残す）
+  const fits = (lines: readonly string[]): boolean =>
+    charCount(lines.slice(1).join("\n")) <= ENVIRONMENT_MAX_CHARS;
+  for (let kept = ais.length; kept >= 0; kept--) {
+    const folded = ais.length - kept;
+    const lines = [...head, ...ais.slice(0, kept), ...(folded > 0 ? [`AI: ほか${folded}件（書ききれないので省いた）`] : [])];
+    if (fits(lines) || kept === 0) return lines;
+  }
+  return head;
 }
 
 /** 作者が書く欄の案内。**案内の一文だけ**にして、消し忘れても害が無い形にする */
@@ -797,6 +829,20 @@ const AUTHOR_SECTIONS: ReadonlyArray<{ heading: string; hint: string }> = [
     hint: "（ここに、実際に起きたことを書いてください。出た通知の文はそのまま写せます）",
   },
 ];
+
+/** 作者が書く欄。再現手順の案内だけは呼ぶ側の製品の例に替えられる（形はボットとの約束どおりか確かめる） */
+function authorSections(stepsHint: string | undefined): ReadonlyArray<{ heading: string; hint: string }> {
+  if (stepsHint === undefined) return AUTHOR_SECTIONS;
+  if (!isAuthorHint(stepsHint)) {
+    throw new Error(`再現手順の案内の一文の形が約束と違います（「（ここに、」で始まり「）」で終わる1行）：${stepsHint}`);
+  }
+  return AUTHOR_SECTIONS.map((s) => (s.heading === SUMMARY_HEADINGS.steps ? { ...s, hint: stepsHint } : s));
+}
+
+/** 作者が書く欄の案内の一文の形（ボットとの約束）。「（ここに、」で始まり「）」で終わる1行 */
+export function isAuthorHint(line: string): boolean {
+  return line.startsWith("（ここに、") && line.endsWith("）") && !/[\r\n]/.test(line);
+}
 
 function summaryText(
   input: IssueReportInput,
@@ -821,7 +867,7 @@ function summaryText(
   const lines = [
     ...environmentLines,
     "",
-    ...AUTHOR_SECTIONS.flatMap((s) => [s.heading, s.hint, ""]),
+    ...authorSections(input.stepsHint).flatMap((s) => [s.heading, s.hint, ""]),
     ...record,
   ];
   return guardShape(lines).join("\n");
@@ -960,8 +1006,8 @@ export function buildIssueReport(input: IssueReportInput): IssueReport {
     `# 障害報告用の記録 ${input.reportId}`,
     "",
     // 案内の行は句点で終わらせない（原稿の形に見せない。`guardShape` と同じ理由）
-    "- 前半の「要約」：Discord の /不具合を報告 の入力窓へ、欄ごとに貼る",
-    "- このファイル：同じ報告に添付する（後半が詳細）",
+    "- このファイル：Discord の /不具合を報告 の「添付」に付けると、前半の「要約」で入力窓が埋まる（後半が詳細）",
+    "- 添付しないとき：前半の「要約」を入力窓へ、欄ごとに貼る",
     "- 相談のやり取りは入れていない",
     "",
     "---",

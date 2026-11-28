@@ -20,7 +20,15 @@ import { isLocalProviderId } from "../core/localProviders";
 import { redactSecrets, workLog } from "../core/logger";
 import { environmentVariable, hostPlatform, isWebRuntime } from "../core/runtime";
 import { revealFolder } from "../views/openDocument";
-import { COMMUNITY_DISCORD_URL, OPEN_COMMUNITY_LABEL } from "../core/community";
+import {
+  BUG_REPORT_CHANNEL_URL,
+  COMMUNITY_DISCORD_URL,
+  COPY_REPORT_PATH_AGAIN_LABEL,
+  JOIN_COMMUNITY_LABEL,
+  OPEN_COMMUNITY_LABEL,
+  REPORT_ON_DISCORD_LABEL,
+  bugReportSteps,
+} from "../core/community";
 import { openSiteLink } from "./openSiteLink";
 import { confirmRunOrChoose, notifyDone } from "../views/notify";
 import { cancelItem, isCancelItem } from "../views/dialogs";
@@ -314,8 +322,12 @@ async function writeReport(
 }
 
 /**
- * 書き出したあとの案内。ボタンは3つ（［要約をコピー］［ファイルの場所を開く］［Discord を開く］。
- * Discord は 1.0.0 で足した。貼る先の /不具合を報告 はそのサーバーにある）。
+ * 書き出したあとの案内。ボタンは報告へ進む順に並べる：
+ * ［Discord で報告する］（1.1.0。記録ファイルを添付して送る道）→［要約をコピー］（添付しないで貼る道）→
+ * ［ファイルの場所を開く］。招待（［サーバーに参加する］）は、報告へ進んだあとの手順の知らせに置く。
+ *
+ * **ファイルの場所を写せないとき**（ブラウザ版など、記録が手元のファイルでないとき）は、
+ * 選ぶ画面へ貼っても開けないので［Discord で報告する］を出さず、前の［Discord を開く］を残す（実装ルール7）。
  *
  * **答えを await して止まらない**（モーダルでない知らせを待つと、作者が押さずに
  * 置いたときに処理が終わらない）。押されたら後から動き、もう一方のボタンも
@@ -324,11 +336,18 @@ async function writeReport(
 function showDone(filePath: string, report: IssueReport): void {
   const copy = "要約をコピー";
   const reveal = "ファイルの場所を開く";
+  const localPath = localFilePath(filePath);
   const message =
     `障害報告用の記録を書き出しました（${report.reportId}）。` +
-    "Discord の /不具合を報告 に貼ってください（詳細はファイルを添付）。";
-  void vscode.window.showInformationMessage(message, copy, reveal, OPEN_COMMUNITY_LABEL).then(async (picked) => {
-    if (picked === copy) {
+    "Discord の /不具合を報告 にファイルを添付してください。";
+  const buttons = localPath
+    ? [REPORT_ON_DISCORD_LABEL, copy, reveal]
+    : [copy, reveal, OPEN_COMMUNITY_LABEL];
+  void vscode.window.showInformationMessage(message, ...buttons).then(async (picked) => {
+    if (picked === REPORT_ON_DISCORD_LABEL && localPath) {
+      await reportOnDiscord(localPath);
+      showDone(filePath, report);
+    } else if (picked === copy) {
       await vscode.env.clipboard.writeText(report.summary);
       notifyDone("要約をコピーしました。入力窓の欄ごとに貼ってください。");
       showDone(filePath, report);
@@ -340,4 +359,38 @@ function showDone(filePath: string, report: IssueReport): void {
       showDone(filePath, report);
     }
   });
+}
+
+/** 記録が手元のファイルなら、OS の形の完全な場所（ファイルを選ぶ画面に貼れる形）。そうでなければ undefined */
+function localFilePath(filePath: string): string | undefined {
+  const uri = path.toUri(filePath);
+  return uri.scheme === "file" ? uri.fsPath : undefined;
+}
+
+/**
+ * ［Discord で報告する］：記録ファイルの場所を写し、#不具合報告 を開いてから、手順の窓を出す。
+ *
+ * **送る口は作らない**（8.5）。Discord には、添付を付けた状態で開くリンクが無いので、作者が
+ * 「添付」の欄で選ぶ画面を開き、写した場所を貼る。手順は閉じるまで残る窓（モーダル）に出す——
+ * リンクを開くと焦点が Discord へ移るので、戻ってきたときに読み直せるように。
+ * 窓のボタンは、ほかの物を写して場所が消えたとき・まだサーバーに入っていないときのため
+ */
+async function reportOnDiscord(localPath: string): Promise<void> {
+  await vscode.env.clipboard.writeText(localPath);
+  await openSiteLink(BUG_REPORT_CHANNEL_URL);
+  for (;;) {
+    const picked = await vscode.window.showInformationMessage(
+      "記録ファイルの場所を写しました。Discord の #不具合報告 で送ってください。",
+      { modal: true, detail: bugReportSteps(hostPlatform()).join("\n") },
+      COPY_REPORT_PATH_AGAIN_LABEL,
+      JOIN_COMMUNITY_LABEL
+    );
+    if (picked === COPY_REPORT_PATH_AGAIN_LABEL) {
+      await vscode.env.clipboard.writeText(localPath);
+    } else if (picked === JOIN_COMMUNITY_LABEL) {
+      await openSiteLink(COMMUNITY_DISCORD_URL);
+    } else {
+      return;
+    }
+  }
 }
