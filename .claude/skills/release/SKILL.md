@@ -100,6 +100,10 @@ Claude in Chrome（`mcp__claude-in-chrome__*`）を使う。管理画面は Micr
 4. 行の版の欄が「Verifying 0.x.y」か「just now」になったかを `get_page_text` で確かめる。窓が閉じていたら開き直して入れ直す。「503」が出ても受け付けられていることがあるので、入れ直す前に `node scripts/checkMarketplace.mjs` で版を見る（検証は数分〜十数分、タブは閉じてよい。画像認証が出たら押さず作者へ）
 5. 反映は `node scripts/checkMarketplace.mjs` で確かめる。終わったら開いたタブを `tabs_close_mcp` で閉じる
 
+## リリースと告知はセット（全製品）
+
+**版を出したら、同じ流れで Discord の #リリース告知 にも告知を出す**（作者の決定 2026-11-28「リリースと告知はセットにしてください。全製品共通です」）。統合・投稿ヘルパー・モバイル版・Rittoku IME・ボットのどれも。統合の GitHub Release はボットがノートを読んで自動で告知する（出たかを確かめる）。それ以外は、出したら製品：Discord へ告知を頼む。まだ出ていない版の話は「次の版で」と書く
+
 ## push のあとは CI を見る
 
 **push のたびに GitHub の CI（`.github/workflows/ci.yml`、windows-latest）が走る。落ちると作者の Gmail へ失敗のメールが届く。** 10-06〜10-18 に気づかないまま175回落ち続けていた（検査機の一時フォルダーが短い形 RUNNER~1 で返る・遅さで5秒の時間切れ・15分の上限）。配布の前と、まとまった push のあとに `gh run list -L 3` で結果を見る。落ちていたら `gh run view <id> --log-failed` で理由を読み、その場で直す。**ci.yml を変える push には workflow の権限が要る**——Claude アプリの中の gh の鍵にだけ付いているので、`git -c credential.helper= -c "credential.helper=!gh auth git-credential" push` で押す（通常の push は資格情報マネージャーの鍵で、権限が無い）。
