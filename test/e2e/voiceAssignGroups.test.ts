@@ -21,7 +21,7 @@ import { VOICE_ENGINE_LABEL } from "../../src/core/voiceEngine";
 import { startFakeVoiceEngine, textCarrying, voiceEngineSettings } from "./support/fakeVoiceEngine";
 import { withVsCode } from "./support/vscodeApp";
 import { chooseEngine, clickAloudButton, openReadingRow } from "./support/voiceReadingUi";
-import { quickInputWaitContext, quickPickRows, waitForQuickPick } from "./support/workbenchDom";
+import { quickInputWaitContext, quickPickRows, quickPickTitle, waitForQuickPick } from "./support/workbenchDom";
 
 const EPISODE = "001_はじまり.txt";
 const TEXT = "　朝の駅は静かだった。\n「おはよう」と彼女が言った。\n";
@@ -60,8 +60,23 @@ test("声を選ぶ窓が「この作品で使っている声」と声の印象�
         await clickAloudButton(frame, "aloudVoiceAssign");
         const listTitle = `声の割り当て（この作品の声。選ぶと ${VOICE_ENGINE_LABEL.voicevox}・${VOICE_ENGINE_LABEL.aivisspeech} の声から選べます）`;
         const rows = await waitForQuickPick(page, listTitle, 20_000);
-        await page.locator(".quick-input-widget .quick-input-list .monaco-list-row").nth(rows.findIndex((row) => row.label === "台詞の既定")).click();
-        await waitForQuickPick(page, `台詞の既定の声（${VOICE_ENGINE_LABEL.voicevox}・${VOICE_ENGINE_LABEL.aivisspeech}）`, 20_000);
+        /*
+          **次の窓が出なければ、同じ行を押し直す（3回まで）。** ノートPCの全件で、押したあと20秒たっても
+          前の窓（声の割り当て）のままで落ちた（99328d06。単独では通る）。製品は押されればすぐ次の窓を出すので、
+          押しが届いていない。押し直すのは前の窓がまだ出ているときだけ（次の窓の行を押さないため）
+        */
+        const voiceTitle = `台詞の既定の声（${VOICE_ENGINE_LABEL.voicevox}・${VOICE_ENGINE_LABEL.aivisspeech}）`;
+        const dialogueRow = rows.findIndex((row) => row.label === "台詞の既定");
+        for (let attempt = 1; ; attempt++) {
+          await page.locator(".quick-input-widget .quick-input-list .monaco-list-row").nth(dialogueRow).click();
+          const shown = await waitForQuickPick(page, voiceTitle, attempt < 3 ? 7_000 : 20_000).then(
+            () => undefined,
+            (error: unknown) => error
+          );
+          if (shown === undefined) break;
+          if (attempt >= 3 || (await quickPickTitle(page)) !== listTitle) throw shown;
+          console.warn(`[voiceAssignGroups] 「台詞の既定」を押しても次の窓が出ず、押し直します（${attempt}回目）`);
+        }
 
         // 区切りの見出しは窓の中の字として出る（行の形は VS Code の版で違うので、窓全体の字で見る）
         const pickerText = (await page.locator(".quick-input-widget").innerText().catch(() => "")) ?? "";
