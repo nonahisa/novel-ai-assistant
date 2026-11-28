@@ -28,6 +28,14 @@ export const JOIN_COMMUNITY_LABEL = "サーバーに参加する";
 export const COPY_REPORT_PATH_AGAIN_LABEL = "場所をもう一度写す";
 
 /**
+ * 写す場所の形をそろえる（1.1.1）。VS Code の fsPath は Windows のドライブ文字を小文字で返す（`c:\Users\…`）。
+ * 貼った場所は作者の目に入るので、エクスプローラーと同じ大文字（`C:\Users\…`）にする。開けるかどうかは変わらない
+ */
+export function pathForClipboard(fsPath: string): string {
+  return /^[a-z]:[\\/]/.test(fsPath) ? fsPath.charAt(0).toUpperCase() + fsPath.slice(1) : fsPath;
+}
+
+/**
  * ファイルを選ぶ画面へ、写した場所を入れるキー。OS ごとに画面の作りが違う
  * （Windows は名前の欄へそのまま貼れる。Mac は「フォルダーへ移動」の欄を開いてから貼る。
  * Linux（GTK）は場所の欄を開いてから貼る）
