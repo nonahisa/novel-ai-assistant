@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { BUG_REPORT_CHANNEL_URL, COMMUNITY_DISCORD_URL, bugReportSteps } from "../../../src/core/community";
+import { BUG_REPORT_CHANNEL_URL, COMMUNITY_DISCORD_URL, bugReportSteps, pathForClipboard } from "../../../src/core/community";
 
 /**
  * コミュニティ（Discord）への案内のリンク（1.0.0）。リンクは `core/community.ts` の1か所に置き、
@@ -40,5 +40,12 @@ describe("［Discord で報告する］の行き先と手順（1.1.0）", () => 
       expect(text).toContain("「添付」");
       expect(text, platform).toContain(keys);
     }
+  });
+
+  it("写す場所は Windows のドライブ文字を大文字にそろえる（VS Code の fsPath は小文字で返す。1.1.1）", () => {
+    expect(pathForClipboard("c:\\Users\\a\\.aiwriter\\reports\\NAI-20261128-ab12.md")).toBe("C:\\Users\\a\\.aiwriter\\reports\\NAI-20261128-ab12.md");
+    expect(pathForClipboard("D:\\作品\\x.md")).toBe("D:\\作品\\x.md");
+    expect(pathForClipboard("/Users/a/.aiwriter/reports/x.md")).toBe("/Users/a/.aiwriter/reports/x.md");
+    expect(pathForClipboard("\\\\server\\share\\x.md")).toBe("\\\\server\\share\\x.md");
   });
 });

@@ -28,6 +28,7 @@ import {
   OPEN_COMMUNITY_LABEL,
   REPORT_ON_DISCORD_LABEL,
   bugReportSteps,
+  pathForClipboard,
 } from "../core/community";
 import { openSiteLink } from "./openSiteLink";
 import { confirmRunOrChoose, notifyDone } from "../views/notify";
@@ -364,7 +365,7 @@ function showDone(filePath: string, report: IssueReport): void {
 /** 記録が手元のファイルなら、OS の形の完全な場所（ファイルを選ぶ画面に貼れる形）。そうでなければ undefined */
 function localFilePath(filePath: string): string | undefined {
   const uri = path.toUri(filePath);
-  return uri.scheme === "file" ? uri.fsPath : undefined;
+  return uri.scheme === "file" ? pathForClipboard(uri.fsPath) : undefined;
 }
 
 /**
